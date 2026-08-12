@@ -80,7 +80,7 @@ export function useMobileContinuousVoice({
   const mountedRef = React.useRef(false);
   const generationRef = React.useRef(0);
   const nativeStatusHandlerRef = React.useRef<((status: AudioStreamStatus) => void) | null>(null);
-  const nativeStopHandlerRef = React.useRef<(() => Promise<void>) | null>(null);
+  const nativeStopHandlerRef = React.useRef<(() => Promise<boolean>) | null>(null);
   const backgroundActivityRef = React.useRef(false);
   const microphoneLeaseRef = React.useRef<MobileMicrophoneLease | null>(null);
   const startPromiseRef = React.useRef<Promise<boolean> | null>(null);
@@ -367,8 +367,9 @@ export function useMobileContinuousVoice({
     session.pause();
   }, [activateStream, finishPlatformCleanup, onError, session, stream]);
 
-  const stop = React.useCallback(async () => {
-    if (session.status === 'idle' || session.status === 'error') return;
+  const stop = React.useCallback(async (): Promise<boolean> => {
+    if (session.status === 'idle') return true;
+    if (session.status === 'error') return false;
     if (session.status === 'starting') {
       const pendingStart = startPromiseRef.current;
       generationRef.current += 1;
@@ -377,10 +378,12 @@ export function useMobileContinuousVoice({
       await pendingStart?.catch(() => undefined);
       await stopPendingStream();
       await finishPlatformCleanup();
-      return;
+      return true;
     }
     await stopPendingStream();
-    if (await session.finish()) await finishPlatformCleanup();
+    const finished = await session.finish();
+    if (finished) await finishPlatformCleanup();
+    return finished;
   }, [finishPlatformCleanup, session, stopNativeStreamNow, stopPendingStream]);
 
   nativeStopHandlerRef.current = stop;

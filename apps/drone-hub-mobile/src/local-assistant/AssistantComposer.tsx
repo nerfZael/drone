@@ -198,6 +198,7 @@ export function AssistantComposer({
   const suppressInputFocusRef = React.useRef(false);
   const voiceActionTokenRef = React.useRef(0);
   const continuousActionInFlightRef = React.useRef(false);
+  const continuousCancelInFlightRef = React.useRef(false);
   const [focused, setFocused] = React.useState(false);
   const [voiceActionInFlight, setVoiceActionInFlight] = React.useState(false);
   const [continuousActionInFlight, setContinuousActionInFlight] = React.useState(false);
@@ -323,11 +324,40 @@ export function AssistantComposer({
     Keyboard.dismiss();
   }, [voiceActive]);
 
+  const stopContinuousVoiceForNavigation = React.useCallback(async () => {
+    if (!(await continuousVoice.stop())) await continuousVoice.cancel();
+  }, [continuousVoice.cancel, continuousVoice.stop]);
+
   const previousVoiceTargetRef = React.useRef(targetKey);
+  const voiceTargetLifecycleRef = React.useRef({
+    targetKey,
+    dictationTargetKey: continuousDictation.targetKey,
+    continuousVoiceTargetKey: continuousVoice.targetKey,
+    continuousVoiceIdle: continuousVoice.status === 'idle',
+  });
+  voiceTargetLifecycleRef.current = {
+    targetKey,
+    dictationTargetKey: continuousDictation.targetKey,
+    continuousVoiceTargetKey: continuousVoice.targetKey,
+    continuousVoiceIdle: continuousVoice.status === 'idle',
+  };
+  const voiceTargetLifecycleActionsRef = React.useRef({
+    cancel: continuousVoice.cancel,
+    clearError: () => setVoiceError(''),
+    discard: continuousDictation.discard,
+    stop: stopContinuousVoiceForNavigation,
+  });
+  voiceTargetLifecycleActionsRef.current = {
+    cancel: continuousVoice.cancel,
+    clearError: () => setVoiceError(''),
+    discard: continuousDictation.discard,
+    stop: stopContinuousVoiceForNavigation,
+  };
   React.useEffect(() => {
     const previousTarget = previousVoiceTargetRef.current;
     const nextTarget = targetKey;
     previousVoiceTargetRef.current = nextTarget;
+    if (previousTarget && previousTarget !== nextTarget) setVoiceError('');
     const action = resolveMobileContinuousDictationNavigationAction({
       previousTargetKey: previousTarget,
       nextTargetKey: nextTarget,
@@ -339,17 +369,39 @@ export function AssistantComposer({
     if (action.voiceAction === 'cancel') {
       void continuousVoice.cancel();
     } else if (action.voiceAction === 'stop') {
-      void continuousVoice.stop();
+      void stopContinuousVoiceForNavigation();
     }
   }, [
     continuousDictation.discard,
     continuousDictation.targetKey,
     continuousVoice.cancel,
     continuousVoice.status,
-    continuousVoice.stop,
     continuousVoice.targetKey,
+    setVoiceError,
+    stopContinuousVoiceForNavigation,
     targetKey,
   ]);
+  React.useEffect(
+    () => () => {
+      const lifecycle = voiceTargetLifecycleRef.current;
+      const action = resolveMobileContinuousDictationNavigationAction({
+        previousTargetKey: lifecycle.targetKey,
+        nextTargetKey: '',
+        dictationTargetKey: lifecycle.dictationTargetKey,
+        continuousVoiceTargetKey: lifecycle.continuousVoiceTargetKey,
+        continuousVoiceIdle: lifecycle.continuousVoiceIdle,
+      });
+      const controls = voiceTargetLifecycleActionsRef.current;
+      controls.clearError();
+      if (action.discardDictation) controls.discard(lifecycle.targetKey);
+      if (action.voiceAction === 'cancel') {
+        void controls.cancel();
+      } else if (action.voiceAction === 'stop') {
+        void controls.stop();
+      }
+    },
+    [],
+  );
 
   const previousRunningRef = React.useRef(running);
   React.useEffect(() => {
@@ -393,7 +445,10 @@ export function AssistantComposer({
   }, [startRecording]);
 
   const beginContinuousVoice = React.useCallback(async (mode: MobileContinuousVoiceMode) => {
-    if (continuousActionInFlightRef.current) return;
+    if (continuousVoiceActionDisabled || continuousActionInFlightRef.current) {
+      setContinuousModePickerOpen(false);
+      return;
+    }
     continuousActionInFlightRef.current = true;
     setContinuousActionInFlight(true);
     setContinuousModePickerOpen(false);
@@ -425,7 +480,13 @@ export function AssistantComposer({
         suppressInputFocusRef.current = false;
       });
     }
-  }, [continuousDictation, continuousVoice, onSend, targetKey]);
+  }, [
+    continuousDictation,
+    continuousVoice,
+    continuousVoiceActionDisabled,
+    onSend,
+    targetKey,
+  ]);
 
   const openContinuousVoiceModePicker = React.useCallback(() => {
     inputRef.current?.blur();
@@ -450,10 +511,12 @@ export function AssistantComposer({
     continuousActionInFlightRef.current = true;
     setContinuousActionInFlight(true);
     try {
-      if (continuousVoiceOwned) await continuousDictation.stop();
+      if (continuousVoiceOwned) await continuousDictation.stop({ cancelOnError: true });
       materializeContinuousDictation();
       suppressInputFocusRef.current = false;
       requestAnimationFrame(() => inputRef.current?.focus());
+    } catch (error: any) {
+      setVoiceError(error?.message ?? String(error));
     } finally {
       continuousActionInFlightRef.current = false;
       setContinuousActionInFlight(false);
@@ -463,7 +526,72 @@ export function AssistantComposer({
     continuousDictationOwned,
     continuousVoiceOwned,
     materializeContinuousDictation,
+    setVoiceError,
   ]);
+
+  const stopContinuousVoice = React.useCallback(async () => {
+    if (!continuousVoiceOwned || continuousActionInFlightRef.current) return;
+    continuousActionInFlightRef.current = true;
+    setContinuousActionInFlight(true);
+    try {
+      if (continuousVoiceMode === 'dictation') {
+        await continuousDictation.stop();
+      } else {
+        await continuousVoice.stop();
+      }
+    } catch (error: any) {
+      setVoiceError(error?.message ?? String(error));
+    } finally {
+      continuousActionInFlightRef.current = false;
+      setContinuousActionInFlight(false);
+    }
+  }, [
+    continuousDictation,
+    continuousVoice,
+    continuousVoiceMode,
+    continuousVoiceOwned,
+    setVoiceError,
+  ]);
+
+  const toggleContinuousVoicePause = React.useCallback(async () => {
+    if (!continuousVoiceOwned || continuousActionInFlightRef.current) return;
+    continuousActionInFlightRef.current = true;
+    setContinuousActionInFlight(true);
+    try {
+      await continuousVoice.togglePause();
+    } catch (error: any) {
+      setVoiceError(error?.message ?? String(error));
+    } finally {
+      continuousActionInFlightRef.current = false;
+      setContinuousActionInFlight(false);
+    }
+  }, [continuousVoice, continuousVoiceOwned, setVoiceError]);
+
+  const cancelContinuousVoice = React.useCallback(async () => {
+    if (continuousCancelInFlightRef.current) return;
+    continuousCancelInFlightRef.current = true;
+    const ownsAction = !continuousActionInFlightRef.current;
+    if (ownsAction) {
+      continuousActionInFlightRef.current = true;
+      setContinuousActionInFlight(true);
+    }
+    try {
+      setVoiceError('');
+      if (continuousVoiceMode === 'dictation') {
+        await continuousDictation.cancel();
+      } else {
+        await continuousVoice.cancel();
+      }
+    } catch (error: any) {
+      setVoiceError(error?.message ?? String(error));
+    } finally {
+      continuousCancelInFlightRef.current = false;
+      if (ownsAction) {
+        continuousActionInFlightRef.current = false;
+        setContinuousActionInFlight(false);
+      }
+    }
+  }, [continuousDictation, continuousVoice, continuousVoiceMode, setVoiceError]);
 
   const stopVoiceForAction = React.useCallback(
     async (action: 'append' | 'send'): Promise<string | null> => {
@@ -515,20 +643,22 @@ export function AssistantComposer({
     if (continuousDictationOwned) {
       continuousActionInFlightRef.current = true;
       setContinuousActionInFlight(true);
-      let snapshot: ReturnType<typeof continuousDictation.takeSnapshot> = null;
       try {
-        if (continuousVoiceOwned) await continuousDictation.stop();
-        snapshot = continuousDictation.takeSnapshot(targetKey);
+        if (continuousVoiceOwned && !(await continuousDictation.stop())) return;
+        const snapshot = continuousDictation.takeSnapshot(targetKey);
         const nextDraft = snapshot
           ? mergeMobileDraftWithContinuousDictation(
               valueRef.current,
               mobileContinuousDictationText(snapshot.lines),
             )
           : valueRef.current;
-        const sent = await onSend(nextDraft.trim() || undefined);
-        if (sent === false && snapshot) continuousDictation.restoreSnapshot(snapshot);
+        if (snapshot) {
+          valueRef.current = nextDraft;
+          onChangeText(nextDraft);
+        }
+        setVoiceError('');
+        await onSend(nextDraft.trim() || undefined);
       } catch (error: any) {
-        if (snapshot) continuousDictation.restoreSnapshot(snapshot);
         setVoiceError(error?.message ?? String(error));
       } finally {
         continuousActionInFlightRef.current = false;
@@ -555,6 +685,7 @@ export function AssistantComposer({
     continuousDictationOwned,
     continuousVoiceOwned,
     hasAttachments,
+    onChangeText,
     onSend,
     stopVoiceForAction,
     targetKey,
@@ -572,7 +703,7 @@ export function AssistantComposer({
       >
         {hasContinuousDictationShadow ? (
           <MobileContinuousDictationDraft
-            active={continuousVoiceOwned}
+            status={continuousVoiceOwned ? continuousVoice.status : 'idle'}
             disabled={continuousActionInFlight}
             onPress={() => void editContinuousDictation()}
             text={continuousDictationShadow}
@@ -774,23 +905,23 @@ export function AssistantComposer({
                   }
                   icon={X}
                   tone="danger"
-                  onPress={() =>
-                    void (continuousVoiceMode === 'dictation'
-                      ? continuousDictation.cancel()
-                      : continuousVoice.cancel())
+                  disabled={
+                    continuousActionInFlight && continuousVoice.status !== 'starting'
                   }
+                  onPress={() => void cancelContinuousVoice()}
                 />
                 <View style={styles.controlSpacer} />
                 <View style={styles.voicePrimaryControls}>
                   <VoiceIconButton
-                    label={continuousVoice.status === 'paused' || continuousVoice.status === 'error' ? 'Resume continuous voice' : 'Pause continuous voice'}
+                    label={`${continuousVoice.status === 'paused' || continuousVoice.status === 'error' ? 'Resume' : 'Pause'} ${continuousVoiceMode}`}
                     icon={continuousVoice.status === 'paused' || continuousVoice.status === 'error' ? Play : Pause}
                     tone={continuousVoice.status === 'paused' || continuousVoice.status === 'error' ? 'paused' : 'default'}
                     disabled={
+                      continuousActionInFlight ||
                       continuousVoice.status === 'starting' ||
                       continuousVoice.status === 'stopping'
                     }
-                    onPress={() => void continuousVoice.togglePause()}
+                    onPress={() => void toggleContinuousVoicePause()}
                   />
                   <VoiceIconButton
                     label={
@@ -801,15 +932,12 @@ export function AssistantComposer({
                     icon={Square}
                     tone="success"
                     disabled={
+                      continuousActionInFlight ||
                       continuousVoice.status === 'starting' ||
                       continuousVoice.status === 'stopping' ||
                       continuousVoice.status === 'error'
                     }
-                    onPress={() =>
-                      void (continuousVoiceMode === 'dictation'
-                        ? continuousDictation.stop()
-                        : continuousVoice.stop())
-                    }
+                    onPress={() => void stopContinuousVoice()}
                   />
                 </View>
               </>

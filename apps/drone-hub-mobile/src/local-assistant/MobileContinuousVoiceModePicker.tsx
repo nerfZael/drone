@@ -20,7 +20,11 @@ export function MobileContinuousVoiceModePicker({
         onPress={onClose}
         style={styles.backdrop}
       >
-        <Pressable onPress={(event) => event.stopPropagation()} style={styles.sheet}>
+        <Pressable
+          accessible={false}
+          onPress={(event) => event.stopPropagation()}
+          style={styles.sheet}
+        >
           <Text style={styles.title}>Continuous voice</Text>
           <Text style={styles.description}>Choose what happens to each spoken thought.</Text>
           <Pressable

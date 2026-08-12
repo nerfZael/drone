@@ -2,6 +2,7 @@ import React from 'react';
 import {
   MobileContinuousDictationBuffer,
   mobileContinuousDictationText,
+  resolveMobileContinuousDictationStopVoiceAction,
   type MobileContinuousDictationLine,
   type MobileContinuousDictationSnapshot,
 } from './mobile-continuous-dictation';
@@ -71,15 +72,37 @@ export function useMobileContinuousDictation(continuousVoice: MobileContinuousVo
     [startVoice, syncBuffer],
   );
 
-  const stop = React.useCallback(async () => {
+  const stop = React.useCallback(async (options?: { cancelOnError?: boolean }) => {
     const stoppingTargetKey = bufferRef.current.snapshot().targetKey;
-    await stopVoice();
+    const cancelOnError = options?.cancelOnError === true;
+    let finished = false;
+    if (
+      resolveMobileContinuousDictationStopVoiceAction(
+        continuousVoice.status,
+        cancelOnError,
+      ) === 'cancel'
+    ) {
+      await cancelVoice();
+      finished = true;
+    } else {
+      finished = await stopVoice();
+      if (!finished && cancelOnError) {
+        await cancelVoice();
+        finished = true;
+      }
+    }
     const snapshot = bufferRef.current.snapshot();
-    if (stoppingTargetKey && snapshot.targetKey === stoppingTargetKey && !snapshot.lines.length) {
+    if (
+      finished &&
+      stoppingTargetKey &&
+      snapshot.targetKey === stoppingTargetKey &&
+      !snapshot.lines.length
+    ) {
       bufferRef.current.discard(stoppingTargetKey);
       syncBuffer();
     }
-  }, [stopVoice, syncBuffer]);
+    return finished;
+  }, [cancelVoice, continuousVoice.status, stopVoice, syncBuffer]);
 
   const cancel = React.useCallback(async () => {
     discard();
@@ -95,13 +118,6 @@ export function useMobileContinuousDictation(continuousVoice: MobileContinuousVo
     [syncBuffer],
   );
 
-  const restoreSnapshot = React.useCallback(
-    (snapshot: MobileContinuousDictationSnapshot) => {
-      if (bufferRef.current.restoreSnapshot(snapshot)) syncBuffer();
-    },
-    [syncBuffer],
-  );
-
   return React.useMemo(
     () => ({
       targetKey,
@@ -111,8 +127,7 @@ export function useMobileContinuousDictation(continuousVoice: MobileContinuousVo
       cancel,
       discard,
       takeSnapshot,
-      restoreSnapshot,
     }),
-    [cancel, discard, lines, restoreSnapshot, start, stop, takeSnapshot, targetKey],
+    [cancel, discard, lines, start, stop, takeSnapshot, targetKey],
   );
 }

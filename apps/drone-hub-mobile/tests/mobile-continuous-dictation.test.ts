@@ -5,7 +5,7 @@ import {
   MobileContinuousDictationBuffer,
   mobileContinuousDictationText,
   resolveMobileContinuousDictationNavigationAction,
-  restoreMobileContinuousDictationLines,
+  resolveMobileContinuousDictationStopVoiceAction,
 } from '../src/local-assistant/mobile-continuous-dictation';
 
 describe('mobile continuous dictation', () => {
@@ -33,20 +33,23 @@ describe('mobile continuous dictation', () => {
     expect(mergeMobileDraftWithContinuousDictation('Typed text  ', '   ')).toBe('Typed text  ');
   });
 
-  test('restores a failed send without duplicating newer deliveries', () => {
-    const first = { id: 'delivery-1', text: 'First thought.' };
-    const second = { id: 'delivery-2', text: 'Second thought.' };
-    expect(restoreMobileContinuousDictationLines([second], [first, second])).toEqual([
-      first,
-      second,
-    ]);
-  });
-
   test('discards and cancels dictation when navigating to another composer', () => {
     expect(
       resolveMobileContinuousDictationNavigationAction({
         previousTargetKey: 'drone-a:chat-a',
         nextTargetKey: 'drone-b:chat-b',
+        dictationTargetKey: 'drone-a:chat-a',
+        continuousVoiceTargetKey: 'drone-a:chat-a',
+        continuousVoiceIdle: false,
+      }),
+    ).toEqual({ discardDictation: true, voiceAction: 'cancel' });
+  });
+
+  test('discards and cancels dictation when its composer unmounts', () => {
+    expect(
+      resolveMobileContinuousDictationNavigationAction({
+        previousTargetKey: 'drone-a:chat-a',
+        nextTargetKey: '',
         dictationTargetKey: 'drone-a:chat-a',
         continuousVoiceTargetKey: 'drone-a:chat-a',
         continuousVoiceIdle: false,
@@ -64,6 +67,12 @@ describe('mobile continuous dictation', () => {
         continuousVoiceIdle: false,
       }),
     ).toEqual({ discardDictation: false, voiceAction: 'stop' });
+  });
+
+  test('cancels an errored session for editing but leaves an ordinary stop retriable', () => {
+    expect(resolveMobileContinuousDictationStopVoiceAction('error', true)).toBe('cancel');
+    expect(resolveMobileContinuousDictationStopVoiceAction('error', false)).toBe('stop');
+    expect(resolveMobileContinuousDictationStopVoiceAction('listening', true)).toBe('stop');
   });
 
   test('preserves stopped text but clears it when a fresh dictation begins', () => {

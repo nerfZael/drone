@@ -1,14 +1,15 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
 import { colors } from '../theme';
+import type { MobileContinuousVoiceStatus } from './mobile-continuous-voice-lifecycle';
 
 export function MobileContinuousDictationDraft({
-  active,
+  status,
   disabled,
   text,
   onPress,
 }: {
-  active: boolean;
+  status: MobileContinuousVoiceStatus;
   disabled: boolean;
   text: string;
   onPress(): void;
@@ -26,12 +27,22 @@ export function MobileContinuousDictationDraft({
         pressed && styles.pressed,
       ]}
     >
-      <Text style={styles.label}>{active ? 'Dictating…' : 'Dictation stopped · Tap to edit'}</Text>
+      <Text style={styles.label}>{mobileContinuousDictationDraftLabel(status)}</Text>
       <Text numberOfLines={6} style={styles.text}>
         {text}
       </Text>
     </Pressable>
   );
+}
+
+function mobileContinuousDictationDraftLabel(status: MobileContinuousVoiceStatus): string {
+  if (status === 'starting') return 'Starting dictation…';
+  if (status === 'paused') return 'Dictation paused · Tap to edit';
+  if (status === 'recovering') return 'Dictation reconnecting…';
+  if (status === 'stopping') return 'Finishing dictation…';
+  if (status === 'error') return 'Dictation needs attention · Tap to edit';
+  if (status === 'idle') return 'Dictation stopped · Tap to edit';
+  return 'Dictating…';
 }
 
 const styles = StyleSheet.create({

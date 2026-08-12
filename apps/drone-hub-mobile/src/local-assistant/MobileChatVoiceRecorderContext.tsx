@@ -20,8 +20,8 @@ const MobileChatVoiceRecorderContext =
   React.createContext<MobileChatVoiceRecorderContextValue | null>(null);
 
 /**
- * Owns the phone's single voice recording session above app navigation so a
- * recording is not tied to the lifetime of any particular message composer.
+ * Owns the phone's single voice recording engine above app navigation. Each
+ * composer still decides whether its active session should stop when it leaves.
  */
 export function MobileChatVoiceRecorderProvider({ children }: { children: React.ReactNode }) {
   const mesh = useMesh();

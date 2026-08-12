@@ -1,3 +1,5 @@
+import type { MobileContinuousVoiceStatus } from './mobile-continuous-voice-lifecycle';
+
 export type MobileContinuousDictationLine = {
   id: string;
   text: string;
@@ -45,14 +47,6 @@ export function mergeMobileDraftWithContinuousDictation(
   return `${draft.trimEnd()}\n${cleanDictation}`;
 }
 
-export function restoreMobileContinuousDictationLines(
-  current: readonly MobileContinuousDictationLine[],
-  restored: readonly MobileContinuousDictationLine[],
-): MobileContinuousDictationLine[] {
-  const currentIds = new Set(current.map((line) => line.id));
-  return [...restored.filter((line) => !currentIds.has(line.id)), ...current];
-}
-
 export function resolveMobileContinuousDictationNavigationAction(input: {
   previousTargetKey: string;
   nextTargetKey: string;
@@ -74,6 +68,13 @@ export function resolveMobileContinuousDictationNavigationAction(input: {
     discardDictation,
     voiceAction: discardDictation ? 'cancel' : 'stop',
   };
+}
+
+export function resolveMobileContinuousDictationStopVoiceAction(
+  status: MobileContinuousVoiceStatus,
+  cancelOnError: boolean,
+): 'cancel' | 'stop' {
+  return status === 'error' && cancelOnError ? 'cancel' : 'stop';
 }
 
 export class MobileContinuousDictationBuffer {
@@ -117,13 +118,6 @@ export class MobileContinuousDictationBuffer {
     this.targetKey = null;
     this.lines = [];
     return snapshot;
-  }
-
-  restoreSnapshot(snapshot: MobileContinuousDictationSnapshot): boolean {
-    if (this.targetKey !== null && this.targetKey !== snapshot.targetKey) return false;
-    this.targetKey = snapshot.targetKey;
-    this.lines = restoreMobileContinuousDictationLines(this.lines, snapshot.lines);
-    return true;
   }
 
   snapshot(): MobileContinuousDictationState {
