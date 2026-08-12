@@ -188,7 +188,15 @@ describe('ChangeRequestGithubMirrorService', () => {
       expect(await git(origin, ['rev-parse', 'refs/heads/main'])).toBe(baseSha);
       await repository.update('request-1', { githubMirror: publishedMirror });
 
-      await service.setAutoUpdate('request-1', false);
+      const autoUpdateDisabled = await service.setAutoUpdate('request-1', false);
+      expect(autoUpdateDisabled.githubMirror).toMatchObject({
+        owner: publishedMirror.owner,
+        repo: publishedMirror.repo,
+        headBranch: publishedMirror.headBranch,
+        autoUpdate: false,
+        createdAt: publishedMirror.createdAt,
+        updatedAt: '2026-01-02T00:00:00.000Z',
+      });
       const secondSnapshot = await snapshotCommit(repoRoot, baseSha, 'feature.txt', 'second\n');
       await git(repoRoot, ['update-ref', snapshotRef, secondSnapshot]);
       const secondRecord = await repository.update('request-1', {

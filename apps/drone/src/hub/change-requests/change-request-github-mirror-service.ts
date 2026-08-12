@@ -174,15 +174,11 @@ export class ChangeRequestGithubMirrorService {
   async setAutoUpdate(idRaw: string, enabled: boolean): Promise<ChangeRequestRecord> {
     const id = String(idRaw ?? '').trim();
     return await this.withLock(id, async () => {
-      const current = this.requiredRecord(id);
-      const mirror = this.requiredMirror(current);
-      await this.deps.repository.update(id, {
-        githubMirror: { ...mirror, autoUpdate: enabled, updatedAt: this.deps.now() },
-      });
-      if (enabled && current.status === 'open' && mirror.state === 'open') {
-        return await this.syncRecord(this.requiredOpenRecord(id));
+      const updated = await this.patchMirror(id, () => ({ autoUpdate: enabled }));
+      if (enabled && updated.status === 'open' && updated.githubMirror?.state === 'open') {
+        return await this.syncRecord(updated);
       }
-      return this.requiredRecord(id);
+      return updated;
     });
   }
 
@@ -231,7 +227,7 @@ export class ChangeRequestGithubMirrorService {
         details.baseRefName === current.destinationBranch &&
         details.title === current.title &&
         details.body === mirrorBody(current);
-      await this.persistPullRequestDetails(current, mirror, details, matchesNative);
+      await this.persistPullRequestDetails(current, details, matchesNative);
       await this.reconcileTerminalMirror(id);
     } catch (error) {
       await this.storeMirrorError(this.requiredRecord(id), error);
@@ -282,7 +278,7 @@ export class ChangeRequestGithubMirrorService {
       });
       this.assertLinkedPullRequest(mirror, remote);
       if (remote.state !== 'open') {
-        await this.persistPullRequestDetails(record, mirror, remote, false);
+        await this.persistPullRequestDetails(record, remote, false);
         await this.reconcileTerminalMirror(record.id);
         return this.requiredRecord(record.id);
       }
@@ -305,20 +301,14 @@ export class ChangeRequestGithubMirrorService {
       });
       this.assertSyncedPullRequest(record, mirror, details);
       this.deps.onGithubChanged?.(record.repoRoot);
-      await this.persistPullRequestDetails(record, mirror, details, details.state === 'open');
+      await this.persistPullRequestDetails(record, details, details.state === 'open');
       await this.reconcileTerminalMirror(record.id);
       return this.requiredRecord(record.id);
     } catch (error) {
-      const latest = this.requiredRecord(record.id);
-      const latestMirror = this.requiredMirror(latest);
-      await this.deps.repository.update(record.id, {
-        githubMirror: {
-          ...latestMirror,
-          headSha: latestMirror.state === 'open' ? pushedHeadSha : latestMirror.headSha,
-          lastError: error instanceof Error ? error.message : String(error),
-          updatedAt: this.deps.now(),
-        },
-      });
+      await this.patchMirror(record.id, (current) => ({
+        headSha: current.state === 'open' ? pushedHeadSha : current.headSha,
+        lastError: error instanceof Error ? error.message : String(error),
+      }));
       throw githubError(error);
     }
   }
@@ -352,15 +342,11 @@ export class ChangeRequestGithubMirrorService {
         );
       }
       this.deps.onGithubChanged?.(current.repoRoot);
-      await this.deps.repository.update(id, {
-        githubMirror: {
-          ...mirror,
-          state: 'merged',
-          mergeCommitSha: merged.sha,
-          lastError: null,
-          updatedAt: this.deps.now(),
-        },
-      });
+      await this.patchMirror(id, () => ({
+        state: 'merged',
+        mergeCommitSha: merged.sha,
+        lastError: null,
+      }));
       await this.reconcileTerminalMirror(id);
       return this.requiredRecord(id);
     } catch (error) {
@@ -371,25 +357,20 @@ export class ChangeRequestGithubMirrorService {
 
   private async persistPullRequestDetails(
     record: ChangeRequestRecord,
-    mirror: ChangeRequestGithubMirrorRecord,
     details: GithubPullRequestDetails,
     syncedWithNative: boolean,
   ): Promise<void> {
     const synced = syncedWithNative && details.state === 'open';
-    await this.deps.repository.update(record.id, {
-      githubMirror: {
-        ...mirror,
-        htmlUrl: details.htmlUrl,
-        headSha: details.headSha,
-        baseBranch: details.baseRefName,
-        state: details.state,
-        mergeCommitSha: details.mergeCommitSha,
-        syncedRevision: synced ? record.revision : 0,
-        syncedNativeUpdatedAt: synced ? record.updatedAt : '',
-        lastError: null,
-        updatedAt: this.deps.now(),
-      },
-    });
+    await this.patchMirror(record.id, () => ({
+      htmlUrl: details.htmlUrl,
+      headSha: details.headSha,
+      baseBranch: details.baseRefName,
+      state: details.state,
+      mergeCommitSha: details.mergeCommitSha,
+      syncedRevision: synced ? record.revision : 0,
+      syncedNativeUpdatedAt: synced ? record.updatedAt : '',
+      lastError: null,
+    }));
   }
 
   private async reconcileTerminalMirror(id: string): Promise<ChangeRequestRecord> {
@@ -411,14 +392,7 @@ export class ChangeRequestGithubMirrorService {
     }
 
     const cleanupError = await this.branches.deleteOwned(current, mirror);
-    await this.deps.repository.update(id, {
-      githubMirror: {
-        ...mirror,
-        lastError: cleanupError,
-        updatedAt: this.deps.now(),
-      },
-    });
-    return this.requiredRecord(id);
+    return await this.patchMirror(id, () => ({ lastError: cleanupError }));
   }
 
   private async closeMirror(
@@ -438,14 +412,7 @@ export class ChangeRequestGithubMirrorService {
         if (throwOnApiError) throw githubError(error);
         return this.requiredRecord(record.id);
       }
-      await this.deps.repository.update(record.id, {
-        githubMirror: {
-          ...mirror,
-          state: 'closed',
-          lastError: null,
-          updatedAt: this.deps.now(),
-        },
-      });
+      await this.patchMirror(record.id, () => ({ state: 'closed', lastError: null }));
     }
     return await this.reconcileTerminalMirror(record.id);
   }
@@ -569,15 +536,27 @@ export class ChangeRequestGithubMirrorService {
     return record.githubMirror;
   }
 
-  private async storeMirrorError(record: ChangeRequestRecord, error: unknown): Promise<void> {
-    if (!record.githubMirror) return;
-    await this.deps.repository.update(record.id, {
+  private async patchMirror(
+    id: string,
+    getPatch: (
+      current: ChangeRequestGithubMirrorRecord,
+    ) => Partial<ChangeRequestGithubMirrorRecord>,
+  ): Promise<ChangeRequestRecord> {
+    const current = this.requiredMirror(this.requiredRecord(id));
+    return await this.deps.repository.update(id, {
       githubMirror: {
-        ...record.githubMirror,
-        lastError: error instanceof Error ? error.message : String(error),
+        ...current,
+        ...getPatch(current),
         updatedAt: this.deps.now(),
       },
     });
+  }
+
+  private async storeMirrorError(record: ChangeRequestRecord, error: unknown): Promise<void> {
+    if (!record.githubMirror) return;
+    await this.patchMirror(record.id, () => ({
+      lastError: error instanceof Error ? error.message : String(error),
+    }));
   }
 
   private async withLock<T>(id: string, operation: () => Promise<T>): Promise<T> {
