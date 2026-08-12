@@ -88,7 +88,7 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   {
     id: 'toggleContinuousDictation',
     label: 'Toggle continuous dictation',
-    description: 'Starts or stops continuous dictation. Starting again clears uncommitted dictation.',
+    description: 'Starts or stops continuous dictation in the active chat composer.',
   },
   {
     id: 'toggleVoiceClipboardRecording',

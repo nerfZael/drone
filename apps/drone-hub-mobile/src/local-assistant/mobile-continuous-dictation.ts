@@ -5,11 +5,6 @@ export type MobileContinuousDictationLine = {
 
 export type MobileContinuousVoiceMode = 'dictation' | 'steering';
 
-export type MobileContinuousDictationSnapshot = {
-  targetKey: string;
-  lines: MobileContinuousDictationLine[];
-};
-
 export type MobileContinuousDictationState = {
   targetKey: string | null;
   lines: MobileContinuousDictationLine[];
@@ -88,17 +83,6 @@ export class MobileContinuousDictationBuffer {
     this.targetKey = null;
     this.lines = [];
     return true;
-  }
-
-  takeSnapshot(expectedTargetKey: string): MobileContinuousDictationSnapshot | null {
-    if (expectedTargetKey !== this.targetKey) return null;
-    const snapshot = this.lines.length
-      ? { targetKey: expectedTargetKey, lines: this.lines.slice() }
-      : null;
-    this.generation += 1;
-    this.targetKey = null;
-    this.lines = [];
-    return snapshot;
   }
 
   snapshot(): MobileContinuousDictationState {

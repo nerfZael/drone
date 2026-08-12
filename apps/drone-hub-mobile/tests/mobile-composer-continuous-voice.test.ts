@@ -9,7 +9,6 @@ describe('mobile composer continuous voice', () => {
     pendingCount: 1,
     durationMillis: 500,
     dictationTargetKey: 'drone-a:chat-a',
-    dictationText: 'Current dictation.',
   };
 
   test('describes dictation owned by the current composer', () => {
@@ -18,7 +17,6 @@ describe('mobile composer continuous voice', () => {
       mode: 'dictation',
       owned: true,
       elsewhere: false,
-      text: 'Current dictation.',
     });
   });
 
@@ -27,7 +25,6 @@ describe('mobile composer continuous voice', () => {
       resolveMobileComposerContinuousVoiceState({
         ...activeDictation,
         dictationTargetKey: null,
-        dictationText: '',
       }),
     ).toMatchObject({ kind: 'steering', mode: 'steering', owned: true });
   });
@@ -38,7 +35,6 @@ describe('mobile composer continuous voice', () => {
         ...activeDictation,
         voiceTargetKey: 'drone-b:chat-b',
         dictationTargetKey: null,
-        dictationText: '',
       }),
     ).toMatchObject({ kind: 'elsewhere', owned: false, elsewhere: true });
   });
@@ -56,13 +52,11 @@ describe('mobile composer continuous voice', () => {
       mode: 'dictation',
       owned: false,
       elsewhere: false,
-      text: 'Current dictation.',
     });
     expect(
       resolveMobileComposerContinuousVoiceState({
         ...stopped,
         dictationTargetKey: null,
-        dictationText: '',
       }),
     ).toMatchObject({ kind: 'idle', owned: false, elsewhere: false });
   });

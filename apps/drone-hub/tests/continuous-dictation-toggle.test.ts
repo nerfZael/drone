@@ -11,9 +11,9 @@ function deferred() {
 }
 
 describe('continuous dictation toggle', () => {
-  test('keeps completed dictation visible while stopped and clears it on the next start', async () => {
+  test('keeps composer text when dictation stops and starts again', async () => {
     let status: ContinuousVoiceSessionStatus = 'listening';
-    let shadowText = 'Existing dictation';
+    let composerText = 'Existing dictation';
     const toggle = createContinuousDictationToggle({
       getStatus: () => status,
       start: async () => {
@@ -22,30 +22,28 @@ describe('continuous dictation toggle', () => {
       },
       stop: async () => {
         status = 'stopping';
-        shadowText = `${shadowText}\nFinal dictated phrase`;
+        composerText = `${composerText}\nFinal dictated phrase`;
         status = 'idle';
       },
       cancel: () => {
         status = 'idle';
       },
-      onStartIntent: () => {
-        shadowText = '';
-      },
+      onStartIntent: () => undefined,
     });
     toggle.sync(true);
 
     await toggle.toggle();
-    expect(shadowText).toBe('Existing dictation\nFinal dictated phrase');
+    expect(composerText).toBe('Existing dictation\nFinal dictated phrase');
     expect(status).toBe('idle');
 
     await toggle.toggle();
-    expect(shadowText).toBe('');
+    expect(composerText).toBe('Existing dictation\nFinal dictated phrase');
     expect(status).toBe('listening');
   });
 
-  test('preserves shadow text on stop and clears it before a rapid restart', async () => {
+  test('preserves composer text during a rapid restart', async () => {
     let status: ContinuousVoiceSessionStatus = 'listening';
-    let shadowText = 'Uncommitted dictation';
+    const composerText = 'Existing dictation';
     let starts = 0;
     let cancels = 0;
     const stopFinished = deferred();
@@ -66,18 +64,16 @@ describe('continuous dictation toggle', () => {
         status = 'idle';
         stopFinished.resolve();
       },
-      onStartIntent: () => {
-        shadowText = '';
-      },
+      onStartIntent: () => undefined,
     });
     toggle.sync(true);
 
     const stop = toggle.toggle();
     expect(status).toBe('stopping');
-    expect(shadowText).toBe('Uncommitted dictation');
+    expect(composerText).toBe('Existing dictation');
 
     const restart = toggle.toggle();
-    expect(shadowText).toBe('');
+    expect(composerText).toBe('Existing dictation');
     expect(cancels).toBe(1);
 
     await Promise.all([stop, restart]);

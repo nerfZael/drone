@@ -25,10 +25,16 @@ describe('mobile continuous dictation', () => {
     expect(mobileContinuousDictationText(second)).toBe('First thought.\nSecond thought.');
   });
 
-  test('merges dictation after typed text without changing an empty dictation', () => {
+  test('writes each dictated thought to a new composer line', () => {
     expect(mergeMobileDraftWithContinuousDictation('Typed text  ', 'Dictated text')).toBe(
       'Typed text\nDictated text',
     );
+    expect(
+      mergeMobileDraftWithContinuousDictation(
+        mergeMobileDraftWithContinuousDictation('Typed text', 'First thought.'),
+        'Second thought.',
+      ),
+    ).toBe('Typed text\nFirst thought.\nSecond thought.');
     expect(mergeMobileDraftWithContinuousDictation('Typed text  ', '   ')).toBe('Typed text  ');
   });
 
@@ -68,7 +74,7 @@ describe('mobile continuous dictation', () => {
     ).toEqual({ discardDictation: false, voiceAction: 'stop' });
   });
 
-  test('preserves stopped text but clears it when a fresh dictation begins', () => {
+  test('resets delivery tracking when a fresh dictation begins', () => {
     const buffer = new MobileContinuousDictationBuffer();
     const firstGeneration = buffer.begin('drone-a:chat-a');
     buffer.append(firstGeneration, 'drone-a:chat-a', {

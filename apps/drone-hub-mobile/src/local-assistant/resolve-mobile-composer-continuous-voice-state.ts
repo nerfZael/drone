@@ -18,7 +18,6 @@ export type MobileComposerContinuousVoiceState =
       mode: 'dictation';
       owned: boolean;
       elsewhere: boolean;
-      text: string;
     })
   | (MobileComposerContinuousVoiceStateBase & {
       kind: 'steering';
@@ -40,7 +39,6 @@ export function resolveMobileComposerContinuousVoiceState(input: {
   pendingCount: number;
   durationMillis: number;
   dictationTargetKey: string | null;
-  dictationText: string;
 }): MobileComposerContinuousVoiceState {
   const voiceActive = input.voiceStatus !== 'idle';
   const voiceOwned = voiceActive && input.voiceTargetKey === input.targetKey;
@@ -57,7 +55,6 @@ export function resolveMobileComposerContinuousVoiceState(input: {
       mode: 'dictation',
       owned: voiceOwned,
       elsewhere: voiceActive && !voiceOwned,
-      text: input.dictationText,
     };
   }
   if (voiceOwned) {
