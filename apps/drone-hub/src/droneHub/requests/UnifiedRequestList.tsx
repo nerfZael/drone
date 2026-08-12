@@ -1,4 +1,5 @@
 import React from 'react';
+import { agentRunNetLineChangeLabel } from '@drone/assistant-chat';
 
 import { UiButton, UiPanelToolbar, UiToolbarInput } from '../../ui/components';
 import { cn } from '../../ui/cn';
@@ -316,17 +317,17 @@ function RequestLineStats({
   const files = Math.max(0, Math.floor(Number(stats.files) || 0));
   const modifications = Math.max(0, Math.floor(Number(stats.modifications) || 0));
   const deletions = Math.max(0, Math.floor(Number(stats.deletions) || 0));
-  const total = Math.max(0, Math.floor(Number(stats.total) || 0));
+  const netLabel = agentRunNetLineChangeLabel(additions - deletions);
   return (
     <span
       className="inline-flex items-center gap-1.5 font-mono tabular-nums"
-      aria-label={`${files} files changed, ${additions} additions, ${modifications} modifications, ${deletions} deletions, ${total} total line changes`}
+      aria-label={`${files} files changed, ${additions} additions, ${modifications} modifications, ${deletions} deletions, ${netLabel} net lines`}
     >
       <span className="text-[var(--muted-dim)]" title="Files changed">{files} files</span>
       <span className="text-[var(--green)]" title="Lines added">+{additions}</span>
       <span className="text-[var(--yellow)]" title="Estimated lines modified">~{modifications}</span>
       <span className="text-[var(--red)]" title="Lines deleted">−{deletions}</span>
-      <span className="text-[var(--accent)]" title="Total line changes">Σ{total}</span>
+      <span className="text-[var(--accent)]" title="Net line change">{netLabel}</span>
     </span>
   );
 }

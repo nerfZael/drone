@@ -216,6 +216,92 @@ test('completes a paused pull request subscription without delivering its termin
   }
 });
 
+test('validates, labels, pauses, and resumes native change request subscriptions', async () => {
+  const { database, close } = memoryHubDatabase();
+  try {
+    const repository = new ResourceSubscriptionRepository(database);
+    let status: 'open' | 'closed' = 'open';
+    let batchResolutionCount = 0;
+    const changeRequest = () => ({
+      number: 42,
+      stateVersion: 7,
+      status,
+      droneId: 'watched-drone',
+      droneName: 'Review worker',
+      title: 'Improve subscriptions',
+    });
+    const service = new ResourceSubscriptionService({
+      repository,
+      readChatStatus: async () => ({ idle: true, reason: 'idle', latest: null }),
+      resolveChangeRequest: (requestNumber) => (requestNumber === 42 ? changeRequest() : null),
+      resolveChangeRequests: (requestNumbers) => {
+        batchResolutionCount += 1;
+        return new Map(requestNumbers.includes(42) ? ([[42, changeRequest()]] as const) : []);
+      },
+      wakePromptQueue: () => {},
+      readSettings: async () => DEFAULT_RESOURCE_SUBSCRIPTION_SETTINGS,
+      log: () => {},
+    });
+    const created = await service.subscribe({
+      subscriber: { chatId: 'subscriber-chat', droneId: 'drone-a', chatName: 'default' },
+      provider: 'drone-hub',
+      resourceType: 'change_request',
+      resourceId: '#42',
+      events: ['change_request.updated', 'change_request.merged'],
+      intent: 'Continue the review.',
+    });
+    assert.equal(created.subscription.resourceId, '42');
+    assert.equal(created.subscription.resourceLabel, '#42 Improve subscriptions');
+    assert.equal(created.subscription.resourceDroneId, 'watched-drone');
+    assert.deepEqual(created.subscription.resourceConfig, {
+      requestNumber: 42,
+      droneId: 'watched-drone',
+      stateVersion: 7,
+    });
+    assert.equal(service.list('subscriber-chat')[0]?.resourceLabel, '#42 Improve subscriptions');
+    assert.equal(batchResolutionCount, 1);
+    const updated = await service.update({
+      id: created.subscription.id,
+      subscriberChatId: 'subscriber-chat',
+      intent: 'Updated intent.',
+    });
+    assert.equal(updated?.resourceLabel, '#42 Improve subscriptions');
+    assert.equal(updated?.resourceDroneId, 'watched-drone');
+
+    await service.pauseForDrone('watched-drone', []);
+    assert.equal(repository.get(created.subscription.id)?.status, 'paused');
+    await service.resumeForDrone('watched-drone', []);
+    assert.equal(repository.get(created.subscription.id)?.status, 'active');
+
+    status = 'closed';
+    await assert.rejects(
+      service.subscribe({
+        subscriber: { chatId: 'other-chat', droneId: 'drone-a', chatName: 'other' },
+        provider: 'drone-hub',
+        resourceType: 'change_request',
+        resourceId: '42',
+        events: ['change_request.closed'],
+      }),
+      /already closed/,
+    );
+    await assert.rejects(
+      service.subscribe({
+        subscriber: { chatId: 'other-chat', droneId: 'drone-a', chatName: 'other' },
+        provider: 'drone-hub',
+        resourceType: 'change_request',
+        resourceId: '99',
+        events: ['change_request.updated'],
+      }),
+      /unknown DroneHub change request/,
+    );
+    const cancelled = await service.cancel(created.subscription.id, 'subscriber-chat');
+    assert.equal(cancelled?.resourceLabel, '#42 Improve subscriptions');
+    assert.equal(cancelled?.resourceDroneId, 'watched-drone');
+  } finally {
+    close();
+  }
+});
+
 test('archived chats pause owned and watched subscriptions without replaying queued events', async () => {
   const { database, close } = memoryHubDatabase();
   try {
@@ -633,29 +719,27 @@ test('pausing one subscription releases unrelated deliveries from a mixed batch'
     assert.equal(claimed?.items.length, 2);
     await repository.pauseForChat('watched-chat');
 
-    const states = database.read((connection) =>
-      connection
-        .prepare(
-          `SELECT subscription_id, state, batch_id
+    const states = database.read(
+      (connection) =>
+        connection
+          .prepare(
+            `SELECT subscription_id, state, batch_id
            FROM subscription_deliveries`,
-        )
-        .all() as Array<{ subscription_id: string; state: string; batch_id: string | null }>,
+          )
+          .all() as Array<{ subscription_id: string; state: string; batch_id: string | null }>,
     );
-    assert.deepEqual(
-      Object.fromEntries(states.map((row) => [row.subscription_id, row])),
-      {
-        [github.subscription.id]: {
-          subscription_id: github.subscription.id,
-          state: 'pending',
-          batch_id: null,
-        },
-        [watched.subscription.id]: {
-          subscription_id: watched.subscription.id,
-          state: 'failed',
-          batch_id: null,
-        },
+    assert.deepEqual(Object.fromEntries(states.map((row) => [row.subscription_id, row])), {
+      [github.subscription.id]: {
+        subscription_id: github.subscription.id,
+        state: 'pending',
+        batch_id: null,
       },
-    );
+      [watched.subscription.id]: {
+        subscription_id: watched.subscription.id,
+        state: 'failed',
+        batch_id: null,
+      },
+    });
     const retry = await repository.claimBatch(
       { ...DEFAULT_RESOURCE_SUBSCRIPTION_SETTINGS, batchWindowMs: 0 },
       new Date(Date.now() + 2_000),

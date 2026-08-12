@@ -898,13 +898,20 @@ code, pre {
    Scrollbars
    ────────────────────────────────────────────────────────── */
 
-::-webkit-scrollbar { height: 6px; width: 6px; }
+/* Keep scrollable workspaces quiet and consistent across chat and utility panes. */
+::-webkit-scrollbar { height: 3px; width: 3px; }
+::-webkit-scrollbar-button {
+  -webkit-appearance: none;
+  display: none;
+  height: 0;
+  width: 0;
+}
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 6px;
+  background: var(--border-subtle);
+  border-radius: 999px;
 }
-::-webkit-scrollbar-thumb:hover { background: var(--muted-dim); }
+::-webkit-scrollbar-thumb:hover { background: var(--border); }
 
 .dh-changed-files-scrollbar::-webkit-scrollbar,
 .dh-agent-activity-scrollbar::-webkit-scrollbar { width: 2px; }
@@ -946,6 +953,11 @@ code, pre {
 .dh-sidebar-scrollbar::-webkit-scrollbar-thumb:hover { background: var(--border); }
 
 @supports (-moz-appearance: none) {
+  * {
+    scrollbar-color: var(--border-subtle) transparent;
+    scrollbar-width: thin;
+  }
+
   .dh-changed-files-scrollbar,
   .dh-agent-activity-scrollbar {
     scrollbar-color: var(--border) transparent;
@@ -3090,7 +3102,6 @@ select:disabled optgroup {
 
 .dh-changes-dock .rdv-wrapper {
   overflow-x: auto;
-  scrollbar-width: thin;
 }
 
 .dh-changes-dock .rdv-wrapper .diff {

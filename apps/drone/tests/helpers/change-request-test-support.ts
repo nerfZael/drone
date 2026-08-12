@@ -3,15 +3,24 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import type {
+  ChangeRequestInsert,
   ChangeRequestPatch,
   ChangeRequestRepository,
 } from '../../src/hub/change-requests/change-request-repository';
+import {
+  changeRequestEventTypeForStatus,
+  createChangeRequestDomainEvent,
+  type ChangeRequestDomainEventType,
+  type PendingChangeRequestDomainEvent,
+} from '../../src/hub/change-requests/change-request-events';
 import type { ChangeRequestRecord } from '../../src/hub/change-requests/change-request-types';
 import type { RunResult } from '../../src/host/dvm';
 
 export class MemoryChangeRequestRepository implements ChangeRequestRepository {
   private sequence = 0;
   private readonly records = new Map<string, ChangeRequestRecord>();
+  private readonly events: PendingChangeRequestDomainEvent[] = [];
+  private outboxAvailableHandler: (() => void) | null = null;
   failNextUpdateMessage: string | null = null;
   private failNextMirrorUpdateMessage: string | null = null;
 
@@ -19,9 +28,14 @@ export class MemoryChangeRequestRepository implements ChangeRequestRepository {
     this.failNextMirrorUpdateMessage = message;
   }
 
-  async insert(input: Omit<ChangeRequestRecord, 'number'>): Promise<ChangeRequestRecord> {
-    const record = { ...input, number: ++this.sequence };
+  async insert(input: ChangeRequestInsert): Promise<ChangeRequestRecord> {
+    const record = { ...input, number: ++this.sequence, stateVersion: 1 };
     this.records.set(record.id, record);
+    this.events.push({
+      ...createChangeRequestDomainEvent(record, 'change_request.created', record.createdAt),
+      attemptCount: 0,
+    });
+    this.outboxAvailableHandler?.();
     return structuredClone(record);
   }
 
@@ -33,6 +47,15 @@ export class MemoryChangeRequestRepository implements ChangeRequestRepository {
   getByNumber(number: number): ChangeRequestRecord | null {
     const record = [...this.records.values()].find((candidate) => candidate.number === number);
     return record ? structuredClone(record) : null;
+  }
+
+  getByNumbers(numbers: number[]): Map<number, ChangeRequestRecord> {
+    return new Map(
+      numbers.flatMap((number) => {
+        const record = this.getByNumber(number);
+        return record ? [[number, record] as const] : [];
+      }),
+    );
   }
 
   list(): ChangeRequestRecord[] {
@@ -49,9 +72,61 @@ export class MemoryChangeRequestRepository implements ChangeRequestRepository {
     }
     const current = this.records.get(id);
     if (!current) throw new Error(`unknown change request: ${id}`);
-    const updated = { ...current, ...patch };
+    const updated = { ...current, ...patch, stateVersion: current.stateVersion + 1 };
     this.records.set(id, updated);
+    this.upsertEvent(
+      updated,
+      changeRequestEventTypeForStatus(updated.status),
+      patch.updatedAt ?? patch.githubMirror?.updatedAt ?? new Date().toISOString(),
+    );
     return structuredClone(updated);
+  }
+
+  async emitEvent(
+    id: string,
+    eventType: Exclude<ChangeRequestDomainEventType, 'change_request.created'>,
+    occurredAt: string,
+  ): Promise<ChangeRequestRecord> {
+    const current = this.records.get(id);
+    if (!current) throw new Error(`unknown change request: ${id}`);
+    const updated = { ...current, stateVersion: current.stateVersion + 1 };
+    this.records.set(id, updated);
+    this.upsertEvent(updated, eventType, occurredAt);
+    this.outboxAvailableHandler?.();
+    return structuredClone(updated);
+  }
+
+  listPendingEvents(limit = 100): PendingChangeRequestDomainEvent[] {
+    return structuredClone(this.events.slice(0, limit));
+  }
+
+  async markEventDispatched(eventId: string): Promise<void> {
+    const index = this.events.findIndex((event) => event.id === eventId);
+    if (index >= 0) this.events.splice(index, 1);
+  }
+
+  async markEventFailed(eventId: string, error: string): Promise<void> {
+    const event = this.events.find((candidate) => candidate.id === eventId);
+    if (event) event.attemptCount += 1;
+  }
+
+  setOutboxAvailableHandler(handler: (() => void) | null): void {
+    this.outboxAvailableHandler = handler;
+  }
+
+  private upsertEvent(
+    record: ChangeRequestRecord,
+    eventType: Exclude<ChangeRequestDomainEventType, 'change_request.created'>,
+    occurredAt: string,
+  ): void {
+    const existing = this.events.findIndex((event) => event.requestNumber === record.number);
+    const event = {
+      ...createChangeRequestDomainEvent(record, eventType, occurredAt),
+      attemptCount: 0,
+    };
+    if (existing >= 0) this.events[existing] = event;
+    else this.events.push(event);
+    this.outboxAvailableHandler?.();
   }
 }
 

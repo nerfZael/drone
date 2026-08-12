@@ -37,6 +37,7 @@ import { configureMonacoTypeScriptDiagnostics } from './editor-monaco-configurat
 import { AppShortcutBoundary } from '../app/AppShortcutBoundary';
 import { IconCopy } from '../icons';
 import {
+  DRONE_HUB_MONACO_SCROLLBAR_OPTIONS,
   defineDroneHubMonacoThemes,
   MonacoEditor,
   MonacoEditorErrorBoundary,
@@ -376,6 +377,7 @@ export function OpenedDroneFilePanel({
       readOnly: Boolean(fileSaving) || readOnly,
       fontSize: 12,
       minimap: { enabled: false },
+      scrollbar: DRONE_HUB_MONACO_SCROLLBAR_OPTIONS,
       wordWrap: 'on',
       scrollBeyondLastLine: false,
       automaticLayout: true,

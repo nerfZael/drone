@@ -21,6 +21,8 @@ import {
   CHANGE_REQUEST_MERGE_TOOL_NAME,
   CHANGE_REQUEST_WRITE_SCOPED_TOOL_NAMES,
 } from './change-requests/change-request-tool-names';
+import { normalizeChangeRequestSubscriptionId } from './subscriptions/change-request-subscription-events';
+import { MCP_RESOURCE_SUBSCRIPTION_EVENTS } from './subscriptions/resource-subscription-capabilities';
 
 import { defaultProfileDroneRootDir, profileDroneRootDir, readActiveProfileNameSync } from '../host/profiles';
 import { GROQ_SPEECH_MAX_CHARS, GROQ_SPEECH_VOICES } from './groq-speech';
@@ -1096,6 +1098,31 @@ async function authorizeChatSubscriptionResource(
   }
 }
 
+async function authorizeChangeRequestSubscriptionResource(
+  context: McpToolRegistrationContext,
+  resourceId: string,
+): Promise<void> {
+  const principal = chatPrincipal(context);
+  if (!principal) return;
+  const requestNumber = normalizeChangeRequestSubscriptionId(resourceId);
+  const response = await requestJson(
+    `/api/change-requests/${encodeURIComponent(requestNumber)}`,
+    { method: 'GET' },
+  );
+  const droneId = cleanString(response?.request?.droneId);
+  if (
+    !droneId ||
+    !mcpChatAccessAllowsDrone(
+      principal.accessScope,
+      'read',
+      droneId,
+      principal.selectedDroneRefs,
+    )
+  ) {
+    throw new Error('MCP principal is not authorized for the requested change request');
+  }
+}
+
 async function requireContainerDroneForManagedChat(
   context: McpToolRegistrationContext,
   droneRefRaw: unknown,
@@ -1873,21 +1900,14 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     return toolResult({ ok: true, drone: cleanString(response?.id, args.drone), chat, runId: cleanString(response?.promptId || body.promptId), status: cleanString(response?.pendingState, 'queued'), raw: response });
   });
 
-  const resourceEventSchema = z.enum([
-    'chat.idle',
-    'chat.failed',
-    'pull_request.opened',
-    'pull_request.comment.created',
-    'pull_request.merged',
-    'pull_request.closed',
-  ]);
+  const resourceEventSchema = z.enum(MCP_RESOURCE_SUBSCRIPTION_EVENTS);
   server.registerTool('subscribe_to_resource_events', {
     title: 'Subscribe to resource events',
     description:
-      'Subscribe this conversation to events. Chat IDs support chat.idle and chat.failed and require read access. GitHub owner/repository supports pull_request.opened, pull_request.comment.created, pull_request.merged, and pull_request.closed. GitHub owner/repository#number supports pull_request.comment.created, pull_request.merged, and pull_request.closed. GitHub resources are validated directly with the Hub GitHub identity and do not need to be registered in DroneHub. Delivery settings and cursors are managed by DroneHub.',
+      'Subscribe this conversation to events. DroneHub chat IDs support chat.idle and chat.failed. Native DroneHub change-request numbers support change_request.updated, change_request.merged, and change_request.closed. Both require read access to their target drone. GitHub owner/repository supports pull_request.opened, pull_request.comment.created, pull_request.merged, and pull_request.closed. GitHub owner/repository#number supports pull_request.comment.created, pull_request.merged, and pull_request.closed. GitHub resources are validated directly with the Hub GitHub identity and do not need to be registered in DroneHub. Delivery settings and cursors are managed by DroneHub.',
     inputSchema: {
       provider: z.enum(['drone-hub', 'github']),
-      resourceType: z.enum(['chat', 'repository', 'pull_request']),
+      resourceType: z.enum(['chat', 'repository', 'pull_request', 'change_request']),
       resourceId: z.string(),
       events: z.array(resourceEventSchema).min(1),
       intent: z.string().optional(),
@@ -1896,6 +1916,9 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     const subscriber = subscriptionSubscriber(context);
     if (args.provider === 'drone-hub' && args.resourceType === 'chat') {
       await authorizeChatSubscriptionResource(context, args.resourceId);
+    }
+    if (args.provider === 'drone-hub' && args.resourceType === 'change_request') {
+      await authorizeChangeRequestSubscriptionResource(context, args.resourceId);
     }
     const response = await requestJson('/api/resource-subscriptions', {
       method: 'POST',

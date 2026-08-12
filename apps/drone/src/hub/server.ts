@@ -313,6 +313,7 @@ import { createResourceSubscriptionDeliveryAuthorizer } from './subscriptions/cr
 import { ResourceSubscriptionRepository } from './subscriptions/resource-subscription-repository';
 import { ResourceSubscriptionService } from './subscriptions/resource-subscription-service';
 import { registerChangeRequestFeature } from './change-requests/register-change-request-feature';
+import { getChangeRequestRepository } from './change-requests/change-request-repository';
 import { partitionWorkflowChatEntries } from './workflows/workflow-chat-metadata';
 import {
   isWorkflowChildDroneEntry,
@@ -5308,9 +5309,15 @@ async function startDroneHubApiServerWithLifecycle(
           enqueuePendingPromptPump(droneId, chatName);
           notifyCanonicalPromptQueueChatWrite(droneId, chatName);
         },
+        resolveChangeRequest: (requestNumber) =>
+          getChangeRequestRepository().getByNumber(requestNumber),
+        resolveChangeRequests: (requestNumbers) =>
+          getChangeRequestRepository().getByNumbers(requestNumbers),
         authorizeDelivery: createResourceSubscriptionDeliveryAuthorizer({
           resolveChatResource: (resourceId) =>
             resourceSubscriptionRepository.resolveChatResource(resourceId),
+          resolveChangeRequest: (requestNumber) =>
+            getChangeRequestRepository().getByNumber(requestNumber),
           loadRegistry: loadCanonicalActiveModel,
         }),
         log: hubLog,
@@ -5447,7 +5454,7 @@ async function startDroneHubApiServerWithLifecycle(
     updateStoredUserTimeZone,
   });
   registerAgentRunDiffRoutes(apiRouter);
-  registerChangeRequestFeature(apiRouter, {
+  const stopChangeRequestFeature = registerChangeRequestFeature(apiRouter, {
     writeSseEvent: writeHubSseEvent,
     nowIso,
     resolveDrone: resolveDroneOrPendingForReadRef,
@@ -5465,7 +5472,12 @@ async function startDroneHubApiServerWithLifecycle(
     storagePath: droneRootPath,
     now: nowIso,
     onGithubChanged: clearGithubPullRequestListCache,
+    deliverEvent: async (event) => {
+      await resourceSubscriptionService?.publishChangeRequest(event);
+    },
+    log: hubLog,
   });
+  registerBackgroundResource('change request events', stopChangeRequestFeature);
   registerNativeChatRoutes(apiRouter, {
     nativeChatLifecycle,
     nativeChatHistoryPage: (threadId, input) => blipAssistantHost.historyPage(threadId, input),

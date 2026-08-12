@@ -7,13 +7,16 @@ import type {
   ChangeRequestActor,
   ChangeRequestStatus,
 } from '../change-requests/change-request-types';
+import type { ChangeRequestDomainEvent } from '../change-requests/change-request-events';
 import type { HubRouteHandler, HubRouter } from '../hub-router';
+import { openHubSseStream } from './hub-sse-stream';
 
 type ChangeRequestRouteDependencies = {
   service: ChangeRequestService | null;
   githubMirrorService: ChangeRequestGithubMirrorService | null;
   writeSseEvent: (res: ServerResponse, event: string, data: unknown) => void;
   nowIso: () => string;
+  subscribeToChanges?: (observer: (event: ChangeRequestDomainEvent) => void) => () => void;
 };
 
 export function registerChangeRequestRoutes(
@@ -39,19 +42,6 @@ export function registerChangeRequestRoutes(
     return deps.githubMirrorService;
   };
   const route = changeRequestRouter(apiRouter);
-  const eventClients = new Map<string, Set<ServerResponse>>();
-  const publishChange = (request: { droneId: string; number: number; status: string; updatedAt: string }) => {
-    const clients = eventClients.get(request.droneId);
-    if (!clients) return;
-    for (const response of clients) {
-      deps.writeSseEvent(response, 'change_request_changed', {
-        droneId: request.droneId,
-        requestNumber: request.number,
-        status: request.status,
-        updatedAt: request.updatedAt,
-      });
-    }
-  };
 
   route.get('/api/change-requests', async ({ url, json }) => {
     const requests = await service().list({
@@ -65,30 +55,23 @@ export function registerChangeRequestRoutes(
   route.get('/api/change-requests/events', ({ req, res, url }) => {
     const droneId = url.searchParams.get('droneId')?.trim();
     if (!droneId) throw new ChangeRequestError('droneId is required');
-    res.statusCode = 200;
-    res.setHeader('content-type', 'text/event-stream; charset=utf-8');
-    res.setHeader('cache-control', 'no-cache, no-transform');
-    res.setHeader('connection', 'keep-alive');
-    req.socket.setTimeout(0);
-    (res as ServerResponse & { flushHeaders?: () => void }).flushHeaders?.();
-    let clients = eventClients.get(droneId);
-    if (!clients) {
-      clients = new Set();
-      eventClients.set(droneId, clients);
-    }
-    clients.add(res);
-    deps.writeSseEvent(res, 'connected', { ok: true, droneId, at: deps.nowIso() });
-    const keepAlive = setInterval(() => {
-      if (!res.destroyed && !res.writableEnded) res.write(': keepalive\n\n');
-    }, 25_000);
-    keepAlive.unref?.();
-    const cleanup = () => {
-      clearInterval(keepAlive);
-      clients?.delete(res);
-      if (clients?.size === 0) eventClients.delete(droneId);
-    };
-    req.once('close', cleanup);
-    res.once('close', cleanup);
+    openHubSseStream({
+      request: req,
+      response: res,
+      writeEvent: deps.writeSseEvent,
+      connectedData: { ok: true, droneId, at: deps.nowIso() },
+      subscribe: () =>
+        deps.subscribeToChanges?.((event) => {
+          if (event.request.droneId !== droneId || res.destroyed || res.writableEnded) return;
+          deps.writeSseEvent(res, 'change_request_changed', {
+            droneId: event.request.droneId,
+            requestNumber: event.requestNumber,
+            stateVersion: event.stateVersion,
+            status: event.request.status,
+            updatedAt: event.request.updatedAt,
+          });
+        }),
+    });
   });
 
   route.post('/api/change-requests', async ({ readJson, json }) => {
@@ -103,7 +86,6 @@ export function registerChangeRequestRoutes(
         typeof body.destinationBranch === 'string' ? body.destinationBranch : undefined,
       actor: requestActor(body.actor),
     });
-    publishChange(request);
     json(201, { ok: true, request });
   });
 
@@ -117,7 +99,6 @@ export function registerChangeRequestRoutes(
 
   route.post('/api/change-requests/:requestNumber/refresh-assessment', async ({ params, json }) => {
     const request = await service().refreshAssessment(params.requestNumber);
-    publishChange(request);
     json(200, { ok: true, request });
   });
 
@@ -130,13 +111,11 @@ export function registerChangeRequestRoutes(
         typeof body.destinationBranch === 'string' ? body.destinationBranch : undefined,
       refreshSnapshot: typeof body.refreshSnapshot === 'boolean' ? body.refreshSnapshot : undefined,
     });
-    publishChange(request);
     json(200, { ok: true, request });
   });
 
   route.post('/api/change-requests/:requestNumber/close', async ({ params, json }) => {
     const request = await service().close(params.requestNumber);
-    publishChange(request);
     json(200, { ok: true, request });
   });
 
@@ -146,7 +125,6 @@ export function registerChangeRequestRoutes(
       actor: requestActor(body.actor),
       commitMessage: typeof body.commitMessage === 'string' ? body.commitMessage : undefined,
     });
-    publishChange(request);
     json(200, { ok: true, request });
   });
 
@@ -159,7 +137,6 @@ export function registerChangeRequestRoutes(
         mergeMethod: mergeMethod(body.mergeMethod),
       });
       const request = await service().get(params.requestNumber);
-      publishChange(request);
       json(201, { ok: true, request });
     },
   );
@@ -167,14 +144,12 @@ export function registerChangeRequestRoutes(
   route.post('/api/change-requests/:requestNumber/github/sync', async ({ params, json }) => {
     await githubMirrorService().sync(params.requestNumber);
     const request = await service().get(params.requestNumber);
-    publishChange(request);
     json(200, { ok: true, request });
   });
 
   route.post('/api/change-requests/:requestNumber/github/refresh', async ({ params, json }) => {
     await githubMirrorService().refresh(params.requestNumber);
     const request = await service().get(params.requestNumber);
-    publishChange(request);
     json(200, { ok: true, request });
   });
 
@@ -185,7 +160,6 @@ export function registerChangeRequestRoutes(
     }
     await githubMirrorService().setAutoUpdate(params.requestNumber, body.autoUpdate);
     const request = await service().get(params.requestNumber);
-    publishChange(request);
     json(200, { ok: true, request });
   });
 
@@ -195,7 +169,6 @@ export function registerChangeRequestRoutes(
       const body = await readJson<Record<string, unknown>>();
       await githubMirrorService().merge(params.requestNumber, mergeMethod(body.method));
       const request = await service().get(params.requestNumber);
-      publishChange(request);
       json(200, { ok: true, request });
     },
   );
@@ -203,7 +176,6 @@ export function registerChangeRequestRoutes(
   route.post('/api/change-requests/:requestNumber/github/close', async ({ params, json }) => {
     await githubMirrorService().close(params.requestNumber);
     const request = await service().get(params.requestNumber);
-    publishChange(request);
     json(200, { ok: true, request });
   });
 

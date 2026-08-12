@@ -15,19 +15,30 @@ describe('change request live updates', () => {
     expect(dock).not.toContain('Refresh change requests');
   });
 
-  test('publishes change request mutations over SSE', () => {
+  test('observes committed change request domain events over SSE', () => {
     const routes = source('../../drone/src/hub/routes/change-request-routes.ts');
+    const service = source('../../drone/src/hub/change-requests/change-request-service.ts');
+    const repository = source('../../drone/src/hub/change-requests/change-request-repository.ts');
+    const events = source('../../drone/src/hub/change-requests/change-request-events.ts');
 
     expect(routes).toContain("'/api/change-requests/events'");
     expect(routes).toContain("'change_request_changed'");
-    expect(routes).toContain('publishChange(request)');
+    expect(routes).toContain('deps.subscribeToChanges?.((event) =>');
+    expect(routes).not.toContain('publishChange');
+    expect(service).toContain("'change_request.updated'");
+    expect(repository).toContain('change_request_event_outbox');
+    expect(repository).toContain('changeRequestEventTypeForStatus(changed.status)');
+    expect(events).toContain("if (status === 'merged') return 'change_request.merged'");
+    expect(events).toContain("if (status === 'closed') return 'change_request.closed'");
   });
 
   test('keys lazy native diffs by revision and does not refresh the remote assessment on open', () => {
     const detail = source('../src/droneHub/changeRequests/ChangeRequestDetail.tsx');
     const changes = source('../src/droneHub/changes/DroneChangesDock.tsx');
 
-    expect(detail).toContain('revisionKey: `${request.revision}:${request.snapshotSha ?? request.sourceHeadSha}`');
+    expect(detail).toContain(
+      'revisionKey: `${request.revision}:${request.snapshotSha ?? request.sourceHeadSha}`',
+    );
     expect(detail).not.toContain('refreshChangeRequestAssessment');
     expect(changes).toContain('reviewOverride.revisionKey');
     expect(changes).toContain('reviewDiffStateKey(selectedEntry.path');

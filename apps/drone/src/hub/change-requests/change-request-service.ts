@@ -188,7 +188,12 @@ export class ChangeRequestService {
         await this.git(current.repoRoot, ['fetch', 'origin', '--prune'], MERGE_TIMEOUT_MS);
       }
       await this.deps.githubMirrorLifecycle?.refreshAfterNativeAssessment(this.requiredRecord(id));
-      return await this.view(this.requiredRecord(id));
+      const updated = await this.deps.repository.emitEvent(
+        id,
+        'change_request.updated',
+        this.deps.now(),
+      );
+      return await this.view(updated);
     });
   }
 

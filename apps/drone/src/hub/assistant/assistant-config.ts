@@ -24,7 +24,7 @@ export const DEFAULT_THREAD_TITLE = 'New thread';
 export const ASSISTANT_SYSTEM_PROMPT_RUNTIME_APPENDIX =
   'Current existing-drone access scope is appended at run time. It limits operations that target existing drones; enabled global creation tools are governed separately.';
 export const ASSISTANT_CHAT_IDLE_PROMPT_LINE =
-  'When you start asynchronous work and need the result later, use subscribe_to_resource_events for chat idle, failure, or GitHub pull-request events. Use subscribe_to_cron for recurring time-based work. These tools return immediately; end your turn when there is nothing else to do, and the system will resume this conversation when subscribed events arrive.';
+  'When you start asynchronous work and need the result later, use subscribe_to_resource_events for chat idle, failure, native change-request, or GitHub pull-request events. Use subscribe_to_cron for recurring time-based work. These tools return immediately; end your turn when there is nothing else to do, and the system will resume this conversation when subscribed events arrive.';
 export const ASSISTANT_MULTI_TARGET_PROMPT_LINE =
   'Use list_targets to discover the workspaces enabled for this chat, including its optional private Artifacts workspace. Use set_target to choose the default workspace before a sequence of file operations, or pass target explicitly on an individual workspace tool. When two or more workspaces are available, use transfer_files to copy a file or folder directly between them.';
 export const ASSISTANT_SINGLE_TARGET_PROMPT_LINE =
@@ -252,7 +252,8 @@ const ASSISTANT_TOOL_SUMMARY_DEFINITIONS: AssistantToolSummary[] = [
     name: 'subscribe_to_resource_events',
     label: 'Subscribe to resource events',
     category: 'chats',
-    description: 'Resume this conversation when selected DroneHub chat or GitHub events occur.',
+    description:
+      'Resume this conversation when selected DroneHub chat, change-request, or GitHub events occur.',
   },
   {
     name: 'subscribe_to_cron',

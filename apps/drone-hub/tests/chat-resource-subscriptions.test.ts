@@ -166,6 +166,34 @@ describe('chat resource subscription presentation', () => {
     ).toBe('Targets: Release helper, Release helper / review');
   });
 
+  test('presents native change request subscriptions with their public number and title', () => {
+    const [subscription] = normalizeChatResourceSubscriptions([
+      {
+        id: 'change-request-watch',
+        provider: 'drone-hub',
+        resourceType: 'change_request',
+        resourceId: '42',
+        resourceLabel: '#42 Improve subscriptions',
+        resourceDroneId: 'drone-b',
+        events: ['change_request.updated', 'change_request.merged'],
+        intent: 'Continue reviewing it.',
+        status: 'active',
+      },
+    ]);
+
+    expect(subscription).toMatchObject({
+      resourceType: 'change_request',
+      resourceId: '42',
+      resourceDroneId: 'drone-b',
+    });
+    expect(chatSubscriptionResourceLabel(subscription!)).toBe(
+      'Change request · #42 Improve subscriptions',
+    );
+    expect(chatSubscriptionSummary([subscription!])).toBe(
+      'Change request updated, Change request merged · #42 Improve subscriptions',
+    );
+  });
+
   test('renders the primary chat subscription snapshot without a client fetch', () => {
     const subscriptions = normalizeChatResourceSubscriptions([
       {

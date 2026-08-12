@@ -127,6 +127,17 @@ describe('sidebar presentation', () => {
     expect(stylesSource).toContain('@supports (-moz-appearance: none)');
   });
 
+  test('keeps desktop workspace scrollbars at an exact narrow Chromium width', () => {
+    const stylesSource = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+    const firefoxFallbackIndex = stylesSource.indexOf('@supports (-moz-appearance: none)');
+    const standardThinIndex = stylesSource.indexOf('scrollbar-width: thin');
+
+    expect(stylesSource).toContain('::-webkit-scrollbar { height: 3px; width: 3px; }');
+    expect(firefoxFallbackIndex).toBeGreaterThan(-1);
+    expect(standardThinIndex).toBeGreaterThan(firefoxFallbackIndex);
+    expect(stylesSource).not.toContain('.rdv-wrapper {\n  overflow-x: auto;\n  scrollbar-width: thin;');
+  });
+
   test('keeps chat row state hierarchy centralized and compact', () => {
     const selected = sidebarChatRowTone({ selected: true });
     const active = sidebarChatRowTone({ active: true });

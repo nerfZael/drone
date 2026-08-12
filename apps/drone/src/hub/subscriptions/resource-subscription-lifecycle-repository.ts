@@ -16,12 +16,14 @@ type LifecycleSubscriptionRow = {
   resource_id: string;
   status: ResourceSubscriptionStatus;
   pause_reasons_json: string;
+  resource_config_json: string;
 };
 
 type SubscriptionRelations = {
   subscriberChatId?: string;
   subscriberDroneId?: string;
   resourceChatIds: string[];
+  resourceDroneId?: string;
   subscriberReason?: ResourceSubscriptionPauseReason;
   resourceReason?: ResourceSubscriptionPauseReason;
 };
@@ -164,7 +166,10 @@ function pauseRelationsWithConnection(
 
 function cancelRelationsWithConnection(
   connection: HubDatabaseConnection,
-  input: Pick<SubscriptionRelations, 'subscriberChatId' | 'subscriberDroneId' | 'resourceChatIds'>,
+  input: Pick<
+    SubscriptionRelations,
+    'subscriberChatId' | 'subscriberDroneId' | 'resourceChatIds' | 'resourceDroneId'
+  >,
   now: string,
 ): string[] {
   const rows = selectRelatedSubscriptions(connection, input, ['active', 'paused']);
@@ -182,7 +187,10 @@ function cancelRelationsWithConnection(
 
 function selectRelatedSubscriptions(
   connection: HubDatabaseConnection,
-  input: Pick<SubscriptionRelations, 'subscriberChatId' | 'subscriberDroneId' | 'resourceChatIds'>,
+  input: Pick<
+    SubscriptionRelations,
+    'subscriberChatId' | 'subscriberDroneId' | 'resourceChatIds' | 'resourceDroneId'
+  >,
   statuses: ResourceSubscriptionStatus[],
 ): LifecycleSubscriptionRow[] {
   const conditions: string[] = [];
@@ -201,11 +209,17 @@ function selectRelatedSubscriptions(
     );
     values.push(...input.resourceChatIds);
   }
+  if (input.resourceDroneId) {
+    conditions.push(
+      `(provider = 'drone-hub' AND resource_type = 'change_request' AND json_extract(resource_config_json, '$.droneId') = ?)`,
+    );
+    values.push(input.resourceDroneId);
+  }
   if (conditions.length === 0 || statuses.length === 0) return [];
   return connection
     .prepare(
       `SELECT id, subscriber_chat_id, subscriber_drone_id, provider, resource_type,
-        resource_id, status, pause_reasons_json
+        resource_id, resource_config_json, status, pause_reasons_json
        FROM resource_subscriptions
        WHERE status IN (${statuses.map(() => '?').join(', ')})
          AND (${conditions.join(' OR ')})
@@ -248,13 +262,24 @@ function subscriberMatches(
 
 function resourceMatches(
   row: LifecycleSubscriptionRow,
-  input: Pick<SubscriptionRelations, 'resourceChatIds'>,
+  input: Pick<SubscriptionRelations, 'resourceChatIds' | 'resourceDroneId'>,
 ): boolean {
   return (
     row.provider === 'drone-hub' &&
-    row.resource_type === 'chat' &&
-    input.resourceChatIds.includes(row.resource_id)
+    ((row.resource_type === 'chat' && input.resourceChatIds.includes(row.resource_id)) ||
+      (row.resource_type === 'change_request' &&
+        Boolean(input.resourceDroneId) &&
+        resourceConfigDroneId(row.resource_config_json) === input.resourceDroneId))
   );
+}
+
+function resourceConfigDroneId(raw: string): string {
+  try {
+    const parsed = JSON.parse(raw);
+    return cleanString(parsed?.droneId);
+  } catch {
+    return '';
+  }
 }
 
 export function failPendingResourceSubscriptionDeliveries(
@@ -332,6 +357,7 @@ function droneRelations(droneIdRaw: string, chatIdsRaw: string[]): SubscriptionR
     ? {
         subscriberDroneId: droneId,
         resourceChatIds: cleanStrings(chatIdsRaw),
+        resourceDroneId: droneId,
         subscriberReason: 'subscriber_drone_archived',
         resourceReason: 'resource_drone_archived',
       }

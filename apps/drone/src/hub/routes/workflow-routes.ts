@@ -3,6 +3,7 @@ import type { ServerResponse } from 'node:http';
 import type { HubRouter } from '../hub-router';
 import type { WorkflowService } from '../workflows/workflow-service';
 import type { WorkflowActor } from '../workflows/workflow-types';
+import { openHubSseStream } from './hub-sse-stream';
 
 export type WorkflowRouteDependencies = {
   service: WorkflowService;
@@ -24,26 +25,16 @@ export function registerWorkflowRoutes(
   const { service, writeSseEvent, nowIso } = dependencies;
 
   router.get('/api/drones/:droneId/workflows/events', ({ req, res, params }) => {
-    res.statusCode = 200;
-    res.setHeader('content-type', 'text/event-stream; charset=utf-8');
-    res.setHeader('cache-control', 'no-cache, no-transform');
-    res.setHeader('connection', 'keep-alive');
-    req.socket.setTimeout(0);
-    (res as any).flushHeaders?.();
-    writeSseEvent(res, 'connected', { ok: true, at: nowIso() });
-    const unsubscribe = service.events.subscribe(params.droneId, (event) => {
-      writeSseEvent(res, 'workflow_change', event);
+    openHubSseStream({
+      request: req,
+      response: res,
+      writeEvent: writeSseEvent,
+      connectedData: { ok: true, at: nowIso() },
+      subscribe: () =>
+        service.events.subscribe(params.droneId, (event) => {
+          writeSseEvent(res, 'workflow_change', event);
+        }),
     });
-    const keepAlive = setInterval(() => {
-      if (!res.destroyed && !res.writableEnded) res.write(': keepalive\n\n');
-    }, 25_000);
-    keepAlive.unref?.();
-    const cleanup = () => {
-      clearInterval(keepAlive);
-      unsubscribe();
-    };
-    req.once('close', cleanup);
-    res.once('close', cleanup);
   });
 
   router.get('/api/drones/:droneId/workflows', ({ params, json }) => {

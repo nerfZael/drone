@@ -5,6 +5,15 @@ import { ManagedLoop } from '../../background/managed-loop';
 import { getPromptQueueRepository } from '../../host/prompt-queue-repository';
 import { resolveGithubToken } from '../github-pull-requests';
 import {
+  changeRequestSubscriptionEvent,
+  changeRequestSubscriptionLabel,
+  isChangeRequestSubscriptionEvent,
+  normalizeChangeRequestSubscriptionId,
+  type ChangeRequestSubscriptionTarget,
+} from './change-request-subscription-events';
+import type { ChangeRequestDomainEvent } from '../change-requests/change-request-events';
+import { resourceSubscriptionCapability } from './resource-subscription-capabilities';
+import {
   cronOccurrenceEvent,
   cronSubscriptionConfig,
   dueCronOccurrence,
@@ -25,7 +34,6 @@ import {
 } from './resource-subscription-repository';
 import { readResourceSubscriptionSettings } from './resource-subscription-settings';
 import {
-  RESOURCE_SUBSCRIPTION_EVENTS,
   type ResourceEvent,
   type ResourceSubscription,
   type ResourceSubscriptionEventType,
@@ -56,6 +64,10 @@ export type ResourceSubscriptionServiceDependencies = {
     subscriber: ChatResourceLocation,
   ) => Promise<boolean>;
   wakePromptQueue: (droneId: string, chatName: string) => void;
+  resolveChangeRequest?: (requestNumber: number) => ChangeRequestSubscriptionTarget | null;
+  resolveChangeRequests?: (
+    requestNumbers: number[],
+  ) => Map<number, ChangeRequestSubscriptionTarget>;
   pollGithubRepository?: typeof pollGithubRepository;
   readSettings?: () => Promise<ResourceSubscriptionSettings>;
   log: (level: 'info' | 'warn', message: string, details?: Record<string, unknown>) => void;
@@ -130,23 +142,69 @@ export class ResourceSubscriptionService {
         )
         .map((subscription) => subscription.resourceId),
     );
-    return subscriptions.map((subscription) =>
-      this.withResourceLabel(subscription, chatResources.get(subscription.resourceId)),
+    const changeRequests = this.resolveChangeRequests(
+      subscriptions
+        .filter(
+          (subscription) =>
+            subscription.provider === 'drone-hub' && subscription.resourceType === 'change_request',
+        )
+        .map((subscription) => changeRequestNumber(subscription.resourceId)),
     );
+    return subscriptions.map((subscription) => {
+      const request =
+        subscription.provider === 'drone-hub' && subscription.resourceType === 'change_request'
+          ? changeRequests.get(changeRequestNumber(subscription.resourceId))
+          : undefined;
+      return this.withResourceLabel(
+        subscription,
+        chatResources.get(subscription.resourceId),
+        request,
+      );
+    });
   }
 
   get(id: string, subscriberChatId: string): ResourceSubscription | null {
-    return this.deps.repository.get(id, subscriberChatId);
+    const subscription = this.deps.repository.get(id, subscriberChatId);
+    return subscription ? this.withResourceLabel(subscription) : null;
   }
 
   resolveChatResource(resourceId: string): ChatResourceLocation | null {
     return this.deps.repository.resolveChatResource(resourceId);
   }
 
+  private resolveChangeRequest(resourceId: string): ChangeRequestSubscriptionTarget | null {
+    if (!this.deps.resolveChangeRequest) return null;
+    return this.deps.resolveChangeRequest(changeRequestNumber(resourceId));
+  }
+
+  private resolveChangeRequests(
+    requestNumbers: number[],
+  ): Map<number, ChangeRequestSubscriptionTarget> {
+    if (requestNumbers.length === 0) return new Map();
+    if (this.deps.resolveChangeRequests) return this.deps.resolveChangeRequests(requestNumbers);
+    return new Map(
+      requestNumbers.flatMap((number) => {
+        const request = this.deps.resolveChangeRequest?.(number);
+        return request ? [[number, request] as const] : [];
+      }),
+    );
+  }
+
   private withResourceLabel(
     subscription: ResourceSubscription,
     location?: ChatResourceLocation,
+    resolvedChangeRequest?: ChangeRequestSubscriptionTarget,
   ): ResourceSubscription {
+    if (subscription.provider === 'drone-hub' && subscription.resourceType === 'change_request') {
+      const request = resolvedChangeRequest ?? this.resolveChangeRequest(subscription.resourceId);
+      return request
+        ? {
+            ...subscription,
+            resourceLabel: changeRequestSubscriptionLabel(request),
+            resourceDroneId: request.droneId,
+          }
+        : subscription;
+    }
     if (subscription.provider !== 'drone-hub' || subscription.resourceType !== 'chat') {
       return subscription;
     }
@@ -176,6 +234,18 @@ export class ResourceSubscriptionService {
     ) {
       await validateGithubSubscriptionResource(resource.resourceType, resource.resourceId);
     }
+    let changeRequestResource: ChangeRequestSubscriptionTarget | null = null;
+    if (resource.provider === 'drone-hub' && resource.resourceType === 'change_request') {
+      changeRequestResource = this.resolveChangeRequest(resource.resourceId);
+      if (!changeRequestResource) {
+        throw new Error(`unknown DroneHub change request: #${resource.resourceId}`);
+      }
+      if (changeRequestResource.status !== 'open') {
+        throw new Error(
+          `change request #${resource.resourceId} is already ${changeRequestResource.status}`,
+        );
+      }
+    }
     const intent = String(input.intent ?? '')
       .trim()
       .slice(0, 2_000);
@@ -196,7 +266,7 @@ export class ResourceSubscriptionService {
       );
     let cursor =
       existing?.status === 'active' || existing?.status === 'paused' ? existing.cursor : undefined;
-    if (resource.provider === 'drone-hub') {
+    if (resource.provider === 'drone-hub' && resource.resourceType === 'chat') {
       const location = this.deps.repository.resolveChatResource(resource.resourceId);
       if (!location) throw new Error(`unknown DroneHub chat resource: ${resource.resourceId}`);
       if (location.chatId === subscriber.chatId) {
@@ -207,9 +277,18 @@ export class ResourceSubscriptionService {
         cursor = chatCursor(location, status);
       }
     }
-    return await this.deps.repository.upsert({
+    const result = await this.deps.repository.upsert({
       subscriber,
       ...resource,
+      ...(changeRequestResource
+        ? {
+            resourceConfig: {
+              requestNumber: changeRequestResource.number,
+              droneId: changeRequestResource.droneId,
+              stateVersion: changeRequestResource.stateVersion,
+            },
+          }
+        : {}),
       events,
       intent,
       cursor,
@@ -225,6 +304,12 @@ export class ResourceSubscriptionService {
         : {}),
       maxActive: settings.maxActiveSubscriptionsPerConversation,
     });
+    return { ...result, subscription: this.withResourceLabel(result.subscription) };
+  }
+
+  async publishChangeRequest(event: ChangeRequestDomainEvent): Promise<void> {
+    if (!isChangeRequestSubscriptionEvent(event.eventType)) return;
+    await this.deps.repository.appendEvent(changeRequestSubscriptionEvent(event));
   }
 
   async subscribeToCron(input: {
@@ -276,7 +361,7 @@ export class ResourceSubscriptionService {
     const events = input.events
       ? normalizeEvents(current.provider, current.resourceType, input.events)
       : undefined;
-    return await this.deps.repository.update({
+    const subscription = await this.deps.repository.update({
       id: input.id,
       subscriberChatId: input.subscriberChatId,
       events,
@@ -284,10 +369,12 @@ export class ResourceSubscriptionService {
         ? { intent: String(input.intent).trim().slice(0, 2_000) }
         : {}),
     });
+    return subscription ? this.withResourceLabel(subscription) : null;
   }
 
   async cancel(id: string, subscriberChatId: string): Promise<ResourceSubscription | null> {
-    return await this.deps.repository.cancel(id, subscriberChatId);
+    const subscription = await this.deps.repository.cancel(id, subscriberChatId);
+    return subscription ? this.withResourceLabel(subscription) : null;
   }
 
   async pauseForDrone(droneId: string, chatIds: string[]): Promise<ResourceSubscription[]> {
@@ -381,6 +468,7 @@ export class ResourceSubscriptionService {
   private async resetResumeCursors(subscriptions: ResourceSubscription[]): Promise<void> {
     for (const subscription of subscriptions) {
       if (subscription.provider === 'github') continue;
+      if (subscription.resourceType === 'change_request') continue;
       if (subscription.resourceType === 'cron') {
         const config = cronSubscriptionConfig(subscription.resourceConfig);
         const schedule = normalizeCronSubscription(config.expression, config.timeZone);
@@ -427,10 +515,7 @@ export class ResourceSubscriptionService {
       try {
         const location = this.deps.repository.resolveChatResource(subscription.resourceId);
         if (!location) {
-          await this.deps.repository.cancelActive(
-            subscription.id,
-            subscription.subscriber.chatId,
-          );
+          await this.deps.repository.cancelActive(subscription.id, subscription.subscriber.chatId);
           continue;
         }
         const status = await this.deps.readChatStatus(location);
@@ -736,6 +821,13 @@ function normalizeResource(
     if (!id) throw new Error('DroneHub chat resource ID is required');
     return { provider, resourceType, resourceId: id };
   }
+  if (provider === 'drone-hub' && resourceType === 'change_request') {
+    return {
+      provider,
+      resourceType,
+      resourceId: normalizeChangeRequestSubscriptionId(resourceId),
+    };
+  }
   if (provider === 'github' && resourceType === 'repository') {
     return { provider, resourceType, resourceId: normalizeGithubRepositoryId(resourceId) };
   }
@@ -750,23 +842,12 @@ function normalizeEvents(
   resourceType: ResourceSubscriptionType,
   raw: ResourceSubscriptionEventType[],
 ): ResourceSubscriptionEventType[] {
-  const supported = new Set<ResourceSubscriptionEventType>(
-    provider === 'drone-hub'
-      ? resourceType === 'cron'
-        ? ['cron.triggered']
-        : ['chat.idle', 'chat.failed']
-      : resourceType === 'repository'
-        ? [
-            'pull_request.opened',
-            'pull_request.comment.created',
-            'pull_request.merged',
-            'pull_request.closed',
-          ]
-        : ['pull_request.comment.created', 'pull_request.merged', 'pull_request.closed'],
-  );
+  const capability = resourceSubscriptionCapability(provider, resourceType);
+  if (!capability)
+    throw new Error(`unsupported subscription resource: ${provider}/${resourceType}`);
+  const supported = new Set<ResourceSubscriptionEventType>(capability.supportedEvents);
   const events = [...new Set((raw ?? []).map(String))].filter(
     (event): event is ResourceSubscriptionEventType =>
-      RESOURCE_SUBSCRIPTION_EVENTS.includes(event as ResourceSubscriptionEventType) &&
       supported.has(event as ResourceSubscriptionEventType),
   );
   if (events.length === 0) {
@@ -777,6 +858,10 @@ function normalizeEvents(
     if (unsupported.length > 0) throw new Error(`unsupported events: ${unsupported.join(', ')}`);
   }
   return events;
+}
+
+function changeRequestNumber(resourceId: string): number {
+  return Number(normalizeChangeRequestSubscriptionId(resourceId));
 }
 
 function chatCursor(

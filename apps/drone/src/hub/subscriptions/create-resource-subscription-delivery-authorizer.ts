@@ -1,9 +1,11 @@
 import { mcpChatAccessAllowsDrone, normalizeMcpChatAccessScope } from '../mcp-chat-access';
 import type { ChatResourceLocation } from './resource-subscription-repository';
 import type { ResourceSubscription } from './resource-subscription-types';
+import type { ChangeRequestSubscriptionTarget } from './change-request-subscription-events';
 
 export function createResourceSubscriptionDeliveryAuthorizer(deps: {
   resolveChatResource: (resourceId: string) => ChatResourceLocation | null;
+  resolveChangeRequest?: (requestNumber: number) => ChangeRequestSubscriptionTarget | null;
   loadRegistry: () => Promise<any>;
 }) {
   return async (
@@ -35,6 +37,14 @@ export function createResourceSubscriptionDeliveryAuthorizer(deps: {
     if (subscription.provider === 'drone-hub' && subscription.resourceType === 'chat') {
       const target = deps.resolveChatResource(subscription.resourceId);
       return Boolean(target && canReadDrone(registry?.drones?.[target.droneId]));
+    }
+    if (subscription.provider === 'drone-hub' && subscription.resourceType === 'change_request') {
+      const requestNumber = Number(subscription.resourceId);
+      const request =
+        Number.isSafeInteger(requestNumber) && requestNumber > 0
+          ? deps.resolveChangeRequest?.(requestNumber)
+          : null;
+      return Boolean(request && canReadDrone(registry?.drones?.[request.droneId]));
     }
     return true;
   };

@@ -111,6 +111,26 @@ describe('OpenedDroneFilePanel', () => {
     expect(pointerTooltipRule).toContain('pointer-events: none');
   });
 
+  test('uses the slim shared Monaco scrollbar in file and chat editors', () => {
+    const loaderSource = readFileSync(
+      new URL('../src/droneHub/files/monaco-editor-loader.tsx', import.meta.url),
+      'utf8',
+    );
+    const fileEditorSource = readFileSync(
+      new URL('../src/droneHub/files/OpenedDroneFilePanel.tsx', import.meta.url),
+      'utf8',
+    );
+    const chatEditorSource = readFileSync(
+      new URL('../src/droneHub/chat/ChatComposerEditor.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(loaderSource).toContain('verticalScrollbarSize: 4');
+    expect(loaderSource).toContain('horizontalScrollbarSize: 4');
+    expect(fileEditorSource).toContain('scrollbar: DRONE_HUB_MONACO_SCROLLBAR_OPTIONS');
+    expect(chatEditorSource).toContain('scrollbar: DRONE_HUB_MONACO_SCROLLBAR_OPTIONS');
+  });
+
   test('uses the tab strip as the only file header', () => {
     const html = renderPanel(makeFile({ dirty: true }), true);
 

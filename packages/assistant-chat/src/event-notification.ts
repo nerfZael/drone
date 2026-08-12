@@ -37,10 +37,7 @@ function xmlEscape(value: unknown): string {
 }
 
 function xmlDecode(value: string): string {
-  return value
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&amp;/g, '&');
+  return value.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 }
 
 function boundedProviderContent(value: Record<string, unknown>, maxChars: number): string {
@@ -156,9 +153,9 @@ function parseLegacyEventNotification(prompt: string): EventNotificationDisplay 
     const resourceRaw = /^- resource:\s*(.+)$/m.exec(block)?.[1]?.trim() ?? '';
     const eventType = /^- event:\s*(.+)$/m.exec(block)?.[1]?.trim() ?? '';
     if (!resourceRaw && !eventType) return [];
-    const summary = /Trusted event summary:\s*\n([\s\S]*?)(?:\n\s*\nUntrusted provider content:|$)/i.exec(
-      block,
-    )?.[1]?.trim();
+    const summary = /Trusted event summary:\s*\n([\s\S]*?)(?:\n\s*\nUntrusted provider content:|$)/i
+      .exec(block)?.[1]
+      ?.trim();
     const providerContentText = /```json\s*\n([\s\S]*?)\n```/i.exec(block)?.[1]?.trim() ?? '';
     return [
       {
@@ -197,7 +194,9 @@ export function parseEventNotificationPrompt(value: unknown): EventNotificationD
 }
 
 export function isEventNotificationPrompt(value: unknown): boolean {
-  const prompt = String(value ?? '').trimStart().toLowerCase();
+  const prompt = String(value ?? '')
+    .trimStart()
+    .toLowerCase();
   return (
     prompt.startsWith(`<${EVENT_NOTIFICATION_ROOT}`) || prompt.startsWith('[event notification]')
   );
@@ -206,6 +205,7 @@ export function isEventNotificationPrompt(value: unknown): boolean {
 export function eventNotificationResourceTypeLabel(resourceTypeRaw: unknown): string {
   const resourceType = String(resourceTypeRaw ?? '').trim();
   if (resourceType === 'pull_request') return 'Pull request';
+  if (resourceType === 'change_request') return 'Change request';
   if (resourceType === 'repository') return 'Repository';
   if (resourceType === 'chat') return 'Chat';
   if (resourceType === 'cron') return 'Schedule';
@@ -221,6 +221,9 @@ export function eventNotificationEventLabel(eventTypeRaw: unknown): string {
     'pull_request.comment.created': 'PR comment added',
     'pull_request.merged': 'PR merged',
     'pull_request.closed': 'PR closed',
+    'change_request.updated': 'Change request updated',
+    'change_request.merged': 'Change request merged',
+    'change_request.closed': 'Change request closed',
     'cron.triggered': 'Scheduled run',
   };
   return (
@@ -251,6 +254,22 @@ export function eventNotificationResourceLabel(input: {
       const timeZone = String(content?.timeZone ?? '').trim();
       const schedule = [description || expression, timeZone].filter(Boolean).join(' · ');
       if (schedule) return `${type} · ${schedule}`;
+    } catch {
+      // Fall back to the resource ID for legacy or truncated notifications.
+    }
+  }
+  if (String(input.resourceType ?? '').trim() === 'change_request') {
+    try {
+      const content = JSON.parse(String(input.providerContentText ?? '')) as Record<
+        string,
+        unknown
+      >;
+      const number = String(content?.requestNumber ?? input.resourceId ?? '')
+        .trim()
+        .replace(/^#/, '');
+      const title = String(content?.title ?? '').trim();
+      const label = [number ? `#${number}` : '', title].filter(Boolean).join(' ');
+      if (label) return `${type} · ${label}`;
     } catch {
       // Fall back to the resource ID for legacy or truncated notifications.
     }

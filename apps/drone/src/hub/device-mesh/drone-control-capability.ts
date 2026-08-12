@@ -265,7 +265,7 @@ function compactChatSubscriptions(value: unknown): Array<Record<string, unknown>
     const resourceId = truncateUtf8(entry.resourceId, 800).trim();
     if (!id || !resourceId || entry.status !== 'active') return [];
     const provider = entry.provider === 'github' ? 'github' : 'drone-hub';
-    const resourceType = ['chat', 'repository', 'pull_request', 'cron'].includes(
+    const resourceType = ['chat', 'repository', 'pull_request', 'change_request', 'cron'].includes(
       String(entry.resourceType),
     )
       ? String(entry.resourceType)
@@ -277,6 +277,15 @@ function compactChatSubscriptions(value: unknown): Array<Record<string, unknown>
         provider,
         resourceType,
         resourceId,
+        ...(truncateUtf8(entry.resourceLabel, 800).trim()
+          ? { resourceLabel: truncateUtf8(entry.resourceLabel, 800).trim() }
+          : {}),
+        ...(truncateUtf8(entry.resourceDroneId, 200).trim()
+          ? { resourceDroneId: truncateUtf8(entry.resourceDroneId, 200).trim() }
+          : {}),
+        ...(truncateUtf8(entry.resourceChatName, 200).trim()
+          ? { resourceChatName: truncateUtf8(entry.resourceChatName, 200).trim() }
+          : {}),
         ...(resourceType === 'cron'
           ? {
               resourceConfig: {

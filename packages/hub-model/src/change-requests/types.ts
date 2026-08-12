@@ -34,6 +34,7 @@ export type ChangeRequestGithubMirrorView = ChangeRequestGithubMirrorRecord & {
 export type ChangeRequestRecord = {
   id: string;
   number: number;
+  stateVersion: number;
   status: ChangeRequestStatus;
   droneId: string;
   droneName: string;

@@ -9,6 +9,29 @@ import {
 } from '../src/drones/chat-subscriptions';
 
 describe('mobile chat subscription presentation', () => {
+  test('presents native change requests by public number and title', () => {
+    const [subscription] = normalizeMobileChatSubscriptions([
+      {
+        id: 'change-request-watch',
+        provider: 'drone-hub',
+        resourceType: 'change_request',
+        resourceId: '42',
+        resourceLabel: '#42 Improve subscriptions',
+        resourceDroneId: 'drone-b',
+        events: ['change_request.updated', 'change_request.merged'],
+        status: 'active',
+      },
+    ]);
+
+    expect(subscription?.resourceDroneId).toBe('drone-b');
+    expect(mobileChatSubscriptionResourceLabel(subscription!)).toBe(
+      'Change request · #42 Improve subscriptions',
+    );
+    expect(mobileChatSubscriptionSummary([subscription!])).toBe(
+      'Change request updated, Change request merged · #42 Improve subscriptions',
+    );
+  });
+
   test('normalizes active subscriptions and summarizes their count', () => {
     const subscriptions = normalizeMobileChatSubscriptions([
       {

@@ -17,6 +17,7 @@ import {
   type ResourceSubscriptionSubscriber,
   type ResourceSubscriptionType,
 } from './resource-subscription-types';
+import { isTerminalResourceSubscriptionEvent } from './resource-subscription-capabilities';
 import {
   failPendingResourceSubscriptionDeliveries,
   ResourceSubscriptionLifecycleRepository,
@@ -602,16 +603,8 @@ export class ResourceSubscriptionRepository {
       const row = connection
         .prepare('SELECT * FROM resource_subscriptions WHERE id = ? AND subscriber_chat_id = ?')
         .get(id, subscriberChatId) as SubscriptionRow | undefined;
-      if (
-        Number(updated.changes ?? 0) === 1 ||
-        (!activeOnly && row?.status === 'cancelled')
-      ) {
-        failPendingResourceSubscriptionDeliveries(
-          connection,
-          id,
-          'subscription cancelled',
-          now,
-        );
+      if (Number(updated.changes ?? 0) === 1 || (!activeOnly && row?.status === 'cancelled')) {
+        failPendingResourceSubscriptionDeliveries(connection, id, 'subscription cancelled', now);
       }
       return subscriptionFromRow(row);
     });
@@ -795,23 +788,21 @@ export class ResourceSubscriptionRepository {
       `);
       for (const row of subscriptions) {
         if (!parseEvents(row.events_json).includes(event.eventType)) continue;
+        if (isChangeRequestEventAtOrBeforeBaseline(row, event)) continue;
         insertDelivery.run(crypto.randomUUID(), row.id, event.id, now, now, now, now);
       }
 
-      if (
-        event.resourceType === 'pull_request' &&
-        (event.eventType === 'pull_request.merged' || event.eventType === 'pull_request.closed')
-      ) {
+      if (isTerminalResourceSubscriptionEvent(event)) {
         connection
           .prepare(
             `
             UPDATE resource_subscriptions
             SET status = 'completed', pause_reasons_json = '[]', completed_at = ?, updated_at = ?
-            WHERE provider = 'github' AND resource_type = 'pull_request'
+            WHERE provider = ? AND resource_type = ?
               AND resource_id = ? AND status IN ('active', 'paused')
           `,
           )
-          .run(now, now, event.resourceId);
+          .run(now, now, event.provider, event.resourceType, event.resourceId);
       }
       return true;
     });
@@ -1369,6 +1360,21 @@ export class ResourceSubscriptionRepository {
         .run(eventCutoff);
     });
   }
+}
+
+function isChangeRequestEventAtOrBeforeBaseline(
+  row: SubscriptionRow,
+  event: ResourceEvent,
+): boolean {
+  if (event.provider !== 'drone-hub' || event.resourceType !== 'change_request') return false;
+  const baseline = Number(parseObject(row.resource_config_json).stateVersion);
+  const eventVersion = Number(event.providerContent.stateVersion);
+  return (
+    Number.isSafeInteger(baseline) &&
+    baseline > 0 &&
+    Number.isSafeInteger(eventVersion) &&
+    eventVersion <= baseline
+  );
 }
 
 function parseJson(raw: unknown): unknown {

@@ -73,12 +73,12 @@ describe('unified request list', () => {
     expect(html).toContain('title="Request #1"');
     expect(html).not.toContain('<circle cx="4" cy="3.5"');
     expect(html).toContain('dateTime="2025-01-02T03:04:05.000Z"');
-    expect(html).toContain('2 files changed, 12 additions, 4 modifications, 3 deletions, 15 total line changes');
+    expect(html).toContain('2 files changed, 12 additions, 4 modifications, 3 deletions, +9 net lines');
     expect(html).toContain('2 files');
     expect(html).toContain('+12');
     expect(html).toContain('~4');
     expect(html).toContain('−3');
-    expect(html).toContain('Σ15');
+    expect(html).toContain('title="Net line change">+9');
     expect(html).not.toContain(
       'min-h-[4.25rem] items-start gap-2.5 border-b border-[var(--border-subtle)] px-3 py-2.5 transition-colors hover:bg',
     );

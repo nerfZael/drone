@@ -25,6 +25,10 @@ import {
 } from '../src/hub/subscriptions/resource-subscription-service';
 import type { ResourceSubscription } from '../src/hub/subscriptions/resource-subscription-types';
 import { normalizeSilentCompletion } from '../src/host/silent-completion';
+import {
+  changeRequestSubscriptionEvent,
+  normalizeChangeRequestSubscriptionId,
+} from '../src/hub/subscriptions/change-request-subscription-events';
 
 const originalFetch = globalThis.fetch;
 const originalGithubToken = process.env.DRONE_HUB_GITHUB_TOKEN;
@@ -95,6 +99,72 @@ describe('resource subscription identifiers', () => {
       'owner/repository#number',
     );
   });
+
+  test('normalizes native change request IDs and creates bounded local events', () => {
+    expect(normalizeChangeRequestSubscriptionId('#42')).toBe('42');
+    expect(() => normalizeChangeRequestSubscriptionId('4.2')).toThrow('positive integer');
+    const request = {
+      id: 'internal-request-id',
+      number: 42,
+      stateVersion: 7,
+      status: 'open' as const,
+      droneId: 'drone-b',
+      droneName: 'Review worker',
+      chatId: 'chat-b',
+      chatName: 'default',
+      repoRoot: '/repo',
+      baseSha: 'base-sha',
+      snapshotRef: 'refs/drone/change-request',
+      snapshotSha: 'snapshot-sha',
+      sourceHeadSha: 'source-sha',
+      title: 'Improve subscriptions',
+      description: 'Resume the owning conversation.',
+      baseBranch: 'main',
+      destinationBranch: 'main',
+      revision: 3,
+      createdBy: { kind: 'user' as const, id: null, label: 'User' },
+      createdAt: '2026-08-11T00:00:00.000Z',
+      updatedAt: '2026-08-12T00:00:00.000Z',
+      mergedAt: null,
+      closedAt: null,
+      mergedBy: null,
+      mergeCommitSha: null,
+      lastError: null,
+      githubMirror: null,
+    };
+    const domainEvent = {
+      id: 'event-7',
+      requestNumber: 42,
+      stateVersion: 7,
+      eventType: 'change_request.updated' as const,
+      occurredAt: '2026-08-12T00:00:00.000Z',
+      request,
+    };
+    const event = changeRequestSubscriptionEvent(domainEvent);
+    expect(event).toMatchObject({
+      provider: 'drone-hub',
+      resourceType: 'change_request',
+      resourceId: '42',
+      eventType: 'change_request.updated',
+      occurredAt: '2026-08-12T00:00:00.000Z',
+      summary: 'Change request #42 was updated.',
+      providerContent: {
+        requestNumber: 42,
+        title: 'Improve subscriptions',
+        revision: 3,
+        droneId: 'drone-b',
+      },
+    });
+    expect(changeRequestSubscriptionEvent(domainEvent).providerEventId).toBe(event.providerEventId);
+    expect(
+      changeRequestSubscriptionEvent({
+        ...domainEvent,
+        id: 'event-8',
+        stateVersion: 8,
+        request: { ...request, stateVersion: 8 },
+      }).providerEventId,
+    ).not.toBe(event.providerEventId);
+  });
 });
 
 describe('cron subscription scheduling', () => {
@@ -111,30 +181,24 @@ describe('cron subscription scheduling', () => {
     });
     expect(schedule.nextEventAt).toBe('2026-08-05T13:00:00.000Z');
     expect(
-      normalizeCronSubscription(
-        '* * * * *',
-        'UTC',
-        new Date('2026-08-05T12:30:00.000Z'),
-      ).nextEventAt,
+      normalizeCronSubscription('* * * * *', 'UTC', new Date('2026-08-05T12:30:00.000Z'))
+        .nextEventAt,
     ).toBe('2026-08-05T12:31:00.000Z');
     expect(schedule.resourceId).toBe(
       normalizeCronSubscription('0 * * * *', 'UTC', new Date('2026-08-05T12:45:00.000Z'))
         .resourceId,
     );
     expect(
-      normalizeCronSubscription(
-        '0 9 * * 1-5',
-        'UTC',
-        new Date('2026-08-05T12:45:00.000Z'),
-      ).resourceConfig.description,
+      normalizeCronSubscription('0 9 * * 1-5', 'UTC', new Date('2026-08-05T12:45:00.000Z'))
+        .resourceConfig.description,
     ).toBe('At 09:00 AM, Monday through Friday');
     expect(
       normalizeCronSubscription('0 * * * *', undefined, new Date('2026-08-05T12:45:00.000Z'))
         .resourceConfig.timeZone,
     ).toBe('UTC');
-    expect(
-      cronSubscriptionConfig({ expression: '0 * * * *', timeZone: 'UTC' }).description,
-    ).toBe('Every hour');
+    expect(cronSubscriptionConfig({ expression: '0 * * * *', timeZone: 'UTC' }).description).toBe(
+      'Every hour',
+    );
   });
 
   test('uses the requested time zone and rejects invalid or second-level schedules', () => {
@@ -573,6 +637,14 @@ describe('subscription delivery authorization', () => {
         droneId: 'drone-b',
         chatName: 'default',
       }),
+      resolveChangeRequest: () => ({
+        number: 42,
+        stateVersion: 7,
+        status: 'open',
+        droneId: 'drone-b',
+        droneName: 'Beta',
+        title: 'Review this',
+      }),
       loadRegistry: async () => registry,
     });
     const subscriber = { chatId: 'subscriber', droneId: 'drone-a', chatName: 'default' };
@@ -587,6 +659,22 @@ describe('subscription delivery authorization', () => {
     };
 
     expect(await authorize(chatSubscription, subscriber)).toBe(false);
+    const changeRequestSubscription: ResourceSubscription = {
+      ...chatSubscription,
+      id: 'change-request-subscription',
+      resourceType: 'change_request',
+      resourceId: '42',
+      resourceRef: 'drone-hub:change_request:42',
+      events: ['change_request.updated'],
+    };
+    const invalidChangeRequestSubscription: ResourceSubscription = {
+      ...changeRequestSubscription,
+      id: 'invalid-change-request-subscription',
+      resourceId: '-1',
+      resourceRef: 'drone-hub:change_request:-1',
+    };
+    expect(await authorize(invalidChangeRequestSubscription, subscriber)).toBe(false);
+    expect(await authorize(changeRequestSubscription, subscriber)).toBe(false);
     expect(await authorize(githubSubscription, subscriber)).toBe(true);
     expect(
       await authorize(
@@ -605,6 +693,7 @@ describe('subscription delivery authorization', () => {
     ).toBe(true);
     registry.drones['drone-a'].chats.default.droneHubMcpAccessScope.droneIds.push('drone-b');
     expect(await authorize(chatSubscription, subscriber)).toBe(true);
+    expect(await authorize(changeRequestSubscription, subscriber)).toBe(true);
   });
 
   test('cancels every subscription owned by a deleted conversation', async () => {
@@ -730,9 +819,7 @@ describe('silent completions', () => {
       output: '',
       silentCompletion: false,
     });
-    expect(
-      normalizeSilentCompletion(true, 'Internal output', { explicitlySilent: true }),
-    ).toEqual({
+    expect(normalizeSilentCompletion(true, 'Internal output', { explicitlySilent: true })).toEqual({
       output: '',
       silentCompletion: true,
     });

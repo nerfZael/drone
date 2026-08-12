@@ -536,6 +536,108 @@ describe('Drone Hub assistant MCP transport', () => {
     });
   });
 
+  test('subscribes to native change requests with target-drone read access', async () => {
+    await withTempDroneDataDir('drone-assistant-mcp-change-request-subscription-', async () => {
+      const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
+      const previousToken = process.env.DRONE_TOKEN;
+      const previousFetch = globalThis.fetch;
+      let createRequests = 0;
+      globalThis.fetch = (async (input, init) => {
+        const url = new URL(
+          typeof input === 'string' ? input : input instanceof URL ? input : input.url,
+        );
+        const method = String(init?.method ?? 'GET').toUpperCase();
+        if (url.pathname === '/api/change-requests/42' && method === 'GET') {
+          return Response.json({
+            ok: true,
+            request: { number: 42, droneId: 'drone-b', status: 'open' },
+          });
+        }
+        if (url.pathname === '/api/resource-subscriptions' && method === 'POST') {
+          createRequests += 1;
+          return Response.json({
+            ok: true,
+            created: true,
+            subscription: {
+              id: 'subscription-42',
+              provider: 'drone-hub',
+              resourceType: 'change_request',
+              resourceId: '42',
+              events: ['change_request.updated', 'change_request.merged'],
+              status: 'active',
+            },
+          });
+        }
+        return Response.json({ ok: false, error: 'unexpected request' }, { status: 500 });
+      }) as typeof fetch;
+      process.env.DRONE_HUB_BASE_URL = 'http://drone-hub.test';
+      process.env.DRONE_TOKEN = 'managed-chat-test-token';
+
+      const principal = (readDroneIds: string[]) => ({
+        kind: 'chat' as const,
+        tokenId: 'chat:drone-a:default',
+        name: 'Drone A / default',
+        droneId: 'drone-a',
+        chatName: 'default',
+        chatId: 'subscriber-chat',
+        accessScope: {
+          readMode: 'selected' as const,
+          writeMode: 'selected' as const,
+          executeMode: 'selected' as const,
+          droneIds: readDroneIds,
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+        selectedDroneRefs: readDroneIds,
+      });
+      let allowedClient: Awaited<ReturnType<typeof createInProcessDroneHubMcpClient>> | null = null;
+      let deniedClient: Awaited<ReturnType<typeof createInProcessDroneHubMcpClient>> | null = null;
+      try {
+        allowedClient = await createInProcessDroneHubMcpClient({
+          correlationId: 'change-request-subscription-allowed',
+          principal: principal(['drone-a', 'drone-b']),
+        });
+        const allowed = await allowedClient.callTool({
+          name: 'subscribe_to_resource_events',
+          arguments: {
+            provider: 'drone-hub',
+            resourceType: 'change_request',
+            resourceId: '#42',
+            events: ['change_request.updated', 'change_request.merged'],
+            intent: 'Continue reviewing after changes.',
+          },
+        });
+        expect(allowed.isError).not.toBe(true);
+        expect(allowed.structuredContent).toMatchObject({
+          subscription: { resourceType: 'change_request', resourceId: '42' },
+        });
+
+        deniedClient = await createInProcessDroneHubMcpClient({
+          correlationId: 'change-request-subscription-denied',
+          principal: principal(['drone-a']),
+        });
+        const denied = await deniedClient.callTool({
+          name: 'subscribe_to_resource_events',
+          arguments: {
+            provider: 'drone-hub',
+            resourceType: 'change_request',
+            resourceId: '42',
+            events: ['change_request.closed'],
+          },
+        });
+        expect(denied.isError).toBe(true);
+        expect(createRequests).toBe(1);
+      } finally {
+        await allowedClient?.close();
+        await deniedClient?.close();
+        globalThis.fetch = previousFetch;
+        if (previousBaseUrl == null) delete process.env.DRONE_HUB_BASE_URL;
+        else process.env.DRONE_HUB_BASE_URL = previousBaseUrl;
+        if (previousToken == null) delete process.env.DRONE_TOKEN;
+        else process.env.DRONE_TOKEN = previousToken;
+      }
+    });
+  });
+
   test('creates cron subscriptions in the timezone last reported by the user interface', async () => {
     await withTempDroneDataDir('drone-assistant-mcp-cron-subscription-', async () => {
       const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;

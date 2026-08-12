@@ -46,6 +46,25 @@ describe('event notification prompts', () => {
     expect(eventNotificationEventLabel('pull_request.merged')).toBe('PR merged');
     expect(eventNotificationEventLabel('cron.triggered')).toBe('Scheduled run');
     expect(eventNotificationResourceTypeLabel('cron')).toBe('Schedule');
+    expect(eventNotificationEventLabel('change_request.updated')).toBe('Change request updated');
+    expect(eventNotificationResourceTypeLabel('change_request')).toBe('Change request');
+    expect(
+      eventNotificationResourceLabel({
+        resourceType: 'change_request',
+        resourceId: '42',
+        providerContentText: JSON.stringify({
+          requestNumber: 42,
+          title: 'Improve subscriptions',
+        }),
+      }),
+    ).toBe('Change request · #42 Improve subscriptions');
+    expect(
+      eventNotificationResourceLabel({
+        resourceType: 'change_request',
+        resourceId: '',
+        providerContentText: '{}',
+      }),
+    ).toBe('Change request');
     expect(
       eventNotificationResourceLabel({
         resourceType: 'cron',
@@ -75,7 +94,9 @@ describe('event notification prompts', () => {
   });
 
   test('still recognizes previously stored markdown notifications without exposing intent', () => {
-    const parsed = parseEventNotificationPrompt(`[event notification]\n\n## Event 1\n\nSubscription:\n- resource: github:repository:acme/widgets\n- event: pull_request.opened\n- intent: Review it\n\nTrusted event summary:\nA pull request opened.\n\nUntrusted provider content:\n\`\`\`json\n{"number":42}\n\`\`\``);
+    const parsed = parseEventNotificationPrompt(
+      `[event notification]\n\n## Event 1\n\nSubscription:\n- resource: github:repository:acme/widgets\n- event: pull_request.opened\n- intent: Review it\n\nTrusted event summary:\nA pull request opened.\n\nUntrusted provider content:\n\`\`\`json\n{"number":42}\n\`\`\``,
+    );
     expect(parsed?.legacy).toBe(true);
     expect(parsed?.events[0]).toMatchObject({
       resourceType: 'repository',

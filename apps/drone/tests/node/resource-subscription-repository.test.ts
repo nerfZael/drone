@@ -35,28 +35,31 @@ test('resolves display names and chat counts for chat subscription resources in 
       `);
     });
 
-    assert.deepEqual(repository.resolveChatResources(['chat-a', 'chat-b-review']), new Map([
-      [
-        'chat-a',
-        {
-          chatId: 'chat-a',
-          droneId: 'drone-a',
-          chatName: 'default',
-          droneName: 'Build worker',
-          droneChatCount: 1,
-        },
-      ],
-      [
-        'chat-b-review',
-        {
-          chatId: 'chat-b-review',
-          droneId: 'drone-b',
-          chatName: 'review',
-          droneName: 'Review worker',
-          droneChatCount: 2,
-        },
-      ],
-    ]));
+    assert.deepEqual(
+      repository.resolveChatResources(['chat-a', 'chat-b-review']),
+      new Map([
+        [
+          'chat-a',
+          {
+            chatId: 'chat-a',
+            droneId: 'drone-a',
+            chatName: 'default',
+            droneName: 'Build worker',
+            droneChatCount: 1,
+          },
+        ],
+        [
+          'chat-b-review',
+          {
+            chatId: 'chat-b-review',
+            droneId: 'drone-b',
+            chatName: 'review',
+            droneName: 'Review worker',
+            droneChatCount: 2,
+          },
+        ],
+      ]),
+    );
   } finally {
     close();
   }
@@ -137,6 +140,163 @@ test('completes exact pull request subscriptions on terminal events', async () =
       providerContent: {},
     });
     assert.equal(repository.get(created.subscription.id)?.status, 'completed');
+  } finally {
+    close();
+  }
+});
+
+test('delivers native change request updates and completes subscriptions on merge', async () => {
+  const { database, close } = memoryHubDatabase();
+  try {
+    const repository = new ResourceSubscriptionRepository(database);
+    const created = await repository.upsert({
+      subscriber: { chatId: 'subscriber-chat', droneId: 'drone-a', chatName: 'default' },
+      provider: 'drone-hub',
+      resourceType: 'change_request',
+      resourceId: '42',
+      resourceConfig: { requestNumber: 42, droneId: 'drone-b' },
+      events: ['change_request.updated', 'change_request.merged'],
+      intent: 'Continue the review.',
+      maxActive: 50,
+    });
+    await repository.appendEvent({
+      id: 'change-request-updated',
+      providerEventId: 'drone-hub:change-request:42:updated:2',
+      provider: 'drone-hub',
+      resourceType: 'change_request',
+      resourceId: '42',
+      parentResourceId: null,
+      eventType: 'change_request.updated',
+      occurredAt: '2026-08-12T00:00:00.000Z',
+      summary: 'Change request #42 was updated.',
+      providerContent: { requestNumber: 42, revision: 2 },
+    });
+    assert.equal(
+      await repository.appendEvent({
+        id: 'change-request-updated-duplicate-state',
+        providerEventId: 'drone-hub:change-request:42:updated:2',
+        provider: 'drone-hub',
+        resourceType: 'change_request',
+        resourceId: '42',
+        parentResourceId: null,
+        eventType: 'change_request.updated',
+        occurredAt: '2026-08-12T00:00:30.000Z',
+        summary: 'Change request #42 was updated.',
+        providerContent: { requestNumber: 42, revision: 2 },
+      }),
+      false,
+    );
+    const batch = await repository.claimBatch(
+      { ...DEFAULT_RESOURCE_SUBSCRIPTION_SETTINGS, batchWindowMs: 0 },
+      new Date(Date.now() + 1_000),
+    );
+    assert.equal(batch?.items[0]?.event.eventType, 'change_request.updated');
+    await repository.completeBatch(batch!.id);
+
+    assert.equal(
+      await repository.appendEvent({
+        id: 'change-request-updated-next-state',
+        providerEventId: 'drone-hub:change-request:42:updated:3',
+        provider: 'drone-hub',
+        resourceType: 'change_request',
+        resourceId: '42',
+        parentResourceId: null,
+        eventType: 'change_request.updated',
+        occurredAt: '2026-08-12T00:00:40.000Z',
+        summary: 'Change request #42 was updated.',
+        providerContent: { requestNumber: 42, revision: 3 },
+      }),
+      true,
+    );
+    assert.equal(
+      await repository.appendEvent({
+        id: 'change-request-updated-reverted-state',
+        providerEventId: 'drone-hub:change-request:42:updated:2:reverted-state',
+        provider: 'drone-hub',
+        resourceType: 'change_request',
+        resourceId: '42',
+        parentResourceId: null,
+        eventType: 'change_request.updated',
+        occurredAt: '2026-08-12T00:00:50.000Z',
+        summary: 'Change request #42 was updated.',
+        providerContent: { requestNumber: 42, revision: 2 },
+      }),
+      true,
+    );
+    const revertedBatch = await repository.claimBatch(
+      { ...DEFAULT_RESOURCE_SUBSCRIPTION_SETTINGS, batchWindowMs: 0 },
+      new Date(Date.now() + 1_500),
+    );
+    assert.deepEqual(
+      revertedBatch?.items.map((item) => item.event.providerContent.revision),
+      [3, 2],
+    );
+    await repository.completeBatch(revertedBatch!.id);
+
+    await repository.appendEvent({
+      id: 'change-request-merged',
+      providerEventId: 'drone-hub:change-request:42:merged:2',
+      provider: 'drone-hub',
+      resourceType: 'change_request',
+      resourceId: '42',
+      parentResourceId: null,
+      eventType: 'change_request.merged',
+      occurredAt: '2026-08-12T00:01:00.000Z',
+      summary: 'Change request #42 was merged.',
+      providerContent: { requestNumber: 42, revision: 2 },
+    });
+    assert.equal(repository.get(created.subscription.id)?.status, 'completed');
+    const terminalBatch = await repository.claimBatch(
+      { ...DEFAULT_RESOURCE_SUBSCRIPTION_SETTINGS, batchWindowMs: 0 },
+      new Date(Date.now() + 2_000),
+    );
+    assert.equal(terminalBatch?.items[0]?.event.eventType, 'change_request.merged');
+  } finally {
+    close();
+  }
+});
+
+test('does not replay an outbox event from the state observed when subscribing', async () => {
+  const { database, close } = memoryHubDatabase();
+  try {
+    const repository = new ResourceSubscriptionRepository(database);
+    await repository.upsert({
+      subscriber: { chatId: 'subscriber-chat', droneId: 'drone-a', chatName: 'default' },
+      provider: 'drone-hub',
+      resourceType: 'change_request',
+      resourceId: '42',
+      resourceConfig: { requestNumber: 42, droneId: 'drone-b', stateVersion: 7 },
+      events: ['change_request.updated'],
+      intent: '',
+      maxActive: 50,
+    });
+    const event = (stateVersion: number) => ({
+      id: `change-request-v${stateVersion}`,
+      providerEventId: `drone-hub:change-request:42:v${stateVersion}:change_request.updated`,
+      provider: 'drone-hub' as const,
+      resourceType: 'change_request' as const,
+      resourceId: '42',
+      parentResourceId: null,
+      eventType: 'change_request.updated' as const,
+      occurredAt: `2026-08-12T00:00:0${stateVersion - 7}.000Z`,
+      summary: 'Change request #42 was updated.',
+      providerContent: { requestNumber: 42, stateVersion },
+    });
+
+    await repository.appendEvent(event(7));
+    assert.equal(
+      await repository.claimBatch(
+        { ...DEFAULT_RESOURCE_SUBSCRIPTION_SETTINGS, batchWindowMs: 0 },
+        new Date(Date.now() + 1_000),
+      ),
+      null,
+    );
+    await repository.appendEvent(event(8));
+    const batch = await repository.claimBatch(
+      { ...DEFAULT_RESOURCE_SUBSCRIPTION_SETTINGS, batchWindowMs: 0 },
+      new Date(Date.now() + 2_000),
+    );
+    assert.equal(batch?.items[0]?.event.providerContent.stateVersion, 8);
   } finally {
     close();
   }
@@ -556,10 +716,7 @@ test('stores cron configuration and advances only subscriptions due for an occur
       2,
     );
     assert.equal(repository.get(due.subscription.id)?.nextEventAt, '2026-08-05T13:00:00.000Z');
-    assert.equal(
-      repository.get(overdue.subscription.id)?.nextEventAt,
-      '2026-08-05T13:00:00.000Z',
-    );
+    assert.equal(repository.get(overdue.subscription.id)?.nextEventAt, '2026-08-05T13:00:00.000Z');
     assert.equal(repository.get(future.subscription.id)?.nextEventAt, '2026-08-05T13:00:00.000Z');
     assert.equal(
       await repository.appendCronOccurrence(

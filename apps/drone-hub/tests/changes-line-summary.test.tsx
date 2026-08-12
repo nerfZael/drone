@@ -4,20 +4,21 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { ChangesFileCountPill, ChangesLineSummary } from '../src/droneHub/changes/ChangesLineSummary';
 
 describe('changes line summary', () => {
-  test('matches the agent changed-files totals and colors', () => {
+  test('matches the agent changed-files breakdown, net change, and colors', () => {
     const html = renderToStaticMarkup(
-      <ChangesLineSummary counts={{ changed: 3, additions: 10, deletions: 5, modified: 3 }} />,
+      <ChangesLineSummary counts={{ changed: 2, additions: 54, deletions: 67, modified: 46 }} />,
     );
 
     expect(html).toContain('Changed files');
     expect(html).toContain('rounded-full');
     expect(html).toContain('bg-[var(--accent-subtle)]');
-    expect(html).toContain('>3</span>');
-    expect(html).toContain('+7');
-    expect(html).toContain('~3');
-    expect(html).toContain('-2');
-    expect(html).toContain('Σ12');
-    expect(html).toContain('12 total line changes');
+    expect(html).toContain('>2</span>');
+    expect(html).toContain('+8');
+    expect(html).toContain('~46');
+    expect(html).toContain('-21');
+    expect(html).toContain('-13 net lines');
+    expect(html).toContain('title="Net line change"');
+    expect(html).not.toContain('Σ');
     expect(html).toContain('text-[var(--green)]');
     expect(html).toContain('text-[var(--yellow)]');
     expect(html).toContain('text-[var(--red)]');

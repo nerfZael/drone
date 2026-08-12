@@ -5,12 +5,20 @@ export const RESOURCE_SUBSCRIPTION_EVENTS = [
   'pull_request.comment.created',
   'pull_request.merged',
   'pull_request.closed',
+  'change_request.updated',
+  'change_request.merged',
+  'change_request.closed',
   'cron.triggered',
 ] as const;
 
 export type ResourceSubscriptionEventType = (typeof RESOURCE_SUBSCRIPTION_EVENTS)[number];
 export type ResourceSubscriptionProvider = 'drone-hub' | 'github';
-export type ResourceSubscriptionType = 'chat' | 'repository' | 'pull_request' | 'cron';
+export type ResourceSubscriptionType =
+  | 'chat'
+  | 'repository'
+  | 'pull_request'
+  | 'change_request'
+  | 'cron';
 export type ResourceSubscriptionStatus = 'active' | 'completed' | 'cancelled' | 'paused';
 export const RESOURCE_SUBSCRIPTION_PAUSE_REASONS = [
   'subscriber_chat_archived',

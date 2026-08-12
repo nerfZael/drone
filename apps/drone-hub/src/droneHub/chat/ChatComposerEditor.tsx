@@ -4,6 +4,7 @@ import { AppShortcutBoundary } from '../app/AppShortcutBoundary';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { isChatEditorQueueShortcut } from './chat-send-shortcuts';
 import {
+  DRONE_HUB_MONACO_SCROLLBAR_OPTIONS,
   defineDroneHubMonacoThemes,
   MonacoEditor,
   MonacoEditorErrorBoundary,
@@ -197,7 +198,7 @@ export const ChatComposerEditor = React.forwardRef<
       padding: { top: 10, bottom: 10 },
       overviewRulerLanes: 0,
       renderLineHighlight: 'line',
-      scrollbar: { verticalScrollbarSize: 8, horizontalScrollbarSize: 8 },
+      scrollbar: DRONE_HUB_MONACO_SCROLLBAR_OPTIONS,
       suggest: { showWords: false },
       quickSuggestions: false,
       parameterHints: { enabled: false },
