@@ -12,6 +12,7 @@ export * from './continuous-voice-session.js';
 export * from './codex-approval.js';
 export * from './event-notification.js';
 export * from './github-pull-request.js';
+export * from './groq-transcription-prompt.js';
 export * from './merge-workspace-transfer-progress.js';
 export * from './model-catalog.js';
 export * from './native-chat-types.js';

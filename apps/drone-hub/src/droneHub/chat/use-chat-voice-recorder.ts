@@ -1,3 +1,4 @@
+import { normalizeGroqTranscriptionPrompt } from '@drone/assistant-chat';
 import React from 'react';
 import {
   browserMicrophoneCoordinator,
@@ -120,7 +121,8 @@ export async function transcribeChatVoiceWav(
     signal?: AbortSignal;
   } = {},
 ): Promise<string> {
-  const promptBytes = options.prompt ? new TextEncoder().encode(options.prompt.slice(-1_200)) : null;
+  const prompt = normalizeGroqTranscriptionPrompt(options.prompt);
+  const promptBytes = prompt ? new TextEncoder().encode(prompt) : null;
   let promptBase64 = '';
   if (promptBytes) {
     let binary = '';

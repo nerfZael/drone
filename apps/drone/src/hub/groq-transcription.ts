@@ -1,3 +1,5 @@
+import { normalizeGroqTranscriptionPrompt } from '@drone/assistant-chat';
+
 const GROQ_TRANSCRIPTION_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
 export type GroqTranscriptionQuality = 'fast' | 'accurate';
 
@@ -65,8 +67,8 @@ export async function transcribeAudioWithGroq(opts: {
   form.append('temperature', '0');
   const language = String(opts.language ?? '').trim();
   if (language) form.append('language', language.slice(0, 35));
-  const prompt = String(opts.prompt ?? '').trim();
-  if (prompt) form.append('prompt', prompt.slice(-1_200));
+  const prompt = normalizeGroqTranscriptionPrompt(opts.prompt);
+  if (prompt) form.append('prompt', prompt);
 
   const response = await fetch(GROQ_TRANSCRIPTION_URL, {
     method: 'POST',

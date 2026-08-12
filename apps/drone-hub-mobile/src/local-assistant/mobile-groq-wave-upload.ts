@@ -1,3 +1,4 @@
+import { normalizeGroqTranscriptionPrompt } from '@drone/assistant-chat';
 import {
   MOBILE_GROQ_TRANSCRIPTION_MAX_BYTES,
   MOBILE_GROQ_TRANSCRIPTION_MODEL,
@@ -51,8 +52,8 @@ export async function uploadMobileVoiceWave(
     form.append('response_format', 'json');
     form.append('temperature', '0');
     if (input.settings.language) form.append('language', input.settings.language);
-    const prompt = String(input.prompt ?? '').trim();
-    if (prompt) form.append('prompt', prompt.slice(-1_200));
+    const prompt = normalizeGroqTranscriptionPrompt(input.prompt);
+    if (prompt) form.append('prompt', prompt);
     const response = await runtime.fetch({
       authorization: `Bearer ${apiKey}`,
       body: form,

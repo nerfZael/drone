@@ -104,6 +104,26 @@ describe('mobile continuous voice WAV upload', () => {
     expect(fixture.cleanupCount()).toBe(1);
   });
 
+  test('bounds long transcript context before calling Groq', async () => {
+    const fixture = createRuntime();
+
+    await uploadMobileVoiceWave(
+      {
+        wave: new Uint8Array(45),
+        apiKey: 'secret',
+        settings: { quality: 'fast', language: '' },
+        prompt: `${'obsolete '.repeat(150)}newest context`,
+      },
+      fixture.runtime,
+    );
+
+    const prompt = String(
+      fixture.entries.find(([name]) => name === 'prompt')?.[1] ?? '',
+    );
+    expect(Array.from(prompt).length).toBeLessThanOrEqual(896);
+    expect(prompt.endsWith('newest context')).toBe(true);
+  });
+
   test('cleans up a staged WAV when an upload is aborted', async () => {
     const abortError = new Error('Aborted');
     abortError.name = 'AbortError';

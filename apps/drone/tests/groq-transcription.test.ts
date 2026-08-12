@@ -33,4 +33,22 @@ describe('GROQ transcription', () => {
     expect(form?.get('prompt')).toBe('Prethodna potvrđena uputa.');
     expect(form?.get('file')).toBeInstanceOf(Blob);
   });
+
+  test('bounds long transcript context before calling Groq', async () => {
+    let form: FormData | null = null;
+    globalThis.fetch = (async (_input, init) => {
+      form = init?.body as FormData;
+      return Response.json({ text: 'Newest thought.' });
+    }) as typeof fetch;
+
+    await transcribeAudioWithGroq({
+      audio: Buffer.from([1, 2, 3, 4]),
+      apiKey: 'groq-test',
+      prompt: `${'obsolete '.repeat(150)}newest context`,
+    });
+
+    const prompt = String(form?.get('prompt') ?? '');
+    expect(Array.from(prompt).length).toBeLessThanOrEqual(896);
+    expect(prompt.endsWith('newest context')).toBe(true);
+  });
 });
