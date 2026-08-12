@@ -4,8 +4,8 @@ import path from 'node:path';
 
 import type {
   ChangeRequestInsert,
-  ChangeRequestPatch,
   ChangeRequestRepository,
+  ChangeRequestUpdate,
 } from '../../src/hub/change-requests/change-request-repository';
 import {
   changeRequestEventTypeForStatus,
@@ -62,7 +62,10 @@ export class MemoryChangeRequestRepository implements ChangeRequestRepository {
     return [...this.records.values()].map((record) => structuredClone(record));
   }
 
-  async update(id: string, patch: ChangeRequestPatch): Promise<ChangeRequestRecord> {
+  async update(id: string, update: ChangeRequestUpdate): Promise<ChangeRequestRecord> {
+    const current = this.records.get(id);
+    if (!current) throw new Error(`unknown change request: ${id}`);
+    const patch = typeof update === 'function' ? update(structuredClone(current)) : update;
     const failure =
       this.failNextUpdateMessage ?? (patch.githubMirror ? this.failNextMirrorUpdateMessage : null);
     if (failure) {
@@ -70,8 +73,6 @@ export class MemoryChangeRequestRepository implements ChangeRequestRepository {
       else this.failNextMirrorUpdateMessage = null;
       throw new Error(failure);
     }
-    const current = this.records.get(id);
-    if (!current) throw new Error(`unknown change request: ${id}`);
     const updated = { ...current, ...patch, stateVersion: current.stateVersion + 1 };
     this.records.set(id, updated);
     this.upsertEvent(

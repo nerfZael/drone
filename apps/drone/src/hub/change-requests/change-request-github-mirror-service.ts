@@ -549,13 +549,15 @@ export class ChangeRequestGithubMirrorService {
       current: ChangeRequestGithubMirrorRecord,
     ) => Partial<ChangeRequestGithubMirrorRecord>,
   ): Promise<ChangeRequestRecord> {
-    const current = this.requiredMirror(this.requiredRecord(id));
-    return await this.deps.repository.update(id, {
-      githubMirror: {
-        ...current,
-        ...getPatch(current),
-        updatedAt: this.deps.now(),
-      },
+    return await this.deps.repository.update(id, (record) => {
+      const current = this.requiredMirror(record);
+      return {
+        githubMirror: {
+          ...current,
+          ...getPatch(current),
+          updatedAt: this.deps.now(),
+        },
+      };
     });
   }
 
