@@ -1,4 +1,5 @@
 export const CONTINUOUS_VOICE_SAMPLE_RATE = 16_000;
+export const CONTINUOUS_VOICE_MINIMUM_SILENCE_MILLIS = 250;
 
 export type ContinuousVoiceNoiseHandling = 'auto' | 'quiet' | 'noisy';
 export type ContinuousVoiceEndpointReason = 'silence' | 'maximum-duration' | 'flush';
@@ -88,7 +89,11 @@ export function normalizeContinuousVoiceEndpointConfig(
       defaults.minimumSpeechMillis,
       40,
     ),
-    silenceMillis: clampInteger(input.silenceMillis ?? defaults.silenceMillis, defaults.silenceMillis, 250),
+    silenceMillis: clampInteger(
+      input.silenceMillis ?? defaults.silenceMillis,
+      defaults.silenceMillis,
+      CONTINUOUS_VOICE_MINIMUM_SILENCE_MILLIS,
+    ),
     maximumSegmentMillis: clampInteger(
       input.maximumSegmentMillis ?? defaults.maximumSegmentMillis,
       defaults.maximumSegmentMillis,

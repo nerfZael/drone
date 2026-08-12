@@ -20,7 +20,7 @@ describe('voice input settings', () => {
       });
       await upsertStoredVoiceInputSettings({
         endThoughtPreset: 'custom',
-        customSilenceMillis: 3_200,
+        customSilenceMillis: 250,
         noiseHandling: 'noisy',
         language: 'hr-HR',
         quality: 'accurate',
@@ -28,8 +28,8 @@ describe('voice input settings', () => {
       });
       expect((await resolveVoiceInputSettingsResponse()).voiceInput).toEqual({
         endThoughtPreset: 'custom',
-        customSilenceMillis: 3_200,
-        silenceMillis: 3_200,
+        customSilenceMillis: 250,
+        silenceMillis: 250,
         noiseHandling: 'noisy',
         language: 'hr-HR',
         quality: 'accurate',
@@ -40,8 +40,8 @@ describe('voice input settings', () => {
 
   test('rejects invalid endpoint settings', async () => {
     await withTempDroneDataDir('drone-voice-input-settings-invalid-', async () => {
-      await expect(upsertStoredVoiceInputSettings({ customSilenceMillis: 500 })).rejects.toThrow(
-        'between 1000 and 10000',
+      await expect(upsertStoredVoiceInputSettings({ customSilenceMillis: 249 })).rejects.toThrow(
+        'between 250 and 10000',
       );
       await expect(upsertStoredVoiceInputSettings({ language: 'not a language tag' })).rejects.toThrow(
         'valid language tag',

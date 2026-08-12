@@ -17,6 +17,8 @@ export const DEFAULT_MOBILE_VOICE_INPUT_SETTINGS: MobileVoiceInputSettings = {
   quality: 'fast',
   confirmationFeedback: false,
 };
+export const MOBILE_VOICE_INPUT_SILENCE_MILLIS_MIN = 250;
+export const MOBILE_VOICE_INPUT_SILENCE_MILLIS_MAX = 10_000;
 
 const STORAGE_KEY = 'droneHub.voiceInput.settings.v1';
 
@@ -32,7 +34,9 @@ export function normalizeMobileVoiceInputSettings(raw: unknown): MobileVoiceInpu
   return {
     endThoughtPreset: preset,
     customSilenceMillis:
-      Number.isFinite(customSilenceMillis) && customSilenceMillis >= 1_000 && customSilenceMillis <= 10_000
+      Number.isFinite(customSilenceMillis) &&
+      customSilenceMillis >= MOBILE_VOICE_INPUT_SILENCE_MILLIS_MIN &&
+      customSilenceMillis <= MOBILE_VOICE_INPUT_SILENCE_MILLIS_MAX
         ? Math.round(customSilenceMillis)
         : 2_500,
     noiseHandling:
@@ -40,7 +44,8 @@ export function normalizeMobileVoiceInputSettings(raw: unknown): MobileVoiceInpu
         ? input.noiseHandling
         : 'auto',
     language:
-      typeof input.language === 'string' && /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(input.language.trim())
+      typeof input.language === 'string' &&
+      /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(input.language.trim())
         ? input.language.trim()
         : null,
     quality: input.quality === 'accurate' ? 'accurate' : 'fast',

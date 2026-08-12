@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   ContinuousVoiceSegmenter,
+  normalizeContinuousVoiceEndpointConfig,
   normalizePcm16Audio,
   pcm16ToWaveBytes,
 } from '../src/continuous-voice';
@@ -14,6 +15,11 @@ function pcm(milliseconds: number, amplitude: number, sampleRate = 16_000): Int1
 }
 
 describe('ContinuousVoiceSegmenter', () => {
+  test('allows silence pauses down to 250 milliseconds', () => {
+    expect(normalizeContinuousVoiceEndpointConfig({ silenceMillis: 250 }).silenceMillis).toBe(250);
+    expect(normalizeContinuousVoiceEndpointConfig({ silenceMillis: 249 }).silenceMillis).toBe(250);
+  });
+
   test('does not submit indefinite silence or a short noise', () => {
     const segmenter = new ContinuousVoiceSegmenter({ silenceMillis: 500 });
     expect(segmenter.push(pcm(2_000, 20)).segments).toEqual([]);

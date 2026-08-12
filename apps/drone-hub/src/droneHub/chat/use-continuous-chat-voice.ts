@@ -11,6 +11,7 @@ import {
   type BrowserMicrophoneLease,
 } from './browser-microphone-coordinator';
 import { floatToPcm16, transcribeChatVoiceWav } from './use-chat-voice-recorder';
+import { normalizeVoiceInputSilenceMillis } from './voice-input-silence';
 
 export type ContinuousChatVoiceStatus = ContinuousVoiceSessionStatus;
 
@@ -44,11 +45,10 @@ async function loadVoiceInputSettings(): Promise<VoiceInputSettings> {
   if (!response.ok) return DEFAULT_SETTINGS;
   const data = (await response.json()) as { voiceInput?: Partial<VoiceInputSettings> };
   return {
-    silenceMillis:
-      Number.isFinite(data.voiceInput?.silenceMillis) &&
-      Number(data.voiceInput?.silenceMillis) >= 1_000
-        ? Number(data.voiceInput?.silenceMillis)
-        : DEFAULT_SETTINGS.silenceMillis,
+    silenceMillis: normalizeVoiceInputSilenceMillis(
+      data.voiceInput?.silenceMillis,
+      DEFAULT_SETTINGS.silenceMillis,
+    ),
     noiseHandling:
       data.voiceInput?.noiseHandling === 'quiet' || data.voiceInput?.noiseHandling === 'noisy'
         ? data.voiceInput.noiseHandling
@@ -333,6 +333,8 @@ export function useContinuousChatVoice({
     session.discardPending();
   }, [session]);
 
+  const getStatus = React.useCallback(() => session.status, [session]);
+
   const previousResetKeyRef = React.useRef(resetKey);
   React.useEffect(() => {
     const previous = previousResetKeyRef.current;
@@ -344,6 +346,7 @@ export function useContinuousChatVoice({
     status,
     pendingCount,
     durationMillis,
+    getStatus,
     start,
     stop,
     cancel,

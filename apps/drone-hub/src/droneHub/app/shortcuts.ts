@@ -8,6 +8,7 @@ export type ShortcutActionId =
   | 'moveSelectedDroneToTop'
   | 'toggleSelectedDronesToDo'
   | 'focusPrimaryChatInput'
+  | 'toggleContinuousDictation'
   | 'toggleVoiceClipboardRecording'
   | 'markSelectedDronesUnread'
   | 'toggleSidebarCollapsed'
@@ -85,6 +86,11 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     description: 'Focuses the primary chat input.',
   },
   {
+    id: 'toggleContinuousDictation',
+    label: 'Toggle continuous dictation',
+    description: 'Starts or stops continuous dictation. Starting again clears uncommitted dictation.',
+  },
+  {
     id: 'toggleVoiceClipboardRecording',
     label: 'Record voice to clipboard',
     description: 'Starts or stops a microphone recording, transcribes it with GROQ, and copies the result.',
@@ -156,12 +162,13 @@ const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   moveSelectedDroneToTop: { key: 'w', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleSelectedDronesToDo: null,
   focusPrimaryChatInput: { key: 'enter', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  toggleContinuousDictation: { key: 'r', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleVoiceClipboardRecording: { key: '`', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   markSelectedDronesUnread: { key: 'z', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleSidebarCollapsed: { key: 'a', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleRightPanelWidth: { key: 's', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openHoveredGroupMultiChat: { key: 'g', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  openPullRequestsTab: { key: 'r', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  openPullRequestsTab: null,
   openChangesTab: { key: 'c', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openCanvasTab: { key: 'x', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openBrowserTab: { key: 'b', mod: false, ctrl: false, meta: false, alt: false, shift: false },
@@ -215,6 +222,29 @@ export function sanitizeSingleShortcutBinding(value: unknown, fallback: Shortcut
   return sanitizeShortcutBinding(value, fallback);
 }
 
+export function migrateFormerPullRequestsShortcut(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const raw = value as Record<string, unknown>;
+  if (Object.prototype.hasOwnProperty.call(raw, 'toggleContinuousDictation')) return value;
+  const formerBinding = sanitizeShortcutBinding(raw.openPullRequestsTab, null);
+  if (
+    !formerBinding ||
+    formerBinding.key !== 'r' ||
+    formerBinding.mod ||
+    formerBinding.ctrl ||
+    formerBinding.meta ||
+    formerBinding.alt ||
+    formerBinding.shift
+  ) {
+    return value;
+  }
+  return {
+    ...raw,
+    toggleContinuousDictation: { ...formerBinding },
+    openPullRequestsTab: null,
+  };
+}
+
 function cloneShortcutBinding(binding: ShortcutBinding | null): ShortcutBinding | null {
   return binding ? { ...binding } : null;
 }
@@ -230,6 +260,7 @@ export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
     moveSelectedDroneToTop: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.moveSelectedDroneToTop),
     toggleSelectedDronesToDo: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleSelectedDronesToDo),
     focusPrimaryChatInput: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.focusPrimaryChatInput),
+    toggleContinuousDictation: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleContinuousDictation),
     toggleVoiceClipboardRecording: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleVoiceClipboardRecording),
     markSelectedDronesUnread: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.markSelectedDronesUnread),
     toggleSidebarCollapsed: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleSidebarCollapsed),

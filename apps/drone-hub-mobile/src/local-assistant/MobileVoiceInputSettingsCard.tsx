@@ -5,6 +5,8 @@ import { Button, ErrorBanner, Label, textStyles } from '../components/Ui';
 import { colors } from '../theme';
 import {
   DEFAULT_MOBILE_VOICE_INPUT_SETTINGS,
+  MOBILE_VOICE_INPUT_SILENCE_MILLIS_MAX,
+  MOBILE_VOICE_INPUT_SILENCE_MILLIS_MIN,
   loadMobileVoiceInputSettings,
   saveMobileVoiceInputSettings,
   type MobileVoiceInputSettings,
@@ -61,7 +63,7 @@ export function MobileVoiceInputSettingsCard() {
       .then((next) => {
         if (!active) return;
         setSettings(next);
-        setCustomSeconds((next.customSilenceMillis / 1_000).toFixed(1));
+        setCustomSeconds(formatPauseSeconds(next.customSilenceMillis));
       })
       .catch((nextError: any) => active && setError(nextError?.message ?? String(nextError)))
       .finally(() => active && setLoading(false));
@@ -78,16 +80,20 @@ export function MobileVoiceInputSettingsCard() {
       const seconds = Number(customSeconds);
       if (
         settings.endThoughtPreset === 'custom' &&
-        (!Number.isFinite(seconds) || seconds < 1 || seconds > 10)
+        (!Number.isFinite(seconds) ||
+          seconds < MOBILE_VOICE_INPUT_SILENCE_MILLIS_MIN / 1_000 ||
+          seconds > MOBILE_VOICE_INPUT_SILENCE_MILLIS_MAX / 1_000)
       ) {
-        throw new Error('Custom pause must be between 1 and 10 seconds.');
+        throw new Error(
+          `Custom pause must be between ${MOBILE_VOICE_INPUT_SILENCE_MILLIS_MIN / 1_000} and ${MOBILE_VOICE_INPUT_SILENCE_MILLIS_MAX / 1_000} seconds.`,
+        );
       }
       const saved = await saveMobileVoiceInputSettings({
         ...settings,
         customSilenceMillis: Math.round((Number.isFinite(seconds) ? seconds : 2.5) * 1_000),
       });
       setSettings(saved);
-      setCustomSeconds((saved.customSilenceMillis / 1_000).toFixed(1));
+      setCustomSeconds(formatPauseSeconds(saved.customSilenceMillis));
       setNotice('Saved voice input settings.');
     } catch (nextError: any) {
       setError(nextError?.message ?? String(nextError));
@@ -190,6 +196,10 @@ export function MobileVoiceInputSettingsCard() {
       </Button>
     </View>
   );
+}
+
+function formatPauseSeconds(milliseconds: number): string {
+  return (milliseconds / 1_000).toFixed(2).replace(/\.?0+$/, '');
 }
 
 const styles = StyleSheet.create({
