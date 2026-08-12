@@ -8,6 +8,7 @@ const {
 
 function memoryHubDatabase() {
   const connection = new BetterSqlite3(':memory:');
+  let queue = Promise.resolve();
   return {
     database: {
       path: ':memory:',
@@ -15,8 +16,15 @@ function memoryHubDatabase() {
       read(operation) {
         return operation(connection);
       },
-      async writeTransaction(_label, operation) {
-        return connection.transaction(() => operation(connection)).immediate();
+      writeTransaction(_label, operation) {
+        const write = queue.then(() =>
+          connection.transaction(() => operation(connection)).immediate(),
+        );
+        queue = write.then(
+          () => undefined,
+          () => undefined,
+        );
+        return write;
       },
       diagnostics() {
         throw new Error('not needed');
@@ -26,7 +34,7 @@ function memoryHubDatabase() {
   };
 }
 
-test('change request repository persists GitHub mirror metadata', async () => {
+test('change request repository persists and atomically updates GitHub mirror metadata', async () => {
   const memory = memoryHubDatabase();
   try {
     const repository = new SqliteChangeRequestRepository(memory.database);
@@ -61,7 +69,7 @@ test('change request repository persists GitHub mirror metadata', async () => {
     assert.equal(repository.getByNumber(inserted.number).id, inserted.id);
     assert.equal(repository.getByNumber(inserted.number + 1), null);
 
-    await repository.update(inserted.id, {
+    const mirrored = await repository.update(inserted.id, {
       githubMirror: {
         owner: 'example',
         repo: 'repo',
@@ -86,6 +94,21 @@ test('change request repository persists GitHub mirror metadata', async () => {
     assert.equal(stored.githubMirror.pullNumber, 42);
     assert.equal(stored.githubMirror.autoUpdate, true);
     assert.equal(stored.githubMirror.branchOwnedByDroneHub, true);
+
+    await Promise.all([
+      repository.update(inserted.id, (current) => ({
+        githubMirror: { ...current.githubMirror, autoUpdate: false },
+      })),
+      repository.update(inserted.id, (current) => ({
+        githubMirror: { ...current.githubMirror, lastError: 'sync failed' },
+      })),
+    ]);
+
+    const updated = repository.get(inserted.id);
+    assert.equal(updated.githubMirror.autoUpdate, false);
+    assert.equal(updated.githubMirror.lastError, 'sync failed');
+    assert.equal(updated.stateVersion, mirrored.stateVersion + 2);
+    assert.deepEqual(repository.listPendingEvents()[0].request, updated);
   } finally {
     memory.close();
   }
