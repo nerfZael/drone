@@ -56,7 +56,12 @@ const productionSurfaces = [
   {
     name: 'Pull requests',
     path: '../src/droneHub/pullRequests/DronePullRequestsDock.tsx',
-    components: ['UiMenuSelect', 'UiPaneState', 'UiPanel', 'UiPanelHeader', 'UiPanelToolbar'],
+    components: ['UiCenteredLoadingState', 'UiPaneState', 'UiPanel', 'UiPanelStatusStrip'],
+  },
+  {
+    name: 'Change requests',
+    path: '../src/droneHub/changeRequests/DroneChangeRequestsDock.tsx',
+    components: ['UiButton', 'UiCenteredLoadingState', 'UiPaneState', 'UiPanel', 'UiPanelStatusStrip'],
   },
   {
     name: 'Terminal',

@@ -29,6 +29,7 @@ type ChangesQueryOptions = {
   primaryView: ChangesPrimaryView;
   pullRequestNumber: number | null;
   selectedCommitSha: string | null;
+  externalPullRequestData?: boolean;
 };
 
 export const changesQueryKeys = {
@@ -60,6 +61,7 @@ export function useChangesQueries(options: ChangesQueryOptions) {
     primaryView,
     pullRequestNumber,
     selectedCommitSha,
+    externalPullRequestData = false,
   } = options;
   const available = repoAttached && !disabled;
   const encodedDroneId = encodeURIComponent(droneId);
@@ -79,7 +81,11 @@ export function useChangesQueries(options: ChangesQueryOptions) {
   const pullRequest = useChangesResourceQuery<Successful<RepoPullRequestChangesPayload>>({
     queryKey: changesQueryKeys.pullRequest(droneId, repoPath, pullRequestNumber),
     url: `/api/drones/${encodedDroneId}/repo/pull-requests/${pullRequestNumber}/changes`,
-    enabled: available && dataMode === 'pull-request' && Boolean(pullRequestNumber),
+    enabled:
+      available &&
+      !externalPullRequestData &&
+      dataMode === 'pull-request' &&
+      Boolean(pullRequestNumber),
   });
   const branchCommits = useChangesResourceQuery<Successful<RepoCommitListPayload>>({
     queryKey: changesQueryKeys.branchCommits(droneId, repoPath),
@@ -89,7 +95,12 @@ export function useChangesQueries(options: ChangesQueryOptions) {
   const pullRequestCommits = useChangesResourceQuery<Successful<RepoPullRequestCommitListPayload>>({
     queryKey: changesQueryKeys.pullRequestCommits(droneId, repoPath, pullRequestNumber),
     url: `/api/drones/${encodedDroneId}/repo/pull-requests/${pullRequestNumber}/commits`,
-    enabled: available && primaryView === 'commits' && contextMode === 'pull-request' && Boolean(pullRequestNumber),
+    enabled:
+      available &&
+      !externalPullRequestData &&
+      primaryView === 'commits' &&
+      contextMode === 'pull-request' &&
+      Boolean(pullRequestNumber),
   });
   const branchCommit = useChangesResourceQuery<Successful<RepoCommitChangesPayload>>({
     queryKey: changesQueryKeys.branchCommit(droneId, repoPath, selectedCommitSha),
@@ -101,6 +112,7 @@ export function useChangesQueries(options: ChangesQueryOptions) {
     url: `/api/drones/${encodedDroneId}/repo/pull-requests/${pullRequestNumber}/commits/${encodeURIComponent(selectedCommitSha ?? '')}/changes`,
     enabled:
       available &&
+      !externalPullRequestData &&
       primaryView === 'commits' &&
       contextMode === 'pull-request' &&
       Boolean(pullRequestNumber) &&

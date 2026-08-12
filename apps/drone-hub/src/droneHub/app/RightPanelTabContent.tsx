@@ -568,10 +568,12 @@ export function RightPanelTabContent({
             <DroneChangeRequestsDock
               key={`${paneKey}-${drone.id}-requests`}
               droneId={drone.id}
-              droneName={drone.name}
               chatName={chatName}
               repoAttached={repoFeaturesEnabled}
+              repoPath={drone.repoPath}
               disabled={disabled}
+              onRevealFileInFiles={(repoRelativePath) => onRevealChangesFileInFiles(paneKey, repoRelativePath)}
+              onOpenFileInEditor={onOpenChangesFileInEditor}
             />
           )}
         </PaneModule>

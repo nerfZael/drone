@@ -83,7 +83,7 @@ export class ChangeRequestGithubMirrorService {
     idRaw: string,
     input: { merge?: boolean; mergeMethod?: GithubPullRequestMergeMethod } = {},
   ): Promise<ChangeRequestRecord> {
-    const id = String(idRaw ?? '').trim();
+    const id = this.requiredRecord(idRaw).id;
     return await this.withLock(id, async () => {
       const record = this.requiredOpenRecord(id);
       if (record.githubMirror?.state === 'open') {
@@ -167,12 +167,12 @@ export class ChangeRequestGithubMirrorService {
   }
 
   async sync(idRaw: string): Promise<ChangeRequestRecord> {
-    const id = String(idRaw ?? '').trim();
+    const id = this.requiredRecord(idRaw).id;
     return await this.withLock(id, async () => await this.syncRecord(this.requiredOpenRecord(id)));
   }
 
   async setAutoUpdate(idRaw: string, enabled: boolean): Promise<ChangeRequestRecord> {
-    const id = String(idRaw ?? '').trim();
+    const id = this.requiredRecord(idRaw).id;
     return await this.withLock(id, async () => {
       const current = this.requiredRecord(id);
       const mirror = this.requiredMirror(current);
@@ -190,12 +190,12 @@ export class ChangeRequestGithubMirrorService {
     idRaw: string,
     method: GithubPullRequestMergeMethod = 'squash',
   ): Promise<ChangeRequestRecord> {
-    const id = String(idRaw ?? '').trim();
+    const id = this.requiredRecord(idRaw).id;
     return await this.withLock(id, async () => await this.mergeLocked(id, method));
   }
 
   async close(idRaw: string): Promise<ChangeRequestRecord> {
-    const id = String(idRaw ?? '').trim();
+    const id = this.requiredRecord(idRaw).id;
     return await this.withLock(
       id,
       async () => await this.closeMirror(this.requiredRecord(id), true),
@@ -529,7 +529,9 @@ export class ChangeRequestGithubMirrorService {
       cleanupErrors.push('could not safely identify the pull request to close');
     }
     if (!record.snapshotSha) {
-      cleanupErrors.push(`could not safely delete mirror branch ${headBranch}: snapshot SHA missing`);
+      cleanupErrors.push(
+        `could not safely delete mirror branch ${headBranch}: snapshot SHA missing`,
+      );
     } else {
       try {
         await this.branches.deleteRemote(record.repoRoot, headBranch, record.snapshotSha);
@@ -549,7 +551,12 @@ export class ChangeRequestGithubMirrorService {
   }
 
   private requiredRecord(id: string): ChangeRequestRecord {
-    const record = this.deps.repository.get(String(id ?? '').trim());
+    const reference = String(id ?? '').trim();
+    const number = Number(reference);
+    const record =
+      Number.isSafeInteger(number) && number > 0
+        ? this.deps.repository.getByNumber(number)
+        : this.deps.repository.get(reference);
     if (!record) throw new ChangeRequestError(`unknown change request: ${id}`, 404, 'not_found');
     return record;
   }

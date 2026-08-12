@@ -29,7 +29,9 @@ describe('ChangeRequestService', () => {
       await git(repoRoot, ['push', '-u', 'origin', 'main']);
       await git(repoRoot, ['checkout', '-b', 'feature']);
       await fs.writeFile(path.join(repoRoot, 'feature.txt'), 'captured change\n');
-      await git(repoRoot, ['add', 'feature.txt']);
+      await fs.writeFile(path.join(repoRoot, 'README.md'), 'base updated\nextra\n');
+      await fs.writeFile(path.join(repoRoot, 'image.bin'), Buffer.from([0, 1, 2, 3]));
+      await git(repoRoot, ['add', 'feature.txt', 'README.md', 'image.bin']);
       await git(repoRoot, ['commit', '-m', 'container-authored change']);
 
       const repository = new MemoryChangeRequestRepository();
@@ -105,22 +107,33 @@ describe('ChangeRequestService', () => {
       });
 
       expect(created.status).toBe('open');
+      expect('id' in created).toBe(false);
       expect(created.destinationExists).toBe(false);
       expect(created.snapshotSha).toMatch(/^[0-9a-f]{40}$/);
-      expect((await service.getByNumber(created.number, 'drone-1')).id).toBe(created.id);
+      expect(created.lineStats).toEqual({
+        files: 3,
+        additions: 2,
+        modifications: 1,
+        deletions: 0,
+        total: 3,
+      });
+      expect((await service.getByNumber(created.number, 'drone-1')).number).toBe(created.number);
       await expect(service.getByNumber(created.number, 'another-drone')).rejects.toThrow(
         `unknown change request: #${created.number}`,
       );
-      expect((await service.changes(created.id)).entries.map((entry) => entry.path)).toEqual([
+      expect((await service.changes(created.number)).entries.map((entry) => entry.path)).toEqual([
         'feature.txt',
+        'image.bin',
+        'README.md',
       ]);
+      const internalId = repository.getByNumber(created.number)!.id;
 
       await fs.writeFile(path.join(repoRoot, 'follow-up.txt'), 'second revision\n');
       await git(repoRoot, ['add', 'follow-up.txt']);
       await git(repoRoot, ['commit', '-m', 'second container-authored change']);
       repository.failNextUpdateMessage = 'database unavailable';
-      await expect(service.update(created.id, {})).rejects.toThrow('database unavailable');
-      expect(repository.get(created.id)?.revision).toBe(1);
+      await expect(service.update(created.number, {})).rejects.toThrow('database unavailable');
+      expect(repository.get(internalId)?.revision).toBe(1);
       expect(
         (await run('git', ['-C', repoRoot, 'rev-parse', '--verify', created.snapshotRef!])).code,
       ).toBe(0);
@@ -131,12 +144,12 @@ describe('ChangeRequestService', () => {
             repoRoot,
             'rev-parse',
             '--verify',
-            `refs/drone/change-requests/${created.id}/snapshots/2`,
+            `refs/drone/change-requests/${internalId}/snapshots/2`,
           ])
         ).code,
       ).not.toBe(0);
 
-      const updated = await service.update(created.id, {});
+      const updated = await service.update(created.number, {});
       expect(updated.snapshotRef).not.toBe(created.snapshotRef);
       expect(updated.revision).toBe(2);
       expect(
@@ -154,12 +167,12 @@ describe('ChangeRequestService', () => {
       await git(upstreamRepo, ['commit', '-m', 'advance main']);
       await git(upstreamRepo, ['push', 'origin', 'main']);
 
-      const refreshed = await service.refreshAssessment(created.id);
+      const refreshed = await service.refreshAssessment(created.number);
       expect(refreshed.stale).toBe(true);
       expect(refreshed.destinationSha).toBe(await git(upstreamRepo, ['rev-parse', 'HEAD']));
 
       const sourceBranchBeforeMerge = await git(repoRoot, ['branch', '--show-current']);
-      const merged = await service.merge(created.id, {
+      const merged = await service.merge(created.number, {
         actor: { kind: 'user', id: null, label: 'Test user' },
         commitMessage: 'Custom squash message',
       });
@@ -277,13 +290,15 @@ describe('ChangeRequestService', () => {
       await fs.rm(containerRepo, { recursive: true, force: true });
 
       expect(created.snapshotSha).toMatch(/^[0-9a-f]{40}$/);
-      expect((await service.changes(created.id)).entries.map((entry) => entry.path)).toEqual([
+      expect((await service.changes(created.number)).entries.map((entry) => entry.path)).toEqual([
         'container.txt',
       ]);
-      expect((await service.diff(created.id, 'container.txt')).diff).toContain('+container change');
+      expect((await service.diff(created.number, 'container.txt')).diff).toContain(
+        '+container change',
+      );
       expect(await fs.readdir(path.join(storageRoot, 'change-request-exports'))).toEqual([]);
 
-      const closed = await service.close(created.id);
+      const closed = await service.close(created.number);
       expect(closed.status).toBe('closed');
       expect(
         (await run('git', ['-C', repoRoot, 'rev-parse', '--verify', created.snapshotRef!])).code,

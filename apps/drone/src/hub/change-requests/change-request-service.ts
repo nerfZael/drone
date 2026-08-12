@@ -27,6 +27,7 @@ import type {
   ChangeRequestChanges,
   ChangeRequestCreateInput,
   ChangeRequestFileChange,
+  ChangeRequestLineStats,
   ChangeRequestRecord,
   ChangeRequestStatus,
   ChangeRequestUpdateInput,
@@ -147,8 +148,8 @@ export class ChangeRequestService {
     return await this.view(created);
   }
 
-  async get(idRaw: string): Promise<ChangeRequestView> {
-    return await this.view(this.requiredRecord(idRaw));
+  async get(requestNumberRaw: unknown): Promise<ChangeRequestView> {
+    return await this.view(this.requiredRecord(requestNumberRaw));
   }
 
   async getByNumber(numberRaw: unknown, droneIdRaw: unknown): Promise<ChangeRequestView> {
@@ -179,8 +180,8 @@ export class ChangeRequestService {
     );
   }
 
-  async refreshAssessment(idRaw: string): Promise<ChangeRequestView> {
-    const id = String(idRaw ?? '').trim();
+  async refreshAssessment(requestNumberRaw: unknown): Promise<ChangeRequestView> {
+    const id = this.requiredRecord(requestNumberRaw).id;
     return await this.withLock(id, async () => {
       const current = this.requiredRecord(id);
       if (current.status === 'open') {
@@ -191,8 +192,11 @@ export class ChangeRequestService {
     });
   }
 
-  async update(idRaw: string, input: ChangeRequestUpdateInput): Promise<ChangeRequestView> {
-    const id = String(idRaw ?? '').trim();
+  async update(
+    requestNumberRaw: unknown,
+    input: ChangeRequestUpdateInput,
+  ): Promise<ChangeRequestView> {
+    const id = this.requiredRecord(requestNumberRaw).id;
     return await this.withLock(id, async () => {
       const current = this.requiredOpenRecord(id);
       const destinationBranch = input.destinationBranch
@@ -252,8 +256,8 @@ export class ChangeRequestService {
     });
   }
 
-  async close(idRaw: string): Promise<ChangeRequestView> {
-    const id = String(idRaw ?? '').trim();
+  async close(requestNumberRaw: unknown): Promise<ChangeRequestView> {
+    const id = this.requiredRecord(requestNumberRaw).id;
     return await this.withLock(id, async () => {
       const current = this.requiredOpenRecord(id);
       const closed = await this.lifecycle.completeClose(current);
@@ -263,10 +267,10 @@ export class ChangeRequestService {
   }
 
   async merge(
-    idRaw: string,
+    requestNumberRaw: unknown,
     input: { actor: ChangeRequestActor; commitMessage?: string },
   ): Promise<ChangeRequestView> {
-    const id = String(idRaw ?? '').trim();
+    const id = this.requiredRecord(requestNumberRaw).id;
     return await this.withLock(id, async () => {
       const current = this.requiredOpenRecord(id);
       if (!current.snapshotRef || !current.snapshotSha) {
@@ -297,8 +301,8 @@ export class ChangeRequestService {
     });
   }
 
-  async changes(idRaw: string): Promise<ChangeRequestChanges> {
-    const request = await this.get(idRaw);
+  async changes(requestNumberRaw: unknown): Promise<ChangeRequestChanges> {
+    const request = await this.get(requestNumberRaw);
     if (!request.snapshotRef || !request.snapshotSha) {
       return {
         request,
@@ -361,7 +365,7 @@ export class ChangeRequestService {
   }
 
   async diff(
-    idRaw: string,
+    requestNumberRaw: unknown,
     filePathRaw: string,
     contextLinesRaw = 3,
   ): Promise<{
@@ -370,7 +374,7 @@ export class ChangeRequestService {
     diff: string;
     truncated: boolean;
   }> {
-    const request = await this.get(idRaw);
+    const request = await this.get(requestNumberRaw);
     if (!request.snapshotRef || !request.snapshotSha) {
       throw new ChangeRequestError(
         'Change request snapshot is unavailable.',
@@ -402,16 +406,23 @@ export class ChangeRequestService {
     };
   }
 
-  private requiredRecord(idRaw: string): ChangeRequestRecord {
-    const id = String(idRaw ?? '').trim();
-    if (!id) throw new ChangeRequestError('change request id is required');
-    const record = this.deps.repository.get(id);
-    if (!record) throw new ChangeRequestError(`unknown change request: ${id}`, 404, 'not_found');
-    return record;
+  private requiredRecord(requestNumberRaw: unknown): ChangeRequestRecord {
+    const reference = String(requestNumberRaw ?? '').trim();
+    const number = Number(requestNumberRaw);
+    if (Number.isSafeInteger(number) && number > 0) {
+      const record = this.deps.repository.getByNumber(number);
+      if (record) return record;
+      throw new ChangeRequestError(`unknown change request: #${number}`, 404, 'not_found');
+    }
+    // Internal services may still use the opaque storage key. Public API and MCP
+    // callers only receive and submit the integer request number.
+    const internalRecord = reference ? this.deps.repository.get(reference) : null;
+    if (internalRecord) return internalRecord;
+    throw new ChangeRequestError('change request number must be a positive integer');
   }
 
-  private requiredOpenRecord(idRaw: string): ChangeRequestRecord {
-    const record = this.requiredRecord(idRaw);
+  private requiredOpenRecord(requestNumberRaw: unknown): ChangeRequestRecord {
+    const record = this.requiredRecord(requestNumberRaw);
     if (record.status !== 'open') {
       throw new ChangeRequestError(`Change request is ${record.status}.`, 409, 'not_open');
     }
@@ -433,11 +444,14 @@ export class ChangeRequestService {
   }
 
   private async view(record: ChangeRequestRecord): Promise<ChangeRequestView> {
+    const { id: _internalId, ...publicRecord } = record;
     const githubMirror = this.githubMirrorView(record);
+    const lineStats = await this.lineStats(record);
     if (record.status !== 'open' || !record.snapshotRef || !record.snapshotSha) {
       return {
-        ...record,
+        ...publicRecord,
         githubMirror,
+        lineStats,
         stale: false,
         conflicted: false,
         destinationExists: record.status === 'merged',
@@ -452,8 +466,9 @@ export class ChangeRequestService {
     );
     if (!snapshot || snapshot !== record.snapshotSha) {
       return {
-        ...record,
+        ...publicRecord,
         githubMirror,
+        lineStats,
         stale: false,
         conflicted: false,
         destinationExists: false,
@@ -478,8 +493,9 @@ export class ChangeRequestService {
       : null;
     if (!destinationSha) {
       return {
-        ...record,
+        ...publicRecord,
         githubMirror,
+        lineStats,
         stale: false,
         conflicted: false,
         destinationExists: Boolean(destinationRef),
@@ -503,14 +519,55 @@ export class ChangeRequestService {
     );
     const combined = `${mergeTree.stdout}\n${mergeTree.stderr}`.trim();
     return {
-      ...record,
+      ...publicRecord,
       githubMirror,
+      lineStats,
       stale: destinationSha !== record.baseSha,
       conflicted: mergeTree.code !== 0,
       destinationExists: Boolean(destinationRef),
       destinationSha,
       conflictFiles: mergeTree.code === 0 ? [] : changeRequestConflictFiles(combined),
     };
+  }
+
+  private async lineStats(record: ChangeRequestRecord): Promise<ChangeRequestLineStats | null> {
+    if (!record.snapshotSha) return null;
+    try {
+      const result = await this.git(record.repoRoot, [
+        'diff',
+        '--numstat',
+        `${record.baseSha}..${record.snapshotSha}`,
+      ]);
+      if (result.code !== 0) return null;
+      let files = 0;
+      let additions = 0;
+      let modifications = 0;
+      let deletions = 0;
+      for (const line of result.stdout.split(/\r?\n/)) {
+        if (!line) continue;
+        const [addedRaw, deletedRaw, ...pathParts] = line.split('\t');
+        if (!pathParts.some((part) => part.trim())) continue;
+        files += 1;
+        // Git reports binary files as "-\t-". They still count as changed
+        // files even though a meaningful line total is unavailable.
+        if (!/^\d+$/.test(addedRaw ?? '') || !/^\d+$/.test(deletedRaw ?? '')) continue;
+        const added = Number(addedRaw);
+        const deleted = Number(deletedRaw);
+        const modified = Math.min(added, deleted);
+        additions += added - modified;
+        modifications += modified;
+        deletions += deleted - modified;
+      }
+      return {
+        files,
+        additions,
+        modifications,
+        deletions,
+        total: additions + modifications + deletions,
+      };
+    } catch {
+      return null;
+    }
   }
 
   private githubMirrorView(record: ChangeRequestRecord): ChangeRequestView['githubMirror'] {

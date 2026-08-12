@@ -16,7 +16,8 @@ describe('changes line summary', () => {
     expect(html).toContain('+7');
     expect(html).toContain('~3');
     expect(html).toContain('-2');
-    expect(html).toContain('+5');
+    expect(html).toContain('Σ12');
+    expect(html).toContain('12 total line changes');
     expect(html).toContain('text-[var(--green)]');
     expect(html).toContain('text-[var(--yellow)]');
     expect(html).toContain('text-[var(--red)]');

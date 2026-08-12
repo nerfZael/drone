@@ -385,7 +385,7 @@ export function HeaderPullRequestShortcuts({
         style={{ fontFamily: 'var(--display)' }}
         title={error ?? 'Open pull requests tab'}
       >
-        PRs {loading && !pullRequestsData ? '...' : String(count)}
+        Pull requests {loading && !pullRequestsData ? '...' : String(count)}
       </button>
       {previewRows.map((pr) => (
         <button

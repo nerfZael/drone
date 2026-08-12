@@ -13,7 +13,7 @@ import {
 } from './change-request-api';
 
 export function ChangeRequestGithubMirrorPanel({
-  requestId,
+  requestNumber,
   nativeStatus,
   mirror,
   disabled,
@@ -22,7 +22,7 @@ export function ChangeRequestGithubMirrorPanel({
   onMergeMethodChange,
   mutate,
 }: {
-  requestId: string;
+  requestNumber: number;
   nativeStatus: 'open' | 'merged' | 'closed';
   mirror: ChangeRequestGithubMirrorView | null;
   disabled: boolean;
@@ -68,7 +68,7 @@ export function ChangeRequestGithubMirrorPanel({
               disabled={disabled}
               onClick={() =>
                 void mutate('github-publish', () =>
-                  publishChangeRequestMirror(requestId, { merge: false, mergeMethod }),
+                  publishChangeRequestMirror(requestNumber, { merge: false, mergeMethod }),
                 )
               }
               className="rounded border border-[var(--border)] px-3 py-1.5 text-[var(--text-11)] text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40"
@@ -87,7 +87,7 @@ export function ChangeRequestGithubMirrorPanel({
                   })
                 ) {
                   void mutate('github-publish-merge', () =>
-                    publishChangeRequestMirror(requestId, { merge: true, mergeMethod }),
+                    publishChangeRequestMirror(requestNumber, { merge: true, mergeMethod }),
                   );
                 }
               }}
@@ -144,7 +144,7 @@ export function ChangeRequestGithubMirrorPanel({
                 disabled={disabled || mirror.state !== 'open' || !isOpen}
                 onChange={(event) =>
                   void mutate('github-auto-update', () =>
-                    setChangeRequestMirrorAutoUpdate(requestId, event.target.checked),
+                    setChangeRequestMirrorAutoUpdate(requestNumber, event.target.checked),
                   )
                 }
               />
@@ -154,7 +154,7 @@ export function ChangeRequestGithubMirrorPanel({
               type="button"
               disabled={disabled}
               onClick={() =>
-                void mutate('github-refresh', () => refreshChangeRequestMirror(requestId))
+                void mutate('github-refresh', () => refreshChangeRequestMirror(requestNumber))
               }
               className="rounded border border-[var(--border)] px-3 py-1.5 text-[var(--text-11)] text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40"
             >
@@ -164,7 +164,9 @@ export function ChangeRequestGithubMirrorPanel({
               <button
                 type="button"
                 disabled={disabled}
-                onClick={() => void mutate('github-sync', () => syncChangeRequestMirror(requestId))}
+                onClick={() =>
+                  void mutate('github-sync', () => syncChangeRequestMirror(requestNumber))
+                }
                 className="rounded border border-[var(--border)] px-3 py-1.5 text-[var(--text-11)] text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40"
               >
                 {busy === 'github-sync' ? 'Updating…' : 'Update PR now'}
@@ -189,7 +191,7 @@ export function ChangeRequestGithubMirrorPanel({
                       })
                     ) {
                       void mutate('github-merge', () =>
-                        mergeChangeRequestMirror(requestId, mergeMethod),
+                        mergeChangeRequestMirror(requestNumber, mergeMethod),
                       );
                     }
                   }}
@@ -212,7 +214,7 @@ export function ChangeRequestGithubMirrorPanel({
                       destructive: true,
                     })
                   ) {
-                    void mutate('github-close', () => closeChangeRequestMirror(requestId));
+                    void mutate('github-close', () => closeChangeRequestMirror(requestNumber));
                   }
                 }}
                 className="rounded border border-[var(--red-border)] px-3 py-1.5 text-[var(--text-11)] text-[var(--red)] disabled:opacity-40"

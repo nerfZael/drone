@@ -11,12 +11,16 @@ export function listChangeRequests(droneId: string): Promise<ChangeRequestView[]
   ).then((payload) => payload.requests);
 }
 
+export function changeRequestEventsUrl(droneId: string): string {
+  return `/api/change-requests/events?droneId=${encodeURIComponent(droneId)}`;
+}
+
 export function getChangeRequestByNumber(
   droneId: string,
   requestNumber: number,
 ): Promise<ChangeRequestView> {
   return requestJson<RequestPayload>(
-    `/api/change-requests/by-number/${encodeURIComponent(requestNumber)}?droneId=${encodeURIComponent(droneId)}`,
+    `${requestPath(requestNumber)}?droneId=${encodeURIComponent(droneId)}`,
   ).then((payload) => payload.request);
 }
 
@@ -33,25 +37,25 @@ export function createChangeRequest(input: {
   });
 }
 
-export function loadChangeRequestChanges(requestId: string): Promise<ChangesPayload> {
-  return requestJson<ChangesPayload>(`${requestPath(requestId)}/changes`);
+export function loadChangeRequestChanges(requestNumber: number): Promise<ChangesPayload> {
+  return requestJson<ChangesPayload>(`${requestPath(requestNumber)}/changes`);
 }
 
 export function loadChangeRequestDiff(
-  requestId: string,
+  requestNumber: number,
   filePath: string,
 ): Promise<{ diff: string; truncated: boolean }> {
   return requestJson<{ ok: true; diff: string; truncated: boolean }>(
-    `${requestPath(requestId)}/diff?path=${encodeURIComponent(filePath)}&contextLines=5`,
+    `${requestPath(requestNumber)}/diff?path=${encodeURIComponent(filePath)}&contextLines=5`,
   );
 }
 
-export function refreshChangeRequestAssessment(requestId: string): Promise<ChangeRequestView> {
-  return requestMutation(`${requestPath(requestId)}/refresh-assessment`, 'POST');
+export function refreshChangeRequestAssessment(requestNumber: number): Promise<ChangeRequestView> {
+  return requestMutation(`${requestPath(requestNumber)}/refresh-assessment`, 'POST');
 }
 
 export function updateChangeRequest(
-  requestId: string,
+  requestNumber: number,
   input: {
     title?: string;
     description?: string;
@@ -59,54 +63,54 @@ export function updateChangeRequest(
     refreshSnapshot?: boolean;
   },
 ): Promise<ChangeRequestView> {
-  return requestMutation(requestPath(requestId), 'PATCH', input);
+  return requestMutation(requestPath(requestNumber), 'PATCH', input);
 }
 
 export function mergeChangeRequest(
-  requestId: string,
+  requestNumber: number,
   commitMessage?: string,
 ): Promise<ChangeRequestView> {
-  return requestMutation(`${requestPath(requestId)}/merge`, 'POST', {
+  return requestMutation(`${requestPath(requestNumber)}/merge`, 'POST', {
     actor: userActor(),
     commitMessage,
   });
 }
 
-export function closeChangeRequest(requestId: string): Promise<ChangeRequestView> {
-  return requestMutation(`${requestPath(requestId)}/close`, 'POST');
+export function closeChangeRequest(requestNumber: number): Promise<ChangeRequestView> {
+  return requestMutation(`${requestPath(requestNumber)}/close`, 'POST');
 }
 
 export function publishChangeRequestMirror(
-  requestId: string,
+  requestNumber: number,
   input: { merge: boolean; mergeMethod: GithubMirrorMergeMethod },
 ): Promise<ChangeRequestView> {
-  return requestMutation(`${githubPath(requestId)}/publish`, 'POST', input);
+  return requestMutation(`${githubPath(requestNumber)}/publish`, 'POST', input);
 }
 
-export function syncChangeRequestMirror(requestId: string): Promise<ChangeRequestView> {
-  return requestMutation(`${githubPath(requestId)}/sync`, 'POST');
+export function syncChangeRequestMirror(requestNumber: number): Promise<ChangeRequestView> {
+  return requestMutation(`${githubPath(requestNumber)}/sync`, 'POST');
 }
 
-export function refreshChangeRequestMirror(requestId: string): Promise<ChangeRequestView> {
-  return requestMutation(`${githubPath(requestId)}/refresh`, 'POST');
+export function refreshChangeRequestMirror(requestNumber: number): Promise<ChangeRequestView> {
+  return requestMutation(`${githubPath(requestNumber)}/refresh`, 'POST');
 }
 
 export function setChangeRequestMirrorAutoUpdate(
-  requestId: string,
+  requestNumber: number,
   autoUpdate: boolean,
 ): Promise<ChangeRequestView> {
-  return requestMutation(githubPath(requestId), 'PATCH', { autoUpdate });
+  return requestMutation(githubPath(requestNumber), 'PATCH', { autoUpdate });
 }
 
 export function mergeChangeRequestMirror(
-  requestId: string,
+  requestNumber: number,
   method: GithubMirrorMergeMethod,
 ): Promise<ChangeRequestView> {
-  return requestMutation(`${githubPath(requestId)}/merge`, 'POST', { method });
+  return requestMutation(`${githubPath(requestNumber)}/merge`, 'POST', { method });
 }
 
-export function closeChangeRequestMirror(requestId: string): Promise<ChangeRequestView> {
-  return requestMutation(`${githubPath(requestId)}/close`, 'POST');
+export function closeChangeRequestMirror(requestNumber: number): Promise<ChangeRequestView> {
+  return requestMutation(`${githubPath(requestNumber)}/close`, 'POST');
 }
 
 async function requestMutation(
@@ -123,12 +127,12 @@ async function requestMutation(
   return payload.request;
 }
 
-function requestPath(requestId: string): string {
-  return `/api/change-requests/${encodeURIComponent(requestId)}`;
+function requestPath(requestNumber: number): string {
+  return `/api/change-requests/${encodeURIComponent(requestNumber)}`;
 }
 
-function githubPath(requestId: string): string {
-  return `${requestPath(requestId)}/github`;
+function githubPath(requestNumber: number): string {
+  return `${requestPath(requestNumber)}/github`;
 }
 
 function userActor() {

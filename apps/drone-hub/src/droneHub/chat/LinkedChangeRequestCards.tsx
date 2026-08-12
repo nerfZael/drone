@@ -102,7 +102,7 @@ function LinkedChangeRequestCard({
     setBusy('merge');
     setError(null);
     try {
-      setRequest(await mergeChangeRequest(request.id));
+      setRequest(await mergeChangeRequest(request.number));
     } catch (cause: unknown) {
       setError(errorMessage(cause));
       setExpanded(true);
@@ -123,7 +123,7 @@ function LinkedChangeRequestCard({
     setBusy('close');
     setError(null);
     try {
-      setRequest(await closeChangeRequest(request.id));
+      setRequest(await closeChangeRequest(request.number));
     } catch (cause: unknown) {
       setError(errorMessage(cause));
       setExpanded(true);
@@ -237,7 +237,7 @@ function LinkedChangeRequestCard({
                 onClick={openRequest}
                 className="ml-auto text-[var(--accent)] hover:underline"
               >
-                Open in Change Requests
+                Open in change requests
               </button>
             </div>
           ) : null}

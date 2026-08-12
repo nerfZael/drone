@@ -67,7 +67,6 @@ import {
 } from './DiffZoomControl';
 import { CommitInspectionView } from './CommitInspectionView';
 import { ChangesFileCountPill, ChangesLineSummary } from './ChangesLineSummary';
-import { MetaChip } from './MetaChip';
 import type { DiffExpansionRange, DiffState, DiffViewType } from './types';
 import {
   CHANGES_BRANCH_MODE_STORAGE_KEY,
@@ -120,6 +119,25 @@ type ChangesViewMode = 'stacked' | 'split';
 type ChangesContextMode = 'branch' | 'pull-request';
 type ChangesPrimaryView = 'changes' | 'commits';
 type BranchChangesMode = Exclude<ChangesDataMode, 'pull-request'>;
+type SuccessfulPullRequestChanges = Extract<RepoPullRequestChangesPayload, { ok: true }>;
+
+export type DroneChangesReviewOverride = {
+  kind: 'change-request';
+  number: number;
+  revisionKey: string;
+  payload: SuccessfulPullRequestChanges | null;
+  lineCounts?: {
+    changed: number;
+    additions: number;
+    deletions: number;
+    modified?: number;
+  } | null;
+  loading: boolean;
+  error: string | null;
+  header: React.ReactNode;
+  loadingLabel?: string;
+  loadDiff: (path: string) => Promise<{ diff: string; truncated: boolean; isBinary?: boolean }>;
+};
 type ChangesWorkspaceUiSnapshot = {
   pullRequestNumber: number | null;
   contextMode: ChangesContextMode;
@@ -145,6 +163,22 @@ const COMMIT_LIST_MAX_RATIO = 0.42;
 const COMMIT_DETAIL_MIN_WIDTH_PX = 420;
 function changesSegmentButtonClass(active: boolean): string {
   return `dh-changes-segment-button ${active ? 'is-active' : ''}`;
+}
+
+function ReviewBackIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5" aria-hidden="true">
+      <path d="m9.5 3-5 5 5 5M5 8h7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function ExternalLinkIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5" aria-hidden="true">
+      <path d="M6 4H3.5A1.5 1.5 0 0 0 2 5.5v7A1.5 1.5 0 0 0 3.5 14h7a1.5 1.5 0 0 0 1.5-1.5V10M9 2h5v5M14 2 7.5 8.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
 }
 
 function changesEntryStatusLabel(entry: RepoChangeEntry): string {
@@ -399,6 +433,8 @@ export type DroneChangesDockProps = {
   initialViewMode?: ChangesViewMode | null;
   initialDiffViewType?: DiffViewType | null;
   persistViewPreferences?: boolean;
+  reviewOverride?: DroneChangesReviewOverride | null;
+  onReviewBack?: (() => void) | null;
   acceptHistoricalRunChanges?: boolean;
   disabled: boolean;
   hubPhase?: 'draft' | 'creating' | 'starting' | 'seeding' | 'error' | null;
@@ -450,6 +486,8 @@ function LiveDroneChangesDock({
   initialViewMode = null,
   initialDiffViewType = null,
   persistViewPreferences = true,
+  reviewOverride = null,
+  onReviewBack = null,
   disabled,
   hubPhase,
   hubMessage,
@@ -469,7 +507,7 @@ function LiveDroneChangesDock({
 
   const initialRequestedPullNumberRef = React.useRef<number | null>(requestedPullRequestForDrone(droneId));
   const [pullRequestNumber, setPullRequestNumber] = React.useState<number | null>(
-    () => initialRequestedPullNumberRef.current ?? workspaceSnapshot?.pullRequestNumber ?? selectedPullRequestForDrone(droneId),
+    () => reviewOverride?.number ?? initialRequestedPullNumberRef.current ?? workspaceSnapshot?.pullRequestNumber ?? selectedPullRequestForDrone(droneId),
   );
   const [pullRequestActionBusy, setPullRequestActionBusy] = React.useState<'merge' | 'close' | null>(null);
   const [pullRequestActionError, setPullRequestActionError] = React.useState<string | null>(null);
@@ -611,7 +649,14 @@ function LiveDroneChangesDock({
     primaryView,
     pullRequestNumber,
     selectedCommitSha,
+    externalPullRequestData: Boolean(reviewOverride),
   });
+
+  React.useEffect(() => {
+    if (!reviewOverride) return;
+    setPullRequestNumber(reviewOverride.number);
+    setPrimaryView('changes');
+  }, [reviewOverride?.number]);
 
   React.useEffect(() => {
     changesWorkspaceUiByDrone.set(droneId, {
@@ -758,11 +803,12 @@ function LiveDroneChangesDock({
     if (refreshNonce <= 0) return;
     void queryClient.invalidateQueries({ queryKey: changesQueryKeys.drone(droneId), refetchType: 'active' });
   }, [droneId, queryClient, refreshNonce]);
-  const activePullRequestChanges =
-    contextMode === 'pull-request' &&
-    pullRequestNumber &&
-    pullRequestChanges?.id === droneId &&
-    pullRequestChanges.pullRequest.number === pullRequestNumber
+  const activePullRequestChanges = reviewOverride
+    ? reviewOverride.payload
+    : contextMode === 'pull-request' &&
+        pullRequestNumber &&
+        pullRequestChanges?.id === droneId &&
+        pullRequestChanges.pullRequest.number === pullRequestNumber
       ? pullRequestChanges
       : null;
 
@@ -814,10 +860,20 @@ function LiveDroneChangesDock({
     () => (hideViewed ? allEntries.filter((entry) => entryViewedStatus(entry) !== 'viewed') : allEntries),
     [allEntries, entryViewedStatus, hideViewed],
   );
-  const listLoading =
-    dataMode === 'working-tree' ? changesLoading : dataMode === 'pull-request' ? pullRequestLoading : pullLoading;
-  const listError =
-    dataMode === 'working-tree' ? changesError : dataMode === 'pull-request' ? pullRequestError : pullError;
+  const listLoading = reviewOverride
+    ? reviewOverride.loading
+    : dataMode === 'working-tree'
+      ? changesLoading
+      : dataMode === 'pull-request'
+        ? pullRequestLoading
+        : pullLoading;
+  const listError = reviewOverride
+    ? reviewOverride.error
+    : dataMode === 'working-tree'
+      ? changesError
+      : dataMode === 'pull-request'
+        ? pullRequestError
+        : pullError;
   const activeCommitList =
     contextMode === 'pull-request'
       ? pullRequestNumber &&
@@ -1279,6 +1335,16 @@ function LiveDroneChangesDock({
       scopedChangesStateKey(droneId, `pr\u0000${Math.max(1, Math.floor(Number(prNumber ?? 0)))}\u0000${path}`),
     [droneId],
   );
+  const reviewDiffStateKey = React.useCallback(
+    (path: string, prNumber: number | null | undefined) =>
+      reviewOverride
+        ? scopedChangesStateKey(
+            droneId,
+            `review\u0000${reviewOverride.kind}\u0000${reviewOverride.number}\u0000${reviewOverride.revisionKey}\u0000${path}`,
+          )
+        : pullRequestDiffStateKey(path, prNumber),
+    [droneId, pullRequestDiffStateKey, reviewOverride?.kind, reviewOverride?.number, reviewOverride?.revisionKey],
+  );
   const commitDiffStateKey = React.useCallback(
     (path: string, sha: string | null | undefined, mode: ChangesContextMode) =>
       scopedChangesStateKey(droneId, `commit\u0000${mode}\u0000${String(sha ?? '').trim().toLowerCase()}\u0000${path}`),
@@ -1300,7 +1366,7 @@ function LiveDroneChangesDock({
       return keys;
     }
     for (const entry of entries) {
-      keys.add(pullRequestDiffStateKey(entry.path, activePullRequestChanges?.pullRequest.number ?? pullRequestNumber));
+      keys.add(reviewDiffStateKey(entry.path, activePullRequestChanges?.pullRequest.number ?? pullRequestNumber));
     }
     return keys;
   }, [
@@ -1309,7 +1375,7 @@ function LiveDroneChangesDock({
     pullChanges?.baseSha,
     pullChanges?.headSha,
     activePullRequestChanges?.pullRequest.number,
-    pullRequestDiffStateKey,
+    reviewDiffStateKey,
     pullPreviewDiffStateKey,
     pullRequestNumber,
     workingDiffStateKey,
@@ -1567,6 +1633,48 @@ function LiveDroneChangesDock({
     [clearDiffExpansionSource, clearExpandedRangesForDiff, droneId],
   );
 
+  const loadExternalReviewDiff = React.useCallback(
+    async (path: string, force = false) => {
+      if (!reviewOverride) return;
+      const key = reviewDiffStateKey(path, reviewOverride.number);
+      if (inflightRef.current.has(key)) return;
+      const current = diffByKeyRef.current[key];
+      if (current?.status === 'loading') return;
+      if (!force && current?.status === 'loaded') return;
+
+      inflightRef.current.add(key);
+      if (!(force && current?.status === 'loaded')) {
+        setDiffByKey((previous) => ({ ...previous, [key]: { status: 'loading' } }));
+      }
+      try {
+        const result = await reviewOverride.loadDiff(path);
+        if (!mountedRef.current) return;
+        const text = typeof result.diff === 'string' ? result.diff : '';
+        setDiffByKey((previous) => ({
+          ...previous,
+          [key]: {
+            status: 'loaded',
+            text,
+            truncated: Boolean(result.truncated),
+            fromUntracked: false,
+            isBinary: Boolean(result.isBinary),
+            noTextReason: result.isBinary ? 'binary' : text ? null : 'empty',
+            contextLines: 5,
+          },
+        }));
+      } catch (error: any) {
+        if (!mountedRef.current) return;
+        setDiffByKey((previous) => ({
+          ...previous,
+          [key]: { status: 'error', error: error?.message ?? String(error) },
+        }));
+      } finally {
+        inflightRef.current.delete(key);
+      }
+    },
+    [reviewDiffStateKey, reviewOverride],
+  );
+
   const loadCommitDiff = React.useCallback(
     async ({
       filePath,
@@ -1628,7 +1736,7 @@ function LiveDroneChangesDock({
     if (!Number.isFinite(prNumber) || prNumber <= 0) return;
     const list = activePullRequestChanges?.entries ?? [];
     for (const entry of list) {
-      const key = pullRequestDiffStateKey(entry.path, prNumber);
+      const key = reviewDiffStateKey(entry.path, prNumber);
       clearDiffExpansionSource(key);
       clearExpandedRangesForDiff(key);
     }
@@ -1636,7 +1744,8 @@ function LiveDroneChangesDock({
       const next = { ...prev };
       let changed = false;
       for (const entry of list) {
-        const key = pullRequestDiffStateKey(entry.path, prNumber);
+        if (reviewOverride && typeof entry.patch !== 'string') continue;
+        const key = reviewDiffStateKey(entry.path, prNumber);
         const text = typeof entry.patch === 'string' ? entry.patch : '';
         const value: DiffState = {
           status: 'loaded',
@@ -1669,8 +1778,22 @@ function LiveDroneChangesDock({
     dataMode,
     activePullRequestChanges?.entries,
     activePullRequestChanges?.pullRequest.number,
-    pullRequestDiffStateKey,
+    reviewDiffStateKey,
+    reviewOverride,
   ]);
+
+  React.useEffect(() => {
+    if (!reviewOverride || dataMode !== 'pull-request' || !selectedEntry) return;
+    void loadExternalReviewDiff(selectedEntry.path);
+  }, [dataMode, loadExternalReviewDiff, reviewOverride, selectedEntry]);
+
+  React.useEffect(() => {
+    if (!reviewOverride || dataMode !== 'pull-request' || viewMode !== 'stacked') return;
+    for (const entry of entries) {
+      if (expandedPullFiles[entry.path] !== true) continue;
+      void loadExternalReviewDiff(entry.path);
+    }
+  }, [dataMode, entries, expandedPullFiles, loadExternalReviewDiff, reviewOverride, viewMode]);
 
   const splitShownKind = effectiveKindForEntry(selectedEntry, splitKind);
 
@@ -1822,7 +1945,7 @@ function LiveDroneChangesDock({
     selectedPullRequestNumber === loadedPullRequestNumber;
   const activePullRequestNumber = hasLoadedActivePullRequest ? loadedPullRequestNumber : null;
   const awaitingPullRequestDetails =
-    contextMode === 'pull-request' && Boolean(selectedPullRequestNumber) && !hasLoadedActivePullRequest && !pullRequestError;
+    contextMode === 'pull-request' && Boolean(selectedPullRequestNumber) && !hasLoadedActivePullRequest && !listError;
   const activePullRequestTitleRaw = contextMode === 'pull-request' ? String(activePullRequestChanges?.pullRequest.title ?? '').trim() : '';
   const activePullRequestHtmlUrl = contextMode === 'pull-request' ? String(activePullRequestChanges?.pullRequest.htmlUrl ?? '').trim() : '';
   const activePullRequestState = contextMode === 'pull-request' ? String(activePullRequestChanges?.pullRequest.state ?? '').trim().toLowerCase() : '';
@@ -2021,7 +2144,7 @@ function LiveDroneChangesDock({
       if (!/^[0-9a-f]{40}$/.test(String(baseSha ?? '').trim().toLowerCase())) return null;
       const stateKey =
         dataMode === 'pull-request'
-          ? pullRequestDiffStateKey(entry.path, activePullRequestChanges?.pullRequest.number ?? pullRequestNumber)
+          ? reviewDiffStateKey(entry.path, activePullRequestChanges?.pullRequest.number ?? pullRequestNumber)
           : pullPreviewDiffStateKey(entry.path, baseSha, headSha);
       const sourcePath = entry.originalPath ?? entry.path;
       return () =>
@@ -2041,7 +2164,7 @@ function LiveDroneChangesDock({
       activePullRequestChanges?.pullRequest.baseSha,
       activePullRequestChanges?.pullRequest.headSha,
       activePullRequestChanges?.pullRequest.number,
-      pullRequestDiffStateKey,
+      reviewDiffStateKey,
       pullRequestNumber,
     ],
   );
@@ -2053,7 +2176,7 @@ function LiveDroneChangesDock({
       const headSha = dataMode === 'pull-request' ? activePullRequestChanges?.pullRequest.headSha : pullChanges?.headSha;
       if (!/^[0-9a-f]{40}$/.test(String(baseSha ?? '').trim().toLowerCase())) return null;
       return dataMode === 'pull-request'
-        ? pullRequestDiffStateKey(entry.path, activePullRequestChanges?.pullRequest.number ?? pullRequestNumber)
+        ? reviewDiffStateKey(entry.path, activePullRequestChanges?.pullRequest.number ?? pullRequestNumber)
         : pullPreviewDiffStateKey(entry.path, baseSha, headSha);
     },
     [
@@ -2064,7 +2187,7 @@ function LiveDroneChangesDock({
       activePullRequestChanges?.pullRequest.baseSha,
       activePullRequestChanges?.pullRequest.headSha,
       activePullRequestChanges?.pullRequest.number,
-      pullRequestDiffStateKey,
+      reviewDiffStateKey,
       pullRequestNumber,
     ],
   );
@@ -2629,7 +2752,7 @@ function LiveDroneChangesDock({
           ? pullChanges
           : null;
   const activeLineChangeCounts =
-    dataMode === 'working-tree'
+    reviewOverride?.lineCounts ?? (dataMode === 'working-tree'
       ? changes?.id === droneId
         ? changes.counts
         : null
@@ -2645,7 +2768,7 @@ function LiveDroneChangesDock({
           : null
         : pullChanges?.id === droneId
           ? pullChanges.counts
-          : null;
+          : null);
   const showingInitialLoad =
     repoAttached &&
     !disabled &&
@@ -2653,7 +2776,7 @@ function LiveDroneChangesDock({
       ? !activeCommitList && !commitListError
       : !activeChangesPayload && !listError);
   const initialLoadingLabel =
-    primaryView === 'commits'
+    reviewOverride?.loadingLabel ?? (primaryView === 'commits'
       ? contextMode === 'pull-request'
         ? 'Loading pull request commits…'
         : 'Loading branch commits…'
@@ -2661,13 +2784,13 @@ function LiveDroneChangesDock({
         ? 'Loading pull request…'
         : dataMode === 'pull-preview'
           ? 'Loading apply preview…'
-          : 'Loading changes…';
+          : 'Loading changes…');
   const allVisibleChangesViewed = allEntries.length > 0 && hideViewed;
   const emptyChangesTitle = allVisibleChangesViewed
     ? 'All visible files are viewed'
     : dataMode === 'pull-request'
       ? pullRequestNumber
-        ? `No changes in PR #${pullRequestNumber}`
+        ? `No changes in ${reviewOverride ? 'change request' : 'PR'} #${pullRequestNumber}`
         : 'No pull request selected'
       : dataMode === 'pull-preview'
         ? 'No apply changes to preview'
@@ -2700,6 +2823,20 @@ function LiveDroneChangesDock({
         surface="alternate"
         style={{ background: 'var(--chat-background)', ...diffZoomStyle(diffZoom) }}
       >
+        {reviewOverride ? reviewOverride.header : onReviewBack ? (
+          <div className="flex min-h-9 items-center gap-2 border-b border-[var(--border-subtle)] px-2 py-1">
+            <UiToolbarIconButton
+              size="xsmall"
+              label="Back to pull requests"
+              title="Back to pull requests"
+              icon={<ReviewBackIcon />}
+              onClick={onReviewBack}
+            />
+            <span className="truncate text-[var(--text-10)] text-[var(--muted)]">
+              Loading pull request{pullRequestNumber ? ` #${pullRequestNumber}` : ''}…
+            </span>
+          </div>
+        ) : null}
         <UiCenteredLoadingState message={initialLoadingLabel} />
       </UiPanel>
     );
@@ -2756,16 +2893,18 @@ function LiveDroneChangesDock({
               {primaryView === 'changes' && activeLineChangeCounts && activeLineChangeCounts.changed > 0 ? (
                 <ChangesLineSummary counts={activeLineChangeCounts} />
               ) : null}
-              <UiToolbarSegmentedControl
-                label="Changes view"
-                value={primaryView}
-                onValueChange={setPrimaryView}
-                size="xsmall"
-                options={[
-                  { value: 'changes', label: 'Changes' },
-                  { value: 'commits', label: 'Commits' },
-                ]}
-              />
+              {!reviewOverride ? (
+                <UiToolbarSegmentedControl
+                  label="Changes view"
+                  value={primaryView}
+                  onValueChange={setPrimaryView}
+                  size="xsmall"
+                  options={[
+                    { value: 'changes', label: 'Changes' },
+                    { value: 'commits', label: 'Commits' },
+                  ]}
+                />
+              ) : null}
             </>
           ) : null}
           <DiffZoomControl value={diffZoom} onChange={setDiffZoom} />
@@ -2782,84 +2921,86 @@ function LiveDroneChangesDock({
         </div>
       </UiPanelToolbar>
 
-      {contextMode === 'pull-request' && awaitingPullRequestDetails ? (
+      {!reviewOverride && contextMode === 'pull-request' && awaitingPullRequestDetails ? (
         <UiPanelStatusStrip>
           Loading PR #{selectedPullRequestNumber} details...
         </UiPanelStatusStrip>
       ) : null}
-      {contextMode === 'pull-request' && hasLoadedActivePullRequest && activePullRequestNumber ? (
-        <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] bg-[var(--surface-soft)] flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div
-              className="text-[var(--text-9)] font-[var(--weight-semibold)] tracking-[0.12em] uppercase text-[var(--muted-dim)]"
-              style={{ fontFamily: 'var(--display)' }}
-            >
-              Pull Request
+      {reviewOverride ? reviewOverride.header : null}
+      {!reviewOverride && contextMode === 'pull-request' && hasLoadedActivePullRequest && activePullRequestNumber ? (
+        <div className="flex min-h-9 items-center gap-2 border-b border-[var(--border-subtle)] px-2 py-1">
+          {onReviewBack ? (
+            <UiToolbarIconButton
+              size="xsmall"
+              label="Back to pull requests"
+              title="Back to pull requests"
+              icon={<ReviewBackIcon />}
+              onClick={onReviewBack}
+            />
+          ) : null}
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]" title={activePullRequestTitleRaw || undefined}>
+              {activePullRequestTitleRaw || 'Untitled pull request'}
             </div>
-            <div className="mt-1 text-[var(--text-13)] leading-snug font-[var(--weight-semibold)] text-[var(--fg-secondary)] truncate" title={activePullRequestTitleRaw || undefined}>
-              <span className="font-mono text-[var(--accent)] mr-1.5">#{activePullRequestNumber}</span>
-              <span>{activePullRequestTitleRaw || 'Untitled pull request'}</span>
-            </div>
-            <div className="mt-1 inline-flex items-center gap-1.5 text-[var(--text-10)] text-[var(--muted)]">
-              <MetaChip label="base" value={activePullRequestChanges?.pullRequest.baseRefName ?? '-'} mono />
-              <MetaChip label="head" value={activePullRequestChanges?.pullRequest.headRefName ?? '-'} mono />
+            <div className="flex min-w-0 items-center gap-1.5 text-[var(--text-9)] text-[var(--muted-dim)]">
+              <span className="font-mono text-[var(--accent)]">#{activePullRequestNumber}</span>
+              <span className="truncate font-mono">{activePullRequestChanges?.pullRequest.headRefName ?? '-'} → {activePullRequestChanges?.pullRequest.baseRefName ?? '-'}</span>
             </div>
           </div>
-          <div className="shrink-0 flex items-center gap-1.5">
-            <button
-              type="button"
+          <div className="flex shrink-0 items-center gap-0.5">
+            <UiToolbarButton
+              size="xsmall"
+              tone="success"
               onClick={() => {
                 void mergeActivePullRequest();
               }}
               disabled={Boolean(pullRequestActionBusy) || Boolean(activePullRequestActionBlockedReason)}
-              className="inline-flex items-center h-6 px-2 rounded border text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
+              loading={pullRequestActionBusy === 'merge'}
               title={activePullRequestActionBlockedReason ?? 'Merge pull request'}
-              style={{ fontFamily: 'var(--display)' }}
             >
-              {pullRequestActionBusy === 'merge' ? 'Merging...' : 'Merge'}
-            </button>
-            <button
-              type="button"
+              Merge
+            </UiToolbarButton>
+            <UiToolbarButton
+              size="xsmall"
+              tone="danger"
               onClick={() => {
                 void closeActivePullRequest();
               }}
               disabled={Boolean(pullRequestActionBusy) || Boolean(activePullRequestActionBlockedReason)}
-              className="inline-flex items-center h-6 px-2 rounded border text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
+              loading={pullRequestActionBusy === 'close'}
               title={activePullRequestActionBlockedReason ?? 'Close pull request without merging'}
-              style={{ fontFamily: 'var(--display)' }}
             >
-              {pullRequestActionBusy === 'close' ? 'Closing...' : 'Close'}
-            </button>
+              Close
+            </UiToolbarButton>
             {activePullRequestStatus ? (
               <span
-                className={`inline-flex items-center h-6 px-2 rounded border text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide ${activePullRequestStatus.className}`}
+                className={`inline-flex h-5 items-center rounded-full px-1.5 text-[var(--text-9)] font-[var(--weight-semibold)] ${activePullRequestStatus.className}`}
                 title={activePullRequestStatus.title}
-                style={{ fontFamily: 'var(--display)' }}
               >
                 {activePullRequestStatus.label}
               </span>
             ) : null}
             {activePullRequestHtmlUrl ? (
               <a
-                className="inline-flex items-center h-6 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+                className="inline-flex h-6 w-6 items-center justify-center rounded-[var(--radius-medium)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
                 href={activePullRequestHtmlUrl}
                 target="_blank"
                 rel="noreferrer"
-                title="Open PR on GitHub"
-                style={{ fontFamily: 'var(--display)' }}
+                title="Open externally"
+                aria-label="Open pull request externally"
               >
-                Open
+                <ExternalLinkIcon />
               </a>
             ) : null}
           </div>
         </div>
       ) : null}
-      {contextMode === 'pull-request' && pullRequestActionNotice ? (
+      {!reviewOverride && contextMode === 'pull-request' && pullRequestActionNotice ? (
         <UiPanelStatusStrip tone="success">
           {pullRequestActionNotice}
         </UiPanelStatusStrip>
       ) : null}
-      {contextMode === 'pull-request' && pullRequestActionError ? (
+      {!reviewOverride && contextMode === 'pull-request' && pullRequestActionError ? (
         <UiPanelStatusStrip tone="danger">
           {pullRequestActionError}
         </UiPanelStatusStrip>
@@ -3029,7 +3170,7 @@ function LiveDroneChangesDock({
                 const open = expandedPullFiles[entry.path] === true;
                 const key =
                   dataMode === 'pull-request'
-                    ? pullRequestDiffStateKey(entry.path, activePullRequestChanges?.pullRequest.number ?? pullRequestNumber)
+                    ? reviewDiffStateKey(entry.path, activePullRequestChanges?.pullRequest.number ?? pullRequestNumber)
                     : pullPreviewDiffStateKey(entry.path, pullChanges?.baseSha, pullChanges?.headSha);
                 const state = diffByKey[key];
                 return (
@@ -3055,13 +3196,17 @@ function LiveDroneChangesDock({
                             const next = { ...prev, [entry.path]: !open };
                             return next;
                           });
-                          if (!open && dataMode === 'pull-preview') {
-                            void loadRangeDiff({
-                              filePath: entry.path,
-                              baseSha: pullChanges?.baseSha,
-                              headSha: pullChanges?.headSha,
-                              stateKey: key,
-                            });
+                          if (!open) {
+                            if (reviewOverride) {
+                              void loadExternalReviewDiff(entry.path);
+                            } else if (dataMode === 'pull-preview') {
+                              void loadRangeDiff({
+                                filePath: entry.path,
+                                baseSha: pullChanges?.baseSha,
+                                headSha: pullChanges?.headSha,
+                                stateKey: key,
+                              });
+                            }
                           }
                         }}
                         className="h-6 px-2 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
@@ -3120,7 +3265,7 @@ function LiveDroneChangesDock({
                 ) : (
                   <div className="text-[var(--text-9)] text-[var(--muted-dim)] font-mono whitespace-nowrap">
                     {dataMode === 'pull-request'
-                      ? `PR #${activePullRequestChanges?.pullRequest.number ?? pullRequestNumber ?? '-'} ${shortSha(pullBase)}..${shortSha(pullHead)}`
+                      ? `${reviewOverride ? 'CR' : 'PR'} #${activePullRequestChanges?.pullRequest.number ?? pullRequestNumber ?? '-'} ${shortSha(pullBase)}..${shortSha(pullHead)}`
                       : `${shortSha(pullBase)}..${shortSha(pullHead)}`}
                   </div>
                 )}
@@ -3147,7 +3292,7 @@ function LiveDroneChangesDock({
               <DiffBlock
                 state={
                   dataMode === 'pull-request'
-                    ? diffByKey[pullRequestDiffStateKey(selectedEntry.path, activePullRequestChanges?.pullRequest.number ?? pullRequestNumber)]
+                    ? diffByKey[reviewDiffStateKey(selectedEntry.path, activePullRequestChanges?.pullRequest.number ?? pullRequestNumber)]
                     : diffByKey[pullPreviewDiffStateKey(selectedEntry.path, pullChanges?.baseSha, pullChanges?.headSha)]
                 }
                 filePath={selectedEntry.path}
@@ -3157,14 +3302,14 @@ function LiveDroneChangesDock({
                 expansionRanges={
                   expandedRangesByDiffKey[
                     dataMode === 'pull-request'
-                      ? pullRequestDiffStateKey(selectedEntry.path, activePullRequestChanges?.pullRequest.number ?? pullRequestNumber)
+                      ? reviewDiffStateKey(selectedEntry.path, activePullRequestChanges?.pullRequest.number ?? pullRequestNumber)
                       : pullPreviewDiffStateKey(selectedEntry.path, pullChanges?.baseSha, pullChanges?.headSha)
                   ] ?? []
                 }
                 onAddExpansionRange={(range) =>
                   addExpandedRangeForDiff(
                     dataMode === 'pull-request'
-                      ? pullRequestDiffStateKey(selectedEntry.path, activePullRequestChanges?.pullRequest.number ?? pullRequestNumber)
+                      ? reviewDiffStateKey(selectedEntry.path, activePullRequestChanges?.pullRequest.number ?? pullRequestNumber)
                       : pullPreviewDiffStateKey(selectedEntry.path, pullChanges?.baseSha, pullChanges?.headSha),
                     range,
                   )

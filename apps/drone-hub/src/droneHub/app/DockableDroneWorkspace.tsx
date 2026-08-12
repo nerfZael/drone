@@ -262,6 +262,17 @@ export function restoreRequiredWorkspacePanels(api: DockviewApi): void {
   ensureChatPanel(api);
 }
 
+export function refreshWorkspacePanelTitles(api: DockviewApi): void {
+  for (const panel of api.panels) {
+    if (panel.id === CHAT_PANEL_ID) {
+      panel.api.setTitle('Agent Chat');
+      continue;
+    }
+    const tab = tabFromPanel(panel);
+    if (tab) panel.api.setTitle(RIGHT_PANEL_TAB_LABELS[tab]);
+  }
+}
+
 export function migrateEditorChangesPanels(api: DockviewApi): void {
   const panels = editorChangesPanels(api);
   if (panels.length === 0) return;
@@ -484,6 +495,7 @@ export function DockableDroneWorkspace({
         api.fromJSON(stored, { reuseExistingPanels: true });
         restoreRequiredWorkspacePanels(api);
         migrateEditorChangesPanels(api);
+        refreshWorkspacePanelTitles(api);
       } else {
         resetWorkspaceToChat(api);
       }

@@ -68,9 +68,18 @@ export type ChangeRequestAssessment = {
   conflictFiles: string[];
 };
 
-export type ChangeRequestView = Omit<ChangeRequestRecord, 'githubMirror'> &
+export type ChangeRequestLineStats = {
+  files: number;
+  additions: number;
+  modifications: number;
+  deletions: number;
+  total: number;
+};
+
+export type ChangeRequestView = Omit<ChangeRequestRecord, 'id' | 'githubMirror'> &
   ChangeRequestAssessment & {
     githubMirror: ChangeRequestGithubMirrorView | null;
+    lineStats?: ChangeRequestLineStats | null;
   };
 
 export type ChangeRequestFileChange = {

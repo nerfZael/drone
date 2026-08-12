@@ -117,11 +117,11 @@ export class ChangeRequestDirectMerger {
     }
   }
 
-  private worktreePath(requestId: string): string {
+  private worktreePath(internalId: string): string {
     const runId = `${Date.now().toString(36)}-${crypto.randomBytes(4).toString('hex')}`;
     return this.deps.storagePath(
       'change-request-worktrees',
-      `${safeChangeRequestRefSegment(requestId)}-${runId}`,
+      `${safeChangeRequestRefSegment(internalId)}-${runId}`,
     );
   }
 

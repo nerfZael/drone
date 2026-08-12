@@ -111,8 +111,8 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   },
   {
     id: 'openPullRequestsTab',
-    label: 'Open PRs tab',
-    description: 'Opens the PRs workspace pane.',
+    label: 'Open pull requests tab',
+    description: 'Opens the pull requests workspace pane.',
   },
   {
     id: 'openChangesTab',

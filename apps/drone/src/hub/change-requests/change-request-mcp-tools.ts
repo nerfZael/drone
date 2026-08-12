@@ -63,9 +63,9 @@ export function registerChangeRequestMcpTools(
     {
       title: 'Update change request',
       description:
-        'Refresh a native DroneHub change request from the latest committed source and optionally change its title, description, or destination branch.',
+        'Refresh a native DroneHub change request, identified by its integer requestNumber, from the latest committed source and optionally change its title, description, or destination branch.',
       inputSchema: {
-        requestId: z.string(),
+        requestNumber: z.number().int().positive(),
         title: z.string().optional(),
         description: z.string().optional(),
         destinationBranch: z.string().optional(),
@@ -73,9 +73,9 @@ export function registerChangeRequestMcpTools(
       },
     },
     async (args) => {
-      await requireOwnedChangeRequest(context, requestJson, args.requestId);
+      await requireOwnedChangeRequest(context, requestJson, args.requestNumber);
       const response = await requestJson(
-        `/api/change-requests/${encodeURIComponent(args.requestId)}`,
+        `/api/change-requests/${encodeURIComponent(args.requestNumber)}`,
         {
           method: 'PATCH',
           body: JSON.stringify({
@@ -95,13 +95,14 @@ export function registerChangeRequestMcpTools(
     'close_change_request',
     {
       title: 'Close change request',
-      description: 'Close a native DroneHub change request without merging it.',
-      inputSchema: { requestId: z.string() },
+      description:
+        'Close a native DroneHub change request, identified by its integer requestNumber, without merging it.',
+      inputSchema: { requestNumber: z.number().int().positive() },
     },
     async (args) => {
-      await requireOwnedChangeRequest(context, requestJson, args.requestId);
+      await requireOwnedChangeRequest(context, requestJson, args.requestNumber);
       return toolResult(
-        await requestJson(`/api/change-requests/${encodeURIComponent(args.requestId)}/close`, {
+        await requestJson(`/api/change-requests/${encodeURIComponent(args.requestNumber)}/close`, {
           method: 'POST',
         }),
       );
@@ -113,17 +114,17 @@ export function registerChangeRequestMcpTools(
     {
       title: 'Merge change request',
       description:
-        'Directly squash-merge a native DroneHub change request to its destination branch using the host Git identity and credentials.',
+        'Directly squash-merge a native DroneHub change request, identified by its integer requestNumber, to its destination branch using the host Git identity and credentials.',
       inputSchema: {
-        requestId: z.string(),
+        requestNumber: z.number().int().positive(),
         commitMessage: z.string().optional(),
       },
     },
     async (args) => {
-      await requireOwnedChangeRequest(context, requestJson, args.requestId);
+      await requireOwnedChangeRequest(context, requestJson, args.requestNumber);
       return toolResult(
         await requestJson(
-          `/api/change-requests/${encodeURIComponent(args.requestId)}/merge`,
+          `/api/change-requests/${encodeURIComponent(args.requestNumber)}/merge`,
           {
             method: 'POST',
             body: JSON.stringify({
@@ -163,15 +164,17 @@ function changeRequestActor(context: ChangeRequestMcpContext) {
 async function requireOwnedChangeRequest(
   context: ChangeRequestMcpContext,
   requestJson: ChangeRequestMcpDependencies['requestJson'],
-  requestIdRaw: unknown,
+  requestNumberRaw: unknown,
 ): Promise<void> {
-  const requestId = cleanString(requestIdRaw);
-  if (!requestId) throw new Error('requestId is required');
-  const response = await requestJson(`/api/change-requests/${encodeURIComponent(requestId)}`, {
+  const requestNumber = Number(requestNumberRaw);
+  if (!Number.isSafeInteger(requestNumber) || requestNumber <= 0) {
+    throw new Error('requestNumber must be a positive integer');
+  }
+  const response = await requestJson(`/api/change-requests/${encodeURIComponent(requestNumber)}`, {
     method: 'GET',
   });
   const request = response?.request;
-  if (!request) throw new Error(`unknown change request: ${requestId}`);
+  if (!request) throw new Error(`unknown change request: #${requestNumber}`);
   const principal = chatPrincipal(context);
   if (principal && !changeRequestBelongsToChat(request, principal)) {
     throw new Error('This chat can only manage change requests that it created.');

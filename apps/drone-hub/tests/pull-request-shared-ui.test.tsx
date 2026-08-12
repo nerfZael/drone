@@ -1,5 +1,7 @@
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import fs from 'node:fs';
+import path from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { PullRequestStatusBadgeStrip } from '../src/droneHub/pullRequests/pull-request-ui';
 import {
@@ -51,6 +53,16 @@ afterEach(() => {
 });
 
 describe('shared pull request UI behavior', () => {
+  test('portals the merge-method menu above panel overflow', () => {
+    const source = fs.readFileSync(
+      path.join(import.meta.dir, '../src/droneHub/pullRequests/PullRequestListView.tsx'),
+      'utf8',
+    );
+    expect(source).toContain('<UiActionMenu');
+    expect(source).toContain('portal');
+    expect(source).not.toContain('<UiMenuSelect');
+  });
+
   test('uses one merge-method preference reader and writer', () => {
     expect(readPullRequestMergeMethod()).toBe('merge');
     writePullRequestMergeMethod('squash');

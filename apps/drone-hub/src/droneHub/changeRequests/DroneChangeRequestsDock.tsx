@@ -1,48 +1,124 @@
 import React from 'react';
 import type { ChangeRequestView } from '@drone/hub-model/change-requests';
 
-import { cn } from '../../ui/cn';
+import {
+  UiButton,
+  UiCenteredLoadingState,
+  UiPaneState,
+  UiPanel,
+  UiPanelStatusStrip,
+} from '../../ui/components';
+import { UnifiedRequestList, type UnifiedRequestListItem } from '../requests/UnifiedRequestList';
 import { ChangeRequestDetail } from './ChangeRequestDetail';
-import { createChangeRequest, listChangeRequests } from './change-request-api';
+import {
+  changeRequestEventsUrl,
+  createChangeRequest,
+  listChangeRequests,
+} from './change-request-api';
 import {
   consumeRequestedChangeRequest,
   OPEN_CHANGE_REQUEST_EVENT,
   type OpenChangeRequestDetail,
 } from './change-request-navigation';
-import {
-  changeRequestStatusClasses,
-  changeRequestStatusLabel,
-  relativeChangeRequestTime,
-} from './change-request-presentation';
+
+type ChangeRequestFilter = 'all' | 'open' | 'merged' | 'closed';
 
 export function DroneChangeRequestsDock({
   droneId,
-  droneName,
   chatName,
   repoAttached,
+  repoPath,
   disabled,
+  onRevealFileInFiles,
+  onOpenFileInEditor,
 }: {
   droneId: string;
-  droneName: string;
   chatName: string;
   repoAttached: boolean;
+  repoPath: string;
   disabled: boolean;
+  onRevealFileInFiles: (repoRelativePath: string) => void;
+  onOpenFileInEditor: (repoRelativePath: string) => void;
 }) {
   const [requests, setRequests] = React.useState<ChangeRequestView[]>([]);
-  const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const [selectedNumber, setSelectedNumber] = React.useState<number | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [creating, setCreating] = React.useState(false);
   const [showCreate, setShowCreate] = React.useState(false);
+  const [checkedNumbers, setCheckedNumbers] = React.useState<Set<number>>(() => new Set());
+  const [query, setQuery] = React.useState('');
+  const [statusFilter, setStatusFilter] = React.useState<ChangeRequestFilter>('all');
   const [createTitle, setCreateTitle] = React.useState('');
   const [createDescription, setCreateDescription] = React.useState('');
   const [createDestination, setCreateDestination] = React.useState('');
   const requestedNumberRef = React.useRef<number | null>(null);
-  const selected = requests.find((request) => request.id === selectedId) ?? null;
+  const selected = requests.find((request) => request.number === selectedNumber) ?? null;
+  const requestCounts = React.useMemo(
+    () => ({
+      all: requests.length,
+      open: requests.filter((request) => request.status === 'open').length,
+      merged: requests.filter((request) => request.status === 'merged').length,
+      closed: requests.filter((request) => request.status === 'closed').length,
+    }),
+    [requests],
+  );
+  const visibleRequests = React.useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    return requests.filter((request) => {
+      if (statusFilter !== 'all' && request.status !== statusFilter) return false;
+      if (!normalizedQuery) return true;
+      return [
+        request.title,
+        request.chatName,
+        request.baseBranch,
+        request.destinationBranch,
+        `#${request.number}`,
+      ].some((value) => String(value).toLowerCase().includes(normalizedQuery));
+    });
+  }, [query, requests, statusFilter]);
+  const listItems = React.useMemo<UnifiedRequestListItem[]>(
+    () =>
+      visibleRequests.map((request) => ({
+        number: request.number,
+        title: request.title,
+        state: request.status,
+        updatedAt: request.updatedAt,
+        lineStats: request.lineStats,
+        metadata: (
+          <>
+            <span>{request.chatName}</span>
+            <span aria-hidden="true">·</span>
+            <span
+              className="font-mono"
+              title={`${request.baseBranch} → ${request.destinationBranch}`}
+            >
+              {request.baseBranch} → {request.destinationBranch}
+            </span>
+            <span aria-hidden="true">·</span>
+            <span>revision {request.revision}</span>
+          </>
+        ),
+        signals: (
+          <>
+            {request.conflicted ? (
+              <span className="text-[var(--text-9)] text-[var(--red)]">Conflicts</span>
+            ) : request.stale ? (
+              <span className="text-[var(--text-9)] text-[var(--yellow)]">Out of date</span>
+            ) : null}
+            {!request.destinationExists && request.status === 'open' ? (
+              <span className="text-[var(--text-9)] text-[var(--accent)]">New branch</span>
+            ) : null}
+          </>
+        ),
+        selectionDisabled: request.status !== 'open',
+      })),
+    [visibleRequests],
+  );
 
   const loadRequests = React.useCallback(
-    async (preserveSelection = true) => {
-      setLoading(true);
+    async (preserveSelection = true, silent = false) => {
+      if (!silent) setLoading(true);
       setError(null);
       try {
         const loaded = await listChangeRequests(droneId);
@@ -52,12 +128,16 @@ export function DroneChangeRequestsDock({
         const requested = loaded.find((request) => request.number === requestedNumber);
         if (requested) {
           requestedNumberRef.current = null;
-          setSelectedId(requested.id);
+          setSelectedNumber(requested.number);
           return;
         }
         requestedNumberRef.current = null;
-        setSelectedId((current) => {
-          if (preserveSelection && current && loaded.some((request) => request.id === current)) {
+        setSelectedNumber((current) => {
+          if (
+            preserveSelection &&
+            current &&
+            loaded.some((request) => request.number === current)
+          ) {
             return current;
           }
           return null;
@@ -65,17 +145,30 @@ export function DroneChangeRequestsDock({
       } catch (cause: unknown) {
         setError(errorMessage(cause));
       } finally {
-        setLoading(false);
+        if (!silent) setLoading(false);
       }
     },
     [droneId],
   );
 
   React.useEffect(() => {
-    setSelectedId(null);
+    setSelectedNumber(null);
     setShowCreate(false);
+    setCheckedNumbers(new Set());
+    setQuery('');
+    setStatusFilter('all');
     void loadRequests(false);
   }, [loadRequests]);
+
+  React.useEffect(() => {
+    const available = new Set(
+      requests.filter((request) => request.status === 'open').map((request) => request.number),
+    );
+    setCheckedNumbers((current) => {
+      const next = new Set([...current].filter((number) => available.has(number)));
+      return next.size === current.size ? current : next;
+    });
+  }, [requests]);
 
   React.useEffect(() => {
     const openRequest = (event: Event) => {
@@ -88,9 +181,25 @@ export function DroneChangeRequestsDock({
     return () => window.removeEventListener(OPEN_CHANGE_REQUEST_EVENT, openRequest);
   }, [droneId, loadRequests]);
 
+  React.useEffect(() => {
+    if (
+      !repoAttached ||
+      disabled ||
+      typeof window === 'undefined' ||
+      typeof window.EventSource === 'undefined'
+    ) {
+      return;
+    }
+    const events = new window.EventSource(changeRequestEventsUrl(droneId));
+    const refresh = () => void loadRequests(true, true);
+    events.addEventListener('connected', refresh);
+    events.addEventListener('change_request_changed', refresh);
+    return () => events.close();
+  }, [disabled, droneId, loadRequests, repoAttached]);
+
   const replaceRequest = React.useCallback((request: ChangeRequestView) => {
     setRequests((current) =>
-      current.map((candidate) => (candidate.id === request.id ? request : candidate)),
+      current.map((candidate) => (candidate.number === request.number ? request : candidate)),
     );
   }, []);
 
@@ -107,7 +216,7 @@ export function DroneChangeRequestsDock({
         destinationBranch: createDestination || undefined,
       });
       setRequests((current) => [request, ...current]);
-      setSelectedId(request.id);
+      setSelectedNumber(request.number);
       setCreateTitle('');
       setCreateDescription('');
       setCreateDestination('');
@@ -119,159 +228,138 @@ export function DroneChangeRequestsDock({
     }
   }, [chatName, createDescription, createDestination, createTitle, droneId]);
 
-  if (!repoAttached) {
-    return (
-      <div className="flex h-full items-center justify-center p-6 text-center text-[var(--text-12)] text-[var(--muted)]">
-        Attach a repository to use change requests.
-      </div>
-    );
-  }
-
   if (selected) {
     return (
       <ChangeRequestDetail
         request={selected}
+        droneId={droneId}
+        repoAttached={repoAttached}
+        repoPath={repoPath}
         disabled={disabled}
-        onBack={() => setSelectedId(null)}
+        onBack={() => setSelectedNumber(null)}
         onChange={replaceRequest}
+        onRevealFileInFiles={onRevealFileInFiles}
+        onOpenFileInEditor={onOpenFileInEditor}
       />
     );
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[var(--panel-alt)]">
-      <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-2.5">
-        <div className="min-w-0 flex-1">
-          <div className="text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--fg)]">
-            Change requests
+    <UiPanel flush surface="alternate" className="h-full w-full">
+      {showCreate ? (
+        <div className="shrink-0 border-b border-[var(--border-subtle)] px-3 py-3">
+          <div className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg)]">
+            Capture committed changes
           </div>
-          <div className="text-[var(--text-10)] text-[var(--muted-dim)]">
-            {droneName} · native to DroneHub
-          </div>
-        </div>
-        <button
-          type="button"
-          disabled={disabled || creating}
-          onClick={() => setShowCreate((value) => !value)}
-          className="rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-3 py-1.5 text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--accent)] disabled:opacity-40"
-        >
-          New request
-        </button>
-        <button
-          type="button"
-          disabled={loading}
-          onClick={() => void loadRequests()}
-          className="rounded border border-[var(--border)] px-2 py-1.5 text-[var(--text-11)] text-[var(--muted)] disabled:opacity-40"
-        >
-          Refresh
-        </button>
-      </div>
-      <div className="min-h-0 flex-1 overflow-auto p-3">
-        {showCreate ? (
-          <div className="mb-3 rounded-[var(--radius-large)] border border-[var(--accent-muted)] bg-[var(--surface-softest)] p-3">
-            <div className="text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--fg)]">
-              Capture committed changes
-            </div>
+          <div className="mt-2 grid gap-2 md:grid-cols-2">
             <input
               autoFocus
               value={createTitle}
               onChange={(event) => setCreateTitle(event.target.value)}
               placeholder="Title"
-              className="mt-3 h-9 w-full rounded border border-[var(--border)] bg-[var(--surface-inset-faint)] px-2 text-[var(--text-12)] text-[var(--fg)]"
+              className="h-8 w-full rounded-[var(--radius-medium)] border border-transparent bg-[var(--surface-inset)] px-2.5 text-[var(--text-11)] text-[var(--fg)] focus:border-[var(--accent-muted)] focus:outline-none"
             />
             <input
               value={createDestination}
               onChange={(event) => setCreateDestination(event.target.value)}
-              placeholder="Destination branch (defaults to base branch)"
-              className="mt-2 h-9 w-full rounded border border-[var(--border)] bg-[var(--surface-inset-faint)] px-2 font-mono text-[var(--text-11)] text-[var(--fg)]"
+              placeholder="Destination branch (optional)"
+              className="h-8 w-full rounded-[var(--radius-medium)] border border-transparent bg-[var(--surface-inset)] px-2.5 font-mono text-[var(--text-10)] text-[var(--fg)] focus:border-[var(--accent-muted)] focus:outline-none"
             />
-            <textarea
-              value={createDescription}
-              onChange={(event) => setCreateDescription(event.target.value)}
-              placeholder="Description (optional)"
-              rows={3}
-              className="mt-2 w-full resize-y rounded border border-[var(--border)] bg-[var(--surface-inset-faint)] p-2 text-[var(--text-11)] text-[var(--fg)]"
-            />
-            <div className="mt-2 text-[var(--text-10)] text-[var(--muted-dim)]">
-              Uses chat {chatName}. Commit all source changes first.
-            </div>
-            <div className="mt-3 flex gap-2">
-              <button
-                type="button"
-                disabled={creating || !createTitle.trim()}
-                onClick={() => void createRequest()}
-                className="rounded bg-[var(--accent)] px-3 py-1.5 text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--accent-fg)] disabled:opacity-40"
-              >
-                {creating ? 'Creating…' : 'Create'}
-              </button>
-              <button
-                type="button"
-                disabled={creating}
-                onClick={() => setShowCreate(false)}
-                className="rounded px-3 py-1.5 text-[var(--text-11)] text-[var(--muted)] hover:bg-[var(--hover)]"
-              >
-                Cancel
-              </button>
-            </div>
           </div>
-        ) : null}
-        {error ? (
-          <div className="mb-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-11)] text-[var(--red)]">
-            {error}
+          <textarea
+            value={createDescription}
+            onChange={(event) => setCreateDescription(event.target.value)}
+            placeholder="Description (optional)"
+            rows={2}
+            className="mt-2 w-full resize-y rounded-[var(--radius-medium)] border border-transparent bg-[var(--surface-inset)] p-2.5 text-[var(--text-11)] text-[var(--fg)] focus:border-[var(--accent-muted)] focus:outline-none"
+          />
+          <div className="mt-2 flex items-center gap-1.5">
+            <UiButton
+              size="small"
+              variant="primary"
+              disabled={creating || !createTitle.trim()}
+              onClick={() => void createRequest()}
+            >
+              {creating ? 'Creating…' : 'Create'}
+            </UiButton>
+            <UiButton size="small" variant="ghost" disabled={creating} onClick={() => setShowCreate(false)}>
+              Cancel
+            </UiButton>
+            <span className="ml-1 text-[var(--text-9)] text-[var(--muted-dim)]">
+              Uses chat {chatName}. Commit source changes first.
+            </span>
           </div>
-        ) : null}
-        {loading ? (
-          <div className="p-6 text-center text-[var(--text-11)] text-[var(--muted)]">
-            Loading change requests…
-          </div>
-        ) : requests.length === 0 ? (
-          <div className="rounded-[var(--radius-large)] border border-dashed border-[var(--border)] p-8 text-center">
-            <div className="text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
-              No change requests yet
-            </div>
-            <div className="mt-1 text-[var(--text-11)] text-[var(--muted)]">
-              An agent or you can capture committed changes here without opening a GitHub pull
-              request.
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {requests.map((request) => (
-              <button
-                key={request.id}
-                type="button"
-                onClick={() => setSelectedId(request.id)}
-                className="block w-full rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3 text-left transition-colors hover:border-[var(--accent-muted)] hover:bg-[var(--hover)]"
-              >
-                <div className="flex items-start gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--fg)]">
-                      #{request.number} {request.title}
-                    </div>
-                    <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-[var(--text-10)] text-[var(--muted-dim)]">
-                      <span>{request.chatName}</span>
-                      <span>
-                        {request.baseBranch} → {request.destinationBranch}
-                      </span>
-                      <span>r{request.revision}</span>
-                      <span>{relativeChangeRequestTime(request.updatedAt)}</span>
-                    </div>
-                  </div>
-                  <span
-                    className={cn(
-                      'rounded-full border px-2 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase',
-                      changeRequestStatusClasses(request),
-                    )}
-                  >
-                    {changeRequestStatusLabel(request)}
-                  </span>
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
+        </div>
+      ) : null}
+      {error ? <UiPanelStatusStrip tone="danger">{error}</UiPanelStatusStrip> : null}
+      {!repoAttached ? (
+        <UiPaneState
+          kind="unavailable"
+          title="Repository unavailable"
+          description="Attach a repository to use change requests."
+        />
+      ) : loading && requests.length === 0 ? (
+        <UiCenteredLoadingState message="Loading change requests…" />
+      ) : (
+        <UnifiedRequestList
+          ariaLabel="Change requests"
+          items={listItems}
+          selectedNumbers={checkedNumbers}
+          onSelectedNumbersChange={setCheckedNumbers}
+          onOpenRequest={setSelectedNumber}
+          query={query}
+          onQueryChange={setQuery}
+          queryPlaceholder="Search change requests"
+          toolbarTrailing={
+            <UiButton
+              size="small"
+              variant="primary"
+              leadingIcon={<NewRequestIcon />}
+              disabled={!repoAttached || disabled || creating}
+              onClick={() => setShowCreate((value) => !value)}
+              aria-pressed={showCreate}
+              title="Create a change request"
+            >
+              New
+            </UiButton>
+          }
+          emptyTitle={requests.length === 0 ? 'No change requests yet' : undefined}
+          emptyDescription={
+            requests.length === 0
+              ? 'Create one here, or let an agent capture the next committed change.'
+              : undefined
+          }
+          filters={[
+            { value: 'all', label: 'All', count: requestCounts.all },
+            { value: 'open', label: 'Open', count: requestCounts.open },
+            { value: 'merged', label: 'Merged', count: requestCounts.merged },
+            { value: 'closed', label: 'Closed', count: requestCounts.closed },
+          ]}
+          activeFilter={statusFilter}
+          onFilterChange={(value) => setStatusFilter(value as ChangeRequestFilter)}
+          mergeAction={{
+            label: 'Merge',
+            title: 'Bulk change-request merging is coming soon',
+            tone: 'success',
+            disabled: true,
+          }}
+          closeAction={{
+            label: 'Close',
+            title: 'Bulk change-request closing is coming soon',
+            tone: 'danger',
+            disabled: true,
+          }}
+        />
+      )}
+    </UiPanel>
+  );
+}
+
+function NewRequestIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5" aria-hidden="true">
+      <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
   );
 }
 

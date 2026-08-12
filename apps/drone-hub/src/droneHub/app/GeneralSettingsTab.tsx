@@ -275,7 +275,7 @@ export function GeneralSettingsTab({
                 <div className="mt-2 dh-type-control text-[var(--fg-secondary)]">
                   {githubStatus?.pullRequestTransport === 'github-api' ? 'GitHub API' : 'Unknown'}
                 </div>
-                <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">List, inspect, merge, and close PRs without shelling out to container `gh`.</div>
+                <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">List, inspect, merge, and close pull requests without shelling out to container `gh`.</div>
               </div>
               <div className="dh-settings-row px-3 py-3">
                 <div className="dh-type-label">Effective auth</div>

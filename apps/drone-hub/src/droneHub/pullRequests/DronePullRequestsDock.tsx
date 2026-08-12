@@ -1,17 +1,10 @@
 import React from 'react';
 import {
-  pullRequestCloseConfirmation,
-  pullRequestMergeConfirmation,
-} from '@drone/assistant-chat';
-import {
-  UiMenuSelect,
   UiPaneState,
+  UiCenteredLoadingState,
   UiPanel,
-  UiPanelHeader,
   UiPanelStatusStrip,
-  UiPanelToolbar,
   UiToolbarButton,
-  UiToolbarLink,
 } from '../../ui/components';
 import { requestJson } from '../http';
 import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
@@ -32,11 +25,7 @@ import {
 } from '../changes/navigation';
 import { PullRequestListView } from './PullRequestListView';
 import { readPullRequestMergeMethod, writePullRequestMergeMethod } from './pull-request-preferences';
-import {
-  forceMergeReason,
-  mergeBlockedReason,
-  MetaChip,
-} from './pull-request-ui';
+import { mergeBlockedReason } from './pull-request-ui';
 
 const PR_LIST_CACHE_TTL_MS = 12_000;
 const PR_LIST_POLL_INTERVAL_MS = 20_000;
@@ -93,7 +82,6 @@ function normalizePullRequestListDiagnostics(raw: any): PullRequestListDiagnosti
 
 export function DronePullRequestsDock({
   droneId,
-  droneName,
   repoAttached,
   repoPath,
   repoUnavailableReason,
@@ -128,6 +116,10 @@ export function DronePullRequestsDock({
   const [actionNotice, setActionNotice] = React.useState<string | null>(null);
   const [busyByPullNumber, setBusyByPullNumber] = React.useState<Record<number, 'merge' | 'close'>>({});
   const [bulkAction, setBulkAction] = React.useState<BulkActionState | null>(null);
+  const [selectedPullNumbers, setSelectedPullNumbers] = React.useState<Set<number>>(
+    () => new Set(),
+  );
+  const [query, setQuery] = React.useState('');
   const lastRefreshNonceRef = React.useRef(refreshNonce);
   const repoCacheKey = React.useMemo(() => normalizePullRequestListCacheKey(repoPath, droneId), [droneId, repoPath]);
   const lastRepoCacheKeyRef = React.useRef(repoCacheKey);
@@ -250,13 +242,49 @@ export function DronePullRequestsDock({
     };
   }, [disabled, droneId, refreshNonce, repoAttached, repoCacheKey, startup.markReady, startup.suppressErrors]);
 
-  const pullRequests = listData?.pullRequests ?? [];
+  const pullRequests = React.useMemo(() => listData?.pullRequests ?? [], [listData]);
   const anyBusy = bulkAction != null || Object.keys(busyByPullNumber).length > 0;
-  const mergeablePullRequests = React.useMemo(() => pullRequests.filter((pr) => !mergeBlockedReason(pr)), [pullRequests]);
-  const blockedMergeCount = Math.max(0, pullRequests.length - mergeablePullRequests.length);
-  const blockedConflictCount = React.useMemo(() => pullRequests.filter((pr) => pr.hasMergeConflicts).length, [pullRequests]);
+  const selectedPullRequests = React.useMemo(
+    () => pullRequests.filter((pullRequest) => selectedPullNumbers.has(pullRequest.number)),
+    [pullRequests, selectedPullNumbers],
+  );
+  const mergeablePullRequests = React.useMemo(
+    () => selectedPullRequests.filter((pr) => !mergeBlockedReason(pr)),
+    [selectedPullRequests],
+  );
+  const blockedMergeCount = Math.max(
+    0,
+    selectedPullRequests.length - mergeablePullRequests.length,
+  );
+  const blockedConflictCount = React.useMemo(
+    () => selectedPullRequests.filter((pr) => pr.hasMergeConflicts).length,
+    [selectedPullRequests],
+  );
   const blockedPolicyCount = Math.max(0, blockedMergeCount - blockedConflictCount);
+  const filteredPullRequests = React.useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    if (!normalizedQuery) return pullRequests;
+    return pullRequests.filter((pullRequest) =>
+      [
+        pullRequest.title,
+        pullRequest.authorLogin,
+        pullRequest.headRefName,
+        pullRequest.baseRefName,
+        `#${pullRequest.number}`,
+      ]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(normalizedQuery)),
+    );
+  }, [pullRequests, query]);
   const unavailableReason = String(repoUnavailableReason ?? '').trim();
+
+  React.useEffect(() => {
+    const available = new Set(pullRequests.map((pullRequest) => pullRequest.number));
+    setSelectedPullNumbers((current) => {
+      const next = new Set([...current].filter((number) => available.has(number)));
+      return next.size === current.size ? current : next;
+    });
+  }, [pullRequests]);
 
   const requestMergePullRequest = React.useCallback(
     async (pullNumber: number) =>
@@ -280,86 +308,16 @@ export function DronePullRequestsDock({
     [droneId],
   );
 
-  const mergePullRequest = React.useCallback(
-    async (pr: RepoPullRequestSummary) => {
-      const pullNumber = Number(pr?.number);
-      if (!Number.isFinite(pullNumber) || pullNumber <= 0) return;
-      const blockedReason = mergeBlockedReason(pr);
-      if (blockedReason) {
-        setActionError(`Cannot merge PR #${pullNumber}: ${blockedReason}.`);
-        return;
-      }
-      const forceReason = forceMergeReason(pr);
-      if (bulkAction) return;
-      if (busyByPullNumber[pullNumber]) return;
-      if (
-        !(await confirm(
-          pullRequestMergeConfirmation({
-            pullNumber,
-            baseRefName: pr.baseRefName,
-            method: mergeMethod,
-            forceReason,
-          }),
-        ))
-      )
-        return;
-
-      setActionError(null);
-      setActionNotice(null);
-      setBusyByPullNumber((prev) => ({ ...prev, [pullNumber]: 'merge' }));
-      try {
-        const merged = await requestMergePullRequest(pullNumber);
-        setActionNotice(merged.message || `Merged PR #${pullNumber}.`);
-        setRefreshNonce((n) => n + 1);
-      } catch (e: any) {
-        setActionError(e?.message ?? String(e));
-      } finally {
-        setBusyByPullNumber((prev) => {
-          const next = { ...prev };
-          delete next[pullNumber];
-          return next;
-        });
-      }
-    },
-    [bulkAction, busyByPullNumber, confirm, mergeMethod, requestMergePullRequest],
-  );
-
-  const closePullRequest = React.useCallback(
-    async (pr: RepoPullRequestSummary) => {
-      const pullNumber = Number(pr?.number);
-      if (!Number.isFinite(pullNumber) || pullNumber <= 0) return;
-      if (bulkAction) return;
-      if (busyByPullNumber[pullNumber]) return;
-      if (!(await confirm(pullRequestCloseConfirmation({ pullNumber })))) return;
-
-      setActionError(null);
-      setActionNotice(null);
-      setBusyByPullNumber((prev) => ({ ...prev, [pullNumber]: 'close' }));
-      try {
-        const closed = await requestClosePullRequest(pullNumber);
-        setActionNotice(`Closed PR #${closed.number}.`);
-        setRefreshNonce((n) => n + 1);
-      } catch (e: any) {
-        setActionError(e?.message ?? String(e));
-      } finally {
-        setBusyByPullNumber((prev) => {
-          const next = { ...prev };
-          delete next[pullNumber];
-          return next;
-        });
-      }
-    },
-    [bulkAction, busyByPullNumber, confirm, requestClosePullRequest],
-  );
-
-  const mergeAllPullRequests = React.useCallback(async () => {
+  const mergeSelectedPullRequests = React.useCallback(async () => {
     if (anyBusy) return;
     const queue = mergeablePullRequests
       .map((pr) => Number(pr?.number))
       .filter((n) => Number.isFinite(n) && n > 0)
       .map((n) => Math.floor(n));
     if (queue.length === 0) {
-      setActionError('No mergeable PRs: all open PRs are blocked (conflicts, draft state, or changes requested).');
+      setActionError(
+        'No selected pull requests can be merged because they are blocked by conflicts, draft state, or requested changes.',
+      );
       return;
     }
     const skipLabel =
@@ -369,7 +327,7 @@ export function DronePullRequestsDock({
     if (
       !(await confirm({
         title: `Merge ${queue.length} pull request${queue.length === 1 ? '' : 's'}?`,
-        message: `Merge ${queue.length} mergeable open pull request${queue.length === 1 ? '' : 's'} using ${mergeMethod === 'merge' ? 'merge commits' : mergeMethod === 'squash' ? 'squash merging' : 'rebasing'}${skipLabel}.`,
+        message: `Merge ${queue.length} selected pull request${queue.length === 1 ? '' : 's'} using ${mergeMethod === 'merge' ? 'merge commits' : mergeMethod === 'squash' ? 'squash merging' : 'rebasing'}${skipLabel}.`,
         confirmLabel: `Merge ${queue.length}`,
       }))
     )
@@ -402,6 +360,7 @@ export function DronePullRequestsDock({
     }
 
     setBulkAction(null);
+    setSelectedPullNumbers(new Set());
     setRefreshNonce((n) => n + 1);
 
     if (failures.length === 0) {
@@ -420,9 +379,9 @@ export function DronePullRequestsDock({
     setActionError(`Bulk merge finished with ${failures.length} failure(s): ${failures.slice(0, 3).join(' | ')}`);
   }, [anyBusy, blockedConflictCount, blockedMergeCount, blockedPolicyCount, confirm, mergeMethod, mergeablePullRequests, requestMergePullRequest]);
 
-  const closeAllPullRequests = React.useCallback(async () => {
+  const closeSelectedPullRequests = React.useCallback(async () => {
     if (anyBusy) return;
-    const queue = pullRequests
+    const queue = selectedPullRequests
       .map((pr) => Number(pr?.number))
       .filter((n) => Number.isFinite(n) && n > 0)
       .map((n) => Math.floor(n));
@@ -430,7 +389,7 @@ export function DronePullRequestsDock({
     if (
       !(await confirm({
         title: `Close ${queue.length} pull request${queue.length === 1 ? '' : 's'}?`,
-        message: `This closes ${queue.length === 1 ? 'the open pull request' : `all ${queue.length} open pull requests`} without merging ${queue.length === 1 ? 'it' : 'them'}.`,
+        message: `This closes ${queue.length === 1 ? 'the selected pull request' : `all ${queue.length} selected pull requests`} without merging ${queue.length === 1 ? 'it' : 'them'}.`,
         confirmLabel: `Close ${queue.length}`,
         destructive: true,
       }))
@@ -464,6 +423,7 @@ export function DronePullRequestsDock({
     }
 
     setBulkAction(null);
+    setSelectedPullNumbers(new Set());
     setRefreshNonce((n) => n + 1);
 
     if (failures.length === 0) {
@@ -472,7 +432,7 @@ export function DronePullRequestsDock({
     }
     setActionNotice(`Closed ${successCount} of ${queue.length} pull requests.`);
     setActionError(`Bulk close finished with ${failures.length} failure(s): ${failures.slice(0, 3).join(' | ')}`);
-  }, [anyBusy, confirm, pullRequests, requestClosePullRequest]);
+  }, [anyBusy, confirm, requestClosePullRequest, selectedPullRequests]);
 
   const bulkActionLabel = React.useMemo(() => {
     if (!bulkAction) return null;
@@ -492,11 +452,6 @@ export function DronePullRequestsDock({
     [droneId, onOpenPullRequest],
   );
 
-  const activePullRequest = React.useMemo(
-    () => pullRequests.find((pr) => Number(pr?.number) === activePullRequestNumber) ?? null,
-    [activePullRequestNumber, pullRequests],
-  );
-
   const closeDetailView = React.useCallback(() => {
     clearSelectedPullRequestForDrone(droneId);
     setActivePullRequestNumber(null);
@@ -505,99 +460,10 @@ export function DronePullRequestsDock({
 
   return (
     <UiPanel flush surface="alternate" className="relative h-full w-full">
-      <UiPanelHeader
-        title={activePullRequestNumber ? `Pull Request #${activePullRequestNumber}` : 'Pull Requests'}
-        description={activePullRequest?.title || droneName}
-        density="compact"
-        actions={
-          activePullRequestNumber ? (
-            <>
-              <UiToolbarButton
-                size="xsmall"
-                onClick={closeDetailView}
-                title="Return to the pull request list"
-              >
-                Back to List
-              </UiToolbarButton>
-              {activePullRequest?.htmlUrl ? (
-                <UiToolbarLink
-                  href={activePullRequest.htmlUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  size="xsmall"
-                  title="Open PR on GitHub"
-                >
-                  Open
-                </UiToolbarLink>
-              ) : null}
-            </>
-          ) : null
-        }
-      />
-      {!activePullRequestNumber ? (
-        <UiPanelToolbar
-          aria-label="Pull request actions"
-          className="flex-wrap overflow-visible"
-        >
-          <span className="text-[var(--text-9)] uppercase tracking-wide text-[var(--muted-dim)] mr-1" style={{ fontFamily: 'var(--display)' }}>
-            Merge
-          </span>
-          <UiMenuSelect
-            variant="toolbar"
-            value={mergeMethod}
-            onValueChange={(value) => setMergeMethod(value as RepoPullRequestMergeMethod)}
-            entries={[
-              { value: 'merge', label: 'merge' },
-              { value: 'squash', label: 'squash' },
-              { value: 'rebase', label: 'rebase' },
-            ]}
-            title="Default merge method"
-          />
-          <UiToolbarButton
-            size="xsmall"
-            tone="success"
-            active
-            loading={bulkAction?.kind === 'merge'}
-            onClick={() => {
-              void mergeAllPullRequests();
-            }}
-            disabled={!repoAttached || disabled || mergeablePullRequests.length === 0 || anyBusy || Boolean(listError)}
-            title={
-              mergeablePullRequests.length > 0
-                ? `Merge all mergeable PRs with "${mergeMethod}"${
-                    blockedMergeCount > 0 ? ` (${blockedMergeCount} blocked skipped: ${blockedConflictCount} conflicts, ${blockedPolicyCount} policy)` : ''
-                  }`
-                : 'No mergeable PRs (all blocked)'
-            }
-          >
-            {bulkAction?.kind === 'merge' ? `${bulkAction.done}/${bulkAction.total}` : 'Merge All'}
-          </UiToolbarButton>
-          <UiToolbarButton
-            size="xsmall"
-            tone="danger"
-            active
-            loading={bulkAction?.kind === 'close'}
-            onClick={() => {
-              void closeAllPullRequests();
-            }}
-            disabled={!repoAttached || disabled || pullRequests.length === 0 || anyBusy || Boolean(listError)}
-            title="Close all open PRs without merging"
-          >
-            {bulkAction?.kind === 'close' ? `${bulkAction.done}/${bulkAction.total}` : 'Close All'}
-          </UiToolbarButton>
-          <UiToolbarButton
-            size="xsmall"
-            onClick={() => setRefreshNonce((n) => n + 1)}
-            title="Refresh pull requests"
-          >
-            Refresh
-          </UiToolbarButton>
-        </UiPanelToolbar>
-      ) : null}
       {activePullRequestNumber ? (
         <React.Suspense
           fallback={
-            <UiPaneState kind="loading" title="Loading pull request changes…" />
+            <UiCenteredLoadingState message="Loading pull request…" />
           }
         >
           <LazyDroneChangesDock
@@ -606,6 +472,7 @@ export function DronePullRequestsDock({
             repoPath={repoPath}
             repoUnavailableReason={repoUnavailableReason}
             fixedContextMode="pull-request"
+            onReviewBack={closeDetailView}
             disabled={disabled}
             hubPhase={hubPhase}
             hubMessage={hubMessage}
@@ -615,32 +482,6 @@ export function DronePullRequestsDock({
         </React.Suspense>
       ) : (
         <>
-          <UiPanelStatusStrip>
-            {!repoAttached ? (
-              <span title={unavailableReason || 'No repo attached'}>
-                {unavailableReason || 'No repo attached.'}
-              </span>
-            ) : disabled ? (
-              <span title={String(hubMessage ?? '').trim() || undefined}>
-                {startup.timedOut ? 'Still provisioning... repo not ready yet.' : 'Provisioning... waiting for repo.'}
-              </span>
-            ) : listLoading && !listData ? (
-              <span>Loading pull requests...</span>
-            ) : listError ? (
-              <span className="text-[var(--red)]">Error loading pull requests.</span>
-            ) : (
-              <>
-                <span className="truncate max-w-[36ch]" title={listData?.repoRoot || repoPath || '-'}>
-                  {listData?.repoRoot || repoPath || '-'}
-                </span>
-                {listData?.github ? (
-                  <MetaChip label="github" value={`${listData.github.owner}/${listData.github.repo}`} title={`${listData.github.owner}/${listData.github.repo}`} mono />
-                ) : null}
-                <MetaChip label="open" value={pullRequests.length} />
-              </>
-            )}
-          </UiPanelStatusStrip>
-
           {actionNotice ? (
             <UiPanelStatusStrip tone="success">{actionNotice}</UiPanelStatusStrip>
           ) : null}
@@ -690,26 +531,42 @@ export function DronePullRequestsDock({
               }
             />
           ) : listLoading && !listData ? (
-            <UiPaneState kind="loading" title="Loading pull requests…" />
-          ) : pullRequests.length === 0 && !listLoading ? (
-            <UiPaneState
-              kind="empty"
-              title="No open pull requests"
-              description="New pull requests for this repository will appear here."
-            />
+            <UiCenteredLoadingState message="Loading pull requests…" />
           ) : (
             <PullRequestListView
-              pullRequests={pullRequests}
-              busyByPullNumber={busyByPullNumber}
-              anyBusy={anyBusy}
+              pullRequests={filteredPullRequests}
+              openCount={pullRequests.length}
+              selectedNumbers={selectedPullNumbers}
+              onSelectedNumbersChange={setSelectedPullNumbers}
+              query={query}
+              onQueryChange={setQuery}
               mergeMethod={mergeMethod}
+              onMergeMethodChange={setMergeMethod}
               onOpenPullRequest={openPullRequest}
-              onMergePullRequest={(pr) => {
-                void mergePullRequest(pr);
+              onMergeSelected={() => {
+                void mergeSelectedPullRequests();
               }}
-              onClosePullRequest={(pr) => {
-                void closePullRequest(pr);
+              onCloseSelected={() => {
+                void closeSelectedPullRequests();
               }}
+              onRefresh={() => setRefreshNonce((n) => n + 1)}
+              refreshLoading={listLoading}
+              mergeDisabled={
+                !repoAttached ||
+                disabled ||
+                mergeablePullRequests.length === 0 ||
+                anyBusy ||
+                Boolean(listError)
+              }
+              closeDisabled={
+                !repoAttached ||
+                disabled ||
+                selectedPullRequests.length === 0 ||
+                anyBusy ||
+                Boolean(listError)
+              }
+              mergeLoading={bulkAction?.kind === 'merge'}
+              closeLoading={bulkAction?.kind === 'close'}
             />
           )}
         </>

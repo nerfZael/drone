@@ -166,7 +166,7 @@ describe('ChangeRequestGithubMirrorService', () => {
         },
       });
 
-      const published = await service.publish('request-1');
+      const published = await service.publish('1');
       const publishedMirror = published.githubMirror!;
       expect(publishedMirror.autoUpdate).toBe(true);
       expect(publishedMirror.branchOwnedByDroneHub).toBe(true);

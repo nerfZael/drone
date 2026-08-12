@@ -1,3 +1,5 @@
+import type { ServerResponse } from 'node:http';
+
 import { ChangeRequestError } from '../change-requests/change-request-error';
 import type { ChangeRequestGithubMirrorService } from '../change-requests/change-request-github-mirror-service';
 import type { ChangeRequestService } from '../change-requests/change-request-service';
@@ -10,6 +12,8 @@ import type { HubRouteHandler, HubRouter } from '../hub-router';
 type ChangeRequestRouteDependencies = {
   service: ChangeRequestService | null;
   githubMirrorService: ChangeRequestGithubMirrorService | null;
+  writeSseEvent: (res: ServerResponse, event: string, data: unknown) => void;
+  nowIso: () => string;
 };
 
 export function registerChangeRequestRoutes(
@@ -35,6 +39,19 @@ export function registerChangeRequestRoutes(
     return deps.githubMirrorService;
   };
   const route = changeRequestRouter(apiRouter);
+  const eventClients = new Map<string, Set<ServerResponse>>();
+  const publishChange = (request: { droneId: string; number: number; status: string; updatedAt: string }) => {
+    const clients = eventClients.get(request.droneId);
+    if (!clients) return;
+    for (const response of clients) {
+      deps.writeSseEvent(response, 'change_request_changed', {
+        droneId: request.droneId,
+        requestNumber: request.number,
+        status: request.status,
+        updatedAt: request.updatedAt,
+      });
+    }
+  };
 
   route.get('/api/change-requests', async ({ url, json }) => {
     const requests = await service().list({
@@ -43,6 +60,35 @@ export function registerChangeRequestRoutes(
       status: statusFilter(url.searchParams.get('status')),
     });
     json(200, { ok: true, requests });
+  });
+
+  route.get('/api/change-requests/events', ({ req, res, url }) => {
+    const droneId = url.searchParams.get('droneId')?.trim();
+    if (!droneId) throw new ChangeRequestError('droneId is required');
+    res.statusCode = 200;
+    res.setHeader('content-type', 'text/event-stream; charset=utf-8');
+    res.setHeader('cache-control', 'no-cache, no-transform');
+    res.setHeader('connection', 'keep-alive');
+    req.socket.setTimeout(0);
+    (res as ServerResponse & { flushHeaders?: () => void }).flushHeaders?.();
+    let clients = eventClients.get(droneId);
+    if (!clients) {
+      clients = new Set();
+      eventClients.set(droneId, clients);
+    }
+    clients.add(res);
+    deps.writeSseEvent(res, 'connected', { ok: true, droneId, at: deps.nowIso() });
+    const keepAlive = setInterval(() => {
+      if (!res.destroyed && !res.writableEnded) res.write(': keepalive\n\n');
+    }, 25_000);
+    keepAlive.unref?.();
+    const cleanup = () => {
+      clearInterval(keepAlive);
+      clients?.delete(res);
+      if (clients?.size === 0) eventClients.delete(droneId);
+    };
+    req.once('close', cleanup);
+    res.once('close', cleanup);
   });
 
   route.post('/api/change-requests', async ({ readJson, json }) => {
@@ -57,101 +103,119 @@ export function registerChangeRequestRoutes(
         typeof body.destinationBranch === 'string' ? body.destinationBranch : undefined,
       actor: requestActor(body.actor),
     });
+    publishChange(request);
     json(201, { ok: true, request });
   });
 
-  route.get('/api/change-requests/by-number/:requestNumber', async ({ params, url, json }) => {
-    const request = await service().getByNumber(
-      params.requestNumber,
-      url.searchParams.get('droneId'),
-    );
+  route.get('/api/change-requests/:requestNumber', async ({ params, url, json }) => {
+    const droneId = url.searchParams.get('droneId');
+    const request = droneId
+      ? await service().getByNumber(params.requestNumber, droneId)
+      : await service().get(params.requestNumber);
     json(200, { ok: true, request });
   });
 
-  route.get('/api/change-requests/:requestId', async ({ params, json }) => {
-    json(200, { ok: true, request: await service().get(params.requestId) });
+  route.post('/api/change-requests/:requestNumber/refresh-assessment', async ({ params, json }) => {
+    const request = await service().refreshAssessment(params.requestNumber);
+    publishChange(request);
+    json(200, { ok: true, request });
   });
 
-  route.post('/api/change-requests/:requestId/refresh-assessment', async ({ params, json }) => {
-    json(200, { ok: true, request: await service().refreshAssessment(params.requestId) });
-  });
-
-  route.patch('/api/change-requests/:requestId', async ({ params, readJson, json }) => {
+  route.patch('/api/change-requests/:requestNumber', async ({ params, readJson, json }) => {
     const body = await readJson<Record<string, unknown>>();
-    const request = await service().update(params.requestId, {
+    const request = await service().update(params.requestNumber, {
       title: typeof body.title === 'string' ? body.title : undefined,
       description: typeof body.description === 'string' ? body.description : undefined,
       destinationBranch:
         typeof body.destinationBranch === 'string' ? body.destinationBranch : undefined,
       refreshSnapshot: typeof body.refreshSnapshot === 'boolean' ? body.refreshSnapshot : undefined,
     });
+    publishChange(request);
     json(200, { ok: true, request });
   });
 
-  route.post('/api/change-requests/:requestId/close', async ({ params, json }) => {
-    json(200, { ok: true, request: await service().close(params.requestId) });
+  route.post('/api/change-requests/:requestNumber/close', async ({ params, json }) => {
+    const request = await service().close(params.requestNumber);
+    publishChange(request);
+    json(200, { ok: true, request });
   });
 
-  route.post('/api/change-requests/:requestId/merge', async ({ params, readJson, json }) => {
+  route.post('/api/change-requests/:requestNumber/merge', async ({ params, readJson, json }) => {
     const body = await readJson<Record<string, unknown>>();
-    const request = await service().merge(params.requestId, {
+    const request = await service().merge(params.requestNumber, {
       actor: requestActor(body.actor),
       commitMessage: typeof body.commitMessage === 'string' ? body.commitMessage : undefined,
     });
+    publishChange(request);
     json(200, { ok: true, request });
   });
 
   route.post(
-    '/api/change-requests/:requestId/github/publish',
+    '/api/change-requests/:requestNumber/github/publish',
     async ({ params, readJson, json }) => {
       const body = await readJson<Record<string, unknown>>();
-      await githubMirrorService().publish(params.requestId, {
+      await githubMirrorService().publish(params.requestNumber, {
         merge: body.merge === true,
         mergeMethod: mergeMethod(body.mergeMethod),
       });
-      json(201, { ok: true, request: await service().get(params.requestId) });
+      const request = await service().get(params.requestNumber);
+      publishChange(request);
+      json(201, { ok: true, request });
     },
   );
 
-  route.post('/api/change-requests/:requestId/github/sync', async ({ params, json }) => {
-    await githubMirrorService().sync(params.requestId);
-    json(200, { ok: true, request: await service().get(params.requestId) });
+  route.post('/api/change-requests/:requestNumber/github/sync', async ({ params, json }) => {
+    await githubMirrorService().sync(params.requestNumber);
+    const request = await service().get(params.requestNumber);
+    publishChange(request);
+    json(200, { ok: true, request });
   });
 
-  route.post('/api/change-requests/:requestId/github/refresh', async ({ params, json }) => {
-    await githubMirrorService().refresh(params.requestId);
-    json(200, { ok: true, request: await service().get(params.requestId) });
+  route.post('/api/change-requests/:requestNumber/github/refresh', async ({ params, json }) => {
+    await githubMirrorService().refresh(params.requestNumber);
+    const request = await service().get(params.requestNumber);
+    publishChange(request);
+    json(200, { ok: true, request });
   });
 
-  route.patch('/api/change-requests/:requestId/github', async ({ params, readJson, json }) => {
+  route.patch('/api/change-requests/:requestNumber/github', async ({ params, readJson, json }) => {
     const body = await readJson<Record<string, unknown>>();
     if (typeof body.autoUpdate !== 'boolean') {
       throw new ChangeRequestError('autoUpdate must be a boolean');
     }
-    await githubMirrorService().setAutoUpdate(params.requestId, body.autoUpdate);
-    json(200, { ok: true, request: await service().get(params.requestId) });
+    await githubMirrorService().setAutoUpdate(params.requestNumber, body.autoUpdate);
+    const request = await service().get(params.requestNumber);
+    publishChange(request);
+    json(200, { ok: true, request });
   });
 
-  route.post('/api/change-requests/:requestId/github/merge', async ({ params, readJson, json }) => {
-    const body = await readJson<Record<string, unknown>>();
-    await githubMirrorService().merge(params.requestId, mergeMethod(body.method));
-    json(200, { ok: true, request: await service().get(params.requestId) });
+  route.post(
+    '/api/change-requests/:requestNumber/github/merge',
+    async ({ params, readJson, json }) => {
+      const body = await readJson<Record<string, unknown>>();
+      await githubMirrorService().merge(params.requestNumber, mergeMethod(body.method));
+      const request = await service().get(params.requestNumber);
+      publishChange(request);
+      json(200, { ok: true, request });
+    },
+  );
+
+  route.post('/api/change-requests/:requestNumber/github/close', async ({ params, json }) => {
+    await githubMirrorService().close(params.requestNumber);
+    const request = await service().get(params.requestNumber);
+    publishChange(request);
+    json(200, { ok: true, request });
   });
 
-  route.post('/api/change-requests/:requestId/github/close', async ({ params, json }) => {
-    await githubMirrorService().close(params.requestId);
-    json(200, { ok: true, request: await service().get(params.requestId) });
-  });
-
-  route.get('/api/change-requests/:requestId/changes', async ({ params, json }) => {
-    const changes = await service().changes(params.requestId);
+  route.get('/api/change-requests/:requestNumber/changes', async ({ params, json }) => {
+    const changes = await service().changes(params.requestNumber);
     const request = changes.request;
     json(200, {
       ok: true,
       id: request.droneId,
       name: request.droneName,
       repoRoot: request.repoRoot,
-      reviewScopeId: `change-request:${request.id}:${request.revision}`,
+      reviewScopeId: `change-request:${request.number}:${request.revision}`,
       baseSha: request.baseSha,
       headSha: request.snapshotSha,
       counts: changes.counts,
@@ -167,9 +231,9 @@ export function registerChangeRequestRoutes(
     });
   });
 
-  route.get('/api/change-requests/:requestId/diff', async ({ params, url, json }) => {
+  route.get('/api/change-requests/:requestNumber/diff', async ({ params, url, json }) => {
     const result = await service().diff(
-      params.requestId,
+      params.requestNumber,
       url.searchParams.get('path') ?? '',
       Number(url.searchParams.get('contextLines')),
     );

@@ -48,7 +48,7 @@ export const ASSISTANT_SYSTEM_PROMPT_DEFAULT = [
   'Use set_thinking_level when the user asks to change how much the agent thinks. It changes this chat to another supported thinking level for the same selected model and does not require approval.',
   'Use create_group for empty repository-scoped groups, set_drone_group for moving drones to one group, reorder_drones for sidebar order, open_drone_chat for UI navigation, highlight_drones to visually point out drones for about 10 seconds, and open_whiteboard/close_whiteboard for whiteboard panel navigation. Prefer immutable groupId values from list_groups when names are duplicated across repositories.',
   'Use whiteboard tools for simple diagrams, rectangles, arrows, and labels. Prefer structured shapes over raw scene JSON. Use capture_whiteboard when you need to inspect or share the full visible board as an image.',
-  'Use create_change_request after committed work is ready for review. Native change requests stay in DroneHub and do not create GitHub pull requests. Update or close only this chat\'s requests, and merge one only when the user explicitly asks and this chat has merge permission.',
+  "Use create_change_request after committed work is ready for review. Native change requests stay in DroneHub and do not create GitHub pull requests. Pass the returned integer number as requestNumber for later actions. Update or close only this chat's requests, and merge one only when the user explicitly asks and this chat has merge permission.",
   'File paths are interpreted by drone id plus path. Relative paths resolve inside the target drone workspace, usually the repo root for repo-backed drones.',
   'Chat timelines contain user messages and agent messages. Queued or pending user messages appear in the same timeline with a non-completed status.',
   ASSISTANT_CHAT_IDLE_PROMPT_LINE,
@@ -150,8 +150,7 @@ const ASSISTANT_TOOL_SUMMARY_DEFINITIONS: AssistantToolSummary[] = [
     name: 'set_thinking_level',
     label: 'Set thinking level',
     category: 'actions',
-    description:
-      'Change this chat to a supported thinking level for its current model.',
+    description: 'Change this chat to a supported thinking level for its current model.',
   },
   {
     name: 'list_targets',

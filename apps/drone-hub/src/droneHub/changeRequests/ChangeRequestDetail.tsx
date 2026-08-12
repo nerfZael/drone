@@ -2,81 +2,102 @@ import React from 'react';
 import type { ChangeRequestChanges, ChangeRequestView } from '@drone/hub-model/change-requests';
 
 import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
-import { cn } from '../../ui/cn';
-import { DiffBlock } from '../changes/DiffBlock';
-import type { DiffState } from '../changes/types';
 import {
-  readPullRequestMergeMethod,
-  writePullRequestMergeMethod,
-} from '../pullRequests/pull-request-preferences';
+  UiPanelStatusStrip,
+  UiToolbarButton,
+  UiToolbarIconButton,
+} from '../../ui/components';
+import type { RepoBranchesPayload, RepoPullRequestChangesPayload } from '../types';
+import { DroneChangesDock, ExternalLinkIcon, type DroneChangesReviewOverride } from '../changes/DroneChangesDock';
+import { requestJson } from '../http';
 import { ChangeRequestGithubMirrorPanel } from './ChangeRequestGithubMirrorPanel';
 import {
   closeChangeRequest,
   loadChangeRequestChanges,
   loadChangeRequestDiff,
   mergeChangeRequest,
-  refreshChangeRequestAssessment,
   updateChangeRequest,
 } from './change-request-api';
 import {
+  readPullRequestMergeMethod,
+  writePullRequestMergeMethod,
+} from '../pullRequests/pull-request-preferences';
+import {
   changeRequestStatusClasses,
   changeRequestStatusLabel,
-  shortChangeRequestSha,
 } from './change-request-presentation';
 
 type ChangesPayload = Pick<ChangeRequestChanges, 'counts' | 'entries'> & { ok: true };
+type ReviewPayload = Extract<RepoPullRequestChangesPayload, { ok: true }>;
+
 export function ChangeRequestDetail({
   request,
+  droneId,
+  repoAttached,
+  repoPath,
   disabled,
   onBack,
   onChange,
+  onRevealFileInFiles,
+  onOpenFileInEditor,
 }: {
   request: ChangeRequestView;
+  droneId: string;
+  repoAttached: boolean;
+  repoPath: string;
   disabled: boolean;
   onBack: () => void;
   onChange: (request: ChangeRequestView) => void;
+  onRevealFileInFiles: (repoRelativePath: string) => void;
+  onOpenFileInEditor: (repoRelativePath: string) => void;
 }) {
   const confirm = useAppConfirmDialog();
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
+  const [editing, setEditing] = React.useState(false);
+  const [showMirror, setShowMirror] = React.useState(false);
   const [draftTitle, setDraftTitle] = React.useState(request.title);
   const [draftDescription, setDraftDescription] = React.useState(request.description);
   const [draftDestination, setDraftDestination] = React.useState(request.destinationBranch);
-  const [mergeCommitMessage, setMergeCommitMessage] = React.useState('');
-  const [assessmentLoading, setAssessmentLoading] = React.useState(false);
-  const [githubMergeMethod, setGithubMergeMethod] = React.useState(() =>
-    readPullRequestMergeMethod(),
-  );
+  const [githubMergeMethod, setGithubMergeMethod] = React.useState(readPullRequestMergeMethod);
   const [changes, setChanges] = React.useState<ChangesPayload | null>(null);
   const [changesLoading, setChangesLoading] = React.useState(false);
-  const [selectedPath, setSelectedPath] = React.useState<string | null>(null);
-  const [diff, setDiff] = React.useState('');
-  const [diffLoading, setDiffLoading] = React.useState(false);
-  const [diffError, setDiffError] = React.useState<string | null>(null);
-  const [diffTruncated, setDiffTruncated] = React.useState(false);
+  const [changesError, setChangesError] = React.useState<string | null>(null);
+  const [branchOptions, setBranchOptions] = React.useState<string[]>([]);
+  const [branchesLoading, setBranchesLoading] = React.useState(false);
 
   React.useEffect(() => {
+    setEditing(false);
+    setShowMirror(false);
     setError(null);
-    setSelectedPath(null);
-    setDiff('');
-    setDiffError(null);
-    setDiffTruncated(false);
     setDraftTitle(request.title);
     setDraftDescription(request.description);
     setDraftDestination(request.destinationBranch);
-    setMergeCommitMessage('');
+  }, [request.number]);
+
+  React.useEffect(() => {
+    if (editing) return;
+    setDraftTitle(request.title);
+    setDraftDescription(request.description);
+    setDraftDestination(request.destinationBranch);
+  }, [editing, request.description, request.destinationBranch, request.title]);
+
+  React.useEffect(() => {
     if (request.status !== 'open') {
       setChanges(null);
+      setChangesLoading(false);
+      setChangesError(null);
       return;
     }
     let cancelled = false;
     setChangesLoading(true);
-    loadChangeRequestChanges(request.id)
+    setChangesError(null);
+    loadChangeRequestChanges(request.number)
       .then((data) => {
         if (!cancelled) setChanges(data);
       })
       .catch((cause: unknown) => {
-        if (!cancelled) setError(errorMessage(cause));
+        if (!cancelled) setChangesError(errorMessage(cause));
       })
       .finally(() => {
         if (!cancelled) setChangesLoading(false);
@@ -84,35 +105,37 @@ export function ChangeRequestDetail({
     return () => {
       cancelled = true;
     };
-  }, [request.id, request.revision, request.status]);
+  }, [request.number, request.revision, request.status]);
 
   React.useEffect(() => {
-    if (request.status !== 'open') {
-      setAssessmentLoading(false);
-      return;
-    }
+    const targetRepo = String(request.repoRoot || repoPath).trim();
+    if (!targetRepo || !editing) return;
     let cancelled = false;
-    setAssessmentLoading(true);
-    refreshChangeRequestAssessment(request.id)
-      .then((updated) => {
-        if (!cancelled) onChange(updated);
+    setBranchesLoading(true);
+    requestJson<RepoBranchesPayload>(`/api/repos/branches?repoPath=${encodeURIComponent(targetRepo)}`)
+      .then((payload) => {
+        if (cancelled || !payload.ok) return;
+        const branches = [
+          payload.hostBranch,
+          ...payload.remoteBranches.map((entry) => entry.branch),
+        ]
+          .map((value) => String(value ?? '').trim())
+          .filter(Boolean);
+        setBranchOptions(Array.from(new Set(branches)).sort((a, b) => a.localeCompare(b)));
       })
-      .catch((cause: unknown) => {
-        if (!cancelled) setError(errorMessage(cause));
+      .catch(() => {
+        if (!cancelled) setBranchOptions([]);
       })
       .finally(() => {
-        if (!cancelled) setAssessmentLoading(false);
+        if (!cancelled) setBranchesLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [onChange, request.id, request.revision, request.status]);
+  }, [editing, repoPath, request.repoRoot]);
 
   const mutate = React.useCallback(
-    async (
-      action: string,
-      operation: () => Promise<ChangeRequestView>,
-    ): Promise<ChangeRequestView | null> => {
+    async (action: string, operation: () => Promise<ChangeRequestView>) => {
       setBusy(action);
       setError(null);
       try {
@@ -129,298 +152,387 @@ export function ChangeRequestDetail({
     [onChange],
   );
 
-  const loadDiff = React.useCallback(
-    async (filePath: string) => {
-      setSelectedPath(filePath);
-      setDiffLoading(true);
-      setDiffError(null);
-      setDiffTruncated(false);
-      setError(null);
-      try {
-        const data = await loadChangeRequestDiff(request.id, filePath);
-        setDiff(data.diff);
-        setDiffTruncated(data.truncated);
-      } catch (cause: unknown) {
-        const message = errorMessage(cause);
-        setError(message);
-        setDiffError(message);
-        setDiff('');
-      } finally {
-        setDiffLoading(false);
-      }
-    },
-    [request.id],
+  const isOpen = request.status === 'open';
+  const actionDisabled = disabled || busy !== null;
+
+  const saveDetails = React.useCallback(async () => {
+    if (!draftTitle.trim() || !draftDestination.trim()) return;
+    const updated = await mutate('save', () =>
+      updateChangeRequest(request.number, {
+        title: draftTitle.trim(),
+        description: draftDescription,
+        destinationBranch: draftDestination.trim(),
+        refreshSnapshot: false,
+      }),
+    );
+    if (updated) setEditing(false);
+  }, [draftDescription, draftDestination, draftTitle, mutate, request.number]);
+
+  const reviewPayload = React.useMemo<ReviewPayload | null>(() => {
+    if (!changes && request.status === 'open') return null;
+    const fallbackStats = request.lineStats;
+    return {
+      ok: true,
+      id: droneId,
+      name: request.droneName,
+      repoRoot: request.repoRoot,
+      reviewScopeId: `change-request:${request.number}`,
+      github: request.githubMirror
+        ? { owner: request.githubMirror.owner, repo: request.githubMirror.repo }
+        : { owner: '', repo: '' },
+      pullRequest: {
+        number: request.number,
+        title: request.title,
+        state: request.status,
+        htmlUrl: request.githubMirror?.htmlUrl ?? null,
+        baseRefName: request.destinationBranch,
+        headRefName: request.baseBranch,
+        baseSha: request.destinationSha ?? request.baseSha,
+        headSha: request.snapshotSha ?? request.sourceHeadSha,
+      },
+      counts: {
+        changed: changes?.counts.changed ?? fallbackStats?.files ?? 0,
+        additions:
+          changes?.counts.additions ??
+          (fallbackStats ? fallbackStats.additions + fallbackStats.modifications : 0),
+        deletions:
+          changes?.counts.deletions ??
+          (fallbackStats ? fallbackStats.deletions + fallbackStats.modifications : 0),
+      },
+      entries: (changes?.entries ?? []).map((entry) => ({
+        ...entry,
+        patch: null,
+        truncated: false,
+        isBinary: false,
+        reviewKey: `${entry.originalPath ?? ''}\u0000${entry.path}`,
+        reviewToken: `${request.snapshotSha ?? request.sourceHeadSha}\u0000${entry.path}`,
+      })),
+    };
+  }, [changes, droneId, request]);
+
+  const reviewLineCounts = React.useMemo(() => {
+    if (changes) return changes.counts;
+    if (!request.lineStats) return null;
+    return {
+      changed: request.lineStats.files,
+      additions: request.lineStats.additions + request.lineStats.modifications,
+      deletions: request.lineStats.deletions + request.lineStats.modifications,
+      modified: request.lineStats.modifications,
+    };
+  }, [changes, request.lineStats]);
+
+  const loadReviewDiff = React.useCallback(
+    (path: string) => loadChangeRequestDiff(request.number, path),
+    [request.number],
   );
 
-  const diffState: DiffState | undefined = diffLoading
-    ? { status: 'loading' }
-    : diffError
-      ? { status: 'error', error: diffError }
-      : selectedPath
-        ? {
-            status: 'loaded',
-            text: diff,
-            truncated: diffTruncated,
-            fromUntracked: false,
-            isBinary: false,
-            noTextReason: diff ? null : 'empty',
-            contextLines: 5,
-          }
-        : undefined;
-  const isOpen = request.status === 'open';
-  const actionDisabled = disabled || busy !== null || assessmentLoading;
+  const merge = React.useCallback(async () => {
+    if (
+      !(await confirm({
+        title: 'Merge change request?',
+        message: `Squash-merge this change request into ${request.destinationBranch}?`,
+        confirmLabel: 'Merge',
+      }))
+    ) return;
+    void mutate('merge', () => mergeChangeRequest(request.number));
+  }, [confirm, mutate, request.destinationBranch, request.number]);
 
-  return (
-    <div className="flex h-full min-h-0 flex-col bg-[var(--panel-alt)]">
-      <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-2.5">
+  const close = React.useCallback(async () => {
+    if (
+      !(await confirm({
+        title: 'Close change request?',
+        message: 'Close this change request without merging it?',
+        confirmLabel: 'Close request',
+        destructive: true,
+      }))
+    ) return;
+    void mutate('close', () => closeChangeRequest(request.number));
+  }, [confirm, mutate, request.number]);
+
+  const header = (
+    <div className="border-b border-[var(--border-subtle)]">
+      <div className="flex min-h-9 items-center gap-2 px-2 py-1">
+        <UiToolbarIconButton
+          size="xsmall"
+          label="Back to change requests"
+          title="Back to change requests"
+          icon={<BackIcon />}
+          onClick={onBack}
+        />
         <button
           type="button"
-          onClick={onBack}
-          className="rounded px-2 py-1 text-[var(--text-11)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg)]"
+          disabled={!isOpen || actionDisabled}
+          onClick={() => setEditing(true)}
+          className="group min-w-0 flex-1 text-left disabled:cursor-default"
+          title={isOpen ? 'Edit change request' : request.title}
         >
-          ← Requests
+          <span className="block truncate text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-secondary)] group-enabled:group-hover:text-[var(--accent)]">
+            {request.title || 'Untitled change request'}
+          </span>
+          <span className="flex min-w-0 items-center gap-1.5 text-[var(--text-9)] text-[var(--muted-dim)]">
+            <span className="font-mono text-[var(--accent)]">#{request.number}</span>
+            <span className="truncate font-mono">{request.baseBranch} → {request.destinationBranch}</span>
+          </span>
         </button>
-        <div className="min-w-0 flex-1 truncate text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--fg)]">
-          CR #{request.number}: {request.title}
+        <div className="flex shrink-0 items-center gap-0.5">
+          {isOpen ? (
+            <>
+              <UiToolbarButton size="xsmall" onClick={() => setEditing((value) => !value)} disabled={actionDisabled}>
+                {editing ? 'Cancel' : 'Edit'}
+              </UiToolbarButton>
+              <UiToolbarButton size="xsmall" tone="success" loading={busy === 'merge'} disabled={actionDisabled || request.conflicted} onClick={() => void merge()}>
+                Merge
+              </UiToolbarButton>
+              <UiToolbarButton size="xsmall" tone="danger" loading={busy === 'close'} disabled={actionDisabled} onClick={() => void close()}>
+                Close
+              </UiToolbarButton>
+            </>
+          ) : null}
+          <span className={`inline-flex h-5 items-center rounded-full border px-1.5 text-[var(--text-9)] font-[var(--weight-semibold)] ${changeRequestStatusClasses(request)}`}>
+            {changeRequestStatusLabel(request)}
+          </span>
+          <UiToolbarIconButton
+            size="xsmall"
+            label="GitHub mirror options"
+            title="GitHub mirror options"
+            icon={<GithubIcon />}
+            pressed={showMirror}
+            onClick={() => setShowMirror((value) => !value)}
+          />
+          {request.githubMirror?.htmlUrl ? (
+            <a
+              href={request.githubMirror.htmlUrl}
+              target="_blank"
+              rel="noreferrer"
+              title="Open externally"
+              aria-label="Open change request externally"
+              className="inline-flex h-6 w-6 items-center justify-center rounded-[var(--radius-medium)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+            >
+              <ExternalLinkIcon />
+            </a>
+          ) : null}
         </div>
-        <span
-          className={cn(
-            'rounded-full border px-2 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase',
-            changeRequestStatusClasses(request),
-          )}
-        >
-          {changeRequestStatusLabel(request)}
-        </span>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto p-3">
-        {error ? (
-          <div className="mb-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-11)] text-[var(--red)]">
-            {error}
-          </div>
-        ) : null}
-        <div className="rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3">
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="text-[var(--text-10)] text-[var(--muted)]">
-              Title
-              <input
-                value={draftTitle}
-                disabled={!isOpen || actionDisabled}
-                onChange={(event) => setDraftTitle(event.target.value)}
-                className="mt-1 h-9 w-full rounded border border-[var(--border)] bg-[var(--surface-inset-faint)] px-2 text-[var(--text-12)] text-[var(--fg)]"
-              />
-            </label>
-            <label className="text-[var(--text-10)] text-[var(--muted)]">
-              Destination branch
-              <input
-                value={draftDestination}
-                disabled={!isOpen || actionDisabled}
-                onChange={(event) => setDraftDestination(event.target.value)}
-                className="mt-1 h-9 w-full rounded border border-[var(--border)] bg-[var(--surface-inset-faint)] px-2 font-mono text-[var(--text-11)] text-[var(--fg)]"
-              />
-            </label>
-          </div>
-          <label className="mt-3 block text-[var(--text-10)] text-[var(--muted)]">
+
+      {!editing && request.description ? (
+        <button
+          type="button"
+          disabled={!isOpen || actionDisabled}
+          onClick={() => setEditing(true)}
+          className="block w-full truncate px-10 pb-1.5 text-left text-[var(--text-10)] text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:cursor-default"
+          title={request.description}
+        >
+          {request.description}
+        </button>
+      ) : null}
+
+      {editing ? (
+        <div className="grid gap-2 border-t border-[var(--border-subtle)] px-2 py-2 md:grid-cols-2">
+          <label className="min-w-0 text-[var(--text-9)] text-[var(--muted-dim)]">
+            Title
+            <input
+              autoFocus
+              value={draftTitle}
+              onChange={(event) => setDraftTitle(event.target.value)}
+              className="mt-1 h-8 w-full rounded-[var(--radius-medium)] border border-[var(--field-border)] bg-[var(--field-bg)] px-2.5 text-[var(--text-11)] text-[var(--field-fg)] focus:border-[var(--accent-muted)] focus:outline-none"
+            />
+          </label>
+          <DestinationBranchPicker
+            value={draftDestination}
+            options={branchOptions}
+            loading={branchesLoading}
+            onChange={setDraftDestination}
+          />
+          <label className="min-w-0 text-[var(--text-9)] text-[var(--muted-dim)] md:col-span-2">
             Description
             <textarea
               value={draftDescription}
-              disabled={!isOpen || actionDisabled}
               onChange={(event) => setDraftDescription(event.target.value)}
-              rows={3}
-              className="mt-1 w-full resize-y rounded border border-[var(--border)] bg-[var(--surface-inset-faint)] p-2 text-[var(--text-11)] text-[var(--fg)]"
+              rows={2}
+              className="mt-1 w-full resize-y rounded-[var(--radius-medium)] border border-[var(--field-border)] bg-[var(--field-bg)] px-2.5 py-2 text-[var(--text-11)] text-[var(--field-fg)] focus:border-[var(--accent-muted)] focus:outline-none"
             />
           </label>
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-[var(--text-10)] text-[var(--muted-dim)]">
-            <span>
-              {request.baseBranch} → {request.destinationBranch}
-            </span>
-            <span>·</span>
-            <span>revision {request.revision}</span>
-            <span>·</span>
-            <span>
-              {shortChangeRequestSha(request.baseSha)} →{' '}
-              {shortChangeRequestSha(request.snapshotSha || request.mergeCommitSha)}
-            </span>
-            {!request.destinationExists && isOpen ? (
-              <span className="text-[var(--accent)]">new branch</span>
-            ) : null}
+          <div className="flex justify-end gap-1 md:col-span-2">
+            <UiToolbarButton size="xsmall" onClick={() => setEditing(false)}>Cancel</UiToolbarButton>
+            <UiToolbarButton size="xsmall" tone="accent" active loading={busy === 'save'} disabled={actionDisabled || !draftTitle.trim() || !draftDestination.trim()} onClick={() => void saveDetails()}>
+              Save
+            </UiToolbarButton>
           </div>
-          {request.conflicted ? (
-            <div className="mt-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-11)] text-[var(--red)]">
-              This request conflicts with its destination
-              {request.conflictFiles.length ? `: ${request.conflictFiles.join(', ')}` : '.'}
-            </div>
+        </div>
+      ) : null}
+
+      {request.conflicted ? (
+        <UiPanelStatusStrip tone="danger">
+          This request conflicts with {request.destinationBranch}{request.conflictFiles.length ? `: ${request.conflictFiles.join(', ')}` : '.'}
+        </UiPanelStatusStrip>
+      ) : null}
+      {request.lastError ? <UiPanelStatusStrip tone="danger">{request.lastError}</UiPanelStatusStrip> : null}
+      {error ? <UiPanelStatusStrip tone="danger">{error}</UiPanelStatusStrip> : null}
+      {showMirror ? (
+        <div className="border-t border-[var(--border-subtle)] px-2 pb-2">
+          <ChangeRequestGithubMirrorPanel
+            requestNumber={request.number}
+            nativeStatus={request.status}
+            mirror={request.githubMirror}
+            disabled={actionDisabled}
+            busy={busy}
+            mergeMethod={githubMergeMethod}
+            onMergeMethodChange={(method) => {
+              setGithubMergeMethod(method);
+              writePullRequestMergeMethod(method);
+            }}
+            mutate={mutate}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+
+  const reviewOverride = React.useMemo<DroneChangesReviewOverride>(
+    () => ({
+      kind: 'change-request',
+      number: request.number,
+      revisionKey: `${request.revision}:${request.snapshotSha ?? request.sourceHeadSha}`,
+      payload: reviewPayload,
+      lineCounts: reviewLineCounts,
+      loading: changesLoading,
+      error: changesError,
+      header,
+      loadingLabel: 'Loading change request…',
+      loadDiff: loadReviewDiff,
+    }),
+    [changesError, changesLoading, header, loadReviewDiff, request.number, request.revision, request.snapshotSha, request.sourceHeadSha, reviewLineCounts, reviewPayload],
+  );
+
+  return (
+    <DroneChangesDock
+      droneId={droneId}
+      repoAttached={repoAttached}
+      repoPath={repoPath}
+      fixedContextMode="pull-request"
+      reviewOverride={reviewOverride}
+      disabled={disabled}
+      onRevealFileInFiles={onRevealFileInFiles}
+      onOpenFileInEditor={onOpenFileInEditor}
+    />
+  );
+}
+
+function DestinationBranchPicker({
+  value,
+  options,
+  loading,
+  onChange,
+}: {
+  value: string;
+  options: string[];
+  loading: boolean;
+  onChange: (value: string) => void;
+}) {
+  const listId = React.useId();
+  const rootRef = React.useRef<HTMLDivElement | null>(null);
+  const [open, setOpen] = React.useState(false);
+  const normalized = value.trim();
+  const exists = options.some((option) => option === normalized);
+  const visibleOptions = React.useMemo(() => {
+    const query = normalized.toLowerCase();
+    return options
+      .filter((option) => !query || option.toLowerCase().includes(query))
+      .slice(0, 10);
+  }, [normalized, options]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const dismiss = (event: PointerEvent) => {
+      if (rootRef.current?.contains(event.target as Node)) return;
+      setOpen(false);
+    };
+    document.addEventListener('pointerdown', dismiss);
+    return () => document.removeEventListener('pointerdown', dismiss);
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="relative min-w-0 text-[var(--text-9)] text-[var(--muted-dim)]">
+      <span>Destination branch</span>
+      <input
+        aria-label="Destination branch"
+        value={value}
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={open}
+        aria-controls={open ? listId : undefined}
+        onFocus={() => setOpen(true)}
+        onChange={(event) => {
+          onChange(event.target.value);
+          setOpen(true);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') setOpen(false);
+        }}
+        placeholder={loading ? 'Loading branches…' : 'Search or create a branch'}
+        className="mt-1 h-8 w-full rounded-[var(--radius-medium)] border border-[var(--field-border)] bg-[var(--field-bg)] px-2.5 font-mono text-[var(--text-10)] text-[var(--field-fg)] focus:border-[var(--accent-muted)] focus:outline-none"
+      />
+      {open ? (
+        <div
+          id={listId}
+          role="listbox"
+          className="absolute left-0 right-0 z-50 mt-1 max-h-56 overflow-auto rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--panel-raised)] p-1 shadow-lg"
+        >
+          {visibleOptions.map((option) => (
+            <button
+              key={option}
+              type="button"
+              role="option"
+              aria-selected={option === normalized}
+              onClick={() => {
+                onChange(option);
+                setOpen(false);
+              }}
+              className="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left font-mono text-[var(--text-10)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+            >
+              <span className="truncate">{option}</span>
+              {option === normalized ? <span className="text-[var(--accent)]">Selected</span> : null}
+            </button>
+          ))}
+          {normalized && !exists ? (
+            <button
+              type="button"
+              role="option"
+              aria-selected="false"
+              onClick={() => setOpen(false)}
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[var(--text-10)] text-[var(--accent)] hover:bg-[var(--accent-subtle)]"
+            >
+              <span className="text-[var(--text-13)]">+</span>
+              <span className="min-w-0 truncate">Create <span className="font-mono">{normalized}</span></span>
+            </button>
           ) : null}
-          {request.lastError ? (
-            <div className="mt-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-11)] text-[var(--red)]">
-              {request.lastError}
-            </div>
-          ) : null}
-          {isOpen ? (
-            <>
-              <label className="mt-3 block text-[var(--text-10)] text-[var(--muted)]">
-                Squash commit message
-                <input
-                  value={mergeCommitMessage}
-                  disabled={actionDisabled}
-                  onChange={(event) => setMergeCommitMessage(event.target.value)}
-                  placeholder={request.title}
-                  className="mt-1 h-9 w-full rounded border border-[var(--border)] bg-[var(--surface-inset-faint)] px-2 text-[var(--text-11)] text-[var(--fg)]"
-                />
-                <span className="mt-1 block text-[var(--text-9)] text-[var(--muted-dim)]">
-                  Optional. The request title is used when this is empty.
-                </span>
-              </label>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  disabled={actionDisabled || !draftTitle.trim() || !draftDestination.trim()}
-                  onClick={() =>
-                    void mutate('save', () =>
-                      updateChangeRequest(request.id, {
-                        title: draftTitle,
-                        description: draftDescription,
-                        destinationBranch: draftDestination,
-                        refreshSnapshot: false,
-                      }),
-                    )
-                  }
-                  className="rounded border border-[var(--border)] px-3 py-1.5 text-[var(--text-11)] text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40"
-                >
-                  Save details
-                </button>
-                <button
-                  type="button"
-                  disabled={actionDisabled}
-                  onClick={() =>
-                    void mutate('refresh', () =>
-                      updateChangeRequest(request.id, { refreshSnapshot: true }),
-                    )
-                  }
-                  className="rounded border border-[var(--border)] px-3 py-1.5 text-[var(--text-11)] text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40"
-                >
-                  Refresh snapshot
-                </button>
-                <button
-                  type="button"
-                  disabled={actionDisabled || request.conflicted}
-                  onClick={async () => {
-                    if (
-                      await confirm({
-                        title: 'Merge change request?',
-                        message: `Squash-merge this change request into ${request.destinationBranch}?`,
-                        confirmLabel: 'Merge directly',
-                      })
-                    ) {
-                      void mutate('merge', () =>
-                        mergeChangeRequest(request.id, mergeCommitMessage.trim() || undefined),
-                      );
-                    }
-                  }}
-                  className="rounded border border-[var(--accent)] bg-[var(--accent)] px-3 py-1.5 text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--accent-fg)] disabled:opacity-40"
-                >
-                  {busy === 'merge' ? 'Merging…' : 'Merge directly'}
-                </button>
-                <button
-                  type="button"
-                  disabled={actionDisabled}
-                  onClick={async () => {
-                    if (
-                      await confirm({
-                        title: 'Close change request?',
-                        message: 'Close this change request without merging it?',
-                        confirmLabel: 'Close request',
-                        destructive: true,
-                      })
-                    ) {
-                      void mutate('close', () => closeChangeRequest(request.id));
-                    }
-                  }}
-                  className="rounded border border-[var(--red-border)] px-3 py-1.5 text-[var(--text-11)] text-[var(--red)] disabled:opacity-40"
-                >
-                  Close
-                </button>
-              </div>
-              {assessmentLoading ? (
-                <div className="mt-2 text-[var(--text-10)] text-[var(--muted-dim)]">
-                  Refreshing destination status…
-                </div>
-              ) : null}
-            </>
+          {!loading && visibleOptions.length === 0 && (!normalized || exists) ? (
+            <div className="px-2 py-2 text-[var(--text-10)] text-[var(--muted)]">No branches found.</div>
           ) : null}
         </div>
-
-        <ChangeRequestGithubMirrorPanel
-          requestId={request.id}
-          nativeStatus={request.status}
-          mirror={request.githubMirror}
-          disabled={actionDisabled}
-          busy={busy}
-          mergeMethod={githubMergeMethod}
-          onMergeMethodChange={(method) => {
-            setGithubMergeMethod(method);
-            writePullRequestMergeMethod(method);
-          }}
-          mutate={mutate}
-        />
-
-        {isOpen ? (
-          <div className="mt-3 grid min-h-72 gap-3 lg:grid-cols-[minmax(14rem,0.38fr)_minmax(0,1fr)]">
-            <div className="overflow-hidden rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--surface-softest)]">
-              <div className="border-b border-[var(--border-subtle)] px-3 py-2 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase text-[var(--muted-dim)]">
-                {changesLoading
-                  ? 'Loading changes…'
-                  : `${changes?.counts.changed ?? 0} files · +${changes?.counts.additions ?? 0} −${changes?.counts.deletions ?? 0}`}
-              </div>
-              <div className="max-h-[32rem] overflow-auto">
-                {changes?.entries.map((entry) => (
-                  <button
-                    key={entry.path}
-                    type="button"
-                    onClick={() => void loadDiff(entry.path)}
-                    className={cn(
-                      'flex w-full items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-2 text-left text-[var(--text-11)] hover:bg-[var(--hover)]',
-                      selectedPath === entry.path && 'bg-[var(--accent-subtle)]',
-                    )}
-                  >
-                    <span className="w-4 flex-shrink-0 font-mono text-[var(--accent)]">
-                      {entry.statusChar}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate font-mono text-[var(--fg-secondary)]">
-                      {entry.path}
-                    </span>
-                    <span className="flex-shrink-0 text-[var(--green)]">+{entry.additions}</span>
-                    <span className="flex-shrink-0 text-[var(--red)]">−{entry.deletions}</span>
-                  </button>
-                ))}
-                {!changesLoading && changes?.entries.length === 0 ? (
-                  <div className="p-4 text-center text-[var(--text-11)] text-[var(--muted)]">
-                    No changed files.
-                  </div>
-                ) : null}
-              </div>
-            </div>
-            <div className="min-w-0 overflow-hidden rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--surface-softest)]">
-              <div className="truncate border-b border-[var(--border-subtle)] px-3 py-2 font-mono text-[var(--text-10)] text-[var(--muted)]">
-                {selectedPath || 'Select a file to review'}
-              </div>
-              {selectedPath ? (
-                <div className="max-h-[32rem] overflow-auto">
-                  <DiffBlock state={diffState} filePath={selectedPath} viewType="unified" />
-                </div>
-              ) : (
-                <div className="p-6 text-center text-[var(--text-11)] text-[var(--muted)]">
-                  Choose a changed file to see its patch.
-                </div>
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className="mt-3 rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--surface-inset-faint)] p-4 text-[var(--text-11)] text-[var(--muted)]">
-            The snapshot was cleaned up when this request was {request.status}.
-          </div>
-        )}
-      </div>
+      ) : null}
+      {normalized ? (
+        <span className="mt-1 block text-[var(--text-9)] text-[var(--muted-dim)]">
+          {exists ? 'Existing branch' : 'A new branch will be created when merged'}
+        </span>
+      ) : null}
     </div>
+  );
+}
+
+function BackIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5" aria-hidden="true">
+      <path d="m9.5 3-5 5 5 5M5 8h7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function GithubIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5" aria-hidden="true">
+      <path d="M8 1.3a6.7 6.7 0 0 0-2.12 13.06c.34.06.46-.15.46-.33v-1.3c-1.88.41-2.28-.8-2.28-.8-.3-.78-.75-.99-.75-.99-.62-.42.04-.41.04-.41.68.05 1.04.7 1.04.7.61 1.04 1.6.74 1.99.57.06-.44.24-.74.43-.91-1.5-.17-3.08-.75-3.08-3.35 0-.74.26-1.34.7-1.81-.07-.17-.3-.86.07-1.79 0 0 .57-.18 1.84.69A6.4 6.4 0 0 1 8 4.42c.57 0 1.13.08 1.66.23 1.28-.87 1.84-.69 1.84-.69.37.93.14 1.62.07 1.79.44.47.7 1.07.7 1.81 0 2.61-1.59 3.18-3.1 3.35.25.21.46.63.46 1.27v1.85c0 .18.12.4.47.33A6.7 6.7 0 0 0 8 1.3Z" />
+    </svg>
   );
 }
 

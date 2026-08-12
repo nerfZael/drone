@@ -7,6 +7,7 @@ export type {
   ChangeRequestGithubMirrorRecord,
   ChangeRequestGithubMirrorState,
   ChangeRequestGithubMirrorView,
+  ChangeRequestLineStats,
   ChangeRequestRecord,
   ChangeRequestStatus,
   ChangeRequestUpdateInput,

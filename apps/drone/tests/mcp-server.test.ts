@@ -5,6 +5,7 @@ import { createInProcessDroneHubMcpClient } from '../src/hub/assistant/in-proces
 import {
   changeRequestBelongsToChat,
   changeRequestIsWithinWriteScope,
+  registerChangeRequestMcpTools,
 } from '../src/hub/change-requests/change-request-mcp-tools';
 import { normalizeMcpChatAccessScope } from '../src/hub/mcp-chat-access';
 import { authorizeDroneHubMcpTool, imageToolResult } from '../src/hub/mcp-server';
@@ -148,7 +149,7 @@ describe('Drone Hub MCP principal authorization', () => {
     expect(() => authorizeDroneHubMcpTool(
       { principal },
       'merge_change_request',
-      { requestId: 'cr-1' },
+      { requestNumber: 1 },
     )).toThrow('not allowed to merge change requests');
     expect(() => authorizeDroneHubMcpTool(
       {
@@ -158,8 +159,37 @@ describe('Drone Hub MCP principal authorization', () => {
         },
       },
       'merge_change_request',
-      { requestId: 'cr-1' },
+      { requestNumber: 1 },
     )).not.toThrow();
+  });
+
+  test('addresses change requests by integer number in MCP tools', async () => {
+    let updateTool: { config: any; handler: (args: any) => Promise<any> } | null = null;
+    const paths: string[] = [];
+    registerChangeRequestMcpTools(
+      {
+        registerTool(name: string, config: any, handler: (args: any) => Promise<any>) {
+          if (name === 'update_change_request') updateTool = { config, handler };
+        },
+      } as any,
+      {
+        context: {
+          principal: { kind: 'host', tokenId: 'host', name: 'Host token' },
+        },
+        requestJson: async (pathname) => {
+          paths.push(pathname);
+          return { ok: true, request: { number: 7, droneId: 'drone-a', droneName: 'Drone A' } };
+        },
+        toolResult: (value) => value,
+      },
+    );
+
+    expect(updateTool).not.toBeNull();
+    expect(updateTool!.config.inputSchema.requestNumber.safeParse(7).success).toBe(true);
+    expect(updateTool!.config.inputSchema.requestNumber.safeParse('7').success).toBe(false);
+    expect(updateTool!.config.inputSchema.requestId).toBeUndefined();
+    await updateTool!.handler({ requestNumber: 7, title: 'Use the public number' });
+    expect(paths).toEqual(['/api/change-requests/7', '/api/change-requests/7']);
   });
 
   test('uses the stable chat id for change-request ownership', () => {

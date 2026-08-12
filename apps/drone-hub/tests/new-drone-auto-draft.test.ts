@@ -23,7 +23,9 @@ describe('new drone automatic drafts', () => {
     expect(modelSource).toContain('selectOnSuccess: false');
     expect(modelSource).toContain("setDraftChat(null)");
     expect(creationSource).not.toContain('Draft drones cannot queue attachments');
-    expect(creationSource).toContain('(body as any).seedAttachments = draftAttachments');
+    expect(creationSource).toContain(
+      'seedAttachments: shouldSeedPromptViaCreate ? draftAttachments : []',
+    );
   });
 
   test('mobile removes the header toggle and saves before leaving the new-drone screen', () => {

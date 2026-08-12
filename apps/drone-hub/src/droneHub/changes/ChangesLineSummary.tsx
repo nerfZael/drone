@@ -1,5 +1,5 @@
 import React from 'react';
-import { agentRunLineChangeBreakdown, agentRunNetLineChangeLabel } from '@drone/assistant-chat';
+import { agentRunLineChangeBreakdown } from '@drone/assistant-chat';
 
 export type ChangesLineSummaryCounts = {
   changed: number;
@@ -34,10 +34,11 @@ export function ChangesFileCountPill({
 
 export function ChangesLineSummary({ counts }: { counts: ChangesLineSummaryCounts }) {
   const lineChanges = agentRunLineChangeBreakdown(counts);
+  const total = lineChanges.added + lineChanges.modified + lineChanges.deleted;
   return (
     <div
       className="flex shrink-0 items-center gap-1.5 px-1"
-      aria-label={`${counts.changed} changed files, ${lineChanges.added} lines added, ${lineChanges.modified} lines modified, ${lineChanges.deleted} lines deleted, ${agentRunNetLineChangeLabel(lineChanges.net)} net lines`}
+      aria-label={`${counts.changed} changed files, ${lineChanges.added} lines added, ${lineChanges.modified} lines modified, ${lineChanges.deleted} lines deleted, ${total} total line changes`}
     >
       <span className="sr-only">Changed files</span>
       <ChangesFileCountPill count={counts.changed} />
@@ -48,9 +49,9 @@ export function ChangesLineSummary({ counts }: { counts: ChangesLineSummaryCount
         <span className="text-[var(--muted-dim)]" aria-hidden="true">│</span>
         <span
           className="font-[var(--weight-semibold)] text-[var(--accent)]"
-          title="Net line change"
+          title="Total line changes"
         >
-          {agentRunNetLineChangeLabel(lineChanges.net)}
+          Σ{total}
         </span>
       </span>
     </div>

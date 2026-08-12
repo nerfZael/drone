@@ -22,6 +22,8 @@ The first version intentionally stays small:
 
 ## Core behavior
 
+- Change requests receive a Hub-wide auto-incrementing number starting at 1. This number is their
+  only public identifier in the UI, HTTP API, and MCP tools; opaque storage keys remain internal.
 - A change request records the chat and drone that created it.
 - It contains a fixed snapshot of committed changes. Later work in the chat does not silently change an existing request.
 - Refreshing a request deliberately replaces its snapshot and increases its revision number.

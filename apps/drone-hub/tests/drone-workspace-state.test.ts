@@ -39,6 +39,7 @@ const {
   resetWorkspaceToChat,
   ensureWorkspaceToolPanel,
   migrateEditorChangesPanels,
+  refreshWorkspacePanelTitles,
   restoreRequiredWorkspacePanels,
 } = await import('../src/droneHub/app/DockableDroneWorkspace');
 const {
@@ -255,6 +256,27 @@ describe('per-drone workspace state', () => {
       component: 'chat',
       position: { direction: 'left', referencePanel: 'tool:editor' },
     });
+  });
+
+  test('replaces stale titles restored from saved workspace layouts', () => {
+    const titles = new Map<string, string>([
+      ['agent-chat', 'Chat'],
+      ['tool:prs', 'PRs'],
+      ['tool:requests', 'Requests'],
+    ]);
+    const panels = Array.from(titles.keys(), (id) => ({
+      id,
+      api: {
+        getParameters: () => ({}),
+        setTitle: (title: string) => titles.set(id, title),
+      },
+    }));
+
+    refreshWorkspacePanelTitles({ panels } as unknown as Parameters<typeof refreshWorkspacePanelTitles>[0]);
+
+    expect(titles.get('agent-chat')).toBe('Agent Chat');
+    expect(titles.get('tool:prs')).toBe('Pull requests');
+    expect(titles.get('tool:requests')).toBe('Change requests');
   });
 
   test('does not persist a teardown layout after the required chat panel is gone', () => {

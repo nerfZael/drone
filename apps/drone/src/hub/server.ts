@@ -5448,6 +5448,8 @@ async function startDroneHubApiServerWithLifecycle(
   });
   registerAgentRunDiffRoutes(apiRouter);
   registerChangeRequestFeature(apiRouter, {
+    writeSseEvent: writeHubSseEvent,
+    nowIso,
     resolveDrone: resolveDroneOrPendingForReadRef,
     withLockedDroneContainer,
     exportFullHeadBundleFromDrone,
