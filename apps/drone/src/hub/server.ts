@@ -504,7 +504,10 @@ import {
   type ResolvedOrPendingDrone,
 } from './drone-lifecycle-service';
 import { permanentlyDeleteCanonicalDrone } from './drone-deletion-service';
-import { readCanonicalActiveDroneModel } from './canonical-drone-read-model';
+import {
+  readCanonicalActiveDroneModel,
+  readCanonicalDroneLifecycleModel,
+} from './canonical-drone-read-model';
 import {
   commitDroneMetadataPatch,
   renameDroneDisplayName,
@@ -4455,6 +4458,11 @@ async function startDroneHubApiServerWithLifecycle(
     return model;
   }
 
+  async function loadCanonicalLifecycleModel(): Promise<any> {
+    if ((globalThis as any).Bun) return await loadRegistry();
+    return readCanonicalDroneLifecycleModel() ?? (await loadRegistry());
+  }
+
   async function mapDroneRegistrySummaryConcurrent<T, R>(
     items: T[],
     limitRaw: number,
@@ -5903,6 +5911,7 @@ async function startDroneHubApiServerWithLifecycle(
     gitResolveRemoteBranchForCreate,
     isSafePromptId,
     loadCanonicalActiveModel,
+    loadCanonicalLifecycleModel,
     loadRegistry,
     logSlowHubRequest,
     makeDroneIdentity,

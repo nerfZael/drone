@@ -115,6 +115,11 @@ describeSocketSuite('create runtime api', () => {
       pendingState: 'queued',
       status: 'queued',
     });
+    const serverTiming = String(resp.r.headers.get('server-timing') ?? '');
+    expect(serverTiming).toContain('loadLifecycle;dur=');
+    expect(serverTiming).toContain('persistPending;dur=');
+    expect(serverTiming).toContain('reservePrompt;dur=');
+    expect(serverTiming).toContain('total;dur=');
     expect(promptId).not.toBe('');
 
     const queue = getPromptQueueRepository();

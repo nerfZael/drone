@@ -131,4 +131,62 @@ describe('repoSeed checkout target', () => {
       ]),
     );
   });
+
+  test('skips container discovery when the caller guarantees it is already ready', async () => {
+    const execCommand = jest.fn(async () => '');
+    const copyToContainer = jest.fn(async () => {});
+    const startContainer = jest.fn(async () => {});
+    const ensureGit = jest.fn(async () => {});
+    const containerExists = jest.fn(async () => true);
+    const api = new DvmApi({
+      manager: {
+        docker: {
+          containerExists,
+          execCommand,
+          copyToContainer,
+        },
+        startContainer,
+        ensureGit,
+      } as any,
+      baseConfig: {} as any,
+    });
+
+    const prepared = {
+      version: 1 as const,
+      hostRepoPath: '/repo',
+      destinationPath: '/work/repo',
+      bundlePathInContainer: '/tmp/dvm-repo.bundle',
+      baseSha: 'c6df507a1f66b3f579507bc5868aff1c32909d3b',
+      baseTreeSha: '9f4a1c0e5fef77278a9a9fc09f02e3f1a950f98d',
+      hostRemoteUrl: null,
+      temporaryDirectory: '',
+      bundlePath: '/tmp/prepared-repo.bundle',
+      seedBranch: 'dvm-seed/demo',
+      seedRef: 'refs/heads/dvm-seed/demo',
+      prepareDurationMs: 0,
+      preparePhases: {},
+    };
+    let timing: DvmRepoSeedTiming | null = null;
+
+    await api.repoSeedPrepared(
+      {
+        containerName: 'demo',
+        hostRepoPath: '/repo',
+        containerAlreadyReady: true,
+        branch: 'dvm/work',
+        clean: true,
+        onTiming: (snapshot) => {
+          timing = snapshot;
+        },
+      },
+      prepared,
+    );
+
+    expect(containerExists).not.toHaveBeenCalled();
+    expect(startContainer).not.toHaveBeenCalled();
+    expect(timing).toMatchObject({
+      outcome: 'completed',
+      phases: { ensureContainer: 0 },
+    });
+  });
 });

@@ -715,6 +715,10 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
             return await dvmRepoSeedPrepared({
               container: repoSeedContainer,
               prepared: preparedHostSeed,
+              // Runtime creation immediately preceded this call and completed a
+              // daemon health check, so DVM does not need to rediscover and
+              // restart the same container before copying the repository.
+              containerAlreadyReady: true,
               branch: 'dvm/work',
               clean: true,
               timeoutMs: deps.defaultRepoSeedTimeoutMs(),

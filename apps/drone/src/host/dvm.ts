@@ -273,6 +273,7 @@ export async function dvmRepoPrepareSeed(opts: {
 export async function dvmRepoSeedPrepared(opts: {
   container: string;
   prepared: DvmPreparedRepoSeed;
+  containerAlreadyReady?: boolean;
   branch?: string;
   clean?: boolean;
   timeoutMs?: number;
@@ -285,6 +286,7 @@ export async function dvmRepoSeedPrepared(opts: {
         hostRepoPath: opts.prepared.hostRepoPath,
         destinationPath: opts.prepared.destinationPath,
         baseRef: opts.prepared.baseSha,
+        containerAlreadyReady: opts.containerAlreadyReady,
         branch: opts.branch,
         clean: opts.clean,
         onTiming: opts.onTiming,

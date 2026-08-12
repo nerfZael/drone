@@ -190,6 +190,7 @@ function createDroneProvisioningServiceHandler(
     getDroneRegistrySseLastSnapshot,
     isSafePromptId,
     loadCanonicalActiveModel,
+    loadCanonicalLifecycleModel,
     loadRegistry,
     logSlowHubRequest,
     makeDroneIdentity,
@@ -231,9 +232,11 @@ function createDroneProvisioningServiceHandler(
       // POST /api/drones
       // Creates a new drone (container or host runtime, like `drone create`).
       if (method === 'POST' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'drones') {
+        const timer = createRequestTimer();
         let body: any = null;
         try {
           body = await readJsonBody(req);
+          timer.mark('readBody');
         } catch (e: any) {
           json(res, 400, { ok: false, error: e?.message ?? String(e) });
           return;
@@ -248,6 +251,7 @@ function createDroneProvisioningServiceHandler(
             ? body.group.trim()
             : '';
         const referencedGroup = body?.groupId ? await resolveCanonicalGroupReference(groupRefRaw) : null;
+        timer.mark('resolveGroup');
         if (body?.groupId && !referencedGroup) {
           json(res, 404, { ok: false, error: `unknown group: ${groupRefRaw}` });
           return;
@@ -303,8 +307,10 @@ function createDroneProvisioningServiceHandler(
             return;
           }
         }
+        timer.mark('parseBasics');
 
-        const preRegAny: any = await loadRegistry();
+        const preRegAny: any = await loadCanonicalLifecycleModel();
+        timer.mark('loadLifecycle');
         let name = '';
         try {
           name = normalizeDroneDisplayName(nameRaw);
@@ -548,10 +554,12 @@ function createDroneProvisioningServiceHandler(
             return;
           }
         }
+        timer.mark('validateRequest');
         const createdEnvironment = await deriveCanonicalCreatedDroneEnvironmentConfig(preRegAny, {
           repoPath,
           runtime,
         });
+        timer.mark('deriveEnvironment');
         const droneId = makeDroneIdentity();
         if (referencedGroup && referencedGroup.repoPath !== repoPath) {
           json(res, 409, { ok: false, error: 'group belongs to a different repository' });
@@ -560,6 +568,7 @@ function createDroneProvisioningServiceHandler(
         const canonicalGroup = group
           ? referencedGroup ?? await ensureCanonicalGroup(group, repoPath)
           : null;
+        timer.mark('ensureGroup');
         if (droneDisplayNameExists(preRegAny, name)) {
           json(res, 409, { ok: false, error: `drone already exists: ${name}` });
           return;
@@ -589,6 +598,7 @@ function createDroneProvisioningServiceHandler(
           seedCwdRaw,
           seedAgent,
         });
+        timer.mark('buildPending');
         try {
           await upsertCanonicalDroneLifecycle('pending', droneId, {
             id: droneId,
@@ -637,6 +647,7 @@ function createDroneProvisioningServiceHandler(
           }
           throw error;
         }
+        timer.mark('persistPending');
         if (initialPrompt.shouldReserveQueuePosition) {
           await reserveInitialPromptQueuePosition({
             droneId,
@@ -647,9 +658,18 @@ function createDroneProvisioningServiceHandler(
             ...(seedCwdRaw ? { cwd: String(seedCwdRaw) } : {}),
           });
         }
+        timer.mark('reservePrompt');
         notifyCanonicalDroneRegistryWrite();
 
         if (!createAsDraft) enqueueProvisioning(droneId);
+        timer.mark('scheduleProvisioning');
+        timer.setHeader(res);
+        logSlowHubRequest('drone create', timer, {
+          status: createAsDraft ? 201 : 202,
+          droneId,
+          runtime,
+          draft: createAsDraft,
+        });
 
         json(res, createAsDraft ? 201 : 202, {
           ok: true,

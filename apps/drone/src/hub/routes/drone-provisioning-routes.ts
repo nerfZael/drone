@@ -25,6 +25,7 @@ type DroneProvisioningDependencyName =
   | 'getDroneRegistrySseLastSnapshot'
   | 'isSafePromptId'
   | 'loadCanonicalActiveModel'
+  | 'loadCanonicalLifecycleModel'
   | 'loadRegistry'
   | 'logSlowHubRequest'
   | 'makeDroneIdentity'

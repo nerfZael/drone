@@ -72,6 +72,8 @@ export type DvmRepoSeedOptions = {
   baseRef?: string;
   createIfMissing?: boolean;
   createOptions?: DvmCreateContainerOptions;
+  /** The caller guarantees that the container exists and is already running. */
+  containerAlreadyReady?: boolean;
   branch?: string;
   forceBranch?: boolean;
   clean?: boolean;
@@ -819,15 +821,19 @@ export class DvmApi {
     const dest = prepared.destinationPath;
     const bundlePathInContainer = prepared.bundlePathInContainer;
     try {
-      await measureTiming(
-        'ensureContainer',
-        async () =>
-          await this.ensureContainerExistsOrCreate(
-            containerName,
-            options.createIfMissing !== false,
-            options.createOptions,
-          ),
-      );
+      if (options.containerAlreadyReady) {
+        timingPhases.set('ensureContainer', 0);
+      } else {
+        await measureTiming(
+          'ensureContainer',
+          async () =>
+            await this.ensureContainerExistsOrCreate(
+              containerName,
+              options.createIfMissing !== false,
+              options.createOptions,
+            ),
+        );
+      }
       await measureTiming('ensureGit', async () => await this.manager.ensureGit(containerName));
 
       await measureTiming(
