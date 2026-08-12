@@ -1,9 +1,18 @@
 import { describe, expect, test } from 'bun:test';
 import path from 'node:path';
 
-const { blipBundleArgs, daemonBundleArgs, mcpBridgeBundleArgs } = require('../scripts/postbuild.cjs');
+const {
+  blipBundleArgs,
+  CONTAINER_RUNTIME_FILES,
+  daemonBundleArgs,
+  mcpBridgeBundleArgs,
+} = require('../scripts/postbuild.cjs');
+import { requiredDroneDaemonRuntimeFiles } from '../src/hub/drone-daemon-runtime';
 
 describe('postbuild bundles', () => {
+  test('packages exactly the files required by a container daemon', () => {
+    expect(CONTAINER_RUNTIME_FILES).toEqual([...requiredDroneDaemonRuntimeFiles()]);
+  });
   test('bundles blip for Node into dist/blip.js', () => {
     const root = path.resolve(__dirname, '..');
     expect(blipBundleArgs(root)).toEqual([

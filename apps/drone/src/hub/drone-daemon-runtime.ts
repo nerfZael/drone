@@ -9,6 +9,32 @@ import {
   hostDroneDaemonTokenPath,
 } from '../host/runtime';
 
+const REQUIRED_DRONE_DAEMON_RUNTIME_FILES = [
+  DRONE_DAEMON_BUNDLE_FILENAME,
+  'blip.js',
+  'mcp-http-stdio-bridge.js',
+] as const;
+
+export function requiredDroneDaemonRuntimeFiles(): readonly string[] {
+  return REQUIRED_DRONE_DAEMON_RUNTIME_FILES;
+}
+
+export function resolveContainerDroneRuntimePayloadDir(runtimeDir: string): string {
+  return path.join(runtimeDir, 'container-runtime');
+}
+
+export async function assertContainerDroneRuntimePayloadReady(runtimeDir: string): Promise<void> {
+  const payloadDir = resolveContainerDroneRuntimePayloadDir(runtimeDir);
+  for (const fileName of REQUIRED_DRONE_DAEMON_RUNTIME_FILES) {
+    const filePath = path.join(payloadDir, fileName);
+    try {
+      await fs.promises.access(filePath, fs.constants.R_OK);
+    } catch {
+      throw new Error(`Missing ${filePath}. Run: bun run --filter drone build`);
+    }
+  }
+}
+
 export function resolveDroneDaemonJsPath(baseDir: string = __dirname): string {
   const candidates = [
     // The portable bundle has a distinct name so a concurrent tsc build cannot
@@ -69,7 +95,7 @@ export async function assertDroneDaemonRuntimeReady(runtimeDir: string): Promise
     );
   }
 
-  for (const fileName of ['blip.js', 'mcp-http-stdio-bridge.js']) {
+  for (const fileName of REQUIRED_DRONE_DAEMON_RUNTIME_FILES.slice(1)) {
     const filePath = path.join(runtimeDir, fileName);
     try {
       await fs.promises.access(filePath, fs.constants.R_OK);

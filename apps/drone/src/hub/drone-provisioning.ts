@@ -37,6 +37,11 @@ import type { EnqueuePromptOptions } from './chat-prompt-runtime';
 import type { ManagedDroneStateSyncResult } from './managed-drone-state-sync';
 import type { ProvisionedPromptHandoff } from './provisioned-prompt-handoff';
 import { seededDroneRunFileChangesBaseline } from './run-file-changes';
+import {
+  DroneRuntimeContainerExistsError,
+  type CreateDroneRuntimeInput,
+  type ImportContainerDroneRuntimeInput,
+} from './drone-runtime-creation-service';
 
 type PendingDronePatch = Partial<{
   phase: PendingPhase;
@@ -82,12 +87,9 @@ type DroneProvisioningControllerDeps = {
   normalizePendingStartupPrompts: (raw: unknown, chatNameFilter?: string) => PendingStartupPrompt[];
   nowIso: () => string;
   parseSeedAgent: (raw: any) => any | null;
-  resolveDroneCliPath: () => string;
   resolvePendingDroneDisplayName: (pendingEntry: any, fallbackRaw: unknown) => string;
-  runNodeCli: (
-    args: string[],
-    opts?: { cwd?: string; timeoutMs?: number },
-  ) => Promise<{ code: number; stdout: string; stderr: string }>;
+  createDroneRuntime: (input: CreateDroneRuntimeInput) => Promise<unknown>;
+  importContainerDroneRuntime: (input: ImportContainerDroneRuntimeInput) => Promise<unknown>;
   setChatAgentConfig: (opts: {
     droneId: string;
     chatName: string;
@@ -310,7 +312,6 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
     const repoPath = String(pending.repoPath ?? '').trim();
     const group = typeof pending.group === 'string' ? pending.group.trim() : '';
     const runtime = normalizeDroneRuntime((pending as any)?.runtime);
-    const build = Boolean(pending.build);
     const persistVolume = (pending as any)?.persistVolume === false ? false : undefined;
     const containerPort =
       typeof pending.containerPort === 'number' && Number.isFinite(pending.containerPort)
@@ -352,8 +353,6 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
         }),
     );
 
-    const droneCli = deps.resolveDroneCliPath();
-    const repoArg = repoPath ? repoPath : '-';
     const latestCanonicalPending = await timing.measure(
       'loadCreateState',
       async () => await getCanonicalDroneLifecycle(pendingDroneId),
@@ -365,24 +364,18 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
       latestPendingForCreate,
       String(pending?.name ?? '').trim() || name,
     );
-    const args: string[] = [
-      droneCli,
-      'create',
-      displayName,
-      '--runtime',
+    const runtimeInput: CreateDroneRuntimeInput = {
+      name: displayName,
       runtime,
-      '--repo',
-      repoArg,
-      '--drone-id',
-      pendingDroneId,
-    ];
-    if (group) args.push('--group', group);
-    if (!build) args.push('--no-build');
-    if (containerPort != null) args.push('--container-port', String(containerPort));
-    if (runtime === 'container' && persistVolume === false) args.push('--no-persist-volume');
-    if (runtime === 'container' && cloneSourceContainerName)
-      args.push('--clone-container', cloneSourceContainerName);
-    if (runtime === 'container' && !repoPath) args.push('--cwd', deps.NON_REPO_HOME_CWD, '--mkdir');
+      repoPath,
+      droneId: pendingDroneId,
+      containerPort: containerPort ?? 7777,
+      ...(group ? { group } : {}),
+      ...(persistVolume === false ? { persistVolume: false } : {}),
+      ...(cloneSourceContainerName ? { cloneContainer: cloneSourceContainerName } : {}),
+      ...(runtime === 'container' && !repoPath ? { cwd: deps.NON_REPO_HOME_CWD, mkdir: true } : {}),
+      onPhaseTiming: (phase, durationMs) => timing.record(`createRuntime.${phase}`, durationMs),
+    };
 
     type PreparedHostSeed = {
       repoRoot: string;
@@ -416,7 +409,7 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
             return { repoRoot, baseRef, prepared };
           })()
         : null;
-    // The CLI create runs concurrently. Attach a handler now so a preparation
+    // Runtime creation runs concurrently. Attach a handler now so a preparation
     // failure cannot become an unhandled rejection before the seed phase awaits it.
     void preparedHostSeedPromise?.catch(() => {});
     let preparedHostSeedConsumed = false;
@@ -430,36 +423,36 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
       }
     };
 
-    const r = await timing.measure('createRuntime', async () => await deps.runNodeCli(args));
-    if (r.code !== 0) {
-      const errText = (r.stderr || r.stdout || `drone create failed (exit ${r.code})`).trim();
-      if (runtime === 'container' && /already exists/i.test(errText)) {
+    try {
+      await timing.measure(
+        'createRuntime',
+        async () => await deps.createDroneRuntime(runtimeInput),
+      );
+    } catch (error: any) {
+      const errText = String(error?.message ?? error ?? 'drone create failed').trim();
+      if (runtime === 'container' && error instanceof DroneRuntimeContainerExistsError) {
         await updatePendingDrone(name, {
           phase: 'creating',
           message: 'Container exists; importing…',
         });
-        const impArgs: string[] = [
-          droneCli,
-          'import',
-          displayName,
-          '--runtime',
-          'container',
-          '--repo',
-          repoArg,
-          '--drone-id',
-          pendingDroneId,
-        ];
-        if (group) impArgs.push('--group', group);
-        if (containerPort != null) impArgs.push('--container-port', String(containerPort));
-        if (persistVolume === false) impArgs.push('--no-persist-volume');
-        if (!repoPath) impArgs.push('--cwd', deps.NON_REPO_HOME_CWD, '--mkdir');
-        const imp = await deps.runNodeCli(impArgs);
-        if (imp.code !== 0) {
+        try {
+          await timing.measure('importRuntime', async () =>
+            deps.importContainerDroneRuntime({
+              name: displayName,
+              repoPath,
+              droneId: pendingDroneId,
+              containerPort: containerPort ?? 7777,
+              ...(group ? { group } : {}),
+              ...(persistVolume === false ? { persistVolume: false } : {}),
+              ...(!repoPath ? { cwd: deps.NON_REPO_HOME_CWD, mkdir: true } : {}),
+              onPhaseTiming: (phase, durationMs) =>
+                timing.record(`importRuntime.${phase}`, durationMs),
+            }),
+          );
+        } catch (importError: any) {
           await discardPreparedHostSeed();
-          const impErr = (
-            imp.stderr ||
-            imp.stdout ||
-            `drone import failed (exit ${imp.code})`
+          const impErr = String(
+            importError?.message ?? importError ?? 'drone import failed',
           ).trim();
           await failPendingDrone(name, `${errText}\n\nImport also failed:\n${impErr}`);
           return;

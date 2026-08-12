@@ -14,7 +14,7 @@ import { pipeline } from 'node:stream/promises';
 import { formatHubStartOutput, formatHubStopOutput, formatHumanOutput } from './cli-output';
 import { health, procStart, procStop, readOutput, sendInput, sendKeys, status } from './host/api';
 import { ensureContainerDroneDaemonSession } from './host/container-daemon';
-import { dvmClone, dvmCopyToContainer, dvmCreate, dvmExec, dvmLs, dvmPorts, dvmRemove, dvmSessionStart } from './host/dvm';
+import { dvmExec, dvmLs, dvmPorts, dvmRemove } from './host/dvm';
 import { droneRootPath } from './host/paths';
 import {
   createProfile as createManagedProfile,
@@ -37,34 +37,17 @@ import {
   readActiveProfileNameSync,
   writeActiveProfileName,
 } from './host/profiles';
-import { loadRegistry, registryHasDisplayName, updateRegistry } from './host/registry';
+import { loadRegistry, updateRegistry } from './host/registry';
 import { readRegistryJsonFromSqlitePath } from './host/sqlite-registry-store';
-import {
-  hostDroneDaemonDataPath,
-  hostDroneDaemonTokenPath,
-  hostDroneRootPath,
-  hostDroneWorkspacePath,
-  buildContainerDroneDaemonLaunchScript,
-  DRONE_DAEMON_SESSION_NAME,
-  installBlipCliScript,
-  removeRetiredContainerCliScripts,
-  missingHostDependencyMessage,
-  normalizeDroneRuntime,
-  type DroneRuntime,
-} from './host/runtime';
+import { hostDroneRootPath, normalizeDroneRuntime, type DroneRuntime } from './host/runtime';
 import { ensureHubSetupState } from './host/setup-state';
 import { resolveDetachedCliLaunchSpec } from './hub/hub-launch';
 import { readRawBody } from './hub/hub-http';
 import {
-  assertDroneDaemonRuntimeReady,
-  launchHostDroneDaemon,
-  resolveDroneDaemonJsPath,
-  resolveDroneDaemonRuntimeDir,
-} from './hub/drone-daemon-runtime';
+  createDroneRuntime,
+  importContainerDroneRuntime,
+} from './hub/drone-runtime-creation-service';
 import { cleanupLegacyRemoteHub } from './hub/legacy-remote-cleanup';
-import {
-  upsertCanonicalDroneLifecycle,
-} from './hub/drone-lifecycle-service';
 import { permanentlyDeleteCanonicalDrone } from './hub/drone-deletion-service';
 import { renameDroneDisplayName, setDroneGroupMetadata } from './hub/drone-metadata-commands';
 import { DEFAULT_DEVICE_MESH_INGRESS_PORT } from './hub/device-mesh/device-mesh-ingress';
@@ -78,20 +61,9 @@ import {
   upsertChatInStore,
   upsertTranscriptTurnInStore,
 } from './hub/transcript-store';
-import { ensureCanonicalGroup, listCanonicalGroups, listCanonicalRepositories, registerCanonicalRepository } from './hub/groups-repositories';
+import { listCanonicalGroups, listCanonicalRepositories, registerCanonicalRepository } from './hub/groups-repositories';
 
 const requireFromCli = createRequire(__filename);
-
-async function persistRealDroneEntry(droneId: string, entry: any): Promise<void> {
-  const canonical = await upsertCanonicalDroneLifecycle('real', droneId, entry);
-  if (canonical) return;
-  // Bun/native-binding compatibility only. Production Node must commit the
-  // lifecycle row before any legacy projection exists.
-  await updateRegistry((registry: any) => {
-    registry.drones = registry.drones ?? {};
-    registry.drones[droneId] = entry;
-  });
-}
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -194,15 +166,6 @@ function normalizeDroneIdentity(raw: unknown): string | undefined {
   if (!id) return undefined;
   if (id.length > 128) throw new Error('invalid --drone-id');
   return id;
-}
-
-function stableContainerNameFromDroneId(droneId: string): string {
-  const id = String(droneId ?? '').trim();
-  if (!id) throw new Error('missing drone id for container name');
-  const uuid = parseUuid(id);
-  if (uuid) return `drone-${uuid.toLowerCase()}`;
-  const hex = crypto.createHash('sha256').update(id, 'utf8').digest('hex').slice(0, 32);
-  return `drone-${hex}`;
 }
 
 function resolveDroneFromRegistry(
@@ -800,32 +763,6 @@ async function startStaticDroneHubUiServer(opts: {
   };
 }
 
-async function getUniqueFreeTcpPorts(count: number): Promise<number[]> {
-  const ports: number[] = [];
-  const seen = new Set<number>();
-  const maxAttempts = Math.max(20, count * 12);
-  for (let i = 0; i < maxAttempts && ports.length < count; i++) {
-    const p = await getFreeTcpPort();
-    if (seen.has(p)) continue;
-    seen.add(p);
-    ports.push(p);
-  }
-  if (ports.length !== count) {
-    throw new Error(`failed to allocate ${count} unique host ports`);
-  }
-  return ports;
-}
-
-function isPortAllocationConflictError(err: unknown): boolean {
-  const msg = String((err as any)?.message ?? err ?? '').toLowerCase();
-  return (
-    msg.includes('port is already allocated') ||
-    msg.includes('address already in use') ||
-    (msg.includes('bind for') && msg.includes('failed')) ||
-    (msg.includes('failed to set up container networking') && msg.includes('bind'))
-  );
-}
-
 type HubState = {
   version: 1;
   pid: number;
@@ -1340,11 +1277,6 @@ function parseGithubSlug(remoteUrl: string | null): { owner: string; repo: strin
   return { owner, repo };
 }
 
-async function ensureDaemonBuilt(_repoPath: string) {
-  const runtimeDir = resolveDroneDaemonRuntimeDir();
-  await assertDroneDaemonRuntimeReady(runtimeDir);
-}
-
 async function resolveHostPort(container: string, containerPort: number): Promise<number> {
   const ports = await dvmPorts(container);
   const match = ports.find((p) => p.containerPort === containerPort);
@@ -1420,16 +1352,6 @@ async function ensureContainerDroneReady(drone: DroneRegistryEntry, hostPort: nu
   await waitForHealth(hostPort, token);
 }
 
-async function hostCommandExists(command: string): Promise<boolean> {
-  const name = String(command ?? '').trim();
-  if (!name) return false;
-  return await new Promise<boolean>((resolve) => {
-    const child = spawn('bash', ['-lc', `command -v ${bashQuote(name)} >/dev/null 2>&1`], { stdio: 'ignore' });
-    child.once('error', () => resolve(false));
-    child.once('close', (code) => resolve(code === 0));
-  });
-}
-
 type DroneRegistryEntry = Awaited<ReturnType<typeof loadRegistry>>['drones'][string];
 type DroneClient = ReturnType<typeof makeClient>;
 
@@ -1463,13 +1385,6 @@ async function waitForHealth(hostPort: number, token: string, timeoutMs = 15_000
       await sleep(300);
     }
   }
-}
-
-async function readTokenFromContainer(containerName: string): Promise<string> {
-  const r = await dvmExec(containerName, 'bash', ['-lc', 'cat /dvm-data/drone/token 2>/dev/null || true']);
-  const token = String(r.stdout ?? '').trim();
-  if (!token) throw new Error(`missing token in container: ${containerName} (expected /dvm-data/drone/token)`);
-  return token;
 }
 
 async function isDroneContainer(containerName: string): Promise<boolean> {
@@ -1506,228 +1421,12 @@ const createCommand = addCreateOptions(
 createCommand
   .option('--no-build', 'Skip rebuilding daemon output (the existing runtime is still validated)')
   .action(async (name, options) => {
-    const { repoPath, group, containerPort, runtime, cwd, mkdir, droneId, cloneContainer, persistVolume } = parseCreateOptions(options);
-
-    // --no-build skips rebuilding, but never skips validating the runtime that
-    // will be copied. A transient tsc output cannot run outside the monorepo.
-    await ensureDaemonBuilt(repoPath);
-
-    const token = crypto.randomBytes(32).toString('base64url');
-    const stableId = droneId ?? crypto.randomUUID();
-    const displayName = normalizeDroneDisplayName(name);
-
-    if (runtime === 'host') {
-      if (cloneContainer) throw new Error('--clone-container is only supported for container runtime');
-      if (!(await hostCommandExists('tmux'))) {
-        throw new Error(missingHostDependencyMessage('tmux', 'host runtime drones'));
-      }
-      const hostPort = await getFreeTcpPort();
-      const hostPid = await launchHostDroneDaemon({
-        droneId: stableId,
-        hostPort,
-        token,
-        daemonPath: resolveDroneDaemonJsPath(),
-      });
-      const workspaceDir = hostDroneWorkspacePath(stableId);
-      const defaultCwd = repoPath ? repoPath : workspaceDir;
-      const effectiveCwd = cwd || defaultCwd;
-      if (!repoPath) {
-        await fs.mkdir(workspaceDir, { recursive: true });
-      }
-      if (effectiveCwd) {
-        if (mkdir) {
-          await fs.mkdir(effectiveCwd, { recursive: true });
-        } else {
-          const st = await fs.stat(effectiveCwd).catch(() => null);
-          if (!st || !st.isDirectory()) {
-            await stopHostDaemonByPid(hostPid);
-            throw new Error(`cwd does not exist: ${effectiveCwd} (pass --mkdir to create)`);
-          }
-        }
-      }
-      try {
-        await waitForHealth(hostPort, token);
-      } catch (error) {
-        await stopHostDaemonByPid(hostPid);
-        throw error;
-      }
-
-      try {
-        const canonicalGroup = group ? await ensureCanonicalGroup(group, repoPath) : null;
-        const registry = await loadRegistry();
-        if (registryHasDisplayName(registry, displayName, { excludeId: stableId })) throw new Error(`drone already exists: ${displayName}`);
-        const at = new Date().toISOString();
-        const createdEntry = {
-            id: stableId,
-            runtime: 'host',
-            name: displayName,
-            containerName: stableContainerNameFromDroneId(stableId),
-            group,
-            groupId: canonicalGroup?.id,
-            cwd: effectiveCwd,
-            hostPort,
-            containerPort: hostPort,
-            token,
-            repoPath,
-            ...(repoPath ? { repo: { dest: repoPath } } : {}),
-            createdAt: at,
-            host: {
-              pid: hostPid,
-              workspaceDir,
-              rootDir: hostDroneRootPath(stableId),
-              dataDir: hostDroneDaemonDataPath(stableId),
-              tokenPath: hostDroneDaemonTokenPath(stableId),
-            },
-          } as any;
-        await persistRealDroneEntry(stableId, createdEntry);
-      } catch (error) {
-        await stopHostDaemonByPid(hostPid);
-        throw error;
-      }
-
-      printCommandOutput({
-        ok: true,
-        id: stableId,
-        runtime: 'host',
-        name: displayName,
-        hostPort,
-        daemonPid: hostPid,
-        ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
-      });
-      return;
-    }
-
-    const containerName = stableContainerNameFromDroneId(stableId);
-
-    let hostPort = 0;
-    if (cloneContainer) {
-      const cloneAttempts = 5;
-      for (let attempt = 1; attempt <= cloneAttempts; attempt++) {
-        try {
-          const [hostPortDaemon, hostPortRdp, hostPortNoVnc, hostPort3000, hostPort3001, hostPort5173, hostPort5174] =
-            await getUniqueFreeTcpPorts(7);
-          await dvmClone(cloneContainer, containerName, {
-            start: true,
-            copyPersistenceVolume: true,
-            ...(typeof persistVolume === 'boolean' ? { persistVolume } : {}),
-            ports: [
-              { hostPort: hostPortDaemon, containerPort, hostIp: '127.0.0.1' },
-              { hostPort: hostPortRdp, containerPort: 3389 },
-              { hostPort: hostPortNoVnc, containerPort: 6080 },
-              { hostPort: hostPort3000, containerPort: 3000 },
-              { hostPort: hostPort3001, containerPort: 3001 },
-              { hostPort: hostPort5173, containerPort: 5173 },
-              { hostPort: hostPort5174, containerPort: 5174 },
-            ],
-          });
-          hostPort = await resolveHostPort(containerName, containerPort);
-          break;
-        } catch (err) {
-          if (!isPortAllocationConflictError(err) || attempt === cloneAttempts) throw err;
-          try {
-            await dvmRemove(containerName);
-          } catch {
-            // ignore best-effort cleanup between retries
-          }
-          await sleep(125 * attempt);
-        }
-      }
-    } else {
-      const createAttempts = 5;
-      for (let attempt = 1; attempt <= createAttempts; attempt++) {
-        try {
-          // Pick truly free host ports (dvm's auto-allocation only checks Docker ports, not host processes).
-          const [hostPortDaemon, hostPortRdp, hostPortNoVnc, hostPort3000, hostPort3001, hostPort5173, hostPort5174] =
-            await getUniqueFreeTcpPorts(7);
-          await dvmCreate(containerName, {
-            ...(persistVolume === false ? { persist: false } : {}),
-            ports: [
-              { hostPort: hostPortDaemon, containerPort, hostIp: '127.0.0.1' },
-              { hostPort: hostPortRdp, containerPort: 3389 },
-              { hostPort: hostPortNoVnc, containerPort: 6080 },
-              { hostPort: hostPort3000, containerPort: 3000 },
-              { hostPort: hostPort3001, containerPort: 3001 },
-              { hostPort: hostPort5173, containerPort: 5173 },
-              { hostPort: hostPort5174, containerPort: 5174 },
-            ],
-          });
-          hostPort = await resolveHostPort(containerName, containerPort);
-          break;
-        } catch (err) {
-          if (!isPortAllocationConflictError(err) || attempt === createAttempts) throw err;
-          try {
-            await dvmRemove(containerName);
-          } catch {
-            // ignore best-effort cleanup between retries
-          }
-          await sleep(125 * attempt);
-        }
-      }
-    }
-    if (!hostPort) throw new Error(`failed creating ${containerName}: no daemon host port mapped`);
-
-    if (cwd) {
-      const ensureCmd = mkdir
-        ? `mkdir -p ${bashQuote(cwd)}`
-        : `test -d ${bashQuote(cwd)} || (echo "cwd does not exist: ${cwd} (pass --mkdir to create)" 1>&2; exit 1)`;
-      const ensured = await dvmExec(containerName, 'bash', ['-lc', ensureCmd]);
-      if (ensured.code !== 0) {
-        throw new Error(ensured.stderr || ensured.stdout || `failed ensuring --cwd: ${cwd}`);
-      }
-    }
-
-    // Persist token inside container too (so daemon can read it).
-    const writeTokenCmd = `mkdir -p /dvm-data/drone && umask 077 && printf %s '${token}' > /dvm-data/drone/token`;
-    const wr = await dvmExec(containerName, 'bash', ['-lc', writeTokenCmd]);
-    if (wr.code !== 0) throw new Error(wr.stderr || wr.stdout || 'failed writing token in container');
-
-    // Copy the built daemon runtime tree so relative requires continue to work in-container.
-    const clearDaemonRuntime = await dvmExec(containerName, 'bash', ['-lc', 'mkdir -p /dvm-data/drone && rm -rf /dvm-data/drone/dist']);
-    if (clearDaemonRuntime.code !== 0) {
-      throw new Error(clearDaemonRuntime.stderr || clearDaemonRuntime.stdout || 'failed clearing daemon runtime in container');
-    }
-    await dvmCopyToContainer(containerName, resolveDroneDaemonRuntimeDir(), '/dvm-data/drone/dist', { clean: false });
-    const removeRetiredClis = await dvmExec(containerName, 'bash', ['-lc', removeRetiredContainerCliScripts()]);
-    if (removeRetiredClis.code !== 0) {
-      throw new Error(removeRetiredClis.stderr || removeRetiredClis.stdout || 'failed removing retired CLIs from container');
-    }
-    const installBlipCli = await dvmExec(containerName, 'bash', ['-lc', installBlipCliScript()]);
-    if (installBlipCli.code !== 0) {
-      throw new Error(installBlipCli.stderr || installBlipCli.stdout || 'failed installing blip CLI in container');
-    }
-
-    await dvmSessionStart(
-      containerName,
-      DRONE_DAEMON_SESSION_NAME,
-      'bash',
-      ['-lc', buildContainerDroneDaemonLaunchScript(containerPort)],
-      true
-    );
-
-    await waitForHealth(hostPort, token);
-
-    const canonicalGroup = group ? await ensureCanonicalGroup(group, repoPath) : null;
-    const registry = await loadRegistry();
-    if (registryHasDisplayName(registry, displayName, { excludeId: stableId })) throw new Error(`drone already exists: ${displayName}`);
-    const at = new Date().toISOString();
-    const createdEntry = {
-        id: stableId,
-        runtime: 'container' as const,
-        name: displayName,
-        containerName,
-        group,
-        groupId: canonicalGroup?.id,
-        cwd,
-        hostPort,
-        containerPort,
-        token,
-        repoPath,
-        ...(persistVolume === false ? { persistVolume: false } : {}),
-        createdAt: at,
-      };
-    await persistRealDroneEntry(stableId, createdEntry);
-
-    printCommandOutput({ ok: true, id: stableId, runtime: 'container', name: displayName, containerName, hostPort, containerPort, ...(cwd ? { cwd } : {}) });
+    const parsed = parseCreateOptions(options);
+    const result = await createDroneRuntime({
+      name,
+      ...parsed,
+    });
+    printCommandOutput(result);
   });
 
 const importCommand = addCreateOptions(
@@ -1740,68 +1439,23 @@ const importCommand = addCreateOptions(
 importCommand
   .option('--container <name>', 'Existing container name to import (defaults to derived from --drone-id when provided)')
   .action(async (name, options) => {
-    const { repoPath, group, containerPort, runtime, cwd, mkdir, droneId, persistVolume } = parseCreateOptions(options);
-    if (runtime !== 'container') {
+    const parsed = parseCreateOptions(options);
+    if (parsed.runtime !== 'container') {
       throw new Error('drone import currently supports only container runtime');
     }
-
-    const displayName = normalizeDroneDisplayName(name);
-
-    const regSnap = await loadRegistry();
-    let existingId = '';
-    try {
-      const resolved = resolveDroneFromRegistry(regSnap, displayName);
-      existingId = typeof (resolved.drone as any)?.id === 'string' ? String((resolved.drone as any).id).trim() : '';
-    } catch {
-      existingId = '';
-    }
-    const stableId = (droneId ?? existingId) || crypto.randomUUID();
-    const derivedContainerName = stableContainerNameFromDroneId(stableId);
-    const containerName = String((options as any)?.container ?? '').trim() || derivedContainerName;
-
-    const hostPort = await resolveHostPort(containerName, containerPort);
-    const token = await readTokenFromContainer(containerName);
-    await waitForHealth(hostPort, token);
-
-    if (cwd) {
-      const ensureCmd = mkdir
-        ? `mkdir -p ${bashQuote(cwd)}`
-        : `test -d ${bashQuote(cwd)} || (echo "cwd does not exist: ${cwd} (pass --mkdir to create)" 1>&2; exit 1)`;
-      const ensured = await dvmExec(containerName, 'bash', ['-lc', ensureCmd]);
-      if (ensured.code !== 0) {
-        throw new Error(ensured.stderr || ensured.stdout || `failed ensuring --cwd: ${cwd}`);
-      }
-    }
-
-    const canonicalGroup = group ? await ensureCanonicalGroup(group, repoPath) : null;
-    const registry = await loadRegistry();
-    // Enforce unique display names (unless this is updating the same id).
-    for (const [k, v] of Object.entries((registry as any)?.drones ?? {})) {
-        if (String((v as any)?.name ?? '').trim() === displayName && String(k) !== String(stableId)) {
-          throw new Error(`drone already exists: ${displayName}`);
-        }
-    }
-    const at = new Date().toISOString();
-    const importedEntry = {
-        id: stableId,
-        runtime: 'container' as const,
-        name: displayName,
-        containerName,
-        group,
-        groupId: canonicalGroup?.id,
-        cwd,
-        hostPort,
-        containerPort,
-        token,
-        repoPath,
-        ...(persistVolume === false ? { persistVolume: false } : {}),
-        createdAt: at,
-      };
-    await persistRealDroneEntry(stableId, importedEntry);
-
-    printCommandOutput({ ok: true, id: stableId, runtime: 'container', name: displayName, containerName, hostPort, containerPort, ...(cwd ? { cwd } : {}) });
+    const result = await importContainerDroneRuntime({
+      name,
+      repoPath: parsed.repoPath,
+      group: parsed.group,
+      containerPort: parsed.containerPort,
+      cwd: parsed.cwd,
+      mkdir: parsed.mkdir,
+      droneId: parsed.droneId,
+      persistVolume: parsed.persistVolume,
+      containerName: String((options as any)?.container ?? '').trim() || undefined,
+    });
+    printCommandOutput(result);
   });
-
 program
   .command('rm')
   .alias('remove')

@@ -128,6 +128,18 @@ async function copyBuiltDroneHubUi(root) {
   await fs.cp(source, target, { recursive: true });
 }
 
+const CONTAINER_RUNTIME_FILES = ['daemon.bundle.js', 'blip.js', 'mcp-http-stdio-bridge.js'];
+
+async function packageContainerRuntime(root) {
+  const dist = path.join(root, 'dist');
+  const target = path.join(dist, 'container-runtime');
+  await fs.rm(target, { recursive: true, force: true });
+  await fs.mkdir(target, { recursive: true });
+  for (const fileName of CONTAINER_RUNTIME_FILES) {
+    await fs.copyFile(path.join(dist, fileName), path.join(target, fileName));
+  }
+}
+
 async function main() {
   const root = path.resolve(__dirname, '..');
   await removeFileBestEffort(path.join(root, 'dist', 'fleet.js'));
@@ -141,6 +153,7 @@ async function main() {
   runOrThrow('bun', mcpBridgeBundleArgs(root), { cwd: root });
   await assertDaemonBundleIsSelfContained(root);
   await assertBlipBundleHasErrorDetails(root);
+  await packageContainerRuntime(root);
   await copyDroneHubElectronMain(root);
   await copyBuiltDroneHubUi(root);
   await chmodExecutableBestEffort(path.join(root, 'dist', 'blip.js'));
@@ -152,6 +165,7 @@ async function main() {
 
 module.exports = {
   blipBundleArgs,
+  CONTAINER_RUNTIME_FILES,
   daemonBundleArgs,
   mcpBridgeBundleArgs,
 };

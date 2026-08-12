@@ -61,6 +61,7 @@ type ChatPromptRuntimeDependencyName =
   | 'createDroneChat'
   | 'createDronePendingPromptStore'
   | 'createDroneProvisioningController'
+  | 'createDroneRuntime'
   | 'defaultDaemonReadyTimeoutMs'
   | 'defaultPendingPromptEnqueueRetryDelayMs'
   | 'defaultPromptEnqueueTimeoutMs'
@@ -89,6 +90,7 @@ type ChatPromptRuntimeDependencyName =
   | 'hubChatSessionName'
   | 'hubLog'
   | 'importChatFromRegistry'
+  | 'importContainerDroneRuntime'
   | 'inferChatAgent'
   | 'hasInFlightPriorPendingPrompt'
   | 'isDraftChatEntry'
@@ -133,7 +135,6 @@ type ChatPromptRuntimeDependencyName =
   | 'resolveCanonicalDroneOrPendingForReadRef'
   | 'resolveChatTmuxCommand'
   | 'resolveCodexTurnRuntime'
-  | 'resolveDroneCliPath'
   | 'resolveDroneDaemonClientForEntry'
   | 'resolveDroneEnvironmentConfig'
   | 'resolveEffectiveLlmProvider'
@@ -142,7 +143,6 @@ type ChatPromptRuntimeDependencyName =
   | 'resolveManagedChatMcpEnv'
   | 'resolvePendingDroneDisplayName'
   | 'resolveTranscriptPromptAt'
-  | 'runNodeCli'
   | 'sameAgentPlan'
   | 'setChatAgentConfig'
   | 'setDroneHubMetaByIdentity'
@@ -213,6 +213,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     createDroneChat,
     createDronePendingPromptStore,
     createDroneProvisioningController,
+    createDroneRuntime,
     defaultDaemonReadyTimeoutMs,
     defaultPendingPromptEnqueueRetryDelayMs,
     defaultPromptEnqueueTimeoutMs,
@@ -241,6 +242,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     hubChatSessionName,
     hubLog,
     importChatFromRegistry,
+    importContainerDroneRuntime,
     inferChatAgent,
     hasInFlightPriorPendingPrompt,
     isDraftChatEntry,
@@ -288,7 +290,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     resolveCanonicalDroneOrPendingForReadRef,
     resolveChatTmuxCommand,
     resolveCodexTurnRuntime,
-    resolveDroneCliPath,
     resolveDroneDaemonClientForEntry,
     resolveDroneEnvironmentConfig,
     resolveEffectiveLlmProvider,
@@ -297,7 +298,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     resolveManagedChatMcpEnv,
     resolvePendingDroneDisplayName,
     resolveTranscriptPromptAt,
-    runNodeCli,
     sameAgentPlan,
     setChatAgentConfig,
     setDroneHubMetaByIdentity,
@@ -3274,9 +3274,9 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     normalizePendingStartupPrompts,
     nowIso,
     parseSeedAgent,
-    resolveDroneCliPath,
+    createDroneRuntime,
+    importContainerDroneRuntime,
     resolvePendingDroneDisplayName,
-    runNodeCli,
     setChatAgentConfig,
     registerProvisionedPromptHandoff,
     sharedPathsOverlapRepository: (repositoryPath: string) =>

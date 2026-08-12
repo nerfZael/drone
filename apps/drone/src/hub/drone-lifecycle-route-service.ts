@@ -31,7 +31,6 @@ function createDroneLifecycleServiceHandler(
     dvmBaseSet,
     dvmStop,
     enqueueProvisioning,
-    fileExists,
     findDroneIdByRef,
     hubLog,
     isDraftDroneEntry,
@@ -55,7 +54,6 @@ function createDroneLifecycleServiceHandler(
     renameDrone,
     resolveArchiveDeleteAtIso,
     resolveCanonicalDroneOrPendingForReadRef,
-    resolveDroneCliPath,
     resolveDroneOrPendingForReadRef,
     resolveDroneOrRespond,
     resolveEffectiveDeleteActionSettings,
@@ -210,11 +208,6 @@ function createDroneLifecycleServiceHandler(
         const pendingEntry = regAnySnapshot?.pending?.[droneId];
         if (!isDraftDroneEntry(pendingEntry)) {
           json(res, 409, { ok: false, error: `drone is not a draft: ${droneRef}` });
-          return;
-        }
-        const droneCli = resolveDroneCliPath();
-        if (!(await fileExists(droneCli))) {
-          json(res, 500, { ok: false, error: `drone CLI not found at ${droneCli}` });
           return;
         }
         let published: { id: string; name: string; runtime: DroneRuntime } | null = null;

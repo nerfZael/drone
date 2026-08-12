@@ -4,6 +4,7 @@ import { loadRegistry, updateRegistry } from '../src/host/registry';
 import { upsertCanonicalDroneLifecycle } from '../src/hub/drone-lifecycle-service';
 import { createPendingDroneStateHelpers } from '../src/hub/drone-pending-state';
 import { createDroneProvisioningController } from '../src/hub/drone-provisioning';
+import { DroneRuntimeContainerExistsError } from '../src/hub/drone-runtime-creation-service';
 import { withTempDroneDataDir } from './test-helpers';
 
 function sleep(ms: number): Promise<void> {
@@ -20,11 +21,12 @@ async function waitFor(check: () => Promise<boolean>, timeoutMs = 1500): Promise
 }
 
 function createControllerHarness(opts?: {
-  duringRunNodeCli?: (context: { droneId: string; displayName: string }) => Promise<void>;
+  duringCreateRuntime?: (context: { droneId: string; displayName: string }) => Promise<void>;
   duringPostCreateSync?: (context: { droneId: string; stage: string }) => Promise<void>;
   failAttachedPromptStaging?: boolean;
   reservedPromptIds?: string[];
-  runNodeCliResult?: { code: number; stdout: string; stderr: string };
+  createRuntimeError?: string;
+  importRuntimeError?: string;
 }) {
   const pendingStateHelpers = createPendingDroneStateHelpers({
     normalizeChatImageAttachments: (raw: unknown) => (Array.isArray(raw) ? (raw as any[]) : []),
@@ -39,7 +41,8 @@ function createControllerHarness(opts?: {
   const syncSkillLibraryCalls: any[] = [];
   const syncMcpServersCalls: any[] = [];
   const syncSharedPathsCalls: any[] = [];
-  const runNodeCliCalls: string[][] = [];
+  const createRuntimeCalls: any[] = [];
+  const importRuntimeCalls: any[] = [];
   const pendingPromptPumpCalls: any[] = [];
   const cancelPendingPromptsCalls: any[] = [];
   const hubLogCalls: any[] = [];
@@ -89,15 +92,16 @@ function createControllerHarness(opts?: {
     nowIso: () => '2026-03-26T12:00:00.000Z',
     parseSeedAgent: (raw: any) => (raw && typeof raw === 'object' ? raw : null),
     registerProvisionedPromptHandoff: (handoff) => provisionedPromptHandoffs.push(handoff),
-    resolveDroneCliPath: () => '/mock/drone-cli.js',
     resolvePendingDroneDisplayName: pendingStateHelpers.resolvePendingDroneDisplayName,
-    runNodeCli: async (args) => {
-      runNodeCliCalls.push([...args]);
-      const displayName = String(args[2] ?? '').trim();
-      const droneIdIndex = args.indexOf('--drone-id');
-      const droneId = droneIdIndex >= 0 ? String(args[droneIdIndex + 1] ?? '').trim() : '';
-      await opts?.duringRunNodeCli?.({ droneId, displayName });
-      if (opts?.runNodeCliResult && opts.runNodeCliResult.code !== 0) return opts.runNodeCliResult;
+    createDroneRuntime: async (input) => {
+      createRuntimeCalls.push({ ...input });
+      const displayName = String(input.name ?? '').trim();
+      const droneId = String(input.droneId ?? '').trim();
+      await opts?.duringCreateRuntime?.({ droneId, displayName });
+      if (opts?.createRuntimeError === 'container already exists') {
+        throw new DroneRuntimeContainerExistsError('drone-existing', opts.createRuntimeError);
+      }
+      if (opts?.createRuntimeError) throw new Error(opts.createRuntimeError);
       await upsertCanonicalDroneLifecycle('real', droneId, {
         id: droneId,
         name: 'Untitled 25',
@@ -106,7 +110,22 @@ function createControllerHarness(opts?: {
         createdAt: '2026-03-26T11:00:00.000Z',
         chats: {},
       });
-      return opts?.runNodeCliResult ?? { code: 0, stdout: '', stderr: '' };
+      return { ok: true };
+    },
+    importContainerDroneRuntime: async (input) => {
+      importRuntimeCalls.push({ ...input });
+      if (opts?.importRuntimeError) throw new Error(opts.importRuntimeError);
+      input.onPhaseTiming?.('resolveHostPort', 12.3);
+      const droneId = String(input.droneId ?? '').trim();
+      await upsertCanonicalDroneLifecycle('real', droneId, {
+        id: droneId,
+        name: String(input.name ?? '').trim(),
+        runtime: 'container',
+        containerName: `drone-${droneId}`,
+        createdAt: '2026-03-26T11:00:00.000Z',
+        chats: {},
+      });
+      return { ok: true };
     },
     setChatAgentConfig: async (opts) => {
       setChatAgentConfigCalls.push(opts);
@@ -138,7 +157,8 @@ function createControllerHarness(opts?: {
     syncSkillLibraryCalls,
     syncMcpServersCalls,
     syncSharedPathsCalls,
-    runNodeCliCalls,
+    createRuntimeCalls,
+    importRuntimeCalls,
     pendingPromptPumpCalls,
     cancelPendingPromptsCalls,
     hubLogCalls,
@@ -171,7 +191,7 @@ describe('drone provisioning controller', () => {
       await harness.controller.stopProvisioning();
 
       let registry: any = await loadRegistry();
-      expect(harness.runNodeCliCalls).toHaveLength(0);
+      expect(harness.createRuntimeCalls).toHaveLength(0);
       expect(registry?.pending?.['drone-pre-create']?.phase).toBe('starting');
 
       harness.controller.startProvisioning();
@@ -180,7 +200,7 @@ describe('drone provisioning controller', () => {
         registry = await loadRegistry();
         return Boolean(registry?.drones?.['drone-pre-create']);
       });
-      expect(harness.runNodeCliCalls).toHaveLength(1);
+      expect(harness.createRuntimeCalls).toHaveLength(1);
       await harness.controller.stopProvisioning();
     });
   });
@@ -212,7 +232,7 @@ describe('drone provisioning controller', () => {
         releaseCreate = resolve;
       });
       const harness = createControllerHarness({
-        duringRunNodeCli: async () => {
+        duringCreateRuntime: async () => {
           markCreateStarted();
           await createRelease;
         },
@@ -359,7 +379,7 @@ describe('drone provisioning controller', () => {
     });
   });
 
-  test('preserves a pending auto-rename that lands while the CLI create is running', async () => {
+  test('preserves a pending auto-rename that lands while runtime creation is running', async () => {
     await withTempDroneDataDir('drone-provisioning-', async () => {
       await updateRegistry((reg: any) => {
         reg.pending = {
@@ -378,7 +398,7 @@ describe('drone provisioning controller', () => {
       });
 
       const harness = createControllerHarness({
-        duringRunNodeCli: async ({ droneId }) => {
+        duringCreateRuntime: async ({ droneId }) => {
           await updateRegistry((reg: any) => {
             reg.pending[droneId].name = 'file-transfer-tool';
           });
@@ -390,6 +410,9 @@ describe('drone provisioning controller', () => {
         const reg: any = await loadRegistry();
         return !reg?.pending?.['drone-race'] && Boolean(reg?.drones?.['drone-race']);
       });
+      await waitFor(async () =>
+        harness.hubLogCalls.some((call) => call[1] === 'drone provisioning timing'),
+      );
 
       const reg: any = await loadRegistry();
       expect(reg?.drones?.['drone-race']?.name).toBe('file-transfer-tool');
@@ -759,6 +782,9 @@ describe('drone provisioning controller', () => {
           harness.setChatAgentConfigCalls.length > 0
         );
       });
+      await waitFor(async () =>
+        harness.hubLogCalls.some((call) => call[1] === 'drone provisioning timing'),
+      );
 
       const reg: any = await loadRegistry();
       expect(reg?.drones?.['drone-image-first']?.chats?.default).toMatchObject({
@@ -808,9 +834,55 @@ describe('drone provisioning controller', () => {
         const reg: any = await loadRegistry();
         return !reg?.pending?.['drone-no-volume'] && Boolean(reg?.drones?.['drone-no-volume']);
       });
+      await waitFor(async () =>
+        harness.hubLogCalls.some((call) => call[1] === 'drone provisioning timing'),
+      );
 
-      expect(harness.runNodeCliCalls).toHaveLength(1);
-      expect(harness.runNodeCliCalls[0]).toContain('--no-persist-volume');
+      expect(harness.createRuntimeCalls).toHaveLength(1);
+      expect(harness.createRuntimeCalls[0]).toMatchObject({ persistVolume: false });
+    });
+  });
+
+  test('imports an existing container in-process and records its inner timing', async () => {
+    await withTempDroneDataDir('drone-provisioning-', async () => {
+      await updateRegistry((reg: any) => {
+        reg.pending = {
+          'drone-existing': {
+            id: 'drone-existing',
+            name: 'existing-runtime',
+            runtime: 'container',
+            repoPath: '',
+            containerPort: 7777,
+            createdAt: '2026-03-26T11:00:00.000Z',
+            updatedAt: '2026-03-26T11:00:00.000Z',
+            phase: 'starting',
+            message: 'Starting...',
+          },
+        };
+      });
+
+      const harness = createControllerHarness({ createRuntimeError: 'container already exists' });
+      harness.controller.enqueueProvisioning('drone-existing');
+
+      await waitFor(async () => {
+        const reg: any = await loadRegistry();
+        return !reg?.pending?.['drone-existing'] && Boolean(reg?.drones?.['drone-existing']);
+      });
+
+      expect(harness.importRuntimeCalls).toHaveLength(1);
+      expect(harness.importRuntimeCalls[0]).toMatchObject({
+        droneId: 'drone-existing',
+        cwd: '/dvm-data/home',
+        mkdir: true,
+      });
+      await waitFor(async () =>
+        harness.hubLogCalls.some((call) => call[1] === 'drone provisioning timing'),
+      );
+      const timingLog = harness.hubLogCalls.find((call) => call[1] === 'drone provisioning timing');
+      expect(timingLog?.[2]?.phases).toMatchObject({
+        importRuntime: expect.any(Number),
+        'importRuntime.resolveHostPort': 12.3,
+      });
     });
   });
 
@@ -842,7 +914,7 @@ describe('drone provisioning controller', () => {
       });
 
       const harness = createControllerHarness({
-        runNodeCliResult: { code: 1, stdout: '', stderr: 'runtime import failed' },
+        createRuntimeError: 'runtime import failed',
       });
       harness.controller.enqueueProvisioning('drone-failed');
 

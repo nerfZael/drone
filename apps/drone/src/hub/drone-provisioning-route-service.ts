@@ -184,7 +184,6 @@ function createDroneProvisioningServiceHandler(
     enqueueProvisioning,
     ensureCanonicalGroup,
     resolveCanonicalGroupReference,
-    fileExists,
     findDroneEntryByIdentity,
     findDroneIdByRef,
     gitResolveRemoteBranchForCreate,
@@ -213,7 +212,6 @@ function createDroneProvisioningServiceHandler(
     parseSeedAgent,
     refreshDroneChatEventSnapshot,
     refreshDroneRegistryBroadcasterSnapshot,
-    resolveDroneCliPath,
     resolveDroneOrRespond,
     resolveEffectiveLlmProvider,
     resolveStableDroneOrPendingIdFromRef,
@@ -304,12 +302,6 @@ function createDroneProvisioningServiceHandler(
             });
             return;
           }
-        }
-
-        const droneCli = resolveDroneCliPath();
-        if (!createAsDraft && !(await fileExists(droneCli))) {
-          json(res, 500, { ok: false, error: `drone CLI not found at ${droneCli}` });
-          return;
         }
 
         const preRegAny: any = await loadRegistry();

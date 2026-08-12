@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
-import { createReadStream, existsSync } from 'node:fs';
+import { createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
@@ -333,8 +333,10 @@ import { isUngroupedGroupName } from './application/group-name';
 import type { HubApplicationEvent } from './application/hub-application-events';
 import { createSidebarCommandService } from './sidebar-command-service';
 import {
+  assertContainerDroneRuntimePayloadReady,
   assertDroneDaemonRuntimeReady,
   launchHostDroneDaemon,
+  resolveContainerDroneRuntimePayloadDir,
   resolveDroneDaemonRuntimeDir,
 } from './drone-daemon-runtime';
 import { hubChatSessionName } from './terminal-open';
@@ -517,6 +519,7 @@ import {
 } from './drone-pending-state';
 import { createDronePendingPromptStore, type PendingPrompt } from './drone-pending-prompts';
 import { createDroneProvisioningController } from './drone-provisioning';
+import { createDroneRuntime, importContainerDroneRuntime } from './drone-runtime-creation-service';
 import { createDockerSnapshotRuntime } from './docker-snapshot-runtime';
 import { createDroneStatusRuntime } from './drone-status-runtime';
 import { startHubHttpTransport } from './hub-http-transport';
@@ -3151,6 +3154,7 @@ function createHubRuntimeGraph(
     createDronePendingPromptStore,
     createDroneChat,
     createDroneProvisioningController,
+    createDroneRuntime,
     defaultDaemonReadyTimeoutMs,
     defaultPendingPromptEnqueueRetryDelayMs,
     defaultPromptEnqueueTimeoutMs,
@@ -3180,6 +3184,7 @@ function createHubRuntimeGraph(
     hubChatSessionName,
     hubLog,
     importChatFromRegistry,
+    importContainerDroneRuntime,
     inferChatAgent,
     isDraftChatEntry,
     isNotFoundErrorMessage,
@@ -3227,7 +3232,6 @@ function createHubRuntimeGraph(
     resolveCanonicalDroneOrPendingForReadRef,
     resolveChatTmuxCommand,
     resolveCodexTurnRuntime,
-    resolveDroneCliPath,
     resolveDroneDaemonClientForEntry,
     resolveDroneEnvironmentConfig,
     resolveEffectiveLlmProvider,
@@ -3236,7 +3240,6 @@ function createHubRuntimeGraph(
     resolveManagedChatMcpEnv,
     resolvePendingDroneDisplayName,
     resolveTranscriptPromptAt,
-    runNodeCli,
     sameAgentPlan,
     setChatAgentConfig,
     setDroneHubMetaByIdentity,
@@ -3308,13 +3311,6 @@ function createHubRuntimeGraph(
   };
 }
 
-function resolveDroneCliPath(): string {
-  // Prefer built CLI when available. In source/dev mode, fall back to src/cli.ts.
-  const jsPath = path.resolve(__dirname, '..', 'cli.js');
-  if (existsSync(jsPath)) return jsPath;
-  return path.resolve(__dirname, '..', 'cli.ts');
-}
-
 function isNotFoundErrorMessage(msg: string): boolean {
   const s = String(msg ?? '')
     .trim()
@@ -3330,6 +3326,7 @@ async function upgradeDroneDaemonInContainer(opts: {
   // the replacement has a runnable daemon.js.
   const runtimeDir = resolveDroneDaemonRuntimeDir();
   await assertDroneDaemonRuntimeReady(runtimeDir);
+  await assertContainerDroneRuntimePayloadReady(runtimeDir);
 
   const clearStagedDaemonRuntime = await dvmExec(opts.containerName, 'bash', [
     '-lc',
@@ -3342,9 +3339,12 @@ async function upgradeDroneDaemonInContainer(opts: {
         'failed clearing staged daemon runtime in container',
     );
   }
-  await dvmCopyToContainer(opts.containerName, runtimeDir, '/dvm-data/drone/dist.next', {
-    clean: false,
-  });
+  await dvmCopyToContainer(
+    opts.containerName,
+    resolveContainerDroneRuntimePayloadDir(runtimeDir),
+    '/dvm-data/drone/dist.next',
+    { clean: false },
+  );
   const verifyStagedDaemonRuntime = await dvmExec(opts.containerName, 'bash', [
     '-lc',
     'test -f /dvm-data/drone/dist.next/daemon.bundle.js -o -f /dvm-data/drone/dist.next/daemon.js || { echo "staged daemon runtime is missing a daemon entry" 1>&2; exit 1; }',
@@ -3771,86 +3771,6 @@ function defaultBuiltinChatAgentIdForDrone(droneEntry: any): BuiltinAgentId {
 
 function defaultChatAgentConfigForDrone(droneEntry: any): ChatAgentConfig {
   return { kind: 'builtin', id: defaultBuiltinChatAgentIdForDrone(droneEntry) };
-}
-
-async function runNodeCli(args: string[], opts?: { cwd?: string; timeoutMs?: number }) {
-  const envTimeoutRaw = String(process.env.DRONE_HUB_NODE_CLI_TIMEOUT_MS ?? '').trim();
-  const envTimeout = envTimeoutRaw ? Number(envTimeoutRaw) : NaN;
-  const timeoutMs =
-    typeof opts?.timeoutMs === 'number' && Number.isFinite(opts.timeoutMs) && opts.timeoutMs > 0
-      ? opts.timeoutMs
-      : Number.isFinite(envTimeout) && envTimeout > 0
-        ? envTimeout
-        : 10 * 60_000;
-
-  let nodeArgs = [...args];
-  const cliEntry = String(nodeArgs[0] ?? '').trim();
-  if (cliEntry.endsWith('.ts')) {
-    try {
-      const tsNodeRegister = requireForHub.resolve('ts-node/register');
-      nodeArgs = ['-r', tsNodeRegister, ...nodeArgs];
-    } catch {
-      const builtCliPath = path.resolve(
-        path.dirname(cliEntry),
-        '..',
-        'dist',
-        `${path.basename(cliEntry, '.ts')}.js`,
-      );
-      if (existsSync(builtCliPath)) nodeArgs = [builtCliPath, ...nodeArgs.slice(1)];
-    }
-  }
-
-  const r = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
-    const child = spawn(process.execPath, nodeArgs, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: process.env,
-      cwd: opts?.cwd,
-    });
-    let stdout = '';
-    let stderr = '';
-    let done = false;
-    let timeout: any = null;
-
-    const finish = (res: { code: number; stdout: string; stderr: string }) => {
-      if (done) return;
-      done = true;
-      if (timeout) clearTimeout(timeout);
-      resolve(res);
-    };
-
-    child.stdout.on('data', (d) => (stdout += d.toString('utf8')));
-    child.stderr.on('data', (d) => (stderr += d.toString('utf8')));
-
-    if (timeoutMs > 0) {
-      timeout = setTimeout(() => {
-        try {
-          child.kill('SIGTERM');
-        } catch {
-          // ignore
-        }
-        setTimeout(() => {
-          try {
-            child.kill('SIGKILL');
-          } catch {
-            // ignore
-          }
-        }, 1500);
-        finish({
-          code: 124,
-          stdout,
-          stderr: `${stderr}${stderr.trim() ? '\n\n' : ''}Timed out after ${Math.round(timeoutMs / 1000)}s`,
-        });
-      }, timeoutMs);
-    }
-
-    child.once('error', (err: any) =>
-      finish({ code: 127, stdout, stderr: `${stderr}${err?.message ?? String(err)}` }),
-    );
-    child.once('close', (code) =>
-      finish({ code: typeof code === 'number' ? code : 1, stdout, stderr }),
-    );
-  });
-  return r;
 }
 
 function llmProviderEnvLogMeta() {
@@ -5664,7 +5584,6 @@ async function startDroneHubApiServerWithLifecycle(
     dvmBaseSet,
     dvmStop,
     enqueueProvisioning,
-    fileExists,
     findDroneIdByRef,
     hubLog,
     isDraftDroneEntry,
@@ -5688,7 +5607,6 @@ async function startDroneHubApiServerWithLifecycle(
     renameDrone: renameDroneCommand,
     resolveArchiveDeleteAtIso,
     resolveCanonicalDroneOrPendingForReadRef,
-    resolveDroneCliPath,
     resolveDroneOrPendingForReadRef,
     resolveDroneOrRespond,
     resolveEffectiveDeleteActionSettings,
@@ -5979,7 +5897,6 @@ async function startDroneHubApiServerWithLifecycle(
     enqueueProvisioning,
     ensureCanonicalGroup,
     resolveCanonicalGroupReference,
-    fileExists,
     findDroneEntryByIdentity,
     findDroneIdByRef,
     getDroneRegistrySseLastSnapshot: () => droneRegistryBroadcaster.snapshot,
@@ -6008,7 +5925,6 @@ async function startDroneHubApiServerWithLifecycle(
     parseSeedAgent,
     refreshDroneChatEventSnapshot,
     refreshDroneRegistryBroadcasterSnapshot,
-    resolveDroneCliPath,
     resolveDroneOrRespond,
     resolveEffectiveLlmProvider,
     resolveStableDroneOrPendingIdFromRef,
