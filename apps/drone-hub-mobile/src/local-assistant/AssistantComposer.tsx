@@ -18,7 +18,6 @@ import {
   resolveMobileVoiceTranscriptDraft,
 } from './mobile-voice-transcription-model';
 import { useSharedMobileChatVoiceRecorder } from './MobileChatVoiceRecorderContext';
-import { MobileContinuousDictationDraft } from './MobileContinuousDictationDraft';
 import { MobileContinuousVoiceModePicker } from './MobileContinuousVoiceModePicker';
 import type { MobileContinuousVoiceMode } from './mobile-continuous-dictation';
 import {
@@ -236,7 +235,6 @@ export function AssistantComposer({
     actionInFlight: continuousActionInFlight,
     startBlocked: continuousVoiceActionDisabled,
     start: startContinuousVoice,
-    editDictation,
     finish: finishContinuousVoice,
     togglePause: toggleContinuousVoicePause,
     cancel: cancelContinuousVoice,
@@ -254,8 +252,6 @@ export function AssistantComposer({
   const continuousVoiceOwned = continuousSession.owned;
   const continuousVoiceElsewhere = continuousSession.elsewhere;
   const continuousDictationOwned = continuousSession.kind === 'dictation';
-  const continuousDictationShadow = continuousDictationOwned ? continuousSession.text : '';
-  const hasContinuousDictationShadow = Boolean(continuousDictationShadow.trim());
   const continuousVoiceMode = continuousSession.mode;
   const expanded =
     alwaysExpanded ||
@@ -276,7 +272,7 @@ export function AssistantComposer({
       voiceActive,
     });
   const canSend =
-    (Boolean(value.trim()) || hasAttachments || voiceCanStop || hasContinuousDictationShadow) &&
+    (Boolean(value.trim()) || hasAttachments || voiceCanStop) &&
     !sending &&
     editable &&
     !sendBlocked &&
@@ -392,13 +388,6 @@ export function AssistantComposer({
     setContinuousModePickerOpen(true);
   }, []);
 
-  const editContinuousDictation = React.useCallback(async () => {
-    if (await editDictation()) {
-      suppressInputFocusRef.current = false;
-      requestAnimationFrame(() => inputRef.current?.focus());
-    }
-  }, [editDictation]);
-
   const stopVoiceForAction = React.useCallback(
     async (action: 'append' | 'send'): Promise<string | null> => {
       if (!voiceCanStop || voiceActionInFlight) return null;
@@ -471,14 +460,6 @@ export function AssistantComposer({
           Boolean(leadingControl) && styles.composerWithLeadingControl,
         ]}
       >
-        {hasContinuousDictationShadow ? (
-          <MobileContinuousDictationDraft
-            status={continuousVoiceOwned ? continuousSession.status : 'idle'}
-            disabled={continuousActionInFlight}
-            onPress={() => void editContinuousDictation()}
-            text={continuousDictationShadow}
-          />
-        ) : null}
         <ThemedTextInput
           ref={inputRef}
           value={value}
@@ -674,7 +655,7 @@ export function AssistantComposer({
                 <VoiceIconButton
                   label={
                     continuousVoiceMode === 'dictation'
-                      ? 'Cancel continuous dictation and discard text'
+                      ? 'Cancel continuous dictation and keep transcribed text'
                       : 'Cancel continuous voice and discard unsent audio'
                   }
                   icon={X}

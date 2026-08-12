@@ -44,24 +44,15 @@ import {
   takeChatComposerDraftSnapshot,
   type ChatComposerDraftSnapshot,
 } from './chat-composer-draft';
-import {
-  useContinuousDictation,
-  type ContinuousDictationShadowSnapshot,
-} from './ContinuousDictationContext';
-import {
-  continuousDictationLinesText,
-  mergeDraftWithContinuousDictation,
-} from './continuous-dictation-draft';
+import { useContinuousDictation } from './ContinuousDictationContext';
+import { mergeDraftWithContinuousDictation } from './continuous-dictation-draft';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { preloadMonacoEditor } from '../files/monaco-editor-loader';
 
 const CHAT_INPUT_TEXTAREA_MIN_HEIGHT_PX = 36;
 const CHAT_INPUT_TEXTAREA_MAX_HEIGHT_PX = 160;
 
-type ChatSubmissionSnapshot = ChatComposerDraftSnapshot<DraftChatAttachment> & {
-  regularPrompt: string;
-  dictationShadow: ContinuousDictationShadowSnapshot | null;
-};
+type ChatSubmissionSnapshot = ChatComposerDraftSnapshot<DraftChatAttachment>;
 
 function CodeEditorIcon() {
   return (
@@ -237,6 +228,7 @@ export function ChatInput({
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const onDraftContentChangeRef = React.useRef(onDraftContentChange);
   onDraftContentChangeRef.current = onDraftContentChange;
+  const appendContinuousDictationRef = React.useRef<(text: string) => void>(() => undefined);
   const voiceActionInFlightRef = React.useRef(false);
   const voiceActionTokenRef = React.useRef(0);
   const persistenceKey = String(draftPersistenceKey ?? '').trim();
@@ -292,6 +284,7 @@ export function ChatInput({
     return registerContinuousDictationComposer({
       id: continuousDictationComposerId,
       isEligible: continuousDictationEligible,
+      appendTranscript: (text) => appendContinuousDictationRef.current(text),
     });
   }, [
     continuousDictationComposerId,
@@ -301,12 +294,8 @@ export function ChatInput({
   ]);
   const continuousDictationOwnsComposer =
     continuousDictation?.activeComposerId === continuousDictationComposerId;
-  const continuousDictationShadow = continuousDictationOwnsComposer
-    ? continuousDictation.shadowText
-    : '';
   const continuousDictationTargeted = Boolean(
-    continuousDictationOwnsComposer &&
-    (continuousDictation?.status !== 'idle' || continuousDictationShadow.trim()),
+    continuousDictationOwnsComposer && continuousDictation?.status !== 'idle',
   );
 
   const attachmentsOn = attachmentsEnabled !== false;
@@ -358,6 +347,9 @@ export function ChatInput({
     },
     [controlledDraftEnabled, onDraftValueChange, persistenceKey, setChatInputDraft],
   );
+  appendContinuousDictationRef.current = (text) => {
+    setDraft((current) => mergeDraftWithContinuousDictation(current, text));
+  };
 
   const setComposerAttachments = React.useCallback(
     (next: React.SetStateAction<DraftChatAttachment[]>, markChanged = true) => {
@@ -473,23 +465,21 @@ export function ChatInput({
   const voicePauseButtonDisabled = !voiceRecordingCanPauseOrStop || voiceActionInFlight;
   const voiceStopButtonDisabled = !voiceRecordingCanPauseOrStop || voiceActionInFlight;
   const trimmed = draft.trim();
-  const hasContinuousDictationShadow = continuousDictationShadow.trim().length > 0;
   const sendDisabled =
     composerLocked ||
     voiceActionInFlight ||
     (trimmed.length === 0 &&
       attachments.length === 0 &&
-      !voiceRecordingActive &&
-      !hasContinuousDictationShadow);
+      !voiceRecordingActive);
   const composerExpanded =
     editorMode ||
     alwaysExpanded ||
     composerFocused ||
     trimmed.length > 0 ||
-    hasContinuousDictationShadow ||
     attachments.length > 0 ||
     Boolean(composerContext) ||
     Boolean(promptError || attachmentError) ||
+    continuousDictationTargeted ||
     continuousVoiceActive ||
     (voiceRecordingActive && !compactVoiceRecording);
   const voiceRecordingLabel =
@@ -579,22 +569,11 @@ export function ChatInput({
   }
 
   function activateContinuousDictationComposer() {
-    if (!continuousDictation) return;
     focusContinuousDictationComposer();
-    const transcript = continuousDictation.consumeShadow(continuousDictationComposerId);
-    if (!transcript) return;
-    const next = mergeDraftWithContinuousDictation(draftRef.current, transcript);
-    setDraft(next);
-    rememberComposerSelection({ start: next.length, end: next.length });
   }
 
   function focusContinuousDictationComposer() {
     continuousDictation?.focusComposer(continuousDictationComposerId);
-  }
-
-  function materializeContinuousDictationAndFocus() {
-    activateContinuousDictationComposer();
-    window.requestAnimationFrame(() => focusComposerAtSelection());
   }
 
   function preserveEditorFocus(event: React.MouseEvent<HTMLButtonElement>) {
@@ -837,29 +816,15 @@ export function ChatInput({
   }
 
   function takeSubmissionSnapshot(): ChatSubmissionSnapshot | null {
-    const dictationShadow =
-      continuousDictation?.takeShadowSnapshot(continuousDictationComposerId) ?? null;
-    const regularSnapshot = takeChatComposerDraftSnapshot<DraftChatAttachment>({
+    const snapshot = takeChatComposerDraftSnapshot<DraftChatAttachment>({
       draft: draftRef,
       attachments: attachmentsRef,
       revision: draftRevisionRef,
     });
-    if (!regularSnapshot && !dictationShadow) return null;
-    if (regularSnapshot) {
-      setDraft('', false);
-      setComposerAttachments([], false);
-    }
-    const regularPrompt = regularSnapshot?.prompt ?? '';
-    const shadowText = dictationShadow
-      ? continuousDictationLinesText(dictationShadow.lines)
-      : '';
-    return {
-      prompt: mergeDraftWithContinuousDictation(regularPrompt, shadowText),
-      regularPrompt,
-      attachments: regularSnapshot?.attachments ?? [],
-      revision: regularSnapshot?.revision ?? draftRevisionRef.current,
-      dictationShadow,
-    };
+    if (!snapshot) return null;
+    setDraft('', false);
+    setComposerAttachments([], false);
+    return snapshot;
   }
 
   function restoreSubmissionSnapshot(snapshot: ChatSubmissionSnapshot) {
@@ -867,18 +832,11 @@ export function ChatInput({
       draft: draftRef,
       attachments: attachmentsRef,
       revision: draftRevisionRef,
-      snapshot: {
-        prompt: snapshot.regularPrompt,
-        attachments: snapshot.attachments,
-        revision: snapshot.revision,
-      },
+      snapshot,
     });
-    if (restored.draftRestored) setDraft(snapshot.regularPrompt, false);
+    if (restored.draftRestored) setDraft(snapshot.prompt, false);
     if (restored.attachmentsRestored) setComposerAttachments(snapshot.attachments, false);
     else revokeDraftImagePreviewUrls(snapshot.attachments);
-    if (snapshot.dictationShadow) {
-      continuousDictation?.restoreShadowSnapshot(snapshot.dictationShadow);
-    }
     return restored;
   }
 
@@ -1103,26 +1061,6 @@ export function ChatInput({
             />
           ) : null}
 
-          {hasContinuousDictationShadow ? (
-            <button
-              type="button"
-              onClick={materializeContinuousDictationAndFocus}
-              className="mx-3 mt-2 block rounded border border-dashed border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-3 py-2 text-left transition-colors hover:border-[var(--accent)]"
-              style={{ width: 'calc(100% - 1.5rem)' }}
-              title="Click to edit this dictated text"
-            >
-              <span className="block text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--accent)]">
-                Dictation · click to edit
-              </span>
-              <span
-                className="mt-1 block whitespace-pre-wrap text-[var(--chat-text-size)] leading-5 text-[var(--fg-secondary)] opacity-80"
-                aria-live="polite"
-              >
-                {continuousDictationShadow}
-              </span>
-            </button>
-          ) : null}
-
           <div className={`relative flex ${editorMode ? 'items-stretch' : 'items-center'} ${composerExpanded ? (editorMode ? '' : 'px-4') : 'min-h-[3.125rem] px-[.5625rem]'}`}>
             {!composerExpanded && compactVoiceRecording && voiceRecordingActive ? (
               <>
@@ -1314,8 +1252,7 @@ export function ChatInput({
                   hasContent:
                     Boolean(draftRef.current.trim()) ||
                     attachmentsRef.current.length > 0 ||
-                    voiceRecordingActive ||
-                    hasContinuousDictationShadow,
+                    voiceRecordingActive,
                 });
                 if (!shortcutAction) return;
                 if (shortcutAction === 'new-chat' && !onSendInNewChat) return;

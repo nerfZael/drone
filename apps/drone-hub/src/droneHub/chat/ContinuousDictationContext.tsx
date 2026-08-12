@@ -5,21 +5,12 @@ import {
   browserMicrophoneCoordinator,
   type BrowserMicrophoneOwner,
 } from './browser-microphone-coordinator';
-import {
-  continuousDictationLinesText,
-  restoreContinuousDictationLines,
-  type ContinuousDictationLine,
-} from './continuous-dictation-draft';
 import { createContinuousDictationToggle } from './create-continuous-dictation-toggle';
-
-export type ContinuousDictationShadowSnapshot = {
-  targetId: string;
-  lines: ContinuousDictationLine[];
-};
 
 type ContinuousDictationComposer = {
   id: string;
   isEligible(): boolean;
+  appendTranscript(text: string): void;
 };
 
 type ContinuousDictationContextValue = {
@@ -28,12 +19,8 @@ type ContinuousDictationContextValue = {
   error: string;
   microphoneOwner: BrowserMicrophoneOwner | null;
   activeComposerId: string | null;
-  shadowText: string;
   registerComposer(composer: ContinuousDictationComposer): () => void;
   focusComposer(id: string): void;
-  consumeShadow(id: string): string;
-  takeShadowSnapshot(id: string): ContinuousDictationShadowSnapshot | null;
-  restoreShadowSnapshot(snapshot: ContinuousDictationShadowSnapshot): void;
   toggle(): Promise<void>;
 };
 
@@ -42,23 +29,15 @@ const ContinuousDictationContext =
 
 export function ContinuousDictationProvider({ children }: { children: React.ReactNode }) {
   const [activeComposerId, setActiveComposerId] = React.useState<string | null>(null);
-  const [shadowLines, setShadowLines] = React.useState<ContinuousDictationLine[]>([]);
   const [error, setError] = React.useState('');
   const composersRef = React.useRef(new Map<string, ContinuousDictationComposer>());
   const activeComposerIdRef = React.useRef<string | null>(null);
-  const shadowLinesRef = React.useRef<ContinuousDictationLine[]>([]);
-  const nextLineOrderRef = React.useRef(0);
   const discardPendingRef = React.useRef<() => void>(() => undefined);
   const microphoneOwner = React.useSyncExternalStore(
     browserMicrophoneCoordinator.subscribe,
     browserMicrophoneCoordinator.getSnapshot,
     browserMicrophoneCoordinator.getSnapshot,
   );
-
-  const replaceShadowLines = React.useCallback((lines: ContinuousDictationLine[]) => {
-    shadowLinesRef.current = lines;
-    setShadowLines(lines);
-  }, []);
 
   const resolveTargetId = React.useCallback((): string | null => {
     const activeId = activeComposerIdRef.current;
@@ -76,10 +55,9 @@ export function ContinuousDictationProvider({ children }: { children: React.Reac
       if (activeComposerIdRef.current === normalized) return;
       activeComposerIdRef.current = normalized;
       setActiveComposerId(normalized);
-      replaceShadowLines([]);
       discardPendingRef.current();
     },
-    [replaceShadowLines],
+    [],
   );
 
   const ensureTargetId = React.useCallback((): string | null => {
@@ -89,7 +67,7 @@ export function ContinuousDictationProvider({ children }: { children: React.Reac
   }, [changeTarget, resolveTargetId]);
 
   const onTranscript = React.useCallback(
-    async (text: string, deliveryId: string, route: string | null): Promise<boolean> => {
+    async (text: string, _deliveryId: string, route: string | null): Promise<boolean> => {
       if (!route || route !== activeComposerIdRef.current) return true;
       const composer = composersRef.current.get(route);
       if (!composer?.isEligible()) {
@@ -98,15 +76,10 @@ export function ContinuousDictationProvider({ children }: { children: React.Reac
       }
       const cleanText = text.trim();
       if (!cleanText) return true;
-      const next = [
-        ...shadowLinesRef.current,
-        { id: deliveryId, text: cleanText, order: nextLineOrderRef.current },
-      ];
-      nextLineOrderRef.current += 1;
-      replaceShadowLines(next);
+      composer.appendTranscript(cleanText);
       return true;
     },
-    [ensureTargetId, replaceShadowLines],
+    [ensureTargetId],
   );
 
   const {
@@ -139,10 +112,7 @@ export function ContinuousDictationProvider({ children }: { children: React.Reac
       cancel: () => {
         void voiceControlsRef.current.cancel();
       },
-      onStartIntent: () => {
-        replaceShadowLines([]);
-        discardPendingRef.current();
-      },
+      onStartIntent: () => discardPendingRef.current(),
     });
   }
   toggleControllerRef.current.sync(status !== 'idle');
@@ -173,45 +143,12 @@ export function ContinuousDictationProvider({ children }: { children: React.Reac
     [changeTarget],
   );
 
-  const consumeShadow = React.useCallback(
-    (id: string): string => {
-      if (id !== activeComposerIdRef.current || shadowLinesRef.current.length === 0) return '';
-      const text = continuousDictationLinesText(shadowLinesRef.current);
-      replaceShadowLines([]);
-      return text;
-    },
-    [replaceShadowLines],
-  );
-
-  const takeShadowSnapshot = React.useCallback(
-    (id: string): ContinuousDictationShadowSnapshot | null => {
-      if (id !== activeComposerIdRef.current || shadowLinesRef.current.length === 0) return null;
-      const snapshot = { targetId: id, lines: shadowLinesRef.current.slice() };
-      replaceShadowLines([]);
-      return snapshot;
-    },
-    [replaceShadowLines],
-  );
-
-  const restoreShadowSnapshot = React.useCallback(
-    (snapshot: ContinuousDictationShadowSnapshot) => {
-      if (snapshot.targetId !== activeComposerIdRef.current) return;
-      const composer = composersRef.current.get(snapshot.targetId);
-      if (!composer?.isEligible()) return;
-      replaceShadowLines(
-        restoreContinuousDictationLines(shadowLinesRef.current, snapshot.lines),
-      );
-    },
-    [replaceShadowLines],
-  );
-
   const toggle = React.useCallback(async () => {
     setError('');
     ensureTargetId();
     await toggleControllerRef.current?.toggle();
   }, [ensureTargetId]);
 
-  const shadowText = continuousDictationLinesText(shadowLines);
   const value = React.useMemo<ContinuousDictationContextValue>(
     () => ({
       status,
@@ -219,26 +156,18 @@ export function ContinuousDictationProvider({ children }: { children: React.Reac
       error,
       microphoneOwner,
       activeComposerId,
-      shadowText,
       registerComposer,
       focusComposer,
-      consumeShadow,
-      takeShadowSnapshot,
-      restoreShadowSnapshot,
       toggle,
     }),
     [
       activeComposerId,
-      consumeShadow,
       error,
       focusComposer,
       microphoneOwner,
       pendingCount,
       registerComposer,
-      restoreShadowSnapshot,
-      shadowText,
       status,
-      takeShadowSnapshot,
       toggle,
     ],
   );
