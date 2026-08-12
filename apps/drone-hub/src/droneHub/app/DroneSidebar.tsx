@@ -985,7 +985,7 @@ export function DroneSidebar({
     continuousDictation.microphoneOwner !== null,
   );
   const continuousDictationActionDisabled = Boolean(
-    continuousDictationBlocked || continuousDictation?.status === 'stopping',
+    continuousDictationBlocked,
   );
   const continuousDictationLabel = continuousDictation
     ? continuousDictation.error ||
