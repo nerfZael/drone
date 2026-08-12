@@ -1,6 +1,7 @@
 import React from 'react';
 import { useMesh } from '../mesh/MeshContext';
 import { useMobileChatVoiceRecorder } from './use-mobile-chat-voice-recorder';
+import { useMobileContinuousDictation } from './use-mobile-continuous-dictation';
 import { useMobileContinuousVoice } from './use-mobile-continuous-voice';
 import {
   MobileMicrophoneCoordinator,
@@ -9,6 +10,7 @@ import {
 
 type MobileChatVoiceRecorderContextValue = ReturnType<typeof useMobileChatVoiceRecorder> & {
   continuousVoice: ReturnType<typeof useMobileContinuousVoice>;
+  continuousDictation: ReturnType<typeof useMobileContinuousDictation>;
   microphoneOwner: MobileMicrophoneOwner | null;
   error: string;
   setError: React.Dispatch<React.SetStateAction<string>>;
@@ -40,9 +42,17 @@ export function MobileChatVoiceRecorderProvider({ children }: { children: React.
     onError: handleError,
     onBackgroundActivityChange: mesh.setBackgroundActivityRequired,
   });
+  const continuousDictation = useMobileContinuousDictation(continuousVoice);
   const value = React.useMemo(
-    () => ({ ...recorder, continuousVoice, error, microphoneOwner, setError }),
-    [continuousVoice, error, microphoneOwner, recorder],
+    () => ({
+      ...recorder,
+      continuousVoice,
+      continuousDictation,
+      error,
+      microphoneOwner,
+      setError,
+    }),
+    [continuousDictation, continuousVoice, error, microphoneOwner, recorder],
   );
 
   return (

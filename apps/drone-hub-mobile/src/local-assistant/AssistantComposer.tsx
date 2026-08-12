@@ -18,6 +18,14 @@ import {
   resolveMobileVoiceTranscriptDraft,
 } from './mobile-voice-transcription-model';
 import { useSharedMobileChatVoiceRecorder } from './MobileChatVoiceRecorderContext';
+import { MobileContinuousDictationDraft } from './MobileContinuousDictationDraft';
+import { MobileContinuousVoiceModePicker } from './MobileContinuousVoiceModePicker';
+import {
+  mergeMobileDraftWithContinuousDictation,
+  mobileContinuousDictationText,
+  resolveMobileContinuousDictationNavigationAction,
+  type MobileContinuousVoiceMode,
+} from './mobile-continuous-dictation';
 import { mobileContinuousVoiceStatusLabel } from './use-mobile-continuous-voice';
 import {
   mobileAssistantComposerExpanded,
@@ -189,8 +197,11 @@ export function AssistantComposer({
   const valueRef = React.useRef(value);
   const suppressInputFocusRef = React.useRef(false);
   const voiceActionTokenRef = React.useRef(0);
+  const continuousActionInFlightRef = React.useRef(false);
   const [focused, setFocused] = React.useState(false);
   const [voiceActionInFlight, setVoiceActionInFlight] = React.useState(false);
+  const [continuousActionInFlight, setContinuousActionInFlight] = React.useState(false);
+  const [continuousModePickerOpen, setContinuousModePickerOpen] = React.useState(false);
   const {
     error: voiceError,
     setError: setVoiceError,
@@ -201,13 +212,21 @@ export function AssistantComposer({
     discardRecording,
     stopRecordingForTranscript,
     continuousVoice,
+    continuousDictation,
     microphoneOwner,
   } = useSharedMobileChatVoiceRecorder();
+  const targetKey = String(voiceResetKey ?? '').trim();
   const voiceActive = voiceStatus !== 'idle';
   const continuousVoiceActive = continuousVoice.status !== 'idle';
   const continuousVoiceOwned =
-    continuousVoiceActive && continuousVoice.targetKey === String(voiceResetKey ?? '');
+    continuousVoiceActive && continuousVoice.targetKey === targetKey;
   const continuousVoiceElsewhere = continuousVoiceActive && !continuousVoiceOwned;
+  const continuousDictationOwned = continuousDictation.targetKey === targetKey;
+  const continuousDictationShadow = continuousDictationOwned ? continuousDictation.text : '';
+  const hasContinuousDictationShadow = Boolean(continuousDictationShadow.trim());
+  const continuousVoiceMode: MobileContinuousVoiceMode = continuousDictationOwned
+    ? 'dictation'
+    : 'steering';
   const voiceRecordAccessibilityLabel =
     microphoneOwner === 'continuous'
       ? 'Continuous voice is using the microphone'
@@ -231,7 +250,11 @@ export function AssistantComposer({
     microphoneAvailable: microphoneOwner === null,
   });
   const continuousVoiceActionDisabled =
-    !continuousVoiceEnabled || voiceRecordActionDisabled || voiceActive || continuousVoiceElsewhere;
+    !continuousVoiceEnabled ||
+    voiceRecordActionDisabled ||
+    voiceActive ||
+    continuousVoiceElsewhere ||
+    continuousActionInFlight;
   const expanded =
     alwaysExpanded ||
     mobileAssistantComposerExpanded({
@@ -240,7 +263,7 @@ export function AssistantComposer({
       hasAttachments,
       voiceActive,
       voiceError,
-    }) || continuousVoiceOwned;
+    }) || continuousVoiceOwned || continuousDictationOwned;
   const showAssistantStop =
     editable &&
     mobileAssistantStopVisible({
@@ -249,13 +272,14 @@ export function AssistantComposer({
       voiceActive,
     });
   const canSend =
-    (Boolean(value.trim()) || hasAttachments || voiceCanStop) &&
+    (Boolean(value.trim()) || hasAttachments || voiceCanStop || hasContinuousDictationShadow) &&
     !sending &&
     editable &&
     !sendBlocked &&
     !voiceActionInFlight &&
     voiceStatus !== 'starting' &&
-    voiceStatus !== 'transcribing';
+    voiceStatus !== 'transcribing' &&
+    !continuousActionInFlight;
   const reasoning = assistantReasoningName(String(reasoningLabel ?? '').trim());
   const model = compactAssistantModelName(modelLabel);
   const voiceStatusText = mobileVoiceStatusLabel(voiceStatus);
@@ -263,6 +287,7 @@ export function AssistantComposer({
   const continuousStatusText = mobileContinuousVoiceStatusLabel(
     continuousVoice.status,
     continuousVoice.pendingCount,
+    continuousVoiceMode,
   );
   const continuousDurationText = formatMobileVoiceDuration(continuousVoice.durationMillis);
 
@@ -298,20 +323,33 @@ export function AssistantComposer({
     Keyboard.dismiss();
   }, [voiceActive]);
 
-  const previousVoiceTargetRef = React.useRef(String(voiceResetKey ?? ''));
+  const previousVoiceTargetRef = React.useRef(targetKey);
   React.useEffect(() => {
     const previousTarget = previousVoiceTargetRef.current;
-    const nextTarget = String(voiceResetKey ?? '');
+    const nextTarget = targetKey;
     previousVoiceTargetRef.current = nextTarget;
-    if (
-      previousTarget &&
-      previousTarget !== nextTarget &&
-      continuousVoice.targetKey === previousTarget &&
-      continuousVoice.status !== 'idle'
-    ) {
+    const action = resolveMobileContinuousDictationNavigationAction({
+      previousTargetKey: previousTarget,
+      nextTargetKey: nextTarget,
+      dictationTargetKey: continuousDictation.targetKey,
+      continuousVoiceTargetKey: continuousVoice.targetKey,
+      continuousVoiceIdle: continuousVoice.status === 'idle',
+    });
+    if (action.discardDictation) continuousDictation.discard(previousTarget);
+    if (action.voiceAction === 'cancel') {
+      void continuousVoice.cancel();
+    } else if (action.voiceAction === 'stop') {
       void continuousVoice.stop();
     }
-  }, [continuousVoice, voiceResetKey]);
+  }, [
+    continuousDictation.discard,
+    continuousDictation.targetKey,
+    continuousVoice.cancel,
+    continuousVoice.status,
+    continuousVoice.stop,
+    continuousVoice.targetKey,
+    targetKey,
+  ]);
 
   const previousRunningRef = React.useRef(running);
   React.useEffect(() => {
@@ -354,10 +392,15 @@ export function AssistantComposer({
     }
   }, [startRecording]);
 
-  const beginContinuousVoice = React.useCallback(async () => {
-    const targetKey = String(voiceResetKey ?? '').trim();
+  const beginContinuousVoice = React.useCallback(async (mode: MobileContinuousVoiceMode) => {
+    if (continuousActionInFlightRef.current) return;
+    continuousActionInFlightRef.current = true;
+    setContinuousActionInFlight(true);
+    setContinuousModePickerOpen(false);
     if (!targetKey) {
       setVoiceError('Continuous voice requires a target chat.');
+      continuousActionInFlightRef.current = false;
+      setContinuousActionInFlight(false);
       return;
     }
     suppressInputFocusRef.current = true;
@@ -365,17 +408,62 @@ export function AssistantComposer({
     setFocused(false);
     Keyboard.dismiss();
     try {
-      await continuousVoice.start({
-        targetKey,
-        onTranscript: async (text, deliveryId) =>
-          (await onSend(text, 'asap', deliveryId, true)) !== false,
-      });
+      if (mode === 'dictation') {
+        await continuousDictation.start(targetKey);
+      } else {
+        continuousDictation.discard(targetKey);
+        await continuousVoice.start({
+          targetKey,
+          onTranscript: async (text, deliveryId) =>
+            (await onSend(text, 'asap', deliveryId, true)) !== false,
+        });
+      }
     } finally {
+      continuousActionInFlightRef.current = false;
+      setContinuousActionInFlight(false);
       requestAnimationFrame(() => {
         suppressInputFocusRef.current = false;
       });
     }
-  }, [continuousVoice, onSend, voiceResetKey]);
+  }, [continuousDictation, continuousVoice, onSend, targetKey]);
+
+  const openContinuousVoiceModePicker = React.useCallback(() => {
+    inputRef.current?.blur();
+    Keyboard.dismiss();
+    setContinuousModePickerOpen(true);
+  }, []);
+
+  const materializeContinuousDictation = React.useCallback((): string => {
+    const snapshot = continuousDictation.takeSnapshot(targetKey);
+    if (!snapshot) return valueRef.current;
+    const next = mergeMobileDraftWithContinuousDictation(
+      valueRef.current,
+      mobileContinuousDictationText(snapshot.lines),
+    );
+    valueRef.current = next;
+    onChangeText(next);
+    return next;
+  }, [continuousDictation, onChangeText, targetKey]);
+
+  const editContinuousDictation = React.useCallback(async () => {
+    if (!continuousDictationOwned || continuousActionInFlightRef.current) return;
+    continuousActionInFlightRef.current = true;
+    setContinuousActionInFlight(true);
+    try {
+      if (continuousVoiceOwned) await continuousDictation.stop();
+      materializeContinuousDictation();
+      suppressInputFocusRef.current = false;
+      requestAnimationFrame(() => inputRef.current?.focus());
+    } finally {
+      continuousActionInFlightRef.current = false;
+      setContinuousActionInFlight(false);
+    }
+  }, [
+    continuousDictation,
+    continuousDictationOwned,
+    continuousVoiceOwned,
+    materializeContinuousDictation,
+  ]);
 
   const stopVoiceForAction = React.useCallback(
     async (action: 'append' | 'send'): Promise<string | null> => {
@@ -423,7 +511,31 @@ export function AssistantComposer({
   );
 
   const send = React.useCallback(async () => {
-    if (!canSend) return;
+    if (!canSend || continuousActionInFlightRef.current) return;
+    if (continuousDictationOwned) {
+      continuousActionInFlightRef.current = true;
+      setContinuousActionInFlight(true);
+      let snapshot: ReturnType<typeof continuousDictation.takeSnapshot> = null;
+      try {
+        if (continuousVoiceOwned) await continuousDictation.stop();
+        snapshot = continuousDictation.takeSnapshot(targetKey);
+        const nextDraft = snapshot
+          ? mergeMobileDraftWithContinuousDictation(
+              valueRef.current,
+              mobileContinuousDictationText(snapshot.lines),
+            )
+          : valueRef.current;
+        const sent = await onSend(nextDraft.trim() || undefined);
+        if (sent === false && snapshot) continuousDictation.restoreSnapshot(snapshot);
+      } catch (error: any) {
+        if (snapshot) continuousDictation.restoreSnapshot(snapshot);
+        setVoiceError(error?.message ?? String(error));
+      } finally {
+        continuousActionInFlightRef.current = false;
+        setContinuousActionInFlight(false);
+      }
+      return;
+    }
     if (!voiceActive) {
       setVoiceError('');
       onSend();
@@ -437,7 +549,17 @@ export function AssistantComposer({
       setVoiceError('');
       onSend();
     }
-  }, [canSend, hasAttachments, onSend, stopVoiceForAction, voiceActive]);
+  }, [
+    canSend,
+    continuousDictation,
+    continuousDictationOwned,
+    continuousVoiceOwned,
+    hasAttachments,
+    onSend,
+    stopVoiceForAction,
+    targetKey,
+    voiceActive,
+  ]);
 
   return (
     <View style={styles.frame}>
@@ -448,6 +570,14 @@ export function AssistantComposer({
           Boolean(leadingControl) && styles.composerWithLeadingControl,
         ]}
       >
+        {hasContinuousDictationShadow ? (
+          <MobileContinuousDictationDraft
+            active={continuousVoiceOwned}
+            disabled={continuousActionInFlight}
+            onPress={() => void editContinuousDictation()}
+            text={continuousDictationShadow}
+          />
+        ) : null}
         <ThemedTextInput
           ref={inputRef}
           value={value}
@@ -524,12 +654,12 @@ export function AssistantComposer({
               accessibilityLabel={
                 continuousVoiceElsewhere
                   ? 'Continuous voice is active in another chat'
-                  : 'Start continuous voice steering'
+                  : 'Choose continuous voice mode'
               }
               accessibilityState={{ disabled: continuousVoiceActionDisabled, checked: false }}
               disabled={continuousVoiceActionDisabled}
               hitSlop={6}
-              onPress={() => void beginContinuousVoice()}
+              onPress={openContinuousVoiceModePicker}
               style={({ pressed }) => [
                 styles.collapsedContinuousVoiceButton,
                 showAssistantStop && styles.collapsedContinuousVoiceButtonWithStop,
@@ -627,20 +757,28 @@ export function AssistantComposer({
                   label={
                     continuousVoiceElsewhere
                       ? 'Continuous voice is active in another chat'
-                      : 'Start continuous voice steering'
+                      : 'Choose continuous voice mode'
                   }
                   icon={AudioLines}
                   disabled={continuousVoiceActionDisabled}
-                  onPress={() => void beginContinuousVoice()}
+                  onPress={openContinuousVoiceModePicker}
                 />
               </>
             ) : continuousVoiceOwned ? (
               <>
                 <VoiceIconButton
-                  label="Cancel continuous voice and discard unsent audio"
+                  label={
+                    continuousVoiceMode === 'dictation'
+                      ? 'Cancel continuous dictation and discard text'
+                      : 'Cancel continuous voice and discard unsent audio'
+                  }
                   icon={X}
                   tone="danger"
-                  onPress={() => void continuousVoice.cancel()}
+                  onPress={() =>
+                    void (continuousVoiceMode === 'dictation'
+                      ? continuousDictation.cancel()
+                      : continuousVoice.cancel())
+                  }
                 />
                 <View style={styles.controlSpacer} />
                 <View style={styles.voicePrimaryControls}>
@@ -655,7 +793,11 @@ export function AssistantComposer({
                     onPress={() => void continuousVoice.togglePause()}
                   />
                   <VoiceIconButton
-                    label="Stop continuous voice after pending thoughts are sent"
+                    label={
+                      continuousVoiceMode === 'dictation'
+                        ? 'Stop continuous dictation and keep text'
+                        : 'Stop continuous voice after pending thoughts are sent'
+                    }
                     icon={Square}
                     tone="success"
                     disabled={
@@ -663,7 +805,11 @@ export function AssistantComposer({
                       continuousVoice.status === 'stopping' ||
                       continuousVoice.status === 'error'
                     }
-                    onPress={() => void continuousVoice.stop()}
+                    onPress={() =>
+                      void (continuousVoiceMode === 'dictation'
+                        ? continuousDictation.stop()
+                        : continuousVoice.stop())
+                    }
                   />
                 </View>
               </>
@@ -711,6 +857,11 @@ export function AssistantComposer({
         ) : null}
       </View>
       {footer ? <View style={styles.footer}>{footer}</View> : null}
+      <MobileContinuousVoiceModePicker
+        visible={continuousModePickerOpen}
+        onClose={() => setContinuousModePickerOpen(false)}
+        onSelect={(mode) => void beginContinuousVoice(mode)}
+      />
     </View>
   );
 }

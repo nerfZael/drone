@@ -44,18 +44,22 @@ export type StartMobileContinuousVoiceInput = {
 export function mobileContinuousVoiceStatusLabel(
   status: MobileContinuousVoiceStatus,
   pendingCount: number,
+  mode: 'dictation' | 'steering' = 'steering',
 ): string {
-  if (status === 'starting') return 'Starting continuous voice…';
-  if (status === 'speech') return 'Speech detected';
-  if (status === 'thought-pause') return 'Waiting for end of thought';
-  if (status === 'recovering') return 'Microphone interrupted · reconnecting…';
-  if (status === 'paused') return `Paused${pendingCount ? ` · ${pendingCount} pending` : ''}`;
-  if (status === 'stopping') {
-    return `Finishing${pendingCount ? ` · ${pendingCount} pending` : ''}…`;
+  const label = mode === 'dictation' ? 'Dictation' : 'Steering';
+  if (status === 'starting') return `${label} · starting…`;
+  if (status === 'speech') return `${label} · speech detected`;
+  if (status === 'thought-pause') return `${label} · waiting for end of thought`;
+  if (status === 'recovering') return `${label} · microphone interrupted · reconnecting…`;
+  if (status === 'paused') {
+    return `${label} · paused${pendingCount ? ` · ${pendingCount} pending` : ''}`;
   }
-  if (status === 'error') return 'Continuous voice needs attention';
+  if (status === 'stopping') {
+    return `${label} · finishing${pendingCount ? ` · ${pendingCount} pending` : ''}…`;
+  }
+  if (status === 'error') return `${label} needs attention`;
   if (status === 'listening') {
-    return `Listening${pendingCount ? ` · ${pendingCount} pending` : ''}`;
+    return `${label} · listening${pendingCount ? ` · ${pendingCount} pending` : ''}`;
   }
   return '';
 }
@@ -250,6 +254,7 @@ export function useMobileContinuousVoice({
         await releaseMicrophone();
         return false;
       }
+      if (mountedRef.current) setTargetKey(input.targetKey);
       onError('');
       try {
         if (!(await readGroqApiKey())) {
@@ -298,7 +303,6 @@ export function useMobileContinuousVoice({
         if (AppState.currentState !== 'active') {
           throw new Error('Start continuous voice while Drone Hub is in the foreground.');
         }
-        if (mountedRef.current) setTargetKey(input.targetKey);
         setBackgroundActivity(true);
         if (!(await activateStream(generation))) return false;
         session.listen();
