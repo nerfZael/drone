@@ -1,6 +1,7 @@
 import React from 'react';
 import { isUngroupedGroupName } from '../../domain';
 import type { DroneSummary } from '../types';
+import type { SidebarMoveIntent } from '@drone/hub-model/sidebar';
 import { joinSidebarGroupPath, isSameOrDescendantSidebarGroupPath, sidebarGroupBaseName, sidebarGroupParentPath } from './sidebar-group-paths';
 import {
   observeSidebarSelectionForExpansion,
@@ -63,6 +64,7 @@ type UseSidebarInteractionsArgs = {
     chatName: string,
     newName: string,
   ) => Promise<{ ok: boolean; chatName?: string; error?: string | null }>;
+  onMoveSidebar?: (intent: SidebarMoveIntent) => Promise<boolean>;
   onSelectDroneCard: (droneId: string, opts?: DroneSelectionClickOptions) => void;
   onSelectDroneChat: (droneId: string, chatName: string) => void;
   onToggleGroupCollapsed: (group: string) => void;
@@ -88,6 +90,7 @@ export function useSidebarInteractions({
   isRepoGroupingMode,
   onCreateDroneChat,
   onRenameDroneChat,
+  onMoveSidebar,
   onSelectDroneCard,
   onSelectDroneChat,
   onToggleGroupCollapsed,
@@ -385,11 +388,33 @@ export function useSidebarInteractions({
       return;
     }
     const nextChatName = String(result.chatName ?? chatName).trim() || chatName;
+    const previousMuteId = sidebarChatSidebarNodeId(draft.droneId, targetChatName);
+    const nextMuteId = sidebarChatSidebarNodeId(draft.droneId, nextChatName);
+    if (
+      previousMuteId !== nextMuteId &&
+      useDroneHubUiStore.getState().mutedChatIds.includes(previousMuteId) &&
+      onMoveSidebar
+    ) {
+      const migrated = await onMoveSidebar({
+        kind: 'set-muted',
+        targetKind: 'chat',
+        targetId: nextMuteId,
+        muted: true,
+      });
+      if (migrated) {
+        await onMoveSidebar({
+          kind: 'set-muted',
+          targetKind: 'chat',
+          targetId: previousMuteId,
+          muted: false,
+        });
+      }
+    }
     setSelectedFolderPath(null);
     setSelectedSidebarNodeId(sidebarChatSidebarNodeId(draft.droneId, nextChatName));
     onSelectDroneChat(draft.droneId, nextChatName);
     setChatEditor(null);
-  }, [chatEditor, onCreateDroneChat, onRenameDroneChat, onSelectDroneChat, optimisticSidebarDronesFilteredByRepo]);
+  }, [chatEditor, onCreateDroneChat, onMoveSidebar, onRenameDroneChat, onSelectDroneChat, optimisticSidebarDronesFilteredByRepo]);
 
   const blurChatEditor = React.useCallback(() => {
     const draft = chatEditor;

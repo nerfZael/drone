@@ -33,6 +33,9 @@ describe('pinned drone settings batch', () => {
       await upsertStoredUiPreferencesSettings({
         collapsedGroups: { 'repo:/work/repo': true, open: false },
         collapsedDroneSections: { 'chats:drone-a': true, 'children:drone-b': false },
+        mutedSidebarGroupIds: ['group-id:review'],
+        mutedDroneIds: ['drone-a'],
+        mutedChatIds: ['chat:drone-b:review'],
       });
 
       const response = await resolveUiPreferencesSettingsResponse();
@@ -44,6 +47,9 @@ describe('pinned drone settings batch', () => {
         'chats:drone-a': true,
         'children:drone-b': false,
       });
+      expect(response.uiPreferences.mutedSidebarGroupIds).toEqual(['group-id:review']);
+      expect(response.uiPreferences.mutedDroneIds).toEqual(['drone-a']);
+      expect(response.uiPreferences.mutedChatIds).toEqual(['chat:drone-b:review']);
     });
   });
 });

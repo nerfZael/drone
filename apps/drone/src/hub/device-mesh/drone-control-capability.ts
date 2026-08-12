@@ -760,6 +760,9 @@ export function createDroneControlCapability(
             sidebarNodeOrderByParent: textListMap(preferences.sidebarNodeOrderByParent),
             sidebarChatOrderByDrone: textListMap(preferences.sidebarChatOrderByDrone),
             pinnedDroneIds: textList(preferences.pinnedDroneIds),
+            mutedSidebarGroupIds: textList(preferences.mutedSidebarGroupIds),
+            mutedDroneIds: textList(preferences.mutedDroneIds),
+            mutedChatIds: textList(preferences.mutedChatIds),
           },
           ...(payload.includeCreateOptions === true
             ? { createOptions: { repos: createRepos } }

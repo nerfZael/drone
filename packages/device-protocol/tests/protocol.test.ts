@@ -186,6 +186,25 @@ describe('device protocol', () => {
         pinned: true,
       },
     });
+    expect(
+      parseSidebarMoveCommandRequest({
+        mutationId: 'mute-1',
+        intent: {
+          kind: 'set-muted',
+          targetKind: 'chat',
+          targetId: ' chat:alpha:review ',
+          muted: true,
+        },
+      }),
+    ).toEqual({
+      mutationId: 'mute-1',
+      intent: {
+        kind: 'set-muted',
+        targetKind: 'chat',
+        targetId: 'chat:alpha:review',
+        muted: true,
+      },
+    });
   });
 
   test('advertises chat rename and delete as explicit permissions', () => {

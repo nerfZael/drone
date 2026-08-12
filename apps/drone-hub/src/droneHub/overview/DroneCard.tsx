@@ -55,6 +55,8 @@ type DroneCardProps = {
   inlineRenameRequestKey?: number;
   onSetBaseImage?: () => void;
   onTogglePinned?: () => void;
+  onToggleMuted?: (muted: boolean) => void;
+  onUnmuteCollapsedChat?: () => void;
   onDelete?: () => void;
   onErrorClick?: (drone: DroneSummary, message: string) => void;
   cloneDisabled?: boolean;
@@ -65,6 +67,8 @@ type DroneCardProps = {
   setBaseImageDisabled?: boolean;
   setBaseImageBusy?: boolean;
   pinned?: boolean;
+  muted?: boolean;
+  collapsedChatMuted?: boolean;
   pinBusy?: boolean;
   deleteDisabled?: boolean;
   deleteBusy?: boolean;
@@ -216,6 +220,24 @@ export function SidebarItemStateIndicator({
         <span className={`h-1.5 w-1.5 rounded-full ${indicatorToneClass}`} />
       )}
     </span>
+  );
+}
+
+export function SidebarMutedStatusIndicator({ className = 'h-3 w-3' }: { className?: string }) {
+  return (
+    <svg
+      data-sidebar-muted-indicator="true"
+      className={`block text-[var(--muted-dim)] ${className}`}
+      viewBox="0 0 12 12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.25"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <circle cx="6" cy="6" r="4.25" />
+      <path d="M2.6 9.4 9.4 2.6" />
+    </svg>
   );
 }
 
@@ -476,6 +498,8 @@ function areDroneCardPropsEqual(a: DroneCardProps, b: DroneCardProps): boolean {
     (a.inlineRenameRequestKey ?? 0) === (b.inlineRenameRequestKey ?? 0) &&
     Boolean(a.onSetBaseImage) === Boolean(b.onSetBaseImage) &&
     Boolean(a.onTogglePinned) === Boolean(b.onTogglePinned) &&
+    Boolean(a.onToggleMuted) === Boolean(b.onToggleMuted) &&
+    Boolean(a.onUnmuteCollapsedChat) === Boolean(b.onUnmuteCollapsedChat) &&
     Boolean(a.onDelete) === Boolean(b.onDelete) &&
     Boolean(a.onErrorClick) === Boolean(b.onErrorClick) &&
     Boolean(a.cloneDisabled) === Boolean(b.cloneDisabled) &&
@@ -486,6 +510,8 @@ function areDroneCardPropsEqual(a: DroneCardProps, b: DroneCardProps): boolean {
     Boolean(a.setBaseImageDisabled) === Boolean(b.setBaseImageDisabled) &&
     Boolean(a.setBaseImageBusy) === Boolean(b.setBaseImageBusy) &&
     Boolean(a.pinned) === Boolean(b.pinned) &&
+    Boolean(a.muted) === Boolean(b.muted) &&
+    Boolean(a.collapsedChatMuted) === Boolean(b.collapsedChatMuted) &&
     Boolean(a.pinBusy) === Boolean(b.pinBusy) &&
     Boolean(a.deleteDisabled) === Boolean(b.deleteDisabled) &&
     Boolean(a.deleteBusy) === Boolean(b.deleteBusy) &&
@@ -528,6 +554,8 @@ export const DroneCard = React.memo(function DroneCard({
   inlineRenameRequestKey,
   onSetBaseImage,
   onTogglePinned,
+  onToggleMuted,
+  onUnmuteCollapsedChat,
   onDelete,
   onErrorClick,
   cloneDisabled,
@@ -538,6 +566,8 @@ export const DroneCard = React.memo(function DroneCard({
   setBaseImageDisabled,
   setBaseImageBusy,
   pinned,
+  muted,
+  collapsedChatMuted,
   pinBusy,
   deleteDisabled,
   deleteBusy,
@@ -556,6 +586,8 @@ export const DroneCard = React.memo(function DroneCard({
   density = 'default',
 }: DroneCardProps) {
   const taggedToDo = useDroneHubUiStore((state) => state.toDoDroneIds.includes(drone.id));
+  const directlyMuted = useDroneHubUiStore((state) => state.mutedDroneIds.includes(drone.id));
+  const isMuted = Boolean(muted) || directlyMuted;
   const shortcutBindings = useDroneHubUiStore((state) => state.shortcutBindings);
   const shownName = String(displayName ?? drone.name).trim() || drone.name;
   const canClone = typeof onClone === 'function';
@@ -565,9 +597,14 @@ export const DroneCard = React.memo(function DroneCard({
   const canRename = typeof onRename === 'function';
   const canSetBaseImage = typeof onSetBaseImage === 'function';
   const canTogglePinned = typeof onTogglePinned === 'function';
+  const canToggleMuted = typeof onToggleMuted === 'function';
+  const canUnmuteCollapsedChat =
+    Boolean(collapsedChatMuted) && typeof onUnmuteCollapsedChat === 'function';
   const canDelete = typeof onDelete === 'function';
   const hasContextMenuActions =
     canTogglePinned ||
+    canToggleMuted ||
+    canUnmuteCollapsedChat ||
     canClone ||
     canCreateChat ||
     canAddToGroup ||
@@ -608,13 +645,14 @@ export const DroneCard = React.memo(function DroneCard({
     Boolean(approvalRequired),
     !hasMultipleChats,
   );
-  const effectiveChatStateSummary = hasMultipleChats
+  const effectiveChatStateSummary = hasMultipleChats && !isMuted
     ? suppressUnreadWhileWorking(
         chatStateSummary ?? summarizeDroneChats(drone, chatNames),
         displayState,
       )
     : null;
   const unread =
+    !isMuted &&
     !isDraftDrone &&
     !hasMultipleChats &&
     displayState !== 'working' &&
@@ -637,7 +675,7 @@ export const DroneCard = React.memo(function DroneCard({
     );
     return () => window.clearTimeout(timeoutId);
   }, [displayState]);
-  const stateLabel = sidebarDroneStateLabel(displayState, unread);
+  const stateLabel = isMuted ? 'Muted' : sidebarDroneStateLabel(displayState, unread);
   const showDisclosureOperationIndicator =
     displayState === 'archiving' || displayState === 'deleting';
   const showActiveIndicator = Boolean(active) && !unread;
@@ -716,6 +754,24 @@ export const DroneCard = React.memo(function DroneCard({
       ),
       disabled: Boolean(pinBusy),
       onSelect: () => onTogglePinned?.(),
+    });
+  }
+  if (canToggleMuted) {
+    actionMenuItems.push({
+      id: 'mute',
+      label: directlyMuted ? 'Unmute drone' : 'Mute drone',
+      separatorBefore: actionMenuItems.length > 0,
+      icon: <SidebarMutedStatusIndicator className="h-3.5 w-3.5" />,
+      onSelect: () => onToggleMuted?.(!directlyMuted),
+    });
+  }
+  if (canUnmuteCollapsedChat) {
+    actionMenuItems.push({
+      id: 'unmute-collapsed-chat',
+      label: 'Unmute chat',
+      separatorBefore: actionMenuItems.length > 0,
+      icon: <SidebarMutedStatusIndicator className="h-3.5 w-3.5" />,
+      onSelect: () => onUnmuteCollapsedChat?.(),
     });
   }
   if (canCreateChat) {
@@ -820,7 +876,9 @@ export const DroneCard = React.memo(function DroneCard({
       tabIndex={disabled ? -1 : 0}
       aria-disabled={disabled || undefined}
       aria-expanded={disclosureExpanded}
-      aria-label={disclosureLabel}
+      aria-label={
+        disclosureLabel ? `${disclosureLabel}${isMuted ? ', muted' : ''}` : undefined
+      }
       title={disabled ? disabledReason : disclosureLabel}
       {...dragAttributes}
       {...dragListeners}
@@ -896,7 +954,9 @@ export const DroneCard = React.memo(function DroneCard({
                 className={`max-w-none flex-shrink-0 !translate-x-0 ${densityClasses.folderChevron}`}
               />
             </span>
-            {showDisclosureOperationIndicator ? (
+            {isMuted ? (
+              <SidebarMutedStatusIndicator />
+            ) : showDisclosureOperationIndicator ? (
               <span
                 role="img"
                 className="inline-flex flex-shrink-0"
@@ -920,6 +980,10 @@ export const DroneCard = React.memo(function DroneCard({
             data-sidebar-state-spacer="draft"
             aria-hidden="true"
           />
+        ) : isMuted ? (
+          <span role="img" className="inline-flex flex-shrink-0" title="Muted" aria-label="Muted">
+            <SidebarMutedStatusIndicator />
+          </span>
         ) : canOpenInlineError ? (
           <button
             type="button"

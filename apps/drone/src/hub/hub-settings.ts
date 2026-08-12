@@ -144,6 +144,9 @@ export type UiPreferencesSettings = {
   sidebarNodeOrderByParent: Record<string, string[]>;
   sidebarChatOrderByDrone: Record<string, string[]>;
   pinnedDroneIds: string[];
+  mutedSidebarGroupIds: string[];
+  mutedDroneIds: string[];
+  mutedChatIds: string[];
   hiddenSidebarGroups: string[];
   spawnAgentKey: string;
   spawnModel: string;
@@ -424,6 +427,9 @@ function sanitizeUiPreferencesSettings(value: unknown): UiPreferencesSettings {
     sidebarNodeOrderByParent: normalizeOrderedStringMap(raw.sidebarNodeOrderByParent),
     sidebarChatOrderByDrone: normalizeOrderedStringMap(raw.sidebarChatOrderByDrone),
     pinnedDroneIds: normalizeOrderedStringList(raw.pinnedDroneIds),
+    mutedSidebarGroupIds: normalizeOrderedStringList(raw.mutedSidebarGroupIds),
+    mutedDroneIds: normalizeOrderedStringList(raw.mutedDroneIds),
+    mutedChatIds: normalizeOrderedStringList(raw.mutedChatIds),
     hiddenSidebarGroups: normalizeOrderedStringList(raw.hiddenSidebarGroups),
     spawnAgentKey: normalizeUiPreferenceText(raw.spawnAgentKey, 200) || DEFAULT_SPAWN_AGENT_KEY,
     spawnModel: normalizeUiPreferenceText(raw.spawnModel, 200),

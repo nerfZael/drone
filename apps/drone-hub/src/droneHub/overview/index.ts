@@ -7,6 +7,7 @@ export {
   SidebarBlockedStatusIndicator,
   SidebarDeletingStatusIndicator,
   SidebarItemStateIndicator,
+  SidebarMutedStatusIndicator,
   SidebarWorkingStatusIndicator,
   sidebarChatDisplayState,
   sidebarDroneDisplayState,

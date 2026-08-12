@@ -17,6 +17,7 @@ import {
   compareSidebarDronesByNewestFirst,
   orderSidebarEntries,
   sidebarFolderNodeId,
+  sidebarGroupOrderToken,
   type SidebarNodeTreeModel,
   type SidebarTreeFolderNode,
 } from '@drone/hub-model/sidebar';
@@ -106,6 +107,7 @@ export type MobileDroneRepoGroup = {
 
 export type MobileDroneGroupFolder = {
   id: string;
+  muteId: string;
   path: string;
   label: string;
   roots: MobileDroneTreeNode[];
@@ -127,6 +129,9 @@ export type MobileDroneSidebarOrder = {
   sidebarNodeOrderByParent: Record<string, string[]>;
   sidebarChatOrderByDrone: Record<string, string[]>;
   pinnedDroneIds: string[];
+  mutedSidebarGroupIds: string[];
+  mutedDroneIds: string[];
+  mutedChatIds: string[];
 };
 
 export type MobileDroneSidebarGroup = {
@@ -230,6 +235,9 @@ export const EMPTY_MOBILE_DRONE_SIDEBAR_ORDER: MobileDroneSidebarOrder = {
   sidebarNodeOrderByParent: {},
   sidebarChatOrderByDrone: {},
   pinnedDroneIds: [],
+  mutedSidebarGroupIds: [],
+  mutedDroneIds: [],
+  mutedChatIds: [],
 };
 
 export const EMPTY_MOBILE_DRONE_LIST_SNAPSHOT: MobileDroneListSnapshot = {
@@ -510,6 +518,9 @@ export function normalizeMobileDroneListPayload(raw: unknown): NormalizedMobileD
       sidebarNodeOrderByParent: stringListMap(sidebar.sidebarNodeOrderByParent),
       sidebarChatOrderByDrone: stringListMap(sidebar.sidebarChatOrderByDrone),
       pinnedDroneIds: stringList(sidebar.pinnedDroneIds),
+      mutedSidebarGroupIds: stringList(sidebar.mutedSidebarGroupIds),
+      mutedDroneIds: stringList(sidebar.mutedDroneIds),
+      mutedChatIds: stringList(sidebar.mutedChatIds),
     },
     sidebarSnapshotStatus,
     sidebarPreferenceVersion:
@@ -629,6 +640,11 @@ function mobileDroneGroupFolder(
   );
   return {
     id: node.path,
+    muteId: sidebarGroupOrderToken({
+      groupId: node.groupId,
+      group: node.groupPath ?? node.path,
+      kind: node.groupKind,
+    }),
     path: node.groupPath ?? node.path,
     label: node.label,
     roots: entries.flatMap((entry) => (entry.kind === 'drone' ? [entry.node] : [])),

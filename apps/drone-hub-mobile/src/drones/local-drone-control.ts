@@ -145,6 +145,9 @@ function useLocalDroneControlValue() {
   const sidebarOrderRef = React.useRef({
     sidebarNodeOrderByParent: {} as Record<string, string[]>,
     sidebarChatOrderByDrone: {} as Record<string, string[]>,
+    mutedSidebarGroupIds: [] as string[],
+    mutedDroneIds: [] as string[],
+    mutedChatIds: [] as string[],
   });
   const writeRef = React.useRef(Promise.resolve());
   const loadedRef = React.useRef(false);
@@ -209,9 +212,24 @@ function useLocalDroneControlValue() {
         return {
           sidebarNodeOrderByParent: localStringListMap(source.sidebarNodeOrderByParent),
           sidebarChatOrderByDrone: localStringListMap(source.sidebarChatOrderByDrone),
+          mutedSidebarGroupIds: Array.isArray(source.mutedSidebarGroupIds)
+            ? [...new Set(source.mutedSidebarGroupIds.map((id) => String(id ?? '').trim()).filter(Boolean))]
+            : [],
+          mutedDroneIds: Array.isArray(source.mutedDroneIds)
+            ? [...new Set(source.mutedDroneIds.map((id) => String(id ?? '').trim()).filter(Boolean))]
+            : [],
+          mutedChatIds: Array.isArray(source.mutedChatIds)
+            ? [...new Set(source.mutedChatIds.map((id) => String(id ?? '').trim()).filter(Boolean))]
+            : [],
         };
       })
-      .catch(() => ({ sidebarNodeOrderByParent: {}, sidebarChatOrderByDrone: {} }));
+      .catch(() => ({
+        sidebarNodeOrderByParent: {},
+        sidebarChatOrderByDrone: {},
+        mutedSidebarGroupIds: [],
+        mutedDroneIds: [],
+        mutedChatIds: [],
+      }));
     void Promise.all([loadDrones, loadPinnedDroneIds, loadSidebarOrder])
       .then(([nextDrones, nextPinnedDroneIds, nextSidebarOrder]) => {
         if (!active) return;
@@ -308,6 +326,9 @@ function useLocalDroneControlValue() {
             sidebarNodeOrderByParent: sidebarOrderRef.current.sidebarNodeOrderByParent,
             sidebarChatOrderByDrone: sidebarOrderRef.current.sidebarChatOrderByDrone,
             pinnedDroneIds: pinnedDroneIdsRef.current,
+            mutedSidebarGroupIds: sidebarOrderRef.current.mutedSidebarGroupIds,
+            mutedDroneIds: sidebarOrderRef.current.mutedDroneIds,
+            mutedChatIds: sidebarOrderRef.current.mutedChatIds,
           },
           createOptions: { repos: [] },
         };
@@ -339,6 +360,9 @@ function useLocalDroneControlValue() {
           const nextOrder = {
             sidebarNodeOrderByParent: nextLayout.sidebarNodeOrderByParent,
             sidebarChatOrderByDrone: nextLayout.sidebarChatOrderByDrone,
+            mutedSidebarGroupIds: nextLayout.mutedSidebarGroupIds,
+            mutedDroneIds: nextLayout.mutedDroneIds,
+            mutedChatIds: nextLayout.mutedChatIds,
           };
           await Promise.all([
             AsyncStorage.setItem(LOCAL_DRONES_KEY, JSON.stringify(nextDrones)),

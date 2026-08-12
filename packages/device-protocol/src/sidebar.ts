@@ -12,6 +12,8 @@ export type {
   SidebarMoveIntoFolderIntent,
   SidebarReorderIntent,
   SidebarSetPinnedIntent,
+  SidebarSetMutedIntent,
+  SidebarMuteTargetKind,
 } from '@drone/hub-model';
 
 /** One user gesture, expressed as intent rather than client-computed persisted state. */
@@ -75,6 +77,20 @@ export function parseSidebarMoveCommandRequest(value: unknown): SidebarMoveComma
       kind,
       droneIds: texts(rawIntent.droneIds, 'intent.droneIds'),
       pinned: rawIntent.pinned,
+    };
+  } else if (kind === 'set-muted') {
+    const targetKind = text(rawIntent.targetKind, 'intent.targetKind');
+    if (targetKind !== 'group' && targetKind !== 'drone' && targetKind !== 'chat') {
+      invalidSidebarMove('intent.targetKind must be group, drone, or chat');
+    }
+    if (typeof rawIntent.muted !== 'boolean') {
+      invalidSidebarMove('intent.muted must be a boolean');
+    }
+    intent = {
+      kind,
+      targetKind,
+      targetId: text(rawIntent.targetId, 'intent.targetId'),
+      muted: rawIntent.muted,
     };
   } else if (kind === 'move-into-folder') {
     const itemKind = text(rawIntent.itemKind, 'intent.itemKind');

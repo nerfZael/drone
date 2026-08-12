@@ -13,6 +13,7 @@ import {
   DroneCard,
   SidebarApprovalStatusIndicator,
   SidebarItemStateIndicator,
+  SidebarMutedStatusIndicator,
   SidebarWorkingStatusIndicator,
   sidebarChatDisplayState,
   sidebarDroneDisplayState,
@@ -49,6 +50,8 @@ import {
 } from './icons';
 import { DesktopDevicePicker } from './DesktopDevicePicker';
 import { GroupedSidebarTree } from './GroupedSidebarTree';
+import { SidebarContextMenu } from './SidebarContextMenu';
+import { resolveEffectiveSidebarMuteSets } from './sidebar-mute';
 import { createCanvasChatNodeId } from './app-config';
 import { droneChatRequiresApproval, normalizedDroneChats } from './chat-node-helpers';
 import { useDroneSidebarUiState } from './use-drone-hub-ui-store';
@@ -1020,6 +1023,9 @@ export function DroneSidebar({
     sidebarDroneOrderByGroup,
     sidebarNodeOrderByParent,
     sidebarChatOrderByDrone,
+    mutedSidebarGroupIds,
+    mutedDroneIds,
+    mutedChatIds,
     hiddenSidebarGroups,
     showHiddenSidebarGroups,
     setAppView,
@@ -1086,6 +1092,12 @@ export function DroneSidebar({
   const [sidebarDockDragActive, setSidebarDockDragActive] = React.useState(false);
   const [pinningDroneIds, setPinningDroneIds] = React.useState<ReadonlySet<string>>(() => new Set());
   const [pinError, setPinError] = React.useState<string | null>(null);
+  const [pinnedChatContextMenu, setPinnedChatContextMenu] = React.useState<{
+    droneId: string;
+    chatName: string;
+    x: number;
+    y: number;
+  } | null>(null);
   const [sidebarDockDragPreviewSide, setSidebarDockDragPreviewSide] = React.useState<
     'left' | 'right' | null
   >(null);
@@ -1098,6 +1110,12 @@ export function DroneSidebar({
     : (sidebarGroupingModeOverride ?? sidebarGroupingMode);
   const isRepoGroupingMode = effectiveSidebarGroupingMode === 'repos';
   const pinnedDroneIdSet = React.useMemo(() => new Set(pinnedDroneIds), [pinnedDroneIds]);
+  const mutedSidebarGroupIdSet = React.useMemo(
+    () => new Set(mutedSidebarGroupIds),
+    [mutedSidebarGroupIds],
+  );
+  const mutedDroneIdSet = React.useMemo(() => new Set(mutedDroneIds), [mutedDroneIds]);
+  const mutedChatIdSet = React.useMemo(() => new Set(mutedChatIds), [mutedChatIds]);
   const setPinned = React.useCallback(
     async (droneId: string, pinned: boolean) => {
       setPinError(null);
@@ -1445,6 +1463,7 @@ export function DroneSidebar({
     isRepoGroupingMode,
     onCreateDroneChat,
     onRenameDroneChat,
+    onMoveSidebar: runOptimisticMoveSidebar,
     onSelectDroneCard,
     onSelectDroneChat,
     onToggleGroupCollapsed,
@@ -1661,20 +1680,28 @@ export function DroneSidebar({
     disabled: !sidebarDndEnabled || !showExternalMoveTargets || sidebarHasUngroupedGroup,
   });
   const settingsViewActive = appView === 'settings';
-  const summarizeSidebarFleet = React.useCallback((drones: readonly DroneSummary[]) => {
+  const summarizeSidebarFleet = React.useCallback((
+    drones: readonly DroneSummary[],
+    effectiveMutedDroneIds: ReadonlySet<string> = mutedDroneIdSet,
+  ) => {
     let working = 0;
     let approval = 0;
     let unread = 0;
     for (const drone of drones) {
-      const chats = drone.chats.length > 0 ? drone.chats : ['default'];
+      if (effectiveMutedDroneIds.has(drone.id)) continue;
+      const chats = (drone.chats.length > 0 ? drone.chats : ['default']).filter(
+        (chatName) => !mutedChatIdSet.has(sidebarChatSidebarNodeId(drone.id, chatName)),
+      );
+      if (chats.length === 0) continue;
       const droneApprovalRequired = chats.some((chatName) =>
         droneChatRequiresApproval(drone, chatName) ||
         Boolean(approvalRequiredByChatNodeId[createCanvasChatNodeId(drone.id, chatName)]),
       );
+      const knownBusyChats = drone.busyChats ?? [];
       const droneWorking =
         !droneApprovalRequired &&
-        (Boolean(drone.busy) ||
-          (drone.busyChats?.length ?? 0) > 0 ||
+        ((Boolean(drone.busy) && knownBusyChats.length === 0) ||
+          knownBusyChats.some((chatName) => chats.includes(chatName)) ||
           chats.some((chatName) => busyChatNodeIdSet.has(sidebarChatSidebarNodeId(drone.id, chatName))) ||
           drone.hubPhase === 'creating' ||
           drone.hubPhase === 'starting' ||
@@ -1685,7 +1712,7 @@ export function DroneSidebar({
         !droneWorking &&
         inactiveDisplayState !== 'blocked' &&
         inactiveDisplayState !== 'offline' &&
-        ((drone.unreadChats?.length ?? 0) > 0 ||
+        ((drone.unreadChats ?? []).some((chatName) => chats.includes(chatName)) ||
           chats.some((chatName) =>
             Boolean(unreadAgentMessageByChatNodeId[sidebarChatSidebarNodeId(drone.id, chatName)]),
           ));
@@ -1698,10 +1725,12 @@ export function DroneSidebar({
     approvalRequiredByChatNodeId,
     busyChatNodeIdSet,
     deletingDrones,
+    mutedChatIdSet,
+    mutedDroneIdSet,
     unreadAgentMessageByChatNodeId,
   ]);
   const repositoryNavigationModel = React.useMemo(() => {
-    return buildSidebarRepositoryNavigationModel({
+    const model = buildSidebarRepositoryNavigationModel({
       repos,
       drones: sidebarDrones,
       summarize: summarizeSidebarFleet,
@@ -1712,7 +1741,27 @@ export function DroneSidebar({
       sidebarGroupIdByName,
       repoScopedGroupPathsByRepoGroup,
     });
+    const { effectiveMutedDroneIdSet } = resolveEffectiveSidebarMuteSets(
+      model.nodeTree,
+      mutedSidebarGroupIdSet,
+      mutedDroneIdSet,
+    );
+    const dronesByRepositoryGroup = new Map(
+      model.groups.map((group) => [group.group, group.items] as const),
+    );
+    return {
+      ...model,
+      items: model.items.map((item) => ({
+        ...item,
+        stateSummary: summarizeSidebarFleet(
+          dronesByRepositoryGroup.get(item.id) ?? [],
+          effectiveMutedDroneIdSet,
+        ),
+      })),
+    };
   }, [
+    mutedDroneIdSet,
+    mutedSidebarGroupIdSet,
     repoScopedGroupPathsByRepoGroup,
     repos,
     sidebarDroneOrderByGroup,
@@ -2600,6 +2649,9 @@ export function DroneSidebar({
                       (chatName) => chatName,
                     );
                     const hasOnlyDefaultChat = chats.length === 1 && chats[0] === 'default';
+                    const collapsedChatMuteId = sidebarChatSidebarNodeId(droneId, 'default');
+                    const collapsedChatMuted =
+                      hasOnlyDefaultChat && mutedChatIdSet.has(collapsedChatMuteId);
                     const hasChatSection = chats.length > 1;
                     const chatSectionExpanded =
                       collapsedDroneSections[sidebarInlineSectionKey(droneId, 'chats')] !== true;
@@ -2659,8 +2711,30 @@ export function DroneSidebar({
                               unreadAgentMessage={hasOnlyDefaultChat && unreadAgentMessageByChatNodeId[defaultChatNodeId] === true}
                               statusHint={pinnedDroneRepoLabel(pinnedRepoPath, pinnedRepositoryItem?.label)}
                               pinned
+                              muted={collapsedChatMuted}
                               pinBusy={pinningDroneIds.has(droneId)}
                               onTogglePinned={sidebarCapabilities.actions ? () => void setPinned(droneId, false) : undefined}
+                              onToggleMuted={
+                                sidebarCapabilities.actions
+                                  ? (nextMuted) => void runOptimisticMoveSidebar({
+                                      kind: 'set-muted',
+                                      targetKind: 'drone',
+                                      targetId: droneId,
+                                      muted: nextMuted,
+                                    })
+                                  : undefined
+                              }
+                              collapsedChatMuted={collapsedChatMuted}
+                              onUnmuteCollapsedChat={
+                                collapsedChatMuted
+                                  ? () => void runOptimisticMoveSidebar({
+                                      kind: 'set-muted',
+                                      targetKind: 'chat',
+                                      targetId: collapsedChatMuteId,
+                                      muted: false,
+                                    })
+                                  : undefined
+                              }
                               onCreateChat={sidebarCapabilities.actions ? () => openDroneChatCreate(drone) : undefined}
                               onClone={sidebarCapabilities.actions ? () => onCloneDrone(drone) : undefined}
                               onAddToGroup={
@@ -2720,6 +2794,9 @@ export function DroneSidebar({
                                 {chats.map((chatName) => {
                                   const active = selectedDrone === droneId && activeChatName === chatName;
                                   const chatNodeId = createCanvasChatNodeId(droneId, chatName);
+                                  const chatSidebarId = sidebarChatSidebarNodeId(droneId, chatName);
+                                  const chatMuted =
+                                    mutedDroneIdSet.has(droneId) || mutedChatIdSet.has(chatSidebarId);
                                   const chatBusy =
                                     (drone.busyChats ?? []).includes(chatName) ||
                                     busyChatNodeIdSet.has(chatNodeId);
@@ -2740,21 +2817,35 @@ export function DroneSidebar({
                                       type="button"
                                       className={`relative flex items-center gap-1 rounded border text-left transition-colors ${pinnedDensityClasses.chatRow} ${sidebarChatRowTone({ active })}`}
                                       onClick={() => selectPinnedDroneChat(drone, chatName)}
+                                      onContextMenu={(event) => {
+                                        if (!sidebarCapabilities.actions) return;
+                                        event.preventDefault();
+                                        setPinnedChatContextMenu({
+                                          droneId,
+                                          chatName,
+                                          x: event.clientX,
+                                          y: event.clientY,
+                                        });
+                                      }}
                                       aria-label={`${uiDroneName(drone.name)} / ${chatName}`}
                                       aria-current={active ? 'page' : undefined}
                                     >
                                       <span
                                         className={sidebarChatStateClass}
-                                        title={chatStateLabel}
+                                        title={chatMuted ? 'Muted' : chatStateLabel}
                                         role="img"
-                                        aria-label={chatStateLabel}
+                                        aria-label={chatMuted ? 'Muted' : chatStateLabel}
                                       >
-                                        <SidebarItemStateIndicator
-                                          state={chatState}
-                                          unread={chatUnread}
-                                          showReadyAnchor
-                                          emphasized={active}
-                                        />
+                                        {chatMuted ? (
+                                          <SidebarMutedStatusIndicator />
+                                        ) : (
+                                          <SidebarItemStateIndicator
+                                            state={chatState}
+                                            unread={chatUnread}
+                                            showReadyAnchor
+                                            emphasized={active}
+                                          />
+                                        )}
                                       </span>
                                       <span className={sidebarChatLabelClass}>{chatName}</span>
                                       {drone.draftChats?.[chatName] === true ? (
@@ -3212,6 +3303,41 @@ export function DroneSidebar({
           onCreateGroupAndMove={runOptimisticCreateGroupAndMove}
           onMoveToGroup={runOptimisticMoveDronesToGroup}
           onClose={() => setAddToGroupTarget(null)}
+        />
+      ) : null}
+
+      {pinnedChatContextMenu ? (
+        <SidebarContextMenu
+          x={pinnedChatContextMenu.x}
+          y={pinnedChatContextMenu.y}
+          label={`Actions for ${pinnedChatContextMenu.chatName}`}
+          items={[
+            {
+              id: 'mute',
+              label: mutedChatIdSet.has(
+                sidebarChatSidebarNodeId(
+                  pinnedChatContextMenu.droneId,
+                  pinnedChatContextMenu.chatName,
+                ),
+              )
+                ? 'Unmute chat'
+                : 'Mute chat',
+              icon: <SidebarMutedStatusIndicator className="h-3.5 w-3.5" />,
+              onSelect: () => {
+                const targetId = sidebarChatSidebarNodeId(
+                  pinnedChatContextMenu.droneId,
+                  pinnedChatContextMenu.chatName,
+                );
+                void runOptimisticMoveSidebar({
+                  kind: 'set-muted',
+                  targetKind: 'chat',
+                  targetId,
+                  muted: !mutedChatIdSet.has(targetId),
+                });
+              },
+            },
+          ]}
+          onClose={() => setPinnedChatContextMenu(null)}
         />
       ) : null}
 

@@ -149,6 +149,11 @@ type DrawerChatActionTarget = {
   chatName: string;
 };
 
+type DrawerMuteActionTarget =
+  | { kind: 'chat'; drone: MobileDroneSummary; chatName: string }
+  | { kind: 'drone'; drone: MobileDroneSummary }
+  | { kind: 'group'; folder: MobileDroneGroupFolder };
+
 type RegisterDrawer = (props: AppDrawerProps | null) => void;
 
 const AppDrawerHostContext = React.createContext<RegisterDrawer | null>(null);
@@ -156,6 +161,12 @@ const DrawerWorkingPhaseContext = React.createContext<Animated.Value | null>(nul
 const DrawerSidebarReorderContext = React.createContext<
   ((request: MobileSidebarMutationRequest) => void) | null
 >(null);
+const DrawerSidebarMuteContext = React.createContext<{
+  effectiveGroupIds: ReadonlySet<string>;
+  effectiveDroneIds: ReadonlySet<string>;
+  mutedChatIds: ReadonlySet<string>;
+  openActions?(target: DrawerMuteActionTarget): void;
+} | null>(null);
 const DRAWER_WORKING_SPIN_DURATION_MS = 1_600;
 const RECENT_BLOCKED_EMPHASIS_MS = 30_000;
 const DRAWER_TREE_ROW_PADDING_LEFT = 12;
@@ -174,6 +185,10 @@ function mobileSidebarEntryNodeId(entry: MobileDroneSidebarEntry): string {
   return entry.kind === 'drone'
     ? sidebarDroneNodeId(entry.node.drone.id)
     : sidebarFolderNodeId(entry.folder.id);
+}
+
+function mobileSidebarChatId(droneId: string, chatName: string): string {
+  return `chat:${String(droneId).trim()}:${String(chatName).trim() || 'default'}`;
 }
 
 export function AppDrawerProvider({ children }: { children: React.ReactNode }) {
@@ -429,30 +444,58 @@ type SwitchDisplayState = MobileDroneDisplayState | 'done' | 'archiving' | 'dele
 function addDroneNodesToStateSummary(
   summary: MobileDroneStateSummary,
   nodes: MobileDroneTreeNode[],
+  mutedDroneIds: ReadonlySet<string>,
+  mutedChatIds: ReadonlySet<string>,
 ): void {
   for (const node of nodes) {
-    addMobileDroneToStateSummary(summary, node.drone);
-    addDroneNodesToStateSummary(summary, node.children);
+    if (!mutedDroneIds.has(node.drone.id)) {
+      const unmutedChats = node.drone.chats.filter(
+        (chatName) => !mutedChatIds.has(mobileSidebarChatId(node.drone.id, chatName)),
+      );
+      if (unmutedChats.length > 0) {
+        const unmutedSet = new Set(unmutedChats);
+        const unmutedApprovalChats = (node.drone.approvalChats ?? []).filter((chatName) =>
+          unmutedSet.has(chatName),
+        );
+        addMobileDroneToStateSummary(summary, {
+          ...node.drone,
+          chats: unmutedChats,
+          busyChats: node.drone.busyChats.filter((chatName) => unmutedSet.has(chatName)),
+          unreadChats: node.drone.unreadChats?.filter((chatName) => unmutedSet.has(chatName)),
+          approvalChats: unmutedApprovalChats,
+          approvalRequired:
+            node.drone.approvalRequired &&
+            (node.drone.approvalChats
+              ? unmutedApprovalChats.length > 0
+              : unmutedChats.length > 0),
+        });
+      }
+    }
+    addDroneNodesToStateSummary(summary, node.children, mutedDroneIds, mutedChatIds);
   }
 }
 
 function addDroneFoldersToStateSummary(
   summary: MobileDroneStateSummary,
   folders: MobileDroneGroupFolder[],
+  mutedDroneIds: ReadonlySet<string>,
+  mutedChatIds: ReadonlySet<string>,
 ): void {
   for (const folder of folders) {
-    addDroneNodesToStateSummary(summary, folder.roots);
-    addDroneFoldersToStateSummary(summary, folder.children);
+    addDroneNodesToStateSummary(summary, folder.roots, mutedDroneIds, mutedChatIds);
+    addDroneFoldersToStateSummary(summary, folder.children, mutedDroneIds, mutedChatIds);
   }
 }
 
 function summarizeDroneScope(
   roots: MobileDroneTreeNode[],
   folders: MobileDroneGroupFolder[] = [],
+  mutedDroneIds: ReadonlySet<string> = new Set(),
+  mutedChatIds: ReadonlySet<string> = new Set(),
 ): MobileDroneStateSummary {
   const summary = { ...EMPTY_MOBILE_DRONE_STATE_SUMMARY };
-  addDroneNodesToStateSummary(summary, roots);
-  addDroneFoldersToStateSummary(summary, folders);
+  addDroneNodesToStateSummary(summary, roots, mutedDroneIds, mutedChatIds);
+  addDroneFoldersToStateSummary(summary, folders, mutedDroneIds, mutedChatIds);
   return summary;
 }
 
@@ -534,11 +577,13 @@ function switchStateColor(state: SwitchDisplayState): string {
 function SwitchItemStatusIndicator({
   state,
   unread = false,
+  muted = false,
   emphasized = false,
   showReadyAnchor = true,
 }: {
   state: SwitchDisplayState;
   unread?: boolean;
+  muted?: boolean;
   emphasized?: boolean;
   showReadyAnchor?: boolean;
 }) {
@@ -547,7 +592,9 @@ function SwitchItemStatusIndicator({
   const stateColor = switchStateColor(state);
   return (
     <View accessible={false} style={styles.switchItemStatus}>
-      {ready ? (
+      {muted ? (
+        <MutedStatusIndicator />
+      ) : ready ? (
         <View style={styles.readyStateAnchor} />
       ) : state === 'archiving' ? (
         <OperationStatusIndicator operation="archiving" />
@@ -566,6 +613,25 @@ function SwitchItemStatusIndicator({
           <View style={[styles.switchStateDot, { backgroundColor: stateColor }]} />
         </View>
       )}
+    </View>
+  );
+}
+
+function MutedStatusIndicator() {
+  return (
+    <View accessible={false} style={styles.stateStatusIndicator}>
+      <Svg height={12} width={12} viewBox="0 0 12 12" fill="none">
+        <Circle cx="6" cy="6" r="4.25" stroke={colors.sidebarMutedDim} strokeWidth="1.25" />
+        <Line
+          x1="2.6"
+          y1="9.4"
+          x2="9.4"
+          y2="2.6"
+          stroke={colors.sidebarMutedDim}
+          strokeWidth="1.25"
+          strokeLinecap="round"
+        />
+      </Svg>
     </View>
   );
 }
@@ -722,16 +788,25 @@ function DrawerDroneChatRow({
   onSelect(droneId: string, chatName: string): void;
 }) {
   const reorderSidebar = React.useContext(DrawerSidebarReorderContext);
+  const muteContext = React.useContext(DrawerSidebarMuteContext);
   const selected = drone.id === activeDroneId && chatName === activeChatName;
   const suppressPressAfterLongPressRef = React.useRef(false);
   const draft = drone.draftChats?.[chatName] === true;
-  const unread = !selected && (drone.unreadChats?.includes(chatName) ?? false);
+  const muted = Boolean(
+    muteContext?.effectiveDroneIds.has(drone.id) ||
+      muteContext?.mutedChatIds.has(mobileSidebarChatId(drone.id, chatName)),
+  );
+  const unread = !muted && !selected && (drone.unreadChats?.includes(chatName) ?? false);
   const displayState = mobileDroneChatDisplayState(
     drone,
     chatName,
     selected && Boolean(drone.approvalRequired),
   );
-  const stateLabel = unread && displayState === 'idle' ? 'Unread' : switchStateLabel(displayState);
+  const stateLabel = muted
+    ? 'Muted'
+    : unread && displayState === 'idle'
+      ? 'Unread'
+      : switchStateLabel(displayState);
   const reorderChat = React.useCallback(
     (overChatName: string, placement: 'before' | 'inside' | 'after') => {
       if (placement === 'inside') return;
@@ -789,7 +864,7 @@ function DrawerDroneChatRow({
           <View style={[styles.droneChatSelectionWash, { left: -selectionWashInset }]} />
         ) : null}
         {selected ? <View style={styles.sidebarSelectionEdge} /> : null}
-        <SwitchItemStatusIndicator state={displayState} unread={unread} showReadyAnchor />
+        <SwitchItemStatusIndicator state={displayState} unread={unread} muted={muted} showReadyAnchor />
         {reorderSidebar && chatNames.length > 1 ? (
           <MobileSidebarDragArea
             scope={dragScope}
@@ -867,6 +942,8 @@ function DrawerDroneNode({
   onSelect(droneId: string, chatName: string): void;
 }) {
   const reorderSidebar = React.useContext(DrawerSidebarReorderContext);
+  const muteContext = React.useContext(DrawerSidebarMuteContext);
+  const suppressPressAfterLongPressRef = React.useRef(false);
   const { drone } = node;
   const chats = orderedMobileDroneChats(drone, sidebarChatOrderByDrone[drone.id]);
   const selected = drone.id === activeDroneId;
@@ -881,13 +958,40 @@ function DrawerDroneNode({
     selected && chats.includes(activeChatName) ? activeChatName : (chats[0] ?? '');
   const operation = droneOperationById[drone.id] as 'archiving' | 'deleting' | undefined;
   const displayState = operation ?? mobileDroneDisplayState(drone, !hasMultipleChats);
-  const isDraft = drone.draft === true || drone.phase.trim().toLowerCase() === 'draft';
-  const unread = !isDraft && !hasMultipleChats && (drone.unreadChats?.length ?? 0) > 0;
-  const chatStateSummary = React.useMemo(
-    () => summarizeMobileDroneChats(drone, selected ? activeChatName : ''),
-    [activeChatName, drone, selected],
+  const collapsedChatMuted = Boolean(
+    !hasMultipleChats &&
+      chats.length === 1 &&
+      muteContext?.mutedChatIds.has(mobileSidebarChatId(drone.id, chats[0]!)),
   );
-  const stateLabel = isDraft
+  const muted = Boolean(muteContext?.effectiveDroneIds.has(drone.id) || collapsedChatMuted);
+  const isDraft = drone.draft === true || drone.phase.trim().toLowerCase() === 'draft';
+  const unread = !muted && !isDraft && !hasMultipleChats && (drone.unreadChats?.length ?? 0) > 0;
+  const chatStateSummary = React.useMemo(
+    () => {
+      if (muted) return EMPTY_MOBILE_DRONE_STATE_SUMMARY;
+      const unmutedChats = drone.chats.filter(
+        (chatName) => !muteContext?.mutedChatIds.has(mobileSidebarChatId(drone.id, chatName)),
+      );
+      const unmutedSet = new Set(unmutedChats);
+      const unmutedApprovalChats = (drone.approvalChats ?? []).filter((chatName) =>
+        unmutedSet.has(chatName),
+      );
+      return summarizeMobileDroneChats({
+        ...drone,
+        chats: unmutedChats,
+        busyChats: drone.busyChats.filter((chatName) => unmutedSet.has(chatName)),
+        unreadChats: drone.unreadChats?.filter((chatName) => unmutedSet.has(chatName)),
+        approvalChats: unmutedApprovalChats,
+        approvalRequired:
+          drone.approvalRequired &&
+          (drone.approvalChats ? unmutedApprovalChats.length > 0 : unmutedChats.length > 0),
+      }, selected ? activeChatName : '');
+    },
+    [activeChatName, drone, muteContext, muted, selected],
+  );
+  const stateLabel = muted
+    ? 'Muted'
+    : isDraft
     ? 'Draft'
     : unread && displayState === 'idle'
       ? 'Unread'
@@ -1031,7 +1135,23 @@ function DrawerDroneNode({
           }}
           accessibilityLabel={accessibilityLabel}
           disabled={Boolean(operation)}
+          delayLongPress={600}
+          onLongPress={() => {
+            if (!muteContext?.openActions || operation) return;
+            suppressPressAfterLongPressRef.current = true;
+            muteContext.openActions({ kind: 'drone', drone });
+          }}
+          onPressOut={() => {
+            if (!suppressPressAfterLongPressRef.current) return;
+            setTimeout(() => {
+              suppressPressAfterLongPressRef.current = false;
+            }, 0);
+          }}
           onPress={() => {
+            if (suppressPressAfterLongPressRef.current) {
+              suppressPressAfterLongPressRef.current = false;
+              return;
+            }
             if (isChatDisclosure) {
               onSelectContainer(drone.id);
               onToggleDrone(drone.id);
@@ -1048,7 +1168,7 @@ function DrawerDroneNode({
         >
           {parentSelected ? <View style={styles.sidebarSelectionEdge} /> : null}
           <View style={styles.switchItemMain}>
-            {isChatDisclosure ? (
+            {isChatDisclosure && !muted ? (
               <View accessible={false} style={styles.droneChevronSlot}>
                 <SidebarTreeChevronIcon
                   color={colors.sidebarMutedDim}
@@ -1064,7 +1184,9 @@ function DrawerDroneNode({
                 <RuntimeIcon runtime={runtime} size={14} />
               </View>
             ) : null}
-            {isChatDisclosure ? null : isDraft ? (
+            {muted ? (
+              <MutedStatusIndicator />
+            ) : isChatDisclosure ? null : isDraft ? (
               <View accessible={false} style={styles.switchItemStatus} />
             ) : (
               <SwitchItemStatusIndicator
@@ -1107,7 +1229,7 @@ function DrawerDroneNode({
                 Draft
               </Text>
             ) : null}
-            {hasMultipleChats && contextLabel ? (
+            {!muted && hasMultipleChats && contextLabel ? (
               <DroneStateCounts summary={chatStateSummary} compact entity="chat" />
             ) : null}
             {contextLabel ? (
@@ -1115,7 +1237,7 @@ function DrawerDroneNode({
                 {contextLabel}
               </Text>
             ) : null}
-            {hasMultipleChats && !contextLabel ? (
+            {!muted && hasMultipleChats && !contextLabel ? (
               <DroneStateCounts summary={chatStateSummary} compact entity="chat" />
             ) : null}
           </View>
@@ -1223,11 +1345,19 @@ function DrawerDroneFolder({
   onSelect(droneId: string, chatName: string): void;
 }) {
   const reorderSidebar = React.useContext(DrawerSidebarReorderContext);
+  const muteContext = React.useContext(DrawerSidebarMuteContext);
+  const suppressPressAfterLongPressRef = React.useRef(false);
   const collapsed = !expandedFolderIds.has(folder.id);
+  const muted = Boolean(muteContext?.effectiveGroupIds.has(sidebarFolderNodeId(folder.id)));
   const hasSelectedDirectDrone = folder.roots.some((node) => node.drone.id === activeDroneId);
   const stateSummary = React.useMemo(
-    () => summarizeDroneScope(folder.roots, folder.children),
-    [folder.children, folder.roots],
+    () => summarizeDroneScope(
+      folder.roots,
+      folder.children,
+      muteContext?.effectiveDroneIds,
+      muteContext?.mutedChatIds,
+    ),
+    [folder.children, folder.roots, muteContext],
   );
   const nodeId = sidebarFolderNodeId(folder.id);
   const childNodeIds = folder.entries.map(mobileSidebarEntryNodeId);
@@ -1320,7 +1450,26 @@ function DrawerDroneFolder({
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ expanded: !collapsed }}
-          onPress={() => onToggleFolder(folder.id)}
+          accessibilityLabel={`${folder.label} group${muted ? ', muted' : ''}`}
+          delayLongPress={600}
+          onLongPress={() => {
+            if (!muteContext?.openActions) return;
+            suppressPressAfterLongPressRef.current = true;
+            muteContext.openActions({ kind: 'group', folder });
+          }}
+          onPressOut={() => {
+            if (!suppressPressAfterLongPressRef.current) return;
+            setTimeout(() => {
+              suppressPressAfterLongPressRef.current = false;
+            }, 0);
+          }}
+          onPress={() => {
+            if (suppressPressAfterLongPressRef.current) {
+              suppressPressAfterLongPressRef.current = false;
+              return;
+            }
+            onToggleFolder(folder.id);
+          }}
           style={({ pressed }) => [
             styles.groupRow,
             { paddingLeft: drawerTreeRowPaddingLeft(depth) },
@@ -1354,7 +1503,7 @@ function DrawerDroneFolder({
               {folder.label}
             </Text>
           )}
-          {collapsed ? <DroneStateCounts summary={stateSummary} compact /> : null}
+          {muted ? <MutedStatusIndicator /> : collapsed ? <DroneStateCounts summary={stateSummary} compact /> : null}
         </Pressable>
       </MobileSidebarDragTarget>
       {!collapsed ? (
@@ -1847,12 +1996,53 @@ function AppDrawerView({
     () => buildMobileDroneRepoGroups(drones, droneSidebarOrder),
     [droneSidebarOrder, drones],
   );
+  const mutedSidebarGroupIdSet = React.useMemo(
+    () => new Set(droneSidebarOrder.mutedSidebarGroupIds),
+    [droneSidebarOrder.mutedSidebarGroupIds],
+  );
+  const mutedDroneIdSet = React.useMemo(
+    () => new Set(droneSidebarOrder.mutedDroneIds),
+    [droneSidebarOrder.mutedDroneIds],
+  );
+  const mutedChatIdSet = React.useMemo(
+    () => new Set(droneSidebarOrder.mutedChatIds),
+    [droneSidebarOrder.mutedChatIds],
+  );
+  const { effectiveMutedGroupIds, effectiveMutedDroneIds } = React.useMemo(() => {
+    const effectiveGroups = new Set<string>();
+    const effectiveDrones = new Set(mutedDroneIdSet);
+    const visitDrone = (node: MobileDroneTreeNode, inheritedMuted: boolean) => {
+      const muted = inheritedMuted || effectiveDrones.has(node.drone.id);
+      if (muted) effectiveDrones.add(node.drone.id);
+      for (const child of node.children) visitDrone(child, muted);
+    };
+    const visitFolder = (folder: MobileDroneGroupFolder, inheritedMuted: boolean) => {
+      const folderId = sidebarFolderNodeId(folder.id);
+      const muted = inheritedMuted || mutedSidebarGroupIdSet.has(folder.muteId);
+      if (muted) effectiveGroups.add(folderId);
+      for (const root of folder.roots) visitDrone(root, muted);
+      for (const child of folder.children) visitFolder(child, muted);
+    };
+    for (const group of droneGroups) {
+      for (const root of group.roots) visitDrone(root, false);
+      for (const folder of group.folders) visitFolder(folder, false);
+    }
+    return { effectiveMutedGroupIds: effectiveGroups, effectiveMutedDroneIds: effectiveDrones };
+  }, [droneGroups, mutedDroneIdSet, mutedSidebarGroupIdSet]);
   const repoStateSummaries = React.useMemo(
     () =>
       new Map(
-        droneGroups.map((group) => [group.id, summarizeDroneScope(group.roots, group.folders)]),
+        droneGroups.map((group) => [
+          group.id,
+          summarizeDroneScope(
+            group.roots,
+            group.folders,
+            effectiveMutedDroneIds,
+            mutedChatIdSet,
+          ),
+        ]),
       ),
-    [droneGroups],
+    [droneGroups, effectiveMutedDroneIds, mutedChatIdSet],
   );
   const [activeRepoId, setActiveRepoId] = React.useState<string | null>(null);
   const alignedActiveDroneSelectionKeyRef = React.useRef<string | null>(null);
@@ -1862,6 +2052,7 @@ function AppDrawerView({
   const [chatActionTarget, setChatActionTarget] = React.useState<DrawerChatActionTarget | null>(
     null,
   );
+  const [muteActionTarget, setMuteActionTarget] = React.useState<DrawerMuteActionTarget | null>(null);
   const [chatEditor, setChatEditor] = React.useState<{
     mode: 'create' | 'rename';
     target: DrawerChatActionTarget;
@@ -1880,6 +2071,7 @@ function AppDrawerView({
     setChatEditor(null);
     setDeleteChatTarget(null);
     setChatMutationError(null);
+    setMuteActionTarget(null);
   }, [activeDeviceId]);
   React.useEffect(() => {
     if (open || chatMutationBusy) return;
@@ -1916,12 +2108,12 @@ function AppDrawerView({
   );
   const openChatActions = React.useCallback(
     (target: DrawerChatActionTarget) => {
-      if (!dronesReachable || (!onCreateDroneChat && !onRenameDroneChat && !onDeleteDroneChat))
+      if (!dronesReachable || (!onCreateDroneChat && !onRenameDroneChat && !onDeleteDroneChat && !onReorderSidebar))
         return;
       setChatMutationError(null);
       setChatActionTarget(target);
     },
-    [dronesReachable, onCreateDroneChat, onDeleteDroneChat, onRenameDroneChat],
+    [dronesReachable, onCreateDroneChat, onDeleteDroneChat, onRenameDroneChat, onReorderSidebar],
   );
   const submitChatEditor = React.useCallback(async () => {
     if (!chatEditor || chatMutationBusy) return;
@@ -1984,6 +2176,19 @@ function AppDrawerView({
   const chatContextActions = React.useMemo<ContextMenuAction[]>(() => {
     if (!chatActionTarget) return [];
     const actions: ContextMenuAction[] = [];
+    if (onReorderSidebar) {
+      const targetId = mobileSidebarChatId(chatActionTarget.drone.id, chatActionTarget.chatName);
+      const directlyMuted = mutedChatIdSet.has(targetId);
+      actions.push({
+        label: directlyMuted ? 'Unmute chat' : 'Mute chat',
+        onPress: () => onReorderSidebar({
+          kind: 'set-muted',
+          targetKind: 'chat',
+          targetId,
+          muted: !directlyMuted,
+        }),
+      });
+    }
     if (onCreateDroneChat) {
       actions.push({
         label: 'Create chat',
@@ -2021,7 +2226,63 @@ function AppDrawerView({
       });
     }
     return actions;
-  }, [chatActionTarget, onCreateDroneChat, onDeleteDroneChat, onRenameDroneChat]);
+  }, [chatActionTarget, mutedChatIdSet, onCreateDroneChat, onDeleteDroneChat, onRenameDroneChat, onReorderSidebar]);
+  const muteContextActions = React.useMemo<ContextMenuAction[]>(() => {
+    if (!muteActionTarget || !onReorderSidebar) return [];
+    if (muteActionTarget.kind === 'drone') {
+      const targetId = muteActionTarget.drone.id;
+      const directlyMuted = mutedDroneIdSet.has(targetId);
+      const actions: ContextMenuAction[] = [{
+        label: directlyMuted ? 'Unmute drone' : 'Mute drone',
+        onPress: () => onReorderSidebar({
+          kind: 'set-muted', targetKind: 'drone', targetId, muted: !directlyMuted,
+        }),
+      }];
+      const chats = orderedMobileDroneChats(
+        muteActionTarget.drone,
+        droneSidebarOrder.sidebarChatOrderByDrone[targetId],
+      );
+      if (chats.length === 1) {
+        const chatTargetId = mobileSidebarChatId(targetId, chats[0]!);
+        if (mutedChatIdSet.has(chatTargetId)) {
+          actions.push({
+            label: 'Unmute chat',
+            onPress: () => onReorderSidebar({
+              kind: 'set-muted',
+              targetKind: 'chat',
+              targetId: chatTargetId,
+              muted: false,
+            }),
+          });
+        }
+      }
+      return actions;
+    }
+    if (muteActionTarget.kind === 'group') {
+      const targetId = muteActionTarget.folder.muteId;
+      const directlyMuted = mutedSidebarGroupIdSet.has(targetId);
+      return [{
+        label: directlyMuted ? 'Unmute group' : 'Mute group',
+        onPress: () => onReorderSidebar({
+          kind: 'set-muted', targetKind: 'group', targetId, muted: !directlyMuted,
+        }),
+      }];
+    }
+    return [];
+  }, [
+    droneSidebarOrder.sidebarChatOrderByDrone,
+    muteActionTarget,
+    mutedChatIdSet,
+    mutedDroneIdSet,
+    mutedSidebarGroupIdSet,
+    onReorderSidebar,
+  ]);
+  const muteContextValue = React.useMemo(() => ({
+    effectiveGroupIds: effectiveMutedGroupIds,
+    effectiveDroneIds: effectiveMutedDroneIds,
+    mutedChatIds: mutedChatIdSet,
+    openActions: onReorderSidebar ? setMuteActionTarget : undefined,
+  }), [effectiveMutedDroneIds, effectiveMutedGroupIds, mutedChatIdSet, onReorderSidebar]);
   const pinnedDronesSection = (
     <DrawerPinnedDrones
       drones={globalPinnedDrones}
@@ -2114,7 +2375,8 @@ function AppDrawerView({
   return (
     <DrawerWorkingPhaseContext.Provider value={workingPhase}>
       <DrawerSidebarReorderContext.Provider value={onReorderSidebar ?? null}>
-        <MobileSidebarDragDropProvider>
+        <DrawerSidebarMuteContext.Provider value={muteContextValue}>
+          <MobileSidebarDragDropProvider>
           <View
             renderToHardwareTextureAndroid
             style={[
@@ -2376,6 +2638,18 @@ function AppDrawerView({
             actions={chatContextActions}
             onClose={() => setChatActionTarget(null)}
           />
+          <ContextMenu
+            visible={Boolean(muteActionTarget)}
+            title={
+              muteActionTarget?.kind === 'drone'
+                ? muteActionTarget.drone.name
+                : muteActionTarget?.kind === 'group'
+                  ? muteActionTarget.folder.label
+                  : 'Mute actions'
+            }
+            actions={muteContextActions}
+            onClose={() => setMuteActionTarget(null)}
+          />
           <TextInputDialog
             visible={Boolean(chatEditor)}
             title={chatEditor?.mode === 'rename' ? 'Rename chat' : 'Create chat'}
@@ -2423,7 +2697,8 @@ function AppDrawerView({
             }}
             onConfirm={() => void confirmDeleteChat()}
           />
-        </MobileSidebarDragDropProvider>
+          </MobileSidebarDragDropProvider>
+        </DrawerSidebarMuteContext.Provider>
       </DrawerSidebarReorderContext.Provider>
     </DrawerWorkingPhaseContext.Provider>
   );

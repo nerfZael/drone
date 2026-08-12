@@ -5,6 +5,7 @@ import {
   DroneCard,
   SidebarApprovalStatusIndicator,
   SidebarItemStateIndicator,
+  SidebarMutedStatusIndicator,
   SidebarWorkingStatusIndicator,
   sidebarChatDisplayState,
   sidebarDroneDisplayState,
@@ -58,6 +59,7 @@ import type { SidebarGroup } from './use-sidebar-view-model';
 import { SidebarContextMenu, type SidebarContextMenuItem } from './SidebarContextMenu';
 import { formatShortcutBinding } from './shortcuts';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
+import { resolveEffectiveSidebarMuteSets, sidebarFolderMuteId } from './sidebar-mute';
 import {
   sidebarChatLabelClass,
   sidebarChatRowTone,
@@ -213,6 +215,11 @@ type GroupedSidebarTreeContextValue = GroupedSidebarTreeProps & {
   deletingChats: Record<string, boolean>;
   handleDeleteChat: (droneId: string, chatName: string) => Promise<void>;
   shouldSuppressClick: () => boolean;
+  mutedSidebarGroupIdSet: ReadonlySet<string>;
+  effectiveMutedSidebarGroupIdSet: ReadonlySet<string>;
+  effectiveMutedDroneIdSet: ReadonlySet<string>;
+  mutedDroneIdSet: ReadonlySet<string>;
+  mutedChatIdSet: ReadonlySet<string>;
 };
 
 const GroupedSidebarTreeContext = React.createContext<GroupedSidebarTreeContextValue | null>(null);
@@ -481,6 +488,9 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
     settingBaseImages,
     handleDeleteChat,
     shouldSuppressClick,
+    effectiveMutedDroneIdSet,
+    mutedChatIdSet,
+    onMoveSidebar,
     actionsEnabled = true,
   } = useGroupedSidebarTreeContext();
   const densityClasses = sidebarDensityClasses(sidebarDensityMode);
@@ -515,6 +525,8 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
   });
   const active = selectedDrone === drone.id && activeChatName === chatName;
   const selected = selectedSidebarNodeId === sidebarChatId;
+  const muted = effectiveMutedDroneIdSet.has(drone.id) || mutedChatIdSet.has(sidebarChatId);
+  const directlyMuted = mutedChatIdSet.has(sidebarChatId);
   const chatBusy =
     (drone.busyChats ?? []).includes(chatName) || busyChatNodeIdSet.has(chatNodeId);
   const chatUnread =
@@ -522,7 +534,7 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
     ((drone.unreadChats ?? []).includes(chatName) ||
       unreadAgentMessageByChatNodeId[chatNodeId] === true);
   const chatState = sidebarChatDisplayState(drone, chatBusy, approvalRequired);
-  const chatStateLabel = sidebarDroneStateLabel(chatState, chatUnread);
+  const chatStateLabel = muted ? 'Muted' : sidebarDroneStateLabel(chatState, chatUnread);
   const chatActionsDisabled =
     isOptimistic ||
     Boolean(deletingDrones[drone.id]) ||
@@ -599,12 +611,16 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
             role="img"
             aria-label={chatStateLabel}
           >
-            <SidebarItemStateIndicator
-              state={chatState}
-              unread={chatUnread}
-              showReadyAnchor
-              emphasized={selected}
-            />
+            {muted ? (
+              <SidebarMutedStatusIndicator />
+            ) : (
+              <SidebarItemStateIndicator
+                state={chatState}
+                unread={chatUnread}
+                showReadyAnchor
+                emphasized={selected}
+              />
+            )}
           </span>
           <span className={sidebarChatLabelClass}>{chatName}</span>
           {draft ? (
@@ -621,8 +637,20 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
           label={`Actions for ${chatName}`}
           items={[
             {
+              id: 'mute-chat',
+              label: directlyMuted ? 'Unmute chat' : 'Mute chat',
+              icon: <SidebarMutedStatusIndicator className="h-3.5 w-3.5" />,
+              onSelect: () => void onMoveSidebar({
+                kind: 'set-muted',
+                targetKind: 'chat',
+                targetId: sidebarChatId,
+                muted: !directlyMuted,
+              }),
+            },
+            {
               id: 'create-chat',
               label: 'Create chat',
+              separatorBefore: true,
               icon: <IconPlus className="h-3.5 w-3.5 text-[var(--accent)]" />,
               disabled: chatActionsDisabled,
               onSelect: () => onOpenCreateDroneChat(drone),
@@ -672,6 +700,8 @@ const GroupedSidebarChatRowStatic = React.memo(function GroupedSidebarChatRowSta
     setSelectedSidebarNodeId,
     onSelectDroneChat,
     shouldSuppressClick,
+    effectiveMutedDroneIdSet,
+    mutedChatIdSet,
   } = useGroupedSidebarTreeContext();
   const densityClasses = sidebarDensityClasses(sidebarDensityMode);
   const chatNodeId = createCanvasChatNodeId(drone.id, chatName);
@@ -681,6 +711,7 @@ const GroupedSidebarChatRowStatic = React.memo(function GroupedSidebarChatRowSta
   const sidebarChatId = sidebarChatSidebarNodeId(drone.id, chatName);
   const active = selectedDrone === drone.id && activeChatName === chatName;
   const selected = selectedSidebarNodeId === sidebarChatId;
+  const muted = effectiveMutedDroneIdSet.has(drone.id) || mutedChatIdSet.has(sidebarChatId);
   const chatBusy =
     (drone.busyChats ?? []).includes(chatName) || busyChatNodeIdSet.has(chatNodeId);
   const chatUnread =
@@ -688,7 +719,7 @@ const GroupedSidebarChatRowStatic = React.memo(function GroupedSidebarChatRowSta
     ((drone.unreadChats ?? []).includes(chatName) ||
       unreadAgentMessageByChatNodeId[chatNodeId] === true);
   const chatState = sidebarChatDisplayState(drone, chatBusy, approvalRequired);
-  const chatStateLabel = sidebarDroneStateLabel(chatState, chatUnread);
+  const chatStateLabel = muted ? 'Muted' : sidebarDroneStateLabel(chatState, chatUnread);
   return (
     <div className="flex flex-col gap-0.5">
       <div className="relative flex items-stretch gap-1 group/chat-row">
@@ -711,12 +742,16 @@ const GroupedSidebarChatRowStatic = React.memo(function GroupedSidebarChatRowSta
             role="img"
             aria-label={chatStateLabel}
           >
-            <SidebarItemStateIndicator
-              state={chatState}
-              unread={chatUnread}
-              showReadyAnchor
-              emphasized={selected}
-            />
+            {muted ? (
+              <SidebarMutedStatusIndicator />
+            ) : (
+              <SidebarItemStateIndicator
+                state={chatState}
+                unread={chatUnread}
+                showReadyAnchor
+                emphasized={selected}
+              />
+            )}
           </span>
           <span className={sidebarChatLabelClass}>{chatName}</span>
         </button>
@@ -786,11 +821,17 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
     dragOverTreeTarget,
     nodeTree,
     shouldSuppressClick,
+    effectiveMutedDroneIdSet,
+    mutedDroneIdSet,
+    mutedChatIdSet,
+    onMoveSidebar,
     actionsEnabled = true,
   } = useGroupedSidebarTreeContext();
   const densityClasses = sidebarDensityClasses(sidebarDensityMode);
   const drone = droneById[node.droneId];
   if (!drone) return null;
+  const muted = effectiveMutedDroneIdSet.has(drone.id);
+  const directlyMuted = mutedDroneIdSet.has(drone.id);
   const isOptimistic = sidebarOptimisticDroneIdSet.has(drone.id);
   const dragDisabled = !sidebarDndEnabled || isOptimistic;
   const dragData = React.useMemo(
@@ -836,6 +877,8 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
     disabled: chatTailDropDisabled,
   });
   const hasOnlyDefaultChat = chats.length === 1 && chats[0] === 'default';
+  const defaultChatMuted =
+    hasOnlyDefaultChat && mutedChatIdSet.has(sidebarChatSidebarNodeId(drone.id, 'default'));
   const hasChatSection = chats.length > 1;
   const chatSectionExpanded = collapsedDroneSections[sidebarInlineSectionKey(drone.id, 'chats')] !== true;
   const showCreateChatEditor = chatEditor?.mode === 'create' && chatEditor.droneId === drone.id;
@@ -851,6 +894,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
     if (hasOnlyDefaultChat) return summary;
     for (const chatName of chats) {
       const chatNodeId = createCanvasChatNodeId(drone.id, chatName);
+      if (mutedChatIdSet.has(sidebarChatSidebarNodeId(drone.id, chatName))) continue;
       const approval =
         droneChatRequiresApproval(drone, chatName) ||
         Boolean(approvalRequiredByChatNodeId[chatNodeId]);
@@ -877,6 +921,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
     hasOnlyDefaultChat,
     selectedDrone,
     unreadAgentMessageByChatNodeId,
+    mutedChatIdSet,
   ]);
   const childDroneIds = (nodeTree.childIdsByParent[node.id] ?? [])
     .map((childNodeId) => nodeTree.nodesById[childNodeId])
@@ -980,10 +1025,32 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
             }
             onSetBaseImage={actionsEnabled ? () => onSetDroneBaseImage(drone.id) : undefined}
             pinned={pinnedDroneIdSet.has(drone.id)}
+            muted={muted || defaultChatMuted}
+            collapsedChatMuted={defaultChatMuted}
             pinBusy={pinningDroneIds.has(drone.id)}
             onTogglePinned={
               actionsEnabled
                 ? () => void onSetDronePinned(drone.id, !pinnedDroneIdSet.has(drone.id))
+                : undefined
+            }
+            onToggleMuted={
+              actionsEnabled
+                ? (nextMuted) => void onMoveSidebar({
+                    kind: 'set-muted',
+                    targetKind: 'drone',
+                    targetId: drone.id,
+                    muted: nextMuted,
+                  })
+                : undefined
+            }
+            onUnmuteCollapsedChat={
+              defaultChatMuted
+                ? () => void onMoveSidebar({
+                    kind: 'set-muted',
+                    targetKind: 'chat',
+                    targetId: sidebarChatSidebarNodeId(drone.id, 'default'),
+                    muted: false,
+                  })
                 : undefined
             }
             onDelete={actionsEnabled ? handleDeleteDrone : undefined}
@@ -1259,6 +1326,11 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
     unreadAgentMessageByChatNodeId,
     deletingDrones,
     shouldSuppressClick,
+    mutedSidebarGroupIdSet,
+    effectiveMutedSidebarGroupIdSet,
+    effectiveMutedDroneIdSet,
+    mutedChatIdSet,
+    onMoveSidebar,
     actionsEnabled = true,
   } = useGroupedSidebarTreeContext();
   const densityClasses = sidebarDensityClasses(sidebarDensityMode);
@@ -1271,15 +1343,21 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
     [folderPath, node.groupId, node.groupKind],
   );
   const groupToken = React.useMemo(() => sidebarGroupOrderToken(groupRef), [groupRef]);
+  const groupMuteId = sidebarFolderMuteId(node);
+  const directlyMuted = mutedSidebarGroupIdSet.has(groupMuteId);
+  const muted = effectiveMutedSidebarGroupIdSet.has(node.id);
   const collapsed = isSidebarGroupCollapsed(collapsedGroups, folderPath);
   const folderDroneIds = React.useMemo(() => collectSidebarTreeDroneIds(nodeTree, node.id), [node.id, nodeTree]);
   const stateSummary = React.useMemo<SidebarGroupStateSummary>(() => {
     const summary: SidebarGroupStateSummary = { approval: 0, unread: 0, working: 0 };
+    if (muted) return summary;
     for (const droneId of folderDroneIds) {
+      if (effectiveMutedDroneIdSet.has(droneId)) continue;
       const drone = droneById[droneId];
       if (!drone) continue;
       const chats = normalizedDroneChats(drone, { includeDefaultWhenEmpty: true });
       const approval = chats.some((chatName) => {
+        if (mutedChatIdSet.has(sidebarChatSidebarNodeId(drone.id, chatName))) return false;
         const chatNodeId = createCanvasChatNodeId(drone.id, chatName);
         return (
           droneChatRequiresApproval(drone, chatName) ||
@@ -1288,9 +1366,11 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
       });
       const working =
         !approval &&
-        (Boolean(drone.busy) ||
-          (drone.busyChats?.length ?? 0) > 0 ||
+        ((drone.busyChats ?? []).some(
+            (chatName) => !mutedChatIdSet.has(sidebarChatSidebarNodeId(drone.id, chatName)),
+          ) ||
           chats.some((chatName) =>
+            !mutedChatIdSet.has(sidebarChatSidebarNodeId(drone.id, chatName)) &&
             busyChatNodeIdSet.has(createCanvasChatNodeId(drone.id, chatName)),
           ) ||
           drone.hubPhase === 'creating' ||
@@ -1302,9 +1382,12 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
         !working &&
         inactiveDisplayState !== 'blocked' &&
         inactiveDisplayState !== 'offline' &&
-        ((drone.unreadChats?.length ?? 0) > 0 ||
+        ((drone.unreadChats ?? []).some(
+          (chatName) => !mutedChatIdSet.has(sidebarChatSidebarNodeId(drone.id, chatName)),
+        ) ||
           chats.some((chatName) =>
             Boolean(
+              !mutedChatIdSet.has(sidebarChatSidebarNodeId(drone.id, chatName)) &&
               unreadAgentMessageByChatNodeId[createCanvasChatNodeId(drone.id, chatName)],
             ),
           ));
@@ -1320,6 +1403,9 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
     droneById,
     folderDroneIds,
     unreadAgentMessageByChatNodeId,
+    muted,
+    effectiveMutedDroneIdSet,
+    mutedChatIdSet,
   ]);
   const folderDroneSelected = folderDroneIds.length > 0 && folderDroneIds.every((droneId) => selectedDroneSet.has(droneId));
   const isSelected = isSidebarFolderRowSelected({
@@ -1436,6 +1522,18 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
         } satisfies SidebarContextMenuItem]
       : []),
     {
+      id: 'mute',
+      label: directlyMuted ? 'Unmute group' : 'Mute group',
+      separatorBefore: true,
+      icon: <SidebarMutedStatusIndicator className="h-3.5 w-3.5" />,
+      onSelect: () => void onMoveSidebar({
+        kind: 'set-muted',
+        targetKind: 'group',
+        targetId: groupMuteId,
+        muted: !directlyMuted,
+      }),
+    },
+    {
       id: 'visibility',
       label: isHiddenGroup ? 'Unhide group' : 'Hide group',
       separatorBefore: isVirtualGroup,
@@ -1542,6 +1640,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
               }`}
               aria-expanded={!collapsed}
               aria-selected={isSelected}
+              aria-label={`${node.label}${muted ? ', muted' : ''}`}
               {...(folderDndDisabled ? {} : attributes as unknown as Record<string, unknown>)}
               {...(folderDndDisabled ? {} : listeners as unknown as Record<string, unknown>)}
               onClick={(event) => {
@@ -1578,7 +1677,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
                 <span className={`${sidebarFolderLabelClass} ${densityClasses.folderLabel}`} title={folderPath}>
                   {node.label}
                 </span>
-                {collapsed ? <SidebarGroupStateCounts summary={stateSummary} /> : null}
+                {muted ? <SidebarMutedStatusIndicator /> : collapsed ? <SidebarGroupStateCounts summary={stateSummary} /> : null}
               </div>
             </button>
           )}
@@ -1625,6 +1724,9 @@ function GroupedSidebarNodeEntry({ nodeId, groupPath }: { nodeId: string; groupP
 }
 
 export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
+  const mutedSidebarGroupIds = useDroneHubUiStore((state) => state.mutedSidebarGroupIds);
+  const mutedDroneIds = useDroneHubUiStore((state) => state.mutedDroneIds);
+  const mutedChatIds = useDroneHubUiStore((state) => state.mutedChatIds);
   const {
     sidebarGroups,
     nodeTreeOverride,
@@ -1669,6 +1771,16 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
         ? (nodeTree.childIdsByParent[displayRootNodeId] ?? [])
         : nodeTree.rootChildIds,
     [displayRootNodeId, nodeTree],
+  );
+  const mutedSidebarGroupIdSet = React.useMemo(
+    () => new Set(mutedSidebarGroupIds),
+    [mutedSidebarGroupIds],
+  );
+  const mutedChatIdSet = React.useMemo(() => new Set(mutedChatIds), [mutedChatIds]);
+  const mutedDroneIdSet = React.useMemo(() => new Set(mutedDroneIds), [mutedDroneIds]);
+  const { effectiveMutedSidebarGroupIdSet, effectiveMutedDroneIdSet } = React.useMemo(
+    () => resolveEffectiveSidebarMuteSets(nodeTree, mutedSidebarGroupIdSet, mutedDroneIdSet),
+    [mutedDroneIdSet, mutedSidebarGroupIdSet, nodeTree],
   );
   const visibleDroneOrder = React.useMemo(
     () => flattenVisibleDroneOrderFromNodeTree(nodeTree, props.collapsedGroups, displayedRootChildIds),
@@ -1717,7 +1829,19 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       setDeletingChats((prev) => ({ ...prev, [key]: true }));
       try {
         const result = await onDeleteDroneChat(droneId, chatName);
-        if (!result.ok && result.error) window.alert(result.error);
+        if (!result.ok && result.error) {
+          window.alert(result.error);
+        } else if (result.ok) {
+          const targetId = sidebarChatSidebarNodeId(droneId, chatName);
+          if (mutedChatIdSet.has(targetId)) {
+            await onMoveSidebar({
+              kind: 'set-muted',
+              targetKind: 'chat',
+              targetId,
+              muted: false,
+            });
+          }
+        }
       } finally {
         setDeletingChats((prev) => {
           const next = { ...prev };
@@ -1726,7 +1850,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
         });
       }
     },
-    [deletingChats, onDeleteDroneChat],
+    [deletingChats, mutedChatIdSet, onDeleteDroneChat, onMoveSidebar],
   );
 
   const sidebarDropTargetFromEvent = React.useCallback(
@@ -1856,6 +1980,11 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       handleDeleteChat,
       shouldSuppressClick,
       visibleDroneOrder,
+      mutedSidebarGroupIdSet,
+      effectiveMutedSidebarGroupIdSet,
+      effectiveMutedDroneIdSet,
+      mutedDroneIdSet,
+      mutedChatIdSet,
     }),
     [
       props.activeChatName,
@@ -1947,6 +2076,11 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       nodeTree,
       shouldSuppressClick,
       visibleDroneOrder,
+      mutedSidebarGroupIdSet,
+      effectiveMutedSidebarGroupIdSet,
+      effectiveMutedDroneIdSet,
+      mutedDroneIdSet,
+      mutedChatIdSet,
     ],
   );
 

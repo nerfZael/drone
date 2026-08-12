@@ -384,7 +384,7 @@ describe('sidebar presentation', () => {
     const countsSource = groupedTreeSource.slice(countsStart, countsEnd);
 
     expect(groupedTreeSource).toContain(
-      '{collapsed ? <SidebarGroupStateCounts summary={stateSummary} /> : null}',
+      '{muted ? <SidebarMutedStatusIndicator /> : collapsed ? <SidebarGroupStateCounts summary={stateSummary} /> : null}',
     );
     expect(groupedTreeSource).toContain(
       'collectSidebarTreeDroneIds(nodeTree, node.id)',

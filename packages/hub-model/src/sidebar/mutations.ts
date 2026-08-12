@@ -73,15 +73,28 @@ export type SidebarSetPinnedIntent = {
   pinned: boolean;
 };
 
+export type SidebarMuteTargetKind = 'group' | 'drone' | 'chat';
+
+export type SidebarSetMutedIntent = {
+  kind: 'set-muted';
+  targetKind: SidebarMuteTargetKind;
+  targetId: string;
+  muted: boolean;
+};
+
 export type SidebarMoveIntent =
   | SidebarReorderIntent
   | SidebarMoveIntoFolderIntent
-  | SidebarSetPinnedIntent;
+  | SidebarSetPinnedIntent
+  | SidebarSetMutedIntent;
 
 export type SidebarLayoutState = {
   sidebarNodeOrderByParent: Record<string, string[]>;
   sidebarChatOrderByDrone: Record<string, string[]>;
   pinnedDroneIds: string[];
+  mutedSidebarGroupIds: string[];
+  mutedDroneIds: string[];
+  mutedChatIds: string[];
 };
 
 export type SidebarLayoutPatch = Partial<SidebarLayoutState>;
@@ -92,6 +105,9 @@ export function normalizeSidebarLayout(value: unknown): SidebarLayoutState {
     sidebarNodeOrderByParent: cleanStringMap(source.sidebarNodeOrderByParent),
     sidebarChatOrderByDrone: cleanStringMap(source.sidebarChatOrderByDrone),
     pinnedDroneIds: cleanStrings(source.pinnedDroneIds),
+    mutedSidebarGroupIds: cleanStrings(source.mutedSidebarGroupIds),
+    mutedDroneIds: cleanStrings(source.mutedDroneIds),
+    mutedChatIds: cleanStrings(source.mutedChatIds),
   };
 }
 
@@ -102,6 +118,13 @@ export function sidebarLayoutPatch(
   if (intent.kind === 'chat') return { sidebarChatOrderByDrone: layout.sidebarChatOrderByDrone };
   if (intent.kind === 'pinned-drone' || intent.kind === 'set-pinned') {
     return { pinnedDroneIds: layout.pinnedDroneIds };
+  }
+  if (intent.kind === 'set-muted') {
+    if (intent.targetKind === 'group') {
+      return { mutedSidebarGroupIds: layout.mutedSidebarGroupIds };
+    }
+    if (intent.targetKind === 'drone') return { mutedDroneIds: layout.mutedDroneIds };
+    return { mutedChatIds: layout.mutedChatIds };
   }
   return { sidebarNodeOrderByParent: layout.sidebarNodeOrderByParent };
 }
@@ -237,6 +260,18 @@ export function applySidebarReorder<T extends SidebarLayoutState>(
   };
 }
 
+function toggleSidebarMuteTarget(
+  current: readonly string[],
+  targetIdRaw: string,
+  muted: boolean,
+): string[] {
+  const targetId = String(targetIdRaw ?? '').trim();
+  const normalized = cleanStrings(current);
+  if (!targetId) return normalized;
+  if (muted) return normalized.includes(targetId) ? normalized : [...normalized, targetId];
+  return normalized.filter((entry) => entry !== targetId);
+}
+
 export function sidebarMoveDestination(
   intent: SidebarMoveIntoFolderIntent,
 ): { targetGroup: string | null; nextGroup: string | null } | null {
@@ -311,6 +346,17 @@ export function applySidebarMove<T extends SidebarLayoutState>(
       pinnedDroneIds: intent.pinned
         ? [...current, ...requested.filter((droneId) => !current.includes(droneId))]
         : current.filter((droneId) => !requestedSet.has(droneId)),
+    };
+  }
+  if (intent.kind === 'set-muted') {
+    const key = intent.targetKind === 'group'
+      ? 'mutedSidebarGroupIds'
+      : intent.targetKind === 'drone'
+        ? 'mutedDroneIds'
+        : 'mutedChatIds';
+    return {
+      ...layout,
+      [key]: toggleSidebarMuteTarget(layout[key], intent.targetId, intent.muted),
     };
   }
   return applySidebarReorder(layout, intent);

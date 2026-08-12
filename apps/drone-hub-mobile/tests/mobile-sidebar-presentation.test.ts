@@ -420,10 +420,10 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain('style={styles.droneRuntimeIconSlot}');
     expect(source).not.toContain('<SidebarContainerIcon');
     expect(source).not.toContain('styles.droneSpineExpanded');
-    expect(source).toContain('isChatDisclosure ? null : isDraft ? (');
+    expect(source).toContain('muted ? (');
     expect(source).toContain('mobileDroneDisplayState(drone, !hasMultipleChats)');
     expect(source).toContain('!isDraft && !hasMultipleChats');
-    expect(source).toContain("summarizeMobileDroneChats(drone, selected ? activeChatName : '')");
+    expect(source).toContain('return summarizeMobileDroneChats({');
     expect(source).toContain(
       '<DroneStateCounts summary={chatStateSummary} compact entity="chat" />',
     );
@@ -438,7 +438,7 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain('styles.droneChatDraftBadge');
     expect(source).toContain('borderColor: colors.accentAlt,');
     expect(source).toContain(
-      '<SwitchItemStatusIndicator state={displayState} unread={unread} showReadyAnchor />',
+      '<SwitchItemStatusIndicator state={displayState} unread={unread} muted={muted} showReadyAnchor />',
     );
     expect(source).toContain(
       'const containerSelected = isChatDisclosure && selectedContainerDroneId === drone.id;',
@@ -478,8 +478,16 @@ describe('mobile sidebar presentation', () => {
     expect(screenSource).toContain('onCreateDroneChat={createDrawerChat}');
     expect(screenSource).toContain('onRenameDroneChat={renameDrawerChat}');
     expect(screenSource).toContain('onDeleteDroneChat={deleteDrawerChat}');
+    expect(screenSource).toContain(
+      'const wasMuted = droneSidebarOrderRef.current.mutedChatIds.includes',
+    );
+    expect(screenSource).toContain("targetKind: 'chat'");
     expect(localControlSource).toContain("if (operation === 'chat.rename')");
     expect(localControlSource).toContain("if (operation === 'chat.delete')");
+    expect(localControlSource).toContain(
+      'mutedSidebarGroupIds: sidebarOrderRef.current.mutedSidebarGroupIds',
+    );
+    expect(localControlSource).toContain('mutedChatIds: nextLayout.mutedChatIds');
   });
 
   test('distinguishes draft and loading rows instead of showing misleading ready content', () => {
@@ -658,9 +666,10 @@ describe('mobile sidebar presentation', () => {
     const folderEnd = source.indexOf('function DrawerDroneEntry', folderStart);
     const folderSource = source.slice(folderStart, folderEnd);
 
-    expect(folderSource).toContain('summarizeDroneScope(folder.roots, folder.children)');
+    expect(folderSource).toContain('summarizeDroneScope(');
+    expect(folderSource).toContain('muteContext?.effectiveDroneIds');
     expect(folderSource).toContain(
-      '{collapsed ? <DroneStateCounts summary={stateSummary} compact /> : null}',
+      '{muted ? <MutedStatusIndicator /> : collapsed ? <DroneStateCounts summary={stateSummary} compact /> : null}',
     );
     expect(source).toContain(
       "groupRow: {\n    minHeight: 36,\n    flexDirection: 'row',\n    alignItems: 'center',\n    gap: DRAWER_TREE_LEADING_GAP,\n    paddingRight: 10,",

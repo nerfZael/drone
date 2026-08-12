@@ -173,6 +173,9 @@ describe('device mesh drone summaries', () => {
                         sidebarNodeOrderByParent: { root: ['drone:one'] },
                         sidebarChatOrderByDrone: { one: ['review', 'default'] },
                         pinnedDroneIds: ['one'],
+                        mutedSidebarGroupIds: ['group-id:group-review'],
+                        mutedDroneIds: ['one'],
+                        mutedChatIds: ['chat:one:review'],
                       },
                     }
                   : {
@@ -227,6 +230,9 @@ describe('device mesh drone summaries', () => {
                     sidebarNodeOrderByParent: { root: ['drone:one'] },
                     sidebarChatOrderByDrone: { one: ['review', 'default'] },
                     pinnedDroneIds: ['one'],
+                    mutedSidebarGroupIds: ['group-id:group-review'],
+                    mutedDroneIds: ['one'],
+                    mutedChatIds: ['chat:one:review'],
                   },
                 }),
               },
@@ -264,6 +270,9 @@ describe('device mesh drone summaries', () => {
           sidebarNodeOrderByParent: { root: ['drone:one'] },
           sidebarChatOrderByDrone: { one: ['review', 'default'] },
           pinnedDroneIds: ['one'],
+          mutedSidebarGroupIds: ['group-id:group-review'],
+          mutedDroneIds: ['one'],
+          mutedChatIds: ['chat:one:review'],
         },
         createOptions: {
           repos: [

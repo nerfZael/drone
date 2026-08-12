@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { buildSidebarFolderTree } from '../src/droneHub/app/sidebar-folder-tree';
 import { SIDEBAR_ROOT_PARENT_ID, sidebarDroneNodeId, sidebarFolderNodeId } from '../src/droneHub/app/sidebar-node-order';
 import { buildSidebarNodeTree, type SidebarTreeFolderNode } from '../src/droneHub/app/sidebar-node-tree';
+import { resolveEffectiveSidebarMuteSets, sidebarFolderMuteId } from '../src/droneHub/app/sidebar-mute';
 import type { SidebarGroup } from '../src/droneHub/app/use-sidebar-view-model';
 import type { DroneSummary } from '../src/droneHub/types';
 
@@ -232,5 +233,44 @@ describe('buildSidebarNodeTree', () => {
       sidebarDroneNodeId('older-drone'),
       sidebarFolderNodeId(alphaFolderPath),
     ]);
+  });
+
+  test('inherits group and parent-drone muting through the rendered tree', () => {
+    const sidebarGroups: SidebarGroup[] = [
+      {
+        group: 'Review',
+        groupId: 'group-review',
+        label: 'Review',
+        kind: 'group',
+        items: [
+          drone({ id: 'parent', name: 'parent', group: 'Review' }),
+          drone({ id: 'child', name: 'child', group: 'Review', fleetParentId: 'parent' }),
+        ],
+      },
+    ];
+    const tree = buildSidebarNodeTree({
+      sidebarFolderTree: buildSidebarFolderTree(sidebarGroups, []),
+      sidebarGroups,
+      sidebarGroupOrder: [],
+      sidebarDroneOrderByGroup: {},
+      sidebarNodeOrderByParent: {},
+    });
+    const folder = folderNode(tree.nodesById[sidebarFolderNodeId('Review')]);
+
+    const fromGroup = resolveEffectiveSidebarMuteSets(
+      tree,
+      new Set([sidebarFolderMuteId(folder)]),
+      new Set(),
+    );
+    expect(fromGroup.effectiveMutedSidebarGroupIdSet).toContain(folder.id);
+    expect(fromGroup.effectiveMutedDroneIdSet).toEqual(new Set(['parent', 'child']));
+
+    const fromParentDrone = resolveEffectiveSidebarMuteSets(
+      tree,
+      new Set(),
+      new Set(['parent']),
+    );
+    expect(fromParentDrone.effectiveMutedSidebarGroupIdSet.size).toBe(0);
+    expect(fromParentDrone.effectiveMutedDroneIdSet).toEqual(new Set(['parent', 'child']));
   });
 });

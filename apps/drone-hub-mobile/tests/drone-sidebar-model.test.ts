@@ -210,6 +210,9 @@ describe('mobile drone sidebar model', () => {
         sidebarNodeOrderByParent: { root: ['drone:mapped'] },
         sidebarChatOrderByDrone: { mapped: ['review', 'default'] },
         pinnedDroneIds: ['mapped'],
+        mutedSidebarGroupIds: ['group-id:review'],
+        mutedDroneIds: ['mapped'],
+        mutedChatIds: ['chat:mapped:review'],
       },
     });
 
@@ -230,6 +233,9 @@ describe('mobile drone sidebar model', () => {
       sidebarNodeOrderByParent: { root: ['drone:mapped'] },
       sidebarChatOrderByDrone: { mapped: ['review', 'default'] },
       pinnedDroneIds: ['mapped'],
+      mutedSidebarGroupIds: ['group-id:review'],
+      mutedDroneIds: ['mapped'],
+      mutedChatIds: ['chat:mapped:review'],
     });
     expect(
       orderedMobileDroneChats(payload.drones[0]!, payload.sidebar.sidebarChatOrderByDrone.mapped),

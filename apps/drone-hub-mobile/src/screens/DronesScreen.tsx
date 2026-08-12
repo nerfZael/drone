@@ -149,6 +149,10 @@ const EMPTY_CHAT_HISTORY_PAGE: MobileChatHistoryPage = {
   contentTruncated: false,
 };
 
+function mobileMutedChatId(droneId: string, chatName: string): string {
+  return `chat:${String(droneId).trim()}:${String(chatName).trim() || 'default'}`;
+}
+
 type MobileSidebarJournalState = {
   drones: MobileDroneSummary[];
   sidebar: MobileDroneSidebarOrder;
@@ -711,8 +715,10 @@ export function DronesScreen({
     (request: MobileSidebarMutationRequest) => {
       const destinationId = targetId;
       const current = droneListSnapshotRef.current;
-      if (current.targetId !== destinationId) return;
-      if (request.kind === 'move-into-folder' && !mobileSidebarMoveDestination(request)) return;
+      if (current.targetId !== destinationId) return Promise.resolve(false);
+      if (request.kind === 'move-into-folder' && !mobileSidebarMoveDestination(request)) {
+        return Promise.resolve(false);
+      }
       const generation = sidebarWriteGenerationRef.current + 1;
       sidebarWriteGenerationRef.current = generation;
       const commandId = `sidebar:${destinationId}:${Date.now()}:${generation}`;
@@ -734,18 +740,20 @@ export function DronesScreen({
       commitDroneListSnapshot({ ...current, ...visible });
 
       const write = async () => {
+        let saved = false;
         try {
-          if (targetIdRef.current !== destinationId) return;
+          if (targetIdRef.current !== destinationId) return false;
           const result = await requestDroneControl(destinationId, 'sidebar.move', {
             mutationId: commandId,
             intent: request,
           });
-          if (targetIdRef.current !== destinationId) return;
+          if (targetIdRef.current !== destinationId) return false;
           const savedVersion =
             Number.isSafeInteger(result?.version) && Number(result.version) >= 0
               ? Number(result.version)
               : sidebarPreferenceVersionRef.current;
           sidebarPreferenceVersionRef.current = savedVersion;
+          saved = true;
         } catch (nextError: any) {
           if (targetIdRef.current === destinationId) {
             setError(nextError?.message ?? String(nextError));
@@ -757,8 +765,11 @@ export function DronesScreen({
           );
         }
         if (targetIdRef.current === destinationId) await loadDronesRef.current(true);
+        return saved;
       };
-      void sidebarWriteQueueRef.current!.enqueue(write);
+      const pending = sidebarWriteQueueRef.current!.enqueue(write);
+      void pending;
+      return pending;
     },
     [commitDroneListSnapshot, requestDroneControl, targetId],
   );
@@ -1912,6 +1923,8 @@ export function DronesScreen({
 
   const renameDrawerChat = async (droneId: string, currentChatName: string, newName: string) => {
     const destinationId = targetId;
+    const previousMuteId = mobileMutedChatId(droneId, currentChatName);
+    const wasMuted = droneSidebarOrderRef.current.mutedChatIds.includes(previousMuteId);
     const result = await requestDroneControl(destinationId, 'chat.rename', {
       droneId,
       chatName: currentChatName,
@@ -1931,11 +1944,30 @@ export function DronesScreen({
       to: newName,
     });
     await loadDrones(true);
+    if (wasMuted && targetIdRef.current === destinationId) {
+      const nextMuteId = mobileMutedChatId(droneId, newName);
+      const migrated = await reorderSidebar({
+        kind: 'set-muted',
+        targetKind: 'chat',
+        targetId: nextMuteId,
+        muted: true,
+      });
+      if (migrated) {
+        await reorderSidebar({
+          kind: 'set-muted',
+          targetKind: 'chat',
+          targetId: previousMuteId,
+          muted: false,
+        });
+      }
+    }
     return targetIdRef.current === destinationId;
   };
 
   const deleteDrawerChat = async (droneId: string, chatToDelete: string) => {
     const destinationId = targetId;
+    const deletedMuteId = mobileMutedChatId(droneId, chatToDelete);
+    const wasMuted = droneSidebarOrderRef.current.mutedChatIds.includes(deletedMuteId);
     const result = await requestDroneControl(destinationId, 'chat.delete', {
       droneId,
       chatName: chatToDelete,
@@ -1948,6 +1980,14 @@ export function DronesScreen({
     const nextChats = normalizedChatMutationList(result?.chats, fallbackChats);
     commitDrawerChatMutation(droneId, nextChats);
     await loadDrones(true);
+    if (wasMuted && targetIdRef.current === destinationId) {
+      await reorderSidebar({
+        kind: 'set-muted',
+        targetKind: 'chat',
+        targetId: deletedMuteId,
+        muted: false,
+      });
+    }
     if (selectedRef.current?.id === droneId && chatNameRef.current === chatToDelete) {
       const fallbackChat = nextChats[0] ?? '';
       transitionToChat(fallbackChat);

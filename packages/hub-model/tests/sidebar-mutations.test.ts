@@ -46,6 +46,9 @@ describe('canonical sidebar mutations', () => {
       sidebarNodeOrderByParent: { root: ['drone:a', 'drone:b'] },
       sidebarChatOrderByDrone: { a: ['default', 'review'] },
       pinnedDroneIds: ['a', 'b'],
+      mutedSidebarGroupIds: [],
+      mutedDroneIds: [],
+      mutedChatIds: [],
     });
     const reordered = applySidebarMove(original, {
       kind: 'tree-entry',
@@ -67,7 +70,43 @@ describe('canonical sidebar mutations', () => {
       sidebarNodeOrderByParent: { root: ['drone:b', 'drone:a'] },
       sidebarChatOrderByDrone: { a: ['review', 'default'] },
       pinnedDroneIds: ['a', 'b'],
+      mutedSidebarGroupIds: [],
+      mutedDroneIds: [],
+      mutedChatIds: [],
     });
+  });
+
+  test('mutes and unmutes groups, drones, and chats independently', () => {
+    let layout = normalizeSidebarLayout(null);
+    layout = applySidebarMove(layout, {
+      kind: 'set-muted',
+      targetKind: 'group',
+      targetId: 'folder:Review',
+      muted: true,
+    });
+    layout = applySidebarMove(layout, {
+      kind: 'set-muted',
+      targetKind: 'drone',
+      targetId: 'alpha',
+      muted: true,
+    });
+    layout = applySidebarMove(layout, {
+      kind: 'set-muted',
+      targetKind: 'chat',
+      targetId: 'chat:alpha:review',
+      muted: true,
+    });
+    expect(layout).toMatchObject({
+      mutedSidebarGroupIds: ['folder:Review'],
+      mutedDroneIds: ['alpha'],
+      mutedChatIds: ['chat:alpha:review'],
+    });
+    expect(applySidebarMove(layout, {
+      kind: 'set-muted',
+      targetKind: 'drone',
+      targetId: 'alpha',
+      muted: false,
+    }).mutedDroneIds).toEqual([]);
   });
 
   test('rebases one dragged item without replaying stale sibling order', () => {

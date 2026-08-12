@@ -550,6 +550,28 @@ describe('drone hub ui store migration', () => {
     });
   });
 
+  test('rebases mute changes independently without resurrecting a local unmute', () => {
+    const base = {
+      mutedSidebarGroupIds: [],
+      mutedDroneIds: ['drone:a'],
+      mutedChatIds: ['chat:a:review'],
+    };
+    const local = {
+      ...base,
+      mutedDroneIds: [],
+    };
+    const remote = {
+      mutedSidebarGroupIds: ['group-id:review'],
+      mutedDroneIds: ['drone:a'],
+      mutedChatIds: ['chat:a:review', 'chat:b:review'],
+    };
+
+    const merged = mergeUiPreferencesChanges(base, local, remote);
+    expect(merged.mutedSidebarGroupIds).toEqual(['group-id:review']);
+    expect(merged.mutedDroneIds).toEqual([]);
+    expect(merged.mutedChatIds).toEqual(['chat:a:review', 'chat:b:review']);
+  });
+
   test('does not resurrect cleared server preferences from stale browser storage', () => {
     const snapshot = reconcileUiPreferencesReload({
       backend: {
