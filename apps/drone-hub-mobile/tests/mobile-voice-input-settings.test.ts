@@ -28,4 +28,19 @@ describe('mobile voice input settings', () => {
     expect(mobileVoiceInputSilenceMillis(settings)).toBe(3_250);
     expect(settings.language).toBe('hr-HR');
   });
+
+  test('allows a custom pause down to 250 milliseconds', () => {
+    expect(
+      normalizeMobileVoiceInputSettings({
+        endThoughtPreset: 'custom',
+        customSilenceMillis: 250,
+      }).customSilenceMillis,
+    ).toBe(250);
+    expect(
+      normalizeMobileVoiceInputSettings({
+        endThoughtPreset: 'custom',
+        customSilenceMillis: 249,
+      }).customSilenceMillis,
+    ).toBe(2_500);
+  });
 });

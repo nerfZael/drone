@@ -8,6 +8,7 @@ import {
 } from './app-config';
 import {
   cloneDefaultShortcutBindings,
+  migrateFormerPullRequestsShortcut,
   sanitizeSingleShortcutBinding,
   sanitizeShortcutBindings,
   type ShortcutActionId,
@@ -689,9 +690,10 @@ function isExactShortcutBinding(value: unknown, expected: ShortcutBinding | null
 
 function migrateLegacyShortcutBindings(value: unknown): unknown {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
-  const raw = value as Record<string, unknown>;
+  const migratedPullRequestsShortcut = migrateFormerPullRequestsShortcut(value);
+  const raw = migratedPullRequestsShortcut as Record<string, unknown>;
   const next = { ...raw };
-  let changed = false;
+  let changed = migratedPullRequestsShortcut !== value;
   const hasCreateDraftGroupBinding = Object.prototype.hasOwnProperty.call(raw, 'createDraftGroup');
   const usesLegacyToDoShortcut = isExactShortcutBinding(raw.toggleSelectedDronesToDo, {
     key: 'e',

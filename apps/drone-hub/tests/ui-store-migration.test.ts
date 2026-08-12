@@ -755,4 +755,31 @@ describe('drone hub ui store migration', () => {
       toggleSelectedDronesToDo: null,
     });
   });
+
+  test('moves the former default R shortcut from pull requests to continuous dictation', () => {
+    const migrated = migrateDroneHubUiPersistedState({
+      shortcutBindings: {
+        openPullRequestsTab: {
+          key: 'r',
+          mod: false,
+          ctrl: false,
+          meta: false,
+          alt: false,
+          shift: false,
+        },
+      },
+    });
+
+    expect(migrated.shortcutBindings).toMatchObject({
+      toggleContinuousDictation: {
+        key: 'r',
+        mod: false,
+        ctrl: false,
+        meta: false,
+        alt: false,
+        shift: false,
+      },
+      openPullRequestsTab: null,
+    });
+  });
 });

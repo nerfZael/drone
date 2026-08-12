@@ -201,6 +201,8 @@ export const DEFAULT_VOICE_INPUT_SETTINGS: VoiceInputSettings = {
   quality: 'fast',
   confirmationFeedback: false,
 };
+export const VOICE_INPUT_CUSTOM_SILENCE_MILLIS_MIN = 250;
+export const VOICE_INPUT_CUSTOM_SILENCE_MILLIS_MAX = 10_000;
 
 export const VOICE_INPUT_SILENCE_MILLIS_BY_PRESET: Record<
   Exclude<VoiceInputEndThoughtPreset, 'custom'>,
@@ -1044,7 +1046,10 @@ function parseVoiceInputCustomSilenceMillis(raw: unknown): number | null {
   const value = Number(raw);
   if (!Number.isFinite(value)) return null;
   const rounded = Math.round(value);
-  return rounded >= 1_000 && rounded <= 10_000 ? rounded : null;
+  return rounded >= VOICE_INPUT_CUSTOM_SILENCE_MILLIS_MIN &&
+    rounded <= VOICE_INPUT_CUSTOM_SILENCE_MILLIS_MAX
+    ? rounded
+    : null;
 }
 
 export async function resolveEffectiveVoiceInputSettings(): Promise<VoiceInputSettings> {
@@ -1080,7 +1085,9 @@ export async function upsertStoredVoiceInputSettings(
       ? null
       : parseVoiceInputCustomSilenceMillis(input.customSilenceMillis);
   if (input.customSilenceMillis != null && silence == null) {
-    throw new Error('customSilenceMillis must be between 1000 and 10000');
+    throw new Error(
+      `customSilenceMillis must be between ${VOICE_INPUT_CUSTOM_SILENCE_MILLIS_MIN} and ${VOICE_INPUT_CUSTOM_SILENCE_MILLIS_MAX}`,
+    );
   }
   const noise = input.noiseHandling == null ? null : parseVoiceInputNoiseHandling(input.noiseHandling);
   if (input.noiseHandling != null && !noise) throw new Error('noiseHandling is not supported');

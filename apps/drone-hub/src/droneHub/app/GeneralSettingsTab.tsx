@@ -12,6 +12,10 @@ import { CodexConnectControl } from './CodexConnectControl';
 import { DESKTOP_THEMES } from '../../theme';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 import { ResourceSubscriptionSettingsSection } from './ResourceSubscriptionSettingsSection';
+import {
+  VOICE_INPUT_SILENCE_MILLIS_MAX,
+  VOICE_INPUT_SILENCE_MILLIS_MIN,
+} from '../chat/voice-input-silence';
 
 function llmProviderLabel(provider: LlmProviderId | null | undefined): string {
   if (provider === 'codex') return 'Codex';
@@ -566,12 +570,12 @@ export function GeneralSettingsTab({
               <span className="flex items-center justify-between gap-3 dh-type-label">
                 <span>Custom pause</span>
                 <span className="font-mono text-[var(--fg-secondary)]">
-                  {(voiceInput.draft.customSilenceMillis / 1_000).toFixed(1)}s
+                  {formatVoiceInputPause(voiceInput.draft.customSilenceMillis)}
                 </span>
               </span>
               <UiSlider
-                min={1_000}
-                max={10_000}
+                min={VOICE_INPUT_SILENCE_MILLIS_MIN}
+                max={VOICE_INPUT_SILENCE_MILLIS_MAX}
                 step={250}
                 value={voiceInput.draft.customSilenceMillis}
                 onChange={(event) =>
@@ -890,4 +894,9 @@ export function GeneralSettingsTab({
       </div>
     </>
   );
+}
+
+function formatVoiceInputPause(milliseconds: number): string {
+  if (milliseconds < 1_000) return `${milliseconds}ms`;
+  return `${(milliseconds / 1_000).toFixed(2).replace(/\.?0+$/, '')}s`;
 }

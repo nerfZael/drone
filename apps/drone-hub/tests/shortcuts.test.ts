@@ -3,6 +3,7 @@ import {
   cloneDefaultShortcutBindings,
   formatShortcutBinding,
   isShortcutMatch,
+  migrateFormerPullRequestsShortcut,
   shortcutBindingFromKeyboardEvent,
 } from '../src/droneHub/app/shortcuts';
 
@@ -74,6 +75,15 @@ describe('shortcut defaults', () => {
       alt: false,
       shift: false,
     });
+    expect(defaults.toggleContinuousDictation).toEqual({
+      key: 'r',
+      mod: false,
+      ctrl: false,
+      meta: false,
+      alt: false,
+      shift: false,
+    });
+    expect(defaults.openPullRequestsTab).toBeNull();
     expect(defaults.toggleVoiceClipboardRecording).toEqual({
       key: '`',
       mod: false,
@@ -111,6 +121,44 @@ describe('shortcut defaults', () => {
     expect(isShortcutMatch(binding, { key: 'p', ctrlKey: true, metaKey: false, altKey: true, shiftKey: true })).toBe(true);
     expect(isShortcutMatch(binding, { key: 'p', ctrlKey: false, metaKey: true, altKey: true, shiftKey: true })).toBe(true);
     expect(isShortcutMatch(binding, { key: 'p', ctrlKey: true, metaKey: false, altKey: false, shiftKey: true })).toBe(false);
+  });
+
+  test('moves the former default R binding from pull requests to continuous dictation', () => {
+    expect(
+      migrateFormerPullRequestsShortcut({
+        openPullRequestsTab: {
+          key: 'r',
+          mod: false,
+          ctrl: false,
+          meta: false,
+          alt: false,
+          shift: false,
+        },
+      }),
+    ).toMatchObject({
+      toggleContinuousDictation: {
+        key: 'r',
+        mod: false,
+        ctrl: false,
+        meta: false,
+        alt: false,
+        shift: false,
+      },
+      openPullRequestsTab: null,
+    });
+
+    const explicitlyConfigured = {
+      toggleContinuousDictation: null,
+      openPullRequestsTab: {
+        key: 'r',
+        mod: false,
+        ctrl: false,
+        meta: false,
+        alt: false,
+        shift: false,
+      },
+    };
+    expect(migrateFormerPullRequestsShortcut(explicitlyConfigured)).toBe(explicitlyConfigured);
   });
 
   test('keeps the Changes editor E binding available for the global create-group action', () => {

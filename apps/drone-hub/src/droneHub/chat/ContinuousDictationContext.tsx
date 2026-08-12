@@ -10,6 +10,7 @@ import {
   restoreContinuousDictationLines,
   type ContinuousDictationLine,
 } from './continuous-dictation-draft';
+import { createContinuousDictationToggle } from './create-continuous-dictation-toggle';
 
 export type ContinuousDictationShadowSnapshot = {
   targetId: string;
@@ -114,6 +115,7 @@ export function ContinuousDictationProvider({ children }: { children: React.Reac
     start,
     stop,
     cancel,
+    getStatus,
     discardPending,
   } = useContinuousChatVoice({
     resetKey: 'global-continuous-dictation',
@@ -124,6 +126,31 @@ export function ContinuousDictationProvider({ children }: { children: React.Reac
     microphoneOwner: 'continuous-dictation',
   });
   discardPendingRef.current = discardPending;
+  const voiceControlsRef = React.useRef({ getStatus, start, stop, cancel });
+  voiceControlsRef.current = { getStatus, start, stop, cancel };
+  const toggleControllerRef = React.useRef<ReturnType<
+    typeof createContinuousDictationToggle
+  > | null>(null);
+  if (!toggleControllerRef.current) {
+    toggleControllerRef.current = createContinuousDictationToggle({
+      getStatus: () => voiceControlsRef.current.getStatus(),
+      start: () => voiceControlsRef.current.start(),
+      stop: () => voiceControlsRef.current.stop(),
+      cancel: () => {
+        void voiceControlsRef.current.cancel();
+      },
+      onStartIntent: () => {
+        replaceShadowLines([]);
+        discardPendingRef.current();
+      },
+    });
+  }
+  toggleControllerRef.current.sync(status !== 'idle');
+  React.useEffect(() => {
+    const controller = toggleControllerRef.current;
+    controller?.activate();
+    return () => controller?.deactivate();
+  }, []);
 
   const registerComposer = React.useCallback(
     (composer: ContinuousDictationComposer) => {
@@ -180,17 +207,9 @@ export function ContinuousDictationProvider({ children }: { children: React.Reac
 
   const toggle = React.useCallback(async () => {
     setError('');
-    if (status === 'idle') {
-      ensureTargetId();
-      await start();
-      return;
-    }
-    if (status === 'error') {
-      await cancel();
-      return;
-    }
-    await stop();
-  }, [cancel, ensureTargetId, start, status, stop]);
+    ensureTargetId();
+    await toggleControllerRef.current?.toggle();
+  }, [ensureTargetId]);
 
   const shadowText = continuousDictationLinesText(shadowLines);
   const value = React.useMemo<ContinuousDictationContextValue>(
