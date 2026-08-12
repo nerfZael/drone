@@ -9,7 +9,7 @@ import {
 } from '@drone/assistant-chat';
 import { stripAnsi } from '../../domain';
 import type { TranscriptItem } from '../types';
-import { AgentMessageExtras, extractAgentMessageContent } from './AgentMessageExtras';
+import { AgentMessageExtras } from './AgentMessageExtras';
 import type { LinkedPullRequestContext } from './LinkedPullRequestCards';
 import { ChatMessageBody } from './ChatMessageBody';
 import { ChatMessageCopyAction } from './ChatMessageCopyAction';
@@ -19,8 +19,6 @@ import {
   normalizeImageAttachmentRefs,
 } from './ImageAttachmentChips';
 import type { MarkdownFileReference } from './MarkdownMessage';
-import type { DroneHubTask } from './drone-hub-task-parser';
-import type { DroneHubTaskSpawnMode } from './drone-hub-task-spawn';
 import { IconSnapshot, IconSpinner } from './icons';
 import { ChatMessageFrame } from './ChatMessageFrame';
 import { collectInlineAgentMedia } from './inline-agent-media';
@@ -52,7 +50,6 @@ function sameAttachments(aRaw: unknown, bRaw: unknown): boolean {
 export const TranscriptTurn = React.memo(
   function TranscriptTurn({
     item,
-    onSpawnDroneHubTask,
     messageId,
     onRollbackDockerSnapshot,
     onOpenFileReference,
@@ -67,10 +64,6 @@ export const TranscriptTurn = React.memo(
     initiallyExpandFileChanges = false,
   }: {
     item: TranscriptItem;
-    onSpawnDroneHubTask: (
-      mode: DroneHubTaskSpawnMode,
-      task: DroneHubTask,
-    ) => Promise<{ ok: boolean; error?: string | null }>;
     messageId: string;
     onRollbackDockerSnapshot?: (item: TranscriptItem) => void | Promise<void>;
     onOpenFileReference?: (ref: MarkdownFileReference) => void;
@@ -97,11 +90,7 @@ export const TranscriptTurn = React.memo(
       : item.ok
         ? stripAnsi(item.output)
         : stripAnsi(item.error || 'failed');
-    const agentMessage = React.useMemo(
-      () => extractAgentMessageContent(cleaned, item.ok),
-      [cleaned, item.ok],
-    );
-    const cleanedAgentMessage = agentMessage.text;
+    const cleanedAgentMessage = cleaned;
     const activity =
       isSilentCompletion || isUserOnly ? undefined : normalizeAgentRunActivity(item.activity);
     const activityHasResponse = agentRunActivityHasResponse(activity);
@@ -182,7 +171,6 @@ export const TranscriptTurn = React.memo(
             messageExtras={{
               messageId,
               actionsEnabled: actionsEnabled && item.ok,
-              onSpawnTask: onSpawnDroneHubTask,
               linkedPullRequestContext,
               droneId,
               droneHomePath,
@@ -266,10 +254,8 @@ export const TranscriptTurn = React.memo(
             />
             <AgentMessageExtras
               text={cleanedAgentMessage}
-              tasks={agentMessage.tasks}
               messageId={messageId}
               actionsEnabled={actionsEnabled && item.ok}
-              onSpawnTask={onSpawnDroneHubTask}
               linkedPullRequestContext={linkedPullRequestContext}
               droneId={droneId}
               droneHomePath={droneHomePath}
@@ -364,7 +350,6 @@ export const TranscriptTurn = React.memo(
     a.item.silentCompletion === b.item.silentCompletion &&
     sameAgentPlan(a.item.agentPlan, b.item.agentPlan) &&
     (a.item.error ?? '') === (b.item.error ?? '') &&
-    a.onSpawnDroneHubTask === b.onSpawnDroneHubTask &&
     a.messageId === b.messageId &&
     a.onRollbackDockerSnapshot === b.onRollbackDockerSnapshot &&
     a.onOpenFileReference === b.onOpenFileReference &&

@@ -18,7 +18,6 @@ describe('completed external transcript presentation', () => {
           output: '',
           userOnly: true,
         }}
-        onSpawnDroneHubTask={async () => ({ ok: true })}
         messageId="codex-steering-input"
       />,
     );
@@ -43,7 +42,6 @@ describe('completed external transcript presentation', () => {
           ok: true,
           output: 'The interface is ready for review.',
         }}
-        onSpawnDroneHubTask={async () => ({ ok: true })}
         messageId="external-turn-1"
         showRoleIcons={false}
       />,
@@ -83,7 +81,6 @@ describe('completed external transcript presentation', () => {
           ok: true,
           output: 'Done.',
         }}
-        onSpawnDroneHubTask={async () => ({ ok: true })}
         messageId="external-turn-queued"
       />,
     );

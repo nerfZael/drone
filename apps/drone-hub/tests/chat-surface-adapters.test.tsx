@@ -672,7 +672,7 @@ describe('agent chat surface adapters', () => {
     expect(html).toContain('group-hover/markdown-block:opacity-100');
   });
 
-  test('native assistant messages use shared tasks, linked requests, and inline media', () => {
+  test('native assistant messages use linked requests and inline media', () => {
     const html = renderToStaticMarkup(
       <AssistantMessageRow
         message={{
@@ -685,14 +685,12 @@ describe('agent chat surface adapters', () => {
                 'Implemented the change.',
                 '![Screenshot](https://example.com/screenshot.png)',
                 'PR: https://github.com/nerfZael/drone/pull/609',
-                '{"type":"drone-hub-task","name":"Follow up","description":"Finish the remaining work."}',
               ].join('\n\n'),
             },
           ],
         }}
         messageExtras={{
           messageId: 'native-message',
-          onSpawnTask: async () => ({ ok: true }),
           linkedPullRequestContext: {
             droneId: 'drone-a',
             repoPath: '/work/repo',
@@ -706,8 +704,6 @@ describe('agent chat surface adapters', () => {
       />,
     );
 
-    expect(html).toContain('Drone tasks');
-    expect(html).toContain('Follow up');
     expect(html).toContain('screenshot.png');
     expect(html).toContain('aria-label="Hide inline media"');
     expect(html).toContain('aria-pressed="false"');
@@ -716,7 +712,6 @@ describe('agent chat surface adapters', () => {
     expect(html.match(/<img/g)).toHaveLength(1);
     expect(html).toContain('Pull request');
     expect(html).toContain('#609');
-    expect(html).not.toContain('&quot;type&quot;:&quot;drone-hub-task&quot;');
   });
 
   test('marks the inline media control active only while media is hidden', () => {

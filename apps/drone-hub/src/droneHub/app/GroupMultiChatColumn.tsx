@@ -7,8 +7,6 @@ import {
   type ChatComposerControlsConfig,
   type ChatSendContext,
   type ChatSendPayload,
-  type DroneHubTask,
-  type DroneHubTaskSpawnMode,
   EmptyState,
   PendingTranscriptTurn,
   TranscriptTurn,
@@ -76,12 +74,6 @@ export type GroupMultiChatColumnProps = {
   onOpenDrone: () => void;
   onDeleteDrone: () => void;
   deleteBusy?: boolean;
-  onSpawnDroneHubTask: (opts: {
-    sourceDroneId: string;
-    sourceChatName: string;
-    task: DroneHubTask;
-    mode: DroneHubTaskSpawnMode;
-  }) => Promise<{ ok: boolean; error?: string | null }>;
   onSendPromptInNewChat: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
   onCreateQueuedNewChatNow: (actionId: string, sourceChatName: string) => Promise<void>;
   focusedNewChatActionId: string;
@@ -100,7 +92,6 @@ export function GroupMultiChatColumn({
   onOpenDrone,
   onDeleteDrone,
   deleteBusy = false,
-  onSpawnDroneHubTask,
   onSendPromptInNewChat,
   onCreateQueuedNewChatNow,
   focusedNewChatActionId,
@@ -630,17 +621,6 @@ export function GroupMultiChatColumn({
       waitingForAgent,
     ],
   );
-  const spawnDroneHubTaskForColumn = React.useCallback(
-    (mode: DroneHubTaskSpawnMode, task: DroneHubTask) =>
-      onSpawnDroneHubTask({
-        sourceDroneId: drone.id,
-        sourceChatName: chatName,
-        task,
-        mode,
-      }),
-    [chatName, drone.id, onSpawnDroneHubTask],
-  );
-
   const stopResponse = React.useCallback(async (): Promise<void> => {
     if (!canStopResponse || stoppingResponse) return;
     setStoppingResponse(true);
@@ -1099,7 +1079,6 @@ export function GroupMultiChatColumn({
                     index === items.length - 1 &&
                     visiblePendingPrompts.length === 0
                   }
-                  onSpawnDroneHubTask={spawnDroneHubTaskForColumn}
                   messageId={messageId}
                   droneId={drone.id}
                   droneHomePath={droneHome}

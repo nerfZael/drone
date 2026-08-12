@@ -5,21 +5,12 @@ import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import type { AgentPlan } from '../types';
 import { VideoPreview } from '../media/VideoPreview';
 import { AgentPlanList } from './AgentPlanList';
-import { DroneHubTaskList } from './DroneHubTaskList';
 import { LinkedPullRequestCards, type LinkedPullRequestContext } from './LinkedPullRequestCards';
 import { LinkedChangeRequestCards } from './LinkedChangeRequestCards';
 import type { MarkdownFileReference } from './MarkdownMessage';
-import type { DroneHubTask } from './drone-hub-task-parser';
-import { extractDroneHubTasksFromAgentMessage } from './drone-hub-task-parser';
-import type { DroneHubTaskSpawnMode } from './drone-hub-task-spawn';
 import { IconImage, IconOpen } from './icons';
 import { collectInlineAgentMedia, type InlineAgentMedia } from './inline-agent-media';
 import { ChangedFilesCard } from './ChangedFilesCard';
-
-export type AgentMessageContent = {
-  text: string;
-  tasks: DroneHubTask[];
-};
 
 export function resolveInlineMediaToggleState(inlineMediaVisible: boolean): {
   active: boolean;
@@ -30,21 +21,10 @@ export function resolveInlineMediaToggleState(inlineMediaVisible: boolean): {
     : { active: true, label: 'Show inline media' };
 }
 
-export function extractAgentMessageContent(text: string, enabled = true): AgentMessageContent {
-  if (!enabled) return { text, tasks: [] };
-  const taskData = extractDroneHubTasksFromAgentMessage(text);
-  return { text: taskData.cleanedText, tasks: taskData.tasks };
-}
-
 export type AgentMessageExtrasProps = {
   text: string;
-  tasks: DroneHubTask[];
   messageId: string;
   actionsEnabled?: boolean;
-  onSpawnTask?: (
-    mode: DroneHubTaskSpawnMode,
-    task: DroneHubTask,
-  ) => Promise<{ ok: boolean; error?: string | null }>;
   linkedPullRequestContext?: LinkedPullRequestContext;
   droneId?: string;
   droneHomePath?: string;
@@ -59,10 +39,8 @@ export type AgentMessageExtrasProps = {
 
 export function AgentMessageExtras({
   text,
-  tasks,
   messageId,
   actionsEnabled = true,
-  onSpawnTask,
   linkedPullRequestContext,
   droneId,
   droneHomePath,
@@ -133,10 +111,6 @@ export function AgentMessageExtras({
 
   return (
     <>
-      {actionsEnabled && onSpawnTask && tasks.length > 0 ? (
-        <DroneHubTaskList tasks={tasks} onSpawnTask={onSpawnTask} />
-      ) : null}
-
       {showInlineMedia ? (
         <div className="mt-2">
           <div className="grid grid-cols-1 items-start gap-2 sm:grid-cols-2">

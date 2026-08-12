@@ -35,7 +35,7 @@ The system will not:
 - Use `read_file` or `apply_patch` as the workflow CRUD interface.
 - Add standalone workflow commands to the Blip CLI.
 - Store workflow definitions or run state in a drone workspace.
-- Reuse Drone Hub task cards, Fleet workflows, old playbooks, or group orchestration.
+- Reuse Fleet workflows, old playbooks, or group orchestration.
 
 The Blip CLI agent can use workflows when it is running in or connected to Drone Hub and has the Drone Hub MCP server configured. The Drone Hub native assistant uses the same tools through its in-process MCP client. Other built-in or external agents can use the tools when their Drone Hub MCP identity allows it.
 

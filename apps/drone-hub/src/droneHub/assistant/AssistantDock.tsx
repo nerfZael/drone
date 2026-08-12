@@ -16,8 +16,6 @@ import {
   type ChatComposerContextConfig,
   type ChatSendContext,
   type ChatSendPayload,
-  type DroneHubTask,
-  type DroneHubTaskSpawnMode,
 } from '../chat';
 import { PendingTranscriptTurn } from '../chat/PendingTranscriptTurn';
 import type { LinkedPullRequestContext } from '../chat/LinkedPullRequestCards';
@@ -270,10 +268,6 @@ export type NativeChatBinding = {
 };
 
 export type AssistantMessageFeatures = {
-  onSpawnTask: (
-    mode: DroneHubTaskSpawnMode,
-    task: DroneHubTask,
-  ) => Promise<{ ok: boolean; error?: string | null }>;
   linkedPullRequestContext: LinkedPullRequestContext;
   droneId: string;
   droneHomePath: string;
@@ -2127,7 +2121,6 @@ export function AssistantDock({
             autoExpandMessage={isLatestActivity}
             messageExtras={{
               messageId: `${activeThreadId}:${item.key}`,
-              onSpawnTask: messageFeatures.onSpawnTask,
               linkedPullRequestContext: messageFeatures.linkedPullRequestContext,
               droneId: messageFeatures.droneId,
               droneHomePath: messageFeatures.droneHomePath,

@@ -4,8 +4,6 @@ import {
   ChatInput,
   type ChatSendContext,
   type ChatSendPayload,
-  type DroneHubTask,
-  type DroneHubTaskSpawnMode,
   EmptyState,
 } from '../chat';
 import { GroupMultiChatColumn } from './GroupMultiChatColumn';
@@ -55,12 +53,6 @@ type GroupMultiChatWorkspaceProps = {
   onSelectDroneCard: (droneId: string) => void;
   onDeleteDrone: (droneId: string) => void;
   deletingDrones: Record<string, boolean>;
-  onSpawnDroneHubTaskFromAgentMessage: (opts: {
-    sourceDroneId: string;
-    sourceChatName: string;
-    task: DroneHubTask;
-    mode: DroneHubTaskSpawnMode;
-  }) => Promise<{ ok: boolean; error?: string | null }>;
 };
 
 export function GroupMultiChatWorkspace({
@@ -78,7 +70,6 @@ export function GroupMultiChatWorkspace({
   onSelectDroneCard,
   onDeleteDrone,
   deletingDrones,
-  onSpawnDroneHubTaskFromAgentMessage,
 }: GroupMultiChatWorkspaceProps) {
   const {
     selectedChat,
@@ -311,7 +302,6 @@ export function GroupMultiChatWorkspace({
                   onOpenDrone={() => onSelectDroneCard(d.id)}
                   onDeleteDrone={() => onDeleteDrone(d.id)}
                   deleteBusy={Boolean(deletingDrones[d.id])}
-                  onSpawnDroneHubTask={onSpawnDroneHubTaskFromAgentMessage}
                   onSendPromptInNewChat={(payload, context) =>
                     onSendPromptInNewChat(d, payload, context, selectedChat || 'default')
                   }

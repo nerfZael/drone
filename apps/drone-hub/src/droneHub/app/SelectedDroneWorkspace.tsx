@@ -16,8 +16,6 @@ import {
   adaptNativeAgentChatSurface,
   type AgentChatTranscriptItem,
   type ChatSendContext,
-  type DroneHubTask,
-  type DroneHubTaskSpawnMode,
   type ChatSendPayload,
   type ChatComposerMenuAction,
   CollapsibleOutput,
@@ -477,12 +475,6 @@ type SelectedDroneWorkspaceProps = {
   transcripts: TranscriptItem[] | null;
   visiblePendingPromptsWithStartup: PendingPrompt[];
   transcriptMessageId: (item: TranscriptItem) => string;
-  spawnDroneHubTaskFromAgentMessage: (opts: {
-    sourceDroneId: string;
-    sourceChatName: string;
-    task: DroneHubTask;
-    mode: DroneHubTaskSpawnMode;
-  }) => Promise<{ ok: boolean; error?: string | null }>;
   outputScrollRef: React.RefObject<HTMLDivElement | null>;
   updatePinned: (el: HTMLDivElement) => void;
   startupSeedForCurrentDrone: StartupSeedState | null;
@@ -609,7 +601,6 @@ export function SelectedDroneWorkspace({
   transcripts,
   visiblePendingPromptsWithStartup,
   transcriptMessageId,
-  spawnDroneHubTaskFromAgentMessage,
   outputScrollRef,
   updatePinned,
   startupSeedForCurrentDrone,
@@ -745,16 +736,6 @@ export function SelectedDroneWorkspace({
       }
     },
     [activeChatName, codexApprovalBusyId, currentDrone.id],
-  );
-  const spawnCurrentDroneHubTask = React.useCallback(
-    (mode: DroneHubTaskSpawnMode, task: DroneHubTask) =>
-      spawnDroneHubTaskFromAgentMessage({
-        sourceDroneId: currentDrone.id,
-        sourceChatName: activeChatName,
-        task,
-        mode,
-      }),
-    [activeChatName, currentDrone.id, spawnDroneHubTaskFromAgentMessage],
   );
   const hasChats = React.useMemo(
     () =>
@@ -1391,7 +1372,6 @@ export function SelectedDroneWorkspace({
           initiallyExpandFileChanges={
             isLatestActivity && timelineIndex === latestFileChangesTimelineIndex
           }
-          onSpawnDroneHubTask={spawnCurrentDroneHubTask}
           messageId={messageId}
           onRollbackDockerSnapshot={rollbackDockerSnapshot}
           onOpenFileReference={onOpenMarkdownFileReference}
@@ -2296,7 +2276,6 @@ export function SelectedDroneWorkspace({
                     composerLeadingControls={externalLeadingComposerControls}
                     composerTrailingControls={externalTrailingComposerControls}
                     messageFeatures={{
-                      onSpawnTask: spawnCurrentDroneHubTask,
                       linkedPullRequestContext,
                       droneId: currentDrone.id,
                       droneHomePath: currentDroneHomePath,

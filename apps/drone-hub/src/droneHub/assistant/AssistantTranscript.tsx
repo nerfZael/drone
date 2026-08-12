@@ -7,7 +7,6 @@ import {
 
 import {
   AgentMessageExtras,
-  extractAgentMessageContent,
   type AgentMessageExtrasProps,
 } from '../chat/AgentMessageExtras';
 import type { MarkdownTextMentionLink } from '../chat/MarkdownMessage';
@@ -1408,7 +1407,7 @@ export function AssistantMessageRow({
   autoExpandMessage = false,
 }: {
   message: AssistantMessage;
-  messageExtras?: Omit<AgentMessageExtrasProps, 'text' | 'tasks'>;
+  messageExtras?: Omit<AgentMessageExtrasProps, 'text'>;
   droneMentionLinks?: MarkdownTextMentionLink[];
   onOpenDroneMention?: (mention: MarkdownTextMentionLink) => void;
   showToolCalls?: boolean;
@@ -1419,24 +1418,16 @@ export function AssistantMessageRow({
   const content = message.content;
   const visibleText =
     message.role === 'assistant' ? assistantVisibleText(message) : messageText(message);
-  const agentMessage = React.useMemo(
-    () =>
-      extractAgentMessageContent(
-        visibleText,
-        message.role === 'assistant' && !message.errorMessage,
-      ),
-    [message.errorMessage, message.role, visibleText],
-  );
   const renderedInlineMediaHrefs = React.useMemo(
     () =>
       collectInlineAgentMedia(
-        agentMessage.text,
+        visibleText,
         messageExtras?.droneId,
         messageExtras?.droneHomePath,
       )
         .map((media) => media.linkHref)
         .filter((href): href is string => Boolean(href)),
-    [agentMessage.text, messageExtras?.droneHomePath, messageExtras?.droneId],
+    [messageExtras?.droneHomePath, messageExtras?.droneId, visibleText],
   );
   const structuredAssistant =
     message.role === 'assistant' &&
@@ -1483,10 +1474,7 @@ export function AssistantMessageRow({
           blocks.push(<ReasoningBlock key={`th:${i}`} text={thinkingText} />);
         }
       } else if (part.type === 'text') {
-        const t = extractAgentMessageContent(
-          String(part.text ?? ''),
-          !message.errorMessage,
-        ).text.trim();
+        const t = String(part.text ?? '').trim();
         if (t) {
           blocks.push(
             <ChatMessageBody
@@ -1506,7 +1494,7 @@ export function AssistantMessageRow({
     }
     body = blocks.length > 0 ? <div className="space-y-1">{blocks}</div> : null;
   } else {
-    const text = agentMessage.text;
+    const text = visibleText;
     const images = messageImageParts(message);
     body =
       text || images.length > 0 || message.errorMessage ? (
@@ -1534,8 +1522,7 @@ export function AssistantMessageRow({
     message.role === 'assistant' &&
     !body &&
     !message.errorMessage &&
-    calls.length === 0 &&
-    agentMessage.tasks.length === 0
+    calls.length === 0
   )
     return null;
 
@@ -1547,8 +1534,8 @@ export function AssistantMessageRow({
       showRoleLabel={false}
       plainAssistant
       hoverActions={
-        agentMessage.text ? (
-          <ChatMessageCopyAction text={agentMessage.text} position="hover-rail" />
+        visibleText ? (
+          <ChatMessageCopyAction text={visibleText} position="hover-rail" />
         ) : undefined
       }
     >
@@ -1570,8 +1557,7 @@ export function AssistantMessageRow({
       {message.role === 'assistant' ? (
         <AgentMessageExtras
           {...messageExtras}
-          text={agentMessage.text}
-          tasks={agentMessage.tasks}
+          text={visibleText}
           messageId={
             messageExtras?.messageId ??
             String(message.id ?? message.createdAt ?? message.timestamp ?? 'assistant-message')

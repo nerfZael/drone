@@ -409,7 +409,6 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     deleteDrone,
     deletingDrones,
     optimisticallyDeletedDrones,
-    spawnDroneHubTaskFromAgentMessage,
     dronesLoading,
     sidebarDrones,
     dronesError,
@@ -636,7 +635,6 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
           onSelectDroneCard: selectDroneCard,
           onDeleteDrone: deleteDrone,
           deletingDrones,
-          onSpawnDroneHubTaskFromAgentMessage: spawnDroneHubTaskFromAgentMessage,
         }
       : null,
     noDroneSelectedStateProps: {
@@ -720,7 +718,6 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
           transcripts,
           visiblePendingPromptsWithStartup,
           transcriptMessageId,
-          spawnDroneHubTaskFromAgentMessage,
           outputScrollRef,
           updatePinned,
           startupSeedForCurrentDrone,
