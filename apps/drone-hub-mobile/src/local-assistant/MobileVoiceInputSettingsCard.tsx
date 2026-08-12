@@ -106,7 +106,8 @@ export function MobileVoiceInputSettingsCard() {
     <View style={styles.section}>
       <Label>Voice input</Label>
       <Text style={[textStyles.body, styles.description]}>
-        Configure how continuous voice steering decides that a spoken thought is complete.
+        Configure how continuous dictation and voice steering decide that a spoken thought is
+        complete.
         Listening continues while the screen is locked and recovers after calls or temporary
         microphone interruptions.
       </Text>

@@ -18,6 +18,13 @@ import {
   resolveMobileVoiceTranscriptDraft,
 } from './mobile-voice-transcription-model';
 import { useSharedMobileChatVoiceRecorder } from './MobileChatVoiceRecorderContext';
+import { MobileContinuousDictationDraft } from './MobileContinuousDictationDraft';
+import { MobileContinuousVoiceModePicker } from './MobileContinuousVoiceModePicker';
+import type { MobileContinuousVoiceMode } from './mobile-continuous-dictation';
+import {
+  useMobileComposerContinuousVoice,
+  type MobileComposerSend,
+} from './use-mobile-composer-continuous-voice';
 import { mobileContinuousVoiceStatusLabel } from './use-mobile-continuous-voice';
 import {
   mobileAssistantComposerExpanded,
@@ -157,12 +164,7 @@ export function AssistantComposer({
   voiceResetKey?: string;
   value: string;
   onChangeText(value: string): void;
-  onSend(
-    promptOverride?: string,
-    deliveryMode?: 'queue' | 'asap',
-    promptId?: string,
-    preserveComposer?: boolean,
-  ): void | boolean | Promise<void | boolean>;
+  onSend: MobileComposerSend;
   onStop?(): void;
   onOpenModel(): void;
   modelLabel: string;
@@ -191,6 +193,7 @@ export function AssistantComposer({
   const voiceActionTokenRef = React.useRef(0);
   const [focused, setFocused] = React.useState(false);
   const [voiceActionInFlight, setVoiceActionInFlight] = React.useState(false);
+  const [continuousModePickerOpen, setContinuousModePickerOpen] = React.useState(false);
   const {
     error: voiceError,
     setError: setVoiceError,
@@ -201,13 +204,11 @@ export function AssistantComposer({
     discardRecording,
     stopRecordingForTranscript,
     continuousVoice,
+    continuousDictation,
     microphoneOwner,
   } = useSharedMobileChatVoiceRecorder();
+  const targetKey = String(voiceResetKey ?? '').trim();
   const voiceActive = voiceStatus !== 'idle';
-  const continuousVoiceActive = continuousVoice.status !== 'idle';
-  const continuousVoiceOwned =
-    continuousVoiceActive && continuousVoice.targetKey === String(voiceResetKey ?? '');
-  const continuousVoiceElsewhere = continuousVoiceActive && !continuousVoiceOwned;
   const voiceRecordAccessibilityLabel =
     microphoneOwner === 'continuous'
       ? 'Continuous voice is using the microphone'
@@ -230,8 +231,32 @@ export function AssistantComposer({
     queueWhileRunning,
     microphoneAvailable: microphoneOwner === null,
   });
-  const continuousVoiceActionDisabled =
-    !continuousVoiceEnabled || voiceRecordActionDisabled || voiceActive || continuousVoiceElsewhere;
+  const {
+    state: continuousSession,
+    actionInFlight: continuousActionInFlight,
+    startBlocked: continuousVoiceActionDisabled,
+    start: startContinuousVoice,
+    editDictation,
+    finish: finishContinuousVoice,
+    togglePause: toggleContinuousVoicePause,
+    cancel: cancelContinuousVoice,
+    sendDictation,
+  } = useMobileComposerContinuousVoice({
+    targetKey,
+    valueRef,
+    onChangeText,
+    onSend,
+    onError: setVoiceError,
+    startBlocked: !continuousVoiceEnabled || voiceRecordActionDisabled || voiceActive,
+    continuousVoice,
+    continuousDictation,
+  });
+  const continuousVoiceOwned = continuousSession.owned;
+  const continuousVoiceElsewhere = continuousSession.elsewhere;
+  const continuousDictationOwned = continuousSession.kind === 'dictation';
+  const continuousDictationShadow = continuousDictationOwned ? continuousSession.text : '';
+  const hasContinuousDictationShadow = Boolean(continuousDictationShadow.trim());
+  const continuousVoiceMode = continuousSession.mode;
   const expanded =
     alwaysExpanded ||
     mobileAssistantComposerExpanded({
@@ -240,7 +265,9 @@ export function AssistantComposer({
       hasAttachments,
       voiceActive,
       voiceError,
-    }) || continuousVoiceOwned;
+    }) ||
+    continuousVoiceOwned ||
+    continuousDictationOwned;
   const showAssistantStop =
     editable &&
     mobileAssistantStopVisible({
@@ -249,22 +276,24 @@ export function AssistantComposer({
       voiceActive,
     });
   const canSend =
-    (Boolean(value.trim()) || hasAttachments || voiceCanStop) &&
+    (Boolean(value.trim()) || hasAttachments || voiceCanStop || hasContinuousDictationShadow) &&
     !sending &&
     editable &&
     !sendBlocked &&
     !voiceActionInFlight &&
     voiceStatus !== 'starting' &&
-    voiceStatus !== 'transcribing';
+    voiceStatus !== 'transcribing' &&
+    !continuousActionInFlight;
   const reasoning = assistantReasoningName(String(reasoningLabel ?? '').trim());
   const model = compactAssistantModelName(modelLabel);
   const voiceStatusText = mobileVoiceStatusLabel(voiceStatus);
   const voiceDurationText = formatMobileVoiceDuration(voiceDurationMillis);
   const continuousStatusText = mobileContinuousVoiceStatusLabel(
-    continuousVoice.status,
-    continuousVoice.pendingCount,
+    continuousSession.status,
+    continuousSession.pendingCount,
+    continuousVoiceMode,
   );
-  const continuousDurationText = formatMobileVoiceDuration(continuousVoice.durationMillis);
+  const continuousDurationText = formatMobileVoiceDuration(continuousSession.durationMillis);
 
   React.useEffect(() => {
     valueRef.current = value;
@@ -297,21 +326,6 @@ export function AssistantComposer({
     setFocused(false);
     Keyboard.dismiss();
   }, [voiceActive]);
-
-  const previousVoiceTargetRef = React.useRef(String(voiceResetKey ?? ''));
-  React.useEffect(() => {
-    const previousTarget = previousVoiceTargetRef.current;
-    const nextTarget = String(voiceResetKey ?? '');
-    previousVoiceTargetRef.current = nextTarget;
-    if (
-      previousTarget &&
-      previousTarget !== nextTarget &&
-      continuousVoice.targetKey === previousTarget &&
-      continuousVoice.status !== 'idle'
-    ) {
-      void continuousVoice.stop();
-    }
-  }, [continuousVoice, voiceResetKey]);
 
   const previousRunningRef = React.useRef(running);
   React.useEffect(() => {
@@ -354,28 +368,36 @@ export function AssistantComposer({
     }
   }, [startRecording]);
 
-  const beginContinuousVoice = React.useCallback(async () => {
-    const targetKey = String(voiceResetKey ?? '').trim();
-    if (!targetKey) {
-      setVoiceError('Continuous voice requires a target chat.');
-      return;
-    }
-    suppressInputFocusRef.current = true;
+  const beginContinuousVoice = React.useCallback(
+    async (mode: MobileContinuousVoiceMode) => {
+      setContinuousModePickerOpen(false);
+      suppressInputFocusRef.current = true;
+      inputRef.current?.blur();
+      setFocused(false);
+      Keyboard.dismiss();
+      try {
+        await startContinuousVoice(mode);
+      } finally {
+        requestAnimationFrame(() => {
+          suppressInputFocusRef.current = false;
+        });
+      }
+    },
+    [startContinuousVoice],
+  );
+
+  const openContinuousVoiceModePicker = React.useCallback(() => {
     inputRef.current?.blur();
-    setFocused(false);
     Keyboard.dismiss();
-    try {
-      await continuousVoice.start({
-        targetKey,
-        onTranscript: async (text, deliveryId) =>
-          (await onSend(text, 'asap', deliveryId, true)) !== false,
-      });
-    } finally {
-      requestAnimationFrame(() => {
-        suppressInputFocusRef.current = false;
-      });
+    setContinuousModePickerOpen(true);
+  }, []);
+
+  const editContinuousDictation = React.useCallback(async () => {
+    if (await editDictation()) {
+      suppressInputFocusRef.current = false;
+      requestAnimationFrame(() => inputRef.current?.focus());
     }
-  }, [continuousVoice, onSend, voiceResetKey]);
+  }, [editDictation]);
 
   const stopVoiceForAction = React.useCallback(
     async (action: 'append' | 'send'): Promise<string | null> => {
@@ -424,6 +446,7 @@ export function AssistantComposer({
 
   const send = React.useCallback(async () => {
     if (!canSend) return;
+    if (await sendDictation()) return;
     if (!voiceActive) {
       setVoiceError('');
       onSend();
@@ -437,7 +460,7 @@ export function AssistantComposer({
       setVoiceError('');
       onSend();
     }
-  }, [canSend, hasAttachments, onSend, stopVoiceForAction, voiceActive]);
+  }, [canSend, hasAttachments, onSend, sendDictation, stopVoiceForAction, voiceActive]);
 
   return (
     <View style={styles.frame}>
@@ -448,6 +471,14 @@ export function AssistantComposer({
           Boolean(leadingControl) && styles.composerWithLeadingControl,
         ]}
       >
+        {hasContinuousDictationShadow ? (
+          <MobileContinuousDictationDraft
+            status={continuousVoiceOwned ? continuousSession.status : 'idle'}
+            disabled={continuousActionInFlight}
+            onPress={() => void editContinuousDictation()}
+            text={continuousDictationShadow}
+          />
+        ) : null}
         <ThemedTextInput
           ref={inputRef}
           value={value}
@@ -524,12 +555,12 @@ export function AssistantComposer({
               accessibilityLabel={
                 continuousVoiceElsewhere
                   ? 'Continuous voice is active in another chat'
-                  : 'Start continuous voice steering'
+                  : 'Choose continuous voice mode'
               }
               accessibilityState={{ disabled: continuousVoiceActionDisabled, checked: false }}
               disabled={continuousVoiceActionDisabled}
               hitSlop={6}
-              onPress={() => void beginContinuousVoice()}
+              onPress={openContinuousVoiceModePicker}
               style={({ pressed }) => [
                 styles.collapsedContinuousVoiceButton,
                 showAssistantStop && styles.collapsedContinuousVoiceButtonWithStop,
@@ -569,8 +600,12 @@ export function AssistantComposer({
                     styles.voiceStatusDot,
                     voiceStatus === 'paused' && styles.voiceStatusDotPaused,
                     voiceStatus === 'transcribing' && styles.voiceStatusDotTranscribing,
-                    continuousVoiceOwned && continuousVoice.status === 'speech' && styles.voiceStatusDotSpeech,
-                    continuousVoiceOwned && continuousVoice.status === 'error' && styles.voiceStatusDotError,
+                    continuousVoiceOwned &&
+                      continuousSession.status === 'speech' &&
+                      styles.voiceStatusDotSpeech,
+                    continuousVoiceOwned &&
+                      continuousSession.status === 'error' &&
+                      styles.voiceStatusDotError,
                   ]}
                 />
                 <Text accessibilityLiveRegion="polite" style={styles.voiceFeedbackText}>
@@ -627,43 +662,62 @@ export function AssistantComposer({
                   label={
                     continuousVoiceElsewhere
                       ? 'Continuous voice is active in another chat'
-                      : 'Start continuous voice steering'
+                      : 'Choose continuous voice mode'
                   }
                   icon={AudioLines}
                   disabled={continuousVoiceActionDisabled}
-                  onPress={() => void beginContinuousVoice()}
+                  onPress={openContinuousVoiceModePicker}
                 />
               </>
             ) : continuousVoiceOwned ? (
               <>
                 <VoiceIconButton
-                  label="Cancel continuous voice and discard unsent audio"
+                  label={
+                    continuousVoiceMode === 'dictation'
+                      ? 'Cancel continuous dictation and discard text'
+                      : 'Cancel continuous voice and discard unsent audio'
+                  }
                   icon={X}
                   tone="danger"
-                  onPress={() => void continuousVoice.cancel()}
+                  disabled={continuousActionInFlight && continuousSession.status !== 'starting'}
+                  onPress={() => void cancelContinuousVoice()}
                 />
                 <View style={styles.controlSpacer} />
                 <View style={styles.voicePrimaryControls}>
                   <VoiceIconButton
-                    label={continuousVoice.status === 'paused' || continuousVoice.status === 'error' ? 'Resume continuous voice' : 'Pause continuous voice'}
-                    icon={continuousVoice.status === 'paused' || continuousVoice.status === 'error' ? Play : Pause}
-                    tone={continuousVoice.status === 'paused' || continuousVoice.status === 'error' ? 'paused' : 'default'}
-                    disabled={
-                      continuousVoice.status === 'starting' ||
-                      continuousVoice.status === 'stopping'
+                    label={`${continuousSession.status === 'paused' || continuousSession.status === 'error' ? 'Resume' : 'Pause'} ${continuousVoiceMode}`}
+                    icon={
+                      continuousSession.status === 'paused' || continuousSession.status === 'error'
+                        ? Play
+                        : Pause
                     }
-                    onPress={() => void continuousVoice.togglePause()}
+                    tone={
+                      continuousSession.status === 'paused' || continuousSession.status === 'error'
+                        ? 'paused'
+                        : 'default'
+                    }
+                    disabled={
+                      continuousActionInFlight ||
+                      continuousSession.status === 'starting' ||
+                      continuousSession.status === 'stopping'
+                    }
+                    onPress={() => void toggleContinuousVoicePause()}
                   />
                   <VoiceIconButton
-                    label="Stop continuous voice after pending thoughts are sent"
+                    label={
+                      continuousVoiceMode === 'dictation'
+                        ? 'Stop continuous dictation and keep text'
+                        : 'Stop continuous voice after pending thoughts are sent'
+                    }
                     icon={Square}
                     tone="success"
                     disabled={
-                      continuousVoice.status === 'starting' ||
-                      continuousVoice.status === 'stopping' ||
-                      continuousVoice.status === 'error'
+                      continuousActionInFlight ||
+                      continuousSession.status === 'starting' ||
+                      continuousSession.status === 'stopping' ||
+                      continuousSession.status === 'error'
                     }
-                    onPress={() => void continuousVoice.stop()}
+                    onPress={() => void finishContinuousVoice()}
                   />
                 </View>
               </>
@@ -711,6 +765,11 @@ export function AssistantComposer({
         ) : null}
       </View>
       {footer ? <View style={styles.footer}>{footer}</View> : null}
+      <MobileContinuousVoiceModePicker
+        visible={continuousModePickerOpen}
+        onClose={() => setContinuousModePickerOpen(false)}
+        onSelect={(mode) => void beginContinuousVoice(mode)}
+      />
     </View>
   );
 }
