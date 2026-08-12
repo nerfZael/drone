@@ -72,6 +72,10 @@ export type ChangeRequestPatch = Partial<
   >
 >;
 
+export type ChangeRequestUpdate =
+  | ChangeRequestPatch
+  | ((current: ChangeRequestRecord) => ChangeRequestPatch);
+
 export interface ChangeRequestRepository {
   insert(input: ChangeRequestInsert): Promise<ChangeRequestRecord>;
   get(id: string): ChangeRequestRecord | null;
@@ -82,7 +86,8 @@ export interface ChangeRequestRepository {
     chatName?: string;
     status?: ChangeRequestStatus;
   }): ChangeRequestRecord[];
-  update(id: string, patch: ChangeRequestPatch): Promise<ChangeRequestRecord>;
+  /** Atomically reads and updates a change request when given an updater function. */
+  update(id: string, update: ChangeRequestUpdate): Promise<ChangeRequestRecord>;
   emitEvent(
     id: string,
     eventType: Exclude<ChangeRequestDomainEventType, 'change_request.created'>,
@@ -382,13 +387,15 @@ export class SqliteChangeRequestRepository implements ChangeRequestRepository {
     });
   }
 
-  async update(id: string, patch: ChangeRequestPatch): Promise<ChangeRequestRecord> {
+  async update(id: string, update: ChangeRequestUpdate): Promise<ChangeRequestRecord> {
     const updated = await this.database.writeTransaction('update change request', (connection) => {
-      const current = connection.prepare('SELECT * FROM change_requests WHERE id = ?').get(id) as
-        | ChangeRequestRow
-        | undefined;
-      if (!current) throw new Error(`unknown change request: ${id}`);
-      const next = { ...record(current), ...patch };
+      const currentRow = connection
+        .prepare('SELECT * FROM change_requests WHERE id = ?')
+        .get(id) as ChangeRequestRow | undefined;
+      if (!currentRow) throw new Error(`unknown change request: ${id}`);
+      const current = record(currentRow);
+      const patch = typeof update === 'function' ? update(current) : update;
+      const next = { ...current, ...patch };
       next.stateVersion += 1;
       connection
         .prepare(
