@@ -770,6 +770,15 @@ function createRequestTimer() {
     total(): number {
       return Number(process.hrtime.bigint() - start) / 1_000_000;
     },
+    snapshot() {
+      return {
+        totalMs: Math.round((Number(process.hrtime.bigint() - start) / 1_000_000) * 10) / 10,
+        phases: items.map((item) => ({
+          name: item.name,
+          durationMs: Math.round(Math.max(0, item.dur) * 10) / 10,
+        })),
+      };
+    },
     setHeader(res: http.ServerResponse) {
       if (res.headersSent || items.length === 0) return;
       const total = Number(process.hrtime.bigint() - start) / 1_000_000;
@@ -792,6 +801,7 @@ function logSlowHubRequest(
   hubLog('warn', `slow ${label} request`, {
     ...(meta ?? {}),
     durationMs: Math.round(totalMs),
+    timing: timer.snapshot(),
   });
 }
 

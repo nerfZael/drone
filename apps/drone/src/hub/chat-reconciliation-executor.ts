@@ -137,6 +137,39 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
     return value && Number.isFinite(Date.parse(value)) ? value : undefined;
   }
 
+  function elapsedBetween(startRaw: unknown, endRaw: unknown): number | null {
+    const start = Date.parse(String(startRaw ?? ''));
+    const end = Date.parse(String(endRaw ?? ''));
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+    return Math.max(0, Math.round((end - start) * 10) / 10);
+  }
+
+  function logDaemonPromptStartTiming(input: {
+    droneId: string;
+    chatName: string;
+    prompt: any;
+    job: any;
+  }): void {
+    const submittedAt = String(input.prompt?.at ?? '').trim() || null;
+    const daemonReceivedAt = String(input.job?.createdAt ?? '').trim() || null;
+    const agentStartedAt = validRunStartedAt(input.job?.startedAt) ?? null;
+    if (!agentStartedAt) return;
+    const observedAt = nowIso();
+    hubLog('info', 'daemon prompt start timing', {
+      droneId: input.droneId,
+      chatName: input.chatName,
+      promptId: String(input.prompt?.id ?? '').trim(),
+      submittedAt,
+      daemonReceivedAt,
+      agentStartedAt,
+      hubDeliveryMs: elapsedBetween(submittedAt, daemonReceivedAt),
+      daemonQueueMs: elapsedBetween(daemonReceivedAt, agentStartedAt),
+      totalBeforeAgentStartMs: elapsedBetween(submittedAt, agentStartedAt),
+      startObservationDelayMs: elapsedBetween(agentStartedAt, observedAt),
+      observedAt,
+    });
+  }
+
   async function reconcileChatFromDaemon(opts: {
     droneId: string;
     chatName: string;
@@ -337,6 +370,9 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             ? (validRunStartedAt(job?.startedAt) ?? priorStartedAt)
             : priorStartedAt;
         const startedAtChanged = nextStartedAt !== priorStartedAt;
+        if (startedAtChanged && nextStartedAt) {
+          logDaemonPromptStartTiming({ droneId, chatName, prompt: p, job });
+        }
         if (
           state !== 'sent' ||
           agentPlanChanged ||
@@ -400,6 +436,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
       const terminalStartedAt =
         validRunStartedAt(job?.startedAt) ?? validRunStartedAt((p as any).startedAt);
       if (terminalStartedAt && (p as any).startedAt !== terminalStartedAt) {
+        logDaemonPromptStartTiming({ droneId, chatName, prompt: p, job });
         (p as any).startedAt = terminalStartedAt;
         pendingList[i] = p;
         changed = true;

@@ -365,6 +365,7 @@ export function createChatPromptRouteHandler(
           logSlowHubRequest('chat prompt', timer, {
             droneId,
             chatName: chat,
+            promptId: r.id,
             pendingState: r.pendingState,
             status: 202,
           });

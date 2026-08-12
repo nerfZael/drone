@@ -26,6 +26,7 @@ import { chatPromptAcceptancePlan } from './prompt-acceptance';
 import { captureDroneRunFileChangesBaseline } from './run-file-changes';
 import { createTerminalPromptWakeHandler } from './terminal-prompt-wake';
 import { workflowBlipPermissionArgs } from './workflows/workflow-permissions';
+import { createPromptDeliveryTiming, type PromptDeliveryTiming } from './prompt-delivery-timing';
 
 type ChatPromptRuntimeDependencyName =
   | 'NON_REPO_HOME_CWD'
@@ -313,6 +314,14 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     withTimeout,
   } = deps;
 
+  async function measurePromptDeliveryPhase<T>(
+    timing: PromptDeliveryTiming | undefined,
+    name: string,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    return timing ? await timing.measure(name, run) : await run();
+  }
+
   const daemonRecovery = new DroneDaemonRecovery({
     probe: async (client) => {
       await droneStatus(client, { timeoutMs: 1_000 });
@@ -356,6 +365,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     prompt?: string;
     deliveryMode?: 'queue' | 'asap';
     signal?: AbortSignal;
+    timing?: PromptDeliveryTiming;
   }) {
     throwIfBackgroundPromptAborted(opts.signal);
     const d = opts.drone;
@@ -363,10 +373,11 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     const droneId = normalizeDroneIdentity(d?.id) || String(d?.name ?? '');
     const containerName = String(d?.containerName ?? d?.name ?? '').trim();
     const token = typeof d.token === 'string' ? d.token : '';
-    const hostPort =
+    const hostPort = await measurePromptDeliveryPhase(opts.timing, 'resolveDaemonPort', async () =>
       typeof d.hostPort === 'number' && Number.isFinite(d.hostPort)
         ? d.hostPort
-        : await resolveHostPort(containerName, d.containerPort);
+        : await resolveHostPort(containerName, d.containerPort),
+    );
     if (!hostPort || !token) throw new Error('drone daemon not reachable (missing hostPort/token)');
     const daemonReadyTimeoutMs =
       typeof opts.waitForDaemonMs === 'number' &&
@@ -381,16 +392,21 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         ? Math.floor(opts.waitForDaemonMs)
         : Math.max(daemonReadyTimeoutMs, UPGRADE_DAEMON_READY_TIMEOUT_MS);
     const client = makeClient(hostPort, token);
-    const recovery = await daemonRecovery.ensure({
-      droneId,
-      runtime,
-      client,
-      containerName,
-      containerPort: Number(d?.containerPort ?? hostPort),
-      hostPort,
-      token,
-      readyTimeoutMs: daemonReadyTimeoutMs,
-    });
+    const recovery = await measurePromptDeliveryPhase(
+      opts.timing,
+      'daemonReady',
+      async () =>
+        await daemonRecovery.ensure({
+          droneId,
+          runtime,
+          client,
+          containerName,
+          containerPort: Number(d?.containerPort ?? hostPort),
+          hostPort,
+          token,
+          readyTimeoutMs: daemonReadyTimeoutMs,
+        }),
+    );
     throwIfBackgroundPromptAborted(opts.signal);
     if (recovery.recovered) {
       hubLog('info', 'recovered drone daemon on demand', {
@@ -401,17 +417,22 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       });
     }
     try {
-      await dronePromptEnqueue(
-        client,
-        {
-          id: String(opts.id ?? ''),
-          kind: opts.kind,
-          cmd: 'bash',
-          args: ['-lc', opts.script],
-          ...(typeof opts.prompt === 'string' ? { prompt: opts.prompt } : {}),
-          ...(opts.deliveryMode ? { deliveryMode: opts.deliveryMode } : {}),
-        },
-        { signal: opts.signal },
+      await measurePromptDeliveryPhase(
+        opts.timing,
+        'daemonEnqueueRequest',
+        async () =>
+          await dronePromptEnqueue(
+            client,
+            {
+              id: String(opts.id ?? ''),
+              kind: opts.kind,
+              cmd: 'bash',
+              args: ['-lc', opts.script],
+              ...(typeof opts.prompt === 'string' ? { prompt: opts.prompt } : {}),
+              ...(opts.deliveryMode ? { deliveryMode: opts.deliveryMode } : {}),
+            },
+            { signal: opts.signal },
+          ),
       );
       ensureDaemonPromptEventSubscription(droneId);
     } catch (e: any) {
@@ -454,6 +475,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     model?: string;
     effort?: string;
     signal?: AbortSignal;
+    timing?: PromptDeliveryTiming;
   }) {
     throwIfBackgroundPromptAborted(opts.signal);
     const d = opts.drone;
@@ -461,10 +483,11 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     const droneId = normalizeDroneIdentity(d?.id) || String(d?.name ?? '');
     const containerName = String(d?.containerName ?? d?.name ?? '').trim();
     const token = typeof d.token === 'string' ? d.token : '';
-    const hostPort =
+    const hostPort = await measurePromptDeliveryPhase(opts.timing, 'resolveDaemonPort', async () =>
       typeof d.hostPort === 'number' && Number.isFinite(d.hostPort)
         ? d.hostPort
-        : await resolveHostPort(containerName, d.containerPort);
+        : await resolveHostPort(containerName, d.containerPort),
+    );
     if (!hostPort || !token) throw new Error('drone daemon not reachable (missing hostPort/token)');
     const daemonReadyTimeoutMs =
       typeof opts.waitForDaemonMs === 'number' &&
@@ -477,16 +500,21 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       UPGRADE_DAEMON_READY_TIMEOUT_MS,
     );
     const client = makeClient(hostPort, token);
-    const recovery = await daemonRecovery.ensure({
-      droneId,
-      runtime,
-      client,
-      containerName,
-      containerPort: Number(d?.containerPort ?? hostPort),
-      hostPort,
-      token,
-      readyTimeoutMs: daemonReadyTimeoutMs,
-    });
+    const recovery = await measurePromptDeliveryPhase(
+      opts.timing,
+      'daemonReady',
+      async () =>
+        await daemonRecovery.ensure({
+          droneId,
+          runtime,
+          client,
+          containerName,
+          containerPort: Number(d?.containerPort ?? hostPort),
+          hostPort,
+          token,
+          readyTimeoutMs: daemonReadyTimeoutMs,
+        }),
+    );
     throwIfBackgroundPromptAborted(opts.signal);
     if (recovery.recovered) {
       hubLog('info', 'recovered drone daemon on demand', {
@@ -560,7 +588,11 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       });
     };
     try {
-      await droneCodexPromptEnqueue(client, payload, { signal: opts.signal });
+      await measurePromptDeliveryPhase(
+        opts.timing,
+        'daemonEnqueueRequest',
+        async () => await droneCodexPromptEnqueue(client, payload, { signal: opts.signal }),
+      );
       ensureDaemonPromptEventSubscription(droneId);
     } catch (e: any) {
       const msg = e?.message ?? String(e);
@@ -594,12 +626,17 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     deliveryMode?: 'queue' | 'asap';
     mark?: (name: string) => void;
     signal?: AbortSignal;
+    timing?: PromptDeliveryTiming;
   }) {
     throwIfBackgroundPromptAborted(opts.signal);
     const droneId = normalizeDroneIdentity(opts.droneId);
     if (!droneId) throw new Error('missing droneId');
 
-    const regAny: any = await loadRegistry();
+    const regAny: any = await measurePromptDeliveryPhase(
+      opts.timing,
+      'loadRegistryBeforeSync',
+      async () => await loadRegistry(),
+    );
     if (regAny?.pending?.[droneId] && !regAny?.drones?.[droneId]) {
       throw new Error(`drone "${droneId}" is still starting`);
     }
@@ -608,9 +645,21 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
 
     if (opts.skipManagedRepoSync !== true) {
       try {
-        await syncSkillLibraryForDrone({ droneId, droneEntry: dSeed });
-        await syncMcpServersForDrone({ droneId, droneEntry: dSeed });
-        await syncRepoAgentsInstructionsForDrone({ droneId, droneEntry: dSeed });
+        await measurePromptDeliveryPhase(
+          opts.timing,
+          'syncSkills',
+          async () => await syncSkillLibraryForDrone({ droneId, droneEntry: dSeed }),
+        );
+        await measurePromptDeliveryPhase(
+          opts.timing,
+          'syncMcpServers',
+          async () => await syncMcpServersForDrone({ droneId, droneEntry: dSeed }),
+        );
+        await measurePromptDeliveryPhase(
+          opts.timing,
+          'syncAgentsInstructions',
+          async () => await syncRepoAgentsInstructionsForDrone({ droneId, droneEntry: dSeed }),
+        );
         opts.mark?.('skillSync');
       } catch (e: any) {
         const error = String(e?.message ?? String(e));
@@ -629,9 +678,15 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
 
     const lockKey = `drone:${droneId}`;
 
+    const lockWaitStartedAt = performance.now();
     return await withDroneOpLock(lockKey, async () => {
+      opts.timing?.record('droneLockWait', performance.now() - lockWaitStartedAt);
       throwIfBackgroundPromptAborted(opts.signal);
-      const regLatest: any = await loadRegistry();
+      const regLatest: any = await measurePromptDeliveryPhase(
+        opts.timing,
+        'loadRegistryAfterLock',
+        async () => await loadRegistry(),
+      );
       if (regLatest?.pending?.[droneId] && !regLatest?.drones?.[droneId]) {
         throw new Error(`drone "${droneId}" is still starting`);
       }
@@ -643,9 +698,17 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         String(d?.containerName ?? '').trim() || String(d?.name ?? '').trim() || droneId;
 
       const normalizedChat = opts.chatName || 'default';
-      await ensureChatEntry({ droneId, chatName: normalizedChat });
+      await measurePromptDeliveryPhase(
+        opts.timing,
+        'ensureChat',
+        async () => await ensureChatEntry({ droneId, chatName: normalizedChat }),
+      );
 
-      const { d: dWithChat, chat } = await getChatEntry({ droneId, chatName: normalizedChat });
+      const { d: dWithChat, chat } = await measurePromptDeliveryPhase(
+        opts.timing,
+        'loadChat',
+        async () => await getChatEntry({ droneId, chatName: normalizedChat }),
+      );
       const agent = inferChatAgent(chat, dWithChat);
       const chatModel = normalizeChatModel((chat as any)?.model);
       const chatReasoning = normalizeChatReasoning((chat as any)?.reasoning);
@@ -654,12 +717,17 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       if (agentPermissionMode !== 'execute') assertReadOnlySupportedForAgent(agent);
       const managedEnv = resolveDroneEnvironmentConfig(regLatest, d).resolvedVars;
       const managedEnvLines = buildEnvExportLines(managedEnv);
-      const managedChatMcpEnv = await resolveManagedChatMcpEnv({
-        runtime,
-        droneId,
-        chatName: normalizedChat,
-        chat,
-      });
+      const managedChatMcpEnv = await measurePromptDeliveryPhase(
+        opts.timing,
+        'resolveChatMcpEnvironment',
+        async () =>
+          await resolveManagedChatMcpEnv({
+            runtime,
+            droneId,
+            chatName: normalizedChat,
+            chat,
+          }),
+      );
       const managedChatMcpEnvLines = buildEnvExportLines(managedChatMcpEnv);
 
       const cwd = normalizeDroneCwdForRuntime(d, typeof opts.cwd === 'string' ? opts.cwd : null);
@@ -769,6 +837,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           prompt: effectivePrompt,
           deliveryMode: opts.deliveryMode,
           signal: opts.signal,
+          timing: opts.timing,
         });
         return {
           ok: true as const,
@@ -822,6 +891,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           ...(chatModel ? { model: chatModel } : {}),
           ...(chatReasoning ? { effort: chatReasoning } : {}),
           signal: opts.signal,
+          timing: opts.timing,
         });
         return {
           ok: true as const,
@@ -857,6 +927,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           prompt: effectivePrompt,
           deliveryMode: opts.deliveryMode,
           signal: opts.signal,
+          timing: opts.timing,
         });
         return {
           ok: true as const,
@@ -894,6 +965,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           prompt: effectivePrompt,
           deliveryMode: opts.deliveryMode,
           signal: opts.signal,
+          timing: opts.timing,
         });
         return {
           ok: true as const,
@@ -927,6 +999,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           prompt: effectivePrompt,
           deliveryMode: opts.deliveryMode,
           signal: opts.signal,
+          timing: opts.timing,
         });
         return {
           ok: true as const,
@@ -968,6 +1041,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           script,
           deliveryMode: opts.deliveryMode,
           signal: opts.signal,
+          timing: opts.timing,
         });
         return {
           ok: true as const,
@@ -2059,6 +2133,8 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
 
     // Avoid unbounded loops if state keeps changing due to concurrent requests.
     for (let attempts = 0; attempts < 50; attempts++) {
+      const dispatchStartedEpochMs = Date.now();
+      const dispatchStartedMonotonicMs = performance.now();
       throwIfBackgroundPromptAborted(opts.signal);
       const { d, chat } = await getChatEntry({ droneId, chatName });
       if (isDraftChatEntry(chat)) return;
@@ -2240,20 +2316,45 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         return;
       }
 
+      const deliveryTiming = createPromptDeliveryTiming({
+        promptId: id,
+        droneId,
+        chatName,
+        submittedAt: typeof p?.at === 'string' ? p.at : null,
+        attemptStartedEpochMs: dispatchStartedEpochMs,
+        attemptStartedMonotonicMs: dispatchStartedMonotonicMs,
+      });
+      deliveryTiming.record(
+        'selectDispatchCandidate',
+        performance.now() - dispatchStartedMonotonicMs,
+      );
+
       // Transition queued -> sending before we attempt any daemon work.
       // This claim is atomic to prevent a race where a user cancels a queued row.
-      const claimed = await claimQueuedPendingPromptForSending({ droneId, chatName, id });
+      const claimed = await deliveryTiming.measure(
+        'claimPrompt',
+        async () => await claimQueuedPendingPromptForSending({ droneId, chatName, id }),
+      );
       if (!claimed) {
+        hubLog('info', 'prompt delivery timing', {
+          ...deliveryTiming.snapshot(),
+          outcome: 'claim-lost',
+        });
         continue;
       }
 
-      await capturePendingPromptFileChangesBaseline({
-        droneId,
-        chatName,
-        promptId: id,
-        drone: d,
-      });
+      await deliveryTiming.measure(
+        'captureFileChangesBaseline',
+        async () =>
+          await capturePendingPromptFileChangesBaseline({
+            droneId,
+            chatName,
+            promptId: id,
+            drone: d,
+          }),
+      );
 
+      let deliveryOutcome = 'failed';
       try {
         const enqueueTimeoutMs = defaultPromptEnqueueTimeoutMs();
         const r: any = await withTimeout(
@@ -2267,24 +2368,35 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
             waitForDaemonMs: undefined,
             deliveryMode: p?.deliveryMode === 'asap' ? 'asap' : 'queue',
             signal: opts.signal,
+            timing: deliveryTiming,
           }),
           enqueueTimeoutMs,
           `queued prompt enqueue failed for ${droneId}/${chatName}`,
         );
         if (r?.turnOk === false) {
-          await updatePendingPrompt({
-            droneId,
-            chatName,
-            id,
-            patch: { state: 'failed', error: String(r?.error ?? 'failed') },
-          });
+          await deliveryTiming.measure(
+            'persistDeliveryState',
+            async () =>
+              await updatePendingPrompt({
+                droneId,
+                chatName,
+                id,
+                patch: { state: 'failed', error: String(r?.error ?? 'failed') },
+              }),
+          );
+          deliveryOutcome = 'agent-rejected';
         } else {
           if (agent.kind === 'native') {
             const nativeChatId = String((chat as any)?.id ?? '').trim();
             if (!nativeChatId) throw new Error('native chat has no stable identity');
             await waitForNativePromptCompletion(nativeChatId, 30 * 60_000);
           }
-          await updatePendingPrompt({ droneId, chatName, id, patch: { state: 'sent' } });
+          await deliveryTiming.measure(
+            'persistDeliveryState',
+            async () =>
+              await updatePendingPrompt({ droneId, chatName, id, patch: { state: 'sent' } }),
+          );
+          deliveryOutcome = 'enqueued';
           if (agent.kind === 'builtin') {
             // Best-effort: reconcile soon after enqueue to keep UI fresh.
             enqueueReconcile(droneId, chatName);
@@ -2292,6 +2404,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         }
       } catch (e: any) {
         if (backgroundPromptWasAborted(opts.signal)) {
+          deliveryOutcome = 'paused';
           await releasePendingPromptClaim({
             droneId,
             chatName,
@@ -2318,6 +2431,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           ...(diagnostics ? { diagnostics } : {}),
         });
         if (looksLikeTransientPromptEnqueueError(errorText)) {
+          deliveryOutcome = 'retry';
           const retry = await retryPendingPrompt({
             droneId,
             chatName,
@@ -2339,6 +2453,11 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           chatName,
           id,
           patch: { state: 'failed', error: errorText },
+        });
+      } finally {
+        hubLog('info', 'prompt delivery timing', {
+          ...deliveryTiming.snapshot(),
+          outcome: deliveryOutcome,
         });
       }
     }
