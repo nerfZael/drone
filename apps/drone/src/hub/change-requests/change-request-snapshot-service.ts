@@ -49,10 +49,6 @@ export type ChangeRequestSnapshotDependencies = {
   updateHostRef: (input: { repoRoot: string; refName: string; target: string }) => Promise<void>;
   deleteHostRefBestEffort: (input: { repoRoot: string; refName: string }) => Promise<void>;
   gitTopLevel: (repoPath: string) => Promise<string>;
-  droneRepoBaseSha: (input: {
-    container: string;
-    repoPathInContainer: string;
-  }) => Promise<string | null>;
   dvmRepoHeadSha: (input: { container: string; repoPathInContainer?: string }) => Promise<string>;
   runGitInDrone: (input: {
     container: string;
@@ -71,11 +67,12 @@ export type ChangeRequestSnapshotSource = {
   drone: any;
   repoRoot: string;
   baseBranch: string;
-  baseSha: string;
+  baseSha: string | null;
   sourceHeadSha: string;
 };
 
-export type ChangeRequestSnapshot = ChangeRequestSnapshotSource & {
+export type ChangeRequestSnapshot = Omit<ChangeRequestSnapshotSource, 'baseSha'> & {
+  baseSha: string;
   snapshotRef: string;
   snapshotSha: string;
 };
@@ -105,6 +102,9 @@ export class ChangeRequestSnapshotService {
         409,
         'repo_changed',
       );
+    }
+    if (!existing) {
+      await this.fetchOriginIfPresent(repoRoot);
     }
     const chatName = String(chatNameRaw ?? '').trim() || 'default';
     const chat = drone?.chats?.[chatName] ?? null;
@@ -181,19 +181,7 @@ export class ChangeRequestSnapshotService {
           container: containerName,
           repoPathInContainer,
         });
-        const configuredBaseSha = await this.deps.droneRepoBaseSha({
-          container: containerName,
-          repoPathInContainer,
-        });
-        const baseSha = existing?.baseSha || configuredBaseSha;
-        if (!baseSha) {
-          throw new ChangeRequestError(
-            'The drone does not have a base commit. Reseed it before creating a change request.',
-            409,
-            'base_commit_missing',
-          );
-        }
-        return { ...shared, baseSha, sourceHeadSha };
+        return { ...shared, baseSha: existing?.baseSha ?? null, sourceHeadSha };
       },
     );
   }
@@ -209,13 +197,14 @@ export class ChangeRequestSnapshotService {
       .trim()
       .toLowerCase();
     if (runtime === 'host') {
-      const snapshotSha = await this.createSnapshotCommit(id, source, source.sourceHeadSha);
+      const resolvedSource = this.requireResolvedBase(source);
+      const snapshotSha = await this.createSnapshotCommit(id, resolvedSource, source.sourceHeadSha);
       await this.deps.updateHostRef({
         repoRoot: source.repoRoot,
         refName: permanentRef,
         target: snapshotSha,
       });
-      return { ...source, snapshotRef: permanentRef, snapshotSha };
+      return { ...resolvedSource, snapshotRef: permanentRef, snapshotSha };
     }
     const repoPathInContainer =
       String(source.drone?.repo?.dest ?? '/work/repo').trim() || '/work/repo';
@@ -244,13 +233,16 @@ export class ChangeRequestSnapshotService {
           'source_changed',
         );
       }
-      const snapshotSha = await this.createSnapshotCommit(id, source, importRef);
+      const resolvedSource = source.baseSha
+        ? this.requireResolvedBase(source)
+        : await this.resolveBaseFromImportedHead(source, importRef);
+      const snapshotSha = await this.createSnapshotCommit(id, resolvedSource, importRef);
       await this.deps.updateHostRef({
         repoRoot: source.repoRoot,
         refName: permanentRef,
         target: snapshotSha,
       });
-      return { ...source, snapshotRef: permanentRef, snapshotSha };
+      return { ...resolvedSource, snapshotRef: permanentRef, snapshotSha };
     } finally {
       await this.deps.deleteHostRefBestEffort({ repoRoot: source.repoRoot, refName: importRef });
       if (bundlePath) await fs.rm(bundlePath, { force: true }).catch(() => {});
@@ -259,7 +251,7 @@ export class ChangeRequestSnapshotService {
 
   private async createSnapshotCommit(
     id: string,
-    source: ChangeRequestSnapshotSource,
+    source: ChangeRequestSnapshotSource & { baseSha: string },
     sourceRef: string,
   ): Promise<string> {
     const snapshotSha = await this.deps.createHostAuthoredMirrorCommit({
@@ -270,6 +262,52 @@ export class ChangeRequestSnapshotService {
     });
     await this.assertHasChanges(source.repoRoot, source.baseSha, snapshotSha);
     return snapshotSha;
+  }
+
+  private requireResolvedBase(
+    source: ChangeRequestSnapshotSource,
+  ): ChangeRequestSnapshotSource & { baseSha: string } {
+    if (!source.baseSha) {
+      throw new ChangeRequestError(
+        'The change request base commit could not be resolved.',
+        409,
+        'base_commit_missing',
+      );
+    }
+    return source as ChangeRequestSnapshotSource & { baseSha: string };
+  }
+
+  private async resolveBaseFromImportedHead(
+    source: ChangeRequestSnapshotSource,
+    importedHeadRef: string,
+  ): Promise<ChangeRequestSnapshotSource & { baseSha: string }> {
+    const baseRef = await resolveChangeRequestBranch(
+      this.deps.runHostCommand,
+      source.repoRoot,
+      source.baseBranch,
+    );
+    if (!baseRef) {
+      throw new ChangeRequestError(
+        `Base branch is unavailable: ${source.baseBranch}`,
+        409,
+        'base_branch_missing',
+      );
+    }
+    const baseSha = (
+      await this.git(source.repoRoot, ['merge-base', baseRef, importedHeadRef])
+    ).stdout
+      .trim()
+      .toLowerCase();
+    return { ...source, baseSha };
+  }
+
+  private async fetchOriginIfPresent(repoRoot: string): Promise<void> {
+    const remotes = (await this.git(repoRoot, ['remote'])).stdout
+      .split(/\r?\n/)
+      .map((remote) => remote.trim())
+      .filter(Boolean);
+    if (!remotes.includes('origin')) return;
+    await this.git(repoRoot, ['fetch', 'origin', '--prune'], 120_000);
   }
 
   private async assertHasChanges(
@@ -294,8 +332,8 @@ export class ChangeRequestSnapshotService {
       );
   }
 
-  private git(repoRoot: string, args: string[]): Promise<RunResult> {
-    return runChangeRequestGit(this.deps.runHostCommand, repoRoot, args);
+  private git(repoRoot: string, args: string[], timeoutMs?: number): Promise<RunResult> {
+    return runChangeRequestGit(this.deps.runHostCommand, repoRoot, args, timeoutMs);
   }
 }
 
