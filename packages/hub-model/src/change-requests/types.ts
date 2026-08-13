@@ -61,6 +61,33 @@ export type ChangeRequestRecord = {
   githubMirror: ChangeRequestGithubMirrorRecord | null;
 };
 
+export type ChangeRequestSourceCommit = {
+  sha: string;
+  parentShas: string[];
+  authorName: string;
+  authorEmail: string;
+  authoredAt: string;
+  subject: string;
+};
+
+/**
+ * One immutable proposal published to a change request. Revisions are review
+ * checkpoints; a revision may contain any number of source commits.
+ */
+export type ChangeRequestRevision = {
+  number: number;
+  baseBranch: string;
+  baseSha: string;
+  snapshotSha: string;
+  sourceHeadSha: string;
+  createdBy: ChangeRequestActor;
+  createdAt: string;
+};
+
+export type ChangeRequestRevisionView = ChangeRequestRevision & {
+  commits: ChangeRequestSourceCommit[];
+};
+
 export type ChangeRequestAssessment = {
   stale: boolean;
   conflicted: boolean;
@@ -95,6 +122,7 @@ export type ChangeRequestFileChange = {
 
 export type ChangeRequestChanges = {
   request: ChangeRequestView;
+  revision: ChangeRequestRevisionView;
   counts: {
     changed: number;
     additions: number;
@@ -119,4 +147,5 @@ export type ChangeRequestUpdateInput = {
   description?: string;
   destinationBranch?: string;
   refreshSnapshot?: boolean;
+  actor?: ChangeRequestActor;
 };

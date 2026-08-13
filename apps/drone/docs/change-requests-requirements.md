@@ -6,19 +6,21 @@ DroneHub should have its own change requests. They should feel similar to pull r
 
 A chat can commit some work, open a change request, and either wait for the user to merge it or merge it itself when it has permission. A user may optionally mirror an individual request to GitHub, but GitHub remains a publishing choice rather than a requirement.
 
-## Initial implementation scope
+## Current implementation scope
 
-The first version intentionally stays small:
+The native model intentionally stays focused:
 
-- one current, durable snapshot per change request;
+- immutable, durable revisions with one current revision per change request;
+- optional source-commit history within each captured revision;
 - open, merged, and closed stored states, with stale and conflicted calculated when read;
 - an explicit destination branch that defaults to the request's base branch;
 - direct squash merge only;
 - separate per-chat permissions for creating/managing and merging requests;
 - user controls and file/diff review inside DroneHub;
-- fixed cleanup behavior with no retention settings;
+- retained review history with no retention settings yet;
 - optional user-only GitHub mirroring for one request at a time;
-- no bulk actions, agent mirror access, approval history, normal native merge, or repository/branch-specific policy editor.
+- provider-neutral publication persistence with GitHub as the current adapter;
+- no approvals, checks, merge queues, bulk actions, agent publication access, normal native merge, or repository/branch-specific policy editor.
 
 ## Core behavior
 
@@ -26,11 +28,11 @@ The first version intentionally stays small:
   only public identifier in the UI, HTTP API, and MCP tools; opaque storage keys remain internal.
 - A change request records the chat and drone that created it.
 - It contains a fixed snapshot of committed changes. Later work in the chat does not silently change an existing request.
-- Refreshing a request deliberately replaces its snapshot and increases its revision number.
+- Refreshing a request deliberately creates a new immutable revision and advances the current revision number.
 - It records the repository, source and base commits, destination, title, description, status, creator, merger, final merge commit, errors, and relevant timestamps.
 - Stored states are open, merged, and closed. Opening a request fetches its remote before stale and conflicted are assessed against the destination.
-- The snapshot is stored outside the source container, so an open request remains reviewable if that container is deleted.
-- DroneHub provides file and diff review for the captured snapshot.
+- Revisions are stored in Hub-managed Git object storage, so open and completed requests remain reviewable if their source checkout moves or is deleted.
+- DroneHub provides file, diff, revision, and source-commit review for every retained revision.
 
 ## Creating and updating a change request
 
@@ -39,7 +41,7 @@ The first version intentionally stays small:
 - The user can also create, update, refresh, retarget, and close a request in the Requests panel.
 - The source working tree must be clean. The chat or user commits the work before capturing it.
 - Creating or updating a request does not give the container host Git or GitHub credentials.
-- A refresh keeps only the newest snapshot. Earlier snapshots are not retained as revision history in the first version.
+- Every refresh captures against a freshly resolved base and retains earlier revisions for historical review.
 
 ## Permissions and merge policy
 
@@ -49,7 +51,7 @@ Creating/managing and merging are separate per-chat permissions:
 - **Merge change requests:** disabled by default. When enabled, the chat may merge one of its own requests when explicitly instructed.
 - The user can always use the DroneHub UI actions.
 - Host credentials are used inside DroneHub and are never handed to the chat or container.
-- Background “merge automatically when checks pass” behavior is not included.
+- Approvals, checks, and background “merge automatically when checks pass” behavior are not included.
 - Repository-specific and destination-branch-specific permission rules can be added later if needed.
 - GitHub mirror actions are not MCP tools and have no agent permissions. They are user-only UI actions.
 
@@ -75,6 +77,8 @@ Creating/managing and merging are separate per-chat permissions:
 - Immediately before merging, DroneHub fetches the remote and recalculates the result against the latest destination.
 - The merge is prepared in an isolated temporary worktree, so the normal host working tree is not changed.
 - A concurrent remote update is allowed to make the push fail instead of being overwritten.
+- The push uses an exact force-with-lease for the destination SHA observed while preparing the merge.
+- DroneHub records the prepared merge before pushing and reconciles interrupted attempts on startup, including the case where the push succeeded before request metadata was committed.
 - The final commit and push use the configured host Git identity and credentials, not the container identity.
 - The request records the DroneHub actor that requested the merge and the final commit SHA.
 - The user can supply a final commit message. Otherwise the request title is used.
@@ -94,12 +98,12 @@ A managed chat can only update, close, or merge a request belonging to that same
 ## Cleanup and disk usage
 
 - Temporary bundles, import refs, and merge worktrees are removed after each operation.
-- An open request retains one Git snapshot ref, not another repository or permanent worktree.
-- Closing or merging immediately removes the stored snapshot ref while keeping the small metadata record.
+- Each request retains its source and review refs in isolated Hub-managed bare Git storage; no permanent worktree is kept.
+- Closing or merging keeps immutable revisions reviewable. Temporary bundles, import refs, and worktrees are still removed immediately.
 - DroneHub deletes a remote mirror branch after its linked pull request is closed or merged only when the stored mirror record proves that DroneHub created and owns that branch.
 - Deleting the source drone does not delete an open request in the first version because its snapshot is already independent.
 - Missing or damaged snapshots are reported clearly.
-- Configurable retention, storage reporting, startup recovery cleanup, and manual storage cleanup are future improvements.
+- Configurable retention, storage reporting, and manual storage cleanup are future improvements.
 
 ## Optional GitHub pull-request mirror
 
@@ -117,7 +121,7 @@ The mirror updates automatically by default when the native request changes. The
 
 DroneHub generates and records a unique mirror head branch. Only a branch proven by that record to have been created and owned by DroneHub, and whose remote head still matches DroneHub's last known head, may be deleted. DroneHub never deletes `main`, `dev`, a destination branch, an externally changed mirror branch, or another user-created branch. If the selected destination does not exist, it is created from the latest remote head of the request's base branch and is not treated as a disposable mirror branch.
 
-Opening and immediately merging a pull request, or merging an existing linked pull request, uses the merge method selected by the user. A successful GitHub merge marks the native request merged, records the GitHub merge commit, and cleans up the native snapshot and owned mirror branch. Closing a linked pull request leaves the native request open so it can still be updated or directly merged.
+Opening and immediately merging a pull request, or merging an existing linked pull request, uses the merge method selected by the user. A successful GitHub merge marks the native request merged, records the GitHub merge commit, retains native revision history, and cleans up the owned mirror branch. Closing a linked pull request leaves the native request open so it can still be updated or directly merged.
 
 If a native request is closed or directly merged while its GitHub mirror is open, DroneHub closes the linked pull request and cleans up its owned mirror branch on a best-effort basis. Any failure remains visible on the mirror record so the user can retry cleanup.
 

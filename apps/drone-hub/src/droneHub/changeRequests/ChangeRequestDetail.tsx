@@ -1,5 +1,9 @@
 import React from 'react';
-import type { ChangeRequestChanges, ChangeRequestView } from '@drone/hub-model/change-requests';
+import type {
+  ChangeRequestChanges,
+  ChangeRequestRevisionView,
+  ChangeRequestView,
+} from '@drone/hub-model/change-requests';
 
 import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
 import {
@@ -10,7 +14,11 @@ import {
   UiToolbarIconButton,
 } from '../../ui/components';
 import type { RepoBranchesPayload, RepoPullRequestChangesPayload } from '../types';
-import { DroneChangesDock, ExternalLinkIcon, type DroneChangesReviewOverride } from '../changes/DroneChangesDock';
+import {
+  DroneChangesDock,
+  ExternalLinkIcon,
+  type DroneChangesReviewOverride,
+} from '../changes/DroneChangesDock';
 import { requestJson } from '../http';
 import { RequestOverview } from '../requests/RequestOverview';
 import { ChangeRequestGithubMirrorPanel } from './ChangeRequestGithubMirrorPanel';
@@ -18,6 +26,7 @@ import {
   closeChangeRequest,
   loadChangeRequestChanges,
   loadChangeRequestDiff,
+  loadChangeRequestRevisions,
   mergeChangeRequest,
   updateChangeRequest,
 } from './change-request-api';
@@ -28,9 +37,10 @@ import {
 import {
   changeRequestStatusClasses,
   changeRequestStatusLabel,
+  shortChangeRequestSha,
 } from './change-request-presentation';
 
-type ChangesPayload = Pick<ChangeRequestChanges, 'counts' | 'entries'> & { ok: true };
+type ChangesPayload = Pick<ChangeRequestChanges, 'counts' | 'entries' | 'revision'> & { ok: true };
 type ReviewPayload = Extract<RepoPullRequestChangesPayload, { ok: true }>;
 
 export function ChangeRequestDetail({
@@ -62,6 +72,7 @@ export function ChangeRequestDetail({
   const [editing, setEditing] = React.useState(false);
   const [detailTab, setDetailTab] = React.useState<'overview' | 'files'>('overview');
   const [showMirror, setShowMirror] = React.useState(false);
+  const [showHistory, setShowHistory] = React.useState(false);
   const [draftTitle, setDraftTitle] = React.useState(request.title);
   const [draftDescription, setDraftDescription] = React.useState(request.description);
   const [draftDestination, setDraftDestination] = React.useState(request.destinationBranch);
@@ -69,6 +80,8 @@ export function ChangeRequestDetail({
   const [changes, setChanges] = React.useState<ChangesPayload | null>(null);
   const [changesLoading, setChangesLoading] = React.useState(false);
   const [changesError, setChangesError] = React.useState<string | null>(null);
+  const [revisions, setRevisions] = React.useState<ChangeRequestRevisionView[]>([]);
+  const [selectedRevisionNumber, setSelectedRevisionNumber] = React.useState(request.revision);
   const [branchOptions, setBranchOptions] = React.useState<string[]>([]);
   const [branchesLoading, setBranchesLoading] = React.useState(false);
 
@@ -76,11 +89,31 @@ export function ChangeRequestDetail({
     setEditing(false);
     setDetailTab('overview');
     setShowMirror(false);
+    setShowHistory(false);
     setError(null);
     setDraftTitle(request.title);
     setDraftDescription(request.description);
     setDraftDestination(request.destinationBranch);
+    setSelectedRevisionNumber(request.revision);
   }, [request.number]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    loadChangeRequestRevisions(request.number)
+      .then((loaded) => {
+        if (cancelled) return;
+        setRevisions(loaded);
+        setSelectedRevisionNumber((current) =>
+          loaded.some((revision) => revision.number === current) ? current : request.revision,
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setRevisions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [request.number, request.revision]);
 
   React.useEffect(() => {
     if (editing) return;
@@ -90,16 +123,10 @@ export function ChangeRequestDetail({
   }, [editing, request.description, request.destinationBranch, request.title]);
 
   React.useEffect(() => {
-    if (request.status !== 'open') {
-      setChanges(null);
-      setChangesLoading(false);
-      setChangesError(null);
-      return;
-    }
     let cancelled = false;
     setChangesLoading(true);
     setChangesError(null);
-    loadChangeRequestChanges(request.number)
+    loadChangeRequestChanges(request.number, selectedRevisionNumber)
       .then((data) => {
         if (!cancelled) setChanges(data);
       })
@@ -112,14 +139,16 @@ export function ChangeRequestDetail({
     return () => {
       cancelled = true;
     };
-  }, [request.number, request.revision, request.status]);
+  }, [request.number, request.revision, selectedRevisionNumber]);
 
   React.useEffect(() => {
     const targetRepo = String(request.repoRoot || repoPath).trim();
     if (!targetRepo || !editing) return;
     let cancelled = false;
     setBranchesLoading(true);
-    requestJson<RepoBranchesPayload>(`/api/repos/branches?repoPath=${encodeURIComponent(targetRepo)}`)
+    requestJson<RepoBranchesPayload>(
+      `/api/repos/branches?repoPath=${encodeURIComponent(targetRepo)}`,
+    )
       .then((payload) => {
         if (cancelled || !payload.ok) return;
         const branches = [
@@ -161,6 +190,10 @@ export function ChangeRequestDetail({
 
   const isOpen = request.status === 'open';
   const actionDisabled = disabled || busy !== null;
+  const selectedRevision =
+    revisions.find((revision) => revision.number === selectedRevisionNumber) ??
+    changes?.revision ??
+    null;
 
   const saveDetails = React.useCallback(async () => {
     if (!draftTitle.trim() || !draftDestination.trim()) return;
@@ -176,14 +209,15 @@ export function ChangeRequestDetail({
   }, [draftDescription, draftDestination, draftTitle, mutate, request.number]);
 
   const reviewPayload = React.useMemo<ReviewPayload | null>(() => {
-    if (!changes && request.status === 'open') return null;
+    if (!changes) return null;
     const fallbackStats = request.lineStats;
+    const selectedRevision = changes.revision;
     return {
       ok: true,
       id: droneId,
       name: request.droneName,
       repoRoot: request.repoRoot,
-      reviewScopeId: `change-request:${request.number}`,
+      reviewScopeId: `change-request:${request.number}:${selectedRevision.number}`,
       github: request.githubMirror
         ? { owner: request.githubMirror.owner, repo: request.githubMirror.repo }
         : { owner: '', repo: '' },
@@ -194,8 +228,8 @@ export function ChangeRequestDetail({
         htmlUrl: request.githubMirror?.htmlUrl ?? null,
         baseRefName: request.destinationBranch,
         headRefName: request.baseBranch,
-        baseSha: request.destinationSha ?? request.baseSha,
-        headSha: request.snapshotSha ?? request.sourceHeadSha,
+        baseSha: selectedRevision.baseSha,
+        headSha: selectedRevision.snapshotSha,
       },
       counts: {
         changed: changes?.counts.changed ?? fallbackStats?.files ?? 0,
@@ -212,7 +246,7 @@ export function ChangeRequestDetail({
         truncated: false,
         isBinary: false,
         reviewKey: `${entry.originalPath ?? ''}\u0000${entry.path}`,
-        reviewToken: `${request.snapshotSha ?? request.sourceHeadSha}\u0000${entry.path}`,
+        reviewToken: `${selectedRevision.snapshotSha}\u0000${entry.path}`,
       })),
     };
   }, [changes, droneId, request]);
@@ -229,8 +263,8 @@ export function ChangeRequestDetail({
   }, [changes, request.lineStats]);
 
   const loadReviewDiff = React.useCallback(
-    (path: string) => loadChangeRequestDiff(request.number, path),
-    [request.number],
+    (path: string) => loadChangeRequestDiff(request.number, path, selectedRevisionNumber),
+    [request.number, selectedRevisionNumber],
   );
 
   const merge = React.useCallback(async () => {
@@ -240,7 +274,8 @@ export function ChangeRequestDetail({
         message: `Squash-merge this change request into ${request.destinationBranch}?`,
         confirmLabel: 'Merge',
       }))
-    ) return;
+    )
+      return;
     void mutate('merge', () => mergeChangeRequest(request.number));
   }, [confirm, mutate, request.destinationBranch, request.number]);
 
@@ -252,7 +287,8 @@ export function ChangeRequestDetail({
         confirmLabel: 'Close request',
         destructive: true,
       }))
-    ) return;
+    )
+      return;
     void mutate('close', () => closeChangeRequest(request.number));
   }, [confirm, mutate, request.number]);
 
@@ -283,20 +319,59 @@ export function ChangeRequestDetail({
           </span>
         </button>
         <div className="flex shrink-0 items-center gap-0.5">
+          {revisions.length > 1 ? (
+            <select
+              aria-label="Change request revision"
+              value={selectedRevisionNumber}
+              onChange={(event) => setSelectedRevisionNumber(Number(event.target.value))}
+              className="h-6 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-1 text-[var(--text-9)] text-[var(--muted)] focus:border-[var(--accent-muted)] focus:outline-none"
+            >
+              {revisions.map((revision) => (
+                <option key={revision.number} value={revision.number}>
+                  Revision {revision.number}
+                </option>
+              ))}
+            </select>
+          ) : null}
+          <UiToolbarButton
+            size="xsmall"
+            active={showHistory}
+            onClick={() => setShowHistory((value) => !value)}
+          >
+            History
+          </UiToolbarButton>
           {isOpen ? (
             <>
-              <UiToolbarButton size="xsmall" onClick={() => setEditing((value) => !value)} disabled={actionDisabled}>
+              <UiToolbarButton
+                size="xsmall"
+                onClick={() => setEditing((value) => !value)}
+                disabled={actionDisabled}
+              >
                 {editing ? 'Cancel' : 'Edit'}
               </UiToolbarButton>
-              <UiToolbarButton size="xsmall" tone="success" loading={busy === 'merge'} disabled={actionDisabled || request.conflicted} onClick={() => void merge()}>
+              <UiToolbarButton
+                size="xsmall"
+                tone="success"
+                loading={busy === 'merge'}
+                disabled={actionDisabled || request.conflicted}
+                onClick={() => void merge()}
+              >
                 Merge
               </UiToolbarButton>
-              <UiToolbarButton size="xsmall" tone="danger" loading={busy === 'close'} disabled={actionDisabled} onClick={() => void close()}>
+              <UiToolbarButton
+                size="xsmall"
+                tone="danger"
+                loading={busy === 'close'}
+                disabled={actionDisabled}
+                onClick={() => void close()}
+              >
                 Close
               </UiToolbarButton>
             </>
           ) : null}
-          <span className={`inline-flex h-5 items-center rounded-full border px-1.5 text-[var(--text-9)] font-[var(--weight-semibold)] ${changeRequestStatusClasses(request)}`}>
+          <span
+            className={`inline-flex h-5 items-center rounded-full border px-1.5 text-[var(--text-9)] font-[var(--weight-semibold)] ${changeRequestStatusClasses(request)}`}
+          >
             {changeRequestStatusLabel(request)}
           </span>
           <UiToolbarIconButton
@@ -349,20 +424,84 @@ export function ChangeRequestDetail({
             />
           </label>
           <div className="flex justify-end gap-1 md:col-span-2">
-            <UiToolbarButton size="xsmall" onClick={() => setEditing(false)}>Cancel</UiToolbarButton>
-            <UiToolbarButton size="xsmall" tone="accent" active loading={busy === 'save'} disabled={actionDisabled || !draftTitle.trim() || !draftDestination.trim()} onClick={() => void saveDetails()}>
+            <UiToolbarButton size="xsmall" onClick={() => setEditing(false)}>
+              Cancel
+            </UiToolbarButton>
+            <UiToolbarButton
+              size="xsmall"
+              tone="accent"
+              active
+              loading={busy === 'save'}
+              disabled={actionDisabled || !draftTitle.trim() || !draftDestination.trim()}
+              onClick={() => void saveDetails()}
+            >
               Save
             </UiToolbarButton>
           </div>
         </div>
       ) : null}
 
+      {showHistory ? (
+        <div className="border-t border-[var(--border-subtle)] px-2 py-2 text-[var(--text-10)]">
+          <div className="flex flex-wrap gap-1">
+            {revisions.map((revision) => (
+              <button
+                key={revision.number}
+                type="button"
+                onClick={() => setSelectedRevisionNumber(revision.number)}
+                className={`rounded px-2 py-1 ${
+                  revision.number === selectedRevisionNumber
+                    ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
+                    : 'bg-[var(--surface-inset)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
+                }`}
+              >
+                Revision {revision.number}
+              </button>
+            ))}
+          </div>
+          {selectedRevision ? (
+            <div className="mt-2">
+              <div className="text-[var(--muted-dim)]">
+                Base{' '}
+                <span className="font-mono">{shortChangeRequestSha(selectedRevision.baseSha)}</span>
+                <span aria-hidden="true"> · </span>
+                {selectedRevision.commits.length} source{' '}
+                {selectedRevision.commits.length === 1 ? 'commit' : 'commits'}
+              </div>
+              {selectedRevision.commits.length ? (
+                <ol className="mt-1 grid gap-1">
+                  {selectedRevision.commits.map((commit) => (
+                    <li key={commit.sha} className="flex min-w-0 items-baseline gap-2">
+                      <span className="shrink-0 font-mono text-[var(--muted-dim)]">
+                        {shortChangeRequestSha(commit.sha)}
+                      </span>
+                      <span
+                        className="min-w-0 truncate text-[var(--fg-secondary)]"
+                        title={commit.subject}
+                      >
+                        {commit.subject}
+                      </span>
+                      <span className="shrink-0 text-[var(--muted-dim)]">{commit.authorName}</span>
+                    </li>
+                  ))}
+                </ol>
+              ) : null}
+            </div>
+          ) : (
+            <div className="mt-2 text-[var(--muted-dim)]">Revision history is unavailable.</div>
+          )}
+        </div>
+      ) : null}
+
       {request.conflicted ? (
         <UiPanelStatusStrip tone="danger">
-          This request conflicts with {request.destinationBranch}{request.conflictFiles.length ? `: ${request.conflictFiles.join(', ')}` : '.'}
+          This request conflicts with {request.destinationBranch}
+          {request.conflictFiles.length ? `: ${request.conflictFiles.join(', ')}` : '.'}
         </UiPanelStatusStrip>
       ) : null}
-      {request.lastError ? <UiPanelStatusStrip tone="danger">{request.lastError}</UiPanelStatusStrip> : null}
+      {request.lastError ? (
+        <UiPanelStatusStrip tone="danger">{request.lastError}</UiPanelStatusStrip>
+      ) : null}
       {error ? <UiPanelStatusStrip tone="danger">{error}</UiPanelStatusStrip> : null}
       {showMirror ? (
         <div className="border-t border-[var(--border-subtle)] px-2 pb-2">
@@ -420,14 +559,21 @@ export function ChangeRequestDetail({
         </div>
       </div>
     ),
-    [changes?.counts.changed, detailTab, request.baseBranch, request.destinationBranch, request.lineStats?.files, request.number],
+    [
+      changes?.counts.changed,
+      detailTab,
+      request.baseBranch,
+      request.destinationBranch,
+      request.lineStats?.files,
+      request.number,
+    ],
   );
 
   const reviewOverride = React.useMemo<DroneChangesReviewOverride>(
     () => ({
       kind: 'change-request',
       number: request.number,
-      revisionKey: `${request.revision}:${request.snapshotSha ?? request.sourceHeadSha}`,
+      revisionKey: `${selectedRevisionNumber}:${changes?.revision.snapshotSha ?? request.snapshotSha ?? request.sourceHeadSha}`,
       payload: reviewPayload,
       lineCounts: reviewLineCounts,
       loading: changesLoading,
@@ -441,7 +587,20 @@ export function ChangeRequestDetail({
       loadingLabel: 'Loading change request…',
       loadDiff: loadReviewDiff,
     }),
-    [changesError, changesLoading, header, loadReviewDiff, renderTabs, request.number, request.revision, request.snapshotSha, request.sourceHeadSha, reviewLineCounts, reviewPayload],
+    [
+      changes?.revision.snapshotSha,
+      changesError,
+      changesLoading,
+      header,
+      loadReviewDiff,
+      renderTabs,
+      request.number,
+      request.snapshotSha,
+      request.sourceHeadSha,
+      reviewLineCounts,
+      reviewPayload,
+      selectedRevisionNumber,
+    ],
   );
 
   if (detailTab === 'overview') {
@@ -449,10 +608,7 @@ export function ChangeRequestDetail({
       <UiPanel flush surface="alternate" className="h-full w-full">
         {header}
         {renderTabs()}
-        <ChangeRequestOverview
-          request={request}
-          showChatName={showChatName}
-        />
+        <ChangeRequestOverview request={request} showChatName={showChatName} />
       </UiPanel>
     );
   }
@@ -526,9 +682,7 @@ function DestinationBranchPicker({
   const exists = options.some((option) => option === normalized);
   const visibleOptions = React.useMemo(() => {
     const query = normalized.toLowerCase();
-    return options
-      .filter((option) => !query || option.toLowerCase().includes(query))
-      .slice(0, 10);
+    return options.filter((option) => !query || option.toLowerCase().includes(query)).slice(0, 10);
   }, [normalized, options]);
 
   React.useEffect(() => {
@@ -581,7 +735,9 @@ function DestinationBranchPicker({
               className="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left font-mono text-[var(--text-10)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
             >
               <span className="truncate">{option}</span>
-              {option === normalized ? <span className="text-[var(--accent)]">Selected</span> : null}
+              {option === normalized ? (
+                <span className="text-[var(--accent)]">Selected</span>
+              ) : null}
             </button>
           ))}
           {normalized && !exists ? (
@@ -593,11 +749,15 @@ function DestinationBranchPicker({
               className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[var(--text-10)] text-[var(--accent)] hover:bg-[var(--accent-subtle)]"
             >
               <span className="text-[var(--text-13)]">+</span>
-              <span className="min-w-0 truncate">Create <span className="font-mono">{normalized}</span></span>
+              <span className="min-w-0 truncate">
+                Create <span className="font-mono">{normalized}</span>
+              </span>
             </button>
           ) : null}
           {!loading && visibleOptions.length === 0 && (!normalized || exists) ? (
-            <div className="px-2 py-2 text-[var(--text-10)] text-[var(--muted)]">No branches found.</div>
+            <div className="px-2 py-2 text-[var(--text-10)] text-[var(--muted)]">
+              No branches found.
+            </div>
           ) : null}
         </div>
       ) : null}
@@ -613,7 +773,13 @@ function DestinationBranchPicker({
 function BackIcon() {
   return (
     <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5" aria-hidden="true">
-      <path d="m9.5 3-5 5 5 5M5 8h7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="m9.5 3-5 5 5 5M5 8h7"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }

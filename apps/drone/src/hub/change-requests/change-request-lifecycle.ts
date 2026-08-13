@@ -23,12 +23,10 @@ export class ChangeRequestLifecycle {
     const now = this.deps.now();
     const closed = await this.deps.repository.update(record.id, {
       status: 'closed',
-      snapshotRef: null,
       lastError: null,
       updatedAt: now,
       closedAt: now,
     });
-    await this.deleteSnapshotRef(record);
     return closed;
   }
 
@@ -40,22 +38,12 @@ export class ChangeRequestLifecycle {
     const now = this.deps.now();
     const merged = await this.deps.repository.update(record.id, {
       status: 'merged',
-      snapshotRef: null,
       mergedBy: normalizeChangeRequestActor(input.actor),
       mergeCommitSha: input.mergeCommitSha,
       lastError: null,
       updatedAt: now,
       mergedAt: now,
     });
-    await this.deleteSnapshotRef(record);
     return merged;
-  }
-
-  private async deleteSnapshotRef(record: ChangeRequestRecord): Promise<void> {
-    if (!record.snapshotRef) return;
-    await this.deps.deleteHostRefBestEffort({
-      repoRoot: record.repoRoot,
-      refName: record.snapshotRef,
-    });
   }
 }

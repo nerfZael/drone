@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import type { RunResult } from '../../host/dvm';
 import { ChangeRequestError } from './change-request-error';
+import { ChangeRequestObjectStore } from './change-request-object-store';
 import {
   normalizeChangeRequestBranch,
   resolveChangeRequestBranch,
@@ -75,10 +76,16 @@ export type ChangeRequestSnapshot = Omit<ChangeRequestSnapshotSource, 'baseSha'>
   baseSha: string;
   snapshotRef: string;
   snapshotSha: string;
+  sourceRef: string;
+  objectStorePath: string;
 };
 
 export class ChangeRequestSnapshotService {
-  constructor(private readonly deps: ChangeRequestSnapshotDependencies) {}
+  private readonly objectStore: ChangeRequestObjectStore;
+
+  constructor(private readonly deps: ChangeRequestSnapshotDependencies) {
+    this.objectStore = new ChangeRequestObjectStore(deps);
+  }
 
   async captureSource(
     droneRefRaw: string,
@@ -103,9 +110,7 @@ export class ChangeRequestSnapshotService {
         'repo_changed',
       );
     }
-    if (!existing) {
-      await this.fetchOriginIfPresent(repoRoot);
-    }
+    await this.fetchOriginIfPresent(repoRoot);
     const chatName = String(chatNameRaw ?? '').trim() || 'default';
     const chat = drone?.chats?.[chatName] ?? null;
     const droneName = String(drone?.name ?? resolved.id).trim() || resolved.id;
@@ -152,11 +157,9 @@ export class ChangeRequestSnapshotService {
           409,
           'base_branch_missing',
         );
-      const baseSha =
-        existing?.baseSha ||
-        (await this.git(repoRoot, ['merge-base', baseRef, sourceHeadSha])).stdout
-          .trim()
-          .toLowerCase();
+      const baseSha = (await this.git(repoRoot, ['merge-base', baseRef, sourceHeadSha])).stdout
+        .trim()
+        .toLowerCase();
       return { ...shared, baseSha, sourceHeadSha };
     }
     const repoPathInContainer = String(drone?.repo?.dest ?? '/work/repo').trim() || '/work/repo';
@@ -181,7 +184,7 @@ export class ChangeRequestSnapshotService {
           container: containerName,
           repoPathInContainer,
         });
-        return { ...shared, baseSha: existing?.baseSha ?? null, sourceHeadSha };
+        return { ...shared, baseSha: null, sourceHeadSha };
       },
     );
   }
@@ -192,19 +195,42 @@ export class ChangeRequestSnapshotService {
     source: ChangeRequestSnapshotSource,
   ): Promise<ChangeRequestSnapshot> {
     const permanentRef = snapshotRef(id, revision);
+    const permanentSourceRef = sourceRevisionRef(id, revision);
     const importRef = temporaryImportRef(id);
     const runtime = String(source.drone?.runtime ?? 'container')
       .trim()
       .toLowerCase();
     if (runtime === 'host') {
       const resolvedSource = this.requireResolvedBase(source);
-      const snapshotSha = await this.createSnapshotCommit(id, resolvedSource, source.sourceHeadSha);
-      await this.deps.updateHostRef({
-        repoRoot: source.repoRoot,
-        refName: permanentRef,
-        target: snapshotSha,
-      });
-      return { ...resolvedSource, snapshotRef: permanentRef, snapshotSha };
+      try {
+        await this.deps.updateHostRef({
+          repoRoot: source.repoRoot,
+          refName: permanentSourceRef,
+          target: source.sourceHeadSha,
+        });
+        const snapshotSha = await this.createSnapshotCommit(id, resolvedSource, permanentSourceRef);
+        await this.deps.updateHostRef({
+          repoRoot: source.repoRoot,
+          refName: permanentRef,
+          target: snapshotSha,
+        });
+        const objectStorePath = await this.objectStore.importRevision({
+          requestId: id,
+          sourceRepoRoot: source.repoRoot,
+          sourceRef: permanentSourceRef,
+          snapshotRef: permanentRef,
+        });
+        return {
+          ...resolvedSource,
+          snapshotRef: permanentRef,
+          snapshotSha,
+          sourceRef: permanentSourceRef,
+          objectStorePath,
+        };
+      } catch (error) {
+        await this.cleanupFailedRevision(id, source.repoRoot, permanentSourceRef, permanentRef);
+        throw error;
+      }
     }
     const repoPathInContainer =
       String(source.drone?.repo?.dest ?? '/work/repo').trim() || '/work/repo';
@@ -236,17 +262,59 @@ export class ChangeRequestSnapshotService {
       const resolvedSource = source.baseSha
         ? this.requireResolvedBase(source)
         : await this.resolveBaseFromImportedHead(source, importRef);
-      const snapshotSha = await this.createSnapshotCommit(id, resolvedSource, importRef);
+      await this.deps.updateHostRef({
+        repoRoot: source.repoRoot,
+        refName: permanentSourceRef,
+        target: importedHead,
+      });
+      const snapshotSha = await this.createSnapshotCommit(id, resolvedSource, permanentSourceRef);
       await this.deps.updateHostRef({
         repoRoot: source.repoRoot,
         refName: permanentRef,
         target: snapshotSha,
       });
-      return { ...resolvedSource, snapshotRef: permanentRef, snapshotSha };
+      const objectStorePath = await this.objectStore.importRevision({
+        requestId: id,
+        sourceRepoRoot: source.repoRoot,
+        sourceRef: permanentSourceRef,
+        snapshotRef: permanentRef,
+      });
+      return {
+        ...resolvedSource,
+        snapshotRef: permanentRef,
+        snapshotSha,
+        sourceRef: permanentSourceRef,
+        objectStorePath,
+      };
+    } catch (error) {
+      await this.cleanupFailedRevision(id, source.repoRoot, permanentSourceRef, permanentRef);
+      throw error;
     } finally {
       await this.deps.deleteHostRefBestEffort({ repoRoot: source.repoRoot, refName: importRef });
       if (bundlePath) await fs.rm(bundlePath, { force: true }).catch(() => {});
     }
+  }
+
+  async discard(requestId: string, snapshot: ChangeRequestSnapshot): Promise<void> {
+    await this.cleanupFailedRevision(
+      requestId,
+      snapshot.repoRoot,
+      snapshot.sourceRef,
+      snapshot.snapshotRef,
+    );
+  }
+
+  private async cleanupFailedRevision(
+    requestId: string,
+    repoRoot: string,
+    sourceRef: string,
+    snapshotRefName: string,
+  ): Promise<void> {
+    await Promise.all([
+      this.deps.deleteHostRefBestEffort({ repoRoot, refName: sourceRef }),
+      this.deps.deleteHostRefBestEffort({ repoRoot, refName: snapshotRefName }),
+      this.objectStore.deleteRevisionRefsBestEffort(requestId, [sourceRef, snapshotRefName]),
+    ]);
   }
 
   private async createSnapshotCommit(
@@ -339,6 +407,10 @@ export class ChangeRequestSnapshotService {
 
 function snapshotRef(id: string, revision: number): string {
   return `refs/drone/change-requests/${safeChangeRequestRefSegment(id)}/snapshots/${revision}`;
+}
+
+function sourceRevisionRef(id: string, revision: number): string {
+  return `refs/drone/change-requests/${safeChangeRequestRefSegment(id)}/sources/${revision}`;
 }
 
 function temporaryImportRef(id: string): string {

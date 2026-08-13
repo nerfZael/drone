@@ -418,6 +418,10 @@ function ReadOnlySidebarGroups({
                         onClick={(rowOpts) => {
                           if (hasChatSection) {
                             onSelectDroneContainer(droneId);
+                            onSelectDroneCard(droneId, {
+                              ...rowOpts,
+                              orderedDroneIds: visibleDroneOrder,
+                            });
                             onToggleDroneSection(droneId, 'chats');
                             return;
                           }
@@ -666,6 +670,7 @@ function StaticReadOnlySidebarTree({
           onClick={(rowOpts) => {
             if (hasChatSection) {
               onSelectDroneContainer(drone.id);
+              onSelectDroneCard(drone.id, { ...rowOpts, orderedDroneIds: visibleDroneOrder });
               onToggleDroneSection(drone.id, 'chats');
               return;
             }
@@ -1872,11 +1877,12 @@ export function DroneSidebar({
     ],
   );
   const selectPinnedDroneContainer = React.useCallback(
-    (drone: DroneSummary) => {
+    (drone: DroneSummary, opts?: DroneSelectionClickOptions) => {
       handleGroupedSelectDroneContainer(drone.id);
+      selectPinnedDroneCard(drone, opts);
       toggleDroneSection(drone.id, 'chats');
     },
-    [handleGroupedSelectDroneContainer, toggleDroneSection],
+    [handleGroupedSelectDroneContainer, selectPinnedDroneCard, toggleDroneSection],
   );
   const selectPinnedDroneChat = React.useCallback(
     (drone: DroneSummary, chatName: string) => {
@@ -2781,7 +2787,7 @@ export function DroneSidebar({
                               deleteBusy={Boolean(deletingDrones[droneId])}
                               onClick={(rowOpts) =>
                                 hasChatSection
-                                  ? selectPinnedDroneContainer(drone)
+                                  ? selectPinnedDroneContainer(drone, rowOpts)
                                   : selectPinnedDroneCard(drone, rowOpts)
                               }
                               dragNodeRef={dragProps.dragNodeRef}

@@ -992,6 +992,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
               if (shouldSuppressClick()) return;
               if (hasChatSection) {
                 onSelectDroneContainer(drone.id);
+                onSelectDroneCard(drone.id, { ...rowOpts, orderedDroneIds: visibleDroneOrder });
                 onToggleDroneSection(drone.id, 'chats');
                 return;
               }

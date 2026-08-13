@@ -1154,6 +1154,7 @@ function DrawerDroneNode({
             }
             if (isChatDisclosure) {
               onSelectContainer(drone.id);
+              onSelect(drone.id, selectedChat);
               onToggleDrone(drone.id);
               return;
             }

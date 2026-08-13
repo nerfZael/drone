@@ -94,7 +94,7 @@ describe('desktop pinned drone presentation', () => {
       pinnedContainerStart,
       pinnedContainerEnd,
     );
-    expect(pinnedContainerSource).not.toContain('selectPinnedDroneCard');
+    expect(pinnedContainerSource).toContain('selectPinnedDroneCard(drone, opts)');
     expect(pinnedContainerSource).not.toContain('openPinnedDroneRepository');
     expect(sidebarSource).toContain('const selectPinnedDroneChat');
     expect(sidebarSource).toContain('handleGroupedSelectDroneChat(drone.id, chatName)');

@@ -249,9 +249,9 @@ describe('ChangeRequestGithubMirrorService', () => {
           ])
         ).code,
       ).not.toBe(0);
-      expect(
-        (await run('git', ['-C', repoRoot, 'rev-parse', '--verify', snapshotRef])).code,
-      ).not.toBe(0);
+      expect((await run('git', ['-C', repoRoot, 'rev-parse', '--verify', snapshotRef])).code).toBe(
+        0,
+      );
 
       const rollbackSnapshot = await snapshotCommit(
         repoRoot,
@@ -548,7 +548,7 @@ describe('ChangeRequestGithubMirrorService', () => {
     expect(result.githubMirror?.state).toBe('merged');
     expect(result.mergeCommitSha).toBe(mergeSha);
     expect(mergeCalls).toBe(0);
-    expect(deletedRefs).toEqual([snapshotRef]);
+    expect(deletedRefs).toEqual([]);
     expect(gitCalls.some((args) => args.includes('--delete') && args.includes(headBranch))).toBe(
       true,
     );

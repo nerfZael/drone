@@ -12,7 +12,7 @@ describe('multi-chat drone disclosure', () => {
     expect(observeSidebarSelectionForExpansion(tracker, 'drone-a', 'planning', true)).toBe(true);
   });
 
-  test('makes grouped multi-chat drone rows toggle chats without selecting a chat', () => {
+  test('makes grouped multi-chat drone rows select the drone and toggle chats', () => {
     const source = readFileSync(
       new URL('../src/droneHub/app/GroupedSidebarTree.tsx', import.meta.url),
       'utf8',
@@ -20,6 +20,9 @@ describe('multi-chat drone disclosure', () => {
 
     expect(source).toContain("const hasChatSection = chats.length > 1;");
     expect(source).toContain('onSelectDroneContainer(drone.id);');
+    expect(source).toContain(
+      'onSelectDroneCard(drone.id, { ...rowOpts, orderedDroneIds: visibleDroneOrder });',
+    );
     expect(source).toContain('? selectedSidebarNodeId === node.id');
     expect(source).toContain("onToggleDroneSection(drone.id, 'chats');\n                return;");
     expect(source).toContain(
@@ -87,7 +90,7 @@ describe('multi-chat drone disclosure', () => {
     expect(source).toContain('sidebarChatSidebarNodeId(droneId, selectedChatName)');
   });
 
-  test('uses the same parent-only disclosure interaction in read-only desktop trees', () => {
+  test('selects multi-chat drones from read-only desktop trees too', () => {
     const source = readFileSync(
       new URL('../src/droneHub/app/DroneSidebar.tsx', import.meta.url),
       'utf8',
@@ -95,6 +98,12 @@ describe('multi-chat drone disclosure', () => {
 
     expect(source.match(/onToggleDroneSection\(drone(?:Id|\.id), 'chats'\);/g)).toHaveLength(2);
     expect(source.match(/onSelectDroneContainer\(drone(?:Id|\.id)\);/g)).toHaveLength(2);
+    expect(source).toContain(
+      'onSelectDroneContainer(droneId);\n                            onSelectDroneCard(droneId, {',
+    );
+    expect(source).toContain(
+      'onSelectDroneContainer(drone.id);\n              onSelectDroneCard(drone.id, {',
+    );
     expect(source).toContain('const showChatRows = hasChatSection && chatSectionExpanded;');
     expect(source).toContain('{hasChatSection && chatSectionExpanded ? (');
     const containerSelectionStart = source.indexOf('const selectGroupedDroneContainer');
@@ -107,6 +116,16 @@ describe('multi-chat drone disclosure', () => {
       containerSelectionEnd,
     );
     expect(containerSelectionSource).not.toContain('onSetDroneSelectionFromFolder');
+  });
+
+  test('selects pinned multi-chat drones before toggling their disclosure', () => {
+    const source = readFileSync(
+      new URL('../src/droneHub/app/DroneSidebar.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(source).toContain('selectPinnedDroneCard(drone, opts);');
+    expect(source).toContain('? selectPinnedDroneContainer(drone, rowOpts)');
   });
 
   test('exposes the disclosure state accessibly with the shared runtime icon', () => {

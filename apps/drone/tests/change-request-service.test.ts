@@ -11,6 +11,97 @@ import {
 } from './helpers/change-request-test-support';
 
 describe('ChangeRequestService', () => {
+  test('recovers a direct merge pushed before lifecycle persistence completed', async () => {
+    const repository = new MemoryChangeRequestRepository();
+    const mergeSha = '7'.repeat(40);
+    const targetSha = '6'.repeat(40);
+    const created = await repository.insert(
+      {
+        id: 'recover-request',
+        status: 'open',
+        droneId: 'drone-1',
+        droneName: 'Drone',
+        chatId: null,
+        chatName: 'default',
+        repoRoot: '/tmp/recover-repo',
+        baseBranch: 'main',
+        baseSha: targetSha,
+        destinationBranch: 'dev',
+        snapshotRef: 'refs/drone/change-requests/recover-request/snapshots/1',
+        snapshotSha: '5'.repeat(40),
+        sourceHeadSha: '4'.repeat(40),
+        revision: 1,
+        title: 'Recover merge',
+        description: '',
+        createdBy: { kind: 'user', id: null, label: 'Test user' },
+        mergedBy: null,
+        mergeCommitSha: null,
+        lastError: null,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        mergedAt: null,
+        closedAt: null,
+        githubMirror: null,
+      },
+      {
+        number: 1,
+        baseBranch: 'main',
+        baseSha: targetSha,
+        snapshotRef: 'refs/drone/change-requests/recover-request/snapshots/1',
+        snapshotSha: '5'.repeat(40),
+        sourceRef: 'refs/drone/change-requests/recover-request/sources/1',
+        sourceHeadSha: '4'.repeat(40),
+        objectStorePath: null,
+        createdBy: { kind: 'user', id: null, label: 'Test user' },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+    );
+    await repository.insertMergeAttempt({
+      id: 'attempt-1',
+      requestId: created.id,
+      revision: 1,
+      destinationBranch: 'dev',
+      expectedTargetSha: targetSha,
+      mergeCommitSha: mergeSha,
+      actor: { kind: 'user', id: 'user-1', label: 'Recovering user' },
+      status: 'prepared',
+      error: null,
+      createdAt: '2026-01-02T00:00:00.000Z',
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    });
+    const unused = async () => {
+      throw new Error('unused test dependency');
+    };
+    const service = new ChangeRequestService({
+      repository,
+      resolveDrone: unused,
+      withLockedDroneContainer: unused as any,
+      exportFullHeadBundleFromDrone: unused,
+      importBundleHeadToHostRef: unused,
+      createHostAuthoredMirrorCommit: unused,
+      updateHostRef: unused,
+      deleteHostRefBestEffort: async () => {},
+      gitTopLevel: unused,
+      dvmRepoHeadSha: unused,
+      runGitInDrone: unused,
+      runHostCommand: async (_command, args) => {
+        if (args.includes('fetch')) return { code: 0, stdout: '', stderr: '' };
+        if (args.includes('rev-parse') && args.some((arg) => arg.includes('origin/dev'))) {
+          return { code: 0, stdout: `${mergeSha}\n`, stderr: '' };
+        }
+        return { code: 1, stdout: '', stderr: 'not found' };
+      },
+      storagePath: (...segments) => path.join('/tmp', ...segments),
+      now: () => '2026-01-02T00:01:00.000Z',
+    });
+
+    await service.recoverPendingMerges();
+
+    expect(repository.get(created.id)?.status).toBe('merged');
+    expect(repository.get(created.id)?.mergeCommitSha).toBe(mergeSha);
+    expect(repository.listPreparedMergeAttempts()).toEqual([]);
+  });
+
   test('captures a durable host snapshot and directly squash-merges a planned branch', async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'drone-change-request-test-'));
     const origin = path.join(tempRoot, 'origin.git');
@@ -155,10 +246,19 @@ describe('ChangeRequestService', () => {
       expect(updated.revision).toBe(2);
       expect(
         (await run('git', ['-C', repoRoot, 'rev-parse', '--verify', created.snapshotRef!])).code,
-      ).not.toBe(0);
+      ).toBe(0);
       expect(
         (await run('git', ['-C', repoRoot, 'rev-parse', '--verify', updated.snapshotRef!])).code,
       ).toBe(0);
+      expect((await service.revisions(created.number)).map((revision) => revision.number)).toEqual([
+        2, 1,
+      ]);
+      expect(
+        (await service.revisions(created.number))[0]?.commits.map((commit) => commit.subject),
+      ).toEqual(['container-authored change', 'second container-authored change']);
+      expect((await service.changes(created.number, 1)).entries.map((entry) => entry.path)).toEqual(
+        ['feature.txt', 'image.bin', 'README.md'],
+      );
 
       await run('git', ['clone', '-b', 'main', origin, upstreamRepo]);
       await git(upstreamRepo, ['config', 'user.name', 'Upstream User']);
@@ -196,7 +296,7 @@ describe('ChangeRequestService', () => {
       );
       expect(
         (await run('git', ['-C', repoRoot, 'rev-parse', '--verify', updated.snapshotRef!])).code,
-      ).not.toBe(0);
+      ).toBe(0);
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
@@ -321,7 +421,11 @@ describe('ChangeRequestService', () => {
       expect(closed.status).toBe('closed');
       expect(
         (await run('git', ['-C', repoRoot, 'rev-parse', '--verify', created.snapshotRef!])).code,
-      ).not.toBe(0);
+      ).toBe(0);
+      await fs.rm(repoRoot, { recursive: true, force: true });
+      expect((await service.changes(created.number)).entries.map((entry) => entry.path)).toEqual([
+        'container.txt',
+      ]);
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }

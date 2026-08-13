@@ -411,6 +411,7 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain('const chatSectionExpanded = !collapsedDroneIds.has(drone.id);');
     expect(source).toContain('if (isChatDisclosure) {');
     expect(source).toContain('onSelectContainer(drone.id);');
+    expect(source).toContain('onSelect(drone.id, selectedChat);');
     expect(source).toContain('onToggleDrone(drone.id);');
     expect(source).toContain('expanded: isChatDisclosure ? chatSectionExpanded : undefined');
     expect(source).toContain('<View accessible={false} style={styles.droneChevronSlot}>');

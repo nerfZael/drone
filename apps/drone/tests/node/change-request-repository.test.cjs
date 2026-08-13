@@ -35,7 +35,7 @@ function memoryHubDatabase() {
   };
 }
 
-test('change request repository persists and atomically updates GitHub mirror metadata', async () => {
+test('change request repository persists revisions, publications, and recoverable merges', async () => {
   const memory = memoryHubDatabase();
   try {
     const repository = new SqliteChangeRequestRepository(memory.database);
@@ -95,6 +95,22 @@ test('change request repository persists and atomically updates GitHub mirror me
     assert.equal(stored.githubMirror.pullNumber, 42);
     assert.equal(stored.githubMirror.autoUpdate, true);
     assert.equal(stored.githubMirror.branchOwnedByDroneHub, true);
+    assert.equal(
+      memory.database.read(
+        (connection) =>
+          connection.prepare('SELECT external_id FROM change_request_publications').get()
+            .external_id,
+      ),
+      'example/repo#42',
+    );
+    assert.equal(
+      memory.database.read(
+        (connection) =>
+          connection.prepare('SELECT github_mirror_json FROM change_requests').get()
+            .github_mirror_json,
+      ),
+      null,
+    );
 
     await Promise.all([
       repository.update(inserted.id, (current) => ({
@@ -109,8 +125,62 @@ test('change request repository persists and atomically updates GitHub mirror me
     assert.equal(updated.githubMirror.autoUpdate, false);
     assert.equal(updated.githubMirror.lastError, 'sync failed');
     assert.equal(updated.stateVersion, mirrored.stateVersion + 2);
+    await repository.updateWithRevision(
+      inserted.id,
+      {
+        baseSha: '3'.repeat(40),
+        snapshotRef: 'refs/drone/change-requests/request-1/snapshots/2',
+        snapshotSha: '4'.repeat(40),
+        sourceHeadSha: '5'.repeat(40),
+        revision: 2,
+        updatedAt: '2026-01-03T00:00:00.000Z',
+      },
+      {
+        number: 2,
+        baseBranch: 'main',
+        baseSha: '3'.repeat(40),
+        snapshotRef: 'refs/drone/change-requests/request-1/snapshots/2',
+        snapshotSha: '4'.repeat(40),
+        sourceRef: 'refs/drone/change-requests/request-1/sources/2',
+        sourceHeadSha: '5'.repeat(40),
+        objectStorePath: '/tmp/change-request-1.git',
+        createdBy: { kind: 'user', id: 'user-1', label: 'Test user' },
+        createdAt: '2026-01-03T00:00:00.000Z',
+      },
+    );
+    assert.deepEqual(
+      repository.listRevisions(inserted.id).map((revision) => revision.number),
+      [2, 1],
+    );
+    assert.equal(
+      repository.getRevision(inserted.id, 2).objectStorePath,
+      '/tmp/change-request-1.git',
+    );
+
+    await repository.insertMergeAttempt({
+      id: 'attempt-1',
+      requestId: inserted.id,
+      revision: 2,
+      destinationBranch: 'dev',
+      expectedTargetSha: '6'.repeat(40),
+      mergeCommitSha: '7'.repeat(40),
+      actor: { kind: 'user', id: 'user-1', label: 'Test user' },
+      status: 'prepared',
+      error: null,
+      createdAt: '2026-01-04T00:00:00.000Z',
+      updatedAt: '2026-01-04T00:00:00.000Z',
+    });
+    assert.equal(repository.listPreparedMergeAttempts()[0].mergeCommitSha, '7'.repeat(40));
+    await repository.completeMergeAttempt(
+      'attempt-1',
+      'completed',
+      null,
+      '2026-01-04T00:01:00.000Z',
+    );
+    assert.deepEqual(repository.listPreparedMergeAttempts(), []);
+
     const events = new HubOutboxRepository(memory.database).list({ status: 'pending' });
-    assert.deepEqual(events.at(-1).payload.request, updated);
+    assert.equal(events.at(-1).payload.request.revision, 2);
     assert.ok(events.every((event) => event.topic === 'change-request.events'));
   } finally {
     memory.close();

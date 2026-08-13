@@ -1,8 +1,12 @@
-import type { ChangeRequestChanges, ChangeRequestView } from '@drone/hub-model/change-requests';
+import type {
+  ChangeRequestChanges,
+  ChangeRequestRevisionView,
+  ChangeRequestView,
+} from '@drone/hub-model/change-requests';
 
 import { requestJson } from '../http';
 type RequestPayload = { ok: true; request: ChangeRequestView };
-type ChangesPayload = Pick<ChangeRequestChanges, 'counts' | 'entries'> & { ok: true };
+type ChangesPayload = Pick<ChangeRequestChanges, 'counts' | 'entries' | 'revision'> & { ok: true };
 export type GithubMirrorMergeMethod = 'merge' | 'squash' | 'rebase';
 
 export function listChangeRequests(droneId: string): Promise<ChangeRequestView[]> {
@@ -37,16 +41,30 @@ export function createChangeRequest(input: {
   });
 }
 
-export function loadChangeRequestChanges(requestNumber: number): Promise<ChangesPayload> {
-  return requestJson<ChangesPayload>(`${requestPath(requestNumber)}/changes`);
+export function loadChangeRequestRevisions(
+  requestNumber: number,
+): Promise<ChangeRequestRevisionView[]> {
+  return requestJson<{ ok: true; revisions: ChangeRequestRevisionView[] }>(
+    `${requestPath(requestNumber)}/revisions`,
+  ).then((payload) => payload.revisions);
+}
+
+export function loadChangeRequestChanges(
+  requestNumber: number,
+  revision?: number,
+): Promise<ChangesPayload> {
+  const query = revision ? `?revision=${encodeURIComponent(revision)}` : '';
+  return requestJson<ChangesPayload>(`${requestPath(requestNumber)}/changes${query}`);
 }
 
 export function loadChangeRequestDiff(
   requestNumber: number,
   filePath: string,
+  revision?: number,
 ): Promise<{ diff: string; truncated: boolean }> {
+  const revisionQuery = revision ? `&revision=${encodeURIComponent(revision)}` : '';
   return requestJson<{ ok: true; diff: string; truncated: boolean }>(
-    `${requestPath(requestNumber)}/diff?path=${encodeURIComponent(filePath)}&contextLines=5`,
+    `${requestPath(requestNumber)}/diff?path=${encodeURIComponent(filePath)}&contextLines=5${revisionQuery}`,
   );
 }
 

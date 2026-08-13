@@ -44,4 +44,16 @@ describe('change request presentation', () => {
     expect(changes).toContain('<PullRequestOverview payload={activePullRequestChanges} />');
     expect(github).toContain("body: String(pull?.body ?? '')");
   });
+
+  test('lets reviewers select immutable revisions and inspect their source commits', () => {
+    const detail = source('../src/droneHub/changeRequests/ChangeRequestDetail.tsx');
+    const api = source('../src/droneHub/changeRequests/change-request-api.ts');
+
+    expect(detail).toContain('aria-label="Change request revision"');
+    expect(detail).toContain('Revision {revision.number}');
+    expect(detail).toContain('selectedRevision.commits.map((commit) =>');
+    expect(detail).toContain('loadChangeRequestDiff(request.number, path, selectedRevisionNumber)');
+    expect(api).toContain('/revisions`');
+    expect(api).toContain('revision=${encodeURIComponent(revision)}');
+  });
 });

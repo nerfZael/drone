@@ -51,6 +51,11 @@ export function registerChangeRequestFeature(
     ...dependencies,
     repository,
   });
+  void feature.service.recoverPendingMerges().catch((error) => {
+    dependencies.log('warn', 'change request merge recovery failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
   const handleOutboxEvent = async (outboxEvent: HubOutboxEvent): Promise<boolean> => {
     const event = changeRequestEventFromOutbox(outboxEvent);
     if (!event) return false;

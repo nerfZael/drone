@@ -37,7 +37,7 @@ describe('change request live updates', () => {
     const changes = source('../src/droneHub/changes/DroneChangesDock.tsx');
 
     expect(detail).toContain(
-      'revisionKey: `${request.revision}:${request.snapshotSha ?? request.sourceHeadSha}`',
+      'revisionKey: `${selectedRevisionNumber}:${changes?.revision.snapshotSha ?? request.snapshotSha ?? request.sourceHeadSha}`',
     );
     expect(detail).not.toContain('refreshChangeRequestAssessment');
     expect(changes).toContain('reviewOverride.revisionKey');

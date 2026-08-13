@@ -11,7 +11,7 @@ import {
   safeChangeRequestRefSegment,
   type RunHostCommand,
 } from './change-request-git';
-import type { ChangeRequestRecord } from './change-request-types';
+import type { ChangeRequestRecord, ChangeRequestRevisionRecord } from './change-request-types';
 
 export type ChangeRequestDirectMergerDependencies = {
   runHostCommand: RunHostCommand;
@@ -23,16 +23,23 @@ const MERGE_TIMEOUT_MS = 120_000;
 export class ChangeRequestDirectMerger {
   constructor(private readonly deps: ChangeRequestDirectMergerDependencies) {}
 
-  async merge(record: ChangeRequestRecord, commitMessage: string): Promise<string> {
-    await this.git(record.repoRoot, ['fetch', 'origin', '--prune'], MERGE_TIMEOUT_MS);
+  async merge(
+    record: ChangeRequestRecord,
+    commitMessage: string,
+    revision?: ChangeRequestRevisionRecord,
+    onPrepared?: (prepared: { expectedTargetSha: string; mergeCommitSha: string }) => Promise<void>,
+  ): Promise<string> {
+    const gitRoot = revision?.objectStorePath || record.repoRoot;
+    const snapshotRef = revision?.snapshotRef || record.snapshotRef;
+    await this.git(gitRoot, ['fetch', 'origin', '--prune'], MERGE_TIMEOUT_MS);
     const destinationRef = await resolveChangeRequestBranch(
       this.deps.runHostCommand,
-      record.repoRoot,
+      gitRoot,
       record.destinationBranch,
     );
     const baseRef = await resolveChangeRequestBranch(
       this.deps.runHostCommand,
-      record.repoRoot,
+      gitRoot,
       record.baseBranch,
     );
     const targetRef = destinationRef ?? baseRef;
@@ -45,7 +52,7 @@ export class ChangeRequestDirectMerger {
     }
     const targetSha = await resolveChangeRequestCommit(
       this.deps.runHostCommand,
-      record.repoRoot,
+      gitRoot,
       targetRef,
     );
     if (!targetSha) {
@@ -59,13 +66,13 @@ export class ChangeRequestDirectMerger {
     await fs.mkdir(path.dirname(worktreePath), { recursive: true });
     try {
       await this.git(
-        record.repoRoot,
+        gitRoot,
         ['worktree', 'add', '--detach', worktreePath, targetSha],
         MERGE_TIMEOUT_MS,
       );
       const merged = await this.deps.runHostCommand(
         'git',
-        ['-C', worktreePath, 'merge', '--squash', '--no-commit', record.snapshotRef!],
+        ['-C', worktreePath, 'merge', '--squash', '--no-commit', snapshotRef!],
         { timeoutMs: MERGE_TIMEOUT_MS },
       );
       if (merged.code !== 0) {
@@ -96,24 +103,28 @@ export class ChangeRequestDirectMerger {
       } else if (staged.code !== 0) {
         throw new ChangeRequestError(staged.stderr || 'Unable to inspect the prepared merge.', 500);
       }
+      await onPrepared?.({ expectedTargetSha: targetSha, mergeCommitSha });
       await this.git(
         worktreePath,
-        ['push', 'origin', `HEAD:refs/heads/${record.destinationBranch}`],
+        [
+          'push',
+          destinationRef
+            ? `--force-with-lease=refs/heads/${record.destinationBranch}:${targetSha}`
+            : `--force-with-lease=refs/heads/${record.destinationBranch}:`,
+          'origin',
+          `HEAD:refs/heads/${record.destinationBranch}`,
+        ],
         MERGE_TIMEOUT_MS,
       );
       return mergeCommitSha;
     } finally {
       await this.deps
-        .runHostCommand(
-          'git',
-          ['-C', record.repoRoot, 'worktree', 'remove', '--force', worktreePath],
-          { timeoutMs: 30_000 },
-        )
+        .runHostCommand('git', ['-C', gitRoot, 'worktree', 'remove', '--force', worktreePath], {
+          timeoutMs: 30_000,
+        })
         .catch(() => null);
       await fs.rm(worktreePath, { recursive: true, force: true }).catch(() => {});
-      await this.deps
-        .runHostCommand('git', ['-C', record.repoRoot, 'worktree', 'prune'])
-        .catch(() => null);
+      await this.deps.runHostCommand('git', ['-C', gitRoot, 'worktree', 'prune']).catch(() => null);
     }
   }
 

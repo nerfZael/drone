@@ -4,16 +4,23 @@ import path from 'node:path';
 
 import type {
   ChangeRequestInsert,
+  ChangeRequestMergeAttempt,
   ChangeRequestRepository,
+  ChangeRequestRevisionInsert,
   ChangeRequestUpdate,
 } from '../../src/hub/change-requests/change-request-repository';
 import type { ChangeRequestDomainEventType } from '../../src/hub/change-requests/change-request-events';
-import type { ChangeRequestRecord } from '../../src/hub/change-requests/change-request-types';
+import type {
+  ChangeRequestRecord,
+  ChangeRequestRevisionRecord,
+} from '../../src/hub/change-requests/change-request-types';
 import type { RunResult } from '../../src/host/dvm';
 
 export class MemoryChangeRequestRepository implements ChangeRequestRepository {
   private sequence = 0;
   private readonly records = new Map<string, ChangeRequestRecord>();
+  private readonly revisions = new Map<string, Map<number, ChangeRequestRevisionRecord>>();
+  private readonly mergeAttempts = new Map<string, ChangeRequestMergeAttempt>();
   failNextUpdateMessage: string | null = null;
   private failNextMirrorUpdateMessage: string | null = null;
 
@@ -21,9 +28,14 @@ export class MemoryChangeRequestRepository implements ChangeRequestRepository {
     this.failNextMirrorUpdateMessage = message;
   }
 
-  async insert(input: ChangeRequestInsert): Promise<ChangeRequestRecord> {
+  async insert(
+    input: ChangeRequestInsert,
+    revision?: ChangeRequestRevisionInsert,
+  ): Promise<ChangeRequestRecord> {
     const record = { ...input, number: ++this.sequence, stateVersion: 1 };
     this.records.set(record.id, record);
+    const initialRevision = revision ?? revisionFromInsert(input);
+    if (initialRevision) this.storeRevision(record.id, initialRevision);
     return structuredClone(record);
   }
 
@@ -66,6 +78,49 @@ export class MemoryChangeRequestRepository implements ChangeRequestRepository {
     return structuredClone(updated);
   }
 
+  async updateWithRevision(
+    id: string,
+    update: ChangeRequestUpdate,
+    revision: ChangeRequestRevisionInsert,
+  ): Promise<ChangeRequestRecord> {
+    const updated = await this.update(id, update);
+    if (updated.revision !== revision.number) throw new Error('change request revision mismatch');
+    this.storeRevision(id, revision);
+    return updated;
+  }
+
+  getRevision(id: string, revision: number): ChangeRequestRevisionRecord | null {
+    const value = this.revisions.get(id)?.get(revision);
+    return value ? structuredClone(value) : null;
+  }
+
+  listRevisions(id: string): ChangeRequestRevisionRecord[] {
+    return [...(this.revisions.get(id)?.values() ?? [])]
+      .sort((left, right) => right.number - left.number)
+      .map((revision) => structuredClone(revision));
+  }
+
+  async insertMergeAttempt(attempt: ChangeRequestMergeAttempt): Promise<void> {
+    this.mergeAttempts.set(attempt.id, structuredClone(attempt));
+  }
+
+  async completeMergeAttempt(
+    id: string,
+    status: 'completed' | 'failed',
+    error: string | null,
+    updatedAt: string,
+  ): Promise<void> {
+    const attempt = this.mergeAttempts.get(id);
+    if (!attempt) return;
+    this.mergeAttempts.set(id, { ...attempt, status, error, updatedAt });
+  }
+
+  listPreparedMergeAttempts(): ChangeRequestMergeAttempt[] {
+    return [...this.mergeAttempts.values()]
+      .filter((attempt) => attempt.status === 'prepared')
+      .map((attempt) => structuredClone(attempt));
+  }
+
   async emitEvent(
     id: string,
     eventType: Exclude<ChangeRequestDomainEventType, 'change_request.created'>,
@@ -77,6 +132,28 @@ export class MemoryChangeRequestRepository implements ChangeRequestRepository {
     this.records.set(id, updated);
     return structuredClone(updated);
   }
+
+  private storeRevision(id: string, revision: ChangeRequestRevisionInsert): void {
+    const revisions = this.revisions.get(id) ?? new Map<number, ChangeRequestRevisionRecord>();
+    revisions.set(revision.number, { ...structuredClone(revision), requestId: id });
+    this.revisions.set(id, revisions);
+  }
+}
+
+function revisionFromInsert(input: ChangeRequestInsert): ChangeRequestRevisionInsert | null {
+  if (!input.snapshotRef || !input.snapshotSha) return null;
+  return {
+    number: input.revision,
+    baseBranch: input.baseBranch,
+    baseSha: input.baseSha,
+    snapshotRef: input.snapshotRef,
+    snapshotSha: input.snapshotSha,
+    sourceRef: input.snapshotRef,
+    sourceHeadSha: input.sourceHeadSha,
+    objectStorePath: null,
+    createdBy: input.createdBy,
+    createdAt: input.createdAt,
+  };
 }
 
 export async function runCommand(

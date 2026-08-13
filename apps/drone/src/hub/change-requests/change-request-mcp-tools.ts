@@ -83,6 +83,7 @@ export function registerChangeRequestMcpTools(
             description: args.description,
             destinationBranch: args.destinationBranch,
             refreshSnapshot: args.refreshSnapshot,
+            actor: changeRequestActor(context),
           }),
         },
         120_000,

@@ -97,6 +97,11 @@ export function registerChangeRequestRoutes(
     json(200, { ok: true, request });
   });
 
+  route.get('/api/change-requests/:requestNumber/revisions', async ({ params, json }) => {
+    const revisions = await service().revisions(params.requestNumber);
+    json(200, { ok: true, revisions });
+  });
+
   route.post('/api/change-requests/:requestNumber/refresh-assessment', async ({ params, json }) => {
     const request = await service().refreshAssessment(params.requestNumber);
     json(200, { ok: true, request });
@@ -110,6 +115,7 @@ export function registerChangeRequestRoutes(
       destinationBranch:
         typeof body.destinationBranch === 'string' ? body.destinationBranch : undefined,
       refreshSnapshot: typeof body.refreshSnapshot === 'boolean' ? body.refreshSnapshot : undefined,
+      actor: requestActor(body.actor),
     });
     json(200, { ok: true, request });
   });
@@ -179,19 +185,20 @@ export function registerChangeRequestRoutes(
     json(200, { ok: true, request });
   });
 
-  route.get('/api/change-requests/:requestNumber/changes', async ({ params, json }) => {
-    const changes = await service().changes(params.requestNumber);
+  route.get('/api/change-requests/:requestNumber/changes', async ({ params, url, json }) => {
+    const changes = await service().changes(params.requestNumber, url.searchParams.get('revision'));
     const request = changes.request;
     json(200, {
       ok: true,
       id: request.droneId,
       name: request.droneName,
       repoRoot: request.repoRoot,
-      reviewScopeId: `change-request:${request.number}:${request.revision}`,
-      baseSha: request.baseSha,
-      headSha: request.snapshotSha,
+      reviewScopeId: `change-request:${request.number}:${changes.revision.number}`,
+      baseSha: changes.revision.baseSha,
+      headSha: changes.revision.snapshotSha,
       counts: changes.counts,
       entries: changes.entries,
+      revision: changes.revision,
       mode: 'change-request',
       branchContext: {
         hostCurrent: request.destinationBranch,
@@ -208,14 +215,16 @@ export function registerChangeRequestRoutes(
       params.requestNumber,
       url.searchParams.get('path') ?? '',
       Number(url.searchParams.get('contextLines')),
+      url.searchParams.get('revision'),
     );
     json(200, {
       ok: true,
       id: result.request.droneId,
       name: result.request.droneName,
       repoRoot: result.request.repoRoot,
-      baseSha: result.request.baseSha,
-      headSha: result.request.snapshotSha,
+      baseSha: result.revision.baseSha,
+      headSha: result.revision.snapshotSha,
+      revision: result.revision,
       path: result.path,
       diff: result.diff,
       truncated: result.truncated,

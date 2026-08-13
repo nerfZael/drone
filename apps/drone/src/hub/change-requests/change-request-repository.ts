@@ -2,6 +2,7 @@ import {
   applyHubDatabaseMigrations,
   getHubDatabase,
   type HubDatabase,
+  type HubDatabaseConnection,
   type HubDatabaseMigration,
 } from '../../host/hub-database';
 import { initializeHubOutbox } from '../../host/hub-outbox';
@@ -15,6 +16,7 @@ import type {
   ChangeRequestActor,
   ChangeRequestGithubMirrorRecord,
   ChangeRequestRecord,
+  ChangeRequestRevisionRecord,
   ChangeRequestStatus,
 } from './change-request-types';
 
@@ -48,12 +50,76 @@ type ChangeRequestRow = {
   github_mirror_json: string | null;
 };
 
+type ChangeRequestRevisionRow = {
+  request_id: string;
+  revision: number;
+  base_branch: string;
+  base_sha: string;
+  snapshot_ref: string;
+  snapshot_sha: string;
+  source_ref: string;
+  source_head_sha: string;
+  object_store_path: string | null;
+  created_by_json: string;
+  created_at: string;
+};
+
+type ChangeRequestPublicationRow = {
+  request_id: string;
+  provider: string;
+  external_id: string;
+  state: string;
+  url: string;
+  head_ref: string;
+  head_sha: string;
+  target_ref: string;
+  auto_sync: number;
+  branch_owned: number;
+  synced_revision: number;
+  synced_request_updated_at: string;
+  merge_commit_sha: string | null;
+  last_error: string | null;
+  metadata_json: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type ChangeRequestMergeAttemptRow = {
+  id: string;
+  request_id: string;
+  revision: number;
+  destination_branch: string;
+  expected_target_sha: string;
+  merge_commit_sha: string;
+  actor_json: string;
+  status: 'prepared' | 'completed' | 'failed';
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ChangeRequestMergeAttempt = {
+  id: string;
+  requestId: string;
+  revision: number;
+  destinationBranch: string;
+  expectedTargetSha: string;
+  mergeCommitSha: string;
+  actor: ChangeRequestActor;
+  status: 'prepared' | 'completed' | 'failed';
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type ChangeRequestInsert = Omit<ChangeRequestRecord, 'number' | 'stateVersion'>;
+export type ChangeRequestRevisionInsert = Omit<ChangeRequestRevisionRecord, 'requestId'>;
 
 export type ChangeRequestPatch = Partial<
   Pick<
     ChangeRequestRecord,
     | 'status'
+    | 'baseSha'
     | 'destinationBranch'
     | 'snapshotRef'
     | 'snapshotSha'
@@ -72,10 +138,14 @@ export type ChangeRequestPatch = Partial<
 >;
 
 export type ChangeRequestUpdate =
-  ChangeRequestPatch | ((current: ChangeRequestRecord) => ChangeRequestPatch);
+  | ChangeRequestPatch
+  | ((current: ChangeRequestRecord) => ChangeRequestPatch);
 
 export interface ChangeRequestRepository {
-  insert(input: ChangeRequestInsert): Promise<ChangeRequestRecord>;
+  insert(
+    input: ChangeRequestInsert,
+    revision?: ChangeRequestRevisionInsert,
+  ): Promise<ChangeRequestRecord>;
   get(id: string): ChangeRequestRecord | null;
   getByNumber(number: number): ChangeRequestRecord | null;
   getByNumbers(numbers: number[]): Map<number, ChangeRequestRecord>;
@@ -86,6 +156,21 @@ export interface ChangeRequestRepository {
   }): ChangeRequestRecord[];
   /** Atomically reads and updates a change request when given an updater function. */
   update(id: string, update: ChangeRequestUpdate): Promise<ChangeRequestRecord>;
+  updateWithRevision(
+    id: string,
+    update: ChangeRequestUpdate,
+    revision: ChangeRequestRevisionInsert,
+  ): Promise<ChangeRequestRecord>;
+  getRevision(id: string, revision: number): ChangeRequestRevisionRecord | null;
+  listRevisions(id: string): ChangeRequestRevisionRecord[];
+  insertMergeAttempt(attempt: ChangeRequestMergeAttempt): Promise<void>;
+  completeMergeAttempt(
+    id: string,
+    status: 'completed' | 'failed',
+    error: string | null,
+    updatedAt: string,
+  ): Promise<void>;
+  listPreparedMergeAttempts(): ChangeRequestMergeAttempt[];
   emitEvent(
     id: string,
     eventType: Exclude<ChangeRequestDomainEventType, 'change_request.created'>,
@@ -197,6 +282,107 @@ const CHANGE_REQUEST_MIGRATIONS: readonly HubDatabaseMigration[] = [
       connection.exec('DROP TABLE change_request_event_outbox;');
     },
   },
+  {
+    version: 5,
+    name: 'immutable change request revisions',
+    migrate(connection) {
+      connection.exec(`
+        CREATE TABLE change_request_revisions (
+          request_id TEXT NOT NULL,
+          revision INTEGER NOT NULL CHECK (revision > 0),
+          base_branch TEXT NOT NULL,
+          base_sha TEXT NOT NULL,
+          snapshot_ref TEXT NOT NULL,
+          snapshot_sha TEXT NOT NULL,
+          source_ref TEXT NOT NULL,
+          source_head_sha TEXT NOT NULL,
+          object_store_path TEXT,
+          created_by_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          PRIMARY KEY (request_id, revision),
+          FOREIGN KEY (request_id) REFERENCES change_requests(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX idx_change_request_revisions_request
+          ON change_request_revisions (request_id, revision DESC);
+      `);
+      connection.exec(`
+        INSERT INTO change_request_revisions (
+          request_id, revision, base_branch, base_sha, snapshot_ref, snapshot_sha,
+          source_ref, source_head_sha, object_store_path, created_by_json, created_at
+        )
+        SELECT id, revision, base_branch, base_sha, snapshot_ref, snapshot_sha,
+          snapshot_ref, source_head_sha, NULL, created_by_json, updated_at
+        FROM change_requests
+        WHERE snapshot_ref IS NOT NULL AND snapshot_sha IS NOT NULL;
+      `);
+    },
+  },
+  {
+    version: 6,
+    name: 'provider neutral change request publications',
+    migrate(connection) {
+      connection.exec(`
+        CREATE TABLE change_request_publications (
+          request_id TEXT NOT NULL,
+          provider TEXT NOT NULL,
+          external_id TEXT NOT NULL,
+          state TEXT NOT NULL,
+          url TEXT NOT NULL,
+          head_ref TEXT NOT NULL,
+          head_sha TEXT NOT NULL,
+          target_ref TEXT NOT NULL,
+          auto_sync INTEGER NOT NULL CHECK (auto_sync IN (0, 1)),
+          branch_owned INTEGER NOT NULL CHECK (branch_owned IN (0, 1)),
+          synced_revision INTEGER NOT NULL CHECK (synced_revision >= 0),
+          synced_request_updated_at TEXT NOT NULL,
+          merge_commit_sha TEXT,
+          last_error TEXT,
+          metadata_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (request_id, provider),
+          UNIQUE (provider, external_id),
+          FOREIGN KEY (request_id) REFERENCES change_requests(id) ON DELETE CASCADE
+        );
+      `);
+      const legacy = connection
+        .prepare(
+          `SELECT id, github_mirror_json FROM change_requests
+           WHERE github_mirror_json IS NOT NULL`,
+        )
+        .all() as Array<{ id: string; github_mirror_json: string }>;
+      for (const row of legacy) {
+        const mirror = parseGithubMirror(row.github_mirror_json);
+        if (mirror) upsertGithubPublication(connection, row.id, mirror);
+      }
+    },
+  },
+  {
+    version: 7,
+    name: 'recoverable direct merge attempts',
+    migrate(connection) {
+      connection.exec(`
+        CREATE TABLE change_request_merge_attempts (
+          id TEXT PRIMARY KEY,
+          request_id TEXT NOT NULL,
+          revision INTEGER NOT NULL CHECK (revision > 0),
+          destination_branch TEXT NOT NULL,
+          expected_target_sha TEXT NOT NULL,
+          merge_commit_sha TEXT NOT NULL,
+          actor_json TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('prepared', 'completed', 'failed')),
+          error TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (request_id) REFERENCES change_requests(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX idx_change_request_merge_attempts_status
+          ON change_request_merge_attempts (status, created_at);
+      `);
+    },
+  },
 ];
 
 type LegacyChangeRequestOutboxRow = {
@@ -247,7 +433,103 @@ function parseGithubMirror(raw: string | null): ChangeRequestGithubMirrorRecord 
   }
 }
 
-function record(row: ChangeRequestRow): ChangeRequestRecord {
+function githubPublication(
+  connection: HubDatabaseConnection,
+  requestId: string,
+): ChangeRequestGithubMirrorRecord | null {
+  const row = connection
+    .prepare(
+      `SELECT * FROM change_request_publications
+       WHERE request_id = ? AND provider = 'github'`,
+    )
+    .get(requestId) as ChangeRequestPublicationRow | undefined;
+  if (!row) return null;
+  let metadata: { owner?: unknown; repo?: unknown; pullNumber?: unknown } = {};
+  try {
+    metadata = JSON.parse(row.metadata_json) as typeof metadata;
+  } catch {
+    return null;
+  }
+  const pullNumber = Number(metadata.pullNumber ?? row.external_id);
+  if (!metadata.owner || !metadata.repo || !Number.isSafeInteger(pullNumber) || pullNumber <= 0) {
+    return null;
+  }
+  return {
+    owner: String(metadata.owner),
+    repo: String(metadata.repo),
+    pullNumber,
+    htmlUrl: row.url,
+    headBranch: row.head_ref,
+    headSha: row.head_sha,
+    baseBranch: row.target_ref,
+    state: row.state === 'merged' ? 'merged' : row.state === 'closed' ? 'closed' : 'open',
+    autoUpdate: row.auto_sync === 1,
+    branchOwnedByDroneHub: row.branch_owned === 1,
+    syncedRevision: row.synced_revision,
+    syncedNativeUpdatedAt: row.synced_request_updated_at,
+    mergeCommitSha: row.merge_commit_sha,
+    lastError: row.last_error,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function upsertGithubPublication(
+  connection: HubDatabaseConnection,
+  requestId: string,
+  mirror: ChangeRequestGithubMirrorRecord,
+): void {
+  connection
+    .prepare(
+      `INSERT INTO change_request_publications (
+        request_id, provider, external_id, state, url, head_ref, head_sha, target_ref,
+        auto_sync, branch_owned, synced_revision, synced_request_updated_at,
+        merge_commit_sha, last_error, metadata_json, created_at, updated_at
+      ) VALUES (?, 'github', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (request_id, provider) DO UPDATE SET
+        external_id = excluded.external_id,
+        state = excluded.state,
+        url = excluded.url,
+        head_ref = excluded.head_ref,
+        head_sha = excluded.head_sha,
+        target_ref = excluded.target_ref,
+        auto_sync = excluded.auto_sync,
+        branch_owned = excluded.branch_owned,
+        synced_revision = excluded.synced_revision,
+        synced_request_updated_at = excluded.synced_request_updated_at,
+        merge_commit_sha = excluded.merge_commit_sha,
+        last_error = excluded.last_error,
+        metadata_json = excluded.metadata_json,
+        updated_at = excluded.updated_at`,
+    )
+    .run(
+      requestId,
+      `${mirror.owner}/${mirror.repo}#${mirror.pullNumber}`,
+      mirror.state,
+      mirror.htmlUrl,
+      mirror.headBranch,
+      mirror.headSha,
+      mirror.baseBranch,
+      mirror.autoUpdate ? 1 : 0,
+      mirror.branchOwnedByDroneHub ? 1 : 0,
+      mirror.syncedRevision,
+      mirror.syncedNativeUpdatedAt,
+      mirror.mergeCommitSha,
+      mirror.lastError,
+      JSON.stringify({
+        owner: mirror.owner,
+        repo: mirror.repo,
+        pullNumber: mirror.pullNumber,
+      }),
+      mirror.createdAt,
+      mirror.updatedAt,
+    );
+}
+
+function record(
+  row: ChangeRequestRow,
+  githubMirror?: ChangeRequestGithubMirrorRecord | null,
+): ChangeRequestRecord {
   return {
     id: row.id,
     number: row.sequence,
@@ -279,7 +561,94 @@ function record(row: ChangeRequestRow): ChangeRequestRecord {
     updatedAt: row.updated_at,
     mergedAt: row.merged_at,
     closedAt: row.closed_at,
-    githubMirror: parseGithubMirror(row.github_mirror_json),
+    githubMirror:
+      githubMirror === undefined ? parseGithubMirror(row.github_mirror_json) : githubMirror,
+  };
+}
+
+function recordFromConnection(
+  connection: HubDatabaseConnection,
+  row: ChangeRequestRow,
+): ChangeRequestRecord {
+  return record(row, githubPublication(connection, row.id));
+}
+
+function revisionRecord(row: ChangeRequestRevisionRow): ChangeRequestRevisionRecord {
+  return {
+    requestId: row.request_id,
+    number: row.revision,
+    baseBranch: row.base_branch,
+    baseSha: row.base_sha,
+    snapshotRef: row.snapshot_ref,
+    snapshotSha: row.snapshot_sha,
+    sourceRef: row.source_ref,
+    sourceHeadSha: row.source_head_sha,
+    objectStorePath: row.object_store_path,
+    createdBy: parseActor(row.created_by_json) ?? {
+      kind: 'system',
+      id: null,
+      label: 'Unknown actor',
+    },
+    createdAt: row.created_at,
+  };
+}
+
+function mergeAttemptRecord(row: ChangeRequestMergeAttemptRow): ChangeRequestMergeAttempt {
+  return {
+    id: row.id,
+    requestId: row.request_id,
+    revision: row.revision,
+    destinationBranch: row.destination_branch,
+    expectedTargetSha: row.expected_target_sha,
+    mergeCommitSha: row.merge_commit_sha,
+    actor: parseActor(row.actor_json) ?? { kind: 'system', id: null, label: 'DroneHub' },
+    status: row.status,
+    error: row.error,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function insertRevision(
+  connection: HubDatabaseConnection,
+  requestId: string,
+  revision: ChangeRequestRevisionInsert,
+): void {
+  connection
+    .prepare(
+      `INSERT INTO change_request_revisions (
+        request_id, revision, base_branch, base_sha, snapshot_ref, snapshot_sha,
+        source_ref, source_head_sha, object_store_path, created_by_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      requestId,
+      revision.number,
+      revision.baseBranch,
+      revision.baseSha,
+      revision.snapshotRef,
+      revision.snapshotSha,
+      revision.sourceRef,
+      revision.sourceHeadSha,
+      revision.objectStorePath,
+      JSON.stringify(revision.createdBy),
+      revision.createdAt,
+    );
+}
+
+function revisionFromCurrentRecord(input: ChangeRequestInsert): ChangeRequestRevisionInsert | null {
+  if (!input.snapshotRef || !input.snapshotSha) return null;
+  return {
+    number: input.revision,
+    baseBranch: input.baseBranch,
+    baseSha: input.baseSha,
+    snapshotRef: input.snapshotRef,
+    snapshotSha: input.snapshotSha,
+    sourceRef: input.snapshotRef,
+    sourceHeadSha: input.sourceHeadSha,
+    objectStorePath: null,
+    createdBy: input.createdBy,
+    createdAt: input.createdAt,
   };
 }
 
@@ -291,7 +660,11 @@ export class SqliteChangeRequestRepository implements ChangeRequestRepository {
     );
   }
 
-  async insert(input: ChangeRequestInsert): Promise<ChangeRequestRecord> {
+  async insert(
+    input: ChangeRequestInsert,
+    revision: ChangeRequestRevisionInsert | undefined = revisionFromCurrentRecord(input) ??
+      undefined,
+  ): Promise<ChangeRequestRecord> {
     const inserted = await this.database.writeTransaction('insert change request', (connection) => {
       connection
         .prepare(
@@ -332,12 +705,14 @@ export class SqliteChangeRequestRepository implements ChangeRequestRepository {
           input.updatedAt,
           input.mergedAt,
           input.closedAt,
-          input.githubMirror ? JSON.stringify(input.githubMirror) : null,
+          null,
         );
+      if (input.githubMirror) upsertGithubPublication(connection, input.id, input.githubMirror);
       const row = connection
         .prepare('SELECT * FROM change_requests WHERE id = ?')
         .get(input.id) as ChangeRequestRow;
-      const created = record(row);
+      const created = recordFromConnection(connection, row);
+      if (revision) insertRevision(connection, created.id, revision);
       appendChangeRequestOutboxEvent(
         connection,
         createChangeRequestDomainEvent(created, 'change_request.created', input.createdAt),
@@ -350,8 +725,9 @@ export class SqliteChangeRequestRepository implements ChangeRequestRepository {
   get(id: string): ChangeRequestRecord | null {
     return this.database.read((connection) => {
       const row = connection.prepare('SELECT * FROM change_requests WHERE id = ?').get(id) as
-        ChangeRequestRow | undefined;
-      return row ? record(row) : null;
+        | ChangeRequestRow
+        | undefined;
+      return row ? recordFromConnection(connection, row) : null;
     });
   }
 
@@ -360,7 +736,7 @@ export class SqliteChangeRequestRepository implements ChangeRequestRepository {
       const row = connection
         .prepare('SELECT * FROM change_requests WHERE sequence = ?')
         .get(number) as ChangeRequestRow | undefined;
-      return row ? record(row) : null;
+      return row ? recordFromConnection(connection, row) : null;
     });
   }
 
@@ -376,7 +752,7 @@ export class SqliteChangeRequestRepository implements ChangeRequestRepository {
            WHERE sequence IN (${numbers.map(() => '?').join(', ')})`,
         )
         .all(...numbers) as ChangeRequestRow[];
-      return new Map(rows.map((row) => [row.sequence, record(row)]));
+      return new Map(rows.map((row) => [row.sequence, recordFromConnection(connection, row)]));
     });
   }
 
@@ -407,17 +783,112 @@ export class SqliteChangeRequestRepository implements ChangeRequestRepository {
         connection
           .prepare(`SELECT * FROM change_requests ${where} ORDER BY updated_at DESC, sequence DESC`)
           .all(...values) as ChangeRequestRow[]
-      ).map(record);
+      ).map((row) => recordFromConnection(connection, row));
     });
   }
 
+  getRevision(id: string, revision: number): ChangeRequestRevisionRecord | null {
+    return this.database.read((connection) => {
+      const row = connection
+        .prepare(
+          `SELECT * FROM change_request_revisions
+           WHERE request_id = ? AND revision = ?`,
+        )
+        .get(id, revision) as ChangeRequestRevisionRow | undefined;
+      return row ? revisionRecord(row) : null;
+    });
+  }
+
+  listRevisions(id: string): ChangeRequestRevisionRecord[] {
+    return this.database.read((connection) =>
+      (
+        connection
+          .prepare(
+            `SELECT * FROM change_request_revisions
+             WHERE request_id = ? ORDER BY revision DESC`,
+          )
+          .all(id) as ChangeRequestRevisionRow[]
+      ).map(revisionRecord),
+    );
+  }
+
+  async insertMergeAttempt(attempt: ChangeRequestMergeAttempt): Promise<void> {
+    await this.database.writeTransaction('prepare change request merge', (connection) => {
+      connection
+        .prepare(
+          `INSERT INTO change_request_merge_attempts (
+          id, request_id, revision, destination_branch, expected_target_sha,
+          merge_commit_sha, actor_json, status, error, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          attempt.id,
+          attempt.requestId,
+          attempt.revision,
+          attempt.destinationBranch,
+          attempt.expectedTargetSha,
+          attempt.mergeCommitSha,
+          JSON.stringify(attempt.actor),
+          attempt.status,
+          attempt.error,
+          attempt.createdAt,
+          attempt.updatedAt,
+        );
+    });
+  }
+
+  async completeMergeAttempt(
+    id: string,
+    status: 'completed' | 'failed',
+    error: string | null,
+    updatedAt: string,
+  ): Promise<void> {
+    await this.database.writeTransaction('complete change request merge attempt', (connection) => {
+      connection
+        .prepare(
+          `UPDATE change_request_merge_attempts
+         SET status = ?, error = ?, updated_at = ? WHERE id = ?`,
+        )
+        .run(status, error, updatedAt, id);
+    });
+  }
+
+  listPreparedMergeAttempts(): ChangeRequestMergeAttempt[] {
+    return this.database.read((connection) =>
+      (
+        connection
+          .prepare(
+            `SELECT * FROM change_request_merge_attempts
+         WHERE status = 'prepared' ORDER BY created_at`,
+          )
+          .all() as ChangeRequestMergeAttemptRow[]
+      ).map(mergeAttemptRecord),
+    );
+  }
+
   async update(id: string, update: ChangeRequestUpdate): Promise<ChangeRequestRecord> {
-    const updated = await this.database.writeTransaction('update change request', (connection) => {
+    return await this.updateInternal(id, update);
+  }
+
+  async updateWithRevision(
+    id: string,
+    update: ChangeRequestUpdate,
+    revision: ChangeRequestRevisionInsert,
+  ): Promise<ChangeRequestRecord> {
+    return await this.updateInternal(id, update, revision);
+  }
+
+  private async updateInternal(
+    id: string,
+    update: ChangeRequestUpdate,
+    revision?: ChangeRequestRevisionInsert,
+  ): Promise<ChangeRequestRecord> {
+    return await this.database.writeTransaction('update change request', (connection) => {
       const currentRow = connection
         .prepare('SELECT * FROM change_requests WHERE id = ?')
         .get(id) as ChangeRequestRow | undefined;
       if (!currentRow) throw new Error(`unknown change request: ${id}`);
-      const current = record(currentRow);
+      const current = recordFromConnection(connection, currentRow);
       const patch = typeof update === 'function' ? update(current) : update;
       const next = { ...current, ...patch };
       next.stateVersion += 1;
@@ -425,16 +896,17 @@ export class SqliteChangeRequestRepository implements ChangeRequestRepository {
         .prepare(
           `
           UPDATE change_requests SET
-            state_version = ?, status = ?, destination_branch = ?, snapshot_ref = ?, snapshot_sha = ?,
+            state_version = ?, status = ?, base_sha = ?, destination_branch = ?, snapshot_ref = ?, snapshot_sha = ?,
             source_head_sha = ?, revision = ?, title = ?, description = ?,
             merged_by_json = ?, merge_commit_sha = ?, last_error = ?, updated_at = ?,
-            merged_at = ?, closed_at = ?, github_mirror_json = ?
+            merged_at = ?, closed_at = ?, github_mirror_json = NULL
           WHERE id = ?
         `,
         )
         .run(
           next.stateVersion,
           next.status,
+          next.baseSha,
           next.destinationBranch,
           next.snapshotRef,
           next.snapshotSha,
@@ -448,13 +920,30 @@ export class SqliteChangeRequestRepository implements ChangeRequestRepository {
           next.updatedAt,
           next.mergedAt,
           next.closedAt,
-          next.githubMirror ? JSON.stringify(next.githubMirror) : null,
           id,
         );
+      if (Object.prototype.hasOwnProperty.call(patch, 'githubMirror')) {
+        if (patch.githubMirror) upsertGithubPublication(connection, id, patch.githubMirror);
+        else {
+          connection
+            .prepare(
+              "DELETE FROM change_request_publications WHERE request_id = ? AND provider = 'github'",
+            )
+            .run(id);
+        }
+      }
       const row = connection
         .prepare('SELECT * FROM change_requests WHERE id = ?')
         .get(id) as ChangeRequestRow;
-      const changed = record(row);
+      const changed = recordFromConnection(connection, row);
+      if (revision) {
+        if (revision.number !== changed.revision) {
+          throw new Error(
+            `change request revision mismatch: expected ${changed.revision}, received ${revision.number}`,
+          );
+        }
+        insertRevision(connection, id, revision);
+      }
       const occurredAt =
         patch.updatedAt ?? patch.githubMirror?.updatedAt ?? new Date().toISOString();
       appendChangeRequestOutboxEvent(
@@ -467,7 +956,6 @@ export class SqliteChangeRequestRepository implements ChangeRequestRepository {
       );
       return changed;
     });
-    return updated;
   }
 
   async emitEvent(
@@ -479,7 +967,8 @@ export class SqliteChangeRequestRepository implements ChangeRequestRepository {
       'emit change request event',
       (connection) => {
         const current = connection.prepare('SELECT * FROM change_requests WHERE id = ?').get(id) as
-          ChangeRequestRow | undefined;
+          | ChangeRequestRow
+          | undefined;
         if (!current) throw new Error(`unknown change request: ${id}`);
         connection
           .prepare('UPDATE change_requests SET state_version = state_version + 1 WHERE id = ?')
@@ -487,7 +976,7 @@ export class SqliteChangeRequestRepository implements ChangeRequestRepository {
         const nextRow = connection
           .prepare('SELECT * FROM change_requests WHERE id = ?')
           .get(id) as ChangeRequestRow;
-        const next = record(nextRow);
+        const next = recordFromConnection(connection, nextRow);
         appendChangeRequestOutboxEvent(
           connection,
           createChangeRequestDomainEvent(next, eventType, occurredAt),
