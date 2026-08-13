@@ -104,7 +104,7 @@ export class ChangeRequestSnapshotService {
       );
     }
     if (!existing) {
-      await this.git(repoRoot, ['fetch', 'origin', '--prune'], 120_000);
+      await this.fetchOriginIfPresent(repoRoot);
     }
     const chatName = String(chatNameRaw ?? '').trim() || 'default';
     const chat = drone?.chats?.[chatName] ?? null;
@@ -299,6 +299,15 @@ export class ChangeRequestSnapshotService {
       .trim()
       .toLowerCase();
     return { ...source, baseSha };
+  }
+
+  private async fetchOriginIfPresent(repoRoot: string): Promise<void> {
+    const remotes = (await this.git(repoRoot, ['remote'])).stdout
+      .split(/\r?\n/)
+      .map((remote) => remote.trim())
+      .filter(Boolean);
+    if (!remotes.includes('origin')) return;
+    await this.git(repoRoot, ['fetch', 'origin', '--prune'], 120_000);
   }
 
   private async assertHasChanges(

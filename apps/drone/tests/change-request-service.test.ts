@@ -97,6 +97,7 @@ describe('ChangeRequestService', () => {
         now: () => new Date().toISOString(),
       });
 
+      await git(repoRoot, ['remote', 'remove', 'origin']);
       const created = await service.create({
         droneRef: 'drone-1',
         chatName: 'default',
@@ -104,6 +105,7 @@ describe('ChangeRequestService', () => {
         destinationBranch: 'integration/42',
         actor: { kind: 'user', id: null, label: 'Test user' },
       });
+      await git(repoRoot, ['remote', 'add', 'origin', origin]);
 
       expect(created.status).toBe('open');
       expect('id' in created).toBe(false);
