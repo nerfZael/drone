@@ -104,7 +104,7 @@ export function DroneChangeRequestsDock({
             {request.conflicted ? (
               <span className="text-[var(--text-9)] text-[var(--red)]">Conflicts</span>
             ) : request.stale ? (
-              <span className="text-[var(--text-9)] text-[var(--yellow)]">Out of date</span>
+              <span className="text-[var(--text-9)] text-[var(--muted-dim)]">Stale</span>
             ) : null}
             {!request.destinationExists && request.status === 'open' ? (
               <span className="text-[var(--text-9)] text-[var(--accent)]">New branch</span>
