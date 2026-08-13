@@ -33,7 +33,10 @@ export function FileDictationSidebarIndicator() {
   const target = dictation?.target;
   if (!dictation || !target) return null;
 
-  const resume = dictation.status === 'paused' || dictation.status === 'error';
+  const resume =
+    dictation.status === 'paused' ||
+    dictation.status === 'error' ||
+    dictation.status === 'idle';
   const controlsDisabled = dictation.status === 'starting' || dictation.status === 'stopping';
   const status = fileDictationStatusLabel(
     dictation.status,
@@ -88,7 +91,13 @@ export function FileDictationSidebarIndicator() {
           tone={resume ? 'accent' : 'neutral'}
           label={resume ? 'Resume file dictation' : 'Pause file dictation'}
           icon={<PauseIcon resume={resume} />}
-          onClick={() => void dictation.togglePause()}
+          onClick={() => {
+            if (dictation.status === 'idle') {
+              void dictation.toggle();
+              return;
+            }
+            void dictation.togglePause();
+          }}
           disabled={controlsDisabled || dictation.saving}
         />
         <UiToolbarIconButton

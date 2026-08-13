@@ -36,8 +36,7 @@ export function FileDictationEditorAction({
     dictation.target &&
       fileDictationTargetKey(dictation.target) === fileDictationTargetKey({ droneId, path }),
   );
-  const active = Boolean(dictation.target && dictation.status !== 'idle');
-  const blocked = !targetMatches && (active || dictation.microphoneOwner !== null);
+  const blocked = !targetMatches && (dictation.target !== null || dictation.microphoneOwner !== null);
   const disabled = !editable || !path || loading || saving || externallyChanged || blocked;
   const label = targetMatches
     ? 'Finish file dictation'

@@ -118,12 +118,7 @@ export function FileDictationProvider({ children }: { children: React.ReactNode 
       targetRef.current = nextTarget;
       setTarget(nextTarget);
       const started = await startVoice();
-      if (!started) {
-        targetRef.current = null;
-        setTarget(null);
-      } else {
-        lastTargetRef.current = nextTarget;
-      }
+      if (started) lastTargetRef.current = nextTarget;
       return started;
     },
     [getStatus, startVoice],
@@ -148,11 +143,11 @@ export function FileDictationProvider({ children }: { children: React.ReactNode 
   }, []);
 
   const toggle = React.useCallback(async (): Promise<boolean> => {
-    if (getStatus() !== 'idle' || targetRef.current) {
+    if (getStatus() !== 'idle') {
       await finish();
       return true;
     }
-    const previousTarget = lastTargetRef.current;
+    const previousTarget = targetRef.current ?? lastTargetRef.current;
     if (!previousTarget) return false;
     return await start(previousTarget);
   }, [finish, getStatus, start]);
