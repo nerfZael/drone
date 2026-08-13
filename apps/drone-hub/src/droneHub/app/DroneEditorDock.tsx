@@ -12,6 +12,7 @@ type OpenFileTarget = {
 
 type DroneEditorDockProps = {
   droneId: string;
+  droneName: string;
   openedFile: DroneOpenedFileState;
   quickOpen: {
     open: boolean;
@@ -32,6 +33,16 @@ type DroneEditorDockProps = {
   activeOpenedFileTabId: string | null;
   onOpenedEditorFileContentChange: (nextContent: string) => void;
   onSaveOpenedEditorFile: (contentOverride?: string) => Promise<boolean>;
+  onAppendFileDictationLine: (input: {
+    droneId: string;
+    path: string;
+    line: string;
+  }) => Promise<boolean>;
+  onOpenFileDictationTarget: (target: {
+    droneId: string;
+    path: string;
+    name: string;
+  }) => void;
   onReloadOpenedEditorFileFromDisk: () => void;
   onOverwriteOpenedEditorFile: () => Promise<boolean>;
   onCloseOpenedEditorFile: (tabId?: string | null) => void;
@@ -42,12 +53,15 @@ type DroneEditorDockProps = {
 
 export function DroneEditorDock({
   droneId,
+  droneName,
   openedFile,
   quickOpen,
   openedFileTabs,
   activeOpenedFileTabId,
   onOpenedEditorFileContentChange,
   onSaveOpenedEditorFile,
+  onAppendFileDictationLine,
+  onOpenFileDictationTarget,
   onReloadOpenedEditorFileFromDisk,
   onOverwriteOpenedEditorFile,
   onCloseOpenedEditorFile,
@@ -71,11 +85,14 @@ export function DroneEditorDock({
       {openedFile.path ? (
         <OpenedDroneFilePanel
           droneId={droneId}
+          droneName={droneName}
           file={openedFile}
           fileTabs={openedFileTabs}
           activeTabId={activeOpenedFileTabId}
           onFileContentChange={onOpenedEditorFileContentChange}
           onSaveFile={onSaveOpenedEditorFile}
+          onAppendFileDictationLine={onAppendFileDictationLine}
+          onOpenFileDictationTarget={onOpenFileDictationTarget}
           onReloadFromDisk={onReloadOpenedEditorFileFromDisk}
           onOverwriteFile={onOverwriteOpenedEditorFile}
           onCloseFile={onCloseOpenedEditorFile}

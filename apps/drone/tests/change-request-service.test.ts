@@ -77,7 +77,6 @@ describe('ChangeRequestService', () => {
           await run('git', ['-C', repoRoot, 'update-ref', '-d', refName]);
         },
         gitTopLevel: async (repoPath) => await git(repoPath, ['rev-parse', '--show-toplevel']),
-        droneRepoBaseSha: async () => null,
         dvmRepoHeadSha: async () => {
           throw new Error('container HEAD was not expected');
         },
@@ -98,6 +97,7 @@ describe('ChangeRequestService', () => {
         now: () => new Date().toISOString(),
       });
 
+      await git(repoRoot, ['remote', 'remove', 'origin']);
       const created = await service.create({
         droneRef: 'drone-1',
         chatName: 'default',
@@ -105,6 +105,7 @@ describe('ChangeRequestService', () => {
         destinationBranch: 'integration/42',
         actor: { kind: 'user', id: null, label: 'Test user' },
       });
+      await git(repoRoot, ['remote', 'add', 'origin', origin]);
 
       expect(created.status).toBe('open');
       expect('id' in created).toBe(false);
@@ -201,11 +202,12 @@ describe('ChangeRequestService', () => {
     }
   });
 
-  test('imports a container bundle and keeps the snapshot reviewable without the container', async () => {
+  test('derives a container CR base after a fast-forward and keeps its snapshot reviewable', async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'drone-change-request-container-'));
     const origin = path.join(tempRoot, 'origin.git');
     const repoRoot = path.join(tempRoot, 'host-repo');
     const containerRepo = path.join(tempRoot, 'container-repo');
+    const upstreamRepo = path.join(tempRoot, 'upstream-repo');
     const storageRoot = path.join(tempRoot, 'storage');
     try {
       await run('git', ['init', '--bare', origin]);
@@ -222,6 +224,19 @@ describe('ChangeRequestService', () => {
       await run('git', ['clone', '-b', 'main', origin, containerRepo]);
       await git(containerRepo, ['config', 'user.name', 'Container User']);
       await git(containerRepo, ['config', 'user.email', 'container@example.test']);
+      await git(containerRepo, ['config', 'dvm.baseSha', baseSha]);
+
+      await run('git', ['clone', '-b', 'main', origin, upstreamRepo]);
+      await git(upstreamRepo, ['config', 'user.name', 'Upstream User']);
+      await git(upstreamRepo, ['config', 'user.email', 'upstream@example.test']);
+      await fs.writeFile(path.join(upstreamRepo, 'upstream.txt'), 'upstream change\n');
+      await git(upstreamRepo, ['add', 'upstream.txt']);
+      await git(upstreamRepo, ['commit', '-m', 'advance main']);
+      await git(upstreamRepo, ['push', 'origin', 'main']);
+      const advancedMainSha = await git(upstreamRepo, ['rev-parse', 'HEAD']);
+
+      await git(containerRepo, ['fetch', 'origin']);
+      await git(containerRepo, ['merge', '--ff-only', 'origin/main']);
       await git(containerRepo, ['checkout', '-b', 'feature']);
       await fs.writeFile(path.join(containerRepo, 'container.txt'), 'container change\n');
       await git(containerRepo, ['add', 'container.txt']);
@@ -272,7 +287,6 @@ describe('ChangeRequestService', () => {
           await run('git', ['-C', repoRoot, 'update-ref', '-d', refName]);
         },
         gitTopLevel: async (repoPath) => await git(repoPath, ['rev-parse', '--show-toplevel']),
-        droneRepoBaseSha: async () => baseSha,
         dvmRepoHeadSha: async () => await git(containerRepo, ['rev-parse', 'HEAD']),
         runGitInDrone: async ({ args }) => await run('git', ['-C', containerRepo, ...args]),
         runHostCommand: run,
@@ -280,6 +294,7 @@ describe('ChangeRequestService', () => {
         now: () => new Date().toISOString(),
       });
 
+      expect(await git(repoRoot, ['rev-parse', 'origin/main'])).toBe(baseSha);
       const created = await service.create({
         droneRef: 'container-drone',
         chatName: 'default',
@@ -287,9 +302,13 @@ describe('ChangeRequestService', () => {
         actor: { kind: 'chat', id: 'container-chat', label: 'Container chat' },
       });
 
+      expect(await git(containerRepo, ['config', '--get', 'dvm.baseSha'])).toBe(baseSha);
       await fs.rm(containerRepo, { recursive: true, force: true });
 
       expect(created.snapshotSha).toMatch(/^[0-9a-f]{40}$/);
+      expect(created.baseSha).toBe(advancedMainSha);
+      expect(created.stale).toBe(false);
+      expect(await git(repoRoot, ['rev-parse', 'origin/main'])).toBe(advancedMainSha);
       expect((await service.changes(created.number)).entries.map((entry) => entry.path)).toEqual([
         'container.txt',
       ]);

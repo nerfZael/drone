@@ -233,6 +233,16 @@ type RightPanelTabContentProps = {
   activeOpenedFileTabId: string | null;
   onOpenedEditorFileContentChange: (next: string) => void;
   onSaveOpenedEditorFile: (contentOverride?: string) => Promise<boolean>;
+  onAppendFileDictationLine: (input: {
+    droneId: string;
+    path: string;
+    line: string;
+  }) => Promise<boolean>;
+  onOpenFileDictationTarget: (target: {
+    droneId: string;
+    path: string;
+    name: string;
+  }) => void;
   onCloseOpenedEditorFile: (tabId?: string | null) => void;
   onConfirmCloseOpenedEditorFilesForPaths: (paths: string[], actionLabel?: string) => boolean;
   onCloseOpenedEditorFilesForPaths: (paths: string[]) => void;
@@ -319,6 +329,8 @@ export function RightPanelTabContent({
   activeOpenedFileTabId,
   onOpenedEditorFileContentChange,
   onSaveOpenedEditorFile,
+  onAppendFileDictationLine,
+  onOpenFileDictationTarget,
   onCloseOpenedEditorFile,
   onConfirmCloseOpenedEditorFilesForPaths,
   onCloseOpenedEditorFilesForPaths,
@@ -371,12 +383,15 @@ export function RightPanelTabContent({
   const fileEditor = (
     <DroneEditorDock
       droneId={drone.id}
+      droneName={drone.name}
       openedFile={openedFile}
       quickOpen={quickOpen}
       openedFileTabs={openedFileTabs}
       activeOpenedFileTabId={activeOpenedFileTabId}
       onOpenedEditorFileContentChange={onOpenedEditorFileContentChange}
       onSaveOpenedEditorFile={onSaveOpenedEditorFile}
+      onAppendFileDictationLine={onAppendFileDictationLine}
+      onOpenFileDictationTarget={onOpenFileDictationTarget}
       onReloadOpenedEditorFileFromDisk={onReloadOpenedEditorFileFromDisk}
       onOverwriteOpenedEditorFile={onOverwriteOpenedEditorFile}
       onCloseOpenedEditorFile={onCloseOpenedEditorFile}

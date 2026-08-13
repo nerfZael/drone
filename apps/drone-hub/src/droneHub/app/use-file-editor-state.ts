@@ -37,6 +37,7 @@ import {
 } from '../files/quick-open-state';
 import { DRONE_WORKSPACE_STATE_DISPOSE_EVENT, disposedDroneIdFromEvent } from '../workspace-state-events';
 import { openedFileTabsStateForDrone, updateOpenedFileTabsStateForDrone } from './drone-file-editor-state';
+import { appendFileDictationLine } from '../files/file-dictation-text';
 
 type RequestJson = typeof requestJsonFn;
 
@@ -147,6 +148,8 @@ export function useFileEditorState({
 }: UseFileEditorStateArgs) {
   const currentDroneId = String(currentDrone?.id ?? '').trim();
   const [tabStateByDroneId, setTabStateByDroneId] = React.useState<Record<string, OpenedFileTabsState>>({});
+  const tabStateByDroneIdRef = React.useRef(tabStateByDroneId);
+  tabStateByDroneIdRef.current = tabStateByDroneId;
   const tabState = openedFileTabsStateForDrone(tabStateByDroneId, currentDroneId);
   const { tabs, activeTabId } = tabState;
   const [openFailure, setOpenFailure] = React.useState<{ message: string; at: number } | null>(null);
@@ -171,11 +174,13 @@ export function useFileEditorState({
       const droneId = String(droneIdRaw ?? '').trim();
       if (!droneId) return;
       setTabStateByDroneId((prev) => {
-        return updateOpenedFileTabsStateForDrone(prev, droneId, (current) =>
+        const updated = updateOpenedFileTabsStateForDrone(prev, droneId, (current) =>
           typeof next === 'function'
             ? (next as (state: OpenedFileTabsState) => OpenedFileTabsState)(current)
             : next,
         );
+        tabStateByDroneIdRef.current = updated;
+        return updated;
       });
     },
     [],
@@ -909,6 +914,127 @@ export function useFileEditorState({
     }
   }, [activeTab, onRefreshFsList, requestJson, updateTabs]);
 
+  const appendAndSaveFileDictationLine = React.useCallback(
+    async (input: { droneId: string; path: string; line: string }): Promise<boolean> => {
+      const droneId = String(input.droneId ?? '').trim();
+      const filePath = String(input.path ?? '').trim();
+      const line = String(input.line ?? '').trim();
+      if (!droneId || !filePath || !line) return false;
+
+      const openTab = (tabStateByDroneIdRef.current[droneId]?.tabs ?? []).find(
+        (tab) => tab.path === filePath,
+      );
+      if (
+        openTab &&
+        (openTab.loading ||
+          openTab.saving ||
+          !openTab.loaded ||
+          openTab.kind !== 'text' ||
+          Boolean(openTab.externalRevision))
+      ) {
+        return false;
+      }
+
+      let sourceContent = '';
+      let expectedRevision: string | null = null;
+      if (openTab) {
+        sourceContent = openTab.content;
+        expectedRevision = openTab.revision ?? null;
+        setTabStateForDrone(droneId, (state) => ({
+          ...state,
+          tabs: state.tabs.map((tab) =>
+            tab.tabId === openTab.tabId ? { ...tab, saving: true, error: null } : tab,
+          ),
+        }));
+      } else {
+        try {
+          const data = await requestJson<Extract<DroneFsReadPayload, { ok: true }>>(
+            `/api/drones/${encodeURIComponent(droneId)}/fs/file?path=${encodeURIComponent(filePath)}`,
+          );
+          const loaded = readPayloadToTabState(data);
+          if (loaded.kind !== 'text') return false;
+          sourceContent = loaded.content;
+          expectedRevision = loaded.revision;
+        } catch {
+          return false;
+        }
+      }
+
+      const nextContent = appendFileDictationLine(sourceContent, line);
+      try {
+        const resp = await requestJson<Extract<DroneFsWritePayload, { ok: true }>>(
+          `/api/drones/${encodeURIComponent(droneId)}/fs/file`,
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              path: filePath,
+              content: nextContent,
+              expectedRevision,
+            }),
+          },
+        );
+        if (openTab) {
+          const latestOpenTab = (
+            tabStateByDroneIdRef.current[droneId]?.tabs ?? []
+          ).find((tab) => tab.tabId === openTab.tabId);
+          const editorContent =
+            latestOpenTab && latestOpenTab.content !== sourceContent
+              ? appendFileDictationLine(latestOpenTab.content, line)
+              : nextContent;
+          setTabStateForDrone(droneId, (state) => ({
+            ...state,
+            tabs: state.tabs.map((tab) =>
+              tab.tabId === openTab.tabId
+                ? {
+                    ...tab,
+                    saving: false,
+                    error: null,
+                    content: editorContent,
+                    savedContent: nextContent,
+                    mtimeMs:
+                      typeof resp.mtimeMs === 'number' && Number.isFinite(resp.mtimeMs)
+                        ? resp.mtimeMs
+                        : null,
+                    revision:
+                      typeof resp.revision === 'string' && resp.revision.trim()
+                        ? resp.revision.trim()
+                        : tab.revision,
+                    externalRevision: null,
+                  }
+                : tab,
+            ),
+          }));
+          if (activeTabIdRef.current === openTab.tabId) contentRef.current = editorContent;
+        }
+        if (currentDroneId === droneId) onRefreshFsList();
+        return true;
+      } catch (error: any) {
+        if (openTab) {
+          const message = error?.message ?? String(error);
+          setTabStateForDrone(droneId, (state) => ({
+            ...state,
+            tabs: state.tabs.map((tab) =>
+              tab.tabId === openTab.tabId
+                ? {
+                    ...tab,
+                    saving: false,
+                    error: message,
+                    externalRevision:
+                      Number(error?.status ?? 0) === 409
+                        ? String(error?.data?.currentRevision ?? tab.externalRevision ?? 'changed')
+                        : tab.externalRevision,
+                  }
+                : tab,
+            ),
+          }));
+        }
+        return false;
+      }
+    },
+    [currentDroneId, onRefreshFsList, requestJson, setTabStateForDrone],
+  );
+
   const overwriteOpenedFile = React.useCallback(
     async (): Promise<boolean> => {
       if (!activeTab?.externalRevision || activeTab.externalRevision === 'deleted') return false;
@@ -1013,6 +1139,7 @@ export function useFileEditorState({
     openedFileTabs,
     activeOpenedFileTabId: activeTabId,
     openEditorFile,
+    openEditorLocation,
     closeEditorFile,
     confirmCloseOpenedFileTabsForPaths,
     closeOpenedFileTabsForPaths,
@@ -1029,5 +1156,6 @@ export function useFileEditorState({
     reloadOpenedFileFromDisk,
     overwriteOpenedFile,
     saveOpenedFile,
+    appendAndSaveFileDictationLine,
   };
 }

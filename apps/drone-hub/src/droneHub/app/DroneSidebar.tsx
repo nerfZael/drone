@@ -140,6 +140,10 @@ import {
   useContinuousDictation,
 } from '../chat/ContinuousDictationContext';
 import { browserMicrophoneOwnerLabel } from '../chat/browser-microphone-coordinator';
+import {
+  FileDictationSidebarIndicator,
+  FileDictationSidebarRailButton,
+} from '../files/FileDictationSidebarIndicator';
 
 const SIDEBAR_EXPANDED_WIDTH_PX = 308;
 const SIDEBAR_COLLAPSED_RAIL_WIDTH_PX = 40;
@@ -3225,6 +3229,8 @@ export function DroneSidebar({
           />
         ) : null}
 
+        <FileDictationSidebarIndicator />
+
         {continuousDictation?.error ? (
           <UiPanelStatusStrip tone="danger" className="mx-2 mb-2 rounded border">
             {continuousDictation.error}
@@ -3361,6 +3367,11 @@ export function DroneSidebar({
           label="Expand sidebar"
           icon={<IconSidebarExpand className={sidebarDirectionalIconClass} />}
           tone="accent"
+          disabled={!collapsedRailInteractive}
+          tabIndex={collapsedRailInteractive ? 0 : -1}
+        />
+        <FileDictationSidebarRailButton
+          onExpand={() => setSidebarCollapsed(false)}
           disabled={!collapsedRailInteractive}
           tabIndex={collapsedRailInteractive ? 0 : -1}
         />

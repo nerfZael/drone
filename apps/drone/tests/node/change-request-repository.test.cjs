@@ -5,6 +5,7 @@ const BetterSqlite3 = require('better-sqlite3');
 const {
   SqliteChangeRequestRepository,
 } = require('../../dist/hub/change-requests/change-request-repository.js');
+const { HubOutboxRepository } = require('../../dist/host/hub-outbox.js');
 
 function memoryHubDatabase() {
   const connection = new BetterSqlite3(':memory:');
@@ -108,7 +109,9 @@ test('change request repository persists and atomically updates GitHub mirror me
     assert.equal(updated.githubMirror.autoUpdate, false);
     assert.equal(updated.githubMirror.lastError, 'sync failed');
     assert.equal(updated.stateVersion, mirrored.stateVersion + 2);
-    assert.deepEqual(repository.listPendingEvents()[0].request, updated);
+    const events = new HubOutboxRepository(memory.database).list({ status: 'pending' });
+    assert.deepEqual(events.at(-1).payload.request, updated);
+    assert.ok(events.every((event) => event.topic === 'change-request.events'));
   } finally {
     memory.close();
   }
