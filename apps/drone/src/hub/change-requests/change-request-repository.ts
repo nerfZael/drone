@@ -2,16 +2,15 @@ import {
   applyHubDatabaseMigrations,
   getHubDatabase,
   type HubDatabase,
-  type HubDatabaseConnection,
   type HubDatabaseMigration,
 } from '../../host/hub-database';
+import { initializeHubOutbox } from '../../host/hub-outbox';
 import {
   changeRequestEventTypeForStatus,
   createChangeRequestDomainEvent,
-  type ChangeRequestDomainEvent,
   type ChangeRequestDomainEventType,
-  type PendingChangeRequestDomainEvent,
 } from './change-request-events';
+import { appendChangeRequestOutboxEvent } from './change-request-outbox';
 import type {
   ChangeRequestActor,
   ChangeRequestGithubMirrorRecord,
@@ -73,8 +72,7 @@ export type ChangeRequestPatch = Partial<
 >;
 
 export type ChangeRequestUpdate =
-  | ChangeRequestPatch
-  | ((current: ChangeRequestRecord) => ChangeRequestPatch);
+  ChangeRequestPatch | ((current: ChangeRequestRecord) => ChangeRequestPatch);
 
 export interface ChangeRequestRepository {
   insert(input: ChangeRequestInsert): Promise<ChangeRequestRecord>;
@@ -93,10 +91,6 @@ export interface ChangeRequestRepository {
     eventType: Exclude<ChangeRequestDomainEventType, 'change_request.created'>,
     occurredAt: string,
   ): Promise<ChangeRequestRecord>;
-  listPendingEvents(limit?: number): PendingChangeRequestDomainEvent[];
-  markEventDispatched(eventId: string): Promise<void>;
-  markEventFailed(eventId: string, error: string, attemptedAt: string): Promise<void>;
-  setOutboxAvailableHandler(handler: (() => void) | null): void;
 }
 
 const CHANGE_REQUEST_MIGRATIONS: readonly HubDatabaseMigration[] = [
@@ -179,7 +173,40 @@ const CHANGE_REQUEST_MIGRATIONS: readonly HubDatabaseMigration[] = [
       `);
     },
   },
+  {
+    version: 4,
+    name: 'move change request events to shared outbox',
+    migrate(connection) {
+      const pending = connection
+        .prepare(
+          `SELECT id, request_number, state_version, event_type, occurred_at, request_json
+           FROM change_request_event_outbox
+           ORDER BY sequence`,
+        )
+        .all() as LegacyChangeRequestOutboxRow[];
+      for (const row of pending) {
+        appendChangeRequestOutboxEvent(connection, {
+          id: row.id,
+          requestNumber: row.request_number,
+          stateVersion: row.state_version,
+          eventType: row.event_type,
+          occurredAt: row.occurred_at,
+          request: JSON.parse(row.request_json) as ChangeRequestRecord,
+        });
+      }
+      connection.exec('DROP TABLE change_request_event_outbox;');
+    },
+  },
 ];
+
+type LegacyChangeRequestOutboxRow = {
+  id: string;
+  request_number: number;
+  state_version: number;
+  event_type: ChangeRequestDomainEventType;
+  occurred_at: string;
+  request_json: string;
+};
 
 function parseActor(raw: string | null): ChangeRequestActor | null {
   if (!raw) return null;
@@ -257,9 +284,8 @@ function record(row: ChangeRequestRow): ChangeRequestRecord {
 }
 
 export class SqliteChangeRequestRepository implements ChangeRequestRepository {
-  private outboxAvailableHandler: (() => void) | null = null;
-
   constructor(private readonly database: HubDatabase) {
+    initializeHubOutbox(database);
     database.read((connection) =>
       applyHubDatabaseMigrations(connection, CHANGE_REQUEST_MIGRATIONS, 'change-requests'),
     );
@@ -312,21 +338,19 @@ export class SqliteChangeRequestRepository implements ChangeRequestRepository {
         .prepare('SELECT * FROM change_requests WHERE id = ?')
         .get(input.id) as ChangeRequestRow;
       const created = record(row);
-      insertOutboxEvent(
+      appendChangeRequestOutboxEvent(
         connection,
         createChangeRequestDomainEvent(created, 'change_request.created', input.createdAt),
       );
       return created;
     });
-    this.outboxAvailableHandler?.();
     return inserted;
   }
 
   get(id: string): ChangeRequestRecord | null {
     return this.database.read((connection) => {
       const row = connection.prepare('SELECT * FROM change_requests WHERE id = ?').get(id) as
-        | ChangeRequestRow
-        | undefined;
+        ChangeRequestRow | undefined;
       return row ? record(row) : null;
     });
   }
@@ -433,7 +457,7 @@ export class SqliteChangeRequestRepository implements ChangeRequestRepository {
       const changed = record(row);
       const occurredAt =
         patch.updatedAt ?? patch.githubMirror?.updatedAt ?? new Date().toISOString();
-      insertOutboxEvent(
+      appendChangeRequestOutboxEvent(
         connection,
         createChangeRequestDomainEvent(
           changed,
@@ -443,7 +467,6 @@ export class SqliteChangeRequestRepository implements ChangeRequestRepository {
       );
       return changed;
     });
-    this.outboxAvailableHandler?.();
     return updated;
   }
 
@@ -456,8 +479,7 @@ export class SqliteChangeRequestRepository implements ChangeRequestRepository {
       'emit change request event',
       (connection) => {
         const current = connection.prepare('SELECT * FROM change_requests WHERE id = ?').get(id) as
-          | ChangeRequestRow
-          | undefined;
+          ChangeRequestRow | undefined;
         if (!current) throw new Error(`unknown change request: ${id}`);
         connection
           .prepare('UPDATE change_requests SET state_version = state_version + 1 WHERE id = ?')
@@ -466,105 +488,15 @@ export class SqliteChangeRequestRepository implements ChangeRequestRepository {
           .prepare('SELECT * FROM change_requests WHERE id = ?')
           .get(id) as ChangeRequestRow;
         const next = record(nextRow);
-        insertOutboxEvent(connection, createChangeRequestDomainEvent(next, eventType, occurredAt));
+        appendChangeRequestOutboxEvent(
+          connection,
+          createChangeRequestDomainEvent(next, eventType, occurredAt),
+        );
         return next;
       },
     );
-    this.outboxAvailableHandler?.();
     return request;
   }
-
-  listPendingEvents(limit = 100): PendingChangeRequestDomainEvent[] {
-    const boundedLimit = Math.max(1, Math.min(1_000, Math.floor(limit)));
-    return this.database.read((connection) => {
-      const rows = connection
-        .prepare(
-          `SELECT id, request_number, state_version, event_type, occurred_at,
-             request_json, attempt_count
-           FROM change_request_event_outbox
-           ORDER BY sequence
-           LIMIT ?`,
-        )
-        .all(boundedLimit) as ChangeRequestOutboxRow[];
-      return rows.map(pendingEventFromRow);
-    });
-  }
-
-  async markEventDispatched(eventId: string): Promise<void> {
-    await this.database.writeTransaction('complete change request event', (connection) => {
-      connection.prepare('DELETE FROM change_request_event_outbox WHERE id = ?').run(eventId);
-    });
-  }
-
-  async markEventFailed(eventId: string, error: string, attemptedAt: string): Promise<void> {
-    await this.database.writeTransaction('fail change request event', (connection) => {
-      connection
-        .prepare(
-          `UPDATE change_request_event_outbox
-           SET attempt_count = attempt_count + 1, last_error = ?
-           WHERE id = ?`,
-        )
-        .run(`${attemptedAt}: ${error}`.slice(0, 2_000), eventId);
-    });
-  }
-
-  setOutboxAvailableHandler(handler: (() => void) | null): void {
-    this.outboxAvailableHandler = handler;
-  }
-}
-
-type ChangeRequestOutboxRow = {
-  id: string;
-  request_number: number;
-  state_version: number;
-  event_type: ChangeRequestDomainEventType;
-  occurred_at: string;
-  request_json: string;
-  attempt_count: number;
-};
-
-function insertOutboxEvent(
-  connection: HubDatabaseConnection,
-  event: ChangeRequestDomainEvent,
-): void {
-  connection
-    .prepare(
-      `INSERT INTO change_request_event_outbox (
-        id, request_number, state_version, event_type, occurred_at,
-        request_json, attempt_count, last_error, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?)
-      ON CONFLICT (request_number) DO UPDATE SET
-        id = excluded.id,
-        state_version = excluded.state_version,
-        event_type = excluded.event_type,
-        occurred_at = excluded.occurred_at,
-        request_json = excluded.request_json,
-        attempt_count = 0,
-        last_error = NULL,
-        created_at = excluded.created_at`,
-    )
-    .run(
-      event.id,
-      event.requestNumber,
-      event.stateVersion,
-      event.eventType,
-      event.occurredAt,
-      JSON.stringify(event.request),
-      event.occurredAt,
-    );
-}
-
-function pendingEventFromRow(row: ChangeRequestOutboxRow): PendingChangeRequestDomainEvent {
-  const request = JSON.parse(row.request_json) as ChangeRequestRecord;
-  return {
-    id: row.id,
-    requestNumber: row.request_number,
-    stateVersion: row.state_version,
-    eventType: row.event_type,
-    occurredAt: row.occurred_at,
-    request,
-    attemptCount: row.attempt_count,
-  };
 }
 
 let cached: { path: string; repository: SqliteChangeRequestRepository } | null = null;

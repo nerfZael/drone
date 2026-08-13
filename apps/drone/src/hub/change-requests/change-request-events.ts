@@ -25,10 +25,6 @@ export type ChangeRequestDomainEvent = {
     Partial<ChangeRequestAssessment> & { lineStats?: ChangeRequestLineStats | null };
 };
 
-export type PendingChangeRequestDomainEvent = ChangeRequestDomainEvent & {
-  attemptCount: number;
-};
-
 export function createChangeRequestDomainEvent(
   request: ChangeRequestRecord,
   eventType: ChangeRequestDomainEventType,

@@ -5449,7 +5449,7 @@ async function startDroneHubApiServerWithLifecycle(
     updateStoredUserTimeZone,
   });
   registerAgentRunDiffRoutes(apiRouter);
-  const stopChangeRequestFeature = registerChangeRequestFeature(apiRouter, {
+  const changeRequestFeature = registerChangeRequestFeature(apiRouter, {
     writeSseEvent: writeHubSseEvent,
     nowIso,
     resolveDrone: resolveDroneOrPendingForReadRef,
@@ -5472,7 +5472,7 @@ async function startDroneHubApiServerWithLifecycle(
     },
     log: hubLog,
   });
-  registerBackgroundResource('change request events', stopChangeRequestFeature);
+  registerBackgroundResource('change request events', changeRequestFeature.stop);
   registerNativeChatRoutes(apiRouter, {
     nativeChatLifecycle,
     nativeChatHistoryPage: (threadId, input) => blipAssistantHost.historyPage(threadId, input),
@@ -6115,7 +6115,8 @@ async function startDroneHubApiServerWithLifecycle(
   const outboxDatabase = getHubDatabase();
   const hubOutboxDispatchLoop = outboxDatabase
     ? new HubOutboxDispatchLoop(
-        new HubOutboxDispatcher(new HubOutboxRepository(outboxDatabase), async () => {
+        new HubOutboxDispatcher(new HubOutboxRepository(outboxDatabase), async (event) => {
+          if (await changeRequestFeature.handleOutboxEvent(event)) return;
           // Canonical transactions only enqueue. Projection/SSE effects happen here,
           // after claim commit, and are coalesced by the existing refresh scheduler.
           hubChangeEvents.emitRegistryWrite();

@@ -1,10 +1,11 @@
 import type { ServerResponse } from 'node:http';
 
 import { getHubDatabase } from '../../host/hub-database';
+import type { HubOutboxEvent } from '../../host/hub-outbox';
 import type { HubRouter } from '../hub-router';
 import { registerChangeRequestRoutes } from '../routes/change-request-routes';
-import { ChangeRequestEventDispatcher } from './change-request-event-dispatcher';
 import type { ChangeRequestDomainEvent } from './change-request-events';
+import { changeRequestEventFromOutbox } from './change-request-outbox';
 import { getChangeRequestRepository } from './change-request-repository';
 import {
   createChangeRequestFeature,
@@ -21,10 +22,15 @@ export type RegisterChangeRequestFeatureDependencies = Omit<
   log: (level: 'info' | 'warn', message: string, details?: Record<string, unknown>) => void;
 };
 
+export type RegisteredChangeRequestFeature = {
+  handleOutboxEvent: (event: HubOutboxEvent) => Promise<boolean>;
+  stop: () => Promise<void>;
+};
+
 export function registerChangeRequestFeature(
   apiRouter: HubRouter,
   dependencies: RegisterChangeRequestFeatureDependencies,
-): () => Promise<void> {
+): RegisteredChangeRequestFeature {
   const database = getHubDatabase();
   if (!database) {
     registerChangeRequestRoutes(apiRouter, {
@@ -33,33 +39,60 @@ export function registerChangeRequestFeature(
       writeSseEvent: dependencies.writeSseEvent,
       nowIso: dependencies.nowIso,
     });
-    return async () => {};
+    return {
+      handleOutboxEvent: async () => false,
+      stop: async () => {},
+    };
   }
 
+  const observers = new Set<(event: ChangeRequestDomainEvent) => void>();
   const repository = getChangeRequestRepository();
   const feature = createChangeRequestFeature({
     ...dependencies,
     repository,
   });
-  const dispatcher = new ChangeRequestEventDispatcher({
-    repository,
-    hydrate: async (event) => {
+  const handleOutboxEvent = async (outboxEvent: HubOutboxEvent): Promise<boolean> => {
+    const event = changeRequestEventFromOutbox(outboxEvent);
+    if (!event) return false;
+    let hydratedEvent = event;
+    try {
       const view = await feature.service.get(event.requestNumber);
-      return view.stateVersion === event.stateVersion
-        ? { ...event, request: { ...event.request, ...view } }
-        : event;
-    },
-    deliver: dependencies.deliverEvent ?? (async () => {}),
-    now: dependencies.nowIso,
-    log: dependencies.log,
-  });
+      if (view.stateVersion === event.stateVersion) {
+        hydratedEvent = { ...event, request: { ...event.request, ...view } };
+      }
+    } catch (error) {
+      dependencies.log('warn', 'change request event hydration failed', {
+        eventId: event.id,
+        requestNumber: event.requestNumber,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    await dependencies.deliverEvent?.(hydratedEvent);
+    for (const observer of observers) {
+      try {
+        observer(hydratedEvent);
+      } catch (error) {
+        dependencies.log('warn', 'change request event observer failed', {
+          eventId: event.id,
+          requestNumber: event.requestNumber,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return true;
+  };
   registerChangeRequestRoutes(apiRouter, {
     service: feature.service,
     githubMirrorService: feature.githubMirrorService,
     writeSseEvent: dependencies.writeSseEvent,
     nowIso: dependencies.nowIso,
-    subscribeToChanges: (observer) => dispatcher.subscribe(observer),
+    subscribeToChanges: (observer) => {
+      observers.add(observer);
+      return () => observers.delete(observer);
+    },
   });
-  dispatcher.start();
-  return async () => await dispatcher.stop();
+  return {
+    handleOutboxEvent,
+    stop: async () => observers.clear(),
+  };
 }
