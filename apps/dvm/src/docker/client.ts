@@ -388,9 +388,11 @@ export class DockerClient {
   async execCommandDetailed(
     name: string,
     command: string[],
-    options?: { timeoutMs?: number }
+    options?: { timeoutMs?: number; containerAlreadyReady?: boolean }
   ): Promise<ExecCommandResult> {
-    const container = await this.getContainer(name);
+    const container = options?.containerAlreadyReady
+      ? this.docker.getContainer(name)
+      : await this.getContainer(name);
     if (!container) {
       throw new Error(`Container ${name} not found`);
     }
@@ -488,8 +490,12 @@ export class DockerClient {
     });
   }
 
-  async execCommand(name: string, command: string[]): Promise<string> {
-    const out = await this.execCommandDetailed(name, command);
+  async execCommand(
+    name: string,
+    command: string[],
+    options?: { timeoutMs?: number; containerAlreadyReady?: boolean },
+  ): Promise<string> {
+    const out = await this.execCommandDetailed(name, command, options);
     if (out.code !== 0) {
       const cmd = command.map((c) => JSON.stringify(c)).join(' ');
       const combined = `${out.stdout}${out.stderr}`.trim();
@@ -626,10 +632,17 @@ export class DockerClient {
    * If `localPath` is a directory, this copies its *contents* into `containerPath`
    * (equivalent to `docker cp localPath/. container:containerPath`).
    */
-  async copyToContainer(containerName: string, localPath: string, containerPath: string): Promise<void> {
-    const container = await this.getContainer(containerName);
-    if (!container) {
-      throw new Error(`Container ${containerName} not found`);
+  async copyToContainer(
+    containerName: string,
+    localPath: string,
+    containerPath: string,
+    options?: { containerAlreadyReady?: boolean },
+  ): Promise<void> {
+    if (!options?.containerAlreadyReady) {
+      const container = await this.getContainer(containerName);
+      if (!container) {
+        throw new Error(`Container ${containerName} not found`);
+      }
     }
 
     let stat: fs.Stats;

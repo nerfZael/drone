@@ -1287,7 +1287,10 @@ export class ContainerManager {
    *
    * Used by repo workflows (bundle clone, format-patch export, etc).
    */
-  async ensureGit(containerName: string): Promise<void> {
+  async ensureGit(
+    containerName: string,
+    options?: { containerAlreadyReady?: boolean },
+  ): Promise<void> {
     // Keep this POSIX-ish so it works across more images.
     const install = [
       'set -e',
@@ -1318,7 +1321,7 @@ export class ContainerManager {
     ].join('\n');
 
     // Use `sh -c` (not login shell) to avoid relying on /etc/profile correctness.
-    await this.docker.execCommand(containerName, ['sh', '-c', install]);
+    await this.docker.execCommand(containerName, ['sh', '-c', install], options);
   }
 
   /**

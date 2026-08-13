@@ -184,6 +184,18 @@ describe('repoSeed checkout target', () => {
 
     expect(containerExists).not.toHaveBeenCalled();
     expect(startContainer).not.toHaveBeenCalled();
+    expect(ensureGit).toHaveBeenCalledWith('demo', { containerAlreadyReady: true });
+    expect(execCommand).toHaveBeenCalledWith(
+      'demo',
+      expect.arrayContaining(['sh', '-lc']),
+      { containerAlreadyReady: true },
+    );
+    expect(copyToContainer).toHaveBeenCalledWith(
+      'demo',
+      prepared.bundlePath,
+      prepared.bundlePathInContainer,
+      { containerAlreadyReady: true },
+    );
     expect(timing).toMatchObject({
       outcome: 'completed',
       phases: { ensureContainer: 0 },

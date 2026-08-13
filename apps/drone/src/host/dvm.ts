@@ -125,9 +125,12 @@ export async function dvmExec(
   container: string,
   cmd: string,
   args: string[] = [],
-  opts?: { timeoutMs?: number },
+  opts?: { timeoutMs?: number; containerAlreadyReady?: boolean },
 ): Promise<RunResult> {
-  return await dvm.exec(container, cmd, args, { timeoutMs: opts?.timeoutMs });
+  return await dvm.exec(container, cmd, args, {
+    timeoutMs: opts?.timeoutMs,
+    containerAlreadyReady: opts?.containerAlreadyReady,
+  });
 }
 
 export async function dvmRemove(container: string, opts?: { keepVolume?: boolean }): Promise<void> {
@@ -194,10 +197,19 @@ export async function dvmCopyToContainer(
   container: string,
   srcPath: string,
   destPath: string,
-  opts?: { clean?: boolean; timeoutMs?: number },
+  opts?: {
+    clean?: boolean;
+    timeoutMs?: number;
+    containerAlreadyReady?: boolean;
+    targetAlreadyPrepared?: boolean;
+  },
 ): Promise<void> {
   await withTimeout(
-    dvm.copyToContainer(container, srcPath, destPath, { clean: Boolean(opts?.clean) }),
+    dvm.copyToContainer(container, srcPath, destPath, {
+      clean: Boolean(opts?.clean),
+      containerAlreadyReady: opts?.containerAlreadyReady,
+      targetAlreadyPrepared: opts?.targetAlreadyPrepared,
+    }),
     opts?.timeoutMs,
   );
 }

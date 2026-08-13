@@ -17,6 +17,7 @@ function useRoot() {
   roots.push(root);
   process.env.DRONE_DATA_DIR = path.join(root, 'data');
   resetDroneRootDirForTests();
+  return root;
 }
 
 function syncSet(id, label) {
@@ -77,4 +78,49 @@ test('Node sync-set commands seed from raw migration state and never use registr
   assert.deepEqual((await service.storedSyncSets()).map((record) => record.label), ['Updated']);
   assert.equal(compatibilityReads, 0);
   assert.equal(compatibilityWrites, 0);
+});
+
+test('one-drone provisioning reads definitions directly and records detailed timing', async () => {
+  const root = useRoot();
+  const sourcePath = path.join(root, 'auth.json');
+  const targetPath = path.join(root, 'copied-auth.json');
+  fs.writeFileSync(sourcePath, '{"token":"test"}\n');
+  let compatibilityReads = 0;
+  const timings = [];
+  const service = createSyncSetService({
+    loadRegistry: async () => {
+      compatibilityReads += 1;
+      throw new Error('one-drone sync loaded the projected registry');
+    },
+    updateRegistry: async () => {
+      throw new Error('one-drone sync used registry fallback');
+    },
+    normalizeDroneIdentity: (value) => String(value ?? '').trim(),
+    droneRuntime: () => 'host',
+    withLockedDroneContainer: async (_opts, fn) => await fn({ containerName: 'unused' }),
+    nowIso: () => '2026-01-01T00:00:03.000Z',
+    logWarn: () => {},
+    logInfo: (message, meta) => timings.push({ message, meta }),
+  });
+  await service.createSyncSet({
+    ...syncSet('auth', 'Auth'),
+    sourceType: 'host-path',
+    sourcePath,
+    targetPath,
+  });
+
+  await service.applyAllSyncSetsToDrone({
+    droneId: 'drone-1',
+    droneEntry: { id: 'drone-1', name: 'Drone 1', runtime: 'host' },
+  });
+
+  assert.equal(compatibilityReads, 0);
+  assert.equal(fs.readFileSync(targetPath, 'utf8'), '{"token":"test"}\n');
+  const stored = (await service.storedSyncSets())[0];
+  assert.equal(stored.targetStatus['drone-1'].state, 'synced');
+  assert.equal(timings.length, 1);
+  assert.equal(timings[0].message, 'shared path sync timing');
+  assert.equal(timings[0].meta.syncSetCount, 1);
+  assert.equal(typeof timings[0].meta.phases.loadSyncSets, 'number');
+  assert.equal(typeof timings[0].meta.phases.persistOutcome, 'number');
 });

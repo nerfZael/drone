@@ -207,6 +207,7 @@ function droneGitRunner(container: string, repoPath: string): GitRunner {
         environment.length > 0
           ? [...environment, 'git', '-C', repoPath, ...args]
           : ['-C', repoPath, ...args],
+        { containerAlreadyReady: true },
       );
     }
     const captureBytes = maxStdoutBytes + 1;
@@ -227,6 +228,7 @@ function droneGitRunner(container: string, repoPath: string): GitRunner {
       container,
       environment.length > 0 ? 'env' : 'bash',
       environment.length > 0 ? commandArgs : commandArgs.slice(1),
+      { containerAlreadyReady: true },
     );
     return boundedStdout(result, maxStdoutBytes);
   };
@@ -614,6 +616,12 @@ function droneCaptureTarget(
   indexPath: string;
   runGit: GitRunner;
   cleanup: () => Promise<void>;
+  captureBaseline?: (baseRef: unknown) => Promise<{
+    repoRoot: string;
+    treeOid: string;
+    headCommitOid: string | null;
+    base: { baseRef: string; treeOid: string; commitOid: string } | null;
+  }>;
 } | null {
   if (!isRepoAttachedDrone(drone)) return null;
   const label = String(drone?.name ?? droneId).trim() || droneId;
@@ -647,7 +655,79 @@ function droneCaptureTarget(
     indexPath,
     runGit: droneGitRunner(container, repoPath),
     cleanup: async () => {
-      await dvmExec(container, 'rm', ['-f', '--', indexPath, `${indexPath}.lock`]);
+      await dvmExec(container, 'rm', ['-f', '--', indexPath, `${indexPath}.lock`], {
+        containerAlreadyReady: true,
+      });
+    },
+    captureBaseline: async (baseRefRaw) => {
+      const baseRef = normalizeBaseRef(baseRefRaw) ?? '';
+      const candidates = baseRef ? baseRefCandidates(baseRef) : [];
+      const script = [
+        'set -euo pipefail',
+        'repo=$1',
+        'idx=$2',
+        'base_ref=$3',
+        'shift 3',
+        'cleanup() { rm -f -- "$idx" "$idx.lock"; }',
+        'trap cleanup EXIT',
+        'repo_root=$(git -C "$repo" rev-parse --show-toplevel)',
+        'if ! GIT_INDEX_FILE="$idx" git -C "$repo" read-tree HEAD; then',
+        '  GIT_INDEX_FILE="$idx" git -C "$repo" read-tree --empty',
+        'fi',
+        'GIT_INDEX_FILE="$idx" git -C "$repo" add -A -- :/',
+        'tree_oid=$(GIT_INDEX_FILE="$idx" git -C "$repo" write-tree)',
+        'head_oid=$(git -C "$repo" rev-parse --verify "HEAD^{commit}" 2>/dev/null || true)',
+        'base_tree_oid=',
+        'base_commit_oid=',
+        'if [[ -n "$base_ref" ]]; then',
+        '  for candidate in "$@"; do',
+        '    if candidate_tree=$(git -C "$repo" rev-parse --verify "${candidate}^{tree}" 2>/dev/null) && candidate_commit=$(git -C "$repo" rev-parse --verify "${candidate}^{commit}" 2>/dev/null); then',
+        '      base_tree_oid=$candidate_tree',
+        '      base_commit_oid=$candidate_commit',
+        '      break',
+        '    fi',
+        '  done',
+        'fi',
+        'for value in "$repo_root" "$tree_oid" "$head_oid" "$base_ref" "$base_tree_oid" "$base_commit_oid"; do',
+        "  printf '%s' \"$value\" | base64 -w0",
+        "  printf '\\n'",
+        'done',
+      ].join('\n');
+      const result = await dvmExec(
+        container,
+        'bash',
+        ['-lc', script, 'drone-run-baseline', repoPath, indexPath, baseRef, ...candidates],
+        { containerAlreadyReady: true },
+      );
+      if (result.code !== 0) {
+        throw new Error(
+          String(result.stderr || result.stdout || 'failed capturing repository baseline').trim(),
+        );
+      }
+      const decoded = result.stdout
+        .trimEnd()
+        .split('\n')
+        .map((value) => Buffer.from(value, 'base64').toString('utf8'));
+      const [repoRootRaw, treeOidRaw, headCommitOidRaw, resolvedBaseRef, baseTreeOidRaw, baseCommitOidRaw] =
+        decoded;
+      const treeOid = String(treeOidRaw ?? '').trim().toLowerCase();
+      const headCommitOid = String(headCommitOidRaw ?? '').trim().toLowerCase();
+      const baseTreeOid = String(baseTreeOidRaw ?? '').trim().toLowerCase();
+      const baseCommitOid = String(baseCommitOidRaw ?? '').trim().toLowerCase();
+      if (!/^[0-9a-f]{40,64}$/.test(treeOid)) {
+        throw new Error('git returned an invalid tree id');
+      }
+      return {
+        repoRoot: String(repoRootRaw ?? '').trim() || '.',
+        treeOid,
+        headCommitOid: /^[0-9a-f]{40,64}$/.test(headCommitOid) ? headCommitOid : null,
+        base:
+          resolvedBaseRef &&
+          /^[0-9a-f]{40,64}$/.test(baseTreeOid) &&
+          /^[0-9a-f]{40,64}$/.test(baseCommitOid)
+            ? { baseRef: resolvedBaseRef, treeOid: baseTreeOid, commitOid: baseCommitOid }
+            : null,
+      };
     },
   };
 }
@@ -660,23 +740,27 @@ export async function captureDroneRunFileChangesBaseline(input: {
   const droneId = String(input.droneId ?? '').trim();
   const target = droneId ? droneCaptureTarget(droneId, input.drone) : null;
   if (!target) return null;
-  const snapshot = await captureTree(target.runGit, target.indexPath, target.cleanup);
-  const headCommitOid = await resolveHeadCommit(target.runGit);
-  const base = await resolveBaseTree(target.runGit, input.drone?.repo?.baseRef);
+  const captured = target.captureBaseline
+    ? await target.captureBaseline(input.drone?.repo?.baseRef)
+    : {
+        ...(await captureTree(target.runGit, target.indexPath, target.cleanup)),
+        headCommitOid: await resolveHeadCommit(target.runGit),
+        base: await resolveBaseTree(target.runGit, input.drone?.repo?.baseRef),
+      };
   return {
     version: 1,
     capturedAt: new Date().toISOString(),
     targetId: `drone:${droneId}`,
     droneId,
     label: target.label,
-    repoRoot: snapshot.repoRoot,
-    treeOid: snapshot.treeOid,
-    ...(headCommitOid ? { headCommitOid } : {}),
-    ...(base
+    repoRoot: captured.repoRoot,
+    treeOid: captured.treeOid,
+    ...(captured.headCommitOid ? { headCommitOid: captured.headCommitOid } : {}),
+    ...(captured.base
       ? {
-          baseRef: base.baseRef,
-          baseTreeOid: base.treeOid,
-          baseCommitOid: base.commitOid,
+          baseRef: captured.base.baseRef,
+          baseTreeOid: captured.base.treeOid,
+          baseCommitOid: captured.base.commitOid,
         }
       : {}),
     owner: { droneId, ...(input.owner ?? {}) },

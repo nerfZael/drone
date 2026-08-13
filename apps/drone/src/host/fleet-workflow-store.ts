@@ -60,6 +60,62 @@ const MIGRATIONS: readonly HubDatabaseMigration[] = [
       connection.prepare("DELETE FROM workflow_backfills WHERE domain = 'playbook-queue'").run();
     },
   },
+  {
+    version: 4,
+    name: 'normalize sync set target status',
+    migrate(connection) {
+      connection.exec(`
+        CREATE TABLE workflow_sync_set_targets (
+          sync_set_id TEXT NOT NULL,
+          target_id TEXT NOT NULL,
+          target_kind TEXT NOT NULL CHECK(target_kind IN ('drone','host')),
+          state TEXT NOT NULL CHECK(state IN ('idle','synced','error')),
+          applied_version_id TEXT,
+          applied_at TEXT,
+          error TEXT,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY(sync_set_id,target_id),
+          FOREIGN KEY(sync_set_id) REFERENCES workflow_sync_sets(id) ON DELETE CASCADE
+        );
+        CREATE INDEX workflow_sync_set_targets_target
+          ON workflow_sync_set_targets(target_id,sync_set_id);
+      `);
+      const rows = connection
+        .prepare('SELECT id,record_json,updated_at FROM workflow_sync_sets')
+        .all() as Array<{ id: string; record_json: string; updated_at: string }>;
+      const insert = connection.prepare(`INSERT INTO workflow_sync_set_targets
+        (sync_set_id,target_id,target_kind,state,applied_version_id,applied_at,error,updated_at)
+        VALUES (?,?,?,?,?,?,?,?)`);
+      const update = connection.prepare(
+        'UPDATE workflow_sync_sets SET record_json=? WHERE id=?',
+      );
+      for (const row of rows) {
+        const record = parse<Record<string, any>>(row.record_json);
+        const statuses =
+          record.targetStatus && typeof record.targetStatus === 'object'
+            ? record.targetStatus
+            : {};
+        for (const [targetId, raw] of Object.entries(statuses)) {
+          const status = raw as Record<string, unknown>;
+          const targetKind = status.targetKind === 'host' ? 'host' : 'drone';
+          const state =
+            status.state === 'synced' || status.state === 'error' ? status.state : 'idle';
+          insert.run(
+            row.id,
+            targetId,
+            targetKind,
+            state,
+            status.appliedVersionId ?? null,
+            status.appliedAt ?? null,
+            status.error ?? null,
+            row.updated_at,
+          );
+        }
+        record.targetStatus = {};
+        update.run(json(record), row.id);
+      }
+    },
+  },
 ];
 
 export type WorkflowSyncSet = {
@@ -73,6 +129,13 @@ export type WorkflowSyncSet = {
   updatedAt: string;
   [key: string]: unknown;
 };
+export type WorkflowSyncSetTargetStatus = {
+  targetKind: 'drone' | 'host';
+  state: 'idle' | 'synced' | 'error';
+  appliedVersionId: string | null;
+  appliedAt: string | null;
+  error: string | null;
+};
 function json(value: unknown): string {
   const out = JSON.stringify(value);
   if (out === undefined) throw new Error('workflow value must be JSON serializable');
@@ -80,6 +143,113 @@ function json(value: unknown): string {
 }
 function parse<T>(raw: string): T {
   return JSON.parse(raw) as T;
+}
+
+function splitSyncSetRecord<T extends WorkflowSyncSet>(record: T): {
+  definition: T;
+  targetStatus: Record<string, WorkflowSyncSetTargetStatus>;
+} {
+  // Validate the complete caller value before removing the separately stored
+  // target map. This preserves the previous rejection of cyclic/non-JSON data.
+  json(record);
+  const targetStatus =
+    record.targetStatus && typeof record.targetStatus === 'object'
+      ? (record.targetStatus as Record<string, WorkflowSyncSetTargetStatus>)
+      : {};
+  return {
+    definition: { ...record, targetStatus: {} },
+    targetStatus,
+  };
+}
+
+function readTargetStatuses(
+  connection: HubDatabaseConnection,
+): Map<string, Record<string, WorkflowSyncSetTargetStatus>> {
+  const rows = connection
+    .prepare(
+      `SELECT sync_set_id,target_id,target_kind,state,applied_version_id,applied_at,error
+       FROM workflow_sync_set_targets`,
+    )
+    .all() as Array<{
+    sync_set_id: string;
+    target_id: string;
+    target_kind: 'drone' | 'host';
+    state: 'idle' | 'synced' | 'error';
+    applied_version_id: string | null;
+    applied_at: string | null;
+    error: string | null;
+    }>;
+  const bySyncSet = new Map<string, Record<string, WorkflowSyncSetTargetStatus>>();
+  for (const row of rows) {
+    let statuses = bySyncSet.get(row.sync_set_id);
+    if (!statuses) {
+      statuses = {};
+      bySyncSet.set(row.sync_set_id, statuses);
+    }
+    statuses[row.target_id] = {
+      targetKind: row.target_kind,
+      state: row.state,
+      appliedVersionId: row.applied_version_id,
+      appliedAt: row.applied_at,
+      error: row.error,
+    };
+  }
+  return bySyncSet;
+}
+
+function readTargetStatusForSyncSet(
+  connection: HubDatabaseConnection,
+  syncSetId: string,
+): Record<string, WorkflowSyncSetTargetStatus> {
+  const rows = connection
+    .prepare(
+      `SELECT target_id,target_kind,state,applied_version_id,applied_at,error
+       FROM workflow_sync_set_targets WHERE sync_set_id=?`,
+    )
+    .all(syncSetId) as Array<{
+    target_id: string;
+    target_kind: 'drone' | 'host';
+    state: 'idle' | 'synced' | 'error';
+    applied_version_id: string | null;
+    applied_at: string | null;
+    error: string | null;
+  }>;
+  return Object.fromEntries(
+    rows.map((row) => [
+      row.target_id,
+      {
+        targetKind: row.target_kind,
+        state: row.state,
+        appliedVersionId: row.applied_version_id,
+        appliedAt: row.applied_at,
+        error: row.error,
+      },
+    ]),
+  );
+}
+
+function replaceTargetStatuses(
+  connection: HubDatabaseConnection,
+  syncSetId: string,
+  statuses: Record<string, WorkflowSyncSetTargetStatus>,
+  updatedAt: string,
+): void {
+  connection.prepare('DELETE FROM workflow_sync_set_targets WHERE sync_set_id=?').run(syncSetId);
+  const insert = connection.prepare(`INSERT INTO workflow_sync_set_targets
+    (sync_set_id,target_id,target_kind,state,applied_version_id,applied_at,error,updated_at)
+    VALUES (?,?,?,?,?,?,?,?)`);
+  for (const [targetId, status] of Object.entries(statuses)) {
+    insert.run(
+      syncSetId,
+      targetId,
+      status.targetKind,
+      status.state,
+      status.appliedVersionId ?? null,
+      status.appliedAt ?? null,
+      status.error ?? null,
+      updatedAt,
+    );
+  }
 }
 
 export class FleetWorkflowStore {
@@ -93,14 +263,28 @@ export class FleetWorkflowStore {
   }
 
   listSyncSets<T extends WorkflowSyncSet>(): T[] {
+    return this.database.read((c) => {
+      const rows = c
+        .prepare(
+          'SELECT id,record_json FROM workflow_sync_sets WHERE deleted_at IS NULL ORDER BY created_at,id',
+        )
+        .all() as Array<{ id: string; record_json: string }>;
+      const statuses = readTargetStatuses(c);
+      return rows.map((row) => ({
+        ...parse<T>(row.record_json),
+        targetStatus: statuses.get(row.id) ?? {},
+      }));
+    });
+  }
+  listSyncSetDefinitions<T extends WorkflowSyncSet>(): T[] {
     return this.database.read((c) =>
       (
         c
           .prepare(
             'SELECT record_json FROM workflow_sync_sets WHERE deleted_at IS NULL ORDER BY created_at,id',
           )
-          .all() as any[]
-      ).map((r) => parse<T>(r.record_json)),
+          .all() as Array<{ record_json: string }>
+      ).map((row) => ({ ...parse<T>(row.record_json), targetStatus: {} })),
     );
   }
   backfillSyncSets<T extends WorkflowSyncSet>(records: T[]): Promise<boolean> {
@@ -109,24 +293,28 @@ export class FleetWorkflowStore {
       const insert = c.prepare(`INSERT OR IGNORE INTO workflow_sync_sets
         (id,label,source_type,source_path,target_path,apply_to_host,record_json,created_at,updated_at)
         VALUES (?,?,?,?,?,?,?,?,?)`);
-      for (const r of records)
-        insert.run(
+      for (const r of records) {
+        const { definition, targetStatus } = splitSyncSetRecord(r);
+        const inserted = insert.run(
           r.id,
           r.label,
           r.sourceType,
           r.sourcePath ?? null,
           r.targetPath,
           r.applyToHost ? 1 : 0,
-          json(r),
+          json(definition),
           r.createdAt,
           r.updatedAt,
         );
+        if (inserted.changes) replaceTargetStatuses(c, r.id, targetStatus, r.updatedAt);
+      }
       this.finishBackfill(c, 'sync-sets');
       return true;
     });
   }
   putSyncSet<T extends WorkflowSyncSet>(record: T): Promise<T> {
     return this.database.writeTransaction('write sync set', (c) => {
+      const { definition, targetStatus } = splitSyncSetRecord(record);
       const current = c
         .prepare('SELECT 1 FROM workflow_sync_sets WHERE id=? AND deleted_at IS NULL')
         .get(record.id);
@@ -144,10 +332,11 @@ export class FleetWorkflowStore {
         record.sourcePath ?? null,
         record.targetPath,
         record.applyToHost ? 1 : 0,
-        json(record),
+        json(definition),
         record.createdAt,
         record.updatedAt,
       );
+      replaceTargetStatuses(c, record.id, targetStatus, record.updatedAt);
       appendHubOutboxEvent(c, {
         topic: 'fleet.workflows',
         eventType: current ? 'sync-set.updated' : 'sync-set.created',
@@ -167,7 +356,9 @@ export class FleetWorkflowStore {
         .prepare('SELECT record_json FROM workflow_sync_sets WHERE id=? AND deleted_at IS NULL')
         .get(id) as any;
       if (!row) return null;
-      const next = transform(parse<T>(row.record_json));
+      const statuses = readTargetStatusForSyncSet(c, id);
+      const next = transform({ ...parse<T>(row.record_json), targetStatus: statuses });
+      const { definition, targetStatus } = splitSyncSetRecord(next);
       c.prepare(
         `UPDATE workflow_sync_sets SET label=?,source_type=?,source_path=?,target_path=?,apply_to_host=?,record_json=?,updated_at=?,version=version+1 WHERE id=? AND deleted_at IS NULL`,
       ).run(
@@ -176,10 +367,11 @@ export class FleetWorkflowStore {
         next.sourcePath ?? null,
         next.targetPath,
         next.applyToHost ? 1 : 0,
-        json(next),
+        json(definition),
         next.updatedAt,
         id,
       );
+      replaceTargetStatuses(c, id, targetStatus, next.updatedAt);
       appendHubOutboxEvent(c, {
         topic: 'fleet.workflows',
         eventType: 'sync-set.updated',
@@ -190,6 +382,88 @@ export class FleetWorkflowStore {
       return next;
     });
   }
+  updateSyncSetTarget<T extends WorkflowSyncSet>(
+    id: string,
+    targetId: string,
+    transform: (
+      current: T,
+      previous: WorkflowSyncSetTargetStatus | null,
+    ) => { syncSet: T; targetStatus: WorkflowSyncSetTargetStatus },
+  ): Promise<boolean> {
+    return this.database.writeTransaction('update sync set target', (c) => {
+      const normalizedTargetId = String(targetId ?? '').trim();
+      if (!normalizedTargetId) throw new Error('sync set target id is required');
+      const row = c
+        .prepare('SELECT record_json FROM workflow_sync_sets WHERE id=? AND deleted_at IS NULL')
+        .get(id) as { record_json: string } | undefined;
+      if (!row) return false;
+      const previousRow = c
+        .prepare(
+          `SELECT target_kind,state,applied_version_id,applied_at,error
+           FROM workflow_sync_set_targets WHERE sync_set_id=? AND target_id=?`,
+        )
+        .get(id, normalizedTargetId) as
+        | {
+            target_kind: 'drone' | 'host';
+            state: 'idle' | 'synced' | 'error';
+            applied_version_id: string | null;
+            applied_at: string | null;
+            error: string | null;
+          }
+        | undefined;
+      const previous = previousRow
+        ? {
+            targetKind: previousRow.target_kind,
+            state: previousRow.state,
+            appliedVersionId: previousRow.applied_version_id,
+            appliedAt: previousRow.applied_at,
+            error: previousRow.error,
+          }
+        : null;
+      const current = { ...parse<T>(row.record_json), targetStatus: {} };
+      const { syncSet: next, targetStatus } = transform(current, previous);
+      const { definition } = splitSyncSetRecord(next);
+      c.prepare(
+        `UPDATE workflow_sync_sets SET label=?,source_type=?,source_path=?,target_path=?,apply_to_host=?,record_json=?,updated_at=?,version=version+1
+         WHERE id=? AND deleted_at IS NULL`,
+      ).run(
+        next.label,
+        next.sourceType,
+        next.sourcePath ?? null,
+        next.targetPath,
+        next.applyToHost ? 1 : 0,
+        json(definition),
+        next.updatedAt,
+        id,
+      );
+      c.prepare(
+        `INSERT INTO workflow_sync_set_targets
+         (sync_set_id,target_id,target_kind,state,applied_version_id,applied_at,error,updated_at)
+         VALUES (?,?,?,?,?,?,?,?)
+         ON CONFLICT(sync_set_id,target_id) DO UPDATE SET
+           target_kind=excluded.target_kind,state=excluded.state,
+           applied_version_id=excluded.applied_version_id,applied_at=excluded.applied_at,
+           error=excluded.error,updated_at=excluded.updated_at`,
+      ).run(
+        id,
+        normalizedTargetId,
+        targetStatus.targetKind,
+        targetStatus.state,
+        targetStatus.appliedVersionId,
+        targetStatus.appliedAt,
+        targetStatus.error,
+        next.updatedAt,
+      );
+      appendHubOutboxEvent(c, {
+        topic: 'fleet.workflows',
+        eventType: 'sync-set.updated',
+        aggregateType: 'sync-set',
+        aggregateId: id,
+        payload: { id, updatedAt: next.updatedAt },
+      });
+      return true;
+    });
+  }
   deleteSyncSet(id: string, at = new Date().toISOString()): Promise<boolean> {
     return this.database.writeTransaction('delete sync set', (c) => {
       const info = c
@@ -198,6 +472,7 @@ export class FleetWorkflowStore {
         )
         .run(at, at, id);
       if (!info.changes) return false;
+      c.prepare('DELETE FROM workflow_sync_set_targets WHERE sync_set_id=?').run(id);
       appendHubOutboxEvent(c, {
         topic: 'fleet.workflows',
         eventType: 'sync-set.deleted',

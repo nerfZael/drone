@@ -122,4 +122,32 @@ describe('drone metadata application commands', () => {
     ).all());
     assert.deepEqual(events, [{ event_type: 'drone.environment.changed' }]);
   });
+
+  test('does not reload the legacy registry after lifecycle backfill is complete', async () => {
+    useTempDataDir('completed-backfill');
+    await saveRegistry({
+      version: 2,
+      drones: { 'drone-1': entry() },
+      pending: {},
+      archived: {},
+    });
+    const repository = await getDroneLifecycleRepository();
+    await repository.backfillLegacyInsertOnly(await loadRegistry());
+
+    requireHubDatabase().read((connection) =>
+      connection
+        .prepare("UPDATE hub_registry_state SET registry_json = ? WHERE id = 'current'")
+        .run('{"version":2,"drones":'),
+    );
+
+    const committed = await commitDroneMetadataPatch({
+      droneId: 'drone-1',
+      state: 'real',
+      eventType: 'drone.metadata.after-backfill',
+      transform: (lifecycle) => ({ ...lifecycle, phase: 'ready' }),
+    });
+
+    assert.equal(committed.lifecycle.phase, 'ready');
+    assert.equal(repository.get('drone-1').lifecycle.phase, 'ready');
+  });
 });

@@ -19,6 +19,7 @@ import { normalizeDisabledRepoKeys, normalizeEnvVarMap } from './environment-con
 import { fleetActorConfig, setFleetActorConfig } from './fleet-helpers';
 import {
   getCanonicalDroneLifecycle,
+  resolveCanonicalDroneOrPendingForReadRef,
   resolveDroneContainerNameByIdentity,
   setDroneHubMetaByIdentity,
 } from './drone-lifecycle-service';
@@ -168,9 +169,8 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
     droneIdRaw: string,
     patch: PendingDronePatch,
   ): Promise<string | null> {
-    const registry = await loadRegistry();
-    const found = findDroneEntryByIdentity({ drones: registry?.pending }, droneIdRaw);
-    const droneId = normalizeDroneIdentity(found?.entry?.id ?? found?.key);
+    const resolved = await resolveCanonicalDroneOrPendingForReadRef(droneIdRaw);
+    const droneId = resolved?.kind === 'pending' ? normalizeDroneIdentity(resolved.id) : '';
     if (!droneId) return null;
     await commitDroneMetadataPatch({
       droneId,
@@ -296,19 +296,16 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
     const provisioningStartedAtEpochMs = Date.now();
     const provisioningStartedAt = performance.now();
     throwIfProvisioningAborted(signal);
-    const regAny: any = await loadRegistry();
-    const canonical = await getCanonicalDroneLifecycle(name);
+    const canonical = await resolveCanonicalDroneOrPendingForReadRef(name);
     throwIfProvisioningAborted(signal);
-    if (canonical?.state === 'real') return;
-    const pending = canonical?.state === 'pending' ? canonical.lifecycle : regAny?.pending?.[name];
+    if (canonical?.kind === 'real') return;
+    const pending = canonical?.kind === 'pending' ? canonical.pending : null;
     if (!pending) return;
     const pendingDroneId = normalizeDroneIdentity(pending?.id);
     if (!pendingDroneId) {
       await failPendingDrone(name, 'missing pending drone identity');
       return;
     }
-    if (regAny?.drones?.[name]) return;
-
     const repoPath = String(pending.repoPath ?? '').trim();
     const group = typeof pending.group === 'string' ? pending.group.trim() : '';
     const runtime = normalizeDroneRuntime((pending as any)?.runtime);
@@ -319,7 +316,13 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
         : null;
     const cloneFrom = typeof pending.cloneFrom === 'string' ? pending.cloneFrom.trim() : '';
     const cloneChats = pending.cloneChats !== false;
-    const cloneSource = cloneFrom ? findDroneEntryByIdentity(regAny, cloneFrom) : null;
+    const resolvedCloneSource = cloneFrom
+      ? await resolveCanonicalDroneOrPendingForReadRef(cloneFrom)
+      : null;
+    const cloneSource =
+      resolvedCloneSource?.kind === 'real'
+        ? { key: resolvedCloneSource.id, entry: resolvedCloneSource.drone }
+        : null;
     const cloneSourceContainerName = cloneSource
       ? String(
           (cloneSource.entry as any)?.containerName ??

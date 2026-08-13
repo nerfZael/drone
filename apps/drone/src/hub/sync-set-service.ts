@@ -14,7 +14,11 @@ import {
   type StoredSyncSet,
   type SyncSetSourceSnapshot,
 } from './sync-sets';
-import { getFleetWorkflowStore, type FleetWorkflowStore } from '../host/fleet-workflow-store';
+import {
+  getFleetWorkflowStore,
+  type FleetWorkflowStore,
+  type WorkflowSyncSetTargetStatus,
+} from '../host/fleet-workflow-store';
 import { getHubDatabase } from '../host/hub-database';
 import { loadRegistryRawSnapshot } from '../host/registry';
 
@@ -30,7 +34,17 @@ type SyncSetTargetOutcome = {
   error?: string | null;
 };
 
-type ApplySyncSetResult = { ok: true } | { ok: false; error: string };
+type SyncSetApplyPhases = {
+  snapshot: number;
+  droneLockWait: number;
+  prepareTarget: number;
+  copyTarget: number;
+  persistOutcome: number;
+};
+
+type ApplySyncSetResult =
+  | { ok: true; phases: Omit<SyncSetApplyPhases, 'snapshot'> }
+  | { ok: false; error: string; phases: Omit<SyncSetApplyPhases, 'snapshot'> };
 
 export type ApplyAllSyncSetsToDroneResult = {
   repositoryFilesMayHaveChanged: boolean;
@@ -47,7 +61,29 @@ type CreateSyncSetServiceDeps = {
   ) => Promise<T>;
   nowIso: () => string;
   logWarn: (message: string, meta: Record<string, unknown>) => void;
+  logInfo?: (message: string, meta: Record<string, unknown>) => void;
 };
+
+function roundedMs(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+function emptyTargetPhases(): Omit<SyncSetApplyPhases, 'snapshot'> {
+  return { droneLockWait: 0, prepareTarget: 0, copyTarget: 0, persistOutcome: 0 };
+}
+
+async function measurePhase<T>(
+  phases: Record<string, number>,
+  phase: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const startedAt = performance.now();
+  try {
+    return await operation();
+  } finally {
+    phases[phase] = (phases[phase] ?? 0) + performance.now() - startedAt;
+  }
+}
 
 function buildSyncSetDroneNameMap(
   regAny: any,
@@ -90,6 +126,13 @@ export function createSyncSetService(deps: CreateSyncSetServiceDeps) {
     return store.listSyncSets<StoredSyncSet>();
   }
 
+  async function storedSyncSetDefinitions(regAny?: any): Promise<StoredSyncSet[]> {
+    const store = await workflowStore();
+    if (!store) return readStoredSyncSets(regAny ?? (await deps.loadRegistry()));
+    await ensureWorkflowBackfill(store);
+    return store.listSyncSetDefinitions<StoredSyncSet>();
+  }
+
   async function buildViewsFromRegistry(regAny: any) {
     const syncSets = await storedSyncSets(regAny);
     const droneNameById = buildSyncSetDroneNameMap(regAny, deps.normalizeDroneIdentity);
@@ -107,29 +150,36 @@ export function createSyncSetService(deps: CreateSyncSetServiceDeps) {
   async function recordTargetOutcome(opts: SyncSetTargetOutcome) {
     const store = await workflowStore();
     if (store) {
-      await store.updateSyncSet<StoredSyncSet>(opts.syncSetId, (existing) => {
-        const previousTarget = existing.targetStatus[String(opts.targetId ?? '').trim()] ?? null;
-        let next = setStoredSyncSetTargetStatus(existing, opts.targetId, {
-          targetKind: opts.targetKind,
-          state: opts.state,
-          appliedVersionId:
-            opts.state === 'synced'
-              ? (opts.appliedVersionId ?? null)
-              : (previousTarget?.appliedVersionId ?? null),
-          appliedAt:
-            opts.state === 'synced'
-              ? (opts.appliedAt ?? null)
-              : (previousTarget?.appliedAt ?? null),
-          error: opts.state === 'error' ? String(opts.error ?? '').trim() || 'sync failed' : null,
-        });
-        if (opts.state === 'synced')
-          next = {
-            ...next,
-            lastAppliedVersionId: opts.appliedVersionId ?? null,
-            lastAppliedAt: opts.appliedAt ?? null,
+      const targetId = String(opts.targetId ?? '').trim();
+      await store.updateSyncSetTarget<StoredSyncSet>(
+        opts.syncSetId,
+        targetId,
+        (existing, previousTarget) => {
+          const targetStatus: WorkflowSyncSetTargetStatus = {
+            targetKind: opts.targetKind,
+            state: opts.state,
+            appliedVersionId:
+              opts.state === 'synced'
+                ? (opts.appliedVersionId ?? null)
+                : (previousTarget?.appliedVersionId ?? null),
+            appliedAt:
+              opts.state === 'synced'
+                ? (opts.appliedAt ?? null)
+                : (previousTarget?.appliedAt ?? null),
+            error: opts.state === 'error' ? String(opts.error ?? '').trim() || 'sync failed' : null,
           };
-        return { ...next, updatedAt: deps.nowIso() };
-      });
+          const next =
+            opts.state === 'synced'
+              ? {
+                  ...existing,
+                  lastAppliedVersionId: opts.appliedVersionId ?? null,
+                  lastAppliedAt: opts.appliedAt ?? null,
+                  updatedAt: deps.nowIso(),
+                }
+              : { ...existing, updatedAt: deps.nowIso() };
+          return { syncSet: next, targetStatus };
+        },
+      );
       return;
     }
     await deps.updateRegistry((regAny: any) => {
@@ -167,84 +217,106 @@ export function createSyncSetService(deps: CreateSyncSetServiceDeps) {
     droneId: string;
     droneEntry: any;
   }): Promise<ApplySyncSetResult> {
+    const phases = emptyTargetPhases();
     const droneId = deps.normalizeDroneIdentity(opts.droneId);
-    if (!droneId || !opts.droneEntry) return { ok: false, error: 'missing drone target' };
+    if (!droneId || !opts.droneEntry)
+      return { ok: false, error: 'missing drone target', phases };
     const appliedAt = deps.nowIso();
+    const persistOutcome = async (outcome: SyncSetTargetOutcome) =>
+      await measurePhase(phases, 'persistOutcome', async () => await recordTargetOutcome(outcome));
     try {
       if (deps.droneRuntime(opts.droneEntry) === 'host') {
-        await mirrorLocalSourceToHostTarget({
-          sourcePath: opts.snapshot.sourcePath,
-          sourceKind: opts.snapshot.sourceKind,
-          targetPath: opts.syncSet.targetPath,
-        });
+        await measurePhase(phases, 'copyTarget', async () =>
+          await mirrorLocalSourceToHostTarget({
+            sourcePath: opts.snapshot.sourcePath,
+            sourceKind: opts.snapshot.sourceKind,
+            targetPath: opts.syncSet.targetPath,
+          }),
+        );
       } else {
         const requestedDroneName =
           String((opts.droneEntry as any)?.name ?? droneId).trim() || droneId;
-        await deps.withLockedDroneContainer(
-          { requestedDroneName, droneEntry: opts.droneEntry },
-          async ({ containerName }) => {
-            await mirrorLocalSourceToContainerTarget({
-              containerName,
-              sourcePath: opts.snapshot.sourcePath,
-              sourceKind: opts.snapshot.sourceKind,
-              targetPath: opts.syncSet.targetPath,
-            });
-          },
-        );
+        const lockStartedAt = performance.now();
+        let lockEntered = false;
+        try {
+          await deps.withLockedDroneContainer(
+            { requestedDroneName, droneEntry: opts.droneEntry },
+            async ({ containerName }) => {
+              lockEntered = true;
+              phases.droneLockWait += performance.now() - lockStartedAt;
+              await mirrorLocalSourceToContainerTarget({
+                containerName,
+                sourcePath: opts.snapshot.sourcePath,
+                sourceKind: opts.snapshot.sourceKind,
+                targetPath: opts.syncSet.targetPath,
+                onTiming: (phase, durationMs) => {
+                  phases[phase] += durationMs;
+                },
+              });
+            },
+          );
+        } finally {
+          if (!lockEntered) phases.droneLockWait += performance.now() - lockStartedAt;
+        }
       }
-      await recordTargetOutcome({
-        syncSetId: opts.syncSet.id,
-        targetId: droneId,
-        targetKind: 'drone',
-        state: 'synced',
-        appliedVersionId: opts.snapshot.versionId,
-        appliedAt,
-      });
-      return { ok: true };
     } catch (e: any) {
       const error = String(e?.message ?? e ?? 'sync failed').trim();
-      await recordTargetOutcome({
+      await persistOutcome({
         syncSetId: opts.syncSet.id,
         targetId: droneId,
         targetKind: 'drone',
         state: 'error',
         error,
       });
-      return { ok: false, error };
+      return { ok: false, error, phases };
     }
+    await persistOutcome({
+      syncSetId: opts.syncSet.id,
+      targetId: droneId,
+      targetKind: 'drone',
+      state: 'synced',
+      appliedVersionId: opts.snapshot.versionId,
+      appliedAt,
+    });
+    return { ok: true, phases };
   }
 
   async function applyToHostTarget(opts: {
     syncSet: StoredSyncSet;
     snapshot: SyncSetSourceSnapshot;
   }): Promise<ApplySyncSetResult> {
+    const phases = emptyTargetPhases();
     const appliedAt = deps.nowIso();
+    const persistOutcome = async (outcome: SyncSetTargetOutcome) =>
+      await measurePhase(phases, 'persistOutcome', async () => await recordTargetOutcome(outcome));
     try {
-      await mirrorLocalSourceToHostTarget({
-        sourcePath: opts.snapshot.sourcePath,
-        sourceKind: opts.snapshot.sourceKind,
-        targetPath: opts.syncSet.targetPath,
-      });
-      await recordTargetOutcome({
-        syncSetId: opts.syncSet.id,
-        targetId: syncSetTargetStatusKeyForHost(),
-        targetKind: 'host',
-        state: 'synced',
-        appliedVersionId: opts.snapshot.versionId,
-        appliedAt,
-      });
-      return { ok: true };
+      await measurePhase(phases, 'copyTarget', async () =>
+        await mirrorLocalSourceToHostTarget({
+          sourcePath: opts.snapshot.sourcePath,
+          sourceKind: opts.snapshot.sourceKind,
+          targetPath: opts.syncSet.targetPath,
+        }),
+      );
     } catch (e: any) {
       const error = String(e?.message ?? e ?? 'sync failed').trim();
-      await recordTargetOutcome({
+      await persistOutcome({
         syncSetId: opts.syncSet.id,
         targetId: syncSetTargetStatusKeyForHost(),
         targetKind: 'host',
         state: 'error',
         error,
       });
-      return { ok: false, error };
+      return { ok: false, error, phases };
     }
+    await persistOutcome({
+      syncSetId: opts.syncSet.id,
+      targetId: syncSetTargetStatusKeyForHost(),
+      targetKind: 'host',
+      state: 'synced',
+      appliedVersionId: opts.snapshot.versionId,
+      appliedAt,
+    });
+    return { ok: true, phases };
   }
 
   return {
@@ -253,7 +325,7 @@ export function createSyncSetService(deps: CreateSyncSetServiceDeps) {
     async syncSetsOverlapRepository(repositoryPathRaw: unknown): Promise<boolean> {
       const repositoryPath = String(repositoryPathRaw ?? '').trim();
       if (!repositoryPath) return false;
-      const syncSets = await storedSyncSets();
+      const syncSets = await storedSyncSetDefinitions();
       return syncSets.some((syncSet) =>
         syncSetTargetOverlapsRepository(syncSet.targetPath, repositoryPath),
       );
@@ -375,26 +447,86 @@ export function createSyncSetService(deps: CreateSyncSetServiceDeps) {
     }): Promise<ApplyAllSyncSetsToDroneResult> {
       const droneId = deps.normalizeDroneIdentity(opts.droneId);
       if (!droneId || !opts.droneEntry) return { repositoryFilesMayHaveChanged: false };
-      const regAny: any = await deps.loadRegistry();
-      const syncSets = await storedSyncSets(regAny);
+      const startedAt = performance.now();
+      const phases: SyncSetApplyPhases = {
+        snapshot: 0,
+        ...emptyTargetPhases(),
+      };
+      const loadStartedAt = performance.now();
+      let syncSets: StoredSyncSet[];
+      try {
+        syncSets = await storedSyncSetDefinitions();
+      } catch (error) {
+        const loadSyncSetsMs = performance.now() - loadStartedAt;
+        deps.logInfo?.('shared path sync timing', {
+          at: deps.nowIso(),
+          droneId,
+          outcome: 'failed',
+          durationMs: roundedMs(performance.now() - startedAt),
+          syncSetCount: 0,
+          phases: { loadSyncSets: roundedMs(loadSyncSetsMs) },
+          error: String((error as any)?.message ?? error),
+        });
+        throw error;
+      }
+      const loadSyncSetsMs = performance.now() - loadStartedAt;
       const repositoryPath = String(
         opts.repositoryPath ?? opts.droneEntry?.repo?.dest ?? '',
       ).trim();
       let repositoryFilesMayHaveChanged = false;
+      const syncSetTimings: Array<{
+        syncSetId: string;
+        sourceBytes: number | null;
+        outcome: 'completed' | 'failed';
+        durationMs: number;
+      }> = [];
       for (const syncSet of syncSets) {
+        const syncSetStartedAt = performance.now();
+        let sourceBytes: number | null = null;
+        let outcome: 'completed' | 'failed' = 'failed';
         if (repositoryPath && syncSetTargetOverlapsRepository(syncSet.targetPath, repositoryPath)) {
           // Treat even a failed application as potentially mutating: file copies
           // can fail after partially updating their target.
           repositoryFilesMayHaveChanged = true;
         }
         try {
-          const snapshot = await computeSyncSetSourceSnapshot(syncSet);
+          let snapshot: SyncSetSourceSnapshot;
+          try {
+            snapshot = await measurePhase(
+              phases,
+              'snapshot',
+              async () => await computeSyncSetSourceSnapshot(syncSet),
+            );
+            sourceBytes = snapshot.totalBytes;
+          } catch (e: any) {
+            const error = String(e?.message ?? e ?? 'sync failed').trim();
+            await measurePhase(phases, 'persistOutcome', async () =>
+              await recordTargetOutcome({
+                syncSetId: syncSet.id,
+                targetId: droneId,
+                targetKind: 'drone',
+                state: 'error',
+                error,
+              }),
+            );
+            deps.logWarn('sync set snapshot failed during provisioning', {
+              syncSetId: syncSet.id,
+              droneId,
+              error,
+            });
+            continue;
+          }
           const result = await applyToDroneTarget({
             syncSet,
             snapshot,
             droneId,
             droneEntry: opts.droneEntry,
           });
+          phases.droneLockWait += result.phases.droneLockWait;
+          phases.prepareTarget += result.phases.prepareTarget;
+          phases.copyTarget += result.phases.copyTarget;
+          phases.persistOutcome += result.phases.persistOutcome;
+          outcome = result.ok ? 'completed' : 'failed';
           if (!result.ok) {
             deps.logWarn('sync set apply failed during provisioning', {
               syncSetId: syncSet.id,
@@ -404,20 +536,38 @@ export function createSyncSetService(deps: CreateSyncSetServiceDeps) {
           }
         } catch (e: any) {
           const error = String(e?.message ?? e ?? 'sync failed').trim();
-          await recordTargetOutcome({
-            syncSetId: syncSet.id,
-            targetId: droneId,
-            targetKind: 'drone',
-            state: 'error',
-            error,
-          });
-          deps.logWarn('sync set snapshot failed during provisioning', {
+          deps.logWarn('sync set apply failed during provisioning', {
             syncSetId: syncSet.id,
             droneId,
             error,
           });
+        } finally {
+          syncSetTimings.push({
+            syncSetId: syncSet.id,
+            sourceBytes,
+            outcome,
+            durationMs: roundedMs(performance.now() - syncSetStartedAt),
+          });
         }
       }
+      deps.logInfo?.('shared path sync timing', {
+        at: deps.nowIso(),
+        droneId,
+        outcome: syncSetTimings.every((timing) => timing.outcome === 'completed')
+          ? 'completed'
+          : 'partial',
+        durationMs: roundedMs(performance.now() - startedAt),
+        syncSetCount: syncSets.length,
+        phases: {
+          loadSyncSets: roundedMs(loadSyncSetsMs),
+          snapshot: roundedMs(phases.snapshot),
+          droneLockWait: roundedMs(phases.droneLockWait),
+          prepareTarget: roundedMs(phases.prepareTarget),
+          copyTarget: roundedMs(phases.copyTarget),
+          persistOutcome: roundedMs(phases.persistOutcome),
+        },
+        syncSets: syncSetTimings,
+      });
       return { repositoryFilesMayHaveChanged };
     },
   };

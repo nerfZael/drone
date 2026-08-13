@@ -62,36 +62,18 @@ type ManagedDroneStateSyncDependencies = {
 
 const REQUIRED_CAPABILITY = 'managed-state-v1';
 
-function daemonCapabilityCacheKey(droneId: string, droneEntry: any): string {
-  return [
-    droneId,
-    String(droneEntry?.containerName ?? droneEntry?.name ?? ''),
-    Number(droneEntry?.hostPort ?? 0),
-  ].join(':');
-}
-
 export function createManagedDroneStateSyncService(deps: ManagedDroneStateSyncDependencies) {
-  const capableDaemons = new Set<string>();
-
   async function ensureCapability(
-    droneId: string,
     droneEntry: any,
     client: DroneClient,
-    forceProbe = false,
     measure: <T>(name: string, run: () => Promise<T>) => Promise<T>,
   ): Promise<void> {
-    const cacheKey = daemonCapabilityCacheKey(droneId, droneEntry);
-    if (!forceProbe && capableDaemons.has(cacheKey)) return;
-
     const health = await measure(
       'probeDaemonCapability',
       async () => await deps.daemonHealth(client),
     );
     const capabilities = Array.isArray(health?.capabilities) ? health.capabilities : [];
-    if (capabilities.includes(REQUIRED_CAPABILITY)) {
-      capableDaemons.add(cacheKey);
-      return;
-    }
+    if (capabilities.includes(REQUIRED_CAPABILITY)) return;
 
     const containerName = String(droneEntry?.containerName ?? droneEntry?.name ?? '').trim();
     const containerPort = Number(droneEntry?.containerPort ?? NaN);
@@ -114,7 +96,6 @@ export function createManagedDroneStateSyncService(deps: ManagedDroneStateSyncDe
     if (!upgradedCapabilities.includes(REQUIRED_CAPABILITY)) {
       throw new Error(`upgraded drone daemon does not support ${REQUIRED_CAPABILITY}`);
     }
-    capableDaemons.add(cacheKey);
   }
 
   async function syncManagedFilesForDrone(opts: SyncOptions): Promise<ManagedDroneStateSyncResult> {
@@ -194,7 +175,6 @@ export function createManagedDroneStateSyncService(deps: ManagedDroneStateSyncDe
         const clientStartedAt = performance.now();
         const client = deps.daemonClientForDrone(droneEntry);
         record('resolveDaemonClient', performance.now() - clientStartedAt);
-        await ensureCapability(droneId, droneEntry, client, false, measure);
         try {
           const response = await measure(
             'applyManagedStateRequest',
@@ -217,8 +197,10 @@ export function createManagedDroneStateSyncService(deps: ManagedDroneStateSyncDe
           }
         } catch (error) {
           if (!(error instanceof DroneApiRequestError) || error.statusCode !== 404) throw error;
-          capableDaemons.delete(daemonCapabilityCacheKey(droneId, droneEntry));
-          await ensureCapability(droneId, droneEntry, client, true, measure);
+          // The managed-state request is itself the cheapest and most authoritative capability
+          // probe. Only pay for a separate health request and daemon upgrade when an older daemon
+          // actually reports that the endpoint is missing.
+          await ensureCapability(droneEntry, client, measure);
           const response = await measure(
             'retryManagedStateRequest',
             async () => await deps.managedDroneSync(client, payload),

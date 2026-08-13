@@ -2958,6 +2958,9 @@ function createHubRuntimeGraph(
     logWarn: (message, meta) => {
       hubLog('warn', message, meta);
     },
+    logInfo: (message, meta) => {
+      hubLog('info', message, meta);
+    },
   });
   const {
     resolveManagedChatMcpEnv,

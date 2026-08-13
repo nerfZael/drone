@@ -76,6 +76,31 @@ describe('sync set helpers', () => {
     });
   });
 
+  test('computeSyncSetSourceSnapshot hashes a small single-file source', async () => {
+    await withTempDroneDataDir('drone-sync-sets-', async (droneDataDir) => {
+      const sourcePath = path.join(droneDataDir, 'auth.json');
+      await fs.writeFile(sourcePath, '{"token":"first"}\n');
+      const syncSet = buildStoredSyncSet({
+        id: 'sync-file',
+        label: 'Auth file',
+        sourceType: 'host-path',
+        sourcePath,
+        targetPath: '/root/.codex/auth.json',
+        applyToHost: false,
+        createdAt: '2026-04-10T00:00:00.000Z',
+        updatedAt: '2026-04-10T00:00:00.000Z',
+      });
+
+      const first = await computeSyncSetSourceSnapshot(syncSet);
+      expect(first).toMatchObject({ sourceKind: 'file', fileCount: 1 });
+      expect(first.totalBytes).toBe(18);
+
+      await fs.writeFile(sourcePath, '{"token":"other"}\n');
+      const second = await computeSyncSetSourceSnapshot(syncSet);
+      expect(second.versionId).not.toBe(first.versionId);
+    });
+  });
+
   test('mirrorLocalSourceToHostTarget fully mirrors directories and removes extras', async () => {
     await withTempDroneDataDir('drone-sync-sets-', async (droneDataDir) => {
       const sourcePath = path.join(droneDataDir, 'source');

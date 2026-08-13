@@ -58,6 +58,10 @@ export type DvmSessionReadOptions = {
 
 export type DvmCopyToContainerOptions = {
   clean?: boolean;
+  /** The caller guarantees that the container exists and is already running. */
+  containerAlreadyReady?: boolean;
+  /** The caller guarantees that the destination parent/target has been prepared. */
+  targetAlreadyPrepared?: boolean;
 };
 
 export type DvmCopyFromContainerOptions = {
@@ -386,11 +390,12 @@ export class DvmApi {
     containerName: string,
     cmd: string,
     args: string[] = [],
-    options?: { timeoutMs?: number },
+    options?: { timeoutMs?: number; containerAlreadyReady?: boolean },
   ): Promise<DvmRunResult> {
     try {
       return await this.manager.docker.execCommandDetailed(containerName, [cmd, ...args], {
         timeoutMs: options?.timeoutMs,
+        containerAlreadyReady: options?.containerAlreadyReady,
       });
     } catch (error: any) {
       return { code: 1, stdout: '', stderr: error?.message ?? String(error) };
@@ -617,7 +622,9 @@ export class DvmApi {
     const srcStat = await fs.promises.stat(absSrc);
     const targetParent = srcStat.isDirectory() ? target : path.posix.dirname(target) || '/';
 
-    await this.manager.docker.execCommand(containerName, ['bash', '-lc', 'true']);
+    if (!options.containerAlreadyReady) {
+      await this.manager.docker.execCommand(containerName, ['bash', '-lc', 'true']);
+    }
 
     if (options.clean) {
       await this.manager.docker.execCommand(containerName, [
@@ -627,13 +634,21 @@ export class DvmApi {
       ]);
     }
 
-    await this.manager.docker.execCommand(containerName, [
-      'bash',
-      '-lc',
-      `mkdir -p ${JSON.stringify(targetParent)}`,
-    ]);
+    if (!options.targetAlreadyPrepared) {
+      await this.manager.docker.execCommand(containerName, [
+        'bash',
+        '-lc',
+        `mkdir -p ${JSON.stringify(targetParent)}`,
+      ]);
+    }
 
-    await this.manager.docker.copyToContainer(containerName, absSrc, target);
+    if (options.containerAlreadyReady) {
+      await this.manager.docker.copyToContainer(containerName, absSrc, target, {
+        containerAlreadyReady: true,
+      });
+    } else {
+      await this.manager.docker.copyToContainer(containerName, absSrc, target);
+    }
   }
 
   async copyFromContainer(
@@ -820,6 +835,12 @@ export class DvmApi {
     const containerName = String(options.containerName);
     const dest = prepared.destinationPath;
     const bundlePathInContainer = prepared.bundlePathInContainer;
+    const execInReadyContainer = async (command: string[]) =>
+      options.containerAlreadyReady
+        ? await this.manager.docker.execCommand(containerName, command, {
+            containerAlreadyReady: true,
+          })
+        : await this.manager.docker.execCommand(containerName, command);
     try {
       if (options.containerAlreadyReady) {
         timingPhases.set('ensureContainer', 0);
@@ -834,12 +855,18 @@ export class DvmApi {
             ),
         );
       }
-      await measureTiming('ensureGit', async () => await this.manager.ensureGit(containerName));
+      await measureTiming(
+        'ensureGit',
+        async () =>
+          options.containerAlreadyReady
+            ? await this.manager.ensureGit(containerName, { containerAlreadyReady: true })
+            : await this.manager.ensureGit(containerName),
+      );
 
       await measureTiming(
         'prepareBundleDestination',
         async () =>
-          await this.manager.docker.execCommand(containerName, [
+          await execInReadyContainer([
             'sh',
             '-lc',
             `mkdir -p ${JSON.stringify(path.posix.dirname(bundlePathInContainer))}`,
@@ -848,11 +875,18 @@ export class DvmApi {
       await measureTiming(
         'copyBundleToContainer',
         async () =>
-          await this.manager.docker.copyToContainer(
-            containerName,
-            prepared.bundlePath,
-            bundlePathInContainer,
-          ),
+          options.containerAlreadyReady
+            ? await this.manager.docker.copyToContainer(
+                containerName,
+                prepared.bundlePath,
+                bundlePathInContainer,
+                { containerAlreadyReady: true },
+              )
+            : await this.manager.docker.copyToContainer(
+                containerName,
+                prepared.bundlePath,
+                bundlePathInContainer,
+              ),
       );
 
       const branch = options.branch ? String(options.branch) : '';
@@ -885,7 +919,7 @@ export class DvmApi {
       await measureTiming(
         'cloneAndConfigureRepository',
         async () =>
-          await this.manager.docker.execCommand(containerName, ['bash', '-lc', cloneScript]),
+          await execInReadyContainer(['bash', '-lc', cloneScript]),
       );
       timingOutcome = 'completed';
       return {

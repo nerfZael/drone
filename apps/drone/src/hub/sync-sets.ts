@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -75,6 +76,7 @@ export type ParsedSyncSetMutationInput = {
 };
 
 const SYNC_SET_SCOPE_ALL: SyncSetScope = { type: 'all' };
+const SYNCHRONOUS_SINGLE_FILE_SNAPSHOT_MAX_BYTES = 1024 * 1024;
 
 function sanitizeTimestamp(raw: unknown): string | null {
   const value = typeof raw === 'string' ? raw.trim() : '';
@@ -334,6 +336,26 @@ export async function computeSyncSetSourceSnapshot(
   if (!sourcePath) throw new Error('sync set source path is missing');
   const resolvedSourcePath = path.resolve(sourcePath);
   const hash = crypto.createHash('sha256');
+  // Tiny one-file sync sets (most notably auth/config files) are read synchronously. Under heavy
+  // provisioning load, two libuv filesystem jobs for lstat + read can otherwise sit behind
+  // unrelated Docker/filesystem work for over a second even though the file itself takes <1 ms to
+  // read. Keep larger files and directory walks asynchronous so they cannot monopolize the Hub.
+  const sourceStat = fsSync.lstatSync(resolvedSourcePath);
+  if (sourceStat.isSymbolicLink()) {
+    throw new Error(`symlinks are not supported in sync-set sources: ${resolvedSourcePath}`);
+  }
+  if (sourceStat.isFile() && sourceStat.size <= SYNCHRONOUS_SINGLE_FILE_SNAPSHOT_MAX_BYTES) {
+    const contents = fsSync.readFileSync(resolvedSourcePath);
+    hash.update(`file::${sourceStat.size}\n`);
+    hash.update(contents);
+    return {
+      sourcePath: resolvedSourcePath,
+      sourceKind: 'file',
+      versionId: hash.digest('hex'),
+      fileCount: 1,
+      totalBytes: contents.length,
+    };
+  }
   const walked = await walkSnapshotNode(hash, resolvedSourcePath, '');
   return {
     sourcePath: resolvedSourcePath,
@@ -379,6 +401,7 @@ export async function mirrorLocalSourceToContainerTarget(opts: {
   sourceKind: 'file' | 'directory';
   targetPath: string;
   timeoutMs?: number;
+  onTiming?: (phase: 'prepareTarget' | 'copyTarget', durationMs: number) => void;
 }): Promise<void> {
   const targetPath = path.posix.normalize(String(opts.targetPath ?? '').trim());
   if (!targetPath.startsWith('/')) {
@@ -392,8 +415,12 @@ export async function mirrorLocalSourceToContainerTarget(opts: {
     'rm -rf -- "$target"',
     ...(opts.sourceKind === 'directory' ? ['mkdir -p "$target"'] : []),
   ].join('\n');
+  const prepareStartedAt = performance.now();
   const cleanup = await dvmExec(opts.containerName, 'bash', ['-lc', cleanupScript], {
     timeoutMs: opts.timeoutMs,
+    containerAlreadyReady: true,
+  }).finally(() => {
+    opts.onTiming?.('prepareTarget', performance.now() - prepareStartedAt);
   });
   if (cleanup.code !== 0) {
     throw new Error(
@@ -404,9 +431,14 @@ export async function mirrorLocalSourceToContainerTarget(opts: {
     const names = await fs.readdir(opts.sourcePath);
     if (names.length === 0) return;
   }
+  const copyStartedAt = performance.now();
   await dvmCopyToContainer(opts.containerName, opts.sourcePath, targetPath, {
     clean: false,
     timeoutMs: opts.timeoutMs,
+    containerAlreadyReady: true,
+    targetAlreadyPrepared: true,
+  }).finally(() => {
+    opts.onTiming?.('copyTarget', performance.now() - copyStartedAt);
   });
 }
 

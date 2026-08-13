@@ -1,5 +1,9 @@
 import { getDroneLifecycleRepository, type CanonicalDroneLifecycleRecord, type CanonicalDroneLifecycleState } from '../host/drone-lifecycle-repository';
-import { loadRegistry, updateRegistry } from '../host/registry';
+import {
+  loadRegistry,
+  loadRegistryCompatibilityBase,
+  updateRegistry,
+} from '../host/registry';
 import { findDroneEntryByIdentity, normalizeDroneIdentity } from './drone-lifecycle-registry';
 import { ensureCanonicalGroup, listCanonicalGroups } from './groups-repositories';
 import { patchCanonicalDroneLifecycleBatch } from './drone-lifecycle-service';
@@ -14,7 +18,9 @@ async function repositoryWithBackfill() {
     if ((globalThis as any).Bun) return null;
     throw new Error('canonical drone lifecycle repository is unavailable');
   }
-  await repository.backfillLegacyInsertOnly(await loadRegistry());
+  if (!repository.isLegacyBackfillComplete()) {
+    await repository.backfillLegacyInsertOnly(await loadRegistryCompatibilityBase());
+  }
   return repository;
 }
 

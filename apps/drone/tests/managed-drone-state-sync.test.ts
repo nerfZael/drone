@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
+import { DroneApiRequestError } from '../src/host/api';
 import { createManagedDroneStateSyncService } from '../src/hub/managed-drone-state-sync';
 
 function createSerialLock() {
@@ -15,7 +16,7 @@ function createSerialLock() {
 }
 
 describe('managed drone state sync service', () => {
-  test('serializes projection reads with writes and caches the daemon capability', async () => {
+  test('serializes projection reads with writes without probing a supported daemon', async () => {
     let sourceContent = 'old';
     let readCount = 0;
     let releaseFirstRead!: () => void;
@@ -92,7 +93,7 @@ describe('managed drone state sync service', () => {
     await Promise.all([first, second]);
 
     expect(appliedContents).toEqual(['old', 'new']);
-    expect(healthCalls).toBe(1);
+    expect(healthCalls).toBe(0);
     expect(timingSnapshots).toHaveLength(2);
     expect(timingSnapshots[0]).toMatchObject({
       droneId: 'test',
@@ -107,7 +108,6 @@ describe('managed drone state sync service', () => {
         loadProjectionInputs: expect.any(Number),
         buildPayload: expect.any(Number),
         resolveDaemonClient: expect.any(Number),
-        probeDaemonCapability: expect.any(Number),
         applyManagedStateRequest: expect.any(Number),
       },
     });
@@ -145,6 +145,9 @@ describe('managed drone state sync service', () => {
       },
       managedDroneSync: async () => {
         syncCalls += 1;
+        if (syncCalls === 1) {
+          throw new DroneApiRequestError(404, 'missing managed-state endpoint');
+        }
       },
       upgradeDaemon: async () => {
         upgradeCalls += 1;
@@ -168,7 +171,7 @@ describe('managed drone state sync service', () => {
       healthCalls: 2,
       upgradeCalls: 1,
       readyCalls: 1,
-      syncCalls: 1,
+      syncCalls: 2,
     });
   });
 });

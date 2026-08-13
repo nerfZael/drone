@@ -45,6 +45,29 @@ describe('copyToContainer path handling', () => {
     );
   });
 
+  test('docker client skips fleet discovery for a caller-verified container', async () => {
+    const mockedSpawn = spawn as jest.Mock;
+    const proc = createMockProcess();
+    mockedSpawn.mockReturnValue(proc);
+    jest.spyOn(fs.promises, 'stat').mockResolvedValue({ isDirectory: () => false } as fs.Stats);
+
+    const client = new DockerClient();
+    const getContainer = jest.spyOn(client, 'getContainer');
+
+    const copy = client.copyToContainer('demo', '/tmp/auth.json', '/root/.codex/auth.json', {
+      containerAlreadyReady: true,
+    });
+    setImmediate(() => proc.emit('exit', 0));
+    await copy;
+
+    expect(getContainer).not.toHaveBeenCalled();
+    expect(mockedSpawn).toHaveBeenCalledWith(
+      'docker',
+      ['cp', '/tmp/auth.json', 'demo:/root/.codex/auth.json'],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+  });
+
   test('api creates only the parent directory when copying a file', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dvm-copy-to-container-'));
     const srcFile = path.join(tempRoot, 'skill.json');
@@ -74,6 +97,36 @@ describe('copyToContainer path handling', () => {
         'demo',
         path.resolve(srcFile),
         '/dvm-data/home/.agents/skills/.drone-managed-skills.json',
+      );
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('api can copy directly when the caller already prepared a running container target', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dvm-copy-prepared-target-'));
+    const srcFile = path.join(tempRoot, 'auth.json');
+    fs.writeFileSync(srcFile, '{}\n', 'utf8');
+
+    const execCommand = jest.fn(async () => '');
+    const copyToContainer = jest.fn(async () => {});
+    const api = new DvmApi({
+      manager: { docker: { execCommand, copyToContainer } } as any,
+      baseConfig: {} as any,
+    });
+
+    try {
+      await api.copyToContainer('demo', srcFile, '/root/.codex/auth.json', {
+        containerAlreadyReady: true,
+        targetAlreadyPrepared: true,
+      });
+
+      expect(execCommand).not.toHaveBeenCalled();
+      expect(copyToContainer).toHaveBeenCalledWith(
+        'demo',
+        path.resolve(srcFile),
+        '/root/.codex/auth.json',
+        { containerAlreadyReady: true },
       );
     } finally {
       fs.rmSync(tempRoot, { recursive: true, force: true });
