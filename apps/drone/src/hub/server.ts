@@ -5459,7 +5459,6 @@ async function startDroneHubApiServerWithLifecycle(
     createHostAuthoredMirrorCommit,
     updateHostRef,
     gitTopLevel,
-    droneRepoBaseSha,
     dvmRepoHeadSha,
     runGitInDrone,
     runHostCommand,
