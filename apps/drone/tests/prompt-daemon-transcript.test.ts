@@ -1001,6 +1001,105 @@ readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line
     });
   }, 25_000);
 
+  test('completes a run when an implicit continuation uses a different turn id', async () => {
+    const port = await allocatePort();
+    const dataDir = path.join(tempRoot, `daemon-codex-implicit-turn-${port}`);
+    fs.mkdirSync(dataDir, { recursive: true });
+    const fakeServerPath = path.join(tempRoot, `fake-codex-implicit-turn-${port}.js`);
+    fs.writeFileSync(
+      fakeServerPath,
+      `
+const readline = require('node:readline');
+const send = (message) => process.stdout.write(JSON.stringify(message) + '\\n');
+readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line', (line) => {
+  const message = JSON.parse(line);
+  if (message.method === 'initialize') {
+    send({ id: message.id, result: { userAgent: 'fake-codex-implicit-turn' } });
+    return;
+  }
+  if (message.method === 'initialized') return;
+  if (message.method === 'thread/start') {
+    send({ id: message.id, result: { thread: { id: 'thread-implicit', turns: [] } } });
+    return;
+  }
+  if (message.method === 'turn/start') {
+    send({ id: message.id, result: { turn: { id: 'allocated-turn', status: 'inProgress', items: [] } } });
+    send({ method: 'item/started', params: { threadId: 'thread-implicit', turnId: 'implicit-turn', item: { id: 'answer-implicit', type: 'agentMessage', text: '' } } });
+    send({ method: 'item/completed', params: { threadId: 'thread-implicit', turnId: 'implicit-turn', item: { id: 'answer-implicit', type: 'agentMessage', text: 'Implicit continuation completed.' } } });
+    send({ method: 'turn/completed', params: { threadId: 'thread-implicit', turn: { id: 'implicit-turn', status: 'completed', items: [] } } });
+  }
+});
+`,
+      'utf8',
+    );
+
+    const token = 'daemon-token';
+    const daemon = Bun.spawn(
+      [
+        process.execPath,
+        daemonEntry,
+        '--host',
+        '127.0.0.1',
+        '--port',
+        String(port),
+        '--data-dir',
+        dataDir,
+        '--token',
+        token,
+      ],
+      { cwd: process.cwd(), stdout: 'ignore', stderr: 'pipe' },
+    );
+    processes.push(daemon);
+    const baseUrl = `http://127.0.0.1:${port}`;
+    await waitForHealth(baseUrl, token, daemon);
+
+    const id = `codex-implicit-turn-${port}`;
+    const enqueueResponse = await fetch(`${baseUrl}/v1/codex/enqueue`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        id,
+        sessionKey: `implicit-turn-session-${port}`,
+        launchScript: `exec ${process.execPath} ${fakeServerPath}`,
+        prompt: 'Join the implicit continuation.',
+      }),
+    });
+    expect(enqueueResponse.status).toBe(202);
+
+    const completed = await waitForPromptJob(baseUrl, token, id);
+    expect(completed).toMatchObject({
+      state: 'done',
+      codexAppServer: {
+        turnId: 'implicit-turn',
+        run: { state: 'done', turnId: 'implicit-turn' },
+      },
+      transcript: {
+        message: 'Implicit continuation completed.',
+        terminalEvent: 'turn.completed',
+      },
+    });
+
+    const runPath = path.join(dataDir, 'prompts', 'runs', `${id}.json`);
+    const messagePath = path.join(dataDir, 'prompts', 'jobs', `${id}.json`);
+    for (const targetPath of [runPath, messagePath]) {
+      const persisted = JSON.parse(fs.readFileSync(targetPath, 'utf8'));
+      persisted.state = 'running';
+      delete persisted.finishedAt;
+      delete persisted.exitCode;
+      fs.writeFileSync(targetPath, JSON.stringify(persisted, null, 2));
+    }
+
+    const recovered = await waitForPromptJob(baseUrl, token, id);
+    expect(recovered).toMatchObject({
+      state: 'done',
+      codexAppServer: { run: { state: 'done' } },
+      transcript: { terminalEvent: 'turn.completed' },
+    });
+  }, 25_000);
+
   test('delivers every Codex ASAP prompt through same-turn App Server steering', async () => {
     const port = await allocatePort();
     const dataDir = path.join(tempRoot, `daemon-codex-steering-${port}`);

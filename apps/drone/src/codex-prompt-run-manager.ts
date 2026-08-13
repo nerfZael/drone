@@ -124,6 +124,7 @@ type CodexRunSession = {
   threadId: string | null;
   threadReady: boolean;
   activeTurnId: string | null;
+  observedTurnIds: Set<string>;
   activeRun: CodexPromptRun | null;
   startingRun: CodexPromptRun | null;
   queuedMessageIds: string[];
@@ -266,11 +267,24 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
   async failInterrupted(message: TMessage, reason: string, alreadyMutating = false): Promise<void> {
     const run = await this.runForMessage(message);
     if (run) {
-      if (isTerminal(run.state)) {
-        const terminalRun =
-          run.pendingApprovals && run.pendingApprovals.length > 0
-            ? { ...run, pendingApprovals: [], updatedAt: this.now() }
-            : run;
+      const recoveredTerminal = terminalRunResultFromStdout(run.stdout);
+      if (isTerminal(run.state) || recoveredTerminal) {
+        const recoveredAt = this.now();
+        const terminalRun: CodexPromptRun =
+          recoveredTerminal && !isTerminal(run.state)
+            ? {
+                ...run,
+                state: recoveredTerminal.state,
+                pendingApprovals: [],
+                finishedAt: recoveredAt,
+                updatedAt: recoveredAt,
+                ...(recoveredTerminal.state === 'failed'
+                  ? { error: recoveredTerminal.error ?? run.error ?? 'Codex turn failed' }
+                  : { error: undefined }),
+              }
+            : run.pendingApprovals && run.pendingApprovals.length > 0
+              ? { ...run, pendingApprovals: [], updatedAt: recoveredAt }
+              : run;
         const save = async () => {
           if (terminalRun !== run) await this.options.saveRun(terminalRun);
           await this.saveTerminalRunMessages(terminalRun);
@@ -358,6 +372,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
       threadId: spec.threadId ?? spec.existingThreadId ?? null,
       threadReady: false,
       activeTurnId: null,
+      observedTurnIds: new Set(),
       activeRun: null,
       startingRun: null,
       queuedMessageIds: [],
@@ -544,6 +559,9 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
         );
       }
       const currentRun = session.activeRun ?? session.startingRun;
+      if (currentRun && turnId && notification.method !== 'turn/completed') {
+        session.observedTurnIds.add(turnId);
+      }
       const events = translateCodexAppServerNotification(translatedNotification);
       if (currentRun && events.length > 0) {
         const updated = await this.options.mutate(() =>
@@ -604,6 +622,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
       return;
     }
     const startedAt = this.now();
+    session.observedTurnIds.clear();
     let run = await this.options.mutate(async () => {
       const created = await this.options.createRun(message, startedAt);
       await this.options.saveRun(created);
@@ -640,6 +659,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
       const turnId = String(response?.turn?.id ?? session.activeTurnId ?? '').trim();
       if (!turnId) throw new Error('Codex App Server did not return a turn id');
       session.activeTurnId = turnId;
+      session.observedTurnIds.add(turnId);
       run = { ...run, threadId, turnId, updatedAt: this.now() };
       await this.options.mutate(async () => {
         await this.options.saveRun(run);
@@ -722,7 +742,12 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     if (!run) return;
     const turn = notification.params?.turn ?? {};
     const notificationTurnId = String(turn?.id ?? '').trim();
-    if (session.activeTurnId && notificationTurnId && notificationTurnId !== session.activeTurnId) {
+    if (
+      session.activeTurnId &&
+      notificationTurnId &&
+      notificationTurnId !== session.activeTurnId &&
+      !session.observedTurnIds.has(notificationTurnId)
+    ) {
       return;
     }
     const status = String(turn?.status ?? 'completed');
@@ -743,6 +768,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     });
     session.activeRun = null;
     session.activeTurnId = null;
+    session.observedTurnIds.clear();
     session.approvalResolutions.clear();
     session.lastUsedAt = Date.now();
     await this.startNextRun(session);
@@ -816,6 +842,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     session.startingRun = null;
     session.queuedMessageIds = [];
     session.activeTurnId = null;
+    session.observedTurnIds.clear();
     if (this.sessions.get(session.key) === session) this.sessions.delete(session.key);
   }
 
@@ -970,6 +997,47 @@ function terminalState(status: string): CodexPromptState {
   if (status === 'completed') return 'done';
   if (status === 'interrupted') return 'canceled';
   return 'failed';
+}
+
+function terminalRunResultFromStdout(
+  stdout: string | undefined,
+): { state: Extract<CodexPromptState, 'done' | 'failed' | 'canceled'>; error?: string } | null {
+  let terminal: {
+    state: Extract<CodexPromptState, 'done' | 'failed' | 'canceled'>;
+    error?: string;
+  } | null = null;
+  for (const line of String(stdout ?? '').split(/\r?\n/)) {
+    let event: any;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!event || typeof event !== 'object' || Array.isArray(event)) continue;
+    const type = String(event.type ?? '').trim();
+    if (type === 'turn.completed') {
+      const status = String(event.status ?? 'completed')
+        .trim()
+        .toLowerCase();
+      terminal =
+        status === 'completed'
+          ? { state: 'done' }
+          : status === 'interrupted' || status === 'canceled' || status === 'cancelled'
+            ? { state: 'canceled' }
+            : {
+                state: 'failed',
+                error: errorMessage(event.error ?? `Codex turn ${status || 'failed'}`),
+              };
+    } else if (type === 'response.completed') {
+      terminal = { state: 'done' };
+    } else if (type === 'response.failed' || type === 'error') {
+      terminal = {
+        state: 'failed',
+        error: errorMessage(event.error ?? event.message ?? 'Codex turn failed'),
+      };
+    }
+  }
+  return terminal;
 }
 
 function isTerminal(state: CodexPromptState): boolean {
