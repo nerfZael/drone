@@ -26,6 +26,7 @@ type ChangeRequestFilter = 'all' | 'open' | 'merged' | 'closed';
 export function DroneChangeRequestsDock({
   droneId,
   chatName,
+  chatNames,
   repoAttached,
   repoPath,
   disabled,
@@ -34,6 +35,7 @@ export function DroneChangeRequestsDock({
 }: {
   droneId: string;
   chatName: string;
+  chatNames: readonly string[];
   repoAttached: boolean;
   repoPath: string;
   disabled: boolean;
@@ -48,11 +50,15 @@ export function DroneChangeRequestsDock({
   const [showCreate, setShowCreate] = React.useState(false);
   const [checkedNumbers, setCheckedNumbers] = React.useState<Set<number>>(() => new Set());
   const [query, setQuery] = React.useState('');
-  const [statusFilter, setStatusFilter] = React.useState<ChangeRequestFilter>('all');
+  const [statusFilter, setStatusFilter] = React.useState<ChangeRequestFilter>('open');
   const [createTitle, setCreateTitle] = React.useState('');
   const [createDescription, setCreateDescription] = React.useState('');
   const [createDestination, setCreateDestination] = React.useState('');
   const requestedNumberRef = React.useRef<number | null>(null);
+  const hasMultipleChats = React.useMemo(
+    () => new Set(chatNames.map((name) => String(name ?? '').trim()).filter(Boolean)).size > 1,
+    [chatNames],
+  );
   const selected = requests.find((request) => request.number === selectedNumber) ?? null;
   const requestCounts = React.useMemo(
     () => ({
@@ -104,7 +110,7 @@ export function DroneChangeRequestsDock({
             {request.conflicted ? (
               <span className="text-[var(--text-9)] text-[var(--red)]">Conflicts</span>
             ) : request.stale ? (
-              <span className="text-[var(--text-9)] text-[var(--muted-dim)]">Stale</span>
+              <span className="text-[var(--text-9)] text-[var(--muted-dim)]">Out of date</span>
             ) : null}
             {!request.destinationExists && request.status === 'open' ? (
               <span className="text-[var(--text-9)] text-[var(--accent)]">New branch</span>
@@ -156,7 +162,7 @@ export function DroneChangeRequestsDock({
     setShowCreate(false);
     setCheckedNumbers(new Set());
     setQuery('');
-    setStatusFilter('all');
+    setStatusFilter('open');
     void loadRequests(false);
   }, [loadRequests]);
 
@@ -233,6 +239,7 @@ export function DroneChangeRequestsDock({
       <ChangeRequestDetail
         request={selected}
         droneId={droneId}
+        showChatName={hasMultipleChats}
         repoAttached={repoAttached}
         repoPath={repoPath}
         disabled={disabled}

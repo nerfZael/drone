@@ -2,17 +2,13 @@ import React from 'react';
 import type { ChangeRequestView } from '@drone/hub-model/change-requests';
 
 import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
-import { cn } from '../../ui/cn';
 import {
   closeChangeRequest,
   getChangeRequestByNumber,
   mergeChangeRequest,
 } from '../changeRequests/change-request-api';
 import { requestOpenChangeRequest } from '../changeRequests/change-request-navigation';
-import {
-  changeRequestStatusClasses,
-  changeRequestStatusLabel,
-} from '../changeRequests/change-request-presentation';
+import { changeRequestStatusLabel } from '../changeRequests/change-request-presentation';
 import { extractChangeRequestNumbers } from './change-request-references';
 import { IconSpinner } from './icons';
 
@@ -134,6 +130,9 @@ function LinkedChangeRequestCard({
 
   const isOpen = request?.status === 'open';
   const status = request ? changeRequestStatusLabel(request) : loading ? 'loading' : 'unavailable';
+  const displayedStatus = status.length > 0
+    ? `${status.charAt(0).toUpperCase()}${status.slice(1)}`
+    : status;
   const title = request?.title ?? `Change request #${requestNumber}`;
 
   return (
@@ -151,14 +150,27 @@ function LinkedChangeRequestCard({
           >
             <IconSpinner className="h-3 w-3" />
           </span>
+        ) : request?.status === 'merged' ? (
+          <span
+            data-change-request-state="merged"
+            aria-live="polite"
+            aria-label={`Change request state: ${displayedStatus}`}
+            className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[var(--accent-subtle)] px-2 py-1 text-[var(--text-9)] font-[var(--weight-semibold)] leading-none text-[var(--accent)]"
+          >
+            <MergedChangeRequestIcon />
+            {displayedStatus}
+          </span>
         ) : request ? (
           <span
-            className={cn(
-              'inline-flex shrink-0 rounded-full border px-2 py-1 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase leading-none',
-              changeRequestStatusClasses(request),
-            )}
+            aria-live="polite"
+            aria-label={`Change request state: ${displayedStatus}`}
+            className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-1 text-[var(--text-9)] font-[var(--weight-semibold)] leading-none ${changeRequestStatePillClassName(status)}`}
           >
-            {status}
+            <span
+              aria-hidden="true"
+              className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-80"
+            />
+            {displayedStatus}
           </span>
         ) : (
           <span className="inline-flex shrink-0 rounded-full bg-[var(--surface-strong)] px-2 py-1 text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--muted)]">
@@ -232,13 +244,6 @@ function LinkedChangeRequestCard({
                 ·
               </span>
               <span>revision {request.revision}</span>
-              <button
-                type="button"
-                onClick={openRequest}
-                className="ml-auto text-[var(--accent)] hover:underline"
-              >
-                Open in change requests
-              </button>
             </div>
           ) : null}
           {error ? (
@@ -252,6 +257,39 @@ function LinkedChangeRequestCard({
         </div>
       ) : null}
     </details>
+  );
+}
+
+function changeRequestStatePillClassName(status: string): string {
+  if (status === 'open') return 'bg-[var(--green-subtle)] text-[var(--green)]';
+  if (status === 'closed' || status === 'conflicted') {
+    return 'bg-[var(--red-subtle)] text-[var(--red)]';
+  }
+  if (status === 'out of date') {
+    return 'bg-[var(--yellow-subtle)] text-[var(--yellow)]';
+  }
+  return 'bg-[var(--surface-strong)] text-[var(--muted)]';
+}
+
+function MergedChangeRequestIcon() {
+  return (
+    <svg
+      data-icon="change-request-merged"
+      width="12"
+      height="12"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="4" cy="3" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="4" cy="13" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="11" cy="3" r="1.5" fill="currentColor" stroke="none" />
+      <path d="M4 4.5v7M11 4.5v1A5.5 5.5 0 015.5 11H4" />
+    </svg>
   );
 }
 

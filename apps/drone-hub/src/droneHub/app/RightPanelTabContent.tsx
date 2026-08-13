@@ -569,6 +569,7 @@ export function RightPanelTabContent({
               key={`${paneKey}-${drone.id}-requests`}
               droneId={drone.id}
               chatName={chatName}
+              chatNames={drone.chats}
               repoAttached={repoFeaturesEnabled}
               repoPath={drone.repoPath}
               disabled={disabled}

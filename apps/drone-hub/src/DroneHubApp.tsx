@@ -14,6 +14,7 @@ import { DesktopDeviceProvider, useDesktopDevice } from './droneHub/app/DesktopD
 import { RemoteDeviceWorkspace } from './droneHub/app/RemoteDeviceWorkspace';
 import { useIdleMonacoEditorPreload } from './droneHub/files/monaco-editor-loader';
 import { ContinuousDictationProvider } from './droneHub/chat/ContinuousDictationContext';
+import { EditorZoomController } from './droneHub/files/editor-zoom';
 
 function LocalDroneHubAppContent() {
   const { sidebarProps, overlaysProps, workspaceContentProps } = useDroneHubAppModel();
@@ -76,6 +77,7 @@ export default function DroneHubApp() {
   useIdleMonacoEditorPreload();
   return (
     <DesktopDeviceProvider>
+      <EditorZoomController />
       <AppConfirmDialogProvider>
         <ContinuousDictationProvider>
           <DroneHubAppContent />

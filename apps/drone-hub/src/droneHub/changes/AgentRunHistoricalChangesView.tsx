@@ -11,17 +11,12 @@ import {
 } from '@drone/assistant-chat';
 
 import { DiffBlock } from './DiffBlock';
-import {
-  clampDiffZoom,
-  diffZoomStyle,
-  DiffZoomControl,
-  DIFF_ZOOM_DEFAULT,
-} from './DiffZoomControl';
+import { diffZoomStyle } from './diff-zoom-style';
+import { useEditorZoomLevel } from '../files/editor-zoom';
 import { fileNameForChangesPath } from './helpers';
 import type { AgentRunChangesSelection } from './navigation';
 import {
   CHANGES_DIFF_VIEW_STORAGE_KEY,
-  CHANGES_DIFF_ZOOM_STORAGE_KEY,
   readChangesStorage,
   writeChangesStorage,
 } from './storage';
@@ -166,21 +161,13 @@ export function AgentRunHistoricalChangesView({
   const [viewType, setViewType] = React.useState<DiffViewType>(() =>
     readChangesStorage(CHANGES_DIFF_VIEW_STORAGE_KEY) === 'split' ? 'split' : 'unified',
   );
-  const [diffZoom, setDiffZoom] = React.useState<number>(() => {
-    const stored = readChangesStorage(CHANGES_DIFF_ZOOM_STORAGE_KEY);
-    if (stored === null) return DIFF_ZOOM_DEFAULT;
-    const raw = Number(stored);
-    return Number.isFinite(raw) ? clampDiffZoom(raw) : DIFF_ZOOM_DEFAULT;
-  });
+  const editorZoomLevel = useEditorZoomLevel();
   const [selectedDiff, setSelectedDiff] = React.useState<SelectedDiffState>(null);
   const [diffRetryNonce, setDiffRetryNonce] = React.useState(0);
 
   React.useEffect(() => {
     writeChangesStorage(CHANGES_DIFF_VIEW_STORAGE_KEY, viewType);
   }, [viewType]);
-  React.useEffect(() => {
-    writeChangesStorage(CHANGES_DIFF_ZOOM_STORAGE_KEY, String(diffZoom));
-  }, [diffZoom]);
 
   React.useEffect(() => {
     const controller = new AbortController();
@@ -277,8 +264,9 @@ export function AgentRunHistoricalChangesView({
 
   return (
     <div
+      data-editor-zoom-surface="historical-changes"
       className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-[var(--chat-background)] dh-changes-dock"
-      style={diffZoomStyle(diffZoom)}
+      style={diffZoomStyle(editorZoomLevel)}
     >
       <header className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--border-subtle)] px-2.5 py-1.5">
         <div className="flex min-w-0 items-center gap-2">
@@ -315,7 +303,6 @@ export function AgentRunHistoricalChangesView({
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
-          <DiffZoomControl value={diffZoom} onChange={setDiffZoom} />
           <div className="dh-changes-toolbar-group">
             <span className="dh-changes-toolbar-label">Diff</span>
             <div className="dh-changes-segment">

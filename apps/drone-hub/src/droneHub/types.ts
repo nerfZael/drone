@@ -437,8 +437,13 @@ export type RepoPullRequestChangesPayload =
       pullRequest: {
         number: number;
         title: string;
+        body?: string;
         state: RepoPullRequestState;
+        draft?: boolean;
         htmlUrl: string | null;
+        authorLogin?: string | null;
+        createdAt?: string;
+        updatedAt?: string;
         baseRefName: string;
         headRefName: string;
         baseSha: string;

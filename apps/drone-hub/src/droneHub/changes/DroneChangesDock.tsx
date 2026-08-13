@@ -15,6 +15,7 @@ import {
   UiPanelStatusStrip,
   UiPanelToolbar,
   UiResizeHandle,
+  UiTabs,
   UiToolbarButton,
   UiToolbarIconButton,
   UiToolbarSegmentedControl,
@@ -37,6 +38,7 @@ import {
 import { FileTypeIcon } from '../files/FileTypeIcon';
 import { provisioningLabel, usePaneReadiness } from '../panes/usePaneReadiness';
 import { readPullRequestMergeMethod } from '../pullRequests/pull-request-preferences';
+import { RequestOverview } from '../requests/RequestOverview';
 import type {
   RepoChangeEntry,
   RepoCommitDiffPayload,
@@ -59,12 +61,8 @@ import {
 } from './navigation';
 import { AgentRunHistoricalChangesView } from './AgentRunHistoricalChangesView';
 import { DiffBlock } from './DiffBlock';
-import {
-  clampDiffZoom,
-  diffZoomStyle,
-  DiffZoomControl,
-  DIFF_ZOOM_DEFAULT,
-} from './DiffZoomControl';
+import { diffZoomStyle } from './diff-zoom-style';
+import { useEditorZoomLevel } from '../files/editor-zoom';
 import { CommitInspectionView } from './CommitInspectionView';
 import { ChangesFileCountPill, ChangesLineSummary } from './ChangesLineSummary';
 import type { DiffExpansionRange, DiffState, DiffViewType } from './types';
@@ -73,7 +71,6 @@ import {
   CHANGES_COMMIT_LIST_WIDTH_STORAGE_KEY,
   CHANGES_CONTEXT_STORAGE_KEY,
   CHANGES_DIFF_VIEW_STORAGE_KEY,
-  CHANGES_DIFF_ZOOM_STORAGE_KEY,
   CHANGES_HIDE_VIEWED_STORAGE_KEY,
   CHANGES_PRIMARY_VIEW_STORAGE_KEY,
   CHANGES_VIEW_STORAGE_KEY,
@@ -134,7 +131,7 @@ export type DroneChangesReviewOverride = {
   } | null;
   loading: boolean;
   error: string | null;
-  header: React.ReactNode;
+  renderHeader: (controls: React.ReactNode) => React.ReactNode;
   loadingLabel?: string;
   loadDiff: (path: string) => Promise<{ diff: string; truncated: boolean; isBinary?: boolean }>;
 };
@@ -161,6 +158,49 @@ const COMMIT_LIST_DEFAULT_WIDTH_PX = 300;
 const COMMIT_LIST_MAX_WIDTH_PX = 460;
 const COMMIT_LIST_MAX_RATIO = 0.42;
 const COMMIT_DETAIL_MIN_WIDTH_PX = 420;
+
+function PullRequestOverview({ payload }: { payload: SuccessfulPullRequestChanges }) {
+  const pullRequest = payload.pullRequest;
+  return (
+    <RequestOverview
+      id={`pull-request-${pullRequest.number}-overview-panel`}
+      labelledBy={`pull-request-${pullRequest.number}-overview-tab`}
+      description={String(pullRequest.body ?? '')}
+      facts={[
+        {
+          label: 'Branches',
+          value: `${pullRequest.headRefName} → ${pullRequest.baseRefName}`,
+          mono: true,
+        },
+        {
+          label: 'Author',
+          value: pullRequest.authorLogin ? `@${pullRequest.authorLogin}` : 'Unknown',
+        },
+        {
+          label: 'Repository',
+          value: `${payload.github.owner}/${payload.github.repo}`,
+          mono: true,
+        },
+        { label: 'Created', value: formatPullRequestDetailTime(pullRequest.createdAt) },
+        { label: 'Updated', value: formatPullRequestDetailTime(pullRequest.updatedAt) },
+        {
+          label: 'Lines',
+          value: `+${payload.counts.additions} −${payload.counts.deletions}`,
+          mono: true,
+        },
+      ]}
+    />
+  );
+}
+
+function formatPullRequestDetailTime(value: string | null | undefined): string {
+  const normalized = String(value ?? '').trim();
+  if (!normalized) return '—';
+  const timestamp = Date.parse(normalized);
+  if (!Number.isFinite(timestamp)) return normalized;
+  return new Date(timestamp).toLocaleString();
+}
+
 function changesSegmentButtonClass(active: boolean): string {
   return `dh-changes-segment-button ${active ? 'is-active' : ''}`;
 }
@@ -526,6 +566,9 @@ function LiveDroneChangesDock({
   const [primaryView, setPrimaryView] = React.useState<ChangesPrimaryView>(() =>
     workspaceSnapshot?.primaryView ?? (readChangesStorage(CHANGES_PRIMARY_VIEW_STORAGE_KEY) === 'commits' ? 'commits' : 'changes'),
   );
+  const [pullRequestDetailTab, setPullRequestDetailTab] = React.useState<'overview' | 'files'>(
+    () => fixedContextMode === 'pull-request' && !reviewOverride ? 'overview' : 'files',
+  );
   const [branchChangesMode, setBranchChangesMode] = React.useState<BranchChangesMode>(() =>
     workspaceSnapshot?.branchChangesMode ?? (readChangesStorage(CHANGES_BRANCH_MODE_STORAGE_KEY) === 'pull-preview' ? 'pull-preview' : 'working-tree'),
   );
@@ -571,13 +614,7 @@ function LiveDroneChangesDock({
   const splitLayoutRef = React.useRef<HTMLDivElement | null>(null);
   const [explorerManualWidthPx, setExplorerManualWidthPx] = React.useState<number>(readWorkspaceExplorerWidth);
   const [explorerZoom, setExplorerZoom] = React.useState<number>(readWorkspaceExplorerZoom);
-  const [diffZoom, setDiffZoom] = React.useState<number>(() => {
-    const stored = readChangesStorage(CHANGES_DIFF_ZOOM_STORAGE_KEY);
-    if (stored === null) return DIFF_ZOOM_DEFAULT;
-    const raw = Number(stored);
-    if (!Number.isFinite(raw)) return DIFF_ZOOM_DEFAULT;
-    return clampDiffZoom(raw);
-  });
+  const editorZoomLevel = useEditorZoomLevel();
   const [explorerWidthPx, setExplorerWidthPx] = React.useState(EXPLORER_SIDEBAR_DEFAULT_WIDTH_PX);
   const [explorerResizing, setExplorerResizing] = React.useState(false);
   const [splitLayoutWidthPx, setSplitLayoutWidthPx] = React.useState(0);
@@ -659,6 +696,12 @@ function LiveDroneChangesDock({
   }, [reviewOverride?.number]);
 
   React.useEffect(() => {
+    if (reviewOverride || fixedContextMode !== 'pull-request' || !pullRequestNumber) return;
+    setPullRequestDetailTab('overview');
+    setPrimaryView('changes');
+  }, [fixedContextMode, pullRequestNumber, reviewOverride]);
+
+  React.useEffect(() => {
     changesWorkspaceUiByDrone.set(droneId, {
       pullRequestNumber,
       contextMode,
@@ -729,9 +772,6 @@ function LiveDroneChangesDock({
     writeWorkspaceExplorerZoom(explorerZoom);
   }, [explorerZoom]);
   React.useEffect(() => {
-    writeChangesStorage(CHANGES_DIFF_ZOOM_STORAGE_KEY, String(diffZoom));
-  }, [diffZoom]);
-  React.useEffect(() => {
     writeChangesStorage(CHANGES_COMMIT_LIST_WIDTH_STORAGE_KEY, String(Math.floor(commitListWidthPx)));
   }, [commitListWidthPx]);
 
@@ -753,6 +793,7 @@ function LiveDroneChangesDock({
   }, [droneId, fixedContextMode]);
 
   React.useEffect(() => {
+    if (reviewOverride) return;
     if (fixedContextMode === 'branch') {
       setPullRequestNumber(selectedPullRequestForDrone(droneId));
       setContextModeState('branch');
@@ -767,7 +808,7 @@ function LiveDroneChangesDock({
     }
     setPullRequestNumber(selectedPullRequestForDrone(droneId));
     if (!fixedContextMode) setContextModeState('branch');
-  }, [droneId, fixedContextMode]);
+  }, [droneId, fixedContextMode, reviewOverride]);
 
   React.useEffect(() => {
     if (fixedContextMode) return;
@@ -2813,17 +2854,39 @@ function LiveDroneChangesDock({
     splitLayoutWidthPx,
     explorerWidthOptions,
   );
+  const showsPullRequestDetailTabs =
+    !reviewOverride && fixedContextMode === 'pull-request' && Boolean(pullRequestNumber);
+  const showingPullRequestOverview =
+    showsPullRequestDetailTabs && pullRequestDetailTab === 'overview';
+  const reviewControls = reviewOverride ? (
+    <>
+      {activeLineChangeCounts && activeLineChangeCounts.changed > 0 ? (
+        <ChangesLineSummary counts={activeLineChangeCounts} />
+      ) : null}
+      <ChangesViewMenu
+        viewMode={viewMode}
+        diffViewType={diffViewType}
+        showViewedControl
+        hideViewed={hideViewed}
+        hideViewedLabel={hideViewedMenuLabel}
+        onViewModeChange={setViewMode}
+        onDiffViewTypeChange={setDiffViewType}
+        onToggleHideViewed={() => setHideViewed((prev) => !prev)}
+      />
+    </>
+  ) : null;
 
   if (showingInitialLoad) {
     return (
       <UiPanel
         ref={dockRootRef}
+        data-editor-zoom-surface="changes"
         flush
         className="dh-utility-panel h-full w-full dh-changes-dock"
         surface="alternate"
-        style={{ background: 'var(--chat-background)', ...diffZoomStyle(diffZoom) }}
+        style={{ background: 'var(--chat-background)', ...diffZoomStyle(editorZoomLevel) }}
       >
-        {reviewOverride ? reviewOverride.header : onReviewBack ? (
+        {reviewOverride ? reviewOverride.renderHeader(reviewControls) : onReviewBack ? (
           <div className="flex min-h-9 items-center gap-2 border-b border-[var(--border-subtle)] px-2 py-1">
             <UiToolbarIconButton
               size="xsmall"
@@ -2845,15 +2908,17 @@ function LiveDroneChangesDock({
   return (
     <UiPanel
       ref={dockRootRef}
+      data-editor-zoom-surface="changes"
       flush
       className="dh-utility-panel relative h-full w-full dh-changes-dock"
       surface="alternate"
-      style={{ background: 'var(--chat-background)', ...diffZoomStyle(diffZoom) }}
+      style={{ background: 'var(--chat-background)', ...diffZoomStyle(editorZoomLevel) }}
     >
-      <UiPanelToolbar
-        aria-label="Changes controls"
-        className="!min-h-8 !gap-1.5 !px-1.5 !py-0.5"
-      >
+      {!reviewOverride && !showingPullRequestOverview ? (
+        <UiPanelToolbar
+          aria-label="Changes controls"
+          className="!min-h-8 !gap-1.5 !px-1.5 !py-0.5"
+        >
         <div className="flex min-w-0 flex-nowrap items-center gap-1">
           {repoAttached && !disabled && contextMode === 'branch' && primaryView === 'changes' ? (
             <UiToolbarSegmentedControl
@@ -2907,7 +2972,6 @@ function LiveDroneChangesDock({
               ) : null}
             </>
           ) : null}
-          <DiffZoomControl value={diffZoom} onChange={setDiffZoom} />
           <ChangesViewMenu
             viewMode={viewMode}
             diffViewType={diffViewType}
@@ -2919,16 +2983,17 @@ function LiveDroneChangesDock({
             onToggleHideViewed={() => setHideViewed((prev) => !prev)}
           />
         </div>
-      </UiPanelToolbar>
+        </UiPanelToolbar>
+      ) : null}
 
       {!reviewOverride && contextMode === 'pull-request' && awaitingPullRequestDetails ? (
         <UiPanelStatusStrip>
           Loading PR #{selectedPullRequestNumber} details...
         </UiPanelStatusStrip>
       ) : null}
-      {reviewOverride ? reviewOverride.header : null}
+      {reviewOverride ? reviewOverride.renderHeader(reviewControls) : null}
       {!reviewOverride && contextMode === 'pull-request' && hasLoadedActivePullRequest && activePullRequestNumber ? (
-        <div className="flex min-h-9 items-center gap-2 border-b border-[var(--border-subtle)] px-2 py-1">
+        <div className="flex min-h-10 items-center gap-2 border-b border-[var(--border-subtle)] px-2 py-1.5">
           {onReviewBack ? (
             <UiToolbarIconButton
               size="xsmall"
@@ -2938,14 +3003,16 @@ function LiveDroneChangesDock({
               onClick={onReviewBack}
             />
           ) : null}
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]" title={activePullRequestTitleRaw || undefined}>
+          <div
+            className="flex min-w-0 flex-1 items-baseline gap-2"
+            title={activePullRequestTitleRaw || undefined}
+          >
+            <span className="truncate text-[16px] font-[var(--weight-bold)] text-[var(--fg)]">
               {activePullRequestTitleRaw || 'Untitled pull request'}
-            </div>
-            <div className="flex min-w-0 items-center gap-1.5 text-[var(--text-9)] text-[var(--muted-dim)]">
-              <span className="font-mono text-[var(--accent)]">#{activePullRequestNumber}</span>
-              <span className="truncate font-mono">{activePullRequestChanges?.pullRequest.headRefName ?? '-'} → {activePullRequestChanges?.pullRequest.baseRefName ?? '-'}</span>
-            </div>
+            </span>
+            <span className="shrink-0 font-mono text-[var(--text-10)] font-[var(--weight-normal)] text-[var(--muted-dim)]">
+              #{activePullRequestNumber}
+            </span>
           </div>
           <div className="flex shrink-0 items-center gap-0.5">
             <UiToolbarButton
@@ -2995,6 +3062,33 @@ function LiveDroneChangesDock({
           </div>
         </div>
       ) : null}
+      {showsPullRequestDetailTabs && hasLoadedActivePullRequest ? (
+        <UiTabs
+          label="Pull request sections"
+          value={pullRequestDetailTab}
+          onValueChange={(value) => {
+            setPullRequestDetailTab(value);
+            if (value === 'files') setPrimaryView('changes');
+          }}
+          size="small"
+          className="shrink-0 px-2"
+          options={[
+            {
+              value: 'overview',
+              label: 'Overview',
+              tabId: `pull-request-${activePullRequestNumber}-overview-tab`,
+              panelId: `pull-request-${activePullRequestNumber}-overview-panel`,
+            },
+            {
+              value: 'files',
+              label: 'Files changed',
+              badge: activePullRequestChanges?.counts.changed ?? 0,
+              tabId: `pull-request-${activePullRequestNumber}-files-tab`,
+              panelId: `pull-request-${activePullRequestNumber}-files-panel`,
+            },
+          ]}
+        />
+      ) : null}
       {!reviewOverride && contextMode === 'pull-request' && pullRequestActionNotice ? (
         <UiPanelStatusStrip tone="success">
           {pullRequestActionNotice}
@@ -3032,6 +3126,8 @@ function LiveDroneChangesDock({
             </>
           }
         />
+      ) : showingPullRequestOverview && activePullRequestChanges ? (
+        <PullRequestOverview payload={activePullRequestChanges} />
       ) : primaryView === 'commits' ? (
         commitListError ? (
           <UiPaneState

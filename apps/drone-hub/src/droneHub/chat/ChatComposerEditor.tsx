@@ -12,6 +12,7 @@ import {
   type MonacoEditorMountHandler,
   type MonacoEditorProps,
 } from '../files/monaco-editor-loader';
+import { editorZoomedPixels, useEditorZoomLevel } from '../files/editor-zoom';
 
 export type ChatComposerSelection = {
   start: number;
@@ -66,6 +67,7 @@ export const ChatComposerEditor = React.forwardRef<
 ) {
   const themeId = useDroneHubUiStore((state) => state.themeId);
   const monacoTheme = desktopMonacoTheme(themeId);
+  const editorZoomLevel = useEditorZoomLevel();
   const editorRef = React.useRef<MonacoEditorInstance | null>(null);
   const fallbackRef = React.useRef<HTMLTextAreaElement | null>(null);
   const selectionRef = React.useRef(initialSelection);
@@ -185,9 +187,9 @@ export const ChatComposerEditor = React.forwardRef<
       detectIndentation: true,
       insertSpaces: true,
       tabSize: 2,
-      fontSize: 12,
+      fontSize: editorZoomedPixels(12, editorZoomLevel),
       fontLigatures: true,
-      lineHeight: 20,
+      lineHeight: editorZoomedPixels(20, editorZoomLevel),
       lineNumbers: 'on',
       lineNumbersMinChars: 3,
       minimap: { enabled: false },
@@ -204,7 +206,7 @@ export const ChatComposerEditor = React.forwardRef<
       parameterHints: { enabled: false },
       contextmenu: true,
     }),
-    [ariaLabel, disabled, readOnly],
+    [ariaLabel, disabled, editorZoomLevel, readOnly],
   );
 
   const fallback = (
@@ -268,12 +270,18 @@ export const ChatComposerEditor = React.forwardRef<
           onSendQueued();
         }
       }}
+      data-editor-zoom-surface="chat-composer-editor"
       className="h-full w-full resize-none border-0 bg-[var(--chat-composer-input)] p-3 font-mono text-[var(--chat-text-size)] leading-5 text-[var(--chat-composer-fg)] caret-[var(--cursor)] outline-none"
+      style={{
+        fontSize: `${editorZoomedPixels(12, editorZoomLevel)}px`,
+        lineHeight: `${editorZoomedPixels(20, editorZoomLevel)}px`,
+      }}
     />
   );
 
   return (
     <AppShortcutBoundary
+      data-editor-zoom-surface="chat-composer-editor"
       data-chat-input-focus-id={focusTargetId || undefined}
       aria-keyshortcuts="Control+Enter Meta+Enter"
       tabIndex={focusTargetId ? -1 : undefined}

@@ -172,7 +172,7 @@ export function UnifiedRequestList({
           <div
             key={item.number}
             className={cn(
-              'flex min-h-[4.25rem] items-start gap-2.5 border-b border-[var(--border-subtle)] px-3 py-2.5',
+              'flex min-h-[4.5rem] items-start gap-2.5 border-b border-[var(--border-subtle)] px-3 py-2.5',
               selectedNumbers.has(item.number) && 'bg-[var(--accent-subtle)]',
             )}
           >
@@ -184,20 +184,17 @@ export function UnifiedRequestList({
               onChange={(checked) => toggleOne(item.number, checked)}
             />
             <div className="min-w-0 flex-1">
-              <div className="flex min-w-0 items-start gap-2">
+              <div className="flex min-w-0 items-start">
                 <button
                   type="button"
                   onClick={() => onOpenRequest(item.number)}
-                  className="min-w-0 flex-1 truncate text-left text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--fg)] hover:text-[var(--accent)] hover:underline"
+                  className="min-w-0 flex-1 truncate text-left text-[15px] font-[var(--weight-bold)] leading-snug text-[var(--fg)] hover:text-[var(--accent)] hover:underline"
                   title={`Open #${item.number}: ${item.title}`}
                 >
                   {item.title}
                 </button>
-                {item.signals ? (
-                  <div className="flex shrink-0 items-center gap-1">{item.signals}</div>
-                ) : null}
               </div>
-              <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[var(--text-10)] text-[var(--muted)]">
+              <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[var(--text-9)] text-[var(--muted-dim)]">
                 <span
                   className="font-mono tabular-nums text-[var(--muted-dim)]"
                   title={`Request #${item.number}`}
@@ -218,22 +215,25 @@ export function UnifiedRequestList({
                 ) : null}
               </div>
             </div>
-            {item.externalHref || item.updatedAt ? (
+            {item.signals || item.externalHref || item.updatedAt ? (
               <div className="flex min-h-[2.75rem] shrink-0 self-stretch flex-col items-end justify-between">
-                {item.externalHref ? (
-                  <a
-                    href={item.externalHref}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex h-6 w-6 items-center justify-center rounded-[var(--radius-medium)] text-[var(--muted-dim)] opacity-60 transition-[background-color,color,opacity] hover:bg-[var(--surface-strong)] hover:text-[var(--fg)] hover:opacity-100 focus-visible:opacity-100"
-                    aria-label={`Open request #${item.number} externally`}
-                    title="Open externally"
-                  >
-                    <ExternalLinkIcon />
-                  </a>
-                ) : (
-                  <span />
-                )}
+                <div className="flex min-h-6 items-center justify-end gap-1">
+                  {item.signals ? (
+                    <div className="flex items-center justify-end gap-1">{item.signals}</div>
+                  ) : null}
+                  {item.externalHref ? (
+                    <a
+                      href={item.externalHref}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex h-6 w-6 items-center justify-center rounded-[var(--radius-medium)] text-[var(--muted-dim)] opacity-60 transition-[background-color,color,opacity] hover:bg-[var(--surface-strong)] hover:text-[var(--fg)] hover:opacity-100 focus-visible:opacity-100"
+                      aria-label={`Open request #${item.number} externally`}
+                      title="Open externally"
+                    >
+                      <ExternalLinkIcon />
+                    </a>
+                  ) : null}
+                </div>
                 {item.updatedAt ? (
                   <time
                     dateTime={item.updatedAt}

@@ -3,13 +3,16 @@ import type { ChangeRequestChanges, ChangeRequestView } from '@drone/hub-model/c
 
 import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
 import {
+  UiPanel,
   UiPanelStatusStrip,
+  UiTabs,
   UiToolbarButton,
   UiToolbarIconButton,
 } from '../../ui/components';
 import type { RepoBranchesPayload, RepoPullRequestChangesPayload } from '../types';
 import { DroneChangesDock, ExternalLinkIcon, type DroneChangesReviewOverride } from '../changes/DroneChangesDock';
 import { requestJson } from '../http';
+import { RequestOverview } from '../requests/RequestOverview';
 import { ChangeRequestGithubMirrorPanel } from './ChangeRequestGithubMirrorPanel';
 import {
   closeChangeRequest,
@@ -33,6 +36,7 @@ type ReviewPayload = Extract<RepoPullRequestChangesPayload, { ok: true }>;
 export function ChangeRequestDetail({
   request,
   droneId,
+  showChatName,
   repoAttached,
   repoPath,
   disabled,
@@ -43,6 +47,7 @@ export function ChangeRequestDetail({
 }: {
   request: ChangeRequestView;
   droneId: string;
+  showChatName: boolean;
   repoAttached: boolean;
   repoPath: string;
   disabled: boolean;
@@ -55,6 +60,7 @@ export function ChangeRequestDetail({
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
   const [editing, setEditing] = React.useState(false);
+  const [detailTab, setDetailTab] = React.useState<'overview' | 'files'>('overview');
   const [showMirror, setShowMirror] = React.useState(false);
   const [draftTitle, setDraftTitle] = React.useState(request.title);
   const [draftDescription, setDraftDescription] = React.useState(request.description);
@@ -68,6 +74,7 @@ export function ChangeRequestDetail({
 
   React.useEffect(() => {
     setEditing(false);
+    setDetailTab('overview');
     setShowMirror(false);
     setError(null);
     setDraftTitle(request.title);
@@ -251,7 +258,7 @@ export function ChangeRequestDetail({
 
   const header = (
     <div className="border-b border-[var(--border-subtle)]">
-      <div className="flex min-h-9 items-center gap-2 px-2 py-1">
+      <div className="flex min-h-10 items-center gap-2 px-2 py-1.5">
         <UiToolbarIconButton
           size="xsmall"
           label="Back to change requests"
@@ -261,17 +268,18 @@ export function ChangeRequestDetail({
         />
         <button
           type="button"
-          disabled={!isOpen || actionDisabled}
-          onClick={() => setEditing(true)}
-          className="group min-w-0 flex-1 text-left disabled:cursor-default"
-          title={isOpen ? 'Edit change request' : request.title}
+          onClick={onBack}
+          className="group min-w-0 flex-1 text-left"
+          title="Back to change requests"
+          aria-label={`Back to change requests from #${request.number}: ${request.title}`}
         >
-          <span className="block truncate text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-secondary)] group-enabled:group-hover:text-[var(--accent)]">
-            {request.title || 'Untitled change request'}
-          </span>
-          <span className="flex min-w-0 items-center gap-1.5 text-[var(--text-9)] text-[var(--muted-dim)]">
-            <span className="font-mono text-[var(--accent)]">#{request.number}</span>
-            <span className="truncate font-mono">{request.baseBranch} → {request.destinationBranch}</span>
+          <span className="flex min-w-0 items-baseline gap-2">
+            <span className="truncate text-[16px] font-[var(--weight-bold)] text-[var(--fg)] group-hover:text-[var(--accent)]">
+              {request.title || 'Untitled change request'}
+            </span>
+            <span className="shrink-0 font-mono text-[var(--text-10)] font-[var(--weight-normal)] text-[var(--muted-dim)]">
+              #{request.number}
+            </span>
           </span>
         </button>
         <div className="flex shrink-0 items-center gap-0.5">
@@ -313,18 +321,6 @@ export function ChangeRequestDetail({
           ) : null}
         </div>
       </div>
-
-      {!editing && request.description ? (
-        <button
-          type="button"
-          disabled={!isOpen || actionDisabled}
-          onClick={() => setEditing(true)}
-          className="block w-full truncate px-10 pb-1.5 text-left text-[var(--text-10)] text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:cursor-default"
-          title={request.description}
-        >
-          {request.description}
-        </button>
-      ) : null}
 
       {editing ? (
         <div className="grid gap-2 border-t border-[var(--border-subtle)] px-2 py-2 md:grid-cols-2">
@@ -388,6 +384,45 @@ export function ChangeRequestDetail({
     </div>
   );
 
+  const renderTabs = React.useCallback(
+    (controls: React.ReactNode = null) => (
+      <div className="flex min-w-0 shrink-0 items-end overflow-x-auto border-b border-[var(--border-subtle)]">
+        <UiTabs
+          label="Change request sections"
+          value={detailTab}
+          onValueChange={setDetailTab}
+          size="small"
+          className="shrink-0 !border-b-0 px-2"
+          options={[
+            {
+              value: 'overview',
+              label: 'Overview',
+              tabId: `change-request-${request.number}-overview-tab`,
+              panelId: `change-request-${request.number}-overview-panel`,
+            },
+            {
+              value: 'files',
+              label: 'Files changed',
+              badge: changes?.counts.changed ?? request.lineStats?.files ?? 0,
+              tabId: `change-request-${request.number}-files-tab`,
+              panelId: `change-request-${request.number}-files-panel`,
+            },
+          ]}
+        />
+        <div className="ml-auto flex h-8 shrink-0 items-center gap-1.5 pr-1.5">
+          <span
+            className="max-w-56 truncate px-1 font-mono text-[var(--text-9)] text-[var(--muted-dim)]"
+            title={`${request.baseBranch} → ${request.destinationBranch}`}
+          >
+            {request.baseBranch} → {request.destinationBranch}
+          </span>
+          {controls}
+        </div>
+      </div>
+    ),
+    [changes?.counts.changed, detailTab, request.baseBranch, request.destinationBranch, request.lineStats?.files, request.number],
+  );
+
   const reviewOverride = React.useMemo<DroneChangesReviewOverride>(
     () => ({
       kind: 'change-request',
@@ -397,25 +432,80 @@ export function ChangeRequestDetail({
       lineCounts: reviewLineCounts,
       loading: changesLoading,
       error: changesError,
-      header,
+      renderHeader: (controls) => (
+        <>
+          {header}
+          {renderTabs(controls)}
+        </>
+      ),
       loadingLabel: 'Loading change request…',
       loadDiff: loadReviewDiff,
     }),
-    [changesError, changesLoading, header, loadReviewDiff, request.number, request.revision, request.snapshotSha, request.sourceHeadSha, reviewLineCounts, reviewPayload],
+    [changesError, changesLoading, header, loadReviewDiff, renderTabs, request.number, request.revision, request.snapshotSha, request.sourceHeadSha, reviewLineCounts, reviewPayload],
   );
 
+  if (detailTab === 'overview') {
+    return (
+      <UiPanel flush surface="alternate" className="h-full w-full">
+        {header}
+        {renderTabs()}
+        <ChangeRequestOverview
+          request={request}
+          showChatName={showChatName}
+        />
+      </UiPanel>
+    );
+  }
+
   return (
-    <DroneChangesDock
-      droneId={droneId}
-      repoAttached={repoAttached}
-      repoPath={repoPath}
-      fixedContextMode="pull-request"
-      reviewOverride={reviewOverride}
-      disabled={disabled}
-      onRevealFileInFiles={onRevealFileInFiles}
-      onOpenFileInEditor={onOpenFileInEditor}
+    <div
+      id={`change-request-${request.number}-files-panel`}
+      role="tabpanel"
+      aria-labelledby={`change-request-${request.number}-files-tab`}
+      className="h-full w-full"
+    >
+      <DroneChangesDock
+        droneId={droneId}
+        repoAttached={repoAttached}
+        repoPath={repoPath}
+        fixedContextMode="pull-request"
+        reviewOverride={reviewOverride}
+        disabled={disabled}
+        onRevealFileInFiles={onRevealFileInFiles}
+        onOpenFileInEditor={onOpenFileInEditor}
+      />
+    </div>
+  );
+}
+
+function ChangeRequestOverview({
+  request,
+  showChatName,
+}: {
+  request: ChangeRequestView;
+  showChatName: boolean;
+}) {
+  return (
+    <RequestOverview
+      id={`change-request-${request.number}-overview-panel`}
+      labelledBy={`change-request-${request.number}-overview-tab`}
+      description={request.description}
+      facts={[
+        { label: 'Created by', value: request.droneName },
+        ...(showChatName ? [{ label: 'Chat', value: request.chatName }] : []),
+        { label: 'Revision', value: String(request.revision) },
+        { label: 'Created', value: formatDetailTime(request.createdAt) },
+        { label: 'Updated', value: formatDetailTime(request.updatedAt) },
+      ]}
     />
   );
+}
+
+function formatDetailTime(value: string | null): string {
+  if (!value) return '—';
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return value;
+  return new Date(timestamp).toLocaleString();
 }
 
 function DestinationBranchPicker({

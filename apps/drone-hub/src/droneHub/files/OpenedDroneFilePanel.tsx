@@ -45,6 +45,7 @@ import {
   type MonacoEditorMountHandler,
   type MonacoEditorProps,
 } from './monaco-editor-loader';
+import { editorZoomedPixels, useEditorZoomLevel } from './editor-zoom';
 
 const LARGE_TEXT_CHUNK_BYTES = 256 * 1024;
 
@@ -99,6 +100,7 @@ function PlainTextEditorFallback({
   onChange?: (next: string) => void;
   onSave?: (contentOverride?: string) => Promise<boolean>;
 }) {
+  const editorZoomLevel = useEditorZoomLevel();
   const [localValue, setLocalValue] = React.useState(value);
 
   React.useEffect(() => {
@@ -121,7 +123,12 @@ function PlainTextEditorFallback({
       }}
       readOnly={saving || readOnly}
       spellCheck={false}
+      data-editor-zoom-surface="file-editor"
       className="h-full w-full resize-none border-0 bg-[var(--panel-alt)] p-3 font-mono text-[var(--text-12)] leading-5 text-[var(--fg-secondary)] outline-none"
+      style={{
+        fontSize: `${editorZoomedPixels(12, editorZoomLevel)}px`,
+        lineHeight: `${editorZoomedPixels(20, editorZoomLevel)}px`,
+      }}
       aria-label="Plain text editor"
     />
   );
@@ -254,6 +261,7 @@ export function OpenedDroneFilePanel({
 }: OpenedDroneFilePanelProps) {
   const themeId = useDroneHubUiStore((state) => state.themeId);
   const monacoTheme = desktopMonacoTheme(themeId);
+  const editorZoomLevel = useEditorZoomLevel();
   const {
     path: filePath,
     name: fileName,
@@ -375,7 +383,7 @@ export function OpenedDroneFilePanel({
   const monacoOptions = React.useMemo<MonacoEditorProps['options']>(
     () => ({
       readOnly: Boolean(fileSaving) || readOnly,
-      fontSize: 12,
+      fontSize: editorZoomedPixels(12, editorZoomLevel),
       minimap: { enabled: false },
       scrollbar: DRONE_HUB_MONACO_SCROLLBAR_OPTIONS,
       wordWrap: 'on',
@@ -391,7 +399,7 @@ export function OpenedDroneFilePanel({
         bracketPairsHorizontal: false,
       },
     }),
-    [fileSaving, readOnly],
+    [editorZoomLevel, fileSaving, readOnly],
   );
   const openedFileMediaSrc = React.useMemo(() => {
     if (!activeFilePath) return '';
@@ -852,6 +860,7 @@ export function OpenedDroneFilePanel({
               <IsolatedHtmlPreview source={fileContent ?? ''} fileName={fileName} />
             ) : openedFileEditorVisible ? (
               <AppShortcutBoundary
+                data-editor-zoom-surface="file-editor"
                 className="h-full w-full"
               >
                 <MonacoEditorErrorBoundary fallback={plainTextEditorFallback}>

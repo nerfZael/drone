@@ -3,7 +3,7 @@ import type { ChangeRequestView } from '@drone/hub-model/change-requests';
 export function changeRequestStatusLabel(request: ChangeRequestView): string {
   if (request.status !== 'open') return request.status;
   if (request.conflicted) return 'conflicted';
-  if (request.stale) return 'stale';
+  if (request.stale) return 'out of date';
   return 'open';
 }
 
@@ -13,7 +13,7 @@ export function changeRequestStatusClasses(request: ChangeRequestView): string {
     return 'border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)]';
   if (status === 'conflicted')
     return 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]';
-  if (status === 'stale')
+  if (status === 'out of date')
     return 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)] text-[var(--yellow)]';
   return 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]';
 }

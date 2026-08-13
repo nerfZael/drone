@@ -61,8 +61,13 @@ export type GithubPullRequestChanges = {
   pullRequest: {
     number: number;
     title: string;
+    body: string;
     state: GithubPullRequestState;
+    draft: boolean;
     htmlUrl: string | null;
+    authorLogin: string | null;
+    createdAt: string;
+    updatedAt: string;
     baseRefName: string;
     headRefName: string;
     baseSha: string;
@@ -957,10 +962,15 @@ export async function listGithubPullRequestChangesForRepoRoot(opts: {
   const pull = await githubApiRequest<{
     number?: number;
     title?: string;
+    body?: string | null;
     state?: string;
+    draft?: boolean;
     merged?: boolean;
     merged_at?: string | null;
     html_url?: string | null;
+    created_at?: string;
+    updated_at?: string;
+    user?: { login?: string | null } | null;
     base?: { ref?: string; sha?: string };
     head?: { ref?: string; sha?: string };
   }>({
@@ -1000,11 +1010,16 @@ export async function listGithubPullRequestChangesForRepoRoot(opts: {
     pullRequest: {
       number: pullNumber,
       title: String(pull?.title ?? '').trim() || `PR #${pullNumber}`,
+      body: String(pull?.body ?? ''),
       state: normalizeGithubPullRequestState(pull?.state, {
         merged: pull?.merged,
         mergedAt: pull?.merged_at,
       }),
+      draft: pull?.draft === true,
       htmlUrl: pull?.html_url ? String(pull.html_url).trim() : null,
+      authorLogin: String(pull?.user?.login ?? '').trim() || null,
+      createdAt: String(pull?.created_at ?? '').trim(),
+      updatedAt: String(pull?.updated_at ?? '').trim(),
       baseRefName: String(pull?.base?.ref ?? '').trim(),
       headRefName: String(pull?.head?.ref ?? '').trim(),
       baseSha: String(pull?.base?.sha ?? '')
