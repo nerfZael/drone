@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   mergeMobileDraftWithContinuousDictation,
-  mobileContinuousDictationText,
   resolveMobileContinuousDictationNavigationAction,
   type MobileContinuousVoiceMode,
 } from './mobile-continuous-dictation';
@@ -48,7 +47,6 @@ export function useMobileComposerContinuousVoice({
     pendingCount: continuousVoice.pendingCount,
     durationMillis: continuousVoice.durationMillis,
     dictationTargetKey: continuousDictation.targetKey,
-    dictationText: continuousDictation.text,
   });
   const stateRef = React.useRef(state);
   stateRef.current = state;
@@ -78,8 +76,8 @@ export function useMobileComposerContinuousVoice({
     stopVoice: continuousVoice.stop,
   };
 
-  // Mobile composer drafts intentionally do not survive navigation. Dictation
-  // is discarded, while steering gets a chance to deliver its final thought.
+  // Mobile composer drafts intentionally do not survive navigation. Active
+  // dictation is canceled, while steering gets a chance to deliver its final thought.
   const leaveTarget = React.useCallback(
     async (previousTargetKey: string, nextTargetKey: string) => {
       const current = lifecycleRef.current;
@@ -145,7 +143,11 @@ export function useMobileComposerContinuousVoice({
       const ran = await runExclusive(async () => {
         if (!targetKey) throw new Error('Continuous voice requires a target chat.');
         if (mode === 'dictation') {
-          started = await continuousDictation.start(targetKey);
+          started = await continuousDictation.start(targetKey, (text) => {
+            const nextValue = mergeMobileDraftWithContinuousDictation(valueRef.current, text);
+            valueRef.current = nextValue;
+            onChangeText(nextValue);
+          });
           return;
         }
         continuousDictation.discard(targetKey);
@@ -161,32 +163,14 @@ export function useMobileComposerContinuousVoice({
       continuousDictation.discard,
       continuousDictation.start,
       continuousVoice.start,
+      onChangeText,
       onSend,
       runExclusive,
       startBlocked,
       targetKey,
+      valueRef,
     ],
   );
-
-  const materializeDictation = React.useCallback((): string => {
-    const snapshot = continuousDictation.takeSnapshot(targetKey);
-    if (!snapshot) return valueRef.current;
-    const nextValue = mergeMobileDraftWithContinuousDictation(
-      valueRef.current,
-      mobileContinuousDictationText(snapshot.lines),
-    );
-    valueRef.current = nextValue;
-    onChangeText(nextValue);
-    return nextValue;
-  }, [continuousDictation.takeSnapshot, onChangeText, targetKey, valueRef]);
-
-  const editDictation = React.useCallback(async (): Promise<boolean> => {
-    if (stateRef.current.kind !== 'dictation') return false;
-    return await runExclusive(async () => {
-      if (stateRef.current.owned) await continuousDictation.finishOrDiscardPending();
-      materializeDictation();
-    });
-  }, [continuousDictation.finishOrDiscardPending, materializeDictation, runExclusive]);
 
   const finish = React.useCallback(async () => {
     if (!stateRef.current.owned) return false;
@@ -238,21 +222,17 @@ export function useMobileComposerContinuousVoice({
     if (stateRef.current.kind !== 'dictation') return false;
     await runExclusive(async () => {
       if (stateRef.current.owned && !(await continuousDictation.finish())) return;
-      // Materialize first so the parent composer owns failed-send recovery and
-      // there is only one copy of the draft to restore.
-      const nextValue = materializeDictation();
       onError('');
-      await onSend(nextValue.trim() || undefined);
+      await onSend(valueRef.current.trim() || undefined);
     });
     return true;
-  }, [continuousDictation.finish, materializeDictation, onError, onSend, runExclusive]);
+  }, [continuousDictation.finish, onError, onSend, runExclusive, valueRef]);
 
   return {
     state,
     actionInFlight,
     startBlocked: startBlocked || state.elsewhere || actionInFlight,
     start,
-    editDictation,
     finish,
     togglePause,
     cancel,
