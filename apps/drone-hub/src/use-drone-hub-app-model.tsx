@@ -2419,6 +2419,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     openedFileTabs: openedEditorFileTabs,
     activeOpenedFileTabId,
     openEditorFile,
+    openEditorLocation,
     closeEditorFile,
     confirmCloseOpenedFileTabsForPaths,
     closeOpenedFileTabsForPaths,
@@ -2435,6 +2436,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     reloadOpenedFileFromDisk,
     overwriteOpenedFile,
     saveOpenedFile,
+    appendAndSaveFileDictationLine,
   } = useFileEditorState({
     currentDrone,
     requestJson,
@@ -2830,6 +2832,43 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       focusEditorPane();
     },
     [currentDrone, focusEditorPane, openEditorFile, setCurrentFsPath],
+  );
+  const openFileDictationTarget = React.useCallback(
+    (target: { droneId: string; path: string; name: string }) => {
+      const droneId = String(target.droneId ?? '').trim();
+      const path = String(target.path ?? '').trim();
+      if (!droneId || !path) return;
+      const name =
+        String(target.name ?? '').trim() || path.split('/').filter(Boolean).pop() || path;
+      const slash = path.lastIndexOf('/');
+      const targetDrone = droneByIdRef.current[droneId];
+      if (targetDrone) setActiveRepoPath(String(targetDrone.repoPath ?? '').trim());
+      setAppView('workspace');
+      setHomeOpen(false);
+      setSelectedGroupMultiChat(null);
+      setDraftChat(null);
+      setDraftCreateOpen(false);
+      setDraftCreateError(null);
+      setSelectedDrone(droneId);
+      setSelectedDroneIds([droneId]);
+      setCurrentFsPath(slash > 0 ? path.slice(0, slash) : '/');
+      openEditorLocation({ droneId, path, name });
+      requestRightPanelTab('editor');
+    },
+    [
+      openEditorLocation,
+      requestRightPanelTab,
+      setActiveRepoPath,
+      setAppView,
+      setCurrentFsPath,
+      setDraftChat,
+      setDraftCreateError,
+      setDraftCreateOpen,
+      setHomeOpen,
+      setSelectedDrone,
+      setSelectedDroneIds,
+      setSelectedGroupMultiChat,
+    ],
   );
   const openFileInPanelFromFilesPane = React.useCallback(
     (next: {
@@ -3999,6 +4038,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           activeOpenedFileTabId={activeOpenedFileTabId}
           onOpenedEditorFileContentChange={setOpenedFileContent}
           onSaveOpenedEditorFile={saveOpenedFile}
+          onAppendFileDictationLine={appendAndSaveFileDictationLine}
+          onOpenFileDictationTarget={openFileDictationTarget}
           onCloseOpenedEditorFile={closeEditorFile}
           onConfirmCloseOpenedEditorFilesForPaths={confirmCloseOpenedFileTabsForPaths}
           onCloseOpenedEditorFilesForPaths={closeOpenedFileTabsForPaths}
@@ -4076,6 +4117,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       openChangesFileInEditor,
       openFileInFilesPane,
       openFileInPanelFromFilesPane,
+      openFileDictationTarget,
       openedEditorRecentFiles,
       openedEditorFile,
       openedEditorFileContent,
@@ -4104,6 +4146,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setOpenedFileContent,
       refreshOpenedFile,
       saveOpenedFile,
+      appendAndSaveFileDictationLine,
       closeEditorFile,
       confirmCloseOpenedFileTabsForPaths,
       closeOpenedFileTabsForPaths,

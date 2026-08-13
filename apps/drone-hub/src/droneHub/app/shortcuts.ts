@@ -9,6 +9,7 @@ export type ShortcutActionId =
   | 'toggleSelectedDronesToDo'
   | 'focusPrimaryChatInput'
   | 'toggleContinuousDictation'
+  | 'toggleFileDictation'
   | 'toggleVoiceClipboardRecording'
   | 'markSelectedDronesUnread'
   | 'toggleSidebarCollapsed'
@@ -91,6 +92,11 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     description: 'Starts or stops continuous dictation in the active chat composer.',
   },
   {
+    id: 'toggleFileDictation',
+    label: 'Toggle file dictation',
+    description: 'Finishes file dictation, or resumes dictation to the previous file target.',
+  },
+  {
     id: 'toggleVoiceClipboardRecording',
     label: 'Record voice to clipboard',
     description: 'Starts or stops a microphone recording, transcribes it with GROQ, and copies the result.',
@@ -163,6 +169,7 @@ const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   toggleSelectedDronesToDo: null,
   focusPrimaryChatInput: { key: 'enter', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleContinuousDictation: { key: 'r', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  toggleFileDictation: { key: 'd', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleVoiceClipboardRecording: { key: '`', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   markSelectedDronesUnread: { key: 'z', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleSidebarCollapsed: { key: 'a', mod: false, ctrl: false, meta: false, alt: false, shift: false },
@@ -261,6 +268,7 @@ export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
     toggleSelectedDronesToDo: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleSelectedDronesToDo),
     focusPrimaryChatInput: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.focusPrimaryChatInput),
     toggleContinuousDictation: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleContinuousDictation),
+    toggleFileDictation: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleFileDictation),
     toggleVoiceClipboardRecording: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleVoiceClipboardRecording),
     markSelectedDronesUnread: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.markSelectedDronesUnread),
     toggleSidebarCollapsed: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleSidebarCollapsed),

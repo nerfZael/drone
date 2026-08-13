@@ -45,6 +45,7 @@ import {
   type MonacoEditorMountHandler,
   type MonacoEditorProps,
 } from './monaco-editor-loader';
+import { FileDictationEditorAction } from './FileDictationEditorAction';
 
 const LARGE_TEXT_CHUNK_BYTES = 256 * 1024;
 
@@ -223,6 +224,7 @@ function LargeTextFileViewer({
 
 type OpenedDroneFilePanelProps = {
   droneId: string;
+  droneName: string;
   file: DroneOpenedFileState;
   fileTabs?: DroneOpenedFileTabState[];
   activeTabId?: string | null;
@@ -234,11 +236,22 @@ type OpenedDroneFilePanelProps = {
   onActivateFileTab?: (tabId: string) => void;
   onReorderFileTabs?: (fromTabId: string, toTabId: string) => void;
   onOpenResolvedFile?: (next: { path: string; name: string; line?: number | null; column?: number | null }) => void;
+  onAppendFileDictationLine?: (input: {
+    droneId: string;
+    path: string;
+    line: string;
+  }) => Promise<boolean>;
+  onOpenFileDictationTarget?: (target: {
+    droneId: string;
+    path: string;
+    name: string;
+  }) => void;
   readOnly?: boolean;
 };
 
 export function OpenedDroneFilePanel({
   droneId,
+  droneName,
   file,
   fileTabs = [],
   activeTabId = null,
@@ -250,6 +263,8 @@ export function OpenedDroneFilePanel({
   onActivateFileTab,
   onReorderFileTabs,
   onOpenResolvedFile,
+  onAppendFileDictationLine,
+  onOpenFileDictationTarget,
   readOnly = false,
 }: OpenedDroneFilePanelProps) {
   const themeId = useDroneHubUiStore((state) => state.themeId);
@@ -634,93 +649,113 @@ export function OpenedDroneFilePanel({
           onCloseTab={(tabId) => onCloseFile?.(tabId)}
           onReorderTabs={(fromTabId, toTabId) => onReorderFileTabs?.(fromTabId, toTabId)}
           trailingActions={
-            openedFileIsMarkdown || openedFileIsHtml ? (
+            (onAppendFileDictationLine && onOpenFileDictationTarget) ||
+            openedFileIsMarkdown ||
+            openedFileIsHtml ? (
               <div className="flex items-center gap-1.5">
-                {openedFileShowsPreview ? (
-                  <div className="relative">
-                    {previewContentsCopied ? (
+                {onAppendFileDictationLine && onOpenFileDictationTarget ? (
+                  <FileDictationEditorAction
+                    droneId={droneId}
+                    droneName={droneName}
+                    path={activeFilePath}
+                    name={fileName || activeFilePath}
+                    editable={!readOnly && openedEditorIsText}
+                    loading={Boolean(fileLoading)}
+                    saving={Boolean(fileSaving)}
+                    externallyChanged={Boolean(file.externallyChanged)}
+                    onAppendLine={onAppendFileDictationLine}
+                    onOpenTarget={onOpenFileDictationTarget}
+                  />
+                ) : null}
+                {openedFileIsMarkdown || openedFileIsHtml ? (
+                  <>
+                    {openedFileShowsPreview ? (
+                      <div className="relative">
+                        {previewContentsCopied ? (
+                          <div
+                            role="status"
+                            aria-live="polite"
+                            className="pointer-events-none absolute right-0 top-full z-20 mt-1 whitespace-nowrap rounded border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-2 py-1 text-[var(--text-9)] uppercase tracking-wide text-[var(--fg-secondary)] shadow-[0_6px_14px_var(--shadow-color)]"
+                            style={{ fontFamily: 'var(--display)' }}
+                          >
+                            Copied
+                          </div>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() => void copyPreviewContents()}
+                          disabled={Boolean(fileLoading)}
+                          className={headingActionClassName(Boolean(fileLoading))}
+                          title={previewContentsCopied ? 'Copied file contents' : 'Copy file contents'}
+                          aria-label="Copy file contents"
+                        >
+                          <IconCopy className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ) : null}
+                    {openedFileShowsMarkdownPreview ? (
                       <div
-                        role="status"
-                        aria-live="polite"
-                        className="pointer-events-none absolute right-0 top-full z-20 mt-1 whitespace-nowrap rounded border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-2 py-1 text-[var(--text-9)] uppercase tracking-wide text-[var(--fg-secondary)] shadow-[0_6px_14px_var(--shadow-color)]"
-                        style={{ fontFamily: 'var(--display)' }}
+                        className="flex h-6 items-center gap-0.5 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--panel-alt)] p-0.5"
+                        role="group"
+                        aria-label="Heading expansion"
                       >
-                        Copied
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setMarkdownOutlineExpansionCommand((previous) => ({
+                              action: 'collapse',
+                              sequence: (previous?.sequence ?? 0) + 1,
+                            }))
+                          }
+                          disabled={Boolean(fileLoading)}
+                          className={headingActionClassName(Boolean(fileLoading))}
+                          title="Collapse all Markdown headings"
+                          aria-label="Collapse all Markdown headings"
+                        >
+                          <CollapseAllHeadingsIcon />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setMarkdownOutlineExpansionCommand((previous) => ({
+                              action: 'expand',
+                              sequence: (previous?.sequence ?? 0) + 1,
+                            }))
+                          }
+                          disabled={Boolean(fileLoading)}
+                          className={headingActionClassName(Boolean(fileLoading))}
+                          title="Expand all Markdown headings"
+                          aria-label="Expand all Markdown headings"
+                        >
+                          <ExpandAllHeadingsIcon />
+                        </button>
                       </div>
                     ) : null}
                     <button
                       type="button"
-                      onClick={() => void copyPreviewContents()}
+                      onClick={() => {
+                        if (openedFileShowsPreview) {
+                          setOpenedTextMode('edit');
+                          setMarkdownOutlineExpansionCommand(null);
+                        } else {
+                          setOpenedTextMode('preview');
+                          setMarkdownOutlineExpansionCommand(null);
+                        }
+                      }}
                       disabled={Boolean(fileLoading)}
-                      className={headingActionClassName(Boolean(fileLoading))}
-                      title={previewContentsCopied ? 'Copied file contents' : 'Copy file contents'}
-                      aria-label="Copy file contents"
-                    >
-                      <IconCopy className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ) : null}
-                {openedFileShowsMarkdownPreview ? (
-                  <div
-                    className="flex h-6 items-center gap-0.5 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--panel-alt)] p-0.5"
-                    role="group"
-                    aria-label="Heading expansion"
-                  >
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setMarkdownOutlineExpansionCommand((previous) => ({
-                          action: 'collapse',
-                          sequence: (previous?.sequence ?? 0) + 1,
-                        }))
+                      className={modeButtonClassName(Boolean(fileLoading))}
+                      title={
+                        openedFileShowsPreview
+                          ? readOnly
+                            ? `View ${openedFileIsHtml ? 'HTML' : 'markdown'} source`
+                            : `Edit ${openedFileIsHtml ? 'HTML' : 'markdown'} source`
+                          : `Render ${openedFileIsHtml ? 'isolated HTML' : 'markdown'} preview`
                       }
-                      disabled={Boolean(fileLoading)}
-                      className={headingActionClassName(Boolean(fileLoading))}
-                      title="Collapse all Markdown headings"
-                      aria-label="Collapse all Markdown headings"
                     >
-                      <CollapseAllHeadingsIcon />
+                      {openedFileShowsPreview ? (readOnly ? 'Source' : 'Edit') : 'Preview'}
                     </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setMarkdownOutlineExpansionCommand((previous) => ({
-                          action: 'expand',
-                          sequence: (previous?.sequence ?? 0) + 1,
-                        }))
-                      }
-                      disabled={Boolean(fileLoading)}
-                      className={headingActionClassName(Boolean(fileLoading))}
-                      title="Expand all Markdown headings"
-                      aria-label="Expand all Markdown headings"
-                    >
-                      <ExpandAllHeadingsIcon />
-                    </button>
-                  </div>
+                  </>
                 ) : null}
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (openedFileShowsPreview) {
-                      setOpenedTextMode('edit');
-                      setMarkdownOutlineExpansionCommand(null);
-                    } else {
-                      setOpenedTextMode('preview');
-                      setMarkdownOutlineExpansionCommand(null);
-                    }
-                  }}
-                  disabled={Boolean(fileLoading)}
-                  className={modeButtonClassName(Boolean(fileLoading))}
-                  title={
-                    openedFileShowsPreview
-                      ? readOnly
-                        ? `View ${openedFileIsHtml ? 'HTML' : 'markdown'} source`
-                        : `Edit ${openedFileIsHtml ? 'HTML' : 'markdown'} source`
-                      : `Render ${openedFileIsHtml ? 'isolated HTML' : 'markdown'} preview`
-                  }
-                >
-                  {openedFileShowsPreview ? (readOnly ? 'Source' : 'Edit') : 'Preview'}
-                </button>
               </div>
             ) : null
           }
