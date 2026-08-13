@@ -1,7 +1,8 @@
 export type BrowserMicrophoneOwner =
   | 'voice-message'
   | 'continuous-steering'
-  | 'continuous-dictation';
+  | 'continuous-dictation'
+  | 'file-dictation';
 
 export type BrowserMicrophoneLease = {
   owner: BrowserMicrophoneOwner;
@@ -44,5 +45,6 @@ export const browserMicrophoneCoordinator = new BrowserMicrophoneCoordinator();
 export function browserMicrophoneOwnerLabel(owner: BrowserMicrophoneOwner): string {
   if (owner === 'continuous-dictation') return 'Continuous dictation';
   if (owner === 'continuous-steering') return 'Continuous voice steering';
+  if (owner === 'file-dictation') return 'File dictation';
   return 'A voice message';
 }

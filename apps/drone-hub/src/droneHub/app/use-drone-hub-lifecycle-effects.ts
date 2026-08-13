@@ -15,6 +15,7 @@ import { APP_SHORTCUT_BOUNDARY_SELECTOR } from './AppShortcutBoundary';
 import { useDropdownDismiss } from '../../ui/dropdown';
 import { requestSidebarGroupDraft } from './sidebar-group-draft-events';
 import { useContinuousDictation } from '../chat/ContinuousDictationContext';
+import { useFileDictation } from '../files/FileDictationContext';
 
 type Updater<T> = T | ((prev: T) => T);
 type Setter<T> = (next: Updater<T>) => void;
@@ -154,6 +155,7 @@ export function useDroneHubLifecycleEffects({
   onMarkSelectedDronesUnreadShortcut,
 }: UseDroneHubLifecycleEffectsArgs) {
   const toggleContinuousDictation = useContinuousDictation()?.toggle;
+  const toggleFileDictation = useFileDictation()?.toggle;
   const outputScrollContextRef = React.useRef<string>('');
   useDropdownDismiss(terminalMenuRef, terminalMenuOpen, setTerminalMenuOpen);
   useDropdownDismiss(headerOverflowRef, headerOverflowOpen, setHeaderOverflowOpen);
@@ -291,6 +293,11 @@ export function useDroneHubLifecycleEffects({
       toggleContinuousDictation: () => {
         if (!toggleContinuousDictation) return false;
         void toggleContinuousDictation();
+        return true;
+      },
+      toggleFileDictation: () => {
+        if (!toggleFileDictation) return false;
+        void toggleFileDictation();
         return true;
       },
       toggleVoiceClipboardRecording: () => toggleVoiceClipboardRecording(),
@@ -451,6 +458,7 @@ export function useDroneHubLifecycleEffects({
     onMarkSelectedDronesUnreadShortcut,
     toggleVoiceClipboardRecording,
     toggleContinuousDictation,
+    toggleFileDictation,
     visibleToolTabs,
   ]);
 

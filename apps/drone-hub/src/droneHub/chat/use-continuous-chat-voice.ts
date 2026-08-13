@@ -128,7 +128,7 @@ export function useContinuousChatVoice({
   onError: (message: string) => void;
   routeKey?: () => string | null;
   shouldCapture?: () => boolean;
-  microphoneOwner?: 'continuous-steering' | 'continuous-dictation';
+  microphoneOwner?: 'continuous-steering' | 'continuous-dictation' | 'file-dictation';
 }) {
   const [status, setStatus] = React.useState<ContinuousChatVoiceStatus>('idle');
   const [pendingCount, setPendingCount] = React.useState(0);

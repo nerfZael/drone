@@ -83,6 +83,14 @@ describe('shortcut defaults', () => {
       alt: false,
       shift: false,
     });
+    expect(defaults.toggleFileDictation).toEqual({
+      key: 'd',
+      mod: false,
+      ctrl: false,
+      meta: false,
+      alt: false,
+      shift: false,
+    });
     expect(defaults.openPullRequestsTab).toBeNull();
     expect(defaults.toggleVoiceClipboardRecording).toEqual({
       key: '`',
