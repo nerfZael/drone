@@ -2,6 +2,8 @@ import type { AgentPlan, AgentRunActivity } from '@drone/assistant-chat';
 import { codexPromptOwnsResponse } from './codex-prompt-run';
 import type { PendingPrompt } from './drone-pending-prompts';
 import { finalizeDroneRunFileChanges } from './run-file-changes';
+import { completePendingChatFork } from './chat-fork';
+import type { BuiltinTranscriptAgentId } from './pendingPromptEnqueue';
 
 export type ChatReconciliationExecutorDependencies = {
   applyChatReconciliationInStore: any;
@@ -110,6 +112,28 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
     if (jobKind === 'pi') return parsePiJobTranscript(job);
     if (jobKind === 'blip') return parseBlipJobTranscript(job);
     return {};
+  }
+
+  function applyBuiltinSessionId(
+    entry: any,
+    agentId: BuiltinTranscriptAgentId,
+    sessionIdRaw: unknown,
+  ): boolean {
+    const sessionId = String(sessionIdRaw ?? '').trim();
+    if (!sessionId) return false;
+    const fieldByAgent: Record<BuiltinTranscriptAgentId, string> = {
+      cursor: 'chatId',
+      codex: 'codexThreadId',
+      claude: 'claudeSessionId',
+      opencode: 'openCodeSessionId',
+      pi: 'piSessionId',
+      blip: 'blipSessionId',
+    };
+    const field = fieldByAgent[agentId];
+    const idChanged = String(entry?.[field] ?? '').trim() !== sessionId;
+    if (idChanged) entry[field] = sessionId;
+    const forkCompleted = completePendingChatFork(entry, agentId);
+    return idChanged || forkCompleted;
   }
 
   function sameLiveAgentActivity(
@@ -224,10 +248,11 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
       turns.map((turn: any) => String(turn?.id ?? '').trim()).filter(Boolean),
     );
     const metadataBefore = Object.fromEntries(
-      ['codexThreadId', 'claudeSessionId', 'openCodeSessionId', 'piSessionId', 'blipSessionId'].map(
+      ['chatId', 'codexThreadId', 'claudeSessionId', 'openCodeSessionId', 'piSessionId', 'blipSessionId'].map(
         (field) => [field, String((entry as any)?.[field] ?? '').trim()],
       ),
     ) as Record<string, string>;
+    const forkOriginBefore = JSON.stringify(entry?.chatForkOrigin ?? null);
     const transcriptIds = new Set(
       turns.map((t: any) => String(t?.id ?? '').trim()).filter(Boolean),
     );
@@ -329,12 +354,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
       let jobState = String(job?.state ?? '').trim();
       let jobKind = normalizeBuiltinAgentId(job?.kind) ?? agent.id;
       const appServerThreadId = String(job?.codexAppServer?.threadId ?? '').trim();
-      if (
-        jobKind === 'codex' &&
-        appServerThreadId &&
-        String(entry?.codexThreadId ?? '').trim() !== appServerThreadId
-      ) {
-        entry.codexThreadId = appServerThreadId;
+      if (jobKind === 'codex' && applyBuiltinSessionId(entry, 'codex', appServerThreadId)) {
         changed = true;
       }
       if (jobState === 'queued' || jobState === 'running') {
@@ -342,6 +362,17 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
           jobKind !== 'codex' || !job?.codexAppServer || codexPromptOwnsResponse(job, id);
         const liveState =
           jobState === 'running' && ownsLiveOutput ? parseLiveAgentState(jobKind, job) : {};
+        if (
+          jobState === 'running' &&
+          ['cursor', 'claude', 'opencode', 'pi', 'blip'].includes(jobKind) &&
+          applyBuiltinSessionId(
+            entry,
+            jobKind as BuiltinTranscriptAgentId,
+            liveState.sessionId,
+          )
+        ) {
+          changed = true;
+        }
         const parsedBlip = jobKind === 'blip' && jobState === 'running' ? liveState : null;
         const nextAgentPlan = jobState === 'running' ? liveState.agentPlan : (p as any).agentPlan;
         const nextActivity = jobState === 'running' ? liveState.activity : (p as any).activity;
@@ -351,12 +382,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
               ? job.codexAppServer.run.pendingApprovals
               : []
             : (p as any).approvals;
-        if (
-          parsedBlip?.sessionId &&
-          String(parsedBlip.sessionId).trim() &&
-          String(entry?.blipSessionId ?? '').trim() !== parsedBlip.sessionId
-        ) {
-          entry.blipSessionId = parsedBlip.sessionId;
+        if (applyBuiltinSessionId(entry, 'blip', parsedBlip?.sessionId)) {
           changed = true;
         }
         const agentPlanChanged = !sameAgentPlan((p as any).agentPlan, nextAgentPlan);
@@ -512,6 +538,9 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
           const threadId = parsed.threadId;
           const msg = parsed.message;
           const output = String(msg ?? '').trimEnd();
+          if (applyBuiltinSessionId(entry, 'codex', threadId)) {
+            changed = true;
+          }
           if (!output) {
             const error = formatTranscriptJobFailure({
               agentId: jobKind,
@@ -530,10 +559,6 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             };
             changed = true;
             continue;
-          }
-          if (threadId) {
-            entry.codexThreadId = threadId;
-            changed = true;
           }
           // Record transcript turn (success).
           turns.push({
@@ -564,6 +589,19 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
           const turnModel = normalizeChatModel(parsed.model) ?? pendingModel;
           const turnReasoning = normalizeChatReasoning(parsed.reasoning);
           const output = String(parsed.message ?? '').trimEnd();
+          const structuredSessionId =
+            jobKind === 'opencode'
+              ? parsed.sessionId ??
+                (await ensureOpenCodeSessionId({
+                  droneId,
+                  droneLabel: String(d?.name ?? '').trim() || droneId,
+                  containerName: String(d?.containerName ?? d?.name ?? droneId).trim() || droneId,
+                  chatName: opts.chatName,
+                }).catch(() => null))
+              : parsed.sessionId;
+          if (applyBuiltinSessionId(entry, jobKind, structuredSessionId)) {
+            changed = true;
+          }
           if (!output) {
             const error = formatTranscriptJobFailure({
               agentId: jobKind,
@@ -582,20 +620,6 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             };
             changed = true;
             continue;
-          }
-          if (jobKind === 'opencode') {
-            const openCodeSessionId =
-              parsed.sessionId ??
-              (await ensureOpenCodeSessionId({
-                droneId,
-                droneLabel: String(d?.name ?? '').trim() || droneId,
-                containerName: String(d?.containerName ?? d?.name ?? droneId).trim() || droneId,
-                chatName: opts.chatName,
-              }).catch(() => null));
-            if (openCodeSessionId) {
-              entry.openCodeSessionId = openCodeSessionId;
-              changed = true;
-            }
           }
           turns.push({
             at: promptAt,
@@ -624,12 +648,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
           const parsed = parsePiJobTranscript(job);
           const turnModel = normalizeChatModel(parsed.model) ?? pendingModel;
           const turnReasoning = normalizeChatReasoning(parsed.reasoning);
-          if (
-            parsed.sessionId &&
-            String(parsed.sessionId).trim() &&
-            String(entry?.piSessionId ?? '').trim() !== parsed.sessionId
-          ) {
-            entry.piSessionId = parsed.sessionId;
+          if (applyBuiltinSessionId(entry, 'pi', parsed.sessionId)) {
             changed = true;
           }
           const output = String(parsed.message ?? '').trimEnd();
@@ -671,12 +690,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
           const parsed = parseBlipJobTranscript(job);
           const turnModel = normalizeChatModel(parsed.model) ?? pendingModel;
           const turnReasoning = normalizeChatReasoning(parsed.reasoning);
-          if (
-            parsed.sessionId &&
-            String(parsed.sessionId).trim() &&
-            String(entry?.blipSessionId ?? '').trim() !== parsed.sessionId
-          ) {
-            entry.blipSessionId = parsed.sessionId;
+          if (applyBuiltinSessionId(entry, 'blip', parsed.sessionId)) {
             changed = true;
           }
           const output = String(parsed.message ?? '').trimEnd();
@@ -726,8 +740,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
               containerName: String(d?.containerName ?? d?.name ?? droneId).trim() || droneId,
               chatName: opts.chatName,
             }).catch(() => null)) ?? null;
-          if (openCodeSessionId) {
-            entry.openCodeSessionId = openCodeSessionId;
+          if (applyBuiltinSessionId(entry, 'opencode', openCodeSessionId)) {
             changed = true;
           }
         }
@@ -782,8 +795,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
           const hasCompletedTurn =
             terminalEvent === 'turn.completed' || terminalEvent === 'response.completed';
           if (output && hasCompletedTurn) {
-            if (parsed.threadId) {
-              entry.codexThreadId = parsed.threadId;
+            if (applyBuiltinSessionId(entry, 'codex', parsed.threadId)) {
               changed = true;
             }
             turns.push({
@@ -818,6 +830,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
         }
         if (jobKind === 'cursor' || jobKind === 'claude' || jobKind === 'opencode') {
           const parsed = parseStructuredAgentJobTranscript(jobKind, job);
+          if (applyBuiltinSessionId(entry, jobKind, parsed.sessionId)) changed = true;
           const output = String(parsed.message ?? '').trimEnd();
           const finishedAt = typeof job?.finishedAt === 'string' ? job.finishedAt : nowIso();
           const promptAt = resolveTranscriptPromptAt({
@@ -893,12 +906,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             finishedAt,
           });
           const startedAt = terminalStartedAt ?? promptAt;
-          if (
-            parsed.sessionId &&
-            String(parsed.sessionId).trim() &&
-            String(entry?.piSessionId ?? '').trim() !== parsed.sessionId
-          ) {
-            entry.piSessionId = parsed.sessionId;
+          if (applyBuiltinSessionId(entry, 'pi', parsed.sessionId)) {
             changed = true;
           }
           // Same self-heal logic as Codex: if Pi produced a complete assistant turn before the
@@ -945,12 +953,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             finishedAt,
           });
           const startedAt = terminalStartedAt ?? promptAt;
-          if (
-            parsed.sessionId &&
-            String(parsed.sessionId).trim() &&
-            String(entry?.blipSessionId ?? '').trim() !== parsed.sessionId
-          ) {
-            entry.blipSessionId = parsed.sessionId;
+          if (applyBuiltinSessionId(entry, 'blip', parsed.sessionId)) {
             changed = true;
           }
           if (output && parsed.terminalEvent === 'session_finished') {
@@ -1033,20 +1036,33 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
     }
 
     if (changed) {
-      const metadataSet: Record<string, string> = {};
+      const metadataSet: Record<string, unknown> = {};
       for (const field of Object.keys(metadataBefore)) {
         const value = String((entry as any)?.[field] ?? '').trim();
         if (value && value !== metadataBefore[field]) metadataSet[field] = value;
       }
+      const forkOriginAfter = JSON.stringify(entry?.chatForkOrigin ?? null);
+      const forkOriginChanged = forkOriginAfter !== forkOriginBefore;
+      if (forkOriginChanged && entry?.chatForkOrigin) {
+        metadataSet.chatForkOrigin = entry.chatForkOrigin;
+      }
+      const metadataUnset =
+        forkOriginChanged && !entry?.chatForkOrigin ? ['chatForkOrigin'] : [];
       const newTurns = turns.filter((turn: any) => {
         const id = String(turn?.id ?? '').trim();
         return id && !initialTurnIds.has(id);
       });
-      if (Object.keys(metadataSet).length > 0 || newTurns.length > 0) {
+      if (Object.keys(metadataSet).length > 0 || metadataUnset.length > 0 || newTurns.length > 0) {
         await applyChatReconciliationInStore({
           droneId,
           chatName,
-          metadataPatch: Object.keys(metadataSet).length > 0 ? { set: metadataSet } : undefined,
+          metadataPatch:
+            Object.keys(metadataSet).length > 0 || metadataUnset.length > 0
+              ? {
+                  ...(Object.keys(metadataSet).length > 0 ? { set: metadataSet } : {}),
+                  ...(metadataUnset.length > 0 ? { unset: metadataUnset } : {}),
+                }
+              : undefined,
           turns: newTurns,
         });
         await projectCanonicalChatToRegistry(droneId, chatName);

@@ -20,7 +20,7 @@ import {
   sidebarDroneStateLabel,
   type DroneInlineRenameResult,
 } from '../overview';
-import { IconPin } from '../overview/icons';
+import { IconClone, IconPin } from '../overview/icons';
 import {
   UiActionMenu,
   type UiActionMenuEntry,
@@ -856,6 +856,11 @@ export type DroneSidebarProps = {
     chatName: string,
     opts?: { draft?: boolean },
   ) => Promise<{ ok: boolean; chatName?: string; error?: string | null }>;
+  onCloneDroneChat: (
+    droneId: string,
+    chatName: string,
+  ) => Promise<{ ok: boolean; chatName?: string; error?: string | null }>;
+  cloningChatKeys: Record<string, true>;
   onRenameDroneChat: (
     droneId: string,
     chatName: string,
@@ -947,6 +952,8 @@ export function DroneSidebar({
   onDeleteDroneChat,
   onCloneDrone,
   onCreateDroneChat,
+  onCloneDroneChat,
+  cloningChatKeys,
   onRenameDroneChat,
   onRenameDrone,
   onSetDroneBaseImage,
@@ -2746,6 +2753,11 @@ export function DroneSidebar({
                                   : undefined
                               }
                               onCreateChat={sidebarCapabilities.actions ? () => openDroneChatCreate(drone) : undefined}
+                              onCloneChat={
+                                sidebarCapabilities.actions && hasOnlyDefaultChat
+                                  ? () => void onCloneDroneChat(droneId, 'default')
+                                  : undefined
+                              }
                               onClone={sidebarCapabilities.actions ? () => onCloneDrone(drone) : undefined}
                               onAddToGroup={
                                 sidebarCapabilities.actions && pinnedDroneIsInActiveRepository
@@ -2776,6 +2788,15 @@ export function DroneSidebar({
                                 isOptimistic ||
                                 droneMutationBusy ||
                                 String(drone.runtime ?? 'container').trim().toLowerCase() === 'host'
+                              }
+                              cloneChatBusy={Boolean(cloningChatKeys[`${droneId}:default`])}
+                              cloneChatDisabled={
+                                isOptimistic ||
+                                droneMutationBusy ||
+                                droneProvisioning ||
+                                (drone.busyChats ?? []).includes('default') ||
+                                busyChatNodeIdSet.has(defaultChatNodeId) ||
+                                Boolean(cloningChatKeys[`${droneId}:default`])
                               }
                               createChatDisabled={isOptimistic || droneMutationBusy || droneProvisioning}
                               addToGroupDisabled={isOptimistic || movingDroneGroups || droneMutationBusy || droneProvisioning}
@@ -3182,6 +3203,8 @@ export function DroneSidebar({
                       onAddDroneToGroup={openAddDroneToGroup}
                       onCreateGroupBeforeDrone={openGroupDraftBeforeDrone}
                       onCreateDroneChat={onCreateDroneChat}
+                      onCloneDroneChat={onCloneDroneChat}
+                      cloningChatKeys={cloningChatKeys}
                       onRenameDroneChat={onRenameDroneChat}
                       chatEditor={chatEditor}
                       chatEditorInputRef={chatEditorInputRef}
@@ -3347,6 +3370,44 @@ export function DroneSidebar({
                   muted: !mutedChatIdSet.has(targetId),
                 });
               },
+            },
+            {
+              id: 'clone-chat',
+              label: 'Clone chat',
+              separatorBefore: true,
+              icon: cloningChatKeys[
+                `${pinnedChatContextMenu.droneId}:${pinnedChatContextMenu.chatName}`
+              ] ? (
+                <IconSpinner className="h-3.5 w-3.5" />
+              ) : (
+                <IconClone className="h-3.5 w-3.5 text-[var(--accent)]" />
+              ),
+              disabled: (() => {
+                const drone = sidebarDroneById[pinnedChatContextMenu.droneId];
+                const chatNodeId = createCanvasChatNodeId(
+                  pinnedChatContextMenu.droneId,
+                  pinnedChatContextMenu.chatName,
+                );
+                return (
+                  !drone ||
+                  Boolean(
+                    cloningChatKeys[
+                      `${pinnedChatContextMenu.droneId}:${pinnedChatContextMenu.chatName}`
+                    ],
+                  ) ||
+                  (drone.busyChats ?? []).includes(pinnedChatContextMenu.chatName) ||
+                  busyChatNodeIdSet.has(chatNodeId) ||
+                  Boolean(deletingDrones[pinnedChatContextMenu.droneId]) ||
+                  Boolean(renamingDrones[pinnedChatContextMenu.droneId]) ||
+                  Boolean(settingBaseImages[pinnedChatContextMenu.droneId]) ||
+                  isDroneStartingOrSeeding(drone.hubPhase)
+                );
+              })(),
+              onSelect: () =>
+                void onCloneDroneChat(
+                  pinnedChatContextMenu.droneId,
+                  pinnedChatContextMenu.chatName,
+                ),
             },
           ]}
           onClose={() => setPinnedChatContextMenu(null)}

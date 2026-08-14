@@ -420,6 +420,7 @@ export async function codexPromptEnqueue(
     prompt: string;
     imagePaths?: string[];
     existingThreadId?: string;
+    forkThreadId?: string;
     deliveryMode?: 'queue' | 'asap';
     approvalPolicy?: 'untrusted' | 'on-request' | 'never';
     approvalsReviewer?: 'user' | 'auto_review';

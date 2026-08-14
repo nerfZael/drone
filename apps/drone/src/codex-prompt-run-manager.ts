@@ -18,6 +18,7 @@ export type CodexPromptSpec = {
   prompt: string;
   imagePaths?: string[];
   existingThreadId?: string;
+  forkThreadId?: string;
   threadId?: string;
   turnId?: string;
   runId?: string;
@@ -600,6 +601,16 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
         session.threadId = null;
         session.threadReady = false;
       }
+    }
+    if (spec.forkThreadId) {
+      const forked = await session.connection.call('thread/fork', {
+        threadId: spec.forkThreadId,
+      });
+      const threadId = String(forked?.thread?.id ?? '').trim();
+      if (!threadId) throw new Error('Codex App Server did not return a forked thread id');
+      session.threadId = threadId;
+      session.threadReady = true;
+      return threadId;
     }
     const started = await session.connection.call('thread/start', {
       cwd: undefined,

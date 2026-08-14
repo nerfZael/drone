@@ -3442,7 +3442,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     async (
       drone: DroneSummary,
       chatNameRaw: string,
-      opts?: { draft?: boolean; select?: boolean; copyFromChat?: string },
+      opts?: {
+        draft?: boolean;
+        select?: boolean;
+        copyFromChat?: string;
+        mode?: 'copy-config' | 'fork';
+      },
     ): Promise<{ ok: boolean; chatName?: string; error?: string | null }> => {
       const droneId = String(drone?.id ?? '').trim();
       if (!droneId) return { ok: false, error: 'Missing drone id.' };
@@ -3467,6 +3472,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           body: JSON.stringify({
             name: chatName,
             ...(availableChats.length > 0 ? { copyFromChat } : {}),
+            ...(availableChats.length > 0
+              ? { mode: opts?.mode === 'fork' ? 'fork' : 'copy-config' }
+              : {}),
             ...(opts?.draft === true ? { draft: true } : {}),
           }),
         });
@@ -3484,7 +3492,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const createUntitledDroneChat = React.useCallback(
     async (
       drone: DroneSummary,
-      opts?: { select?: boolean; copyFromChat?: string },
+      opts?: {
+        select?: boolean;
+        copyFromChat?: string;
+        mode?: 'copy-config' | 'fork';
+      },
     ): Promise<{ ok: boolean; chatName?: string; error?: string | null }> => {
       const latestDrone = droneByIdRef.current[drone.id] ?? drone;
       const unavailableChatNames = [...(latestDrone.chats ?? [])];
@@ -3501,6 +3513,43 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       return { ok: false, error: 'Could not find an available untitled chat name.' };
     },
     [createDroneChat],
+  );
+  const cloningChatKeysRef = React.useRef(new Set<string>());
+  const [cloningChatKeys, setCloningChatKeys] = React.useState<Record<string, true>>({});
+  const cloneDroneChat = React.useCallback(
+    async (
+      droneIdRaw: string,
+      sourceChatNameRaw: string,
+    ): Promise<{ ok: boolean; chatName?: string; error?: string | null }> => {
+      const droneId = String(droneIdRaw ?? '').trim();
+      const sourceChatName = String(sourceChatNameRaw ?? '').trim() || 'default';
+      const drone = droneByIdRef.current[droneId];
+      if (!drone) return { ok: false, error: 'Unknown drone.' };
+      const cloneKey = `${droneId}:${sourceChatName}`;
+      if (cloningChatKeysRef.current.has(cloneKey)) {
+        return { ok: false, error: 'This chat is already being cloned.' };
+      }
+      cloningChatKeysRef.current.add(cloneKey);
+      setCloningChatKeys((current) => ({ ...current, [cloneKey]: true }));
+      try {
+        const result = await createUntitledDroneChat(drone, {
+          copyFromChat: sourceChatName,
+          mode: 'fork',
+        });
+        if (!result.ok) {
+          showShortcutToast(result.error || 'The chat could not be cloned.', 'Clone chat failed');
+        }
+        return result;
+      } finally {
+        cloningChatKeysRef.current.delete(cloneKey);
+        setCloningChatKeys((current) => {
+          const next = { ...current };
+          delete next[cloneKey];
+          return next;
+        });
+      }
+    },
+    [createUntitledDroneChat, showShortcutToast],
   );
   const [focusedNewChatActionId, setFocusedNewChatActionId] = React.useState('');
   const consumeNewChatActionAutoFocus = React.useCallback((actionIdRaw: string) => {
@@ -4257,6 +4306,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     selectDroneCard,
     selectDroneChat,
     createDroneChat,
+    cloneDroneChat,
+    cloningChatKeys,
     renameCanvasChat,
     deleteCanvasChat,
     cloneDroneFromSidebar,

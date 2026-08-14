@@ -284,13 +284,22 @@ export function createChatManagementRouteHandler(
           body?.copyFrom ?? body?.copyFromChat ?? body?.fromChat ?? '',
         ).trim();
         const copyFrom = copyFromRaw ? normalizeChatName(copyFromRaw) : '';
+        if (body?.mode && !copyFrom) {
+          json(res, 400, { ok: false, error: `${body.mode} chat creation requires a source chat` });
+          return;
+        }
+        const creationMode = copyFrom
+          ? body?.mode === 'copy-config'
+            ? 'copy-config'
+            : 'clone-history'
+          : 'empty';
         const createAsDraft = parseDraftFlag(body?.draft ?? body?.isDraft);
         try {
           const created = await createDroneChat({
             droneId,
             chatName,
             droneEntry: resolved.drone,
-            creationMode: copyFrom ? 'clone-history' : 'empty',
+            creationMode,
             ...(copyFrom ? { sourceChatName: copyFrom } : {}),
             draft: createAsDraft,
           });
@@ -309,9 +318,9 @@ export function createChatManagementRouteHandler(
           const msg = e?.message ?? String(e);
           const code = /unknown drone|unknown chat/i.test(msg)
             ? 404
-            : /already exists/i.test(msg)
+            : /already exists|stop this chat|not supported/i.test(msg)
               ? 409
-              : /missing /i.test(msg)
+              : /missing |requires a source|cannot specify a source|unsupported chat creation mode/i.test(msg)
                 ? 400
                 : 500;
           json(res, code, { ok: false, error: msg });
