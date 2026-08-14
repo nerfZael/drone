@@ -15,6 +15,7 @@ import { APP_SHORTCUT_BOUNDARY_SELECTOR } from './AppShortcutBoundary';
 import { useDropdownDismiss } from '../../ui/dropdown';
 import { requestSidebarGroupDraft } from './sidebar-group-draft-events';
 import { useContinuousDictation } from '../chat/ContinuousDictationContext';
+import { toggleCurrentChatComposerEditorMode } from '../chat/chat-composer-editor-mode-shortcut';
 import { useFileDictation } from '../files/FileDictationContext';
 
 type Updater<T> = T | ((prev: T) => T);
@@ -290,8 +291,8 @@ export function useDroneHubLifecycleEffects({
       moveSelectedDroneToTop: () => moveSelectedDroneToTopFromShortcut(),
       toggleSelectedDronesToDo: () => toggleSelectedDronesToDoFromShortcut(),
       focusPrimaryChatInput: () => focusPrimaryChatInput(),
-      // ChatInput handles this action during capture so it can identify the
-      // focused composer, including Monaco's app-shortcut boundary.
+      // This action runs in the capture handler below so editor shortcut
+      // boundaries cannot swallow it and dialogs can explicitly suppress it.
       toggleChatComposerEditorMode: () => false,
       toggleContinuousDictation: () => {
         if (!toggleContinuousDictation) return false;
@@ -389,6 +390,21 @@ export function useDroneHubLifecycleEffects({
       return target.matches('[data-onboarding-id="sidebar.droneCard"]');
     };
 
+    const onChatComposerEditorShortcutCapture = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.repeat || e.isComposing) return;
+      const captureRoot =
+        e.target instanceof HTMLElement ? e.target.closest('[data-shortcut-capture="true"]') : null;
+      if (captureRoot) return;
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      const matched = SHORTCUT_DEFINITIONS.find(
+        (definition) => isShortcutMatch(shortcutBindings[definition.id], e),
+      );
+      if (matched?.id !== 'toggleChatComposerEditorMode') return;
+      if (!toggleCurrentChatComposerEditorMode()) return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
       if (
@@ -439,8 +455,12 @@ export function useDroneHubLifecycleEffects({
       if (!handled) return;
       e.preventDefault();
     };
+    document.addEventListener('keydown', onChatComposerEditorShortcutCapture, { capture: true });
     document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onChatComposerEditorShortcutCapture, { capture: true });
+      document.removeEventListener('keydown', onKeyDown);
+    };
   }, [
     currentDrone,
     openHome,

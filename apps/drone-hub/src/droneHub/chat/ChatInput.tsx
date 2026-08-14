@@ -50,6 +50,10 @@ import { mergeDraftWithContinuousDictation } from './continuous-dictation-draft'
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { isShortcutMatch } from '../app/shortcuts';
 import { preloadMonacoEditor } from '../files/monaco-editor-loader';
+import {
+  markCurrentChatComposerEditorModeTarget,
+  registerChatComposerEditorModeTarget,
+} from './chat-composer-editor-mode-shortcut';
 
 const CHAT_INPUT_TEXTAREA_MIN_HEIGHT_PX = 36;
 const CHAT_INPUT_TEXTAREA_MAX_HEIGHT_PX = 160;
@@ -227,6 +231,8 @@ export function ChatInput({
   const composerRootRef = React.useRef<HTMLDivElement | null>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
   const editorRef = React.useRef<ChatComposerEditorHandle | null>(null);
+  const editorModeShortcutTargetId = React.useId();
+  const toggleEditorModeRef = React.useRef<() => void>(() => undefined);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const onDraftContentChangeRef = React.useRef(onDraftContentChange);
   onDraftContentChangeRef.current = onDraftContentChange;
@@ -594,6 +600,26 @@ export function ChatInput({
       setUncontrolledEditorMode((current) => !current);
     }
   }
+  toggleEditorModeRef.current = toggleEditorMode;
+
+  React.useEffect(
+    () =>
+      registerChatComposerEditorModeTarget({
+        id: editorModeShortcutTargetId,
+        primary: focusTargetId === 'primary-chat',
+        isEligible: () => {
+          const root = composerRootRef.current;
+          return Boolean(
+            root &&
+            root.isConnected &&
+            root.getClientRects().length > 0 &&
+            !root.closest('[aria-hidden="true"]'),
+          );
+        },
+        toggle: () => toggleEditorModeRef.current(),
+      }),
+    [editorModeShortcutTargetId, focusTargetId],
+  );
 
   React.useEffect(() => {
     if (!focusAfterModeChangeRef.current) return;
@@ -945,11 +971,15 @@ export function ChatInput({
       data-onboarding-id="chat.input"
       data-continuous-dictation-target={continuousDictationTargeted ? 'true' : undefined}
       className="flex-shrink-0 bg-[var(--chat-background)] px-[.5625rem] pb-[.75rem] pt-[.375rem] [font-family:var(--chat-composer-font)]"
+      onPointerDownCapture={() => {
+        markCurrentChatComposerEditorModeTarget(editorModeShortcutTargetId);
+      }}
       onKeyDownCapture={(event) => {
         if (event.defaultPrevented || event.repeat || event.nativeEvent.isComposing) return;
         if (!isShortcutMatch(toggleEditorModeShortcut, event)) return;
         event.preventDefault();
         event.stopPropagation();
+        markCurrentChatComposerEditorModeTarget(editorModeShortcutTargetId);
         toggleEditorMode();
       }}
       onDragEnter={(e) => {
@@ -988,6 +1018,7 @@ export function ChatInput({
         <div
           data-chat-composer-expanded={composerExpanded ? 'true' : 'false'}
           onFocusCapture={(event) => {
+            markCurrentChatComposerEditorModeTarget(editorModeShortcutTargetId);
             focusContinuousDictationComposer();
             const target = event.target;
             if (
