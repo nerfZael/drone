@@ -23,6 +23,7 @@ describe('queued chat creation', () => {
         chats.set(chatName, created);
         return { chat: created, chats: [...chats.keys()] };
       },
+      deleteChatFromStore: async ({ chatName }) => chats.delete(chatName),
       getChatEntry: async ({ chatName }) => ({ chat: chats.get(chatName) }),
       importDroneChatsFromRegistry: async () => {},
       inferChatAgent: (chat) => chat.agent ?? { kind: 'builtin' },
@@ -140,5 +141,98 @@ describe('queued chat creation', () => {
         },
       }),
     ).rejects.toThrow('chat already exists');
+  });
+
+  test('forks builtin history, blocks active sources, and rejects custom agents', async () => {
+    const chats = new Map<string, any>([
+      [
+        'default',
+        {
+          id: 'source-chat',
+          agent: { kind: 'builtin', id: 'claude' },
+          claudeSessionId: 'source-session',
+          turns: [{ id: 'completed-prompt', prompt: 'hello', output: 'hi' }],
+          pendingPrompts: [{ id: 'completed-prompt', state: 'sent' }],
+        },
+      ],
+    ]);
+    let failNativeClone = false;
+    const createDroneChat = createDroneChatCreator({
+      buildNewChatEntry: ({ createdAt, sourceChatEntry }) => ({
+        id: 'new-chat',
+        createdAt,
+        agent: sourceChatEntry?.agent ?? { kind: 'native' },
+      }),
+      cloneNativeChatSession: async () => {
+        if (failNativeClone) throw new Error('native fork failed');
+      },
+      copyNativeChatConfiguration: async () => {},
+      createChatInStore: async ({ chatName, copyFromChatName, createEntry }) => {
+        const created = createEntry(copyFromChatName ? chats.get(copyFromChatName) : null);
+        chats.set(chatName, created);
+        return { chat: created, chats: [...chats.keys()] };
+      },
+      deleteChatFromStore: async ({ chatName }) => chats.delete(chatName),
+      getChatEntry: async ({ chatName }) => ({ chat: chats.get(chatName) }),
+      importDroneChatsFromRegistry: async () => {},
+      inferChatAgent: (chat) => chat.agent,
+      listChatsFromStore: () => ({ chats: [...chats.keys()] }),
+      nowIso: () => '2026-08-01T10:00:00.000Z',
+      projectCanonicalChatsToRegistry: async () => {},
+      readChatFromStore: ({ chatName }) => ({ available: true, chat: chats.get(chatName) ?? null }),
+    });
+
+    await createDroneChat({
+      droneId: 'alpha',
+      droneEntry: {},
+      chatName: 'Forked',
+      creationMode: 'clone-history',
+      sourceChatName: 'default',
+    });
+    expect(chats.get('Forked')).toMatchObject({
+      turns: [{ id: 'completed-prompt', inheritedFromClone: true }],
+      chatForkOrigin: {
+        agentId: 'claude',
+        sourceSessionId: 'source-session',
+        state: 'pending',
+      },
+    });
+
+    chats.get('default').pendingPrompts.push({ id: 'active-prompt', state: 'queued' });
+    await expect(
+      createDroneChat({
+        droneId: 'alpha',
+        droneEntry: {},
+        chatName: 'Busy fork',
+        creationMode: 'clone-history',
+        sourceChatName: 'default',
+      }),
+    ).rejects.toThrow('Stop this chat before cloning it');
+    expect(chats.has('Busy fork')).toBe(false);
+
+    chats.set('custom', { id: 'custom-chat', agent: { kind: 'custom', id: 'custom' } });
+    await expect(
+      createDroneChat({
+        droneId: 'alpha',
+        droneEntry: {},
+        chatName: 'Custom fork',
+        creationMode: 'clone-history',
+        sourceChatName: 'custom',
+      }),
+    ).rejects.toThrow('not supported for custom agents');
+    expect(chats.has('Custom fork')).toBe(false);
+
+    chats.set('native', { id: 'native-source', agent: { kind: 'native' }, turns: [] });
+    failNativeClone = true;
+    await expect(
+      createDroneChat({
+        droneId: 'alpha',
+        droneEntry: {},
+        chatName: 'Failed native fork',
+        creationMode: 'clone-history',
+        sourceChatName: 'native',
+      }),
+    ).rejects.toThrow('native fork failed');
+    expect(chats.has('Failed native fork')).toBe(false);
   });
 });

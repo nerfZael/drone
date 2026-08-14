@@ -1,3 +1,9 @@
+import {
+  cloneTranscriptTurnsForChatFork,
+  createChatForkOrigin,
+} from './chat-fork';
+import type { BuiltinTranscriptAgentId } from './pendingPromptEnqueue';
+
 export type QueuedChatOrigin = {
   sourceChatName: string;
   sourceChatId?: string;
@@ -51,9 +57,10 @@ export type DroneChatCreationDependencies = {
     implicitDefaultEntry?: unknown;
     createEntry: (source: any | null) => unknown;
   }) => Promise<{ chat: any; chats: string[] }>;
+  deleteChatFromStore: (input: { droneId: string; chatName: string }) => Promise<boolean>;
   getChatEntry: (input: { droneId: string; chatName: string }) => Promise<{ chat: any }>;
   importDroneChatsFromRegistry: (input: { droneId: string; chats: any }) => Promise<unknown>;
-  inferChatAgent: (chat: any, drone: any) => { kind: string };
+  inferChatAgent: (chat: any, drone: any) => { kind: string; id?: string };
   listChatsFromStore: (input: { droneId: string }) => { chats: string[] };
   nowIso: () => string;
   projectCanonicalChatsToRegistry: (droneId: string) => Promise<unknown>;
@@ -100,6 +107,27 @@ export function createDroneChatCreator(deps: DroneChatCreationDependencies) {
       chats: input.droneEntry?.chats,
     });
 
+    const sourceBeforeCreate = sourceChatName
+      ? deps.readChatFromStore({ droneId: input.droneId, chatName: sourceChatName }).chat
+      : null;
+    if (input.creationMode === 'clone-history' && sourceBeforeCreate) {
+      const sourceBusy = (input.droneEntry?.busyChats ?? []).includes(sourceChatName);
+      const completedTurnIds = new Set(
+        (sourceBeforeCreate.turns ?? [])
+          .map((turn: any) => String(turn?.id ?? '').trim())
+          .filter(Boolean),
+      );
+      const sourceHasActivePrompts = (sourceBeforeCreate.pendingPrompts ?? []).some(
+        (prompt: any) =>
+          ['queued', 'sending'].includes(String(prompt?.state ?? '')) ||
+          (String(prompt?.state ?? '') === 'sent' &&
+            !completedTurnIds.has(String(prompt?.id ?? '').trim())),
+      );
+      if (sourceBusy || sourceHasActivePrompts) {
+        throw new Error('Stop this chat before cloning it');
+      }
+    }
+
     const existing = deps.readChatFromStore({ droneId: input.droneId, chatName: input.chatName });
     let created: { chat: any; chats: string[] };
     let wasCreated = false;
@@ -126,6 +154,21 @@ export function createDroneChatCreator(deps: DroneChatCreationDependencies) {
             createdAt,
             ...(source ? { sourceChatEntry: source } : {}),
           });
+          if (input.creationMode === 'clone-history' && source) {
+            const sourceAgent = deps.inferChatAgent(source, input.droneEntry);
+            if (sourceAgent.kind === 'custom') {
+              throw new Error('Chat cloning is not supported for custom agents');
+            }
+            entry.turns = cloneTranscriptTurnsForChatFork(source.turns);
+            if (sourceAgent.kind === 'builtin' && sourceAgent.id) {
+              const forkOrigin = createChatForkOrigin(
+                source,
+                sourceChatName,
+                sourceAgent.id as BuiltinTranscriptAgentId,
+              );
+              if (forkOrigin) entry.chatForkOrigin = forkOrigin;
+            }
+          }
           if (input.draft) entry.draft = true;
           if (input.queuedOrigin) entry.queuedChatOrigin = input.queuedOrigin;
           return entry;
@@ -150,16 +193,27 @@ export function createDroneChatCreator(deps: DroneChatCreationDependencies) {
             input.creationMode === 'copy-config'
               ? deps.copyNativeChatConfiguration
               : deps.cloneNativeChatSession;
-          await createNativeSession({
-            sourceId,
-            sourceChatName,
-            sourceProvider: String(sourceChat?.nativeProvider ?? '').trim(),
-            sourceModel: String(sourceChat?.model ?? '').trim(),
-            sourceThinkingLevel: String(sourceChat?.reasoning ?? '').trim(),
-            targetId,
-            droneId: input.droneId,
-            chatName: input.chatName,
-          });
+          try {
+            await createNativeSession({
+              sourceId,
+              sourceChatName,
+              sourceProvider: String(sourceChat?.nativeProvider ?? '').trim(),
+              sourceModel: String(sourceChat?.model ?? '').trim(),
+              sourceThinkingLevel: String(sourceChat?.reasoning ?? '').trim(),
+              targetId,
+              droneId: input.droneId,
+              chatName: input.chatName,
+            });
+          } catch (error) {
+            if (wasCreated) {
+              await deps.deleteChatFromStore({
+                droneId: input.droneId,
+                chatName: input.chatName,
+              }).catch(() => false);
+              await deps.projectCanonicalChatsToRegistry(input.droneId).catch(() => undefined);
+            }
+            throw error;
+          }
         }
       }
     }

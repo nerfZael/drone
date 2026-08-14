@@ -3083,6 +3083,7 @@ function createHubRuntimeGraph(
     cloneNativeChatSession: nativeChatRuntimePort.cloneSession,
     copyNativeChatConfiguration: nativeChatRuntimePort.copyConfiguration,
     createChatInStore,
+    deleteChatFromStore,
     getChatEntry,
     importDroneChatsFromRegistry,
     inferChatAgent,

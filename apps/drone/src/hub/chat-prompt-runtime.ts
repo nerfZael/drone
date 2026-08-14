@@ -34,6 +34,7 @@ import {
   ProvisionedPromptHandoffStore,
   type ProvisionedPromptHandoff,
 } from './provisioned-prompt-handoff';
+import { pendingChatForkSourceSessionId } from './chat-fork';
 
 type ChatPromptRuntimeDependencyName =
   | 'NON_REPO_HOME_CWD'
@@ -475,6 +476,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     prompt: string;
     imagePaths?: string[];
     existingThreadId?: string;
+    forkThreadId?: string;
     deliveryMode?: 'queue' | 'asap';
     approvalPolicy: 'untrusted' | 'on-request' | 'never';
     approvalsReviewer: 'user' | 'auto_review';
@@ -538,6 +540,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       prompt: opts.prompt,
       ...(opts.imagePaths?.length ? { imagePaths: opts.imagePaths } : {}),
       ...(opts.existingThreadId ? { existingThreadId: opts.existingThreadId } : {}),
+      ...(opts.forkThreadId ? { forkThreadId: opts.forkThreadId } : {}),
       ...(opts.deliveryMode ? { deliveryMode: opts.deliveryMode } : {}),
       approvalPolicy: opts.approvalPolicy,
       approvalsReviewer: opts.approvalsReviewer,
@@ -794,8 +797,12 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           turnOk: true as const,
         };
       }
-      const promptWithHistory =
+      const pendingNativeForkSourceSessionId =
         agent.kind === 'builtin'
+          ? pendingChatForkSourceSessionId(chat, agent.id)
+          : '';
+      const promptWithHistory =
+        agent.kind === 'builtin' && !pendingNativeForkSourceSessionId
           ? maybeBootstrapPromptFromTranscript({
               agentId: agent.id,
               prompt: effectivePrompt,
@@ -871,7 +878,10 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
             : approvalPolicy === 'none'
               ? 'never'
               : 'untrusted';
-        const existingThreadId = readBuiltinTranscriptSessionId(chat, 'codex');
+        const forkThreadId = pendingChatForkSourceSessionId(chat, 'codex');
+        const existingThreadId = forkThreadId
+          ? ''
+          : readBuiltinTranscriptSessionId(chat, 'codex');
         const stableChatId = String((chat as any)?.id ?? '').trim() || normalizedChat;
         const launchScript = [
           'set -euo pipefail',
@@ -894,6 +904,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
             .map((attachment: any) => String(attachment?.path ?? '').trim())
             .filter(Boolean),
           ...(existingThreadId ? { existingThreadId } : {}),
+          ...(forkThreadId ? { forkThreadId } : {}),
           deliveryMode: opts.deliveryMode,
           approvalPolicy: approvalArg,
           approvalsReviewer: approvalPolicy === 'auto' ? 'auto_review' : 'user',
@@ -914,7 +925,10 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       }
 
       if (agent.kind === 'builtin' && agent.id === 'claude') {
-        const claudeSessionId = await ensureClaudeSessionId({ droneId, chatName: normalizedChat });
+        const forkSessionId = pendingChatForkSourceSessionId(chat, 'claude');
+        const claudeSessionId = forkSessionId
+          ? ''
+          : await ensureClaudeSessionId({ droneId, chatName: normalizedChat });
         const supportsModel = chatModel
           ? await cliSupportsModelFlag({ runtime, containerName, cwd, bin: 'claude' })
           : false;
@@ -926,7 +940,11 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           ...managedChatMcpEnvLines,
           `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
           cdCommand,
-          `claude --print --dangerously-skip-permissions --output-format stream-json --verbose${modelArg} --session-id ${bashQuote(claudeSessionId)} ${bashQuote(promptWithHistory)}`,
+          `claude --print --dangerously-skip-permissions --output-format stream-json --verbose${modelArg}${
+            forkSessionId
+              ? ` --resume ${bashQuote(forkSessionId)} --fork-session`
+              : ` --session-id ${bashQuote(claudeSessionId)}`
+          } ${bashQuote(promptWithHistory)}`,
         ].join('\n');
         await enqueueTranscriptPrompt({
           id: opts.id,
@@ -954,9 +972,16 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           ? await cliSupportsModelFlag({ runtime, containerName, cwd, bin: 'opencode' })
           : false;
         const modelArg = chatModel && supportsModel ? ` --model ${bashQuote(chatModel)}` : '';
-        const openCodeSessionId = readBuiltinTranscriptSessionId(chat, 'opencode');
+        const forkSessionId = pendingChatForkSourceSessionId(chat, 'opencode');
+        const openCodeSessionId = forkSessionId
+          ? ''
+          : readBuiltinTranscriptSessionId(chat, 'opencode');
         const title = openCodeSessionTitle(droneLabel, normalizedChat);
-        const resumeArg = openCodeSessionId ? ` --session ${bashQuote(openCodeSessionId)}` : '';
+        const resumeArg = forkSessionId
+          ? ` --session ${bashQuote(forkSessionId)} --fork`
+          : openCodeSessionId
+            ? ` --session ${bashQuote(openCodeSessionId)}`
+            : '';
         const script = [
           'set -euo pipefail',
           ...buildContainerManagedEnvLines(d),
@@ -989,8 +1014,13 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
 
       if (agent.kind === 'builtin' && agent.id === 'pi') {
         const modelArg = chatModel ? ` --model ${bashQuote(chatModel)}` : '';
-        const piSessionId = readBuiltinTranscriptSessionId(chat, 'pi');
-        const sessionArg = piSessionId ? ` --session ${bashQuote(piSessionId)}` : '';
+        const forkSessionId = pendingChatForkSourceSessionId(chat, 'pi');
+        const piSessionId = forkSessionId ? '' : readBuiltinTranscriptSessionId(chat, 'pi');
+        const sessionArg = forkSessionId
+          ? ` --fork ${bashQuote(forkSessionId)}`
+          : piSessionId
+            ? ` --session ${bashQuote(piSessionId)}`
+            : '';
         const script = [
           'set -euo pipefail',
           ...buildContainerManagedEnvLines(d),
@@ -1031,8 +1061,13 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
             : agentPermissionMode === 'write'
               ? '--permission workspace-write --profile no-shell-workspace-write'
               : '--permission full-access --profile local-trusted-write');
-        const blipSessionId = readBuiltinTranscriptSessionId(chat, 'blip');
-        const sessionArg = blipSessionId ? ` --session ${bashQuote(blipSessionId)}` : '';
+        const forkSessionId = pendingChatForkSourceSessionId(chat, 'blip');
+        const blipSessionId = forkSessionId ? '' : readBuiltinTranscriptSessionId(chat, 'blip');
+        const sessionArg = forkSessionId
+          ? ` --fork ${bashQuote(forkSessionId)}`
+          : blipSessionId
+            ? ` --session ${bashQuote(blipSessionId)}`
+            : '';
         const blipCommand = resolveBlipPromptCommand(runtime);
         const script = [
           'set -euo pipefail',

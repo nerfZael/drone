@@ -203,6 +203,7 @@ export async function createDroneChatEntry(
     droneId: string;
     chatName: string;
     copyFromChat?: string | null;
+    mode?: 'copy-config' | 'fork';
   },
 ): Promise<void> {
   const droneId = String(opts.droneId ?? '').trim();
@@ -214,6 +215,7 @@ export async function createDroneChatEntry(
     body: JSON.stringify({
       name: chatName,
       ...(copyFromChat ? { copyFromChat } : {}),
+      ...(copyFromChat ? { mode: opts.mode ?? 'copy-config' } : {}),
     }),
   });
 }

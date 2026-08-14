@@ -50,6 +50,7 @@ describe('multi-chat drone disclosure', () => {
     );
     expect(chatRows).not.toContain('onFocusDroneChat(drone.id, chatName)');
     expect(chatRows).toContain("label: 'Create chat'");
+    expect(chatRows).toContain("label: 'Clone chat'");
     expect(chatRows).toContain("label: 'Rename chat'");
     expect(chatRows).toContain("shortcut: 'F2'");
     expect(chatRows).toContain("label: 'Delete chat'");
@@ -126,6 +127,27 @@ describe('multi-chat drone disclosure', () => {
 
     expect(source).toContain('selectPinnedDroneCard(drone, opts);');
     expect(source).toContain('? selectPinnedDroneContainer(drone, rowOpts)');
+  });
+
+  test('offers chat cloning from single-chat drone menus', () => {
+    const cardSource = readFileSync(
+      new URL('../src/droneHub/overview/DroneCard.tsx', import.meta.url),
+      'utf8',
+    );
+    const treeSource = readFileSync(
+      new URL('../src/droneHub/app/GroupedSidebarTree.tsx', import.meta.url),
+      'utf8',
+    );
+    const sidebarSource = readFileSync(
+      new URL('../src/droneHub/app/DroneSidebar.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(cardSource).toContain("label: 'Clone chat'");
+    expect(treeSource).toContain('actionsEnabled && hasOnlyDefaultChat');
+    expect(treeSource).toContain("onCloneDroneChat(drone.id, 'default')");
+    expect(sidebarSource).toContain('sidebarCapabilities.actions && hasOnlyDefaultChat');
+    expect(sidebarSource).toContain("onCloneDroneChat(droneId, 'default')");
   });
 
   test('exposes the disclosure state accessibly with the shared runtime icon', () => {

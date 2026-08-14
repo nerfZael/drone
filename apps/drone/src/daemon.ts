@@ -1693,6 +1693,9 @@ async function main() {
           ...(typeof body?.existingThreadId === 'string' && body.existingThreadId.trim()
             ? { existingThreadId: body.existingThreadId.trim() }
             : {}),
+          ...(typeof body?.forkThreadId === 'string' && body.forkThreadId.trim()
+            ? { forkThreadId: body.forkThreadId.trim() }
+            : {}),
           ...(body?.approvalPolicy === 'untrusted' ||
           body?.approvalPolicy === 'on-request' ||
           body?.approvalPolicy === 'never'
