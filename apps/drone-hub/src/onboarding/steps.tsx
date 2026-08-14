@@ -81,7 +81,7 @@ export const GUIDED_ONBOARDING_STEPS: GuidedOnboardingStep[] = [
     body: (
       <div className="space-y-2">
         <div>
-          Press Enter to send ASAP, Tab to queue, Ctrl/Command+Enter to send in a new chat, and Shift+Enter for a newline.
+          Press Enter to queue, Tab to send ASAP, Ctrl/Command+Enter to send in a new chat, and Shift+Enter for a newline.
         </div>
       </div>
     ),

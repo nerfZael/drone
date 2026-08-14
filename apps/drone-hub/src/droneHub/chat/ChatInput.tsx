@@ -36,6 +36,7 @@ import {
   type ChatComposerSelection,
 } from './ChatComposerEditor';
 import {
+  DEFAULT_CHAT_MESSAGE_DELIVERY_MODE,
   chatSendShortcut,
   type ChatMessageDeliveryMode,
 } from './chat-send-shortcuts';
@@ -97,7 +98,7 @@ function ChatComposerEditorToggle({
       title={
         enabled
           ? 'Switch back to the chat composer'
-          : 'Use a full text editor; send ASAP with the button or queue with Ctrl/Command+Enter'
+          : 'Use a full text editor; queue with the button or Ctrl/Command+Enter'
       }
     >
       <CodeEditorIcon />
@@ -1150,7 +1151,12 @@ export function ChatInput({
                     type="button"
                     data-chat-composer-collapsed-action="true"
                     onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => sendNow({ trigger: 'button', deliveryMode: 'asap' })}
+                    onClick={() =>
+                      sendNow({
+                        trigger: 'button',
+                        deliveryMode: DEFAULT_CHAT_MESSAGE_DELIVERY_MODE,
+                      })
+                    }
                     disabled={sendDisabled}
                     className="inline-flex h-[2.125rem] w-[2.125rem] items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
                     title={voiceActionInFlight ? sendButtonLabel : 'Transcribe and send recording'}
@@ -1609,7 +1615,10 @@ export function ChatInput({
                   void onStop?.();
                   return;
                 }
-                sendNow({ trigger: 'button', deliveryMode: 'asap' });
+                sendNow({
+                  trigger: 'button',
+                  deliveryMode: DEFAULT_CHAT_MESSAGE_DELIVERY_MODE,
+                });
               }}
               disabled={showStopAction && !showSeparateStopAction ? stopping : sendDisabled}
               className={`inline-flex h-8 w-8 items-center justify-center rounded-[var(--chat-composer-control-radius)] border transition-opacity hover:opacity-70 ${
@@ -1625,10 +1634,10 @@ export function ChatInput({
                 showStopAction && !showSeparateStopAction
                   ? 'Stop response'
                   : editorMode
-                    ? 'Send ASAP. Queue with Ctrl/Command+Enter.'
+                    ? 'Queue message. You can also queue with Ctrl/Command+Enter.'
                   : onSendInNewChat
-                    ? 'Send ASAP (Enter). Queue with Tab. Send in a new chat with Ctrl/Command+Enter.'
-                    : 'Send ASAP (Enter). Queue with Tab.'
+                    ? 'Queue message (Enter). Send ASAP with Tab. Send in a new chat with Ctrl/Command+Enter.'
+                    : 'Queue message (Enter). Send ASAP with Tab.'
               }
               aria-label={sendButtonLabel}
             >

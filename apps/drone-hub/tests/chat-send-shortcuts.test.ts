@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 
-import { chatSendShortcut, isChatEditorQueueShortcut } from '../src/droneHub/chat';
+import {
+  DEFAULT_CHAT_MESSAGE_DELIVERY_MODE,
+  chatSendShortcut,
+  isChatEditorQueueShortcut,
+} from '../src/droneHub/chat';
 
 function shortcut(key: string, overrides: Partial<Parameters<typeof chatSendShortcut>[0]> = {}) {
   return chatSendShortcut({
@@ -15,13 +20,17 @@ function shortcut(key: string, overrides: Partial<Parameters<typeof chatSendShor
 }
 
 describe('chat send shortcuts', () => {
-  test('sends Enter as ASAP', () => {
-    expect(shortcut('Enter')).toBe('asap');
-    expect(shortcut('Enter', { altKey: true })).toBe('asap');
+  test('uses queued delivery by default', () => {
+    expect(DEFAULT_CHAT_MESSAGE_DELIVERY_MODE).toBe('queue');
   });
 
-  test('queues with Tab', () => {
-    expect(shortcut('Tab')).toBe('queue');
+  test('queues with Enter', () => {
+    expect(shortcut('Enter')).toBe('queue');
+    expect(shortcut('Enter', { altKey: true })).toBe('queue');
+  });
+
+  test('sends ASAP with Tab', () => {
+    expect(shortcut('Tab')).toBe('asap');
   });
 
   test('starts a new chat with Ctrl+Enter or Command+Enter', () => {
@@ -45,6 +54,18 @@ describe('chat send shortcuts', () => {
     expect(editorShortcut({ ctrlKey: true, shiftKey: true })).toBe(false);
     expect(editorShortcut({ metaKey: true, altKey: true })).toBe(false);
     expect(editorShortcut({ key: 'Enter' })).toBe(false);
+  });
+
+  test('keeps Tab as indentation in the full text editor', () => {
+    const editor = readFileSync(
+      new URL('../src/droneHub/chat/ChatComposerEditor.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(editor).not.toContain('monaco.KeyCode.Tab');
+    expect(editor).toContain("const spaces = '  '");
+    expect(editor).toContain('tabSize: 2');
+    expect(editor.match(/aria-keyshortcuts="Control\+Enter Meta\+Enter"/g)).toHaveLength(2);
   });
 
   test('keeps Shift+Enter and Shift+Tab available to the editor', () => {
