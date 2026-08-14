@@ -13,6 +13,7 @@ import {
   type DroneInlineRenameResult,
 } from '../overview';
 import type { DroneSummary } from '../types';
+import { IconClone } from '../overview/icons';
 import { createCanvasChatNodeId } from './app-config';
 import { droneChatRequiresApproval, normalizedDroneChats } from './chat-node-helpers';
 import { createSidebarChatDragData, parseDroneHubDragData, useDroneHubActiveDrag, type SidebarDroneDragData } from './drone-hub-dnd';
@@ -169,6 +170,11 @@ type GroupedSidebarTreeProps = {
     chatName: string,
     opts?: { draft?: boolean },
   ) => Promise<{ ok: boolean; chatName?: string; error?: string | null }>;
+  onCloneDroneChat: (
+    droneId: string,
+    chatName: string,
+  ) => Promise<{ ok: boolean; chatName?: string; error?: string | null }>;
+  cloningChatKeys: Record<string, true>;
   onRenameDroneChat: (
     droneId: string,
     chatName: string,
@@ -478,6 +484,8 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
     chatEditorInputRef,
     onStartRenameDroneChat,
     onOpenCreateDroneChat,
+    onCloneDroneChat,
+    cloningChatKeys,
     onChatEditorValueChange,
     onSubmitChatEditor,
     onBlurChatEditor,
@@ -654,6 +662,20 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
               icon: <IconPlus className="h-3.5 w-3.5 text-[var(--accent)]" />,
               disabled: chatActionsDisabled,
               onSelect: () => onOpenCreateDroneChat(drone),
+            },
+            {
+              id: 'clone-chat',
+              label: 'Clone chat',
+              icon: cloningChatKeys[`${drone.id}:${chatName}`] ? (
+                <IconSpinner className="h-3.5 w-3.5" />
+              ) : (
+                <IconClone className="h-3.5 w-3.5 text-[var(--accent)]" />
+              ),
+              disabled:
+                chatActionsDisabled ||
+                chatBusy ||
+                Boolean(cloningChatKeys[`${drone.id}:${chatName}`]),
+              onSelect: () => void onCloneDroneChat(drone.id, chatName),
             },
             {
               id: 'rename-chat',
@@ -1015,6 +1037,11 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
                   }
                 : undefined
             }
+            onCloneChat={
+              actionsEnabled && hasOnlyDefaultChat
+                ? () => void onCloneDroneChat(drone.id, 'default')
+                : undefined
+            }
             onClone={actionsEnabled ? () => onCloneDrone(drone) : undefined}
             onAddToGroup={actionsEnabled ? () => onAddDroneToGroup(drone) : undefined}
             onCreateGroup={actionsEnabled ? () => onCreateGroupBeforeDrone(drone) : undefined}
@@ -1062,6 +1089,16 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
               Boolean(renamingDrones[drone.id]) ||
               Boolean(settingBaseImages[drone.id]) ||
               String(drone.runtime ?? 'container').trim().toLowerCase() === 'host'
+            }
+            cloneChatBusy={Boolean(cloningChatKeys[`${drone.id}:default`])}
+            cloneChatDisabled={
+              showBusy ||
+              Boolean(cloningChatKeys[`${drone.id}:default`]) ||
+              isOptimistic ||
+              Boolean(deletingDrones[drone.id]) ||
+              Boolean(renamingDrones[drone.id]) ||
+              Boolean(settingBaseImages[drone.id]) ||
+              isDroneStartingOrSeeding(drone.hubPhase)
             }
             createChatDisabled={
               isOptimistic ||
@@ -1993,6 +2030,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       props.busyChatNodeIdSet,
       props.chatEditor,
       props.chatEditorInputRef,
+      props.cloningChatKeys,
       props.collapsedDroneSections,
       props.collapsedGroups,
       props.deletingDrones,
@@ -2018,6 +2056,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       props.onFolderEditorValueChange,
       props.onMoveDronesToGroup,
       props.onCloneDrone,
+      props.onCloneDroneChat,
       props.onCreateGroupBeforeDrone,
       props.onOpenCreateDroneChat,
       props.onOpenDroneErrorModal,

@@ -48,6 +48,7 @@ type DroneCardProps = {
   draggable?: boolean;
   dragging?: boolean;
   onClone?: () => void;
+  onCloneChat?: () => void;
   onCreateChat?: () => void;
   onAddToGroup?: () => void;
   onCreateGroup?: () => void;
@@ -60,6 +61,8 @@ type DroneCardProps = {
   onDelete?: () => void;
   onErrorClick?: (drone: DroneSummary, message: string) => void;
   cloneDisabled?: boolean;
+  cloneChatDisabled?: boolean;
+  cloneChatBusy?: boolean;
   createChatDisabled?: boolean;
   addToGroupDisabled?: boolean;
   renameDisabled?: boolean;
@@ -491,6 +494,7 @@ function areDroneCardPropsEqual(a: DroneCardProps, b: DroneCardProps): boolean {
     Boolean(a.draggable) === Boolean(b.draggable) &&
     Boolean(a.dragging) === Boolean(b.dragging) &&
     Boolean(a.onClone) === Boolean(b.onClone) &&
+    Boolean(a.onCloneChat) === Boolean(b.onCloneChat) &&
     Boolean(a.onCreateChat) === Boolean(b.onCreateChat) &&
     Boolean(a.onAddToGroup) === Boolean(b.onAddToGroup) &&
     Boolean(a.onCreateGroup) === Boolean(b.onCreateGroup) &&
@@ -503,6 +507,8 @@ function areDroneCardPropsEqual(a: DroneCardProps, b: DroneCardProps): boolean {
     Boolean(a.onDelete) === Boolean(b.onDelete) &&
     Boolean(a.onErrorClick) === Boolean(b.onErrorClick) &&
     Boolean(a.cloneDisabled) === Boolean(b.cloneDisabled) &&
+    Boolean(a.cloneChatDisabled) === Boolean(b.cloneChatDisabled) &&
+    Boolean(a.cloneChatBusy) === Boolean(b.cloneChatBusy) &&
     Boolean(a.createChatDisabled) === Boolean(b.createChatDisabled) &&
     Boolean(a.addToGroupDisabled) === Boolean(b.addToGroupDisabled) &&
     Boolean(a.renameDisabled) === Boolean(b.renameDisabled) &&
@@ -547,6 +553,7 @@ export const DroneCard = React.memo(function DroneCard({
   draggable,
   dragging,
   onClone,
+  onCloneChat,
   onCreateChat,
   onAddToGroup,
   onCreateGroup,
@@ -559,6 +566,8 @@ export const DroneCard = React.memo(function DroneCard({
   onDelete,
   onErrorClick,
   cloneDisabled,
+  cloneChatDisabled,
+  cloneChatBusy,
   createChatDisabled,
   addToGroupDisabled,
   renameDisabled,
@@ -591,6 +600,7 @@ export const DroneCard = React.memo(function DroneCard({
   const shortcutBindings = useDroneHubUiStore((state) => state.shortcutBindings);
   const shownName = String(displayName ?? drone.name).trim() || drone.name;
   const canClone = typeof onClone === 'function';
+  const canCloneChat = typeof onCloneChat === 'function';
   const canCreateChat = typeof onCreateChat === 'function';
   const canAddToGroup = typeof onAddToGroup === 'function';
   const canCreateGroup = typeof onCreateGroup === 'function';
@@ -606,6 +616,7 @@ export const DroneCard = React.memo(function DroneCard({
     canToggleMuted ||
     canUnmuteCollapsedChat ||
     canClone ||
+    canCloneChat ||
     canCreateChat ||
     canAddToGroup ||
     canCreateGroup ||
@@ -785,6 +796,19 @@ export const DroneCard = React.memo(function DroneCard({
       icon: <IconPlus className="h-3.5 w-3.5 text-[var(--accent)]" />,
       disabled: Boolean(createChatDisabled),
       onSelect: () => onCreateChat?.(),
+    });
+  }
+  if (canCloneChat) {
+    actionMenuItems.push({
+      id: 'clone-chat',
+      label: 'Clone chat',
+      icon: cloneChatBusy ? (
+        <IconSpinner className="h-3.5 w-3.5" />
+      ) : (
+        <IconClone className="h-3.5 w-3.5 text-[var(--accent)]" />
+      ),
+      disabled: Boolean(cloneChatDisabled),
+      onSelect: () => onCloneChat?.(),
     });
   }
   if (canAddToGroup) {

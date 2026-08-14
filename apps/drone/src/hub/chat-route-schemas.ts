@@ -24,6 +24,7 @@ export const chatCreateBodySchema = z
     copyFrom: z.unknown().optional(),
     copyFromChat: z.unknown().optional(),
     fromChat: z.unknown().optional(),
+    mode: z.enum(['fork', 'copy-config']).optional(),
     draft: z.unknown().optional(),
     isDraft: z.unknown().optional(),
   })
