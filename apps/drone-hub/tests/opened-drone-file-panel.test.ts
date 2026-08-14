@@ -145,6 +145,13 @@ describe('OpenedDroneFilePanel', () => {
     expect(html).not.toContain('aria-label="Go forward"');
   });
 
+  test('offers a full-screen reading action in the file tab strip', () => {
+    const html = renderPanel(makeFile({}), true);
+
+    expect(html).toContain('aria-label="Enter full screen"');
+    expect(html).toContain('aria-pressed="false"');
+  });
+
   test('shows one contextual markdown view action and compact heading controls', () => {
     const html = renderPanel(
       makeFile({

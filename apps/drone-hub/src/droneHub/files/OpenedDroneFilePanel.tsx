@@ -307,6 +307,8 @@ export function OpenedDroneFilePanel({
     React.useState<MarkdownOutlineExpansionCommand | null>(null);
   const [previewContentsCopied, setPreviewContentsCopied] = React.useState(false);
   const previewCopyTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const panelRef = React.useRef<HTMLDivElement | null>(null);
+  const [fullScreen, setFullScreen] = React.useState(false);
   const editorRef = React.useRef<MonacoEditorInstance | null>(null);
   const languageActionsRef = React.useRef<{
     goToDefinition: () => void;
@@ -332,6 +334,27 @@ export function OpenedDroneFilePanel({
     baseX: number;
     baseY: number;
   } | null>(null);
+
+  React.useEffect(() => {
+    const handleFullScreenChange = () => {
+      setFullScreen(document.fullscreenElement === panelRef.current);
+    };
+    document.addEventListener('fullscreenchange', handleFullScreenChange);
+    handleFullScreenChange();
+    return () => document.removeEventListener('fullscreenchange', handleFullScreenChange);
+  }, []);
+
+  const toggleFullScreen = React.useCallback(() => {
+    if (document.fullscreenElement === panelRef.current) {
+      void document.exitFullscreen();
+      return;
+    }
+    const panel = panelRef.current;
+    if (!panel) return;
+    void panel.requestFullscreen().catch((error: unknown) => {
+      console.warn(`Unable to enter file editor full screen: ${String(error)}`);
+    });
+  }, []);
 
   React.useEffect(() => {
     if (!activeFilePath || !openedEditorIsText) {
@@ -648,7 +671,10 @@ export function OpenedDroneFilePanel({
     />
   );
   return (
-    <div className="h-full min-h-0 overflow-hidden bg-[var(--panel-alt)]">
+    <div
+      ref={panelRef}
+      className="dh-opened-file-panel h-full min-h-0 overflow-hidden bg-[var(--panel-alt)]"
+    >
       <div className="min-w-0 h-full min-h-0 bg-[var(--panel-alt)] flex flex-col">
         <OpenedDroneFileTabs
           tabs={fileTabs}
@@ -767,6 +793,7 @@ export function OpenedDroneFilePanel({
               </div>
             ) : null
           }
+          fullScreenAction={{ active: fullScreen, onToggle: toggleFullScreen }}
         />
         {fileError ? (
           <div className="m-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-11)] text-[var(--red)]">

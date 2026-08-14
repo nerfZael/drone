@@ -2861,6 +2861,12 @@ select:disabled optgroup {
   pointer-events: none;
 }
 
+.dh-opened-file-panel:fullscreen {
+  width: 100%;
+  height: 100%;
+  background: var(--panel-alt);
+}
+
 .dh-changes-dock {
   background: var(--chat-background);
   border-left: 1px solid var(--border);

@@ -9,6 +9,10 @@ type OpenedDroneFileTabsProps = {
   onCloseTab: (tabId: string) => void;
   onReorderTabs: (fromTabId: string, toTabId: string) => void;
   trailingActions?: React.ReactNode;
+  fullScreenAction?: {
+    active: boolean;
+    onToggle: () => void;
+  };
 };
 
 function IconClose({ className }: { className?: string }) {
@@ -20,6 +24,38 @@ function IconClose({ className }: { className?: string }) {
   );
 }
 
+function FullScreenIcon({ active }: { active: boolean }) {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {active ? (
+        <>
+          <path d="M6 2v4H2" />
+          <path d="m2 6 4-4" />
+          <path d="M10 14v-4h4" />
+          <path d="m14 10-4 4" />
+        </>
+      ) : (
+        <>
+          <path d="M6 2H2v4" />
+          <path d="M10 2h4v4" />
+          <path d="M6 14H2v-4" />
+          <path d="M10 14h4v-4" />
+        </>
+      )}
+    </svg>
+  );
+}
+
 export function OpenedDroneFileTabs({
   tabs,
   activeTabId,
@@ -27,10 +63,11 @@ export function OpenedDroneFileTabs({
   onCloseTab,
   onReorderTabs,
   trailingActions,
+  fullScreenAction,
 }: OpenedDroneFileTabsProps) {
   const [draggingTabId, setDraggingTabId] = React.useState<string | null>(null);
   const normalizedTabs = tabs.filter((tab) => String(tab.tabId ?? '').trim());
-  if (normalizedTabs.length === 0 && !trailingActions) return null;
+  if (normalizedTabs.length === 0 && !trailingActions && !fullScreenAction) return null;
 
   return (
     <div className="flex h-7 items-end border-b border-[var(--border-subtle)] bg-[var(--surface-softest)]">
@@ -121,6 +158,20 @@ export function OpenedDroneFileTabs({
       {trailingActions ? (
         <div className="flex h-7 shrink-0 items-center px-1.5">
           {trailingActions}
+        </div>
+      ) : null}
+      {fullScreenAction ? (
+        <div className="flex h-7 shrink-0 items-center pr-1.5">
+          <button
+            type="button"
+            onClick={fullScreenAction.onToggle}
+            className="flex h-5 w-5 items-center justify-center rounded-[var(--radius-small)] bg-transparent text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+            title={fullScreenAction.active ? 'Exit full screen' : 'Enter full screen'}
+            aria-label={fullScreenAction.active ? 'Exit full screen' : 'Enter full screen'}
+            aria-pressed={fullScreenAction.active}
+          >
+            <FullScreenIcon active={fullScreenAction.active} />
+          </button>
         </div>
       ) : null}
     </div>
