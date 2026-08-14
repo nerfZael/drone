@@ -8,6 +8,7 @@ export type ShortcutActionId =
   | 'moveSelectedDroneToTop'
   | 'toggleSelectedDronesToDo'
   | 'focusPrimaryChatInput'
+  | 'toggleChatComposerEditorMode'
   | 'toggleContinuousDictation'
   | 'toggleFileDictation'
   | 'toggleVoiceClipboardRecording'
@@ -85,6 +86,11 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     id: 'focusPrimaryChatInput',
     label: 'Focus chat input',
     description: 'Focuses the primary chat input.',
+  },
+  {
+    id: 'toggleChatComposerEditorMode',
+    label: 'Toggle full text editor',
+    description: 'Toggles full text editor mode for the chat composer that currently has focus.',
   },
   {
     id: 'toggleContinuousDictation',
@@ -168,6 +174,7 @@ const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   moveSelectedDroneToTop: { key: 'w', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleSelectedDronesToDo: null,
   focusPrimaryChatInput: { key: 'enter', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  toggleChatComposerEditorMode: { key: 'e', mod: false, ctrl: true, meta: false, alt: false, shift: false },
   toggleContinuousDictation: { key: 'r', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleFileDictation: { key: 'd', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleVoiceClipboardRecording: { key: '`', mod: false, ctrl: false, meta: false, alt: false, shift: false },
@@ -267,6 +274,7 @@ export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
     moveSelectedDroneToTop: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.moveSelectedDroneToTop),
     toggleSelectedDronesToDo: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleSelectedDronesToDo),
     focusPrimaryChatInput: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.focusPrimaryChatInput),
+    toggleChatComposerEditorMode: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleChatComposerEditorMode),
     toggleContinuousDictation: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleContinuousDictation),
     toggleFileDictation: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleFileDictation),
     toggleVoiceClipboardRecording: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleVoiceClipboardRecording),

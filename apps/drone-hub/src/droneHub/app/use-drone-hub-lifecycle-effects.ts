@@ -290,6 +290,9 @@ export function useDroneHubLifecycleEffects({
       moveSelectedDroneToTop: () => moveSelectedDroneToTopFromShortcut(),
       toggleSelectedDronesToDo: () => toggleSelectedDronesToDoFromShortcut(),
       focusPrimaryChatInput: () => focusPrimaryChatInput(),
+      // ChatInput handles this action during capture so it can identify the
+      // focused composer, including Monaco's app-shortcut boundary.
+      toggleChatComposerEditorMode: () => false,
       toggleContinuousDictation: () => {
         if (!toggleContinuousDictation) return false;
         void toggleContinuousDictation();

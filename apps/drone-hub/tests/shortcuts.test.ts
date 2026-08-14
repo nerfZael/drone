@@ -4,6 +4,7 @@ import {
   formatShortcutBinding,
   isShortcutMatch,
   migrateFormerPullRequestsShortcut,
+  sanitizeShortcutBindings,
   shortcutBindingFromKeyboardEvent,
 } from '../src/droneHub/app/shortcuts';
 
@@ -75,6 +76,23 @@ describe('shortcut defaults', () => {
       alt: false,
       shift: false,
     });
+    expect(defaults.toggleChatComposerEditorMode).toEqual({
+      key: 'e',
+      mod: false,
+      ctrl: true,
+      meta: false,
+      alt: false,
+      shift: false,
+    });
+    expect(
+      isShortcutMatch(defaults.toggleChatComposerEditorMode, {
+        key: 'e',
+        ctrlKey: true,
+        metaKey: false,
+        altKey: false,
+        shiftKey: false,
+      }),
+    ).toBe(true);
     expect(defaults.toggleContinuousDictation).toEqual({
       key: 'r',
       mod: false,
@@ -129,6 +147,32 @@ describe('shortcut defaults', () => {
     expect(isShortcutMatch(binding, { key: 'p', ctrlKey: true, metaKey: false, altKey: true, shiftKey: true })).toBe(true);
     expect(isShortcutMatch(binding, { key: 'p', ctrlKey: false, metaKey: true, altKey: true, shiftKey: true })).toBe(true);
     expect(isShortcutMatch(binding, { key: 'p', ctrlKey: true, metaKey: false, altKey: false, shiftKey: true })).toBe(false);
+  });
+
+  test('restores and accepts customization of the full-editor shortcut', () => {
+    expect(sanitizeShortcutBindings({}).toggleChatComposerEditorMode).toEqual(
+      cloneDefaultShortcutBindings().toggleChatComposerEditorMode,
+    );
+
+    expect(
+      sanitizeShortcutBindings({
+        toggleChatComposerEditorMode: {
+          key: 'u',
+          mod: true,
+          ctrl: false,
+          meta: false,
+          alt: true,
+          shift: false,
+        },
+      }).toggleChatComposerEditorMode,
+    ).toEqual({
+      key: 'u',
+      mod: true,
+      ctrl: false,
+      meta: false,
+      alt: true,
+      shift: false,
+    });
   });
 
   test('moves the former default R binding from pull requests to continuous dictation', () => {

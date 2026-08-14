@@ -47,6 +47,7 @@ import {
 import { useContinuousDictation } from './ContinuousDictationContext';
 import { mergeDraftWithContinuousDictation } from './continuous-dictation-draft';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
+import { isShortcutMatch } from '../app/shortcuts';
 import { preloadMonacoEditor } from '../files/monaco-editor-loader';
 
 const CHAT_INPUT_TEXTAREA_MIN_HEIGHT_PX = 36;
@@ -240,6 +241,9 @@ export function ChatInput({
   );
   const setChatInputDraft = useDroneHubUiStore((state) => state.setChatInputDraft);
   const setChatInputEditorMode = useDroneHubUiStore((state) => state.setChatInputEditorMode);
+  const toggleEditorModeShortcut = useDroneHubUiStore(
+    (state) => state.shortcutBindings.toggleChatComposerEditorMode,
+  );
   const controlledDraftEnabled =
     typeof draftValue === 'string' && typeof onDraftValueChange === 'function';
   const draft = controlledDraftEnabled
@@ -940,6 +944,13 @@ export function ChatInput({
       data-onboarding-id="chat.input"
       data-continuous-dictation-target={continuousDictationTargeted ? 'true' : undefined}
       className="flex-shrink-0 bg-[var(--chat-background)] px-[.5625rem] pb-[.75rem] pt-[.375rem] [font-family:var(--chat-composer-font)]"
+      onKeyDownCapture={(event) => {
+        if (event.defaultPrevented || event.repeat || event.nativeEvent.isComposing) return;
+        if (!isShortcutMatch(toggleEditorModeShortcut, event)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        toggleEditorMode();
+      }}
       onDragEnter={(e) => {
         if (!attachmentsOn) return;
         if (attachmentControlsLocked) return;
