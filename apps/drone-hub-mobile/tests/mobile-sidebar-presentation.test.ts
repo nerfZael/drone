@@ -676,6 +676,10 @@ describe('mobile sidebar presentation', () => {
       new URL('../src/local-assistant/use-mobile-companion-workspace-target.ts', import.meta.url),
       'utf8',
     );
+    const dronesSource = readFileSync(
+      new URL('../src/screens/DronesScreen.tsx', import.meta.url),
+      'utf8',
+    );
     const shellSource = readFileSync(new URL('../src/shell/MeshApp.tsx', import.meta.url), 'utf8');
     const bottomPinnedIndex = drawerSource.lastIndexOf(
       "pinnedSidebarPlacement === 'bottom' ? pinnedDronesSection : null",
@@ -690,6 +694,7 @@ describe('mobile sidebar presentation', () => {
     expect(shellSource).toContain("workspaceVisible={!pairingVisible && tab === 'drones'}");
     expect(workspaceTargetSource).toContain('pane: !workspaceVisible');
     expect(workspaceTargetSource).toContain('workspaceVisible && openFile.visible');
+    expect(dronesSource).toContain('visible={workspaceVisible && filePreview.visible}');
     expect(providerSource).toContain('!activeTarget.reachable');
     expect(providerSource).toContain('!hasOperations');
     expect(providerSource).toContain('!hasGrant');

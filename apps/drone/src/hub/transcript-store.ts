@@ -2834,6 +2834,7 @@ export function listChatsFromStore(opts: { droneId: string }): ChatStoreListResu
 export function searchActiveChatMessages(opts: {
   query: string;
   droneId?: string;
+  droneIds?: readonly string[];
   chatName?: string;
   limit?: number;
   offset?: number;
@@ -2846,12 +2847,20 @@ export function searchActiveChatMessages(opts: {
     ? Math.max(0, Math.min(5_000, Math.floor(Number(opts.offset))))
     : 0;
   if (!query) return { available: true, results: [], limit, offset };
+  const allowedDroneIds = opts.droneIds
+    ? [...new Set(opts.droneIds.map((value) => String(value ?? '').trim()).filter(Boolean))]
+    : null;
+  if (allowedDroneIds?.length === 0) return { available: true, results: [], limit, offset };
+  const allowedDroneIdSet = allowedDroneIds ? new Set(allowedDroneIds) : null;
 
   const database = getHubDatabase();
   if (database) {
     const terms = query.match(/[\p{L}\p{N}_-]+/gu) ?? [];
     if (terms.length === 0) return { available: true, results: [], limit, offset };
     const ftsQuery = terms.slice(0, 20).map((term) => `"${term.replace(/"/g, '""')}"`).join(' AND ');
+    const allowedDroneClause = allowedDroneIds
+      ? `AND drone_id IN (${allowedDroneIds.map(() => '?').join(', ')})`
+      : '';
     const results = database.read((connection) =>
       connection.prepare(`
         SELECT drone_id, chat_name, turn_id, role, timestamp,
@@ -2860,6 +2869,7 @@ export function searchActiveChatMessages(opts: {
         FROM companion_chat_search
         WHERE companion_chat_search MATCH ?
           AND (? = '' OR drone_id = ?)
+          ${allowedDroneClause}
           AND (? = '' OR chat_name = ?)
         ORDER BY rank, timestamp DESC
         LIMIT ? OFFSET ?
@@ -2867,6 +2877,7 @@ export function searchActiveChatMessages(opts: {
         ftsQuery,
         String(opts.droneId ?? '').trim(),
         String(opts.droneId ?? '').trim(),
+        ...(allowedDroneIds ?? []),
         String(opts.chatName ?? '').trim(),
         String(opts.chatName ?? '').trim(),
         limit,
@@ -2902,6 +2913,7 @@ export function searchActiveChatMessages(opts: {
   for (const [chatKey, turns] of memoryTurns) {
     const [droneId, chatName] = chatKey.split('\u0000');
     if (opts.droneId && droneId !== opts.droneId) continue;
+    if (allowedDroneIdSet && !allowedDroneIdSet.has(droneId)) continue;
     if (opts.chatName && chatName !== opts.chatName) continue;
     for (const turn of turns.values()) {
       const fields: Array<[ActiveChatSearchResult['role'], string]> = [

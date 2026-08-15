@@ -240,8 +240,8 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       if (tool === 'read_open_file') return resolveEditor().read();
       if (tool === 'apply_editor_patch') {
         const targetId = String(args.targetId ?? '');
-        const editor = editorTargetsRef.current.get(targetId);
-        if (!editor?.isEligible()) throw new Error('EDITOR_NOT_EDITABLE');
+        const editor = resolveEditor();
+        if (editor.id !== targetId) throw new Error('STALE_EDITOR_TARGET');
         return editor.apply(String(args.baseRevision ?? ''), String(args.content ?? ''));
       }
       if (tool === 'prepare_drone_draft') return await activeTarget.prepareDroneDraft(args);

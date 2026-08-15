@@ -118,11 +118,11 @@ export function CompanionWorkspaceProvider({ children }: { children: React.React
 
   const applyEditor = React.useCallback(
     (targetId: string, baseRevision: string, content: string) => {
-      const target = editorTargetsRef.current.get(targetId);
-      if (!target?.isEligible()) throw new Error('EDITOR_NOT_EDITABLE');
+      const target = resolveEditor();
+      if (target.id !== targetId) throw new Error('STALE_EDITOR_TARGET');
       return target.apply(baseRevision, content);
     },
-    [],
+    [resolveEditor],
   );
 
   const value = React.useMemo<CompanionWorkspaceContextValue>(

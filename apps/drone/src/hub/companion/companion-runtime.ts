@@ -85,6 +85,16 @@ function normalizeBrowserSnapshot(kind: BrowserTextSnapshot['kind'], value: any)
   };
 }
 
+function rememberBrowserSnapshot(
+  snapshots: Map<string, BrowserTextSnapshot>,
+  snapshot: BrowserTextSnapshot,
+): void {
+  for (const [key, existing] of snapshots) {
+    if (existing.kind === snapshot.kind) snapshots.delete(key);
+  }
+  snapshots.set(snapshotKey(snapshot.kind, snapshot.targetId, snapshot.revision), snapshot);
+}
+
 export class CompanionRuntime {
   private readonly contexts = new Map<string, RunContext>();
   private readonly activeRunIds = new Set<string>();
@@ -275,22 +285,18 @@ export class CompanionRuntime {
           droneId: String(input.droneId ?? '').trim() || undefined,
           chatName: String(input.chatName ?? '').trim() || undefined,
         };
-        let matches;
-        if (wantedRepo) {
-          matches = [] as ReturnType<typeof searchActiveChatMessages>['results'];
-          for (let scanOffset = 0; scanOffset < 500 && matches.length < offset + limit; scanOffset += 50) {
-            const page = searchActiveChatMessages({ ...baseSearch, limit: 50, offset: scanOffset });
-            matches.push(...page.results.filter((item) => droneById.get(item.droneId)?.repoPath === wantedRepo));
-            if (page.results.length < 50) break;
-          }
-          matches = matches.slice(offset, offset + limit);
-        } else {
-          matches = searchActiveChatMessages({
-            ...baseSearch,
-            limit,
-            offset,
-          }).results;
-        }
+        const matches = searchActiveChatMessages({
+          ...baseSearch,
+          ...(wantedRepo
+            ? {
+                droneIds: drones
+                  .filter((drone) => drone.repoPath === wantedRepo)
+                  .map((drone) => drone.id),
+              }
+            : {}),
+          limit,
+          offset,
+        }).results;
         const rows = matches.map((item) => {
           const drone = droneById.get(item.droneId);
           const repoPath = drone?.repoPath ?? '';
@@ -321,7 +327,7 @@ export class CompanionRuntime {
           const value = await context.callBrowser(name, {}, signal);
           if (name !== 'get_app_context') {
             const snapshot = normalizeBrowserSnapshot(name === 'read_active_composer' ? 'composer' : 'editor', value);
-            context.snapshots.set(snapshotKey(snapshot.kind, snapshot.targetId, snapshot.revision), snapshot);
+            rememberBrowserSnapshot(context.snapshots, snapshot);
           }
           return result(value);
         },
@@ -363,6 +369,7 @@ export class CompanionRuntime {
             baseRevision,
             content: nextContent,
           }, signal);
+          context.snapshots.delete(snapshotKey(kind, targetId, baseRevision));
           return result(value);
         },
       });

@@ -3177,7 +3177,7 @@ export function DronesScreen({
         )}
       </KeyboardAvoidingView>
       <FilePreviewModal
-        visible={filePreview.visible}
+        visible={workspaceVisible && filePreview.visible}
         preview={filePreview.preview}
         displayPath={filePreview.displayPath}
         line={filePreview.line}

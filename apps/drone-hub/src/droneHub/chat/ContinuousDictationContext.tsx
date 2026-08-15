@@ -177,13 +177,15 @@ export function ContinuousDictationProvider({ children }: { children: React.Reac
 
   const applyComposer = React.useCallback(
     (targetId: string, baseRevision: string, content: string) => {
+      const activeComposer = resolveReadableComposer();
+      if (activeComposer.id !== targetId) throw new Error('STALE_COMPOSER_TARGET');
       const composer = composersRef.current.get(targetId);
       if (!composer?.applyContent || !(composer.isReadable?.() ?? composer.isEligible())) {
         throw new Error('COMPOSER_NOT_AVAILABLE');
       }
       return composer.applyContent(baseRevision, content);
     },
-    [],
+    [resolveReadableComposer],
   );
 
   React.useEffect(() => {
