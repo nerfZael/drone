@@ -1,8 +1,43 @@
 import http from 'node:http';
 import { expect, test } from 'bun:test';
-import { WebSocket } from 'ws';
+import { WebSocket, type WebSocketServer } from 'ws';
 
 import { createCompanionWebSocketServer } from '../src/hub/companion/companion-websocket-server';
+
+function nextMessage(client: WebSocket): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const onMessage = (raw: WebSocket.RawData) => {
+      client.off('error', onError);
+      resolve(JSON.parse(raw.toString()));
+    };
+    const onError = (error: Error) => {
+      client.off('message', onMessage);
+      reject(error);
+    };
+    client.once('message', onMessage);
+    client.once('error', onError);
+  });
+}
+
+async function closeTestServer(
+  client: WebSocket,
+  webSocketServer: WebSocketServer,
+  httpServer: http.Server,
+): Promise<void> {
+  const clients = [client, ...webSocketServer.clients];
+  const closed = clients.map(
+    (connectedClient) =>
+      new Promise<void>((resolve) => {
+        if (connectedClient.readyState === WebSocket.CLOSED) resolve();
+        else connectedClient.once('close', () => resolve());
+      }),
+  );
+  for (const connectedClient of clients) connectedClient.terminate();
+  await Promise.all(closed);
+  await new Promise<void>((resolve) => webSocketServer.close(() => resolve()));
+  httpServer.closeAllConnections();
+  await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+}
 
 test('Companion socket cancels its active run when the browser disconnects', async () => {
   let finishRun!: (reply: string) => void;
@@ -52,9 +87,64 @@ test('Companion socket cancels its active run when the browser disconnects', asy
     expect(cancelledRunId).toBe('disconnect-test');
   } finally {
     finishRun('');
-    client.terminate();
-    for (const connectedClient of webSocketServer.clients) connectedClient.terminate();
-    await new Promise<void>((resolve) => webSocketServer.close(() => resolve()));
-    await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+    await closeTestServer(client, webSocketServer, httpServer);
+  }
+});
+
+test('Companion socket rejects late browser tools from a cancelled run after restart', async () => {
+  const runs: any[] = [];
+  const completions: Array<(reply: string) => void> = [];
+  const runtime = {
+    run: (input: any) => {
+      runs.push(input);
+      return new Promise<string>((resolve) => completions.push(resolve));
+    },
+    cancel() {},
+  };
+  const webSocketServer = createCompanionWebSocketServer(runtime as any);
+  const httpServer = http.createServer();
+  httpServer.on('upgrade', (request, socket, head) => {
+    webSocketServer.handleUpgrade(request, socket, head, (client) => {
+      webSocketServer.emit('connection', client, request);
+    });
+  });
+  await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
+  const address = httpServer.address();
+  if (!address || typeof address === 'string') throw new Error('test server did not bind');
+  const client = new WebSocket(`ws://127.0.0.1:${address.port}`);
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      client.once('open', resolve);
+      client.once('error', reject);
+    });
+    const firstStarted = nextMessage(client);
+    client.send(JSON.stringify({ type: 'start_run', runId: 'first-run', prompt: 'First' }));
+    expect(await firstStarted).toMatchObject({
+      type: 'status',
+      runId: 'first-run',
+      status: 'working',
+    });
+    const firstCancelled = nextMessage(client);
+    client.send(JSON.stringify({ type: 'cancel_run', runId: 'first-run' }));
+    expect(await firstCancelled).toMatchObject({
+      type: 'status',
+      runId: 'first-run',
+      status: 'cancelled',
+    });
+    const secondStarted = nextMessage(client);
+    client.send(JSON.stringify({ type: 'start_run', runId: 'second-run', prompt: 'Second' }));
+    expect(await secondStarted).toMatchObject({
+      type: 'status',
+      runId: 'second-run',
+      status: 'working',
+    });
+
+    await expect(runs[0].callBrowser('highlight_drones', { droneIds: ['drone-a'] })).rejects.toThrow(
+      'Companion run is no longer active',
+    );
+  } finally {
+    for (const complete of completions) complete('');
+    await closeTestServer(client, webSocketServer, httpServer);
   }
 });

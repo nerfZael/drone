@@ -41,9 +41,6 @@ export function createCompanionWebSocketServer(runtime: CompanionRuntime): WebSo
       unavailableMessage: 'Companion browser disconnected',
       dispatch: (call) => send({ type: 'tool_call', runId: activeRunId, ...call }),
     });
-    const callBrowser: CompanionBrowserCall = (tool, args, signal) =>
-      browserTools.request(tool, args, generation, signal);
-
     socket.on('message', (raw) => {
       let message: CompanionClientMessage;
       try {
@@ -88,6 +85,12 @@ export function createCompanionWebSocketServer(runtime: CompanionRuntime): WebSo
       activeRunId = runId;
       generation += 1;
       const runGeneration = generation;
+      const callBrowser: CompanionBrowserCall = (tool, args, signal) => {
+        if (activeRunId !== runId || generation !== runGeneration) {
+          return Promise.reject(new Error('Companion run is no longer active'));
+        }
+        return browserTools.request(tool, args, runGeneration, signal);
+      };
       send({ type: 'status', runId, status: 'working' });
       void runtime.run({
         runId,
