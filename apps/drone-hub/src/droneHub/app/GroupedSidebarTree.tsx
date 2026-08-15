@@ -823,6 +823,8 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
     selectedDrone,
     activeChatName,
     onCloneDrone,
+    onCloneDroneChat,
+    cloningChatKeys,
     onAddDroneToGroup,
     onCreateGroupBeforeDrone,
     onOpenCreateDroneChat,
