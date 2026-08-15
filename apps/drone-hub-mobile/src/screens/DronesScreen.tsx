@@ -296,6 +296,7 @@ function mobileDroneAgentId(value: unknown): MobileDroneAgentId | null {
 
 export function DronesScreen({
   drawerOpen,
+  workspaceVisible,
   navigationItems,
   onDrawerOpenChange,
   onHeaderChange,
@@ -304,6 +305,7 @@ export function DronesScreen({
   onDeviceChange,
 }: {
   drawerOpen: boolean;
+  workspaceVisible: boolean;
   navigationItems: AppDrawerNavigationItem[];
   onDrawerOpenChange(open: boolean): void;
   onHeaderChange(header: DronesAppHeaderState | null): void;
@@ -2088,8 +2090,12 @@ export function DronesScreen({
     drones,
     selectedDrone: selected,
     composerAvailable: Boolean(
-      selected && chats.length > 0 && !(accessOpen && phoneTarget && nativeChatId),
+      workspaceVisible &&
+      selected &&
+      chats.length > 0 &&
+      !(accessOpen && phoneTarget && nativeChatId),
     ),
+    workspaceVisible,
     chatName,
     prompt,
     setPrompt,

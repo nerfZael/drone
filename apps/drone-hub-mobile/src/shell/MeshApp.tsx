@@ -417,6 +417,7 @@ function Shell() {
         >
           <DronesScreen
             drawerOpen={appDrawerOpen}
+            workspaceVisible={!pairingVisible && tab === 'drones'}
             navigationItems={navigationItems}
             onDrawerOpenChange={setAppDrawerOpen}
             onHeaderChange={handleDronesHeaderChange}

@@ -23,6 +23,7 @@ export function useMobileCompanionWorkspaceTarget({
   drones,
   selectedDrone,
   composerAvailable,
+  workspaceVisible,
   chatName,
   prompt,
   setPrompt,
@@ -36,6 +37,7 @@ export function useMobileCompanionWorkspaceTarget({
   drones: MobileDroneSummary[];
   selectedDrone: MobileDroneSummary | null;
   composerAvailable: boolean;
+  workspaceVisible: boolean;
   chatName: string;
   prompt: string;
   setPrompt(value: string): void;
@@ -81,7 +83,13 @@ export function useMobileCompanionWorkspaceTarget({
         name: targetName,
         reachable: targetReachable,
       },
-      pane: openFile.visible ? 'file' : selectedDrone ? 'chat' : 'new-drone',
+      pane: !workspaceVisible
+        ? 'other'
+        : openFile.visible
+          ? 'file'
+          : selectedDrone
+            ? 'chat'
+            : 'new-drone',
       selectedDrone: selectedDrone
         ? {
             id: selectedDrone.id,
@@ -93,7 +101,8 @@ export function useMobileCompanionWorkspaceTarget({
             chats: selectedDrone.chats,
           }
         : null,
-      openFile: openFile.visible ? { path: openFile.path, kind: openFile.kind } : null,
+      openFile:
+        workspaceVisible && openFile.visible ? { path: openFile.path, kind: openFile.kind } : null,
       composer: {
         available: composerAvailable,
         editable: composerAvailable && targetReachable,

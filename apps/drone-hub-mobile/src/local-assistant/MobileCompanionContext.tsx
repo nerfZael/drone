@@ -267,11 +267,19 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
   }, [erase, mesh.request, voice.discardRecording]);
 
   React.useEffect(() => {
-    const activeTargetDeviceId = workspaceTargetRef.current?.targetDeviceId ?? '';
-    if (runTargetDeviceIdRef.current && runTargetDeviceIdRef.current !== activeTargetDeviceId) {
+    const runTargetDeviceId = runTargetDeviceIdRef.current;
+    if (!runTargetDeviceId) return;
+    const activeTarget = workspaceTargetRef.current;
+    if (
+      !activeTarget ||
+      activeTarget.targetDeviceId !== runTargetDeviceId ||
+      !activeTarget.reachable ||
+      !hasOperations ||
+      !hasGrant
+    ) {
       void close();
     }
-  }, [close, targetRevision]);
+  }, [close, hasGrant, hasOperations, targetRevision]);
 
   const run = React.useCallback(
     async (prompt: string) => {

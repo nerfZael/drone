@@ -668,6 +668,14 @@ describe('mobile sidebar presentation', () => {
       new URL('../src/local-assistant/MobileCompanionOverlay.tsx', import.meta.url),
       'utf8',
     );
+    const providerSource = readFileSync(
+      new URL('../src/local-assistant/MobileCompanionContext.tsx', import.meta.url),
+      'utf8',
+    );
+    const workspaceTargetSource = readFileSync(
+      new URL('../src/local-assistant/use-mobile-companion-workspace-target.ts', import.meta.url),
+      'utf8',
+    );
     const shellSource = readFileSync(new URL('../src/shell/MeshApp.tsx', import.meta.url), 'utf8');
     const bottomPinnedIndex = drawerSource.lastIndexOf(
       "pinnedSidebarPlacement === 'bottom' ? pinnedDronesSection : null",
@@ -679,6 +687,12 @@ describe('mobile sidebar presentation', () => {
     expect(drawerSource).toContain("companion.status === 'recording' ? 'Listening' : 'Companion'");
     expect(shellSource).toContain('<MobileCompanionProvider>');
     expect(shellSource).toContain('<MobileCompanionOverlay />');
+    expect(shellSource).toContain("workspaceVisible={!pairingVisible && tab === 'drones'}");
+    expect(workspaceTargetSource).toContain('pane: !workspaceVisible');
+    expect(workspaceTargetSource).toContain('workspaceVisible && openFile.visible');
+    expect(providerSource).toContain('!activeTarget.reachable');
+    expect(providerSource).toContain('!hasOperations');
+    expect(providerSource).toContain('!hasGrant');
     expect(overlaySource).toContain("justifyContent: 'flex-start'");
     expect(overlaySource).toContain('accessibilityLabel="Stop Companion recording"');
     expect(overlaySource).toContain('<NativeMarkdown text={companion.reply} />');
