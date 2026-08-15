@@ -47,6 +47,7 @@ import {
 } from './monaco-editor-loader';
 import { editorZoomedPixels, useEditorZoomLevel } from './editor-zoom';
 import { FileDictationEditorAction } from './FileDictationEditorAction';
+import { useCompanionTargets } from '../companion/CompanionTargetsContext';
 
 const LARGE_TEXT_CHUNK_BYTES = 256 * 1024;
 
@@ -274,6 +275,7 @@ export function OpenedDroneFilePanel({
   onOpenFileDictationTarget,
   readOnly = false,
 }: OpenedDroneFilePanelProps) {
+  const companionTargets = useCompanionTargets();
   const themeId = useDroneHubUiStore((state) => state.themeId);
   const monacoTheme = desktopMonacoTheme(themeId);
   const editorZoomLevel = useEditorZoomLevel();
@@ -310,6 +312,28 @@ export function OpenedDroneFilePanel({
   const panelRef = React.useRef<HTMLDivElement | null>(null);
   const [fullScreen, setFullScreen] = React.useState(false);
   const editorRef = React.useRef<MonacoEditorInstance | null>(null);
+  const companionContentRef = React.useRef({ path: activeFilePath, content: fileContent ?? '', revision: 0 });
+  if (
+    companionContentRef.current.path !== activeFilePath ||
+    companionContentRef.current.content !== (fileContent ?? '')
+  ) {
+    companionContentRef.current = {
+      path: activeFilePath,
+      content: fileContent ?? '',
+      revision: companionContentRef.current.revision + 1,
+    };
+  }
+  const updateCompanionContentRef = React.useCallback((content: string) => {
+    if (
+      companionContentRef.current.path === activeFilePath &&
+      companionContentRef.current.content === content
+    ) return;
+    companionContentRef.current = {
+      path: activeFilePath,
+      content,
+      revision: companionContentRef.current.revision + 1,
+    };
+  }, [activeFilePath]);
   const languageActionsRef = React.useRef<{
     goToDefinition: () => void;
     findReferences: () => void;
@@ -418,6 +442,59 @@ export function OpenedDroneFilePanel({
     openedFileShowsMarkdownPreview || openedFileShowsHtmlPreview;
   const openedFileEditorVisible =
     openedEditorIsText && Boolean(activeFilePath) && !openedFileShowsPreview;
+  const companionEditorTargetId = `editor:${droneId}:${activeFilePath}`;
+  const companionEditorMode = openedFileIsLargeText
+    ? 'large-file'
+    : fileLoading
+      ? 'loading'
+      : fileSaving
+        ? 'saving'
+        : readOnly
+          ? 'read-only'
+          : openedFileShowsPreview
+            ? 'preview'
+            : 'edit';
+  const companionRevision = () =>
+    `${fileRevision ?? ''}:${fileNavigationSeq ?? 0}:${companionContentRef.current.revision}`;
+
+  React.useEffect(() => {
+    if (!companionTargets || !activeFilePath || (!openedEditorIsText && !openedFileIsLargeText)) return;
+    return companionTargets.registerEditor({
+      id: companionEditorTargetId,
+      isEligible: () => Boolean(activeFilePath && (openedEditorIsText || openedFileIsLargeText)),
+      read: () => ({
+        targetId: companionEditorTargetId,
+        path: activeFilePath,
+        content: companionEditorMode === 'large-file' ? '' : companionContentRef.current.content,
+        revision: companionRevision(),
+        mode: companionEditorMode,
+        dirty: Boolean(fileDirty),
+      }),
+      apply: (baseRevision, content) => {
+        if (companionEditorMode !== 'edit') throw new Error('EDITOR_NOT_EDITABLE');
+        if (baseRevision !== companionRevision()) throw new Error('STALE_EDITOR_REVISION');
+        const editor = editorRef.current;
+        const model = editor?.getModel();
+        if (!editor || !model) throw new Error('EDITOR_NOT_READY');
+        editor.pushUndoStop();
+        editor.executeEdits('companion', [{ range: model.getFullModelRange(), text: content }]);
+        editor.pushUndoStop();
+        updateCompanionContentRef(content);
+        return { ok: true, revision: companionRevision() };
+      },
+    });
+  }, [
+    activeFilePath,
+    companionEditorMode,
+    companionEditorTargetId,
+    companionTargets,
+    fileDirty,
+    fileNavigationSeq,
+    fileRevision,
+    openedFileIsLargeText,
+    openedEditorIsText,
+    updateCompanionContentRef,
+  ]);
   const monacoOptions = React.useMemo<MonacoEditorProps['options']>(
     () => ({
       readOnly: Boolean(fileSaving) || readOnly,
@@ -468,8 +545,12 @@ export function OpenedDroneFilePanel({
     editor.focus?.();
   }, [activeFilePath, fileTargetColumn, fileTargetLine, openedFileEditorVisible]);
   const handleEditorChange = React.useCallback<NonNullable<MonacoEditorProps['onChange']>>(
-    (next) => onFileContentChange?.(next ?? ''),
-    [onFileContentChange],
+    (next) => {
+      const content = next ?? '';
+      updateCompanionContentRef(content);
+      onFileContentChange?.(content);
+    },
+    [onFileContentChange, updateCompanionContentRef],
   );
   const handleEditorBeforeMount = React.useCallback<
     NonNullable<MonacoEditorProps['beforeMount']>
@@ -480,6 +561,7 @@ export function OpenedDroneFilePanel({
   const handleEditorMount = React.useCallback<MonacoEditorMountHandler>(
     (editor, monaco) => {
       editorRef.current = editor;
+      editor.onDidFocusEditorText(() => companionTargets?.focusEditor(companionEditorTargetId));
       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
         void onSaveFile?.(editor.getValue());
       });
@@ -491,7 +573,7 @@ export function OpenedDroneFilePanel({
       });
       applyEditorCursorTarget();
     },
-    [applyEditorCursorTarget, onSaveFile],
+    [applyEditorCursorTarget, companionEditorTargetId, companionTargets, onSaveFile],
   );
 
   React.useEffect(() => {
@@ -666,7 +748,10 @@ export function OpenedDroneFilePanel({
       value={fileContent ?? ''}
       saving={Boolean(fileSaving)}
       readOnly={readOnly}
-      onChange={onFileContentChange}
+      onChange={(next) => {
+        updateCompanionContentRef(next);
+        onFileContentChange?.(next);
+      }}
       onSave={onSaveFile}
     />
   );

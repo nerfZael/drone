@@ -92,6 +92,15 @@ export type ChatReadRows = {
 export type ChatStoreImportResult = { available: boolean; sourceHash: string };
 export type ChatStoreReadResult = { available: boolean; chat: any | null; sourceHash: string };
 export type ChatStoreListResult = { available: boolean; chats: string[] };
+export type ActiveChatSearchResult = {
+  droneId: string;
+  chatName: string;
+  turnId: string;
+  role: 'user' | 'assistant' | 'error';
+  timestamp: string;
+  snippet: string;
+  rank: number;
+};
 export type ChatReadState = {
   droneId: string;
   chatName: string;
@@ -483,6 +492,79 @@ export const CHAT_STORE_MIGRATIONS: readonly HubDatabaseMigration[] = [
           row.chat_name,
         );
       }
+    },
+  },
+  {
+    version: 8,
+    name: 'active chat keyword search',
+    migrate(connection) {
+      connection.exec(`
+        CREATE VIRTUAL TABLE companion_chat_search USING fts5(
+          drone_id UNINDEXED,
+          chat_name UNINDEXED,
+          turn_id UNINDEXED,
+          role UNINDEXED,
+          timestamp UNINDEXED,
+          content,
+          tokenize = 'unicode61'
+        );
+
+        CREATE TRIGGER companion_chat_search_turn_insert
+        AFTER INSERT ON canonical_chat_turns BEGIN
+          INSERT INTO companion_chat_search (drone_id, chat_name, turn_id, role, timestamp, content)
+          SELECT NEW.drone_id, NEW.chat_name, NEW.turn_id, 'user',
+                 COALESCE(NEW.prompt_at, NEW.at), json_extract(NEW.turn_json, '$.prompt')
+          WHERE TRIM(COALESCE(json_extract(NEW.turn_json, '$.prompt'), '')) != '';
+          INSERT INTO companion_chat_search (drone_id, chat_name, turn_id, role, timestamp, content)
+          SELECT NEW.drone_id, NEW.chat_name, NEW.turn_id, 'assistant',
+                 COALESCE(NEW.completed_at, NEW.at), json_extract(NEW.turn_json, '$.output')
+          WHERE TRIM(COALESCE(json_extract(NEW.turn_json, '$.output'), '')) != '';
+          INSERT INTO companion_chat_search (drone_id, chat_name, turn_id, role, timestamp, content)
+          SELECT NEW.drone_id, NEW.chat_name, NEW.turn_id, 'error',
+                 COALESCE(NEW.completed_at, NEW.at), json_extract(NEW.turn_json, '$.error')
+          WHERE TRIM(COALESCE(json_extract(NEW.turn_json, '$.error'), '')) != '';
+        END;
+
+        CREATE TRIGGER companion_chat_search_turn_delete
+        AFTER DELETE ON canonical_chat_turns BEGIN
+          DELETE FROM companion_chat_search
+          WHERE drone_id = OLD.drone_id AND chat_name = OLD.chat_name AND turn_id = OLD.turn_id;
+        END;
+
+        CREATE TRIGGER companion_chat_search_turn_update
+        AFTER UPDATE ON canonical_chat_turns BEGIN
+          DELETE FROM companion_chat_search
+          WHERE drone_id = OLD.drone_id AND chat_name = OLD.chat_name AND turn_id = OLD.turn_id;
+          INSERT INTO companion_chat_search (drone_id, chat_name, turn_id, role, timestamp, content)
+          SELECT NEW.drone_id, NEW.chat_name, NEW.turn_id, 'user',
+                 COALESCE(NEW.prompt_at, NEW.at), json_extract(NEW.turn_json, '$.prompt')
+          WHERE TRIM(COALESCE(json_extract(NEW.turn_json, '$.prompt'), '')) != '';
+          INSERT INTO companion_chat_search (drone_id, chat_name, turn_id, role, timestamp, content)
+          SELECT NEW.drone_id, NEW.chat_name, NEW.turn_id, 'assistant',
+                 COALESCE(NEW.completed_at, NEW.at), json_extract(NEW.turn_json, '$.output')
+          WHERE TRIM(COALESCE(json_extract(NEW.turn_json, '$.output'), '')) != '';
+          INSERT INTO companion_chat_search (drone_id, chat_name, turn_id, role, timestamp, content)
+          SELECT NEW.drone_id, NEW.chat_name, NEW.turn_id, 'error',
+                 COALESCE(NEW.completed_at, NEW.at), json_extract(NEW.turn_json, '$.error')
+          WHERE TRIM(COALESCE(json_extract(NEW.turn_json, '$.error'), '')) != '';
+        END;
+
+        INSERT INTO companion_chat_search (drone_id, chat_name, turn_id, role, timestamp, content)
+        SELECT drone_id, chat_name, turn_id, 'user', COALESCE(prompt_at, at),
+               json_extract(turn_json, '$.prompt')
+        FROM canonical_chat_turns
+        WHERE TRIM(COALESCE(json_extract(turn_json, '$.prompt'), '')) != '';
+        INSERT INTO companion_chat_search (drone_id, chat_name, turn_id, role, timestamp, content)
+        SELECT drone_id, chat_name, turn_id, 'assistant', COALESCE(completed_at, at),
+               json_extract(turn_json, '$.output')
+        FROM canonical_chat_turns
+        WHERE TRIM(COALESCE(json_extract(turn_json, '$.output'), '')) != '';
+        INSERT INTO companion_chat_search (drone_id, chat_name, turn_id, role, timestamp, content)
+        SELECT drone_id, chat_name, turn_id, 'error', COALESCE(completed_at, at),
+               json_extract(turn_json, '$.error')
+        FROM canonical_chat_turns
+        WHERE TRIM(COALESCE(json_extract(turn_json, '$.error'), '')) != '';
+      `);
     },
   },
 ];
@@ -2747,6 +2829,103 @@ export function listChatsFromStore(opts: { droneId: string }): ChatStoreListResu
   if (store) return store.listChats(opts);
   const prefix = `${opts.droneId}\u0000`;
   return { available: true, chats: [...memoryChats.keys()].filter((item) => item.startsWith(prefix)).map((item) => item.slice(prefix.length)).sort() };
+}
+
+export function searchActiveChatMessages(opts: {
+  query: string;
+  droneId?: string;
+  chatName?: string;
+  limit?: number;
+  offset?: number;
+}): { available: boolean; results: ActiveChatSearchResult[]; limit: number; offset: number } {
+  const query = String(opts.query ?? '').trim();
+  const limit = Number.isFinite(opts.limit)
+    ? Math.max(1, Math.min(50, Math.floor(Number(opts.limit))))
+    : 20;
+  const offset = Number.isFinite(opts.offset)
+    ? Math.max(0, Math.min(5_000, Math.floor(Number(opts.offset))))
+    : 0;
+  if (!query) return { available: true, results: [], limit, offset };
+
+  const database = getHubDatabase();
+  if (database) {
+    const terms = query.match(/[\p{L}\p{N}_-]+/gu) ?? [];
+    if (terms.length === 0) return { available: true, results: [], limit, offset };
+    const ftsQuery = terms.slice(0, 20).map((term) => `"${term.replace(/"/g, '""')}"`).join(' AND ');
+    const results = database.read((connection) =>
+      connection.prepare(`
+        SELECT drone_id, chat_name, turn_id, role, timestamp,
+               snippet(companion_chat_search, 5, '[', ']', '…', 24) AS snippet,
+               bm25(companion_chat_search) AS rank
+        FROM companion_chat_search
+        WHERE companion_chat_search MATCH ?
+          AND (? = '' OR drone_id = ?)
+          AND (? = '' OR chat_name = ?)
+        ORDER BY rank, timestamp DESC
+        LIMIT ? OFFSET ?
+      `).all(
+        ftsQuery,
+        String(opts.droneId ?? '').trim(),
+        String(opts.droneId ?? '').trim(),
+        String(opts.chatName ?? '').trim(),
+        String(opts.chatName ?? '').trim(),
+        limit,
+        offset,
+      ) as Array<{
+        drone_id: string;
+        chat_name: string;
+        turn_id: string;
+        role: ActiveChatSearchResult['role'];
+        timestamp: string;
+        snippet: string;
+        rank: number;
+      }>,
+    );
+    return {
+      available: true,
+      results: results.map((row) => ({
+        droneId: row.drone_id,
+        chatName: row.chat_name,
+        turnId: row.turn_id,
+        role: row.role,
+        timestamp: row.timestamp,
+        snippet: row.snippet,
+        rank: Number(row.rank),
+      })),
+      limit,
+      offset,
+    };
+  }
+
+  const needle = query.toLocaleLowerCase();
+  const results: ActiveChatSearchResult[] = [];
+  for (const [chatKey, turns] of memoryTurns) {
+    const [droneId, chatName] = chatKey.split('\u0000');
+    if (opts.droneId && droneId !== opts.droneId) continue;
+    if (opts.chatName && chatName !== opts.chatName) continue;
+    for (const turn of turns.values()) {
+      const fields: Array<[ActiveChatSearchResult['role'], string]> = [
+        ['user', turn.prompt],
+        ['assistant', turn.output],
+        ['error', turn.error ?? ''],
+      ];
+      for (const [role, content] of fields) {
+        const matchAt = content.toLocaleLowerCase().indexOf(needle);
+        if (matchAt < 0) continue;
+        results.push({
+          droneId,
+          chatName,
+          turnId: String(turn.id ?? ''),
+          role,
+          timestamp: String(role === 'user' ? turn.promptAt ?? turn.at : turn.completedAt ?? turn.at),
+          snippet: content.slice(Math.max(0, matchAt - 80), matchAt + needle.length + 120),
+          rank: matchAt,
+        });
+      }
+    }
+  }
+  results.sort((left, right) => left.rank - right.rank || right.timestamp.localeCompare(left.timestamp));
+  return { available: true, results: results.slice(offset, offset + limit), limit, offset };
 }
 
 export function readChatReadStateFromStore(opts: {

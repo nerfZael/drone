@@ -620,6 +620,8 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
           onQueueDraftPromptDuringCreate: queueDraftPromptDuringCreate,
           onEnqueueQueuedPrompt: enqueueQueuedPrompt,
           onSetDraftCreateError: setDraftCreateError,
+          onDraftValueChange: (draftValue) =>
+            setDraftChat((current: any) => current ? { ...current, draftValue } : current),
           onDraftContentChange: (content) =>
             rememberNewDroneDraftContent(String(draftChat.focusKey ?? ''), content),
         }

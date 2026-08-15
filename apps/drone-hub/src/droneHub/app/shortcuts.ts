@@ -11,6 +11,7 @@ export type ShortcutActionId =
   | 'toggleChatComposerEditorMode'
   | 'toggleContinuousDictation'
   | 'toggleFileDictation'
+  | 'toggleCompanion'
   | 'toggleVoiceClipboardRecording'
   | 'markSelectedDronesUnread'
   | 'toggleSidebarCollapsed'
@@ -103,6 +104,11 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     description: 'Finishes file dictation, or resumes dictation to the previous file target.',
   },
   {
+    id: 'toggleCompanion',
+    label: 'Toggle Companion recording',
+    description: 'Starts Companion recording, or stops and transcribes the current request.',
+  },
+  {
     id: 'toggleVoiceClipboardRecording',
     label: 'Record voice to clipboard',
     description: 'Starts or stops a microphone recording, transcribes it with GROQ, and copies the result.',
@@ -177,7 +183,8 @@ const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   toggleChatComposerEditorMode: { key: 'e', mod: false, ctrl: true, meta: false, alt: false, shift: false },
   toggleContinuousDictation: { key: 'r', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleFileDictation: { key: 'd', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  toggleVoiceClipboardRecording: { key: '`', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  toggleCompanion: { key: '`', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  toggleVoiceClipboardRecording: null,
   markSelectedDronesUnread: { key: 'z', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleSidebarCollapsed: { key: 'a', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleRightPanelWidth: { key: 's', mod: false, ctrl: false, meta: false, alt: false, shift: false },
@@ -259,6 +266,26 @@ export function migrateFormerPullRequestsShortcut(value: unknown): unknown {
   };
 }
 
+export function migrateCompanionShortcut(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const raw = value as Record<string, unknown>;
+  if (Object.prototype.hasOwnProperty.call(raw, 'toggleCompanion')) return value;
+  const formerVoiceBinding = sanitizeShortcutBinding(raw.toggleVoiceClipboardRecording, null);
+  const usedDefaultVoiceBinding = formerVoiceBinding?.key === '`'
+    && !formerVoiceBinding.mod
+    && !formerVoiceBinding.ctrl
+    && !formerVoiceBinding.meta
+    && !formerVoiceBinding.alt
+    && !formerVoiceBinding.shift;
+  return {
+    ...raw,
+    toggleCompanion: usedDefaultVoiceBinding
+      ? { ...formerVoiceBinding }
+      : cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleCompanion),
+    ...(usedDefaultVoiceBinding ? { toggleVoiceClipboardRecording: null } : {}),
+  };
+}
+
 function cloneShortcutBinding(binding: ShortcutBinding | null): ShortcutBinding | null {
   return binding ? { ...binding } : null;
 }
@@ -277,6 +304,7 @@ export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
     toggleChatComposerEditorMode: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleChatComposerEditorMode),
     toggleContinuousDictation: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleContinuousDictation),
     toggleFileDictation: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleFileDictation),
+    toggleCompanion: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleCompanion),
     toggleVoiceClipboardRecording: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleVoiceClipboardRecording),
     markSelectedDronesUnread: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.markSelectedDronesUnread),
     toggleSidebarCollapsed: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleSidebarCollapsed),

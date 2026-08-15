@@ -1326,14 +1326,12 @@ export function DroneSidebar({
   const visibleDraftSidebarPlaceholder = React.useMemo(() => {
     if (!draftSidebarPlaceholder) return null;
     const repoPath = String(draftSidebarPlaceholder.repoPath ?? '').trim();
-    const activeRepo = String(activeRepoPath ?? '').trim();
-    if (activeRepo && activeRepo !== repoPath) return null;
     return {
       ...draftSidebarPlaceholder,
       repoPath,
       group: String(draftSidebarPlaceholder.group ?? '').trim() || null,
     };
-  }, [activeRepoPath, draftSidebarPlaceholder]);
+  }, [draftSidebarPlaceholder]);
   const draftSidebarPlaceholderDrone = React.useMemo<DroneSummary | null>(() => {
     if (!visibleDraftSidebarPlaceholder) return null;
     return {
@@ -1363,14 +1361,11 @@ export function DroneSidebar({
     visibleSidebarFolderPathSet,
   } = useSidebarReadModel({
     draftSidebarPlaceholderDrone,
-    hiddenSidebarGroupTokenSet,
     isRepoGroupingMode,
     optimisticSidebarDronesFilteredByRepo,
     optimisticSidebarGroups,
     repoScopedGroupPathsByRepoGroup,
-    showHiddenSidebarGroups,
     sidebarGroupOrder,
-    sidebarGroupingMode: effectiveSidebarGroupingMode,
     sidebarGroupCreatedAtByName,
   });
   const addToGroupOptions = React.useMemo(
@@ -2477,6 +2472,22 @@ export function DroneSidebar({
             ) : null}
           </div>
         </div>
+
+        {draftSidebarPlaceholderDrone ? (
+          <div data-sidebar-draft-top-slot="true" className="flex-shrink-0 border-b border-[var(--border-subtle)] px-2 py-1 [--sidebar-selection-edge-offset:-0.5rem]">
+            <DroneCard
+              drone={draftSidebarPlaceholderDrone}
+              density={sidebarDensityMode}
+              displayName={uiDroneName(draftSidebarPlaceholderDrone.name)}
+              selected
+              active
+              activeIndicatorStyle="edge"
+              busy={Boolean(visibleDraftSidebarPlaceholder?.starting)}
+              statusHint={draftSidebarPlaceholderDrone.repoPath || 'No repository'}
+              onClick={() => undefined}
+            />
+          </div>
+        ) : null}
 
         {pinnedSidebarPlacement === 'top' && globalPinnedDrones.length > 0 ? (
           <div

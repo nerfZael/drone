@@ -1275,7 +1275,21 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     inputSchema: {},
   }, async () => {
     const repos = await requestRepoSummaries(context.hubServices);
-    return toolResult({ ok: true, count: repos.length, repos });
+    const response = await requestDroneSummaries();
+    const droneCounts = new Map<string, number>();
+    for (const raw of Array.isArray(response?.drones) ? response.drones : []) {
+      if (isWorkflowChildDroneEntry(raw)) continue;
+      const repoPath = cleanString(raw?.repoPath);
+      if (repoPath) droneCounts.set(repoPath, (droneCounts.get(repoPath) ?? 0) + 1);
+    }
+    return toolResult({
+      ok: true,
+      count: repos.length,
+      repos: repos.map((repo: any) => ({
+        ...repo,
+        droneCount: droneCounts.get(cleanString(repo.path)) ?? 0,
+      })),
+    });
   });
 
   registerChangeRequestMcpTools(server, { context, requestJson, toolResult });

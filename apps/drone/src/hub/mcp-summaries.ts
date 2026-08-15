@@ -25,6 +25,11 @@ export function droneStatusSummary(drone: any): string | null {
 }
 
 export function droneSummary(drone: any) {
+  const repoPath = cleanString(drone?.repoPath) || null;
+  const repoSegments = repoPath?.split(/[\\/]/).filter(Boolean) ?? [];
+  const chats = Array.isArray(drone?.chats)
+    ? drone.chats.map((chat: unknown) => cleanString(chat)).filter(Boolean)
+    : [];
   return {
     id: cleanString(drone?.id),
     name: cleanString(drone?.name),
@@ -32,7 +37,17 @@ export function droneSummary(drone: any) {
     groupId: cleanString(drone?.groupId) || null,
     fleetParentId: cleanString(drone?.fleetParentId) || null,
     runtime: cleanString(drone?.runtime, 'container'),
-    repoPath: cleanString(drone?.repoPath) || null,
+    repoPath,
+    hasRepository: Boolean(repoPath),
+    repository: repoPath
+      ? {
+          path: repoPath,
+          label: repoSegments[repoSegments.length - 1] || repoPath,
+          ref: `repo:${Buffer.from(repoPath, 'utf8').toString('base64url')}`,
+        }
+      : null,
+    chatCount: chats.length || 1,
+    chats: chats.length > 0 ? chats : ['default'],
     cwd: cleanString(drone?.cwd) || null,
     status: droneStatusSummary(drone),
     createdAt: cleanIsoTimestamp(drone?.createdAt),

@@ -16,6 +16,7 @@ type HubHttpTransportOptions = {
   requestListener: http.RequestListener;
   upgradeListener: (...args: any[]) => void;
   webSocketServer: WebSocketServer;
+  additionalWebSocketServers?: WebSocketServer[];
   containerMcp?: ContainerMcpTransportOptions;
 };
 
@@ -53,6 +54,7 @@ export async function startHubHttpTransport(
         server,
         sockets: mainSockets,
         webSocketServer: options.webSocketServer,
+        additionalWebSocketServers: options.additionalWebSocketServers ?? [],
         containerMcpServer,
         containerMcpSockets,
       });
@@ -126,6 +128,7 @@ async function closeTransport(options: {
   server: http.Server;
   sockets: Set<Socket>;
   webSocketServer: WebSocketServer;
+  additionalWebSocketServers: WebSocketServer[];
   containerMcpServer: http.Server | null;
   containerMcpSockets: Set<Socket>;
 }): Promise<void> {
@@ -134,23 +137,25 @@ async function closeTransport(options: {
     ? closeServer(options.containerMcpServer)
     : Promise.resolve();
 
-  try {
-    options.webSocketServer.clients.forEach((client: WebSocket) => {
-      try {
-        client.close();
-      } catch {
-        // Best effort during shutdown.
-      }
-      try {
-        client.terminate();
-      } catch {
-        // Best effort during shutdown.
-      }
-    });
-  } catch {
-    // Best effort during shutdown.
+  for (const webSocketServer of [options.webSocketServer, ...options.additionalWebSocketServers]) {
+    try {
+      webSocketServer.clients.forEach((client: WebSocket) => {
+        try {
+          client.close();
+        } catch {
+          // Best effort during shutdown.
+        }
+        try {
+          client.terminate();
+        } catch {
+          // Best effort during shutdown.
+        }
+      });
+    } catch {
+      // Best effort during shutdown.
+    }
+    await waitWithTimeout(closeWebSocketServer(webSocketServer), 1_000);
   }
-  await waitWithTimeout(closeWebSocketServer(options.webSocketServer), 1_000);
 
   closeIdleConnections(options.server);
   if (options.containerMcpServer) closeIdleConnections(options.containerMcpServer);

@@ -30,7 +30,6 @@ export type BlipAssistantThreadConfiguration = {
 };
 
 export class BlipAssistantHost {
-  private readonly repository = new HubSessionRepository();
   private readonly handles = new Map<string, BlipSessionHandle>();
   private readonly handlePromises = new Map<string, Promise<BlipSessionHandle>>();
   private readonly eventSinks = new Map<
@@ -38,6 +37,7 @@ export class BlipAssistantHost {
     Set<(event: BlipRuntimeEvent) => Promise<void> | void>
   >();
   private readonly invalidatedThreads = new Set<string>();
+  private readonly abortRequestedThreads = new Set<string>();
   private readonly loadedTools = new Map<string, AgentTool<any>[]>();
   private readonly loadedConfigurations = new Map<string, BlipAssistantThreadConfiguration>();
 
@@ -47,6 +47,7 @@ export class BlipAssistantHost {
       threadId: string,
       event: BlipRuntimeEvent,
     ) => Promise<void> | void,
+    private readonly repository: HubSessionRepository = new HubSessionRepository(),
   ) {}
 
   subscribeEvents(
@@ -74,6 +75,9 @@ export class BlipAssistantHost {
     }
     try {
       const handle = await this.handle(threadId);
+      if (this.abortRequestedThreads.delete(threadId)) {
+        throw new Error('Assistant run cancelled');
+      }
       const effectiveDeliveryMode =
         deliveryMode ?? this.loadedConfigurations.get(threadId)?.promptDeliveryMode;
       if (handle.running && effectiveDeliveryMode === 'asap') {
@@ -119,7 +123,12 @@ export class BlipAssistantHost {
   }
 
   abortThread(threadId: string): void {
-    this.handles.get(threadId)?.abort();
+    const handle = this.handles.get(threadId);
+    if (handle) {
+      handle.abort();
+      return;
+    }
+    if (this.handlePromises.has(threadId)) this.abortRequestedThreads.add(threadId);
   }
 
   historyPage(
@@ -152,6 +161,21 @@ export class BlipAssistantHost {
           ? String(part?.text ?? part?.thinking ?? '')
           : '',
       )
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  async latestAssistantVisibleText(threadId: string): Promise<string> {
+    const history = await this.historyPage(threadId, { limit: 50 });
+    const message = [...history.entries]
+      .reverse()
+      .map((entry) => entry.message)
+      .find((candidate) => candidate.role === 'assistant');
+    if (!message) return '';
+    if (typeof message.content === 'string') return message.content;
+    if (!Array.isArray(message.content)) return '';
+    return message.content
+      .map((part: any) => (part?.type === 'text' ? String(part?.text ?? '') : ''))
       .filter(Boolean)
       .join('\n');
   }
@@ -307,6 +331,12 @@ export class BlipAssistantHost {
       this.invalidateThread(threadId);
   }
 
+  async close(): Promise<void> {
+    const threadIds = new Set([...this.handles.keys(), ...this.handlePromises.keys()]);
+    await Promise.allSettled([...threadIds].map((threadId) => this.deleteThread(threadId)));
+    this.repository.close();
+  }
+
   async deleteThread(threadId: string): Promise<void> {
     let handle = this.handles.get(threadId);
     if (!handle) handle = await this.handlePromises.get(threadId);
@@ -321,6 +351,7 @@ export class BlipAssistantHost {
       if (sessionId) await this.repository.delete(sessionId);
     }
     this.handles.delete(threadId);
+    this.abortRequestedThreads.delete(threadId);
     this.invalidatedThreads.delete(threadId);
     this.loadedTools.delete(threadId);
     await this.disposeConfiguration(threadId);

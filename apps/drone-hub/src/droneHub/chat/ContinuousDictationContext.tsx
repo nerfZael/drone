@@ -7,10 +7,21 @@ import {
 } from './browser-microphone-coordinator';
 import { createContinuousDictationToggle } from './create-continuous-dictation-toggle';
 
+export type ContinuousDictationComposerSnapshot = {
+  targetId: string;
+  path: string;
+  content: string;
+  revision: string;
+  mode: 'edit' | 'read-only';
+};
+
 type ContinuousDictationComposer = {
   id: string;
   isEligible(): boolean;
+  isReadable?(): boolean;
   appendTranscript(text: string): void;
+  readSnapshot?(): ContinuousDictationComposerSnapshot;
+  applyContent?(baseRevision: string, content: string): { ok: true; revision: string };
 };
 
 type ContinuousDictationContextValue = {
@@ -21,6 +32,8 @@ type ContinuousDictationContextValue = {
   activeComposerId: string | null;
   registerComposer(composer: ContinuousDictationComposer): () => void;
   focusComposer(id: string): void;
+  readActiveComposer(): ContinuousDictationComposerSnapshot;
+  applyComposer(targetId: string, baseRevision: string, content: string): { ok: true; revision: string };
   toggle(): Promise<void>;
 };
 
@@ -143,6 +156,34 @@ export function ContinuousDictationProvider({ children }: { children: React.Reac
     [changeTarget],
   );
 
+  const resolveReadableComposer = React.useCallback(() => {
+    const activeId = activeComposerIdRef.current;
+    const active = activeId ? composersRef.current.get(activeId) : null;
+    if (active?.readSnapshot && (active.isReadable?.() ?? active.isEligible())) return active;
+    const candidates = [...composersRef.current.values()].filter(
+      (composer) => composer.readSnapshot && (composer.isReadable?.() ?? composer.isEligible()),
+    );
+    const composer = candidates[candidates.length - 1];
+    if (!composer) throw new Error('NO_ACTIVE_COMPOSER');
+    return composer;
+  }, []);
+
+  const readActiveComposer = React.useCallback(
+    () => resolveReadableComposer().readSnapshot!(),
+    [resolveReadableComposer],
+  );
+
+  const applyComposer = React.useCallback(
+    (targetId: string, baseRevision: string, content: string) => {
+      const composer = composersRef.current.get(targetId);
+      if (!composer?.applyContent || !(composer.isReadable?.() ?? composer.isEligible())) {
+        throw new Error('COMPOSER_NOT_AVAILABLE');
+      }
+      return composer.applyContent(baseRevision, content);
+    },
+    [],
+  );
+
   const toggle = React.useCallback(async () => {
     setError('');
     ensureTargetId();
@@ -158,15 +199,19 @@ export function ContinuousDictationProvider({ children }: { children: React.Reac
       activeComposerId,
       registerComposer,
       focusComposer,
+      readActiveComposer,
+      applyComposer,
       toggle,
     }),
     [
       activeComposerId,
       error,
+      applyComposer,
       focusComposer,
       microphoneOwner,
       pendingCount,
       registerComposer,
+      readActiveComposer,
       status,
       toggle,
     ],

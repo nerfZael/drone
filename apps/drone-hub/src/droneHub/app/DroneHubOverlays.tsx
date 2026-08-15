@@ -8,6 +8,7 @@ import type { DraftCreateDroneModal as DraftCreateDroneModalComponent } from './
 import type { DroneErrorModal as DroneErrorModalComponent } from './DroneErrorModal';
 import { HubTransientToasts } from './HubTransientToasts';
 import type { ReposModal as ReposModalComponent } from './ReposModal';
+import { CompanionOverlay } from '../companion/CompanionOverlay';
 
 const CustomAgentsModal = React.lazy(async () => {
   const { CustomAgentsModal } = await import('./CustomAgentsModal');
@@ -71,6 +72,7 @@ export function DroneHubOverlays({
         {customAgentsModalProps.open && <CustomAgentsModal {...customAgentsModalProps} />}
       </React.Suspense>
       <HubTransientToasts {...hubTransientToastsProps} />
+      <CompanionOverlay />
       <React.Suspense fallback={null}>{reposModalProps && <ReposModal {...reposModalProps} />}</React.Suspense>
       <React.Suspense fallback={null}>
         {dirtyDroneApplyModalProps && <DirtyDroneApplyModal {...dirtyDroneApplyModalProps} />}

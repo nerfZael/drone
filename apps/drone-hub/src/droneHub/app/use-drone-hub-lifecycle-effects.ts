@@ -17,6 +17,7 @@ import { requestSidebarGroupDraft } from './sidebar-group-draft-events';
 import { useContinuousDictation } from '../chat/ContinuousDictationContext';
 import { toggleCurrentChatComposerEditorMode } from '../chat/chat-composer-editor-mode-shortcut';
 import { useFileDictation } from '../files/FileDictationContext';
+import { requestCompanionToggle } from '../companion/companion-browser-events';
 
 type Updater<T> = T | ((prev: T) => T);
 type Setter<T> = (next: Updater<T>) => void;
@@ -291,8 +292,8 @@ export function useDroneHubLifecycleEffects({
       moveSelectedDroneToTop: () => moveSelectedDroneToTopFromShortcut(),
       toggleSelectedDronesToDo: () => toggleSelectedDronesToDoFromShortcut(),
       focusPrimaryChatInput: () => focusPrimaryChatInput(),
-      // This action runs in the capture handler below so editor shortcut
-      // boundaries cannot swallow it and dialogs can explicitly suppress it.
+      // This action and Companion run in the capture handler below so editor shortcut
+      // boundaries cannot swallow them and dialogs can explicitly suppress them.
       toggleChatComposerEditorMode: () => false,
       toggleContinuousDictation: () => {
         if (!toggleContinuousDictation) return false;
@@ -302,6 +303,10 @@ export function useDroneHubLifecycleEffects({
       toggleFileDictation: () => {
         if (!toggleFileDictation) return false;
         void toggleFileDictation();
+        return true;
+      },
+      toggleCompanion: () => {
+        requestCompanionToggle();
         return true;
       },
       toggleVoiceClipboardRecording: () => toggleVoiceClipboardRecording(),
@@ -399,6 +404,12 @@ export function useDroneHubLifecycleEffects({
       const matched = SHORTCUT_DEFINITIONS.find(
         (definition) => isShortcutMatch(shortcutBindings[definition.id], e),
       );
+      if (matched?.id === 'toggleCompanion') {
+        requestCompanionToggle();
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       if (matched?.id !== 'toggleChatComposerEditorMode') return;
       if (!toggleCurrentChatComposerEditorMode()) return;
       e.preventDefault();

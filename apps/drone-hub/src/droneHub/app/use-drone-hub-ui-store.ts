@@ -8,6 +8,7 @@ import {
 } from './app-config';
 import {
   cloneDefaultShortcutBindings,
+  migrateCompanionShortcut,
   migrateFormerPullRequestsShortcut,
   sanitizeSingleShortcutBinding,
   sanitizeShortcutBindings,
@@ -830,7 +831,7 @@ function migrateLegacyShortcutBindings(value: unknown): unknown {
     };
     changed = true;
   }
-  return changed ? next : value;
+  return migrateCompanionShortcut(changed ? next : value);
 }
 
 let pendingChatInputDraftsPersist: Record<string, string> | null = null;
@@ -1428,6 +1429,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           themeId: normalizeDesktopThemeId(persisted.themeId ?? currentState.themeId),
           settingsActiveTab:
             persisted.settingsActiveTab === 'general' ||
+            persisted.settingsActiveTab === 'companion' ||
             persisted.settingsActiveTab === 'devices' ||
             persisted.settingsActiveTab === 'sync' ||
             persisted.settingsActiveTab === 'backups' ||

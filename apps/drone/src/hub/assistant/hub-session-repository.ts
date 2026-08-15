@@ -139,7 +139,9 @@ type DatabaseLike = {
 };
 
 function openDatabase(databasePath: string): DatabaseLike {
-  fs.mkdirSync(path.dirname(databasePath), { recursive: true, mode: 0o700 });
+  if (databasePath !== ':memory:') {
+    fs.mkdirSync(path.dirname(databasePath), { recursive: true, mode: 0o700 });
+  }
   const runtimeRequire = createRequire(__filename);
   if (typeof (globalThis as any).Bun !== 'undefined') {
     const BunDatabase = runtimeRequire('bun:sqlite').Database;
@@ -152,9 +154,11 @@ function openDatabase(databasePath: string): DatabaseLike {
 export class HubSessionRepository implements SessionRepository {
   private readonly db: DatabaseLike;
 
-  constructor(databasePath = droneRootPath('assistant-blip.sqlite')) {
-    this.db = openDatabase(path.resolve(databasePath));
-    this.db.pragma?.('journal_mode = WAL');
+  constructor(databasePathOrOptions: string | { inMemory: true } = droneRootPath('assistant-blip.sqlite')) {
+    const inMemory = typeof databasePathOrOptions !== 'string';
+    const databasePath = inMemory ? ':memory:' : path.resolve(databasePathOrOptions);
+    this.db = openDatabase(databasePath);
+    if (!inMemory) this.db.pragma?.('journal_mode = WAL');
     this.db.exec('PRAGMA foreign_keys = ON');
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS assistant_blip_sessions (

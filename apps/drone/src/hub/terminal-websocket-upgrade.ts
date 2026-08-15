@@ -12,6 +12,7 @@ export function createTerminalWebSocketUpgradeHandler(opts: {
   apiToken: string;
   allowedOrigins: Set<string>;
   webSocketServer: WebSocketServer;
+  companionWebSocketServer?: WebSocketServer;
   handleDeviceMeshUpgrade: (req: http.IncomingMessage, socket: Duplex, head: Buffer) => boolean;
   isSafeSessionName: (value: string) => boolean;
   parseSince: (value: string | null) => number | undefined;
@@ -32,6 +33,20 @@ export function createTerminalWebSocketUpgradeHandler(opts: {
       }
 
       const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
+      if (url.pathname === '/api/companion/stream') {
+        if (!opts.companionWebSocketServer) {
+          rejectWebSocketUpgrade(socket, 404, 'Not Found');
+          return;
+        }
+        if (!isHubApiAuthorizedForWebSocket(req, url, opts.apiToken)) {
+          rejectWebSocketUpgrade(socket, 401, 'Unauthorized');
+          return;
+        }
+        opts.companionWebSocketServer.handleUpgrade(req, socket, head, (webSocket: WebSocket) => {
+          opts.companionWebSocketServer!.emit('connection', webSocket, req);
+        });
+        return;
+      }
       const parts = url.pathname.split('/').filter(Boolean);
       const isTerminalStreamRoute =
         parts.length === 6 &&

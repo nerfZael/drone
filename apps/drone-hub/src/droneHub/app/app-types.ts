@@ -37,6 +37,7 @@ export type DraftChatState = {
       attachmentPayloads?: ChatImageAttachmentPayload[];
     }
   >;
+  draftValue?: string;
   // Changes each time the draft composer is opened so input autofocus can re-trigger.
   focusKey?: string;
 };
