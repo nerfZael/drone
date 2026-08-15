@@ -4,6 +4,10 @@ import type { PendingPrompt } from './drone-pending-prompts';
 import { finalizeDroneRunFileChanges } from './run-file-changes';
 import { completePendingChatFork } from './chat-fork';
 import type { BuiltinTranscriptAgentId } from './pendingPromptEnqueue';
+import {
+  BUILTIN_TRANSCRIPT_SESSION_FIELD_BY_AGENT,
+  writeBuiltinTranscriptSessionId,
+} from './builtin-transcript-session-metadata';
 
 export type ChatReconciliationExecutorDependencies = {
   applyChatReconciliationInStore: any;
@@ -121,17 +125,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
   ): boolean {
     const sessionId = String(sessionIdRaw ?? '').trim();
     if (!sessionId) return false;
-    const fieldByAgent: Record<BuiltinTranscriptAgentId, string> = {
-      cursor: 'chatId',
-      codex: 'codexThreadId',
-      claude: 'claudeSessionId',
-      opencode: 'openCodeSessionId',
-      pi: 'piSessionId',
-      blip: 'blipSessionId',
-    };
-    const field = fieldByAgent[agentId];
-    const idChanged = String(entry?.[field] ?? '').trim() !== sessionId;
-    if (idChanged) entry[field] = sessionId;
+    const idChanged = writeBuiltinTranscriptSessionId(entry, agentId, sessionId);
     const forkCompleted = completePendingChatFork(entry, agentId);
     return idChanged || forkCompleted;
   }
@@ -248,9 +242,10 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
       turns.map((turn: any) => String(turn?.id ?? '').trim()).filter(Boolean),
     );
     const metadataBefore = Object.fromEntries(
-      ['chatId', 'codexThreadId', 'claudeSessionId', 'openCodeSessionId', 'piSessionId', 'blipSessionId'].map(
-        (field) => [field, String((entry as any)?.[field] ?? '').trim()],
-      ),
+      Object.values(BUILTIN_TRANSCRIPT_SESSION_FIELD_BY_AGENT).map((field) => [
+        field,
+        String((entry as any)?.[field] ?? '').trim(),
+      ]),
     ) as Record<string, string>;
     const forkOriginBefore = JSON.stringify(entry?.chatForkOrigin ?? null);
     const transcriptIds = new Set(
