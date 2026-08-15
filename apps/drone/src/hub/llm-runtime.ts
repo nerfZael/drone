@@ -1,5 +1,11 @@
-import type { LlmProviderId } from './hub-settings';
+import {
+  parseLlmProvider,
+  providerDisplayName,
+  type LlmProviderId,
+} from './hub-settings';
 import { DEFAULT_GEMINI_FLASH_MODEL_ID } from './llm-models';
+
+export { providerDisplayName } from './hub-settings';
 
 type GenerateObjectInput = {
   model: any;
@@ -22,22 +28,13 @@ export type HubLlmRuntime = {
 const dynamicImport = new Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<any>;
 
 export function normalizeHubLlmProvider(raw: unknown): LlmProviderId {
-  const value = String(raw ?? '').trim().toLowerCase();
-  if (value === 'gemini') return 'gemini';
-  if (value === 'codex' || value === 'openai-codex' || value === 'chatgpt-codex') return 'codex';
-  return 'openai';
+  return parseLlmProvider(raw) ?? 'openai';
 }
 
 export function defaultHubLlmModelId(provider: LlmProviderId, purpose: 'small' | 'standard' = 'small'): string {
   if (provider === 'gemini') return DEFAULT_GEMINI_FLASH_MODEL_ID;
   if (provider === 'codex') return purpose === 'standard' ? 'gpt-5.3-codex' : 'gpt-5.3-codex-spark';
   return purpose === 'standard' ? 'gpt-4o' : 'gpt-4o-mini';
-}
-
-export function providerDisplayName(provider: LlmProviderId): string {
-  if (provider === 'gemini') return 'Gemini';
-  if (provider === 'codex') return 'Codex';
-  return 'OpenAI';
 }
 
 function textFromAssistantMessage(message: any): string {

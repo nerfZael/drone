@@ -30,6 +30,8 @@ import { useSkillLibrary } from './use-skill-library';
 import { useSpeechSettings } from './use-speech-settings';
 import { useVoiceInputSettings } from './use-voice-input-settings';
 import { useSyncSets } from './use-sync-sets';
+import { CompanionSettingsTab } from '../companion/CompanionSettingsTab';
+import { useCompanionSettings } from '../companion/use-companion-settings';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 
@@ -88,6 +90,7 @@ export function SettingsView({
   const profile = useProfileSettings(requestJson);
   const backups = useRegistryBackupSettings(requestJson);
   const subscriptions = useResourceSubscriptionSettings(requestJson);
+  const companion = useCompanionSettings(requestJson);
 
   const settingsBusy =
     hubLogsState.hubLogsLoading ||
@@ -101,6 +104,8 @@ export function SettingsView({
     profile.profileSettingsLoading ||
     backups.backupSettingsLoading ||
     subscriptions.loading ||
+    companion.loading ||
+    companion.saving ||
     deleteAction.archivedDronesLoading ||
     deleteAction.archivedChatsLoading ||
     llm.savingOpenAiSettings ||
@@ -152,14 +157,26 @@ export function SettingsView({
 
   const handleSelectTab = React.useCallback(
     (tabId: SettingsTabId) => {
+      if (activeTab === 'companion' && tabId !== 'companion' && companion.dirty) {
+        if (!window.confirm('Discard unsaved Companion settings?')) return;
+        void companion.load();
+      }
       onSelectTab(tabId);
       if (tabId === 'archive') {
         void deleteAction.loadArchivedDrones();
         void deleteAction.loadArchivedChats();
       }
     },
-    [deleteAction, onSelectTab],
+    [activeTab, companion, deleteAction, onSelectTab],
   );
+
+  const handleBackToWorkspace = React.useCallback(() => {
+    if (activeTab === 'companion' && companion.dirty) {
+      if (!window.confirm('Discard unsaved Companion settings?')) return;
+      void companion.load();
+    }
+    onBackToWorkspace();
+  }, [activeTab, companion, onBackToWorkspace]);
 
   const handleRefreshAll = React.useCallback(() => {
     if (skillLibrary.draftDirty) {
@@ -172,6 +189,10 @@ export function SettingsView({
     }
     if (agentsDraftDirty) {
       const ok = window.confirm('Discard unsaved AGENTS.md edits and refresh all settings?');
+      if (!ok) return;
+    }
+    if (companion.dirty) {
+      const ok = window.confirm('Discard unsaved Companion settings and refresh all settings?');
       if (!ok) return;
     }
     void llm.loadLlmSettings();
@@ -191,7 +212,8 @@ export function SettingsView({
     void skillLibrary.loadSkills();
     void skillLibrary.loadSkillSources();
     void mcpServers.loadMcpServers();
-  }, [agents, agentsDraftDirty, backups.loadBackupSettings, deleteAction, filesystem, github, hubLogsState, llm, mcpServers, profile, skillLibrary, speech, subscriptions.load, syncSets]);
+    void companion.load();
+  }, [agents, agentsDraftDirty, backups.loadBackupSettings, companion, deleteAction, filesystem, github, hubLogsState, llm, mcpServers, profile, skillLibrary, speech, subscriptions.load, syncSets]);
 
   const renderActiveTab = () => {
     if (activeTab === 'general') {
@@ -208,6 +230,7 @@ export function SettingsView({
         />
       );
     }
+    if (activeTab === 'companion') return <CompanionSettingsTab settings={companion} />;
     if (activeTab === 'devices') return <DeviceMeshSettingsTab requestJson={requestJson} />;
     if (activeTab === 'sync') return <SyncSettingsTab syncSets={syncSets} />;
     if (activeTab === 'backups') return <BackupsSettingsTab backups={backups} />;
@@ -237,7 +260,7 @@ export function SettingsView({
             <div className="mb-2 flex h-9 items-center gap-1 px-1">
               <button
                 type="button"
-                onClick={onBackToWorkspace}
+                onClick={handleBackToWorkspace}
                 aria-label="Back to drones"
                 title="Back to drones"
                 className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-medium)] text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]"

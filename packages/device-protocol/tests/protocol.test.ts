@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   canonicalJson,
+  COMPANION_CAPABILITY,
   DRONE_CONTROL_CAPABILITY,
   isGranted,
   pairingClaimSigningText,
@@ -39,6 +40,13 @@ describe('device protocol', () => {
         'groq.export',
       ),
     ).toBe(true);
+  });
+
+  test('advertises Companion run controls as explicit permissions', () => {
+    expect(COMPANION_CAPABILITY.operations).toEqual(['run.start', 'run.cancel', 'tool.result']);
+    expect(isGranted([], COMPANION_CAPABILITY.id, COMPANION_CAPABILITY.version, 'run.start')).toBe(
+      false,
+    );
   });
 
   test('advertises pull request reads and writes as separate permissions', () => {

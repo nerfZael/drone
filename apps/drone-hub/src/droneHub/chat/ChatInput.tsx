@@ -45,8 +45,16 @@ import {
   takeChatComposerDraftSnapshot,
   type ChatComposerDraftSnapshot,
 } from './chat-composer-draft';
-import { useContinuousDictation } from './ContinuousDictationContext';
+import {
+  useContinuousDictation,
+  type ContinuousDictationComposerSnapshot,
+} from './ContinuousDictationContext';
+import { useActiveComposer } from './ActiveComposerContext';
 import { mergeDraftWithContinuousDictation } from './continuous-dictation-draft';
+import {
+  companionTextareaUndoValue,
+  type CompanionTextareaUndoSnapshot,
+} from './companion-textarea-undo';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { isShortcutMatch } from '../app/shortcuts';
 import { preloadMonacoEditor } from '../files/monaco-editor-loader';
@@ -237,6 +245,12 @@ export function ChatInput({
   const onDraftContentChangeRef = React.useRef(onDraftContentChange);
   onDraftContentChangeRef.current = onDraftContentChange;
   const appendContinuousDictationRef = React.useRef<(text: string) => void>(() => undefined);
+  const readCompanionComposerRef = React.useRef<() => ContinuousDictationComposerSnapshot>(() => {
+    throw new Error('NO_ACTIVE_COMPOSER');
+  });
+  const applyCompanionComposerRef = React.useRef<(baseRevision: string, content: string) => { ok: true; revision: string }>(() => {
+    throw new Error('COMPOSER_NOT_AVAILABLE');
+  });
   const voiceActionInFlightRef = React.useRef(false);
   const voiceActionTokenRef = React.useRef(0);
   const persistenceKey = String(draftPersistenceKey ?? '').trim();
@@ -272,15 +286,18 @@ export function ChatInput({
   const focusAfterModeChangeRef = React.useRef(false);
   const attachmentsRef = React.useRef(attachments);
   const draftRevisionRef = React.useRef(0);
+  const companionUndoRef = React.useRef<CompanionTextareaUndoSnapshot | null>(null);
   const composerLocked = Boolean(disabled);
   const composerLockedRef = React.useRef(composerLocked);
   composerLockedRef.current = composerLocked;
   const attachmentControlsLocked = composerLocked;
   const continuousDictation = useContinuousDictation();
-  const continuousDictationInstanceId = React.useId();
-  const continuousDictationComposerId = `${continuousDictationInstanceId}:${resetKey}`;
-  const registerContinuousDictationComposer = continuousDictation?.registerComposer;
-  const continuousDictationEligible = React.useCallback(() => {
+  const activeComposer = useActiveComposer();
+  const composerInstanceId = React.useId();
+  const activeComposerTargetId = `${composerInstanceId}:${resetKey}`;
+  const editorModeRef = React.useRef(editorMode);
+  editorModeRef.current = editorMode;
+  const activeComposerEligible = React.useCallback(() => {
     const root = composerRootRef.current;
     return Boolean(
       root &&
@@ -290,23 +307,34 @@ export function ChatInput({
       !composerLockedRef.current,
     );
   }, []);
+  const companionComposerReadable = React.useCallback(() => {
+    const root = composerRootRef.current;
+    return Boolean(
+      root &&
+      root.isConnected &&
+      root.offsetParent !== null &&
+      !root.closest('[aria-hidden="true"]'),
+    );
+  }, []);
   React.useEffect(() => {
-    if (!registerContinuousDictationComposer) return;
-    return registerContinuousDictationComposer({
-      id: continuousDictationComposerId,
-      isEligible: continuousDictationEligible,
+    return activeComposer.registerComposer({
+      id: activeComposerTargetId,
+      isEligible: activeComposerEligible,
+      isReadable: companionComposerReadable,
       appendTranscript: (text) => appendContinuousDictationRef.current(text),
+      readSnapshot: () => readCompanionComposerRef.current(),
+      applyContent: (baseRevision, content) => applyCompanionComposerRef.current(baseRevision, content),
     });
   }, [
-    continuousDictationComposerId,
-    continuousDictationEligible,
+    activeComposerTargetId,
+    activeComposerEligible,
+    companionComposerReadable,
     composerLocked,
-    registerContinuousDictationComposer,
+    activeComposer.registerComposer,
   ]);
-  const continuousDictationOwnsComposer =
-    continuousDictation?.activeComposerId === continuousDictationComposerId;
+  const ownsActiveComposer = activeComposer.activeComposerId === activeComposerTargetId;
   const continuousDictationTargeted = Boolean(
-    continuousDictationOwnsComposer && continuousDictation?.status !== 'idle',
+    ownsActiveComposer && continuousDictation?.status !== 'idle',
   );
 
   const attachmentsOn = attachmentsEnabled !== false;
@@ -358,6 +386,30 @@ export function ChatInput({
     },
     [controlledDraftEnabled, onDraftValueChange, persistenceKey, setChatInputDraft],
   );
+
+  readCompanionComposerRef.current = () => ({
+    targetId: activeComposerTargetId,
+    path: 'composer.md',
+    content: draftRef.current,
+    revision: String(draftRevisionRef.current),
+    mode: composerLockedRef.current ? 'read-only' : 'edit',
+  });
+  applyCompanionComposerRef.current = (baseRevision, content) => {
+    if (composerLockedRef.current) throw new Error('COMPOSER_NOT_EDITABLE');
+    if (baseRevision !== String(draftRevisionRef.current)) throw new Error('STALE_COMPOSER_REVISION');
+    const before = draftRef.current;
+    if (editorModeRef.current) {
+      if (!editorRef.current?.applyCompanionEdit(content)) throw new Error('COMPOSER_EDITOR_NOT_READY');
+    } else {
+      setDraft(content);
+      companionUndoRef.current = {
+        before,
+        after: content,
+        afterRevision: String(draftRevisionRef.current),
+      };
+    }
+    return { ok: true, revision: String(draftRevisionRef.current) };
+  };
   appendContinuousDictationRef.current = (text) => {
     setDraft((current) => mergeDraftWithContinuousDictation(current, text));
   };
@@ -434,6 +486,7 @@ export function ChatInput({
     // Keep revisions monotonic so an in-flight submission from the previous
     // chat cannot restore its draft after the composer is reset.
     draftRevisionRef.current += 1;
+    companionUndoRef.current = null;
   }, [controlledDraftEnabled, persistenceKey, resetKey, setComposerAttachments]);
 
   React.useEffect(() => {
@@ -580,11 +633,11 @@ export function ChatInput({
   }
 
   function activateContinuousDictationComposer() {
-    focusContinuousDictationComposer();
+    focusActiveComposer();
   }
 
-  function focusContinuousDictationComposer() {
-    continuousDictation?.focusComposer(continuousDictationComposerId);
+  function focusActiveComposer() {
+    activeComposer.focusComposer(activeComposerTargetId);
   }
 
   function preserveEditorFocus(event: React.MouseEvent<HTMLButtonElement>) {
@@ -842,6 +895,7 @@ export function ChatInput({
       restoreSubmissionSnapshot(snapshot);
     } else {
       // Sent: revoke preview URLs for the snapshot attachments.
+      companionUndoRef.current = null;
       revokeDraftImagePreviewUrls(snapshotAttachments);
     }
   }
@@ -1019,7 +1073,7 @@ export function ChatInput({
           data-chat-composer-expanded={composerExpanded ? 'true' : 'false'}
           onFocusCapture={(event) => {
             markCurrentChatComposerEditorModeTarget(editorModeShortcutTargetId);
-            focusContinuousDictationComposer();
+            focusActiveComposer();
             const target = event.target;
             if (
               target instanceof Element &&
@@ -1287,6 +1341,22 @@ export function ChatInput({
               }}
               onKeyDown={(event) => {
                 if ((event.nativeEvent as any)?.isComposing) return;
+                const companionUndoValue = companionTextareaUndoValue(
+                  companionUndoRef.current,
+                  draftRef.current,
+                  String(draftRevisionRef.current),
+                );
+                if (
+                  (event.metaKey || event.ctrlKey) &&
+                  !event.shiftKey &&
+                  event.key.toLowerCase() === 'z' &&
+                  companionUndoValue !== null
+                ) {
+                  event.preventDefault();
+                  companionUndoRef.current = null;
+                  setDraft(companionUndoValue);
+                  return;
+                }
                 if (event.key === 'Escape') {
                   event.currentTarget.blur();
                   return;

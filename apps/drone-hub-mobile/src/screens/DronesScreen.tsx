@@ -28,6 +28,7 @@ import {
 } from '../local-assistant/AppDrawer';
 import { AssistantComposer } from '../local-assistant/AssistantComposer';
 import { MobileLoadingState } from '../local-assistant/MobileLoadingState';
+import { useMobileCompanionWorkspaceTarget } from '../local-assistant/use-mobile-companion-workspace-target';
 import {
   AssistantModelPicker,
   type AssistantModelChoice,
@@ -295,6 +296,7 @@ function mobileDroneAgentId(value: unknown): MobileDroneAgentId | null {
 
 export function DronesScreen({
   drawerOpen,
+  workspaceVisible,
   navigationItems,
   onDrawerOpenChange,
   onHeaderChange,
@@ -303,6 +305,7 @@ export function DronesScreen({
   onDeviceChange,
 }: {
   drawerOpen: boolean;
+  workspaceVisible: boolean;
   navigationItems: AppDrawerNavigationItem[];
   onDrawerOpenChange(open: boolean): void;
   onHeaderChange(header: DronesAppHeaderState | null): void;
@@ -323,6 +326,7 @@ export function DronesScreen({
         )),
   );
   const targetId = selectedDeviceId;
+  const activeTarget = mesh.devices.find((target) => target.id === targetId);
   const phoneTarget = Boolean(targetId && targetId === mesh.identity?.id);
   const targetSupportsDrones = phoneTarget || targets.some((target) => target.id === targetId);
   const targetDroneControlCapability = mesh.profile?.capabilitiesByDevice[targetId]?.find(
@@ -2078,6 +2082,31 @@ export function DronesScreen({
     requestDroneControl,
     subscribeFileChanges,
   });
+  const companionHighlightedDroneIds = useMobileCompanionWorkspaceTarget({
+    targetDeviceId: targetId,
+    targetName: activeTarget?.name ?? 'Drone Hub',
+    targetReachable,
+    phoneTarget,
+    drones,
+    selectedDrone: selected,
+    composerAvailable: Boolean(
+      workspaceVisible &&
+      selected &&
+      chats.length > 0 &&
+      !(accessOpen && phoneTarget && nativeChatId),
+    ),
+    workspaceVisible,
+    chatName,
+    prompt,
+    setPrompt,
+    openFile: {
+      visible: filePreview.visible,
+      path: filePreview.displayPath,
+      kind: filePreview.preview?.kind ?? 'loading',
+    },
+    createDraft: (payload, preferences) =>
+      createDrone(payload, preferences, [], { selectCreatedDrone: false }),
+  });
   const loadRunFileDiff = React.useCallback(
     async ({ artifactId, path }: { artifactId: string; path: string }) => {
       if (!selected || phoneTarget) {
@@ -2174,7 +2203,6 @@ export function DronesScreen({
     .map((approval) => Date.parse(String(approval.createdAt ?? '')))
     .filter((timestamp) => Number.isFinite(timestamp))
     .sort((left, right) => left - right)[0];
-  const activeTarget = mesh.devices.find((target) => target.id === targetId);
   const dronesLoading =
     targetReachable && targetSupportsDrones && (!dronesLoaded || busy === 'drones');
   const displayedModel = chatModel || latestModel || 'Model';
@@ -2730,6 +2758,7 @@ export function DronesScreen({
         droneSidebarOrder={droneSidebarOrder}
         activeDroneId={selected?.id ?? ''}
         activeChatName={chatName}
+        companionHighlightedDroneIds={companionHighlightedDroneIds}
         droneOperationById={droneOperationById}
         dronesLoading={dronesLoading}
         dronesReachable={targetReachable}
@@ -3148,7 +3177,7 @@ export function DronesScreen({
         )}
       </KeyboardAvoidingView>
       <FilePreviewModal
-        visible={filePreview.visible}
+        visible={workspaceVisible && filePreview.visible}
         preview={filePreview.preview}
         displayPath={filePreview.displayPath}
         line={filePreview.line}

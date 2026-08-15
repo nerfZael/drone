@@ -291,6 +291,10 @@ import { DroneChatBroadcaster } from './drone-chat-broadcaster';
 import { DroneRegistryBroadcaster, type DroneRegistrySnapshot } from './drone-registry-broadcaster';
 import { createTerminalWebSocketServer } from './terminal-websocket-server';
 import { createTerminalWebSocketUpgradeHandler } from './terminal-websocket-upgrade';
+import { CompanionRuntime } from './companion/companion-runtime';
+import { registerCompanionRoutes } from './companion/companion-routes';
+import { createCompanionWebSocketServer } from './companion/companion-websocket-server';
+import { createCompanionCapability } from './device-mesh/companion-capability';
 import { registerAssistantRoutes } from './routes/assistant-routes';
 import { registerAgentRunDiffRoutes } from './routes/agent-run-diff-routes';
 import { NativeChatLifecycle } from './assistant/native-chat-lifecycle';
@@ -4301,6 +4305,15 @@ async function startDroneHubApiServerWithLifecycle(
     },
     summarizeDroneActivity,
   });
+  const companionRuntime = new CompanionRuntime({
+    hubServices: hubApplication,
+    buildDroneSummaries: buildAssistantDroneSummariesFromRegistry,
+  });
+  const companionWss = createCompanionWebSocketServer(companionRuntime);
+  deviceMesh.registerCapability(
+    createCompanionCapability(companionRuntime, deviceMesh.broadcastCapabilityEvent),
+  );
+  registerBackgroundResource('Companion runtime', () => companionRuntime.close());
   registerBackgroundResource('device mesh assistant changes', async () => {
     unsubscribeDeviceMeshAssistantChanges();
   });
@@ -5335,6 +5348,7 @@ async function startDroneHubApiServerWithLifecycle(
   }
 
   const apiRouter = new HubRouter(json, readJsonBody);
+  registerCompanionRoutes(apiRouter);
 
   registerSystemRoutes(apiRouter, {
     buildId: HUB_API_BUILD_ID,
@@ -6060,6 +6074,7 @@ async function startDroneHubApiServerWithLifecycle(
     apiToken,
     allowedOrigins,
     webSocketServer: wss,
+    companionWebSocketServer: companionWss,
     handleDeviceMeshUpgrade: (req, socket, head) => deviceMesh.handleUpgrade(req, socket, head),
     isSafeSessionName: isSafeTmuxSessionName,
     parseSince: parseOptionalNonNegativeInt,
@@ -6094,6 +6109,7 @@ async function startDroneHubApiServerWithLifecycle(
     requestListener: handleHubHttpRequest,
     upgradeListener: handleHubUpgrade,
     webSocketServer: wss,
+    additionalWebSocketServers: [companionWss],
     ...(mcpToken && containerMcpHost && containerMcpPort > 0
       ? {
           containerMcp: {

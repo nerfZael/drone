@@ -39,6 +39,7 @@ import {
   NativeMarkdown,
   type NativeMarkdownExpansionCommand,
 } from '../local-assistant/NativeMarkdown';
+import { useMobileCompanion } from '../local-assistant/MobileCompanionContext';
 import {
   isCodePreview,
   isHtmlPreview,
@@ -46,6 +47,7 @@ import {
   isRenderedHtmlPreviewAvailable,
   mobileHtmlPreviewMode,
   mobileFileCanEdit,
+  mobileUtf8ByteLength,
   mobileTextPreviewContent,
   MOBILE_FILE_EDIT_MAX_BYTES,
   MOBILE_RENDERED_HTML_PREVIEW_MAX_CHARS,
@@ -250,12 +252,14 @@ export function FilePreviewModal({
   onClose(): void;
   onRetry(): void;
 }) {
+  const companion = useMobileCompanion();
   const [explorerExpanded, setExplorerExpanded] = React.useState(false);
   const [wordWrap, setWordWrap] = React.useState(true);
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState('');
   const [savedDraft, setSavedDraft] = React.useState('');
   const [draftRevision, setDraftRevision] = React.useState<string | null>(null);
+  const companionDraftRef = React.useRef({ key: '', content: '', revision: 0 });
   const [markdownExpansionCommand, setMarkdownExpansionCommand] =
     React.useState<NativeMarkdownExpansionCommand | null>(null);
   const [htmlModeSelection, setHtmlModeSelection] = React.useState<{
@@ -288,6 +292,74 @@ export function FilePreviewModal({
     [preview?.content, preview?.kind, preview?.size],
   );
   const dirty = canEdit && draft !== savedDraft;
+  const companionEditorTargetId = `editor:${targetId}:${droneId}:${preview?.path ?? displayPath}`;
+  const companionTargetChanged = companionDraftRef.current.key !== companionEditorTargetId;
+  if (
+    companionTargetChanged ||
+    companionDraftRef.current.content !== draft
+  ) {
+    companionDraftRef.current = {
+      key: companionEditorTargetId,
+      content:
+        companionTargetChanged && preview?.kind === 'text'
+          ? String(preview.content ?? '')
+          : draft,
+      revision: companionDraftRef.current.revision + 1,
+    };
+  }
+  const companionEditorMode = loading
+    ? ('loading' as const)
+    : saving
+      ? ('saving' as const)
+      : companionTargetChanged || !editing
+        ? ('preview' as const)
+        : canEdit
+          ? ('edit' as const)
+          : ('read-only' as const);
+
+  React.useEffect(() => {
+    return companion.registerEditorTarget({
+      id: companionEditorTargetId,
+      isEligible: () => Boolean(visible && preview?.kind === 'text'),
+      read: () => ({
+        targetId: companionEditorTargetId,
+        path: preview?.path ?? displayPath,
+        content: companionDraftRef.current.content,
+        revision: `${draftRevision ?? ''}:${companionDraftRef.current.revision}`,
+        mode: companionEditorMode,
+        dirty,
+      }),
+      apply: (baseRevision, content) => {
+        if (companionEditorMode !== 'edit') throw new Error('EDITOR_NOT_EDITABLE');
+        if (mobileUtf8ByteLength(content) > MOBILE_FILE_EDIT_MAX_BYTES) {
+          throw new Error('EDITOR_TOO_LARGE');
+        }
+        const revision = `${draftRevision ?? ''}:${companionDraftRef.current.revision}`;
+        if (baseRevision !== revision) throw new Error('STALE_EDITOR_REVISION');
+        companionDraftRef.current = {
+          ...companionDraftRef.current,
+          content,
+          revision: companionDraftRef.current.revision + 1,
+        };
+        setDraft(content);
+        return {
+          ok: true,
+          revision: `${draftRevision ?? ''}:${companionDraftRef.current.revision}`,
+        };
+      },
+    });
+  }, [
+    canEdit,
+    companion.registerEditorTarget,
+    companionEditorMode,
+    companionEditorTargetId,
+    dirty,
+    displayPath,
+    draftRevision,
+    preview?.kind,
+    preview?.path,
+    visible,
+  ]);
 
   React.useEffect(() => {
     setEditing(false);

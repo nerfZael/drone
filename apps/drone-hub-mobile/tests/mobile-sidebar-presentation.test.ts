@@ -542,8 +542,9 @@ describe('mobile sidebar presentation', () => {
     const shellSource = readFileSync(new URL('../src/shell/MeshApp.tsx', import.meta.url), 'utf8');
 
     expect(drawerSource).toContain(
-      'resolvePinnedSidebarDrones(drones, droneSidebarOrder.pinnedDroneIds)',
+      'resolvePinnedSidebarDrones(sidebarDrones, droneSidebarOrder.pinnedDroneIds)',
     );
+    expect(drawerSource).toContain('<DrawerPreparedDrones');
     expect(drawerSource).not.toContain('resolvePinnedSidebarDronesForRepo(');
     expect(drawerSource).not.toContain('excludePinnedMobileDrones');
     expect(drawerSource).toContain('data={activeRepo.entries}');
@@ -656,6 +657,50 @@ describe('mobile sidebar presentation', () => {
     expect(shellSource).toContain("id: 'toggle-pin'");
     expect(shellSource).toContain("label: dronesHeader.pinned ? 'Unpin drone' : 'Pin drone'");
     expect(shellSource).toContain('disabled: dronesHeader.pinDisabled');
+  });
+
+  test('keeps Companion at the bottom of the drawer with a top app overlay', () => {
+    const drawerSource = readFileSync(
+      new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
+      'utf8',
+    );
+    const overlaySource = readFileSync(
+      new URL('../src/local-assistant/MobileCompanionOverlay.tsx', import.meta.url),
+      'utf8',
+    );
+    const providerSource = readFileSync(
+      new URL('../src/local-assistant/MobileCompanionContext.tsx', import.meta.url),
+      'utf8',
+    );
+    const workspaceTargetSource = readFileSync(
+      new URL('../src/local-assistant/use-mobile-companion-workspace-target.ts', import.meta.url),
+      'utf8',
+    );
+    const dronesSource = readFileSync(
+      new URL('../src/screens/DronesScreen.tsx', import.meta.url),
+      'utf8',
+    );
+    const shellSource = readFileSync(new URL('../src/shell/MeshApp.tsx', import.meta.url), 'utf8');
+    const bottomPinnedIndex = drawerSource.lastIndexOf(
+      "pinnedSidebarPlacement === 'bottom' ? pinnedDronesSection : null",
+    );
+    const companionIndex = drawerSource.lastIndexOf('<DrawerCompanionButton');
+
+    expect(bottomPinnedIndex).toBeGreaterThan(-1);
+    expect(companionIndex).toBeGreaterThan(bottomPinnedIndex);
+    expect(drawerSource).toContain("companion.status === 'recording' ? 'Listening' : 'Companion'");
+    expect(shellSource).toContain('<MobileCompanionProvider>');
+    expect(shellSource).toContain('<MobileCompanionOverlay />');
+    expect(shellSource).toContain("workspaceVisible={!pairingVisible && tab === 'drones'}");
+    expect(workspaceTargetSource).toContain('pane: !workspaceVisible');
+    expect(workspaceTargetSource).toContain('workspaceVisible && openFile.visible');
+    expect(dronesSource).toContain('visible={workspaceVisible && filePreview.visible}');
+    expect(providerSource).toContain('!activeTarget.reachable');
+    expect(providerSource).toContain('!hasOperations');
+    expect(providerSource).toContain('!hasGrant');
+    expect(overlaySource).toContain("justifyContent: 'flex-start'");
+    expect(overlaySource).toContain('accessibilityLabel="Stop Companion recording"');
+    expect(overlaySource).toContain('<NativeMarkdown text={companion.reply} />');
   });
 
   test('shows descendant state counts only on collapsed group rows', () => {

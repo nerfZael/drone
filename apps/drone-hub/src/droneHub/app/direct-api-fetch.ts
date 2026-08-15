@@ -35,6 +35,19 @@ function headersWithAuth(raw: HeadersInit | undefined): Headers {
   return headers;
 }
 
+export function buildDirectApiWebSocketUrl(pathname: string): string {
+  const configuredBase = directApiBase();
+  const path = pathname.startsWith('/') ? pathname : `/${pathname}`;
+  const url = new URL(
+    configuredBase ? `${configuredBase}${path}` : path,
+    window.location.origin,
+  );
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  const token = directApiToken();
+  if (token) url.searchParams.set('token', token);
+  return url.toString();
+}
+
 function requestWithDirectApiUrl(request: Request, url: string): Request {
   return new Request(url, {
     method: request.method,

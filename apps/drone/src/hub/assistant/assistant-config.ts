@@ -1,10 +1,15 @@
-import type { LlmProviderId } from '../hub-settings';
+export {
+  DEFAULT_CODEX_MODEL,
+  DEFAULT_GEMINI_MODEL,
+  DEFAULT_OPENAI_MODEL,
+  HUB_AGENT_MODEL_OPTIONS as ASSISTANT_MODEL_OPTIONS,
+} from '../llm-model-catalog';
 import {
   WORKFLOW_ASSISTANT_SYSTEM_PROMPT_LINE,
   WORKFLOW_ASSISTANT_TOOL_SUMMARIES,
 } from '../workflows/workflow-assistant-tools';
 import { WORKFLOW_MCP_TOOL_NAMES } from '../workflows/workflow-tool-names';
-import type { AssistantThinkingLevel, AssistantToolSummary } from './assistant-contracts';
+import type { AssistantToolSummary } from './assistant-contracts';
 
 export const ASSISTANT_THREAD_MESSAGE_LIMIT = 80;
 export const ASSISTANT_SYSTEM_PROMPT_MAX_CHARS = 20_000;
@@ -17,9 +22,6 @@ export const ASSISTANT_BASH_DEFAULT_TIMEOUT_MS = 30 * 60_000;
 export const ASSISTANT_BASH_MAX_TIMEOUT_MS = 60 * 60_000;
 export const ASSISTANT_SEARCH_MAX_CONTEXT_LINES = 10;
 export const ASSISTANT_CHANGED_FILES_LIMIT = 200;
-export const DEFAULT_OPENAI_MODEL = 'gpt-5.6-sol';
-export const DEFAULT_GEMINI_MODEL = 'gemini-3-flash-preview';
-export const DEFAULT_CODEX_MODEL = 'gpt-5.6-sol';
 export const DEFAULT_THREAD_TITLE = 'New thread';
 export const ASSISTANT_SYSTEM_PROMPT_RUNTIME_APPENDIX =
   'Current existing-drone access scope is appended at run time. It limits operations that target existing drones; enabled global creation tools are governed separately.';
@@ -249,6 +251,12 @@ const ASSISTANT_TOOL_SUMMARY_DEFINITIONS: AssistantToolSummary[] = [
     description: 'Read a paginated timeline for a drone chat.',
   },
   {
+    name: 'search_chat_messages',
+    label: 'Search chats',
+    category: 'chats',
+    description: 'Keyword-search visible messages across active Drone Hub chats.',
+  },
+  {
     name: 'subscribe_to_resource_events',
     label: 'Subscribe to resource events',
     category: 'chats',
@@ -418,6 +426,7 @@ const DRONE_HUB_MCP_TOOL_NAMES = new Set([
   'update_resource_subscription',
   'cancel_resource_subscription',
   'read_chat',
+  'search_chat_messages',
   ...WORKFLOW_MCP_TOOL_NAMES,
 ]);
 export const ASSISTANT_TOOL_SUMMARIES: AssistantToolSummary[] =
@@ -497,36 +506,3 @@ export const ASSISTANT_PRE_FETCH_CONTENT_DEFAULT_ENABLED_TOOL_NAMES =
   ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES.filter((name) => name !== 'fetch_content');
 export const ASSISTANT_PRE_WEB_SEARCH_DEFAULT_ENABLED_TOOL_NAMES =
   ASSISTANT_PRE_FETCH_CONTENT_DEFAULT_ENABLED_TOOL_NAMES.filter((name) => name !== 'web_search');
-type AssistantModelOptionDefinition = {
-  provider: LlmProviderId;
-  id: string;
-  name: string;
-  thinkingLevel: AssistantThinkingLevel;
-};
-
-const ASSISTANT_REASONING_LEVELS: AssistantThinkingLevel[] = ['off', 'low', 'medium', 'high'];
-
-function reasoningModelOptions(
-  provider: LlmProviderId,
-  id: string,
-  name: string,
-): AssistantModelOptionDefinition[] {
-  return ASSISTANT_REASONING_LEVELS.map((thinkingLevel) => ({ provider, id, name, thinkingLevel }));
-}
-
-export const ASSISTANT_MODEL_OPTIONS: AssistantModelOptionDefinition[] = [
-  ...reasoningModelOptions('openai', 'gpt-5.6-sol', 'GPT-5.6 Sol'),
-  ...reasoningModelOptions('openai', 'gpt-5.6-terra', 'GPT-5.6 Terra'),
-  ...reasoningModelOptions('openai', 'gpt-5.6-luna', 'GPT-5.6 Luna'),
-  ...reasoningModelOptions('openai', 'gpt-5.5', 'GPT-5.5'),
-  ...reasoningModelOptions('codex', 'gpt-5.6-sol', 'GPT-5.6 Sol'),
-  ...reasoningModelOptions('codex', 'gpt-5.6-terra', 'GPT-5.6 Terra'),
-  ...reasoningModelOptions('codex', 'gpt-5.6-luna', 'GPT-5.6 Luna'),
-  ...reasoningModelOptions('codex', 'gpt-5.5', 'GPT-5.5'),
-  {
-    provider: 'gemini',
-    id: 'gemini-3-flash-preview',
-    name: 'Gemini 3 Flash',
-    thinkingLevel: 'medium',
-  },
-];

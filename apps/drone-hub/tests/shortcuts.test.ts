@@ -3,6 +3,7 @@ import {
   cloneDefaultShortcutBindings,
   formatShortcutBinding,
   isShortcutMatch,
+  migrateCompanionShortcut,
   migrateFormerPullRequestsShortcut,
   sanitizeShortcutBindings,
   shortcutBindingFromKeyboardEvent,
@@ -110,7 +111,7 @@ describe('shortcut defaults', () => {
       shift: false,
     });
     expect(defaults.openPullRequestsTab).toBeNull();
-    expect(defaults.toggleVoiceClipboardRecording).toEqual({
+    expect(defaults.toggleCompanion).toEqual({
       key: '`',
       mod: false,
       ctrl: false,
@@ -118,6 +119,7 @@ describe('shortcut defaults', () => {
       alt: false,
       shift: false,
     });
+    expect(defaults.toggleVoiceClipboardRecording).toBeNull();
     expect(defaults.openHoveredGroupMultiChat).toEqual({
       key: 'g',
       mod: false,
@@ -211,6 +213,19 @@ describe('shortcut defaults', () => {
       },
     };
     expect(migrateFormerPullRequestsShortcut(explicitlyConfigured)).toBe(explicitlyConfigured);
+  });
+
+  test('moves the former default backtick binding from voice clipboard to Companion', () => {
+    expect(migrateCompanionShortcut({
+      toggleVoiceClipboardRecording: {
+        key: '`', mod: false, ctrl: false, meta: false, alt: false, shift: false,
+      },
+    })).toMatchObject({
+      toggleCompanion: {
+        key: '`', mod: false, ctrl: false, meta: false, alt: false, shift: false,
+      },
+      toggleVoiceClipboardRecording: null,
+    });
   });
 
   test('keeps the Changes editor E binding available for the global create-group action', () => {

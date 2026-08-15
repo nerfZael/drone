@@ -28,6 +28,7 @@ import { defaultProfileDroneRootDir, profileDroneRootDir, readActiveProfileNameS
 import { GROQ_SPEECH_MAX_CHARS, GROQ_SPEECH_VOICES } from './groq-speech';
 import { droneSummary } from './mcp-summaries';
 import { placeMcpRepoScopedGroupNodeAtTop } from './mcp-sidebar-group-order';
+import { searchActiveChatMessages } from './transcript-store';
 import { registerWorkflowMcpTools } from './workflows/workflow-mcp-tools';
 import { isWorkflowChildDroneEntry } from './workflows/workflow-child-drone-metadata';
 import {
@@ -1047,6 +1048,7 @@ function agentFromPreferenceKey(value: string) {
 type McpToolRegistrationContext = {
   principal: McpTokenIdentity;
   allowedWriteDroneRefs?: string[];
+  allowedDroneIds?: string[];
   nativeThreadId?: string;
   speechEnabled?: boolean;
   onSpeechToolRegistered?: (tool: RegisteredTool) => void;
@@ -1275,7 +1277,103 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     inputSchema: {},
   }, async () => {
     const repos = await requestRepoSummaries(context.hubServices);
-    return toolResult({ ok: true, count: repos.length, repos });
+    const response = await requestDroneSummaries();
+    const droneCounts = new Map<string, number>();
+    for (const raw of Array.isArray(response?.drones) ? response.drones : []) {
+      if (isWorkflowChildDroneEntry(raw)) continue;
+      const repoPath = cleanString(raw?.repoPath);
+      if (repoPath) droneCounts.set(repoPath, (droneCounts.get(repoPath) ?? 0) + 1);
+    }
+    return toolResult({
+      ok: true,
+      count: repos.length,
+      repos: repos.map((repo: any) => ({
+        ...repo,
+        droneCount: droneCounts.get(cleanString(repo.path)) ?? 0,
+      })),
+    });
+  });
+
+  server.registerTool('search_chat_messages', {
+    title: 'Search chat messages',
+    description:
+      'Keyword-search visible user, assistant, and error text across active Drone Hub chats. Archived chats are excluded.',
+    inputSchema: {
+      query: z.string().max(500),
+      repoPath: z.string().max(4096).optional(),
+      droneId: z.string().max(200).optional(),
+      chatName: z.string().max(200).optional(),
+      limit: z.number().optional(),
+      offset: z.number().optional(),
+    },
+  }, async (args) => {
+    const response = await requestDroneSummaries();
+    let drones = Array.isArray(response?.drones)
+      ? response.drones
+          .filter((drone: any) => !isWorkflowChildDroneEntry(drone))
+          .map(droneSummary)
+      : [];
+    if (context.allowedDroneIds) {
+      const allowedIds = new Set(context.allowedDroneIds.map((id) => cleanString(id)));
+      drones = drones.filter((drone: any) => allowedIds.has(cleanString(drone.id)));
+    }
+    const principal = chatPrincipal(context);
+    if (principal?.accessScope.readMode === 'selected') {
+      drones = drones.filter((drone: any) =>
+        mcpChatAccessAllowsDrone(
+          principal.accessScope,
+          'read',
+          cleanString(drone.id),
+          principal.selectedDroneRefs,
+        ),
+      );
+    }
+    const repoPath = args.repoPath === undefined ? null : cleanString(args.repoPath);
+    if (repoPath !== null) {
+      drones = drones.filter((drone: any) => cleanString(drone.repoPath) === repoPath);
+    }
+    const requestedDrone = cleanString(args.droneId);
+    if (requestedDrone) {
+      drones = drones.filter(
+        (drone: any) => drone.id === requestedDrone || drone.name === requestedDrone,
+      );
+    }
+    const droneById = new Map<string, any>();
+    for (const drone of drones) {
+      const id = cleanString(drone.id);
+      if (id) droneById.set(id, drone);
+    }
+    const search = searchActiveChatMessages({
+      query: args.query,
+      droneIds: [...droneById.keys()],
+      chatName: cleanString(args.chatName) || undefined,
+      limit: args.limit,
+      offset: args.offset,
+    });
+    const results = search.results.map((item) => {
+      const drone: any = droneById.get(item.droneId);
+      const droneRepoPath = cleanString(drone?.repoPath);
+      return {
+        ...item,
+        droneName: cleanString(drone?.name, item.droneId),
+        repository: droneRepoPath
+          ? {
+              path: droneRepoPath,
+              label: repoPathLabel(droneRepoPath),
+              ref: repoRefForPath(droneRepoPath),
+            }
+          : null,
+        chatRef: `${item.droneId}/${item.chatName}`,
+      };
+    });
+    return toolResult({
+      ok: true,
+      query: args.query,
+      count: results.length,
+      results,
+      limit: search.limit,
+      offset: search.offset,
+    });
   });
 
   registerChangeRequestMcpTools(server, { context, requestJson, toolResult });

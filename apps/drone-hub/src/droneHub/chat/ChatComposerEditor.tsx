@@ -24,6 +24,7 @@ export type ChatComposerEditorHandle = {
   focus: () => void;
   getSelection: () => ChatComposerSelection;
   setSelection: (selection: ChatComposerSelection) => void;
+  applyCompanionEdit: (content: string) => boolean;
 };
 
 type ChatComposerEditorProps = {
@@ -153,6 +154,15 @@ export const ChatComposerEditor = React.forwardRef<
       focus: focusEditor,
       getSelection: readSelection,
       setSelection: applySelection,
+      applyCompanionEdit: (content: string) => {
+        const editor = editorRef.current;
+        const model = editor?.getModel();
+        if (!editor || !model) return false;
+        editor.pushUndoStop();
+        editor.executeEdits('companion', [{ range: model.getFullModelRange(), text: content }]);
+        editor.pushUndoStop();
+        return true;
+      },
     }),
     [applySelection, focusEditor, readSelection],
   );

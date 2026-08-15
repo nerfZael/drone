@@ -1,0 +1,91 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { expect, test } from 'bun:test';
+
+import { resetHubDatabaseForTests } from '../src/host/hub-database';
+import { resetDroneRootDirForTests } from '../src/host/paths';
+import {
+  archiveChatInStore,
+  searchActiveChatMessages,
+  upsertChatInStore,
+  upsertTranscriptTurnInStore,
+} from '../src/hub/transcript-store';
+
+test('active chat keyword search indexes visible text and drops archived chats', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-chat-search-'));
+  const previous = process.env.DRONE_DATA_DIR;
+  process.env.DRONE_DATA_DIR = path.join(root, 'data');
+  resetDroneRootDirForTests();
+  try {
+    await upsertChatInStore({
+      droneId: 'search-drone',
+      chatName: 'default',
+      chatEntry: { id: 'search-chat', createdAt: '2026-08-15T10:00:00.000Z' },
+    });
+    await upsertTranscriptTurnInStore({
+      droneId: 'search-drone',
+      chatName: 'default',
+      turn: {
+        id: 'turn-1',
+        at: '2026-08-15T10:00:00.000Z',
+        prompt: 'Find the cobalt deployment note',
+        ok: true,
+        output: 'The cobalt deployment is ready.',
+      },
+    });
+    await upsertChatInStore({
+      droneId: 'other-drone',
+      chatName: 'default',
+      chatEntry: { id: 'other-chat', createdAt: '2026-08-15T10:00:00.000Z' },
+    });
+    await upsertTranscriptTurnInStore({
+      droneId: 'other-drone',
+      chatName: 'default',
+      turn: {
+        id: 'turn-2',
+        at: '2026-08-15T10:00:00.000Z',
+        prompt: 'The cobalt deployment belongs elsewhere',
+        ok: true,
+        output: '',
+      },
+    });
+
+    const active = searchActiveChatMessages({ query: 'cobalt deployment' });
+    expect(active.results.length).toBe(3);
+    expect(active.results.map((result) => result.role).sort()).toEqual([
+      'assistant',
+      'user',
+      'user',
+    ]);
+    expect(
+      searchActiveChatMessages({
+        query: 'cobalt deployment',
+        droneIds: ['search-drone'],
+      }).results.map((result) => result.droneId),
+    ).toEqual(['search-drone', 'search-drone']);
+    expect(
+      searchActiveChatMessages({ query: 'cobalt deployment', droneIds: [] }).results,
+    ).toEqual([]);
+
+    await archiveChatInStore({
+      droneId: 'search-drone',
+      chatName: 'default',
+      archivedAt: '2026-08-15T11:00:00.000Z',
+      deleteAt: '2026-09-15T11:00:00.000Z',
+      archiveRetention: '30d',
+    });
+    expect(
+      searchActiveChatMessages({
+        query: 'cobalt deployment',
+        droneIds: ['search-drone'],
+      }).results,
+    ).toEqual([]);
+  } finally {
+    await resetHubDatabaseForTests();
+    if (previous == null) delete process.env.DRONE_DATA_DIR;
+    else process.env.DRONE_DATA_DIR = previous;
+    resetDroneRootDirForTests();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

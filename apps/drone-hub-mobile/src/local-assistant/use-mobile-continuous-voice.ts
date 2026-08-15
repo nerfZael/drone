@@ -240,10 +240,13 @@ export function useMobileContinuousVoice({
       if (session.status !== 'idle') return false;
       const microphoneLease = microphoneCoordinator.acquire('continuous');
       if (!microphoneLease) {
+        const currentOwner = microphoneCoordinator.getSnapshot();
         onError(
-          microphoneCoordinator.getSnapshot() === 'single-shot'
+          currentOwner === 'single-shot'
             ? 'A voice message is already using the microphone.'
-            : 'The microphone is still finishing the previous continuous session.',
+            : currentOwner === 'companion'
+              ? 'Companion is already using the microphone.'
+              : 'The microphone is still finishing the previous continuous session.',
         );
         return false;
       }

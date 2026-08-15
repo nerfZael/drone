@@ -1,4 +1,4 @@
-export type SettingsTabId = 'general' | 'devices' | 'sync' | 'backups' | 'profiles' | 'trash' | 'archive' | 'shortcuts' | 'skills' | 'mcp' | 'agents' | 'components' | 'system';
+export type SettingsTabId = 'general' | 'companion' | 'devices' | 'sync' | 'backups' | 'profiles' | 'trash' | 'archive' | 'shortcuts' | 'skills' | 'mcp' | 'agents' | 'components' | 'system';
 
 export const SETTINGS_TABS: Array<{
   id: SettingsTabId;
@@ -11,6 +11,12 @@ export const SETTINGS_TABS: Array<{
     label: 'General',
     title: 'General settings',
     description: 'GitHub readiness, LLM providers, filesystem uploads, transcript defaults, and onboarding controls.',
+  },
+  {
+    id: 'companion',
+    label: 'Companion',
+    title: 'Companion settings',
+    description: 'Configure the voice Companion model, tools, and system prompt.',
   },
   {
     id: 'devices',

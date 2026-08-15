@@ -26,6 +26,8 @@ import { MeshProvider, useMesh } from '../mesh/MeshContext';
 import { LocalDroneControlProvider } from '../drones/local-drone-control';
 import { LocalAssistantProvider } from '../local-assistant/LocalAssistantContext';
 import { MobileChatVoiceRecorderProvider } from '../local-assistant/MobileChatVoiceRecorderContext';
+import { MobileCompanionProvider } from '../local-assistant/MobileCompanionContext';
+import { MobileCompanionOverlay } from '../local-assistant/MobileCompanionOverlay';
 import {
   AppDrawerProvider,
   type AppDrawerNavigationItem,
@@ -415,6 +417,7 @@ function Shell() {
         >
           <DronesScreen
             drawerOpen={appDrawerOpen}
+            workspaceVisible={!pairingVisible && tab === 'drones'}
             navigationItems={navigationItems}
             onDrawerOpenChange={setAppDrawerOpen}
             onHeaderChange={handleDronesHeaderChange}
@@ -514,9 +517,14 @@ export function MeshApp() {
       <LocalAssistantProvider>
         <LocalDroneControlProvider>
           <MobileChatVoiceRecorderProvider>
-            <AppDrawerProvider>
-              <Shell />
-            </AppDrawerProvider>
+            <MobileCompanionProvider>
+              <View style={styles.appRoot}>
+                <AppDrawerProvider>
+                  <Shell />
+                </AppDrawerProvider>
+                <MobileCompanionOverlay />
+              </View>
+            </MobileCompanionProvider>
           </MobileChatVoiceRecorderProvider>
         </LocalDroneControlProvider>
       </LocalAssistantProvider>
@@ -525,6 +533,7 @@ export function MeshApp() {
 }
 
 const styles = StyleSheet.create({
+  appRoot: { flex: 1 },
   safe: { flex: 1, backgroundColor: colors.background },
   loading: {
     flex: 1,

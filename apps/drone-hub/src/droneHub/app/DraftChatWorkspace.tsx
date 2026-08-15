@@ -82,6 +82,7 @@ type DraftChatWorkspaceProps = {
     attachments?: ChatImageAttachmentPayload[],
   ) => void;
   onSetDraftCreateError: (error: string | null) => void;
+  onDraftValueChange: (value: string) => void;
   onDraftContentChange: (content: ChatInputDraftContent) => void;
 };
 
@@ -127,6 +128,7 @@ export function DraftChatWorkspace({
   onQueueDraftPromptDuringCreate,
   onEnqueueQueuedPrompt,
   onSetDraftCreateError,
+  onDraftValueChange,
   onDraftContentChange,
 }: DraftChatWorkspaceProps) {
   const {
@@ -367,6 +369,8 @@ export function DraftChatWorkspace({
       </div>
       <ChatInput
         resetKey={draftChatInputResetKey(draftChat)}
+        draftValue={draftChat.draftValue ?? ''}
+        onDraftValueChange={onDraftValueChange}
         focusTargetId="primary-chat"
         droneName="new drone"
         promptError={draftCreateError}

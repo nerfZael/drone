@@ -1,4 +1,5 @@
 import React from 'react';
+import type { CompanionTextSnapshot } from '@drone/assistant-chat';
 import type { ContinuousChatVoiceStatus } from './use-continuous-chat-voice';
 import { useContinuousChatVoice } from './use-continuous-chat-voice';
 import {
@@ -6,21 +7,15 @@ import {
   type BrowserMicrophoneOwner,
 } from './browser-microphone-coordinator';
 import { createContinuousDictationToggle } from './create-continuous-dictation-toggle';
+import { useActiveComposer } from './ActiveComposerContext';
 
-type ContinuousDictationComposer = {
-  id: string;
-  isEligible(): boolean;
-  appendTranscript(text: string): void;
-};
+export type ContinuousDictationComposerSnapshot = CompanionTextSnapshot;
 
 type ContinuousDictationContextValue = {
   status: ContinuousChatVoiceStatus;
   pendingCount: number;
   error: string;
   microphoneOwner: BrowserMicrophoneOwner | null;
-  activeComposerId: string | null;
-  registerComposer(composer: ContinuousDictationComposer): () => void;
-  focusComposer(id: string): void;
   toggle(): Promise<void>;
 };
 
@@ -28,10 +23,10 @@ const ContinuousDictationContext =
   React.createContext<ContinuousDictationContextValue | null>(null);
 
 export function ContinuousDictationProvider({ children }: { children: React.ReactNode }) {
-  const [activeComposerId, setActiveComposerId] = React.useState<string | null>(null);
+  const activeComposer = useActiveComposer();
+  const activeComposerIdRef = React.useRef(activeComposer.activeComposerId);
+  activeComposerIdRef.current = activeComposer.activeComposerId;
   const [error, setError] = React.useState('');
-  const composersRef = React.useRef(new Map<string, ContinuousDictationComposer>());
-  const activeComposerIdRef = React.useRef<string | null>(null);
   const discardPendingRef = React.useRef<() => void>(() => undefined);
   const microphoneOwner = React.useSyncExternalStore(
     browserMicrophoneCoordinator.subscribe,
@@ -39,47 +34,15 @@ export function ContinuousDictationProvider({ children }: { children: React.Reac
     browserMicrophoneCoordinator.getSnapshot,
   );
 
-  const resolveTargetId = React.useCallback((): string | null => {
-    const activeId = activeComposerIdRef.current;
-    const active = activeId ? composersRef.current.get(activeId) : null;
-    if (active?.isEligible()) return active.id;
-    for (const composer of composersRef.current.values()) {
-      if (composer.isEligible()) return composer.id;
-    }
-    return null;
-  }, []);
-
-  const changeTarget = React.useCallback(
-    (nextId: string | null) => {
-      const normalized = nextId && composersRef.current.get(nextId)?.isEligible() ? nextId : null;
-      if (activeComposerIdRef.current === normalized) return;
-      activeComposerIdRef.current = normalized;
-      setActiveComposerId(normalized);
-      discardPendingRef.current();
-    },
-    [],
-  );
-
-  const ensureTargetId = React.useCallback((): string | null => {
-    const nextTarget = resolveTargetId();
-    if (nextTarget !== activeComposerIdRef.current) changeTarget(nextTarget);
-    return nextTarget;
-  }, [changeTarget, resolveTargetId]);
-
   const onTranscript = React.useCallback(
     async (text: string, _deliveryId: string, route: string | null): Promise<boolean> => {
       if (!route || route !== activeComposerIdRef.current) return true;
-      const composer = composersRef.current.get(route);
-      if (!composer?.isEligible()) {
-        ensureTargetId();
-        return true;
-      }
       const cleanText = text.trim();
       if (!cleanText) return true;
-      composer.appendTranscript(cleanText);
+      activeComposer.appendTranscript(route, cleanText);
       return true;
     },
-    [ensureTargetId],
+    [activeComposer.appendTranscript],
   );
 
   const {
@@ -94,11 +57,12 @@ export function ContinuousDictationProvider({ children }: { children: React.Reac
     resetKey: 'global-continuous-dictation',
     onTranscript,
     onError: setError,
-    routeKey: ensureTargetId,
-    shouldCapture: () => ensureTargetId() !== null,
+    routeKey: activeComposer.ensureTargetId,
+    shouldCapture: () => activeComposer.ensureTargetId() !== null,
     microphoneOwner: 'continuous-dictation',
   });
   discardPendingRef.current = discardPending;
+  React.useEffect(() => discardPending(), [activeComposer.activeComposerId, discardPending]);
   const voiceControlsRef = React.useRef({ getStatus, start, stop, cancel });
   voiceControlsRef.current = { getStatus, start, stop, cancel };
   const toggleControllerRef = React.useRef<ReturnType<
@@ -122,32 +86,11 @@ export function ContinuousDictationProvider({ children }: { children: React.Reac
     return () => controller?.deactivate();
   }, []);
 
-  const registerComposer = React.useCallback(
-    (composer: ContinuousDictationComposer) => {
-      composersRef.current.set(composer.id, composer);
-      ensureTargetId();
-      return () => {
-        if (composersRef.current.get(composer.id) !== composer) return;
-        composersRef.current.delete(composer.id);
-        if (activeComposerIdRef.current === composer.id) ensureTargetId();
-      };
-    },
-    [ensureTargetId],
-  );
-
-  const focusComposer = React.useCallback(
-    (id: string) => {
-      const composer = composersRef.current.get(id);
-      if (composer?.isEligible()) changeTarget(id);
-    },
-    [changeTarget],
-  );
-
   const toggle = React.useCallback(async () => {
     setError('');
-    ensureTargetId();
+    activeComposer.ensureTargetId();
     await toggleControllerRef.current?.toggle();
-  }, [ensureTargetId]);
+  }, [activeComposer.ensureTargetId]);
 
   const value = React.useMemo<ContinuousDictationContextValue>(
     () => ({
@@ -155,18 +98,12 @@ export function ContinuousDictationProvider({ children }: { children: React.Reac
       pendingCount,
       error,
       microphoneOwner,
-      activeComposerId,
-      registerComposer,
-      focusComposer,
       toggle,
     }),
     [
-      activeComposerId,
       error,
-      focusComposer,
       microphoneOwner,
       pendingCount,
-      registerComposer,
       status,
       toggle,
     ],
