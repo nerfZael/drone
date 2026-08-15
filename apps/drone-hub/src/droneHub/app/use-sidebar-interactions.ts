@@ -195,6 +195,10 @@ export function useSidebarInteractions({
     const droneId = String(droneIdRaw ?? '').trim();
     const chatName = String(chatNameRaw ?? '').trim() || 'default';
     if (!droneId || !chatName || chatName === 'default') return;
+    const chatSectionKey = sidebarInlineSectionKey(droneId, 'chats');
+    setCollapsedDroneSections((prev: Record<string, boolean>) =>
+      prev[chatSectionKey] ? { ...prev, [chatSectionKey]: false } : prev,
+    );
     setSelectedSidebarNodeId(sidebarChatSidebarNodeId(droneId, chatName));
     setFolderEditor(null);
     setChatEditor({
@@ -205,7 +209,7 @@ export function useSidebarInteractions({
       error: null,
       pending: false,
     });
-  }, []);
+  }, [setCollapsedDroneSections]);
 
   const openFolderCreate = React.useCallback(
     (
@@ -419,6 +423,10 @@ export function useSidebarInteractions({
   const blurChatEditor = React.useCallback(() => {
     const draft = chatEditor;
     if (!draft || draft.pending) return;
+    if (draft.mode === 'rename') {
+      setChatEditor(null);
+      return;
+    }
     const chatName = String(draft.value ?? '').trim();
     if (!chatName) {
       setChatEditor(null);

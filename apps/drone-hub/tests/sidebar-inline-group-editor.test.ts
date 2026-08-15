@@ -60,8 +60,75 @@ describe('sidebar inline group editor', () => {
       "(!selectedFolderPath ? String(selectedDrone ?? '').trim() : '')",
     );
     expect(sidebarSource).toContain('requestInlineDroneRename(selectedDroneId)');
+    expect(sidebarSource).toContain("event.target, '[data-chat-surface=\"true\"]'");
+    expect(sidebarSource).toContain(
+      "event.target, '[role=\"tree\"][aria-label=\"File Explorer\"]'",
+    );
+    expect(sidebarSource).toContain("document.querySelector('[data-chat-surface=\"true\"]:hover')");
+    expect(sidebarSource).toContain('chatTargeted || (!sidebarTargeted && chatHovered)');
+    expect(sidebarSource).toContain('sidebarTargeted || (!chatContext && sidebarHovered)');
+    expect(sidebarSource).toContain('resolveAgentChatF2RenameTarget({');
+    expect(sidebarSource).toContain('(editableTarget && !chatContext)');
+    expect(sidebarSource).toContain(
+      "document.querySelector('[role=\"dialog\"][aria-modal=\"true\"]')",
+    );
+    expect(sidebarSource).toContain('setSidebarCollapsed(false)');
+    expect(sidebarSource).toContain('event.stopPropagation()');
+    expect(sidebarSource).toContain("if (renameTarget.kind === 'chat') {");
+    expect(sidebarSource).toContain(
+      'startRenameDroneChat(renameTarget.droneId, renameTarget.chatName)',
+    );
+    expect(sidebarSource).toContain("window.addEventListener('keydown', onKeyDown, true)");
     expect(cardSource).toContain('inlineRenameRequestKey');
     expect(cardSource).toContain('setInlineRenameValue(shownName)');
     expect(cardSource).toContain('setInlineRenameOpen(true)');
+  });
+
+  test('keeps chat and group rename controls within their existing row geometry', () => {
+    const groupedTreeSource = readFileSync(
+      new URL('../src/droneHub/app/GroupedSidebarTree.tsx', import.meta.url),
+      'utf8',
+    );
+    const chatRenameEditor = groupedTreeSource.slice(
+      groupedTreeSource.indexOf('if (editing) {'),
+      groupedTreeSource.indexOf("id: 'rename-chat'"),
+    );
+
+    expect(chatRenameEditor).toContain('sidebarChatRowTone({ selected, active })');
+    expect(chatRenameEditor).toContain('sidebarChatStateClass');
+    expect(chatRenameEditor).toContain('appearance-none rounded-none border-0 bg-transparent p-0');
+    expect(chatRenameEditor).toContain("style={{ border: 0, outline: 'none', boxShadow: 'none' }}");
+    expect(chatRenameEditor).not.toContain('bg-[var(--panel-overlay-soft)]');
+    expect(chatRenameEditor).not.toContain("chatEditor?.error ? <div");
+
+    const groupRenameEditor = groupedTreeSource.slice(
+      groupedTreeSource.indexOf('showEditorInline && folderEditor'),
+      groupedTreeSource.indexOf(') : (', groupedTreeSource.indexOf('showEditorInline && folderEditor')),
+    );
+    expect(groupRenameEditor).toContain('p-0 leading-tight');
+    expect(groupRenameEditor).toContain('aria-invalid={Boolean(folderEditor.error)}');
+    expect(groupedTreeSource).not.toContain(
+      'showEditorInline && folderEditor?.error ? <div',
+    );
+  });
+
+  test('reveals chat rename editors and cancels them on blur like other inline renames', () => {
+    const interactionsSource = readFileSync(
+      new URL('../src/droneHub/app/use-sidebar-interactions.ts', import.meta.url),
+      'utf8',
+    );
+    const startChatRename = interactionsSource.slice(
+      interactionsSource.indexOf('const startRenameDroneChat'),
+      interactionsSource.indexOf('const openFolderCreate'),
+    );
+    const blurChatRename = interactionsSource.slice(
+      interactionsSource.indexOf('const blurChatEditor'),
+      interactionsSource.indexOf('const moveFolderIntoGroup'),
+    );
+
+    expect(startChatRename).toContain("sidebarInlineSectionKey(droneId, 'chats')");
+    expect(startChatRename).toContain('{ ...prev, [chatSectionKey]: false }');
+    expect(blurChatRename).toContain("draft.mode === 'rename'");
+    expect(blurChatRename).toContain('setChatEditor(null)');
   });
 });

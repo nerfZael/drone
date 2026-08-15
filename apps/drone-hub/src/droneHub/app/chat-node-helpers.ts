@@ -58,6 +58,29 @@ export function hasOnlyDefaultChat(drone: DroneSummary | null | undefined): bool
   return chats.length === 1 && chats[0] === 'default';
 }
 
+export type AgentChatRenameTarget =
+  | { kind: 'drone'; droneId: string }
+  | { kind: 'chat'; droneId: string; chatName: string };
+
+export function resolveAgentChatF2RenameTarget(args: {
+  selectedDroneIds: readonly string[];
+  selectedDroneId: string | null | undefined;
+  activeChatName: string | null | undefined;
+  drone: DroneSummary | null | undefined;
+}): AgentChatRenameTarget | null {
+  if (args.selectedDroneIds.length !== 1) return null;
+  const droneId = String(args.selectedDroneIds[0] ?? '').trim();
+  if (!droneId || droneId !== String(args.selectedDroneId ?? '').trim()) return null;
+  if (droneId !== String(args.drone?.id ?? '').trim()) return null;
+
+  const chatNames = normalizedDroneChats(args.drone, { includeDefaultWhenEmpty: true });
+  if (chatNames.length <= 1) return { kind: 'drone', droneId };
+
+  const chatName = String(args.activeChatName ?? '').trim() || 'default';
+  if (chatName === 'default' || !chatNames.includes(chatName)) return null;
+  return { kind: 'chat', droneId, chatName };
+}
+
 export function resolveCanvasChatDisplay(
   drone: DroneSummary | null | undefined,
   chatNameRaw: string,

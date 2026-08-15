@@ -5,6 +5,7 @@ import {
   hasOnlyDefaultChat,
   nextUnreadChatReadCursor,
   reconcileManualUnreadMarker,
+  resolveAgentChatF2RenameTarget,
   resolveCanvasChatDisplay,
   unreadChatNodeIdsForDrone,
 } from '../src/droneHub/app/chat-node-helpers';
@@ -81,6 +82,50 @@ describe('chat node helpers', () => {
       primaryLabel: 'default',
       secondaryLabel: 'Alpha',
     });
+  });
+
+  test('renames the drone from agent chat when it has only one chat', () => {
+    const summary = drone({ id: 'alpha', name: 'Alpha', chats: ['default'] });
+    expect(
+      resolveAgentChatF2RenameTarget({
+        selectedDroneIds: ['alpha'],
+        selectedDroneId: 'alpha',
+        activeChatName: 'default',
+        drone: summary,
+      }),
+    ).toEqual({ kind: 'drone', droneId: 'alpha' });
+  });
+
+  test('renames the active chat from agent chat when the drone has multiple chats', () => {
+    const summary = drone({ id: 'alpha', name: 'Alpha', chats: ['default', 'review'] });
+    expect(
+      resolveAgentChatF2RenameTarget({
+        selectedDroneIds: ['alpha'],
+        selectedDroneId: 'alpha',
+        activeChatName: 'review',
+        drone: summary,
+      }),
+    ).toEqual({ kind: 'chat', droneId: 'alpha', chatName: 'review' });
+  });
+
+  test('does not rename from agent chat for multi-selection or the protected default chat', () => {
+    const summary = drone({ id: 'alpha', name: 'Alpha', chats: ['default', 'review'] });
+    expect(
+      resolveAgentChatF2RenameTarget({
+        selectedDroneIds: ['alpha', 'bravo'],
+        selectedDroneId: 'alpha',
+        activeChatName: 'review',
+        drone: summary,
+      }),
+    ).toBeNull();
+    expect(
+      resolveAgentChatF2RenameTarget({
+        selectedDroneIds: ['alpha'],
+        selectedDroneId: 'alpha',
+        activeChatName: 'default',
+        drone: summary,
+      }),
+    ).toBeNull();
   });
 
   test('uses cursor-backed read states instead of a stale unread summary array', () => {

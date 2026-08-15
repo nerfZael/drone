@@ -53,7 +53,11 @@ import { GroupedSidebarTree } from './GroupedSidebarTree';
 import { SidebarContextMenu } from './SidebarContextMenu';
 import { resolveEffectiveSidebarMuteSets } from './sidebar-mute';
 import { createCanvasChatNodeId } from './app-config';
-import { droneChatRequiresApproval, normalizedDroneChats } from './chat-node-helpers';
+import {
+  droneChatRequiresApproval,
+  normalizedDroneChats,
+  resolveAgentChatF2RenameTarget,
+} from './chat-node-helpers';
 import { useDroneSidebarUiState } from './use-drone-hub-ui-store';
 import {
   migrateSidebarGroupEntryOrderMapToIds,
@@ -801,6 +805,10 @@ function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName.toLowerCase();
   return target.isContentEditable || tag === 'input' || tag === 'textarea' || tag === 'select';
+}
+
+function isWithinElement(target: EventTarget | null, selector: string): boolean {
+  return target instanceof Element && Boolean(target.closest(selector));
 }
 
 function isHeaderActionTarget(target: EventTarget | null): boolean {
@@ -2137,7 +2145,17 @@ export function DroneSidebar({
   React.useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
-      if (isEditableTarget(event.target)) return;
+
+      const unmodifiedF2 =
+        !event.repeat &&
+        !event.isComposing &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey &&
+        !event.shiftKey &&
+        event.key === 'F2';
+      const editableTarget = isEditableTarget(event.target);
+      if (!unmodifiedF2 && editableTarget) return;
 
       if (
         !folderEditor &&
@@ -2179,6 +2197,82 @@ export function DroneSidebar({
       const sidebarHovered = Boolean(
         document.querySelector('[data-drone-sidebar-root="true"]:hover'),
       );
+      const chatHovered = Boolean(
+        document.querySelector('[data-chat-surface="true"]:hover'),
+      );
+      const sidebarTargeted = isWithinElement(
+        event.target,
+        '[data-drone-sidebar-root="true"]',
+      );
+      const chatTargeted = isWithinElement(event.target, '[data-chat-surface="true"]');
+      const chatContext = chatTargeted || (!sidebarTargeted && chatHovered);
+
+      if (
+        unmodifiedF2 &&
+        sidebarCapabilities.actions &&
+        event.key === 'F2'
+      ) {
+        if (
+          folderEditor ||
+          chatEditor ||
+          (editableTarget && !chatContext) ||
+          Boolean(document.querySelector('[role="dialog"][aria-modal="true"]')) ||
+          isWithinElement(event.target, '[role="dialog"], [role="menu"]') ||
+          isWithinElement(event.target, '[role="tree"][aria-label="File Explorer"]')
+        ) return;
+
+        if (sidebarTargeted || (!chatContext && sidebarHovered)) {
+          const selectedChatRef = sidebarChatRefFromNodeId(selectedSidebarNodeId ?? '');
+          if (selectedChatRef) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (selectedChatRef.chatName !== 'default') {
+              setSidebarCollapsed(false);
+              startRenameDroneChat(selectedChatRef.droneId, selectedChatRef.chatName);
+            }
+            return;
+          }
+          if (
+            !isRepoGroupingMode &&
+            selectedFolderPath &&
+            visibleSidebarFolderPathSet.has(selectedFolderPath)
+          ) {
+            event.preventDefault();
+            event.stopPropagation();
+            setSidebarCollapsed(false);
+            startRenameFolder(selectedFolderPath);
+            return;
+          }
+          const selectedDroneId =
+            sidebarDroneIdFromNodeId(selectedSidebarNodeId ?? '') ??
+            (!selectedFolderPath ? String(selectedDrone ?? '').trim() : '');
+          if (selectedDroneId && requestInlineDroneRename(selectedDroneId)) {
+            event.preventDefault();
+            event.stopPropagation();
+            setSidebarCollapsed(false);
+          }
+          return;
+        }
+
+        if (!chatContext) return;
+        const renameTarget = resolveAgentChatF2RenameTarget({
+          selectedDroneIds,
+          selectedDroneId: selectedDrone,
+          activeChatName,
+          drone: sidebarDroneById[String(selectedDrone ?? '').trim()],
+        });
+        if (!renameTarget) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setSidebarCollapsed(false);
+        if (renameTarget.kind === 'chat') {
+          startRenameDroneChat(renameTarget.droneId, renameTarget.chatName);
+          return;
+        }
+        requestInlineDroneRename(renameTarget.droneId);
+        return;
+      }
+
       if (!sidebarHovered) return;
 
       if (event.key === 'Escape' && folderEditor) {
@@ -2188,33 +2282,6 @@ export function DroneSidebar({
       }
 
       if (folderEditor) return;
-
-      if (sidebarCapabilities.actions && event.key === 'F2') {
-        const selectedChatRef = sidebarChatRefFromNodeId(selectedSidebarNodeId ?? '');
-        if (selectedChatRef) {
-          event.preventDefault();
-          if (selectedChatRef.chatName !== 'default') {
-            startRenameDroneChat(selectedChatRef.droneId, selectedChatRef.chatName);
-          }
-          return;
-        }
-        if (
-          !isRepoGroupingMode &&
-          selectedFolderPath &&
-          visibleSidebarFolderPathSet.has(selectedFolderPath)
-        ) {
-          event.preventDefault();
-          startRenameFolder(selectedFolderPath);
-          return;
-        }
-        const selectedDroneId =
-          sidebarDroneIdFromNodeId(selectedSidebarNodeId ?? '') ??
-          (!selectedFolderPath ? String(selectedDrone ?? '').trim() : '');
-        if (selectedDroneId && requestInlineDroneRename(selectedDroneId)) {
-          event.preventDefault();
-        }
-        return;
-      }
 
       if (!selectedFolderPath || !visibleSidebarFolderPathSet.has(selectedFolderPath)) return;
 
@@ -2236,10 +2303,12 @@ export function DroneSidebar({
       }
     };
 
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [
     activeRepoPath,
+    activeChatName,
+    chatEditor,
     clearGroupedFolderSelection,
     closeFolderEditor,
     collapsedGroups,
@@ -2252,9 +2321,12 @@ export function DroneSidebar({
     requestInlineDroneRename,
     renamingGroups,
     sidebarCapabilities.actions,
+    sidebarDroneById,
     selectedDrone,
+    selectedDroneIds,
     selectedSidebarNodeId,
     selectedFolderPath,
+    setSidebarCollapsed,
     staticReadOnlyNodeTree,
     startRenameFolder,
     startRenameDroneChat,

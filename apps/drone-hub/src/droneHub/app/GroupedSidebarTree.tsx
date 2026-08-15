@@ -502,6 +502,7 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
     actionsEnabled = true,
   } = useGroupedSidebarTreeContext();
   const densityClasses = sidebarDensityClasses(sidebarDensityMode);
+  const chatRenameErrorId = React.useId();
   const [contextMenuPosition, setContextMenuPosition] = React.useState<{
     x: number;
     y: number;
@@ -561,28 +562,65 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
   if (editing) {
     return (
       <div className={`flex flex-col gap-0.5 transition-[margin] duration-150 ${reorderPreviewClass}`}>
-        <div className={`flex items-center gap-1 rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] ${densityClasses.chatRow}`}>
-          <input
-            ref={chatEditorInputRef}
-            type="text"
-            value={chatEditor?.value ?? ''}
-            onChange={(event) => onChatEditorValueChange(event.target.value)}
-            onBlur={onBlurChatEditor}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                onSubmitChatEditor();
-              } else if (event.key === 'Escape') {
-                event.preventDefault();
-                onCancelChatEditor();
-              }
-            }}
-            placeholder="Chat name"
-            className="min-w-0 flex-1 rounded border border-[var(--accent-muted)] bg-[var(--panel-overlay-soft)] px-2 py-1 font-mono text-[var(--text-11)] text-[var(--fg)] focus:border-[var(--accent)] focus:outline-none"
-          />
-          {chatEditor?.pending ? <IconSpinner className="opacity-90 text-[var(--accent)]" /> : null}
+        <div className="relative flex items-stretch gap-1 group/chat-row">
+          <div
+            className={`relative flex flex-1 items-center gap-1 rounded border text-left transition-colors ${densityClasses.chatRow} ${sidebarChatRowTone({ selected, active })}`}
+          >
+            {selected ? <span className={sidebarSelectionEdgeClass} /> : null}
+            <span
+              className={sidebarChatStateClass}
+              title={chatStateLabel}
+              role="img"
+              aria-label={chatStateLabel}
+            >
+              {muted ? (
+                <SidebarMutedStatusIndicator />
+              ) : (
+                <SidebarItemStateIndicator
+                  state={chatState}
+                  unread={chatUnread}
+                  showReadyAnchor
+                  emphasized={selected}
+                />
+              )}
+            </span>
+            <input
+              ref={chatEditorInputRef}
+              type="text"
+              value={chatEditor?.value ?? ''}
+              onChange={(event) => onChatEditorValueChange(event.target.value)}
+              onBlur={onBlurChatEditor}
+              onClick={(event) => event.stopPropagation()}
+              onPointerDown={(event) => event.stopPropagation()}
+              onMouseDown={(event) => event.stopPropagation()}
+              onKeyDown={(event) => {
+                event.stopPropagation();
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  onSubmitChatEditor();
+                } else if (event.key === 'Escape') {
+                  event.preventDefault();
+                  onCancelChatEditor();
+                }
+              }}
+              readOnly={chatEditor?.pending}
+              aria-label="Chat name"
+              aria-invalid={Boolean(chatEditor?.error)}
+              aria-describedby={chatEditor?.error ? chatRenameErrorId : undefined}
+              title={chatEditor?.error || 'Rename chat'}
+              className={`${sidebarChatLabelClass} appearance-none rounded-none border-0 bg-transparent p-0 shadow-none outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 ${
+                chatEditor?.error ? 'text-[var(--red)]' : ''
+              }`}
+              style={{ border: 0, outline: 'none', boxShadow: 'none' }}
+            />
+            {chatEditor?.error ? (
+              <span id={chatRenameErrorId} role="alert" className="sr-only">
+                {chatEditor.error}
+              </span>
+            ) : null}
+            {chatEditor?.pending ? <IconSpinner className="opacity-90 text-[var(--accent)]" /> : null}
+          </div>
         </div>
-        {chatEditor?.error ? <div className="px-1 text-[var(--text-10)] text-[var(--red)]">{chatEditor.error}</div> : null}
       </div>
     );
   }
@@ -1374,6 +1412,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
     actionsEnabled = true,
   } = useGroupedSidebarTreeContext();
   const densityClasses = sidebarDensityClasses(sidebarDensityMode);
+  const folderRenameErrorId = React.useId();
   const folderPath = folderGroupPath(node) ?? node.path;
   const isVirtualGroup = node.groupKind === 'repo' && !node.groupPath;
   const allowVirtualRepoReorderDrop =
@@ -1667,9 +1706,19 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
                   }}
                   maxLength={64}
                   aria-label="Group name"
-                  className={`min-w-0 flex-1 appearance-none rounded-none border-0 bg-transparent p-0 text-[var(--fg)] shadow-none outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 ${densityClasses.folderInput}`}
+                  aria-invalid={Boolean(folderEditor.error)}
+                  aria-describedby={folderEditor.error ? folderRenameErrorId : undefined}
+                  title={folderEditor.error || 'Rename group'}
+                  className={`min-w-0 flex-1 appearance-none rounded-none border-0 bg-transparent p-0 leading-tight shadow-none outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 ${
+                    folderEditor.error ? 'text-[var(--red)]' : 'text-[var(--fg)]'
+                  } ${densityClasses.folderInput}`}
                   style={{ border: 0, outline: 'none', boxShadow: 'none' }}
                 />
+                {folderEditor.error ? (
+                  <span id={folderRenameErrorId} role="alert" className="sr-only">
+                    {folderEditor.error}
+                  </span>
+                ) : null}
               </div>
             </div>
           ) : (
@@ -1747,7 +1796,6 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
           />
         </GroupedSidebarFolderBodyDropZone>
       ) : null}
-      {showEditorInline && folderEditor?.error ? <div className="ml-5 text-[var(--text-10)] text-[var(--red)]">{folderEditor.error}</div> : null}
     </div>
   );
 }
