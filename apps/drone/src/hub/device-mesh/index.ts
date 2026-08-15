@@ -24,6 +24,7 @@ import { createProviderCredentialsCapability } from './features/provider-credent
 import type { SidebarCommandService } from '../sidebar-command-service';
 import type { HubServices } from '../application/hub-services';
 import { ProviderCredentialsHttp } from './features/provider-credentials/provider-credentials-http';
+import type { CapabilityHandler } from './device-mesh-types';
 
 export async function createDeviceMeshService(options: {
   rootDir: string;
@@ -139,6 +140,21 @@ export async function createDeviceMeshService(options: {
       signal?: AbortSignal,
     ) => router.request(targetDeviceId, capability, operation, payload, signal),
     capabilities,
+    registerCapability: (handler: CapabilityHandler) => capabilities.register(handler),
+    broadcastCapabilityEvent: (
+      capability: string,
+      event: string,
+      payload: Record<string, any>,
+      requiredOperation: string,
+      targetDeviceIds?: Iterable<string>,
+    ) =>
+      router.broadcastCapabilityEvent(
+        capability,
+        event,
+        payload,
+        requiredOperation,
+        targetDeviceIds,
+      ),
     store,
     onAssistantPolicyChange: (listener: (threadIds: string[]) => void) =>
       assistantPolicies.onChange(listener),

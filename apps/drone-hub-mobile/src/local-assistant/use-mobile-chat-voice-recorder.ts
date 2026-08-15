@@ -21,6 +21,7 @@ import { transcribeMobileVoiceRecording } from './mobile-groq-transcription';
 import type {
   MobileMicrophoneCoordinator,
   MobileMicrophoneLease,
+  MobileMicrophoneOwner,
 } from './mobile-microphone-coordinator';
 import {
   MOBILE_GROQ_TRANSCRIPTION_MAX_BYTES,
@@ -226,13 +227,16 @@ export function useMobileChatVoiceRecorder({
     onError('');
   }, [onError, recorder, releaseMicrophone, setStatusValue]);
 
-  const startRecordingOperation = React.useCallback(async () => {
+  const startRecordingOperation = React.useCallback(async (owner: MobileMicrophoneOwner) => {
     if (statusRef.current !== 'idle') return;
-    const microphoneLease = microphoneCoordinator.acquire('single-shot');
+    const microphoneLease = microphoneCoordinator.acquire(owner);
     if (!microphoneLease) {
+      const currentOwner = microphoneCoordinator.getSnapshot();
       onError(
-        microphoneCoordinator.getSnapshot() === 'continuous'
+        currentOwner === 'continuous'
           ? 'Continuous voice is already using the microphone.'
+          : currentOwner === 'companion'
+            ? 'Companion is already using the microphone.'
           : 'The microphone is still finishing the previous recording.',
       );
       return;
@@ -308,12 +312,13 @@ export function useMobileChatVoiceRecorder({
     }
   }, [microphoneCoordinator, onError, recorder, releaseMicrophone, setStatusValue]);
 
-  const startRecording = React.useCallback(async () => {
-    if (startPromiseRef.current || statusRef.current !== 'idle') return;
-    const promise = startRecordingOperation();
+  const startRecording = React.useCallback(async (owner: MobileMicrophoneOwner = 'single-shot') => {
+    if (startPromiseRef.current || statusRef.current !== 'idle') return false;
+    const promise = startRecordingOperation(owner);
     startPromiseRef.current = promise;
     try {
       await promise;
+      return (statusRef.current as MobileVoiceRecordingStatus) === 'recording';
     } finally {
       if (startPromiseRef.current === promise) startPromiseRef.current = null;
     }

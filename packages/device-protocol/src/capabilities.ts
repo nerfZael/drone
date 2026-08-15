@@ -83,6 +83,12 @@ export const PROVIDER_CREDENTIALS_CAPABILITY: CapabilityDescriptor = {
   operations: ['credentials.inspect', 'openai.export', 'codex.export', 'groq.export'],
 };
 
+export const COMPANION_CAPABILITY: CapabilityDescriptor = {
+  id: 'companion',
+  version: 1,
+  operations: ['run.start', 'run.cancel', 'tool.result'],
+};
+
 export function isGranted(
   grants: CapabilityGrant[],
   capability: string,

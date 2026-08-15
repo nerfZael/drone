@@ -17,10 +17,11 @@ describe('mobile microphone coordinator', () => {
     expect(normal).not.toBeNull();
     expect(coordinator.getSnapshot()).toBe('single-shot');
     expect(coordinator.acquire('continuous')).toBeNull();
+    expect(coordinator.acquire('companion')).toBeNull();
 
     await normal?.release();
     expect(coordinator.getSnapshot()).toBeNull();
-    expect(coordinator.acquire('continuous')?.owner).toBe('continuous');
+    expect(coordinator.acquire('companion')?.owner).toBe('companion');
   });
 
   test('keeps ownership until asynchronous native cleanup finishes', async () => {

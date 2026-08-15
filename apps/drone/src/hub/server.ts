@@ -294,6 +294,7 @@ import { createTerminalWebSocketUpgradeHandler } from './terminal-websocket-upgr
 import { CompanionRuntime } from './companion/companion-runtime';
 import { registerCompanionRoutes } from './companion/companion-routes';
 import { createCompanionWebSocketServer } from './companion/companion-websocket-server';
+import { createCompanionCapability } from './device-mesh/companion-capability';
 import { registerAssistantRoutes } from './routes/assistant-routes';
 import { registerAgentRunDiffRoutes } from './routes/agent-run-diff-routes';
 import { NativeChatLifecycle } from './assistant/native-chat-lifecycle';
@@ -4309,6 +4310,9 @@ async function startDroneHubApiServerWithLifecycle(
     buildDroneSummaries: buildAssistantDroneSummariesFromRegistry,
   });
   const companionWss = createCompanionWebSocketServer(companionRuntime);
+  deviceMesh.registerCapability(
+    createCompanionCapability(companionRuntime, deviceMesh.broadcastCapabilityEvent),
+  );
   registerBackgroundResource('Companion runtime', () => companionRuntime.close());
   registerBackgroundResource('device mesh assistant changes', async () => {
     unsubscribeDeviceMeshAssistantChanges();

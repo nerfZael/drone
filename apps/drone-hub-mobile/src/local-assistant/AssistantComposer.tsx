@@ -18,6 +18,7 @@ import {
   resolveMobileVoiceTranscriptDraft,
 } from './mobile-voice-transcription-model';
 import { useSharedMobileChatVoiceRecorder } from './MobileChatVoiceRecorderContext';
+import { useMobileCompanion } from './MobileCompanionContext';
 import { MobileContinuousVoiceModePicker } from './MobileContinuousVoiceModePicker';
 import type { MobileContinuousVoiceMode } from './mobile-continuous-dictation';
 import {
@@ -193,10 +194,11 @@ export function AssistantComposer({
   const [focused, setFocused] = React.useState(false);
   const [voiceActionInFlight, setVoiceActionInFlight] = React.useState(false);
   const [continuousModePickerOpen, setContinuousModePickerOpen] = React.useState(false);
+  const companion = useMobileCompanion();
   const {
-    error: voiceError,
+    error: sharedVoiceError,
     setError: setVoiceError,
-    status: voiceStatus,
+    status: sharedVoiceStatus,
     durationMillis: voiceDurationMillis,
     startRecording,
     toggleRecordingPause,
@@ -206,12 +208,20 @@ export function AssistantComposer({
     continuousDictation,
     microphoneOwner,
   } = useSharedMobileChatVoiceRecorder();
+  const companionUsingVoice =
+    companion.status === 'starting' ||
+    companion.status === 'recording' ||
+    companion.status === 'transcribing';
+  const voiceError = companion.status === 'idle' ? sharedVoiceError : '';
+  const voiceStatus = companionUsingVoice ? ('idle' as const) : sharedVoiceStatus;
   const targetKey = String(voiceResetKey ?? '').trim();
   const voiceActive = voiceStatus !== 'idle';
   const voiceRecordAccessibilityLabel =
     microphoneOwner === 'continuous'
       ? 'Continuous voice is using the microphone'
-      : 'Record voice message';
+      : microphoneOwner === 'companion'
+        ? 'Companion is using the microphone'
+        : 'Record voice message';
   const voiceActiveRef = React.useRef(voiceActive);
   voiceActiveRef.current = voiceActive;
   const voiceCanPause = voiceStatus === 'recording' || voiceStatus === 'paused';
@@ -228,7 +238,7 @@ export function AssistantComposer({
     sending,
     running,
     queueWhileRunning,
-    microphoneAvailable: microphoneOwner === null,
+    microphoneAvailable: microphoneOwner === null && !companionUsingVoice,
   });
   const {
     state: continuousSession,

@@ -13,6 +13,7 @@ type MobileChatVoiceRecorderContextValue = ReturnType<typeof useMobileChatVoiceR
   continuousDictation: ReturnType<typeof useMobileContinuousDictation>;
   microphoneOwner: MobileMicrophoneOwner | null;
   error: string;
+  getError(): string;
   setError: React.Dispatch<React.SetStateAction<string>>;
 };
 
@@ -26,13 +27,28 @@ const MobileChatVoiceRecorderContext =
 export function MobileChatVoiceRecorderProvider({ children }: { children: React.ReactNode }) {
   const mesh = useMesh();
   const [error, setError] = React.useState('');
+  const errorRef = React.useRef('');
   const [microphoneCoordinator] = React.useState(() => new MobileMicrophoneCoordinator());
   const microphoneOwner = React.useSyncExternalStore(
     microphoneCoordinator.subscribe,
     microphoneCoordinator.getSnapshot,
     microphoneCoordinator.getSnapshot,
   );
-  const handleError = React.useCallback((message: string) => setError(message.trim()), []);
+  const handleError = React.useCallback((message: string) => {
+    const next = message.trim();
+    errorRef.current = next;
+    setError(next);
+  }, []);
+  const setSharedError = React.useCallback<React.Dispatch<React.SetStateAction<string>>>(
+    (update) => {
+      setError((current) => {
+        const next = (typeof update === 'function' ? update(current) : update).trim();
+        errorRef.current = next;
+        return next;
+      });
+    },
+    [],
+  );
   const recorder = useMobileChatVoiceRecorder({
     microphoneCoordinator,
     onError: handleError,
@@ -49,10 +65,11 @@ export function MobileChatVoiceRecorderProvider({ children }: { children: React.
       continuousVoice,
       continuousDictation,
       error,
+      getError: () => errorRef.current,
       microphoneOwner,
-      setError,
+      setError: setSharedError,
     }),
-    [continuousDictation, continuousVoice, error, microphoneOwner, recorder],
+    [continuousDictation, continuousVoice, error, microphoneOwner, recorder, setSharedError],
   );
 
   return (

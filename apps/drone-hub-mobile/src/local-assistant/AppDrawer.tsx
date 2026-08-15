@@ -17,6 +17,7 @@ import {
   View,
 } from 'react-native';
 import Square from 'lucide-react-native/icons/square';
+import Mic from 'lucide-react-native/icons/mic';
 import X from 'lucide-react-native/icons/x';
 import Svg, { Circle, Line, Path } from 'react-native-svg';
 import { Drawer } from 'react-native-drawer-layout';
@@ -84,6 +85,7 @@ import {
   type MobileSidebarDragTargetData,
 } from './MobileSidebarDragDrop';
 import { resolveMobileSidebarRepositoryAlignment } from './mobile-sidebar-repository-navigation';
+import { useMobileCompanion } from './MobileCompanionContext';
 
 export function appDrawerWidth(windowWidth: number): number {
   return Math.max(0, windowWidth);
@@ -126,6 +128,7 @@ export type AppDrawerProps = {
   droneSidebarOrder?: MobileDroneSidebarOrder;
   activeDroneId?: string;
   activeChatName?: string;
+  companionHighlightedDroneIds?: readonly string[];
   droneOperationById?: Record<string, 'archiving' | 'deleting'>;
   dronesLoading?: boolean;
   dronesReachable?: boolean;
@@ -167,6 +170,7 @@ const DrawerSidebarMuteContext = React.createContext<{
   mutedChatIds: ReadonlySet<string>;
   openActions?(target: DrawerMuteActionTarget): void;
 } | null>(null);
+const DrawerCompanionHighlightContext = React.createContext<ReadonlySet<string>>(new Set());
 const DRAWER_WORKING_SPIN_DURATION_MS = 1_600;
 const RECENT_BLOCKED_EMPHASIS_MS = 30_000;
 const DRAWER_TREE_ROW_PADDING_LEFT = 12;
@@ -943,8 +947,10 @@ function DrawerDroneNode({
 }) {
   const reorderSidebar = React.useContext(DrawerSidebarReorderContext);
   const muteContext = React.useContext(DrawerSidebarMuteContext);
+  const companionHighlightedDroneIds = React.useContext(DrawerCompanionHighlightContext);
   const suppressPressAfterLongPressRef = React.useRef(false);
   const { drone } = node;
+  const companionHighlighted = companionHighlightedDroneIds.has(drone.id);
   const chats = orderedMobileDroneChats(drone, sidebarChatOrderByDrone[drone.id]);
   const selected = drone.id === activeDroneId;
   const hasMultipleChats = chats.length > 1;
@@ -1163,6 +1169,7 @@ function DrawerDroneNode({
           style={({ pressed }) => [
             styles.switchItemRow,
             { paddingLeft: drawerTreeRowPaddingLeft(depth), paddingRight: 6 },
+            companionHighlighted && styles.switchItemRowCompanionHighlighted,
             parentSelected && styles.switchItemRowActive,
             pressed && !parentSelected && styles.sidebarRowPressed,
           ]}
@@ -1754,6 +1761,67 @@ function DrawerPinnedDrones({
   );
 }
 
+function DrawerPreparedDrones({
+  drones,
+  repoLabelByPath,
+  sidebarChatOrderByDrone,
+  collapsedDroneIds,
+  selectedContainerDroneId,
+  activeDroneId,
+  activeChatName,
+  droneOperationById,
+  onToggleDrone,
+  onSelectContainer,
+  onOpenChatActions,
+  onSelect,
+}: {
+  drones: MobileDroneSummary[];
+  repoLabelByPath: ReadonlyMap<string, string>;
+  sidebarChatOrderByDrone: Record<string, string[]>;
+  collapsedDroneIds: ReadonlySet<string>;
+  selectedContainerDroneId: string;
+  activeDroneId: string;
+  activeChatName: string;
+  droneOperationById: Record<string, 'archiving' | 'deleting'>;
+  onToggleDrone(droneId: string): void;
+  onSelectContainer(droneId: string): void;
+  onOpenChatActions?(target: DrawerChatActionTarget): void;
+  onSelect(droneId: string, chatName: string): void;
+}) {
+  if (drones.length === 0) return null;
+  const siblingNodeIds = drones.map((item) => item.id);
+  return (
+    <View style={styles.preparedDronesSection} accessibilityLabel="Prepared drone drafts">
+      <DrawerSidebarReorderContext.Provider value={null}>
+        {drones.map((drone) => (
+          <DrawerDroneNode
+            key={`prepared:${drone.id}`}
+            node={{ drone, children: [] }}
+            depth={0}
+            parentId="prepared"
+            siblingNodeIds={siblingNodeIds}
+            contextLabel={
+              repoLabelByPath.get(drone.repoPath) ||
+              drone.repoPath.split(/[\\/]/).filter(Boolean).at(-1) ||
+              'Ungrouped'
+            }
+            sidebarChatOrderByDrone={sidebarChatOrderByDrone}
+            collapsedDroneIds={collapsedDroneIds}
+            selectedContainerDroneId={selectedContainerDroneId}
+            activeDroneId={activeDroneId}
+            activeChatName={activeChatName}
+            droneOperationById={droneOperationById}
+            onToggleDrone={onToggleDrone}
+            onSelectContainer={onSelectContainer}
+            onOpenChatActions={onOpenChatActions}
+            onSelect={onSelect}
+          />
+        ))}
+      </DrawerSidebarReorderContext.Provider>
+    </View>
+  );
+}
+
 export function AppDrawer(props: AppDrawerProps) {
   const registerDrawer = React.useContext(AppDrawerHostContext);
 
@@ -1773,7 +1841,8 @@ export function AppDrawer(props: AppDrawerProps) {
 }
 
 function DrawerVoiceRecordingIndicator() {
-  const { error, status, durationMillis, discardRecording, stopRecordingForTranscript } =
+  const companion = useMobileCompanion();
+  const { error, status, durationMillis, microphoneOwner, discardRecording, stopRecordingForTranscript } =
     useSharedMobileChatVoiceRecorder();
   const [copying, setCopying] = React.useState(false);
   const [copyError, setCopyError] = React.useState('');
@@ -1841,7 +1910,7 @@ function DrawerVoiceRecordingIndicator() {
     }
   }, [canStop, copying, stopRecordingForTranscript]);
 
-  if (!visible) return null;
+  if (!visible || microphoneOwner === 'companion' || companion.status !== 'idle') return null;
   return (
     <View style={styles.voiceFooter}>
       <View style={styles.voiceFooterStatus}>
@@ -1910,6 +1979,55 @@ function DrawerVoiceRecordingIndicator() {
   );
 }
 
+function DrawerCompanionButton({ onClose }: { onClose(): void }) {
+  const companion = useMobileCompanion();
+  const busy =
+    companion.status === 'starting' ||
+    companion.status === 'transcribing' ||
+    companion.status === 'working';
+  return (
+    <View style={styles.companionFooter}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={
+          companion.available ? 'Toggle Companion microphone' : companion.unavailableReason
+        }
+        accessibilityState={{ disabled: busy }}
+        disabled={busy}
+        onPress={() => {
+          onClose();
+          void companion.toggle();
+        }}
+        style={({ pressed }) => [
+          styles.companionButton,
+          companion.status === 'recording' && styles.companionButtonRecording,
+          !companion.available && styles.companionButtonUnavailable,
+          busy && styles.companionButtonDisabled,
+          pressed && styles.pressed,
+        ]}
+      >
+        {busy ? (
+          <ActivityIndicator color={colors.accent} size="small" />
+        ) : (
+          <Mic
+            color={companion.status === 'recording' ? colors.online : colors.sidebarActionFg}
+            size={18}
+            strokeWidth={2.1}
+          />
+        )}
+        <Text
+          style={[
+            styles.companionButtonText,
+            companion.status === 'recording' && styles.companionButtonTextRecording,
+          ]}
+        >
+          {companion.status === 'recording' ? 'Listening' : 'Companion'}
+        </Text>
+      </Pressable>
+    </View>
+  );
+}
+
 function AppDrawerView({
   open,
   navigationItems,
@@ -1918,6 +2036,7 @@ function AppDrawerView({
   droneSidebarOrder = EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
   activeDroneId = '',
   activeChatName = 'default',
+  companionHighlightedDroneIds = [],
   droneOperationById = {},
   dronesLoading = false,
   dronesReachable = true,
@@ -1993,9 +2112,17 @@ function AppDrawerView({
     animation.start();
     return () => animation.stop();
   }, [open, workingPhase]);
+  const preparedDrones = React.useMemo(
+    () => drones.filter((drone) => drone.draft === true || drone.phase.trim().toLowerCase() === 'draft'),
+    [drones],
+  );
+  const sidebarDrones = React.useMemo(
+    () => drones.filter((drone) => drone.draft !== true && drone.phase.trim().toLowerCase() !== 'draft'),
+    [drones],
+  );
   const droneGroups = React.useMemo(
-    () => buildMobileDroneRepoGroups(drones, droneSidebarOrder),
-    [droneSidebarOrder, drones],
+    () => buildMobileDroneRepoGroups(sidebarDrones, droneSidebarOrder),
+    [droneSidebarOrder, sidebarDrones],
   );
   const mutedSidebarGroupIdSet = React.useMemo(
     () => new Set(droneSidebarOrder.mutedSidebarGroupIds),
@@ -2083,12 +2210,16 @@ function AppDrawerView({
   }, [chatMutationBusy, open]);
   const activeRepo = droneGroups.find((group) => group.id === activeRepoId) ?? null;
   const globalPinnedDrones = React.useMemo(
-    () => resolvePinnedSidebarDrones(drones, droneSidebarOrder.pinnedDroneIds),
-    [droneSidebarOrder.pinnedDroneIds, drones],
+    () => resolvePinnedSidebarDrones(sidebarDrones, droneSidebarOrder.pinnedDroneIds),
+    [droneSidebarOrder.pinnedDroneIds, sidebarDrones],
   );
   const repoLabelByPath = React.useMemo(
     () => new Map(droneGroups.map((group) => [group.repoPath, group.label])),
     [droneGroups],
+  );
+  const companionHighlightSet = React.useMemo(
+    () => new Set(companionHighlightedDroneIds),
+    [companionHighlightedDroneIds],
   );
   const resolveDroneRepoId = React.useCallback(
     (droneId: string): string | null => {
@@ -2305,6 +2436,22 @@ function AppDrawerView({
       onTogglePlacement={togglePinnedSidebarPlacement}
     />
   );
+  const preparedDronesSection = (
+    <DrawerPreparedDrones
+      drones={preparedDrones}
+      repoLabelByPath={repoLabelByPath}
+      sidebarChatOrderByDrone={droneSidebarOrder.sidebarChatOrderByDrone}
+      collapsedDroneIds={collapsedDroneIds}
+      selectedContainerDroneId={selectedContainerDroneId}
+      activeDroneId={activeDroneId}
+      activeChatName={activeChatName}
+      droneOperationById={droneOperationById}
+      onToggleDrone={toggleDrone}
+      onSelectContainer={setSelectedContainerDroneId}
+      onOpenChatActions={openChatActions}
+      onSelect={selectPinnedDroneChat}
+    />
+  );
   React.useEffect(() => {
     if (activeRepoId && !droneGroups.some((group) => group.id === activeRepoId)) {
       setActiveRepoId(null);
@@ -2377,7 +2524,8 @@ function AppDrawerView({
     <DrawerWorkingPhaseContext.Provider value={workingPhase}>
       <DrawerSidebarReorderContext.Provider value={onReorderSidebar ?? null}>
         <DrawerSidebarMuteContext.Provider value={muteContextValue}>
-          <MobileSidebarDragDropProvider>
+          <DrawerCompanionHighlightContext.Provider value={companionHighlightSet}>
+            <MobileSidebarDragDropProvider>
           <View
             renderToHardwareTextureAndroid
             style={[
@@ -2431,6 +2579,7 @@ function AppDrawerView({
             </View>
             {showDrones ? (
               <>
+                {preparedDronesSection}
                 {pinnedSidebarPlacement === 'top' ? pinnedDronesSection : null}
                 {activeRepo ? (
                   <FlatList<MobileDroneSidebarEntry>
@@ -2627,6 +2776,7 @@ function AppDrawerView({
             ) : (
               <View style={styles.drawerFill} />
             )}
+            <DrawerCompanionButton onClose={onClose} />
             <DrawerVoiceRecordingIndicator />
           </View>
           <ContextMenu
@@ -2698,7 +2848,8 @@ function AppDrawerView({
             }}
             onConfirm={() => void confirmDeleteChat()}
           />
-          </MobileSidebarDragDropProvider>
+            </MobileSidebarDragDropProvider>
+          </DrawerCompanionHighlightContext.Provider>
         </DrawerSidebarMuteContext.Provider>
       </DrawerSidebarReorderContext.Provider>
     </DrawerWorkingPhaseContext.Provider>
@@ -2952,6 +3103,13 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     paddingBottom: 4,
   },
+  preparedDronesSection: {
+    flexShrink: 0,
+    paddingVertical: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderSubtle,
+    backgroundColor: colors.accentWash,
+  },
   pinnedSectionTop: {
     borderBottomWidth: 1,
     borderBottomColor: colors.borderSubtle,
@@ -3037,6 +3195,11 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   switchItemRowActive: { backgroundColor: colors.sidebarSelectionWash },
+  switchItemRowCompanionHighlighted: {
+    backgroundColor: colors.accentWash,
+    borderLeftWidth: 2,
+    borderLeftColor: colors.accent,
+  },
   switchItemMain: {
     flex: 1,
     minWidth: 0,
@@ -3237,6 +3400,31 @@ const styles = StyleSheet.create({
     backgroundColor: colors.borderSubtle,
   },
   drawerFill: { flex: 1 },
+  companionFooter: {
+    flexShrink: 0,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.borderSubtle,
+  },
+  companionButton: {
+    alignSelf: 'flex-start',
+    minHeight: 40,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    paddingHorizontal: 10,
+    borderRadius: 7,
+  },
+  companionButtonRecording: {
+    borderWidth: 1,
+    borderColor: colors.onlineBorder,
+    backgroundColor: colors.onlineDark,
+  },
+  companionButtonUnavailable: { opacity: 0.62 },
+  companionButtonDisabled: { opacity: 0.48 },
+  companionButtonText: { color: colors.sidebarFg, fontSize: 12, fontWeight: '600' },
+  companionButtonTextRecording: { color: colors.online },
   voiceFooter: {
     flexShrink: 0,
     gap: 10,
