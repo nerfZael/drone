@@ -1,15 +1,7 @@
 import React from 'react';
-import { useContinuousDictation } from '../chat/ContinuousDictationContext';
 import { useChatVoiceRecorder } from '../chat/use-chat-voice-recorder';
-import { useCompanionTargets } from './CompanionTargetsContext';
+import { useCompanionWorkspace } from './CompanionWorkspaceContext';
 import { buildDirectApiWebSocketUrl } from '../app/direct-api-fetch';
-import {
-  COMPANION_APP_CONTEXT_EVENT,
-  COMPANION_HIGHLIGHT_DRONES_EVENT,
-  COMPANION_PREPARE_DRAFT_EVENT,
-  COMPANION_TOGGLE_EVENT,
-  requestCompanionBrowserAction,
-} from './companion-browser-events';
 
 export type CompanionStatus =
   | 'idle'
@@ -51,8 +43,7 @@ function newRunId(): string {
 }
 
 export function CompanionProvider({ children }: { children: React.ReactNode }) {
-  const continuousDictation = useContinuousDictation();
-  const editorTargets = useCompanionTargets();
+  const workspace = useCompanionWorkspace();
   const [status, setStatus] = React.useState<CompanionStatus>('idle');
   const [error, setError] = React.useState('');
   const [reply, setReply] = React.useState('');
@@ -107,40 +98,43 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
 
   const executeBrowserTool = React.useCallback(async (tool: string, args: Record<string, unknown>) => {
     if (tool === 'get_app_context') {
-      return await requestCompanionBrowserAction(COMPANION_APP_CONTEXT_EVENT, args);
+      if (!workspace) throw new Error('NO_ACTIVE_WORKSPACE');
+      return workspace.getAppContext();
     }
     if (tool === 'read_active_composer') {
-      if (!continuousDictation) throw new Error('NO_ACTIVE_COMPOSER');
-      return continuousDictation.readActiveComposer();
+      if (!workspace) throw new Error('NO_ACTIVE_COMPOSER');
+      return workspace.readActiveComposer();
     }
     if (tool === 'apply_composer_patch') {
-      if (!continuousDictation) throw new Error('NO_ACTIVE_COMPOSER');
-      return continuousDictation.applyComposer(
+      if (!workspace) throw new Error('NO_ACTIVE_COMPOSER');
+      return workspace.applyComposer(
         String(args.targetId ?? ''),
         String(args.baseRevision ?? ''),
         String(args.content ?? ''),
       );
     }
     if (tool === 'read_open_file') {
-      if (!editorTargets) throw new Error('NO_OPEN_FILE');
-      return editorTargets.readOpenFile();
+      if (!workspace) throw new Error('NO_OPEN_FILE');
+      return workspace.readOpenFile();
     }
     if (tool === 'apply_editor_patch') {
-      if (!editorTargets) throw new Error('NO_OPEN_FILE');
-      return editorTargets.applyEditor(
+      if (!workspace) throw new Error('NO_OPEN_FILE');
+      return workspace.applyEditor(
         String(args.targetId ?? ''),
         String(args.baseRevision ?? ''),
         String(args.content ?? ''),
       );
     }
     if (tool === 'prepare_drone_draft') {
-      return await requestCompanionBrowserAction(COMPANION_PREPARE_DRAFT_EVENT, args);
+      if (!workspace) throw new Error('NO_ACTIVE_WORKSPACE');
+      return await workspace.prepareDroneDraft(args);
     }
     if (tool === 'highlight_drones') {
-      return await requestCompanionBrowserAction(COMPANION_HIGHLIGHT_DRONES_EVENT, args);
+      if (!workspace) throw new Error('NO_ACTIVE_WORKSPACE');
+      return await workspace.highlightDrones(args);
     }
     throw new Error(`Unsupported Companion browser tool: ${tool}`);
-  }, [continuousDictation, editorTargets]);
+  }, [workspace]);
 
   const run = React.useCallback(async (prompt: string) => {
     const cleanPrompt = prompt.trim();
@@ -311,13 +305,6 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     else if (statusRef.current !== 'error') erase();
   }, [close, erase, run, setStatusValue, voice.startRecording, voice.stopRecordingForTranscript]);
 
-  const toggleRef = React.useRef(toggle);
-  toggleRef.current = toggle;
-  React.useEffect(() => {
-    const onToggle = () => void toggleRef.current();
-    window.addEventListener(COMPANION_TOGGLE_EVENT, onToggle);
-    return () => window.removeEventListener(COMPANION_TOGGLE_EVENT, onToggle);
-  }, []);
   React.useEffect(() => () => {
     generationRef.current += 1;
     socketRef.current?.close();

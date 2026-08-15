@@ -47,7 +47,7 @@ import {
 } from './monaco-editor-loader';
 import { editorZoomedPixels, useEditorZoomLevel } from './editor-zoom';
 import { FileDictationEditorAction } from './FileDictationEditorAction';
-import { useCompanionTargets } from '../companion/CompanionTargetsContext';
+import { useCompanionWorkspace } from '../companion/CompanionWorkspaceContext';
 
 const LARGE_TEXT_CHUNK_BYTES = 256 * 1024;
 
@@ -275,7 +275,7 @@ export function OpenedDroneFilePanel({
   onOpenFileDictationTarget,
   readOnly = false,
 }: OpenedDroneFilePanelProps) {
-  const companionTargets = useCompanionTargets();
+  const companionWorkspace = useCompanionWorkspace();
   const themeId = useDroneHubUiStore((state) => state.themeId);
   const monacoTheme = desktopMonacoTheme(themeId);
   const editorZoomLevel = useEditorZoomLevel();
@@ -458,8 +458,8 @@ export function OpenedDroneFilePanel({
     `${fileRevision ?? ''}:${fileNavigationSeq ?? 0}:${companionContentRef.current.revision}`;
 
   React.useEffect(() => {
-    if (!companionTargets || !activeFilePath || (!openedEditorIsText && !openedFileIsLargeText)) return;
-    return companionTargets.registerEditor({
+    if (!companionWorkspace || !activeFilePath || (!openedEditorIsText && !openedFileIsLargeText)) return;
+    return companionWorkspace.registerEditor({
       id: companionEditorTargetId,
       isEligible: () => Boolean(activeFilePath && (openedEditorIsText || openedFileIsLargeText)),
       read: () => ({
@@ -487,7 +487,7 @@ export function OpenedDroneFilePanel({
     activeFilePath,
     companionEditorMode,
     companionEditorTargetId,
-    companionTargets,
+    companionWorkspace,
     fileDirty,
     fileNavigationSeq,
     fileRevision,
@@ -561,7 +561,7 @@ export function OpenedDroneFilePanel({
   const handleEditorMount = React.useCallback<MonacoEditorMountHandler>(
     (editor, monaco) => {
       editorRef.current = editor;
-      editor.onDidFocusEditorText(() => companionTargets?.focusEditor(companionEditorTargetId));
+      editor.onDidFocusEditorText(() => companionWorkspace?.focusEditor(companionEditorTargetId));
       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
         void onSaveFile?.(editor.getValue());
       });
@@ -573,7 +573,7 @@ export function OpenedDroneFilePanel({
       });
       applyEditorCursorTarget();
     },
-    [applyEditorCursorTarget, companionEditorTargetId, companionTargets, onSaveFile],
+    [applyEditorCursorTarget, companionEditorTargetId, companionWorkspace, onSaveFile],
   );
 
   React.useEffect(() => {

@@ -13,8 +13,20 @@ export type CompanionSettingsResponse = {
   settings: CompanionSettingsDraft;
   defaultSystemPrompt: string;
   maxSystemPromptChars: number;
-  tools: Array<{ name: string; label: string; category: string; description: string }>;
-  models: Array<{ provider: 'openai' | 'codex' | 'gemini'; id: string; name: string; thinkingLevel: string }>;
+  tools: Array<{
+    name: string;
+    label: string;
+    category: string;
+    execution: 'server' | 'mcp' | 'browser';
+    requires: string | null;
+    description: string;
+  }>;
+  models: Array<{
+    provider: 'openai' | 'codex' | 'gemini';
+    id: string;
+    name: string;
+    thinkingLevel: string;
+  }>;
   credentials: Record<'openai' | 'codex' | 'gemini', boolean>;
 };
 

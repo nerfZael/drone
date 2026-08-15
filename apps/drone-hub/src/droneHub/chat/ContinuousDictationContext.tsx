@@ -6,6 +6,7 @@ import {
   type BrowserMicrophoneOwner,
 } from './browser-microphone-coordinator';
 import { createContinuousDictationToggle } from './create-continuous-dictation-toggle';
+import { useCompanionWorkspace } from '../companion/CompanionWorkspaceContext';
 
 export type ContinuousDictationComposerSnapshot = {
   targetId: string;
@@ -41,6 +42,7 @@ const ContinuousDictationContext =
   React.createContext<ContinuousDictationContextValue | null>(null);
 
 export function ContinuousDictationProvider({ children }: { children: React.ReactNode }) {
+  const companionWorkspace = useCompanionWorkspace();
   const [activeComposerId, setActiveComposerId] = React.useState<string | null>(null);
   const [error, setError] = React.useState('');
   const composersRef = React.useRef(new Map<string, ContinuousDictationComposer>());
@@ -183,6 +185,14 @@ export function ContinuousDictationProvider({ children }: { children: React.Reac
     },
     [],
   );
+
+  React.useEffect(() => {
+    if (!companionWorkspace) return;
+    return companionWorkspace.registerComposerTarget({
+      readActiveComposer,
+      applyComposer,
+    });
+  }, [applyComposer, companionWorkspace, readActiveComposer]);
 
   const toggle = React.useCallback(async () => {
     setError('');

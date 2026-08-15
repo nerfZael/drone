@@ -17,7 +17,7 @@ import { requestSidebarGroupDraft } from './sidebar-group-draft-events';
 import { useContinuousDictation } from '../chat/ContinuousDictationContext';
 import { toggleCurrentChatComposerEditorMode } from '../chat/chat-composer-editor-mode-shortcut';
 import { useFileDictation } from '../files/FileDictationContext';
-import { requestCompanionToggle } from '../companion/companion-browser-events';
+import { useCompanion } from '../companion/CompanionContext';
 
 type Updater<T> = T | ((prev: T) => T);
 type Setter<T> = (next: Updater<T>) => void;
@@ -156,6 +156,7 @@ export function useDroneHubLifecycleEffects({
   onDeleteSelectedDroneFromInputShortcut,
   onMarkSelectedDronesUnreadShortcut,
 }: UseDroneHubLifecycleEffectsArgs) {
+  const toggleCompanionRecording = useCompanion()?.toggle;
   const toggleContinuousDictation = useContinuousDictation()?.toggle;
   const toggleFileDictation = useFileDictation()?.toggle;
   const outputScrollContextRef = React.useRef<string>('');
@@ -306,7 +307,8 @@ export function useDroneHubLifecycleEffects({
         return true;
       },
       toggleCompanion: () => {
-        requestCompanionToggle();
+        if (!toggleCompanionRecording) return false;
+        void toggleCompanionRecording();
         return true;
       },
       toggleVoiceClipboardRecording: () => toggleVoiceClipboardRecording(),
@@ -405,7 +407,8 @@ export function useDroneHubLifecycleEffects({
         (definition) => isShortcutMatch(shortcutBindings[definition.id], e),
       );
       if (matched?.id === 'toggleCompanion') {
-        requestCompanionToggle();
+        if (!toggleCompanionRecording) return;
+        void toggleCompanionRecording();
         e.preventDefault();
         e.stopPropagation();
         return;
@@ -474,6 +477,7 @@ export function useDroneHubLifecycleEffects({
     };
   }, [
     currentDrone,
+    toggleCompanionRecording,
     openHome,
     openDraftChatComposer,
     openChildDraftChatComposer,

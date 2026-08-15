@@ -2,26 +2,21 @@ import crypto from 'node:crypto';
 import { COMPANION_CAPABILITY } from '@drone/device-protocol';
 
 import type { CompanionBrowserCall, CompanionRuntime } from '../companion/companion-runtime';
+import {
+  boundedCompanionActivityEvent,
+  CompanionBrowserToolBroker,
+} from '../companion/companion-transport-shared';
 import type { CapabilityHandler } from './device-mesh-types';
 
-const BROWSER_TOOL_TIMEOUT_MS = 20_000;
-const ACTIVITY_RESULT_MAX_CHARS = 20_000;
 const MAX_PROMPT_CHARS = 20_000;
 const MAX_RUN_ID_CHARS = 128;
-
-type PendingToolCall = {
-  resolve(value: unknown): void;
-  reject(error: Error): void;
-  timer: ReturnType<typeof setTimeout>;
-  removeAbortListener(): void;
-};
 
 type CompanionMeshSession = {
   clientRunId: string;
   runtimeRunId: string;
   sourceDeviceId: string;
   generation: number;
-  pendingTools: Map<string, PendingToolCall>;
+  browserTools: CompanionBrowserToolBroker;
   eventQueue: Promise<void>;
 };
 
@@ -43,28 +38,6 @@ function requiredText(value: unknown, label: string): string {
   const text = typeof value === 'string' ? value.trim() : '';
   if (!text) throw Object.assign(new Error(`${label} is required`), { code: 'INVALID_REQUEST' });
   return text;
-}
-
-function boundedActivityValue(value: unknown): unknown {
-  let serialized = '';
-  try {
-    serialized = JSON.stringify(value) ?? String(value ?? '');
-  } catch {
-    serialized = String(value ?? '');
-  }
-  return serialized.length <= ACTIVITY_RESULT_MAX_CHARS
-    ? value
-    : `${serialized.slice(0, ACTIVITY_RESULT_MAX_CHARS)}\n… value truncated`;
-}
-
-function boundedActivityEvent(event: any): any | null {
-  const type = String(event?.type ?? '');
-  if (!type.startsWith('tool_call_')) return null;
-  if (type === 'tool_call_started') return { ...event, args: boundedActivityValue(event.args) };
-  if (type === 'tool_call_completed')
-    return { ...event, result: boundedActivityValue(event.result) };
-  if (type === 'tool_call_failed') return { ...event, error: boundedActivityValue(event.error) };
-  return event;
 }
 
 export function createCompanionCapability(
@@ -90,19 +63,10 @@ export function createCompanionCapability(
     await session.eventQueue;
   };
 
-  const rejectPending = (session: CompanionMeshSession, message: string) => {
-    for (const pending of session.pendingTools.values()) {
-      clearTimeout(pending.timer);
-      pending.removeAbortListener();
-      pending.reject(new Error(message));
-    }
-    session.pendingTools.clear();
-  };
-
   const cancelSession = async (session: CompanionMeshSession, notify: boolean) => {
     session.generation += 1;
     runtime.cancel(session.runtimeRunId);
-    rejectPending(session, 'Companion run cancelled');
+    session.browserTools.rejectAll('Companion run cancelled');
     sessions.delete(sessionKey(session.sourceDeviceId, session.clientRunId));
     if (notify) {
       await emit(session, { type: 'status', status: 'cancelled' }).catch(() => undefined);
@@ -111,59 +75,12 @@ export function createCompanionCapability(
 
   const callBrowser =
     (session: CompanionMeshSession): CompanionBrowserCall =>
-    (tool, args, signal) => {
-      const callId = crypto.randomUUID();
-      const callGeneration = session.generation;
-      return new Promise((resolve, reject) => {
-        if (!sessions.has(sessionKey(session.sourceDeviceId, session.clientRunId))) {
-          reject(new Error('Companion mobile client disconnected'));
-          return;
-        }
-        const finish = (error: Error) => {
-          const pending = session.pendingTools.get(callId);
-          if (!pending) return;
-          session.pendingTools.delete(callId);
-          clearTimeout(pending.timer);
-          signal?.removeEventListener('abort', onAbort);
-          pending.reject(error);
-        };
-        const onAbort = () => finish(new Error('mobile tool cancelled'));
-        const timer = setTimeout(
-          () => finish(new Error(`mobile tool timed out: ${tool}`)),
-          BROWSER_TOOL_TIMEOUT_MS,
-        );
-        timer.unref?.();
-        session.pendingTools.set(callId, {
-          resolve: (value) => {
-            signal?.removeEventListener('abort', onAbort);
-            resolve(value);
-          },
-          reject: (error) => {
-            signal?.removeEventListener('abort', onAbort);
-            reject(error);
-          },
-          timer,
-          removeAbortListener: () => signal?.removeEventListener('abort', onAbort),
-        });
-        if (signal?.aborted) {
-          onAbort();
-          return;
-        }
-        signal?.addEventListener('abort', onAbort, { once: true });
-        void emit(session, {
-          type: 'tool_call',
-          generation: callGeneration,
-          callId,
-          tool,
-          args,
-        }).catch((error) => finish(error instanceof Error ? error : new Error(String(error))));
-      });
-    };
+    (tool, args, signal) => session.browserTools.request(tool, args, session.generation, signal);
 
   const closeSession = (session: CompanionMeshSession, message: string) => {
     const key = sessionKey(session.sourceDeviceId, session.clientRunId);
     if (sessions.get(key) === session) sessions.delete(key);
-    rejectPending(session, message);
+    session.browserTools.rejectAll(message);
   };
 
   return {
@@ -184,14 +101,13 @@ export function createCompanionCapability(
         const session = sessions.get(key);
         if (!session || Number(payload.generation) !== session.generation) return { ok: true };
         const callId = requiredText(payload.callId, 'callId');
-        const pending = session.pendingTools.get(callId);
-        if (!pending) return { ok: true };
-        session.pendingTools.delete(callId);
-        clearTimeout(pending.timer);
-        pending.removeAbortListener();
-        if (payload.ok === false)
-          pending.reject(new Error(String(payload.error ?? 'mobile tool failed')));
-        else pending.resolve(payload.result);
+        session.browserTools.resolve({
+          callId,
+          generation: Number(payload.generation),
+          ok: payload.ok !== false,
+          result: payload.result,
+          error: payload.error,
+        });
         return { ok: true };
       }
 
@@ -221,12 +137,18 @@ export function createCompanionCapability(
         }
       }
 
-      const session: CompanionMeshSession = {
+      let session!: CompanionMeshSession;
+      const browserTools = new CompanionBrowserToolBroker({
+        available: () => sessions.get(key) === session,
+        unavailableMessage: 'Companion mobile client disconnected',
+        dispatch: (call) => emit(session, { type: 'tool_call', ...call }),
+      });
+      session = {
         clientRunId,
         runtimeRunId: `mesh:${crypto.randomUUID()}`,
         sourceDeviceId,
         generation: 1,
-        pendingTools: new Map(),
+        browserTools,
         eventQueue: Promise.resolve(),
       };
       sessions.set(key, session);
@@ -243,7 +165,7 @@ export function createCompanionCapability(
           callBrowser: callBrowser(session),
           onEvent: (event) => {
             if (sessions.get(key) !== session) return;
-            const visibleEvent = boundedActivityEvent(event);
+            const visibleEvent = boundedCompanionActivityEvent(event);
             if (visibleEvent) {
               void emit(session, { type: 'activity', event: visibleEvent }).catch(() => undefined);
             }

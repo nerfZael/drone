@@ -5,10 +5,6 @@ import { ChatComposerModelPicker } from '../chat/ChatComposerModelPicker';
 import { useCompanionSettings } from './use-companion-settings';
 
 const PROVIDER_LABELS = { openai: 'OpenAI', codex: 'Codex', gemini: 'Gemini' } as const;
-const PATCH_DEPENDENCIES: Record<string, string> = {
-  apply_composer_patch: 'read_active_composer',
-  apply_editor_patch: 'read_open_file',
-};
 
 export function CompanionSettingsTab({ settings }: {
   settings: ReturnType<typeof useCompanionSettings>;
@@ -29,12 +25,12 @@ export function CompanionSettingsTab({ settings }: {
     for (const name of names) {
       if (enabled) {
         next.add(name);
-        const dependency = PATCH_DEPENDENCIES[name];
+        const dependency = data.tools.find((tool) => tool.name === name)?.requires;
         if (dependency) next.add(dependency);
       } else {
         next.delete(name);
-        for (const [patch, read] of Object.entries(PATCH_DEPENDENCIES)) {
-          if (read === name) next.delete(patch);
+        for (const tool of data.tools) {
+          if (tool.requires === name) next.delete(tool.name);
         }
       }
     }

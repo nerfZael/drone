@@ -13,7 +13,9 @@ import { resolveEffectiveProviderApiKeySettings } from '../hub-settings';
 import { searchActiveChatMessages } from '../transcript-store';
 import {
   COMPANION_RUNTIME_CONTRACT,
+  COMPANION_TOOL_SUMMARIES,
   readCompanionSettings,
+  type CompanionBrowserToolName,
   type CompanionSettings,
   type CompanionToolName,
 } from './companion-config';
@@ -21,17 +23,8 @@ import {
 const MAX_BROWSER_TEXT_CHARS = 1_000_000;
 const MAX_DRAFT_PROMPT_CHARS = 100_000;
 
-type BrowserToolName =
-  | 'get_app_context'
-  | 'read_active_composer'
-  | 'apply_composer_patch'
-  | 'read_open_file'
-  | 'apply_editor_patch'
-  | 'prepare_drone_draft'
-  | 'highlight_drones';
-
 export type CompanionBrowserCall = (
-  tool: BrowserToolName,
+  tool: CompanionBrowserToolName,
   args: Record<string, unknown>,
   signal?: AbortSignal,
 ) => Promise<any>;
@@ -190,7 +183,11 @@ export class CompanionRuntime {
       client: mcpClient,
       correlation: () => ({ runId: context.runId }),
     });
-    const mcpNames = new Set<CompanionToolName>(['list_repos', 'list_drones', 'list_chats', 'read_chat']);
+    const mcpNames = new Set<CompanionToolName>(
+      COMPANION_TOOL_SUMMARIES.filter((tool) => tool.execution === 'mcp').map(
+        (tool) => tool.name,
+      ),
+    );
     const enabled = new Set(context.settings.enabledTools);
     const filteredMcpProvider: BlipToolProvider = {
       id: 'companion-drone-hub',
@@ -220,14 +217,22 @@ export class CompanionRuntime {
   private async customTools(context: RunContext, drones: AssistantDroneSummary[]): Promise<AgentTool<any>[]> {
     const enabled = new Set(context.settings.enabledTools);
     const tools: AgentTool<any>[] = [];
-    const add = (name: CompanionToolName, tool: AgentTool<any>) => {
-      if (enabled.has(name)) tools.push(tool);
+    const add = (
+      name: CompanionToolName,
+      implementation: Omit<AgentTool<any>, 'name' | 'label' | 'description'>,
+    ) => {
+      if (!enabled.has(name)) return;
+      const metadata = COMPANION_TOOL_SUMMARIES.find((tool) => tool.name === name);
+      if (!metadata) throw new Error(`Companion tool metadata is unavailable: ${name}`);
+      tools.push({
+        ...implementation,
+        name,
+        label: metadata.label,
+        description: metadata.description,
+      });
     };
 
     add('get_hub_overview', {
-      name: 'get_hub_overview',
-      label: 'Hub overview',
-      description: 'Count repositories, drones, active chats, groups, busy/error drones, repo-less drones, and drones with multiple chats.',
       parameters: objectParameters({}),
       execute: async () => {
         const [repositories, groups] = await Promise.all([
@@ -251,9 +256,6 @@ export class CompanionRuntime {
     });
 
     add('search_chat_messages', {
-      name: 'search_chat_messages',
-      label: 'Search chats',
-      description: 'Keyword-search visible user, assistant, and error text across active Drone Hub chats. Archived chats are excluded.',
       parameters: objectParameters({
         query: { type: 'string', maxLength: 500 },
         repoPath: { type: 'string', maxLength: 4096 },
@@ -308,15 +310,12 @@ export class CompanionRuntime {
       },
     });
 
-    for (const [name, description] of [
-      ['get_app_context', 'Read the current Drone Hub selection, pane, and editor/composer context.'],
-      ['read_active_composer', 'Read the active chat composer with a target id and revision.'],
-      ['read_open_file', 'Read the open editor buffer with its edit or preview mode and revision.'],
+    for (const name of [
+      'get_app_context',
+      'read_active_composer',
+      'read_open_file',
     ] as const) {
       add(name, {
-        name,
-        label: name === 'get_app_context' ? 'Read app context' : name === 'read_active_composer' ? 'Read active composer' : 'Read open file',
-        description,
         parameters: objectParameters({}),
         execute: async (_callId, _args, signal) => {
           const value = await context.callBrowser(name, {}, signal);
@@ -334,9 +333,6 @@ export class CompanionRuntime {
       ['apply_editor_patch', 'editor'],
     ] as const) {
       add(name, {
-        name,
-        label: kind === 'composer' ? 'Patch composer' : 'Patch editor file',
-        description: `Apply a strict Update File patch to the previously read ${kind} target.`,
         parameters: objectParameters({
           targetId: { type: 'string' },
           baseRevision: { type: 'string' },
@@ -373,9 +369,6 @@ export class CompanionRuntime {
     }
 
     add('prepare_drone_draft', {
-      name: 'prepare_drone_draft',
-      label: 'Prepare drone draft',
-      description: 'Open and prefill the single unsent drone draft shown at the top of the sidebar.',
       parameters: objectParameters({
         name: { type: 'string', maxLength: 80 },
         prompt: { type: 'string', maxLength: MAX_DRAFT_PROMPT_CHARS },
@@ -386,9 +379,6 @@ export class CompanionRuntime {
     });
 
     add('highlight_drones', {
-      name: 'highlight_drones',
-      label: 'Highlight drones',
-      description: 'Temporarily highlight drones in the sidebar without opening or navigating to them.',
       parameters: objectParameters({
         droneIds: { type: 'array', items: { type: 'string' }, maxItems: 200 },
         durationMs: { type: 'number' },

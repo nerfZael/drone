@@ -46,12 +46,7 @@ import { useHubLogs } from './droneHub/app/use-hub-logs';
 import { useCreateDraftWorkflowState } from './droneHub/app/use-create-draft-workflow-store';
 import { useAgentsMdLibraryCatalog } from './droneHub/app/use-agents-md-library-catalog';
 import { useDroneCreationActions } from './droneHub/app/use-drone-creation-actions';
-import {
-  COMPANION_APP_CONTEXT_EVENT,
-  COMPANION_HIGHLIGHT_DRONES_EVENT,
-  COMPANION_PREPARE_DRAFT_EVENT,
-  type CompanionBrowserEventDetail,
-} from './droneHub/companion/companion-browser-events';
+import { useCompanionWorkspace } from './droneHub/companion/CompanionWorkspaceContext';
 import { useChatRuntimeOrchestration } from './droneHub/app/use-chat-runtime-orchestration';
 import { useDroneErrorModalActions } from './droneHub/app/use-drone-error-modal-actions';
 import { useRepoBranchOptions } from './droneHub/app/use-repo-branch-options';
@@ -215,6 +210,7 @@ function droneHubBusyDebugEnabled(): boolean {
 }
 
 export function useDroneHubAppModel(): DroneHubAppModel {
+  const companionWorkspace = useCompanionWorkspace();
   const sidebarCommandQueueRef = React.useRef<ReturnType<typeof createSidebarCommandQueue> | null>(null);
   if (!sidebarCommandQueueRef.current) sidebarCommandQueueRef.current = createSidebarCommandQueue();
   const sidebarCommandQueue = sidebarCommandQueueRef.current;
@@ -2623,10 +2619,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     [currentDrone?.id, openSelectionScopedDraftChatComposer],
   );
   React.useEffect(() => {
-    const handleAppContext = (rawEvent: Event) => {
-      const event = rawEvent as CustomEvent<CompanionBrowserEventDetail>;
-      event.preventDefault();
-      event.detail.resolve({
+    if (!companionWorkspace) return;
+    return companionWorkspace.registerWorkspaceTarget({
+      getAppContext: () => ({
         appView,
         activeRepoPath: activeRepoPath || null,
         selectedDrone: currentDrone
@@ -2644,19 +2639,15 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         openFile: openedEditorFile?.path
           ? { path: openedEditorFile.path }
           : null,
-      });
-    };
-    const handlePrepareDraft = (rawEvent: Event) => {
-      const event = rawEvent as CustomEvent<CompanionBrowserEventDetail>;
-      event.preventDefault();
-      try {
+      }),
+      prepareDroneDraft: (args) => {
         if (draftCreating || draftAutoRenaming || draftChat?.prompt) {
           throw new Error('DRAFT_BUSY');
         }
-        const name = String(event.detail.args.name ?? '').trim();
-        const prompt = String(event.detail.args.prompt ?? '');
-        const repoPath = String(event.detail.args.repoPath ?? '').trim();
-        const group = String(event.detail.args.group ?? '').trim();
+        const name = String(args.name ?? '').trim();
+        const prompt = String(args.prompt ?? '');
+        const repoPath = String(args.repoPath ?? '').trim();
+        const group = String(args.group ?? '').trim();
         if (name.length > 80 || /[\r\n]/.test(name)) throw new Error('INVALID_DRAFT_NAME');
         if (prompt.length > 100_000) throw new Error('DRAFT_PROMPT_TOO_LARGE');
         if (repoPath.length > 4_096) throw new Error('INVALID_DRAFT_REPOSITORY');
@@ -2670,17 +2661,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         setDraftChat((current) => current
           ? { ...current, droneName: name || current.droneName, draftValue: prompt }
           : current);
-        event.detail.resolve({ ok: true, name, prompt, repoPath: repoPath || null, group: group || null });
-      } catch (error) {
-        event.detail.reject(error);
-      }
-    };
-    const handleHighlightDrones = (rawEvent: Event) => {
-      const event = rawEvent as CustomEvent<CompanionBrowserEventDetail>;
-      event.preventDefault();
-      try {
+        return { ok: true, name, prompt, repoPath: repoPath || null, group: group || null };
+      },
+      highlightDrones: (args) => {
         const droneIds = Array.from(new Set(
-          (Array.isArray(event.detail.args.droneIds) ? event.detail.args.droneIds : [])
+          (Array.isArray(args.droneIds) ? args.droneIds : [])
             .map((value) => String(value ?? '').trim())
             .filter((droneId) => Boolean(droneId && droneByIdRef.current[droneId])),
         ));
@@ -2688,7 +2673,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         expandGroupsForDroneIds(droneIds);
         setHighlightedDroneIds(new Set(droneIds));
         if (highlightClearTimerRef.current != null) window.clearTimeout(highlightClearTimerRef.current);
-        const requestedDuration = Number(event.detail.args.durationMs);
+        const requestedDuration = Number(args.durationMs);
         const durationMs = Number.isFinite(requestedDuration)
           ? Math.max(1_000, Math.min(60_000, Math.floor(requestedDuration)))
           : 10_000;
@@ -2696,24 +2681,15 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           highlightClearTimerRef.current = null;
           setHighlightedDroneIds(new Set());
         }, durationMs);
-        event.detail.resolve({ ok: true, droneIds, durationMs });
-      } catch (error) {
-        event.detail.reject(error);
-      }
-    };
-    window.addEventListener(COMPANION_APP_CONTEXT_EVENT, handleAppContext);
-    window.addEventListener(COMPANION_PREPARE_DRAFT_EVENT, handlePrepareDraft);
-    window.addEventListener(COMPANION_HIGHLIGHT_DRONES_EVENT, handleHighlightDrones);
-    return () => {
-      window.removeEventListener(COMPANION_APP_CONTEXT_EVENT, handleAppContext);
-      window.removeEventListener(COMPANION_PREPARE_DRAFT_EVENT, handlePrepareDraft);
-      window.removeEventListener(COMPANION_HIGHLIGHT_DRONES_EVENT, handleHighlightDrones);
-    };
+        return { ok: true, droneIds, durationMs };
+      },
+    });
   }, [
     activeRepoPath,
     appView,
     applyRememberedNewDronePreferences,
     currentDrone,
+    companionWorkspace,
     draftAutoRenaming,
     draftCreating,
     draftChat?.focusKey,

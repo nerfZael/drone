@@ -11,21 +11,6 @@ import {
 
 export type CompanionThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
-export type CompanionToolName =
-  | 'get_hub_overview'
-  | 'list_repos'
-  | 'list_drones'
-  | 'list_chats'
-  | 'read_chat'
-  | 'search_chat_messages'
-  | 'get_app_context'
-  | 'read_active_composer'
-  | 'apply_composer_patch'
-  | 'read_open_file'
-  | 'apply_editor_patch'
-  | 'prepare_drone_draft'
-  | 'highlight_drones';
-
 export type CompanionSettings = {
   provider: LlmProviderId;
   model: string;
@@ -51,33 +36,139 @@ export const DEFAULT_COMPANION_SYSTEM_PROMPT = [
   'You may highlight drones but cannot open or navigate to drones or chats.',
 ].join('\n');
 
-export const COMPANION_TOOL_SUMMARIES: ReadonlyArray<{
-  name: CompanionToolName;
+export const COMPANION_TOOL_SUMMARIES = [
+  {
+    name: 'get_hub_overview',
+    label: 'Hub overview',
+    category: 'hub',
+    execution: 'server',
+    requires: null,
+    description:
+      'Count repositories, drones, active chats, groups, busy/error drones, repository-less drones, and drones with multiple chats.',
+  },
+  {
+    name: 'list_repos',
+    label: 'List repositories',
+    category: 'hub',
+    execution: 'mcp',
+    requires: null,
+    description: 'List registered repositories and their drone counts.',
+  },
+  {
+    name: 'list_drones',
+    label: 'List drones',
+    category: 'hub',
+    execution: 'mcp',
+    requires: null,
+    description: 'List drones, repositories, states, and chat counts.',
+  },
+  {
+    name: 'list_chats',
+    label: 'List chats',
+    category: 'chats',
+    execution: 'mcp',
+    requires: null,
+    description: 'List active chats for a drone.',
+  },
+  {
+    name: 'read_chat',
+    label: 'Read chat',
+    category: 'chats',
+    execution: 'mcp',
+    requires: null,
+    description: 'Read recent visible turns from an active chat.',
+  },
+  {
+    name: 'search_chat_messages',
+    label: 'Search chats',
+    category: 'chats',
+    execution: 'server',
+    requires: null,
+    description:
+      'Keyword-search visible user, assistant, and error text across active Drone Hub chats. Archived chats are excluded.',
+  },
+  {
+    name: 'get_app_context',
+    label: 'Read app context',
+    category: 'browser',
+    execution: 'browser',
+    requires: null,
+    description: 'Read the current Drone Hub selection, pane, and editor/composer context.',
+  },
+  {
+    name: 'read_active_composer',
+    label: 'Read active composer',
+    category: 'browser',
+    execution: 'browser',
+    requires: null,
+    description: 'Read the active chat composer with its target ID and revision.',
+  },
+  {
+    name: 'apply_composer_patch',
+    label: 'Patch composer',
+    category: 'actions',
+    execution: 'browser',
+    requires: 'read_active_composer',
+    description:
+      'Apply one strict Update File patch to the previously read composer as an immediate undoable edit.',
+  },
+  {
+    name: 'read_open_file',
+    label: 'Read open editor file',
+    category: 'browser',
+    execution: 'browser',
+    requires: null,
+    description: 'Read the open editor buffer with its edit or preview mode and revision.',
+  },
+  {
+    name: 'apply_editor_patch',
+    label: 'Patch editor file',
+    category: 'actions',
+    execution: 'browser',
+    requires: 'read_open_file',
+    description:
+      'Apply one strict Update File patch to the previously read editable file buffer as an immediate undoable edit.',
+  },
+  {
+    name: 'prepare_drone_draft',
+    label: 'Prepare drone draft',
+    category: 'actions',
+    execution: 'browser',
+    requires: null,
+    description: 'Open and prefill the single unsent drone draft shown at the top of the sidebar.',
+  },
+  {
+    name: 'highlight_drones',
+    label: 'Highlight drones',
+    category: 'actions',
+    execution: 'browser',
+    requires: null,
+    description:
+      'Temporarily highlight drones in the sidebar without opening or navigating to them.',
+  },
+] as const satisfies ReadonlyArray<{
+  name: string;
   label: string;
   category: 'hub' | 'chats' | 'browser' | 'actions';
+  execution: 'server' | 'mcp' | 'browser';
+  requires: string | null;
   description: string;
-}> = [
-  { name: 'get_hub_overview', label: 'Hub overview', category: 'hub', description: 'Count repositories, drones, chats, groups, and notable drone states.' },
-  { name: 'list_repos', label: 'List repositories', category: 'hub', description: 'List registered repositories and their drone counts.' },
-  { name: 'list_drones', label: 'List drones', category: 'hub', description: 'List drones, repositories, states, and chat counts.' },
-  { name: 'list_chats', label: 'List chats', category: 'chats', description: 'List active chats for a drone.' },
-  { name: 'read_chat', label: 'Read chat', category: 'chats', description: 'Read recent visible turns from an active chat.' },
-  { name: 'search_chat_messages', label: 'Search chats', category: 'chats', description: 'Keyword-search visible messages in active chats.' },
-  { name: 'get_app_context', label: 'Read app context', category: 'browser', description: 'Read the current Drone Hub selection and open pane.' },
-  { name: 'read_active_composer', label: 'Read active composer', category: 'browser', description: 'Read the active chat composer and its revision.' },
-  { name: 'apply_composer_patch', label: 'Patch composer', category: 'actions', description: 'Immediately patch the active composer as one undoable edit.' },
-  { name: 'read_open_file', label: 'Read open editor file', category: 'browser', description: 'Read the current text editor buffer and mode.' },
-  { name: 'apply_editor_patch', label: 'Patch editor file', category: 'actions', description: 'Immediately patch an editable unsaved file buffer as one undoable edit.' },
-  { name: 'prepare_drone_draft', label: 'Prepare drone draft', category: 'actions', description: 'Prefill the single draft shown at the top of the sidebar.' },
-  { name: 'highlight_drones', label: 'Highlight drones', category: 'actions', description: 'Temporarily highlight drones without navigating.' },
-];
+}>;
+
+type CompanionToolCatalogEntry = (typeof COMPANION_TOOL_SUMMARIES)[number];
+export type CompanionToolName = CompanionToolCatalogEntry['name'];
+export type CompanionBrowserToolName = Extract<
+  CompanionToolCatalogEntry,
+  { execution: 'browser' }
+>['name'];
 
 const SETTING_KEY = 'companion';
 const TOOL_NAMES = new Set(COMPANION_TOOL_SUMMARIES.map((tool) => tool.name));
-const PATCH_DEPENDENCIES: Partial<Record<CompanionToolName, CompanionToolName>> = {
-  apply_composer_patch: 'read_active_composer',
-  apply_editor_patch: 'read_open_file',
-};
+const TOOL_DEPENDENCIES = new Map<CompanionToolName, CompanionToolName>(
+  COMPANION_TOOL_SUMMARIES.flatMap((tool) =>
+    tool.requires ? [[tool.name, tool.requires] as const] : [],
+  ),
+);
 
 export const DEFAULT_COMPANION_SETTINGS: CompanionSettings = {
   provider: 'codex',
@@ -92,7 +183,7 @@ function normalizeEnabledTools(value: unknown): CompanionToolName[] {
     ? value.map((item) => String(item).trim()).filter((item): item is CompanionToolName => TOOL_NAMES.has(item as CompanionToolName))
     : DEFAULT_COMPANION_SETTINGS.enabledTools;
   const enabled = new Set(requested);
-  for (const [patchTool, readTool] of Object.entries(PATCH_DEPENDENCIES) as Array<[CompanionToolName, CompanionToolName]>) {
+  for (const [patchTool, readTool] of TOOL_DEPENDENCIES) {
     if (enabled.has(patchTool)) enabled.add(readTool);
   }
   return COMPANION_TOOL_SUMMARIES.map((tool) => tool.name).filter((name) => enabled.has(name));
@@ -141,7 +232,7 @@ export async function writeCompanionSettings(value: unknown): Promise<CompanionS
   const unknownTools = raw.enabledTools.filter((name) => !TOOL_NAMES.has(name as CompanionToolName));
   if (unknownTools.length > 0) throw new Error(`unknown Companion tools: ${unknownTools.join(', ')}`);
   const enabledTools = new Set(raw.enabledTools as CompanionToolName[]);
-  for (const [patchTool, readTool] of Object.entries(PATCH_DEPENDENCIES) as Array<[CompanionToolName, CompanionToolName]>) {
+  for (const [patchTool, readTool] of TOOL_DEPENDENCIES) {
     if (enabledTools.has(patchTool) && !enabledTools.has(readTool)) {
       throw new Error(`${patchTool} requires ${readTool}`);
     }

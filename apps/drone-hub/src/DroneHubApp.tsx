@@ -16,7 +16,7 @@ import { useIdleMonacoEditorPreload } from './droneHub/files/monaco-editor-loade
 import { ContinuousDictationProvider } from './droneHub/chat/ContinuousDictationContext';
 import { EditorZoomController } from './droneHub/files/editor-zoom';
 import { FileDictationProvider } from './droneHub/files/FileDictationContext';
-import { CompanionTargetsProvider } from './droneHub/companion/CompanionTargetsContext';
+import { CompanionWorkspaceProvider } from './droneHub/companion/CompanionWorkspaceContext';
 import { CompanionProvider } from './droneHub/companion/CompanionContext';
 
 function LocalDroneHubAppContent() {
@@ -82,15 +82,15 @@ export default function DroneHubApp() {
     <DesktopDeviceProvider>
       <EditorZoomController />
       <AppConfirmDialogProvider>
-        <ContinuousDictationProvider>
-          <CompanionTargetsProvider>
+        <CompanionWorkspaceProvider>
+          <ContinuousDictationProvider>
             <CompanionProvider>
               <FileDictationProvider>
                 <DroneHubAppContent />
               </FileDictationProvider>
             </CompanionProvider>
-          </CompanionTargetsProvider>
-        </ContinuousDictationProvider>
+          </ContinuousDictationProvider>
+        </CompanionWorkspaceProvider>
       </AppConfirmDialogProvider>
     </DesktopDeviceProvider>
   );

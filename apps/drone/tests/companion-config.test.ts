@@ -13,6 +13,14 @@ describe('Companion settings', () => {
     expect(names).not.toContain('send_message');
     expect(names).not.toContain('bash');
     expect(DEFAULT_COMPANION_SETTINGS.enabledTools).toEqual(names);
+    expect(
+      COMPANION_TOOL_SUMMARIES.filter((tool) => tool.execution === 'mcp').map(
+        (tool) => tool.name,
+      ),
+    ).toEqual(['list_repos', 'list_drones', 'list_chats', 'read_chat']);
+    expect(
+      COMPANION_TOOL_SUMMARIES.find((tool) => tool.name === 'apply_composer_patch')?.requires,
+    ).toBe('read_active_composer');
   });
 
   test('adds the matching read dependency for enabled patch tools', () => {
