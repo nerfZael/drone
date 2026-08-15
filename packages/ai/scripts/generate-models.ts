@@ -119,6 +119,10 @@ function isGemini3FlashModel(modelId: string): boolean {
 	return /gemini-3(?:\.\d+)?-flash/.test(modelId.toLowerCase());
 }
 
+function isGemini35FlashLiteModel(modelId: string): boolean {
+	return modelId.toLowerCase().startsWith("gemini-3.5-flash-lite");
+}
+
 function isGemma4Model(modelId: string): boolean {
 	return /gemma-?4/.test(modelId.toLowerCase());
 }
@@ -150,6 +154,9 @@ function applyThinkingLevelMetadata(model: Model<any>): void {
 	}
 	if (isGoogleThinkingApi(model) && isGemini3FlashModel(model.id)) {
 		mergeThinkingLevelMap(model, { off: null });
+	}
+	if (isGoogleThinkingApi(model) && isGemini35FlashLiteModel(model.id)) {
+		mergeThinkingLevelMap(model, { low: null });
 	}
 	if (isGoogleThinkingApi(model) && isGemma4Model(model.id)) {
 		mergeThinkingLevelMap(model, { off: null, minimal: "MINIMAL", low: null, medium: null, high: "HIGH" });
@@ -1160,6 +1167,27 @@ async function generateModels() {
 				input: 0,
 				output: 0,
 				cacheRead: 0,
+				cacheWrite: 0,
+			},
+			contextWindow: 1048576,
+			maxTokens: 65536,
+		});
+	}
+
+	// Add Gemini 3.5 Flash-Lite until models.dev includes it.
+	if (!allModels.some((m) => m.provider === "google" && m.id === "gemini-3.5-flash-lite")) {
+		allModels.push({
+			id: "gemini-3.5-flash-lite",
+			name: "Gemini 3.5 Flash-Lite",
+			api: "google-generative-ai",
+			baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+			provider: "google",
+			reasoning: true,
+			input: ["text", "image"],
+			cost: {
+				input: 0.3,
+				output: 2.5,
+				cacheRead: 0.03,
 				cacheWrite: 0,
 			},
 			contextWindow: 1048576,

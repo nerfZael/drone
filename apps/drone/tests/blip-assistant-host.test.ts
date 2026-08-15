@@ -10,13 +10,22 @@ import {
 } from '@mariozechner/pi-ai';
 
 import { loadAssistantState } from '../src/host/assistant-store';
-import { BlipAssistantHost } from '../src/hub/assistant/blip-assistant-host';
+import {
+  BlipAssistantHost,
+  toBlipModelProvider,
+} from '../src/hub/assistant/blip-assistant-host';
 import { HubSessionRepository } from '../src/hub/assistant/hub-session-repository';
 import { HubAssistantService } from '../src/hub/assistant';
 import { ensureTestNativeChat } from './native-chat-test-helpers';
 import { withTempDroneDataDir } from './test-helpers';
 
 describe('Blip assistant host', () => {
+  test('maps user-facing provider names to Blip providers', () => {
+    expect(toBlipModelProvider('openai')).toBe('openai');
+    expect(toBlipModelProvider('codex')).toBe('openai-codex');
+    expect(toBlipModelProvider('gemini')).toBe('google');
+  });
+
   test('discards legacy standalone metadata and stores native chat metadata', async () => {
     await withTempDroneDataDir('blip-assistant-state-', async (dataDir) => {
       const legacyPath = path.join(dataDir, 'assistant.json');

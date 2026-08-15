@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
+import { ASSISTANT_MODEL_OPTIONS } from '../src/hub/assistant/assistant-config';
 import {
   COMPANION_TOOL_SUMMARIES,
   DEFAULT_COMPANION_SETTINGS,
@@ -7,6 +8,19 @@ import {
 } from '../src/hub/companion/companion-config';
 
 describe('Companion settings', () => {
+  test('offers OpenAI, Codex, and Gemini including Gemini 3.5 Flash-Lite', () => {
+    expect([...new Set(ASSISTANT_MODEL_OPTIONS.map((option) => option.provider))]).toEqual([
+      'openai',
+      'codex',
+      'gemini',
+    ]);
+    expect(
+      ASSISTANT_MODEL_OPTIONS.filter((option) => option.id === 'gemini-3.5-flash-lite').map(
+        (option) => option.thinkingLevel,
+      ),
+    ).toEqual(['minimal', 'medium', 'high']);
+  });
+
   test('keeps the catalog fixed and excludes navigation tools', () => {
     const names = COMPANION_TOOL_SUMMARIES.map((tool) => tool.name);
     expect(names).not.toContain('open_drone_chat');
@@ -45,7 +59,8 @@ describe('Companion settings', () => {
       enabledTools: ['get_hub_overview', 'not_a_tool'],
     });
     expect(settings.provider).toBe('gemini');
-    expect(settings.model).toBe('gemini-3-flash-preview');
+    expect(settings.model).toBe('gemini-3.5-flash-lite');
+    expect(settings.thinkingLevel).toBe('minimal');
     expect(settings.enabledTools).toEqual(['get_hub_overview']);
   });
 });

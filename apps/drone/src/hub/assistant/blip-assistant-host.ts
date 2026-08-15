@@ -29,6 +29,11 @@ export type BlipAssistantThreadConfiguration = {
   dispose?: () => Promise<void> | void;
 };
 
+export function toBlipModelProvider(provider: string): string {
+  if (provider === 'codex') return 'openai-codex';
+  return provider === 'gemini' ? 'google' : provider;
+}
+
 export class BlipAssistantHost {
   private readonly handles = new Map<string, BlipSessionHandle>();
   private readonly handlePromises = new Map<string, Promise<BlipSessionHandle>>();
@@ -439,7 +444,7 @@ export class BlipAssistantHost {
     const config = await this.configuration(threadId);
     let handle: BlipSessionHandle | undefined;
     try {
-      const provider = config.provider === 'codex' ? 'openai-codex' : config.provider;
+      const provider = toBlipModelProvider(config.provider);
       const model = nodeRuntime.resolveBlipModel(provider, config.model);
       const sessionId = await this.repository.sessionIdForThread(threadId);
       handle = await runtime.createBlipSession({

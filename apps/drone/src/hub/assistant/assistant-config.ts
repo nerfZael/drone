@@ -18,7 +18,7 @@ export const ASSISTANT_BASH_MAX_TIMEOUT_MS = 60 * 60_000;
 export const ASSISTANT_SEARCH_MAX_CONTEXT_LINES = 10;
 export const ASSISTANT_CHANGED_FILES_LIMIT = 200;
 export const DEFAULT_OPENAI_MODEL = 'gpt-5.6-sol';
-export const DEFAULT_GEMINI_MODEL = 'gemini-3-flash-preview';
+export const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash-lite';
 export const DEFAULT_CODEX_MODEL = 'gpt-5.6-sol';
 export const DEFAULT_THREAD_TITLE = 'New thread';
 export const ASSISTANT_SYSTEM_PROMPT_RUNTIME_APPENDIX =
@@ -523,6 +523,24 @@ export const ASSISTANT_MODEL_OPTIONS: AssistantModelOptionDefinition[] = [
   ...reasoningModelOptions('codex', 'gpt-5.6-terra', 'GPT-5.6 Terra'),
   ...reasoningModelOptions('codex', 'gpt-5.6-luna', 'GPT-5.6 Luna'),
   ...reasoningModelOptions('codex', 'gpt-5.5', 'GPT-5.5'),
+  {
+    provider: 'gemini',
+    id: 'gemini-3.5-flash-lite',
+    name: 'Gemini 3.5 Flash-Lite',
+    thinkingLevel: 'minimal',
+  },
+  {
+    provider: 'gemini',
+    id: 'gemini-3.5-flash-lite',
+    name: 'Gemini 3.5 Flash-Lite',
+    thinkingLevel: 'medium',
+  },
+  {
+    provider: 'gemini',
+    id: 'gemini-3.5-flash-lite',
+    name: 'Gemini 3.5 Flash-Lite',
+    thinkingLevel: 'high',
+  },
   {
     provider: 'gemini',
     id: 'gemini-3-flash-preview',
