@@ -28,6 +28,37 @@ describe('completed external transcript presentation', () => {
     expect(html).not.toContain('role="assistant"');
   });
 
+  test('renders an ASAP steering message inside the original user bubble', () => {
+    const html = renderToStaticMarkup(
+      <TranscriptTurn
+        item={{
+          turn: 1,
+          at: '2026-08-07T10:00:00.000Z',
+          prompt: 'Start the review.',
+          session: 'codex-app-server',
+          logPath: '',
+          ok: true,
+          output: 'Review complete.',
+        }}
+        messageId="codex-turn"
+        followUps={[
+          {
+            key: 'steer-1',
+            at: '2026-08-07T10:01:00.000Z',
+            text: 'Also inspect the mobile path.',
+          },
+        ]}
+      />,
+    );
+
+    expect(html).toContain('data-user-message-follow-up="asap"');
+    expect(html).toContain('>ASAP</span>');
+    expect(html).toContain('Also inspect the mobile path.');
+    expect(html.match(/max-w-\[min\(85%,var\(--chat-prose-max\)\)\]/g)).toHaveLength(1);
+    expect(html).toContain('dateTime="2026-08-07T10:01:00.000Z"');
+    expect(html.match(/aria-label="Copy message"/g)).toHaveLength(2);
+  });
+
   test('shares the native duration divider, readable width, and hover timestamps', () => {
     const html = renderToStaticMarkup(
       <TranscriptTurn
@@ -314,9 +345,7 @@ describe('completed external transcript presentation', () => {
             messages: [
               {
                 role: 'assistant',
-                content: [
-                  { type: 'toolCall', id: 'review', name: 'read_file', arguments: {} },
-                ],
+                content: [{ type: 'toolCall', id: 'review', name: 'read_file', arguments: {} }],
               },
               {
                 role: 'toolResult',

@@ -516,6 +516,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
               ok: true,
               output: '',
               userOnly: true,
+              ...((p as any).deliveryMode === 'asap' ? { deliveryMode: 'asap' } : {}),
             });
             transcriptIds.add(id);
             pendingList[i] = {

@@ -106,7 +106,12 @@ import {
   formatTranscriptJson,
   formatTranscriptMarkdown,
 } from '../chat/transcript-export';
-import { buildChatTimelineItems } from './chat-timeline-items';
+import {
+  buildChatTimelineItems,
+  groupedPendingPresentationItem,
+  groupChatTimelineItems,
+} from './chat-timeline-items';
+import { timelineUserFollowUps } from './chat-timeline-follow-ups';
 import { pendingPromptShowsWorkingState } from './optimistic-pending-prompts';
 import { useChatMcpAccess } from './use-chat-mcp-access';
 import { parseDroneHubDragData } from './drone-hub-dnd';
@@ -663,6 +668,10 @@ export function SelectedDroneWorkspace({
     () => buildChatTimelineItems(transcripts ?? [], visiblePendingPromptsWithStartup),
     [transcripts, visiblePendingPromptsWithStartup],
   );
+  const externalTimelineGroups = React.useMemo(
+    () => groupChatTimelineItems(externalTimelineItems),
+    [externalTimelineItems],
+  );
   const {
     bindContentRef: bindTranscriptContentRef,
     bindScrollRef: bindTranscriptScrollRef,
@@ -671,7 +680,7 @@ export function SelectedDroneWorkspace({
     updatePinned: updateTranscriptPinned,
   } = usePinnedTranscriptScroll({
     contextKey: `${currentDrone.id}:${activeChatName}`,
-    contentVersion: externalTimelineItems,
+    contentVersion: externalTimelineGroups,
     enabled: chatUiMode === 'transcript' && (currentAgentKey !== 'native' || currentChatIsDraft),
   });
   const workspaceChatScrollSnapshotRef = React.useRef<ChatScrollSnapshot | null>(null);
@@ -1303,23 +1312,35 @@ export function SelectedDroneWorkspace({
     />
   ) : null;
 
-  let latestFileChangesTimelineIndex = -1;
-  for (let index = externalTimelineItems.length - 1; index >= 0; index -= 1) {
-    if (!externalTimelineItems[index]?.item.fileChanges) continue;
-    latestFileChangesTimelineIndex = index;
+  let latestFileChangesGroupIndex = -1;
+  for (let index = externalTimelineGroups.length - 1; index >= 0; index -= 1) {
+    const group = externalTimelineGroups[index];
+    if (!group || ![group.primary, ...group.followUps].some((entry) => entry.item.fileChanges)) {
+      continue;
+    }
+    latestFileChangesGroupIndex = index;
     break;
   }
   const externalTranscriptItems: AgentChatTranscriptItem[] = [];
-  for (let timelineIndex = 0; timelineIndex < externalTimelineItems.length; timelineIndex += 1) {
-    const entry = externalTimelineItems[timelineIndex]!;
+  const renderedApprovalIds = new Set<string>();
+  for (let groupIndex = 0; groupIndex < externalTimelineGroups.length; groupIndex += 1) {
+    const group = externalTimelineGroups[groupIndex]!;
+    const entry = group.primary;
+    const followUps = timelineUserFollowUps(group.followUps, {
+      droneId: currentDrone.id,
+      droneHomePath: currentDroneHomePath,
+      onOpenFileReference: onOpenMarkdownFileReference,
+      transcriptMessageId,
+    });
     if (entry.kind === 'pending') {
       const prompt = entry.item;
+      const presentationPrompt = groupedPendingPresentationItem(group) ?? prompt;
       externalTranscriptItems.push({
         key: `pending:${prompt.id}`,
         kind: 'pending',
         content: ({ isLatestActivity }) => (
           <PendingTranscriptTurn
-            item={prompt}
+            item={presentationPrompt}
             showRoleIcons={false}
             onCancelQueued={requestCancelPendingPrompt}
             onOpenFileReference={onOpenMarkdownFileReference}
@@ -1337,14 +1358,47 @@ export function SelectedDroneWorkspace({
             autoFocusCreateNewChat={focusedNewChatActionId === prompt.id}
             onCreateNewChatAutoFocusHandled={onCreateNewChatAutoFocusHandled}
             autoExpandPrompt={isLatestActivity}
+            followUps={followUps}
             initiallyExpandFileChanges={
-              isLatestActivity && timelineIndex === latestFileChangesTimelineIndex
+              isLatestActivity && groupIndex === latestFileChangesGroupIndex
             }
           />
         ),
       });
-      for (const approval of prompt.approvals ?? []) {
-        if (resolvedCodexApprovalIds.has(approval.id)) continue;
+    } else {
+      const turn = entry.item;
+      const messageId = transcriptMessageId(turn);
+      externalTranscriptItems.push({
+        key: `transcript:${messageId}`,
+        kind: 'message',
+        content: ({ isLatestActivity }) => (
+          <TranscriptTurn
+            item={turn}
+            autoExpandAgentMessage={isLatestActivity}
+            followUps={followUps}
+            initiallyExpandFileChanges={
+              isLatestActivity && groupIndex === latestFileChangesGroupIndex
+            }
+            messageId={messageId}
+            onRollbackDockerSnapshot={rollbackDockerSnapshot}
+            onOpenFileReference={onOpenMarkdownFileReference}
+            onOpenLink={tryOpenMarkdownPullRequest}
+            linkedPullRequestContext={linkedPullRequestContext}
+            droneId={currentDrone.id}
+            droneHomePath={currentDroneHomePath}
+            showRoleIcons={false}
+            dockerSnapshotsEnabled={dockerSnapshotAfterAgentMessageEnabled}
+          />
+        ),
+      });
+    }
+    for (const approvalEntry of [entry, ...group.followUps]) {
+      if (approvalEntry.kind !== 'pending') continue;
+      for (const approval of approvalEntry.item.approvals ?? []) {
+        if (resolvedCodexApprovalIds.has(approval.id) || renderedApprovalIds.has(approval.id)) {
+          continue;
+        }
+        renderedApprovalIds.add(approval.id);
         externalTranscriptItems.push({
           key: `approval:${approval.id}`,
           kind: 'message',
@@ -1358,32 +1412,7 @@ export function SelectedDroneWorkspace({
           ),
         });
       }
-      continue;
     }
-    const turn = entry.item;
-    const messageId = transcriptMessageId(turn);
-    externalTranscriptItems.push({
-      key: `transcript:${messageId}`,
-      kind: 'message',
-      content: ({ isLatestActivity }) => (
-        <TranscriptTurn
-          item={turn}
-          autoExpandAgentMessage={isLatestActivity}
-          initiallyExpandFileChanges={
-            isLatestActivity && timelineIndex === latestFileChangesTimelineIndex
-          }
-          messageId={messageId}
-          onRollbackDockerSnapshot={rollbackDockerSnapshot}
-          onOpenFileReference={onOpenMarkdownFileReference}
-          onOpenLink={tryOpenMarkdownPullRequest}
-          linkedPullRequestContext={linkedPullRequestContext}
-          droneId={currentDrone.id}
-          droneHomePath={currentDroneHomePath}
-          showRoleIcons={false}
-          dockerSnapshotsEnabled={dockerSnapshotAfterAgentMessageEnabled}
-        />
-      ),
-    });
   }
   return (
     <>

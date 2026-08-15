@@ -69,10 +69,15 @@ describe('device mesh drone chat pages', () => {
         prompt: 'Also check mobile.',
         output: '',
         userOnly: true,
+        deliveryMode: 'asap',
       },
     ]).turns;
 
-    expect(turn).toMatchObject({ id: 'steering-input', userOnly: true });
+    expect(turn).toMatchObject({
+      id: 'steering-input',
+      userOnly: true,
+      deliveryMode: 'asap',
+    });
   });
 
   test('preserves plans, changed files, and bounded external-agent activity', () => {

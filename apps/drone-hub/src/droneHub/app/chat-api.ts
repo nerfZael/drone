@@ -172,6 +172,9 @@ export function sameTranscriptItem(left: TranscriptItem, right: TranscriptItem):
     sameOptionalText(left.session, right.session) &&
     sameOptionalText(left.logPath, right.logPath) &&
     left.ok === right.ok &&
+    left.userOnly === right.userOnly &&
+    left.deliveryMode === right.deliveryMode &&
+    left.silentCompletion === right.silentCompletion &&
     sameOptionalText(left.error, right.error) &&
     left.output === right.output &&
     sameAttachments(left.attachments, right.attachments) &&

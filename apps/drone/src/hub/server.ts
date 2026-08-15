@@ -2444,6 +2444,7 @@ type TranscriptTurn = {
   ok: boolean;
   output: string;
   userOnly?: boolean;
+  deliveryMode?: 'queue' | 'asap';
   error?: string;
   promptAt?: string;
   startedAt?: string;

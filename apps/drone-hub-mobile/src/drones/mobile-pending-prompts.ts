@@ -4,6 +4,7 @@ import {
   hasActivePendingPrompt,
   isStoppedRunError,
   isSendInNewChatQueueAction,
+  isEventNotificationPrompt,
   mergeOptimisticPendingPrompts,
   normalizeAgentPlan,
   normalizeAgentRunActivity,
@@ -16,6 +17,10 @@ import {
   type PromptQueueInterruption,
   type SendInNewChatQueueAction,
 } from '@drone/assistant-chat';
+import {
+  mobileMessageAsapFollowUps,
+  type MobileAsapFollowUp,
+} from '../local-assistant/mobile-asap-follow-ups';
 
 export type MobileDronePendingPrompt = {
   id: string;
@@ -26,6 +31,8 @@ export type MobileDronePendingPrompt = {
   imageCount: number;
   cancelable: boolean;
   startedAt?: string;
+  deliveryMode?: 'queue' | 'asap';
+  asapFollowUps?: MobileAsapFollowUp[];
   agentPlan?: AgentPlan;
   delivered?: boolean;
   queueInterruption?: PromptQueueInterruption;
@@ -39,6 +46,7 @@ export type MobileOptimisticPendingPrompt = {
   state: PendingPromptState;
   attachmentCount?: number;
   imageCount: number;
+  deliveryMode?: 'queue' | 'asap';
   error?: string;
   optimisticSent: true;
 };
@@ -56,6 +64,7 @@ export function optimisticMobilePendingPrompt(input: {
   imageCount?: number;
   at?: string;
   state?: 'queued' | 'sending';
+  deliveryMode?: 'queue' | 'asap';
 }): MobileOptimisticPendingPrompt {
   const attachmentCount = positiveCount(input.attachmentCount ?? input.imageCount);
   return {
@@ -65,6 +74,7 @@ export function optimisticMobilePendingPrompt(input: {
     state: input.state ?? 'sending',
     ...(attachmentCount > 0 ? { attachmentCount } : {}),
     imageCount: positiveCount(input.imageCount),
+    ...(input.deliveryMode ? { deliveryMode: input.deliveryMode } : {}),
     optimisticSent: true,
   };
 }
@@ -175,13 +185,19 @@ export function mobileDronePendingPrompts(
       .map((message: any) => String(message?.id ?? '').trim())
       .filter(Boolean),
   );
-  return (Array.isArray(raw) ? raw : []).flatMap((item: any) => {
+  for (const message of Array.isArray(messagesRaw) ? messagesRaw : []) {
+    for (const followUp of mobileMessageAsapFollowUps(message)) {
+      transcriptMessageIds.add(followUp.id);
+    }
+  }
+  const prompts = (Array.isArray(raw) ? raw : []).flatMap((item: any) => {
     const id = String(item?.id ?? '').trim();
     const state = String(item?.state ?? 'queued');
     if (!id || !['queued', 'sending', 'sent', 'failed'].includes(state)) return [];
     // The Hub deliberately retains recently completed pending rows for reconciliation. Once the
     // matching transcript turn is visible, rendering that row again would duplicate the prompt.
     if (state !== 'failed' && completedIds.has(id)) return [];
+    if (state !== 'failed' && transcriptMessageIds.has(id)) return [];
     const activity = normalizeAgentRunActivity(item?.activity);
     const stopped = state === 'failed' && isStoppedRunError(item?.error);
     const queueInterruption = normalizePromptQueueInterruption(item?.queueInterruption);
@@ -202,11 +218,7 @@ export function mobileDronePendingPrompts(
         transcriptMessageIds.has(id) ||
         Boolean(messageId && transcriptMessageIds.has(messageId)));
     const agentPlan = normalizeAgentPlan(item?.agentPlan);
-    const startedAt = String(
-      state === 'sending' || state === 'sent'
-        ? (item?.startedAt ?? '')
-        : (item?.startedAt ?? item?.at ?? ''),
-    ).trim();
+    const startedAt = String(item?.startedAt ?? item?.at ?? item?.createdAt ?? '').trim();
     const attachmentCount = positiveCount(
       item?.attachmentCount ??
         item?.imageCount ??
@@ -227,6 +239,9 @@ export function mobileDronePendingPrompts(
         ...(attachmentCount > 0 ? { attachmentCount } : {}),
         imageCount: positiveCount(item?.imageCount),
         cancelable: state === 'queued',
+        ...(item?.deliveryMode === 'asap' || item?.deliveryMode === 'queue'
+          ? { deliveryMode: item.deliveryMode }
+          : {}),
         ...(isSendInNewChatQueueAction(item?.action) ? { action: item.action } : {}),
         ...(startedAt ? { startedAt } : {}),
         ...(agentPlan ? { agentPlan } : {}),
@@ -235,4 +250,40 @@ export function mobileDronePendingPrompts(
       } satisfies MobileDronePendingPrompt,
     ];
   });
+  const grouped: MobileDronePendingPrompt[] = [];
+  for (const prompt of prompts) {
+    let owner: MobileDronePendingPrompt | undefined;
+    if (prompt.deliveryMode === 'asap' && prompt.status === 'pending' && !prompt.action) {
+      for (let index = grouped.length - 1; index >= 0; index -= 1) {
+        const candidate = grouped[index]!;
+        if (
+          candidate.status === 'pending' &&
+          candidate.deliveryMode !== 'asap' &&
+          !candidate.action &&
+          !isEventNotificationPrompt(candidate.prompt)
+        ) {
+          owner = candidate;
+          break;
+        }
+      }
+    }
+    if (!owner) {
+      grouped.push(prompt);
+      continue;
+    }
+    owner.asapFollowUps = [
+      ...(owner.asapFollowUps ?? []),
+      {
+        id: prompt.id,
+        prompt: prompt.prompt,
+        ...(prompt.startedAt ? { at: prompt.startedAt } : {}),
+        ...(prompt.attachmentCount
+          ? { attachmentCount: prompt.attachmentCount }
+          : prompt.imageCount > 0
+            ? { attachmentCount: prompt.imageCount }
+            : {}),
+      },
+    ];
+  }
+  return grouped;
 }

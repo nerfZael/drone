@@ -20,7 +20,7 @@ import type { MarkdownFileReference } from './MarkdownMessage';
 import { RelativeTimeText } from './RelativeTimeText';
 import { AgentPlanList } from './AgentPlanList';
 import { CreatingNewChatStatus, WorkingElapsedStatus } from './WorkingElapsedStatus';
-import { UserChatMessage } from './UserChatMessage';
+import { UserChatMessage, type UserChatMessageFollowUp } from './UserChatMessage';
 import { ChangedFilesCard } from './ChangedFilesCard';
 import { StoppedRunNotice } from './StoppedRunNotice';
 import { AgentRunFailureNotice } from './AgentRunFailureNotice';
@@ -51,6 +51,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   createNewChatError = null,
   autoFocusCreateNewChat = false,
   onCreateNewChatAutoFocusHandled,
+  followUps = [],
 }: {
   item: PendingPrompt;
   showRoleIcons?: boolean;
@@ -74,6 +75,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   createNewChatError?: string | null;
   autoFocusCreateNewChat?: boolean;
   onCreateNewChatAutoFocusHandled?: (promptId: string) => void;
+  followUps?: UserChatMessageFollowUp[];
 }) {
   const attachments = normalizeImageAttachmentRefs((item as any).attachments);
   const promptText = isAttachmentOnlyPrompt(item.prompt, attachments) ? '' : item.prompt;
@@ -203,6 +205,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
           headerEnd={pendingHeader}
           headerAttached={Boolean(actionPresentation)}
           text={promptText}
+          followUps={followUps}
           autoExpand={autoExpandPrompt}
           onOpenFileReference={onOpenFileReference}
           onOpenLink={onOpenLink}

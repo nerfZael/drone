@@ -177,6 +177,78 @@ describe('mobile drone pending prompts', () => {
     expect(groups[0]?.type === 'run' ? groups[0].startedAt : null).toBeUndefined();
   });
 
+  test('combines a live ASAP prompt with the active mobile run', () => {
+    const pending = [
+      {
+        id: 'active-run',
+        state: 'sent',
+        prompt: 'Review the implementation.',
+        at: '2026-08-15T10:00:00.000Z',
+        activity: {
+          version: 1,
+          source: 'codex',
+          updatedAt: '2026-08-15T10:00:03.000Z',
+          messages: [{ role: 'assistant', content: [{ type: 'thinking', thinking: 'Working.' }] }],
+        },
+      },
+      {
+        id: 'asap-follow-up',
+        state: 'sending',
+        deliveryMode: 'asap',
+        prompt: 'Also check Android.',
+        at: '2026-08-15T10:00:02.000Z',
+      },
+    ];
+
+    const messages = mobileDroneTurnsToAssistantMessages([], pending);
+    expect(messages[0]).toMatchObject({
+      id: 'active-run:user',
+      details: {
+        asapFollowUps: [
+          {
+            id: 'asap-follow-up',
+            prompt: 'Also check Android.',
+            at: '2026-08-15T10:00:02.000Z',
+          },
+        ],
+      },
+    });
+    expect(mobileDronePendingPrompts(pending, [], messages)).toEqual([]);
+  });
+
+  test('combines optimistic ASAP steering with a not-yet-active pending bubble', () => {
+    const prompts = mobileDronePendingPrompts(
+      [
+        optimisticMobilePendingPrompt({
+          id: 'active-run',
+          prompt: 'Review the implementation.',
+          at: '2026-08-15T10:00:00.000Z',
+          state: 'sending',
+        }),
+        optimisticMobilePendingPrompt({
+          id: 'asap-follow-up',
+          prompt: 'Also check Android.',
+          at: '2026-08-15T10:00:02.000Z',
+          state: 'sending',
+          deliveryMode: 'asap',
+        }),
+      ],
+      [],
+    );
+
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toMatchObject({
+      id: 'active-run',
+      asapFollowUps: [
+        {
+          id: 'asap-follow-up',
+          prompt: 'Also check Android.',
+          at: '2026-08-15T10:00:02.000Z',
+        },
+      ],
+    });
+  });
+
   test('uses the confirmed queued state instead of displaying a follow-up as active', () => {
     const local = optimisticMobilePendingPrompt({
       id: 'prompt-1',

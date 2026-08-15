@@ -86,10 +86,7 @@ describe('mobile drone sidebar model', () => {
   test('names a cloned drone with the desktop suffix and avoids collisions', () => {
     expect(suggestMobileDroneCloneName('Review', [])).toBe('Review-copy');
     expect(
-      suggestMobileDroneCloneName('Review', [
-        { name: 'review-COPY' },
-        { name: 'Review-copy-2' },
-      ]),
+      suggestMobileDroneCloneName('Review', [{ name: 'review-COPY' }, { name: 'Review-copy-2' }]),
     ).toBe('Review-copy-3');
   });
 
@@ -997,6 +994,7 @@ describe('mobile drone sidebar model', () => {
           completedAt: '2026-07-14T10:00:02.000Z',
           prompt: 'Ship it',
           output: 'Done',
+          deliveryMode: 'asap',
           model: 'gpt-5.2-codex',
           agentPlan: {
             items: [{ id: 'step-1', text: 'Ship the change', status: 'in_progress' }],
@@ -1011,6 +1009,7 @@ describe('mobile drone sidebar model', () => {
       turn: 4,
       prompt: 'Ship it',
       output: 'Done',
+      deliveryMode: 'asap',
       ok: true,
       model: 'gpt-5.2-codex',
       agentPlan: {
@@ -1039,6 +1038,76 @@ describe('mobile drone sidebar model', () => {
       role: 'user',
       content: 'Also inspect the mobile path.',
     });
+  });
+
+  test('combines same-turn ASAP steering with the original mobile user bubble', () => {
+    const messages = mobileDroneTurnsToAssistantMessages([
+      {
+        id: 'base-turn',
+        at: '2026-08-07T10:00:05.000Z',
+        promptAt: '2026-08-07T10:00:00.000Z',
+        completedAt: '2026-08-07T10:00:05.000Z',
+        prompt: 'Review the implementation.',
+        output: 'Done.',
+        ok: true,
+      },
+      {
+        id: 'steering-input',
+        at: '2026-08-07T10:00:02.000Z',
+        promptAt: '2026-08-07T10:00:02.000Z',
+        completedAt: '2026-08-07T10:00:02.000Z',
+        prompt: 'Also inspect the Android path.',
+        output: '',
+        ok: true,
+        userOnly: true,
+        deliveryMode: 'asap',
+      },
+    ]);
+
+    expect(messages.map((message) => message.role)).toEqual(['user', 'assistant']);
+    expect(messages[0]).toMatchObject({
+      content: 'Review the implementation.',
+      details: {
+        asapFollowUps: [
+          {
+            id: 'steering-input',
+            prompt: 'Also inspect the Android path.',
+            at: '2026-08-07T10:00:02.000Z',
+          },
+        ],
+      },
+    });
+  });
+
+  test('keeps queued and independently answered follow-ups as separate mobile turns', () => {
+    const messages = mobileDroneTurnsToAssistantMessages([
+      {
+        id: 'base-turn',
+        at: '2026-08-07T10:00:05.000Z',
+        promptAt: '2026-08-07T10:00:00.000Z',
+        completedAt: '2026-08-07T10:00:05.000Z',
+        prompt: 'Start the work.',
+        output: 'First result.',
+      },
+      {
+        id: 'queued-follow-up',
+        at: '2026-08-07T10:00:02.000Z',
+        prompt: 'Do this afterward.',
+        output: '',
+        userOnly: true,
+        deliveryMode: 'queue',
+      },
+      {
+        id: 'answered-follow-up',
+        at: '2026-08-07T10:00:10.000Z',
+        prompt: 'Now answer this.',
+        output: 'Second result.',
+      },
+    ]);
+
+    expect(
+      messages.filter((message) => message.role === 'user').map((message) => message.content),
+    ).toEqual(['Start the work.', 'Do this afterward.', 'Now answer this.']);
   });
 
   test('unwraps paged native history entries for the transcript', () => {

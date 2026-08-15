@@ -23,7 +23,7 @@ import { IconSnapshot, IconSpinner } from './icons';
 import { ChatMessageFrame } from './ChatMessageFrame';
 import { collectInlineAgentMedia } from './inline-agent-media';
 import { AgentRunSummaryLine } from './WorkingElapsedStatus';
-import { UserChatMessage } from './UserChatMessage';
+import { UserChatMessage, type UserChatMessageFollowUp } from './UserChatMessage';
 import { StoppedRunNotice } from './StoppedRunNotice';
 import { AgentRunFailureNotice } from './AgentRunFailureNotice';
 import { ChangedFilesCard } from './ChangedFilesCard';
@@ -47,6 +47,31 @@ function sameAttachments(aRaw: unknown, bRaw: unknown): boolean {
   return true;
 }
 
+function sameFollowUps(a: UserChatMessageFollowUp[], b: UserChatMessageFollowUp[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  return a.every((left, index) => {
+    const right = b[index];
+    return (
+      Boolean(right) &&
+      left.key === right.key &&
+      left.contentKey === right.contentKey &&
+      left.at === right.at &&
+      left.text === right.text &&
+      (left.images?.length ?? 0) === (right.images?.length ?? 0) &&
+      (left.images ?? []).every((image, imageIndex) => {
+        const rightImage = right.images?.[imageIndex];
+        return (
+          Boolean(rightImage) &&
+          image.key === rightImage?.key &&
+          image.src === rightImage?.src &&
+          image.alt === rightImage?.alt
+        );
+      })
+    );
+  });
+}
+
 export const TranscriptTurn = React.memo(
   function TranscriptTurn({
     item,
@@ -62,6 +87,7 @@ export const TranscriptTurn = React.memo(
     dockerSnapshotsEnabled = false,
     autoExpandAgentMessage = false,
     initiallyExpandFileChanges = false,
+    followUps = [],
   }: {
     item: TranscriptItem;
     messageId: string;
@@ -76,6 +102,7 @@ export const TranscriptTurn = React.memo(
     dockerSnapshotsEnabled?: boolean;
     autoExpandAgentMessage?: boolean;
     initiallyExpandFileChanges?: boolean;
+    followUps?: UserChatMessageFollowUp[];
   }) {
     const attachments = normalizeImageAttachmentRefs((item as any).attachments);
     const promptText = isAttachmentOnlyPrompt(item.prompt, attachments) ? '' : item.prompt;
@@ -142,6 +169,7 @@ export const TranscriptTurn = React.memo(
             at={promptIso}
             showRoleIcons={showRoleIcons}
             text={promptText}
+            followUps={followUps}
             onOpenFileReference={onOpenFileReference}
             onOpenLink={onOpenLink}
             attachmentContent={
@@ -388,5 +416,6 @@ export const TranscriptTurn = React.memo(
     (a.item.dockerSnapshot?.restoredAt ?? '') === (b.item.dockerSnapshot?.restoredAt ?? '') &&
     (a.item.dockerSnapshot?.error ?? '') === (b.item.dockerSnapshot?.error ?? '') &&
     (a.showRoleIcons ?? false) === (b.showRoleIcons ?? false) &&
-    (a.actionsEnabled ?? true) === (b.actionsEnabled ?? true),
+    (a.actionsEnabled ?? true) === (b.actionsEnabled ?? true) &&
+    sameFollowUps(a.followUps ?? [], b.followUps ?? []),
 );

@@ -1,6 +1,7 @@
 import {
   agentRunActivityHasResponse,
   isAgentRunFileChanges,
+  isEventNotificationPrompt,
   isStoppedRunError,
   normalizeProviderModelCatalog,
   normalizeAgentPlan,
@@ -22,6 +23,10 @@ import {
   type SidebarTreeFolderNode,
 } from '@drone/hub-model/sidebar';
 import { mobileRunDetails } from '../local-assistant/mobile-transcript-runs';
+import {
+  mobileMessageDetailsWithAsapFollowUps,
+  type MobileAsapFollowUp,
+} from '../local-assistant/mobile-asap-follow-ups';
 
 export type MobileDroneSummary = {
   id: string;
@@ -69,6 +74,7 @@ export type MobileDroneTurn = {
   prompt: string;
   output: string;
   userOnly?: boolean;
+  deliveryMode?: 'queue' | 'asap';
   error: string;
   ok: boolean;
   model: string;
@@ -412,8 +418,7 @@ export function normalizeMobileDrone(raw: unknown): MobileDroneSummary | null {
             text(repo.hostPath) ||
             text(repo.dest),
           ),
-    persistVolume:
-      typeof value.persistVolume === 'boolean' ? value.persistVolume : undefined,
+    persistVolume: typeof value.persistVolume === 'boolean' ? value.persistVolume : undefined,
     fleetParentId: text(value.fleetParentId) || null,
     chats,
     draftChats,
@@ -764,18 +769,65 @@ export function mobileDroneTurnsToAssistantMessages(
 ): AssistantMessage[] {
   const turns = normalizeMobileDroneTurns(raw);
   const completedIds = new Set(turns.map((turn) => turn.id));
-  const completedMessages = turns.flatMap((turn): AssistantMessage[] => {
+  const orderedTurns = turns
+    .map((turn, order) => ({ turn, order, atMs: Date.parse(turn.promptAt || turn.at) }))
+    .sort((left, right) => {
+      const leftTimed = Number.isFinite(left.atMs);
+      const rightTimed = Number.isFinite(right.atMs);
+      if (leftTimed && rightTimed && left.atMs !== right.atMs) return left.atMs - right.atMs;
+      if (leftTimed !== rightTimed) return leftTimed ? -1 : 1;
+      return left.order - right.order;
+    })
+    .map(({ turn }) => turn);
+  const completedGroups: Array<{ primary: MobileDroneTurn; followUps: MobileDroneTurn[] }> = [];
+  for (const turn of orderedTurns) {
+    let owner: (typeof completedGroups)[number] | undefined;
+    if (turn.userOnly === true && turn.deliveryMode !== 'queue') {
+      const followUpAt = Date.parse(turn.promptAt || turn.at);
+      for (let index = completedGroups.length - 1; index >= 0; index -= 1) {
+        const candidate = completedGroups[index]!;
+        if (
+          candidate.primary.userOnly !== true &&
+          !isEventNotificationPrompt(candidate.primary.prompt) &&
+          Number.isFinite(followUpAt) &&
+          Date.parse(candidate.primary.completedAt) >= followUpAt
+        ) {
+          owner = candidate;
+          break;
+        }
+      }
+    }
+    if (owner) owner.followUps.push(turn);
+    else completedGroups.push({ primary: turn, followUps: [] });
+  }
+  const completedMessages = completedGroups.flatMap((group): AssistantMessage[] => {
+    const turn = group.primary;
     const { prompt, output, error, attachments } = turn;
+    const asapFollowUps: MobileAsapFollowUp[] = group.followUps.map((followUp) => ({
+      id: followUp.id,
+      prompt: followUp.prompt,
+      ...(followUp.promptAt || followUp.at ? { at: followUp.promptAt || followUp.at } : {}),
+      ...(followUp.attachments.length > 0
+        ? {
+            attachmentCount: followUp.attachments.length,
+            attachments: followUp.attachments,
+          }
+        : {}),
+    }));
     const promptTruncated = turn.promptTruncated === true || turn.meshTruncated === true;
     const responseTruncated = turn.responseTruncated === true || turn.meshTruncated === true;
     const messages: AssistantMessage[] = [];
-    if (prompt || attachments.length > 0) {
+    if (prompt || attachments.length > 0 || asapFollowUps.length > 0) {
+      const details = mobileMessageDetailsWithAsapFollowUps(
+        attachments.length > 0 ? { attachments } : undefined,
+        asapFollowUps,
+      );
       messages.push({
         ...(promptTruncated ? { id: `${turn.id}:user` } : {}),
         role: 'user',
         ...(prompt ? { content: prompt } : {}),
         ...(turn.promptAt || turn.at ? { createdAt: turn.promptAt || turn.at } : {}),
-        ...(attachments.length > 0 ? { details: { attachments } } : {}),
+        ...(details ? { details } : {}),
         ...(promptTruncated ? { meshTruncated: true } : {}),
       });
     }
@@ -855,72 +907,135 @@ export function mobileDroneTurnsToAssistantMessages(
     }
     return messages;
   });
-  const pendingMessages = (Array.isArray(pendingRaw) ? pendingRaw : []).flatMap(
-    (item: any): AssistantMessage[] => {
-      const id = String(item?.id ?? '').trim();
-      const state = String(item?.state ?? '').trim();
-      const activity = normalizeAgentRunActivity(item?.activity);
-      if (
-        !id ||
-        completedIds.has(id) ||
-        !activity ||
-        !['sending', 'sent', 'failed'].includes(state)
-      ) {
-        return [];
+  const pendingGroups: Array<{ primary: any; followUps: any[] }> = [];
+  const orderedPending = (Array.isArray(pendingRaw) ? pendingRaw : [])
+    .map((item, order) => ({
+      item,
+      order,
+      atMs: Date.parse(String(item?.at ?? item?.createdAt ?? '')),
+    }))
+    .sort((left, right) => {
+      const leftTimed = Number.isFinite(left.atMs);
+      const rightTimed = Number.isFinite(right.atMs);
+      if (leftTimed && rightTimed && left.atMs !== right.atMs) return left.atMs - right.atMs;
+      if (leftTimed !== rightTimed) return leftTimed ? -1 : 1;
+      return left.order - right.order;
+    })
+    .map(({ item }) => item);
+  for (const item of orderedPending) {
+    const id = String(item?.id ?? '').trim();
+    const state = String(item?.state ?? '').trim();
+    if (!id || completedIds.has(id) || !['sending', 'sent', 'failed'].includes(state)) continue;
+    let owner: (typeof pendingGroups)[number] | undefined;
+    if (item?.deliveryMode === 'asap' && state !== 'failed' && !item?.action) {
+      for (let index = pendingGroups.length - 1; index >= 0; index -= 1) {
+        const candidate = pendingGroups[index]!.primary;
+        if (
+          candidate?.deliveryMode !== 'asap' &&
+          ['sending', 'sent'].includes(String(candidate?.state ?? '')) &&
+          !candidate?.action &&
+          !isEventNotificationPrompt(String(candidate?.prompt ?? ''))
+        ) {
+          owner = pendingGroups[index];
+          break;
+        }
       }
-      const at = String(item?.at ?? '').trim();
-      const startedAt = String(item?.startedAt ?? '').trim();
-      const updatedAt = String(item?.updatedAt ?? at);
-      const stopped = state === 'failed' && isStoppedRunError(item?.error);
-      const displayedActivity =
-        state === 'failed' ? (settleAgentRunActivity(activity) ?? activity) : activity;
-      const plan = normalizeAgentPlan(item?.agentPlan);
-      const runDetails = mobileRunDetails({
-        id,
-        ...(startedAt ? { startedAt } : {}),
-        ...(state === 'failed' ? { completedAt: updatedAt } : {}),
-        plan,
+    }
+    if (owner) owner.followUps.push(item);
+    else pendingGroups.push({ primary: item, followUps: [] });
+  }
+  const pendingMessages = pendingGroups.flatMap((group): AssistantMessage[] => {
+    const item = group.primary;
+    const id = String(item?.id ?? '').trim();
+    const state = String(item?.state ?? '').trim();
+    let presentation = item;
+    let activity = normalizeAgentRunActivity(item?.activity);
+    let activityCount = activity?.messages.length ?? -1;
+    let plan = normalizeAgentPlan(item?.agentPlan);
+    let fileChanges = item?.fileChanges;
+    for (const followUp of group.followUps) {
+      const followUpActivity = normalizeAgentRunActivity(followUp?.activity);
+      const followUpCount = followUpActivity?.messages.length ?? -1;
+      if (followUpCount >= 0 && followUpCount >= activityCount) {
+        presentation = followUp;
+        activity = followUpActivity;
+        activityCount = followUpCount;
+      }
+      plan = normalizeAgentPlan(followUp?.agentPlan) ?? plan;
+      fileChanges = followUp?.fileChanges ?? fileChanges;
+    }
+    if (!activity || !['sending', 'sent', 'failed'].includes(state)) {
+      return [];
+    }
+    const at = String(item?.at ?? item?.createdAt ?? '').trim();
+    const startedAt = String(item?.startedAt ?? '').trim();
+    const updatedAt = String(presentation?.updatedAt ?? item?.updatedAt ?? at);
+    const stopped = state === 'failed' && isStoppedRunError(item?.error);
+    const displayedActivity =
+      state === 'failed' ? (settleAgentRunActivity(activity) ?? activity) : activity;
+    const runDetails = mobileRunDetails({
+      id,
+      ...(startedAt ? { startedAt } : {}),
+      ...(state === 'failed' ? { completedAt: updatedAt } : {}),
+      plan,
+    });
+    const asapFollowUps: MobileAsapFollowUp[] = group.followUps.map((followUp) => {
+      const attachmentCount = Math.max(
+        0,
+        Number(
+          followUp?.attachmentCount ??
+            followUp?.imageCount ??
+            (Array.isArray(followUp?.attachments) ? followUp.attachments.length : 0),
+        ) || 0,
+      );
+      return {
+        id: String(followUp?.id ?? '').trim(),
+        prompt: String(followUp?.prompt ?? ''),
+        ...(String(followUp?.at ?? followUp?.createdAt ?? '').trim()
+          ? { at: String(followUp?.at ?? followUp?.createdAt).trim() }
+          : {}),
+        ...(attachmentCount > 0 ? { attachmentCount } : {}),
+      };
+    });
+    const messages: AssistantMessage[] = [
+      {
+        id: `${id}:user`,
+        role: 'user',
+        content: String(item?.prompt ?? ''),
+        createdAt: at,
+        details: mobileMessageDetailsWithAsapFollowUps(runDetails, asapFollowUps),
+      },
+      ...mobileActivityMessages({
+        activity: displayedActivity,
+        turnId: id,
+        createdAt: updatedAt,
+        runDetails,
+        meshTruncated: presentation?.activityMeshTruncated === true,
+        fullLoadAvailable: false,
+      }),
+    ];
+    if (state === 'failed' && !stopped) {
+      messages.push({
+        id: `${id}:assistant`,
+        role: 'assistant',
+        content: '',
+        createdAt: updatedAt,
+        details: runDetails,
+        isError: true,
+        errorMessage: String(item?.error ?? '').trim() || 'failed to send',
       });
-      const messages: AssistantMessage[] = [
-        {
-          id: `${id}:user`,
-          role: 'user',
-          content: String(item?.prompt ?? ''),
-          createdAt: at,
-          details: runDetails,
-        },
-        ...mobileActivityMessages({
-          activity: displayedActivity,
-          turnId: id,
-          createdAt: updatedAt,
-          runDetails,
-          meshTruncated: item?.activityMeshTruncated === true,
-          fullLoadAvailable: false,
-        }),
-      ];
-      if (state === 'failed' && !stopped) {
-        messages.push({
-          id: `${id}:assistant`,
-          role: 'assistant',
-          content: '',
-          createdAt: updatedAt,
-          details: runDetails,
-          isError: true,
-          errorMessage: String(item?.error ?? '').trim() || 'failed to send',
-        });
-      }
-      if (isAgentRunFileChanges(item?.fileChanges)) {
-        messages.push({
-          id: `${id}:run-summary`,
-          role: 'runSummary',
-          content: '',
-          createdAt: updatedAt,
-          details: { fileChanges: item.fileChanges },
-        });
-      }
-      return messages;
-    },
-  );
+    }
+    if (isAgentRunFileChanges(fileChanges)) {
+      messages.push({
+        id: `${id}:run-summary`,
+        role: 'runSummary',
+        content: '',
+        createdAt: updatedAt,
+        details: { fileChanges },
+      });
+    }
+    return messages;
+  });
   return [...completedMessages, ...pendingMessages];
 }
 
@@ -1008,6 +1123,9 @@ export function normalizeMobileDroneTurns(raw: unknown): MobileDroneTurn[] {
         prompt: text(turn.prompt),
         output: text(turn.output),
         ...(turn.userOnly === true ? { userOnly: true } : {}),
+        ...(turn.deliveryMode === 'asap' || turn.deliveryMode === 'queue'
+          ? { deliveryMode: turn.deliveryMode }
+          : {}),
         error: text(turn.error),
         ok: turn.ok !== false,
         model: text(turn.model),

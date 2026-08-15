@@ -1350,6 +1350,7 @@ export function DronesScreen({
         attachmentCount: attachments.length,
         imageCount: attachments.filter((attachment) => attachment.mime.startsWith('image/')).length,
         state: running && deliveryMode !== 'asap' ? 'queued' : 'sending',
+        deliveryMode,
       });
       // A continuous-voice retry reuses its delivery ID. Replace any failed
       // optimistic row from the prior attempt instead of rendering a duplicate.

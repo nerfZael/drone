@@ -103,6 +103,13 @@ describe('chat api transcript equality', () => {
 
     expect(sameTranscriptItem(before, after)).toBe(false);
   });
+
+  test('detects steering presentation metadata', () => {
+    const before = transcriptItem({ userOnly: true });
+    const after = transcriptItem({ userOnly: true, deliveryMode: 'asap' });
+
+    expect(sameTranscriptItem(before, after)).toBe(false);
+  });
 });
 
 describe('chat api request scopes', () => {

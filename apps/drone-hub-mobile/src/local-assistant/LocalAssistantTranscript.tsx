@@ -77,6 +77,8 @@ import {
 } from './mobile-transcript-runs';
 import { shouldToggleMessageTimestamp } from './message-touch-model';
 import { MobileEventNotification } from '../drones/MobileEventNotification';
+import { MobileAsapFollowUps } from './MobileAsapFollowUps';
+import { mobileMessageAsapFollowUps } from './mobile-asap-follow-ups';
 
 function MobileAgentFailureCard({
   failure,
@@ -1422,9 +1424,7 @@ function TranscriptRun({
   const submittedAtMs = timestampMs(messageTimestamp(run.user.message));
   const startedAtMs = timestampMs(run.startedAt);
   const preRunDurationMs =
-    Number.isFinite(submittedAtMs) &&
-    Number.isFinite(startedAtMs) &&
-    startedAtMs >= submittedAtMs
+    Number.isFinite(submittedAtMs) && Number.isFinite(startedAtMs) && startedAtMs >= submittedAtMs
       ? startedAtMs - submittedAtMs
       : undefined;
   return (
@@ -1458,37 +1458,37 @@ function TranscriptRun({
               hasActivityDetails && hasPlan && styles.runDetailsSideBySide,
             ]}
           >
-              {hasActivityDetails ? (
-                <ScrollView
-                  nestedScrollEnabled
-                  showsVerticalScrollIndicator
-                  style={[styles.activityRail, hasPlan && styles.activityRailSideBySide]}
-                  contentContainerStyle={styles.activityRailContent}
-                >
-                  {visibleActivityItems.map((item) => (
-                    <View key={item.key} style={styles.activityItem}>
-                      {renderItem(item, awaitingApproval)}
-                    </View>
-                  ))}
-                  {thinking && !awaitingApproval ? (
-                    <View
-                      accessible
-                      accessibilityLabel="Assistant is thinking"
-                      accessibilityLiveRegion="polite"
-                      accessibilityRole="progressbar"
-                      style={styles.thinkingActivity}
-                    >
-                      <ActivityIndicator accessible={false} color={colors.accent} size={12} />
-                      <Text style={styles.thinkingActivityText}>Thinking…</Text>
-                    </View>
-                  ) : null}
-                </ScrollView>
-              ) : null}
-              {hasPlan ? (
-                <View style={[styles.runPlan, hasActivityDetails && styles.runPlanSideBySide]}>
-                  <MobileAgentPlanList plan={run.plan} running={run.active} />
-                </View>
-              ) : null}
+            {hasActivityDetails ? (
+              <ScrollView
+                nestedScrollEnabled
+                showsVerticalScrollIndicator
+                style={[styles.activityRail, hasPlan && styles.activityRailSideBySide]}
+                contentContainerStyle={styles.activityRailContent}
+              >
+                {visibleActivityItems.map((item) => (
+                  <View key={item.key} style={styles.activityItem}>
+                    {renderItem(item, awaitingApproval)}
+                  </View>
+                ))}
+                {thinking && !awaitingApproval ? (
+                  <View
+                    accessible
+                    accessibilityLabel="Assistant is thinking"
+                    accessibilityLiveRegion="polite"
+                    accessibilityRole="progressbar"
+                    style={styles.thinkingActivity}
+                  >
+                    <ActivityIndicator accessible={false} color={colors.accent} size={12} />
+                    <Text style={styles.thinkingActivityText}>Thinking…</Text>
+                  </View>
+                ) : null}
+              </ScrollView>
+            ) : null}
+            {hasPlan ? (
+              <View style={[styles.runPlan, hasActivityDetails && styles.runPlanSideBySide]}>
+                <MobileAgentPlanList plan={run.plan} running={run.active} />
+              </View>
+            ) : null}
           </View>
         ) : null}
       </View>
@@ -1687,11 +1687,13 @@ export function MobileAssistantTranscript({
     );
     const images = messageImageParts(item.message);
     const files = attachments(item.message);
+    const asapFollowUps = mobileMessageAsapFollowUps(item.message);
     if (
       !text &&
       !hasThinking &&
       images.length === 0 &&
       files.length === 0 &&
+      asapFollowUps.length === 0 &&
       !item.message.errorMessage
     )
       return null;
@@ -1875,7 +1877,27 @@ export function MobileAssistantTranscript({
           {timestampVisible ? (
             <RelativeMessageTimestamp timestamp={timestamp} style={styles.userMessageTime} />
           ) : null}
-          <View style={[styles.message, styles.userMessage]}>{content}</View>
+          <View style={[styles.message, styles.userMessage]}>
+            {content}
+            <MobileAsapFollowUps
+              followUps={asapFollowUps}
+              renderPrompt={(followUp) =>
+                nativeMarkdownHasCodeBlock(followUp.prompt) ? (
+                  <NativeMarkdown
+                    text={followUp.prompt}
+                    tone="user"
+                    onOpenFileReference={onOpenFileReference}
+                  />
+                ) : (
+                  <LinkedMessageText
+                    text={followUp.prompt}
+                    user
+                    onOpenFileReference={onOpenFileReference}
+                  />
+                )
+              }
+            />
+          </View>
         </Pressable>
       );
     }

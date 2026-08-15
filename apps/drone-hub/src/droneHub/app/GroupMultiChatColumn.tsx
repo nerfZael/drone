@@ -59,6 +59,12 @@ import { assignedDroneIdsFromData } from './drone-hub-dnd-utils';
 import { DroneHubPermissionsView } from './DroneHubPermissionsView';
 import { DroneChatComposerMetadata } from './ChatComposerMetadata';
 import type { ChatResourceSubscriptionInfo } from '../../domain';
+import {
+  buildChatTimelineItems,
+  groupedPendingPresentationItem,
+  groupChatTimelineItems,
+} from './chat-timeline-items';
+import { timelineUserFollowUps } from './chat-timeline-follow-ups';
 
 const DirtyDroneApplyModal = React.lazy(async () => {
   const { DirtyDroneApplyModal } = await import('./DirtyDroneApplyModal');
@@ -422,6 +428,11 @@ export function GroupMultiChatColumn({
   const visiblePendingPrompts = React.useMemo(() => {
     return filterCompletedPendingPrompts(pendingPrompts, transcripts);
   }, [pendingPrompts, transcripts]);
+  const timelineGroups = React.useMemo(
+    () =>
+      groupChatTimelineItems(buildChatTimelineItems(transcripts ?? [], visiblePendingPrompts)),
+    [transcripts, visiblePendingPrompts],
+  );
 
   const cancelPendingPrompt = React.useCallback(
     async (promptIdRaw: string): Promise<void> => {
@@ -854,19 +865,14 @@ export function GroupMultiChatColumn({
     if (!ok) setQuickActionError('No preview URL available yet.');
   }, [disabledByProvisioning, drone]);
 
-  let latestTranscriptFileChangesIndex = -1;
-  let latestPendingFileChangesIndex = -1;
-  for (let index = visiblePendingPrompts.length - 1; index >= 0; index -= 1) {
-    if (!visiblePendingPrompts[index]?.fileChanges) continue;
-    latestPendingFileChangesIndex = index;
-    break;
-  }
-  if (latestPendingFileChangesIndex < 0) {
-    for (let index = (transcripts?.length ?? 0) - 1; index >= 0; index -= 1) {
-      if (!transcripts?.[index]?.fileChanges) continue;
-      latestTranscriptFileChangesIndex = index;
-      break;
+  let latestFileChangesGroupIndex = -1;
+  for (let index = timelineGroups.length - 1; index >= 0; index -= 1) {
+    const group = timelineGroups[index];
+    if (!group || ![group.primary, ...group.followUps].some((entry) => entry.item.fileChanges)) {
+      continue;
     }
+    latestFileChangesGroupIndex = index;
+    break;
   }
 
   return (
@@ -1065,52 +1071,57 @@ export function GroupMultiChatColumn({
           </div>
         ) : (transcripts && transcripts.length > 0) || visiblePendingPrompts.length > 0 ? (
           <div className="space-y-5">
-            {(transcripts ?? []).map((item, index, items) => {
-              const messageId = `${drone.id}:${item.turn}:${item.at}`;
+            {timelineGroups.map((group, index) => {
+              const entry = group.primary;
+              const followUps = timelineUserFollowUps(group.followUps, {
+                droneId: drone.id,
+                droneHomePath: droneHome,
+              });
+              const latest = index === timelineGroups.length - 1;
+              if (entry.kind === 'turn') {
+                const item = entry.item;
+                const messageId = `${drone.id}:${item.turn}:${item.at}`;
+                return (
+                  <TranscriptTurn
+                    key={messageId}
+                    item={item}
+                    followUps={followUps}
+                    autoExpandAgentMessage={latest}
+                    initiallyExpandFileChanges={
+                      index === latestFileChangesGroupIndex && latest
+                    }
+                    messageId={messageId}
+                    droneId={drone.id}
+                    droneHomePath={droneHome}
+                    showRoleIcons={false}
+                  />
+                );
+              }
+              const item = entry.item;
               return (
-                <TranscriptTurn
-                  key={messageId}
-                  item={item}
-                  autoExpandAgentMessage={
-                    index === items.length - 1 && visiblePendingPrompts.length === 0
-                  }
-                  initiallyExpandFileChanges={
-                    index === latestTranscriptFileChangesIndex &&
-                    index === items.length - 1 &&
-                    visiblePendingPrompts.length === 0
-                  }
-                  messageId={messageId}
+                <PendingTranscriptTurn
+                  key={`${drone.id}:pending:${item.id}`}
+                  item={groupedPendingPresentationItem(group) ?? item}
+                  followUps={followUps}
+                  autoExpandPrompt={latest}
+                  initiallyExpandFileChanges={index === latestFileChangesGroupIndex && latest}
                   droneId={drone.id}
                   droneHomePath={droneHome}
                   showRoleIcons={false}
+                  onCancelQueued={cancelPendingPrompt}
+                  cancelBusy={Boolean(cancellingPendingPromptById[item.id])}
+                  cancelError={cancelPendingPromptErrorById[item.id] ?? null}
+                  onResolveInterruption={resolvePendingPromptInterruption}
+                  resolvingInterruption={Boolean(resolvingInterruptionById[item.id])}
+                  interruptionError={interruptionResolutionErrorById[item.id] ?? null}
+                  onCreateNewChatNow={(actionId) => onCreateQueuedNewChatNow(actionId, chatName)}
+                  createNewChatBusy={Boolean(promotingNewChatActionById[item.id])}
+                  createNewChatError={promoteNewChatActionErrorById[item.id] ?? null}
+                  autoFocusCreateNewChat={focusedNewChatActionId === item.id}
+                  onCreateNewChatAutoFocusHandled={onCreateNewChatAutoFocusHandled}
                 />
               );
             })}
-            {visiblePendingPrompts.map((item, index) => (
-              <PendingTranscriptTurn
-                key={`${drone.id}:pending:${item.id}`}
-                item={item}
-                autoExpandPrompt={index === visiblePendingPrompts.length - 1}
-                initiallyExpandFileChanges={
-                  index === latestPendingFileChangesIndex &&
-                  index === visiblePendingPrompts.length - 1
-                }
-                droneId={drone.id}
-                droneHomePath={droneHome}
-                showRoleIcons={false}
-                onCancelQueued={cancelPendingPrompt}
-                cancelBusy={Boolean(cancellingPendingPromptById[item.id])}
-                cancelError={cancelPendingPromptErrorById[item.id] ?? null}
-                onResolveInterruption={resolvePendingPromptInterruption}
-                resolvingInterruption={Boolean(resolvingInterruptionById[item.id])}
-                interruptionError={interruptionResolutionErrorById[item.id] ?? null}
-                onCreateNewChatNow={(actionId) => onCreateQueuedNewChatNow(actionId, chatName)}
-                createNewChatBusy={Boolean(promotingNewChatActionById[item.id])}
-                createNewChatError={promoteNewChatActionErrorById[item.id] ?? null}
-                autoFocusCreateNewChat={focusedNewChatActionId === item.id}
-                onCreateNewChatAutoFocusHandled={onCreateNewChatAutoFocusHandled}
-              />
-            ))}
           </div>
         ) : (
           <EmptyState

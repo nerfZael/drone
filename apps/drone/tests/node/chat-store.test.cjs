@@ -109,6 +109,32 @@ describe('canonical chat and transcript repository', () => {
     );
   });
 
+  test('preserves ASAP delivery metadata on historical steering turns', async () => {
+    tempDataDir('asap-steering-turn');
+    await upsertChatInStore({
+      droneId: 'drone-1',
+      chatName: 'default',
+      chatEntry: legacyChat('steering'),
+    });
+    await upsertTranscriptTurnInStore({
+      droneId: 'drone-1',
+      chatName: 'default',
+      turn: {
+        id: 'steer-1',
+        at: '2026-08-07T10:01:00.000Z',
+        prompt: 'Also inspect the mobile path.',
+        ok: true,
+        output: '',
+        userOnly: true,
+        deliveryMode: 'asap',
+      },
+    });
+
+    const [turn] = readChatFromStore({ droneId: 'drone-1', chatName: 'default' }).chat.turns;
+    assert.equal(turn.userOnly, true);
+    assert.equal(turn.deliveryMode, 'asap');
+  });
+
   test('drops retired follow-up metadata while importing and reading chats', async () => {
     tempDataDir('retired-followup-metadata');
     await upsertChatInStore({

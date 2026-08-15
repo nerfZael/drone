@@ -17,6 +17,8 @@ import {
 } from '@drone/assistant-chat';
 import { colors } from '../theme';
 import { MobileEventNotification } from '../drones/MobileEventNotification';
+import { MobileAsapFollowUps } from '../local-assistant/MobileAsapFollowUps';
+import type { MobileAsapFollowUp } from '../local-assistant/mobile-asap-follow-ups';
 
 export type MobileQueuedPrompt = {
   id: string;
@@ -31,6 +33,8 @@ export type MobileQueuedPrompt = {
   delivered?: boolean;
   queueInterruption?: PromptQueueInterruption;
   action?: SendInNewChatQueueAction;
+  deliveryMode?: 'queue' | 'asap';
+  asapFollowUps?: MobileAsapFollowUp[];
 };
 
 export function MobileAgentFailureDetails({
@@ -225,6 +229,7 @@ export function QueuedPromptRows({
                     {attachmentCount} attachment{attachmentCount === 1 ? '' : 's'}
                   </Text>
                 ) : null}
+                <MobileAsapFollowUps followUps={prompt.asapFollowUps ?? []} />
               </View>
             </View>
           );

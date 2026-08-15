@@ -559,6 +559,7 @@ export type TranscriptItem = {
   error?: string;
   output: string;
   userOnly?: boolean;
+  deliveryMode?: 'queue' | 'asap';
   agentPlan?: AgentPlan;
   fileChanges?: AgentRunFileChanges;
   dockerSnapshot?: {
