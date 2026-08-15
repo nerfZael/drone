@@ -14,6 +14,7 @@ import { DesktopDeviceProvider, useDesktopDevice } from './droneHub/app/DesktopD
 import { RemoteDeviceWorkspace } from './droneHub/app/RemoteDeviceWorkspace';
 import { useIdleMonacoEditorPreload } from './droneHub/files/monaco-editor-loader';
 import { ContinuousDictationProvider } from './droneHub/chat/ContinuousDictationContext';
+import { ActiveComposerProvider } from './droneHub/chat/ActiveComposerContext';
 import { EditorZoomController } from './droneHub/files/editor-zoom';
 import { FileDictationProvider } from './droneHub/files/FileDictationContext';
 import { CompanionWorkspaceProvider } from './droneHub/companion/CompanionWorkspaceContext';
@@ -82,15 +83,17 @@ export default function DroneHubApp() {
     <DesktopDeviceProvider>
       <EditorZoomController />
       <AppConfirmDialogProvider>
-        <CompanionWorkspaceProvider>
-          <ContinuousDictationProvider>
-            <CompanionProvider>
-              <FileDictationProvider>
-                <DroneHubAppContent />
-              </FileDictationProvider>
-            </CompanionProvider>
-          </ContinuousDictationProvider>
-        </CompanionWorkspaceProvider>
+        <ActiveComposerProvider>
+          <CompanionWorkspaceProvider>
+            <ContinuousDictationProvider>
+              <CompanionProvider>
+                <FileDictationProvider>
+                  <DroneHubAppContent />
+                </FileDictationProvider>
+              </CompanionProvider>
+            </ContinuousDictationProvider>
+          </CompanionWorkspaceProvider>
+        </ActiveComposerProvider>
       </AppConfirmDialogProvider>
     </DesktopDeviceProvider>
   );

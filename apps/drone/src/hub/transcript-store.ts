@@ -498,76 +498,97 @@ export const CHAT_STORE_MIGRATIONS: readonly HubDatabaseMigration[] = [
     version: 8,
     name: 'active chat keyword search',
     migrate(connection) {
+      createActiveChatMessageSearch(connection);
+    },
+  },
+  {
+    version: 9,
+    name: 'rename Companion chat search index',
+    migrate(connection) {
+      const legacy = connection
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'companion_chat_search'")
+        .get();
+      if (!legacy) return;
       connection.exec(`
-        CREATE VIRTUAL TABLE companion_chat_search USING fts5(
-          drone_id UNINDEXED,
-          chat_name UNINDEXED,
-          turn_id UNINDEXED,
-          role UNINDEXED,
-          timestamp UNINDEXED,
-          content,
-          tokenize = 'unicode61'
-        );
-
-        CREATE TRIGGER companion_chat_search_turn_insert
-        AFTER INSERT ON canonical_chat_turns BEGIN
-          INSERT INTO companion_chat_search (drone_id, chat_name, turn_id, role, timestamp, content)
-          SELECT NEW.drone_id, NEW.chat_name, NEW.turn_id, 'user',
-                 COALESCE(NEW.prompt_at, NEW.at), json_extract(NEW.turn_json, '$.prompt')
-          WHERE TRIM(COALESCE(json_extract(NEW.turn_json, '$.prompt'), '')) != '';
-          INSERT INTO companion_chat_search (drone_id, chat_name, turn_id, role, timestamp, content)
-          SELECT NEW.drone_id, NEW.chat_name, NEW.turn_id, 'assistant',
-                 COALESCE(NEW.completed_at, NEW.at), json_extract(NEW.turn_json, '$.output')
-          WHERE TRIM(COALESCE(json_extract(NEW.turn_json, '$.output'), '')) != '';
-          INSERT INTO companion_chat_search (drone_id, chat_name, turn_id, role, timestamp, content)
-          SELECT NEW.drone_id, NEW.chat_name, NEW.turn_id, 'error',
-                 COALESCE(NEW.completed_at, NEW.at), json_extract(NEW.turn_json, '$.error')
-          WHERE TRIM(COALESCE(json_extract(NEW.turn_json, '$.error'), '')) != '';
-        END;
-
-        CREATE TRIGGER companion_chat_search_turn_delete
-        AFTER DELETE ON canonical_chat_turns BEGIN
-          DELETE FROM companion_chat_search
-          WHERE drone_id = OLD.drone_id AND chat_name = OLD.chat_name AND turn_id = OLD.turn_id;
-        END;
-
-        CREATE TRIGGER companion_chat_search_turn_update
-        AFTER UPDATE ON canonical_chat_turns BEGIN
-          DELETE FROM companion_chat_search
-          WHERE drone_id = OLD.drone_id AND chat_name = OLD.chat_name AND turn_id = OLD.turn_id;
-          INSERT INTO companion_chat_search (drone_id, chat_name, turn_id, role, timestamp, content)
-          SELECT NEW.drone_id, NEW.chat_name, NEW.turn_id, 'user',
-                 COALESCE(NEW.prompt_at, NEW.at), json_extract(NEW.turn_json, '$.prompt')
-          WHERE TRIM(COALESCE(json_extract(NEW.turn_json, '$.prompt'), '')) != '';
-          INSERT INTO companion_chat_search (drone_id, chat_name, turn_id, role, timestamp, content)
-          SELECT NEW.drone_id, NEW.chat_name, NEW.turn_id, 'assistant',
-                 COALESCE(NEW.completed_at, NEW.at), json_extract(NEW.turn_json, '$.output')
-          WHERE TRIM(COALESCE(json_extract(NEW.turn_json, '$.output'), '')) != '';
-          INSERT INTO companion_chat_search (drone_id, chat_name, turn_id, role, timestamp, content)
-          SELECT NEW.drone_id, NEW.chat_name, NEW.turn_id, 'error',
-                 COALESCE(NEW.completed_at, NEW.at), json_extract(NEW.turn_json, '$.error')
-          WHERE TRIM(COALESCE(json_extract(NEW.turn_json, '$.error'), '')) != '';
-        END;
-
-        INSERT INTO companion_chat_search (drone_id, chat_name, turn_id, role, timestamp, content)
-        SELECT drone_id, chat_name, turn_id, 'user', COALESCE(prompt_at, at),
-               json_extract(turn_json, '$.prompt')
-        FROM canonical_chat_turns
-        WHERE TRIM(COALESCE(json_extract(turn_json, '$.prompt'), '')) != '';
-        INSERT INTO companion_chat_search (drone_id, chat_name, turn_id, role, timestamp, content)
-        SELECT drone_id, chat_name, turn_id, 'assistant', COALESCE(completed_at, at),
-               json_extract(turn_json, '$.output')
-        FROM canonical_chat_turns
-        WHERE TRIM(COALESCE(json_extract(turn_json, '$.output'), '')) != '';
-        INSERT INTO companion_chat_search (drone_id, chat_name, turn_id, role, timestamp, content)
-        SELECT drone_id, chat_name, turn_id, 'error', COALESCE(completed_at, at),
-               json_extract(turn_json, '$.error')
-        FROM canonical_chat_turns
-        WHERE TRIM(COALESCE(json_extract(turn_json, '$.error'), '')) != '';
+        DROP TRIGGER IF EXISTS companion_chat_search_turn_insert;
+        DROP TRIGGER IF EXISTS companion_chat_search_turn_delete;
+        DROP TRIGGER IF EXISTS companion_chat_search_turn_update;
+        DROP TABLE companion_chat_search;
       `);
+      createActiveChatMessageSearch(connection);
     },
   },
 ];
+
+function createActiveChatMessageSearch(connection: HubDatabaseConnection): void {
+  connection.exec(`
+    CREATE VIRTUAL TABLE active_chat_message_search USING fts5(
+      drone_id UNINDEXED,
+      chat_name UNINDEXED,
+      turn_id UNINDEXED,
+      role UNINDEXED,
+      timestamp UNINDEXED,
+      content,
+      tokenize = 'unicode61'
+    );
+
+    CREATE TRIGGER active_chat_message_search_turn_insert
+    AFTER INSERT ON canonical_chat_turns BEGIN
+      INSERT INTO active_chat_message_search (drone_id, chat_name, turn_id, role, timestamp, content)
+      SELECT NEW.drone_id, NEW.chat_name, NEW.turn_id, 'user',
+             COALESCE(NEW.prompt_at, NEW.at), json_extract(NEW.turn_json, '$.prompt')
+      WHERE TRIM(COALESCE(json_extract(NEW.turn_json, '$.prompt'), '')) != '';
+      INSERT INTO active_chat_message_search (drone_id, chat_name, turn_id, role, timestamp, content)
+      SELECT NEW.drone_id, NEW.chat_name, NEW.turn_id, 'assistant',
+             COALESCE(NEW.completed_at, NEW.at), json_extract(NEW.turn_json, '$.output')
+      WHERE TRIM(COALESCE(json_extract(NEW.turn_json, '$.output'), '')) != '';
+      INSERT INTO active_chat_message_search (drone_id, chat_name, turn_id, role, timestamp, content)
+      SELECT NEW.drone_id, NEW.chat_name, NEW.turn_id, 'error',
+             COALESCE(NEW.completed_at, NEW.at), json_extract(NEW.turn_json, '$.error')
+      WHERE TRIM(COALESCE(json_extract(NEW.turn_json, '$.error'), '')) != '';
+    END;
+
+    CREATE TRIGGER active_chat_message_search_turn_delete
+    AFTER DELETE ON canonical_chat_turns BEGIN
+      DELETE FROM active_chat_message_search
+      WHERE drone_id = OLD.drone_id AND chat_name = OLD.chat_name AND turn_id = OLD.turn_id;
+    END;
+
+    CREATE TRIGGER active_chat_message_search_turn_update
+    AFTER UPDATE ON canonical_chat_turns BEGIN
+      DELETE FROM active_chat_message_search
+      WHERE drone_id = OLD.drone_id AND chat_name = OLD.chat_name AND turn_id = OLD.turn_id;
+      INSERT INTO active_chat_message_search (drone_id, chat_name, turn_id, role, timestamp, content)
+      SELECT NEW.drone_id, NEW.chat_name, NEW.turn_id, 'user',
+             COALESCE(NEW.prompt_at, NEW.at), json_extract(NEW.turn_json, '$.prompt')
+      WHERE TRIM(COALESCE(json_extract(NEW.turn_json, '$.prompt'), '')) != '';
+      INSERT INTO active_chat_message_search (drone_id, chat_name, turn_id, role, timestamp, content)
+      SELECT NEW.drone_id, NEW.chat_name, NEW.turn_id, 'assistant',
+             COALESCE(NEW.completed_at, NEW.at), json_extract(NEW.turn_json, '$.output')
+      WHERE TRIM(COALESCE(json_extract(NEW.turn_json, '$.output'), '')) != '';
+      INSERT INTO active_chat_message_search (drone_id, chat_name, turn_id, role, timestamp, content)
+      SELECT NEW.drone_id, NEW.chat_name, NEW.turn_id, 'error',
+             COALESCE(NEW.completed_at, NEW.at), json_extract(NEW.turn_json, '$.error')
+      WHERE TRIM(COALESCE(json_extract(NEW.turn_json, '$.error'), '')) != '';
+    END;
+
+    INSERT INTO active_chat_message_search (drone_id, chat_name, turn_id, role, timestamp, content)
+    SELECT drone_id, chat_name, turn_id, 'user', COALESCE(prompt_at, at),
+           json_extract(turn_json, '$.prompt')
+    FROM canonical_chat_turns
+    WHERE TRIM(COALESCE(json_extract(turn_json, '$.prompt'), '')) != '';
+    INSERT INTO active_chat_message_search (drone_id, chat_name, turn_id, role, timestamp, content)
+    SELECT drone_id, chat_name, turn_id, 'assistant', COALESCE(completed_at, at),
+           json_extract(turn_json, '$.output')
+    FROM canonical_chat_turns
+    WHERE TRIM(COALESCE(json_extract(turn_json, '$.output'), '')) != '';
+    INSERT INTO active_chat_message_search (drone_id, chat_name, turn_id, role, timestamp, content)
+    SELECT drone_id, chat_name, turn_id, 'error', COALESCE(completed_at, at),
+           json_extract(turn_json, '$.error')
+    FROM canonical_chat_turns
+    WHERE TRIM(COALESCE(json_extract(turn_json, '$.error'), '')) != '';
+  `);
+}
 
 type ChatRow = {
   chat_name: string;
@@ -2864,10 +2885,10 @@ export function searchActiveChatMessages(opts: {
     const results = database.read((connection) =>
       connection.prepare(`
         SELECT drone_id, chat_name, turn_id, role, timestamp,
-               snippet(companion_chat_search, 5, '[', ']', '…', 24) AS snippet,
-               bm25(companion_chat_search) AS rank
-        FROM companion_chat_search
-        WHERE companion_chat_search MATCH ?
+               snippet(active_chat_message_search, 5, '[', ']', '…', 24) AS snippet,
+               bm25(active_chat_message_search) AS rank
+        FROM active_chat_message_search
+        WHERE active_chat_message_search MATCH ?
           AND (? = '' OR drone_id = ?)
           ${allowedDroneClause}
           AND (? = '' OR chat_name = ?)

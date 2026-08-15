@@ -1,4 +1,8 @@
 import type http from 'node:http';
+import {
+  validateCompanionRunInput,
+  type CompanionClientMessage,
+} from '@drone/assistant-chat';
 import { type RawData, WebSocket, WebSocketServer } from 'ws';
 
 import type { CompanionBrowserCall, CompanionRuntime } from './companion-runtime';
@@ -8,8 +12,6 @@ import {
 } from './companion-transport-shared';
 
 const MAX_CLIENT_PAYLOAD_BYTES = 4 * 1024 * 1024;
-const MAX_PROMPT_CHARS = 20_000;
-const MAX_RUN_ID_CHARS = 128;
 
 function messageText(data: RawData): string {
   if (typeof data === 'string') return data;
@@ -43,9 +45,9 @@ export function createCompanionWebSocketServer(runtime: CompanionRuntime): WebSo
       browserTools.request(tool, args, generation, signal);
 
     socket.on('message', (raw) => {
-      let message: any;
+      let message: CompanionClientMessage;
       try {
-        message = JSON.parse(messageText(raw));
+        message = JSON.parse(messageText(raw)) as CompanionClientMessage;
       } catch {
         send({ type: 'error', error: 'Invalid Companion message.' });
         return;
@@ -73,22 +75,12 @@ export function createCompanionWebSocketServer(runtime: CompanionRuntime): WebSo
         return;
       }
       if (message?.type !== 'start_run') return;
-      const runId = typeof message.runId === 'string' ? message.runId.trim() : '';
-      const prompt = typeof message.prompt === 'string' ? message.prompt.trim() : '';
-      if (!runId || runId.length > MAX_RUN_ID_CHARS || /[\u0000-\u001f\u007f]/.test(runId)) {
-        send({ type: 'error', runId: runId.slice(0, MAX_RUN_ID_CHARS), error: 'A valid runId is required.' });
+      const validation = validateCompanionRunInput(message);
+      if (!validation.ok) {
+        send({ type: 'error', runId: validation.runId, error: validation.error });
         return;
       }
-      if (!prompt || prompt.length > MAX_PROMPT_CHARS) {
-        send({
-          type: 'error',
-          runId,
-          error: !prompt
-            ? 'A non-empty prompt is required.'
-            : `Companion prompts cannot exceed ${MAX_PROMPT_CHARS} characters.`,
-        });
-        return;
-      }
+      const { runId, prompt } = validation;
       if (activeRunId) {
         send({ type: 'error', runId, error: 'This Companion socket already has an active run.' });
         return;

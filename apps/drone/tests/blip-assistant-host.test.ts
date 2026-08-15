@@ -10,12 +10,10 @@ import {
 } from '@mariozechner/pi-ai';
 
 import { loadAssistantState } from '../src/host/assistant-store';
-import {
-  BlipAssistantHost,
-  toBlipModelProvider,
-} from '../src/hub/assistant/blip-assistant-host';
+import { BlipAssistantHost } from '../src/hub/assistant/blip-assistant-host';
 import { HubSessionRepository } from '../src/hub/assistant/hub-session-repository';
 import { HubAssistantService } from '../src/hub/assistant';
+import { toBlipModelProvider } from '../src/hub/hub-settings';
 import { ensureTestNativeChat } from './native-chat-test-helpers';
 import { withTempDroneDataDir } from './test-helpers';
 
@@ -23,7 +21,9 @@ describe('Blip assistant host', () => {
   test('maps user-facing provider names to Blip providers', () => {
     expect(toBlipModelProvider('openai')).toBe('openai');
     expect(toBlipModelProvider('codex')).toBe('openai-codex');
+    expect(toBlipModelProvider('openai-codex')).toBe('openai-codex');
     expect(toBlipModelProvider('gemini')).toBe('google');
+    expect(toBlipModelProvider('google')).toBe('google');
   });
 
   test('discards legacy standalone metadata and stores native chat metadata', async () => {

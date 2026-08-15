@@ -1,26 +1,14 @@
 import React from 'react';
+import {
+  reduceCompanionToolActivity,
+  type CompanionBrowserToolName,
+  type CompanionServerMessage,
+  type CompanionStatus,
+  type CompanionToolActivity,
+} from '@drone/assistant-chat';
 import { useChatVoiceRecorder } from '../chat/use-chat-voice-recorder';
 import { useCompanionWorkspace } from './CompanionWorkspaceContext';
 import { buildDirectApiWebSocketUrl } from '../app/direct-api-fetch';
-
-export type CompanionStatus =
-  | 'idle'
-  | 'starting'
-  | 'recording'
-  | 'transcribing'
-  | 'working'
-  | 'completed'
-  | 'cancelled'
-  | 'error';
-
-export type CompanionToolActivity = {
-  callId: string;
-  tool: string;
-  args?: unknown;
-  result?: unknown;
-  error?: string;
-  status: 'running' | 'completed' | 'failed';
-};
 
 type CompanionContextValue = {
   status: CompanionStatus;
@@ -96,7 +84,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     erase();
   }, [erase, voice.discardRecording]);
 
-  const executeBrowserTool = React.useCallback(async (tool: string, args: Record<string, unknown>) => {
+  const executeBrowserTool = React.useCallback(async (tool: CompanionBrowserToolName, args: Record<string, unknown>) => {
     if (tool === 'get_app_context') {
       if (!workspace) throw new Error('NO_ACTIVE_WORKSPACE');
       return workspace.getAppContext();
@@ -201,16 +189,16 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     };
     socket.onmessage = (event) => {
       if (generationRef.current !== localGeneration || typeof event.data !== 'string') return;
-      let message: any;
+      let message: CompanionServerMessage;
       try {
-        message = JSON.parse(event.data);
+        message = JSON.parse(event.data) as CompanionServerMessage;
       } catch {
         return;
       }
       if (message.runId && message.runId !== runId) return;
       if (message.type === 'tool_call') {
         const messageGeneration = Number(message.generation);
-        void executeBrowserTool(String(message.tool ?? ''), message.args ?? {}).then((result) => {
+        void executeBrowserTool(message.tool, message.args ?? {}).then((result) => {
           if (generationRef.current !== localGeneration || socket.readyState !== WebSocket.OPEN) return;
           socket.send(JSON.stringify({ type: 'tool_result', runId, generation: messageGeneration, callId: message.callId, ok: true, result }));
         }).catch((toolError) => {
@@ -220,34 +208,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       if (message.type === 'activity') {
-        const runtimeEvent = message.event ?? {};
-        const type = String(runtimeEvent.type ?? '');
-        if (type === 'tool_call_started') {
-          setActivity((current) => {
-            const callId = String(runtimeEvent.callId);
-            if (current.some((item) => item.callId === callId)) return current;
-            return [...current, { callId, tool: String(runtimeEvent.tool), args: runtimeEvent.args, status: 'running' }];
-          });
-        } else if (type === 'tool_call_completed' || type === 'tool_call_failed') {
-          setActivity((current) => {
-            const callId = String(runtimeEvent.callId);
-            const status = type === 'tool_call_completed' ? 'completed' : 'failed';
-            const existing = current.find((item) => item.callId === callId);
-            if (!existing) {
-              return [...current, {
-                callId,
-                tool: String(runtimeEvent.tool ?? 'tool'),
-                args: runtimeEvent.args,
-                result: runtimeEvent.result,
-                error: runtimeEvent.error,
-                status,
-              }];
-            }
-            return current.map((item) => item.callId === callId
-              ? { ...item, status, result: runtimeEvent.result, error: runtimeEvent.error }
-              : item);
-          });
-        }
+        setActivity((current) => reduceCompanionToolActivity(current, message.event));
         return;
       }
       if (message.type === 'reply') setReply(String(message.reply ?? ''));

@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
+import type { CompanionBrowserToolName } from '@drone/assistant-chat';
 
-import type { CompanionBrowserToolName } from './companion-config';
 
 const ACTIVITY_RESULT_MAX_CHARS = 20_000;
 const DEFAULT_BROWSER_TOOL_TIMEOUT_MS = 20_000;

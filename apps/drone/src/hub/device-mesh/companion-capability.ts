@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { validateCompanionRunInput } from '@drone/assistant-chat';
 import { COMPANION_CAPABILITY } from '@drone/device-protocol';
 
 import type { CompanionBrowserCall, CompanionRuntime } from '../companion/companion-runtime';
@@ -7,9 +8,6 @@ import {
   CompanionBrowserToolBroker,
 } from '../companion/companion-transport-shared';
 import type { CapabilityHandler } from './device-mesh-types';
-
-const MAX_PROMPT_CHARS = 20_000;
-const MAX_RUN_ID_CHARS = 128;
 
 type CompanionMeshSession = {
   clientRunId: string;
@@ -88,16 +86,18 @@ export function createCompanionCapability(
     async invoke(operation, rawPayload, context) {
       const payload = object(rawPayload);
       const sourceDeviceId = context.sourceDevice.id;
-      const clientRunId = requiredText(payload.runId, 'runId');
-      const key = sessionKey(sourceDeviceId, clientRunId);
 
       if (operation === 'run.cancel') {
+        const clientRunId = requiredText(payload.runId, 'runId');
+        const key = sessionKey(sourceDeviceId, clientRunId);
         const session = sessions.get(key);
         if (session) await cancelSession(session, true);
         return { ok: true };
       }
 
       if (operation === 'tool.result') {
+        const clientRunId = requiredText(payload.runId, 'runId');
+        const key = sessionKey(sourceDeviceId, clientRunId);
         const session = sessions.get(key);
         if (!session || Number(payload.generation) !== session.generation) return { ok: true };
         const callId = requiredText(payload.callId, 'callId');
@@ -116,16 +116,12 @@ export function createCompanionCapability(
           code: 'UNSUPPORTED_OPERATION',
         });
       }
-      const prompt = requiredText(payload.prompt, 'prompt');
-      if (
-        clientRunId.length > MAX_RUN_ID_CHARS ||
-        /[\u0000-\u001f\u007f]/.test(clientRunId) ||
-        prompt.length > MAX_PROMPT_CHARS
-      ) {
-        throw Object.assign(new Error('Companion run input is too large or invalid'), {
-          code: 'INVALID_REQUEST',
-        });
+      const validation = validateCompanionRunInput(payload);
+      if (!validation.ok) {
+        throw Object.assign(new Error(validation.error), { code: 'INVALID_REQUEST' });
       }
+      const { runId: clientRunId, prompt } = validation;
+      const key = sessionKey(sourceDeviceId, clientRunId);
       if (sessions.has(key)) {
         throw Object.assign(new Error('Companion run already exists'), { code: 'CONFLICT' });
       }

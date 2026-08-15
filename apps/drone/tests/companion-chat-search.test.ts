@@ -12,8 +12,8 @@ import {
   upsertTranscriptTurnInStore,
 } from '../src/hub/transcript-store';
 
-test('Companion keyword search indexes visible active-chat text and drops archived chats', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-companion-search-'));
+test('active chat keyword search indexes visible text and drops archived chats', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-chat-search-'));
   const previous = process.env.DRONE_DATA_DIR;
   process.env.DRONE_DATA_DIR = path.join(root, 'data');
   resetDroneRootDirForTests();

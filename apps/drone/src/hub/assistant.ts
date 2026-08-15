@@ -30,7 +30,13 @@ import {
   type PromptSubmissionSource,
 } from '../host/prompt-queue-repository';
 import { loadRegistry } from '../host/registry';
-import { hubLog, resolveEffectiveProviderApiKeySettings, type LlmProviderId } from './hub-settings';
+import {
+  hubLog,
+  parseLlmProvider,
+  resolveEffectiveProviderApiKeySettings,
+  toBlipModelProvider,
+  type LlmProviderId,
+} from './hub-settings';
 import {
   deleteAssistantArtifactsForThread,
   listAssistantArtifactFiles,
@@ -208,17 +214,7 @@ function makeAssistantId(prefix: string): string {
 }
 
 function normalizeProvider(raw: unknown): LlmProviderId {
-  const value = String(raw ?? '')
-    .trim()
-    .toLowerCase();
-  if (value === 'gemini') return 'gemini';
-  if (value === 'codex' || value === 'openai-codex' || value === 'chatgpt-codex') return 'codex';
-  return 'openai';
-}
-
-function providerToPiProvider(provider: LlmProviderId): 'openai' | 'google' | 'openai-codex' {
-  if (provider === 'codex') return 'openai-codex';
-  return provider === 'gemini' ? 'google' : 'openai';
+  return parseLlmProvider(raw) ?? 'openai';
 }
 
 async function defaultAssistantProvider(): Promise<LlmProviderId> {
@@ -2909,7 +2905,7 @@ export class HubAssistantService {
       let reasoning = option.thinkingLevel !== 'off';
       if (runtime) {
         try {
-          const model = runtime.getModel(providerToPiProvider(option.provider), option.id);
+          const model = runtime.getModel(toBlipModelProvider(option.provider), option.id);
           reasoning = Boolean(model?.reasoning);
         } catch {}
       }

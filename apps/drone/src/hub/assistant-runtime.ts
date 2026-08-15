@@ -19,6 +19,7 @@ import { AssistantArtifactsTarget } from './assistant/targets/assistant-artifact
 import { DroneWorkspaceTarget } from './assistant/targets/workspace-targets';
 import {
   hubLog,
+  resolveBlipProviderApiKey,
   resolveEffectiveProviderApiKeySettings,
   resolveExaApiKeySettings,
 } from './hub-settings';
@@ -823,13 +824,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
           );
           return decision;
         },
-        getApiKey: async (provider: string) => {
-          const normalized =
-            provider === 'openai-codex' ? 'codex' : provider === 'google' ? 'gemini' : provider;
-          if (normalized !== 'openai' && normalized !== 'codex' && normalized !== 'gemini')
-            return undefined;
-          return (await resolveEffectiveProviderApiKeySettings(normalized)).apiKey ?? undefined;
-        },
+        getApiKey: resolveBlipProviderApiKey,
         dispose: () => mcpClient.close(),
       };
     },

@@ -224,8 +224,16 @@ export function parseLlmProvider(raw: unknown): LlmProviderId | null {
     .trim()
     .toLowerCase();
   if (s === 'openai' || s === 'gemini' || s === 'codex') return s;
+  if (s === 'google') return 'gemini';
   if (s === 'openai-codex' || s === 'chatgpt' || s === 'chatgpt-codex') return 'codex';
   return null;
+}
+
+export function toBlipModelProvider(provider: string): string {
+  const normalized = parseLlmProvider(provider);
+  if (normalized === 'codex') return 'openai-codex';
+  if (normalized === 'gemini') return 'google';
+  return normalized ?? provider;
 }
 
 export function parseDroneDeleteMode(raw: unknown): DroneDeleteMode | null {
@@ -691,6 +699,12 @@ export async function resolveEffectiveProviderApiKeySettings(provider: LlmProvid
     source: null,
     updatedAt: null,
   };
+}
+
+export async function resolveBlipProviderApiKey(provider: string): Promise<string | undefined> {
+  const normalized = parseLlmProvider(provider);
+  if (!normalized) return undefined;
+  return (await resolveEffectiveProviderApiKeySettings(normalized)).apiKey ?? undefined;
 }
 
 export async function resolveGroqApiKeySettings(): Promise<EffectiveProviderApiKeySettings> {

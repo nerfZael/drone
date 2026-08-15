@@ -1,9 +1,13 @@
+import type { CompanionBrowserToolName } from '@drone/assistant-chat';
+
 import { getHubSettingsRepository } from '../../host/hub-settings-repository';
 import {
-  ASSISTANT_MODEL_OPTIONS,
   ASSISTANT_SYSTEM_PROMPT_MAX_CHARS,
-  DEFAULT_CODEX_MODEL,
 } from '../assistant/assistant-config';
+import {
+  DEFAULT_CODEX_MODEL,
+  HUB_AGENT_MODEL_OPTIONS,
+} from '../llm-model-catalog';
 import {
   resolveEffectiveProviderApiKeySettings,
   type LlmProviderId,
@@ -82,7 +86,7 @@ export const COMPANION_TOOL_SUMMARIES = [
     name: 'search_chat_messages',
     label: 'Search chats',
     category: 'chats',
-    execution: 'server',
+    execution: 'mcp',
     requires: null,
     description:
       'Keyword-search visible user, assistant, and error text across active Drone Hub chats. Archived chats are excluded.',
@@ -157,10 +161,7 @@ export const COMPANION_TOOL_SUMMARIES = [
 
 type CompanionToolCatalogEntry = (typeof COMPANION_TOOL_SUMMARIES)[number];
 export type CompanionToolName = CompanionToolCatalogEntry['name'];
-export type CompanionBrowserToolName = Extract<
-  CompanionToolCatalogEntry,
-  { execution: 'browser' }
->['name'];
+export type { CompanionBrowserToolName } from '@drone/assistant-chat';
 
 const SETTING_KEY = 'companion';
 const TOOL_NAMES = new Set(COMPANION_TOOL_SUMMARIES.map((tool) => tool.name));
@@ -190,7 +191,7 @@ function normalizeEnabledTools(value: unknown): CompanionToolName[] {
 }
 
 function matchingModel(provider: LlmProviderId, model: string, thinkingLevel: CompanionThinkingLevel) {
-  return ASSISTANT_MODEL_OPTIONS.find(
+  return HUB_AGENT_MODEL_OPTIONS.find(
     (option) => option.provider === provider && option.id === model && option.thinkingLevel === thinkingLevel,
   );
 }
@@ -205,8 +206,8 @@ export function normalizeCompanionSettings(value: unknown): CompanionSettings {
   const requestedModel = String(raw.model ?? '').trim();
   const requestedThinking = String(raw.thinkingLevel ?? '').trim() as CompanionThinkingLevel;
   const match = matchingModel(provider, requestedModel, requestedThinking)
-    ?? ASSISTANT_MODEL_OPTIONS.find((option) => option.provider === provider)
-    ?? ASSISTANT_MODEL_OPTIONS[0];
+    ?? HUB_AGENT_MODEL_OPTIONS.find((option) => option.provider === provider)
+    ?? HUB_AGENT_MODEL_OPTIONS[0];
   const prompt = String(raw.systemPrompt ?? DEFAULT_COMPANION_SYSTEM_PROMPT);
   return {
     provider,
@@ -270,7 +271,7 @@ export async function companionSettingsResponse() {
     defaultSystemPrompt: DEFAULT_COMPANION_SYSTEM_PROMPT,
     maxSystemPromptChars: COMPANION_SYSTEM_PROMPT_MAX_CHARS,
     tools: COMPANION_TOOL_SUMMARIES,
-    models: ASSISTANT_MODEL_OPTIONS,
+    models: HUB_AGENT_MODEL_OPTIONS,
     credentials: Object.fromEntries(credentialEntries),
   };
 }

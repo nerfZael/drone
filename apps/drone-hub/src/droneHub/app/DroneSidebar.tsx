@@ -143,6 +143,7 @@ import {
   continuousDictationStatusLabel,
   useContinuousDictation,
 } from '../chat/ContinuousDictationContext';
+import { useActiveComposer } from '../chat/ActiveComposerContext';
 import { browserMicrophoneOwnerLabel } from '../chat/browser-microphone-coordinator';
 import {
   FileDictationSidebarIndicator,
@@ -992,6 +993,7 @@ export function DroneSidebar({
   readOnlyDroneStatusHintById = {},
 }: DroneSidebarProps) {
   const continuousDictation = useContinuousDictation();
+  const activeComposer = useActiveComposer();
   const [pinnedSidebarTopTarget, setPinnedSidebarTopTarget] =
     React.useState<HTMLDivElement | null>(null);
   const [pinnedSidebarBottomTarget, setPinnedSidebarBottomTarget] =
@@ -1018,7 +1020,7 @@ export function DroneSidebar({
     ? continuousDictation.error ||
       (continuousDictationBlocked && continuousDictation.microphoneOwner
         ? `${browserMicrophoneOwnerLabel(continuousDictation.microphoneOwner)} is using the microphone.`
-        : continuousDictationActive && !continuousDictation.activeComposerId
+        : continuousDictationActive && !activeComposer.activeComposerId
           ? 'Continuous dictation is listening · open a chat to receive text.'
           : continuousDictationStatusLabel(
               continuousDictation.status,

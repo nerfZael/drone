@@ -9,8 +9,10 @@ import { HubSessionRepository } from '../assistant/hub-session-repository';
 import { createInProcessDroneHubMcpClient } from '../assistant/in-process-drone-hub-mcp';
 import type { AssistantDroneSummary } from '../assistant/assistant-contracts';
 import type { HubServices } from '../application/hub-services';
-import { resolveEffectiveProviderApiKeySettings } from '../hub-settings';
-import { searchActiveChatMessages } from '../transcript-store';
+import {
+  resolveBlipProviderApiKey,
+  resolveEffectiveProviderApiKeySettings,
+} from '../hub-settings';
 import {
   COMPANION_RUNTIME_CONTRACT,
   COMPANION_TOOL_SUMMARIES,
@@ -215,11 +217,7 @@ export class CompanionRuntime {
       systemPrompt: `${context.settings.systemPrompt}\n\n${COMPANION_RUNTIME_CONTRACT}`,
       tools: await this.customTools(context, drones),
       toolProviders: [filteredMcpProvider],
-      getApiKey: async (provider: string) => {
-        const normalized = provider === 'openai-codex' ? 'codex' : provider === 'google' ? 'gemini' : provider;
-        if (normalized !== 'openai' && normalized !== 'codex' && normalized !== 'gemini') return undefined;
-        return (await resolveEffectiveProviderApiKeySettings(normalized)).apiKey ?? undefined;
-      },
+      getApiKey: resolveBlipProviderApiKey,
       dispose: () => mcpClient.close(),
     };
   }
@@ -262,57 +260,6 @@ export class CompanionRuntime {
           dronesWithMultipleChats: drones.filter((drone) => drone.chats.length > 1).length,
         };
         return result(data);
-      },
-    });
-
-    add('search_chat_messages', {
-      parameters: objectParameters({
-        query: { type: 'string', maxLength: 500 },
-        repoPath: { type: 'string', maxLength: 4096 },
-        droneId: { type: 'string', maxLength: 200 },
-        chatName: { type: 'string', maxLength: 200 },
-        limit: { type: 'number' },
-        offset: { type: 'number' },
-      }, ['query']),
-      execute: async (_callId, args) => {
-        const input = args as Record<string, unknown>;
-        const wantedRepo = String(input.repoPath ?? '').trim();
-        const droneById = new Map(drones.map((drone) => [drone.id, drone]));
-        const offset = Math.max(0, Math.min(5_000, Math.floor(Number(input.offset) || 0)));
-        const limit = Math.max(1, Math.min(50, Math.floor(Number(input.limit) || 20)));
-        const baseSearch = {
-          query: String(input.query ?? ''),
-          droneId: String(input.droneId ?? '').trim() || undefined,
-          chatName: String(input.chatName ?? '').trim() || undefined,
-        };
-        const matches = searchActiveChatMessages({
-          ...baseSearch,
-          ...(wantedRepo
-            ? {
-                droneIds: drones
-                  .filter((drone) => drone.repoPath === wantedRepo)
-                  .map((drone) => drone.id),
-              }
-            : {}),
-          limit,
-          offset,
-        }).results;
-        const rows = matches.map((item) => {
-          const drone = droneById.get(item.droneId);
-          const repoPath = drone?.repoPath ?? '';
-          const repoSegments = repoPath.split(/[\\/]/).filter(Boolean);
-          return {
-            ...item,
-            droneName: drone?.name ?? item.droneId,
-            repository: repoPath ? {
-              path: repoPath,
-              label: repoSegments[repoSegments.length - 1] || repoPath,
-              ref: `repo:${Buffer.from(repoPath, 'utf8').toString('base64url')}`,
-            } : null,
-            chatRef: `${item.droneId}/${item.chatName}`,
-          };
-        });
-        return result({ ok: true, query: input.query, count: rows.length, results: rows, limit, offset });
       },
     });
 

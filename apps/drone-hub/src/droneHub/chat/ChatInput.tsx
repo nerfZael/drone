@@ -49,6 +49,7 @@ import {
   useContinuousDictation,
   type ContinuousDictationComposerSnapshot,
 } from './ContinuousDictationContext';
+import { useActiveComposer } from './ActiveComposerContext';
 import { mergeDraftWithContinuousDictation } from './continuous-dictation-draft';
 import {
   companionTextareaUndoValue,
@@ -291,12 +292,12 @@ export function ChatInput({
   composerLockedRef.current = composerLocked;
   const attachmentControlsLocked = composerLocked;
   const continuousDictation = useContinuousDictation();
-  const continuousDictationInstanceId = React.useId();
-  const continuousDictationComposerId = `${continuousDictationInstanceId}:${resetKey}`;
+  const activeComposer = useActiveComposer();
+  const composerInstanceId = React.useId();
+  const activeComposerTargetId = `${composerInstanceId}:${resetKey}`;
   const editorModeRef = React.useRef(editorMode);
   editorModeRef.current = editorMode;
-  const registerContinuousDictationComposer = continuousDictation?.registerComposer;
-  const continuousDictationEligible = React.useCallback(() => {
+  const activeComposerEligible = React.useCallback(() => {
     const root = composerRootRef.current;
     return Boolean(
       root &&
@@ -316,26 +317,24 @@ export function ChatInput({
     );
   }, []);
   React.useEffect(() => {
-    if (!registerContinuousDictationComposer) return;
-    return registerContinuousDictationComposer({
-      id: continuousDictationComposerId,
-      isEligible: continuousDictationEligible,
+    return activeComposer.registerComposer({
+      id: activeComposerTargetId,
+      isEligible: activeComposerEligible,
       isReadable: companionComposerReadable,
       appendTranscript: (text) => appendContinuousDictationRef.current(text),
       readSnapshot: () => readCompanionComposerRef.current(),
       applyContent: (baseRevision, content) => applyCompanionComposerRef.current(baseRevision, content),
     });
   }, [
-    continuousDictationComposerId,
-    continuousDictationEligible,
+    activeComposerTargetId,
+    activeComposerEligible,
     companionComposerReadable,
     composerLocked,
-    registerContinuousDictationComposer,
+    activeComposer.registerComposer,
   ]);
-  const continuousDictationOwnsComposer =
-    continuousDictation?.activeComposerId === continuousDictationComposerId;
+  const ownsActiveComposer = activeComposer.activeComposerId === activeComposerTargetId;
   const continuousDictationTargeted = Boolean(
-    continuousDictationOwnsComposer && continuousDictation?.status !== 'idle',
+    ownsActiveComposer && continuousDictation?.status !== 'idle',
   );
 
   const attachmentsOn = attachmentsEnabled !== false;
@@ -389,7 +388,7 @@ export function ChatInput({
   );
 
   readCompanionComposerRef.current = () => ({
-    targetId: continuousDictationComposerId,
+    targetId: activeComposerTargetId,
     path: 'composer.md',
     content: draftRef.current,
     revision: String(draftRevisionRef.current),
@@ -634,11 +633,11 @@ export function ChatInput({
   }
 
   function activateContinuousDictationComposer() {
-    focusContinuousDictationComposer();
+    focusActiveComposer();
   }
 
-  function focusContinuousDictationComposer() {
-    continuousDictation?.focusComposer(continuousDictationComposerId);
+  function focusActiveComposer() {
+    activeComposer.focusComposer(activeComposerTargetId);
   }
 
   function preserveEditorFocus(event: React.MouseEvent<HTMLButtonElement>) {
@@ -1074,7 +1073,7 @@ export function ChatInput({
           data-chat-composer-expanded={composerExpanded ? 'true' : 'false'}
           onFocusCapture={(event) => {
             markCurrentChatComposerEditorModeTarget(editorModeShortcutTargetId);
-            focusContinuousDictationComposer();
+            focusActiveComposer();
             const target = event.target;
             if (
               target instanceof Element &&

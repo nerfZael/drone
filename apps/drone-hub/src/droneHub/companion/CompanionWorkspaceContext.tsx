@@ -1,28 +1,14 @@
 import React from 'react';
+import type { CompanionTextSnapshot } from '@drone/assistant-chat';
+import { useActiveComposer } from '../chat/ActiveComposerContext';
 
-export type CompanionTextSnapshot = {
-  targetId: string;
-  path: string;
-  content: string;
-  revision: string;
-  mode: 'edit' | 'preview' | 'read-only' | 'loading' | 'saving' | 'large-file';
-  dirty?: boolean;
-};
+export type { CompanionTextSnapshot } from '@drone/assistant-chat';
 
 export type CompanionTextTarget = {
   id: string;
   isEligible(): boolean;
   read(): CompanionTextSnapshot;
   apply(baseRevision: string, content: string): { ok: true; revision: string };
-};
-
-export type CompanionComposerTarget = {
-  readActiveComposer(): CompanionTextSnapshot;
-  applyComposer(
-    targetId: string,
-    baseRevision: string,
-    content: string,
-  ): { ok: true; revision: string };
 };
 
 export type CompanionWorkspaceTarget = {
@@ -37,7 +23,6 @@ export type CompanionWorkspaceTarget = {
 
 type CompanionWorkspaceContextValue = {
   registerWorkspaceTarget(target: CompanionWorkspaceTarget): () => void;
-  registerComposerTarget(target: CompanionComposerTarget): () => void;
   registerEditor(target: CompanionTextTarget): () => void;
   focusEditor(id: string): void;
   getAppContext(): Record<string, unknown>;
@@ -60,8 +45,8 @@ type CompanionWorkspaceContextValue = {
 const CompanionWorkspaceContext = React.createContext<CompanionWorkspaceContextValue | null>(null);
 
 export function CompanionWorkspaceProvider({ children }: { children: React.ReactNode }) {
+  const activeComposer = useActiveComposer();
   const workspaceTargetRef = React.useRef<CompanionWorkspaceTarget | null>(null);
-  const composerTargetRef = React.useRef<CompanionComposerTarget | null>(null);
   const editorTargetsRef = React.useRef(new Map<string, CompanionTextTarget>());
   const focusedEditorIdRef = React.useRef<string | null>(null);
 
@@ -78,13 +63,6 @@ export function CompanionWorkspaceProvider({ children }: { children: React.React
       if (editorTargetsRef.current.get(target.id) !== target) return;
       editorTargetsRef.current.delete(target.id);
       if (focusedEditorIdRef.current === target.id) focusedEditorIdRef.current = null;
-    };
-  }, []);
-
-  const registerComposerTarget = React.useCallback((target: CompanionComposerTarget) => {
-    composerTargetRef.current = target;
-    return () => {
-      if (composerTargetRef.current === target) composerTargetRef.current = null;
     };
   }, []);
 
@@ -110,12 +88,6 @@ export function CompanionWorkspaceProvider({ children }: { children: React.React
     return candidates[candidates.length - 1]!;
   }, []);
 
-  const resolveComposerTarget = React.useCallback(() => {
-    const target = composerTargetRef.current;
-    if (!target) throw new Error('NO_ACTIVE_COMPOSER');
-    return target;
-  }, []);
-
   const applyEditor = React.useCallback(
     (targetId: string, baseRevision: string, content: string) => {
       const target = resolveEditor();
@@ -128,26 +100,25 @@ export function CompanionWorkspaceProvider({ children }: { children: React.React
   const value = React.useMemo<CompanionWorkspaceContextValue>(
     () => ({
       registerWorkspaceTarget,
-      registerComposerTarget,
       registerEditor,
       focusEditor,
       getAppContext: () => resolveWorkspaceTarget().getAppContext(),
       prepareDroneDraft: async (args) => await resolveWorkspaceTarget().prepareDroneDraft(args),
       highlightDrones: async (args) => await resolveWorkspaceTarget().highlightDrones(args),
-      readActiveComposer: () => resolveComposerTarget().readActiveComposer(),
+      readActiveComposer: activeComposer.readActiveComposer,
       applyComposer: (targetId, baseRevision, content) =>
-        resolveComposerTarget().applyComposer(targetId, baseRevision, content),
+        activeComposer.applyComposer(targetId, baseRevision, content),
       readOpenFile: () => resolveEditor().read(),
       applyEditor,
     }),
     [
       applyEditor,
+      activeComposer.applyComposer,
+      activeComposer.readActiveComposer,
       focusEditor,
       registerEditor,
-      registerComposerTarget,
       registerWorkspaceTarget,
       resolveEditor,
-      resolveComposerTarget,
       resolveWorkspaceTarget,
     ],
   );

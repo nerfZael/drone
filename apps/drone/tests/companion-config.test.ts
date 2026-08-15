@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { ASSISTANT_MODEL_OPTIONS } from '../src/hub/assistant/assistant-config';
+import { HUB_AGENT_MODEL_OPTIONS } from '../src/hub/llm-model-catalog';
 import {
   COMPANION_TOOL_SUMMARIES,
   DEFAULT_COMPANION_SETTINGS,
@@ -9,13 +9,13 @@ import {
 
 describe('Companion settings', () => {
   test('offers OpenAI, Codex, and Gemini including Gemini 3.5 Flash-Lite', () => {
-    expect([...new Set(ASSISTANT_MODEL_OPTIONS.map((option) => option.provider))]).toEqual([
+    expect([...new Set(HUB_AGENT_MODEL_OPTIONS.map((option) => option.provider))]).toEqual([
       'openai',
       'codex',
       'gemini',
     ]);
     expect(
-      ASSISTANT_MODEL_OPTIONS.filter((option) => option.id === 'gemini-3.5-flash-lite').map(
+      HUB_AGENT_MODEL_OPTIONS.filter((option) => option.id === 'gemini-3.5-flash-lite').map(
         (option) => option.thinkingLevel,
       ),
     ).toEqual(['minimal', 'medium', 'high']);
@@ -31,7 +31,13 @@ describe('Companion settings', () => {
       COMPANION_TOOL_SUMMARIES.filter((tool) => tool.execution === 'mcp').map(
         (tool) => tool.name,
       ),
-    ).toEqual(['list_repos', 'list_drones', 'list_chats', 'read_chat']);
+    ).toEqual([
+      'list_repos',
+      'list_drones',
+      'list_chats',
+      'read_chat',
+      'search_chat_messages',
+    ]);
     expect(
       COMPANION_TOOL_SUMMARIES.find((tool) => tool.name === 'apply_composer_patch')?.requires,
     ).toBe('read_active_composer');

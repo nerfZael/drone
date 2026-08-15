@@ -10,6 +10,7 @@ import type {
 } from '@blip/core';
 import type { BlipHistoryPage } from '@blip/protocol';
 
+import { toBlipModelProvider } from '../hub-settings';
 import { HubSessionRepository } from './hub-session-repository';
 import { loadBlipNodeRuntime, loadBlipRuntime } from './blip-runtime-loader';
 
@@ -28,11 +29,6 @@ export type BlipAssistantThreadConfiguration = {
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
   dispose?: () => Promise<void> | void;
 };
-
-export function toBlipModelProvider(provider: string): string {
-  if (provider === 'codex') return 'openai-codex';
-  return provider === 'gemini' ? 'google' : provider;
-}
 
 export class BlipAssistantHost {
   private readonly handles = new Map<string, BlipSessionHandle>();

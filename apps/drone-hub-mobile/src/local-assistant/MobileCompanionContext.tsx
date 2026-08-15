@@ -1,33 +1,21 @@
 import React from 'react';
 import * as Crypto from 'expo-crypto';
 import { COMPANION_CAPABILITY, isGranted, type CapabilityEvent } from '@drone/device-protocol';
+import {
+  reduceCompanionToolActivity,
+  type CompanionBrowserToolName,
+  type CompanionStatus,
+  type CompanionTextSnapshot,
+  type CompanionToolActivity,
+} from '@drone/assistant-chat';
 
 import { useMesh } from '../mesh/MeshContext';
 import { useSharedMobileChatVoiceRecorder } from './MobileChatVoiceRecorderContext';
 
-export type MobileCompanionStatus =
-  | 'idle'
-  | 'starting'
-  | 'recording'
-  | 'transcribing'
-  | 'working'
-  | 'completed'
-  | 'cancelled'
-  | 'error';
-
-export type MobileCompanionTextSnapshot = {
-  targetId: string;
-  path: string;
-  content: string;
-  revision: string;
-  mode: 'edit' | 'preview' | 'read-only' | 'loading' | 'saving' | 'large-file';
-  dirty?: boolean;
-};
-
 export type MobileCompanionEditorTarget = {
   id: string;
   isEligible(): boolean;
-  read(): MobileCompanionTextSnapshot;
+  read(): CompanionTextSnapshot;
   apply(baseRevision: string, content: string): { ok: true; revision: string };
 };
 
@@ -36,7 +24,7 @@ export type MobileCompanionWorkspaceTarget = {
   targetName: string;
   reachable: boolean;
   getAppContext(): Record<string, unknown>;
-  readComposer(): MobileCompanionTextSnapshot;
+  readComposer(): CompanionTextSnapshot;
   applyComposer(
     targetId: string,
     baseRevision: string,
@@ -46,24 +34,15 @@ export type MobileCompanionWorkspaceTarget = {
   highlightDrones(args: Record<string, unknown>): Record<string, unknown>;
 };
 
-export type MobileCompanionToolActivity = {
-  callId: string;
-  tool: string;
-  args?: unknown;
-  result?: unknown;
-  error?: string;
-  status: 'running' | 'completed' | 'failed';
-};
-
 type MobileCompanionContextValue = {
-  status: MobileCompanionStatus;
+  status: CompanionStatus;
   error: string;
   reply: string;
   transcript: string;
   durationMillis: number;
   startedAt: number | null;
   endedAt: number | null;
-  activity: MobileCompanionToolActivity[];
+  activity: CompanionToolActivity[];
   available: boolean;
   unavailableReason: string;
   toggle(): Promise<void>;
@@ -78,48 +57,6 @@ function newRunId(): string {
   return Crypto.randomUUID();
 }
 
-function activityFromEvent(
-  current: MobileCompanionToolActivity[],
-  runtimeEvent: any,
-): MobileCompanionToolActivity[] {
-  const type = String(runtimeEvent?.type ?? '');
-  const callId = String(runtimeEvent?.callId ?? '');
-  if (!callId) return current;
-  if (type === 'tool_call_started') {
-    if (current.some((item) => item.callId === callId)) return current;
-    return [
-      ...current,
-      {
-        callId,
-        tool: String(runtimeEvent.tool ?? 'tool'),
-        args: runtimeEvent.args,
-        status: 'running',
-      },
-    ];
-  }
-  if (type !== 'tool_call_completed' && type !== 'tool_call_failed') return current;
-  const status = type === 'tool_call_completed' ? 'completed' : 'failed';
-  const existing = current.find((item) => item.callId === callId);
-  if (!existing) {
-    return [
-      ...current,
-      {
-        callId,
-        tool: String(runtimeEvent.tool ?? 'tool'),
-        args: runtimeEvent.args,
-        result: runtimeEvent.result,
-        error: runtimeEvent.error,
-        status,
-      },
-    ];
-  }
-  return current.map((item) =>
-    item.callId === callId
-      ? { ...item, status, result: runtimeEvent.result, error: runtimeEvent.error }
-      : item,
-  );
-}
-
 export function MobileCompanionProvider({ children }: { children: React.ReactNode }) {
   const mesh = useMesh();
   const voice = useSharedMobileChatVoiceRecorder();
@@ -127,19 +64,19 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
   const editorTargetsRef = React.useRef(new Map<string, MobileCompanionEditorTarget>());
   const focusedEditorIdRef = React.useRef<string | null>(null);
   const [targetRevision, setTargetRevision] = React.useState(0);
-  const [status, setStatus] = React.useState<MobileCompanionStatus>('idle');
+  const [status, setStatus] = React.useState<CompanionStatus>('idle');
   const [error, setError] = React.useState('');
   const [reply, setReply] = React.useState('');
   const [transcript, setTranscript] = React.useState('');
   const [startedAt, setStartedAt] = React.useState<number | null>(null);
   const [endedAt, setEndedAt] = React.useState<number | null>(null);
-  const [activity, setActivity] = React.useState<MobileCompanionToolActivity[]>([]);
-  const statusRef = React.useRef<MobileCompanionStatus>('idle');
+  const [activity, setActivity] = React.useState<CompanionToolActivity[]>([]);
+  const statusRef = React.useRef<CompanionStatus>('idle');
   const runIdRef = React.useRef('');
   const runTargetDeviceIdRef = React.useRef('');
   const generationRef = React.useRef(0);
 
-  const setStatusValue = React.useCallback((next: MobileCompanionStatus) => {
+  const setStatusValue = React.useCallback((next: CompanionStatus) => {
     statusRef.current = next;
     setStatus(next);
   }, []);
@@ -222,7 +159,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
   }, []);
 
   const executeMobileTool = React.useCallback(
-    async (tool: string, args: Record<string, unknown>) => {
+    async (tool: CompanionBrowserToolName, args: Record<string, unknown>) => {
       const activeTarget = workspaceTargetRef.current;
       if (!activeTarget) throw new Error('NO_ACTIVE_MOBILE_CONTEXT');
       if (activeTarget.targetDeviceId !== runTargetDeviceIdRef.current) {
@@ -407,7 +344,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       const type = String(payload.type ?? '');
       if (type === 'tool_call') {
         const callGeneration = Number(payload.generation);
-        void executeMobileTool(String(payload.tool ?? ''), payload.args ?? {})
+        void executeMobileTool(payload.tool as CompanionBrowserToolName, payload.args ?? {})
           .then((result) =>
             mesh.request(event.sourceDeviceId, COMPANION_CAPABILITY.id, 'tool.result', {
               runId,
@@ -431,7 +368,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
         return;
       }
       if (type === 'activity') {
-        setActivity((current) => activityFromEvent(current, payload.event));
+        setActivity((current) => reduceCompanionToolActivity(current, payload.event ?? {}));
         return;
       }
       if (type === 'reply') setReply(String(payload.reply ?? ''));
