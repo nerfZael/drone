@@ -2285,7 +2285,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
               transcriptDoneIds,
             })
           : shouldDeferQueuedPendingPrompt({
-              agentId: agent.id,
               sessionKnown,
               priorPendingPrompts: prior,
               transcriptDoneIds,

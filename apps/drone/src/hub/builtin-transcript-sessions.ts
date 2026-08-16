@@ -1,19 +1,11 @@
 import { normalizeAgentPlan, type AgentPlan, type AgentRunActivity } from '@drone/assistant-chat';
 import type { BuiltinTranscriptAgentId } from './pendingPromptEnqueue';
 import { BuiltinAgentActivityCollector, normalizeAgentRunActivity } from './builtin-agent-activity';
-import { readBuiltinTranscriptSessionId } from './builtin-transcript-session-metadata';
 
-export { readBuiltinTranscriptSessionId } from './builtin-transcript-session-metadata';
-
-export function hasKnownBuiltinTranscriptSession(
-  chatEntry: any,
-  agentId: BuiltinTranscriptAgentId,
-): boolean {
-  if (agentId === 'codex' || agentId === 'opencode' || agentId === 'pi' || agentId === 'blip') {
-    return Boolean(readBuiltinTranscriptSessionId(chatEntry, agentId));
-  }
-  return true;
-}
+export {
+  hasKnownBuiltinTranscriptSession,
+  readBuiltinTranscriptSessionId,
+} from './builtin-transcript-session-metadata';
 
 function takeStringText(raw: any): string | null {
   if (typeof raw === 'string' && raw) return raw;
