@@ -1,110 +1,31 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  hasActivePriorPendingPrompt,
   hasInFlightPriorPendingPrompt,
   looksLikeTransientPromptEnqueueError,
   shouldDeferQueuedPendingPrompt,
-  shouldDeferQueuedTranscriptPrompt,
   shouldRetryFailedPendingPrompt,
   stalePendingPromptState,
 } from '../src/hub/pendingPromptEnqueue';
 
-describe('shouldDeferQueuedTranscriptPrompt', () => {
-  test('defers when the session is unknown and a prior prompt is enqueued', () => {
-    expect(
-      shouldDeferQueuedTranscriptPrompt({
-        sessionKnown: false,
-        priorPendingPrompts: [{ id: 'p1', state: 'sent' }],
-      }),
-    ).toBe(true);
-    expect(
-      shouldDeferQueuedTranscriptPrompt({
-        sessionKnown: false,
-        priorPendingPrompts: [{ id: 'p1', state: 'sending' }],
-      }),
-    ).toBe(true);
-  });
-
-  test('does not defer when the session is known', () => {
-    expect(
-      shouldDeferQueuedTranscriptPrompt({
-        sessionKnown: true,
-        priorPendingPrompts: [{ id: 'p1', state: 'sent' }],
-      }),
-    ).toBe(false);
-  });
-
-  test('does not defer when prior prompts are failed, done, or only queued', () => {
-    const done = new Set(['p1']);
-    expect(
-      shouldDeferQueuedTranscriptPrompt({
-        sessionKnown: false,
-        transcriptDoneIds: done,
-        priorPendingPrompts: [{ id: 'p1', state: 'sent' }],
-      }),
-    ).toBe(false);
-    expect(
-      shouldDeferQueuedTranscriptPrompt({
-        sessionKnown: false,
-        priorPendingPrompts: [{ id: 'p1', state: 'failed' }],
-      }),
-    ).toBe(false);
-    expect(
-      shouldDeferQueuedTranscriptPrompt({
-        sessionKnown: false,
-        priorPendingPrompts: [{ id: 'p1', state: 'queued' }],
-      }),
-    ).toBe(false);
-    expect(
-      shouldDeferQueuedTranscriptPrompt({
-        sessionKnown: false,
-        priorPendingPrompts: [{ id: 'p1', state: 'queued' }],
-      }),
-    ).toBe(false);
-  });
-});
-
 describe('shouldDeferQueuedPendingPrompt', () => {
-  test('keeps a follow-up queued while a known Codex session has an active prompt', () => {
-    const priorPendingPrompts = [{ id: 'review-first', state: 'sent' }];
-
-    expect(
-      shouldDeferQueuedPendingPrompt({
-        sessionKnown: true,
-        priorPendingPrompts,
-      }),
-    ).toBe(true);
-    expect(
-      shouldDeferQueuedPendingPrompt({
-        sessionKnown: true,
-        priorPendingPrompts,
-        transcriptDoneIds: new Set(['review-first']),
-      }),
-    ).toBe(false);
-  });
-});
-
-describe('hasActivePriorPendingPrompt', () => {
-  test('returns true for queued/sending/sent rows that are not done', () => {
-    expect(
-      hasActivePriorPendingPrompt({
-        priorPendingPrompts: [
-          { id: 'q', state: 'queued' },
-          { id: 's', state: 'sending' },
-          { id: 't', state: 'sent' },
-        ],
-      }),
-    ).toBe(true);
+  test('defers for queued, sending, or sent rows that are not done', () => {
+    for (const state of ['queued', 'sending', 'sent'] as const) {
+      expect(
+        shouldDeferQueuedPendingPrompt({
+          priorPendingPrompts: [{ id: state, state }],
+        }),
+      ).toBe(true);
+    }
   });
 
   test('ignores failed rows and transcript-completed rows', () => {
     expect(
-      hasActivePriorPendingPrompt({
+      shouldDeferQueuedPendingPrompt({
         priorPendingPrompts: [{ id: 'f', state: 'failed' }],
       }),
     ).toBe(false);
     expect(
-      hasActivePriorPendingPrompt({
+      shouldDeferQueuedPendingPrompt({
         priorPendingPrompts: [{ id: 'done', state: 'sent' }],
         transcriptDoneIds: new Set(['done']),
       }),

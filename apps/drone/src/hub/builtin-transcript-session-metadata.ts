@@ -17,17 +17,6 @@ export function readBuiltinTranscriptSessionId(
   return typeof value === 'string' ? value.trim() : '';
 }
 
-export function hasKnownBuiltinTranscriptSession(
-  chatEntry: any,
-  agentId: BuiltinTranscriptAgentId,
-): boolean {
-  return (
-    agentId === 'cursor' ||
-    agentId === 'claude' ||
-    Boolean(readBuiltinTranscriptSessionId(chatEntry, agentId))
-  );
-}
-
 export function writeBuiltinTranscriptSessionId(
   chatEntry: any,
   agentId: BuiltinTranscriptAgentId,
