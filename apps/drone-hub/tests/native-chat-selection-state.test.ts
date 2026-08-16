@@ -124,6 +124,33 @@ describe('native chat selection state', () => {
     ).toBe(false);
   });
 
+  test('shows an initial prompt as failed when startup fails before chat metadata loads', () => {
+    expect(
+      visiblePendingPromptsForAgent({
+        agentKind: null,
+        chatUiMode: 'transcript',
+        startupFailed: true,
+        startupError: 'Repo seed failed',
+        pendingPrompts: [
+          {
+            id: 'initial-review',
+            prompt: 'Review the codebase for correctness bugs.',
+            state: 'queued',
+            at: '2026-08-16T20:09:54.187Z',
+          } as any,
+        ],
+        transcripts: [],
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        id: 'initial-review',
+        prompt: 'Review the codebase for correctness bugs.',
+        state: 'failed',
+        error: 'Repo seed failed',
+      }),
+    ]);
+  });
+
   test('does not turn completed native prompts into generic typing state', () => {
     const sentPrompt = {
       id: 'prompt-1',

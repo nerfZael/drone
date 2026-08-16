@@ -159,7 +159,11 @@ export class DvmApi {
       proc.stdout.on('data', (chunk) => (stdout += chunk.toString()));
       proc.stderr.on('data', (chunk) => (stderr += chunk.toString()));
       proc.on('error', (err) => reject(err));
-      proc.on('exit', (code) => {
+      // `exit` only means the child process has stopped. Its piped stdio can
+      // still have unread data at that point (especially when several Git
+      // commands finish concurrently). Wait for `close`, which is emitted
+      // after the stdio streams have closed, before returning stdout.
+      proc.on('close', (code) => {
         if (code === 0 || code === null) return resolve(stdout);
         const suffix = `${stdout}${stderr}`.trim();
         reject(

@@ -5,6 +5,16 @@ describe('repoSeed checkout target', () => {
     jest.restoreAllMocks();
   });
 
+  test('waits for inherited stdout to close before returning local command output', async () => {
+    const api = new DvmApi();
+    const output = await (api as any).runLocal('sh', [
+      '-c',
+      '(sleep 0.04; printf late-output) &',
+    ]);
+
+    expect(output).toBe('late-output');
+  });
+
   test('creates the work branch from the resolved base SHA instead of the short branch name', async () => {
     const execCommand = jest.fn(async () => '');
     const copyToContainer = jest.fn(async () => {});

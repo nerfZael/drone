@@ -627,11 +627,11 @@ export function useDroneHubLifecycleEffects({
         }
         const isStarting = isDroneStartingOrSeeding(summary.hubPhase);
         if (!isStarting && !summary.busy) {
-          const awaitingNativePromptReconciliation =
-            seed.agent?.kind === 'native' &&
+          const awaitingPromptReconciliation =
+            (seed.agent?.kind === 'native' || summary.hubPhase === 'error') &&
             Boolean(String(seed.prompt ?? '').trim()) &&
             isStartupSeedFresh(seed, nowMs);
-          if (awaitingNativePromptReconciliation) continue;
+          if (awaitingPromptReconciliation) continue;
           delete next[id];
           changed = true;
         }

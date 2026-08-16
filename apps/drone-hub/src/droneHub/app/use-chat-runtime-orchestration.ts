@@ -151,9 +151,24 @@ export function visiblePendingPromptsForAgent(opts: {
   agentKind: ChatAgentConfig['kind'] | null | undefined;
   chatUiMode: 'transcript' | 'cli';
   isDraftChat?: boolean;
+  startupFailed?: boolean;
+  startupError?: string | null;
   pendingPrompts: PendingPrompt[];
   transcripts: TranscriptItem[] | null;
 }): PendingPrompt[] {
+  if (opts.startupFailed) {
+    const error =
+      String(opts.startupError ?? '').trim() ||
+      'Drone failed before the initial message could be sent.';
+    return filterCompletedPendingPrompts(
+      opts.pendingPrompts.map((prompt) =>
+        prompt.state === 'queued' || prompt.state === 'sending'
+          ? { ...prompt, state: 'failed' as const, error }
+          : prompt,
+      ),
+      opts.transcripts,
+    );
+  }
   // Until the selected chat's config is resolved, do not project canonical
   // prompt rows into generic transcript state. The rows may belong to a native
   // chat, whose completion lives in the separate Assistant history store.
@@ -582,6 +597,8 @@ export function useChatRuntimeOrchestration({
     return visiblePendingPromptsForAgent({
       agentKind: chatInfo?.agent?.kind,
       chatUiMode,
+      startupFailed: currentDrone?.hubPhase === 'error',
+      startupError: currentDrone?.hubMessage ?? currentDrone?.statusError ?? null,
       isDraftChat:
         currentDrone?.draft === true ||
         currentDrone?.hubPhase === 'draft' ||
@@ -592,9 +609,10 @@ export function useChatRuntimeOrchestration({
   }, [chatInfo?.agent?.kind, chatUiMode, currentDrone, pendingPrompts, selectedChat, transcripts]);
 
   const startupPendingPrompt = React.useMemo((): PendingPrompt | null => {
-    if (chatUiMode !== 'transcript') return null;
     if (!selectedDroneSummary) return null;
-    if (!isDroneStartingOrSeeding(selectedDroneSummary.hubPhase)) return null;
+    const startupFailed = selectedDroneSummary.hubPhase === 'error';
+    if (chatUiMode !== 'transcript' && !startupFailed) return null;
+    if (!startupFailed && !isDroneStartingOrSeeding(selectedDroneSummary.hubPhase)) return null;
     const seed = selectedDroneSummary.id ? startupSeedByDrone[selectedDroneSummary.id] : null;
     if (!seed) return null;
     const prompt = String(seed.prompt ?? '').trim();
@@ -603,7 +621,15 @@ export function useChatRuntimeOrchestration({
       id: `seed-${selectedDroneSummary.id}-${seed.chatName}`,
       at: seed.at || new Date().toISOString(),
       prompt,
-      state: 'queued',
+      state: startupFailed ? 'failed' : 'queued',
+      ...(startupFailed
+        ? {
+            error:
+              String(
+                selectedDroneSummary.hubMessage ?? selectedDroneSummary.statusError ?? '',
+              ).trim() || 'Drone failed before the initial message could be sent.',
+          }
+        : {}),
       updatedAt: seed.at || undefined,
     };
   }, [chatUiMode, selectedDroneSummary, startupSeedByDrone]);
@@ -615,8 +641,10 @@ export function useChatRuntimeOrchestration({
   }, [queuedPromptsByDroneChat, selectedChat, selectedDrone]);
 
   const visiblePendingPromptsWithStartup = React.useMemo(() => {
+    const showStartupFailureTranscript = selectedDroneSummary?.hubPhase === 'error';
     const base = (() => {
-      if (chatUiMode !== 'transcript') return visiblePendingPrompts;
+      if (chatUiMode !== 'transcript' && !showStartupFailureTranscript)
+        return visiblePendingPrompts;
       if (!startupPendingPrompt) return visiblePendingPrompts;
       const startupPrompt = String(startupPendingPrompt.prompt ?? '').trim();
       if (
@@ -631,11 +659,21 @@ export function useChatRuntimeOrchestration({
       return [startupPendingPrompt, ...visiblePendingPrompts];
     })();
 
-    if (chatUiMode !== 'transcript' || localQueuedPromptsForSelected.length === 0) return base;
+    if (
+      (chatUiMode !== 'transcript' && !showStartupFailureTranscript) ||
+      localQueuedPromptsForSelected.length === 0
+    )
+      return base;
     const ids = new Set(base.map((p) => p.id));
     const extra = localQueuedPromptsForSelected.filter((p) => !ids.has(p.id));
     return extra.length > 0 ? [...base, ...extra] : base;
-  }, [chatUiMode, localQueuedPromptsForSelected, startupPendingPrompt, visiblePendingPrompts]);
+  }, [
+    chatUiMode,
+    localQueuedPromptsForSelected,
+    selectedDroneSummary?.hubPhase,
+    startupPendingPrompt,
+    visiblePendingPrompts,
+  ]);
 
   const canStopTranscriptResponse = React.useMemo(() => {
     if (chatUiMode !== 'transcript') return false;

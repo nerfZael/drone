@@ -681,7 +681,9 @@ export function SelectedDroneWorkspace({
   } = usePinnedTranscriptScroll({
     contextKey: `${currentDrone.id}:${activeChatName}`,
     contentVersion: externalTimelineGroups,
-    enabled: chatUiMode === 'transcript' && (currentAgentKey !== 'native' || currentChatIsDraft),
+    enabled:
+      currentDrone.hubPhase === 'error' ||
+      (chatUiMode === 'transcript' && (currentAgentKey !== 'native' || currentChatIsDraft)),
   });
   const workspaceChatScrollSnapshotRef = React.useRef<ChatScrollSnapshot | null>(null);
   const captureWorkspaceChatScroll = React.useCallback(() => {
@@ -2312,7 +2314,7 @@ export function SelectedDroneWorkspace({
                       onOpenLink: tryOpenMarkdownPullRequest,
                     }}
                   />
-                ) : chatUiMode === 'transcript' ? (
+                ) : droneStartupFailed || chatUiMode === 'transcript' ? (
                   <AgentChatTranscript
                     scrollRef={bindTranscriptScrollRef}
                     contentRef={bindTranscriptContentRef}
