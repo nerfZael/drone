@@ -78,6 +78,9 @@ describe('sidebar presentation', () => {
     expect(readModelSource).toContain(
       'return draftSidebarPlaceholderDrone ? [draftSidebarPlaceholderDrone, ...items] : items;',
     );
+    expect(sidebarSource).toContain(
+      "hubPhase: visibleDraftSidebarPlaceholder.starting ? 'starting' : 'draft'",
+    );
   });
 
   test('opens a repository back into its remembered chat workspace', () => {

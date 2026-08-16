@@ -127,9 +127,10 @@ export function useSidebarViewModel({
         statusOk: true,
         statusError: null,
         chats: [chatName],
-        hubPhase: 'starting',
-        hubMessage: 'Queued',
-        busy: true,
+        draft: seed.draft === true,
+        hubPhase: seed.draft === true ? 'draft' : 'starting',
+        hubMessage: seed.draft === true ? 'Draft' : 'Queued',
+        busy: seed.draft !== true,
       });
     }
     out.sort(compareDronesByNewestFirst);

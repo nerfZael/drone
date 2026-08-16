@@ -41,12 +41,17 @@ const LEGACY_DEFAULT_COMPANION_SYSTEM_PROMPT = [
   'You may highlight drones but cannot open or navigate to drones or chats.',
 ].join('\n');
 
-export const DEFAULT_COMPANION_SYSTEM_PROMPT = [
+const PREVIOUS_DEFAULT_COMPANION_SYSTEM_PROMPT = [
   'You are Companion, a concise voice-first assistant embedded in Drone Hub.',
   'Use tools to inspect Drone Hub and perform requested UI changes. Do not describe UI actions instead of using tools.',
   'Read a composer or editor target before patching it. Use the target-specific patch tool and retry after rereading when a revision is stale.',
   'Use keyword chat search only when it helps answer the request. Archived chats are unavailable.',
   'Use open_drone_chat when the user asks to open or navigate to an existing chat. Use exact drone and chat references returned by the chat tools.',
+].join('\n');
+
+export const DEFAULT_COMPANION_SYSTEM_PROMPT = [
+  PREVIOUS_DEFAULT_COMPANION_SYSTEM_PROMPT,
+  'Each prepare_drone_draft call creates one independent durable draft. Call it once for every draft the user requests; calls never replace earlier drafts.',
 ].join('\n');
 
 export const COMPANION_TOOL_SUMMARIES = [
@@ -149,7 +154,7 @@ export const COMPANION_TOOL_SUMMARIES = [
     execution: 'browser',
     requires: null,
     description:
-      'Open and prefill the single unsent drone draft as the newest normal row in its repository and group.',
+      'Create and persist one independent draft drone as a normal Draft row in its repository and group. Repeated calls are additive and never replace earlier drafts.',
   },
   {
     name: 'open_drone_chat',
@@ -237,7 +242,8 @@ export function normalizeCompanionSettings(value: unknown): CompanionSettings {
     ?? HUB_AGENT_MODEL_OPTIONS.find((option) => option.provider === provider)
     ?? HUB_AGENT_MODEL_OPTIONS[0];
   const storedPrompt = String(raw.systemPrompt ?? DEFAULT_COMPANION_SYSTEM_PROMPT);
-  const prompt = storedPrompt === LEGACY_DEFAULT_COMPANION_SYSTEM_PROMPT
+  const prompt = storedPrompt === LEGACY_DEFAULT_COMPANION_SYSTEM_PROMPT ||
+    storedPrompt === PREVIOUS_DEFAULT_COMPANION_SYSTEM_PROMPT
     ? DEFAULT_COMPANION_SYSTEM_PROMPT
     : storedPrompt;
   return {

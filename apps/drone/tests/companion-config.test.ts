@@ -50,7 +50,10 @@ describe('Companion settings', () => {
     ).toMatchObject({ execution: 'browser', category: 'actions' });
     expect(
       COMPANION_TOOL_SUMMARIES.find((tool) => tool.name === 'prepare_drone_draft')?.description,
-    ).toContain('newest normal row');
+    ).toContain('Repeated calls are additive');
+    expect(DEFAULT_COMPANION_SETTINGS.systemPrompt).toContain(
+      'Call it once for every draft the user requests',
+    );
   });
 
   test('adds the matching read dependency for enabled patch tools', () => {

@@ -437,10 +437,14 @@ export class CompanionRuntime {
     add('prepare_drone_draft', {
       parameters: objectParameters({
         name: { type: 'string', maxLength: 80 },
-        prompt: { type: 'string', maxLength: MAX_DRAFT_PROMPT_CHARS },
+        prompt: {
+          type: 'string',
+          maxLength: MAX_DRAFT_PROMPT_CHARS,
+          description: 'Initial queued task for this durable draft drone.',
+        },
         repoPath: { type: 'string', maxLength: 4096 },
         group: { type: 'string', maxLength: 64 },
-      }),
+      }, ['prompt']),
       execute: async (_callId, args, signal) => result(await context.callBrowser('prepare_drone_draft', args as Record<string, unknown>, signal)),
     });
 

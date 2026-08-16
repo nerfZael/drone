@@ -91,6 +91,7 @@ type UseDroneCreationActionsArgs = {
     drones: Array<{ id: string; name: string }>,
     opts: {
       runtime?: 'container' | 'host';
+      draft?: boolean;
       agent: ChatAgentConfig | null;
       model?: string | null;
       reasoning?: string | null;
@@ -351,12 +352,17 @@ export function useDroneCreationActions({
       attachments?: ChatSendPayload['attachments'];
       name?: string;
       group?: string;
+      repoPath?: string;
+      creationPreferences?: DesktopNewDronePreferences;
+      isolatedContext?: boolean;
       createMode?: 'with-chat' | 'without-chat';
       autoRename?: boolean;
       autoRenamePrompt?: string;
       keepDraftComposerOpen?: boolean;
       createAsDraft?: boolean;
       selectOnSuccess?: boolean;
+      onCreated?: (created: { droneId: string; droneName: string }) => void;
+      onError?: (message: string) => void;
       submittedAt?: string;
       deliveryMode?: 'queue' | 'asap';
     }): Promise<boolean> => {
@@ -379,35 +385,47 @@ export function useDroneCreationActions({
         createWithoutChat,
       });
       const group = String(opts?.group ?? draftCreateGroup ?? '').trim();
-      const fleetParentId = String(draftCreateParentDroneId ?? '').trim();
-      const runtime = createRuntime;
+      const creationPreferences = opts?.creationPreferences;
+      const fleetParentId = opts?.isolatedContext
+        ? ''
+        : String(draftCreateParentDroneId ?? '').trim();
+      const runtime = creationPreferences?.runtime ?? createRuntime;
       const keepDraftComposerOpen = Boolean(opts?.keepDraftComposerOpen);
       const selectOnSuccess = opts?.selectOnSuccess !== false;
-      const persistVolume = runtime === 'container' ? createPersistVolume : undefined;
-      const repoPath = String(draftCreateRepoPath ?? '').trim();
+      const persistVolume =
+        runtime === 'container'
+          ? (creationPreferences?.persistVolume ?? createPersistVolume)
+          : undefined;
+      const repoPath = String(opts?.repoPath ?? draftCreateRepoPath ?? '').trim();
       const repoSeedFromDroneId = resolveRepoSeedFromParentDroneId({
         drones,
         parentDroneId: fleetParentId,
         repoPath,
         runtime,
       });
-      const remoteBranch = String(repoCreateRemoteBranch ?? '').trim();
-      const effectiveRepoBranchSource: RepoBranchSourceMode = createRuntime === 'host' ? 'host' : repoBranchSource;
+      const remoteBranch = String(
+        creationPreferences?.repoCreateRemoteBranch ?? repoCreateRemoteBranch ?? '',
+      ).trim();
+      const effectiveRepoBranchSource: RepoBranchSourceMode =
+        runtime === 'host'
+          ? 'host'
+          : (creationPreferences?.repoBranchSource ?? repoBranchSource);
       const customAgentsMdOverride = resolveAgentsMdOverrideForCreate({
-        enabled: draftAgentsMdOverrideEnabled,
-        content: draftAgentsMdOverride,
+        enabled: opts?.isolatedContext ? false : draftAgentsMdOverrideEnabled,
+        content: opts?.isolatedContext ? '' : draftAgentsMdOverride,
         repoPath,
         runtime,
         isClone: false,
       });
       const agentsMdLibraryFileId = resolveAgentsMdLibraryFileIdForCreate({
-        fileId: draftAgentsMdLibraryFileId,
-        customOverrideEnabled: draftAgentsMdOverrideEnabled,
+        fileId: opts?.isolatedContext ? '' : draftAgentsMdLibraryFileId,
+        customOverrideEnabled: opts?.isolatedContext ? false : draftAgentsMdOverrideEnabled,
         repoPath,
         runtime,
         isClone: false,
       });
       const rejectCreate = (message: string): false => {
+        opts?.onError?.(message);
         if (selectOnSuccess) setDraftCreateError(message);
         else showTransientToast(message, 'Draft could not be saved');
         return false;
@@ -425,9 +443,38 @@ export function useDroneCreationActions({
         return rejectCreate('Choose a remote branch before creating a repo drone from a remote branch.');
       }
 
-      const seedAgent = createWithoutChat ? null : resolveAgentKeyToConfig(spawnAgentKey);
-      const seedAgentPermissionMode: AgentPermissionMode = seedAgent ? spawnAgentPermissionMode : 'execute';
-      const seedApprovalPolicy: AgentApprovalPolicy = seedAgent ? spawnApprovalPolicy : 'ask';
+      const requestedSpawnAgentKey = creationPreferences?.spawnAgentKey ?? spawnAgentKey;
+      const requestedSeedAgent = createWithoutChat
+        ? null
+        : resolveAgentKeyToConfig(requestedSpawnAgentKey);
+      const effectiveSpawnAgentKey =
+        runtime === 'host' && requestedSeedAgent?.kind === 'custom'
+          ? 'builtin:cursor'
+          : requestedSpawnAgentKey;
+      const seedAgent = createWithoutChat
+        ? null
+        : resolveAgentKeyToConfig(effectiveSpawnAgentKey);
+      const supportsAccessControls =
+        seedAgent?.kind === 'native' ||
+        (seedAgent?.kind === 'builtin' &&
+          (seedAgent.id === 'codex' || seedAgent.id === 'blip'));
+      const requestedPermissionMode =
+        creationPreferences?.spawnAgentPermissionMode ?? spawnAgentPermissionMode;
+      const seedAgentPermissionMode: AgentPermissionMode = seedAgent
+        ? (supportsAccessControls ? requestedPermissionMode : 'execute')
+        : 'execute';
+      const supportsApprovalPolicy =
+        seedAgent?.kind === 'native' ||
+        (seedAgent?.kind === 'builtin' && seedAgent.id === 'codex');
+      const requestedApprovalPolicy =
+        creationPreferences?.spawnApprovalPolicy ?? spawnApprovalPolicy;
+      const seedApprovalPolicy: AgentApprovalPolicy = seedAgent
+        ? (!supportsApprovalPolicy ||
+          (requestedApprovalPolicy === 'auto' &&
+            !(seedAgent.kind === 'builtin' && seedAgent.id === 'codex'))
+            ? 'ask'
+            : requestedApprovalPolicy)
+        : 'ask';
       if (!runtimeSupportsCustomAgents(runtime) && seedAgent?.kind === 'custom') {
         return rejectCreate('Host runtime currently supports builtin agents only.');
       }
@@ -445,8 +492,17 @@ export function useDroneCreationActions({
         beginDraftCreate();
         setDraftCreateError(null);
       }
-      const seedModel = createWithoutChat ? null : spawnModelForSeed;
-      const seedReasoning = createWithoutChat ? null : spawnReasoningForSeed;
+      const requestedModel = String(
+        creationPreferences?.spawnModel ?? spawnModelForSeed ?? '',
+      ).trim();
+      const requestedReasoning = String(
+        creationPreferences?.spawnReasoning ?? spawnReasoningForSeed ?? '',
+      ).trim();
+      const seedModel = createWithoutChat || seedAgent?.kind === 'custom'
+        ? null
+        : requestedModel || null;
+      const seedReasoning =
+        !createWithoutChat && supportsAccessControls ? requestedReasoning || null : null;
       let createdDrone = false;
       let postCreateError: string | null = null;
       const optimisticDraftName =
@@ -520,14 +576,15 @@ export function useDroneCreationActions({
           const createdName = String((data as any)?.name ?? name ?? '').trim() || droneId;
           if (!droneId) throw new Error('create drone did not return an id');
           createdDrone = true;
+          opts?.onCreated?.({ droneId, droneName: createdName });
           rememberNewDronePreferences(repoPath, {
             mode: effectiveCreateMode,
             runtime,
             persistVolume: persistVolume === true,
-            spawnAgentKey,
-            spawnModel: String(spawnModelForSeed ?? '').trim(),
-            spawnReasoning: String(spawnReasoningForSeed ?? '').trim(),
-            spawnAgentPermissionMode,
+            spawnAgentKey: effectiveSpawnAgentKey,
+            spawnModel: String(seedModel ?? '').trim(),
+            spawnReasoning: String(seedReasoning ?? '').trim(),
+            spawnAgentPermissionMode: seedAgentPermissionMode,
             spawnApprovalPolicy: seedApprovalPolicy,
             repoBranchSource: effectiveRepoBranchSource,
             repoCreateRemoteBranch: remoteBranch,
@@ -559,6 +616,7 @@ export function useDroneCreationActions({
               chatName: 'default',
               group,
               repoPath,
+              draft: effectiveCreateAsDraft,
               at: opts?.submittedAt ?? pending?.at ?? null,
             });
           }
@@ -657,6 +715,7 @@ export function useDroneCreationActions({
             });
             setDraftCreateError(err);
           } else {
+            opts?.onError?.(err);
             showTransientToast(err, 'Draft could not be saved');
           }
           return false;

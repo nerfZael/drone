@@ -1431,7 +1431,10 @@ export function DronesScreen({
     payload: MobileDroneCreatePayload,
     preferences?: MobileDroneCreatePreferences,
     initialImages: readonly MobileChatImage[] = [],
-    options: { selectCreatedDrone?: boolean } = {},
+    options: {
+      selectCreatedDrone?: boolean;
+      onCreated?: (created: { droneId: string; droneName: string }) => void;
+    } = {},
   ): Promise<boolean> => {
     const selectCreatedDrone = options.selectCreatedDrone !== false;
     let created = false;
@@ -1478,6 +1481,12 @@ export function DronesScreen({
       const createdDroneId = String(
         result?.id ?? result?.droneId ?? result?.drone?.id ?? '',
       ).trim();
+      const createdDroneName = String(
+        result?.name ?? result?.drone?.name ?? payload.name ?? createdDroneId,
+      ).trim() || createdDroneId;
+      if (createdDroneId) {
+        options.onCreated?.({ droneId: createdDroneId, droneName: createdDroneName });
+      }
       const startsWithChat = Boolean(payload.seedAgent);
       const initialPromptSummary =
         String(payload.seedPrompt ?? '').trim() ||
@@ -1485,17 +1494,26 @@ export function DronesScreen({
           ? `Attached ${initialImages.length} image${initialImages.length === 1 ? '' : 's'}`
           : '');
       if (targetIdRef.current === destinationId && createdDroneId && startsWithChat) {
+        const isDraft =
+          payload.draft === true ||
+          result?.draft === true ||
+          result?.phase === 'draft' ||
+          result?.drone?.draft === true ||
+          result?.drone?.phase === 'draft';
         const optimisticDrone = normalizeMobileDrone({
           id: createdDroneId,
-          name: result?.name ?? payload.name ?? createdDroneId,
+          name: createdDroneName,
           runtime: payload.runtime,
-          phase: result?.phase ?? 'starting',
-          status: 'Starting…',
           group: payload.group,
           repoPath: payload.repoPath,
           chats: ['default'],
-          busyChats: ['default'],
           ...(result?.drone && typeof result.drone === 'object' ? result.drone : {}),
+          phase: isDraft ? 'draft' : (result?.drone?.phase ?? result?.phase ?? 'starting'),
+          status: isDraft ? 'Draft' : (result?.drone?.status ?? 'Starting…'),
+          busyChats: isDraft
+            ? []
+            : (Array.isArray(result?.drone?.busyChats) ? result.drone.busyChats : ['default']),
+          draft: isDraft,
           groupId: result?.drone?.groupId ?? result?.groupId,
           createdAt:
             result?.drone?.createdAt ??
@@ -2104,8 +2122,16 @@ export function DronesScreen({
       path: filePreview.displayPath,
       kind: filePreview.preview?.kind ?? 'loading',
     },
-    createDraft: (payload, preferences) =>
-      createDrone(payload, preferences, [], { selectCreatedDrone: false }),
+    createDraft: async (payload, preferences) => {
+      let created: { droneId: string; droneName: string } | null = null;
+      const ok = await createDrone(payload, preferences, [], {
+        selectCreatedDrone: false,
+        onCreated: (result) => {
+          created = result;
+        },
+      });
+      return ok ? created : null;
+    },
     openChat: async (drone, requestedChat) => {
       await saveNewDroneDraftBeforeNavigation();
       navigationItems.find((item) => item.id === 'drones')?.onPress();

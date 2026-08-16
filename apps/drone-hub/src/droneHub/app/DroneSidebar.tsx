@@ -1350,8 +1350,9 @@ export function DroneSidebar({
       statusOk: true,
       statusError: null,
       chats: ['default'],
-      hubPhase: visibleDraftSidebarPlaceholder.starting ? 'starting' : null,
-      hubMessage: visibleDraftSidebarPlaceholder.starting ? 'Starting' : null,
+      draft: !visibleDraftSidebarPlaceholder.starting,
+      hubPhase: visibleDraftSidebarPlaceholder.starting ? 'starting' : 'draft',
+      hubMessage: visibleDraftSidebarPlaceholder.starting ? 'Starting' : 'Draft',
       busy: false,
     };
   }, [visibleDraftSidebarPlaceholder]);

@@ -31,7 +31,7 @@ The first version should support:
 - Hub-wide inventory: repository, drone, and chat counts; repository membership; repo-less drones; and drones with multiple chats.
 - Reading chats and bounded keyword search across active drone chats. Archived chats are excluded.
 - Highlighting drones without navigating to or opening them.
-- Preparing a prefilled drone draft without creating the drone. Its placeholder is always the first drone row in the Hub sidebar.
+- Creating one or more durable draft drones with queued initial prompts. Each appears as a normal Draft row in its repository and group.
 - Reading and immediately patching the active chat composer without confirmation. The patch must be one undo step.
 - Reading and immediately patching the open editor buffer only while that file is in edit mode. A patch leaves the buffer dirty, does not save it, and must be one undo step.
 - Awareness of the active drone, chat, composer, pane, and editor file.
@@ -150,11 +150,11 @@ A separate write or replace tool is not needed. An insert-only update works for 
 
 The server applies the patch hunks to the snapshot, then asks the browser to commit the result immediately if the target, revision, and mode still match; there is no confirmation step. On a conflict, the tool returns the latest revision so the agent can reread and retry. `apply_editor_patch` also rejects non-text, read-only, large-file, loading, saving, and preview states. A successful editor patch updates only the unsaved browser buffer; it does not call the save endpoint.
 
-`prepare_drone_draft` opens and populates the existing draft flow, then returns the resulting draft state. Reuse the current draft store and normal sidebar row. Place the draft inside its selected repository and group, ordered before existing sibling drones while it is new. It remains subject to the same repository, group, recent-drones, pinning, and manual-order behavior as every other drone; draft status changes the row badge and state, not its location. Preparing another draft replaces the existing single draft; it does not add a second draft row.
+`prepare_drone_draft` creates and persists one independent draft drone with its initial prompt queued for publication, then returns the stable drone ID and draft state. Every call is additive, so Companion can call it once per requested draft without replacing earlier results. Place each draft inside its selected repository and group as a normal row. It remains subject to the same repository, group, recent-drones, pinning, and manual-order behavior as every other drone; draft status changes the row badge and state, not its location.
 
 Applying a patch must preserve user undo. For Monaco-backed composer and file editors, expose an edit method on the registered target that uses `pushUndoStop`, `executeEdits`, and `pushUndoStop` instead of replacing the React `value`; one Ctrl/Cmd+Z should revert the whole Companion patch. For controlled textareas, keep an app-owned Companion undo snapshot and intercept Ctrl/Cmd+Z when the current revision still matches the patched result. Clear that snapshot when the composer is sent, reset, or replaced. Browser tests must cover user typing before and after the patch. Do not claim undo support from `setDraft` or `setOpenedFileContent` alone.
 
-Do not enable shell, direct workspace file writes or saves, message sending, actual drone or chat creation, generic navigation, settings changes, or the full built-in-agent catalog in the first version. Opening one existing chat is the only supported navigation action. Broader workspace reads and file search can later reuse a read-only `DroneWorkspaceTarget` for the active drone.
+Do not enable shell, direct workspace file writes or saves, message sending, non-draft drone or chat creation, generic navigation, settings changes, or the full built-in-agent catalog in the first version. Durable draft-drone creation and opening one existing chat are the only supported creation/navigation actions. Broader workspace reads and file search can later reuse a read-only `DroneWorkspaceTarget` for the active drone.
 
 ### 4. Add a dedicated Companion Settings tab
 
@@ -202,7 +202,7 @@ Every completed or failed message also writes a structured `Companion message ti
 - Missing provider credentials produce a clear Settings and overlay error without provider fallback.
 - It can report Hub counts, identify repo-less drones and drones with multiple chats, and show each drone's repository membership without scanning the UI.
 - Keyword search finds matching content in active chats, returns traceable chat references, and never returns archived chats.
-- It can prefill the existing single drone draft without creating or sending anything; the new draft appears first among the drones in its selected repository and group, subject to normal sidebar filtering and ordering afterward.
+- It can create multiple durable draft drones without publishing or starting them; each call returns a stable drone ID and each draft appears in its selected repository and group, subject to normal sidebar filtering and ordering.
 - Companion can open an existing chat in the current client and highlight matching drones, but it cannot create chats or perform generic navigation.
 - A changed composer is never overwritten, and one browser cannot receive another browser's tool calls.
 - Follow-up turns reuse the open Companion thread, and turns submitted while it is working run in order.
@@ -244,7 +244,7 @@ Every completed or failed message also writes a structured `Companion message ti
 - **Decided:** Both patch tools commit immediately without confirmation and must remain reversible with one Ctrl/Cmd+Z. Insert-only patches handle empty targets, so no separate write tool is needed.
 - **Decided:** Chat search is keyword-only and excludes archived chats in the first version.
 - **Decided:** Companion sessions use an isolated in-memory SQLite repository. Normal close deletes them, while a Hub crash removes them with process memory.
-- **Decided:** `prepare_drone_draft` reuses the single existing draft and shows it as the newest normal drone row inside its selected repository and group; it has no dedicated global sidebar slot.
+- **Decided:** Every `prepare_drone_draft` call creates an independent durable draft drone and returns its stable ID; repeated calls are additive and drafts render as normal Draft rows inside their selected repositories and groups.
 - **Decided:** Companion can open an existing chat with `open_drone_chat` and can highlight drones, but it cannot create chats or perform generic UI navigation.
 - **Decided:** Mobile uses a sidebar microphone and top overlay, reuses the existing phone voice recorder and Hub Companion settings, and reaches the same runtime through a permissioned device-mesh capability.
 - **Decided:** Companion takes the backtick default shortcut. Existing users with the old default voice-to-clipboard binding are migrated to Companion and voice-to-clipboard becomes unbound; custom bindings are preserved.

@@ -48,6 +48,10 @@ import { useCreateDraftWorkflowState } from './droneHub/app/use-create-draft-wor
 import { useAgentsMdLibraryCatalog } from './droneHub/app/use-agents-md-library-catalog';
 import { useDroneCreationActions } from './droneHub/app/use-drone-creation-actions';
 import { useCompanionWorkspace } from './droneHub/companion/CompanionWorkspaceContext';
+import {
+  createCompanionDroneDraft,
+  resolveCompanionDraftCreationPreferences,
+} from './droneHub/companion/companion-drone-draft';
 import { useChatRuntimeOrchestration } from './droneHub/app/use-chat-runtime-orchestration';
 import { useDroneErrorModalActions } from './droneHub/app/use-drone-error-modal-actions';
 import { useRepoBranchOptions } from './droneHub/app/use-repo-branch-options';
@@ -86,6 +90,7 @@ import {
 import { useChatConfigState } from './droneHub/app/use-chat-config-state';
 import {
   hasSpawnContextPreferencesForRepo,
+  resolveSpawnContextPreferencesForRepo,
   useDroneHubAppModelUiState,
   useDroneHubUiStore,
 } from './droneHub/app/use-drone-hub-ui-store';
@@ -890,6 +895,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       drones: Array<{ id: string; name: string }>,
       opts: {
         runtime?: 'container' | 'host';
+        draft?: boolean;
         agent: ChatAgentConfig | null;
         model?: string | null;
         reasoning?: string | null;
@@ -944,6 +950,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           next[id] = {
             droneName,
             runtime,
+            draft: opts.draft === true,
             chatName,
             agent: opts.agent ?? null,
             model,
@@ -2641,29 +2648,49 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           ? { path: openedEditorFile.path }
           : null,
       }),
-      prepareDroneDraft: (args) => {
-        if (draftCreating || draftAutoRenaming || draftChat?.prompt) {
-          throw new Error('DRAFT_BUSY');
-        }
-        const name = String(args.name ?? '').trim();
-        const prompt = String(args.prompt ?? '');
-        const repoPath = String(args.repoPath ?? '').trim();
-        const group = String(args.group ?? '').trim();
-        if (name.length > 80 || /[\r\n]/.test(name)) throw new Error('INVALID_DRAFT_NAME');
-        if (prompt.length > 100_000) throw new Error('DRAFT_PROMPT_TOO_LARGE');
-        if (repoPath.length > 4_096) throw new Error('INVALID_DRAFT_REPOSITORY');
-        if (group.length > 64) throw new Error('INVALID_DRAFT_GROUP');
-        const replacedFocusKey = String(draftChat?.focusKey ?? '').trim();
-        if (replacedFocusKey) newDroneDraftContentByFocusKeyRef.current.delete(replacedFocusKey);
-        openDraftChatComposerBase({ repoPath, group });
-        applyRememberedNewDronePreferences(repoPath);
-        setDraftCreateMode('with-chat');
-        if (name) setDraftCreateName(name);
-        setDraftChat((current) => current
-          ? { ...current, droneName: name || current.droneName, draftValue: prompt }
-          : current);
-        return { ok: true, name, prompt, repoPath: repoPath || null, group: group || null };
-      },
+      prepareDroneDraft: async (args) =>
+        await createCompanionDroneDraft(args, async (input) => {
+          const rememberedPreferences = loadDesktopNewDronePreferences(input.repoPath);
+          const basePreferences =
+            rememberedPreferences ?? normalizeDesktopNewDronePreferences({});
+          if (!basePreferences) throw new Error('could not resolve new-drone preferences');
+          const spawnContexts = useDroneHubUiStore.getState().spawnContextByRepoKey;
+          const creationPreferences = resolveCompanionDraftCreationPreferences({
+            remembered: rememberedPreferences,
+            defaults: basePreferences,
+            spawnContext: resolveSpawnContextPreferencesForRepo(
+              spawnContexts,
+              input.repoPath,
+            ),
+            hasSpawnContext: hasSpawnContextPreferencesForRepo(
+              spawnContexts,
+              input.repoPath,
+            ),
+          });
+          let creationError = '';
+          let created: { droneId: string; droneName: string } | null = null;
+          const ok = await createDroneFromDraft({
+            name: input.name,
+            prompt: input.prompt,
+            repoPath: input.repoPath,
+            group: input.group,
+            creationPreferences,
+            isolatedContext: true,
+            createMode: 'with-chat',
+            createAsDraft: true,
+            selectOnSuccess: false,
+            autoRename: !input.name,
+            autoRenamePrompt: input.prompt,
+            onCreated: (result) => {
+              created = result;
+            },
+            onError: (message) => {
+              creationError = message;
+            },
+          });
+          if (!ok && creationError) throw new Error(creationError);
+          return ok ? created : null;
+        }),
       openDroneChat: (args) => {
         const droneId = String(args.droneId ?? '').trim();
         const drone = droneByIdRef.current[droneId];
@@ -2706,24 +2733,16 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   }, [
     activeRepoPath,
     appView,
-    applyRememberedNewDronePreferences,
+    createDroneFromDraft,
     currentDrone,
     companionWorkspace,
-    draftAutoRenaming,
-    draftCreating,
-    draftChat?.focusKey,
-    draftChat?.prompt,
     expandGroupsForDroneIds,
-    openDraftChatComposerBase,
     openedEditorFile,
     rightPanelTab,
     selectedChat,
     selectedDroneIds,
     selectDroneChat,
     setActiveRepoPath,
-    setDraftChat,
-    setDraftCreateMode,
-    setDraftCreateName,
     visibleToolTabs,
   ]);
   React.useEffect(() => {

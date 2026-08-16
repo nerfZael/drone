@@ -10,10 +10,12 @@ import type { MobileDroneCreatePayload } from '../drones/NewDroneScreen';
 import type { MobileDroneSummary } from '../drones/drone-sidebar-model';
 import { useMobileCompanion, type MobileCompanionWorkspaceTarget } from './MobileCompanionContext';
 
+type CreatedDraft = { droneId: string; droneName: string };
+
 type CreateDraft = (
   payload: MobileDroneCreatePayload,
   preferences: MobileDroneCreatePreferences,
-) => Promise<boolean>;
+) => Promise<CreatedDraft | null>;
 const MOBILE_COMPANION_COMPOSER_MAX_CHARS = 32_000;
 
 export function useMobileCompanionWorkspaceTarget({
@@ -161,6 +163,7 @@ export function useMobileCompanionWorkspaceTarget({
           : remembered.repoBranchSource;
       const name = String(args.name ?? '').trim();
       const firstPrompt = String(args.prompt ?? '').trim();
+      if (!firstPrompt) throw new Error('INVALID_DRAFT_PROMPT');
       const group = String(args.group ?? '').trim();
       const payload: MobileDroneCreatePayload = {
         runtime,
@@ -188,8 +191,18 @@ export function useMobileCompanionWorkspaceTarget({
         ...(!name && firstPrompt ? { autoRename: true } : {}),
       };
       const preferences = remembered ?? mobileDroneCreatePreferencesFromPayload(payload);
-      if (!(await createDraft(payload, preferences))) throw new Error('DRONE_DRAFT_NOT_CREATED');
-      return { ok: true, repoPath: repoPath || null, group: group || null };
+      const created = await createDraft(payload, preferences);
+      if (!created?.droneId) throw new Error('DRONE_DRAFT_NOT_CREATED');
+      return {
+        ok: true,
+        persisted: true,
+        draft: true,
+        droneId: created.droneId,
+        name: created.droneName || name || created.droneId,
+        prompt: firstPrompt,
+        repoPath: repoPath || null,
+        group: group || null,
+      };
     },
     openDroneChat: async (args) => {
       if (!targetReachable) throw new Error('TARGET_DEVICE_OFFLINE');
