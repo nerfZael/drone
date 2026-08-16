@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   COMPANION_BROWSER_TOOL_NAMES,
   COMPANION_MAX_PROMPT_CHARS,
+  companionToolActivityLabel,
   groupCompanionToolActivity,
   reduceCompanionToolActivity,
   resolveCompanionChatName,
@@ -112,6 +113,43 @@ describe('Companion contracts', () => {
         status: 'completed',
       },
     ]);
+  });
+
+  test('describes Companion tool activity using its scope and result count', () => {
+    expect(companionToolActivityLabel({
+      callId: 'call-1',
+      tool: 'list_drones',
+      args: { names: ['Stories.prog.drone'], limit: 20 },
+      result: { ok: true, count: 0, drones: [] },
+      status: 'completed',
+    })).toBe('Find drone “Stories.prog.drone” · 0 drones');
+    expect(companionToolActivityLabel({
+      callId: 'call-2',
+      tool: 'list_drones',
+      args: { repoPath: '/home/zael/dev/mojo/StorySpark', limit: 100 },
+      result: { ok: true, count: 40 },
+      status: 'completed',
+    })).toBe('List drones in StorySpark · 40 drones');
+    expect(companionToolActivityLabel({
+      callId: 'call-3',
+      tool: 'search_chat_messages',
+      args: { query: 'source of truth', repoPath: '/home/zael/dev/mojo/StorySpark' },
+      result: { ok: true, count: 2 },
+      status: 'completed',
+    })).toBe('Search chats for “source of truth” in StorySpark · 2 matches');
+    expect(companionToolActivityLabel({
+      callId: 'call-4',
+      tool: 'open_drone_chat',
+      args: { droneId: 'drone-1', chatName: 'default' },
+      result: {
+        ok: true,
+        droneId: 'drone-1',
+        droneName: 'Review Prompt and Shot Architecture',
+        repoPath: '/home/zael/dev/mojo/StorySpark',
+        chatName: 'default',
+      },
+      status: 'completed',
+    })).toBe('Open “default” in Review Prompt and Shot Architecture');
   });
 
   test('groups only overlapping calls from the same turn as parallel', () => {

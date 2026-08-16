@@ -79,6 +79,89 @@ export type CompanionToolActivityGroup = {
   items: CompanionToolActivity[];
 };
 
+function activityRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function activityText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function activityPathLabel(value: unknown): string {
+  const path = activityText(value);
+  if (!path) return '';
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? path;
+}
+
+function activityPreview(value: unknown, maxLength = 64): string {
+  const text = activityText(value).replace(/\s+/g, ' ');
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+function activityResultCount(item: CompanionToolActivity): number | null {
+  const result = activityRecord(item.result);
+  const value = result?.count ?? result?.total;
+  const count = Number(value);
+  return Number.isFinite(count) && count >= 0 ? Math.floor(count) : null;
+}
+
+function activityCountLabel(tool: string, count: number | null): string {
+  if (count === null) return '';
+  const noun = tool === 'list_drones'
+    ? 'drone'
+    : tool === 'list_repos'
+      ? 'repository'
+      : tool === 'list_chats'
+        ? 'chat'
+        : tool === 'search_chat_messages'
+          ? 'match'
+          : 'result';
+  const plural = noun === 'repository' ? 'repositories' : noun === 'match' ? 'matches' : `${noun}s`;
+  return `${count} ${count === 1 ? noun : plural}`;
+}
+
+/** A compact, argument-aware description for Companion's visible tool activity. */
+export function companionToolActivityLabel(item: CompanionToolActivity): string {
+  const args = activityRecord(item.args) ?? {};
+  const result = activityRecord(item.result) ?? {};
+  const repository = activityPathLabel(args.repoPath);
+  const count = activityCountLabel(item.tool, activityResultCount(item));
+  let label = '';
+
+  if (item.tool === 'list_drones') {
+    const names = Array.isArray(args.names)
+      ? args.names.map(activityText).filter(Boolean)
+      : [];
+    if (names.length === 1) label = `Find drone “${activityPreview(names[0])}”`;
+    else if (names.length > 1) label = `Find ${names.length} named drones`;
+    else if (repository) label = `List drones in ${repository}`;
+    else if (activityText(args.group)) label = `List drones in group “${activityPreview(args.group)}”`;
+    else label = 'List drones';
+  } else if (item.tool === 'list_repos') {
+    label = 'List repositories';
+  } else if (item.tool === 'search_chat_messages') {
+    const query = activityPreview(args.query);
+    label = query ? `Search chats for “${query}”` : 'Search chat messages';
+    if (repository) label += ` in ${repository}`;
+  } else if (item.tool === 'open_drone_chat') {
+    const chatName = activityPreview(result.chatName) || activityPreview(args.chatName);
+    const droneName = activityPreview(result.droneName);
+    if (chatName && droneName) label = `Open “${chatName}” in ${droneName}`;
+    else if (droneName) label = `Open ${droneName}`;
+    else label = chatName ? `Open chat “${chatName}”` : 'Open drone chat';
+  } else if (item.tool === 'get_app_context') {
+    label = 'Read app context';
+  } else {
+    label = item.tool.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+
+  return count ? `${label} · ${count}` : label;
+}
+
 export type CompanionBrowserToolRequest = {
   type: 'tool_call';
   generation: number;

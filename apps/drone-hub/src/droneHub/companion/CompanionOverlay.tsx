@@ -1,5 +1,8 @@
 import React from 'react';
-import { groupCompanionToolActivity } from '@drone/assistant-chat';
+import {
+  companionToolActivityLabel,
+  groupCompanionToolActivity,
+} from '@drone/assistant-chat';
 import { AgentRunSummaryLine } from '../chat/WorkingElapsedStatus';
 import { ChatMessageBody } from '../chat/ChatMessageBody';
 import { formatChatVoiceDuration } from '../chat/use-chat-voice-recorder';
@@ -98,12 +101,34 @@ export function CompanionOverlay() {
                             ? 'Running'
                             : item.status === 'failed'
                               ? 'Failed'
-                              : 'Used'}{' '}
-                          {item.tool}
+                              : 'Completed'}{' '}
+                          · {companionToolActivityLabel(item)}
                         </summary>
-                        <pre className="mt-1 overflow-auto whitespace-pre-wrap break-words text-[10px] text-[var(--muted-dim)]">
-                          {JSON.stringify(item.error ?? item.result ?? item.args, null, 2)}
-                        </pre>
+                        <div className="mt-1 space-y-2 text-[10px] text-[var(--muted-dim)]">
+                          {item.args !== undefined ? (
+                            <div>
+                              <div className="font-[var(--weight-semibold)] uppercase tracking-wide">Arguments</div>
+                              <pre className="overflow-auto whitespace-pre-wrap break-words">
+                                {JSON.stringify(item.args, null, 2)}
+                              </pre>
+                            </div>
+                          ) : null}
+                          {item.error !== undefined ? (
+                            <div>
+                              <div className="font-[var(--weight-semibold)] uppercase tracking-wide">Error</div>
+                              <pre className="overflow-auto whitespace-pre-wrap break-words">
+                                {JSON.stringify(item.error, null, 2)}
+                              </pre>
+                            </div>
+                          ) : item.result !== undefined ? (
+                            <div>
+                              <div className="font-[var(--weight-semibold)] uppercase tracking-wide">Result</div>
+                              <pre className="overflow-auto whitespace-pre-wrap break-words">
+                                {JSON.stringify(item.result, null, 2)}
+                              </pre>
+                            </div>
+                          ) : null}
+                        </div>
                       </details>
                     ))}
                   </React.Fragment>

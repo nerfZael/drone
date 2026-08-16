@@ -2675,9 +2675,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         ];
         const chatName = resolveCompanionChatName(chats, requestedChatName);
         if (!chatName) throw new Error(`unknown chat: ${droneId}/${requestedChatName || '(none)'}`);
+        const repoPath = String(drone.repoPath ?? '').trim();
+        const droneName = String(drone.name ?? '').trim() || droneId;
+        setActiveRepoPath(repoPath);
         expandGroupsForDroneIds([droneId]);
         selectDroneChat(droneId, chatName);
-        return { ok: true, droneId, chatName };
+        return { ok: true, droneId, droneName, repoPath: repoPath || null, chatName };
       },
       highlightDrones: (args) => {
         const droneIds = Array.from(new Set(
@@ -2717,6 +2720,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     selectedChat,
     selectedDroneIds,
     selectDroneChat,
+    setActiveRepoPath,
     setDraftChat,
     setDraftCreateMode,
     setDraftCreateName,

@@ -200,7 +200,9 @@ export function useMobileCompanionWorkspaceTarget({
       const chatName = resolveCompanionChatName(drone.chats, requestedChatName);
       if (!chatName) throw new Error(`unknown chat: ${droneId}/${requestedChatName || '(none)'}`);
       await openChat(drone, chatName);
-      return { ok: true, droneId, chatName };
+      const droneName = String(drone.name ?? '').trim() || droneId;
+      const repoPath = String(drone.repoPath ?? '').trim();
+      return { ok: true, droneId, droneName, repoPath: repoPath || null, chatName };
     },
     highlightDrones: (args) => {
       const requested = Array.isArray(args.droneIds)

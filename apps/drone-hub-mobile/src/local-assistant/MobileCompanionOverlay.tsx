@@ -1,5 +1,8 @@
 import React from 'react';
-import { groupCompanionToolActivity } from '@drone/assistant-chat';
+import {
+  companionToolActivityLabel,
+  groupCompanionToolActivity,
+} from '@drone/assistant-chat';
 import {
   ActivityIndicator,
   Pressable,
@@ -155,7 +158,6 @@ export function MobileCompanionOverlay() {
                       ) : null}
                       {group.items.map((item) => {
                         const expanded = expandedCalls.has(item.callId);
-                        const detail = item.error ?? item.result ?? item.args;
                         return (
                           <View key={item.callId} style={styles.toolCall}>
                             <Pressable
@@ -185,14 +187,36 @@ export function MobileCompanionOverlay() {
                                   ? 'Running'
                                   : item.status === 'failed'
                                     ? 'Failed'
-                                    : 'Used'}{' '}
-                                {item.tool}
+                                    : 'Completed'}{' '}
+                                · {companionToolActivityLabel(item)}
                               </Text>
                             </Pressable>
                             {expanded ? (
-                              <Text selectable style={styles.toolDetail}>
-                                {JSON.stringify(detail, null, 2)}
-                              </Text>
+                              <View style={styles.toolDetails}>
+                                {item.args !== undefined ? (
+                                  <View>
+                                    <Text style={styles.toolDetailLabel}>Arguments</Text>
+                                    <Text selectable style={styles.toolDetail}>
+                                      {JSON.stringify(item.args, null, 2)}
+                                    </Text>
+                                  </View>
+                                ) : null}
+                                {item.error !== undefined ? (
+                                  <View>
+                                    <Text style={styles.toolDetailLabel}>Error</Text>
+                                    <Text selectable style={styles.toolDetail}>
+                                      {JSON.stringify(item.error, null, 2)}
+                                    </Text>
+                                  </View>
+                                ) : item.result !== undefined ? (
+                                  <View>
+                                    <Text style={styles.toolDetailLabel}>Result</Text>
+                                    <Text selectable style={styles.toolDetail}>
+                                      {JSON.stringify(item.result, null, 2)}
+                                    </Text>
+                                  </View>
+                                ) : null}
+                              </View>
                             ) : null}
                           </View>
                         );
@@ -319,9 +343,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
   },
   toolName: { flex: 1, color: colors.textSecondary, fontSize: 10 },
+  toolDetails: { gap: 7, paddingBottom: 9 },
+  toolDetailLabel: {
+    marginHorizontal: 10,
+    marginBottom: 3,
+    color: colors.mutedDim,
+    fontSize: 8,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+  },
   toolDetail: {
     marginHorizontal: 10,
-    marginBottom: 9,
     padding: 8,
     color: colors.mutedDim,
     fontSize: 9,
