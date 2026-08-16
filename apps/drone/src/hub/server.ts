@@ -210,9 +210,8 @@ import {
 } from './sync-sets';
 import { createSyncSetService } from './sync-set-service';
 import {
-  hasInFlightPriorPendingPrompt,
   looksLikeTransientPromptEnqueueError,
-  shouldDeferQueuedPendingPrompt,
+  shouldDeferPendingPrompt,
   shouldRetryFailedPendingPrompt,
   stalePendingPromptState,
 } from './pendingPromptEnqueue';
@@ -3191,7 +3190,6 @@ function createHubRuntimeGraph(
     failStaleDockerSnapshotsForChat,
     formatTranscriptJobFailure,
     getChatEntry,
-    hasInFlightPriorPendingPrompt,
     hubChatSessionName,
     hubLog,
     importChatFromRegistry,
@@ -3254,7 +3252,7 @@ function createHubRuntimeGraph(
     sameAgentPlan,
     setChatAgentConfig,
     setDroneHubMetaByIdentity,
-    shouldDeferQueuedPendingPrompt,
+    shouldDeferPendingPrompt,
     shouldRetryFailedPendingPrompt,
     sleepMs,
     stalePendingPromptState,
