@@ -23,9 +23,11 @@ function messageText(data: RawData): string {
 export function createCompanionWebSocketServer(runtime: CompanionRuntime): WebSocketServer {
   const server = new WebSocketServer({ noServer: true, maxPayload: MAX_CLIENT_PAYLOAD_BYTES });
   server.on('connection', (socket: WebSocket, _request: http.IncomingMessage) => {
+    let sessionRunId = '';
     let activeRunId = '';
     let generation = 0;
     let cleanedUp = false;
+    const queuedPrompts: string[] = [];
 
     const send = (payload: unknown) => {
       if (socket.readyState !== WebSocket.OPEN) return;
@@ -41,6 +43,47 @@ export function createCompanionWebSocketServer(runtime: CompanionRuntime): WebSo
       unavailableMessage: 'Companion browser disconnected',
       dispatch: (call) => send({ type: 'tool_call', runId: activeRunId, ...call }),
     });
+
+    const drainQueue = async () => {
+      if (activeRunId || !sessionRunId || cleanedUp) return;
+      while (queuedPrompts.length > 0 && sessionRunId && !cleanedUp) {
+        const prompt = queuedPrompts.shift()!;
+        const runId = sessionRunId;
+        activeRunId = runId;
+        generation += 1;
+        const runGeneration = generation;
+        const callBrowser: CompanionBrowserCall = (tool, args, signal) => {
+          if (activeRunId !== runId || generation !== runGeneration) {
+            return Promise.reject(new Error('Companion run is no longer active'));
+          }
+          return browserTools.request(tool, args, runGeneration, signal);
+        };
+        send({ type: 'status', runId, status: 'working' });
+        try {
+          const reply = await runtime.run({
+            runId,
+            prompt,
+            callBrowser,
+            onEvent: (event) => {
+              if (activeRunId === runId && generation === runGeneration) {
+                const visibleEvent = boundedCompanionActivityEvent(event);
+                if (visibleEvent) send({ type: 'activity', runId, event: visibleEvent });
+              }
+            },
+          });
+          if (activeRunId !== runId || generation !== runGeneration) return;
+          send({ type: 'reply', runId, reply });
+          send({ type: 'status', runId, status: 'completed' });
+        } catch (error) {
+          if (activeRunId !== runId || generation !== runGeneration) return;
+          send({ type: 'error', runId, error: error instanceof Error ? error.message : String(error) });
+        } finally {
+          if (activeRunId === runId && generation === runGeneration) activeRunId = '';
+          if (generation === runGeneration) browserTools.rejectAll('Companion run finished');
+        }
+      }
+    };
+
     socket.on('message', (raw) => {
       let message: CompanionClientMessage;
       try {
@@ -62,12 +105,14 @@ export function createCompanionWebSocketServer(runtime: CompanionRuntime): WebSo
       }
       if (message?.type === 'cancel_run') {
         const requestedRunId = String(message.runId ?? '');
-        if (requestedRunId && requestedRunId === activeRunId) {
+        if (requestedRunId && requestedRunId === sessionRunId) {
           generation += 1;
-          runtime.cancel(activeRunId);
+          send({ type: 'status', runId: requestedRunId, status: 'cancelled' });
+          queuedPrompts.length = 0;
           browserTools.rejectAll('Companion run cancelled');
           activeRunId = '';
-          send({ type: 'status', runId: requestedRunId, status: 'cancelled' });
+          sessionRunId = '';
+          void runtime.deleteSession(requestedRunId).catch(() => undefined);
         }
         return;
       }
@@ -78,51 +123,25 @@ export function createCompanionWebSocketServer(runtime: CompanionRuntime): WebSo
         return;
       }
       const { runId, prompt } = validation;
-      if (activeRunId) {
-        send({ type: 'error', runId, error: 'This Companion socket already has an active run.' });
+      if (sessionRunId && runId !== sessionRunId) {
+        send({ type: 'error', runId, error: 'This Companion socket already owns another session.' });
         return;
       }
-      activeRunId = runId;
-      generation += 1;
-      const runGeneration = generation;
-      const callBrowser: CompanionBrowserCall = (tool, args, signal) => {
-        if (activeRunId !== runId || generation !== runGeneration) {
-          return Promise.reject(new Error('Companion run is no longer active'));
-        }
-        return browserTools.request(tool, args, runGeneration, signal);
-      };
-      send({ type: 'status', runId, status: 'working' });
-      void runtime.run({
-        runId,
-        prompt,
-        callBrowser,
-        onEvent: (event) => {
-          if (activeRunId === runId && generation === runGeneration) {
-            const visibleEvent = boundedCompanionActivityEvent(event);
-            if (visibleEvent) send({ type: 'activity', runId, event: visibleEvent });
-          }
-        },
-      }).then((reply) => {
-        if (activeRunId !== runId || generation !== runGeneration) return;
-        send({ type: 'reply', runId, reply });
-        send({ type: 'status', runId, status: 'completed' });
-        activeRunId = '';
-      }).catch((error) => {
-        if (activeRunId !== runId || generation !== runGeneration) return;
-        send({ type: 'error', runId, error: error instanceof Error ? error.message : String(error) });
-        activeRunId = '';
-      }).finally(() => {
-        if (generation === runGeneration) browserTools.rejectAll('Companion run finished');
-      });
+      sessionRunId = runId;
+      queuedPrompts.push(prompt);
+      void drainQueue();
     });
 
     const cleanup = () => {
       if (cleanedUp) return;
       cleanedUp = true;
       generation += 1;
-      if (activeRunId) runtime.cancel(activeRunId);
+      const runId = sessionRunId;
+      queuedPrompts.length = 0;
       activeRunId = '';
+      sessionRunId = '';
       browserTools.rejectAll('Companion browser disconnected');
+      if (runId) void runtime.deleteSession(runId).catch(() => undefined);
     };
     socket.once('close', cleanup);
     socket.once('error', cleanup);

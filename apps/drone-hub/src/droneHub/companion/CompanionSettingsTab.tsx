@@ -55,6 +55,7 @@ export function CompanionSettingsTab({ settings }: {
             showReasoning: true,
             searchable: true,
             title: 'Choose Companion model and reasoning',
+            menuPlacement: 'below',
             onSelect: (choice, selection) => setDraft({
               ...draft,
               provider: choice.provider as typeof draft.provider,

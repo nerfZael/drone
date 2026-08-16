@@ -39,6 +39,14 @@ async function closeTestServer(
   await new Promise<void>((resolve) => httpServer.close(() => resolve()));
 }
 
+async function waitFor(predicate: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error('expected Companion socket state was not reached');
+}
+
 test('Companion socket cancels its active run when the browser disconnects', async () => {
   let finishRun!: (reply: string) => void;
   const runFinished = new Promise<string>((resolve) => {
@@ -52,6 +60,10 @@ test('Companion socket cancels its active run when the browser disconnects', asy
   const runtime = {
     run: async () => await runFinished,
     cancel: (runId: string) => {
+      cancelledRunId = runId;
+      reportCancelled();
+    },
+    deleteSession: async (runId: string) => {
       cancelledRunId = runId;
       reportCancelled();
     },
@@ -94,12 +106,16 @@ test('Companion socket cancels its active run when the browser disconnects', asy
 test('Companion socket rejects late browser tools from a cancelled run after restart', async () => {
   const runs: any[] = [];
   const completions: Array<(reply: string) => void> = [];
+  const deletedSessions: string[] = [];
   const runtime = {
     run: (input: any) => {
       runs.push(input);
       return new Promise<string>((resolve) => completions.push(resolve));
     },
     cancel() {},
+    async deleteSession(runId: string) {
+      deletedSessions.push(runId);
+    },
   };
   const webSocketServer = createCompanionWebSocketServer(runtime as any);
   const httpServer = http.createServer();
@@ -125,24 +141,64 @@ test('Companion socket rejects late browser tools from a cancelled run after res
       runId: 'first-run',
       status: 'working',
     });
-    const firstCancelled = nextMessage(client);
     client.send(JSON.stringify({ type: 'cancel_run', runId: 'first-run' }));
-    expect(await firstCancelled).toMatchObject({
-      type: 'status',
-      runId: 'first-run',
-      status: 'cancelled',
-    });
-    const secondStarted = nextMessage(client);
+    await waitFor(() => deletedSessions.includes('first-run'));
     client.send(JSON.stringify({ type: 'start_run', runId: 'second-run', prompt: 'Second' }));
-    expect(await secondStarted).toMatchObject({
-      type: 'status',
-      runId: 'second-run',
-      status: 'working',
-    });
+    await waitFor(() => runs.length === 2);
 
     await expect(runs[0].callBrowser('highlight_drones', { droneIds: ['drone-a'] })).rejects.toThrow(
       'Companion run is no longer active',
     );
+  } finally {
+    for (const complete of completions) complete('');
+    await closeTestServer(client, webSocketServer, httpServer);
+  }
+});
+
+test('Companion socket queues follow-ups on the same session', async () => {
+  const runs: any[] = [];
+  const completions: Array<(reply: string) => void> = [];
+  const deletedSessions: string[] = [];
+  const runtime = {
+    run: (input: any) => {
+      runs.push(input);
+      return new Promise<string>((resolve) => completions.push(resolve));
+    },
+    cancel() {},
+    async deleteSession(runId: string) {
+      deletedSessions.push(runId);
+    },
+  };
+  const webSocketServer = createCompanionWebSocketServer(runtime as any);
+  const httpServer = http.createServer();
+  httpServer.on('upgrade', (request, socket, head) => {
+    webSocketServer.handleUpgrade(request, socket, head, (client) => {
+      webSocketServer.emit('connection', client, request);
+    });
+  });
+  await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
+  const address = httpServer.address();
+  if (!address || typeof address === 'string') throw new Error('test server did not bind');
+  const client = new WebSocket(`ws://127.0.0.1:${address.port}`);
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      client.once('open', resolve);
+      client.once('error', reject);
+    });
+    client.send(JSON.stringify({ type: 'start_run', runId: 'conversation', prompt: 'First' }));
+    client.send(JSON.stringify({ type: 'start_run', runId: 'conversation', prompt: 'Second' }));
+    await waitFor(() => runs.length === 1);
+    expect(runs.map((run) => run.prompt)).toEqual(['First']);
+
+    completions[0]!('First reply');
+    await waitFor(() => runs.length === 2);
+    expect(runs.map((run) => run.prompt)).toEqual(['First', 'Second']);
+    expect(runs[1].runId).toBe(runs[0].runId);
+
+    completions[1]!('Second reply');
+    client.send(JSON.stringify({ type: 'cancel_run', runId: 'conversation' }));
+    await waitFor(() => deletedSessions.includes('conversation'));
   } finally {
     for (const complete of completions) complete('');
     await closeTestServer(client, webSocketServer, httpServer);

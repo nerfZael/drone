@@ -221,25 +221,20 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
   const run = React.useCallback(
     async (prompt: string) => {
       const cleanPrompt = prompt.trim();
-      if (!cleanPrompt) {
-        erase();
-        return;
-      }
+      if (!cleanPrompt) return;
       const activeTarget = workspaceTargetRef.current;
       if (!activeTarget) {
         setError('Open Drone Hub before starting Companion.');
         setStatusValue('error');
         return;
       }
-      const runId = newRunId();
-      const generation = generationRef.current + 1;
-      generationRef.current = generation;
+      const runId = runIdRef.current || newRunId();
+      const generation = generationRef.current;
       runIdRef.current = runId;
       runTargetDeviceIdRef.current = activeTarget.targetDeviceId;
       setTranscript(cleanPrompt);
-      setStartedAt(Date.now());
+      setStartedAt((current) => current ?? Date.now());
       setEndedAt(null);
-      setActivity([]);
       setError('');
       setStatusValue('working');
       try {
@@ -249,38 +244,32 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
         });
       } catch (nextError: any) {
         if (generationRef.current !== generation) return;
-        runIdRef.current = '';
-        runTargetDeviceIdRef.current = '';
         setError(String(nextError?.message ?? nextError ?? 'Companion could not start.'));
         setEndedAt(Date.now());
         setStatusValue('error');
       }
     },
-    [erase, mesh.request, setStatusValue],
+    [mesh.request, setStatusValue],
   );
 
   const toggle = React.useCallback(async () => {
-    const current = statusRef.current;
-    if (current === 'starting' || current === 'transcribing' || current === 'working') return;
-    if (current === 'recording') {
+    if (voice.status === 'starting' || voice.status === 'transcribing') return;
+    if (voice.status === 'recording') {
       const generation = generationRef.current;
-      setStatusValue('transcribing');
       const text = await voice.stopRecordingForTranscript();
       if (generationRef.current !== generation) return;
       if (!text.trim()) {
         const voiceError = voice.getError();
         if (voiceError) {
           setError(voiceError);
-          setStatusValue('error');
-        } else {
-          erase();
+          if (!runIdRef.current) setStatusValue('error');
         }
         return;
       }
       await run(text);
       return;
     }
-    if (current !== 'idle') await close();
+    if (statusRef.current === 'cancelled' || statusRef.current === 'error') await close();
     const activeTarget = workspaceTargetRef.current;
     if (!activeTarget || !activeTarget.reachable) {
       setError(unavailableReason || 'Companion is unavailable.');
@@ -306,28 +295,26 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     runTargetDeviceIdRef.current = activeTarget.targetDeviceId;
     voice.setError('');
     setError('');
-    setStatusValue('starting');
     const started = await voice.startRecording('companion');
     if (generationRef.current !== generation) return;
-    if (started) setStatusValue('recording');
-    else {
+    if (!started) {
       setError(
         voice.getError() || 'The microphone could not start. Check microphone and Groq settings.',
       );
-      setStatusValue('error');
+      if (!runIdRef.current) setStatusValue('error');
     }
   }, [available, close, erase, run, setStatusValue, unavailableReason, voice]);
 
   React.useEffect(() => {
     if (
       !voice.error.trim() ||
-      (status !== 'starting' && status !== 'recording' && status !== 'transcribing')
+      !['starting', 'recording', 'stopped', 'transcribing'].includes(voice.status)
     ) {
       return;
     }
     setError(voice.error);
-    setStatusValue('error');
-  }, [setStatusValue, status, voice.error]);
+    if (!runIdRef.current) setStatusValue('error');
+  }, [setStatusValue, voice.error, voice.status]);
 
   React.useEffect(() => {
     const onRunEvent = (event: CapabilityEvent) => {
@@ -373,8 +360,6 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       }
       if (type === 'reply') setReply(String(payload.reply ?? ''));
       if (type === 'status' && payload.status === 'completed') {
-        runIdRef.current = '';
-        runTargetDeviceIdRef.current = '';
         setEndedAt(Date.now());
         setStatusValue('completed');
       } else if (type === 'status' && payload.status === 'cancelled') {
@@ -383,8 +368,6 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
         setEndedAt(Date.now());
         setStatusValue('cancelled');
       } else if (type === 'error' && generationRef.current === generation) {
-        runIdRef.current = '';
-        runTargetDeviceIdRef.current = '';
         setError(String(payload.error ?? 'Companion failed.'));
         setEndedAt(Date.now());
         setStatusValue('error');
@@ -416,9 +399,18 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     [mesh.request, voice.discardRecording],
   );
 
+  const effectiveStatus: CompanionStatus =
+    voice.status === 'paused'
+      ? 'recording'
+      : voice.status === 'stopped'
+        ? 'transcribing'
+      : voice.status !== 'idle'
+        ? voice.status
+        : status;
+
   const value = React.useMemo<MobileCompanionContextValue>(
     () => ({
-      status,
+      status: effectiveStatus,
       error,
       reply,
       transcript,
@@ -439,11 +431,11 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       close,
       endedAt,
       error,
+      effectiveStatus,
       registerEditorTarget,
       registerWorkspaceTarget,
       reply,
       startedAt,
-      status,
       toggle,
       transcript,
       unavailableReason,

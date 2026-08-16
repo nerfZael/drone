@@ -18,6 +18,7 @@ import { useContinuousDictation } from '../chat/ContinuousDictationContext';
 import { toggleCurrentChatComposerEditorMode } from '../chat/chat-composer-editor-mode-shortcut';
 import { useFileDictation } from '../files/FileDictationContext';
 import { useCompanion } from '../companion/CompanionContext';
+import { isCompanionShortcutDoubleTap } from '../companion/companion-shortcut';
 
 type Updater<T> = T | ((prev: T) => T);
 type Setter<T> = (next: Updater<T>) => void;
@@ -156,7 +157,22 @@ export function useDroneHubLifecycleEffects({
   onDeleteSelectedDroneFromInputShortcut,
   onMarkSelectedDronesUnreadShortcut,
 }: UseDroneHubLifecycleEffectsArgs) {
-  const toggleCompanionRecording = useCompanion()?.toggle;
+  const companion = useCompanion();
+  const toggleCompanionRecording = companion?.toggle;
+  const closeCompanion = companion?.close;
+  const lastCompanionShortcutAtRef = React.useRef(0);
+  const runCompanionShortcut = React.useCallback((): boolean => {
+    if (!toggleCompanionRecording) return false;
+    const now = Date.now();
+    if (isCompanionShortcutDoubleTap(lastCompanionShortcutAtRef.current, now)) {
+      lastCompanionShortcutAtRef.current = 0;
+      void closeCompanion?.();
+    } else {
+      lastCompanionShortcutAtRef.current = now;
+      void toggleCompanionRecording();
+    }
+    return true;
+  }, [closeCompanion, toggleCompanionRecording]);
   const toggleContinuousDictation = useContinuousDictation()?.toggle;
   const toggleFileDictation = useFileDictation()?.toggle;
   const outputScrollContextRef = React.useRef<string>('');
@@ -307,9 +323,7 @@ export function useDroneHubLifecycleEffects({
         return true;
       },
       toggleCompanion: () => {
-        if (!toggleCompanionRecording) return false;
-        void toggleCompanionRecording();
-        return true;
+        return runCompanionShortcut();
       },
       toggleVoiceClipboardRecording: () => toggleVoiceClipboardRecording(),
       markSelectedDronesUnread: () => onMarkSelectedDronesUnreadShortcut(),
@@ -407,8 +421,7 @@ export function useDroneHubLifecycleEffects({
         (definition) => isShortcutMatch(shortcutBindings[definition.id], e),
       );
       if (matched?.id === 'toggleCompanion') {
-        if (!toggleCompanionRecording) return;
-        void toggleCompanionRecording();
+        if (!runCompanionShortcut()) return;
         e.preventDefault();
         e.stopPropagation();
         return;
@@ -477,7 +490,7 @@ export function useDroneHubLifecycleEffects({
     };
   }, [
     currentDrone,
-    toggleCompanionRecording,
+    runCompanionShortcut,
     openHome,
     openDraftChatComposer,
     openChildDraftChatComposer,

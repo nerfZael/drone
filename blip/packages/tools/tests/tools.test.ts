@@ -45,6 +45,15 @@ describe("Blip tools", () => {
     }
   });
 
+  test("apply_patch tells models the strict envelope format", () => {
+    const applyPatch = tool(process.cwd(), "apply_patch");
+    const patchSchema = (applyPatch.parameters as any).properties.patch;
+
+    expect(applyPatch.description).toContain("without Markdown fences");
+    expect(patchSchema.description).toContain("*** Begin Patch");
+    expect(patchSchema.description).toContain("*** End Patch");
+  });
+
   test("read_file rejects workspace traversal", async () => {
     const workspace = await tempWorkspace();
     const read = tool(workspace, "read_file");

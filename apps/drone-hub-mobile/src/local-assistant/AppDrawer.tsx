@@ -1983,8 +1983,7 @@ function DrawerCompanionButton({ onClose }: { onClose(): void }) {
   const companion = useMobileCompanion();
   const busy =
     companion.status === 'starting' ||
-    companion.status === 'transcribing' ||
-    companion.status === 'working';
+    companion.status === 'transcribing';
   return (
     <View style={styles.companionFooter}>
       <Pressable
@@ -3408,10 +3407,11 @@ const styles = StyleSheet.create({
     borderTopColor: colors.borderSubtle,
   },
   companionButton: {
-    alignSelf: 'flex-start',
+    width: '100%',
     minHeight: 40,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 9,
     paddingHorizontal: 10,
     borderRadius: 7,

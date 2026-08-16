@@ -42,6 +42,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const statusRef = React.useRef<CompanionStatus>('idle');
   const socketRef = React.useRef<WebSocket | null>(null);
   const runIdRef = React.useRef('');
+  const pendingPromptsRef = React.useRef<string[]>([]);
   const generationRef = React.useRef(0);
 
   const setStatusValue = React.useCallback((next: CompanionStatus) => {
@@ -52,7 +53,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const onVoiceError = React.useCallback((message: string) => {
     if (!message.trim()) return;
     setError(message);
-    setStatusValue('error');
+    if (!runIdRef.current) setStatusValue('error');
   }, [setStatusValue]);
   const voice = useChatVoiceRecorder({ onError: onVoiceError, microphoneOwner: 'companion' });
 
@@ -72,6 +73,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     socketRef.current = null;
     const runId = runIdRef.current;
     runIdRef.current = '';
+    pendingPromptsRef.current = [];
     if (socket?.readyState === WebSocket.OPEN && runId) {
       socket.send(JSON.stringify({ type: 'cancel_run', runId }));
     }
@@ -126,19 +128,24 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
 
   const run = React.useCallback(async (prompt: string) => {
     const cleanPrompt = prompt.trim();
-    if (!cleanPrompt) {
-      erase();
-      return;
-    }
-    const runId = newRunId();
-    const localGeneration = generationRef.current + 1;
-    generationRef.current = localGeneration;
+    if (!cleanPrompt) return;
+    const runId = runIdRef.current || newRunId();
     runIdRef.current = runId;
     setTranscript(cleanPrompt);
-    setStartedAt(Date.now());
+    setStartedAt((current) => current ?? Date.now());
     setEndedAt(null);
-    setActivity([]);
+    setError('');
     setStatusValue('working');
+    const existingSocket = socketRef.current;
+    if (existingSocket?.readyState === WebSocket.OPEN) {
+      existingSocket.send(JSON.stringify({ type: 'start_run', runId, prompt: cleanPrompt }));
+      return;
+    }
+    pendingPromptsRef.current.push(cleanPrompt);
+    if (existingSocket?.readyState === WebSocket.CONNECTING) return;
+
+    const localGeneration = generationRef.current + 1;
+    generationRef.current = localGeneration;
     let socket: WebSocket;
     try {
       socket = new WebSocket(buildDirectApiWebSocketUrl('/api/companion/stream'));
@@ -185,7 +192,10 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         finishSocket();
         return;
       }
-      socket.send(JSON.stringify({ type: 'start_run', runId, prompt: cleanPrompt }));
+      const pendingPrompts = pendingPromptsRef.current.splice(0);
+      for (const pendingPrompt of pendingPrompts) {
+        socket.send(JSON.stringify({ type: 'start_run', runId, prompt: pendingPrompt }));
+      }
     };
     socket.onmessage = (event) => {
       if (generationRef.current !== localGeneration || typeof event.data !== 'string') return;
@@ -215,7 +225,6 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       if (message.type === 'status' && message.status === 'completed') {
         setEndedAt(Date.now());
         setStatusValue('completed');
-        finishSocket();
       } else if (message.type === 'status' && message.status === 'cancelled') {
         setEndedAt(Date.now());
         setStatusValue('cancelled');
@@ -245,26 +254,22 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       setEndedAt(Date.now());
       setStatusValue('error');
     };
-  }, [erase, executeBrowserTool, setStatusValue]);
+  }, [executeBrowserTool, setStatusValue]);
 
   const toggle = React.useCallback(async () => {
-    const current = statusRef.current;
-    if (current === 'starting' || current === 'transcribing' || current === 'working') return;
-    if (current === 'recording') {
+    if (voice.status === 'starting' || voice.status === 'transcribing') return;
+    if (voice.status === 'recording') {
       const stopGeneration = generationRef.current;
-      setStatusValue('transcribing');
       const text = await voice.stopRecordingForTranscript();
       if (generationRef.current !== stopGeneration) return;
       if (statusRef.current === 'error') return;
       await run(text);
       return;
     }
-    if (current !== 'idle') await close();
-    setStatusValue('starting');
+    if (statusRef.current === 'cancelled' || statusRef.current === 'error') await close();
     const started = await voice.startRecording();
-    if (started) setStatusValue('recording');
-    else if (statusRef.current !== 'error') erase();
-  }, [close, erase, run, setStatusValue, voice.startRecording, voice.stopRecordingForTranscript]);
+    if (!started && statusRef.current !== 'error' && !runIdRef.current) erase();
+  }, [close, erase, run, voice.startRecording, voice.status, voice.stopRecordingForTranscript]);
 
   React.useEffect(() => () => {
     generationRef.current += 1;
@@ -272,8 +277,15 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     void voice.discardRecording();
   }, [voice.discardRecording]);
 
+  const effectiveStatus: CompanionStatus =
+    voice.status === 'paused'
+      ? 'recording'
+      : voice.status !== 'idle'
+        ? voice.status
+        : status;
+
   const value = React.useMemo<CompanionContextValue>(() => ({
-    status,
+    status: effectiveStatus,
     error,
     reply,
     transcript,
@@ -283,7 +295,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     activity,
     toggle,
     close,
-  }), [activity, close, endedAt, error, reply, startedAt, status, toggle, transcript, voice.durationMillis]);
+  }), [activity, close, effectiveStatus, endedAt, error, reply, startedAt, toggle, transcript, voice.durationMillis]);
 
   return <CompanionContext.Provider value={value}>{children}</CompanionContext.Provider>;
 }

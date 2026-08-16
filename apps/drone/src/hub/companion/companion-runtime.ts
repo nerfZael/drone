@@ -130,25 +130,28 @@ export class CompanionRuntime {
       settleRun = resolve;
     }));
     try {
-      const settings = await readCompanionSettings();
+      const existingContext = this.contexts.get(threadId);
+      const settings = existingContext?.settings ?? (await readCompanionSettings());
       if (this.cancelledRunIds.has(runId)) throw new Error('Companion run cancelled');
       const credential = await resolveEffectiveProviderApiKeySettings(settings.provider);
       if (!credential.apiKey) {
         throw new Error(`Companion cannot start because ${settings.provider} credentials are not configured.`);
       }
       if (this.cancelledRunIds.has(runId)) throw new Error('Companion run cancelled');
-      this.contexts.set(threadId, {
-        runId,
-        settings,
-        callBrowser: input.callBrowser,
-        snapshots: new Map(),
-      });
+      if (existingContext) {
+        existingContext.callBrowser = input.callBrowser;
+        existingContext.snapshots.clear();
+      } else {
+        this.contexts.set(threadId, {
+          runId,
+          settings,
+          callBrowser: input.callBrowser,
+          snapshots: new Map(),
+        });
+      }
       await this.host.promptThread(threadId, input.prompt, input.onEvent);
       return await this.host.latestAssistantVisibleText(threadId);
     } finally {
-      this.host.abortThread(threadId);
-      await this.host.deleteThread(threadId).catch(() => undefined);
-      this.contexts.delete(threadId);
       this.activeRunIds.delete(runId);
       this.activeRunCompletions.delete(runId);
       this.cancelledRunIds.delete(runId);
@@ -163,11 +166,27 @@ export class CompanionRuntime {
     this.host.abortThread(`companion:${normalizedRunId}`);
   }
 
+  async deleteSession(runId: string): Promise<void> {
+    const normalizedRunId = String(runId).trim();
+    if (!normalizedRunId) return;
+    const completion = this.activeRunCompletions.get(normalizedRunId);
+    this.cancel(normalizedRunId);
+    if (completion) await completion.catch(() => undefined);
+    const threadId = `companion:${normalizedRunId}`;
+    await this.host.deleteThread(threadId).catch(() => undefined);
+    this.contexts.delete(threadId);
+    this.activeRunIds.delete(normalizedRunId);
+    this.activeRunCompletions.delete(normalizedRunId);
+    this.cancelledRunIds.delete(normalizedRunId);
+  }
+
   async close(): Promise<void> {
     this.closing = true;
-    const activeCompletions = [...this.activeRunCompletions.values()];
-    for (const runId of this.activeRunIds) this.cancel(runId);
-    await Promise.allSettled(activeCompletions);
+    const sessionIds = new Set([
+      ...this.activeRunIds,
+      ...[...this.contexts.keys()].map((threadId) => threadId.replace(/^companion:/, '')),
+    ]);
+    await Promise.allSettled([...sessionIds].map((runId) => this.deleteSession(runId)));
     await this.host.close();
     this.contexts.clear();
     this.activeRunIds.clear();
@@ -287,9 +306,14 @@ export class CompanionRuntime {
     ] as const) {
       add(name, {
         parameters: objectParameters({
-          targetId: { type: 'string' },
-          baseRevision: { type: 'string' },
-          patch: { type: 'string', maxLength: MAX_BROWSER_TEXT_CHARS },
+          targetId: { type: 'string', description: 'Exact targetId returned by the preceding read tool.' },
+          baseRevision: { type: 'string', description: 'Exact revision returned by the preceding read tool.' },
+          patch: {
+            type: 'string',
+            maxLength: MAX_BROWSER_TEXT_CHARS,
+            description:
+              "Raw patch text: '*** Begin Patch', then exactly one '*** Update File: <returned path>' operation with '@@' and space/-/+ lines, then '*** End Patch'. No Markdown fences or leading text.",
+          },
         }, ['targetId', 'baseRevision', 'patch']),
         execute: async (_callId, args, signal) => {
           const input = args as Record<string, unknown>;

@@ -689,6 +689,8 @@ describe('mobile sidebar presentation', () => {
     expect(bottomPinnedIndex).toBeGreaterThan(-1);
     expect(companionIndex).toBeGreaterThan(bottomPinnedIndex);
     expect(drawerSource).toContain("companion.status === 'recording' ? 'Listening' : 'Companion'");
+    expect(drawerSource).toContain("width: '100%',");
+    expect(drawerSource).toContain("justifyContent: 'center'");
     expect(shellSource).toContain('<MobileCompanionProvider>');
     expect(shellSource).toContain('<MobileCompanionOverlay />');
     expect(shellSource).toContain("workspaceVisible={!pairingVisible && tab === 'drones'}");
@@ -698,6 +700,7 @@ describe('mobile sidebar presentation', () => {
     expect(providerSource).toContain('!activeTarget.reachable');
     expect(providerSource).toContain('!hasOperations');
     expect(providerSource).toContain('!hasGrant');
+    expect(providerSource).toContain('const runId = runIdRef.current || newRunId()');
     expect(overlaySource).toContain("justifyContent: 'flex-start'");
     expect(overlaySource).toContain('accessibilityLabel="Stop Companion recording"');
     expect(overlaySource).toContain('<NativeMarkdown text={companion.reply} />');

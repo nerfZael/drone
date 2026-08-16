@@ -33,6 +33,7 @@ describe('Companion device mesh capability', () => {
     const events: any[] = [];
     const runtime = {
       cancel() {},
+      async deleteSession() {},
       async run(input: any) {
         input.onEvent({
           type: 'tool_call_started',
@@ -94,6 +95,9 @@ describe('Companion device mesh capability', () => {
       cancel(runId: string) {
         cancelled.push(runId);
       },
+      async deleteSession(runId: string) {
+        cancelled.push(runId);
+      },
       async run() {
         return await new Promise<string>(() => undefined);
       },
@@ -123,6 +127,7 @@ describe('Companion device mesh capability', () => {
     let runs = 0;
     const runtime = {
       cancel() {},
+      async deleteSession() {},
       async run() {
         runs += 1;
         return 'done';
@@ -141,5 +146,41 @@ describe('Companion device mesh capability', () => {
 
     expect(runs).toBe(1);
     await capability.close?.();
+  });
+
+  test('queues follow-ups on the same mobile Companion session', async () => {
+    const prompts: string[] = [];
+    const runtimeRunIds: string[] = [];
+    const completions: Array<(reply: string) => void> = [];
+    const runtime = {
+      cancel() {},
+      async deleteSession() {},
+      run(input: any) {
+        prompts.push(input.prompt);
+        runtimeRunIds.push(input.runId);
+        return new Promise<string>((resolve) => completions.push(resolve));
+      },
+    };
+    const events: any[] = [];
+    const capability = createCompanionCapability(
+      runtime as any,
+      async (_capability, _event, payload) => {
+        events.push(payload);
+      },
+    );
+
+    await capability.invoke('run.start', { runId: 'conversation-1', prompt: 'First' }, context());
+    await capability.invoke('run.start', { runId: 'conversation-1', prompt: 'Second' }, context());
+    await waitFor(() => prompts.length === 1);
+    expect(prompts).toEqual(['First']);
+
+    completions[0]!('First reply');
+    await waitFor(() => prompts.length === 2);
+    expect(prompts).toEqual(['First', 'Second']);
+    expect(runtimeRunIds[1]).toBe(runtimeRunIds[0]);
+
+    completions[1]!('Second reply');
+    await waitFor(() => events.filter((event) => event.status === 'completed').length === 2);
+    await capability.invoke('run.cancel', { runId: 'conversation-1' }, context());
   });
 });

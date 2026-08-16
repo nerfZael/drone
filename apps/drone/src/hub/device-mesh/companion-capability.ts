@@ -16,6 +16,8 @@ type CompanionMeshSession = {
   generation: number;
   browserTools: CompanionBrowserToolBroker;
   eventQueue: Promise<void>;
+  prompts: string[];
+  active: boolean;
 };
 
 type BroadcastEvent = (
@@ -63,9 +65,10 @@ export function createCompanionCapability(
 
   const cancelSession = async (session: CompanionMeshSession, notify: boolean) => {
     session.generation += 1;
-    runtime.cancel(session.runtimeRunId);
+    session.prompts.length = 0;
     session.browserTools.rejectAll('Companion run cancelled');
     sessions.delete(sessionKey(session.sourceDeviceId, session.clientRunId));
+    await runtime.deleteSession(session.runtimeRunId);
     if (notify) {
       await emit(session, { type: 'status', status: 'cancelled' }).catch(() => undefined);
     }
@@ -79,6 +82,59 @@ export function createCompanionCapability(
     const key = sessionKey(session.sourceDeviceId, session.clientRunId);
     if (sessions.get(key) === session) sessions.delete(key);
     session.browserTools.rejectAll(message);
+  };
+
+  const drainSession = async (session: CompanionMeshSession, firstStatusEmitted = false) => {
+    const key = sessionKey(session.sourceDeviceId, session.clientRunId);
+    if (sessions.get(key) !== session) return;
+    if (!firstStatusEmitted) {
+      if (session.active) return;
+      session.active = true;
+    }
+    let statusEmitted = firstStatusEmitted;
+    try {
+      while (session.prompts.length > 0 && sessions.get(key) === session) {
+        const prompt = session.prompts.shift()!;
+        if (!statusEmitted) {
+          session.generation += 1;
+          await emit(session, { type: 'status', status: 'working' });
+        }
+        const runGeneration = session.generation;
+        statusEmitted = false;
+        try {
+          const reply = await runtime.run({
+            runId: session.runtimeRunId,
+            prompt,
+            callBrowser: callBrowser(session),
+            onEvent: (event) => {
+              if (sessions.get(key) !== session || session.generation !== runGeneration) return;
+              const visibleEvent = boundedCompanionActivityEvent(event);
+              if (visibleEvent) {
+                void emit(session, { type: 'activity', event: visibleEvent }).catch(() => undefined);
+              }
+            },
+          });
+          if (sessions.get(key) !== session || session.generation !== runGeneration) return;
+          await emit(session, { type: 'reply', reply });
+          await emit(session, { type: 'status', status: 'completed' });
+        } catch (error) {
+          if (sessions.get(key) !== session || session.generation !== runGeneration) return;
+          await emit(session, {
+            type: 'error',
+            error: error instanceof Error ? error.message : String(error),
+          });
+        } finally {
+          if (session.generation === runGeneration) {
+            session.browserTools.rejectAll('Companion run finished');
+          }
+        }
+      }
+    } catch {
+      closeSession(session, 'Companion mobile client disconnected');
+      await runtime.deleteSession(session.runtimeRunId).catch(() => undefined);
+    } finally {
+      session.active = false;
+    }
   };
 
   return {
@@ -122,65 +178,48 @@ export function createCompanionCapability(
       }
       const { runId: clientRunId, prompt } = validation;
       const key = sessionKey(sourceDeviceId, clientRunId);
-      if (sessions.has(key)) {
-        throw Object.assign(new Error('Companion run already exists'), { code: 'CONFLICT' });
-      }
-      for (const session of sessions.values()) {
-        if (session.sourceDeviceId === sourceDeviceId) {
+      let session = sessions.get(key);
+      for (const existingSession of sessions.values()) {
+        if (existingSession.sourceDeviceId === sourceDeviceId && existingSession !== session) {
           throw Object.assign(new Error('This device already has an active Companion run'), {
             code: 'CONFLICT',
           });
         }
       }
 
-      let session!: CompanionMeshSession;
-      const browserTools = new CompanionBrowserToolBroker({
-        available: () => sessions.get(key) === session,
-        unavailableMessage: 'Companion mobile client disconnected',
-        dispatch: (call) => emit(session, { type: 'tool_call', ...call }),
-      });
-      session = {
-        clientRunId,
-        runtimeRunId: `mesh:${crypto.randomUUID()}`,
-        sourceDeviceId,
-        generation: 1,
-        browserTools,
-        eventQueue: Promise.resolve(),
-      };
-      sessions.set(key, session);
-      try {
-        await emit(session, { type: 'status', status: 'working' });
-      } catch (error) {
-        closeSession(session, 'Companion mobile client disconnected');
-        throw error;
+      if (!session) {
+        let createdSession!: CompanionMeshSession;
+        const browserTools = new CompanionBrowserToolBroker({
+          available: () => sessions.get(key) === createdSession,
+          unavailableMessage: 'Companion mobile client disconnected',
+          dispatch: (call) => emit(createdSession, { type: 'tool_call', ...call }),
+        });
+        createdSession = {
+          clientRunId,
+          runtimeRunId: `mesh:${crypto.randomUUID()}`,
+          sourceDeviceId,
+          generation: 0,
+          browserTools,
+          eventQueue: Promise.resolve(),
+          prompts: [],
+          active: false,
+        };
+        session = createdSession;
+        sessions.set(key, session);
       }
-      void runtime
-        .run({
-          runId: session.runtimeRunId,
-          prompt,
-          callBrowser: callBrowser(session),
-          onEvent: (event) => {
-            if (sessions.get(key) !== session) return;
-            const visibleEvent = boundedCompanionActivityEvent(event);
-            if (visibleEvent) {
-              void emit(session, { type: 'activity', event: visibleEvent }).catch(() => undefined);
-            }
-          },
-        })
-        .then(async (reply) => {
-          if (sessions.get(key) !== session) return;
-          await emit(session, { type: 'reply', reply });
-          await emit(session, { type: 'status', status: 'completed' });
-        })
-        .catch(async (error) => {
-          if (sessions.get(key) !== session) return;
-          await emit(session, {
-            type: 'error',
-            error: error instanceof Error ? error.message : String(error),
-          });
-        })
-        .finally(() => closeSession(session, 'Companion run finished'))
-        .catch(() => undefined);
+      session.prompts.push(prompt);
+      if (!session.active) {
+        session.active = true;
+        session.generation += 1;
+        try {
+          await emit(session, { type: 'status', status: 'working' });
+        } catch (error) {
+          closeSession(session, 'Companion mobile client disconnected');
+          await runtime.deleteSession(session.runtimeRunId).catch(() => undefined);
+          throw error;
+        }
+        void drainSession(session, true);
+      }
       return { accepted: true };
     },
     async close() {

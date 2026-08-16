@@ -24,6 +24,7 @@ export type ChatComposerModelPickerConfig = {
   allowCustomModel?: boolean;
   statusMessage?: string;
   title?: string;
+  menuPlacement?: 'above' | 'below';
   onSelect: (choice: ChatComposerModelChoice, selection: 'model' | 'reasoning') => void;
 };
 
@@ -84,6 +85,7 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
     allowCustomModel = false,
     statusMessage,
     title = showReasoning ? 'Choose model and reasoning' : 'Choose model',
+    menuPlacement = 'above',
     onSelect,
   } = config;
   const rootRef = React.useRef<HTMLDivElement | null>(null);
@@ -213,7 +215,9 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
         <div
           role="dialog"
           aria-label={title}
-          className="absolute bottom-full right-0 z-50 mb-[.375rem] flex max-h-[64vh] w-[min(20rem,calc(100vw-1.25rem))] flex-col overflow-hidden rounded-[.75rem] border border-[var(--border)] bg-[var(--panel)] shadow-[var(--chat-composer-shadow)]"
+          className={`absolute right-0 z-50 flex max-h-[64vh] w-[min(20rem,calc(100vw-1.25rem))] flex-col overflow-hidden rounded-[.75rem] border border-[var(--border)] bg-[var(--panel)] shadow-[var(--chat-composer-shadow)] ${
+            menuPlacement === 'below' ? 'top-full mt-[.375rem]' : 'bottom-full mb-[.375rem]'
+          }`}
         >
           <div className="flex min-h-9 flex-shrink-0 items-center px-3">
             <div className="text-[.8125rem] font-semibold text-[var(--fg-strong)]">

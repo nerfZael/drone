@@ -114,7 +114,7 @@ export const COMPANION_TOOL_SUMMARIES = [
     execution: 'browser',
     requires: 'read_active_composer',
     description:
-      'Apply one strict Update File patch to the previously read composer as an immediate undoable edit.',
+      'Apply one strict Update File patch to the previously read composer as an immediate undoable edit. Use its returned path, target ID, and revision; do not use Markdown fences.',
   },
   {
     name: 'read_open_file',
@@ -131,7 +131,7 @@ export const COMPANION_TOOL_SUMMARIES = [
     execution: 'browser',
     requires: 'read_open_file',
     description:
-      'Apply one strict Update File patch to the previously read editable file buffer as an immediate undoable edit.',
+      'Apply one strict Update File patch to the previously read editable file buffer as an immediate undoable edit. Use its returned path, target ID, and revision; do not use Markdown fences.',
   },
   {
     name: 'prepare_drone_draft',

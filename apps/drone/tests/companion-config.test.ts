@@ -41,6 +41,9 @@ describe('Companion settings', () => {
     expect(
       COMPANION_TOOL_SUMMARIES.find((tool) => tool.name === 'apply_composer_patch')?.requires,
     ).toBe('read_active_composer');
+    expect(
+      COMPANION_TOOL_SUMMARIES.find((tool) => tool.name === 'apply_composer_patch')?.description,
+    ).toContain('do not use Markdown fences');
   });
 
   test('adds the matching read dependency for enabled patch tools', () => {

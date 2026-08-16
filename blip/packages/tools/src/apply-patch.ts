@@ -148,9 +148,12 @@ export function createApplyPatchTool(context: BlipToolContext): BlipTool {
   return {
     name: "apply_patch",
     label: "Apply Patch",
-    description: "Apply a strict patch envelope with add, update, delete, and move operations inside the workspace.",
+    description: "Apply a strict patch envelope inside the workspace. Pass the envelope directly, without Markdown fences or leading text.",
     parameters: Type.Object({
-      patch: Type.String({ description: "Strict patch envelope." }),
+      patch: Type.String({
+        description:
+          "Patch text that starts with '*** Begin Patch', contains operations such as '*** Update File: path' followed by '@@' and space/-/+ lines, and ends with '*** End Patch'. Do not wrap it in Markdown fences.",
+      }),
       baseHash: Type.Optional(Type.String({ description: "Optional stale workspace marker." })),
     }),
     async execute(_toolCallId, params: any) {
