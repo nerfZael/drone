@@ -115,6 +115,20 @@ describe('device protocol', () => {
     expect(DRONE_CONTROL_CAPABILITY.operations).toContain('drone.rename');
   });
 
+  test('advertises proposal group actions as separate explicit permissions', () => {
+    expect(DRONE_CONTROL_CAPABILITY.operations).toEqual(
+      expect.arrayContaining(['groups.list', 'group.create', 'group.rename', 'group.delete']),
+    );
+    expect(
+      isGranted(
+        [{ capability: 'drone-control', version: 1, operations: ['group.create'] }],
+        'drone-control',
+        1,
+        'group.delete',
+      ),
+    ).toBe(false);
+  });
+
   test('advertises sidebar ordering as an explicit permission', () => {
     expect(DRONE_CONTROL_CAPABILITY.operations).toContain('sidebar.move');
   });

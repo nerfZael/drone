@@ -887,6 +887,43 @@ export function createDroneControlCapability(
         return await sidebarCommands.move(payload);
       }
 
+      if (operation === 'groups.list') {
+        return await hubServices.groups.list(
+          payload.repoPath === undefined ? undefined : String(payload.repoPath ?? '').trim(),
+        );
+      }
+      if (operation === 'group.create') {
+        return await hubServices.groups.create({
+          name: requiredText(payload.name, 'name'),
+          repoPath: optionalText(payload.repoPath) ?? '',
+          at: new Date().toISOString(),
+        });
+      }
+      if (operation === 'group.rename') {
+        return await hubServices.groups.rename({
+          groupRef: requiredText(payload.groupRef ?? payload.name, 'groupRef'),
+          repoPath: optionalText(payload.repoPath) ?? '',
+          newName: requiredText(payload.newName, 'newName'),
+          at: new Date().toISOString(),
+        });
+      }
+      if (operation === 'group.delete') {
+        const result = await hubServices.groups.delete({
+          groupRef: requiredText(payload.groupRef ?? payload.name, 'groupRef'),
+          repoPath: optionalText(payload.repoPath) ?? '',
+          keepVolume: false,
+          forget: true,
+        });
+        if (!result.ok) {
+          const messages = (result.errors ?? []).map((item) => item.error).filter(Boolean);
+          throw Object.assign(new Error(messages.join('; ') || 'Group deletion failed'), {
+            code: 'GROUP_DELETE_FAILED',
+            details: result,
+          });
+        }
+        return result;
+      }
+
       const droneId = requiredText(payload.droneId, 'droneId');
       const encodedDrone = encodeURIComponent(droneId);
       if (operation === 'drone.rename') {
@@ -934,9 +971,18 @@ export function createDroneControlCapability(
         }
         const chatName = requiredText(payload.name ?? payload.chatName, 'chatName');
         const copyFrom = optionalText(payload.copyFrom ?? payload.copyFromChat);
+        const mode = payload.mode === 'copy-config'
+          ? 'copy-config'
+          : payload.mode === 'fork'
+            ? 'fork'
+            : undefined;
         const result = await localHubRequest(access, `/api/drones/${encodedDrone}/chats`, {
           method: 'POST',
-          body: JSON.stringify({ name: chatName, ...(copyFrom ? { copyFrom } : {}) }),
+          body: JSON.stringify({
+            name: chatName,
+            ...(copyFrom ? { copyFrom, ...(mode ? { mode } : {}) } : {}),
+            ...(payload.draft === true ? { draft: true } : {}),
+          }),
         });
         return {
           droneId,

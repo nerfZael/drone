@@ -16,7 +16,7 @@ import {
 export type CompanionThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
 export type CompanionSettings = {
-  schemaVersion: 2;
+  schemaVersion: 3;
   provider: LlmProviderId;
   model: string;
   thinkingLevel: CompanionThinkingLevel;
@@ -49,9 +49,16 @@ const PREVIOUS_DEFAULT_COMPANION_SYSTEM_PROMPT = [
   'Use open_drone_chat when the user asks to open or navigate to an existing chat. Use exact drone and chat references returned by the chat tools.',
 ].join('\n');
 
-export const DEFAULT_COMPANION_SYSTEM_PROMPT = [
+const PREVIOUS_DRAFT_DEFAULT_COMPANION_SYSTEM_PROMPT = [
   PREVIOUS_DEFAULT_COMPANION_SYSTEM_PROMPT,
   'Each prepare_drone_draft call creates one independent durable draft. Call it once for every draft the user requests; calls never replace earlier drafts.',
+].join('\n');
+
+export const DEFAULT_COMPANION_SYSTEM_PROMPT = [
+  PREVIOUS_DEFAULT_COMPANION_SYSTEM_PROMPT,
+  'Use read_companion_proposal and apply_companion_proposal_patch for requested Drone Hub changes such as creating, renaming, or deleting groups, drones, and chats, and sending or queueing chat messages.',
+  'There is one editable proposal for the Companion session. Proposal patches update its review card but do not execute it. You may discuss it with the user and revise it over multiple turns before they apply or discard it.',
+  'Read the proposal before every patch. Preserve operations the user still wants, use $create-operation-id references for later operations on a newly created drone, and keep operation order executable.',
 ].join('\n');
 
 export const COMPANION_TOOL_SUMMARIES = [
@@ -79,6 +86,14 @@ export const COMPANION_TOOL_SUMMARIES = [
     execution: 'mcp',
     requires: null,
     description: 'List drones, repositories, states, and chat counts.',
+  },
+  {
+    name: 'list_groups',
+    label: 'List groups',
+    category: 'hub',
+    execution: 'server',
+    requires: null,
+    description: 'List existing groups, optionally scoped to a repository path.',
   },
   {
     name: 'list_chats',
@@ -148,13 +163,22 @@ export const COMPANION_TOOL_SUMMARIES = [
       'Apply one strict Update File patch to the previously read editable file buffer as an immediate undoable edit. Use its returned path, target ID, and revision; do not use Markdown fences.',
   },
   {
-    name: 'prepare_drone_draft',
-    label: 'Prepare drone draft',
-    category: 'actions',
+    name: 'read_companion_proposal',
+    label: 'Read proposal',
+    category: 'browser',
     execution: 'browser',
     requires: null,
     description:
-      'Create and persist one independent draft drone as a normal Draft row in its repository and group. Repeated calls are additive and never replace earlier drafts.',
+      'Read the one editable Companion proposal document, its revision, and its compact operation format.',
+  },
+  {
+    name: 'apply_companion_proposal_patch',
+    label: 'Update proposal',
+    category: 'actions',
+    execution: 'browser',
+    requires: 'read_companion_proposal',
+    description:
+      'Apply one strict Update File patch to the proposal JSON. The complete result is validated and shown for review; it is not executed.',
   },
   {
     name: 'open_drone_chat',
@@ -188,11 +212,17 @@ export type CompanionToolName = CompanionToolCatalogEntry['name'];
 export type { CompanionBrowserToolName } from '@drone/assistant-chat';
 
 const SETTING_KEY = 'companion';
-const COMPANION_SETTINGS_SCHEMA_VERSION = 2;
+const COMPANION_SETTINGS_SCHEMA_VERSION = 3;
 const TOOL_NAMES = new Set(COMPANION_TOOL_SUMMARIES.map((tool) => tool.name));
+const LEGACY_PROPOSAL_TOOL_NAME = 'prepare_drone_draft';
 const LEGACY_DEFAULT_TOOL_NAMES = COMPANION_TOOL_SUMMARIES
   .map((tool) => tool.name)
-  .filter((name) => name !== 'open_drone_chat');
+  .filter((name) =>
+    name !== 'open_drone_chat' &&
+    name !== 'list_groups' &&
+    name !== 'read_companion_proposal' &&
+    name !== 'apply_companion_proposal_patch',
+  );
 const TOOL_DEPENDENCIES = new Map<CompanionToolName, CompanionToolName>(
   COMPANION_TOOL_SUMMARIES.flatMap((tool) =>
     tool.requires ? [[tool.name, tool.requires] as const] : [],
@@ -209,12 +239,20 @@ export const DEFAULT_COMPANION_SETTINGS: CompanionSettings = {
 };
 
 function normalizeEnabledTools(value: unknown, migrateLegacyDefaults: boolean): CompanionToolName[] {
+  const rawRequested = Array.isArray(value)
+    ? value.map((item) => String(item).trim())
+    : DEFAULT_COMPANION_SETTINGS.enabledTools;
   const requested = Array.isArray(value)
-    ? value.map((item) => String(item).trim()).filter((item): item is CompanionToolName => TOOL_NAMES.has(item as CompanionToolName))
+    ? rawRequested.filter((item): item is CompanionToolName => TOOL_NAMES.has(item as CompanionToolName))
     : DEFAULT_COMPANION_SETTINGS.enabledTools;
   const enabled = new Set(requested);
   if (migrateLegacyDefaults && LEGACY_DEFAULT_TOOL_NAMES.every((name) => enabled.has(name))) {
     enabled.add('open_drone_chat');
+    enabled.add('list_groups');
+  }
+  if (migrateLegacyDefaults && rawRequested.includes(LEGACY_PROPOSAL_TOOL_NAME)) {
+    enabled.add('read_companion_proposal');
+    enabled.add('apply_companion_proposal_patch');
   }
   for (const [patchTool, readTool] of TOOL_DEPENDENCIES) {
     if (enabled.has(patchTool)) enabled.add(readTool);
@@ -243,7 +281,8 @@ export function normalizeCompanionSettings(value: unknown): CompanionSettings {
     ?? HUB_AGENT_MODEL_OPTIONS[0];
   const storedPrompt = String(raw.systemPrompt ?? DEFAULT_COMPANION_SYSTEM_PROMPT);
   const prompt = storedPrompt === LEGACY_DEFAULT_COMPANION_SYSTEM_PROMPT ||
-    storedPrompt === PREVIOUS_DEFAULT_COMPANION_SYSTEM_PROMPT
+    storedPrompt === PREVIOUS_DEFAULT_COMPANION_SYSTEM_PROMPT ||
+    storedPrompt === PREVIOUS_DRAFT_DEFAULT_COMPANION_SYSTEM_PROMPT
     ? DEFAULT_COMPANION_SYSTEM_PROMPT
     : storedPrompt;
   return {

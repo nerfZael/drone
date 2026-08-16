@@ -29,7 +29,6 @@ import {
 } from './companion-telemetry';
 
 const MAX_BROWSER_TEXT_CHARS = 1_000_000;
-const MAX_DRAFT_PROMPT_CHARS = 100_000;
 
 export type CompanionBrowserCall = (
   tool: CompanionBrowserToolName,
@@ -45,7 +44,7 @@ type RunContext = {
 };
 
 type BrowserTextSnapshot = {
-  kind: 'composer' | 'editor';
+  kind: 'composer' | 'editor' | 'proposal';
   targetId: string;
   path: string;
   content: string;
@@ -319,7 +318,10 @@ export class CompanionRuntime {
       provider: context.settings.provider,
       model: context.settings.model,
       thinkingLevel: context.settings.thinkingLevel,
-      systemPrompt: `${context.settings.systemPrompt}\n\n${COMPANION_RUNTIME_CONTRACT}`,
+      systemPrompt: [
+        context.settings.systemPrompt,
+        COMPANION_RUNTIME_CONTRACT,
+      ].filter(Boolean).join('\n\n'),
       tools: telemetry
         ? await telemetry.measure('handle.customToolsMs', () => this.customTools(context, drones))
         : await this.customTools(context, drones),
@@ -370,19 +372,39 @@ export class CompanionRuntime {
       },
     });
 
-    for (const name of [
-      'get_app_context',
-      'read_active_composer',
-      'read_open_file',
+    add('list_groups', {
+      parameters: objectParameters({
+        repoPath: {
+          type: 'string',
+          maxLength: 4096,
+          description: 'Exact repository path. Omit to list global groups.',
+        },
+      }),
+      execute: async (_callId, args) => {
+        const input = args as Record<string, unknown>;
+        const repoPath = typeof input.repoPath === 'string' ? input.repoPath.trim() : undefined;
+        const data = await this.deps.hubServices.groups.list(repoPath);
+        return result(data as Record<string, unknown>);
+      },
+    });
+
+    add('get_app_context', {
+      parameters: objectParameters({}),
+      execute: async (_callId, _args, signal) =>
+        result(await context.callBrowser('get_app_context', {}, signal)),
+    });
+
+    for (const [name, kind] of [
+      ['read_active_composer', 'composer'],
+      ['read_open_file', 'editor'],
+      ['read_companion_proposal', 'proposal'],
     ] as const) {
       add(name, {
         parameters: objectParameters({}),
         execute: async (_callId, _args, signal) => {
           const value = await context.callBrowser(name, {}, signal);
-          if (name !== 'get_app_context') {
-            const snapshot = normalizeBrowserSnapshot(name === 'read_active_composer' ? 'composer' : 'editor', value);
-            rememberBrowserSnapshot(context.snapshots, snapshot);
-          }
+          const snapshot = normalizeBrowserSnapshot(kind, value);
+          rememberBrowserSnapshot(context.snapshots, snapshot);
           return result(value);
         },
       });
@@ -391,6 +413,7 @@ export class CompanionRuntime {
     for (const [name, kind] of [
       ['apply_composer_patch', 'composer'],
       ['apply_editor_patch', 'editor'],
+      ['apply_companion_proposal_patch', 'proposal'],
     ] as const) {
       add(name, {
         parameters: objectParameters({
@@ -433,20 +456,6 @@ export class CompanionRuntime {
         },
       });
     }
-
-    add('prepare_drone_draft', {
-      parameters: objectParameters({
-        name: { type: 'string', maxLength: 80 },
-        prompt: {
-          type: 'string',
-          maxLength: MAX_DRAFT_PROMPT_CHARS,
-          description: 'Initial queued task for this durable draft drone.',
-        },
-        repoPath: { type: 'string', maxLength: 4096 },
-        group: { type: 'string', maxLength: 64 },
-      }, ['prompt']),
-      execute: async (_callId, args, signal) => result(await context.callBrowser('prepare_drone_draft', args as Record<string, unknown>, signal)),
-    });
 
     add('open_drone_chat', {
       parameters: objectParameters({

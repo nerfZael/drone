@@ -1,5 +1,10 @@
 import React from 'react';
-import type { CompanionTextSnapshot } from '@drone/assistant-chat';
+import type {
+  CompanionProposal,
+  CompanionProposalExecution,
+  CompanionProposalExecutionContext,
+  CompanionTextSnapshot,
+} from '@drone/assistant-chat';
 import { useActiveComposer } from '../chat/ActiveComposerContext';
 
 export type { CompanionTextSnapshot } from '@drone/assistant-chat';
@@ -13,9 +18,11 @@ export type CompanionTextTarget = {
 
 export type CompanionWorkspaceTarget = {
   getAppContext(): Record<string, unknown>;
-  prepareDroneDraft(
-    args: Record<string, unknown>,
-  ): Promise<Record<string, unknown>> | Record<string, unknown>;
+  resolveDroneName(droneId: string): string | null;
+  executeProposal(
+    proposal: CompanionProposal,
+    context: CompanionProposalExecutionContext,
+  ): Promise<CompanionProposalExecution>;
   openDroneChat(
     args: Record<string, unknown>,
   ): Promise<Record<string, unknown>> | Record<string, unknown>;
@@ -29,7 +36,11 @@ type CompanionWorkspaceContextValue = {
   registerEditor(target: CompanionTextTarget): () => void;
   focusEditor(id: string): void;
   getAppContext(): Record<string, unknown>;
-  prepareDroneDraft(args: Record<string, unknown>): Promise<Record<string, unknown>>;
+  resolveDroneName(droneId: string): string | null;
+  executeProposal(
+    proposal: CompanionProposal,
+    context: CompanionProposalExecutionContext,
+  ): Promise<CompanionProposalExecution>;
   openDroneChat(args: Record<string, unknown>): Promise<Record<string, unknown>>;
   highlightDrones(args: Record<string, unknown>): Promise<Record<string, unknown>>;
   readActiveComposer(): CompanionTextSnapshot;
@@ -107,7 +118,9 @@ export function CompanionWorkspaceProvider({ children }: { children: React.React
       registerEditor,
       focusEditor,
       getAppContext: () => resolveWorkspaceTarget().getAppContext(),
-      prepareDroneDraft: async (args) => await resolveWorkspaceTarget().prepareDroneDraft(args),
+      resolveDroneName: (droneId) => resolveWorkspaceTarget().resolveDroneName(droneId),
+      executeProposal: async (proposal, context) =>
+        await resolveWorkspaceTarget().executeProposal(proposal, context),
       openDroneChat: async (args) => await resolveWorkspaceTarget().openDroneChat(args),
       highlightDrones: async (args) => await resolveWorkspaceTarget().highlightDrones(args),
       readActiveComposer: activeComposer.readActiveComposer,

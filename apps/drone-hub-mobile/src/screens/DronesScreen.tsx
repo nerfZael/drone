@@ -2122,7 +2122,7 @@ export function DronesScreen({
       path: filePreview.displayPath,
       kind: filePreview.preview?.kind ?? 'loading',
     },
-    createDraft: async (payload, preferences) => {
+    createDrone: async (payload, preferences) => {
       let created: { droneId: string; droneName: string } | null = null;
       const ok = await createDrone(payload, preferences, [], {
         selectCreatedDrone: false,
@@ -2132,6 +2132,8 @@ export function DronesScreen({
       });
       return ok ? created : null;
     },
+    requestDroneControl: async (operation, payload) =>
+      await requestDroneControl(targetId, operation, payload),
     openChat: async (drone, requestedChat) => {
       await saveNewDroneDraftBeforeNavigation();
       navigationItems.find((item) => item.id === 'drones')?.onPress();

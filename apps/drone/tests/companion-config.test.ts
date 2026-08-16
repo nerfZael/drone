@@ -49,10 +49,10 @@ describe('Companion settings', () => {
       COMPANION_TOOL_SUMMARIES.find((tool) => tool.name === 'open_drone_chat'),
     ).toMatchObject({ execution: 'browser', category: 'actions' });
     expect(
-      COMPANION_TOOL_SUMMARIES.find((tool) => tool.name === 'prepare_drone_draft')?.description,
-    ).toContain('Repeated calls are additive');
+      COMPANION_TOOL_SUMMARIES.find((tool) => tool.name === 'apply_companion_proposal_patch'),
+    ).toMatchObject({ requires: 'read_companion_proposal', execution: 'browser' });
     expect(DEFAULT_COMPANION_SETTINGS.systemPrompt).toContain(
-      'Call it once for every draft the user requests',
+      'one editable proposal',
     );
   });
 
@@ -99,11 +99,21 @@ describe('Companion settings', () => {
     expect(settings.systemPrompt).toContain('Use open_drone_chat');
   });
 
-  test('enables chat navigation for legacy all-tools profiles without overriding new choices', () => {
+  test('enables proposal editing and chat navigation for legacy all-tools profiles without overriding new choices', () => {
     const legacyToolNames = COMPANION_TOOL_SUMMARIES
       .map((tool) => tool.name)
-      .filter((name) => name !== 'open_drone_chat');
+      .filter((name) =>
+        name !== 'open_drone_chat' &&
+        name !== 'list_groups' &&
+        name !== 'read_companion_proposal' &&
+        name !== 'apply_companion_proposal_patch',
+      );
     const migrated = normalizeCompanionSettings({
+      ...DEFAULT_COMPANION_SETTINGS,
+      schemaVersion: 1,
+      enabledTools: [...legacyToolNames, 'prepare_drone_draft'],
+    });
+    const migratedWithoutDraftPermission = normalizeCompanionSettings({
       ...DEFAULT_COMPANION_SETTINGS,
       schemaVersion: 1,
       enabledTools: legacyToolNames,
@@ -114,6 +124,12 @@ describe('Companion settings', () => {
     });
 
     expect(migrated.enabledTools).toContain('open_drone_chat');
+    expect(migrated.enabledTools).toContain('list_groups');
+    expect(migrated.enabledTools).toContain('read_companion_proposal');
+    expect(migrated.enabledTools).toContain('apply_companion_proposal_patch');
+    expect(migratedWithoutDraftPermission.enabledTools).toContain('open_drone_chat');
+    expect(migratedWithoutDraftPermission.enabledTools).not.toContain('read_companion_proposal');
     expect(explicitlyDisabled.enabledTools).not.toContain('open_drone_chat');
+    expect(explicitlyDisabled.enabledTools).not.toContain('read_companion_proposal');
   });
 });

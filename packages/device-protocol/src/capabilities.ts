@@ -14,6 +14,10 @@ export const DEVICE_CORE_CAPABILITY: CapabilityDescriptor = {
 
 export const DRONE_CONTROL_OPERATIONS = [
   'drones.list',
+  'groups.list',
+  'group.create',
+  'group.rename',
+  'group.delete',
   'chats.list',
   'chat.create',
   'chat.rename',

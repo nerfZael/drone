@@ -34,13 +34,18 @@ export function migrateDeviceMeshGrants(grants: readonly CapabilityGrant[]): Cap
     (grant) => grant.capability === 'drone-control' && grant.version === 1,
   );
   // Existing phones trusted to delete drones should not lose access to newer sidebar,
-  // rename, and per-chat management actions after an upgrade.
+  // rename, group, and per-chat management actions after an upgrade. Group deletion is
+  // not broader than this grant because it can delete the drones inside the group.
   if (droneControl?.operations.includes('drone.delete')) {
     operations.push(
       'drone.rename',
       'chat.rename',
       'chat.delete',
       'sidebar.move',
+      'groups.list',
+      'group.create',
+      'group.rename',
+      'group.delete',
     );
   }
   // Queue recovery is the explicit, safer replacement for letting later chat

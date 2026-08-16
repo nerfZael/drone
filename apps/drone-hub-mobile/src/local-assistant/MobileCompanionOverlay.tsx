@@ -1,5 +1,7 @@
 import React from 'react';
 import {
+  companionProposalOperationLabel,
+  companionProposalOperationDetails,
   companionToolActivityLabel,
   groupCompanionToolActivity,
 } from '@drone/assistant-chat';
@@ -40,6 +42,9 @@ export function MobileCompanionOverlay() {
   const { height } = useWindowDimensions();
   const [activityExpanded, setActivityExpanded] = React.useState(true);
   const [expandedCalls, setExpandedCalls] = React.useState<Set<string>>(() => new Set());
+  const [expandedProposalOperations, setExpandedProposalOperations] = React.useState<Set<string>>(
+    () => new Set(),
+  );
   const [, tick] = React.useState(0);
 
   React.useEffect(() => {
@@ -52,8 +57,13 @@ export function MobileCompanionOverlay() {
     if (companion.status === 'idle') {
       setActivityExpanded(true);
       setExpandedCalls(new Set());
+      setExpandedProposalOperations(new Set());
     }
   }, [companion.status]);
+
+  React.useEffect(() => {
+    setExpandedProposalOperations(new Set());
+  }, [companion.proposal]);
 
   if (companion.status === 'idle') return null;
   const active = companion.status === 'working';
@@ -62,6 +72,9 @@ export function MobileCompanionOverlay() {
     : 0;
   const showActivity = active || companion.activity.length > 0;
   const activityGroups = groupCompanionToolActivity(companion.activity);
+  const completedProposalOperations = companion.proposalExecution?.operations.filter(
+    (item) => item.status === 'completed',
+  ).length ?? 0;
 
   return (
     <View
@@ -114,6 +127,166 @@ export function MobileCompanionOverlay() {
             <View style={styles.transcript}>
               <Mic color={colors.muted} size={13} strokeWidth={2} />
               <Text style={styles.transcriptText}>“{companion.transcript}”</Text>
+            </View>
+          ) : null}
+          {companion.proposal ? (
+            <View accessibilityLabel="Companion proposal" style={styles.proposal}>
+              <View style={styles.proposalHeading}>
+                <View style={styles.proposalHeadingCopy}>
+                  <Text style={styles.proposalEyebrow}>Proposal</Text>
+                  <Text style={styles.proposalTitle}>{companion.proposal.title}</Text>
+                </View>
+                <Text
+                  style={[
+                    styles.proposalStatus,
+                    companion.proposalExecution?.ok
+                      ? styles.proposalStatusSuccess
+                      : companion.proposalExecution
+                        ? styles.proposalStatusFailure
+                        : null,
+                  ]}
+                >
+                  {companion.proposalExecuting
+                    ? 'Applying…'
+                    : companion.proposalExecution?.ok
+                      ? 'Applied'
+                      : companion.proposalExecution
+                        ? completedProposalOperations > 0 ? 'Partially applied' : 'Apply failed'
+                        : 'Review'}
+                </Text>
+              </View>
+              {companion.proposal.summary ? (
+                <Text style={styles.proposalSummary}>{companion.proposal.summary}</Text>
+              ) : null}
+              {companion.proposal.operations.length === 0 ? (
+                <Text style={styles.proposalEmpty}>Companion has not added any operations yet.</Text>
+              ) : (
+                <View style={styles.proposalOperations}>
+                  {companion.proposal.operations.map((operation, index) => {
+                    const outcome = companion.proposalExecution?.operations.find(
+                      (item) => item.id === operation.id,
+                    );
+                    const details = companionProposalOperationDetails(
+                      operation,
+                      companion.proposalDefaultRepoPath ?? '',
+                    );
+                    const detailsExpanded = expandedProposalOperations.has(operation.id);
+                    return (
+                      <View key={operation.id} style={styles.proposalOperation}>
+                        <View style={styles.proposalNumber}>
+                          <Text style={styles.proposalNumberText}>{index + 1}</Text>
+                        </View>
+                        <View style={styles.proposalOperationCopy}>
+                          <Text style={styles.proposalOperationText}>
+                            {companionProposalOperationLabel(operation)}
+                          </Text>
+                          {details.length > 0 ? (
+                            <>
+                              <Pressable
+                                accessibilityRole="button"
+                                accessibilityState={{ expanded: detailsExpanded }}
+                                onPress={() => setExpandedProposalOperations((current) => {
+                                  const next = new Set(current);
+                                  if (next.has(operation.id)) next.delete(operation.id);
+                                  else next.add(operation.id);
+                                  return next;
+                                })}
+                                style={({ pressed }) => [
+                                  styles.proposalDetailsToggle,
+                                  pressed && styles.pressed,
+                                ]}
+                              >
+                                <Text style={styles.proposalDetailsToggleText}>
+                                  {detailsExpanded ? 'Hide details' : 'Review details'}
+                                </Text>
+                              </Pressable>
+                              {detailsExpanded ? (
+                                <View style={styles.proposalDetails}>
+                                  {details.map((detail) => (
+                                    <View key={detail.label} style={styles.proposalDetail}>
+                                      <Text style={styles.proposalDetailLabel}>{detail.label}</Text>
+                                      <Text selectable style={styles.proposalDetailValue}>
+                                        {detail.value}
+                                      </Text>
+                                    </View>
+                                  ))}
+                                </View>
+                              ) : null}
+                            </>
+                          ) : null}
+                          {outcome ? (
+                            <Text
+                              style={[
+                                styles.proposalOutcome,
+                                outcome.status === 'completed'
+                                  ? styles.proposalStatusSuccess
+                                  : outcome.status === 'failed'
+                                    ? styles.proposalStatusFailure
+                                    : null,
+                              ]}
+                            >
+                              {outcome.status === 'completed'
+                                ? 'Applied'
+                                : outcome.status === 'skipped'
+                                  ? 'Not run'
+                                  : outcome.error || 'Failed'}
+                            </Text>
+                          ) : null}
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+              <View style={styles.proposalActions}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Discard Companion proposal"
+                  disabled={companion.proposalExecuting}
+                  onPress={companion.discardProposal}
+                  style={({ pressed }) => [
+                    styles.proposalDiscard,
+                    pressed && styles.pressed,
+                    companion.proposalExecuting && styles.disabled,
+                  ]}
+                >
+                  <Text style={styles.proposalDiscardText}>Discard</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Apply Companion proposal"
+                  disabled={
+                    companion.proposalExecuting ||
+                    active ||
+                    ['starting', 'recording', 'transcribing'].includes(companion.status) ||
+                    companion.proposal.operations.length === 0 ||
+                    companion.proposalExecution !== null
+                  }
+                  onPress={() => void companion.executeProposal()}
+                  style={({ pressed }) => [
+                    styles.proposalApply,
+                    pressed && styles.pressed,
+                    (companion.proposalExecuting ||
+                      active ||
+                      ['starting', 'recording', 'transcribing'].includes(companion.status) ||
+                      companion.proposal!.operations.length === 0 ||
+                      companion.proposalExecution !== null) && styles.disabled,
+                  ]}
+                >
+                  {companion.proposalExecuting ? (
+                    <ActivityIndicator color={colors.onAccent} size="small" />
+                  ) : null}
+                  <Text style={styles.proposalApplyText}>
+                    {companion.proposalExecuting
+                      ? 'Applying…'
+                      : companion.proposalExecution?.ok
+                        ? 'Applied'
+                        : companion.proposalExecution
+                          ? 'Discard to retry'
+                          : 'Apply proposal'}
+                  </Text>
+                </Pressable>
+              </View>
             </View>
           ) : null}
           {showActivity ? (
@@ -306,6 +479,88 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.borderSubtle,
   },
   transcriptText: { flex: 1, color: colors.muted, fontSize: 11, lineHeight: 16 },
+  proposal: {
+    gap: 9,
+    padding: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.borderSubtle,
+    backgroundColor: colors.sidebarSurfaceInset,
+  },
+  proposalHeading: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  proposalHeadingCopy: { flex: 1, minWidth: 0 },
+  proposalEyebrow: {
+    color: colors.mutedDim,
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  proposalTitle: { marginTop: 2, color: colors.text, fontSize: 13, fontWeight: '700' },
+  proposalStatus: { color: colors.mutedDim, fontSize: 9 },
+  proposalStatusSuccess: { color: colors.online },
+  proposalStatusFailure: { color: colors.danger },
+  proposalSummary: { color: colors.muted, fontSize: 11, lineHeight: 16 },
+  proposalEmpty: {
+    paddingVertical: 10,
+    color: colors.mutedDim,
+    fontSize: 10,
+    textAlign: 'center',
+  },
+  proposalOperations: { gap: 6 },
+  proposalOperation: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    padding: 9,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSubtle,
+    backgroundColor: colors.panelRaised,
+  },
+  proposalNumber: {
+    width: 17,
+    height: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 9,
+    backgroundColor: colors.controlSurface,
+  },
+  proposalNumberText: { color: colors.muted, fontSize: 9 },
+  proposalOperationCopy: { flex: 1, minWidth: 0 },
+  proposalOperationText: { color: colors.textSecondary, fontSize: 11, lineHeight: 15 },
+  proposalDetailsToggle: { alignSelf: 'flex-start', marginTop: 4, paddingVertical: 2 },
+  proposalDetailsToggleText: { color: colors.accent, fontSize: 9, fontWeight: '600' },
+  proposalDetails: {
+    gap: 5,
+    marginTop: 3,
+    paddingLeft: 7,
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderLeftColor: colors.borderSubtle,
+  },
+  proposalDetail: { gap: 1 },
+  proposalDetailLabel: { color: colors.mutedDim, fontSize: 8, fontWeight: '700' },
+  proposalDetailValue: { color: colors.textSecondary, fontSize: 9, lineHeight: 13 },
+  proposalOutcome: { marginTop: 3, color: colors.mutedDim, fontSize: 9 },
+  proposalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, paddingTop: 2 },
+  proposalDiscard: {
+    minHeight: 34,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    borderRadius: 7,
+  },
+  proposalDiscardText: { color: colors.muted, fontSize: 11, fontWeight: '600' },
+  proposalApply: {
+    minHeight: 34,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    paddingHorizontal: 13,
+    borderRadius: 7,
+    backgroundColor: colors.accent,
+  },
+  proposalApplyText: { color: colors.onAccent, fontSize: 11, fontWeight: '700' },
+  disabled: { opacity: 0.45 },
   activity: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.borderSubtle },
   activitySummary: {
     minHeight: 42,

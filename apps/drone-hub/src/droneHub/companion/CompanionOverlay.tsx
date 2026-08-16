@@ -2,18 +2,96 @@ import React from 'react';
 import {
   companionToolActivityLabel,
   groupCompanionToolActivity,
+  type CompanionStatus,
 } from '@drone/assistant-chat';
 import { AgentRunSummaryLine } from '../chat/WorkingElapsedStatus';
 import { ChatMessageBody } from '../chat/ChatMessageBody';
 import { formatChatVoiceDuration } from '../chat/use-chat-voice-recorder';
 import { useCompanion } from './CompanionContext';
+import { CompanionProposalCard } from './CompanionProposalCard';
+import { useCompanionWorkspace } from './CompanionWorkspaceContext';
 
 function Chevron({ open }: { open: boolean }) {
   return <span className={`text-xs transition-transform ${open ? 'rotate-90' : ''}`}>›</span>;
 }
 
+function companionStatusLabel(status: CompanionStatus, recordingPaused: boolean): string {
+  if (recordingPaused) return 'Listening paused';
+  if (status === 'starting') return 'Starting microphone';
+  if (status === 'recording') return 'Listening';
+  if (status === 'transcribing') return 'Transcribing';
+  if (status === 'working') return 'Working';
+  if (status === 'completed') return 'Completed';
+  if (status === 'cancelled') return 'Stopped';
+  if (status === 'error') return 'Needs attention';
+  return 'Idle';
+}
+
+function CompanionStatusIndicator({
+  status,
+  recordingPaused,
+}: {
+  status: CompanionStatus;
+  recordingPaused: boolean;
+}) {
+  const label = companionStatusLabel(status, recordingPaused);
+  const tone = recordingPaused
+    ? 'bg-[var(--yellow)]'
+    : status === 'recording' || status === 'error'
+      ? 'bg-[var(--red)]'
+      : status === 'completed'
+        ? 'bg-[var(--green)]'
+        : status === 'cancelled'
+          ? 'bg-[var(--muted-dim)]'
+          : 'bg-[var(--accent)]';
+  const active = !recordingPaused && ['starting', 'recording', 'transcribing', 'working'].includes(status);
+  return (
+    <span
+      className={`h-2 w-2 shrink-0 rounded-full ${tone} ${active ? 'animate-pulse' : ''}`}
+      title={label}
+      aria-label={`Companion status: ${label}`}
+      role="status"
+    />
+  );
+}
+
+function CompanionHeaderButton({
+  label,
+  tone = 'neutral',
+  disabled = false,
+  onClick,
+  children,
+}: {
+  label: string;
+  tone?: 'neutral' | 'accent' | 'success' | 'danger';
+  disabled?: boolean;
+  onClick(): void;
+  children: React.ReactNode;
+}) {
+  const classes = tone === 'danger'
+    ? 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]'
+    : tone === 'success'
+      ? 'border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)]'
+      : tone === 'accent'
+        ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+        : 'border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--muted)]';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`inline-flex h-7 w-7 items-center justify-center rounded-md border transition-opacity hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-40 ${classes}`}
+      title={label}
+      aria-label={label}
+    >
+      {children}
+    </button>
+  );
+}
+
 export function CompanionOverlay() {
   const companion = useCompanion();
+  const workspace = useCompanionWorkspace();
   const [expanded, setExpanded] = React.useState(true);
   const [, tick] = React.useState(0);
   React.useEffect(() => {
@@ -28,33 +106,110 @@ export function CompanionOverlay() {
     : 0;
   const activityGroups = groupCompanionToolActivity(companion.activity);
   return (
-    <aside
-      className="fixed bottom-4 right-4 z-[80] flex max-h-[calc(100vh-2rem)] w-[min(28rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--panel)] shadow-2xl"
-      aria-label="Companion"
-    >
+    <div className="fixed bottom-4 right-4 z-[80] flex max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] flex-col items-end gap-3 min-[860px]:w-auto min-[860px]:flex-row">
+      {companion.proposal ? (
+        <CompanionProposalCard
+          proposal={companion.proposal}
+          defaultRepoPath={companion.proposalDefaultRepoPath ?? ''}
+          execution={companion.proposalExecution}
+          executing={companion.proposalExecuting}
+          companionStatus={companion.status}
+          resolveDroneName={(droneId) => workspace?.resolveDroneName(droneId) ?? null}
+          onExecute={() => void companion.executeProposal()}
+          onDiscard={companion.discardProposal}
+        />
+      ) : null}
+      <aside
+        className="flex max-h-[calc(100vh-2rem)] w-full flex-col overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--panel)] shadow-2xl min-[860px]:w-[28rem]"
+        aria-label="Companion"
+      >
       <div className="flex shrink-0 items-center gap-3 border-b border-[var(--border-subtle)] px-4 py-3">
-        <div className="min-w-0 flex-1">
-          <div className="text-sm font-[var(--weight-semibold)] text-[var(--fg)]">Companion</div>
-          <div className="truncate text-xs text-[var(--muted)]">
-            {companion.status === 'starting' ? 'Starting microphone…' : null}
-            {companion.status === 'recording'
-              ? `Listening · ${formatChatVoiceDuration(companion.durationMillis)}`
-              : null}
-            {companion.status === 'transcribing' ? 'Transcribing…' : null}
-            {companion.status === 'working' ? 'Working…' : null}
-            {companion.status === 'completed' ? 'Completed' : null}
-            {companion.status === 'cancelled' ? 'Cancelled' : null}
-            {companion.status === 'error' ? 'Needs attention' : null}
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <CompanionStatusIndicator
+            status={companion.status}
+            recordingPaused={companion.recordingPaused}
+          />
+          <div className="truncate text-sm font-[var(--weight-semibold)] text-[var(--fg)]">
+            Companion
           </div>
+          {companion.status === 'recording' ? (
+            <span
+              className="shrink-0 font-mono text-[10px] tabular-nums text-[var(--muted)]"
+              aria-label={`${formatChatVoiceDuration(companion.durationMillis)} elapsed`}
+            >
+              {formatChatVoiceDuration(companion.durationMillis)}
+            </span>
+          ) : null}
         </div>
-        <button
-          type="button"
-          onClick={() => void companion.close()}
-          className="rounded px-2 py-1 text-lg text-[var(--muted)] hover:bg-[var(--panel-hover)] hover:text-[var(--fg)]"
-          aria-label="Close Companion"
-        >
-          ×
-        </button>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {companion.status === 'recording' ? (
+            <>
+              <CompanionHeaderButton
+                label="Discard recording"
+                tone="danger"
+                onClick={() => void companion.discardRecording()}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                  <path d="M6 6l12 12" />
+                  <path d="M18 6L6 18" />
+                </svg>
+              </CompanionHeaderButton>
+              <CompanionHeaderButton
+                label={companion.recordingPaused ? 'Resume recording' : 'Pause recording'}
+                tone={companion.recordingPaused ? 'accent' : 'neutral'}
+                onClick={companion.toggleRecordingPause}
+              >
+                {companion.recordingPaused ? (
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M8 5v14l11-7Z" />
+                  </svg>
+                ) : (
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                    <path d="M9 5v14" />
+                    <path d="M15 5v14" />
+                  </svg>
+                )}
+              </CompanionHeaderButton>
+              <CompanionHeaderButton
+                label="Finish recording and send"
+                tone="success"
+                onClick={() => void companion.toggle()}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <rect x="7" y="7" width="10" height="10" rx="1" />
+                </svg>
+              </CompanionHeaderButton>
+            </>
+          ) : null}
+          {companion.status === 'starting' || companion.status === 'transcribing' ? (
+            <CompanionHeaderButton
+              label="Discard recording"
+              tone="danger"
+              onClick={() => void companion.discardRecording()}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                <path d="M6 6l12 12" />
+                <path d="M18 6L6 18" />
+              </svg>
+            </CompanionHeaderButton>
+          ) : null}
+          {companion.status === 'working' ? (
+            <CompanionHeaderButton label="Stop Companion turn" tone="danger" onClick={companion.stop}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <rect x="7" y="7" width="10" height="10" rx="1" />
+              </svg>
+            </CompanionHeaderButton>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => void companion.close()}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-lg text-[var(--muted)] hover:bg-[var(--panel-hover)] hover:text-[var(--fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+            aria-label="Close Companion"
+            title="Close Companion"
+          >
+            ×
+          </button>
+        </div>
       </div>
       <div className="min-h-0 overflow-y-auto">
         {companion.transcript ? (
@@ -148,6 +303,7 @@ export function CompanionOverlay() {
           </div>
         ) : null}
       </div>
-    </aside>
+      </aside>
+    </div>
   );
 }

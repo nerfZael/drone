@@ -31,7 +31,7 @@ The first version should support:
 - Hub-wide inventory: repository, drone, and chat counts; repository membership; repo-less drones; and drones with multiple chats.
 - Reading chats and bounded keyword search across active drone chats. Archived chats are excluded.
 - Highlighting drones without navigating to or opening them.
-- Creating one or more durable draft drones with queued initial prompts. Each appears as a normal Draft row in its repository and group.
+- Drafting one repeatedly editable proposal for group, drone, chat, and message operations, with explicit review and approval before execution.
 - Reading and immediately patching the active chat composer without confirmation. The patch must be one undo step.
 - Reading and immediately patching the open editor buffer only while that file is in edit mode. A patch leaves the buffer dirty, does not save it, and must be one undo step.
 - Awareness of the active drone, chat, composer, pane, and editor file.
@@ -39,7 +39,7 @@ The first version should support:
 - A Companion Settings tab for the system prompt, tool checkboxes, and model/reasoning selection across OpenAI, Codex, and Gemini.
 - A mobile entry point below the sidebar content, with the second toggle in the top overlay so the drawer can close while recording. Mobile reuses the Hub's saved Companion configuration and does not add another settings page.
 
-Continuous transcription, silence-driven end-of-thought detection, spoken replies, recoverable run history, saving files, sending messages, archived-chat search, and real drone creation can be added later. These do not require a different base architecture.
+Continuous transcription, silence-driven end-of-thought detection, spoken replies, recoverable run history, saving files, and archived-chat search can be added later. These do not require a different base architecture.
 
 ## Existing Code to Reuse
 
@@ -119,6 +119,7 @@ Reuse the in-process Drone Hub MCP client for these server-owned tools:
 - `get_hub_overview`: return repository, drone, chat, group, busy, error, and repo-less-drone counts;
 - `list_repos`: return the existing stable repository references and counts, with drone counts added;
 - `list_drones`: add `hasRepository` and repository filters, and return an unambiguous `repository: null | {...}` plus `chatCount`;
+- `list_groups`: return existing group names and repository scope so proposal operations can target them exactly;
 - `list_chats` and `read_chat`: enumerate a drone's chats and inspect a selected transcript;
 - `search_chat_messages`: perform bounded keyword search across active chats, optionally scoped to a repository, drone, or chat;
 - optional read-only workspace tools for the active drone.
@@ -132,11 +133,12 @@ Add a browser tool provider whose Blip tools call the bound client and await a s
 - `apply_composer_patch`
 - `read_open_file`
 - `apply_editor_patch`
-- `prepare_drone_draft`
+- `read_companion_proposal`
+- `apply_companion_proposal_patch`
 - `open_drone_chat`
 - `highlight_drones`
 
-Each tool has a fixed schema and a matching browser implementation; there is no generic `execute_ui` tool. The read tools return a target ID, virtual path, content, mode, and revision. `apply_composer_patch` and `apply_editor_patch` require the matching target ID and base revision, parse the normal Blip patch envelope on the server, and accept only `Update File` operations for that exact path. Add, delete, move, cross-target, and whole-value replacement operations are rejected.
+Each tool has a fixed schema and a matching browser implementation; there is no generic `execute_ui` tool. The read tools return a target ID, virtual path, content, mode, and revision. The three patch tools require the matching target ID and base revision, parse the normal Blip patch envelope on the server, and accept only `Update File` operations for that exact path. Add, delete, move, cross-target, and whole-value replacement operations are rejected.
 
 A separate write or replace tool is not needed. An insert-only update works for an empty composer or editor buffer:
 
@@ -150,11 +152,15 @@ A separate write or replace tool is not needed. An insert-only update works for 
 
 The server applies the patch hunks to the snapshot, then asks the browser to commit the result immediately if the target, revision, and mode still match; there is no confirmation step. On a conflict, the tool returns the latest revision so the agent can reread and retry. `apply_editor_patch` also rejects non-text, read-only, large-file, loading, saving, and preview states. A successful editor patch updates only the unsaved browser buffer; it does not call the save endpoint.
 
-`prepare_drone_draft` creates and persists one independent draft drone with its initial prompt queued for publication, then returns the stable drone ID and draft state. Every call is additive, so Companion can call it once per requested draft without replacing earlier results. Place each draft inside its selected repository and group as a normal row. It remains subject to the same repository, group, recent-drones, pinning, and manual-order behavior as every other drone; draft status changes the row badge and state, not its location.
+`read_companion_proposal` exposes one session-owned JSON document plus a compact list of supported operation shapes. `apply_companion_proposal_patch` updates that document but never performs the proposed operations. The browser validates the complete document after every edit, including strict fields, unique operation IDs, limits, and references to drones created earlier in the same proposal. This keeps the provider tool schema small while still giving the review and execution boundary a typed contract.
+
+The proposal supports creating, renaming, and deleting groups, drones, and chats; creating normal or draft drones/chats; and sending ASAP or queued messages. Operations execute top-to-bottom after explicit user approval and stop after the first failure. A later operation can target a newly created drone with `$<create operation id>`. Repository omissions resolve against the active repository captured when the proposal is first created, so later navigation cannot silently retarget it. Any execution attempt, including a partial failure, is terminal for that proposal; the user must discard it before Companion can create a fresh retry, preventing already-completed operations from being replayed. The review card stays to the left of the desktop Companion window across follow-up turns, so Companion can discuss and patch the same proposal repeatedly before the user applies or discards it.
+
+Desktop and mobile Companion use the same proposal document and validation contract. Desktop shows the review card beside the Companion window; mobile shows it inside the Companion overlay. Neither surface executes proposal edits until the user explicitly applies the reviewed proposal.
 
 Applying a patch must preserve user undo. For Monaco-backed composer and file editors, expose an edit method on the registered target that uses `pushUndoStop`, `executeEdits`, and `pushUndoStop` instead of replacing the React `value`; one Ctrl/Cmd+Z should revert the whole Companion patch. For controlled textareas, keep an app-owned Companion undo snapshot and intercept Ctrl/Cmd+Z when the current revision still matches the patched result. Clear that snapshot when the composer is sent, reset, or replaced. Browser tests must cover user typing before and after the patch. Do not claim undo support from `setDraft` or `setOpenedFileContent` alone.
 
-Do not enable shell, direct workspace file writes or saves, message sending, non-draft drone or chat creation, generic navigation, settings changes, or the full built-in-agent catalog in the first version. Durable draft-drone creation and opening one existing chat are the only supported creation/navigation actions. Broader workspace reads and file search can later reuse a read-only `DroneWorkspaceTarget` for the active drone.
+Do not enable shell, direct workspace file writes or saves, generic navigation, settings changes, or the full built-in-agent catalog. Hub mutations and chat messages go through the proposal review boundary; opening an existing chat and temporary highlighting remain immediate navigation actions.
 
 ### 4. Add a dedicated Companion Settings tab
 
@@ -202,8 +208,9 @@ Every completed or failed message also writes a structured `Companion message ti
 - Missing provider credentials produce a clear Settings and overlay error without provider fallback.
 - It can report Hub counts, identify repo-less drones and drones with multiple chats, and show each drone's repository membership without scanning the UI.
 - Keyword search finds matching content in active chats, returns traceable chat references, and never returns archived chats.
-- It can create multiple durable draft drones without publishing or starting them; each call returns a stable drone ID and each draft appears in its selected repository and group, subject to normal sidebar filtering and ordering.
-- Companion can open an existing chat in the current client and highlight matching drones, but it cannot create chats or perform generic navigation.
+- It can propose multiple durable draft drones without publishing or starting them; approved drafts appear in their selected repositories and groups, subject to normal sidebar filtering and ordering.
+- Companion can propose creation, deletion, and renaming of chats, and can open an existing chat or highlight matching drones immediately, but it cannot perform generic navigation.
+- The proposal card exposes exact prompts, messages, delivery mode, and repository scope before approval; every execution attempt is single-shot, and a failed or partial proposal must be discarded before creating a fresh retry.
 - A changed composer is never overwritten, and one browser cannot receive another browser's tool calls.
 - Follow-up turns reuse the open Companion thread, and turns submitted while it is working run in order.
 - Closing the overlay cancels any active stage, deletes the temporary session, and leaves no recoverable Companion conversation.
@@ -227,6 +234,7 @@ Every completed or failed message also writes a structured `Companion message ti
 - [x] Add focused coverage for shortcut migration, editable dispatch, textarea undo guards, tool dependencies, the fixed catalog, memory-only session isolation, keyword results, and archived-chat exclusion; run server and frontend typechecks.
 - [x] Add the mobile sidebar microphone, top overlay, paired-device run transport, mobile UI tool targets, and focused mesh lifecycle coverage without adding mobile Companion settings.
 - [x] Consolidate desktop UI tools behind one typed workspace provider, derive execution and dependency rules from the fixed tool catalog, and share browser-tool lifecycle bookkeeping across desktop and mobile transports.
+- [x] Add revision-checked, repeatedly editable proposal review and explicit execution on desktop and mobile; retire the direct mobile draft-creation tool.
 - [x] Add privacy-safe per-message latency telemetry, bounded SQLite retention, structured Hub logging, and an aggregate diagnostics API across desktop and mobile transports.
 
 ## Feedback and Decisions
@@ -244,7 +252,8 @@ Every completed or failed message also writes a structured `Companion message ti
 - **Decided:** Both patch tools commit immediately without confirmation and must remain reversible with one Ctrl/Cmd+Z. Insert-only patches handle empty targets, so no separate write tool is needed.
 - **Decided:** Chat search is keyword-only and excludes archived chats in the first version.
 - **Decided:** Companion sessions use an isolated in-memory SQLite repository. Normal close deletes them, while a Hub crash removes them with process memory.
-- **Decided:** Every `prepare_drone_draft` call creates an independent durable draft drone and returns its stable ID; repeated calls are additive and drafts render as normal Draft rows inside their selected repositories and groups.
-- **Decided:** Companion can open an existing chat with `open_drone_chat` and can highlight drones, but it cannot create chats or perform generic UI navigation.
+- **Decided:** Companion maintains one revision-checked, fully validated proposal document that can be patched over multiple turns without blocking the conversation.
+- **Decided:** Proposal approval executes ordered group, drone, chat, and message operations; later operations can reference a drone created earlier in the same proposal.
+- **Decided:** Companion can open an existing chat with `open_drone_chat` and can highlight drones immediately, but creation, deletion, renaming, and messaging require proposal approval.
 - **Decided:** Mobile uses a sidebar microphone and top overlay, reuses the existing phone voice recorder and Hub Companion settings, and reaches the same runtime through a permissioned device-mesh capability.
 - **Decided:** Companion takes the backtick default shortcut. Existing users with the old default voice-to-clipboard binding are migrated to Companion and voice-to-clipboard becomes unbound; custom bindings are preserved.

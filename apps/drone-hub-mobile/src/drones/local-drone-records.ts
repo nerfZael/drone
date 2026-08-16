@@ -15,7 +15,45 @@ export type LocalDroneRecord = {
   chats: Record<string, string>;
   draft?: boolean;
   draftPrompts?: LocalDroneDraftPrompt[];
+  draftChats?: Record<string, true>;
+  draftChatPrompts?: Record<string, LocalDroneDraftPrompt[]>;
 };
+
+export function localDroneDraftChatMap(drone: LocalDroneRecord): Record<string, true> {
+  if (drone.draft !== true) return drone.draftChats ?? {};
+  return Object.fromEntries(Object.keys(drone.chats).map((chatName) => [chatName, true]));
+}
+
+export function localDroneDraftPromptsForChat(
+  drone: LocalDroneRecord,
+  chatName: string,
+): LocalDroneDraftPrompt[] {
+  return drone.draft === true && chatName === 'default'
+    ? (drone.draftPrompts ?? [])
+    : (drone.draftChatPrompts?.[chatName] ?? []);
+}
+
+function cleanDraftPrompts(value: unknown): LocalDroneDraftPrompt[] {
+  return Array.isArray(value)
+    ? value.slice(0, 20).flatMap((prompt: any) => {
+        const id = String(prompt?.id ?? '').trim().slice(0, 160);
+        const text = String(prompt?.prompt ?? '');
+        const createdAt = String(prompt?.createdAt ?? new Date().toISOString());
+        const promptImages = Array.isArray(prompt?.promptImages)
+          ? prompt.promptImages.slice(0, 8).flatMap((image: any) => {
+              const data = String(image?.data ?? '').trim();
+              const mimeType = String(image?.mimeType ?? '').trim().toLowerCase();
+              return data && ['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(mimeType)
+                ? [{ type: 'image' as const, data, mimeType }]
+                : [];
+            })
+          : [];
+        return id && (text.trim() || promptImages.length > 0)
+          ? [{ id, prompt: text, promptImages, createdAt }]
+          : [];
+      })
+    : [];
+}
 
 export function cleanLocalDroneRecords(value: unknown): LocalDroneRecord[] {
   if (!Array.isArray(value)) return [];
@@ -31,25 +69,29 @@ export function cleanLocalDroneRecords(value: unknown): LocalDroneRecord[] {
         ])
         .filter(([chatName, threadId]) => Boolean(chatName && threadId)),
     );
-    const draftPrompts: LocalDroneDraftPrompt[] = Array.isArray(item.draftPrompts)
-      ? item.draftPrompts.slice(0, 20).flatMap((prompt: any) => {
-          const id = String(prompt?.id ?? '').trim().slice(0, 160);
-          const text = String(prompt?.prompt ?? '');
-          const createdAt = String(prompt?.createdAt ?? new Date().toISOString());
-          const promptImages = Array.isArray(prompt?.promptImages)
-            ? prompt.promptImages.slice(0, 8).flatMap((image: any) => {
-                const data = String(image?.data ?? '').trim();
-                const mimeType = String(image?.mimeType ?? '').trim().toLowerCase();
-                return data && ['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(mimeType)
-                  ? [{ type: 'image' as const, data, mimeType }]
-                  : [];
-              })
-            : [];
-          return id && (text.trim() || promptImages.length > 0)
-            ? [{ id, prompt: text, promptImages, createdAt }]
-            : [];
-        })
-      : [];
+    const draftPrompts = cleanDraftPrompts(item.draftPrompts);
+    const draftChats = Object.fromEntries(
+      Object.entries(
+        item.draftChats && typeof item.draftChats === 'object' && !Array.isArray(item.draftChats)
+          ? item.draftChats
+          : {},
+      ).flatMap(([chatName, draft]) =>
+        draft === true && chats[chatName] ? [[chatName, true] as const] : [],
+      ),
+    );
+    const rawDraftChatPrompts =
+      item.draftChatPrompts &&
+      typeof item.draftChatPrompts === 'object' &&
+      !Array.isArray(item.draftChatPrompts)
+        ? item.draftChatPrompts
+        : {};
+    const draftPromptChatNames = item.draft === true ? Object.keys(chats) : Object.keys(draftChats);
+    const draftChatPrompts = Object.fromEntries(
+      draftPromptChatNames.filter((chatName) => chatName !== 'default').flatMap((chatName) => {
+        const prompts = cleanDraftPrompts(rawDraftChatPrompts[chatName]);
+        return prompts.length > 0 ? [[chatName, prompts] as const] : [];
+      }),
+    );
     return [
       {
         id: id.slice(0, 160),
@@ -62,6 +104,8 @@ export function cleanLocalDroneRecords(value: unknown): LocalDroneRecord[] {
         chats,
         ...(item.draft === true ? { draft: true } : {}),
         ...(item.draft === true && draftPrompts.length > 0 ? { draftPrompts } : {}),
+        ...(Object.keys(draftChats).length > 0 ? { draftChats } : {}),
+        ...(Object.keys(draftChatPrompts).length > 0 ? { draftChatPrompts } : {}),
       },
     ];
   });

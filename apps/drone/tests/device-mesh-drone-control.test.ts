@@ -41,6 +41,93 @@ function sidebarOperations(
 }
 
 describe('device mesh drone summaries', () => {
+  test('exposes proposal group mutations through drone control', async () => {
+    const calls: Array<[string, unknown]> = [];
+    const capability = createDroneControlCapability(
+      { baseUrl: () => 'http://127.0.0.1:7777', apiToken: 'test' },
+      undefined,
+      {
+        hubServices: {
+          groups: {
+            list: async (repoPath?: string) => {
+              calls.push(['list', repoPath]);
+              return { ok: true, groups: [] };
+            },
+            create: async (input: unknown) => {
+              calls.push(['create', input]);
+              return { ok: true, id: 'group-one', name: 'One' };
+            },
+            rename: async (input: unknown) => {
+              calls.push(['rename', input]);
+              return { ok: true, renamed: true };
+            },
+            delete: async (input: unknown) => {
+              calls.push(['delete', input]);
+              return { ok: true, deletedGroup: true };
+            },
+          },
+        } as any,
+      },
+    );
+
+    await capability.invoke('groups.list', { repoPath: '/work/repo' });
+    await capability.invoke('group.create', { name: 'One', repoPath: '/work/repo' });
+    await capability.invoke('group.rename', {
+      groupRef: 'group-one',
+      newName: 'Two',
+      repoPath: '/work/repo',
+    });
+    await capability.invoke('group.delete', {
+      groupRef: 'group-one',
+      repoPath: '/work/repo',
+    });
+
+    expect(calls[0]).toEqual(['list', '/work/repo']);
+    expect(calls[1]).toEqual([
+      'create',
+      expect.objectContaining({ name: 'One', repoPath: '/work/repo' }),
+    ]);
+    expect(calls[2]).toEqual([
+      'rename',
+      expect.objectContaining({ groupRef: 'group-one', newName: 'Two', repoPath: '/work/repo' }),
+    ]);
+    expect(calls[3]).toEqual([
+      'delete',
+      { groupRef: 'group-one', repoPath: '/work/repo', keepVolume: false, forget: true },
+    ]);
+  });
+
+  test('rejects a partially failed group deletion', async () => {
+    const capability = createDroneControlCapability(
+      { baseUrl: () => 'http://127.0.0.1:7777', apiToken: 'test' },
+      undefined,
+      {
+        hubServices: {
+          groups: {
+            delete: async () => ({
+              ok: false,
+              group: 'Review',
+              repoPath: '/repo',
+              removed: [],
+              total: 1,
+              errors: [{
+                id: 'drone-1',
+                name: 'Reviewer',
+                error: 'volume is busy',
+                removedRegistry: false,
+              }],
+            }),
+          },
+        } as any,
+      },
+    );
+
+    await expect(capability.invoke('group.delete', {
+      groupRef: 'Review',
+      repoPath: '/repo',
+    })).rejects.toThrow('volume is busy');
+  });
+
   test('preserves the sidebar hierarchy fields needed by mobile clients', () => {
     expect(
       deviceMeshDroneSummary({
@@ -1671,6 +1758,39 @@ describe('device mesh drone summaries', () => {
           method: 'POST',
           body: '{}',
         },
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('only opts chat creation into copy-config when the caller requests it', async () => {
+    const originalFetch = globalThis.fetch;
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (_input, init) => {
+      bodies.push(JSON.parse(String(init?.body ?? '{}')));
+      return Response.json({ ok: true, chats: ['default', 'clone'] });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      await capability.invoke('chat.create', {
+        droneId: 'drone-1',
+        name: 'clone',
+        copyFrom: 'default',
+      });
+      await capability.invoke('chat.create', {
+        droneId: 'drone-1',
+        name: 'settings-only',
+        copyFrom: 'default',
+        mode: 'copy-config',
+      });
+
+      expect(bodies).toEqual([
+        { name: 'clone', copyFrom: 'default' },
+        { name: 'settings-only', copyFrom: 'default', mode: 'copy-config' },
       ]);
     } finally {
       globalThis.fetch = originalFetch;

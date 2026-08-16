@@ -82,6 +82,10 @@ describe('device mesh grant migrations', () => {
           'chat.rename',
           'chat.delete',
           'sidebar.move',
+          'groups.list',
+          'group.create',
+          'group.rename',
+          'group.delete',
         ],
       },
     ]);

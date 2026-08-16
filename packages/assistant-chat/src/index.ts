@@ -8,6 +8,7 @@ export * from './chat-attachment-context.js';
 export * from './chat-attachment-policy.js';
 export * from './chat-queue-actions.js';
 export * from './companion.js';
+export * from './companion-proposal.js';
 export * from './continuous-voice.js';
 export * from './continuous-voice-session.js';
 export * from './codex-approval.js';

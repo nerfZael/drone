@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import {
   cleanLocalDroneRecords,
   createLegacyPhoneDroneRecord,
+  localDroneDraftChatMap,
+  localDroneDraftPromptsForChat,
 } from '../src/drones/local-drone-records';
 import type { LocalAssistantThread } from '../src/local-assistant/local-assistant-types';
 
@@ -87,5 +89,53 @@ describe('local drone records', () => {
         },
       ],
     });
+  });
+
+  test('preserves draft state and queued prompts for individual phone chats', () => {
+    expect(
+      cleanLocalDroneRecords([
+        {
+          id: 'phone-drone',
+          name: 'Phone drone',
+          group: null,
+          createdAt: '2026-08-16T00:00:00.000Z',
+          chats: { default: 'thread-1', review: 'thread-2' },
+          draftChats: { review: true, missing: true },
+          draftChatPrompts: {
+            review: [
+              {
+                id: 'review-prompt',
+                prompt: 'Review this.',
+                createdAt: '2026-08-16T00:00:00.000Z',
+                promptImages: [],
+              },
+            ],
+          },
+        },
+      ])[0],
+    ).toMatchObject({
+      draftChats: { review: true },
+      draftChatPrompts: {
+        review: [{ id: 'review-prompt', prompt: 'Review this.' }],
+      },
+    });
+  });
+
+  test('keeps separate queues for every chat in a draft drone', () => {
+    const drone = cleanLocalDroneRecords([{
+      id: 'phone-draft',
+      name: 'Draft',
+      group: null,
+      chats: { default: 'thread-1', review: 'thread-2' },
+      draft: true,
+      draftPrompts: [{ id: 'default-prompt', prompt: 'Default', promptImages: [] }],
+      draftChatPrompts: {
+        review: [{ id: 'review-prompt', prompt: 'Review', promptImages: [] }],
+      },
+    }])[0]!;
+
+    expect(localDroneDraftChatMap(drone)).toEqual({ default: true, review: true });
+    expect(localDroneDraftPromptsForChat(drone, 'default')[0]?.prompt).toBe('Default');
+    expect(localDroneDraftPromptsForChat(drone, 'review')[0]?.prompt).toBe('Review');
   });
 });

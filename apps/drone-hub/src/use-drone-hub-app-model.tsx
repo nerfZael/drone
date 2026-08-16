@@ -49,9 +49,9 @@ import { useAgentsMdLibraryCatalog } from './droneHub/app/use-agents-md-library-
 import { useDroneCreationActions } from './droneHub/app/use-drone-creation-actions';
 import { useCompanionWorkspace } from './droneHub/companion/CompanionWorkspaceContext';
 import {
-  createCompanionDroneDraft,
-  resolveCompanionDraftCreationPreferences,
-} from './droneHub/companion/companion-drone-draft';
+  resolveCompanionDroneCreationPreferences,
+} from './droneHub/companion/companion-drone-creation';
+import { executeCompanionProposal } from '@drone/assistant-chat';
 import { useChatRuntimeOrchestration } from './droneHub/app/use-chat-runtime-orchestration';
 import { useDroneErrorModalActions } from './droneHub/app/use-drone-error-modal-actions';
 import { useRepoBranchOptions } from './droneHub/app/use-repo-branch-options';
@@ -2629,6 +2629,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   React.useEffect(() => {
     if (!companionWorkspace) return;
     return companionWorkspace.registerWorkspaceTarget({
+      resolveDroneName: (droneId) => {
+        const drone = droneByIdRef.current[String(droneId ?? '').trim()];
+        return drone ? String(drone.name ?? '').trim() || drone.id : null;
+      },
       getAppContext: () => ({
         appView,
         activeRepoPath: activeRepoPath || null,
@@ -2648,48 +2652,163 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           ? { path: openedEditorFile.path }
           : null,
       }),
-      prepareDroneDraft: async (args) =>
-        await createCompanionDroneDraft(args, async (input) => {
-          const rememberedPreferences = loadDesktopNewDronePreferences(input.repoPath);
-          const basePreferences =
-            rememberedPreferences ?? normalizeDesktopNewDronePreferences({});
-          if (!basePreferences) throw new Error('could not resolve new-drone preferences');
-          const spawnContexts = useDroneHubUiStore.getState().spawnContextByRepoKey;
-          const creationPreferences = resolveCompanionDraftCreationPreferences({
-            remembered: rememberedPreferences,
-            defaults: basePreferences,
-            spawnContext: resolveSpawnContextPreferencesForRepo(
-              spawnContexts,
-              input.repoPath,
-            ),
-            hasSpawnContext: hasSpawnContextPreferencesForRepo(
-              spawnContexts,
-              input.repoPath,
-            ),
-          });
-          let creationError = '';
-          let created: { droneId: string; droneName: string } | null = null;
-          const ok = await createDroneFromDraft({
-            name: input.name,
-            prompt: input.prompt,
-            repoPath: input.repoPath,
-            group: input.group,
-            creationPreferences,
-            isolatedContext: true,
-            createMode: 'with-chat',
-            createAsDraft: true,
-            selectOnSuccess: false,
-            autoRename: !input.name,
-            autoRenamePrompt: input.prompt,
-            onCreated: (result) => {
-              created = result;
-            },
-            onError: (message) => {
-              creationError = message;
-            },
-          });
-          if (!ok && creationError) throw new Error(creationError);
-          return ok ? created : null;
+      executeProposal: async (proposal, executionContext) =>
+        await executeCompanionProposal(proposal, {
+          createGroup: async (operation) => {
+            const repoPath = operation.repoPath ?? executionContext.defaultRepoPath;
+            await requestJson('/api/groups', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ name: operation.name, repoPath }),
+            });
+            return { name: operation.name, repoPath: repoPath || null };
+          },
+          deleteGroup: async (operation) => {
+            const repoPath = operation.repoPath ?? executionContext.defaultRepoPath;
+            const groupRef = repoPath === activeRepoPath
+              ? registryGroupIdByName[operation.name] ?? operation.name
+              : operation.name;
+            await requestJson(
+              `/api/groups/${encodeURIComponent(groupRef)}?repoPath=${encodeURIComponent(repoPath)}`,
+              { method: 'DELETE' },
+            );
+            return { name: operation.name, repoPath: repoPath || null };
+          },
+          renameGroup: async (operation) => {
+            const repoPath = operation.repoPath ?? executionContext.defaultRepoPath;
+            const groupRef = repoPath === activeRepoPath
+              ? registryGroupIdByName[operation.name] ?? operation.name
+              : operation.name;
+            await requestJson(`/api/groups/${encodeURIComponent(groupRef)}/rename`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ newName: operation.newName, repoPath }),
+            });
+            return { oldName: operation.name, newName: operation.newName, repoPath: repoPath || null };
+          },
+          createDrone: async (operation) => {
+            const repoPath = operation.repoPath ?? executionContext.defaultRepoPath;
+            const rememberedPreferences = loadDesktopNewDronePreferences(repoPath);
+            const basePreferences =
+              rememberedPreferences ?? normalizeDesktopNewDronePreferences({});
+            if (!basePreferences) throw new Error('could not resolve new-drone preferences');
+            const spawnContexts = useDroneHubUiStore.getState().spawnContextByRepoKey;
+            const creationPreferences = resolveCompanionDroneCreationPreferences({
+              remembered: rememberedPreferences,
+              defaults: basePreferences,
+              spawnContext: resolveSpawnContextPreferencesForRepo(
+                spawnContexts,
+                repoPath,
+              ),
+              hasSpawnContext: hasSpawnContextPreferencesForRepo(
+                spawnContexts,
+                repoPath,
+              ),
+            });
+            let creationError = '';
+            let created: { droneId: string; droneName: string } | null = null;
+            const ok = await createDroneFromDraft({
+              name: operation.name,
+              prompt: operation.prompt,
+              repoPath,
+              group: operation.group,
+              creationPreferences,
+              isolatedContext: true,
+              createMode: 'with-chat',
+              createAsDraft: operation.draft === true,
+              selectOnSuccess: false,
+              autoRename: !operation.name,
+              autoRenamePrompt: operation.prompt,
+              onCreated: (result) => {
+                created = result;
+              },
+              onError: (message) => {
+                creationError = message;
+              },
+            });
+            if (!ok && creationError) throw new Error(creationError);
+            if (!ok || !created) throw new Error('DRONE_NOT_CREATED');
+            return created;
+          },
+          deleteDrone: async (operation) => {
+            const deleted = await deleteDrone(operation.droneId, {
+              confirmed: true,
+              showAlert: false,
+            });
+            if (!deleted) throw new Error(`could not delete drone: ${operation.droneId}`);
+            return { droneId: operation.droneId };
+          },
+          renameDrone: async (operation) => {
+            const renamed = await renameDroneTo(operation.droneId, operation.newName, {
+              showAlert: false,
+              source: 'companion-proposal',
+            });
+            if (!renamed.ok) throw new Error(renamed.error);
+            return { droneId: operation.droneId, name: operation.newName };
+          },
+          createChat: async (operation) => {
+            await requestJson(`/api/drones/${encodeURIComponent(operation.droneId)}/chats`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                name: operation.chatName,
+                ...(operation.copyFromChat ? { copyFromChat: operation.copyFromChat } : {}),
+                ...(operation.copyFromChat ? { mode: 'copy-config' } : {}),
+                ...(operation.draft ? { draft: true } : {}),
+              }),
+            });
+            return { droneId: operation.droneId, chatName: operation.chatName };
+          },
+          deleteChat: async (operation) => {
+            await requestJson(
+              `/api/drones/${encodeURIComponent(operation.droneId)}/chats/${encodeURIComponent(operation.chatName)}`,
+              { method: 'DELETE' },
+            );
+            return { droneId: operation.droneId, chatName: operation.chatName };
+          },
+          renameChat: async (operation) => {
+            await requestJson(
+              `/api/drones/${encodeURIComponent(operation.droneId)}/chats/${encodeURIComponent(operation.chatName)}/rename`,
+              {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ newName: operation.newName }),
+              },
+            );
+            return {
+              droneId: operation.droneId,
+              oldName: operation.chatName,
+              chatName: operation.newName,
+            };
+          },
+          sendMessage: async (operation) => {
+            const userTimeZone = clientTimeZone();
+            const response = await requestJson<{
+              ok: true;
+              promptId: string;
+              pendingState?: string;
+            }>(
+              `/api/drones/${encodeURIComponent(operation.droneId)}/chats/${encodeURIComponent(operation.chatName ?? 'default')}/prompt`,
+              {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                  prompt: operation.message,
+                  attachments: [],
+                  deliveryMode: operation.delivery ?? 'queue',
+                  submittedAt: new Date().toISOString(),
+                  submissionSource: 'assistant-tool',
+                  ...(userTimeZone ? { userTimeZone } : {}),
+                }),
+              },
+            );
+            return {
+              droneId: operation.droneId,
+              chatName: operation.chatName ?? 'default',
+              promptId: response.promptId,
+              status: response.pendingState ?? 'queued',
+            };
+          },
         }),
       openDroneChat: (args) => {
         const droneId = String(args.droneId ?? '').trim();
@@ -2736,9 +2855,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     createDroneFromDraft,
     currentDrone,
     companionWorkspace,
+    deleteDrone,
     expandGroupsForDroneIds,
     openedEditorFile,
     rightPanelTab,
+    registryGroupIdByName,
+    renameDroneTo,
     selectedChat,
     selectedDroneIds,
     selectDroneChat,

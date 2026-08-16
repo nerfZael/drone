@@ -61,6 +61,11 @@ export type LocalAssistantContextValue = {
     prompt: string,
     promptImages?: LocalAssistantPromptImage[],
   ): Promise<void>;
+  queuePrompt(
+    threadId: string,
+    prompt: string,
+    promptImages?: LocalAssistantPromptImage[],
+  ): Promise<{ promptId: string }>;
   cancelQueuedPrompt(threadId: string, promptId: string): Promise<void>;
   skipInterruption(threadId: string): Promise<void>;
   stop(threadId: string): void;
@@ -511,6 +516,45 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
     [mesh.identity, mesh.request, mutateThread],
   );
 
+  const queuePrompt = React.useCallback(
+    async (
+      threadId: string,
+      rawPrompt: string,
+      rawPromptImages: LocalAssistantPromptImage[] = [],
+    ) => {
+      const prompt = rawPrompt.trim();
+      const promptImages = rawPromptImages.filter(
+        (image) =>
+          image?.type === 'image' &&
+          Boolean(String(image.data ?? '').trim()) &&
+          Boolean(String(image.mimeType ?? '').trim()),
+      );
+      if (!prompt && promptImages.length === 0) throw new Error('Add a message or image.');
+      const queued: LocalAssistantQueuedPrompt = {
+        id: `mobile_queued_${Crypto.randomUUID()}`,
+        prompt,
+        promptImages,
+        createdAt: new Date().toISOString(),
+        status: 'queued',
+        error: null,
+      };
+      const updated = await mutateThread(threadId, (latest) => {
+        if (latest.queuedPrompts.length >= 20) {
+          throw new Error('Phone assistant prompt queue is full (max 20)');
+        }
+        return {
+          ...latest,
+          updatedAt: queued.createdAt,
+          queuedPrompts: [...latest.queuedPrompts, queued],
+        };
+      });
+      if (!updated) throw new Error('Built-in chat was not found');
+      queueMicrotask(() => drainQueuedPromptsRef.current());
+      return { promptId: queued.id };
+    },
+    [mutateThread],
+  );
+
   sendPromptRef.current = sendPrompt;
   drainQueuedPromptsRef.current = () => {
     if (abortRef.current || drainingQueuedPromptRef.current) return;
@@ -620,6 +664,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
     updateThread,
     resolveApproval,
     sendPrompt,
+    queuePrompt,
     cancelQueuedPrompt,
     skipInterruption,
     stop,

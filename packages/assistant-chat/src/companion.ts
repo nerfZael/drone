@@ -7,7 +7,8 @@ export const COMPANION_BROWSER_TOOL_NAMES = [
   'apply_composer_patch',
   'read_open_file',
   'apply_editor_patch',
-  'prepare_drone_draft',
+  'read_companion_proposal',
+  'apply_companion_proposal_patch',
   'open_drone_chat',
   'highlight_drones',
 ] as const;
@@ -113,6 +114,8 @@ function activityCountLabel(tool: string, count: number | null): string {
   if (count === null) return '';
   const noun = tool === 'list_drones'
     ? 'drone'
+    : tool === 'list_groups'
+      ? 'group'
     : tool === 'list_repos'
       ? 'repository'
       : tool === 'list_chats'
@@ -143,6 +146,10 @@ export function companionToolActivityLabel(item: CompanionToolActivity): string 
     else label = 'List drones';
   } else if (item.tool === 'list_repos') {
     label = 'List repositories';
+  } else if (item.tool === 'list_groups') {
+    label = activityText(args.repoPath)
+      ? `List groups in ${activityPathLabel(args.repoPath)}`
+      : 'List groups';
   } else if (item.tool === 'search_chat_messages') {
     const query = activityPreview(args.query);
     label = query ? `Search chats for “${query}”` : 'Search chat messages';
@@ -155,6 +162,10 @@ export function companionToolActivityLabel(item: CompanionToolActivity): string 
     else label = chatName ? `Open chat “${chatName}”` : 'Open drone chat';
   } else if (item.tool === 'get_app_context') {
     label = 'Read app context';
+  } else if (item.tool === 'read_companion_proposal') {
+    label = 'Read proposal';
+  } else if (item.tool === 'apply_companion_proposal_patch') {
+    label = 'Update proposal';
   } else {
     label = item.tool.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
   }

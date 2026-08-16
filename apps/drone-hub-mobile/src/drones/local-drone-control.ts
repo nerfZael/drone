@@ -22,6 +22,8 @@ import { applyOptimisticMobileSidebarMove } from './mobile-sidebar-reorder';
 import {
   cleanLocalDroneRecords,
   createLegacyPhoneDroneRecord,
+  localDroneDraftChatMap,
+  localDroneDraftPromptsForChat,
   type LocalDroneRecord,
 } from './local-drone-records';
 import {
@@ -32,9 +34,36 @@ import {
 } from './file-preview-model';
 
 const LOCAL_DRONES_KEY = 'droneHub.nativeDrones.v1';
+const LOCAL_GROUPS_KEY = 'droneHub.nativeGroups.v1';
 const LOCAL_PINNED_DRONES_KEY = 'droneHub.nativePinnedDrones.v1';
 const LOCAL_SIDEBAR_ORDER_KEY = 'droneHub.nativeSidebarOrder.v1';
 const LOCAL_PREVIEW_CHUNK_BYTES = 128 * 1024;
+
+type LocalGroupRecord = { id: string; name: string; createdAt: string };
+
+function cleanLocalGroups(value: unknown): LocalGroupRecord[] {
+  if (!Array.isArray(value)) return [];
+  const names = new Set<string>();
+  return value.flatMap((item): LocalGroupRecord[] => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+    const source = item as Record<string, unknown>;
+    const id = String(source.id ?? '').trim();
+    const name = String(source.name ?? '').trim();
+    const createdAt = String(source.createdAt ?? '').trim();
+    if (!id || !name || names.has(name)) return [];
+    names.add(name);
+    return [{ id, name, createdAt: createdAt || new Date().toISOString() }];
+  });
+}
+
+function parseLocalGroupName(value: unknown): string {
+  const name = String(value ?? '').trim();
+  if (!name) throw new Error('Group name is required.');
+  if (/[\r\n\t]/.test(name)) throw new Error('Group names cannot contain invalid whitespace.');
+  if (name.length > 64) throw new Error('Group names must be 64 characters or fewer.');
+  if (name.toLowerCase() === 'ungrouped') throw new Error('“Ungrouped” is reserved.');
+  return name;
+}
 
 function localStringListMap(value: unknown): Record<string, string[]> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
@@ -138,9 +167,11 @@ function parseLocalChatName(raw: unknown, label = 'Chat name'): string {
 function useLocalDroneControlValue() {
   const assistant = useLocalAssistant();
   const [drones, setDrones] = React.useState<LocalDroneRecord[]>([]);
+  const [groups, setGroups] = React.useState<LocalGroupRecord[]>([]);
   const [pinnedDroneIds, setPinnedDroneIds] = React.useState<string[]>([]);
   const [loading, setLoading] = React.useState(true);
   const dronesRef = React.useRef<LocalDroneRecord[]>([]);
+  const groupsRef = React.useRef<LocalGroupRecord[]>([]);
   const pinnedDroneIdsRef = React.useRef<string[]>([]);
   const sidebarOrderRef = React.useRef({
     sidebarNodeOrderByParent: {} as Record<string, string[]>,
@@ -169,6 +200,34 @@ function useLocalDroneControlValue() {
     const write = writeRef.current.then(() =>
       AsyncStorage.setItem(LOCAL_DRONES_KEY, JSON.stringify(next)),
     );
+    writeRef.current = write.catch(() => undefined);
+    await write;
+  }, []);
+
+  const replaceGroups = React.useCallback(async (next: LocalGroupRecord[]) => {
+    groupsRef.current = next;
+    setGroups(next);
+    const write = writeRef.current.then(() =>
+      AsyncStorage.setItem(LOCAL_GROUPS_KEY, JSON.stringify(next)),
+    );
+    writeRef.current = write.catch(() => undefined);
+    await write;
+  }, []);
+
+  const replaceDronesAndGroups = React.useCallback(async (
+    nextDrones: LocalDroneRecord[],
+    nextGroups: LocalGroupRecord[],
+  ) => {
+    dronesRef.current = nextDrones;
+    groupsRef.current = nextGroups;
+    setDrones(nextDrones);
+    setGroups(nextGroups);
+    const write = writeRef.current.then(async () => {
+      await Promise.all([
+        AsyncStorage.setItem(LOCAL_DRONES_KEY, JSON.stringify(nextDrones)),
+        AsyncStorage.setItem(LOCAL_GROUPS_KEY, JSON.stringify(nextGroups)),
+      ]);
+    });
     writeRef.current = write.catch(() => undefined);
     await write;
   }, []);
@@ -202,6 +261,9 @@ function useLocalDroneControlValue() {
           : [];
       })
       .catch((): string[] => []);
+    const loadGroups = AsyncStorage.getItem(LOCAL_GROUPS_KEY)
+      .then((stored): LocalGroupRecord[] => cleanLocalGroups(stored ? JSON.parse(stored) : []))
+      .catch((): LocalGroupRecord[] => []);
     const loadSidebarOrder = AsyncStorage.getItem(LOCAL_SIDEBAR_ORDER_KEY)
       .then((stored) => {
         const value: unknown = stored ? JSON.parse(stored) : {};
@@ -230,15 +292,31 @@ function useLocalDroneControlValue() {
         mutedDroneIds: [],
         mutedChatIds: [],
       }));
-    void Promise.all([loadDrones, loadPinnedDroneIds, loadSidebarOrder])
-      .then(([nextDrones, nextPinnedDroneIds, nextSidebarOrder]) => {
+    void Promise.all([loadDrones, loadGroups, loadPinnedDroneIds, loadSidebarOrder])
+      .then(async ([nextDrones, storedGroups, nextPinnedDroneIds, nextSidebarOrder]) => {
         if (!active) return;
+        const groupByName = new Map(storedGroups.map((group) => [group.name, group]));
+        for (const drone of nextDrones) {
+          if (!drone.group || groupByName.has(drone.group)) continue;
+          groupByName.set(drone.group, {
+            id: `phone_group_${Crypto.randomUUID()}`,
+            name: drone.group,
+            createdAt: drone.createdAt,
+          });
+        }
+        const nextGroups = [...groupByName.values()];
         dronesRef.current = nextDrones;
         setDrones(nextDrones);
+        groupsRef.current = nextGroups;
+        setGroups(nextGroups);
+        if (nextGroups.length !== storedGroups.length) {
+          await AsyncStorage.setItem(LOCAL_GROUPS_KEY, JSON.stringify(nextGroups));
+        }
         pinnedDroneIdsRef.current = nextPinnedDroneIds;
         setPinnedDroneIds(nextPinnedDroneIds);
         sidebarOrderRef.current = nextSidebarOrder;
       })
+      .catch(() => undefined)
       .finally(() => {
         if (!active) return;
         setLoading(false);
@@ -297,7 +375,11 @@ function useLocalDroneControlValue() {
             group: drone.group,
             repoPath: '',
             chats: Object.keys(drone.chats),
-            ...(drone.draft === true ? { draftChats: { default: true } } : {}),
+            ...(drone.draft === true || Object.keys(drone.draftChats ?? {}).length > 0
+              ? {
+                  draftChats: localDroneDraftChatMap(drone),
+                }
+              : {}),
             busyChats: Object.entries(drone.chats).flatMap(([chatName, threadId]) =>
               assistant.runningThreadId === threadId ||
               threadById.get(threadId)?.status === 'running'
@@ -320,7 +402,14 @@ function useLocalDroneControlValue() {
           })),
           sidebar: {
             registeredRepoPaths: [],
-            groupCreatedAtByName: {},
+            groupCreatedAtByName: Object.fromEntries(
+              groupsRef.current.map((group) => [group.name, group.createdAt]),
+            ),
+            groups: groupsRef.current.map((group) => ({
+              ...group,
+              repoPath: '',
+              parentId: null,
+            })),
             sidebarGroupOrder: [],
             sidebarDroneOrderByGroup: {},
             sidebarNodeOrderByParent: sidebarOrderRef.current.sidebarNodeOrderByParent,
@@ -331,6 +420,96 @@ function useLocalDroneControlValue() {
             mutedChatIds: sidebarOrderRef.current.mutedChatIds,
           },
           createOptions: { repos: [] },
+        };
+      }
+
+      if (operation === 'groups.list') {
+        if (String(payload.repoPath ?? '').trim()) return { ok: true, groups: [] };
+        return {
+          ok: true,
+          groups: groupsRef.current.map((group) => ({ ...group, repoPath: '' })),
+        };
+      }
+      if (operation === 'group.create') {
+        if (String(payload.repoPath ?? '').trim()) {
+          throw new Error('Phone-native groups do not support repositories.');
+        }
+        const name = parseLocalGroupName(payload.name);
+        if (groupsRef.current.some((group) => group.name === name)) {
+          throw new Error(`Group already exists: ${name}`);
+        }
+        const group = {
+          id: `phone_group_${Crypto.randomUUID()}`,
+          name,
+          createdAt: new Date().toISOString(),
+        };
+        await replaceGroups([...groupsRef.current, group]);
+        return { ok: true, ...group, repoPath: '' };
+      }
+      if (operation === 'group.rename') {
+        if (String(payload.repoPath ?? '').trim()) {
+          throw new Error('Phone-native groups do not support repositories.');
+        }
+        const groupRef = String(payload.groupRef ?? payload.name ?? '').trim();
+        const group = groupsRef.current.find(
+          (candidate) => candidate.id === groupRef || candidate.name === groupRef,
+        );
+        if (!group) throw new Error(`Unknown group: ${groupRef}`);
+        const newName = parseLocalGroupName(payload.newName);
+        if (newName.startsWith(`${group.name}/`)) {
+          throw new Error('A group cannot be moved inside itself.');
+        }
+        const inRenamedTree = (name: string) => name === group.name || name.startsWith(`${group.name}/`);
+        const renamedName = (name: string) =>
+          name === group.name ? newName : `${newName}${name.slice(group.name.length)}`;
+        const renamedNames = new Set(
+          groupsRef.current.filter((candidate) => inRenamedTree(candidate.name)).map((candidate) => renamedName(candidate.name)),
+        );
+        if (
+          groupsRef.current.some(
+            (candidate) => !inRenamedTree(candidate.name) && renamedNames.has(candidate.name),
+          )
+        ) {
+          throw new Error(`A group in the renamed tree already exists under: ${newName}`);
+        }
+        const nextGroups = groupsRef.current.map((candidate) =>
+          inRenamedTree(candidate.name)
+            ? { ...candidate, name: renamedName(candidate.name) }
+            : candidate,
+        );
+        const nextDrones = dronesRef.current.map((drone) =>
+          drone.group && inRenamedTree(drone.group)
+            ? { ...drone, group: renamedName(drone.group) }
+            : drone,
+        );
+        await replaceDronesAndGroups(nextDrones, nextGroups);
+        return { ok: true, id: group.id, oldName: group.name, newName };
+      }
+      if (operation === 'group.delete') {
+        if (String(payload.repoPath ?? '').trim()) {
+          throw new Error('Phone-native groups do not support repositories.');
+        }
+        const groupRef = String(payload.groupRef ?? payload.name ?? '').trim();
+        const group = groupsRef.current.find(
+          (candidate) => candidate.id === groupRef || candidate.name === groupRef,
+        );
+        if (!group) throw new Error(`Unknown group: ${groupRef}`);
+        const inDeletedTree = (name: string | null) =>
+          Boolean(name && (name === group.name || name.startsWith(`${group.name}/`)));
+        const removed = dronesRef.current.filter((drone) => inDeletedTree(drone.group));
+        for (const drone of removed) {
+          for (const threadId of Object.values(drone.chats)) await assistant.deleteThread(threadId);
+        }
+        await replaceDronesAndGroups(
+          dronesRef.current.filter((drone) => !inDeletedTree(drone.group)),
+          groupsRef.current.filter((candidate) => !inDeletedTree(candidate.name)),
+        );
+        return {
+          ok: true,
+          deletedGroup: true,
+          group: group.name,
+          removed: removed.map((drone) => ({ id: drone.id, name: drone.name })),
+          total: removed.length,
         };
       }
 
@@ -391,7 +570,12 @@ function useLocalDroneControlValue() {
         return await write;
       }
       if (operation === 'drone.create.host') {
+        if (String(payload.repoPath ?? '').trim()) {
+          throw new Error('Phone-native drones do not support repositories.');
+        }
         const name = uniqueDroneName(dronesRef.current, payload.name);
+        const rawGroupName = String(payload.group ?? '').trim();
+        const groupName = rawGroupName ? parseLocalGroupName(rawGroupName) : '';
         const createInitialChat = payload.seedAgent?.kind === 'native';
         const thread = createInitialChat ? await assistant.createThread('default') : null;
         if (thread) {
@@ -410,7 +594,7 @@ function useLocalDroneControlValue() {
         const drone: LocalDroneRecord = {
           id: `phone_drone_${Crypto.randomUUID()}`,
           name,
-          group: String(payload.group ?? '').trim() || null,
+          group: groupName || null,
           createdAt: new Date().toISOString(),
           chats: thread ? { default: thread.id } : {},
           ...(payload.draft === true ? { draft: true } : {}),
@@ -426,6 +610,16 @@ function useLocalDroneControlValue() {
               createdAt: String(payload.seedSubmittedAt ?? '').trim() || new Date().toISOString(),
             },
           ];
+        }
+        if (groupName && !groupsRef.current.some((group) => group.name === groupName)) {
+          await replaceGroups([
+            ...groupsRef.current,
+            {
+              id: `phone_group_${Crypto.randomUUID()}`,
+              name: groupName,
+              createdAt: new Date().toISOString(),
+            },
+          ]);
         }
         await replaceDrones([drone, ...dronesRef.current]);
         if (payload.draft !== true && thread && (prompt || images.length > 0)) {
@@ -473,11 +667,41 @@ function useLocalDroneControlValue() {
         const chatName = parseLocalChatName(payload.name);
         if (drone.chats[chatName]) throw new Error(`Chat already exists: ${chatName}`);
         const sourceId = drone.chats[String(payload.copyFrom ?? '')];
-        const thread = sourceId
+        const copyConfig = sourceId && payload.mode === 'copy-config';
+        const sourceThread = copyConfig
+          ? assistant.threads.find((candidate) => candidate.id === sourceId)
+          : null;
+        if (copyConfig && !sourceThread) throw new Error('Source chat was not found.');
+        const thread = sourceId && !copyConfig
           ? await assistant.cloneThread(sourceId)
           : await assistant.createThread(chatName);
-        await assistant.updateThread(thread.id, { title: chatName, artifactWorkspace: true });
-        const nextDrone = { ...drone, chats: { ...drone.chats, [chatName]: thread.id } };
+        await assistant.updateThread(thread.id, {
+          title: chatName,
+          artifactWorkspace: sourceThread?.artifactWorkspace ?? true,
+          ...(sourceThread
+            ? {
+                model: sourceThread.model,
+                thinkingLevel: sourceThread.thinkingLevel,
+                workspaceTargets: sourceThread.workspaceTargets.map((target) => ({ ...target })),
+                ...(sourceThread.autoApprove !== undefined
+                  ? { autoApprove: sourceThread.autoApprove }
+                  : {}),
+                ...(sourceThread.agentPermissionMode
+                  ? { agentPermissionMode: sourceThread.agentPermissionMode }
+                  : {}),
+                ...(sourceThread.approvalPolicy
+                  ? { approvalPolicy: sourceThread.approvalPolicy }
+                  : {}),
+              }
+            : {}),
+        });
+        const nextDrone: LocalDroneRecord = {
+          ...drone,
+          chats: { ...drone.chats, [chatName]: thread.id },
+          ...(payload.draft === true
+            ? { draftChats: { ...(drone.draftChats ?? {}), [chatName]: true } }
+            : {}),
+        };
         await replaceDrones(
           dronesRef.current.map((candidate) => (candidate.id === drone.id ? nextDrone : candidate)),
         );
@@ -498,7 +722,24 @@ function useLocalDroneControlValue() {
         const nextChats = Object.fromEntries(
           Object.entries(drone.chats).map(([name, id]) => [name === chatName ? newName : name, id]),
         );
-        const nextDrone = { ...drone, chats: nextChats };
+        const nextDraftChats = Object.fromEntries(
+          Object.entries(drone.draftChats ?? {}).map(([name, draft]) => [
+            name === chatName ? newName : name,
+            draft,
+          ]),
+        );
+        const nextDraftChatPrompts = Object.fromEntries(
+          Object.entries(drone.draftChatPrompts ?? {}).map(([name, prompts]) => [
+            name === chatName ? newName : name,
+            prompts,
+          ]),
+        );
+        const nextDrone = {
+          ...drone,
+          chats: nextChats,
+          draftChats: nextDraftChats,
+          draftChatPrompts: nextDraftChatPrompts,
+        };
         await replaceDrones(
           dronesRef.current.map((candidate) => (candidate.id === drone.id ? nextDrone : candidate)),
         );
@@ -515,7 +756,18 @@ function useLocalDroneControlValue() {
         const nextChats = Object.fromEntries(
           Object.entries(drone.chats).filter(([name]) => name !== chatName),
         );
-        const nextDrone = { ...drone, chats: nextChats };
+        const nextDraftChats = Object.fromEntries(
+          Object.entries(drone.draftChats ?? {}).filter(([name]) => name !== chatName),
+        );
+        const nextDraftChatPrompts = Object.fromEntries(
+          Object.entries(drone.draftChatPrompts ?? {}).filter(([name]) => name !== chatName),
+        );
+        const nextDrone = {
+          ...drone,
+          chats: nextChats,
+          draftChats: nextDraftChats,
+          draftChatPrompts: nextDraftChatPrompts,
+        };
         await replaceDrones(
           dronesRef.current.map((candidate) => (candidate.id === drone.id ? nextDrone : candidate)),
         );
@@ -702,7 +954,7 @@ function useLocalDroneControlValue() {
         };
       }
       if (operation === 'chat.read') {
-        const { drone, thread } = getThread();
+        const { drone, chatName, thread } = getThread();
         const settings = await loadLocalAssistantSettings();
         return {
           ok: true,
@@ -714,8 +966,8 @@ function useLocalDroneControlValue() {
             (approval) => approval.threadId === thread.id,
           ),
           pending:
-            drone.draft === true
-              ? (drone.draftPrompts ?? []).map((prompt) => ({
+            drone.draft === true || drone.draftChats?.[chatName] === true
+              ? localDroneDraftPromptsForChat(drone, chatName).map((prompt) => ({
                   id: prompt.id,
                   prompt: prompt.prompt,
                   at: prompt.createdAt,
@@ -739,10 +991,14 @@ function useLocalDroneControlValue() {
         };
       }
       if (operation === 'chat.prompt') {
-        const { drone, thread } = getThread();
+        const { drone, chatName, thread } = getThread();
         const images = promptImages(payload.attachments);
         const prompt = String(payload.prompt ?? '').trim();
-        if (drone.draft === true) {
+        if (payload.deliveryMode === 'asap' && assistant.runningThreadId) {
+          throw new Error('ASAP delivery is unavailable while a phone-native chat is running.');
+        }
+        if (drone.draft === true || drone.draftChats?.[chatName] === true) {
+          const currentDraftPrompts = localDroneDraftPromptsForChat(drone, chatName);
           const nextPrompt = {
             id: String(payload.promptId ?? '').trim() || `phone_draft_${Crypto.randomUUID()}`,
             prompt,
@@ -750,16 +1006,24 @@ function useLocalDroneControlValue() {
             createdAt: String(payload.submittedAt ?? '').trim() || new Date().toISOString(),
           };
           if (!prompt && images.length === 0) throw new Error('Add a message or image.');
-          if ((drone.draftPrompts?.length ?? 0) >= 20) {
+          if (currentDraftPrompts.length >= 20) {
             throw new Error('Phone draft prompt queue is full (max 20)');
           }
           await replaceDrones(
             dronesRef.current.map((candidate) =>
               candidate.id === drone.id
-                ? {
-                    ...candidate,
-                    draftPrompts: [...(candidate.draftPrompts ?? []), nextPrompt],
-                  }
+                ? candidate.draft === true && chatName === 'default'
+                  ? {
+                      ...candidate,
+                      draftPrompts: [...currentDraftPrompts, nextPrompt],
+                    }
+                  : {
+                      ...candidate,
+                      draftChatPrompts: {
+                        ...(candidate.draftChatPrompts ?? {}),
+                        [chatName]: [...currentDraftPrompts, nextPrompt],
+                      },
+                    }
                 : candidate,
             ),
           );
@@ -767,6 +1031,15 @@ function useLocalDroneControlValue() {
         }
         if (images.length > 0 && assistant.runningThreadId) {
           throw new Error('Wait for the current response before sending images.');
+        }
+        if (payload.deliveryMode === 'queue') {
+          const queued = await assistant.queuePrompt(thread.id, prompt, images);
+          return {
+            ok: true,
+            accepted: true,
+            promptId: queued.promptId,
+            pendingState: 'queued',
+          };
         }
         // The request is acknowledged immediately so the shared chat UI remains responsive.
         // sendPrompt persists failures onto the thread; consume the rejection to avoid an
@@ -854,10 +1127,11 @@ function useLocalDroneControlValue() {
       }
       throw new Error(`Unsupported phone drone operation: ${operation}`);
     },
-    [assistant, replaceDrones],
+    [assistant, replaceDrones, replaceDronesAndGroups, replaceGroups],
   );
 
   const revision = [
+    ...groups.map((group) => `${group.id}:${group.name}:${group.createdAt}`),
     pinnedDroneIds.join(','),
     assistant.runningThreadId ?? '',
     assistant.pendingApprovals.map((approval) => approval.id).join(','),

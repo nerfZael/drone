@@ -1,5 +1,10 @@
 import React from 'react';
-import { resolveCompanionChatName } from '@drone/assistant-chat';
+import {
+  executeCompanionProposal,
+  resolveCompanionChatName,
+  type CompanionProposal,
+} from '@drone/assistant-chat';
+import type { DroneControlRequest } from '@drone/device-protocol';
 
 import {
   mobileDroneCreatePreferencesFromPayload,
@@ -10,12 +15,12 @@ import type { MobileDroneCreatePayload } from '../drones/NewDroneScreen';
 import type { MobileDroneSummary } from '../drones/drone-sidebar-model';
 import { useMobileCompanion, type MobileCompanionWorkspaceTarget } from './MobileCompanionContext';
 
-type CreatedDraft = { droneId: string; droneName: string };
+type CreatedDrone = { droneId: string; droneName: string };
 
-type CreateDraft = (
+type CreateDrone = (
   payload: MobileDroneCreatePayload,
   preferences: MobileDroneCreatePreferences,
-) => Promise<CreatedDraft | null>;
+) => Promise<CreatedDrone | null>;
 const MOBILE_COMPANION_COMPOSER_MAX_CHARS = 32_000;
 
 export function useMobileCompanionWorkspaceTarget({
@@ -31,7 +36,8 @@ export function useMobileCompanionWorkspaceTarget({
   prompt,
   setPrompt,
   openFile,
-  createDraft,
+  createDrone,
+  requestDroneControl,
   openChat,
 }: {
   targetDeviceId: string;
@@ -46,7 +52,8 @@ export function useMobileCompanionWorkspaceTarget({
   prompt: string;
   setPrompt(value: string): void;
   openFile: { visible: boolean; path: string; kind: string };
-  createDraft: CreateDraft;
+  createDrone: CreateDrone;
+  requestDroneControl: DroneControlRequest;
   openChat(drone: MobileDroneSummary, chatName: string): Promise<void>;
 }): string[] {
   const companion = useMobileCompanion();
@@ -83,6 +90,7 @@ export function useMobileCompanionWorkspaceTarget({
   implementationRef.current = {
     getAppContext: () => ({
       surface: 'mobile',
+      activeRepoPath: selectedDrone?.repoPath || null,
       targetDevice: {
         id: targetDeviceId,
         name: targetName,
@@ -151,58 +159,109 @@ export function useMobileCompanionWorkspaceTarget({
       setPrompt(content);
       return { ok: true, revision: String(composerRef.current.revision) };
     },
-    prepareDroneDraft: async (args) => {
+    executeProposal: async (proposal: CompanionProposal, executionContext) => {
       if (!targetReachable) throw new Error('TARGET_DEVICE_OFFLINE');
-      const repoPath = String(args.repoPath ?? selectedDrone?.repoPath ?? '').trim();
-      const remembered = await loadMobileDroneCreatePreferences(targetDeviceId, repoPath);
-      const runtime = phoneTarget ? 'host' : (remembered?.runtime ?? 'container');
-      const agent = phoneTarget ? 'native' : (remembered?.agent ?? 'native');
-      const branchSource =
-        runtime === 'host' || !remembered?.repoCreateRemoteBranch
-          ? 'host'
-          : remembered.repoBranchSource;
-      const name = String(args.name ?? '').trim();
-      const firstPrompt = String(args.prompt ?? '').trim();
-      if (!firstPrompt) throw new Error('INVALID_DRAFT_PROMPT');
-      const group = String(args.group ?? '').trim();
-      const payload: MobileDroneCreatePayload = {
-        runtime,
-        draft: true,
-        ...(name ? { name } : {}),
-        ...(group ? { group } : {}),
-        ...(runtime === 'container' ? { persistVolume: remembered?.persistVolume ?? false } : {}),
-        ...(repoPath ? { repoPath } : {}),
-        repoBranchSource: branchSource,
-        ...(branchSource === 'remote' && remembered?.repoCreateRemoteBranch
-          ? { remoteBranch: remembered.repoCreateRemoteBranch }
-          : {}),
-        seedAgent: agent === 'native' ? { kind: 'native' } : { kind: 'builtin', id: agent },
-        ...(remembered?.provider ? { seedProvider: remembered.provider } : {}),
-        ...(remembered?.model ? { seedModel: remembered.model } : {}),
-        ...(remembered?.reasoning ? { seedReasoning: remembered.reasoning } : {}),
-        ...(remembered?.agentPermissionMode && remembered.agentPermissionMode !== 'execute'
-          ? { seedAgentPermissionMode: remembered.agentPermissionMode }
-          : {}),
-        ...(remembered?.approvalPolicy && remembered.approvalPolicy !== 'ask'
-          ? { seedApprovalPolicy: remembered.approvalPolicy }
-          : {}),
-        seedPrompt: firstPrompt,
-        seedSubmittedAt: new Date().toISOString(),
-        ...(!name && firstPrompt ? { autoRename: true } : {}),
+      const activeRepoPath = executionContext.defaultRepoPath;
+      const proposalRepoPath = (repoPath: string | undefined) => {
+        const resolved = repoPath ?? activeRepoPath;
+        if (phoneTarget && resolved) {
+          throw new Error('Phone-native drones do not support repository-scoped operations.');
+        }
+        return resolved;
       };
-      const preferences = remembered ?? mobileDroneCreatePreferencesFromPayload(payload);
-      const created = await createDraft(payload, preferences);
-      if (!created?.droneId) throw new Error('DRONE_DRAFT_NOT_CREATED');
-      return {
-        ok: true,
-        persisted: true,
-        draft: true,
-        droneId: created.droneId,
-        name: created.droneName || name || created.droneId,
-        prompt: firstPrompt,
-        repoPath: repoPath || null,
-        group: group || null,
-      };
+      return await executeCompanionProposal(proposal, {
+        createGroup: async (operation) =>
+          await requestDroneControl('group.create', {
+            name: operation.name,
+            repoPath: proposalRepoPath(operation.repoPath),
+          }),
+        deleteGroup: async (operation) =>
+          await requestDroneControl('group.delete', {
+            groupRef: operation.name,
+            repoPath: proposalRepoPath(operation.repoPath),
+          }),
+        renameGroup: async (operation) =>
+          await requestDroneControl('group.rename', {
+            groupRef: operation.name,
+            newName: operation.newName,
+            repoPath: proposalRepoPath(operation.repoPath),
+          }),
+        createDrone: async (operation) => {
+          const repoPath = proposalRepoPath(operation.repoPath);
+          const remembered = await loadMobileDroneCreatePreferences(targetDeviceId, repoPath);
+          const runtime = phoneTarget ? 'host' : (remembered?.runtime ?? 'container');
+          const agent = phoneTarget ? 'native' : (remembered?.agent ?? 'native');
+          const branchSource =
+            runtime === 'host' || !remembered?.repoCreateRemoteBranch
+              ? 'host'
+              : remembered.repoBranchSource;
+          const payload: MobileDroneCreatePayload = {
+            runtime,
+            ...(operation.draft === true ? { draft: true } : {}),
+            ...(operation.name ? { name: operation.name } : {}),
+            ...(operation.group ? { group: operation.group } : {}),
+            ...(runtime === 'container'
+              ? { persistVolume: remembered?.persistVolume ?? false }
+              : {}),
+            ...(repoPath ? { repoPath } : {}),
+            repoBranchSource: branchSource,
+            ...(branchSource === 'remote' && remembered?.repoCreateRemoteBranch
+              ? { remoteBranch: remembered.repoCreateRemoteBranch }
+              : {}),
+            seedAgent: agent === 'native' ? { kind: 'native' } : { kind: 'builtin', id: agent },
+            ...(remembered?.provider ? { seedProvider: remembered.provider } : {}),
+            ...(remembered?.model ? { seedModel: remembered.model } : {}),
+            ...(remembered?.reasoning ? { seedReasoning: remembered.reasoning } : {}),
+            ...(remembered?.agentPermissionMode && remembered.agentPermissionMode !== 'execute'
+              ? { seedAgentPermissionMode: remembered.agentPermissionMode }
+              : {}),
+            ...(remembered?.approvalPolicy && remembered.approvalPolicy !== 'ask'
+              ? { seedApprovalPolicy: remembered.approvalPolicy }
+              : {}),
+            seedPrompt: operation.prompt,
+            seedSubmittedAt: new Date().toISOString(),
+            ...(!operation.name ? { autoRename: true } : {}),
+          };
+          const preferences = remembered ?? mobileDroneCreatePreferencesFromPayload(payload);
+          const created = await createDrone(payload, preferences);
+          if (!created?.droneId) throw new Error('DRONE_NOT_CREATED');
+          return created;
+        },
+        deleteDrone: async (operation) =>
+          await requestDroneControl('drone.delete', { droneId: operation.droneId }),
+        renameDrone: async (operation) =>
+          await requestDroneControl('drone.rename', {
+            droneId: operation.droneId,
+            newName: operation.newName,
+          }),
+        createChat: async (operation) =>
+          await requestDroneControl('chat.create', {
+            droneId: operation.droneId,
+            name: operation.chatName,
+            ...(operation.copyFromChat ? { copyFrom: operation.copyFromChat } : {}),
+            ...(operation.copyFromChat ? { mode: 'copy-config' } : {}),
+            ...(operation.draft === true ? { draft: true } : {}),
+          }),
+        deleteChat: async (operation) =>
+          await requestDroneControl('chat.delete', {
+            droneId: operation.droneId,
+            chatName: operation.chatName,
+          }),
+        renameChat: async (operation) =>
+          await requestDroneControl('chat.rename', {
+            droneId: operation.droneId,
+            chatName: operation.chatName,
+            newName: operation.newName,
+          }),
+        sendMessage: async (operation) =>
+          await requestDroneControl('chat.prompt', {
+            droneId: operation.droneId,
+            chatName: operation.chatName ?? 'default',
+            prompt: operation.message,
+            deliveryMode: operation.delivery ?? 'queue',
+            submittedAt: new Date().toISOString(),
+          }),
+      });
     },
     openDroneChat: async (args) => {
       if (!targetReachable) throw new Error('TARGET_DEVICE_OFFLINE');
@@ -247,7 +306,8 @@ export function useMobileCompanionWorkspaceTarget({
       getAppContext: () => implementationRef.current!.getAppContext(),
       readComposer: () => implementationRef.current!.readComposer(),
       applyComposer: (...args) => implementationRef.current!.applyComposer(...args),
-      prepareDroneDraft: (args) => implementationRef.current!.prepareDroneDraft(args),
+      executeProposal: (proposal, context) =>
+        implementationRef.current!.executeProposal(proposal, context),
       openDroneChat: (args) => implementationRef.current!.openDroneChat(args),
       highlightDrones: (args) => implementationRef.current!.highlightDrones(args),
     };

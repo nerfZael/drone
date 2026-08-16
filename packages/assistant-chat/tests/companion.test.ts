@@ -11,8 +11,11 @@ import {
 } from '../src';
 
 describe('Companion contracts', () => {
-  test('allows the browser client to open an existing drone chat', () => {
+  test('allows proposal editing and chat navigation without the legacy draft action', () => {
     expect(COMPANION_BROWSER_TOOL_NAMES).toContain('open_drone_chat');
+    expect(COMPANION_BROWSER_TOOL_NAMES).toContain('read_companion_proposal');
+    expect(COMPANION_BROWSER_TOOL_NAMES).toContain('apply_companion_proposal_patch');
+    expect([...COMPANION_BROWSER_TOOL_NAMES]).not.toContain('prepare_drone_draft');
   });
 
   test('resolves Companion navigation only to an existing chat', () => {

@@ -2,9 +2,18 @@ import React from 'react';
 import * as Crypto from 'expo-crypto';
 import { COMPANION_CAPABILITY, isGranted, type CapabilityEvent } from '@drone/device-protocol';
 import {
+  COMPANION_PROPOSAL_FORMAT,
+  COMPANION_PROPOSAL_PATH,
+  COMPANION_PROPOSAL_TARGET_ID,
+  EMPTY_COMPANION_PROPOSAL,
+  parseCompanionProposalText,
   reduceCompanionToolActivity,
+  serializeCompanionProposal,
   type CompanionBrowserToolName,
   type CompanionClientTelemetry,
+  type CompanionProposal,
+  type CompanionProposalExecution,
+  type CompanionProposalExecutionContext,
   type CompanionStatus,
   type CompanionTextSnapshot,
   type CompanionToolActivity,
@@ -31,7 +40,10 @@ export type MobileCompanionWorkspaceTarget = {
     baseRevision: string,
     content: string,
   ): { ok: true; revision: string };
-  prepareDroneDraft(args: Record<string, unknown>): Promise<Record<string, unknown>>;
+  executeProposal(
+    proposal: CompanionProposal,
+    context: CompanionProposalExecutionContext,
+  ): Promise<CompanionProposalExecution>;
   openDroneChat(args: Record<string, unknown>): Promise<Record<string, unknown>>;
   highlightDrones(args: Record<string, unknown>): Record<string, unknown>;
 };
@@ -45,10 +57,16 @@ type MobileCompanionContextValue = {
   startedAt: number | null;
   endedAt: number | null;
   activity: CompanionToolActivity[];
+  proposal: CompanionProposal | null;
+  proposalExecution: CompanionProposalExecution | null;
+  proposalDefaultRepoPath: string | null;
+  proposalExecuting: boolean;
   available: boolean;
   unavailableReason: string;
   toggle(): Promise<void>;
   close(): Promise<void>;
+  executeProposal(): Promise<void>;
+  discardProposal(): void;
   registerWorkspaceTarget(target: MobileCompanionWorkspaceTarget): () => void;
   registerEditorTarget(target: MobileCompanionEditorTarget): () => void;
 };
@@ -73,6 +91,17 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
   const [startedAt, setStartedAt] = React.useState<number | null>(null);
   const [endedAt, setEndedAt] = React.useState<number | null>(null);
   const [activity, setActivity] = React.useState<CompanionToolActivity[]>([]);
+  const [proposal, setProposal] = React.useState<CompanionProposal | null>(null);
+  const [proposalExecution, setProposalExecution] =
+    React.useState<CompanionProposalExecution | null>(null);
+  const [proposalDefaultRepoPath, setProposalDefaultRepoPath] = React.useState<string | null>(null);
+  const [proposalExecuting, setProposalExecuting] = React.useState(false);
+  const proposalRef = React.useRef<CompanionProposal | null>(null);
+  const proposalRevisionRef = React.useRef(0);
+  const proposalExecutingRef = React.useRef(false);
+  const proposalExecutionRef = React.useRef<CompanionProposalExecution | null>(null);
+  const proposalExecutionContextRef = React.useRef<CompanionProposalExecutionContext | null>(null);
+  const proposalExecutionGenerationRef = React.useRef(0);
   const statusRef = React.useRef<CompanionStatus>('idle');
   const runIdRef = React.useRef('');
   const runTargetDeviceIdRef = React.useRef('');
@@ -160,6 +189,117 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     return eligible[eligible.length - 1]!;
   }, []);
 
+  const readProposal = React.useCallback(() => ({
+    targetId: COMPANION_PROPOSAL_TARGET_ID,
+    path: COMPANION_PROPOSAL_PATH,
+    content: serializeCompanionProposal(proposalRef.current ?? EMPTY_COMPANION_PROPOSAL),
+    revision: String(proposalRevisionRef.current),
+    mode: 'edit' as const,
+    format: COMPANION_PROPOSAL_FORMAT,
+  }), []);
+
+  const applyProposal = React.useCallback((
+    targetId: string,
+    baseRevision: string,
+    content: string,
+  ) => {
+    if (proposalExecutingRef.current) throw new Error('PROPOSAL_EXECUTION_IN_PROGRESS');
+    if (proposalExecutionRef.current) throw new Error('PROPOSAL_ALREADY_EXECUTED');
+    if (targetId !== COMPANION_PROPOSAL_TARGET_ID) throw new Error('STALE_PROPOSAL_TARGET');
+    if (baseRevision !== String(proposalRevisionRef.current)) {
+      throw new Error('STALE_PROPOSAL_REVISION');
+    }
+    const next = parseCompanionProposalText(content);
+    if (!proposalRef.current) {
+      const appContext = workspaceTargetRef.current?.getAppContext();
+      const defaultRepoPath = typeof appContext?.activeRepoPath === 'string'
+        ? appContext.activeRepoPath
+        : '';
+      proposalExecutionContextRef.current = { defaultRepoPath };
+      setProposalDefaultRepoPath(defaultRepoPath);
+    }
+    proposalRevisionRef.current += 1;
+    proposalExecutionGenerationRef.current += 1;
+    proposalRef.current = next;
+    setProposal(next);
+    return {
+      ok: true as const,
+      revision: String(proposalRevisionRef.current),
+      operationCount: next.operations.length,
+    };
+  }, []);
+
+  const discardProposal = React.useCallback(() => {
+    if (proposalExecutingRef.current) return;
+    proposalRevisionRef.current += 1;
+    proposalExecutionGenerationRef.current += 1;
+    proposalRef.current = null;
+    proposalExecutionRef.current = null;
+    proposalExecutionContextRef.current = null;
+    setProposal(null);
+    setProposalExecution(null);
+    setProposalDefaultRepoPath(null);
+  }, []);
+
+  const executeProposal = React.useCallback(async () => {
+    const current = proposalRef.current;
+    const target = workspaceTargetRef.current;
+    const executionContext = proposalExecutionContextRef.current;
+    if (!target || !current || !executionContext || current.operations.length === 0 ||
+      proposalExecutingRef.current || proposalExecutionRef.current) return;
+    if (!target.reachable) {
+      const execution: CompanionProposalExecution = {
+        ok: false,
+        operations: current.operations.map((operation, index) => index === 0
+          ? {
+              id: operation.id,
+              type: operation.type,
+              status: 'failed',
+              error: 'TARGET_DEVICE_OFFLINE',
+            }
+          : { id: operation.id, type: operation.type, status: 'skipped' }),
+      };
+      proposalExecutionRef.current = execution;
+      setProposalExecution(execution);
+      return;
+    }
+    const executionGeneration = proposalExecutionGenerationRef.current + 1;
+    proposalExecutionGenerationRef.current = executionGeneration;
+    proposalExecutingRef.current = true;
+    setProposalExecuting(true);
+    setProposalExecution(null);
+    try {
+      const execution = await target.executeProposal(current, executionContext);
+      if (proposalExecutionGenerationRef.current === executionGeneration) {
+        proposalExecutionRef.current = execution;
+        setProposalExecution(execution);
+      }
+    } catch (executionError) {
+      if (proposalExecutionGenerationRef.current === executionGeneration) {
+        const execution: CompanionProposalExecution = {
+          ok: false,
+          operations: current.operations.map((operation, index) => index === 0
+            ? {
+                id: operation.id,
+                type: operation.type,
+                status: 'failed',
+                error: executionError instanceof Error
+                  ? executionError.message
+                  : String(executionError),
+              }
+            : { id: operation.id, type: operation.type, status: 'skipped' }),
+        };
+        proposalExecutionRef.current = execution;
+        setProposalExecution(execution);
+      }
+    } finally {
+      if (proposalExecutionGenerationRef.current === executionGeneration) {
+        proposalExecutingRef.current = false;
+        setProposalExecuting(false);
+      }
+    }
+  }, []);
+
   const executeMobileTool = React.useCallback(
     async (tool: CompanionBrowserToolName, args: Record<string, unknown>) => {
       const activeTarget = workspaceTargetRef.current;
@@ -183,15 +323,23 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
         if (editor.id !== targetId) throw new Error('STALE_EDITOR_TARGET');
         return editor.apply(String(args.baseRevision ?? ''), String(args.content ?? ''));
       }
-      if (tool === 'prepare_drone_draft') return await activeTarget.prepareDroneDraft(args);
+      if (tool === 'read_companion_proposal') return readProposal();
+      if (tool === 'apply_companion_proposal_patch') {
+        return applyProposal(
+          String(args.targetId ?? ''),
+          String(args.baseRevision ?? ''),
+          String(args.content ?? ''),
+        );
+      }
       if (tool === 'open_drone_chat') return await activeTarget.openDroneChat(args);
       if (tool === 'highlight_drones') return activeTarget.highlightDrones(args);
       throw new Error(`Unsupported Companion mobile tool: ${tool}`);
     },
-    [resolveEditor],
+    [applyProposal, readProposal, resolveEditor],
   );
 
   const close = React.useCallback(async () => {
+    if (proposalExecutingRef.current) return;
     generationRef.current += 1;
     const runId = runIdRef.current;
     const targetDeviceId = runTargetDeviceIdRef.current;
@@ -203,6 +351,16 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
         .catch(() => undefined);
     }
     await voice.discardRecording();
+    proposalRevisionRef.current += 1;
+    proposalExecutionGenerationRef.current += 1;
+    proposalRef.current = null;
+    proposalExecutionRef.current = null;
+    proposalExecutionContextRef.current = null;
+    setProposal(null);
+    setProposalExecution(null);
+    setProposalDefaultRepoPath(null);
+    proposalExecutingRef.current = false;
+    setProposalExecuting(false);
     erase();
   }, [erase, mesh.request, voice.discardRecording]);
 
@@ -219,7 +377,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     ) {
       void close();
     }
-  }, [close, hasGrant, hasOperations, targetRevision]);
+  }, [close, hasGrant, hasOperations, proposalExecuting, targetRevision]);
 
   const run = React.useCallback(
     async (
@@ -405,6 +563,8 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
   React.useEffect(
     () => () => {
       generationRef.current += 1;
+      proposalExecutionGenerationRef.current += 1;
+      proposalExecutingRef.current = false;
       const runId = runIdRef.current;
       const targetDeviceId = runTargetDeviceIdRef.current;
       if (runId && targetDeviceId) {
@@ -436,10 +596,16 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       startedAt,
       endedAt,
       activity,
+      proposal,
+      proposalExecution,
+      proposalDefaultRepoPath,
+      proposalExecuting,
       available,
       unavailableReason,
       toggle,
       close,
+      executeProposal,
+      discardProposal,
       registerWorkspaceTarget,
       registerEditorTarget,
     }),
@@ -447,11 +613,17 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       activity,
       available,
       close,
+      discardProposal,
       endedAt,
       error,
+      executeProposal,
       effectiveStatus,
       registerEditorTarget,
       registerWorkspaceTarget,
+      proposal,
+      proposalExecution,
+      proposalDefaultRepoPath,
+      proposalExecuting,
       reply,
       startedAt,
       toggle,

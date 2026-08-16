@@ -704,8 +704,15 @@ describe('mobile sidebar presentation', () => {
     expect(providerSource).toContain('!hasOperations');
     expect(providerSource).toContain('!hasGrant');
     expect(providerSource).toContain('const runId = runIdRef.current || newRunId()');
+    expect(providerSource).toContain("tool === 'read_companion_proposal'");
+    expect(providerSource).toContain("tool === 'apply_companion_proposal_patch'");
+    expect(providerSource).not.toContain('prepareDroneDraft');
+    expect(workspaceTargetSource).toContain('executeCompanionProposal(proposal');
+    expect(workspaceTargetSource).not.toContain('prepareDroneDraft');
     expect(overlaySource).toContain("justifyContent: 'flex-start'");
     expect(overlaySource).toContain('accessibilityLabel="Stop Companion recording"');
+    expect(overlaySource).toContain('accessibilityLabel="Companion proposal"');
+    expect(overlaySource).toContain('accessibilityLabel="Apply Companion proposal"');
     expect(overlaySource).toContain('<NativeMarkdown text={companion.reply} />');
   });
 
