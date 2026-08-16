@@ -715,6 +715,14 @@ describe('mobile sidebar presentation', () => {
     expect(overlaySource).toContain('accessibilityLabel="Companion proposal"');
     expect(overlaySource).toContain('accessibilityLabel="Apply Companion proposal"');
     expect(overlaySource).toContain('<NativeMarkdown text={companion.reply} />');
+    expect(overlaySource).toContain(
+      'const [activityExpanded, setActivityExpanded] = React.useState(false)',
+    );
+    expect(overlaySource).toContain('setActivityExpanded(false)');
+
+    expect(overlaySource.indexOf('accessibilityLabel="Companion proposal"')).toBeGreaterThan(
+      overlaySource.indexOf('<NativeMarkdown text={companion.reply} />'),
+    );
   });
 
   test('shows descendant state counts only on collapsed group rows', () => {

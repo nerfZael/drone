@@ -40,7 +40,7 @@ export function MobileCompanionOverlay() {
   const companion = useMobileCompanion();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
-  const [activityExpanded, setActivityExpanded] = React.useState(true);
+  const [activityExpanded, setActivityExpanded] = React.useState(false);
   const [expandedCalls, setExpandedCalls] = React.useState<Set<string>>(() => new Set());
   const [expandedProposalOperations, setExpandedProposalOperations] = React.useState<Set<string>>(
     () => new Set(),
@@ -55,7 +55,7 @@ export function MobileCompanionOverlay() {
 
   React.useEffect(() => {
     if (companion.status === 'idle') {
-      setActivityExpanded(true);
+      setActivityExpanded(false);
       setExpandedCalls(new Set());
       setExpandedProposalOperations(new Set());
     }
@@ -127,6 +127,126 @@ export function MobileCompanionOverlay() {
             <View style={styles.transcript}>
               <Mic color={colors.muted} size={13} strokeWidth={2} />
               <Text style={styles.transcriptText}>“{companion.transcript}”</Text>
+            </View>
+          ) : null}
+          {showActivity ? (
+            <View style={styles.activity}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={
+                  activityExpanded ? 'Hide Companion tool calls' : 'Show Companion tool calls'
+                }
+                accessibilityState={{ expanded: activityExpanded }}
+                onPress={() => setActivityExpanded((value) => !value)}
+                style={({ pressed }) => [styles.activitySummary, pressed && styles.pressed]}
+              >
+                {active ? <ActivityIndicator color={colors.accent} size="small" /> : null}
+                <Text style={styles.activitySummaryText}>
+                  {active ? 'Working' : 'Worked'} · {Math.round(elapsed / 1_000)}s
+                  {companion.activity.length > 0
+                    ? ` · ${companion.activity.length} tool ${companion.activity.length === 1 ? 'call' : 'calls'}`
+                    : ''}
+                </Text>
+                <ChevronRight
+                  color={colors.muted}
+                  size={15}
+                  strokeWidth={2}
+                  style={{ transform: [{ rotate: activityExpanded ? '90deg' : '0deg' }] }}
+                />
+              </Pressable>
+              {activityExpanded
+                ? activityGroups.map((group) => (
+                    <View key={group.key}>
+                      {group.parallel ? (
+                        <View
+                          accessibilityLabel={`${group.items.length} tool calls ran in parallel`}
+                          style={styles.parallelDivider}
+                        >
+                          <View style={styles.parallelDividerLine} />
+                          <Text style={styles.parallelDividerText}>
+                            Parallel · {group.items.length}
+                          </Text>
+                          <View style={styles.parallelDividerLine} />
+                        </View>
+                      ) : null}
+                      {group.items.map((item) => {
+                        const expanded = expandedCalls.has(item.callId);
+                        return (
+                          <View key={item.callId} style={styles.toolCall}>
+                            <Pressable
+                              accessibilityRole="button"
+                              accessibilityState={{ expanded }}
+                              onPress={() =>
+                                setExpandedCalls((current) => {
+                                  const next = new Set(current);
+                                  if (next.has(item.callId)) next.delete(item.callId);
+                                  else next.add(item.callId);
+                                  return next;
+                                })
+                              }
+                              style={({ pressed }) => [
+                                styles.toolHeader,
+                                pressed && styles.pressed,
+                              ]}
+                            >
+                              <ChevronRight
+                                color={colors.mutedDim}
+                                size={13}
+                                strokeWidth={2}
+                                style={{ transform: [{ rotate: expanded ? '90deg' : '0deg' }] }}
+                              />
+                              <Text numberOfLines={1} style={styles.toolName}>
+                                {item.status === 'running'
+                                  ? 'Running'
+                                  : item.status === 'failed'
+                                    ? 'Failed'
+                                    : 'Completed'}{' '}
+                                · {companionToolActivityLabel(item)}
+                              </Text>
+                            </Pressable>
+                            {expanded ? (
+                              <View style={styles.toolDetails}>
+                                {item.args !== undefined ? (
+                                  <View>
+                                    <Text style={styles.toolDetailLabel}>Arguments</Text>
+                                    <Text selectable style={styles.toolDetail}>
+                                      {JSON.stringify(item.args, null, 2)}
+                                    </Text>
+                                  </View>
+                                ) : null}
+                                {item.error !== undefined ? (
+                                  <View>
+                                    <Text style={styles.toolDetailLabel}>Error</Text>
+                                    <Text selectable style={styles.toolDetail}>
+                                      {JSON.stringify(item.error, null, 2)}
+                                    </Text>
+                                  </View>
+                                ) : item.result !== undefined ? (
+                                  <View>
+                                    <Text style={styles.toolDetailLabel}>Result</Text>
+                                    <Text selectable style={styles.toolDetail}>
+                                      {JSON.stringify(item.result, null, 2)}
+                                    </Text>
+                                  </View>
+                                ) : null}
+                              </View>
+                            ) : null}
+                          </View>
+                        );
+                      })}
+                    </View>
+                  ))
+                : null}
+            </View>
+          ) : null}
+          {companion.error ? (
+            <View style={styles.errorBox}>
+              <Text style={styles.errorText}>{companion.error}</Text>
+            </View>
+          ) : null}
+          {companion.reply ? (
+            <View style={styles.reply}>
+              <NativeMarkdown text={companion.reply} />
             </View>
           ) : null}
           {companion.proposal ? (
@@ -287,126 +407,6 @@ export function MobileCompanionOverlay() {
                   </Text>
                 </Pressable>
               </View>
-            </View>
-          ) : null}
-          {showActivity ? (
-            <View style={styles.activity}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={
-                  activityExpanded ? 'Hide Companion tool calls' : 'Show Companion tool calls'
-                }
-                accessibilityState={{ expanded: activityExpanded }}
-                onPress={() => setActivityExpanded((value) => !value)}
-                style={({ pressed }) => [styles.activitySummary, pressed && styles.pressed]}
-              >
-                {active ? <ActivityIndicator color={colors.accent} size="small" /> : null}
-                <Text style={styles.activitySummaryText}>
-                  {active ? 'Working' : 'Worked'} · {Math.round(elapsed / 1_000)}s
-                  {companion.activity.length > 0
-                    ? ` · ${companion.activity.length} tool ${companion.activity.length === 1 ? 'call' : 'calls'}`
-                    : ''}
-                </Text>
-                <ChevronRight
-                  color={colors.muted}
-                  size={15}
-                  strokeWidth={2}
-                  style={{ transform: [{ rotate: activityExpanded ? '90deg' : '0deg' }] }}
-                />
-              </Pressable>
-              {activityExpanded
-                ? activityGroups.map((group) => (
-                    <View key={group.key}>
-                      {group.parallel ? (
-                        <View
-                          accessibilityLabel={`${group.items.length} tool calls ran in parallel`}
-                          style={styles.parallelDivider}
-                        >
-                          <View style={styles.parallelDividerLine} />
-                          <Text style={styles.parallelDividerText}>
-                            Parallel · {group.items.length}
-                          </Text>
-                          <View style={styles.parallelDividerLine} />
-                        </View>
-                      ) : null}
-                      {group.items.map((item) => {
-                        const expanded = expandedCalls.has(item.callId);
-                        return (
-                          <View key={item.callId} style={styles.toolCall}>
-                            <Pressable
-                              accessibilityRole="button"
-                              accessibilityState={{ expanded }}
-                              onPress={() =>
-                                setExpandedCalls((current) => {
-                                  const next = new Set(current);
-                                  if (next.has(item.callId)) next.delete(item.callId);
-                                  else next.add(item.callId);
-                                  return next;
-                                })
-                              }
-                              style={({ pressed }) => [
-                                styles.toolHeader,
-                                pressed && styles.pressed,
-                              ]}
-                            >
-                              <ChevronRight
-                                color={colors.mutedDim}
-                                size={13}
-                                strokeWidth={2}
-                                style={{ transform: [{ rotate: expanded ? '90deg' : '0deg' }] }}
-                              />
-                              <Text numberOfLines={1} style={styles.toolName}>
-                                {item.status === 'running'
-                                  ? 'Running'
-                                  : item.status === 'failed'
-                                    ? 'Failed'
-                                    : 'Completed'}{' '}
-                                · {companionToolActivityLabel(item)}
-                              </Text>
-                            </Pressable>
-                            {expanded ? (
-                              <View style={styles.toolDetails}>
-                                {item.args !== undefined ? (
-                                  <View>
-                                    <Text style={styles.toolDetailLabel}>Arguments</Text>
-                                    <Text selectable style={styles.toolDetail}>
-                                      {JSON.stringify(item.args, null, 2)}
-                                    </Text>
-                                  </View>
-                                ) : null}
-                                {item.error !== undefined ? (
-                                  <View>
-                                    <Text style={styles.toolDetailLabel}>Error</Text>
-                                    <Text selectable style={styles.toolDetail}>
-                                      {JSON.stringify(item.error, null, 2)}
-                                    </Text>
-                                  </View>
-                                ) : item.result !== undefined ? (
-                                  <View>
-                                    <Text style={styles.toolDetailLabel}>Result</Text>
-                                    <Text selectable style={styles.toolDetail}>
-                                      {JSON.stringify(item.result, null, 2)}
-                                    </Text>
-                                  </View>
-                                ) : null}
-                              </View>
-                            ) : null}
-                          </View>
-                        );
-                      })}
-                    </View>
-                  ))
-                : null}
-            </View>
-          ) : null}
-          {companion.error ? (
-            <View style={styles.errorBox}>
-              <Text style={styles.errorText}>{companion.error}</Text>
-            </View>
-          ) : null}
-          {companion.reply ? (
-            <View style={styles.reply}>
-              <NativeMarkdown text={companion.reply} />
             </View>
           ) : null}
         </ScrollView>

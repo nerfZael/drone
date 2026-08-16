@@ -92,12 +92,15 @@ function CompanionHeaderButton({
 export function CompanionOverlay() {
   const companion = useCompanion();
   const workspace = useCompanionWorkspace();
-  const [expanded, setExpanded] = React.useState(true);
+  const [expanded, setExpanded] = React.useState(false);
   const [, tick] = React.useState(0);
   React.useEffect(() => {
     if (companion?.status !== 'working') return;
     const timer = window.setInterval(() => tick((value) => value + 1), 1_000);
     return () => window.clearInterval(timer);
+  }, [companion?.status]);
+  React.useEffect(() => {
+    if (companion?.status === 'idle') setExpanded(false);
   }, [companion?.status]);
   if (!companion || companion.status === 'idle') return null;
   const active = companion.status === 'working';
@@ -251,7 +254,6 @@ export function CompanionOverlay() {
                       <details
                         key={item.callId}
                         className="py-1 text-xs"
-                        open={item.status === 'running'}
                       >
                         <summary className="cursor-pointer text-[var(--fg-secondary)]">
                           {item.status === 'running'
