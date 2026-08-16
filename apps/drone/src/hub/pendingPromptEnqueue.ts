@@ -88,10 +88,10 @@ export function shouldRetryFailedPendingPrompt(opts: {
 }
 
 /**
- * Returns true when there is any earlier pending prompt that is still active
+ * Returns true when an earlier prompt still blocks the normal FIFO queue
  * (not failed and not yet present in the transcript).
  */
-export function hasActivePriorPendingPrompt(opts: {
+export function shouldDeferQueuedPendingPrompt(opts: {
   priorPendingPrompts: PendingPromptLike[];
   transcriptDoneIds?: Set<string>;
 }): boolean {
@@ -153,44 +153,4 @@ export function stalePendingPromptState(
       ? Math.max(enqueueTimeoutMs, MIN_SENDING_STALE_MS)
       : Math.max(enqueueTimeoutMs * 2, MIN_SENT_STALE_MS);
   return ageMs >= staleAfterMs ? state : null;
-}
-
-/**
- * For agents whose continuation/session identifier is only discoverable after the first turn
- * completes, avoid enqueuing follow-up prompts that would start a brand new session.
- *
- * If a prior prompt is already enqueued/running (state: sent/sending) and the session is not
- * yet known, defer the new prompt until the session id is available (or the prior prompt fails).
- */
-export function shouldDeferQueuedTranscriptPrompt(opts: {
-  sessionKnown: boolean;
-  priorPendingPrompts: PendingPromptLike[];
-  transcriptDoneIds?: Set<string>;
-}): boolean {
-  const done = opts.transcriptDoneIds ?? new Set<string>();
-  if (opts.sessionKnown) return false;
-
-  // If any earlier prompt is already enqueued in the daemon (sent/sending) and not yet
-  // present in the transcript, a follow-up prompt would start a new underlying session.
-  for (const p of opts.priorPendingPrompts ?? []) {
-    const id = String(p?.id ?? '').trim();
-    if (!id) continue;
-    if (done.has(id)) continue;
-    if (isTerminalPendingPrompt(p)) continue;
-    if (isActivePendingPrompt(p)) return true;
-  }
-  return false;
-}
-
-export function shouldDeferQueuedPendingPrompt(opts: {
-  sessionKnown: boolean;
-  priorPendingPrompts: PendingPromptLike[];
-  transcriptDoneIds?: Set<string>;
-}): boolean {
-  return (
-    hasActivePriorPendingPrompt({
-      priorPendingPrompts: opts.priorPendingPrompts,
-      transcriptDoneIds: opts.transcriptDoneIds,
-    }) || shouldDeferQueuedTranscriptPrompt(opts)
-  );
 }

@@ -2,10 +2,7 @@ import { normalizeAgentPlan, type AgentPlan, type AgentRunActivity } from '@dron
 import type { BuiltinTranscriptAgentId } from './pendingPromptEnqueue';
 import { BuiltinAgentActivityCollector, normalizeAgentRunActivity } from './builtin-agent-activity';
 
-export {
-  hasKnownBuiltinTranscriptSession,
-  readBuiltinTranscriptSessionId,
-} from './builtin-transcript-session-metadata';
+export { readBuiltinTranscriptSessionId } from './builtin-transcript-session-metadata';
 
 function takeStringText(raw: any): string | null {
   if (typeof raw === 'string' && raw) return raw;
