@@ -13,7 +13,19 @@ export function readBuiltinTranscriptSessionId(
   chatEntry: any,
   agentId: BuiltinTranscriptAgentId,
 ): string {
-  return String(chatEntry?.[BUILTIN_TRANSCRIPT_SESSION_FIELD_BY_AGENT[agentId]] ?? '').trim();
+  const value = chatEntry?.[BUILTIN_TRANSCRIPT_SESSION_FIELD_BY_AGENT[agentId]];
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+export function hasKnownBuiltinTranscriptSession(
+  chatEntry: any,
+  agentId: BuiltinTranscriptAgentId,
+): boolean {
+  return (
+    agentId === 'cursor' ||
+    agentId === 'claude' ||
+    Boolean(readBuiltinTranscriptSessionId(chatEntry, agentId))
+  );
 }
 
 export function writeBuiltinTranscriptSessionId(
@@ -22,7 +34,7 @@ export function writeBuiltinTranscriptSessionId(
   sessionIdRaw: unknown,
 ): boolean {
   if (!chatEntry || typeof chatEntry !== 'object') return false;
-  const sessionId = String(sessionIdRaw ?? '').trim();
+  const sessionId = typeof sessionIdRaw === 'string' ? sessionIdRaw.trim() : '';
   if (!sessionId || readBuiltinTranscriptSessionId(chatEntry, agentId) === sessionId) return false;
   chatEntry[BUILTIN_TRANSCRIPT_SESSION_FIELD_BY_AGENT[agentId]] = sessionId;
   return true;
