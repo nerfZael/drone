@@ -111,6 +111,8 @@ describe('Companion device mesh capability', () => {
     );
 
     await capability.invoke('run.start', { runId: 'mobile-run-2', prompt: 'Wait' }, context());
+    await capability.invoke('run.cancel', { runId: 'another-run' }, context());
+    expect(cancelled).toHaveLength(0);
     await capability.invoke('run.cancel', { runId: 'mobile-run-2' }, context());
 
     expect(cancelled).toHaveLength(1);
@@ -186,6 +188,9 @@ describe('Companion device mesh capability', () => {
       { runId: 'conversation-1', messageId: 'mobile-message-2', prompt: 'Second' },
       context(),
     );
+    await expect(
+      capability.invoke('run.start', { runId: 'conversation-2', prompt: 'Conflict' }, context()),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
     await waitFor(() => prompts.length === 1);
     expect(prompts).toEqual(['First']);
 

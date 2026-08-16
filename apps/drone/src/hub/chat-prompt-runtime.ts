@@ -87,7 +87,6 @@ type ChatPromptRuntimeDependencyName =
   | 'failStaleDockerSnapshotsForChat'
   | 'formatTranscriptJobFailure'
   | 'getChatEntry'
-  | 'hasKnownBuiltinTranscriptSession'
   | 'hubChatSessionName'
   | 'hubLog'
   | 'importChatFromRegistry'
@@ -239,7 +238,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     failStaleDockerSnapshotsForChat,
     formatTranscriptJobFailure,
     getChatEntry,
-    hasKnownBuiltinTranscriptSession,
     hubChatSessionName,
     hubLog,
     importChatFromRegistry,
@@ -2267,7 +2265,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         continue;
       }
 
-      const sessionKnown = hasKnownBuiltinTranscriptSession(entry, agent.id);
       const prior = pendingList
         .slice(0, queuedIndex)
         .map((x: any) => ({ id: String(x?.id ?? '').trim(), state: String(x?.state ?? '') }))
@@ -2285,8 +2282,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
               transcriptDoneIds,
             })
           : shouldDeferQueuedPendingPrompt({
-              agentId: agent.id,
-              sessionKnown,
               priorPendingPrompts: prior,
               transcriptDoneIds,
             });

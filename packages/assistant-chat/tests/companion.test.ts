@@ -3,12 +3,63 @@ import { describe, expect, test } from 'bun:test';
 import {
   COMPANION_BROWSER_TOOL_NAMES,
   COMPANION_MAX_PROMPT_CHARS,
+  CompanionClientController,
   companionToolActivityLabel,
   groupCompanionToolActivity,
   reduceCompanionToolActivity,
   resolveCompanionChatName,
+  type CompanionClientTransport,
+  type CompanionServerMessage,
   validateCompanionRunInput,
 } from '../src';
+
+function clientTransport() {
+  let onMessage: ((message: CompanionServerMessage) => void) | null = null;
+  let onDisconnect: ((message: string) => void) | null = null;
+  const toolResults: unknown[] = [];
+  const prompts: unknown[] = [];
+  const cancelled: string[] = [];
+  let closes = 0;
+  let opens = 0;
+  const transport: CompanionClientTransport = {
+    async open(input) {
+      opens += 1;
+      onMessage = input.onMessage;
+      onDisconnect = input.onDisconnect;
+      return { connectionMs: 12, connectionReused: false };
+    },
+    sendPrompt(input) {
+      prompts.push(input);
+    },
+    sendToolResult(input) {
+      toolResults.push(input);
+    },
+    cancel(runId) {
+      cancelled.push(runId);
+    },
+    close() {
+      closes += 1;
+    },
+  };
+  return {
+    transport,
+    message(message: CompanionServerMessage) {
+      onMessage?.(message);
+    },
+    disconnect(message: string) {
+      onDisconnect?.(message);
+    },
+    toolResults,
+    prompts,
+    cancelled,
+    get opens() {
+      return opens;
+    },
+    get closes() {
+      return closes;
+    },
+  };
+}
 
 describe('Companion contracts', () => {
   test('allows proposal editing and chat navigation without the legacy draft action', () => {
@@ -199,5 +250,122 @@ describe('Companion contracts', () => {
         items: [sequential[2]],
       },
     ]);
+  });
+
+  test('runs one shared client lifecycle through tools and completion', async () => {
+    const connection = clientTransport();
+    const ids = ['run-1', 'message-1', 'message-2'];
+    const controller = new CompanionClientController({
+      createId: () => ids.shift()!,
+      now: () => 42,
+    });
+
+    await controller.submitPrompt({
+      prompt: ' Hello ',
+      createTransport: () => connection.transport,
+      executeTool: async (tool) => ({ tool, active: true }),
+    });
+    expect(controller.getSnapshot()).toMatchObject({
+      status: 'working',
+      transcript: 'Hello',
+      startedAt: 42,
+    });
+    expect(connection.prompts).toContainEqual({
+      runId: 'run-1',
+      messageId: 'message-1',
+      prompt: 'Hello',
+      telemetry: { version: 1, connectionMs: 12, connectionReused: false },
+    });
+
+    connection.message({
+      type: 'tool_call',
+      runId: 'run-1',
+      generation: 3,
+      callId: 'call-1',
+      tool: 'get_app_context',
+      args: {},
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(connection.toolResults).toContainEqual({
+      runId: 'run-1',
+      generation: 3,
+      callId: 'call-1',
+      ok: true,
+      result: { tool: 'get_app_context', active: true },
+    });
+
+    connection.message({ type: 'reply', runId: 'run-1', reply: 'Done' });
+    connection.message({ type: 'status', runId: 'run-1', status: 'completed' });
+    expect(controller.getSnapshot()).toMatchObject({
+      status: 'completed',
+      reply: 'Done',
+      endedAt: 42,
+    });
+
+    await controller.submitPrompt({
+      prompt: 'Again',
+      createTransport: () => connection.transport,
+      executeTool: () => ({}),
+    });
+    expect(connection.opens).toBe(1);
+    expect(connection.prompts).toContainEqual({
+      runId: 'run-1',
+      messageId: 'message-2',
+      prompt: 'Again',
+      telemetry: { version: 1, connectionMs: 0, connectionReused: true },
+    });
+    expect(connection.closes).toBe(0);
+  });
+
+  test('invalidates late run events when the client closes', async () => {
+    const connection = clientTransport();
+    const ids = ['run-2', 'message-2'];
+    const controller = new CompanionClientController({ createId: () => ids.shift()! });
+    await controller.submitPrompt({
+      prompt: 'Wait',
+      createTransport: () => connection.transport,
+      executeTool: () => ({}),
+    });
+
+    await controller.close();
+    connection.message({ type: 'reply', runId: 'run-2', reply: 'Too late' });
+    connection.disconnect('Too late');
+
+    expect(controller.getSnapshot()).toEqual({
+      status: 'idle',
+      error: '',
+      reply: '',
+      transcript: '',
+      startedAt: null,
+      endedAt: null,
+      activity: [],
+    });
+    expect(connection.cancelled).toEqual(['run-2']);
+  });
+
+  test('cancels an active run without erasing its visible state', async () => {
+    const connection = clientTransport();
+    const ids = ['run-3', 'message-3'];
+    const controller = new CompanionClientController({
+      createId: () => ids.shift()!,
+      now: () => 84,
+    });
+    await controller.submitPrompt({
+      prompt: 'Keep this transcript',
+      createTransport: () => connection.transport,
+      executeTool: () => ({}),
+    });
+
+    await controller.cancel();
+    connection.message({ type: 'reply', runId: 'run-3', reply: 'Too late' });
+
+    expect(controller.getSnapshot()).toMatchObject({
+      status: 'cancelled',
+      transcript: 'Keep this transcript',
+      endedAt: 84,
+    });
+    expect(connection.cancelled).toEqual(['run-3']);
+    expect(connection.closes).toBe(1);
   });
 });

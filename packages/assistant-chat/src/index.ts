@@ -7,6 +7,7 @@ export * from './agent-run-failure.js';
 export * from './chat-attachment-context.js';
 export * from './chat-attachment-policy.js';
 export * from './chat-queue-actions.js';
+export * from './companion-client.js';
 export * from './companion.js';
 export * from './companion-proposal.js';
 export * from './continuous-voice.js';

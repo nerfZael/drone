@@ -1,4 +1,5 @@
 import type { BuiltinTranscriptAgentId } from './pendingPromptEnqueue';
+import { readBuiltinTranscriptSessionId } from './builtin-transcript-session-metadata';
 
 type TranscriptTurnLike = {
   at?: string;
@@ -42,13 +43,7 @@ export function cloneChatEntryForDroneClone(entryRaw: any): any {
 
 function builtinChatNeedsTranscriptBootstrap(agentId: BuiltinTranscriptAgentId, entry: any): boolean {
   if (!entry || typeof entry !== 'object') return false;
-  if (agentId === 'cursor') return !String(entry?.chatId ?? '').trim();
-  if (agentId === 'codex') return !String(entry?.codexThreadId ?? '').trim();
-  if (agentId === 'claude') return !String(entry?.claudeSessionId ?? '').trim();
-  if (agentId === 'opencode') return !String(entry?.openCodeSessionId ?? '').trim();
-  if (agentId === 'pi') return !String(entry?.piSessionId ?? '').trim();
-  if (agentId === 'blip') return !String(entry?.blipSessionId ?? '').trim();
-  return false;
+  return !readBuiltinTranscriptSessionId(entry, agentId);
 }
 
 function trimTranscriptBootstrapField(raw: unknown, maxChars = CLONED_TRANSCRIPT_BOOTSTRAP_FIELD_MAX_CHARS): string {

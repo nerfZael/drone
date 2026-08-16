@@ -162,7 +162,6 @@ import { renderWhiteboardPng } from './whiteboard-export';
 import { cloneChatEntryForDroneClone, maybeBootstrapPromptFromTranscript } from './chat-clone';
 import {
   formatTranscriptJobFailure,
-  hasKnownBuiltinTranscriptSession,
   parseBlipJobTranscript,
   parseCodexJobTranscript,
   parseCodexRolloutRuntime,
@@ -3193,7 +3192,6 @@ function createHubRuntimeGraph(
     formatTranscriptJobFailure,
     getChatEntry,
     hasInFlightPriorPendingPrompt,
-    hasKnownBuiltinTranscriptSession,
     hubChatSessionName,
     hubLog,
     importChatFromRegistry,

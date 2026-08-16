@@ -1,4 +1,5 @@
 import type { BuiltinTranscriptAgentId } from './pendingPromptEnqueue';
+import { readBuiltinTranscriptSessionId } from './builtin-transcript-session-metadata';
 
 export type ChatForkOrigin = {
   version: 1;
@@ -14,7 +15,7 @@ export function createChatForkOrigin(
   agentId: BuiltinTranscriptAgentId,
 ): ChatForkOrigin | null {
   if (agentId === 'cursor') return null;
-  const sourceSessionId = builtinSessionId(sourceChat, agentId);
+  const sourceSessionId = readBuiltinTranscriptSessionId(sourceChat, agentId);
   if (!sourceSessionId) return null;
   return {
     version: 1,
@@ -68,13 +69,4 @@ export function completePendingChatFork(entry: any, agentId: BuiltinTranscriptAg
   }
   delete entry.chatForkOrigin;
   return true;
-}
-
-function builtinSessionId(chat: any, agentId: BuiltinTranscriptAgentId): string {
-  if (agentId === 'cursor') return String(chat?.chatId ?? '').trim();
-  if (agentId === 'codex') return String(chat?.codexThreadId ?? '').trim();
-  if (agentId === 'claude') return String(chat?.claudeSessionId ?? '').trim();
-  if (agentId === 'opencode') return String(chat?.openCodeSessionId ?? '').trim();
-  if (agentId === 'pi') return String(chat?.piSessionId ?? '').trim();
-  return String(chat?.blipSessionId ?? '').trim();
 }

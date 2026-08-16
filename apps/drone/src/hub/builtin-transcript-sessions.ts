@@ -2,35 +2,7 @@ import { normalizeAgentPlan, type AgentPlan, type AgentRunActivity } from '@dron
 import type { BuiltinTranscriptAgentId } from './pendingPromptEnqueue';
 import { BuiltinAgentActivityCollector, normalizeAgentRunActivity } from './builtin-agent-activity';
 
-export function readBuiltinTranscriptSessionId(
-  chatEntry: any,
-  agentId: Extract<BuiltinTranscriptAgentId, 'codex' | 'opencode' | 'pi' | 'blip'>,
-): string {
-  if (agentId === 'codex') {
-    return typeof chatEntry?.codexThreadId === 'string'
-      ? String(chatEntry.codexThreadId).trim()
-      : '';
-  }
-  if (agentId === 'opencode') {
-    return typeof chatEntry?.openCodeSessionId === 'string'
-      ? String(chatEntry.openCodeSessionId).trim()
-      : '';
-  }
-  if (agentId === 'pi') {
-    return typeof chatEntry?.piSessionId === 'string' ? String(chatEntry.piSessionId).trim() : '';
-  }
-  return typeof chatEntry?.blipSessionId === 'string' ? String(chatEntry.blipSessionId).trim() : '';
-}
-
-export function hasKnownBuiltinTranscriptSession(
-  chatEntry: any,
-  agentId: BuiltinTranscriptAgentId,
-): boolean {
-  if (agentId === 'codex' || agentId === 'opencode' || agentId === 'pi' || agentId === 'blip') {
-    return Boolean(readBuiltinTranscriptSessionId(chatEntry, agentId));
-  }
-  return true;
-}
+export { readBuiltinTranscriptSessionId } from './builtin-transcript-session-metadata';
 
 function takeStringText(raw: any): string | null {
   if (typeof raw === 'string' && raw) return raw;
