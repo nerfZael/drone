@@ -102,8 +102,7 @@ export function createCompanionCapability(
       if (!validation.ok) {
         throw Object.assign(new Error(validation.error), { code: 'INVALID_REQUEST' });
       }
-      const { runId: clientRunId, prompt, telemetry } = validation;
-      const messageId = validation.messageId || crypto.randomUUID();
+      const { runId: clientRunId, prompt, messageId, telemetry } = validation;
       const key = sessionKey(sourceDeviceId, clientRunId);
       let session = sessions.get(key);
       for (const existingSession of sessions.values()) {
@@ -137,13 +136,7 @@ export function createCompanionCapability(
         session = createdSession;
         sessions.set(key, session);
       }
-      await session.run.enqueue({
-        prompt,
-        messageId,
-        telemetry,
-        receivedAtEpochMs: Date.now(),
-        receivedAtMonotonicMs: performance.now(),
-      });
+      await session.run.enqueue({ prompt, messageId, telemetry });
       return { accepted: true };
     },
     async close() {

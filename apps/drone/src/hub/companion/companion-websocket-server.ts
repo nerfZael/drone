@@ -1,9 +1,5 @@
 import type http from 'node:http';
-import crypto from 'node:crypto';
-import {
-  validateCompanionRunInput,
-  type CompanionClientMessage,
-} from '@drone/assistant-chat';
+import { validateCompanionRunInput, type CompanionClientMessage } from '@drone/assistant-chat';
 import { type RawData, WebSocket, WebSocketServer } from 'ws';
 
 import { CompanionRunSession } from './companion-run-session';
@@ -67,10 +63,13 @@ export function createCompanionWebSocketServer(runtime: CompanionRuntime): WebSo
         send({ type: 'error', runId: validation.runId, error: validation.error });
         return;
       }
-      const { runId, prompt, telemetry } = validation;
-      const messageId = validation.messageId || crypto.randomUUID();
+      const { runId, prompt, messageId, telemetry } = validation;
       if (session && runId !== session.clientRunId) {
-        send({ type: 'error', runId, error: 'This Companion socket already owns another session.' });
+        send({
+          type: 'error',
+          runId,
+          error: 'This Companion socket already owns another session.',
+        });
         return;
       }
       if (!session) {
@@ -82,9 +81,7 @@ export function createCompanionWebSocketServer(runtime: CompanionRuntime): WebSo
           runtime,
           emit: (event) => send({ runId, ...event }),
           isAvailable: () =>
-            session === createdSession &&
-            !cleanedUp &&
-            socket.readyState === WebSocket.OPEN,
+            session === createdSession && !cleanedUp && socket.readyState === WebSocket.OPEN,
           unavailableMessage: 'Companion browser disconnected',
           onClose: () => {
             if (session === createdSession) session = null;
@@ -92,13 +89,7 @@ export function createCompanionWebSocketServer(runtime: CompanionRuntime): WebSo
         });
         session = createdSession;
       }
-      void session.enqueue({
-        prompt,
-        messageId,
-        telemetry,
-        receivedAtEpochMs: Date.now(),
-        receivedAtMonotonicMs: performance.now(),
-      });
+      void session.enqueue({ prompt, messageId, telemetry });
     });
 
     const cleanup = () => {
