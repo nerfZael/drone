@@ -1,63 +1,59 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  hasInFlightPriorPendingPrompt,
   looksLikeTransientPromptEnqueueError,
-  shouldDeferQueuedPendingPrompt,
+  shouldDeferPendingPrompt,
   shouldRetryFailedPendingPrompt,
   stalePendingPromptState,
 } from '../src/hub/pendingPromptEnqueue';
 
-describe('shouldDeferQueuedPendingPrompt', () => {
-  test('defers for queued, sending, or sent rows that are not done', () => {
-    for (const state of ['queued', 'sending', 'sent'] as const) {
+describe('shouldDeferPendingPrompt', () => {
+  test('applies the queue and ASAP blocking rules', () => {
+    const cases = [
+      { state: 'queued', queue: true, asap: false },
+      { state: 'sending', queue: true, asap: true },
+      { state: 'sent', queue: true, asap: true },
+      { state: 'failed', queue: false, asap: false },
+      { state: 'unknown', queue: true, asap: false },
+    ] as const;
+
+    for (const { state, queue, asap } of cases) {
       expect(
-        shouldDeferQueuedPendingPrompt({
+        shouldDeferPendingPrompt({
+          priority: 'queue',
           priorPendingPrompts: [{ id: state, state }],
         }),
-      ).toBe(true);
+      ).toBe(queue);
+      expect(
+        shouldDeferPendingPrompt({
+          priority: 'asap',
+          priorPendingPrompts: [{ id: state, state }],
+        }),
+      ).toBe(asap);
     }
-  });
 
-  test('ignores failed rows and transcript-completed rows', () => {
     expect(
-      shouldDeferQueuedPendingPrompt({
-        priorPendingPrompts: [{ id: 'f', state: 'failed' }],
-      }),
-    ).toBe(false);
-    expect(
-      shouldDeferQueuedPendingPrompt({
-        priorPendingPrompts: [{ id: 'done', state: 'sent' }],
-        transcriptDoneIds: new Set(['done']),
-      }),
-    ).toBe(false);
-  });
-});
-
-describe('hasInFlightPriorPendingPrompt', () => {
-  test('waits for running work but lets ASAP jump queued follow-ups', () => {
-    expect(
-      hasInFlightPriorPendingPrompt({
+      shouldDeferPendingPrompt({
+        priority: 'asap',
         priorPendingPrompts: [
           { id: 'queued', state: 'queued' },
           { id: 'running', state: 'sent' },
         ],
       }),
     ).toBe(true);
-    expect(
-      hasInFlightPriorPendingPrompt({
-        priorPendingPrompts: [{ id: 'queued', state: 'queued' }],
-      }),
-    ).toBe(false);
   });
 
-  test('ignores completed and failed work', () => {
+  test('ignores completed and malformed rows', () => {
     expect(
-      hasInFlightPriorPendingPrompt({
-        priorPendingPrompts: [
-          { id: 'done', state: 'sent' },
-          { id: 'failed', state: 'failed' },
-        ],
+      shouldDeferPendingPrompt({
+        priority: 'queue',
+        priorPendingPrompts: [{ id: 'done', state: 'sent' }],
         transcriptDoneIds: new Set(['done']),
+      }),
+    ).toBe(false);
+    expect(
+      shouldDeferPendingPrompt({
+        priority: 'queue',
+        priorPendingPrompts: [{ id: '', state: 'queued' }],
       }),
     ).toBe(false);
   });
