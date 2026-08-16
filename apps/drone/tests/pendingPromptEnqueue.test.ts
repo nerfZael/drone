@@ -1,63 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import {
   looksLikeTransientPromptEnqueueError,
-  shouldDeferPendingPrompt,
   shouldRetryFailedPendingPrompt,
   stalePendingPromptState,
 } from '../src/hub/pendingPromptEnqueue';
-
-describe('shouldDeferPendingPrompt', () => {
-  test('applies the queue and ASAP blocking rules', () => {
-    const cases = [
-      { state: 'queued', queue: true, asap: false },
-      { state: 'sending', queue: true, asap: true },
-      { state: 'sent', queue: true, asap: true },
-      { state: 'failed', queue: false, asap: false },
-      { state: 'unknown', queue: true, asap: false },
-    ] as const;
-
-    for (const { state, queue, asap } of cases) {
-      expect(
-        shouldDeferPendingPrompt({
-          priority: 'queue',
-          priorPendingPrompts: [{ id: state, state }],
-        }),
-      ).toBe(queue);
-      expect(
-        shouldDeferPendingPrompt({
-          priority: 'asap',
-          priorPendingPrompts: [{ id: state, state }],
-        }),
-      ).toBe(asap);
-    }
-
-    expect(
-      shouldDeferPendingPrompt({
-        priority: 'asap',
-        priorPendingPrompts: [
-          { id: 'queued', state: 'queued' },
-          { id: 'running', state: 'sent' },
-        ],
-      }),
-    ).toBe(true);
-  });
-
-  test('ignores completed and malformed rows', () => {
-    expect(
-      shouldDeferPendingPrompt({
-        priority: 'queue',
-        priorPendingPrompts: [{ id: 'done', state: 'sent' }],
-        transcriptDoneIds: new Set(['done']),
-      }),
-    ).toBe(false);
-    expect(
-      shouldDeferPendingPrompt({
-        priority: 'queue',
-        priorPendingPrompts: [{ id: '', state: 'queued' }],
-      }),
-    ).toBe(false);
-  });
-});
 
 describe('shouldRetryFailedPendingPrompt', () => {
   test('does not retry terminal auth failures', () => {

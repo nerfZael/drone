@@ -1,3 +1,4 @@
+import { hasBlockingPendingPrompt } from '@drone/assistant-chat';
 import {
   cloneTranscriptTurnsForChatFork,
   createChatForkOrigin,
@@ -112,18 +113,11 @@ export function createDroneChatCreator(deps: DroneChatCreationDependencies) {
       : null;
     if (input.creationMode === 'clone-history' && sourceBeforeCreate) {
       const sourceBusy = (input.droneEntry?.busyChats ?? []).includes(sourceChatName);
-      const completedTurnIds = new Set(
-        (sourceBeforeCreate.turns ?? [])
-          .map((turn: any) => String(turn?.id ?? '').trim())
-          .filter(Boolean),
+      const sourceHasBlockingPrompts = hasBlockingPendingPrompt(
+        sourceBeforeCreate.pendingPrompts,
+        sourceBeforeCreate.turns,
       );
-      const sourceHasActivePrompts = (sourceBeforeCreate.pendingPrompts ?? []).some(
-        (prompt: any) =>
-          ['queued', 'sending'].includes(String(prompt?.state ?? '')) ||
-          (String(prompt?.state ?? '') === 'sent' &&
-            !completedTurnIds.has(String(prompt?.id ?? '').trim())),
-      );
-      if (sourceBusy || sourceHasActivePrompts) {
+      if (sourceBusy || sourceHasBlockingPrompts) {
         throw new Error('Stop this chat before cloning it');
       }
     }
