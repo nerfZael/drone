@@ -211,7 +211,6 @@ import {
 import { createSyncSetService } from './sync-set-service';
 import {
   looksLikeTransientPromptEnqueueError,
-  shouldDeferPendingPrompt,
   shouldRetryFailedPendingPrompt,
   stalePendingPromptState,
 } from './pendingPromptEnqueue';
@@ -3252,7 +3251,6 @@ function createHubRuntimeGraph(
     sameAgentPlan,
     setChatAgentConfig,
     setDroneHubMetaByIdentity,
-    shouldDeferPendingPrompt,
     shouldRetryFailedPendingPrompt,
     sleepMs,
     stalePendingPromptState,

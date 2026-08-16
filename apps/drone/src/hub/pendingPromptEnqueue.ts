@@ -1,17 +1,8 @@
-import {
-  isActivePendingPrompt,
-  isTerminalPendingPrompt,
-  type PendingPromptState,
-} from '@drone/assistant-chat';
+import type { PendingPromptState } from '@drone/assistant-chat';
 
 export type BuiltinTranscriptAgentId = 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi' | 'blip';
 
 export type { PendingPromptState } from '@drone/assistant-chat';
-
-export type PendingPromptLike = {
-  id: string;
-  state: PendingPromptState | string;
-};
 
 const FAILED_PROMPT_RETRY_WINDOW_MS = 10 * 60_000;
 
@@ -85,20 +76,6 @@ export function shouldRetryFailedPendingPrompt(opts: {
     typeof opts.nowMs === 'number' && Number.isFinite(opts.nowMs) ? opts.nowMs : Date.now();
   const ageMs = nowMs - Number(tsMs);
   return !Number.isFinite(ageMs) || ageMs < 0 || ageMs <= FAILED_PROMPT_RETRY_WINDOW_MS;
-}
-
-export function shouldDeferPendingPrompt(opts: {
-  priority: 'queue' | 'asap';
-  priorPendingPrompts: PendingPromptLike[];
-  transcriptDoneIds?: ReadonlySet<string>;
-}): boolean {
-  return (opts.priorPendingPrompts ?? []).some((prompt) => {
-    const id = String(prompt?.id ?? '').trim();
-    if (!id || opts.transcriptDoneIds?.has(id)) return false;
-    return opts.priority === 'asap'
-      ? isActivePendingPrompt(prompt)
-      : !isTerminalPendingPrompt(prompt);
-  });
 }
 
 type PendingPromptStalenessOpts = {

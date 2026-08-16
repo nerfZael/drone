@@ -3,6 +3,7 @@ import path from 'node:path';
 import {
   chatAttachmentPreviewLabel,
   completedTurnIds,
+  hasBlockingPendingPrompt,
   isSendInNewChatQueueAction,
 } from '@drone/assistant-chat';
 
@@ -149,7 +150,6 @@ type ChatPromptRuntimeDependencyName =
   | 'sameAgentPlan'
   | 'setChatAgentConfig'
   | 'setDroneHubMetaByIdentity'
-  | 'shouldDeferPendingPrompt'
   | 'shouldRetryFailedPendingPrompt'
   | 'sleepMs'
   | 'stalePendingPromptState'
@@ -302,7 +302,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     sameAgentPlan,
     setChatAgentConfig,
     setDroneHubMetaByIdentity,
-    shouldDeferPendingPrompt,
     shouldRetryFailedPendingPrompt,
     sleepMs,
     stalePendingPromptState,
@@ -2197,9 +2196,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
 
       const entry: any = chat;
       const turns: any[] = Array.isArray(entry?.turns) ? entry.turns : [];
-      const transcriptDoneIds = new Set(
-        turns.map((turn: any) => String(turn?.id ?? '').trim()).filter(Boolean),
-      );
+      const transcriptDoneIds = completedTurnIds(turns);
       if (
         await reconcileCompletedInterruption({
           droneId,
@@ -2267,10 +2264,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         continue;
       }
 
-      const prior = pendingList
-        .slice(0, queuedIndex)
-        .map((x: any) => ({ id: String(x?.id ?? '').trim(), state: String(x?.state ?? '') }))
-        .filter((x: any) => x.id);
+      const prior = pendingList.slice(0, queuedIndex);
       // Keep manual follow-ups cancellable until the earlier response reaches the transcript.
       // Codex App Server is the exception: ASAP is a same-turn `turn/steer`, so every
       // queued steering input should be offered while the active turn can still accept it.
@@ -2278,11 +2272,11 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         p?.deliveryMode === 'asap' && agent.kind === 'builtin' && agent.id === 'codex';
       const defer =
         !codexAsapCanSteer &&
-        shouldDeferPendingPrompt({
-          priority: p?.deliveryMode === 'asap' ? 'asap' : 'queue',
-          priorPendingPrompts: prior,
-          transcriptDoneIds,
-        });
+        hasBlockingPendingPrompt(
+          prior,
+          turns,
+          p?.deliveryMode === 'asap' ? 'asap' : 'queue',
+        );
       if (defer) {
         // Completion events are an optimization, not the only wake-up edge.
         // Recheck so an automated prompt cannot remain queued after a missed event.
@@ -2802,11 +2796,11 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     const canonicalPendingPrompts = await readPendingPrompts({ droneId, chatName });
     const runtime = droneRuntime(d);
     const configuredModel = normalizeChatModel((chat as any)?.model);
-    const defer = shouldDeferPendingPrompt({
-      priority: opts.priority === 'asap' ? 'asap' : 'queue',
-      priorPendingPrompts: canonicalPendingPrompts,
-      transcriptDoneIds: completedTurnIds((chat as any)?.turns),
-    });
+    const defer = hasBlockingPendingPrompt(
+      canonicalPendingPrompts,
+      (chat as any)?.turns,
+      opts.priority,
+    );
     opts.mark?.('disposition');
 
     const cwd = normalizeDroneCwdForRuntime(d, typeof opts.cwd === 'string' ? opts.cwd : null);
@@ -3007,12 +3001,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     droneRuntime,
     enqueuePendingPromptPump,
     getChatEntry,
-    hasPendingWork: (chat, pending) =>
-      shouldDeferPendingPrompt({
-        priority: 'queue',
-        priorPendingPrompts: pending,
-        transcriptDoneIds: completedTurnIds(chat?.turns),
-      }),
+    hasPendingWork: (chat, pending) => hasBlockingPendingPrompt(pending, chat?.turns),
     isSafePromptId,
     listChatsFromStore,
     loadRegistry,

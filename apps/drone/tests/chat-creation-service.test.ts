@@ -198,6 +198,19 @@ describe('queued chat creation', () => {
       },
     });
 
+    chats.get('default').pendingPrompts = [
+      { id: 'completed-prompt', state: 'queued' },
+      { id: '', state: 'sending' },
+    ];
+    await createDroneChat({
+      droneId: 'alpha',
+      droneEntry: {},
+      chatName: 'Forked with stale rows',
+      creationMode: 'clone-history',
+      sourceChatName: 'default',
+    });
+    expect(chats.has('Forked with stale rows')).toBe(true);
+
     chats.get('default').pendingPrompts.push({ id: 'active-prompt', state: 'queued' });
     await expect(
       createDroneChat({
