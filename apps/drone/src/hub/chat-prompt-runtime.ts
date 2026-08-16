@@ -1,6 +1,11 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
-import { chatAttachmentPreviewLabel, isSendInNewChatQueueAction } from '@drone/assistant-chat';
+import {
+  chatAttachmentPreviewLabel,
+  completedTurnIds,
+  hasBlockingPendingPrompt,
+  isSendInNewChatQueueAction,
+} from '@drone/assistant-chat';
 
 import type { AgentPlan } from '@drone/assistant-chat';
 import { DroneApiRequestError } from '../host/api';
@@ -92,7 +97,6 @@ type ChatPromptRuntimeDependencyName =
   | 'importChatFromRegistry'
   | 'importContainerDroneRuntime'
   | 'inferChatAgent'
-  | 'hasInFlightPriorPendingPrompt'
   | 'isDraftChatEntry'
   | 'isNotFoundErrorMessage'
   | 'loadRegistry'
@@ -146,7 +150,6 @@ type ChatPromptRuntimeDependencyName =
   | 'sameAgentPlan'
   | 'setChatAgentConfig'
   | 'setDroneHubMetaByIdentity'
-  | 'shouldDeferQueuedPendingPrompt'
   | 'shouldRetryFailedPendingPrompt'
   | 'sleepMs'
   | 'stalePendingPromptState'
@@ -243,7 +246,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     importChatFromRegistry,
     importContainerDroneRuntime,
     inferChatAgent,
-    hasInFlightPriorPendingPrompt,
     isDraftChatEntry,
     isNotFoundErrorMessage,
     loadRegistry,
@@ -300,7 +302,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     sameAgentPlan,
     setChatAgentConfig,
     setDroneHubMetaByIdentity,
-    shouldDeferQueuedPendingPrompt,
     shouldRetryFailedPendingPrompt,
     sleepMs,
     stalePendingPromptState,
@@ -2195,9 +2196,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
 
       const entry: any = chat;
       const turns: any[] = Array.isArray(entry?.turns) ? entry.turns : [];
-      const transcriptDoneIds = new Set(
-        turns.map((turn: any) => String(turn?.id ?? '').trim()).filter(Boolean),
-      );
+      const transcriptDoneIds = completedTurnIds(turns);
       if (
         await reconcileCompletedInterruption({
           droneId,
@@ -2265,26 +2264,19 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         continue;
       }
 
-      const prior = pendingList
-        .slice(0, queuedIndex)
-        .map((x: any) => ({ id: String(x?.id ?? '').trim(), state: String(x?.state ?? '') }))
-        .filter((x: any) => x.id);
+      const prior = pendingList.slice(0, queuedIndex);
       // Keep manual follow-ups cancellable until the earlier response reaches the transcript.
       // Codex App Server is the exception: ASAP is a same-turn `turn/steer`, so every
       // queued steering input should be offered while the active turn can still accept it.
       const codexAsapCanSteer =
         p?.deliveryMode === 'asap' && agent.kind === 'builtin' && agent.id === 'codex';
       const defer =
-        p?.deliveryMode === 'asap'
-          ? !codexAsapCanSteer &&
-            hasInFlightPriorPendingPrompt({
-              priorPendingPrompts: prior,
-              transcriptDoneIds,
-            })
-          : shouldDeferQueuedPendingPrompt({
-              priorPendingPrompts: prior,
-              transcriptDoneIds,
-            });
+        !codexAsapCanSteer &&
+        hasBlockingPendingPrompt(
+          prior,
+          turns,
+          p?.deliveryMode === 'asap' ? 'asap' : 'queue',
+        );
       if (defer) {
         // Completion events are an optimization, not the only wake-up edge.
         // Recheck so an automated prompt cannot remain queued after a missed event.
@@ -2804,11 +2796,11 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     const canonicalPendingPrompts = await readPendingPrompts({ droneId, chatName });
     const runtime = droneRuntime(d);
     const configuredModel = normalizeChatModel((chat as any)?.model);
-    const disposition = getPromptEnqueueDisposition({
-      chatEntry: { ...chat, pendingPrompts: canonicalPendingPrompts },
-    });
-    const defer =
-      disposition.hasPriorInFlight || (opts.priority !== 'asap' && disposition.hasPriorQueued);
+    const defer = hasBlockingPendingPrompt(
+      canonicalPendingPrompts,
+      (chat as any)?.turns,
+      opts.priority,
+    );
     opts.mark?.('disposition');
 
     const cwd = normalizeDroneCwdForRuntime(d, typeof opts.cwd === 'string' ? opts.cwd : null);
@@ -2994,34 +2986,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     return { id, pendingState };
   }
 
-  type PromptEnqueueDisposition = {
-    hasPriorInFlight: boolean;
-    hasPriorQueued: boolean;
-  };
-
-  function getPromptEnqueueDisposition(opts: { chatEntry: any }): PromptEnqueueDisposition {
-    const turns: any[] = Array.isArray((opts.chatEntry as any)?.turns)
-      ? (opts.chatEntry as any).turns
-      : [];
-    const transcriptDoneIds = new Set(
-      turns.map((t: any) => String(t?.id ?? '').trim()).filter(Boolean),
-    );
-    const priorPending: any[] = Array.isArray((opts.chatEntry as any)?.pendingPrompts)
-      ? (opts.chatEntry as any).pendingPrompts
-      : [];
-    const hasPriorInFlight = hasInFlightPriorPendingPrompt({
-      priorPendingPrompts: priorPending
-        .map((p: any) => ({ id: String(p?.id ?? '').trim(), state: String(p?.state ?? '') }))
-        .filter((p: any) => p.id),
-      transcriptDoneIds,
-    });
-    const hasPriorQueued = priorPending.some((p: any) => String(p?.state ?? '') === 'queued');
-    return {
-      hasPriorInFlight,
-      hasPriorQueued,
-    };
-  }
-
   const sendInNewChatActionRuntime = createSendInNewChatActionRuntime({
     attachmentOnlyPromptLabel,
     autoRenameGeneratedChatFromFirstPrompt,
@@ -3037,12 +3001,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     droneRuntime,
     enqueuePendingPromptPump,
     getChatEntry,
-    hasPendingWork: (chat, pending) => {
-      const disposition = getPromptEnqueueDisposition({
-        chatEntry: { ...chat, pendingPrompts: pending },
-      });
-      return disposition.hasPriorInFlight || disposition.hasPriorQueued;
-    },
+    hasPendingWork: (chat, pending) => hasBlockingPendingPrompt(pending, chat?.turns),
     isSafePromptId,
     listChatsFromStore,
     loadRegistry,

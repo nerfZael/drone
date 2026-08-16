@@ -2,6 +2,8 @@ export const PENDING_PROMPT_STATES = ['queued', 'sending', 'sent', 'failed'] as 
 
 export type PendingPromptState = (typeof PENDING_PROMPT_STATES)[number];
 
+export type PendingPromptPriority = 'queue' | 'asap';
+
 export type PendingPromptRecord = Record<string, unknown> & {
   id?: unknown;
   state?: unknown;
@@ -136,13 +138,22 @@ export function hasActivePendingPrompt(
   promptsRaw: unknown,
   turnsRaw: unknown,
 ): boolean {
+  return hasBlockingPendingPrompt(promptsRaw, turnsRaw, 'asap');
+}
+
+export function hasBlockingPendingPrompt(
+  promptsRaw: unknown,
+  turnsRaw: unknown,
+  priority: PendingPromptPriority = 'queue',
+): boolean {
   const completedIds = completedTurnIds(turnsRaw);
-  return (Array.isArray(promptsRaw) ? promptsRaw : []).some(
-    (prompt: PendingPromptRecord) =>
-      Boolean(normalizedId(prompt?.id)) &&
-      isActivePendingPrompt(prompt) &&
-      !pendingPromptHasCompletedTurn(prompt, completedIds),
-  );
+  return (Array.isArray(promptsRaw) ? promptsRaw : []).some((prompt: PendingPromptRecord) => {
+    const id = normalizedId(prompt?.id);
+    if (!id || completedIds.has(id)) return false;
+    return priority === 'asap'
+      ? isActivePendingPrompt(prompt)
+      : !isTerminalPendingPrompt(prompt);
+  });
 }
 
 export function filterCompletedPendingPrompts<T extends PendingPromptRecord>(

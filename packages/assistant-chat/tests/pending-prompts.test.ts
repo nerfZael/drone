@@ -4,6 +4,7 @@ import {
   completedTurnIds,
   filterCompletedPendingPrompts,
   hasActivePendingPrompt,
+  hasBlockingPendingPrompt,
   isActivePendingPrompt,
   isActivePendingPromptState,
   isTerminalPendingPrompt,
@@ -71,6 +72,46 @@ describe('pending prompt lifecycle', () => {
       ),
     ).toBe(false);
     expect(hasActivePendingPrompt([{ state: 'sent' }], [])).toBe(false);
+  });
+
+  test('applies queue and ASAP blocking rules', () => {
+    const cases = [
+      { state: 'queued', queue: true, asap: false },
+      { state: 'sending', queue: true, asap: true },
+      { state: 'sent', queue: true, asap: true },
+      { state: 'failed', queue: false, asap: false },
+      { state: 'unknown', queue: true, asap: false },
+    ] as const;
+
+    for (const { state, queue, asap } of cases) {
+      expect(hasBlockingPendingPrompt([{ id: state, state }], [], 'queue')).toBe(queue);
+      expect(hasBlockingPendingPrompt([{ id: state, state }], [], 'asap')).toBe(asap);
+    }
+
+    expect(
+      hasBlockingPendingPrompt(
+        [
+          { id: 'queued', state: 'queued' },
+          { id: 'running', state: 'sent' },
+        ],
+        [],
+        'asap',
+      ),
+    ).toBe(true);
+  });
+
+  test('ignores completed and malformed rows when checking blockers', () => {
+    expect(
+      hasBlockingPendingPrompt(
+        [
+          { id: 'queued', state: 'queued' },
+          { id: 'sending', state: 'sending' },
+          { id: 'sent', state: 'sent' },
+          { id: '', state: 'queued' },
+        ],
+        [{ id: 'queued' }, { id: 'sending' }, { id: 'sent' }],
+      ),
+    ).toBe(false);
   });
 
   test('filters completed work while retaining failed and stopped records', () => {

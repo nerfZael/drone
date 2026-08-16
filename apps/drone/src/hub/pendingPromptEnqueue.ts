@@ -1,17 +1,8 @@
-import {
-  isActivePendingPrompt,
-  isTerminalPendingPrompt,
-  type PendingPromptState,
-} from '@drone/assistant-chat';
+import type { PendingPromptState } from '@drone/assistant-chat';
 
 export type BuiltinTranscriptAgentId = 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi' | 'blip';
 
 export type { PendingPromptState } from '@drone/assistant-chat';
-
-export type PendingPromptLike = {
-  id: string;
-  state: PendingPromptState | string;
-};
 
 const FAILED_PROMPT_RETRY_WINDOW_MS = 10 * 60_000;
 
@@ -85,38 +76,6 @@ export function shouldRetryFailedPendingPrompt(opts: {
     typeof opts.nowMs === 'number' && Number.isFinite(opts.nowMs) ? opts.nowMs : Date.now();
   const ageMs = nowMs - Number(tsMs);
   return !Number.isFinite(ageMs) || ageMs < 0 || ageMs <= FAILED_PROMPT_RETRY_WINDOW_MS;
-}
-
-/**
- * Returns true when an earlier prompt still blocks the normal FIFO queue
- * (not failed and not yet present in the transcript).
- */
-export function shouldDeferQueuedPendingPrompt(opts: {
-  priorPendingPrompts: PendingPromptLike[];
-  transcriptDoneIds?: Set<string>;
-}): boolean {
-  const done = opts.transcriptDoneIds ?? new Set<string>();
-  for (const p of opts.priorPendingPrompts ?? []) {
-    const id = String(p?.id ?? '').trim();
-    if (!id) continue;
-    if (done.has(id)) continue;
-    if (isTerminalPendingPrompt(p)) continue;
-    return true;
-  }
-  return false;
-}
-
-export function hasInFlightPriorPendingPrompt(opts: {
-  priorPendingPrompts: PendingPromptLike[];
-  transcriptDoneIds?: Set<string>;
-}): boolean {
-  const done = opts.transcriptDoneIds ?? new Set<string>();
-  for (const prompt of opts.priorPendingPrompts ?? []) {
-    const id = String(prompt?.id ?? '').trim();
-    if (!id || done.has(id)) continue;
-    if (isActivePendingPrompt(prompt)) return true;
-  }
-  return false;
 }
 
 type PendingPromptStalenessOpts = {

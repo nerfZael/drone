@@ -1,67 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  hasInFlightPriorPendingPrompt,
   looksLikeTransientPromptEnqueueError,
-  shouldDeferQueuedPendingPrompt,
   shouldRetryFailedPendingPrompt,
   stalePendingPromptState,
 } from '../src/hub/pendingPromptEnqueue';
-
-describe('shouldDeferQueuedPendingPrompt', () => {
-  test('defers for queued, sending, or sent rows that are not done', () => {
-    for (const state of ['queued', 'sending', 'sent'] as const) {
-      expect(
-        shouldDeferQueuedPendingPrompt({
-          priorPendingPrompts: [{ id: state, state }],
-        }),
-      ).toBe(true);
-    }
-  });
-
-  test('ignores failed rows and transcript-completed rows', () => {
-    expect(
-      shouldDeferQueuedPendingPrompt({
-        priorPendingPrompts: [{ id: 'f', state: 'failed' }],
-      }),
-    ).toBe(false);
-    expect(
-      shouldDeferQueuedPendingPrompt({
-        priorPendingPrompts: [{ id: 'done', state: 'sent' }],
-        transcriptDoneIds: new Set(['done']),
-      }),
-    ).toBe(false);
-  });
-});
-
-describe('hasInFlightPriorPendingPrompt', () => {
-  test('waits for running work but lets ASAP jump queued follow-ups', () => {
-    expect(
-      hasInFlightPriorPendingPrompt({
-        priorPendingPrompts: [
-          { id: 'queued', state: 'queued' },
-          { id: 'running', state: 'sent' },
-        ],
-      }),
-    ).toBe(true);
-    expect(
-      hasInFlightPriorPendingPrompt({
-        priorPendingPrompts: [{ id: 'queued', state: 'queued' }],
-      }),
-    ).toBe(false);
-  });
-
-  test('ignores completed and failed work', () => {
-    expect(
-      hasInFlightPriorPendingPrompt({
-        priorPendingPrompts: [
-          { id: 'done', state: 'sent' },
-          { id: 'failed', state: 'failed' },
-        ],
-        transcriptDoneIds: new Set(['done']),
-      }),
-    ).toBe(false);
-  });
-});
 
 describe('shouldRetryFailedPendingPrompt', () => {
   test('does not retry terminal auth failures', () => {
