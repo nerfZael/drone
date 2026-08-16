@@ -61,6 +61,25 @@ describe('sidebar presentation', () => {
     );
   });
 
+  test('keeps the draft placeholder in its normal repository or group ordering', () => {
+    const sidebarSource = readFileSync(
+      new URL('../src/droneHub/app/DroneSidebar.tsx', import.meta.url),
+      'utf8',
+    );
+    const readModelSource = readFileSync(
+      new URL('../src/droneHub/app/use-sidebar-read-model.ts', import.meta.url),
+      'utf8',
+    );
+
+    expect(sidebarSource).not.toContain('data-sidebar-draft-top-slot="true"');
+    expect(readModelSource).toContain(
+      '{ ...group, items: [draftSidebarPlaceholderDrone, ...group.items] }',
+    );
+    expect(readModelSource).toContain(
+      'return draftSidebarPlaceholderDrone ? [draftSidebarPlaceholderDrone, ...items] : items;',
+    );
+  });
+
   test('opens a repository back into its remembered chat workspace', () => {
     const sidebarSource = readFileSync(
       new URL('../src/droneHub/app/DroneSidebar.tsx', import.meta.url),

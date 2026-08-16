@@ -1,4 +1,5 @@
 import React from 'react';
+import { resolveCompanionChatName } from '@drone/assistant-chat';
 
 import {
   mobileDroneCreatePreferencesFromPayload,
@@ -29,6 +30,7 @@ export function useMobileCompanionWorkspaceTarget({
   setPrompt,
   openFile,
   createDraft,
+  openChat,
 }: {
   targetDeviceId: string;
   targetName: string;
@@ -43,6 +45,7 @@ export function useMobileCompanionWorkspaceTarget({
   setPrompt(value: string): void;
   openFile: { visible: boolean; path: string; kind: string };
   createDraft: CreateDraft;
+  openChat(drone: MobileDroneSummary, chatName: string): Promise<void>;
 }): string[] {
   const companion = useMobileCompanion();
   const [highlightedDroneIds, setHighlightedDroneIds] = React.useState<string[]>([]);
@@ -186,7 +189,18 @@ export function useMobileCompanionWorkspaceTarget({
       };
       const preferences = remembered ?? mobileDroneCreatePreferencesFromPayload(payload);
       if (!(await createDraft(payload, preferences))) throw new Error('DRONE_DRAFT_NOT_CREATED');
-      return { ok: true, placement: 'top' };
+      return { ok: true, repoPath: repoPath || null, group: group || null };
+    },
+    openDroneChat: async (args) => {
+      if (!targetReachable) throw new Error('TARGET_DEVICE_OFFLINE');
+      const droneId = String(args.droneId ?? '').trim();
+      const drone = drones.find((candidate) => candidate.id === droneId);
+      if (!drone) throw new Error(`unknown drone: ${droneId || '(empty)'}`);
+      const requestedChatName = String(args.chatName ?? '').trim();
+      const chatName = resolveCompanionChatName(drone.chats, requestedChatName);
+      if (!chatName) throw new Error(`unknown chat: ${droneId}/${requestedChatName || '(none)'}`);
+      await openChat(drone, chatName);
+      return { ok: true, droneId, chatName };
     },
     highlightDrones: (args) => {
       const requested = Array.isArray(args.droneIds)
@@ -219,6 +233,7 @@ export function useMobileCompanionWorkspaceTarget({
       readComposer: () => implementationRef.current!.readComposer(),
       applyComposer: (...args) => implementationRef.current!.applyComposer(...args),
       prepareDroneDraft: (args) => implementationRef.current!.prepareDroneDraft(args),
+      openDroneChat: (args) => implementationRef.current!.openDroneChat(args),
       highlightDrones: (args) => implementationRef.current!.highlightDrones(args),
     };
     return companion.registerWorkspaceTarget(target);

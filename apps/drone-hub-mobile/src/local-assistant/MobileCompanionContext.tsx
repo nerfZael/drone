@@ -32,6 +32,7 @@ export type MobileCompanionWorkspaceTarget = {
     content: string,
   ): { ok: true; revision: string };
   prepareDroneDraft(args: Record<string, unknown>): Promise<Record<string, unknown>>;
+  openDroneChat(args: Record<string, unknown>): Promise<Record<string, unknown>>;
   highlightDrones(args: Record<string, unknown>): Record<string, unknown>;
 };
 
@@ -183,6 +184,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
         return editor.apply(String(args.baseRevision ?? ''), String(args.content ?? ''));
       }
       if (tool === 'prepare_drone_draft') return await activeTarget.prepareDroneDraft(args);
+      if (tool === 'open_drone_chat') return await activeTarget.openDroneChat(args);
       if (tool === 'highlight_drones') return activeTarget.highlightDrones(args);
       throw new Error(`Unsupported Companion mobile tool: ${tool}`);
     },

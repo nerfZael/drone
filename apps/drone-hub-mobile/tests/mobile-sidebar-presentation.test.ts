@@ -501,6 +501,9 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain('<View accessible={false} style={styles.switchItemStatus} />');
     expect(source).toContain('accessibilityLabel="Draft drone"');
     expect(source).toContain('style={styles.switchItemDraftBadge}');
+    expect(source).toContain('buildMobileDroneRepoGroups(drones, droneSidebarOrder)');
+    expect(source).not.toContain('Prepared drone drafts');
+    expect(source).not.toContain('const preparedDrones =');
     expect(source).toContain('dronesLoading && drones.length === 0 ? (');
     expect(source).toContain('accessibilityLabel="Loading projects and drones"');
     expect(source).toContain('Loading projects and drones…');
@@ -542,9 +545,9 @@ describe('mobile sidebar presentation', () => {
     const shellSource = readFileSync(new URL('../src/shell/MeshApp.tsx', import.meta.url), 'utf8');
 
     expect(drawerSource).toContain(
-      'resolvePinnedSidebarDrones(sidebarDrones, droneSidebarOrder.pinnedDroneIds)',
+      'resolvePinnedSidebarDrones(drones, droneSidebarOrder.pinnedDroneIds)',
     );
-    expect(drawerSource).toContain('<DrawerPreparedDrones');
+    expect(drawerSource).not.toContain('<DrawerPreparedDrones');
     expect(drawerSource).not.toContain('resolvePinnedSidebarDronesForRepo(');
     expect(drawerSource).not.toContain('excludePinnedMobileDrones');
     expect(drawerSource).toContain('data={activeRepo.entries}');
@@ -767,6 +770,22 @@ describe('mobile sidebar presentation', () => {
     );
     expect(dronesSource).toContain('backNavigation: true,');
     expect(dronesSource.match(/navigateToDrones\(\);/g)).toHaveLength(2);
+  });
+
+  test('opens Companion chat navigation visibly after preserving the new-drone draft', () => {
+    const source = readFileSync(
+      new URL('../src/screens/DronesScreen.tsx', import.meta.url),
+      'utf8',
+    );
+    const openChat = source.slice(
+      source.indexOf('openChat: async (drone, requestedChat) => {'),
+      source.indexOf('\n    },', source.indexOf('openChat: async (drone, requestedChat) => {')),
+    );
+
+    expect(openChat).toContain('await saveNewDroneDraftBeforeNavigation();');
+    expect(openChat).toContain("navigationItems.find((item) => item.id === 'drones')?.onPress();");
+    expect(openChat).toContain('onDrawerOpenChange(false);');
+    expect(openChat).toContain('await activateDrone(drone, requestedChat);');
   });
 
   test('uses the Drone Hub brand as a project-list home control', () => {

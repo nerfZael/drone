@@ -55,7 +55,7 @@ Continuous transcription, silence-driven end-of-thought detection, spoken replie
 | Active editor file                                  | [`use-file-editor-state.ts`](../../drone-hub/src/droneHub/app/use-file-editor-state.ts) and [`OpenedDroneFilePanel.tsx`](../../drone-hub/src/droneHub/files/OpenedDroneFilePanel.tsx)                                                                                                                            | Register the open buffer, revision, dirty state, and local edit/preview mode as a browser text target.                                                                                       |
 | Browser workspace tools                             | [`CompanionWorkspaceContext.tsx`](../../drone-hub/src/droneHub/companion/CompanionWorkspaceContext.tsx)                                                                                                                                                                                                     | Register app context, draft preparation, highlighting, and editor targets in one typed provider shared by the runtime and Hub model.                                                        |
 | Patch parsing and application                       | [`apply-patch.ts`](../../../blip/packages/tools/src/apply-patch.ts)                                                                                                                                                                                                                                              | Reuse `parsePatch` and `applyPatchHunks` on the server; restrict Companion to updates on the selected browser text target and preserve its original line endings.                            |
-| Drone draft UI                                      | [`use-workspace-navigation-actions.ts`](../../drone-hub/src/droneHub/app/use-workspace-navigation-actions.ts), [`DroneSidebar.tsx`](../../drone-hub/src/droneHub/app/DroneSidebar.tsx), [`use-sidebar-read-model.ts`](../../drone-hub/src/droneHub/app/use-sidebar-read-model.ts), and the existing draft stores | Open and prefill the existing draft flow. Render its existing placeholder in a dedicated top slot instead of inserting it into repository/group ordering. Do not create another draft model. |
+| Drone draft UI                                      | [`use-workspace-navigation-actions.ts`](../../drone-hub/src/droneHub/app/use-workspace-navigation-actions.ts), [`DroneSidebar.tsx`](../../drone-hub/src/droneHub/app/DroneSidebar.tsx), [`use-sidebar-read-model.ts`](../../drone-hub/src/droneHub/app/use-sidebar-read-model.ts), and the existing draft stores | Open and prefill the existing draft flow. Render its placeholder as the newest normal drone row in its selected repository and group. Do not create another draft model. |
 | Overlay placement and style                         | [`HubTransientToasts.tsx`](../../drone-hub/src/droneHub/app/HubTransientToasts.tsx) and [`DroneHubOverlays.tsx`](../../drone-hub/src/droneHub/app/DroneHubOverlays.tsx)                                                                                                                                          | Reuse its visual language, but use a separate `CompanionOverlay` because the state lasts longer than a toast.                                                                                |
 | Working and tool-call details                       | [`AgentRunActivityView.tsx`](../../drone-hub/src/droneHub/assistant/AgentRunActivityView.tsx), [`WorkingElapsedStatus.tsx`](../../drone-hub/src/droneHub/chat/WorkingElapsedStatus.tsx), and [`AssistantTranscript.tsx`](../../drone-hub/src/droneHub/assistant/AssistantTranscript.tsx)                         | Reuse the elapsed-time summary, tool count, chevron, tool rows, grouping, and bounded scrolling in a tools-only Companion view.                                                              |
 | Reply rendering                                     | [`ChatMessageBody.tsx`](../../drone-hub/src/droneHub/chat/ChatMessageBody.tsx) and [`MarkdownMessage.tsx`](../../drone-hub/src/droneHub/chat/MarkdownMessage.tsx)                                                                                                                                                | Render the final reply with the same Markdown, code highlighting, links, tables, and copy actions as agent chat.                                                                             |
@@ -79,7 +79,7 @@ Add `apps/drone-hub/src/droneHub/companion/` with:
 - `CompanionOverlay`, mounted once from `DroneHubOverlays`;
 - a browser tool executor that validates tool calls and invokes existing UI state methods.
 
-Add one shortcut action with toggle-to-talk behavior. The first press only starts recording. The second press stops recording and starts one-shot transcription. Do not use silence to steer, submit, or end the request. If transcription is empty after trimming, return to idle without opening a Blip session or showing an assistant message. While transcribing or working, repeated shortcut presses do nothing; after completion or error, the next press erases the previous overlay state and starts a new recording.
+Add one shortcut action with toggle-to-talk behavior. The first press only starts recording. The second press stops recording and starts one-shot transcription. Escape while starting, recording, or paused discards only that recording, does not transcribe it, and consumes the keypress before other app Escape handlers. If this was a follow-up recording, preserve the completed reply beneath it. Do not use silence to steer, submit, or end the request. If transcription is empty after trimming, return to idle without opening a Blip session or showing an assistant message. While transcribing or working, repeated shortcut presses do nothing; after completion or error, the next press erases the previous overlay state and starts a new recording.
 
 Extend the composers already registered for continuous dictation. A registered composer should expose its ID, virtual path, text, revision, and a compare-and-set commit. This lets `read_active_composer` and `apply_composer_patch` work across normal, draft, built-in, and multi-chat composers.
 
@@ -133,6 +133,7 @@ Add a browser tool provider whose Blip tools call the bound client and await a s
 - `read_open_file`
 - `apply_editor_patch`
 - `prepare_drone_draft`
+- `open_drone_chat`
 - `highlight_drones`
 
 Each tool has a fixed schema and a matching browser implementation; there is no generic `execute_ui` tool. The read tools return a target ID, virtual path, content, mode, and revision. `apply_composer_patch` and `apply_editor_patch` require the matching target ID and base revision, parse the normal Blip patch envelope on the server, and accept only `Update File` operations for that exact path. Add, delete, move, cross-target, and whole-value replacement operations are rejected.
@@ -149,11 +150,11 @@ A separate write or replace tool is not needed. An insert-only update works for 
 
 The server applies the patch hunks to the snapshot, then asks the browser to commit the result immediately if the target, revision, and mode still match; there is no confirmation step. On a conflict, the tool returns the latest revision so the agent can reread and retry. `apply_editor_patch` also rejects non-text, read-only, large-file, loading, saving, and preview states. A successful editor patch updates only the unsaved browser buffer; it does not call the save endpoint.
 
-`prepare_drone_draft` opens and populates the existing draft flow, then returns the resulting draft state. Reuse the current draft store and placeholder, but render that placeholder in a dedicated slot before pinned, repository, group, and normal drone rows. It stays visible at the top while a repository or recent-drones filter is active. Any intended repository or group remains part of the draft's creation settings but does not control where its placeholder is shown. Preparing another draft replaces the existing single draft; it does not add a second draft row.
+`prepare_drone_draft` opens and populates the existing draft flow, then returns the resulting draft state. Reuse the current draft store and normal sidebar row. Place the draft inside its selected repository and group, ordered before existing sibling drones while it is new. It remains subject to the same repository, group, recent-drones, pinning, and manual-order behavior as every other drone; draft status changes the row badge and state, not its location. Preparing another draft replaces the existing single draft; it does not add a second draft row.
 
 Applying a patch must preserve user undo. For Monaco-backed composer and file editors, expose an edit method on the registered target that uses `pushUndoStop`, `executeEdits`, and `pushUndoStop` instead of replacing the React `value`; one Ctrl/Cmd+Z should revert the whole Companion patch. For controlled textareas, keep an app-owned Companion undo snapshot and intercept Ctrl/Cmd+Z when the current revision still matches the patched result. Clear that snapshot when the composer is sent, reset, or replaced. Browser tests must cover user typing before and after the patch. Do not claim undo support from `setDraft` or `setOpenedFileContent` alone.
 
-Do not enable shell, direct workspace file writes or saves, message sending, actual drone creation, chat/drone navigation, settings changes, or the full built-in-agent catalog in the first version. Broader workspace reads and file search can later reuse a read-only `DroneWorkspaceTarget` for the active drone.
+Do not enable shell, direct workspace file writes or saves, message sending, actual drone or chat creation, generic navigation, settings changes, or the full built-in-agent catalog in the first version. Opening one existing chat is the only supported navigation action. Broader workspace reads and file search can later reuse a read-only `DroneWorkspaceTarget` for the active drone.
 
 ### 4. Add a dedicated Companion Settings tab
 
@@ -187,6 +188,7 @@ Every completed or failed message also writes a structured `Companion message ti
 ## Success Criteria
 
 - The shortcut and microphone work from normal local Drone Hub screens and report conflicts clearly.
+- Escape during a desktop Companion recording discards the audio without transcription or another Escape side effect.
 - On mobile, the microphone stays at the bottom-left of the sidebar (after a bottom-pinned section), and the run overlay appears at the top of the app with a stop control while recording.
 - Companion can combine server-owned Drone Hub tools and browser-owned UI tools in one Blip turn.
 - Every UI tool result is visible to the agent before it produces its final answer.
@@ -200,8 +202,8 @@ Every completed or failed message also writes a structured `Companion message ti
 - Missing provider credentials produce a clear Settings and overlay error without provider fallback.
 - It can report Hub counts, identify repo-less drones and drones with multiple chats, and show each drone's repository membership without scanning the UI.
 - Keyword search finds matching content in active chats, returns traceable chat references, and never returns archived chats.
-- It can prefill the existing single drone draft without creating or sending anything; the draft remains the first drone row regardless of grouping, pinning, repository selection, or recent-drones filtering.
-- Companion can highlight matching drones, but its runtime catalog contains no tool that opens or navigates to a drone or chat.
+- It can prefill the existing single drone draft without creating or sending anything; the new draft appears first among the drones in its selected repository and group, subject to normal sidebar filtering and ordering afterward.
+- Companion can open an existing chat in the current client and highlight matching drones, but it cannot create chats or perform generic navigation.
 - A changed composer is never overwritten, and one browser cannot receive another browser's tool calls.
 - Follow-up turns reuse the open Companion thread, and turns submitted while it is working run in order.
 - Closing the overlay cancels any active stage, deletes the temporary session, and leaves no recoverable Companion conversation.
@@ -237,11 +239,12 @@ Every completed or failed message also writes a structured `Companion message ti
 - **Decided:** Companion has its own Settings tab and profile-scoped system prompt, enabled-tool list, model, and reasoning configuration.
 - **Decided:** Companion supports OpenAI, Codex, and Gemini through the existing Hub provider credentials and model mappings.
 - **Decided:** The only first-version voice behavior is toggle-to-talk. The second toggle stops recording and then transcribes; silence never submits automatically.
+- **Decided:** Escape cancels only the active desktop recording and is consumed before other app Escape handlers; it preserves any earlier completed Companion reply.
 - **Decided:** Closing the overlay cancels and permanently erases the conversation. Recoverable history is deferred.
 - **Decided:** Both patch tools commit immediately without confirmation and must remain reversible with one Ctrl/Cmd+Z. Insert-only patches handle empty targets, so no separate write tool is needed.
 - **Decided:** Chat search is keyword-only and excludes archived chats in the first version.
 - **Decided:** Companion sessions use an isolated in-memory SQLite repository. Normal close deletes them, while a Hub crash removes them with process memory.
-- **Decided:** `prepare_drone_draft` reuses the single existing draft but always shows it in a dedicated slot at the top of the Hub sidebar, outside repository/group/filter ordering.
-- **Decided:** Companion can highlight drones but has no `open_drone_chat` or other chat/drone navigation tool.
+- **Decided:** `prepare_drone_draft` reuses the single existing draft and shows it as the newest normal drone row inside its selected repository and group; it has no dedicated global sidebar slot.
+- **Decided:** Companion can open an existing chat with `open_drone_chat` and can highlight drones, but it cannot create chats or perform generic UI navigation.
 - **Decided:** Mobile uses a sidebar microphone and top overlay, reuses the existing phone voice recorder and Hub Companion settings, and reaches the same runtime through a permissioned device-mesh capability.
 - **Decided:** Companion takes the backtick default shortcut. Existing users with the old default voice-to-clipboard binding are migrated to Companion and voice-to-clipboard becomes unbound; custom bindings are preserved.

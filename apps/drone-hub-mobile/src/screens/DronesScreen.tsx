@@ -2106,6 +2106,12 @@ export function DronesScreen({
     },
     createDraft: (payload, preferences) =>
       createDrone(payload, preferences, [], { selectCreatedDrone: false }),
+    openChat: async (drone, requestedChat) => {
+      await saveNewDroneDraftBeforeNavigation();
+      navigationItems.find((item) => item.id === 'drones')?.onPress();
+      onDrawerOpenChange(false);
+      await activateDrone(drone, requestedChat);
+    },
   });
   const loadRunFileDiff = React.useCallback(
     async ({ artifactId, path }: { artifactId: string; path: string }) => {

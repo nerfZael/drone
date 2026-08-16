@@ -1,5 +1,6 @@
 import React from 'react';
 import { createSidebarCommandQueue } from '@drone/hub-model/sidebar';
+import { resolveCompanionChatName } from '@drone/assistant-chat';
 import {
   type AgentApprovalPolicy,
   type AgentPermissionMode,
@@ -2663,6 +2664,21 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           : current);
         return { ok: true, name, prompt, repoPath: repoPath || null, group: group || null };
       },
+      openDroneChat: (args) => {
+        const droneId = String(args.droneId ?? '').trim();
+        const drone = droneByIdRef.current[droneId];
+        if (!drone) throw new Error(`unknown drone: ${droneId || '(empty)'}`);
+        const requestedChatName = String(args.chatName ?? '').trim();
+        const chats = [
+          ...normalizedDroneChats(drone, { includeDefaultWhenEmpty: true }),
+          ...(drone.workflowChats ?? []),
+        ];
+        const chatName = resolveCompanionChatName(chats, requestedChatName);
+        if (!chatName) throw new Error(`unknown chat: ${droneId}/${requestedChatName || '(none)'}`);
+        expandGroupsForDroneIds([droneId]);
+        selectDroneChat(droneId, chatName);
+        return { ok: true, droneId, chatName };
+      },
       highlightDrones: (args) => {
         const droneIds = Array.from(new Set(
           (Array.isArray(args.droneIds) ? args.droneIds : [])
@@ -2700,6 +2716,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     rightPanelTab,
     selectedChat,
     selectedDroneIds,
+    selectDroneChat,
     setDraftChat,
     setDraftCreateMode,
     setDraftCreateName,

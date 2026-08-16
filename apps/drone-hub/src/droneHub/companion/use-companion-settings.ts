@@ -1,6 +1,7 @@
 import React from 'react';
 
 export type CompanionSettingsDraft = {
+  schemaVersion: 2;
   provider: 'openai' | 'codex' | 'gemini';
   model: string;
   thinkingLevel: string;

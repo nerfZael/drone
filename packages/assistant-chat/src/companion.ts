@@ -8,10 +8,22 @@ export const COMPANION_BROWSER_TOOL_NAMES = [
   'read_open_file',
   'apply_editor_patch',
   'prepare_drone_draft',
+  'open_drone_chat',
   'highlight_drones',
 ] as const;
 
 export type CompanionBrowserToolName = (typeof COMPANION_BROWSER_TOOL_NAMES)[number];
+
+/** Resolve an existing chat for Companion navigation without inventing a `default` chat. */
+export function resolveCompanionChatName(
+  chatNames: readonly string[],
+  requestedChatName: unknown,
+): string | null {
+  const available = [...new Set(chatNames.map((name) => String(name ?? '').trim()).filter(Boolean))];
+  const requested = String(requestedChatName ?? '').trim();
+  if (requested) return available.includes(requested) ? requested : null;
+  return available.includes('default') ? 'default' : available[0] ?? null;
+}
 
 export type CompanionStatus =
   | 'idle'

@@ -1,13 +1,27 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  COMPANION_BROWSER_TOOL_NAMES,
   COMPANION_MAX_PROMPT_CHARS,
   groupCompanionToolActivity,
   reduceCompanionToolActivity,
+  resolveCompanionChatName,
   validateCompanionRunInput,
 } from '../src';
 
 describe('Companion contracts', () => {
+  test('allows the browser client to open an existing drone chat', () => {
+    expect(COMPANION_BROWSER_TOOL_NAMES).toContain('open_drone_chat');
+  });
+
+  test('resolves Companion navigation only to an existing chat', () => {
+    expect(resolveCompanionChatName(['planning', 'default'], undefined)).toBe('default');
+    expect(resolveCompanionChatName(['planning', 'review'], '  review  ')).toBe('review');
+    expect(resolveCompanionChatName(['planning', 'review'], undefined)).toBe('planning');
+    expect(resolveCompanionChatName(['planning'], 'default')).toBeNull();
+    expect(resolveCompanionChatName([], undefined)).toBeNull();
+  });
+
   test('normalizes valid run input and rejects invalid input consistently', () => {
     expect(validateCompanionRunInput({ runId: ' run-1 ', prompt: ' hello ' })).toEqual({
       ok: true,

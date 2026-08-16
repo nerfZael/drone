@@ -1761,67 +1761,6 @@ function DrawerPinnedDrones({
   );
 }
 
-function DrawerPreparedDrones({
-  drones,
-  repoLabelByPath,
-  sidebarChatOrderByDrone,
-  collapsedDroneIds,
-  selectedContainerDroneId,
-  activeDroneId,
-  activeChatName,
-  droneOperationById,
-  onToggleDrone,
-  onSelectContainer,
-  onOpenChatActions,
-  onSelect,
-}: {
-  drones: MobileDroneSummary[];
-  repoLabelByPath: ReadonlyMap<string, string>;
-  sidebarChatOrderByDrone: Record<string, string[]>;
-  collapsedDroneIds: ReadonlySet<string>;
-  selectedContainerDroneId: string;
-  activeDroneId: string;
-  activeChatName: string;
-  droneOperationById: Record<string, 'archiving' | 'deleting'>;
-  onToggleDrone(droneId: string): void;
-  onSelectContainer(droneId: string): void;
-  onOpenChatActions?(target: DrawerChatActionTarget): void;
-  onSelect(droneId: string, chatName: string): void;
-}) {
-  if (drones.length === 0) return null;
-  const siblingNodeIds = drones.map((item) => item.id);
-  return (
-    <View style={styles.preparedDronesSection} accessibilityLabel="Prepared drone drafts">
-      <DrawerSidebarReorderContext.Provider value={null}>
-        {drones.map((drone) => (
-          <DrawerDroneNode
-            key={`prepared:${drone.id}`}
-            node={{ drone, children: [] }}
-            depth={0}
-            parentId="prepared"
-            siblingNodeIds={siblingNodeIds}
-            contextLabel={
-              repoLabelByPath.get(drone.repoPath) ||
-              drone.repoPath.split(/[\\/]/).filter(Boolean).at(-1) ||
-              'Ungrouped'
-            }
-            sidebarChatOrderByDrone={sidebarChatOrderByDrone}
-            collapsedDroneIds={collapsedDroneIds}
-            selectedContainerDroneId={selectedContainerDroneId}
-            activeDroneId={activeDroneId}
-            activeChatName={activeChatName}
-            droneOperationById={droneOperationById}
-            onToggleDrone={onToggleDrone}
-            onSelectContainer={onSelectContainer}
-            onOpenChatActions={onOpenChatActions}
-            onSelect={onSelect}
-          />
-        ))}
-      </DrawerSidebarReorderContext.Provider>
-    </View>
-  );
-}
-
 export function AppDrawer(props: AppDrawerProps) {
   const registerDrawer = React.useContext(AppDrawerHostContext);
 
@@ -2111,17 +2050,9 @@ function AppDrawerView({
     animation.start();
     return () => animation.stop();
   }, [open, workingPhase]);
-  const preparedDrones = React.useMemo(
-    () => drones.filter((drone) => drone.draft === true || drone.phase.trim().toLowerCase() === 'draft'),
-    [drones],
-  );
-  const sidebarDrones = React.useMemo(
-    () => drones.filter((drone) => drone.draft !== true && drone.phase.trim().toLowerCase() !== 'draft'),
-    [drones],
-  );
   const droneGroups = React.useMemo(
-    () => buildMobileDroneRepoGroups(sidebarDrones, droneSidebarOrder),
-    [droneSidebarOrder, sidebarDrones],
+    () => buildMobileDroneRepoGroups(drones, droneSidebarOrder),
+    [droneSidebarOrder, drones],
   );
   const mutedSidebarGroupIdSet = React.useMemo(
     () => new Set(droneSidebarOrder.mutedSidebarGroupIds),
@@ -2209,8 +2140,8 @@ function AppDrawerView({
   }, [chatMutationBusy, open]);
   const activeRepo = droneGroups.find((group) => group.id === activeRepoId) ?? null;
   const globalPinnedDrones = React.useMemo(
-    () => resolvePinnedSidebarDrones(sidebarDrones, droneSidebarOrder.pinnedDroneIds),
-    [droneSidebarOrder.pinnedDroneIds, sidebarDrones],
+    () => resolvePinnedSidebarDrones(drones, droneSidebarOrder.pinnedDroneIds),
+    [droneSidebarOrder.pinnedDroneIds, drones],
   );
   const repoLabelByPath = React.useMemo(
     () => new Map(droneGroups.map((group) => [group.repoPath, group.label])),
@@ -2435,22 +2366,6 @@ function AppDrawerView({
       onTogglePlacement={togglePinnedSidebarPlacement}
     />
   );
-  const preparedDronesSection = (
-    <DrawerPreparedDrones
-      drones={preparedDrones}
-      repoLabelByPath={repoLabelByPath}
-      sidebarChatOrderByDrone={droneSidebarOrder.sidebarChatOrderByDrone}
-      collapsedDroneIds={collapsedDroneIds}
-      selectedContainerDroneId={selectedContainerDroneId}
-      activeDroneId={activeDroneId}
-      activeChatName={activeChatName}
-      droneOperationById={droneOperationById}
-      onToggleDrone={toggleDrone}
-      onSelectContainer={setSelectedContainerDroneId}
-      onOpenChatActions={openChatActions}
-      onSelect={selectPinnedDroneChat}
-    />
-  );
   React.useEffect(() => {
     if (activeRepoId && !droneGroups.some((group) => group.id === activeRepoId)) {
       setActiveRepoId(null);
@@ -2578,7 +2493,6 @@ function AppDrawerView({
             </View>
             {showDrones ? (
               <>
-                {preparedDronesSection}
                 {pinnedSidebarPlacement === 'top' ? pinnedDronesSection : null}
                 {activeRepo ? (
                   <FlatList<MobileDroneSidebarEntry>
@@ -3101,13 +3015,6 @@ const styles = StyleSheet.create({
   pinnedSection: {
     flexShrink: 0,
     paddingBottom: 4,
-  },
-  preparedDronesSection: {
-    flexShrink: 0,
-    paddingVertical: 4,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderSubtle,
-    backgroundColor: colors.accentWash,
   },
   pinnedSectionTop: {
     borderBottomWidth: 1,

@@ -16,6 +16,7 @@ import {
 export type CompanionThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
 export type CompanionSettings = {
+  schemaVersion: 2;
   provider: LlmProviderId;
   model: string;
   thinkingLevel: CompanionThinkingLevel;
@@ -32,12 +33,20 @@ export const COMPANION_RUNTIME_CONTRACT = [
   'Keep the final response concise and practical.',
 ].join('\n');
 
-export const DEFAULT_COMPANION_SYSTEM_PROMPT = [
+const LEGACY_DEFAULT_COMPANION_SYSTEM_PROMPT = [
   'You are Companion, a concise voice-first assistant embedded in Drone Hub.',
   'Use tools to inspect Drone Hub and perform requested UI changes. Do not describe UI actions instead of using tools.',
   'Read a composer or editor target before patching it. Use the target-specific patch tool and retry after rereading when a revision is stale.',
   'Use keyword chat search only when it helps answer the request. Archived chats are unavailable.',
   'You may highlight drones but cannot open or navigate to drones or chats.',
+].join('\n');
+
+export const DEFAULT_COMPANION_SYSTEM_PROMPT = [
+  'You are Companion, a concise voice-first assistant embedded in Drone Hub.',
+  'Use tools to inspect Drone Hub and perform requested UI changes. Do not describe UI actions instead of using tools.',
+  'Read a composer or editor target before patching it. Use the target-specific patch tool and retry after rereading when a revision is stale.',
+  'Use keyword chat search only when it helps answer the request. Archived chats are unavailable.',
+  'Use open_drone_chat when the user asks to open or navigate to an existing chat. Use exact drone and chat references returned by the chat tools.',
 ].join('\n');
 
 export const COMPANION_TOOL_SUMMARIES = [
@@ -139,7 +148,17 @@ export const COMPANION_TOOL_SUMMARIES = [
     category: 'actions',
     execution: 'browser',
     requires: null,
-    description: 'Open and prefill the single unsent drone draft shown at the top of the sidebar.',
+    description:
+      'Open and prefill the single unsent drone draft as the newest normal row in its repository and group.',
+  },
+  {
+    name: 'open_drone_chat',
+    label: 'Open drone chat',
+    category: 'actions',
+    execution: 'browser',
+    requires: null,
+    description:
+      'Open an existing drone chat in Drone Hub. This navigates the current client and does not create a chat.',
   },
   {
     name: 'highlight_drones',
@@ -164,7 +183,11 @@ export type CompanionToolName = CompanionToolCatalogEntry['name'];
 export type { CompanionBrowserToolName } from '@drone/assistant-chat';
 
 const SETTING_KEY = 'companion';
+const COMPANION_SETTINGS_SCHEMA_VERSION = 2;
 const TOOL_NAMES = new Set(COMPANION_TOOL_SUMMARIES.map((tool) => tool.name));
+const LEGACY_DEFAULT_TOOL_NAMES = COMPANION_TOOL_SUMMARIES
+  .map((tool) => tool.name)
+  .filter((name) => name !== 'open_drone_chat');
 const TOOL_DEPENDENCIES = new Map<CompanionToolName, CompanionToolName>(
   COMPANION_TOOL_SUMMARIES.flatMap((tool) =>
     tool.requires ? [[tool.name, tool.requires] as const] : [],
@@ -172,6 +195,7 @@ const TOOL_DEPENDENCIES = new Map<CompanionToolName, CompanionToolName>(
 );
 
 export const DEFAULT_COMPANION_SETTINGS: CompanionSettings = {
+  schemaVersion: COMPANION_SETTINGS_SCHEMA_VERSION,
   provider: 'codex',
   model: DEFAULT_CODEX_MODEL,
   thinkingLevel: 'medium',
@@ -179,11 +203,14 @@ export const DEFAULT_COMPANION_SETTINGS: CompanionSettings = {
   enabledTools: COMPANION_TOOL_SUMMARIES.map((tool) => tool.name),
 };
 
-function normalizeEnabledTools(value: unknown): CompanionToolName[] {
+function normalizeEnabledTools(value: unknown, migrateLegacyDefaults: boolean): CompanionToolName[] {
   const requested = Array.isArray(value)
     ? value.map((item) => String(item).trim()).filter((item): item is CompanionToolName => TOOL_NAMES.has(item as CompanionToolName))
     : DEFAULT_COMPANION_SETTINGS.enabledTools;
   const enabled = new Set(requested);
+  if (migrateLegacyDefaults && LEGACY_DEFAULT_TOOL_NAMES.every((name) => enabled.has(name))) {
+    enabled.add('open_drone_chat');
+  }
   for (const [patchTool, readTool] of TOOL_DEPENDENCIES) {
     if (enabled.has(patchTool)) enabled.add(readTool);
   }
@@ -200,6 +227,7 @@ export function normalizeCompanionSettings(value: unknown): CompanionSettings {
   const raw = value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
+  const migrateLegacyDefaults = raw.schemaVersion !== COMPANION_SETTINGS_SCHEMA_VERSION;
   const provider = raw.provider === 'openai' || raw.provider === 'gemini' || raw.provider === 'codex'
     ? raw.provider
     : DEFAULT_COMPANION_SETTINGS.provider;
@@ -208,13 +236,17 @@ export function normalizeCompanionSettings(value: unknown): CompanionSettings {
   const match = matchingModel(provider, requestedModel, requestedThinking)
     ?? HUB_AGENT_MODEL_OPTIONS.find((option) => option.provider === provider)
     ?? HUB_AGENT_MODEL_OPTIONS[0];
-  const prompt = String(raw.systemPrompt ?? DEFAULT_COMPANION_SYSTEM_PROMPT);
+  const storedPrompt = String(raw.systemPrompt ?? DEFAULT_COMPANION_SYSTEM_PROMPT);
+  const prompt = storedPrompt === LEGACY_DEFAULT_COMPANION_SYSTEM_PROMPT
+    ? DEFAULT_COMPANION_SYSTEM_PROMPT
+    : storedPrompt;
   return {
+    schemaVersion: COMPANION_SETTINGS_SCHEMA_VERSION,
     provider,
     model: match.id,
     thinkingLevel: match.thinkingLevel,
     systemPrompt: prompt.slice(0, COMPANION_SYSTEM_PROMPT_MAX_CHARS),
-    enabledTools: normalizeEnabledTools(raw.enabledTools),
+    enabledTools: normalizeEnabledTools(raw.enabledTools, migrateLegacyDefaults),
   };
 }
 

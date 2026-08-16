@@ -1,29 +1,117 @@
 import React from 'react';
+import { isUngroupedGroupName } from '../../domain';
 import type { DroneSummary } from '../types';
 import { compareDronesByNewestFirst } from './helpers';
 import { buildSidebarFolderTree, flattenSidebarFolderTree } from './sidebar-folder-tree';
+import { orderSidebarGroups } from './sidebar-group-order';
+import { isSameOrDescendantSidebarGroupPath } from './sidebar-group-paths';
 import type { SidebarGroup } from './use-sidebar-view-model';
+
+function repoPathToLabel(repoPathRaw: string): string {
+  const repoPath = String(repoPathRaw ?? '').trim();
+  if (!repoPath) return 'Ungrouped';
+  const parts = repoPath.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] || repoPath;
+}
+
+function sidebarFolderHiddenByTokens(
+  hiddenTokens: ReadonlySet<string>,
+  path: string,
+  kind: 'group' | 'repo',
+  groupIdByName: Readonly<Record<string, string>>,
+): boolean {
+  if (kind === 'repo') return hiddenTokens.has(`repo:${path}`);
+  return Array.from(hiddenTokens).some((token) => {
+    if (token.startsWith('group:')) {
+      return isSameOrDescendantSidebarGroupPath(path, token.slice('group:'.length));
+    }
+    if (!token.startsWith('group-id:')) return false;
+    const hiddenGroupId = token.slice('group-id:'.length);
+    const hiddenGroupName = Object.entries(groupIdByName).find(
+      ([, groupId]) => groupId === hiddenGroupId,
+    )?.[0];
+    return Boolean(hiddenGroupName && isSameOrDescendantSidebarGroupPath(path, hiddenGroupName));
+  });
+}
 
 type UseSidebarReadModelArgs = {
   draftSidebarPlaceholderDrone: DroneSummary | null;
+  hiddenSidebarGroupTokenSet: Set<string>;
   isRepoGroupingMode: boolean;
   optimisticSidebarDronesFilteredByRepo: DroneSummary[];
   optimisticSidebarGroups: SidebarGroup[];
   repoScopedGroupPathsByRepoGroup: Record<string, string[]>;
+  showHiddenSidebarGroups: boolean;
+  sidebarGroupIdByName: Record<string, string>;
   sidebarGroupOrder: string[];
+  sidebarGroupingMode: 'groups' | 'repos';
   sidebarGroupCreatedAtByName: Record<string, string | null>;
 };
 
 export function useSidebarReadModel({
   draftSidebarPlaceholderDrone,
+  hiddenSidebarGroupTokenSet,
   isRepoGroupingMode,
   optimisticSidebarDronesFilteredByRepo,
   optimisticSidebarGroups,
   repoScopedGroupPathsByRepoGroup,
+  showHiddenSidebarGroups,
+  sidebarGroupIdByName,
   sidebarGroupOrder,
+  sidebarGroupingMode,
   sidebarGroupCreatedAtByName,
 }: UseSidebarReadModelArgs) {
-  const renderSidebarGroups = optimisticSidebarGroups;
+  const renderSidebarGroups = React.useMemo(() => {
+    if (!draftSidebarPlaceholderDrone) return optimisticSidebarGroups;
+    const placeholderGroup =
+      sidebarGroupingMode === 'repos'
+        ? {
+            group: draftSidebarPlaceholderDrone.repoPath
+              ? `repo:${draftSidebarPlaceholderDrone.repoPath}`
+              : 'repo:ungrouped',
+            label: draftSidebarPlaceholderDrone.repoPath
+              ? repoPathToLabel(draftSidebarPlaceholderDrone.repoPath)
+              : 'Ungrouped',
+            kind: 'repo' as const,
+          }
+        : {
+            group: String(draftSidebarPlaceholderDrone.group ?? '').trim() || 'Ungrouped',
+            label: String(draftSidebarPlaceholderDrone.group ?? '').trim() || 'Ungrouped',
+            kind: 'group' as const,
+          };
+    if (
+      !showHiddenSidebarGroups &&
+      sidebarFolderHiddenByTokens(
+        hiddenSidebarGroupTokenSet,
+        placeholderGroup.group,
+        placeholderGroup.kind,
+        sidebarGroupIdByName,
+      )
+    ) {
+      return optimisticSidebarGroups;
+    }
+    const next = optimisticSidebarGroups.map((group) =>
+      group.group === placeholderGroup.group
+        ? { ...group, items: [draftSidebarPlaceholderDrone, ...group.items] }
+        : group,
+    );
+    if (next.some((group) => group.group === placeholderGroup.group)) return next;
+    next.push({ ...placeholderGroup, items: [draftSidebarPlaceholderDrone] });
+    next.sort((a, b) => {
+      if (isUngroupedGroupName(a.label) && !isUngroupedGroupName(b.label)) return -1;
+      if (!isUngroupedGroupName(a.label) && isUngroupedGroupName(b.label)) return 1;
+      return a.label.localeCompare(b.label);
+    });
+    return orderSidebarGroups(next, sidebarGroupOrder);
+  }, [
+    draftSidebarPlaceholderDrone,
+    hiddenSidebarGroupTokenSet,
+    optimisticSidebarGroups,
+    showHiddenSidebarGroups,
+    sidebarGroupIdByName,
+    sidebarGroupOrder,
+    sidebarGroupingMode,
+  ]);
 
   const sidebarFolderTree = React.useMemo(
     () => buildSidebarFolderTree(renderSidebarGroups, sidebarGroupOrder, sidebarGroupCreatedAtByName),

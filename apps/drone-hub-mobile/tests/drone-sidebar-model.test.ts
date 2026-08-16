@@ -133,6 +133,32 @@ describe('mobile drone sidebar model', () => {
     expect(groups[2]?.folders[0]?.children[0]?.roots[0]?.drone.id).toBe('beta');
   });
 
+  test('keeps a new draft in its repository and orders it before older sibling drones', () => {
+    const groups = buildMobileDroneRepoGroups(
+      normalizeMobileDrones([
+        {
+          id: 'older',
+          name: 'Older drone',
+          repoPath: '/work/alpha',
+          createdAt: '2026-08-15T10:00:00.000Z',
+        },
+        {
+          id: 'draft',
+          name: 'Companion draft',
+          repoPath: '/work/alpha',
+          phase: 'draft',
+          draft: true,
+          createdAt: '2026-08-16T10:00:00.000Z',
+        },
+      ]),
+    );
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.label).toBe('alpha');
+    expect(groups[0]?.roots.map((node) => node.drone.id)).toEqual(['draft', 'older']);
+    expect(groups[0]?.roots[0]?.drone.draft).toBe(true);
+  });
+
   test('uses non-empty legacy repository metadata before falling back to Ungrouped', () => {
     const drones = normalizeMobileDrones([
       {

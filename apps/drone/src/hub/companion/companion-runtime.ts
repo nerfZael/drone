@@ -444,6 +444,25 @@ export class CompanionRuntime {
       execute: async (_callId, args, signal) => result(await context.callBrowser('prepare_drone_draft', args as Record<string, unknown>, signal)),
     });
 
+    add('open_drone_chat', {
+      parameters: objectParameters({
+        droneId: {
+          type: 'string',
+          maxLength: 256,
+          description: 'Exact drone ID returned by list_drones or list_chats.',
+        },
+        chatName: {
+          type: 'string',
+          maxLength: 256,
+          description:
+            "Existing chat name. Omit to open the drone's default chat, or its first existing chat when no default exists.",
+        },
+      }, ['droneId']),
+      execute: async (_callId, args, signal) => result(
+        await context.callBrowser('open_drone_chat', args as Record<string, unknown>, signal),
+      ),
+    });
+
     add('highlight_drones', {
       parameters: objectParameters({
         droneIds: { type: 'array', items: { type: 'string' }, maxItems: 200 },

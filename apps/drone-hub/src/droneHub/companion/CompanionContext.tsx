@@ -10,6 +10,7 @@ import {
 import { useChatVoiceRecorder } from '../chat/use-chat-voice-recorder';
 import { useCompanionWorkspace } from './CompanionWorkspaceContext';
 import { buildDirectApiWebSocketUrl } from '../app/direct-api-fetch';
+import { shouldCancelCompanionRecordingWithEscape } from './companion-shortcut';
 
 type CompanionContextValue = {
   status: CompanionStatus;
@@ -61,6 +62,10 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     if (!runIdRef.current) setStatusValue('error');
   }, [setStatusValue]);
   const voice = useChatVoiceRecorder({ onError: onVoiceError, microphoneOwner: 'companion' });
+  const voiceStatusRef = React.useRef(voice.status);
+  const discardVoiceRecordingRef = React.useRef(voice.discardRecording);
+  voiceStatusRef.current = voice.status;
+  discardVoiceRecordingRef.current = voice.discardRecording;
 
   const erase = React.useCallback(() => {
     setError('');
@@ -90,6 +95,23 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     await voice.discardRecording();
     erase();
   }, [erase, voice.discardRecording]);
+
+  React.useLayoutEffect(() => {
+    const cancelOnEscape = (event: KeyboardEvent) => {
+      if (!shouldCancelCompanionRecordingWithEscape({
+        key: event.key,
+        repeat: event.repeat,
+        isComposing: event.isComposing,
+        voiceStatus: voiceStatusRef.current,
+      })) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      void discardVoiceRecordingRef.current();
+    };
+    window.addEventListener('keydown', cancelOnEscape, { capture: true });
+    return () => window.removeEventListener('keydown', cancelOnEscape, { capture: true });
+  }, []);
 
   const executeBrowserTool = React.useCallback(async (tool: CompanionBrowserToolName, args: Record<string, unknown>) => {
     if (tool === 'get_app_context') {
@@ -123,6 +145,10 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     if (tool === 'prepare_drone_draft') {
       if (!workspace) throw new Error('NO_ACTIVE_WORKSPACE');
       return await workspace.prepareDroneDraft(args);
+    }
+    if (tool === 'open_drone_chat') {
+      if (!workspace) throw new Error('NO_ACTIVE_WORKSPACE');
+      return await workspace.openDroneChat(args);
     }
     if (tool === 'highlight_drones') {
       if (!workspace) throw new Error('NO_ACTIVE_WORKSPACE');

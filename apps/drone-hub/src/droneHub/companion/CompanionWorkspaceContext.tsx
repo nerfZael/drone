@@ -16,6 +16,9 @@ export type CompanionWorkspaceTarget = {
   prepareDroneDraft(
     args: Record<string, unknown>,
   ): Promise<Record<string, unknown>> | Record<string, unknown>;
+  openDroneChat(
+    args: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> | Record<string, unknown>;
   highlightDrones(
     args: Record<string, unknown>,
   ): Promise<Record<string, unknown>> | Record<string, unknown>;
@@ -27,6 +30,7 @@ type CompanionWorkspaceContextValue = {
   focusEditor(id: string): void;
   getAppContext(): Record<string, unknown>;
   prepareDroneDraft(args: Record<string, unknown>): Promise<Record<string, unknown>>;
+  openDroneChat(args: Record<string, unknown>): Promise<Record<string, unknown>>;
   highlightDrones(args: Record<string, unknown>): Promise<Record<string, unknown>>;
   readActiveComposer(): CompanionTextSnapshot;
   applyComposer(
@@ -104,6 +108,7 @@ export function CompanionWorkspaceProvider({ children }: { children: React.React
       focusEditor,
       getAppContext: () => resolveWorkspaceTarget().getAppContext(),
       prepareDroneDraft: async (args) => await resolveWorkspaceTarget().prepareDroneDraft(args),
+      openDroneChat: async (args) => await resolveWorkspaceTarget().openDroneChat(args),
       highlightDrones: async (args) => await resolveWorkspaceTarget().highlightDrones(args),
       readActiveComposer: activeComposer.readActiveComposer,
       applyComposer: (targetId, baseRevision, content) =>
