@@ -119,6 +119,7 @@ export async function transcribeChatVoiceWav(
     quality?: 'fast' | 'accurate';
     language?: string | null;
     prompt?: string | null;
+    telemetryId?: string;
     signal?: AbortSignal;
   } = {},
 ): Promise<string> {
@@ -137,6 +138,9 @@ export async function transcribeChatVoiceWav(
       ...(options.quality ? { 'x-drone-transcription-quality': options.quality } : {}),
       ...(options.language ? { 'x-drone-transcription-language': options.language } : {}),
       ...(promptBase64 ? { 'x-drone-transcription-prompt-base64': promptBase64 } : {}),
+      ...(options.telemetryId
+        ? { 'x-drone-companion-message-id': options.telemetryId.slice(0, 128) }
+        : {}),
     },
     body: wav,
     signal: options.signal,
@@ -328,7 +332,9 @@ export function useChatVoiceRecorder({
     }
   }, [setStatusValue]);
 
-  const transcribeRecording = React.useCallback(async (): Promise<string> => {
+  const transcribeRecording = React.useCallback(async (options?: {
+    telemetryId?: string;
+  }): Promise<string> => {
     const capture = captureRef.current;
     const transcriptionId = startIdRef.current + 1;
     startIdRef.current = transcriptionId;
@@ -349,7 +355,10 @@ export function useChatVoiceRecorder({
       if (capture.totalBytes <= 0) return '';
       const pcm = concatArrayBuffers(capture.chunks, capture.totalBytes);
       const wav = pcm16ToWav(pcm, CHAT_VOICE_SAMPLE_RATE_HZ, CHAT_VOICE_CHANNELS);
-      return await transcribeChatVoiceWav(wav, { signal: transcriptionAbort.signal });
+      return await transcribeChatVoiceWav(wav, {
+        signal: transcriptionAbort.signal,
+        telemetryId: options?.telemetryId,
+      });
     } catch (err: any) {
       if (startIdRef.current === transcriptionId) {
         onError(err?.message ?? String(err));
@@ -363,9 +372,11 @@ export function useChatVoiceRecorder({
     }
   }, [onError, releaseMicrophone, setStatusValue, stopCapture]);
 
-  const stopRecordingForTranscript = React.useCallback(async (): Promise<string> => {
+  const stopRecordingForTranscript = React.useCallback(async (options?: {
+    telemetryId?: string;
+  }): Promise<string> => {
     if (stopPromiseRef.current) return stopPromiseRef.current;
-    const promise = transcribeRecording();
+    const promise = transcribeRecording(options);
     stopPromiseRef.current = promise;
     try {
       return await promise;

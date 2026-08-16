@@ -67,6 +67,9 @@ describe('Hub request infrastructure', () => {
     expect(allowedResponse.getHeader('access-control-allow-headers')).toContain(
       'x-drone-transcription-prompt-base64',
     );
+    expect(allowedResponse.getHeader('access-control-allow-headers')).toContain(
+      'x-drone-companion-message-id',
+    );
 
     const deniedResponse = response();
     expect(

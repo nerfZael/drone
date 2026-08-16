@@ -151,6 +151,7 @@ describe('Companion device mesh capability', () => {
   test('queues follow-ups on the same mobile Companion session', async () => {
     const prompts: string[] = [];
     const runtimeRunIds: string[] = [];
+    const messageIds: string[] = [];
     const completions: Array<(reply: string) => void> = [];
     const runtime = {
       cancel() {},
@@ -158,6 +159,7 @@ describe('Companion device mesh capability', () => {
       run(input: any) {
         prompts.push(input.prompt);
         runtimeRunIds.push(input.runId);
+        messageIds.push(input.messageId);
         return new Promise<string>((resolve) => completions.push(resolve));
       },
     };
@@ -169,8 +171,21 @@ describe('Companion device mesh capability', () => {
       },
     );
 
-    await capability.invoke('run.start', { runId: 'conversation-1', prompt: 'First' }, context());
-    await capability.invoke('run.start', { runId: 'conversation-1', prompt: 'Second' }, context());
+    await capability.invoke(
+      'run.start',
+      {
+        runId: 'conversation-1',
+        messageId: 'mobile-message-1',
+        prompt: 'First',
+        telemetry: { version: 1, transcriptionMs: 80 },
+      },
+      context(),
+    );
+    await capability.invoke(
+      'run.start',
+      { runId: 'conversation-1', messageId: 'mobile-message-2', prompt: 'Second' },
+      context(),
+    );
     await waitFor(() => prompts.length === 1);
     expect(prompts).toEqual(['First']);
 
@@ -178,6 +193,7 @@ describe('Companion device mesh capability', () => {
     await waitFor(() => prompts.length === 2);
     expect(prompts).toEqual(['First', 'Second']);
     expect(runtimeRunIds[1]).toBe(runtimeRunIds[0]);
+    expect(messageIds).toEqual(['mobile-message-1', 'mobile-message-2']);
 
     completions[1]!('Second reply');
     await waitFor(() => events.filter((event) => event.status === 'completed').length === 2);

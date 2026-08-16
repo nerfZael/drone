@@ -130,6 +130,7 @@ export function withCors(
       'x-drone-transcription-quality',
       'x-drone-transcription-language',
       'x-drone-transcription-prompt-base64',
+      'x-drone-companion-message-id',
     ].join(','),
   );
   res.setHeader('access-control-expose-headers', 'etag,mcp-session-id,server-timing');

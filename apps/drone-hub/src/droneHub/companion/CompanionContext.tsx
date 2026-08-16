@@ -2,6 +2,7 @@ import React from 'react';
 import {
   reduceCompanionToolActivity,
   type CompanionBrowserToolName,
+  type CompanionClientTelemetry,
   type CompanionServerMessage,
   type CompanionStatus,
   type CompanionToolActivity,
@@ -42,7 +43,11 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const statusRef = React.useRef<CompanionStatus>('idle');
   const socketRef = React.useRef<WebSocket | null>(null);
   const runIdRef = React.useRef('');
-  const pendingPromptsRef = React.useRef<string[]>([]);
+  const pendingPromptsRef = React.useRef<Array<{
+    prompt: string;
+    messageId: string;
+    telemetry?: CompanionClientTelemetry;
+  }>>([]);
   const generationRef = React.useRef(0);
 
   const setStatusValue = React.useCallback((next: CompanionStatus) => {
@@ -126,10 +131,15 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     throw new Error(`Unsupported Companion browser tool: ${tool}`);
   }, [workspace]);
 
-  const run = React.useCallback(async (prompt: string) => {
+  const run = React.useCallback(async (
+    prompt: string,
+    telemetry?: CompanionClientTelemetry,
+    requestedMessageId?: string,
+  ) => {
     const cleanPrompt = prompt.trim();
     if (!cleanPrompt) return;
     const runId = runIdRef.current || newRunId();
+    const messageId = requestedMessageId || newRunId();
     runIdRef.current = runId;
     setTranscript(cleanPrompt);
     setStartedAt((current) => current ?? Date.now());
@@ -138,15 +148,24 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     setStatusValue('working');
     const existingSocket = socketRef.current;
     if (existingSocket?.readyState === WebSocket.OPEN) {
-      existingSocket.send(JSON.stringify({ type: 'start_run', runId, prompt: cleanPrompt }));
+      existingSocket.send(
+        JSON.stringify({
+          type: 'start_run',
+          runId,
+          messageId,
+          prompt: cleanPrompt,
+          telemetry: { ...telemetry, version: 1, connectionMs: 0, connectionReused: true },
+        }),
+      );
       return;
     }
-    pendingPromptsRef.current.push(cleanPrompt);
+    pendingPromptsRef.current.push({ prompt: cleanPrompt, messageId, telemetry });
     if (existingSocket?.readyState === WebSocket.CONNECTING) return;
 
     const localGeneration = generationRef.current + 1;
     generationRef.current = localGeneration;
     let socket: WebSocket;
+    const connectionStartedAt = performance.now();
     try {
       socket = new WebSocket(buildDirectApiWebSocketUrl('/api/companion/stream'));
     } catch (socketError) {
@@ -192,9 +211,23 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         finishSocket();
         return;
       }
+      const connectionMs = Math.max(0, performance.now() - connectionStartedAt);
       const pendingPrompts = pendingPromptsRef.current.splice(0);
       for (const pendingPrompt of pendingPrompts) {
-        socket.send(JSON.stringify({ type: 'start_run', runId, prompt: pendingPrompt }));
+        socket.send(
+          JSON.stringify({
+            type: 'start_run',
+            runId,
+            messageId: pendingPrompt.messageId,
+            prompt: pendingPrompt.prompt,
+            telemetry: {
+              ...pendingPrompt.telemetry,
+              version: 1,
+              connectionMs,
+              connectionReused: false,
+            },
+          }),
+        );
       }
     };
     socket.onmessage = (event) => {
@@ -260,16 +293,32 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     if (voice.status === 'starting' || voice.status === 'transcribing') return;
     if (voice.status === 'recording') {
       const stopGeneration = generationRef.current;
-      const text = await voice.stopRecordingForTranscript();
+      const messageId = newRunId();
+      const audioDurationMs = voice.durationMillis;
+      const transcriptionStartedAt = performance.now();
+      const text = await voice.stopRecordingForTranscript({ telemetryId: messageId });
+      const transcriptionMs = Math.max(0, performance.now() - transcriptionStartedAt);
       if (generationRef.current !== stopGeneration) return;
       if (statusRef.current === 'error') return;
-      await run(text);
+      await run(
+        text,
+        { version: 1, transcriptionMs, audioDurationMs },
+        messageId,
+      );
       return;
     }
     if (statusRef.current === 'cancelled' || statusRef.current === 'error') await close();
     const started = await voice.startRecording();
     if (!started && statusRef.current !== 'error' && !runIdRef.current) erase();
-  }, [close, erase, run, voice.startRecording, voice.status, voice.stopRecordingForTranscript]);
+  }, [
+    close,
+    erase,
+    run,
+    voice.durationMillis,
+    voice.startRecording,
+    voice.status,
+    voice.stopRecordingForTranscript,
+  ]);
 
   React.useEffect(() => () => {
     generationRef.current += 1;

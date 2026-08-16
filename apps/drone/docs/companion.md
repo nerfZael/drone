@@ -167,6 +167,23 @@ Store this as one profile-scoped canonical Companion settings record containing 
 
 Use one draft and Save action so model, prompt, and tools change together. Show loading, dirty, saving, saved, and error states, and warn before discarding unsaved changes. Each run snapshots the saved settings when it starts; changing settings does not mutate an active run. If the selected provider lacks credentials, show that in Settings and fail the run clearly rather than silently switching providers.
 
+### 5. Observe message latency without retaining content
+
+Companion assigns a distinct `messageId` to every turn, separate from the overlay's reusable run ID. Desktop transcription requests, WebSocket messages, mobile mesh requests, Blip sessions/turns, and browser tool calls carry that correlation through the execution path.
+
+The Hub records one sanitized timing summary per message in the shared Hub SQLite database. It retains the newest 2,000 summaries and never stores the prompt, transcript, model reasoning, tool arguments, tool results, file paths, or reply text. Temporary Blip conversations remain memory-only and are still deleted when the overlay closes.
+
+Each summary includes:
+
+- client transcription and audio duration, plus desktop upload/Groq phases, connection reuse, and connection time;
+- server queue wait, settings and credential lookup, cold handle setup, registry/MCP/tool setup, agent execution, and reply extraction;
+- time to the first reasoning or text output;
+- Blip's total tool/non-tool wall time, parallelism, per-tool aggregate duration, context usage, and terminal status;
+- browser-tool round-trip duration and the desktop WebSocket or mobile device-mesh transport;
+- a bounded failure category instead of the raw error text.
+
+Every completed or failed message also writes a structured `Companion message timing` entry to the Hub log. `GET /api/companion/telemetry?limit=200` returns recent sanitized records plus p50/p95/max distributions, phase and tool summaries, and breakdowns by transport, provider/model, warm/cold start, and status. The route uses the normal authenticated Hub API boundary and does not expose a separate public metrics listener.
+
 ## Success Criteria
 
 - The shortcut and microphone work from normal local Drone Hub screens and report conflicts clearly.
@@ -192,6 +209,7 @@ Use one draft and Save action so model, prompt, and tools change together. Show 
 - Silence and empty transcripts never create a run, session, message, or tool call.
 - Companion session data is memory-only, and a forced mid-run Hub crash leaves no Companion session, binding, or transcript on disk.
 - The backend rejects every tool outside the fixed Companion allow-list.
+- Message telemetry can distinguish transcription, transport/queue, cold setup, model/non-tool, individual tool, and reply-extraction latency without retaining user or tool content.
 
 ## Progress and Next Steps
 
@@ -207,6 +225,7 @@ Use one draft and Save action so model, prompt, and tools change together. Show 
 - [x] Add focused coverage for shortcut migration, editable dispatch, textarea undo guards, tool dependencies, the fixed catalog, memory-only session isolation, keyword results, and archived-chat exclusion; run server and frontend typechecks.
 - [x] Add the mobile sidebar microphone, top overlay, paired-device run transport, mobile UI tool targets, and focused mesh lifecycle coverage without adding mobile Companion settings.
 - [x] Consolidate desktop UI tools behind one typed workspace provider, derive execution and dependency rules from the fixed tool catalog, and share browser-tool lifecycle bookkeeping across desktop and mobile transports.
+- [x] Add privacy-safe per-message latency telemetry, bounded SQLite retention, structured Hub logging, and an aggregate diagnostics API across desktop and mobile transports.
 
 ## Feedback and Decisions
 

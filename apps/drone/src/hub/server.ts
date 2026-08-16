@@ -294,6 +294,7 @@ import { createTerminalWebSocketUpgradeHandler } from './terminal-websocket-upgr
 import { CompanionRuntime } from './companion/companion-runtime';
 import { registerCompanionRoutes } from './companion/companion-routes';
 import { createCompanionWebSocketServer } from './companion/companion-websocket-server';
+import { CompanionTelemetryService } from './companion/companion-telemetry';
 import { createCompanionCapability } from './device-mesh/companion-capability';
 import { registerAssistantRoutes } from './routes/assistant-routes';
 import { registerAgentRunDiffRoutes } from './routes/agent-run-diff-routes';
@@ -4305,9 +4306,14 @@ async function startDroneHubApiServerWithLifecycle(
     },
     summarizeDroneActivity,
   });
+  const companionTelemetry = new CompanionTelemetryService({
+    database: getHubDatabase(),
+    log: hubLog,
+  });
   const companionRuntime = new CompanionRuntime({
     hubServices: hubApplication,
     buildDroneSummaries: buildAssistantDroneSummariesFromRegistry,
+    telemetry: companionTelemetry,
   });
   const companionWss = createCompanionWebSocketServer(companionRuntime);
   deviceMesh.registerCapability(
@@ -5348,7 +5354,7 @@ async function startDroneHubApiServerWithLifecycle(
   }
 
   const apiRouter = new HubRouter(json, readJsonBody);
-  registerCompanionRoutes(apiRouter);
+  registerCompanionRoutes(apiRouter, companionTelemetry);
 
   registerSystemRoutes(apiRouter, {
     buildId: HUB_API_BUILD_ID,
@@ -5588,6 +5594,7 @@ async function startDroneHubApiServerWithLifecycle(
     emitAssistantUiAction: (uiAction, threadId) =>
       assistantService.emitExternalUiAction(uiAction, threadId),
     hubLog,
+    companionTelemetry,
   });
 
   registerResourceSubscriptionRoutes(apiRouter, resourceSubscriptionService);

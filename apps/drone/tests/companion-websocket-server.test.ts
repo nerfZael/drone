@@ -186,15 +186,37 @@ test('Companion socket queues follow-ups on the same session', async () => {
       client.once('open', resolve);
       client.once('error', reject);
     });
-    client.send(JSON.stringify({ type: 'start_run', runId: 'conversation', prompt: 'First' }));
-    client.send(JSON.stringify({ type: 'start_run', runId: 'conversation', prompt: 'Second' }));
+    client.send(
+      JSON.stringify({
+        type: 'start_run',
+        runId: 'conversation',
+        messageId: 'message-1',
+        prompt: 'First',
+        telemetry: { version: 1, transcriptionMs: 125 },
+      }),
+    );
+    client.send(
+      JSON.stringify({
+        type: 'start_run',
+        runId: 'conversation',
+        messageId: 'message-2',
+        prompt: 'Second',
+      }),
+    );
     await waitFor(() => runs.length === 1);
     expect(runs.map((run) => run.prompt)).toEqual(['First']);
+    expect(runs[0]).toMatchObject({
+      messageId: 'message-1',
+      transport: 'websocket',
+      clientTelemetry: { version: 1, transcriptionMs: 125 },
+    });
+    expect(runs[0].queueWaitMs).toBeGreaterThanOrEqual(0);
 
     completions[0]!('First reply');
     await waitFor(() => runs.length === 2);
     expect(runs.map((run) => run.prompt)).toEqual(['First', 'Second']);
     expect(runs[1].runId).toBe(runs[0].runId);
+    expect(runs[1].messageId).toBe('message-2');
 
     completions[1]!('Second reply');
     client.send(JSON.stringify({ type: 'cancel_run', runId: 'conversation' }));

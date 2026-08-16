@@ -629,6 +629,18 @@ async function proxyDroneHubApiRequest(opts: {
       ...(opts.req.headers['content-type'] ? { 'content-type': String(opts.req.headers['content-type']) } : {}),
       ...(opts.req.headers['if-none-match'] ? { 'if-none-match': String(opts.req.headers['if-none-match']) } : {}),
       ...(opts.req.headers['mcp-session-id'] ? { 'mcp-session-id': String(opts.req.headers['mcp-session-id']) } : {}),
+      ...(opts.req.headers['x-drone-transcription-quality']
+        ? { 'x-drone-transcription-quality': String(opts.req.headers['x-drone-transcription-quality']) }
+        : {}),
+      ...(opts.req.headers['x-drone-transcription-language']
+        ? { 'x-drone-transcription-language': String(opts.req.headers['x-drone-transcription-language']) }
+        : {}),
+      ...(opts.req.headers['x-drone-transcription-prompt-base64']
+        ? { 'x-drone-transcription-prompt-base64': String(opts.req.headers['x-drone-transcription-prompt-base64']) }
+        : {}),
+      ...(opts.req.headers['x-drone-companion-message-id']
+        ? { 'x-drone-companion-message-id': String(opts.req.headers['x-drone-companion-message-id']) }
+        : {}),
     },
     body: body as any,
   });

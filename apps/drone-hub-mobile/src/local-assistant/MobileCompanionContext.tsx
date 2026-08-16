@@ -4,6 +4,7 @@ import { COMPANION_CAPABILITY, isGranted, type CapabilityEvent } from '@drone/de
 import {
   reduceCompanionToolActivity,
   type CompanionBrowserToolName,
+  type CompanionClientTelemetry,
   type CompanionStatus,
   type CompanionTextSnapshot,
   type CompanionToolActivity,
@@ -219,7 +220,11 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
   }, [close, hasGrant, hasOperations, targetRevision]);
 
   const run = React.useCallback(
-    async (prompt: string) => {
+    async (
+      prompt: string,
+      telemetry?: CompanionClientTelemetry,
+      requestedMessageId?: string,
+    ) => {
       const cleanPrompt = prompt.trim();
       if (!cleanPrompt) return;
       const activeTarget = workspaceTargetRef.current;
@@ -229,6 +234,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
         return;
       }
       const runId = runIdRef.current || newRunId();
+      const messageId = requestedMessageId || newRunId();
       const generation = generationRef.current;
       runIdRef.current = runId;
       runTargetDeviceIdRef.current = activeTarget.targetDeviceId;
@@ -240,7 +246,9 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       try {
         await mesh.request(activeTarget.targetDeviceId, COMPANION_CAPABILITY.id, 'run.start', {
           runId,
+          messageId,
           prompt: cleanPrompt,
+          telemetry,
         });
       } catch (nextError: any) {
         if (generationRef.current !== generation) return;
@@ -256,7 +264,11 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     if (voice.status === 'starting' || voice.status === 'transcribing') return;
     if (voice.status === 'recording') {
       const generation = generationRef.current;
+      const messageId = newRunId();
+      const audioDurationMs = voice.durationMillis;
+      const transcriptionStartedAt = performance.now();
       const text = await voice.stopRecordingForTranscript();
+      const transcriptionMs = Math.max(0, performance.now() - transcriptionStartedAt);
       if (generationRef.current !== generation) return;
       if (!text.trim()) {
         const voiceError = voice.getError();
@@ -266,7 +278,11 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
         }
         return;
       }
-      await run(text);
+      await run(
+        text,
+        { version: 1, transcriptionMs, audioDurationMs },
+        messageId,
+      );
       return;
     }
     if (statusRef.current === 'cancelled' || statusRef.current === 'error') await close();

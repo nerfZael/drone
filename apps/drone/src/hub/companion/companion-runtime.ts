@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import type { BlipRuntimeEvent, BlipToolProvider } from '@blip/core';
+import type { CompanionClientTelemetry } from '@drone/assistant-chat';
 
 import { loadRegistry } from '../../host/registry';
 import { BlipAssistantHost } from '../assistant/blip-assistant-host';
@@ -21,6 +22,11 @@ import {
   type CompanionSettings,
   type CompanionToolName,
 } from './companion-config';
+import {
+  type CompanionRunTelemetry,
+  type CompanionTelemetryService,
+  type CompanionTelemetryTransport,
+} from './companion-telemetry';
 
 const MAX_BROWSER_TEXT_CHARS = 1_000_000;
 const MAX_DRAFT_PROMPT_CHARS = 100_000;
@@ -50,6 +56,7 @@ type BrowserTextSnapshot = {
 type RuntimeDependencies = {
   hubServices: HubServices;
   buildDroneSummaries(registry: any): AssistantDroneSummary[];
+  telemetry?: CompanionTelemetryService;
 };
 
 function result(data: Record<string, unknown>, text?: string) {
@@ -102,6 +109,7 @@ export class CompanionRuntime {
   private readonly activeRunIds = new Set<string>();
   private readonly activeRunCompletions = new Map<string, Promise<void>>();
   private readonly cancelledRunIds = new Set<string>();
+  private readonly telemetryByThreadId = new Map<string, CompanionRunTelemetry>();
   private closing = false;
   private readonly repository = new HubSessionRepository({ inMemory: true });
   private readonly host: BlipAssistantHost;
@@ -111,12 +119,19 @@ export class CompanionRuntime {
       async (threadId) => await this.configuration(threadId),
       undefined,
       this.repository,
+      (threadId, event) => this.telemetryByThreadId.get(threadId)?.observe(event),
     );
   }
 
   async run(input: {
     runId: string;
+    messageId: string;
     prompt: string;
+    transport: CompanionTelemetryTransport;
+    queueWaitMs?: number;
+    receivedAtEpochMs?: number;
+    receivedAtMonotonicMs?: number;
+    clientTelemetry?: CompanionClientTelemetry;
     callBrowser: CompanionBrowserCall;
     onEvent(event: BlipRuntimeEvent): Promise<void> | void;
   }): Promise<string> {
@@ -125,38 +140,96 @@ export class CompanionRuntime {
     if (this.closing) throw new Error('Companion is shutting down');
     if (this.activeRunIds.has(runId)) throw new Error('Companion run already exists');
     this.activeRunIds.add(runId);
+    const coldStart = !this.host.hasThreadHandle(threadId);
+    const telemetry = this.deps.telemetry?.begin({
+      messageId: input.messageId,
+      runId,
+      transport: input.transport,
+      queueWaitMs: input.queueWaitMs,
+      coldStart,
+      client: input.clientTelemetry,
+      receivedAtEpochMs: input.receivedAtEpochMs,
+      receivedAtMonotonicMs: input.receivedAtMonotonicMs,
+    });
+    if (telemetry) this.telemetryByThreadId.set(threadId, telemetry);
     let settleRun!: () => void;
     this.activeRunCompletions.set(runId, new Promise<void>((resolve) => {
       settleRun = resolve;
     }));
+    let runStatus: 'completed' | 'cancelled' | 'error' = 'completed';
+    let runError: unknown;
     try {
       const existingContext = this.contexts.get(threadId);
-      const settings = existingContext?.settings ?? (await readCompanionSettings());
+      const settings =
+        existingContext?.settings ??
+        (telemetry
+          ? await telemetry.measure('settingsMs', () => readCompanionSettings())
+          : await readCompanionSettings());
+      telemetry?.setModel(settings);
       if (this.cancelledRunIds.has(runId)) throw new Error('Companion run cancelled');
-      const credential = await resolveEffectiveProviderApiKeySettings(settings.provider);
+      const credential = telemetry
+        ? await telemetry.measure('credentialsMs', () =>
+            resolveEffectiveProviderApiKeySettings(settings.provider),
+          )
+        : await resolveEffectiveProviderApiKeySettings(settings.provider);
       if (!credential.apiKey) {
         throw new Error(`Companion cannot start because ${settings.provider} credentials are not configured.`);
       }
       if (this.cancelledRunIds.has(runId)) throw new Error('Companion run cancelled');
       if (existingContext) {
-        existingContext.callBrowser = input.callBrowser;
+        existingContext.callBrowser = this.instrumentBrowserCall(input.callBrowser, telemetry);
         existingContext.snapshots.clear();
       } else {
         this.contexts.set(threadId, {
           runId,
           settings,
-          callBrowser: input.callBrowser,
+          callBrowser: this.instrumentBrowserCall(input.callBrowser, telemetry),
           snapshots: new Map(),
         });
       }
+      if (coldStart) {
+        if (telemetry) {
+          await telemetry.measure('handleSetupMs', () => this.host.prepareThread(threadId));
+        } else {
+          await this.host.prepareThread(threadId);
+        }
+      }
+      telemetry?.markAgentRunStarted();
+      if (telemetry) {
+        await telemetry.measure('agentRunMs', () =>
+          this.host.promptThread(threadId, input.prompt, input.onEvent),
+        );
+        return await telemetry.measure('replyReadMs', () =>
+          this.host.latestAssistantVisibleText(threadId),
+        );
+      }
       await this.host.promptThread(threadId, input.prompt, input.onEvent);
       return await this.host.latestAssistantVisibleText(threadId);
+    } catch (error) {
+      runError = error;
+      runStatus = /abort|cancel/i.test(error instanceof Error ? error.message : String(error))
+        ? 'cancelled'
+        : 'error';
+      throw error;
     } finally {
       this.activeRunIds.delete(runId);
       this.activeRunCompletions.delete(runId);
       this.cancelledRunIds.delete(runId);
+      if (this.telemetryByThreadId.get(threadId) === telemetry) {
+        this.telemetryByThreadId.delete(threadId);
+      }
+      await telemetry?.finish(runStatus, runError).catch(() => undefined);
       settleRun();
     }
+  }
+
+  private instrumentBrowserCall(
+    callBrowser: CompanionBrowserCall,
+    telemetry?: CompanionRunTelemetry,
+  ): CompanionBrowserCall {
+    if (!telemetry) return callBrowser;
+    return async (tool, args, signal) =>
+      await telemetry.measure(`browserTool.${tool}`, () => callBrowser(tool, args, signal));
   }
 
   cancel(runId: string): void {
@@ -197,17 +270,30 @@ export class CompanionRuntime {
   private async configuration(threadId: string) {
     const context = this.contexts.get(threadId);
     if (!context) throw new Error('Companion run context is unavailable');
-    const registry = await loadRegistry();
-    const drones = this.deps.buildDroneSummaries(registry);
+    const telemetry = this.telemetryByThreadId.get(threadId);
+    const registry = telemetry
+      ? await telemetry.measure('handle.registryMs', () => loadRegistry())
+      : await loadRegistry();
+    const drones = telemetry
+      ? await telemetry.measure('handle.droneSummariesMs', async () =>
+          this.deps.buildDroneSummaries(registry),
+        )
+      : this.deps.buildDroneSummaries(registry);
     const refs = [...new Set(drones.flatMap((drone) => [drone.id, drone.name]).filter(Boolean))];
-    const mcpClient = await createInProcessDroneHubMcpClient({
-      correlationId: threadId,
-      allowedDroneRefs: refs,
-      allowedWriteDroneRefs: [],
-      allowedDroneIds: drones.map((drone) => drone.id),
-      hubServices: this.deps.hubServices,
-    });
-    const { createMcpToolProvider } = await loadBlipMcp();
+    const createMcpClient = () =>
+      createInProcessDroneHubMcpClient({
+        correlationId: threadId,
+        allowedDroneRefs: refs,
+        allowedWriteDroneRefs: [],
+        allowedDroneIds: drones.map((drone) => drone.id),
+        hubServices: this.deps.hubServices,
+      });
+    const mcpClient = telemetry
+      ? await telemetry.measure('handle.mcpClientMs', createMcpClient)
+      : await createMcpClient();
+    const { createMcpToolProvider } = telemetry
+      ? await telemetry.measure('handle.blipMcpLoadMs', () => loadBlipMcp())
+      : await loadBlipMcp();
     const mcpProvider = createMcpToolProvider({
       id: 'companion-drone-hub',
       namePrefix: 'drone_hub',
@@ -234,7 +320,9 @@ export class CompanionRuntime {
       model: context.settings.model,
       thinkingLevel: context.settings.thinkingLevel,
       systemPrompt: `${context.settings.systemPrompt}\n\n${COMPANION_RUNTIME_CONTRACT}`,
-      tools: await this.customTools(context, drones),
+      tools: telemetry
+        ? await telemetry.measure('handle.customToolsMs', () => this.customTools(context, drones))
+        : await this.customTools(context, drones),
       toolProviders: [filteredMcpProvider],
       getApiKey: resolveBlipProviderApiKey,
       dispose: () => mcpClient.close(),

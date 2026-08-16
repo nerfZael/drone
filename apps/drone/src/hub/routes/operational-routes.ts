@@ -6,6 +6,7 @@ import {
 } from '../groq-speech';
 import { errorMessage, readRawBody } from '../hub-http';
 import type { HubRouter } from '../hub-router';
+import type { CompanionTelemetryService } from '../companion/companion-telemetry';
 
 type ServiceFunction = (...args: any[]) => any;
 const GROQ_SPEECH_TIMEOUT_MS = 30_000;
@@ -23,6 +24,7 @@ export interface OperationalRouteDependencies {
     message: string,
     meta?: Record<string, unknown>,
   ) => void;
+  companionTelemetry?: Pick<CompanionTelemetryService, 'recordTranscription'>;
 }
 
 export function registerOperationalRoutes(
@@ -37,6 +39,7 @@ export function registerOperationalRoutes(
     resolveSpeechSettings,
     emitAssistantUiAction,
     hubLog,
+    companionTelemetry,
   } = deps;
   let speechQueueTail: Promise<void> = Promise.resolve();
   let speechJobsInQueue = 0;
@@ -129,8 +132,30 @@ export function registerOperationalRoutes(
   });
 
   apiRouter.post('/api/audio/transcriptions', async ({ req, json }) => {
+    const messageIdRaw = String(req.headers['x-drone-companion-message-id'] ?? '').trim();
+    const messageId =
+      messageIdRaw &&
+      messageIdRaw.length <= 128 &&
+      !/[\u0000-\u001f\u007f]/.test(messageIdRaw)
+        ? messageIdRaw
+        : '';
+    const startedAt = performance.now();
+    const phases: Record<string, number> = {};
+    let audioBytes: number | undefined;
+    let model: string | undefined;
+    let telemetryStatus: 'completed' | 'error' = 'error';
+    const measure = async <T>(name: string, operation: () => Promise<T>): Promise<T> => {
+      const phaseStartedAt = performance.now();
+      try {
+        return await operation();
+      } finally {
+        phases[name] = Math.max(0, Math.round((performance.now() - phaseStartedAt) * 10) / 10);
+      }
+    };
     try {
-      const groqSettings = await resolveGroqApiKeySettings();
+      const groqSettings: any = await measure<any>('settingsMs', () =>
+        resolveGroqApiKeySettings(),
+      );
       if (!groqSettings.apiKey) {
         json(400, {
           ok: false,
@@ -138,27 +163,41 @@ export function registerOperationalRoutes(
         });
         return;
       }
-      const audio = await readRawBody(req, { maxBytes: GROQ_TRANSCRIPTION_MAX_BYTES });
+      const audio = await measure('readBodyMs', () =>
+        readRawBody(req, { maxBytes: GROQ_TRANSCRIPTION_MAX_BYTES }),
+      );
+      audioBytes = audio.length;
       const mimeType =
         String(req.headers['content-type'] ?? '')
           .split(';')[0]
           ?.trim() || 'audio/webm';
-      const transcription = await transcribeAudioWithGroq({
-        audio,
-        apiKey: groqSettings.apiKey,
-        mimeType,
-        quality: req.headers['x-drone-transcription-quality'] === 'accurate' ? 'accurate' : 'fast',
-        language: String(req.headers['x-drone-transcription-language'] ?? '').trim() || null,
-        prompt: (() => {
-          const encoded = String(req.headers['x-drone-transcription-prompt-base64'] ?? '').trim();
-          if (!encoded) return null;
-          try {
-            return Buffer.from(encoded.slice(0, 8_000), 'base64').toString('utf8').slice(-1_200) || null;
-          } catch {
-            return null;
-          }
-        })(),
-      });
+      const transcription = await measure('groqMs', () =>
+        transcribeAudioWithGroq({
+          audio,
+          apiKey: groqSettings.apiKey,
+          mimeType,
+          quality:
+            req.headers['x-drone-transcription-quality'] === 'accurate' ? 'accurate' : 'fast',
+          language: String(req.headers['x-drone-transcription-language'] ?? '').trim() || null,
+          prompt: (() => {
+            const encoded = String(
+              req.headers['x-drone-transcription-prompt-base64'] ?? '',
+            ).trim();
+            if (!encoded) return null;
+            try {
+              return (
+                Buffer.from(encoded.slice(0, 8_000), 'base64')
+                  .toString('utf8')
+                  .slice(-1_200) || null
+              );
+            } catch {
+              return null;
+            }
+          })(),
+        }),
+      );
+      model = transcription.model;
+      telemetryStatus = 'completed';
       json(200, { ok: true, ...transcription });
     } catch (error) {
       const message = errorMessage(error);
@@ -168,6 +207,16 @@ export function registerOperationalRoutes(
           ? 400
           : 502;
       json(status, { ok: false, error: message });
+    } finally {
+      if (messageId) {
+        companionTelemetry?.recordTranscription(messageId, {
+          durationMs: Math.max(0, Math.round((performance.now() - startedAt) * 10) / 10),
+          ...(audioBytes !== undefined ? { audioBytes } : {}),
+          ...(model ? { model } : {}),
+          status: telemetryStatus,
+          phases,
+        });
+      }
     }
   });
 

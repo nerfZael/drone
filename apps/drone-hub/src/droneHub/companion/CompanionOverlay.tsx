@@ -1,4 +1,5 @@
 import React from 'react';
+import { groupCompanionToolActivity } from '@drone/assistant-chat';
 import { AgentRunSummaryLine } from '../chat/WorkingElapsedStatus';
 import { ChatMessageBody } from '../chat/ChatMessageBody';
 import { formatChatVoiceDuration } from '../chat/use-chat-voice-recorder';
@@ -22,6 +23,7 @@ export function CompanionOverlay() {
   const duration = companion.startedAt
     ? Math.max(0, (companion.endedAt ?? Date.now()) - companion.startedAt)
     : 0;
+  const activityGroups = groupCompanionToolActivity(companion.activity);
   return (
     <aside
       className="fixed bottom-4 right-4 z-[80] flex max-h-[calc(100vh-2rem)] w-[min(28rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--panel)] shadow-2xl"
@@ -73,24 +75,38 @@ export function CompanionOverlay() {
             />
             {expanded && companion.activity.length ? (
               <div className="dh-agent-activity-scrollbar max-h-52 overflow-y-auto border-l border-[var(--border-subtle)] px-3 py-2">
-                {companion.activity.map((item) => (
-                  <details
-                    key={item.callId}
-                    className="py-1 text-xs"
-                    open={item.status === 'running'}
-                  >
-                    <summary className="cursor-pointer text-[var(--fg-secondary)]">
-                      {item.status === 'running'
-                        ? 'Running'
-                        : item.status === 'failed'
-                          ? 'Failed'
-                          : 'Used'}{' '}
-                      {item.tool}
-                    </summary>
-                    <pre className="mt-1 overflow-auto whitespace-pre-wrap break-words text-[10px] text-[var(--muted-dim)]">
-                      {JSON.stringify(item.error ?? item.result ?? item.args, null, 2)}
-                    </pre>
-                  </details>
+                {activityGroups.map((group) => (
+                  <React.Fragment key={group.key}>
+                    {group.parallel ? (
+                      <div
+                        className="flex items-center gap-2 py-1 text-[9px] uppercase tracking-wider text-[var(--muted-dim)]"
+                        aria-label={`${group.items.length} tool calls ran in parallel`}
+                      >
+                        <span className="h-px flex-1 bg-[var(--border-subtle)]" />
+                        <span>Parallel · {group.items.length}</span>
+                        <span className="h-px flex-1 bg-[var(--border-subtle)]" />
+                      </div>
+                    ) : null}
+                    {group.items.map((item) => (
+                      <details
+                        key={item.callId}
+                        className="py-1 text-xs"
+                        open={item.status === 'running'}
+                      >
+                        <summary className="cursor-pointer text-[var(--fg-secondary)]">
+                          {item.status === 'running'
+                            ? 'Running'
+                            : item.status === 'failed'
+                              ? 'Failed'
+                              : 'Used'}{' '}
+                          {item.tool}
+                        </summary>
+                        <pre className="mt-1 overflow-auto whitespace-pre-wrap break-words text-[10px] text-[var(--muted-dim)]">
+                          {JSON.stringify(item.error ?? item.result ?? item.args, null, 2)}
+                        </pre>
+                      </details>
+                    ))}
+                  </React.Fragment>
                 ))}
               </div>
             ) : null}

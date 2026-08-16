@@ -49,6 +49,10 @@ export class BlipAssistantHost {
       event: BlipRuntimeEvent,
     ) => Promise<void> | void,
     private readonly repository: HubSessionRepository = new HubSessionRepository(),
+    private readonly rawEventObserver?: (
+      threadId: string,
+      event: BlipRuntimeEvent,
+    ) => Promise<void> | void,
   ) {}
 
   subscribeEvents(
@@ -183,6 +187,14 @@ export class BlipAssistantHost {
 
   isThreadRunning(threadId: string): boolean {
     return this.handles.get(threadId)?.running === true;
+  }
+
+  hasThreadHandle(threadId: string): boolean {
+    return this.handles.has(threadId);
+  }
+
+  async prepareThread(threadId: string): Promise<void> {
+    await this.handle(threadId);
   }
 
   async waitForThreadIdle(threadId: string): Promise<void> {
@@ -404,6 +416,11 @@ export class BlipAssistantHost {
   }
 
   private async publishEvent(threadId: string, event: BlipRuntimeEvent): Promise<void> {
+    try {
+      await this.rawEventObserver?.(threadId, event);
+    } catch {
+      // Raw observability must not fail or interrupt the agent run.
+    }
     // The Hub transcript intentionally renders canonical messages only. Do not fan out per-token
     // deltas to snapshots or SSE clients; the final transcript_changed event refreshes history.
     if (event.type === 'assistant_delta') return;

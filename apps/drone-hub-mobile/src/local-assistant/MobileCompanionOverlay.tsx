@@ -1,4 +1,5 @@
 import React from 'react';
+import { groupCompanionToolActivity } from '@drone/assistant-chat';
 import {
   ActivityIndicator,
   Pressable,
@@ -57,6 +58,7 @@ export function MobileCompanionOverlay() {
     ? Math.max(0, (companion.endedAt ?? Date.now()) - companion.startedAt)
     : 0;
   const showActivity = active || companion.activity.length > 0;
+  const activityGroups = groupCompanionToolActivity(companion.activity);
 
   return (
     <View
@@ -137,47 +139,66 @@ export function MobileCompanionOverlay() {
                 />
               </Pressable>
               {activityExpanded
-                ? companion.activity.map((item) => {
-                    const expanded = expandedCalls.has(item.callId);
-                    const detail = item.error ?? item.result ?? item.args;
-                    return (
-                      <View key={item.callId} style={styles.toolCall}>
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityState={{ expanded }}
-                          onPress={() =>
-                            setExpandedCalls((current) => {
-                              const next = new Set(current);
-                              if (next.has(item.callId)) next.delete(item.callId);
-                              else next.add(item.callId);
-                              return next;
-                            })
-                          }
-                          style={({ pressed }) => [styles.toolHeader, pressed && styles.pressed]}
+                ? activityGroups.map((group) => (
+                    <View key={group.key}>
+                      {group.parallel ? (
+                        <View
+                          accessibilityLabel={`${group.items.length} tool calls ran in parallel`}
+                          style={styles.parallelDivider}
                         >
-                          <ChevronRight
-                            color={colors.mutedDim}
-                            size={13}
-                            strokeWidth={2}
-                            style={{ transform: [{ rotate: expanded ? '90deg' : '0deg' }] }}
-                          />
-                          <Text numberOfLines={1} style={styles.toolName}>
-                            {item.status === 'running'
-                              ? 'Running'
-                              : item.status === 'failed'
-                                ? 'Failed'
-                                : 'Used'}{' '}
-                            {item.tool}
+                          <View style={styles.parallelDividerLine} />
+                          <Text style={styles.parallelDividerText}>
+                            Parallel · {group.items.length}
                           </Text>
-                        </Pressable>
-                        {expanded ? (
-                          <Text selectable style={styles.toolDetail}>
-                            {JSON.stringify(detail, null, 2)}
-                          </Text>
-                        ) : null}
-                      </View>
-                    );
-                  })
+                          <View style={styles.parallelDividerLine} />
+                        </View>
+                      ) : null}
+                      {group.items.map((item) => {
+                        const expanded = expandedCalls.has(item.callId);
+                        const detail = item.error ?? item.result ?? item.args;
+                        return (
+                          <View key={item.callId} style={styles.toolCall}>
+                            <Pressable
+                              accessibilityRole="button"
+                              accessibilityState={{ expanded }}
+                              onPress={() =>
+                                setExpandedCalls((current) => {
+                                  const next = new Set(current);
+                                  if (next.has(item.callId)) next.delete(item.callId);
+                                  else next.add(item.callId);
+                                  return next;
+                                })
+                              }
+                              style={({ pressed }) => [
+                                styles.toolHeader,
+                                pressed && styles.pressed,
+                              ]}
+                            >
+                              <ChevronRight
+                                color={colors.mutedDim}
+                                size={13}
+                                strokeWidth={2}
+                                style={{ transform: [{ rotate: expanded ? '90deg' : '0deg' }] }}
+                              />
+                              <Text numberOfLines={1} style={styles.toolName}>
+                                {item.status === 'running'
+                                  ? 'Running'
+                                  : item.status === 'failed'
+                                    ? 'Failed'
+                                    : 'Used'}{' '}
+                                {item.tool}
+                              </Text>
+                            </Pressable>
+                            {expanded ? (
+                              <Text selectable style={styles.toolDetail}>
+                                {JSON.stringify(detail, null, 2)}
+                              </Text>
+                            ) : null}
+                          </View>
+                        );
+                      })}
+                    </View>
+                  ))
                 : null}
             </View>
           ) : null}
@@ -270,6 +291,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   activitySummaryText: { flex: 1, color: colors.textSecondary, fontSize: 11 },
+  parallelDivider: {
+    marginLeft: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  parallelDividerLine: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.borderSubtle,
+  },
+  parallelDividerText: {
+    color: colors.mutedDim,
+    fontSize: 8,
+    letterSpacing: 0.7,
+    textTransform: 'uppercase',
+  },
   toolCall: { marginLeft: 14, borderLeftWidth: 1, borderLeftColor: colors.borderSubtle },
   toolHeader: {
     minHeight: 34,

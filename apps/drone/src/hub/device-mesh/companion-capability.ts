@@ -16,7 +16,14 @@ type CompanionMeshSession = {
   generation: number;
   browserTools: CompanionBrowserToolBroker;
   eventQueue: Promise<void>;
-  prompts: string[];
+  prompts: Array<{
+    prompt: string;
+    messageId: string;
+    telemetry?: import('@drone/assistant-chat').CompanionClientTelemetry;
+    receivedAtEpochMs: number;
+    receivedAtMonotonicMs: number;
+  }>;
+  activeMessageId: string;
   active: boolean;
 };
 
@@ -94,38 +101,50 @@ export function createCompanionCapability(
     let statusEmitted = firstStatusEmitted;
     try {
       while (session.prompts.length > 0 && sessions.get(key) === session) {
-        const prompt = session.prompts.shift()!;
+        const queued = session.prompts.shift()!;
+        const { prompt, messageId } = queued;
+        session.activeMessageId = messageId;
         if (!statusEmitted) {
           session.generation += 1;
-          await emit(session, { type: 'status', status: 'working' });
+          await emit(session, { type: 'status', messageId, status: 'working' });
         }
         const runGeneration = session.generation;
         statusEmitted = false;
         try {
           const reply = await runtime.run({
             runId: session.runtimeRunId,
+            messageId,
             prompt,
+            transport: 'device_mesh',
+            queueWaitMs: performance.now() - queued.receivedAtMonotonicMs,
+            receivedAtEpochMs: queued.receivedAtEpochMs,
+            receivedAtMonotonicMs: queued.receivedAtMonotonicMs,
+            clientTelemetry: queued.telemetry,
             callBrowser: callBrowser(session),
             onEvent: (event) => {
               if (sessions.get(key) !== session || session.generation !== runGeneration) return;
               const visibleEvent = boundedCompanionActivityEvent(event);
               if (visibleEvent) {
-                void emit(session, { type: 'activity', event: visibleEvent }).catch(() => undefined);
+                void emit(session, { type: 'activity', messageId, event: visibleEvent }).catch(
+                  () => undefined,
+                );
               }
             },
           });
           if (sessions.get(key) !== session || session.generation !== runGeneration) return;
-          await emit(session, { type: 'reply', reply });
-          await emit(session, { type: 'status', status: 'completed' });
+          await emit(session, { type: 'reply', messageId, reply });
+          await emit(session, { type: 'status', messageId, status: 'completed' });
         } catch (error) {
           if (sessions.get(key) !== session || session.generation !== runGeneration) return;
           await emit(session, {
             type: 'error',
+            messageId,
             error: error instanceof Error ? error.message : String(error),
           });
         } finally {
           if (session.generation === runGeneration) {
             session.browserTools.rejectAll('Companion run finished');
+            session.activeMessageId = '';
           }
         }
       }
@@ -176,7 +195,8 @@ export function createCompanionCapability(
       if (!validation.ok) {
         throw Object.assign(new Error(validation.error), { code: 'INVALID_REQUEST' });
       }
-      const { runId: clientRunId, prompt } = validation;
+      const { runId: clientRunId, prompt, telemetry } = validation;
+      const messageId = validation.messageId || crypto.randomUUID();
       const key = sessionKey(sourceDeviceId, clientRunId);
       let session = sessions.get(key);
       for (const existingSession of sessions.values()) {
@@ -192,7 +212,12 @@ export function createCompanionCapability(
         const browserTools = new CompanionBrowserToolBroker({
           available: () => sessions.get(key) === createdSession,
           unavailableMessage: 'Companion mobile client disconnected',
-          dispatch: (call) => emit(createdSession, { type: 'tool_call', ...call }),
+          dispatch: (call) =>
+            emit(createdSession, {
+              type: 'tool_call',
+              messageId: createdSession.activeMessageId,
+              ...call,
+            }),
         });
         createdSession = {
           clientRunId,
@@ -202,17 +227,25 @@ export function createCompanionCapability(
           browserTools,
           eventQueue: Promise.resolve(),
           prompts: [],
+          activeMessageId: '',
           active: false,
         };
         session = createdSession;
         sessions.set(key, session);
       }
-      session.prompts.push(prompt);
+      session.prompts.push({
+        prompt,
+        messageId,
+        telemetry,
+        receivedAtEpochMs: Date.now(),
+        receivedAtMonotonicMs: performance.now(),
+      });
       if (!session.active) {
         session.active = true;
         session.generation += 1;
         try {
-          await emit(session, { type: 'status', status: 'working' });
+          session.activeMessageId = messageId;
+          await emit(session, { type: 'status', messageId, status: 'working' });
         } catch (error) {
           closeSession(session, 'Companion mobile client disconnected');
           await runtime.deleteSession(session.runtimeRunId).catch(() => undefined);

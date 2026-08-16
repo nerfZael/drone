@@ -1,4 +1,5 @@
 import type http from 'node:http';
+import crypto from 'node:crypto';
 import {
   validateCompanionRunInput,
   type CompanionClientMessage,
@@ -27,7 +28,13 @@ export function createCompanionWebSocketServer(runtime: CompanionRuntime): WebSo
     let activeRunId = '';
     let generation = 0;
     let cleanedUp = false;
-    const queuedPrompts: string[] = [];
+    const queuedPrompts: Array<{
+      prompt: string;
+      messageId: string;
+      telemetry?: import('@drone/assistant-chat').CompanionClientTelemetry;
+      receivedAtEpochMs: number;
+      receivedAtMonotonicMs: number;
+    }> = [];
 
     const send = (payload: unknown) => {
       if (socket.readyState !== WebSocket.OPEN) return;
@@ -47,7 +54,8 @@ export function createCompanionWebSocketServer(runtime: CompanionRuntime): WebSo
     const drainQueue = async () => {
       if (activeRunId || !sessionRunId || cleanedUp) return;
       while (queuedPrompts.length > 0 && sessionRunId && !cleanedUp) {
-        const prompt = queuedPrompts.shift()!;
+        const queued = queuedPrompts.shift()!;
+        const { prompt, messageId } = queued;
         const runId = sessionRunId;
         activeRunId = runId;
         generation += 1;
@@ -58,25 +66,32 @@ export function createCompanionWebSocketServer(runtime: CompanionRuntime): WebSo
           }
           return browserTools.request(tool, args, runGeneration, signal);
         };
-        send({ type: 'status', runId, status: 'working' });
+        send({ type: 'status', runId, messageId, status: 'working' });
         try {
           const reply = await runtime.run({
             runId,
+            messageId,
             prompt,
+            transport: 'websocket',
+            queueWaitMs: performance.now() - queued.receivedAtMonotonicMs,
+            receivedAtEpochMs: queued.receivedAtEpochMs,
+            receivedAtMonotonicMs: queued.receivedAtMonotonicMs,
+            clientTelemetry: queued.telemetry,
             callBrowser,
             onEvent: (event) => {
               if (activeRunId === runId && generation === runGeneration) {
                 const visibleEvent = boundedCompanionActivityEvent(event);
-                if (visibleEvent) send({ type: 'activity', runId, event: visibleEvent });
+                if (visibleEvent)
+                  send({ type: 'activity', runId, messageId, event: visibleEvent });
               }
             },
           });
           if (activeRunId !== runId || generation !== runGeneration) return;
-          send({ type: 'reply', runId, reply });
-          send({ type: 'status', runId, status: 'completed' });
+          send({ type: 'reply', runId, messageId, reply });
+          send({ type: 'status', runId, messageId, status: 'completed' });
         } catch (error) {
           if (activeRunId !== runId || generation !== runGeneration) return;
-          send({ type: 'error', runId, error: error instanceof Error ? error.message : String(error) });
+          send({ type: 'error', runId, messageId, error: error instanceof Error ? error.message : String(error) });
         } finally {
           if (activeRunId === runId && generation === runGeneration) activeRunId = '';
           if (generation === runGeneration) browserTools.rejectAll('Companion run finished');
@@ -122,13 +137,20 @@ export function createCompanionWebSocketServer(runtime: CompanionRuntime): WebSo
         send({ type: 'error', runId: validation.runId, error: validation.error });
         return;
       }
-      const { runId, prompt } = validation;
+      const { runId, prompt, telemetry } = validation;
+      const messageId = validation.messageId || crypto.randomUUID();
       if (sessionRunId && runId !== sessionRunId) {
         send({ type: 'error', runId, error: 'This Companion socket already owns another session.' });
         return;
       }
       sessionRunId = runId;
-      queuedPrompts.push(prompt);
+      queuedPrompts.push({
+        prompt,
+        messageId,
+        telemetry,
+        receivedAtEpochMs: Date.now(),
+        receivedAtMonotonicMs: performance.now(),
+      });
       void drainQueue();
     });
 
