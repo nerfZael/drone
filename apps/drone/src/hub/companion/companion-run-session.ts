@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import type { CompanionClientTelemetry, CompanionRunEvent } from '@drone/assistant-chat';
 
 import type { CompanionBrowserCall, CompanionRuntime } from './companion-runtime';
@@ -7,10 +8,14 @@ import {
   CompanionBrowserToolBroker,
 } from './companion-transport-shared';
 
-type QueuedCompanionPrompt = {
+type CompanionPromptInput = {
   prompt: string;
-  messageId: string;
+  messageId?: string;
   telemetry?: CompanionClientTelemetry;
+};
+
+type QueuedCompanionPrompt = CompanionPromptInput & {
+  messageId: string;
   receivedAtEpochMs: number;
   receivedAtMonotonicMs: number;
 };
@@ -52,21 +57,27 @@ export class CompanionRunSession {
     });
   }
 
-  async enqueue(prompt: QueuedCompanionPrompt): Promise<void> {
+  async enqueue(prompt: CompanionPromptInput): Promise<void> {
     if (this.closed) throw new Error(this.options.unavailableMessage);
-    this.prompts.push(prompt);
-    if (this.active) return;
+    const queued = {
+      ...prompt,
+      messageId: prompt.messageId || crypto.randomUUID(),
+      receivedAtEpochMs: Date.now(),
+      receivedAtMonotonicMs: performance.now(),
+    };
+    if (this.active) {
+      this.prompts.push(queued);
+      return;
+    }
 
     this.active = true;
-    this.generation += 1;
-    this.activeMessageId = prompt.messageId;
     try {
-      await this.options.emit({ type: 'status', messageId: prompt.messageId, status: 'working' });
+      await this.beginPrompt(queued);
     } catch (error) {
       await this.close(this.options.unavailableMessage).catch(() => undefined);
       throw error;
     }
-    void this.drain(true);
+    void this.drain(queued);
   }
 
   resolveBrowserTool(input: {
@@ -91,19 +102,11 @@ export class CompanionRunSession {
     await this.options.runtime.deleteSession(this.options.runtimeRunId);
   }
 
-  private async drain(firstStatusEmitted: boolean): Promise<void> {
-    let statusEmitted = firstStatusEmitted;
+  private async drain(queued: QueuedCompanionPrompt): Promise<void> {
     try {
-      while (this.prompts.length > 0 && this.isAvailable()) {
-        const queued = this.prompts.shift()!;
+      while (this.isAvailable()) {
         const { prompt, messageId } = queued;
-        this.activeMessageId = messageId;
-        if (!statusEmitted) {
-          this.generation += 1;
-          await this.options.emit({ type: 'status', messageId, status: 'working' });
-        }
         const runGeneration = this.generation;
-        statusEmitted = false;
         const callBrowser: CompanionBrowserCall = (tool, args, signal) => {
           if (!this.isCurrentGeneration(runGeneration)) {
             return Promise.reject(new Error('Companion run is no longer active'));
@@ -148,12 +151,22 @@ export class CompanionRunSession {
             this.activeMessageId = '';
           }
         }
+        const next = this.prompts.shift();
+        if (!next) break;
+        await this.beginPrompt(next);
+        queued = next;
       }
     } catch {
       await this.close(this.options.unavailableMessage).catch(() => undefined);
     } finally {
       this.active = false;
     }
+  }
+
+  private async beginPrompt(prompt: QueuedCompanionPrompt): Promise<void> {
+    this.generation += 1;
+    this.activeMessageId = prompt.messageId;
+    await this.options.emit({ type: 'status', messageId: prompt.messageId, status: 'working' });
   }
 
   private isAvailable(): boolean {
