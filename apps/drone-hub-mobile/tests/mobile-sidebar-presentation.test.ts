@@ -703,7 +703,8 @@ describe('mobile sidebar presentation', () => {
     expect(providerSource).toContain('!activeTarget.reachable');
     expect(providerSource).toContain('!hasOperations');
     expect(providerSource).toContain('!hasGrant');
-    expect(providerSource).toContain('const runId = runIdRef.current || newRunId()');
+    expect(providerSource).toContain('controller.submitPrompt({');
+    expect(providerSource).toContain('controller.hasSession()');
     expect(overlaySource).toContain("justifyContent: 'flex-start'");
     expect(overlaySource).toContain('accessibilityLabel="Stop Companion recording"');
     expect(overlaySource).toContain('<NativeMarkdown text={companion.reply} />');
