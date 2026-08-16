@@ -6,8 +6,56 @@ import {
   type CompanionProposal,
   type CompanionProposalOperation,
   type CompanionProposalExecution,
+  type CompanionProposalExecutionItem,
+  type CompanionProposalExecutionProgress,
   type CompanionStatus,
 } from '@drone/assistant-chat';
+
+function ProposalOperationMarker({
+  index,
+  active,
+  outcome,
+}: {
+  index: number;
+  active: boolean;
+  outcome?: CompanionProposalExecutionItem;
+}) {
+  const className = 'mt-px flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[var(--panel-hover)]';
+  if (active) {
+    return (
+      <span className={`${className} text-[var(--accent)]`} role="status" aria-label={`Applying operation ${index}`}>
+        <svg className="h-3 w-3 animate-spin motion-reduce:animate-none" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+          <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.5" opacity="0.25" />
+          <path d="M6 1.5a4.5 4.5 0 0 1 4.5 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      </span>
+    );
+  }
+  if (outcome?.status === 'completed') {
+    return (
+      <span className={`${className} text-[var(--green)]`} aria-label={`Operation ${index} applied`} title="Applied">
+        <svg className="h-2.5 w-2.5" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M2 5.2l2 2 4-4.4" />
+        </svg>
+      </span>
+    );
+  }
+  if (outcome?.status === 'failed') {
+    return (
+      <span className={`${className} text-[var(--red)]`} aria-label={`Operation ${index} failed`} title="Failed">
+        <span aria-hidden="true">×</span>
+      </span>
+    );
+  }
+  if (outcome?.status === 'skipped') {
+    return (
+      <span className={`${className} text-[var(--muted-dim)]`} aria-label={`Operation ${index} not run`} title="Not run">
+        <span aria-hidden="true">–</span>
+      </span>
+    );
+  }
+  return <span className={`${className} text-[9px] text-[var(--muted)]`}>{index}</span>;
+}
 
 type HoverableProposalOperation = Extract<
   CompanionProposalOperation,
@@ -94,8 +142,10 @@ export function CompanionProposalCard({
   proposal,
   defaultRepoPath,
   execution,
+  executionProgress = null,
   executing,
   companionStatus,
+  droneNames = {},
   resolveDroneName,
   onExecute,
   onDiscard,
@@ -103,15 +153,17 @@ export function CompanionProposalCard({
   proposal: CompanionProposal;
   defaultRepoPath: string;
   execution: CompanionProposalExecution | null;
+  executionProgress?: CompanionProposalExecutionProgress | null;
   executing: boolean;
   companionStatus: CompanionStatus;
+  droneNames?: Readonly<Record<string, string>>;
   resolveDroneName?(droneId: string): string | null;
   onExecute(): void;
   onDiscard(): void;
 }) {
   const operationResult = React.useMemo(
-    () => new Map((execution?.operations ?? []).map((item) => [item.id, item])),
-    [execution],
+    () => new Map((execution?.operations ?? executionProgress?.operations ?? []).map((item) => [item.id, item])),
+    [execution, executionProgress],
   );
   const companionBusy = ['starting', 'recording', 'transcribing', 'working'].includes(
     companionStatus,
@@ -126,8 +178,8 @@ export function CompanionProposalCard({
       );
       if (created?.type === 'create_drone') return created.name || 'New drone';
     }
-    return resolveDroneName?.(droneId) || droneId;
-  }, [proposal.operations, resolveDroneName]);
+    return droneNames[droneId] || resolveDroneName?.(droneId) || droneId;
+  }, [droneNames, proposal.operations, resolveDroneName]);
 
   return (
     <Tooltip.Provider delayDuration={250} skipDelayDuration={100}>
@@ -230,9 +282,11 @@ export function CompanionProposalCard({
                   className="py-2 first:pt-0 last:pb-0"
                 >
                   <div className="flex items-start gap-2">
-                    <span className="mt-px flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[var(--panel-hover)] text-[9px] text-[var(--muted)]">
-                      {index + 1}
-                    </span>
+                    <ProposalOperationMarker
+                      index={index + 1}
+                      active={executing && executionProgress?.activeOperationId === operation.id}
+                      outcome={outcome}
+                    />
                     <div className="min-w-0 flex-1">
                       {isMessage || isCreateDrone ? (
                         <ProposalOperationHoverCard
@@ -262,13 +316,9 @@ export function CompanionProposalCard({
                           </dl>
                         </details>
                       ) : null}
-                      {outcome ? (
-                        <div className={`mt-1 text-[10px] ${outcome.status === 'completed' ? 'text-[var(--green)]' : outcome.status === 'failed' ? 'text-[var(--red)]' : 'text-[var(--muted-dim)]'}`}>
-                          {outcome.status === 'completed'
-                            ? 'Applied'
-                            : outcome.status === 'skipped'
-                              ? 'Not run'
-                              : outcome.error || 'Failed'}
+                      {outcome && outcome.status !== 'completed' ? (
+                        <div className={`mt-1 text-[10px] ${outcome.status === 'failed' ? 'text-[var(--red)]' : 'text-[var(--muted-dim)]'}`}>
+                          {outcome.status === 'skipped' ? 'Not run' : outcome.error || 'Failed'}
                         </div>
                       ) : null}
                     </div>

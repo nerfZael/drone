@@ -2,8 +2,37 @@ import { describe, expect, test } from 'bun:test';
 import {
   COMPANION_SHORTCUT_DOUBLE_TAP_MS,
   isCompanionShortcutDoubleTap,
+  shouldConsumeCompanionProposalShortcut,
   shouldCancelCompanionRecordingWithEscape,
 } from '../src/droneHub/companion/companion-shortcut';
+
+describe('Companion proposal shortcut', () => {
+  test('consumes Caps Lock even while Apply is unavailable so capitalization is not toggled', () => {
+    expect(shouldConsumeCompanionProposalShortcut({
+      matched: true,
+      shortcutKey: 'capslock',
+      canApply: false,
+    })).toBe(true);
+    expect(shouldConsumeCompanionProposalShortcut({
+      matched: true,
+      shortcutKey: 'capslock',
+      canApply: true,
+    })).toBe(true);
+  });
+
+  test('does not swallow an unavailable custom binding or unrelated key', () => {
+    expect(shouldConsumeCompanionProposalShortcut({
+      matched: true,
+      shortcutKey: 'k',
+      canApply: false,
+    })).toBe(false);
+    expect(shouldConsumeCompanionProposalShortcut({
+      matched: false,
+      shortcutKey: 'capslock',
+      canApply: true,
+    })).toBe(false);
+  });
+});
 
 describe('Companion shortcut double tap', () => {
   test('closes only when the second press is relatively quick', () => {

@@ -2652,7 +2652,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           ? { path: openedEditorFile.path }
           : null,
       }),
-      executeProposal: async (proposal, executionContext) =>
+      executeProposal: async (proposal, executionContext, onProgress) =>
         await executeCompanionProposal(proposal, {
           createGroup: async (operation) => {
             const repoPath = operation.repoPath ?? executionContext.defaultRepoPath;
@@ -2809,7 +2809,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
               status: response.pendingState ?? 'queued',
             };
           },
-        }),
+        }, { onProgress }),
       openDroneChat: (args) => {
         const droneId = String(args.droneId ?? '').trim();
         const drone = droneByIdRef.current[droneId];

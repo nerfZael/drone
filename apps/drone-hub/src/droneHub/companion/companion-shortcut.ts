@@ -1,5 +1,18 @@
 export const COMPANION_SHORTCUT_DOUBLE_TAP_MS = 400;
 
+export function shouldConsumeCompanionProposalShortcut({
+  matched,
+  shortcutKey,
+  canApply,
+}: {
+  matched: boolean;
+  shortcutKey: string | null | undefined;
+  canApply: boolean;
+}): boolean {
+  if (!matched) return false;
+  return canApply || shortcutKey === 'capslock';
+}
+
 type CompanionRecordingEscapeInput = {
   key: string;
   repeat: boolean;

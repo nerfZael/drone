@@ -112,8 +112,10 @@ export function CompanionOverlay() {
           proposal={companion.proposal}
           defaultRepoPath={companion.proposalDefaultRepoPath ?? ''}
           execution={companion.proposalExecution}
+          executionProgress={companion.proposalExecutionProgress}
           executing={companion.proposalExecuting}
           companionStatus={companion.status}
+          droneNames={companion.proposalDroneNames}
           resolveDroneName={(droneId) => workspace?.resolveDroneName(droneId) ?? null}
           onExecute={() => void companion.executeProposal()}
           onDiscard={companion.discardProposal}

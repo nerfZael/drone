@@ -78,7 +78,7 @@ export function AgentRunSummaryLine({
         aria-expanded={expanded}
         aria-label={`${expanded ? 'Collapse' : 'Expand'} ${toggleLabel}`}
         onClick={onToggle}
-        className={`${className} hover:text-[var(--fg-secondary)]`}
+        className={`${className} transition-colors hover:text-[var(--fg-secondary)] focus-visible:text-[var(--fg-secondary)] focus-visible:outline-none`}
       >
         {content}
       </button>

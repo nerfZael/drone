@@ -18,7 +18,10 @@ import { useContinuousDictation } from '../chat/ContinuousDictationContext';
 import { toggleCurrentChatComposerEditorMode } from '../chat/chat-composer-editor-mode-shortcut';
 import { useFileDictation } from '../files/FileDictationContext';
 import { useCompanion } from '../companion/CompanionContext';
-import { isCompanionShortcutDoubleTap } from '../companion/companion-shortcut';
+import {
+  isCompanionShortcutDoubleTap,
+  shouldConsumeCompanionProposalShortcut,
+} from '../companion/companion-shortcut';
 
 type Updater<T> = T | ((prev: T) => T);
 type Setter<T> = (next: Updater<T>) => void;
@@ -160,6 +163,15 @@ export function useDroneHubLifecycleEffects({
   const companion = useCompanion();
   const toggleCompanionRecording = companion?.toggle;
   const closeCompanion = companion?.close;
+  const applyCompanionProposal = companion?.executeProposal;
+  const canApplyCompanionProposal = Boolean(
+    companion?.proposal &&
+    companion.proposal.operations.length > 0 &&
+    companion.proposalDefaultRepoPath !== null &&
+    !companion.proposalExecuting &&
+    companion.proposalExecution === null &&
+    !['starting', 'recording', 'transcribing', 'working'].includes(companion.status),
+  );
   const lastCompanionShortcutAtRef = React.useRef(0);
   const runCompanionShortcut = React.useCallback((): boolean => {
     if (!toggleCompanionRecording) return false;
@@ -309,8 +321,8 @@ export function useDroneHubLifecycleEffects({
       moveSelectedDroneToTop: () => moveSelectedDroneToTopFromShortcut(),
       toggleSelectedDronesToDo: () => toggleSelectedDronesToDoFromShortcut(),
       focusPrimaryChatInput: () => focusPrimaryChatInput(),
-      // This action and Companion run in the capture handler below so editor shortcut
-      // boundaries cannot swallow them and dialogs can explicitly suppress them.
+      // These actions run in the capture handler below so editor shortcut boundaries
+      // cannot swallow them and dialogs can explicitly suppress them.
       toggleChatComposerEditorMode: () => false,
       toggleContinuousDictation: () => {
         if (!toggleContinuousDictation) return false;
@@ -324,6 +336,11 @@ export function useDroneHubLifecycleEffects({
       },
       toggleCompanion: () => {
         return runCompanionShortcut();
+      },
+      applyCompanionProposal: () => {
+        if (!applyCompanionProposal || !canApplyCompanionProposal) return false;
+        void applyCompanionProposal();
+        return true;
       },
       toggleVoiceClipboardRecording: () => toggleVoiceClipboardRecording(),
       markSelectedDronesUnread: () => onMarkSelectedDronesUnreadShortcut(),
@@ -416,10 +433,22 @@ export function useDroneHubLifecycleEffects({
       const captureRoot =
         e.target instanceof HTMLElement ? e.target.closest('[data-shortcut-capture="true"]') : null;
       if (captureRoot) return;
-      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
       const matched = SHORTCUT_DEFINITIONS.find(
         (definition) => isShortcutMatch(shortcutBindings[definition.id], e),
       );
+      const modalOpen = Boolean(document.querySelector('[role="dialog"][aria-modal="true"]'));
+      if (matched?.id === 'applyCompanionProposal') {
+        const handled = modalOpen ? false : runShortcutAction(matched.id, e);
+        if (!shouldConsumeCompanionProposalShortcut({
+          matched: true,
+          shortcutKey: shortcutBindings[matched.id]?.key,
+          canApply: handled,
+        })) return;
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      if (modalOpen) return;
       if (matched?.id === 'toggleCompanion') {
         if (!runCompanionShortcut()) return;
         e.preventDefault();
@@ -482,15 +511,28 @@ export function useDroneHubLifecycleEffects({
       if (!handled) return;
       e.preventDefault();
     };
+    const onKeyUpCapture = (e: KeyboardEvent) => {
+      const binding = shortcutBindings.applyCompanionProposal;
+      if (binding?.key !== 'capslock' || !isShortcutMatch(binding, e)) return;
+      const captureRoot =
+        e.target instanceof HTMLElement ? e.target.closest('[data-shortcut-capture="true"]') : null;
+      if (captureRoot) return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
     document.addEventListener('keydown', onChatComposerEditorShortcutCapture, { capture: true });
+    document.addEventListener('keyup', onKeyUpCapture, { capture: true });
     document.addEventListener('keydown', onKeyDown);
     return () => {
       document.removeEventListener('keydown', onChatComposerEditorShortcutCapture, { capture: true });
+      document.removeEventListener('keyup', onKeyUpCapture, { capture: true });
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [
     currentDrone,
     runCompanionShortcut,
+    applyCompanionProposal,
+    canApplyCompanionProposal,
     openHome,
     openDraftChatComposer,
     openChildDraftChatComposer,

@@ -3,6 +3,7 @@ import type {
   CompanionProposal,
   CompanionProposalExecution,
   CompanionProposalExecutionContext,
+  CompanionProposalExecutionProgress,
   CompanionTextSnapshot,
 } from '@drone/assistant-chat';
 import { useActiveComposer } from '../chat/ActiveComposerContext';
@@ -22,6 +23,7 @@ export type CompanionWorkspaceTarget = {
   executeProposal(
     proposal: CompanionProposal,
     context: CompanionProposalExecutionContext,
+    onProgress?: (progress: CompanionProposalExecutionProgress) => void,
   ): Promise<CompanionProposalExecution>;
   openDroneChat(
     args: Record<string, unknown>,
@@ -40,6 +42,7 @@ type CompanionWorkspaceContextValue = {
   executeProposal(
     proposal: CompanionProposal,
     context: CompanionProposalExecutionContext,
+    onProgress?: (progress: CompanionProposalExecutionProgress) => void,
   ): Promise<CompanionProposalExecution>;
   openDroneChat(args: Record<string, unknown>): Promise<Record<string, unknown>>;
   highlightDrones(args: Record<string, unknown>): Promise<Record<string, unknown>>;
@@ -119,8 +122,8 @@ export function CompanionWorkspaceProvider({ children }: { children: React.React
       focusEditor,
       getAppContext: () => resolveWorkspaceTarget().getAppContext(),
       resolveDroneName: (droneId) => resolveWorkspaceTarget().resolveDroneName(droneId),
-      executeProposal: async (proposal, context) =>
-        await resolveWorkspaceTarget().executeProposal(proposal, context),
+      executeProposal: async (proposal, context, onProgress) =>
+        await resolveWorkspaceTarget().executeProposal(proposal, context, onProgress),
       openDroneChat: async (args) => await resolveWorkspaceTarget().openDroneChat(args),
       highlightDrones: async (args) => await resolveWorkspaceTarget().highlightDrones(args),
       readActiveComposer: activeComposer.readActiveComposer,

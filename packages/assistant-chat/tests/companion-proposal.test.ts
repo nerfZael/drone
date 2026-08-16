@@ -144,6 +144,30 @@ describe('Companion proposal contract', () => {
     expect(result.operations.map((item) => item.status)).toEqual(['completed', 'completed']);
   });
 
+  test('reports the active operation and completed work while executing', async () => {
+    const progress: Array<{ activeOperationId: string | null; statuses: string[] }> = [];
+    await executeCompanionProposal({
+      version: 1,
+      title: 'Delete two drones',
+      operations: [
+        { id: 'first', type: 'delete_drone', droneId: 'drone-1' },
+        { id: 'second', type: 'delete_drone', droneId: 'drone-2' },
+      ],
+    }, executor(), {
+      onProgress: (update) => progress.push({
+        activeOperationId: update.activeOperationId,
+        statuses: update.operations.map((item) => item.status),
+      }),
+    });
+
+    expect(progress).toEqual([
+      { activeOperationId: 'first', statuses: [] },
+      { activeOperationId: null, statuses: ['completed'] },
+      { activeOperationId: 'second', statuses: ['completed'] },
+      { activeOperationId: null, statuses: ['completed', 'completed'] },
+    ]);
+  });
+
   test('stops after a failure and marks remaining operations skipped', async () => {
     const result = await executeCompanionProposal({
       version: 1,

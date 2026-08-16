@@ -119,6 +119,15 @@ describe('shortcut defaults', () => {
       alt: false,
       shift: false,
     });
+    expect(defaults.applyCompanionProposal).toEqual({
+      key: 'capslock',
+      mod: false,
+      ctrl: false,
+      meta: false,
+      alt: false,
+      shift: false,
+    });
+    expect(formatShortcutBinding(defaults.applyCompanionProposal)).toBe('Caps Lock');
     expect(defaults.toggleVoiceClipboardRecording).toBeNull();
     expect(defaults.openHoveredGroupMultiChat).toEqual({
       key: 'g',

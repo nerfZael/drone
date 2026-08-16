@@ -13,6 +13,7 @@ import {
   type CompanionProposal,
   type CompanionProposalExecution,
   type CompanionProposalExecutionContext,
+  type CompanionProposalExecutionProgress,
   type CompanionStatus,
   type CompanionToolActivity,
 } from '@drone/assistant-chat';
@@ -35,6 +36,8 @@ type CompanionContextValue = {
   activity: CompanionToolActivity[];
   proposal: CompanionProposal | null;
   proposalExecution: CompanionProposalExecution | null;
+  proposalExecutionProgress: CompanionProposalExecutionProgress | null;
+  proposalDroneNames: Readonly<Record<string, string>>;
   proposalDefaultRepoPath: string | null;
   proposalExecuting: boolean;
   toggle(): Promise<void>;
@@ -70,6 +73,10 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const [proposal, setProposal] = React.useState<CompanionProposal | null>(null);
   const [proposalExecution, setProposalExecution] =
     React.useState<CompanionProposalExecution | null>(null);
+  const [proposalExecutionProgress, setProposalExecutionProgress] =
+    React.useState<CompanionProposalExecutionProgress | null>(null);
+  const [proposalDroneNames, setProposalDroneNames] =
+    React.useState<Readonly<Record<string, string>>>({});
   const [proposalDefaultRepoPath, setProposalDefaultRepoPath] = React.useState<string | null>(null);
   const [proposalExecuting, setProposalExecuting] = React.useState(false);
   const proposalExecutingRef = React.useRef(false);
@@ -102,6 +109,8 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     proposalExecutionContextRef.current = null;
     setProposal(null);
     setProposalExecution(null);
+    setProposalExecutionProgress(null);
+    setProposalDroneNames({});
     setProposalDefaultRepoPath(null);
     proposalExecutingRef.current = false;
     setProposalExecuting(false);
@@ -155,6 +164,8 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     proposalExecutionGenerationRef.current += 1;
     proposalRef.current = next;
     setProposal(next);
+    setProposalExecutionProgress(null);
+    setProposalDroneNames({});
     return {
       ok: true as const,
       revision: String(proposalRevisionRef.current),
@@ -171,6 +182,8 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     proposalExecutionContextRef.current = null;
     setProposal(null);
     setProposalExecution(null);
+    setProposalExecutionProgress(null);
+    setProposalDroneNames({});
     setProposalDefaultRepoPath(null);
   }, []);
 
@@ -184,11 +197,23 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     proposalExecutingRef.current = true;
     setProposalExecuting(true);
     setProposalExecution(null);
+    setProposalExecutionProgress({ activeOperationId: null, operations: [] });
+    setProposalDroneNames(Object.fromEntries(
+      current.operations.flatMap((operation) => {
+        if (!('droneId' in operation) || operation.droneId.startsWith('$')) return [];
+        return [[operation.droneId, workspace.resolveDroneName(operation.droneId) || operation.droneId]];
+      }),
+    ));
     try {
-      const execution = await workspace.executeProposal(current, executionContext);
+      const execution = await workspace.executeProposal(current, executionContext, (progress) => {
+        if (proposalExecutionGenerationRef.current === executionGeneration) {
+          setProposalExecutionProgress(progress);
+        }
+      });
       if (proposalExecutionGenerationRef.current === executionGeneration) {
         proposalExecutionRef.current = execution;
         setProposalExecution(execution);
+        setProposalExecutionProgress(null);
       }
     } catch (executionError) {
       if (proposalExecutionGenerationRef.current === executionGeneration) {
@@ -207,6 +232,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         };
         proposalExecutionRef.current = execution;
         setProposalExecution(execution);
+        setProposalExecutionProgress(null);
       }
     } finally {
       if (proposalExecutionGenerationRef.current === executionGeneration) {
@@ -326,6 +352,8 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       durationMillis: voice.durationMillis,
       proposal,
       proposalExecution,
+      proposalExecutionProgress,
+      proposalDroneNames,
       proposalDefaultRepoPath,
       proposalExecuting,
       toggle,
@@ -345,6 +373,8 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       proposal,
       proposalDefaultRepoPath,
       proposalExecution,
+      proposalExecutionProgress,
+      proposalDroneNames,
       proposalExecuting,
       state,
       stop,

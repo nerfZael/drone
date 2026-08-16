@@ -107,4 +107,65 @@ describe('Companion proposal card', () => {
     expect(html).toContain('Discard to retry');
     expect(html).toContain('disabled');
   });
+
+  test('uses inline progress icons and preserves snapshotted drone names', () => {
+    const proposal = {
+      version: 1 as const,
+      title: 'Delete recent drones',
+      operations: [
+        { id: 'first', type: 'delete_drone' as const, droneId: 'drone-one' },
+        { id: 'second', type: 'delete_drone' as const, droneId: 'drone-two' },
+      ],
+    };
+    const applyingHtml = renderToStaticMarkup(
+      <CompanionProposalCard
+        proposal={proposal}
+        defaultRepoPath=""
+        execution={null}
+        executionProgress={{
+          activeOperationId: 'second',
+          operations: [{ id: 'first', type: 'delete_drone', status: 'completed' }],
+        }}
+        executing
+        companionStatus="completed"
+        droneNames={{ 'drone-one': 'Refactoring opportunities review', 'drone-two': 'Security code review' }}
+        resolveDroneName={() => null}
+        onExecute={() => undefined}
+        onDiscard={() => undefined}
+      />,
+    );
+
+    expect(applyingHtml).toContain('Operation 1 applied');
+    expect(applyingHtml).toContain('Applying operation 2');
+    expect(applyingHtml).toContain('animate-spin');
+    expect(applyingHtml).toContain('Delete drone Refactoring opportunities review');
+    expect(applyingHtml).toContain('Delete drone Security code review');
+    expect(applyingHtml).not.toContain('Delete drone drone-one');
+    expect(applyingHtml).not.toContain('Delete drone drone-two');
+
+    const appliedHtml = renderToStaticMarkup(
+      <CompanionProposalCard
+        proposal={proposal}
+        defaultRepoPath=""
+        execution={{
+          ok: true,
+          operations: [
+            { id: 'first', type: 'delete_drone', status: 'completed' },
+            { id: 'second', type: 'delete_drone', status: 'completed' },
+          ],
+        }}
+        executing={false}
+        companionStatus="completed"
+        droneNames={{ 'drone-one': 'Refactoring opportunities review', 'drone-two': 'Security code review' }}
+        resolveDroneName={() => null}
+        onExecute={() => undefined}
+        onDiscard={() => undefined}
+      />,
+    );
+
+    expect(appliedHtml.match(/>Applied<\/div>/g)).toHaveLength(1);
+    expect(appliedHtml.match(/aria-label="Operation \d applied"/g)).toHaveLength(2);
+    expect(appliedHtml).toContain('Delete drone Refactoring opportunities review');
+    expect(appliedHtml).toContain('Delete drone Security code review');
+  });
 });

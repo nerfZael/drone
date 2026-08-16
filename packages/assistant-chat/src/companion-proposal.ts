@@ -88,6 +88,15 @@ export type CompanionProposalExecution = {
   operations: CompanionProposalExecutionItem[];
 };
 
+export type CompanionProposalExecutionProgress = {
+  activeOperationId: string | null;
+  operations: CompanionProposalExecutionItem[];
+};
+
+export type CompanionProposalExecutionOptions = {
+  onProgress?(progress: CompanionProposalExecutionProgress): void;
+};
+
 export type CompanionProposalExecutionContext = {
   /** Repository captured when the proposal document was first created. */
   defaultRepoPath: string;
@@ -259,17 +268,23 @@ export function companionProposalOperationDetails(
 export async function executeCompanionProposal(
   rawProposal: CompanionProposal,
   executor: CompanionProposalExecutor,
+  options: CompanionProposalExecutionOptions = {},
 ): Promise<CompanionProposalExecution> {
   const proposal = validateCompanionProposal(rawProposal);
   const createdDrones = new Map<string, string>();
   const results: CompanionProposalExecution['operations'] = [];
   let failed = false;
+  const reportProgress = (activeOperationId: string | null) => {
+    options.onProgress?.({ activeOperationId, operations: [...results] });
+  };
 
   for (const rawOperation of proposal.operations) {
     if (failed) {
       results.push({ id: rawOperation.id, type: rawOperation.type, status: 'skipped' });
+      reportProgress(null);
       continue;
     }
+    reportProgress(rawOperation.id);
     const operation = resolveDroneReference(rawOperation, createdDrones);
     try {
       let result: CompanionProposalActionResult;
@@ -297,6 +312,7 @@ export async function executeCompanionProposal(
         status: 'completed',
         ...(result ? { result } : {}),
       });
+      reportProgress(null);
     } catch (error) {
       failed = true;
       results.push({
@@ -305,6 +321,7 @@ export async function executeCompanionProposal(
         status: 'failed',
         error: error instanceof Error ? error.message : String(error),
       });
+      reportProgress(null);
     }
   }
 

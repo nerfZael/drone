@@ -31,6 +31,7 @@ import { AgentRunActivityView } from '../src/droneHub/assistant/AgentRunActivity
 import { buildNativeAgentComposerControls } from '../src/droneHub/assistant/native-agent-composer-controls';
 import { assistantTranscriptHasErrorMessage } from '../src/droneHub/assistant/assistant-message-model';
 import { resolveInlineMediaToggleState } from '../src/droneHub/chat/AgentMessageExtras';
+import { AgentRunSummaryLine } from '../src/droneHub/chat/WorkingElapsedStatus';
 
 const TRANSCRIPT_ITEMS = [
   { key: 'message', kind: 'message' as const, content: <div>Visible message</div> },
@@ -55,6 +56,20 @@ function renderComposer(adapter: AgentChatSurfaceAdapter) {
 }
 
 describe('agent chat surface adapters', () => {
+  test('expandable run summaries replace the full focus outline with a quiet text state', () => {
+    const html = renderToStaticMarkup(
+      <AgentRunSummaryLine
+        active
+        durationMs={4_000}
+        expanded
+        onToggle={() => {}}
+      />,
+    );
+
+    expect(html).toContain('focus-visible:outline-none');
+    expect(html).toContain('focus-visible:text-[var(--fg-secondary)]');
+  });
+
   test('both agent types use the same centered conversation loader', () => {
     const loaderHtml = renderToStaticMarkup(<ChatLoadingState />);
 

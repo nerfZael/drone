@@ -169,7 +169,7 @@ export const COMPANION_TOOL_SUMMARIES = [
     execution: 'browser',
     requires: null,
     description:
-      'Read the one editable Companion proposal document, its revision, and its compact operation format.',
+      'Use this first whenever the user asks to create, delete, or rename groups, drones, or chats, or to send or queue chat messages. Read the one editable proposal document, its revision, and the supported operation schemas, including delete_drone and send_message. A proposal is reviewable and does not run until the user applies it.',
   },
   {
     name: 'apply_companion_proposal_patch',
@@ -178,7 +178,7 @@ export const COMPANION_TOOL_SUMMARIES = [
     execution: 'browser',
     requires: 'read_companion_proposal',
     description:
-      'Apply one strict Update File patch to the proposal JSON. The complete result is validated and shown for review; it is not executed.',
+      'After read_companion_proposal, use this to add or revise the requested Drone Hub operations, including deleting drones and sending or queueing chat messages. Apply one strict Update File patch to the proposal JSON. This updates the review card only; it does not execute the operations.',
   },
   {
     name: 'open_drone_chat',

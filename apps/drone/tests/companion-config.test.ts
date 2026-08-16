@@ -51,6 +51,12 @@ describe('Companion settings', () => {
     expect(
       COMPANION_TOOL_SUMMARIES.find((tool) => tool.name === 'apply_companion_proposal_patch'),
     ).toMatchObject({ requires: 'read_companion_proposal', execution: 'browser' });
+    expect(
+      COMPANION_TOOL_SUMMARIES.find((tool) => tool.name === 'read_companion_proposal')?.description,
+    ).toContain('delete_drone and send_message');
+    expect(
+      COMPANION_TOOL_SUMMARIES.find((tool) => tool.name === 'apply_companion_proposal_patch')?.description,
+    ).toContain('deleting drones and sending or queueing chat messages');
     expect(DEFAULT_COMPANION_SETTINGS.systemPrompt).toContain(
       'one editable proposal',
     );
