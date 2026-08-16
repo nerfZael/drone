@@ -37,9 +37,7 @@ export function createCompanionCapability(
   runtime: CompanionRuntime,
   broadcast: BroadcastEvent,
 ): CapabilityHandler {
-  const sessions = new Map<string, CompanionMeshSession>();
-  const sessionKey = (sourceDeviceId: string, clientRunId: string) =>
-    `${sourceDeviceId}\u0000${clientRunId}`;
+  const sessionsByDeviceId = new Map<string, CompanionMeshSession>();
 
   const emit = async (session: CompanionMeshSession, message: Record<string, unknown>) => {
     session.eventQueue = session.eventQueue
@@ -71,17 +69,15 @@ export function createCompanionCapability(
 
       if (operation === 'run.cancel') {
         const clientRunId = requiredText(payload.runId, 'runId');
-        const key = sessionKey(sourceDeviceId, clientRunId);
-        const session = sessions.get(key);
-        if (session) await cancelSession(session, true);
+        const session = sessionsByDeviceId.get(sourceDeviceId);
+        if (session?.clientRunId === clientRunId) await cancelSession(session, true);
         return { ok: true };
       }
 
       if (operation === 'tool.result') {
         const clientRunId = requiredText(payload.runId, 'runId');
-        const key = sessionKey(sourceDeviceId, clientRunId);
-        const session = sessions.get(key);
-        if (!session) return { ok: true };
+        const session = sessionsByDeviceId.get(sourceDeviceId);
+        if (session?.clientRunId !== clientRunId) return { ok: true };
         const callId = requiredText(payload.callId, 'callId');
         session.run.resolveBrowserTool({
           callId,
@@ -103,14 +99,11 @@ export function createCompanionCapability(
         throw Object.assign(new Error(validation.error), { code: 'INVALID_REQUEST' });
       }
       const { runId: clientRunId, prompt, messageId, telemetry } = validation;
-      const key = sessionKey(sourceDeviceId, clientRunId);
-      let session = sessions.get(key);
-      for (const existingSession of sessions.values()) {
-        if (existingSession.sourceDeviceId === sourceDeviceId && existingSession !== session) {
-          throw Object.assign(new Error('This device already has an active Companion run'), {
-            code: 'CONFLICT',
-          });
-        }
+      let session = sessionsByDeviceId.get(sourceDeviceId);
+      if (session && session.clientRunId !== clientRunId) {
+        throw Object.assign(new Error('This device already has an active Companion run'), {
+          code: 'CONFLICT',
+        });
       }
 
       if (!session) {
@@ -121,10 +114,12 @@ export function createCompanionCapability(
           transport: 'device_mesh',
           runtime,
           emit: (event) => emit(createdSession, event),
-          isAvailable: () => sessions.get(key) === createdSession,
+          isAvailable: () => sessionsByDeviceId.get(sourceDeviceId) === createdSession,
           unavailableMessage: 'Companion mobile client disconnected',
           onClose: () => {
-            if (sessions.get(key) === createdSession) sessions.delete(key);
+            if (sessionsByDeviceId.get(sourceDeviceId) === createdSession) {
+              sessionsByDeviceId.delete(sourceDeviceId);
+            }
           },
         });
         createdSession = {
@@ -134,20 +129,19 @@ export function createCompanionCapability(
           run,
         };
         session = createdSession;
-        sessions.set(key, session);
+        sessionsByDeviceId.set(sourceDeviceId, session);
       }
       await session.run.enqueue({ prompt, messageId, telemetry });
       return { accepted: true };
     },
     async close() {
-      await Promise.all([...sessions.values()].map((session) => cancelSession(session, false)));
+      await Promise.all(
+        [...sessionsByDeviceId.values()].map((session) => cancelSession(session, false)),
+      );
     },
     async revokeDevice(deviceId) {
-      await Promise.all(
-        [...sessions.values()]
-          .filter((session) => session.sourceDeviceId === deviceId)
-          .map((session) => cancelSession(session, false)),
-      );
+      const session = sessionsByDeviceId.get(deviceId);
+      if (session) await cancelSession(session, false);
     },
   };
 }
