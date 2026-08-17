@@ -502,8 +502,6 @@ export function AssistantComposer({
                 ? styles.inputWithCollapsedVoice
                 : styles.inputWithCollapsedVoiceOnly),
             !expanded && showAssistantStop && styles.inputWithCollapsedStop,
-            !expanded && styles.inputWithCollapsedContinuous,
-            !expanded && showAssistantStop && styles.inputWithCollapsedContinuousAndStop,
           ]}
         />
         {!expanded ? (
@@ -540,26 +538,6 @@ export function AssistantComposer({
               ]}
             >
               <Mic color={colors.textSecondary} size={17} strokeWidth={2.1} />
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={
-                continuousVoiceElsewhere
-                  ? 'Continuous voice is active in another chat'
-                  : 'Choose continuous voice mode'
-              }
-              accessibilityState={{ disabled: continuousVoiceActionDisabled, checked: false }}
-              disabled={continuousVoiceActionDisabled}
-              hitSlop={6}
-              onPress={openContinuousVoiceModePicker}
-              style={({ pressed }) => [
-                styles.collapsedContinuousVoiceButton,
-                showAssistantStop && styles.collapsedContinuousVoiceButtonWithStop,
-                continuousVoiceActionDisabled && styles.disabled,
-                pressed && styles.pressed,
-              ]}
-            >
-              <AudioLines color={colors.accent} size={17} strokeWidth={2.1} />
             </Pressable>
             {showAssistantStop ? (
               <Pressable
@@ -644,12 +622,6 @@ export function AssistantComposer({
                   <ChevronDown color={colors.secondary} size={14} strokeWidth={2.2} />
                 </Pressable>
                 <IconButton
-                  label={voiceRecordAccessibilityLabel}
-                  icon={Mic}
-                  disabled={voiceRecordActionDisabled}
-                  onPress={() => void beginVoiceRecording()}
-                />
-                <IconButton
                   label={
                     continuousVoiceElsewhere
                       ? 'Continuous voice is active in another chat'
@@ -658,6 +630,12 @@ export function AssistantComposer({
                   icon={AudioLines}
                   disabled={continuousVoiceActionDisabled}
                   onPress={openContinuousVoiceModePicker}
+                />
+                <IconButton
+                  label={voiceRecordAccessibilityLabel}
+                  icon={Mic}
+                  disabled={voiceRecordActionDisabled}
+                  onPress={() => void beginVoiceRecording()}
                 />
               </>
             ) : continuousVoiceOwned ? (
@@ -801,8 +779,6 @@ const styles = StyleSheet.create({
   inputWithCollapsedVoice: { paddingLeft: 54, paddingRight: 54 },
   inputWithCollapsedVoiceOnly: { paddingLeft: 16, paddingRight: 54 },
   inputWithCollapsedStop: { paddingRight: 97 },
-  inputWithCollapsedContinuous: { paddingRight: 97 },
-  inputWithCollapsedContinuousAndStop: { paddingRight: 140 },
   collapsedAddButton: {
     position: 'absolute',
     left: 9,
@@ -824,17 +800,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   collapsedVoiceButtonWithStop: { right: 52 },
-  collapsedContinuousVoiceButton: {
-    position: 'absolute',
-    right: 52,
-    top: 9,
-    width: 34,
-    height: 34,
-    borderRadius: 5,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  collapsedContinuousVoiceButtonWithStop: { right: 95 },
   collapsedStopButton: {
     position: 'absolute',
     right: 9,

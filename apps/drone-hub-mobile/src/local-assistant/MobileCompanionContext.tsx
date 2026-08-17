@@ -24,6 +24,10 @@ import {
 import { useMesh } from '../mesh/MeshContext';
 import { useSharedMobileChatVoiceRecorder } from './MobileChatVoiceRecorderContext';
 import { createMobileCompanionTransport } from './mobile-companion-transport';
+import {
+  mobileCompanionOwnsMicrophone,
+  resolveMobileCompanionVoiceStatus,
+} from './mobile-companion-voice-model';
 
 export type MobileCompanionEditorTarget = {
   id: string;
@@ -79,6 +83,15 @@ const MobileCompanionContext = React.createContext<MobileCompanionContextValue |
 export function MobileCompanionProvider({ children }: { children: React.ReactNode }) {
   const mesh = useMesh();
   const voice = useSharedMobileChatVoiceRecorder();
+  const companionOwnsMicrophone = mobileCompanionOwnsMicrophone(voice.microphoneOwner);
+  const [companionVoiceSessionActive, setCompanionVoiceSessionActiveState] =
+    React.useState(false);
+  const companionVoiceSessionActiveRef = React.useRef(false);
+  const setCompanionVoiceSessionActive = React.useCallback((active: boolean) => {
+    companionVoiceSessionActiveRef.current = active;
+    setCompanionVoiceSessionActiveState(active);
+  }, []);
+  const companionVoiceActive = companionOwnsMicrophone || companionVoiceSessionActive;
   const controllerRef = React.useRef<CompanionClientController | null>(null);
   if (!controllerRef.current) {
     controllerRef.current = new CompanionClientController({ createId: Crypto.randomUUID });
@@ -326,7 +339,8 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     if (proposalExecutingRef.current) return;
     activeTargetDeviceIdRef.current = '';
     await controller.close();
-    await voice.discardRecording();
+    if (companionVoiceSessionActiveRef.current) await voice.discardRecording();
+    setCompanionVoiceSessionActive(false);
     proposalRevisionRef.current += 1;
     proposalExecutionGenerationRef.current += 1;
     proposalRef.current = null;
@@ -337,7 +351,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     setProposalDefaultRepoPath(null);
     proposalExecutingRef.current = false;
     setProposalExecuting(false);
-  }, [controller, voice.discardRecording]);
+  }, [controller, setCompanionVoiceSessionActive, voice.discardRecording]);
 
   React.useEffect(() => {
     const activeTargetDeviceId = activeTargetDeviceIdRef.current;
@@ -385,8 +399,13 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
   );
 
   const toggle = React.useCallback(async () => {
-    if (voice.status === 'starting' || voice.status === 'transcribing') return;
-    if (voice.status === 'recording') {
+    if (
+      companionVoiceActive &&
+      (voice.status === 'starting' || voice.status === 'transcribing')
+    ) {
+      return;
+    }
+    if (companionVoiceActive && voice.status === 'recording') {
       const token = controller.getToken();
       const messageId = Crypto.randomUUID();
       const audioDurationMs = voice.durationMillis;
@@ -394,6 +413,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       const text = await voice.stopRecordingForTranscript();
       const transcriptionMs = Math.max(0, performance.now() - transcriptionStartedAt);
       if (!controller.isCurrent(token)) return;
+      setCompanionVoiceSessionActive(false);
       if (!text.trim()) {
         controller.reportVoiceError(voice.getError());
         return;
@@ -419,24 +439,36 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     activeTargetDeviceIdRef.current = activeTarget.targetDeviceId;
     voice.setError('');
     const token = controller.getToken();
+    setCompanionVoiceSessionActive(true);
     const started = await voice.startRecording('companion');
     if (!controller.isCurrent(token)) return;
     if (!started) {
+      setCompanionVoiceSessionActive(false);
       controller.reportVoiceError(
         voice.getError() || 'The microphone could not start. Check microphone and Groq settings.',
       );
     }
-  }, [available, close, controller, run, unavailableReason, voice]);
+  }, [
+    available,
+    close,
+    companionVoiceActive,
+    controller,
+    run,
+    setCompanionVoiceSessionActive,
+    unavailableReason,
+    voice,
+  ]);
 
   React.useEffect(() => {
     if (
+      !companionVoiceActive ||
       !voice.error.trim() ||
       !['starting', 'recording', 'stopped', 'transcribing'].includes(voice.status)
     ) {
       return;
     }
     controller.reportVoiceError(voice.error);
-  }, [controller, voice.error, voice.status]);
+  }, [companionVoiceActive, controller, voice.error, voice.status]);
 
   React.useEffect(() => {
     if (state.status === 'cancelled' || state.status === 'error' || state.status === 'idle') {
@@ -454,25 +486,24 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       proposalExecutionGenerationRef.current += 1;
       proposalExecutingRef.current = false;
       void controller.close();
-      void voice.discardRecording();
+      if (companionVoiceSessionActiveRef.current) void voice.discardRecording();
     },
     [controller, voice.discardRecording],
   );
 
-  const effectiveStatus: CompanionStatus =
-    voice.status === 'paused'
-      ? 'recording'
-      : voice.status === 'stopped'
-        ? 'transcribing'
-        : voice.status !== 'idle'
-          ? voice.status
-          : state.status;
+  const effectiveStatus = resolveMobileCompanionVoiceStatus({
+    companionStatus: state.status,
+    companionVoiceSessionActive,
+    microphoneOwner: voice.microphoneOwner,
+    voiceStatus: voice.status,
+  });
+  const effectiveDurationMillis = companionVoiceActive ? voice.durationMillis : 0;
 
   const value = React.useMemo<MobileCompanionContextValue>(
     () => ({
       ...state,
       status: effectiveStatus,
-      durationMillis: voice.durationMillis,
+      durationMillis: effectiveDurationMillis,
       proposal,
       proposalExecution,
       proposalDefaultRepoPath,
@@ -492,6 +523,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       discardProposal,
       executeProposal,
       effectiveStatus,
+      effectiveDurationMillis,
       registerEditorTarget,
       registerWorkspaceTarget,
       proposal,
@@ -501,7 +533,6 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       state,
       toggle,
       unavailableReason,
-      voice.durationMillis,
     ],
   );
 
