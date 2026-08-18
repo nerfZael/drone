@@ -2817,8 +2817,6 @@ function createHubAgentModelCatalogService(): AgentModelCatalogService {
         dvmExec(containerName, 'bash', ['-lc', command], { timeoutMs }),
       runHost: async (command, timeoutMs) =>
         runHostCommand('bash', ['-lc', command], { timeoutMs }),
-      readHostFile: (filePath) => fs.readFile(filePath, 'utf8'),
-      hostHomeDirectory: () => os.homedir(),
       hostModelListCommand: (agentId) =>
         agentId === 'blip' ? `${resolveBlipPromptCommand('host')} --list-models` : null,
       ensureContainerAgent: async (agentId, target) => {
