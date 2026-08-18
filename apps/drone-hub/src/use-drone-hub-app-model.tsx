@@ -1,6 +1,10 @@
 import React from 'react';
 import { createSidebarCommandQueue } from '@drone/hub-model/sidebar';
-import { resolveCompanionChatName } from '@drone/assistant-chat';
+import {
+  executeCompanionProposal,
+  resolveCompanionChatName,
+  type CompanionProposalChatOverrides,
+} from '@drone/assistant-chat';
 import {
   type AgentApprovalPolicy,
   type AgentPermissionMode,
@@ -51,7 +55,6 @@ import { useCompanionWorkspace } from './droneHub/companion/CompanionWorkspaceCo
 import {
   resolveCompanionDroneCreationPreferences,
 } from './droneHub/companion/companion-drone-creation';
-import { executeCompanionProposal } from '@drone/assistant-chat';
 import { useChatRuntimeOrchestration } from './droneHub/app/use-chat-runtime-orchestration';
 import { useDroneErrorModalActions } from './droneHub/app/use-drone-error-modal-actions';
 import { useRepoBranchOptions } from './droneHub/app/use-repo-branch-options';
@@ -2628,6 +2631,74 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   );
   React.useEffect(() => {
     if (!companionWorkspace) return;
+    const resolveProposalAgent = (agentKeyRaw: string): ChatAgentConfig => {
+      const agentKey = String(agentKeyRaw ?? '').trim();
+      const builtin = BUILTIN_AGENT_OPTIONS.find((option) => option.key === agentKey);
+      if (builtin) return builtin.agent;
+      if (agentKey.startsWith('custom:')) {
+        const customId = agentKey.slice('custom:'.length);
+        const custom = customAgents.find((agent) => agent.id === customId);
+        if (custom) {
+          return { kind: 'custom', id: custom.id, label: custom.label, command: custom.command };
+        }
+      }
+      throw new Error(`unknown agent: ${agentKey || '(empty)'}`);
+    };
+    const configureProposedChat = async (
+      droneId: string,
+      chatName: string,
+      overrides: CompanionProposalChatOverrides,
+    ): Promise<void> => {
+      const hasOverrides = Boolean(
+        overrides.agent ||
+        overrides.provider ||
+        overrides.model ||
+        overrides.reasoning ||
+        overrides.agentPermissionMode ||
+        overrides.approvalPolicy,
+      );
+      if (!hasOverrides) return;
+      const agent = overrides.agent ? resolveProposalAgent(overrides.agent) : undefined;
+      const chatPath = `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}`;
+      await requestJson(`${chatPath}/config`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          ...(agent ? { agent } : {}),
+          ...(overrides.provider ? { provider: overrides.provider } : {}),
+          ...(overrides.model ? { model: overrides.model } : {}),
+          ...(overrides.reasoning ? { reasoning: overrides.reasoning } : {}),
+          ...(overrides.agentPermissionMode
+            ? { agentPermissionMode: overrides.agentPermissionMode }
+            : {}),
+          ...(overrides.approvalPolicy
+            ? { approvalPolicy: overrides.approvalPolicy }
+            : {}),
+        }),
+      });
+      if (!overrides.provider && !overrides.model && !overrides.reasoning) return;
+      const metadata = await requestJson<{
+        chatId?: string | null;
+        agent?: ChatAgentConfig;
+      }>(chatPath);
+      const chatId = String(metadata.chatId ?? '').trim();
+      if (!chatId || metadata.agent?.kind !== 'native') return;
+      try {
+        await requestJson(`/api/assistant/threads/${encodeURIComponent(chatId)}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            ...(overrides.provider ? { provider: overrides.provider } : {}),
+            ...(overrides.model ? { model: overrides.model } : {}),
+            ...(overrides.reasoning ? { thinkingLevel: overrides.reasoning } : {}),
+          }),
+        });
+      } catch (error: any) {
+        // A brand-new native chat has no assistant thread until its first prompt.
+        // Its stored configuration above will be used when that thread is created.
+        if (Number(error?.status ?? 0) !== 404) throw error;
+      }
+    };
     return companionWorkspace.registerWorkspaceTarget({
       resolveDroneName: (droneId) => {
         const drone = droneByIdRef.current[String(droneId ?? '').trim()];
@@ -2705,6 +2776,46 @@ export function useDroneHubAppModel(): DroneHubAppModel {
                 repoPath,
               ),
             });
+            const effectiveCreationPreferences = {
+              ...creationPreferences,
+              ...(operation.runtime ? { runtime: operation.runtime } : {}),
+              ...(operation.persistVolume === undefined
+                ? {}
+                : { persistVolume: operation.persistVolume }),
+              ...(operation.agent ? { spawnAgentKey: operation.agent } : {}),
+              ...(operation.model ? { spawnModel: operation.model } : {}),
+              ...(operation.reasoning ? { spawnReasoning: operation.reasoning } : {}),
+              ...(operation.agentPermissionMode
+                ? { spawnAgentPermissionMode: operation.agentPermissionMode }
+                : {}),
+              ...(operation.approvalPolicy
+                ? { spawnApprovalPolicy: operation.approvalPolicy }
+                : {}),
+              ...(operation.repoBranchSource || operation.remoteBranch
+                ? { repoBranchSource: operation.repoBranchSource ?? 'remote' }
+                : {}),
+              ...(operation.remoteBranch
+                ? { repoCreateRemoteBranch: operation.remoteBranch }
+                : {}),
+            };
+            const effectiveAgent = resolveProposalAgent(effectiveCreationPreferences.spawnAgentKey);
+            if (operation.provider && effectiveAgent.kind !== 'native') {
+              throw new Error('provider overrides require the native agent');
+            }
+            if (
+              effectiveCreationPreferences.runtime === 'host' &&
+              effectiveAgent.kind === 'custom'
+            ) {
+              throw new Error('Host runtime currently supports builtin agents only.');
+            }
+            if (
+              effectiveCreationPreferences.runtime === 'host' &&
+              (operation.persistVolume !== undefined ||
+                operation.repoBranchSource === 'remote' ||
+                operation.remoteBranch)
+            ) {
+              throw new Error('Volume and remote branch overrides require a container drone.');
+            }
             let creationError = '';
             let created: { droneId: string; droneName: string } | null = null;
             const ok = await createDroneFromDraft({
@@ -2712,7 +2823,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
               prompt: operation.prompt,
               repoPath,
               group: operation.group,
-              creationPreferences,
+              creationPreferences: effectiveCreationPreferences,
+              seedProvider: operation.provider,
+              rememberPreferences: false,
               isolatedContext: true,
               createMode: 'with-chat',
               createAsDraft: operation.draft === true,
@@ -2729,6 +2842,38 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             if (!ok && creationError) throw new Error(creationError);
             if (!ok || !created) throw new Error('DRONE_NOT_CREATED');
             return created;
+          },
+          cloneDrone: async (operation) => {
+            const source = droneByIdRef.current[operation.sourceDroneId];
+            if (!source) throw new Error(`unknown source drone: ${operation.sourceDroneId}`);
+            if (String(source.runtime ?? 'container').trim().toLowerCase() === 'host') {
+              throw new Error('Host runtime drones cannot be cloned.');
+            }
+            const sourceRepoPath =
+              source.repoAttached === false ? '' : String(source.repoPath ?? '').trim();
+            const repoPath = operation.repoPath ?? sourceRepoPath;
+            const group = operation.group === undefined
+              ? String(source.group ?? '').trim()
+              : operation.group;
+            const response = await requestJson<{ id?: string; name?: string; droneId?: string }>(
+              '/api/drones',
+              {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                  name: operation.name,
+                  runtime: 'container',
+                  group,
+                  repoPath,
+                  persistVolume: source.persistVolume !== false,
+                  cloneFrom: source.id,
+                  cloneChats: operation.cloneChats !== false,
+                }),
+              },
+            );
+            const droneId = String(response.id ?? response.droneId ?? '').trim();
+            if (!droneId) throw new Error('clone drone did not return an id');
+            return { droneId, droneName: String(response.name ?? operation.name).trim() };
           },
           deleteDrone: async (operation) => {
             const deleted = await deleteDrone(operation.droneId, {
@@ -2757,7 +2902,25 @@ export function useDroneHubAppModel(): DroneHubAppModel {
                 ...(operation.draft ? { draft: true } : {}),
               }),
             });
+            await configureProposedChat(operation.droneId, operation.chatName, operation);
             return { droneId: operation.droneId, chatName: operation.chatName };
+          },
+          cloneChat: async (operation) => {
+            await requestJson(`/api/drones/${encodeURIComponent(operation.droneId)}/chats`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                name: operation.chatName,
+                copyFromChat: operation.sourceChat,
+                mode: 'fork',
+                ...(operation.draft ? { draft: true } : {}),
+              }),
+            });
+            return {
+              droneId: operation.droneId,
+              sourceChat: operation.sourceChat,
+              chatName: operation.chatName,
+            };
           },
           deleteChat: async (operation) => {
             await requestJson(
@@ -2854,6 +3017,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     appView,
     createDroneFromDraft,
     currentDrone,
+    customAgents,
     companionWorkspace,
     deleteDrone,
     expandGroupsForDroneIds,

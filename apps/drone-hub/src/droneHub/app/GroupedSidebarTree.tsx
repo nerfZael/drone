@@ -69,6 +69,12 @@ import {
   sidebarFolderLabelClass,
   sidebarSelectionEdgeClass,
 } from '../sidebar/presentation';
+import {
+  companionSidebarChatProjectionKey,
+  companionSidebarGroupProjectionKey,
+  type CompanionSidebarProjectionMarks,
+  type CompanionSidebarProjectionMark,
+} from '../companion/companion-sidebar-projection';
 
 type FolderEditorState = {
   mode: 'create' | 'rename';
@@ -207,6 +213,7 @@ type GroupedSidebarTreeProps = {
     opts?: { targetGroup?: string | null },
   ) => Promise<{ ok: boolean; error?: string | null; reparentedIds?: string[]; rollbackOptimistic?: () => void }>;
   actionsEnabled?: boolean;
+  companionProposalPreview?: CompanionSidebarProjectionMarks;
 };
 
 type TreeDropPlacement = SidebarTreeDropPlacement;
@@ -820,8 +827,71 @@ const GroupedSidebarChatRowStatic = React.memo(function GroupedSidebarChatRowSta
   );
 });
 
+function proposalActionLabel(mark: CompanionSidebarProjectionMark): string {
+  if (mark.active) return 'Applying';
+  if (mark.action === 'create') return 'New';
+  if (mark.action === 'clone') return 'Clone';
+  if (mark.action === 'delete') return 'Remove';
+  return 'Rename';
+}
+
+const GroupedSidebarProjectedChatRow = React.memo(function GroupedSidebarProjectedChatRow({
+  drone,
+  mark,
+}: {
+  drone: DroneSummary;
+  mark: CompanionSidebarProjectionMark;
+}) {
+  const { sidebarDensityMode } = useGroupedSidebarTreeContext();
+  const densityClasses = sidebarDensityClasses(sidebarDensityMode);
+  return (
+    <div
+      data-companion-proposal-preview="chat"
+      data-proposal-operation-id={mark.operationId}
+      className="pointer-events-none flex flex-col gap-0.5 opacity-80"
+    >
+      <div className="relative flex items-stretch gap-1">
+        <div
+          className={`relative flex flex-1 items-center gap-1 rounded border border-dashed border-[var(--accent-muted)] text-left ${densityClasses.chatRow}`}
+          aria-label={`Proposed chat change in ${drone.name}`}
+        >
+          <span className={sidebarChatStateClass} aria-hidden="true">
+            <span className="block h-1.5 w-1.5 rounded-full border border-dashed border-[var(--accent)]" />
+          </span>
+          {mark.previousLabel ? (
+            <>
+              <span className={`${sidebarChatLabelClass} text-[var(--sidebar-meta-fg)] line-through`}>
+                {mark.previousLabel}
+              </span>
+              <span aria-hidden="true" className="text-[var(--sidebar-meta-fg)]">
+                →
+              </span>
+            </>
+          ) : null}
+          <span
+            className={`${sidebarChatLabelClass} ${mark.action === 'delete' ? 'line-through' : ''}`}
+          >
+            {mark.label}
+          </span>
+          <span className="ml-auto flex-shrink-0 px-1 text-[8px] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--accent)]">
+            {proposalActionLabel(mark)}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+});
+
 const GroupedSidebarChatRow = React.memo(function GroupedSidebarChatRow(props: GroupedSidebarChatRowProps) {
-  const { sidebarDndEnabled, actionsEnabled = true } = useGroupedSidebarTreeContext();
+  const {
+    sidebarDndEnabled,
+    actionsEnabled = true,
+    companionProposalPreview,
+  } = useGroupedSidebarTreeContext();
+  const mark = companionProposalPreview?.chats[
+    companionSidebarChatProjectionKey(props.drone.id, props.chatName)
+  ];
+  if (mark) return <GroupedSidebarProjectedChatRow drone={props.drone} mark={mark} />;
   return sidebarDndEnabled || actionsEnabled
     ? <GroupedSidebarChatRowDnd {...props} />
     : <GroupedSidebarChatRowStatic {...props} />;
@@ -888,13 +958,18 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
     mutedChatIdSet,
     onMoveSidebar,
     actionsEnabled = true,
+    companionProposalPreview,
   } = useGroupedSidebarTreeContext();
   const densityClasses = sidebarDensityClasses(sidebarDensityMode);
   const drone = droneById[node.droneId];
   if (!drone) return null;
+  const companionPreviewMark = companionProposalPreview?.drones[drone.id];
+  const isCompanionPreview = Boolean(companionPreviewMark);
+  const isCompanionPreviewCreate =
+    companionPreviewMark?.action === 'create' || companionPreviewMark?.action === 'clone';
   const muted = effectiveMutedDroneIdSet.has(drone.id);
   const directlyMuted = mutedDroneIdSet.has(drone.id);
-  const isOptimistic = sidebarOptimisticDroneIdSet.has(drone.id);
+  const isOptimistic = sidebarOptimisticDroneIdSet.has(drone.id) || isCompanionPreview;
   const dragDisabled = !sidebarDndEnabled || isOptimistic;
   const dragData = React.useMemo(
     () =>
@@ -912,7 +987,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
     data: dragData,
     disabled: dragDisabled,
   });
-  const droneDropDisabled = !sidebarDndEnabled;
+  const droneDropDisabled = !sidebarDndEnabled || isCompanionPreview;
   const { setNodeRef: setDropNodeRef } = useDroppable({
     id: `sidebar-tree-node:${node.id}`,
     data: {
@@ -942,7 +1017,16 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
   const defaultChatMuted =
     hasOnlyDefaultChat && mutedChatIdSet.has(sidebarChatSidebarNodeId(drone.id, 'default'));
   const hasChatSection = chats.length > 1;
-  const chatSectionExpanded = collapsedDroneSections[sidebarInlineSectionKey(drone.id, 'chats')] !== true;
+  const hasCompanionPreviewChat = chats.some((chatName) =>
+    Boolean(
+      companionProposalPreview?.chats[
+        companionSidebarChatProjectionKey(drone.id, chatName)
+      ],
+    ),
+  );
+  const chatSectionExpanded =
+    hasCompanionPreviewChat ||
+    collapsedDroneSections[sidebarInlineSectionKey(drone.id, 'chats')] !== true;
   const showCreateChatEditor = chatEditor?.mode === 'create' && chatEditor.droneId === drone.id;
   const defaultChatNodeId = createCanvasChatNodeId(drone.id, 'default');
   const locallyRequiredDefaultChatApproval = useChatApprovalRequired(defaultChatNodeId);
@@ -1019,21 +1103,40 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
   return (
     <div
       data-sidebar-drone-unit="true"
-      className={`flex flex-col gap-0 transition-[margin] duration-150 ${nested ? densityClasses.nestedDroneIndent : ''} ${reorderPreviewClass}`}
+      data-companion-proposal-preview={isCompanionPreview ? 'drone' : undefined}
+      data-proposal-operation-id={companionPreviewMark?.operationId}
+      className={`flex flex-col gap-0 transition-[margin] duration-150 ${nested ? densityClasses.nestedDroneIndent : ''} ${reorderPreviewClass} ${
+        isCompanionPreview
+          ? `opacity-80 ${isCompanionPreviewCreate ? 'pointer-events-none' : ''}`
+          : ''
+      }`}
     >
       <div ref={droneDropDisabled ? undefined : setDropNodeRef} data-sidebar-node-anchor-id={node.id} className="relative">
         {dragOverTreeTarget?.nodeId === node.id &&
         (dragOverTreeTarget.placement === 'before' || dragOverTreeTarget.placement === 'after') ? (
           <TreeDropGuide placement={dragOverTreeTarget.placement} />
         ) : null}
-        <div className={hasChatSection && groupPath ? '[--sidebar-selection-edge-offset:-1px]' : undefined}>
+        <div
+          className={`${hasChatSection && groupPath ? '[--sidebar-selection-edge-offset:-1px]' : ''} ${
+            isCompanionPreview
+              ? 'rounded-[var(--sidebar-row-radius)] outline outline-1 outline-offset-[-1px] outline-dashed outline-[var(--accent-muted)]'
+              : ''
+          }`}
+        >
           <DroneCard
             drone={drone}
             density={sidebarDensityMode}
-            displayName={uiDroneName(drone.name)}
-            selected={selected}
-            highlighted={highlightedDroneIds.has(drone.id)}
-            active={showOpenDefaultChatIndicator || showCollapsedActiveChatIndicator}
+            displayName={
+              companionPreviewMark?.previousLabel
+                ? `${companionPreviewMark.previousLabel} → ${companionPreviewMark.label}`
+                : uiDroneName(drone.name)
+            }
+            selected={isCompanionPreviewCreate ? false : selected}
+            highlighted={!isCompanionPreview && highlightedDroneIds.has(drone.id)}
+            active={
+              !isCompanionPreviewCreate &&
+              (showOpenDefaultChatIndicator || showCollapsedActiveChatIndicator)
+            }
             activeIndicatorStyle="edge"
             disclosureExpanded={hasChatSection ? chatSectionExpanded : undefined}
             disclosureLabel={
@@ -1044,13 +1147,16 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
             busy={showBusy}
             approvalRequired={hasOnlyDefaultChat && defaultChatApprovalRequired}
             operationLabel={
-              deletingDrones[drone.id]
+              companionPreviewMark
+                ? proposalActionLabel(companionPreviewMark)
+                : deletingDrones[drone.id]
                 ? ((deleteOperationModeById[drone.id] ?? deleteMode) === 'archive' ? 'Archiving' : 'Deleting')
                 : undefined
             }
             chatStateSummary={hasOnlyDefaultChat ? undefined : chatStateSummary}
             unreadAgentMessage={showUnread}
             onClick={(rowOpts) => {
+              if (isCompanionPreviewCreate) return;
               if (shouldSuppressClick()) return;
               if (hasChatSection) {
                 onSelectDroneContainer(drone.id);
@@ -1067,7 +1173,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
             dragAttributes={dragDisabled ? undefined : attributes as unknown as Record<string, unknown>}
             dragListeners={dragDisabled ? undefined : listeners as unknown as Record<string, unknown>}
             onCreateChat={
-              actionsEnabled
+              actionsEnabled && !isCompanionPreview
                 ? () => {
                     setCollapsedDroneSections((prev) => ({
                       ...prev,
@@ -1078,31 +1184,31 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
                 : undefined
             }
             onCloneChat={
-              actionsEnabled && hasOnlyDefaultChat
+              actionsEnabled && !isCompanionPreview && hasOnlyDefaultChat
                 ? () => void onCloneDroneChat(drone.id, 'default')
                 : undefined
             }
-            onClone={actionsEnabled ? () => onCloneDrone(drone) : undefined}
-            onAddToGroup={actionsEnabled ? () => onAddDroneToGroup(drone) : undefined}
-            onCreateGroup={actionsEnabled ? () => onCreateGroupBeforeDrone(drone) : undefined}
-            onRename={actionsEnabled ? (newName) => onRenameDrone(drone.id, newName) : undefined}
+            onClone={actionsEnabled && !isCompanionPreview ? () => onCloneDrone(drone) : undefined}
+            onAddToGroup={actionsEnabled && !isCompanionPreview ? () => onAddDroneToGroup(drone) : undefined}
+            onCreateGroup={actionsEnabled && !isCompanionPreview ? () => onCreateGroupBeforeDrone(drone) : undefined}
+            onRename={actionsEnabled && !isCompanionPreview ? (newName) => onRenameDrone(drone.id, newName) : undefined}
             inlineRenameRequestKey={
               inlineRenameDroneRequest?.droneId === drone.id
                 ? inlineRenameDroneRequest.key
                 : 0
             }
-            onSetBaseImage={actionsEnabled ? () => onSetDroneBaseImage(drone.id) : undefined}
+            onSetBaseImage={actionsEnabled && !isCompanionPreview ? () => onSetDroneBaseImage(drone.id) : undefined}
             pinned={pinnedDroneIdSet.has(drone.id)}
             muted={muted || defaultChatMuted}
             collapsedChatMuted={defaultChatMuted}
             pinBusy={pinningDroneIds.has(drone.id)}
             onTogglePinned={
-              actionsEnabled
+              actionsEnabled && !isCompanionPreview
                 ? () => void onSetDronePinned(drone.id, !pinnedDroneIdSet.has(drone.id))
                 : undefined
             }
             onToggleMuted={
-              actionsEnabled
+              actionsEnabled && !isCompanionPreview
                 ? (nextMuted) => void onMoveSidebar({
                     kind: 'set-muted',
                     targetKind: 'drone',
@@ -1121,8 +1227,8 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
                   })
                 : undefined
             }
-            onDelete={actionsEnabled ? handleDeleteDrone : undefined}
-            onErrorClick={onOpenDroneErrorModal}
+            onDelete={actionsEnabled && !isCompanionPreview ? handleDeleteDrone : undefined}
+            onErrorClick={isCompanionPreview ? undefined : onOpenDroneErrorModal}
             cloneDisabled={
               isOptimistic ||
               Boolean(deletingDrones[drone.id]) ||
@@ -1410,10 +1516,14 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
     mutedChatIdSet,
     onMoveSidebar,
     actionsEnabled = true,
+    companionProposalPreview,
   } = useGroupedSidebarTreeContext();
   const densityClasses = sidebarDensityClasses(sidebarDensityMode);
   const folderRenameErrorId = React.useId();
   const folderPath = folderGroupPath(node) ?? node.path;
+  const companionPreviewMark = companionProposalPreview?.groups[
+    companionSidebarGroupProjectionKey(folderPath, node.repoGroupPath)
+  ];
   const isVirtualGroup = node.groupKind === 'repo' && !node.groupPath;
   const allowVirtualRepoReorderDrop =
     isVirtualGroup && activeDrag?.type === 'sidebar-folder' && activeDrag.groupKind === 'repo';
@@ -1425,8 +1535,23 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
   const groupMuteId = sidebarFolderMuteId(node);
   const directlyMuted = mutedSidebarGroupIdSet.has(groupMuteId);
   const muted = effectiveMutedSidebarGroupIdSet.has(node.id);
-  const collapsed = isSidebarGroupCollapsed(collapsedGroups, folderPath);
   const folderDroneIds = React.useMemo(() => collectSidebarTreeDroneIds(nodeTree, node.id), [node.id, nodeTree]);
+  const hasCompanionPreviewDescendant = folderDroneIds.some((droneId) => {
+    if (companionProposalPreview?.drones[droneId]) return true;
+    const drone = droneById[droneId];
+    if (!drone) return false;
+    return normalizedDroneChats(drone, { includeDefaultWhenEmpty: true }).some((chatName) =>
+      Boolean(
+        companionProposalPreview?.chats[
+          companionSidebarChatProjectionKey(droneId, chatName)
+        ],
+      ),
+    );
+  });
+  const collapsed =
+    companionPreviewMark?.action === 'create' || hasCompanionPreviewDescendant
+      ? false
+      : isSidebarGroupCollapsed(collapsedGroups, folderPath);
   const stateSummary = React.useMemo<SidebarGroupStateSummary>(() => {
     const summary: SidebarGroupStateSummary = { approval: 0, unread: 0, working: 0 };
     if (muted) return summary;
@@ -1517,10 +1642,13 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
             label: node.label,
           }
         : groupedFolderDragData({ groupId: node.groupId, nodeId: node.id, folderPath, groupKind: node.groupKind, label: node.label }),
-    disabled: !sidebarDndEnabled,
+    disabled: !sidebarDndEnabled || Boolean(companionPreviewMark),
   });
-  const folderDndDisabled = !sidebarDndEnabled;
-  const folderDropDisabled = !sidebarDndEnabled || (isVirtualGroup ? !allowVirtualRepoReorderDrop : false);
+  const folderDndDisabled = !sidebarDndEnabled || Boolean(companionPreviewMark);
+  const folderDropDisabled =
+    !sidebarDndEnabled ||
+    Boolean(companionPreviewMark) ||
+    (isVirtualGroup ? !allowVirtualRepoReorderDrop : false);
   const { setNodeRef: setDropNodeRef } = useDroppable({
     id: `sidebar-tree-node:${node.id}`,
     data: {
@@ -1652,6 +1780,8 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
   return (
     <div
       data-sidebar-folder-node={node.id}
+      data-companion-proposal-preview={companionPreviewMark ? 'group' : undefined}
+      data-proposal-operation-id={companionPreviewMark?.operationId}
       className={`flex flex-col gap-0 transition-[margin] duration-150 ${reorderPreviewClass}`}
     >
       <div ref={setHeaderRef} data-sidebar-node-anchor-id={node.id} className="relative">
@@ -1668,7 +1798,11 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
               : isSelected
                 ? 'dh-sidebar-row-selected border border-transparent'
                 : 'border border-transparent'
-          } ${isDragging ? 'opacity-60' : isHiddenGroup ? 'opacity-70' : ''}`}
+          } ${isDragging ? 'opacity-60' : isHiddenGroup ? 'opacity-70' : ''} ${
+            companionPreviewMark
+              ? 'pointer-events-none opacity-80 outline outline-1 outline-offset-[-1px] outline-dashed outline-[var(--accent-muted)]'
+              : ''
+          }`}
           onContextMenu={(event) => {
             if (!actionsEnabled || event.target instanceof HTMLInputElement) return;
             event.preventDefault();
@@ -1763,10 +1897,36 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
                   strokeWidth={1.25}
                   className={`flex-shrink-0 ${densityClasses.folderChevron}`}
                 />
-                <span className={`${sidebarFolderLabelClass} ${densityClasses.folderLabel}`} title={folderPath}>
-                  {node.label}
+                {companionPreviewMark?.previousLabel ? (
+                  <span
+                    className={`${sidebarFolderLabelClass} ${densityClasses.folderLabel} text-[var(--sidebar-meta-fg)] line-through`}
+                    title={folderPath}
+                  >
+                    {companionPreviewMark.previousLabel}
+                  </span>
+                ) : null}
+                {companionPreviewMark?.previousLabel ? (
+                  <span aria-hidden="true" className="text-[var(--sidebar-meta-fg)]">
+                    →
+                  </span>
+                ) : null}
+                <span
+                  className={`${sidebarFolderLabelClass} ${densityClasses.folderLabel} ${
+                    companionPreviewMark?.action === 'delete' ? 'line-through' : ''
+                  }`}
+                  title={folderPath}
+                >
+                  {companionPreviewMark?.label ?? node.label}
                 </span>
-                {muted ? <SidebarMutedStatusIndicator /> : collapsed ? <SidebarGroupStateCounts summary={stateSummary} /> : null}
+                {companionPreviewMark ? (
+                  <span className="ml-auto flex-shrink-0 px-1 text-[8px] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--accent)]">
+                    {proposalActionLabel(companionPreviewMark)}
+                  </span>
+                ) : (
+                  <>
+                    {muted ? <SidebarMutedStatusIndicator /> : collapsed ? <SidebarGroupStateCounts summary={stateSummary} /> : null}
+                  </>
+                )}
               </div>
             </button>
           )}
@@ -1784,7 +1944,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
       {!collapsed ? (
         <GroupedSidebarFolderBodyDropZone
           nodeId={node.id}
-          disabled={!sidebarDndEnabled || isVirtualGroup}
+          disabled={!sidebarDndEnabled || isVirtualGroup || Boolean(companionPreviewMark)}
           className={`${densityClasses.folderBody} dh-sidebar-folder-body [--sidebar-selection-edge-offset:-1px] ${intoState ? 'bg-[var(--accent-subtle)]' : ''}`}
           selectedDirectChild={hasSelectedDirectChild}
           dropActive={intoState}
@@ -2081,6 +2241,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       props.chatEditor,
       props.chatEditorInputRef,
       props.cloningChatKeys,
+      props.companionProposalPreview,
       props.collapsedDroneSections,
       props.collapsedGroups,
       props.deletingDrones,

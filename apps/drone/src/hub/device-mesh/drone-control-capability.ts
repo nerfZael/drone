@@ -1509,10 +1509,21 @@ export function createDroneControlCapability(
         const requestedNativeChatId = optionalText(payload.nativeChatId);
         if (requestedNativeChatId) {
           const { nativeChatId } = await resolveNativeChat(requestedNativeChatId);
-          if (payload.agentPermissionMode !== undefined || payload.approvalPolicy !== undefined) {
+          if (
+            payload.agent !== undefined ||
+            payload.provider !== undefined ||
+            payload.model !== undefined ||
+            payload.reasoning !== undefined ||
+            payload.agentPermissionMode !== undefined ||
+            payload.approvalPolicy !== undefined
+          ) {
             await localHubRequest(access, `${chatPath}/config`, {
               method: 'POST',
               body: JSON.stringify({
+                ...(payload.agent !== undefined ? { agent: payload.agent } : {}),
+                ...(payload.provider !== undefined ? { provider: payload.provider } : {}),
+                ...(payload.model !== undefined ? { model: model || null } : {}),
+                ...(payload.reasoning !== undefined ? { reasoning: payload.reasoning } : {}),
                 ...(payload.agentPermissionMode !== undefined
                   ? { agentPermissionMode: payload.agentPermissionMode }
                   : {}),
@@ -1532,8 +1543,8 @@ export function createDroneControlCapability(
                 ...(optionalText(payload.provider)
                   ? { provider: optionalText(payload.provider) }
                   : {}),
-                ...(optionalText(payload.thinkingLevel)
-                  ? { thinkingLevel: optionalText(payload.thinkingLevel) }
+                ...(optionalText(payload.thinkingLevel ?? payload.reasoning)
+                  ? { thinkingLevel: optionalText(payload.thinkingLevel ?? payload.reasoning) }
                   : {}),
                 ...(typeof payload.autoApprove === 'boolean'
                   ? { autoApprove: payload.autoApprove }
@@ -1548,10 +1559,13 @@ export function createDroneControlCapability(
             },
           );
         }
-        return await localHubRequest(access, `${chatPath}/config`, {
+        const updated = await localHubRequest(access, `${chatPath}/config`, {
           method: 'POST',
           body: JSON.stringify({
             ...(payload.model !== undefined ? { model: model || null } : {}),
+            ...(payload.agent !== undefined ? { agent: payload.agent } : {}),
+            ...(payload.provider !== undefined ? { provider: payload.provider } : {}),
+            ...(payload.reasoning !== undefined ? { reasoning: payload.reasoning } : {}),
             ...(payload.agentPermissionMode !== undefined
               ? { agentPermissionMode: payload.agentPermissionMode }
               : {}),
@@ -1560,6 +1574,35 @@ export function createDroneControlCapability(
               : {}),
           }),
         });
+        if (payload.syncNativeThread === true) {
+          const metadata = await localHubRequest(access, chatPath);
+          if (metadata?.agent?.kind === 'native') {
+            const { nativeChatId } = await resolveNativeChat();
+            await localHubRequest(
+              access,
+              `/api/assistant/threads/${encodeURIComponent(nativeChatId)}`,
+              {
+                method: 'PATCH',
+                body: JSON.stringify({
+                  ...(model ? { model } : {}),
+                  ...(optionalText(payload.provider)
+                    ? { provider: optionalText(payload.provider) }
+                    : {}),
+                  ...(optionalText(payload.thinkingLevel ?? payload.reasoning)
+                    ? { thinkingLevel: optionalText(payload.thinkingLevel ?? payload.reasoning) }
+                    : {}),
+                  ...(payload.agentPermissionMode !== undefined
+                    ? { agentPermissionMode: payload.agentPermissionMode }
+                    : {}),
+                  ...(payload.approvalPolicy !== undefined
+                    ? { approvalPolicy: payload.approvalPolicy }
+                    : {}),
+                }),
+              },
+            );
+          }
+        }
+        return updated;
       }
       if (operation === 'chat.approval.resolve') {
         if (payload.promptId) {

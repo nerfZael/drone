@@ -867,6 +867,50 @@ describeSocketSuite('chat management api', () => {
     });
   });
 
+  test('stores an explicit native provider override and rejects it for external agents', async () => {
+    const droneId = 'drone-chat-provider-override';
+    await seedDrone(droneId);
+
+    const configured = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/config`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          agent: { kind: 'native' },
+          provider: 'codex',
+          model: 'gpt-5.3-codex',
+          reasoning: 'high',
+        }),
+      },
+    );
+    expect(configured.r.status).toBe(200);
+    expect(configured.data?.provider).toBe('codex');
+
+    const info = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default`,
+    );
+    expect(info.data?.provider).toBe('codex');
+    expect(info.data?.model).toBe('gpt-5.3-codex');
+    expect(info.data?.reasoning).toBe('high');
+
+    const rejected = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/config`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          agent: { kind: 'builtin', id: 'codex' },
+          provider: 'openai',
+        }),
+      },
+    );
+    expect(rejected.r.status).toBe(400);
+    expect(String(rejected.data?.error ?? '')).toContain(
+      'provider is only supported for Built-in chats',
+    );
+  });
+
   test('clears read-only agent permission mode when switching to an unsupported agent', async () => {
     const droneId = 'drone-chat-agent-permission-clear';
     await seedDrone(droneId);

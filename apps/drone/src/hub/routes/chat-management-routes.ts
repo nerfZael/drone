@@ -879,6 +879,9 @@ export function createChatManagementRouteHandler(
             chat: chatName,
             agent,
             agentLocked,
+            provider: agent.kind === 'native'
+              ? String((chatEntry as any).nativeProvider ?? '').trim() || null
+              : null,
             model: (chatEntry as any).model ?? null,
             reasoning: normalizeChatReasoning((chatEntry as any).reasoning),
             agentPermissionMode: normalizeAgentPermissionMode(
@@ -1028,6 +1031,11 @@ export function createChatManagementRouteHandler(
             typeof body === 'object' &&
             Object.prototype.hasOwnProperty.call(body, 'chatModel'),
           );
+        const hasProviderField = Boolean(
+          body &&
+          typeof body === 'object' &&
+          Object.prototype.hasOwnProperty.call(body, 'provider'),
+        );
         const hasAgentPermissionModeField = Boolean(
           body &&
           typeof body === 'object' &&
@@ -1049,6 +1057,7 @@ export function createChatManagementRouteHandler(
           Object.prototype.hasOwnProperty.call(body, 'dockerSnapshotAfterAgentMessageEnabled'),
         );
         let model: string | null = null;
+        let provider: 'openai' | 'codex' | 'gemini' | null = null;
         let reasoning: string | null = null;
         let agentPermissionMode: AgentPermissionMode = 'execute';
         let approvalPolicy: AgentApprovalPolicy = 'ask';
@@ -1066,6 +1075,14 @@ export function createChatManagementRouteHandler(
             json(res, 400, { ok: false, error: e?.message ?? String(e) });
             return;
           }
+        }
+        if (hasProviderField) {
+          const candidate = String(body?.provider ?? '').trim().toLowerCase();
+          if (candidate !== 'openai' && candidate !== 'codex' && candidate !== 'gemini') {
+            json(res, 400, { ok: false, error: 'provider must be openai, codex, or gemini' });
+            return;
+          }
+          provider = candidate;
         }
         if (hasReasoningField) {
           try {
@@ -1114,6 +1131,8 @@ export function createChatManagementRouteHandler(
               droneId,
               chatName,
               agent,
+              setProvider: hasProviderField,
+              provider,
               setModel: hasModelField,
               model,
               setReasoning: hasReasoningField,
@@ -1131,6 +1150,7 @@ export function createChatManagementRouteHandler(
               name: droneName,
               chat: chatName,
               agent,
+              ...(hasProviderField ? { provider } : {}),
               ...(hasModelField ? { model } : {}),
               ...(hasReasoningField ? { reasoning } : {}),
               ...(hasAgentPermissionModeField ? { agentPermissionMode } : {}),
@@ -1151,6 +1171,8 @@ export function createChatManagementRouteHandler(
               droneId,
               chatName,
               agent,
+              setProvider: hasProviderField,
+              provider,
               setModel: hasModelField,
               model,
               setReasoning: hasReasoningField,
@@ -1169,6 +1191,7 @@ export function createChatManagementRouteHandler(
               name: droneName,
               chat: chatName,
               agent,
+              ...(hasProviderField ? { provider } : {}),
               ...(hasModelField ? { model } : {}),
               ...(hasReasoningField ? { reasoning } : {}),
               ...(hasAgentPermissionModeField ? { agentPermissionMode } : {}),
@@ -1195,6 +1218,8 @@ export function createChatManagementRouteHandler(
               droneId,
               chatName,
               agent,
+              setProvider: hasProviderField,
+              provider,
               setModel: hasModelField,
               model,
               setReasoning: hasReasoningField,
@@ -1213,6 +1238,7 @@ export function createChatManagementRouteHandler(
               name: droneName,
               chat: chatName,
               agent,
+              ...(hasProviderField ? { provider } : {}),
               ...(hasModelField ? { model } : {}),
               ...(hasReasoningField ? { reasoning } : {}),
               ...(hasAgentPermissionModeField ? { agentPermissionMode } : {}),
@@ -1222,6 +1248,7 @@ export function createChatManagementRouteHandler(
             return;
           }
           if (
+            hasProviderField ||
             hasModelField ||
             hasReasoningField ||
             hasAgentPermissionModeField ||
@@ -1231,6 +1258,8 @@ export function createChatManagementRouteHandler(
             await setChatAgentConfig({
               droneId,
               chatName,
+              setProvider: hasProviderField,
+              provider,
               setModel: hasModelField,
               model,
               setReasoning: hasReasoningField,
@@ -1247,6 +1276,7 @@ export function createChatManagementRouteHandler(
               id: droneId,
               name: droneName,
               chat: chatName,
+              ...(hasProviderField ? { provider } : {}),
               ...(hasModelField ? { model } : {}),
               ...(hasReasoningField ? { reasoning } : {}),
               ...(hasAgentPermissionModeField ? { agentPermissionMode } : {}),
@@ -1257,7 +1287,7 @@ export function createChatManagementRouteHandler(
           }
           json(res, 400, {
             ok: false,
-            error: `invalid request (expected agent native|cursor|codex|claude|opencode|pi|blip|custom, model, reasoning, agentPermissionMode, approvalPolicy, dockerSnapshotAfterAgentMessageEnabled)`,
+            error: `invalid request (expected agent native|cursor|codex|claude|opencode|pi|blip|custom, provider, model, reasoning, agentPermissionMode, approvalPolicy, dockerSnapshotAfterAgentMessageEnabled)`,
           });
           return;
         } catch (e: any) {

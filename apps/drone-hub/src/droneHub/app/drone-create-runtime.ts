@@ -122,6 +122,7 @@ type BuildDraftDroneCreatePayloadArgs = {
   persistVolume?: boolean | null;
   repoBranchSelection: RepoBranchSelectionState;
   seedAgent: ChatAgentConfig | null;
+  seedProvider?: string | null;
   seedModel?: string | null;
   seedReasoning?: string | null;
   seedAgentPermissionMode?: AgentPermissionMode;
@@ -144,6 +145,7 @@ export function buildDraftDroneCreatePayload({
   persistVolume,
   repoBranchSelection,
   seedAgent,
+  seedProvider,
   seedModel,
   seedReasoning,
   seedAgentPermissionMode,
@@ -162,11 +164,14 @@ export function buildDraftDroneCreatePayload({
   const trimmedRepoSeedFromDroneId = String(repoSeedFromDroneId ?? '').trim();
   const trimmedPrompt = String(prompt ?? '').trim();
   const trimmedModel = String(seedModel ?? '').trim();
+  const trimmedProvider = String(seedProvider ?? '').trim();
   const trimmedReasoning = String(seedReasoning ?? '').trim();
   const repoBranchSource = repoBranchSelection.repoBranchSource;
   const remoteBranch = String(repoBranchSelection.remoteBranch ?? '').trim();
   const hasInitialPrompt = Boolean(trimmedPrompt || seedAttachments.length > 0);
-  const hasChatSeed = Boolean(seedAgent || trimmedModel || trimmedReasoning || hasInitialPrompt);
+  const hasChatSeed = Boolean(
+    seedAgent || trimmedProvider || trimmedModel || trimmedReasoning || hasInitialPrompt,
+  );
   return {
     ...(trimmedName ? { name: trimmedName } : {}),
     ...(trimmedGroup ? { group: trimmedGroup } : {}),
@@ -180,6 +185,7 @@ export function buildDraftDroneCreatePayload({
     ...(agentsMd !== undefined ? { agentsMd } : {}),
     ...(hasChatSeed ? { seedChat: 'default' } : {}),
     ...(seedAgent ? { seedAgent } : {}),
+    ...(trimmedProvider ? { seedProvider: trimmedProvider } : {}),
     ...(trimmedModel ? { seedModel: trimmedModel } : {}),
     ...(trimmedReasoning ? { seedReasoning: trimmedReasoning } : {}),
     ...(seedAgentPermissionMode && seedAgentPermissionMode !== 'execute'

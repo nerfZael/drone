@@ -16,9 +16,11 @@ function executor(overrides: Record<string, (...args: any[]) => Promise<any>> = 
     deleteGroup: complete,
     renameGroup: complete,
     createDrone: async () => ({ droneId: 'created-drone', droneName: 'Created' }),
+    cloneDrone: async () => ({ droneId: 'cloned-drone', droneName: 'Cloned' }),
     deleteDrone: complete,
     renameDrone: complete,
     createChat: complete,
+    cloneChat: complete,
     deleteChat: complete,
     renameChat: complete,
     sendMessage: complete,
@@ -63,7 +65,7 @@ describe('Companion proposal contract', () => {
         { id: 'message', type: 'send_message', droneId: '$later', message: 'Hello' },
         { id: 'later', type: 'create_drone', prompt: 'Start.' },
       ],
-    })).toThrow('earlier create_drone');
+    })).toThrow('earlier create_drone or clone_drone');
   });
 
   test('rejects unknown operation fields and invalid JSON', () => {
@@ -107,8 +109,93 @@ describe('Companion proposal contract', () => {
     }, '/repo')).toEqual([
       { label: 'Repository', value: '/repo' },
       { label: 'Group', value: 'Ungrouped' },
+      { label: 'Runtime', value: 'Saved default' },
+      { label: 'Persist volume', value: 'Saved default' },
+      { label: 'Branch source', value: 'Saved default' },
+      { label: 'Agent', value: 'Saved default' },
+      { label: 'Provider', value: 'Saved default' },
+      { label: 'Model', value: 'Saved default' },
+      { label: 'Reasoning', value: 'Saved default' },
+      { label: 'Agent permissions', value: 'Saved default' },
+      { label: 'Approval policy', value: 'Saved default' },
       { label: 'Initial prompt', value: 'Review every changed file.' },
     ]);
+  });
+
+  test('accepts explicit create overrides and true clone operations', () => {
+    const proposal = validateCompanionProposal({
+      version: 1,
+      title: 'Configured workspaces',
+      operations: [
+        {
+          id: 'configured',
+          type: 'create_drone',
+          prompt: 'Implement the change.',
+          repoPath: '/repo',
+          group: 'Backend/Payments',
+          runtime: 'host',
+          agent: 'native',
+          provider: 'codex',
+          model: 'gpt-5.3-codex',
+          reasoning: 'high',
+          agentPermissionMode: 'write',
+          approvalPolicy: 'none',
+          repoBranchSource: 'host',
+        },
+        {
+          id: 'cloned-chat',
+          type: 'clone_chat',
+          droneId: '$configured',
+          sourceChat: 'default',
+          chatName: 'investigation-copy',
+        },
+        {
+          id: 'cloned-drone',
+          type: 'clone_drone',
+          sourceDroneId: 'source-drone',
+          name: 'source-copy',
+          group: '',
+          cloneChats: false,
+        },
+      ],
+    });
+
+    expect(proposal.operations[0]).toMatchObject({
+      runtime: 'host',
+      agent: 'native',
+      provider: 'codex',
+      model: 'gpt-5.3-codex',
+      agentPermissionMode: 'write',
+      approvalPolicy: 'none',
+    });
+    expect(proposal.operations[1]).toMatchObject({ type: 'clone_chat', sourceChat: 'default' });
+    expect(proposal.operations[2]).toMatchObject({ type: 'clone_drone', group: '', cloneChats: false });
+  });
+
+  test('rejects contradictory or unsupported overrides', () => {
+    expect(() => validateCompanionProposal({
+      version: 1,
+      title: 'Wrong provider',
+      operations: [{
+        id: 'chat',
+        type: 'create_chat',
+        droneId: 'drone',
+        chatName: 'chat',
+        agent: 'builtin:codex',
+        provider: 'openai',
+      }],
+    })).toThrow('provider is only supported with agent "native"');
+    expect(() => validateCompanionProposal({
+      version: 1,
+      title: 'Wrong branch',
+      operations: [{
+        id: 'drone',
+        type: 'create_drone',
+        prompt: 'Start.',
+        repoBranchSource: 'host',
+        remoteBranch: 'main',
+      }],
+    })).toThrow('remoteBranch cannot be used');
   });
 
   test('uses a resolved drone name in operation labels', () => {
@@ -142,6 +229,26 @@ describe('Companion proposal contract', () => {
     expect(targets).toEqual(['created-drone']);
     expect(result.ok).toBe(true);
     expect(result.operations.map((item) => item.status)).toEqual(['completed', 'completed']);
+  });
+
+  test('resolves cloned drone references before running later operations', async () => {
+    const targets: string[] = [];
+    const result = await executeCompanionProposal({
+      version: 1,
+      title: 'Clone and message',
+      operations: [
+        { id: 'clone', type: 'clone_drone', sourceDroneId: 'source', name: 'copy' },
+        { id: 'follow-up', type: 'send_message', droneId: '$clone', message: 'Continue.' },
+      ],
+    }, executor({
+      sendMessage: async (operation) => {
+        targets.push(operation.droneId);
+        return { promptId: 'prompt-2' };
+      },
+    }));
+
+    expect(targets).toEqual(['cloned-drone']);
+    expect(result.ok).toBe(true);
   });
 
   test('reports the active operation and completed work while executing', async () => {

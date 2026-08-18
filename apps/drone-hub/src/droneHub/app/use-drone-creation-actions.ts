@@ -354,6 +354,8 @@ export function useDroneCreationActions({
       group?: string;
       repoPath?: string;
       creationPreferences?: DesktopNewDronePreferences;
+      seedProvider?: string;
+      rememberPreferences?: boolean;
       isolatedContext?: boolean;
       createMode?: 'with-chat' | 'without-chat';
       autoRename?: boolean;
@@ -501,6 +503,10 @@ export function useDroneCreationActions({
       const seedModel = createWithoutChat || seedAgent?.kind === 'custom'
         ? null
         : requestedModel || null;
+      const seedProvider =
+        !createWithoutChat && seedAgent?.kind === 'native'
+          ? String(opts?.seedProvider ?? '').trim() || null
+          : null;
       const seedReasoning =
         !createWithoutChat && supportsAccessControls ? requestedReasoning || null : null;
       let createdDrone = false;
@@ -549,6 +555,7 @@ export function useDroneCreationActions({
               remoteBranch,
             },
             seedAgent,
+            seedProvider,
             seedModel,
             seedReasoning,
             seedAgentPermissionMode,
@@ -577,18 +584,20 @@ export function useDroneCreationActions({
           if (!droneId) throw new Error('create drone did not return an id');
           createdDrone = true;
           opts?.onCreated?.({ droneId, droneName: createdName });
-          rememberNewDronePreferences(repoPath, {
-            mode: effectiveCreateMode,
-            runtime,
-            persistVolume: persistVolume === true,
-            spawnAgentKey: effectiveSpawnAgentKey,
-            spawnModel: String(seedModel ?? '').trim(),
-            spawnReasoning: String(seedReasoning ?? '').trim(),
-            spawnAgentPermissionMode: seedAgentPermissionMode,
-            spawnApprovalPolicy: seedApprovalPolicy,
-            repoBranchSource: effectiveRepoBranchSource,
-            repoCreateRemoteBranch: remoteBranch,
-          });
+          if (opts?.rememberPreferences !== false) {
+            rememberNewDronePreferences(repoPath, {
+              mode: effectiveCreateMode,
+              runtime,
+              persistVolume: persistVolume === true,
+              spawnAgentKey: effectiveSpawnAgentKey,
+              spawnModel: String(seedModel ?? '').trim(),
+              spawnReasoning: String(seedReasoning ?? '').trim(),
+              spawnAgentPermissionMode: seedAgentPermissionMode,
+              spawnApprovalPolicy: seedApprovalPolicy,
+              repoBranchSource: effectiveRepoBranchSource,
+              repoCreateRemoteBranch: remoteBranch,
+            });
+          }
 
           if (optimisticSeeds.length > 0) {
             replaceOptimisticStartupSeeds(setStartupSeedByDrone, optimisticSeeds, [{ id: droneId, name: createdName }], {

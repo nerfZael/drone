@@ -1417,6 +1417,8 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     droneId: string;
     chatName: string;
     agent?: ChatAgentConfig;
+    setProvider?: boolean;
+    provider?: string | null;
     setModel?: boolean;
     model?: string | null;
     setReasoning?: boolean;
@@ -1490,6 +1492,21 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
               !(opts.agent.kind === 'builtin' && opts.agent.id === 'codex'))
           ) {
             delete cur.approvalPolicy;
+          }
+        }
+        if (opts.setProvider) {
+          if (effectiveAgent.kind !== 'native') {
+            const error: Error & { statusCode?: number } = new Error(
+              'provider is only supported for Built-in chats',
+            );
+            error.statusCode = 400;
+            throw error;
+          }
+          const provider = String(opts.provider ?? '').trim().toLowerCase();
+          if (provider === 'openai' || provider === 'codex' || provider === 'gemini') {
+            cur.nativeProvider = provider;
+          } else {
+            delete cur.nativeProvider;
           }
         }
         if (opts.setModel) {

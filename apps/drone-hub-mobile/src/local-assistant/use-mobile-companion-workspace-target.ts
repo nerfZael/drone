@@ -11,7 +11,10 @@ import {
   type MobileDroneCreatePreferences,
 } from '../drones/create-preferences-model';
 import { loadMobileDroneCreatePreferences } from '../drones/create-preferences-storage';
-import type { MobileDroneCreatePayload } from '../drones/NewDroneScreen';
+import type {
+  MobileDroneAgentId,
+  MobileDroneCreatePayload,
+} from '../drones/NewDroneScreen';
 import type { MobileDroneSummary } from '../drones/drone-sidebar-model';
 import { useMobileCompanion, type MobileCompanionWorkspaceTarget } from './MobileCompanionContext';
 
@@ -169,6 +172,60 @@ export function useMobileCompanionWorkspaceTarget({
         }
         return resolved;
       };
+      const proposalAgent = (
+        agentKeyRaw: string,
+      ): { kind: 'native' } | { kind: 'builtin'; id: Exclude<MobileDroneAgentId, 'native'> } => {
+        const agentKey = String(agentKeyRaw ?? '').trim();
+        if (agentKey === 'native') return { kind: 'native' as const };
+        const builtinId = agentKey.startsWith('builtin:')
+          ? agentKey.slice('builtin:'.length)
+          : '';
+        if (
+          builtinId === 'cursor' ||
+          builtinId === 'codex' ||
+          builtinId === 'claude' ||
+          builtinId === 'opencode' ||
+          builtinId === 'pi' ||
+          builtinId === 'blip'
+        ) {
+          return {
+            kind: 'builtin',
+            id: builtinId as Exclude<MobileDroneAgentId, 'native'>,
+          };
+        }
+        throw new Error(`unknown or unsupported mobile agent: ${agentKey || '(empty)'}`);
+      };
+      const configureChat = async (
+        operation: Extract<
+          CompanionProposal['operations'][number],
+          { type: 'create_chat' }
+        >,
+      ) => {
+        const hasOverrides = Boolean(
+          operation.agent ||
+          operation.provider ||
+          operation.model ||
+          operation.reasoning ||
+          operation.agentPermissionMode ||
+          operation.approvalPolicy,
+        );
+        if (!hasOverrides) return;
+        await requestDroneControl('chat.update', {
+          droneId: operation.droneId,
+          chatName: operation.chatName,
+          ...(operation.agent ? { agent: proposalAgent(operation.agent) } : {}),
+          ...(operation.provider ? { provider: operation.provider } : {}),
+          ...(operation.model ? { model: operation.model } : {}),
+          ...(operation.reasoning ? { reasoning: operation.reasoning } : {}),
+          ...(operation.agentPermissionMode
+            ? { agentPermissionMode: operation.agentPermissionMode }
+            : {}),
+          ...(operation.approvalPolicy
+            ? { approvalPolicy: operation.approvalPolicy }
+            : {}),
+          syncNativeThread: true,
+        });
+      };
       return await executeCompanionProposal(proposal, {
         createGroup: async (operation) =>
           await requestDroneControl('group.create', {
@@ -189,43 +246,111 @@ export function useMobileCompanionWorkspaceTarget({
         createDrone: async (operation) => {
           const repoPath = proposalRepoPath(operation.repoPath);
           const remembered = await loadMobileDroneCreatePreferences(targetDeviceId, repoPath);
-          const runtime = phoneTarget ? 'host' : (remembered?.runtime ?? 'container');
-          const agent = phoneTarget ? 'native' : (remembered?.agent ?? 'native');
+          const runtime =
+            operation.runtime ?? (phoneTarget ? 'host' : (remembered?.runtime ?? 'container'));
+          if (phoneTarget && runtime !== 'host') {
+            throw new Error('Phone-native drones only support the host runtime.');
+          }
+          if (
+            runtime === 'host' &&
+            (operation.persistVolume !== undefined ||
+              operation.repoBranchSource === 'remote' ||
+              operation.remoteBranch)
+          ) {
+            throw new Error('Volume and remote branch overrides require a container drone.');
+          }
+          const defaultAgentKey = phoneTarget
+            ? 'native'
+            : `builtin:${remembered?.agent ?? 'native'}`.replace('builtin:native', 'native');
+          const requestedAgent = proposalAgent(operation.agent ?? defaultAgentKey);
+          if (phoneTarget && requestedAgent.kind !== 'native') {
+            throw new Error('Phone-native drones only support the native agent.');
+          }
+          const agent = requestedAgent.kind === 'native' ? 'native' : requestedAgent.id;
+          if (operation.provider && agent !== 'native') {
+            throw new Error('provider overrides require the native agent');
+          }
           const branchSource =
-            runtime === 'host' || !remembered?.repoCreateRemoteBranch
+            runtime === 'host'
               ? 'host'
-              : remembered.repoBranchSource;
+              : (operation.repoBranchSource ??
+                (operation.remoteBranch ? 'remote' : undefined) ??
+                remembered?.repoBranchSource ??
+                'host');
+          const remoteBranch = operation.remoteBranch ?? remembered?.repoCreateRemoteBranch ?? '';
+          if (repoPath && branchSource === 'remote' && !remoteBranch) {
+            throw new Error('A remote branch is required when repoBranchSource is remote.');
+          }
           const payload: MobileDroneCreatePayload = {
             runtime,
             ...(operation.draft === true ? { draft: true } : {}),
             ...(operation.name ? { name: operation.name } : {}),
             ...(operation.group ? { group: operation.group } : {}),
             ...(runtime === 'container'
-              ? { persistVolume: remembered?.persistVolume ?? false }
+              ? { persistVolume: operation.persistVolume ?? remembered?.persistVolume ?? false }
               : {}),
             ...(repoPath ? { repoPath } : {}),
             repoBranchSource: branchSource,
-            ...(branchSource === 'remote' && remembered?.repoCreateRemoteBranch
-              ? { remoteBranch: remembered.repoCreateRemoteBranch }
+            ...(branchSource === 'remote' && remoteBranch
+              ? { remoteBranch }
               : {}),
             seedAgent: agent === 'native' ? { kind: 'native' } : { kind: 'builtin', id: agent },
-            ...(remembered?.provider ? { seedProvider: remembered.provider } : {}),
-            ...(remembered?.model ? { seedModel: remembered.model } : {}),
-            ...(remembered?.reasoning ? { seedReasoning: remembered.reasoning } : {}),
-            ...(remembered?.agentPermissionMode && remembered.agentPermissionMode !== 'execute'
-              ? { seedAgentPermissionMode: remembered.agentPermissionMode }
+            ...(operation.provider ?? remembered?.provider
+              ? { seedProvider: operation.provider ?? remembered?.provider }
               : {}),
-            ...(remembered?.approvalPolicy && remembered.approvalPolicy !== 'ask'
-              ? { seedApprovalPolicy: remembered.approvalPolicy }
+            ...(operation.model ?? remembered?.model
+              ? { seedModel: operation.model ?? remembered?.model }
+              : {}),
+            ...(operation.reasoning ?? remembered?.reasoning
+              ? { seedReasoning: operation.reasoning ?? remembered?.reasoning }
+              : {}),
+            ...((operation.agentPermissionMode ?? remembered?.agentPermissionMode) &&
+            (operation.agentPermissionMode ?? remembered?.agentPermissionMode) !== 'execute'
+              ? {
+                  seedAgentPermissionMode:
+                    operation.agentPermissionMode ?? remembered?.agentPermissionMode,
+                }
+              : {}),
+            ...((operation.approvalPolicy ?? remembered?.approvalPolicy) &&
+            (operation.approvalPolicy ?? remembered?.approvalPolicy) !== 'ask'
+              ? { seedApprovalPolicy: operation.approvalPolicy ?? remembered?.approvalPolicy }
               : {}),
             seedPrompt: operation.prompt,
             seedSubmittedAt: new Date().toISOString(),
             ...(!operation.name ? { autoRename: true } : {}),
           };
-          const preferences = remembered ?? mobileDroneCreatePreferencesFromPayload(payload);
+          const preferences = remembered ?? mobileDroneCreatePreferencesFromPayload({
+            runtime: phoneTarget ? 'host' : 'container',
+            repoBranchSource: 'host',
+            seedAgent: { kind: 'native' },
+          });
           const created = await createDrone(payload, preferences);
           if (!created?.droneId) throw new Error('DRONE_NOT_CREATED');
           return created;
+        },
+        cloneDrone: async (operation) => {
+          const source = drones.find((drone) => drone.id === operation.sourceDroneId);
+          if (!source) throw new Error(`unknown source drone: ${operation.sourceDroneId}`);
+          if (source.runtime.trim().toLowerCase() === 'host') {
+            throw new Error('Host runtime drones cannot be cloned.');
+          }
+          const repoPath = proposalRepoPath(
+            operation.repoPath ?? (source.repoAttached === false ? '' : source.repoPath),
+          );
+          const result: any = await requestDroneControl('drone.create.container', {
+            name: operation.name,
+            group: operation.group === undefined ? source.group : operation.group,
+            repoPath,
+            persistVolume: source.persistVolume !== false,
+            cloneFrom: source.id,
+            cloneChats: operation.cloneChats !== false,
+          });
+          const droneId = String(result?.id ?? result?.droneId ?? result?.drone?.id ?? '').trim();
+          if (!droneId) throw new Error('clone drone did not return an id');
+          return {
+            droneId,
+            droneName: String(result?.name ?? result?.drone?.name ?? operation.name).trim(),
+          };
         },
         deleteDrone: async (operation) =>
           await requestDroneControl('drone.delete', { droneId: operation.droneId }),
@@ -234,12 +359,23 @@ export function useMobileCompanionWorkspaceTarget({
             droneId: operation.droneId,
             newName: operation.newName,
           }),
-        createChat: async (operation) =>
-          await requestDroneControl('chat.create', {
+        createChat: async (operation) => {
+          const created = await requestDroneControl('chat.create', {
             droneId: operation.droneId,
             name: operation.chatName,
             ...(operation.copyFromChat ? { copyFrom: operation.copyFromChat } : {}),
             ...(operation.copyFromChat ? { mode: 'copy-config' } : {}),
+            ...(operation.draft === true ? { draft: true } : {}),
+          });
+          await configureChat(operation);
+          return created as Record<string, unknown>;
+        },
+        cloneChat: async (operation) =>
+          await requestDroneControl('chat.create', {
+            droneId: operation.droneId,
+            name: operation.chatName,
+            copyFrom: operation.sourceChat,
+            mode: 'fork',
             ...(operation.draft === true ? { draft: true } : {}),
           }),
         deleteChat: async (operation) =>

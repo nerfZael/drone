@@ -49,6 +49,7 @@ export const chatReadBodySchema = z
 export const chatConfigBodySchema = z
   .object({
     agent: z.unknown().optional(),
+    provider: z.unknown().optional(),
     model: z.unknown().optional(),
     chatModel: z.unknown().optional(),
     reasoning: z.unknown().optional(),

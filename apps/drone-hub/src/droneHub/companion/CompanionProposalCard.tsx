@@ -161,6 +161,9 @@ export function CompanionProposalCard({
   onExecute(): void;
   onDiscard(): void;
 }) {
+  const [expandedOperationIds, setExpandedOperationIds] = React.useState<Set<string>>(
+    () => new Set(),
+  );
   const operationResult = React.useMemo(
     () => new Map((execution?.operations ?? executionProgress?.operations ?? []).map((item) => [item.id, item])),
     [execution, executionProgress],
@@ -174,20 +177,31 @@ export function CompanionProposalCard({
   const droneLabel = React.useCallback((droneId: string) => {
     if (droneId.startsWith('$')) {
       const created = proposal.operations.find(
-        (operation) => operation.type === 'create_drone' && operation.id === droneId.slice(1),
+        (operation) =>
+          (operation.type === 'create_drone' || operation.type === 'clone_drone') &&
+          operation.id === droneId.slice(1),
       );
       if (created?.type === 'create_drone') return created.name || 'New drone';
+      if (created?.type === 'clone_drone') return created.name;
     }
     return droneNames[droneId] || resolveDroneName?.(droneId) || droneId;
   }, [droneNames, proposal.operations, resolveDroneName]);
+  const toggleOperationDetails = React.useCallback((operationId: string) => {
+    setExpandedOperationIds((current) => {
+      const next = new Set(current);
+      if (next.has(operationId)) next.delete(operationId);
+      else next.add(operationId);
+      return next;
+    });
+  }, []);
 
   return (
     <Tooltip.Provider delayDuration={250} skipDelayDuration={100}>
       <aside
-        className="flex max-h-[min(34rem,calc(100vh-2rem))] w-full shrink-0 flex-col overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--panel)] shadow-2xl min-[860px]:w-80"
+        className="flex max-h-[min(34rem,calc(100vh-2rem))] w-full shrink-0 flex-col overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--panel)] shadow-2xl min-[860px]:w-80 min-[1100px]:w-96"
         aria-label="Companion proposal"
       >
-      <div className="border-b border-[var(--border-subtle)] px-4 py-3">
+      <div className="border-b border-[var(--border-subtle)] px-3 py-2.5">
         <div className="flex items-center justify-between gap-3">
           <div className="text-[10px] font-[var(--weight-semibold)] uppercase tracking-[0.1em] text-[var(--muted)]">
             Proposal
@@ -202,17 +216,40 @@ export function CompanionProposalCard({
                   : 'Ready for review'}
           </div>
         </div>
-        <div className="mt-1 text-sm font-[var(--weight-semibold)] text-[var(--fg)]">
-          {proposal.title}
-        </div>
         {proposal.summary ? (
-          <div className="mt-1 text-xs leading-relaxed text-[var(--muted)]">
-            {proposal.summary}
+          <details className="group/description mt-1">
+            <summary className="flex cursor-pointer list-none items-start gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] [&::-webkit-details-marker]:hidden">
+              <span className="min-w-0 flex-1 text-sm font-[var(--weight-semibold)] text-[var(--fg)]">
+                {proposal.title}
+              </span>
+              <span className="mt-0.5 inline-flex shrink-0 items-center gap-1 text-[9px] uppercase tracking-wide text-[var(--muted-dim)]">
+                Description
+                <svg
+                  className="h-2.5 w-2.5 transition-transform group-open/description:rotate-90"
+                  viewBox="0 0 10 10"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="m3.5 2 3 3-3 3" />
+                </svg>
+              </span>
+            </summary>
+            <div className="mt-1.5 pr-6 text-xs leading-relaxed text-[var(--muted)]">
+              {proposal.summary}
+            </div>
+          </details>
+        ) : (
+          <div className="mt-1 text-sm font-[var(--weight-semibold)] text-[var(--fg)]">
+            {proposal.title}
           </div>
-        ) : null}
+        )}
       </div>
 
-      <div className="dh-agent-activity-scrollbar min-h-0 flex-1 overflow-y-auto px-3 py-2">
+      <div className="dh-agent-activity-scrollbar min-h-0 flex-1 overflow-y-auto px-2.5 py-1.5">
         {proposal.operations.length === 0 ? (
           <div className="rounded-lg border border-dashed border-[var(--border-subtle)] px-3 py-4 text-center text-xs text-[var(--muted)]">
             Companion has not added any operations yet.
@@ -221,32 +258,31 @@ export function CompanionProposalCard({
           <ol className="divide-y divide-[var(--border-subtle)]">
             {proposal.operations.map((operation, index) => {
               const outcome = operationResult.get(operation.id);
-              const details = operation.type === 'send_message' || operation.type === 'create_drone'
+              const details = operation.type === 'send_message'
                 ? []
-                : companionProposalOperationDetails(operation, defaultRepoPath);
+                : companionProposalOperationDetails(operation, defaultRepoPath).filter(
+                    (detail) => detail.label !== 'Initial prompt',
+                  );
               const isMessage = operation.type === 'send_message';
               const isCreateDrone = operation.type === 'create_drone';
               const createLocation = isCreateDrone
                 ? proposalLocation(operation, defaultRepoPath)
                 : null;
-              const summary = (
-                <div
-                  className="min-w-0 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
-                  tabIndex={isMessage || isCreateDrone ? 0 : undefined}
-                  aria-label={isMessage
-                    ? `Preview full message to ${droneLabel(operation.droneId)}`
-                    : isCreateDrone
-                      ? `Preview full initial message and group path for ${operation.name || 'new drone'}`
-                      : undefined}
-                >
+              const operationLabel = companionProposalOperationLabel(
+                operation,
+                'droneId' in operation ? droneLabel(operation.droneId) : '',
+              );
+              const detailsExpanded = expandedOperationIds.has(operation.id);
+              const summaryContent = (
+                <>
                   {isMessage ? (
                     <>
-                      <div className="truncate text-[10px] text-[var(--muted)]">
+                      <div className="truncate text-[10px] text-[var(--fg-secondary)]">
                         Message to{' '}
-                        <span className="font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
+                        <span className="font-[var(--weight-semibold)] text-[var(--fg)]">
                           {droneLabel(operation.droneId)}
                         </span>
-                        <span className="text-[var(--muted-dim)]">
+                        <span className="text-[var(--muted)]">
                           {' '}· {operation.chatName ?? 'default'}
                         </span>
                       </div>
@@ -256,30 +292,69 @@ export function CompanionProposalCard({
                     </>
                   ) : isCreateDrone ? (
                     <>
-                      <div className="text-xs leading-snug text-[var(--fg-secondary)]">
-                        {companionProposalOperationLabel(operation)}
+                      <div className="text-xs leading-snug text-[var(--fg)]">
+                        {operationLabel}
                       </div>
-                      <div className="mt-1 line-clamp-2 whitespace-pre-wrap break-words text-[10px] leading-relaxed text-[var(--muted)]">
+                      <div className="mt-1 line-clamp-2 whitespace-pre-wrap break-words text-[10px] leading-relaxed text-[var(--fg-secondary)]">
                         {operation.prompt}
                       </div>
-                      <div className="mt-1 truncate text-[10px] text-[var(--muted-dim)]">
+                      <div className="mt-1 truncate text-[10px] text-[var(--muted)]">
                         {createLocation?.groupPath}
                       </div>
                     </>
                   ) : (
-                    <div className="text-xs leading-snug text-[var(--fg-secondary)]">
-                      {companionProposalOperationLabel(
-                        operation,
-                        'droneId' in operation ? droneLabel(operation.droneId) : '',
-                      )}
+                    <div className="text-xs leading-snug text-[var(--fg)]">
+                      {operationLabel}
                     </div>
                   )}
+                </>
+              );
+              const summary = details.length > 0 ? (
+                <button
+                  type="button"
+                  className="relative block w-full min-w-0 appearance-none rounded-sm bg-transparent p-0 pr-4 text-left outline-none hover:brightness-110 focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+                  aria-expanded={detailsExpanded}
+                  aria-controls={`proposal-operation-details-${operation.id}`}
+                  aria-label={`${
+                    isCreateDrone
+                      ? `Preview full initial message and group path for ${operation.name || 'new drone'}; `
+                      : ''
+                  }${detailsExpanded ? 'hide' : 'review'} details for ${operationLabel}`}
+                  onClick={() => toggleOperationDetails(operation.id)}
+                >
+                  {summaryContent}
+                  <svg
+                    className={`absolute right-0 top-0.5 h-2.5 w-2.5 text-[var(--muted)] transition-transform ${
+                      detailsExpanded ? 'rotate-90' : ''
+                    }`}
+                    viewBox="0 0 10 10"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="m3.5 2 3 3-3 3" />
+                  </svg>
+                </button>
+              ) : (
+                <div
+                  className="min-w-0 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+                  tabIndex={isMessage || isCreateDrone ? 0 : undefined}
+                  aria-label={isMessage
+                    ? `Preview full message to ${droneLabel(operation.droneId)}`
+                    : isCreateDrone
+                      ? `Preview full initial message and group path for ${operation.name || 'new drone'}`
+                      : undefined}
+                >
+                  {summaryContent}
                 </div>
               );
               return (
                 <li
                   key={operation.id}
-                  className="py-2 first:pt-0 last:pb-0"
+                  className="py-1.5 first:pt-0 last:pb-0"
                 >
                   <div className="flex items-start gap-2">
                     <ProposalOperationMarker
@@ -299,10 +374,11 @@ export function CompanionProposalCard({
                       ) : (
                         summary
                       )}
-                      {details.length > 0 ? (
-                        <details className="mt-1 text-[10px] text-[var(--muted)]">
-                          <summary className="cursor-pointer select-none">Review details</summary>
-                          <dl className="mt-1 space-y-1 border-l border-[var(--border-subtle)] pl-2">
+                      {details.length > 0 && detailsExpanded ? (
+                          <dl
+                            id={`proposal-operation-details-${operation.id}`}
+                            className="mt-1.5 space-y-1 border-l border-[var(--border-subtle)] pl-2 text-[10px] text-[var(--muted)]"
+                          >
                             {details.map((detail) => (
                               <div key={detail.label}>
                                 <dt className="font-[var(--weight-semibold)] text-[var(--muted-dim)]">
@@ -314,7 +390,6 @@ export function CompanionProposalCard({
                               </div>
                             ))}
                           </dl>
-                        </details>
                       ) : null}
                       {outcome && outcome.status !== 'completed' ? (
                         <div className={`mt-1 text-[10px] ${outcome.status === 'failed' ? 'text-[var(--red)]' : 'text-[var(--muted-dim)]'}`}>
@@ -330,7 +405,7 @@ export function CompanionProposalCard({
         )}
       </div>
 
-      <div className="flex shrink-0 items-center justify-end gap-2 border-t border-[var(--border-subtle)] px-3 py-3">
+      <div className="flex shrink-0 items-center justify-end gap-2 border-t border-[var(--border-subtle)] px-3 py-2">
         <button
           type="button"
           onClick={onDiscard}

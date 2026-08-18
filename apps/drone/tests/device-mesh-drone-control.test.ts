@@ -1128,6 +1128,68 @@ describe('device mesh drone summaries', () => {
     }
   });
 
+  test('applies chat overrides and synchronizes a native assistant thread', async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{ url: string; method: string; body: string }> = [];
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input);
+      requests.push({
+        url,
+        method: String(init?.method ?? 'GET'),
+        body: String(init?.body ?? ''),
+      });
+      if (url.endsWith('/native')) {
+        return Response.json({ ok: true, nativeChatId: 'native-chat-1' });
+      }
+      if (url.endsWith('/chats/default') && String(init?.method ?? 'GET') === 'GET') {
+        return Response.json({ ok: true, agent: { kind: 'native' }, chatId: 'native-chat-1' });
+      }
+      return Response.json({ ok: true });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      await capability.invoke('chat.update', {
+        droneId: 'drone-1',
+        chatName: 'default',
+        agent: { kind: 'native' },
+        provider: 'codex',
+        model: 'gpt-5.3-codex',
+        reasoning: 'high',
+        agentPermissionMode: 'write',
+        approvalPolicy: 'none',
+        syncNativeThread: true,
+      });
+
+      expect(requests).toHaveLength(4);
+      expect(JSON.parse(requests[0]!.body)).toEqual({
+        model: 'gpt-5.3-codex',
+        agent: { kind: 'native' },
+        provider: 'codex',
+        reasoning: 'high',
+        agentPermissionMode: 'write',
+        approvalPolicy: 'none',
+      });
+      expect(requests[1]!.url).toEndWith('/api/drones/drone-1/chats/default');
+      expect(requests[2]!.url).toEndWith('/api/drones/drone-1/chats/default/native');
+      expect(requests[3]).toMatchObject({
+        url: 'http://127.0.0.1:7777/api/assistant/threads/native-chat-1',
+        method: 'PATCH',
+      });
+      expect(JSON.parse(requests[3]!.body)).toEqual({
+        model: 'gpt-5.3-codex',
+        provider: 'codex',
+        thinkingLevel: 'high',
+        agentPermissionMode: 'write',
+        approvalPolicy: 'none',
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('forwards Codex approval decisions without treating them as native approvals', async () => {
     const originalFetch = globalThis.fetch;
     const requests: Array<{ url: string; method: string; body: string }> = [];

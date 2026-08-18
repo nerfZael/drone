@@ -56,7 +56,7 @@ const PREVIOUS_DRAFT_DEFAULT_COMPANION_SYSTEM_PROMPT = [
 
 export const DEFAULT_COMPANION_SYSTEM_PROMPT = [
   PREVIOUS_DEFAULT_COMPANION_SYSTEM_PROMPT,
-  'Use read_companion_proposal and apply_companion_proposal_patch for requested Drone Hub changes such as creating, renaming, or deleting groups, drones, and chats, and sending or queueing chat messages.',
+  'Use read_companion_proposal and apply_companion_proposal_patch for requested Drone Hub changes such as creating, cloning, renaming, or deleting groups, drones, and chats, configuring creation overrides, and sending or queueing chat messages.',
   'There is one editable proposal for the Companion session. Proposal patches update its review card but do not execute it. You may discuss it with the user and revise it over multiple turns before they apply or discard it.',
   'Read the proposal before every patch. Preserve operations the user still wants, use $create-operation-id references for later operations on a newly created drone, and keep operation order executable.',
 ].join('\n');
@@ -169,7 +169,7 @@ export const COMPANION_TOOL_SUMMARIES = [
     execution: 'browser',
     requires: null,
     description:
-      'Use this first whenever the user asks to create, delete, or rename groups, drones, or chats, or to send or queue chat messages. Read the one editable proposal document, its revision, and the supported operation schemas, including delete_drone and send_message. A proposal is reviewable and does not run until the user applies it.',
+      'Use this first whenever the user asks to create, clone, delete, rename, or configure groups, drones, or chats, or to send or queue chat messages. Read the one editable proposal document, its revision, and the supported operation schemas and optional overrides, including delete_drone and send_message. A proposal is reviewable and does not run until the user applies it.',
   },
   {
     name: 'apply_companion_proposal_patch',
@@ -178,7 +178,7 @@ export const COMPANION_TOOL_SUMMARIES = [
     execution: 'browser',
     requires: 'read_companion_proposal',
     description:
-      'After read_companion_proposal, use this to add or revise the requested Drone Hub operations, including deleting drones and sending or queueing chat messages. Apply one strict Update File patch to the proposal JSON. This updates the review card only; it does not execute the operations.',
+      'After read_companion_proposal, use this to add or revise the requested Drone Hub operations, including deleting drones and sending or queueing chat messages, true chat clones, container-drone clones, and creation overrides. Apply one strict Update File patch to the proposal JSON. This updates the review card only; it does not execute the operations.',
   },
   {
     name: 'open_drone_chat',

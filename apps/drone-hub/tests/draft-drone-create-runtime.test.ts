@@ -85,6 +85,25 @@ describe('draft drone create runtime support', () => {
     });
   });
 
+  test('includes an explicit native provider in the seed configuration', () => {
+    const payload = buildDraftDroneCreatePayload({
+      name: 'native-provider-drone',
+      runtime: 'container',
+      repoBranchSelection: { repoBranchSource: 'host' },
+      seedAgent: { kind: 'native' },
+      seedProvider: 'codex',
+      seedModel: 'gpt-5.3-codex',
+      prompt: 'Review the implementation',
+    });
+
+    expect(payload).toMatchObject({
+      seedChat: 'default',
+      seedAgent: { kind: 'native' },
+      seedProvider: 'codex',
+      seedModel: 'gpt-5.3-codex',
+    });
+  });
+
   test('omits chat seed fields when creating an empty drone', () => {
     const payload = buildDraftDroneCreatePayload({
       name: 'empty-drone',

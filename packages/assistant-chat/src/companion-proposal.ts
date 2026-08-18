@@ -8,6 +8,23 @@ type CompanionProposalOperationBase = {
   id: string;
 };
 
+export type CompanionProposalChatOverrides = {
+  /** Existing Drone Hub agent key, for example native, builtin:codex, or custom:my-agent. */
+  agent?: string;
+  provider?: 'openai' | 'codex' | 'gemini';
+  model?: string;
+  reasoning?: string;
+  agentPermissionMode?: 'read' | 'write' | 'execute';
+  approvalPolicy?: 'ask' | 'auto' | 'none';
+};
+
+type CompanionProposalCreateOverrides = CompanionProposalChatOverrides & {
+  runtime?: 'container' | 'host';
+  persistVolume?: boolean;
+  repoBranchSource?: 'host' | 'remote';
+  remoteBranch?: string;
+};
+
 export type CompanionProposalOperation =
   | (CompanionProposalOperationBase & {
       type: 'create_group';
@@ -25,13 +42,21 @@ export type CompanionProposalOperation =
       newName: string;
       repoPath?: string;
     })
-  | (CompanionProposalOperationBase & {
+  | (CompanionProposalOperationBase & CompanionProposalCreateOverrides & {
       type: 'create_drone';
       name?: string;
       prompt: string;
       repoPath?: string;
       group?: string;
       draft?: boolean;
+    })
+  | (CompanionProposalOperationBase & {
+      type: 'clone_drone';
+      sourceDroneId: string;
+      name: string;
+      repoPath?: string;
+      group?: string;
+      cloneChats?: boolean;
     })
   | (CompanionProposalOperationBase & {
       type: 'delete_drone';
@@ -42,11 +67,18 @@ export type CompanionProposalOperation =
       droneId: string;
       newName: string;
     })
-  | (CompanionProposalOperationBase & {
+  | (CompanionProposalOperationBase & CompanionProposalChatOverrides & {
       type: 'create_chat';
       droneId: string;
       chatName: string;
       copyFromChat?: string;
+      draft?: boolean;
+    })
+  | (CompanionProposalOperationBase & {
+      type: 'clone_chat';
+      droneId: string;
+      sourceChat: string;
+      chatName: string;
       draft?: boolean;
     })
   | (CompanionProposalOperationBase & {
@@ -114,9 +146,11 @@ export type CompanionProposalExecutor = {
   deleteGroup(operation: Extract<CompanionProposalOperation, { type: 'delete_group' }>): Promise<CompanionProposalActionResult>;
   renameGroup(operation: Extract<CompanionProposalOperation, { type: 'rename_group' }>): Promise<CompanionProposalActionResult>;
   createDrone(operation: Extract<CompanionProposalOperation, { type: 'create_drone' }>): Promise<{ droneId: string; droneName?: string }>;
+  cloneDrone(operation: Extract<CompanionProposalOperation, { type: 'clone_drone' }>): Promise<{ droneId: string; droneName?: string }>;
   deleteDrone(operation: Extract<CompanionProposalOperation, { type: 'delete_drone' }>): Promise<CompanionProposalActionResult>;
   renameDrone(operation: Extract<CompanionProposalOperation, { type: 'rename_drone' }>): Promise<CompanionProposalActionResult>;
   createChat(operation: Extract<CompanionProposalOperation, { type: 'create_chat' }>): Promise<CompanionProposalActionResult>;
+  cloneChat(operation: Extract<CompanionProposalOperation, { type: 'clone_chat' }>): Promise<CompanionProposalActionResult>;
   deleteChat(operation: Extract<CompanionProposalOperation, { type: 'delete_chat' }>): Promise<CompanionProposalActionResult>;
   renameChat(operation: Extract<CompanionProposalOperation, { type: 'rename_chat' }>): Promise<CompanionProposalActionResult>;
   sendMessage(operation: Extract<CompanionProposalOperation, { type: 'send_message' }>): Promise<CompanionProposalActionResult>;
@@ -139,15 +173,20 @@ export const COMPANION_PROPOSAL_FORMAT = [
   '- create_group: { id, type, name, repoPath? }',
   '- delete_group: { id, type, name, repoPath? }',
   '- rename_group: { id, type, name, newName, repoPath? }',
-  '- create_drone: { id, type, name?, prompt, repoPath?, group?, draft? }',
+  '- create_drone: { id, type, name?, prompt, repoPath?, group?, draft?, runtime?, persistVolume?, repoBranchSource?, remoteBranch?, agent?, provider?, model?, reasoning?, agentPermissionMode?, approvalPolicy? }',
+  '- clone_drone: { id, type, sourceDroneId, name, repoPath?, group?, cloneChats? } (container drones only)',
   '- delete_drone: { id, type, droneId }',
   '- rename_drone: { id, type, droneId, newName }',
   '- create_chat: { id, type, droneId, chatName, copyFromChat?, draft? }',
+  '  create_chat also accepts optional agent, provider, model, reasoning, agentPermissionMode, and approvalPolicy overrides. copyFromChat copies configuration only.',
+  '- clone_chat: { id, type, droneId, sourceChat, chatName, draft? } (clones history and configuration)',
+  'Agent overrides use "native", "builtin:cursor", "builtin:codex", "builtin:claude", "builtin:opencode", "builtin:pi", "builtin:blip", or an existing "custom:<id>" agent. Custom agents are unavailable on mobile and host runtime targets.',
+  'Provider is openai, codex, or gemini and only applies to the native agent. agentPermissionMode is read, write, or execute. approvalPolicy is ask, auto, or none. Unsupported agent combinations fail validation during Apply.',
   '- delete_chat: { id, type, droneId, chatName } (the default chat cannot be deleted)',
   '- rename_chat: { id, type, droneId, chatName, newName } (the default chat cannot be renamed)',
   '- send_message: { id, type, droneId, chatName?, message, delivery?: "asap" | "queue" }',
-  'A later operation may target a drone created earlier in the document with droneId "$<create operation id>".',
-  'Operations run top-to-bottom and stop after the first failure. Omit repoPath to use the repository captured when this proposal was first created, and chatName to use "default".',
+  'A later operation may target a drone created or cloned earlier in the document with droneId "$<operation id>".',
+  'Operations run top-to-bottom and stop after the first failure. Omit repoPath to use the repository captured when this proposal was first created, except clone_drone, which keeps the source repository and group when they are omitted. Use an empty clone_drone group to make the clone ungrouped. Omit chatName to use "default" where it is optional.',
   'Any Apply attempt is terminal for this proposal. The user must discard it before creating a fresh proposal; completed operations are never replayed.',
 ].join('\n');
 
@@ -193,11 +232,15 @@ export function validateCompanionProposal(value: unknown): CompanionProposal {
     if ('droneId' in operation && operation.droneId.startsWith('$')) {
       const reference = operation.droneId.slice(1);
       if (!createdDroneIds.has(reference)) {
-        throw new Error(`${path}.droneId references an earlier create_drone operation that does not exist`);
+        throw new Error(
+          `${path}.droneId references an earlier create_drone or clone_drone operation that does not exist`,
+        );
       }
     }
     ids.add(operation.id);
-    if (operation.type === 'create_drone') createdDroneIds.add(operation.id);
+    if (operation.type === 'create_drone' || operation.type === 'clone_drone') {
+      createdDroneIds.add(operation.id);
+    }
     return operation;
   });
 
@@ -221,9 +264,11 @@ export function companionProposalOperationLabel(
     case 'delete_group': return `Delete group “${operation.name}” and its contents`;
     case 'rename_group': return `Rename group “${operation.name}” to “${operation.newName}”`;
     case 'create_drone': return `${operation.draft ? 'Create draft drone' : 'Create drone'}${operation.name ? ` “${operation.name}”` : ''}`;
+    case 'clone_drone': return `Clone drone ${operation.sourceDroneId} as “${operation.name}”`;
     case 'delete_drone': return `Delete drone ${drone}`;
     case 'rename_drone': return `Rename drone ${drone} to “${operation.newName}”`;
     case 'create_chat': return `Create ${operation.draft ? 'draft ' : ''}chat “${operation.chatName}” in ${drone}`;
+    case 'clone_chat': return `Clone chat “${operation.sourceChat}” as “${operation.chatName}” in ${drone}`;
     case 'delete_chat': return `Delete chat “${operation.chatName}” from ${drone}`;
     case 'rename_chat': return `Rename chat “${operation.chatName}” to “${operation.newName}”`;
     case 'send_message': return `${operation.delivery === 'asap' ? 'Send' : 'Queue'} message to ${drone} / ${operation.chatName ?? 'default'}`;
@@ -238,6 +283,17 @@ export function companionProposalOperationDetails(
     label: 'Repository',
     value: (repoPath ?? defaultRepoPath) || 'No repository',
   });
+  const overrides = (
+    operation: CompanionProposalChatOverrides,
+    fallback: string,
+  ): CompanionProposalOperationDetail[] => [
+    { label: 'Agent', value: operation.agent || fallback },
+    { label: 'Provider', value: operation.provider || fallback },
+    { label: 'Model', value: operation.model || fallback },
+    { label: 'Reasoning', value: operation.reasoning || fallback },
+    { label: 'Agent permissions', value: operation.agentPermissionMode || fallback },
+    { label: 'Approval policy', value: operation.approvalPolicy || fallback },
+  ];
   switch (operation.type) {
     case 'create_group':
     case 'delete_group':
@@ -248,12 +304,53 @@ export function companionProposalOperationDetails(
       return [
         repo(operation.repoPath),
         { label: 'Group', value: operation.group || 'Ungrouped' },
+        { label: 'Runtime', value: operation.runtime || 'Saved default' },
+        {
+          label: 'Persist volume',
+          value: operation.persistVolume === undefined
+            ? 'Saved default'
+            : operation.persistVolume ? 'On' : 'Off',
+        },
+        {
+          label: 'Branch source',
+          value:
+            operation.repoBranchSource || (operation.remoteBranch ? 'remote' : 'Saved default'),
+        },
+        ...(operation.remoteBranch
+          ? [{ label: 'Remote branch', value: operation.remoteBranch }]
+          : []),
+        ...overrides(operation, 'Saved default'),
         { label: 'Initial prompt', value: operation.prompt },
       ];
+    case 'clone_drone':
+      return [
+        { label: 'Source drone', value: operation.sourceDroneId },
+        {
+          label: 'Repository',
+          value: operation.repoPath === undefined
+            ? 'Source drone repository'
+            : operation.repoPath || 'No repository',
+        },
+        {
+          label: 'Group',
+          value: operation.group === undefined
+            ? 'Source drone group'
+            : operation.group || 'Ungrouped',
+        },
+        { label: 'Clone chats', value: operation.cloneChats === false ? 'No' : 'Yes' },
+      ];
     case 'create_chat':
-      return operation.copyFromChat
-        ? [{ label: 'Copy settings from', value: operation.copyFromChat }]
-        : [];
+      return [
+        ...(operation.copyFromChat
+          ? [{ label: 'Copy settings from', value: operation.copyFromChat }]
+          : []),
+        ...overrides(
+          operation,
+          operation.copyFromChat ? 'Copied from source chat' : 'Drone default',
+        ),
+      ];
+    case 'clone_chat':
+      return [{ label: 'Clone history from', value: operation.sourceChat }];
     case 'send_message':
       return [{ label: 'Message', value: operation.message }];
     case 'delete_drone':
@@ -299,9 +396,17 @@ export async function executeCompanionProposal(
           createdDrones.set(operation.id, droneId);
           break;
         }
+        case 'clone_drone': {
+          result = await executor.cloneDrone(operation);
+          const droneId = String(result?.droneId ?? '').trim();
+          if (!droneId) throw new Error('clone_drone did not return a drone id');
+          createdDrones.set(operation.id, droneId);
+          break;
+        }
         case 'delete_drone': result = await executor.deleteDrone(operation); break;
         case 'rename_drone': result = await executor.renameDrone(operation); break;
         case 'create_chat': result = await executor.createChat(operation); break;
+        case 'clone_chat': result = await executor.cloneChat(operation); break;
         case 'delete_chat': result = await executor.deleteChat(operation); break;
         case 'rename_chat': result = await executor.renameChat(operation); break;
         case 'send_message': result = await executor.sendMessage(operation); break;
@@ -363,15 +468,39 @@ function validateOperation(value: unknown, path: string): CompanionProposalOpera
     };
   }
   if (type === 'create_drone') {
-    exactKeys(operation, ['id', 'type', 'name', 'prompt', 'repoPath', 'group', 'draft'], path);
+    exactKeys(operation, [
+      'id', 'type', 'name', 'prompt', 'repoPath', 'group', 'draft', 'runtime',
+      'persistVolume', 'repoBranchSource', 'remoteBranch', 'agent', 'provider', 'model',
+      'reasoning', 'agentPermissionMode', 'approvalPolicy',
+    ], path);
+    const createOverrides = validateCreateOverrides(operation, path);
     return {
       id,
       type,
       ...optionalNonEmptyField(operation, 'name', path, 80),
       prompt: requiredText(operation.prompt, `${path}.prompt`, 100_000),
       ...optionalField(operation, 'repoPath', path, 4_096),
-      ...optionalNonEmptyField(operation, 'group', path, 64),
+      ...optionalField(operation, 'group', path, 64),
       ...optionalBooleanField(operation, 'draft', path),
+      ...createOverrides,
+    };
+  }
+  if (type === 'clone_drone') {
+    exactKeys(operation, [
+      'id', 'type', 'sourceDroneId', 'name', 'repoPath', 'group', 'cloneChats',
+    ], path);
+    return {
+      id,
+      type,
+      sourceDroneId: requiredSingleLineText(
+        operation.sourceDroneId,
+        `${path}.sourceDroneId`,
+        256,
+      ),
+      name: requiredSingleLineText(operation.name, `${path}.name`, 80),
+      ...optionalField(operation, 'repoPath', path, 4_096),
+      ...optionalField(operation, 'group', path, 64),
+      ...optionalBooleanField(operation, 'cloneChats', path),
     };
   }
   if (type === 'delete_drone') {
@@ -388,13 +517,28 @@ function validateOperation(value: unknown, path: string): CompanionProposalOpera
     };
   }
   if (type === 'create_chat') {
-    exactKeys(operation, ['id', 'type', 'droneId', 'chatName', 'copyFromChat', 'draft'], path);
+    exactKeys(operation, [
+      'id', 'type', 'droneId', 'chatName', 'copyFromChat', 'draft', 'agent', 'provider',
+      'model', 'reasoning', 'agentPermissionMode', 'approvalPolicy',
+    ], path);
     return {
       id,
       type,
       droneId: requiredSingleLineText(operation.droneId, `${path}.droneId`, 256),
       chatName: requiredSingleLineText(operation.chatName, `${path}.chatName`, 160),
       ...optionalNonEmptyField(operation, 'copyFromChat', path, 160),
+      ...optionalBooleanField(operation, 'draft', path),
+      ...validateChatOverrides(operation, path),
+    };
+  }
+  if (type === 'clone_chat') {
+    exactKeys(operation, ['id', 'type', 'droneId', 'sourceChat', 'chatName', 'draft'], path);
+    return {
+      id,
+      type,
+      droneId: requiredSingleLineText(operation.droneId, `${path}.droneId`, 256),
+      sourceChat: requiredSingleLineText(operation.sourceChat, `${path}.sourceChat`, 160),
+      chatName: requiredSingleLineText(operation.chatName, `${path}.chatName`, 160),
       ...optionalBooleanField(operation, 'draft', path),
     };
   }
@@ -512,4 +656,73 @@ function optionalBooleanField(
   if (candidate === undefined) return {};
   if (typeof candidate !== 'boolean') throw new Error(`${path}.${key} must be a boolean`);
   return { [key]: candidate };
+}
+
+function optionalEnumField<const T extends string>(
+  value: Record<string, unknown>,
+  key: string,
+  path: string,
+  allowed: readonly T[],
+): Record<string, T> {
+  const candidate = value[key];
+  if (candidate === undefined) return {};
+  if (typeof candidate !== 'string' || !allowed.includes(candidate as T)) {
+    throw new Error(`${path}.${key} must be one of: ${allowed.join(', ')}`);
+  }
+  return { [key]: candidate as T };
+}
+
+function validateChatOverrides(
+  operation: Record<string, unknown>,
+  path: string,
+): CompanionProposalChatOverrides {
+  const overrides: CompanionProposalChatOverrides = {
+    ...optionalNonEmptyField(operation, 'agent', path, 200),
+    ...optionalEnumField(operation, 'provider', path, ['openai', 'codex', 'gemini'] as const),
+    ...optionalNonEmptyField(operation, 'model', path, 200),
+    ...optionalNonEmptyField(operation, 'reasoning', path, 200),
+    ...optionalEnumField(
+      operation,
+      'agentPermissionMode',
+      path,
+      ['read', 'write', 'execute'] as const,
+    ),
+    ...optionalEnumField(
+      operation,
+      'approvalPolicy',
+      path,
+      ['ask', 'auto', 'none'] as const,
+    ),
+  };
+  if (overrides.provider && overrides.agent && overrides.agent !== 'native') {
+    throw new Error(`${path}.provider is only supported with agent "native"`);
+  }
+  return overrides;
+}
+
+function validateCreateOverrides(
+  operation: Record<string, unknown>,
+  path: string,
+): CompanionProposalCreateOverrides {
+  const overrides: CompanionProposalCreateOverrides = {
+    ...optionalEnumField(operation, 'runtime', path, ['container', 'host'] as const),
+    ...optionalBooleanField(operation, 'persistVolume', path),
+    ...optionalEnumField(operation, 'repoBranchSource', path, ['host', 'remote'] as const),
+    ...optionalNonEmptyField(operation, 'remoteBranch', path, 400),
+    ...validateChatOverrides(operation, path),
+  };
+  if (overrides.repoBranchSource === 'host' && overrides.remoteBranch) {
+    throw new Error(`${path}.remoteBranch cannot be used with repoBranchSource "host"`);
+  }
+  if (
+    overrides.runtime === 'host' &&
+    (overrides.persistVolume !== undefined ||
+      overrides.repoBranchSource === 'remote' ||
+      overrides.remoteBranch)
+  ) {
+    throw new Error(
+      `${path} container volume and remote branch overrides require runtime "container"`,
+    );
+  }
+  return overrides;
 }

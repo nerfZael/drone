@@ -28,6 +28,9 @@ describe('Companion proposal card', () => {
     );
 
     expect(html).toContain('Review setup');
+    expect(html).toContain('<summary');
+    expect(html).toContain('Description');
+    expect(html).not.toContain('open=""');
     expect(html).toContain('Create draft drone');
     expect(html).toContain('Message to');
     expect(html).toContain('Reviewer');
@@ -38,6 +41,10 @@ describe('Companion proposal card', () => {
     expect(html).toContain('Check tests.');
     expect(html).toContain('Apply proposal');
     expect(html).toContain('Discard');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain('review details for Create draft drone');
+    expect(html).not.toContain('>Review details</summary>');
+    expect(html).toContain('text-[var(--fg)]');
   });
 
   test('shows a compact message preview with a focusable full-message hover target', () => {
@@ -106,6 +113,61 @@ describe('Companion proposal card', () => {
     expect(html).toContain('Not run');
     expect(html).toContain('Discard to retry');
     expect(html).toContain('disabled');
+  });
+
+  test('keeps clone semantics and explicit creation overrides behind item disclosures', () => {
+    const html = renderToStaticMarkup(
+      <CompanionProposalCard
+        proposal={{
+          version: 1,
+          title: 'Configured clones',
+          operations: [
+            {
+              id: 'create',
+              type: 'create_drone',
+              name: 'Reviewer',
+              prompt: 'Review the branch.',
+              group: 'Backend/Payments',
+              runtime: 'host',
+              agent: 'native',
+              provider: 'codex',
+              model: 'gpt-5.3-codex',
+              agentPermissionMode: 'write',
+              approvalPolicy: 'none',
+              repoBranchSource: 'host',
+            },
+            {
+              id: 'clone-chat',
+              type: 'clone_chat',
+              droneId: '$create',
+              sourceChat: 'default',
+              chatName: 'review-copy',
+            },
+            {
+              id: 'clone-drone',
+              type: 'clone_drone',
+              sourceDroneId: 'source-drone',
+              name: 'source-copy',
+            },
+          ],
+        }}
+        defaultRepoPath="/workspace/repo"
+        execution={null}
+        executing={false}
+        companionStatus="completed"
+        onExecute={() => undefined}
+        onDiscard={() => undefined}
+      />,
+    );
+
+    expect(html).toContain('Backend/Payments');
+    expect(html).toContain('aria-controls="proposal-operation-details-create"');
+    expect(html).toContain('aria-controls="proposal-operation-details-clone-chat"');
+    expect(html).not.toContain('>Runtime<');
+    expect(html).not.toContain('>gpt-5.3-codex<');
+    expect(html).toContain('Clone chat');
+    expect(html).not.toContain('>Clone history from<');
+    expect(html).toContain('Clone drone source-drone as');
   });
 
   test('uses inline progress icons and preserves snapshotted drone names', () => {
