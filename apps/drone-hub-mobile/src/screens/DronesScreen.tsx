@@ -490,7 +490,6 @@ export function DronesScreen({
   const createDefaultsRequestVersion = React.useRef(0);
   const createOptionsRequestVersion = React.useRef(0);
   const chatTabsRef = React.useRef<ScrollView>(null);
-  const createModelCatalogCache = React.useRef(new Map<string, MobileDroneCreateModel[]>());
   const createRepoBranchesCache = React.useRef(new Map<string, MobileDroneCreateRepo>());
   const loadedDronesTargetIdRef = React.useRef('');
   const loadDronesRef = React.useRef<(quiet?: boolean) => Promise<void>>(async () => {});
@@ -1684,11 +1683,6 @@ export function DronesScreen({
       refresh = false,
     ): Promise<MobileDroneCreateModel[]> => {
       const destinationId = targetId;
-      const cacheKey = `${destinationId}:${runtime}:${agent}`;
-      if (!refresh) {
-        const cached = createModelCatalogCache.current.get(cacheKey);
-        if (cached) return cached;
-      }
       const result = await requestDroneControl(destinationId, 'drones.list', {
         createModelAgent: agent,
         createModelRuntime: runtime,
@@ -1700,7 +1694,6 @@ export function DronesScreen({
       if (models.length === 0 && catalog?.error) {
         throw new Error(String(catalog.error));
       }
-      createModelCatalogCache.current.set(cacheKey, models);
       return models;
     },
     [requestDroneControl, targetId],

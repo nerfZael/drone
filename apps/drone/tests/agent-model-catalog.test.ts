@@ -62,6 +62,56 @@ describe('agent model catalog', () => {
     ]);
   });
 
+  test('uses an updated Codex cache even while the Drone Hub catalog is still fresh', async () => {
+    const discoveredAt = '2026-01-01T00:00:00.000Z';
+    let containerCalls = 0;
+    const runtime: AgentModelCatalogRuntime = {
+      async runContainer() {
+        containerCalls += 1;
+        return { code: 1 };
+      },
+      async runHost() {
+        return { code: 1 };
+      },
+      async readHostFile() {
+        return JSON.stringify({
+          models: [
+            { slug: 'gpt-5.6-sol', display_name: 'GPT-5.6-Sol', visibility: 'list' },
+            { slug: 'gpt-5.6-terra', display_name: 'GPT-5.6-Terra', visibility: 'list' },
+            { slug: 'gpt-5.6-luna', display_name: 'GPT-5.6-Luna', visibility: 'list' },
+          ],
+        });
+      },
+      hostHomeDirectory: () => '/tmp',
+      hostModelListCommand: () => null,
+      timeoutMs: () => 1_000,
+      now: () => Date.parse('2026-01-01T00:01:00.000Z'),
+    };
+    const service = new AgentModelCatalogService(runtime, {
+      read: () => ({
+        key: 'v3:shared:codex',
+        agentId: 'codex',
+        runtime: 'container',
+        models: [{ id: 'gpt-5.5', label: 'GPT-5.5' }] as any,
+        discoveredAt,
+      }),
+      async write() {},
+    });
+
+    const result = await service.get({
+      agentId: 'codex',
+      target: { runtime: 'container', containerName: 'drone-a' },
+    });
+
+    expect(result.models.map((model) => model.id)).toEqual([
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
+    ]);
+    expect(result.source).toBe('live');
+    expect(containerCalls).toBe(0);
+  });
+
   test('uses Codex visibility and priority metadata', () => {
     expect(
       parseCodexModelCache(
