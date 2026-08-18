@@ -198,28 +198,26 @@ export function AssistantComposer({
   const {
     error: sharedVoiceError,
     setError: setVoiceError,
-    status: sharedVoiceStatus,
-    durationMillis: voiceDurationMillis,
-    startRecording,
+    session: voiceSession,
+    startVoiceMessageRecording,
     toggleRecordingPause,
     discardRecording,
     stopRecordingForTranscript,
     continuousVoice,
     continuousDictation,
-    microphoneOwner,
   } = useSharedMobileChatVoiceRecorder();
-  const companionUsingVoice =
-    companion.status === 'starting' ||
-    companion.status === 'recording' ||
-    companion.status === 'transcribing';
+  const companionUsingVoice = voiceSession.kind === 'companion';
   const voiceError = companion.status === 'idle' ? sharedVoiceError : '';
-  const voiceStatus = companionUsingVoice ? ('idle' as const) : sharedVoiceStatus;
+  const voiceStatus =
+    voiceSession.kind === 'single-shot' ? voiceSession.status : ('idle' as const);
+  const voiceDurationMillis =
+    voiceSession.kind === 'single-shot' ? voiceSession.durationMillis : 0;
   const targetKey = String(voiceResetKey ?? '').trim();
   const voiceActive = voiceStatus !== 'idle';
   const voiceRecordAccessibilityLabel =
-    microphoneOwner === 'continuous'
+    voiceSession.kind === 'continuous'
       ? 'Continuous voice is using the microphone'
-      : microphoneOwner === 'companion'
+      : companionUsingVoice
         ? 'Companion is using the microphone'
         : 'Record voice message';
   const voiceActiveRef = React.useRef(voiceActive);
@@ -238,7 +236,7 @@ export function AssistantComposer({
     sending,
     running,
     queueWhileRunning,
-    microphoneAvailable: microphoneOwner === null && !companionUsingVoice,
+    microphoneAvailable: voiceSession.kind === 'idle' && voiceSession.microphoneAvailable,
   });
   const {
     state: continuousSession,
@@ -256,6 +254,7 @@ export function AssistantComposer({
     onSend,
     onError: setVoiceError,
     startBlocked: !continuousVoiceEnabled || voiceRecordActionDisabled || voiceActive,
+    session: voiceSession,
     continuousVoice,
     continuousDictation,
   });
@@ -364,7 +363,7 @@ export function AssistantComposer({
     setFocused(false);
     Keyboard.dismiss();
     try {
-      await startRecording();
+      await startVoiceMessageRecording();
     } finally {
       requestAnimationFrame(() => {
         inputRef.current?.blur();
@@ -372,7 +371,7 @@ export function AssistantComposer({
         suppressInputFocusRef.current = false;
       });
     }
-  }, [startRecording]);
+  }, [startVoiceMessageRecording]);
 
   const beginContinuousVoice = React.useCallback(
     async (mode: MobileContinuousVoiceMode) => {
