@@ -328,7 +328,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     if (proposalExecutingRef.current) return;
     activeTargetDeviceIdRef.current = '';
     await controller.close();
-    if (voice.getSession().kind === 'companion') await voice.discardRecording();
+    await voice.discardRecording('companion');
     proposalRevisionRef.current += 1;
     proposalExecutionGenerationRef.current += 1;
     proposalRef.current = null;
@@ -339,7 +339,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     setProposalDefaultRepoPath(null);
     proposalExecutingRef.current = false;
     setProposalExecuting(false);
-  }, [controller, voice.discardRecording, voice.getSession]);
+  }, [controller, voice.discardRecording]);
 
   React.useEffect(() => {
     const activeTargetDeviceId = activeTargetDeviceIdRef.current;
@@ -398,7 +398,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       const messageId = Crypto.randomUUID();
       const audioDurationMs = voice.session.durationMillis;
       const transcriptionStartedAt = performance.now();
-      const text = await voice.stopRecordingForTranscript();
+      const text = await voice.stopRecordingForTranscript('companion');
       const transcriptionMs = Math.max(0, performance.now() - transcriptionStartedAt);
       if (!controller.isCurrent(token)) return;
       if (!text.trim()) {
@@ -426,7 +426,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     activeTargetDeviceIdRef.current = activeTarget.targetDeviceId;
     voice.setError('');
     const token = controller.getToken();
-    const started = await voice.startCompanionRecording();
+    const started = await voice.startRecording('companion');
     if (!controller.isCurrent(token)) return;
     if (!started) {
       controller.reportVoiceError(
@@ -470,9 +470,9 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       proposalExecutionGenerationRef.current += 1;
       proposalExecutingRef.current = false;
       void controller.close();
-      if (voice.getSession().kind === 'companion') void voice.discardRecording();
+      void voice.discardRecording('companion');
     },
-    [controller, voice.discardRecording, voice.getSession],
+    [controller, voice.discardRecording],
   );
 
   const effectiveStatus = resolveMobileCompanionVoiceStatus(state.status, voice.session);

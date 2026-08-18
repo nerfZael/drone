@@ -1816,7 +1816,7 @@ function DrawerVoiceRecordingIndicator() {
     actionTokenRef.current += 1;
     setCopying(false);
     setCopyError('');
-    void discardRecording();
+    void discardRecording('single-shot');
   }, [discardRecording]);
 
   const stopAndCopy = React.useCallback(async () => {
@@ -1826,7 +1826,7 @@ function DrawerVoiceRecordingIndicator() {
     setCopying(true);
     setCopyError('');
     try {
-      const transcript = (await stopRecordingForTranscript()).trim();
+      const transcript = (await stopRecordingForTranscript('single-shot')).trim();
       if (actionTokenRef.current !== actionToken) return;
       if (!transcript) {
         if (!recorderErrorRef.current) setCopyError('No speech detected.');

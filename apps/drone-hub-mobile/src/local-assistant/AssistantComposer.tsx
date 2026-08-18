@@ -199,7 +199,7 @@ export function AssistantComposer({
     error: sharedVoiceError,
     setError: setVoiceError,
     session: voiceSession,
-    startVoiceMessageRecording,
+    startRecording,
     toggleRecordingPause,
     discardRecording,
     stopRecordingForTranscript,
@@ -354,7 +354,7 @@ export function AssistantComposer({
     voiceActionTokenRef.current += 1;
     setVoiceActionInFlight(false);
     setVoiceError('');
-    void discardRecording();
+    void discardRecording('single-shot');
   }, [discardRecording]);
 
   const beginVoiceRecording = React.useCallback(async () => {
@@ -363,7 +363,7 @@ export function AssistantComposer({
     setFocused(false);
     Keyboard.dismiss();
     try {
-      await startVoiceMessageRecording();
+      await startRecording('single-shot');
     } finally {
       requestAnimationFrame(() => {
         inputRef.current?.blur();
@@ -371,7 +371,7 @@ export function AssistantComposer({
         suppressInputFocusRef.current = false;
       });
     }
-  }, [startVoiceMessageRecording]);
+  }, [startRecording]);
 
   const beginContinuousVoice = React.useCallback(
     async (mode: MobileContinuousVoiceMode) => {
@@ -404,7 +404,7 @@ export function AssistantComposer({
       voiceActionTokenRef.current = token;
       setVoiceActionInFlight(true);
       try {
-        const transcript = await stopRecordingForTranscript();
+        const transcript = await stopRecordingForTranscript('single-shot');
         if (voiceActionTokenRef.current !== token) return null;
         const currentDraft = valueRef.current;
         const result = resolveMobileVoiceTranscriptDraft({
@@ -705,7 +705,7 @@ export function AssistantComposer({
                     icon={voiceStatus === 'paused' ? Play : Pause}
                     tone={voiceStatus === 'paused' ? 'paused' : 'default'}
                     disabled={!voiceCanPause || voiceActionInFlight}
-                    onPress={toggleRecordingPause}
+                    onPress={() => toggleRecordingPause('single-shot')}
                   />
                   <VoiceIconButton
                     label="Stop recording and transcribe"

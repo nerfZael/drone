@@ -29,7 +29,10 @@ import {
   shouldCancelMobileVoiceWhenInactive,
   type MobileVoiceRecordingStatus,
 } from './mobile-voice-transcription-model';
-import type { MobileRecordedVoiceSessionOwner } from './mobile-voice-session';
+import type {
+  MobileRecordedVoiceSession,
+  MobileRecordedVoiceSessionOwner,
+} from './mobile-voice-session';
 
 const MOBILE_VOICE_RECORDING_OPTIONS = {
   ...RecordingPresets.HIGH_QUALITY,
@@ -83,10 +86,11 @@ export function useMobileChatVoiceRecorder({
   microphoneCoordinator: MobileMicrophoneCoordinator;
   onError(message: string): void;
 }) {
-  const [status, setStatus] = React.useState<MobileVoiceRecordingStatus>('idle');
-  const statusRef = React.useRef<MobileVoiceRecordingStatus>('idle');
-  const [sessionOwner, setSessionOwnerState] =
-    React.useState<MobileRecordedVoiceSessionOwner | null>(null);
+  const [session, setSession] = React.useState<MobileRecordedVoiceSession>({
+    kind: 'idle',
+    status: 'idle',
+  });
+  const sessionRef = React.useRef(session);
   const generationRef = React.useRef(0);
   const mountedRef = React.useRef(false);
   const startPromiseRef = React.useRef<Promise<void> | null>(null);
@@ -96,17 +100,18 @@ export function useMobileChatVoiceRecorder({
   const recordingUriRef = React.useRef<string | null>(null);
   const microphoneLeaseRef = React.useRef<MobileMicrophoneLease | null>(null);
 
-  const setStatusValue = React.useCallback((next: MobileVoiceRecordingStatus) => {
-    statusRef.current = next;
-    if (mountedRef.current) {
-      setStatus(next);
-      if (next === 'idle') setSessionOwnerState(null);
-    }
+  const setSessionValue = React.useCallback((next: MobileRecordedVoiceSession) => {
+    sessionRef.current = next;
+    if (mountedRef.current) setSession(next);
   }, []);
 
-  const setSessionOwner = React.useCallback((owner: MobileRecordedVoiceSessionOwner) => {
-    if (mountedRef.current) setSessionOwnerState(owner);
-  }, []);
+  const setStatusValue = React.useCallback((status: MobileVoiceRecordingStatus) => {
+    if (status === 'idle') {
+      setSessionValue({ kind: 'idle', status });
+    } else if (sessionRef.current.kind !== 'idle') {
+      setSessionValue({ ...sessionRef.current, status });
+    }
+  }, [setSessionValue]);
 
   const deactivateRecordingMode = React.useCallback(async () => {
     await setAudioModeAsync({
@@ -126,7 +131,7 @@ export function useMobileChatVoiceRecorder({
     (next: RecordingStatus) => {
       if (
         isUnexpectedMobileVoiceRecordingCompletion({
-          status: statusRef.current,
+          status: sessionRef.current.status,
           activeUri: recordingUriRef.current,
           eventUri: next.url,
           finished: next.isFinished,
@@ -149,7 +154,7 @@ export function useMobileChatVoiceRecorder({
         // prepareToRecordAsync reports its own errors. Until it gives this
         // generation a URI, a callback cannot safely be attributed to it and
         // may be the delayed stop event from the previous recording.
-        ignoreFailureWithoutActiveUri: statusRef.current === 'starting',
+        ignoreFailureWithoutActiveUri: sessionRef.current.status === 'starting',
       });
       if (!event.handleFailure) return;
       generationRef.current += 1;
@@ -208,8 +213,10 @@ export function useMobileChatVoiceRecorder({
     [releaseMicrophone],
   );
 
-  const discardRecording = React.useCallback(async () => {
-    const previousStatus = statusRef.current;
+  // Owner checks keep stale UI callbacks from mutating a newer session.
+  const discardRecording = React.useCallback(async (owner: MobileRecordedVoiceSessionOwner) => {
+    if (sessionRef.current.kind !== owner) return;
+    const previousStatus = sessionRef.current.status;
     const pendingStart = startPromiseRef.current;
     const controller = transcribeAbortRef.current;
     generationRef.current += 1;
@@ -236,7 +243,7 @@ export function useMobileChatVoiceRecorder({
   }, [onError, recorder, releaseMicrophone, setStatusValue]);
 
   const startRecordingOperation = React.useCallback(async (owner: MobileRecordedVoiceSessionOwner) => {
-    if (statusRef.current !== 'idle') return;
+    if (sessionRef.current.kind !== 'idle') return;
     const microphoneLease = microphoneCoordinator.acquire(owner);
     if (!microphoneLease) {
       const currentOwner = microphoneCoordinator.getSnapshot();
@@ -250,13 +257,12 @@ export function useMobileChatVoiceRecorder({
       return;
     }
     microphoneLeaseRef.current = microphoneLease;
-    setSessionOwner(owner);
+    setSessionValue({ kind: owner, status: 'starting' });
     const generation = generationRef.current + 1;
     generationRef.current = generation;
     const staleUri = recordingUriRef.current;
     recordingUriRef.current = null;
     deleteRecordingFile(staleUri);
-    setStatusValue('starting');
     onError('');
     try {
       if (!(await readGroqApiKey())) {
@@ -319,15 +325,15 @@ export function useMobileChatVoiceRecorder({
       setStatusValue('idle');
       onError(error?.message ?? String(error));
     }
-  }, [microphoneCoordinator, onError, recorder, releaseMicrophone, setSessionOwner, setStatusValue]);
+  }, [microphoneCoordinator, onError, recorder, releaseMicrophone, setSessionValue, setStatusValue]);
 
   const startRecording = React.useCallback(async (owner: MobileRecordedVoiceSessionOwner) => {
-    if (startPromiseRef.current || statusRef.current !== 'idle') return false;
+    if (startPromiseRef.current || sessionRef.current.kind !== 'idle') return false;
     const promise = startRecordingOperation(owner);
     startPromiseRef.current = promise;
     try {
       await promise;
-      return (statusRef.current as MobileVoiceRecordingStatus) === 'recording';
+      return (sessionRef.current.status as MobileVoiceRecordingStatus) === 'recording';
     } finally {
       if (startPromiseRef.current === promise) startPromiseRef.current = null;
     }
@@ -336,12 +342,16 @@ export function useMobileChatVoiceRecorder({
   React.useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') return;
-      const interruptedStatus = statusRef.current;
+      const interruptedStatus = sessionRef.current.status;
+      const interruptedOwner = sessionRef.current.kind;
       // The native background audio session keeps active and paused recordings
       // alive through screen lock. Startup synchronizes itself with foreground
       // state, while network transcription remains foreground-only/cancellable.
-      if (shouldCancelMobileVoiceWhenInactive(interruptedStatus)) {
-        void discardRecording().then(() => {
+      if (
+        interruptedOwner !== 'idle' &&
+        shouldCancelMobileVoiceWhenInactive(interruptedStatus)
+      ) {
+        void discardRecording(interruptedOwner).then(() => {
           if (mountedRef.current) {
             onError('Voice transcription was cancelled when the app left the foreground.');
           }
@@ -351,12 +361,13 @@ export function useMobileChatVoiceRecorder({
     return () => subscription.remove();
   }, [discardRecording, onError]);
 
-  const toggleRecordingPause = React.useCallback(() => {
+  const toggleRecordingPause = React.useCallback((owner: MobileRecordedVoiceSessionOwner) => {
+    if (sessionRef.current.kind !== owner) return;
     try {
-      if (statusRef.current === 'recording') {
+      if (sessionRef.current.status === 'recording') {
         recorder.pause();
         setStatusValue('paused');
-      } else if (statusRef.current === 'paused') {
+      } else if (sessionRef.current.status === 'paused') {
         recorder.record();
         setStatusValue('recording');
       }
@@ -366,11 +377,11 @@ export function useMobileChatVoiceRecorder({
   }, [onError, recorder, setStatusValue]);
 
   const transcribeRecording = React.useCallback(async (): Promise<string> => {
-    const alreadyStopped = statusRef.current === 'stopped';
+    const alreadyStopped = sessionRef.current.status === 'stopped';
     if (
       !alreadyStopped &&
-      statusRef.current !== 'recording' &&
-      statusRef.current !== 'paused'
+      sessionRef.current.status !== 'recording' &&
+      sessionRef.current.status !== 'paused'
     ) {
       return '';
     }
@@ -418,7 +429,10 @@ export function useMobileChatVoiceRecorder({
     }
   }, [onError, recorder, releaseMicrophone, setStatusValue]);
 
-  const stopRecordingForTranscript = React.useCallback(async (): Promise<string> => {
+  const stopRecordingForTranscript = React.useCallback(async (
+    owner: MobileRecordedVoiceSessionOwner,
+  ): Promise<string> => {
+    if (sessionRef.current.kind !== owner) return '';
     if (stopPromiseRef.current) return stopPromiseRef.current;
     const promise = transcribeRecording();
     stopPromiseRef.current = promise;
@@ -430,9 +444,9 @@ export function useMobileChatVoiceRecorder({
   }, [transcribeRecording]);
 
   return {
-    status,
-    sessionOwner,
-    durationMillis: status === 'starting' || status === 'idle' ? 0 : recorderState.durationMillis,
+    session,
+    durationMillis:
+      session.status === 'starting' || session.status === 'idle' ? 0 : recorderState.durationMillis,
     startRecording,
     toggleRecordingPause,
     discardRecording,

@@ -5,8 +5,7 @@ import {
 } from '../src/local-assistant/mobile-voice-session';
 
 const idleInput = {
-  recordingOwner: null,
-  recordingStatus: 'idle' as const,
+  recordingSession: { kind: 'idle', status: 'idle' } as const,
   recordingDurationMillis: 0,
   continuousStatus: 'idle' as const,
   continuousTargetKey: null,
@@ -20,8 +19,7 @@ describe('mobile voice session', () => {
   test('keeps a recording owner for the complete logical session', () => {
     const session = resolveMobileVoiceSession({
       ...idleInput,
-      recordingOwner: 'companion',
-      recordingStatus: 'transcribing',
+      recordingSession: { kind: 'companion', status: 'transcribing' },
       recordingDurationMillis: 1_500,
     });
 
@@ -37,8 +35,7 @@ describe('mobile voice session', () => {
   test('does not turn another recording into Companion activity', () => {
     const session = resolveMobileVoiceSession({
       ...idleInput,
-      recordingOwner: 'single-shot',
-      recordingStatus: 'recording',
+      recordingSession: { kind: 'single-shot', status: 'recording' },
     });
 
     expect(session.kind).toBe('single-shot');
@@ -48,13 +45,11 @@ describe('mobile voice session', () => {
   test('normalizes paused and unexpectedly stopped Companion recordings', () => {
     const paused = resolveMobileVoiceSession({
       ...idleInput,
-      recordingOwner: 'companion',
-      recordingStatus: 'paused',
+      recordingSession: { kind: 'companion', status: 'paused' },
     });
     const stopped = resolveMobileVoiceSession({
       ...idleInput,
-      recordingOwner: 'companion',
-      recordingStatus: 'stopped',
+      recordingSession: { kind: 'companion', status: 'stopped' },
     });
 
     expect(resolveMobileCompanionVoiceStatus('idle', paused)).toBe('recording');
