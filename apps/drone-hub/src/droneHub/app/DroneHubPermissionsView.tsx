@@ -402,8 +402,8 @@ export function DroneHubPermissionsView({
           </div>
           <div className="divide-y divide-[var(--border-subtle)] overflow-hidden rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--surface-softest)]">
             <FeaturePermissionRow
-              label="Create and update change requests"
-              description="Lets this chat capture, refresh, retarget, and close its own native change requests. Enabled by default."
+              label="Create and close change requests"
+              description="Lets this chat create and close its own native change requests. Every agent may update open requests. Enabled by default."
               allowed={changeRequestCreate}
               disabled={disabled}
               onChange={(allowed) => onChangeRequestPermissionChange('create', allowed)}

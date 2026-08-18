@@ -28,6 +28,8 @@ export class ChangeRequestDirectMerger {
     commitMessage: string,
     revision?: ChangeRequestRevisionRecord,
     onPrepared?: (prepared: { expectedTargetSha: string; mergeCommitSha: string }) => Promise<void>,
+    expectedDestinationSha?: string,
+    expectedCandidateTreeSha?: string,
   ): Promise<string> {
     const gitRoot = revision?.objectStorePath || record.repoRoot;
     const snapshotRef = revision?.snapshotRef || record.snapshotRef;
@@ -62,6 +64,17 @@ export class ChangeRequestDirectMerger {
         'destination_missing',
       );
     }
+    const expectedTarget = String(expectedDestinationSha ?? '')
+      .trim()
+      .toLowerCase();
+    if (expectedTarget && targetSha !== expectedTarget) {
+      throw new ChangeRequestError(
+        'The destination changed after the reviewed candidate was prepared. Prepare and review it again before merging.',
+        409,
+        'review_candidate_outdated',
+        { expectedDestinationSha: expectedTarget, destinationSha: targetSha },
+      );
+    }
     const worktreePath = this.worktreePath(record.id);
     await fs.mkdir(path.dirname(worktreePath), { recursive: true });
     try {
@@ -90,18 +103,56 @@ export class ChangeRequestDirectMerger {
         '--cached',
         '--quiet',
       ]);
+      if (staged.code !== 0 && staged.code !== 1) {
+        throw new ChangeRequestError(staged.stderr || 'Unable to inspect the prepared merge.', 500);
+      }
+      const preparedTreeSha = (await this.git(worktreePath, ['write-tree'])).stdout
+        .trim()
+        .toLowerCase();
+      const expectedTree = String(expectedCandidateTreeSha ?? '')
+        .trim()
+        .toLowerCase();
+      if (expectedTree && preparedTreeSha !== expectedTree) {
+        throw new ChangeRequestError(
+          'The prepared merge tree differs from the reviewed candidate. Prepare and review it again before merging.',
+          409,
+          'review_candidate_outdated',
+          { expectedCandidateTreeSha: expectedTree, candidateTreeSha: preparedTreeSha },
+        );
+      }
       let mergeCommitSha = targetSha;
       if (staged.code === 1) {
+        const disabledHooksPath = this.deps.storagePath('disabled-git-hooks');
+        await fs.mkdir(disabledHooksPath, { recursive: true });
         await this.git(
           worktreePath,
-          ['commit', '-m', requiredCommitMessage(commitMessage)],
+          [
+            '-c',
+            `core.hooksPath=${disabledHooksPath}`,
+            '-c',
+            'commit.gpgsign=false',
+            'commit',
+            '--no-verify',
+            '-m',
+            requiredCommitMessage(commitMessage),
+          ],
           MERGE_TIMEOUT_MS,
         );
         mergeCommitSha = (await this.git(worktreePath, ['rev-parse', 'HEAD'])).stdout
           .trim()
           .toLowerCase();
-      } else if (staged.code !== 0) {
-        throw new ChangeRequestError(staged.stderr || 'Unable to inspect the prepared merge.', 500);
+        const committedTreeSha = (
+          await this.git(worktreePath, ['rev-parse', `${mergeCommitSha}^{tree}`])
+        ).stdout
+          .trim()
+          .toLowerCase();
+        if (committedTreeSha !== preparedTreeSha) {
+          throw new ChangeRequestError(
+            'The merge tree changed while its commit was being created.',
+            409,
+            'merge_tree_changed',
+          );
+        }
       }
       await onPrepared?.({ expectedTargetSha: targetSha, mergeCommitSha });
       await this.git(

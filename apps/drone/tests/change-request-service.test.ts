@@ -11,6 +11,350 @@ import {
 } from './helpers/change-request-test-support';
 
 describe('ChangeRequestService', () => {
+  test('materializes and reuses an exact merge candidate in a reviewer container worktree', async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'drone-cr-review-test-'));
+    const origin = path.join(tempRoot, 'origin.git');
+    const sourceRepo = path.join(tempRoot, 'source');
+    const reviewerRepo = path.join(tempRoot, 'reviewer');
+    const storageRoot = path.join(tempRoot, 'storage');
+    const containerTemp = path.join(tempRoot, 'container-tmp');
+    try {
+      await run('git', ['init', '--bare', origin]);
+      await run('git', ['init', '-b', 'main', sourceRepo]);
+      await git(sourceRepo, ['config', 'user.name', 'Host User']);
+      await git(sourceRepo, ['config', 'user.email', 'host@example.test']);
+      await git(sourceRepo, ['remote', 'add', 'origin', origin]);
+      await fs.writeFile(path.join(sourceRepo, 'README.md'), 'base\n');
+      await git(sourceRepo, ['add', 'README.md']);
+      await git(sourceRepo, ['commit', '-m', 'base']);
+      await git(sourceRepo, ['push', '-u', 'origin', 'main']);
+      await git(origin, ['symbolic-ref', 'HEAD', 'refs/heads/main']);
+      const baseSha = await git(sourceRepo, ['rev-parse', 'HEAD']);
+      await git(sourceRepo, ['checkout', '-b', 'feature']);
+      await fs.writeFile(path.join(sourceRepo, 'feature.txt'), 'review me\n');
+      await git(sourceRepo, ['add', 'feature.txt']);
+      await git(sourceRepo, ['commit', '-m', 'feature']);
+      const sourceHeadSha = await git(sourceRepo, ['rev-parse', 'HEAD']);
+      await git(sourceRepo, ['branch', 'alternate', baseSha]);
+      const snapshotRef = 'refs/drone/change-requests/review-request/snapshots/1';
+      await git(sourceRepo, ['update-ref', snapshotRef, sourceHeadSha]);
+      await run('git', ['clone', origin, reviewerRepo]);
+      await git(reviewerRepo, ['config', 'user.name', 'Reviewer']);
+      await git(reviewerRepo, ['config', 'user.email', 'reviewer@example.test']);
+      const reviewerHeadBefore = await git(reviewerRepo, ['rev-parse', 'HEAD']);
+
+      const repository = new MemoryChangeRequestRepository();
+      const created = await repository.insert(
+        {
+          id: 'review-request',
+          status: 'open',
+          droneId: 'source-drone',
+          droneName: 'Source drone',
+          chatId: 'source-chat',
+          chatName: 'default',
+          repoRoot: sourceRepo,
+          baseBranch: 'main',
+          baseSha,
+          destinationBranch: 'main',
+          snapshotRef,
+          snapshotSha: sourceHeadSha,
+          sourceHeadSha,
+          revision: 1,
+          title: 'Review candidate',
+          description: '',
+          createdBy: { kind: 'chat', id: 'source-chat', label: 'Source chat' },
+          mergedBy: null,
+          mergeCommitSha: null,
+          lastError: null,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          mergedAt: null,
+          closedAt: null,
+          githubMirror: null,
+        },
+        {
+          number: 1,
+          baseBranch: 'main',
+          baseSha,
+          snapshotRef,
+          snapshotSha: sourceHeadSha,
+          sourceRef: snapshotRef,
+          sourceHeadSha,
+          objectStorePath: null,
+          createdBy: { kind: 'chat', id: 'source-chat', label: 'Source chat' },
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+      );
+      const unused = async () => {
+        throw new Error('unused test dependency');
+      };
+      const mapContainerPath = (value: string) =>
+        value.startsWith('/tmp/drone-hub/')
+          ? path.join(containerTemp, value.slice('/tmp/drone-hub/'.length))
+          : value;
+      const service = new ChangeRequestService({
+        repository,
+        resolveDrone: async (ref) =>
+          ref === 'reviewer-drone'
+            ? {
+                kind: 'real' as const,
+                id: 'reviewer-drone',
+                drone: {
+                  id: 'reviewer-drone',
+                  name: 'Reviewer drone',
+                  runtime: 'container',
+                  repo: { dest: reviewerRepo },
+                },
+              }
+            : null,
+        withLockedDroneContainer: async (_input, operation) =>
+          operation({ containerName: 'reviewer-container', droneEntry: {} }),
+        exportFullHeadBundleFromDrone: async ({ repoPathInContainer, outDir }) => {
+          await fs.mkdir(outDir, { recursive: true });
+          const exportedPath = path.join(outDir, 'review-update.bundle');
+          await git(repoPathInContainer, ['bundle', 'create', exportedPath, 'HEAD']);
+          return { exportedPath };
+        },
+        importBundleHeadToHostRef: async ({ repoRoot, bundlePath, refName }) => {
+          await git(repoRoot, ['fetch', bundlePath, `HEAD:${refName}`]);
+          return await git(repoRoot, ['rev-parse', refName]);
+        },
+        createHostAuthoredMirrorCommit: async ({ repoRoot, sourceRef, parentRef, message }) => {
+          const tree = await git(repoRoot, ['rev-parse', `${sourceRef}^{tree}`]);
+          return await git(repoRoot, [
+            'commit-tree',
+            tree,
+            '-p',
+            parentRef,
+            '-m',
+            message ?? 'snapshot',
+          ]);
+        },
+        updateHostRef: async ({ repoRoot, refName, target }) => {
+          await git(repoRoot, ['update-ref', refName, target]);
+        },
+        deleteHostRefBestEffort: async ({ repoRoot, refName }) => {
+          await run('git', ['-C', repoRoot, 'update-ref', '-d', refName]);
+        },
+        gitTopLevel: unused,
+        dvmRepoHeadSha: unused,
+        runGitInDrone: unused,
+        runHostCommand: run,
+        copyToContainer: async (_container, sourcePath, destinationPath) => {
+          const mappedDestination = mapContainerPath(destinationPath);
+          await fs.mkdir(path.dirname(mappedDestination), { recursive: true });
+          await fs.copyFile(sourcePath, mappedDestination);
+        },
+        runCommandInDrone: ({ command, args, timeoutMs }) =>
+          run(command, args.map(mapContainerPath), { timeoutMs }),
+        storagePath: (...segments) => path.join(storageRoot, ...segments),
+        now: () => '2026-01-01T00:01:00.000Z',
+      });
+
+      const first = await service.prepareReviewWorkspace({
+        requestNumber: created.number,
+        reviewerDroneRef: 'reviewer-drone',
+      });
+      expect(first).toMatchObject({
+        requestNumber: created.number,
+        revision: 1,
+        currentRevision: 1,
+        isCurrentRevision: true,
+        destinationSha: baseSha,
+        snapshotSha: sourceHeadSha,
+        reviewerDroneId: 'reviewer-drone',
+        reused: false,
+      });
+      expect(await fs.readFile(path.join(first.path, 'feature.txt'), 'utf8')).toBe('review me\n');
+      expect(await git(first.path, ['rev-parse', 'HEAD'])).toBe(first.candidateSha);
+      expect(await git(first.path, ['rev-parse', 'HEAD^'])).toBe(baseSha);
+      expect(await git(reviewerRepo, ['rev-parse', 'HEAD'])).toBe(reviewerHeadBefore);
+      expect(await git(reviewerRepo, ['status', '--porcelain'])).toBe('');
+
+      const second = await service.prepareReviewWorkspace({
+        requestNumber: created.number,
+        reviewerDroneRef: 'reviewer-drone',
+      });
+      expect(second.path).toBe(first.path);
+      expect(second.candidateSha).toBe(first.candidateSha);
+      expect(second.reused).toBe(true);
+
+      const retargeted = await service.update(created.number, {
+        destinationBranch: 'alternate',
+        refreshSnapshot: false,
+        actor: { kind: 'chat', id: 'reviewer-chat', label: 'Reviewer chat' },
+      });
+      expect(retargeted).toMatchObject({ revision: 1, destinationBranch: 'alternate' });
+      await expect(
+        service.updateFromReviewWorkspace({
+          requestNumber: created.number,
+          workspaceId: first.workspaceId,
+          reviewerDroneRef: 'reviewer-drone',
+          actor: { kind: 'chat', id: 'reviewer-chat', label: 'Reviewer chat' },
+        }),
+      ).rejects.toMatchObject({ code: 'review_workspace_outdated' });
+      await service.update(created.number, {
+        destinationBranch: 'main',
+        refreshSnapshot: false,
+        actor: { kind: 'chat', id: 'reviewer-chat', label: 'Reviewer chat' },
+      });
+      const restored = await service.prepareReviewWorkspace({
+        requestNumber: created.number,
+        reviewerDroneRef: 'reviewer-drone',
+      });
+      expect(restored).toMatchObject({ workspaceId: first.workspaceId, reused: true });
+
+      await git(reviewerRepo, ['config', 'status.showUntrackedFiles', 'no']);
+      await fs.writeFile(path.join(first.path, 'untracked.tmp'), 'must not affect review\n');
+      await expect(
+        service.prepareReviewWorkspace({
+          requestNumber: created.number,
+          reviewerDroneRef: 'reviewer-drone',
+        }),
+      ).rejects.toMatchObject({ code: 'review_workspace_dirty' });
+      await fs.rm(path.join(first.path, 'untracked.tmp'));
+
+      await fs.writeFile(path.join(first.path, 'feature.txt'), 'reviewed and fixed\n');
+      await expect(
+        service.prepareReviewWorkspace({
+          requestNumber: created.number,
+          reviewerDroneRef: 'reviewer-drone',
+        }),
+      ).rejects.toMatchObject({ code: 'review_workspace_dirty' });
+      await expect(
+        service.updateFromReviewWorkspace({
+          requestNumber: created.number,
+          workspaceId: first.workspaceId,
+          reviewerDroneRef: 'reviewer-drone',
+          actor: { kind: 'chat', id: 'reviewer-chat', label: 'Reviewer chat' },
+        }),
+      ).rejects.toMatchObject({ code: 'review_workspace_dirty' });
+
+      await git(first.path, ['add', 'feature.txt']);
+      await git(first.path, ['commit', '-m', 'fix during review']);
+      const reviewHead = await git(first.path, ['rev-parse', 'HEAD']);
+      const updated = await service.updateFromReviewWorkspace({
+        requestNumber: created.number,
+        workspaceId: first.workspaceId,
+        reviewerDroneRef: 'reviewer-drone',
+        actor: { kind: 'chat', id: 'reviewer-chat', label: 'Reviewer chat' },
+      });
+      expect(updated).toMatchObject({
+        number: created.number,
+        revision: 2,
+        baseSha,
+        sourceHeadSha: reviewHead,
+      });
+      const promotedRevision = repository.getRevision('review-request', 2);
+      expect(promotedRevision).toMatchObject({
+        number: 2,
+        baseSha,
+        sourceHeadSha: reviewHead,
+        createdBy: { kind: 'chat', id: 'reviewer-chat', label: 'Reviewer chat' },
+      });
+      expect(promotedRevision?.objectStorePath).toBeTruthy();
+      expect(
+        await git(promotedRevision!.objectStorePath!, [
+          'show',
+          `${promotedRevision!.snapshotSha}:feature.txt`,
+        ]),
+      ).toBe('reviewed and fixed');
+      expect(repository.getRevision('review-request', 1)?.snapshotSha).toBe(sourceHeadSha);
+      const maliciousHooksPath = path.join(tempRoot, 'malicious-hooks');
+      await fs.mkdir(maliciousHooksPath, { recursive: true });
+      await fs.writeFile(
+        path.join(maliciousHooksPath, 'pre-commit'),
+        '#!/bin/sh\nprintf "hook injected\\n" > hook-injected.txt\ngit add hook-injected.txt\n',
+      );
+      await fs.chmod(path.join(maliciousHooksPath, 'pre-commit'), 0o755);
+      await git(promotedRevision!.objectStorePath!, [
+        'config',
+        'core.hooksPath',
+        maliciousHooksPath,
+      ]);
+      await expect(
+        service.updateFromReviewWorkspace({
+          requestNumber: created.number,
+          workspaceId: first.workspaceId,
+          reviewerDroneRef: 'reviewer-drone',
+          actor: { kind: 'chat', id: 'reviewer-chat', label: 'Reviewer chat' },
+        }),
+      ).rejects.toMatchObject({ code: 'review_workspace_outdated' });
+
+      const nextReview = await service.prepareReviewWorkspace({
+        requestNumber: created.number,
+        reviewerDroneRef: 'reviewer-drone',
+      });
+      expect(nextReview).toMatchObject({
+        revision: 2,
+        currentRevision: 2,
+        isCurrentRevision: true,
+        reused: false,
+      });
+      expect(nextReview.workspaceId).not.toBe(first.workspaceId);
+      expect(nextReview.candidateTreeSha).toMatch(/^[0-9a-f]{40}$/);
+      expect(await git(nextReview.path, ['rev-parse', 'HEAD^{tree}'])).toBe(
+        nextReview.candidateTreeSha,
+      );
+      expect(await fs.readFile(path.join(nextReview.path, 'feature.txt'), 'utf8')).toBe(
+        'reviewed and fixed\n',
+      );
+      expect(
+        (
+          await run('git', [
+            '-C',
+            nextReview.path,
+            'cat-file',
+            '-e',
+            `${nextReview.candidateSha}:hook-injected.txt`,
+          ])
+        ).code,
+      ).not.toBe(0);
+      await expect(
+        service.merge(created.number, {
+          actor: { kind: 'chat', id: 'reviewer-chat', label: 'Reviewer chat' },
+          expectedRevision: nextReview.revision,
+          expectedDestinationBranch: 'alternate',
+          expectedDestinationSha: nextReview.destinationSha,
+          expectedCandidateTreeSha: nextReview.candidateTreeSha,
+        }),
+      ).rejects.toThrow('destination branch changed after the reviewed candidate');
+      await expect(
+        service.merge(created.number, {
+          actor: { kind: 'chat', id: 'reviewer-chat', label: 'Reviewer chat' },
+          expectedRevision: nextReview.revision,
+          expectedDestinationBranch: nextReview.destinationBranch,
+          expectedDestinationSha: nextReview.destinationSha,
+          expectedCandidateTreeSha: 'f'.repeat(40),
+        }),
+      ).rejects.toThrow('prepared merge tree differs from the reviewed candidate');
+      const merged = await service.merge(created.number, {
+        actor: { kind: 'chat', id: 'reviewer-chat', label: 'Reviewer chat' },
+        expectedRevision: nextReview.revision,
+        expectedDestinationBranch: nextReview.destinationBranch,
+        expectedDestinationSha: nextReview.destinationSha,
+        expectedCandidateTreeSha: nextReview.candidateTreeSha,
+      });
+      expect(merged.status).toBe('merged');
+      expect(await git(origin, ['show', 'refs/heads/main:feature.txt'])).toBe(
+        'reviewed and fixed',
+      );
+      expect(
+        (
+          await run('git', [
+            '-C',
+            origin,
+            'cat-file',
+            '-e',
+            'refs/heads/main:hook-injected.txt',
+          ])
+        ).code,
+      ).not.toBe(0);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   test('recovers a direct merge pushed before lifecycle persistence completed', async () => {
     const repository = new MemoryChangeRequestRepository();
     const mergeSha = '7'.repeat(40);
@@ -271,6 +615,40 @@ describe('ChangeRequestService', () => {
       const refreshed = await service.refreshAssessment(created.number);
       expect(refreshed.stale).toBe(true);
       expect(refreshed.destinationSha).toBe(await git(upstreamRepo, ['rev-parse', 'HEAD']));
+
+      await expect(
+        service.merge(created.number, {
+          actor: { kind: 'user', id: null, label: 'Test user' },
+          expectedRevision: 2,
+        }),
+      ).rejects.toMatchObject({ code: 'review_pins_incomplete' });
+      await expect(
+        service.merge(created.number, {
+          actor: { kind: 'user', id: null, label: 'Test user' },
+          expectedRevision: 1,
+          expectedDestinationBranch: 'integration/42',
+          expectedDestinationSha: refreshed.destinationSha!,
+          expectedCandidateTreeSha: 'f'.repeat(40),
+        }),
+      ).rejects.toThrow('revision changed after the reviewed candidate');
+      await expect(
+        service.merge(created.number, {
+          actor: { kind: 'user', id: null, label: 'Test user' },
+          expectedRevision: 2,
+          expectedDestinationBranch: 'main',
+          expectedDestinationSha: refreshed.destinationSha!,
+          expectedCandidateTreeSha: 'f'.repeat(40),
+        }),
+      ).rejects.toThrow('destination branch changed after the reviewed candidate');
+      await expect(
+        service.merge(created.number, {
+          actor: { kind: 'user', id: null, label: 'Test user' },
+          expectedRevision: 2,
+          expectedDestinationBranch: 'integration/42',
+          expectedDestinationSha: 'f'.repeat(40),
+          expectedCandidateTreeSha: 'f'.repeat(40),
+        }),
+      ).rejects.toThrow('destination changed after the reviewed candidate');
 
       const sourceBranchBeforeMerge = await git(repoRoot, ['branch', '--show-current']);
       const merged = await service.merge(created.number, {

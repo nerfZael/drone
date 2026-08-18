@@ -21,6 +21,135 @@ export function registerChangeRequestMcpTools(
   const { context, requestJson, toolResult } = dependencies;
 
   server.registerTool(
+    'get_change_request',
+    {
+      title: 'Get change request',
+      description:
+        'Read a native DroneHub change request by integer requestNumber. This is public, read-only review access and does not grant update or merge authority.',
+      inputSchema: { requestNumber: z.number().int().positive() },
+    },
+    async (args) => {
+      const response = await requestJson(
+        `/api/change-requests/${encodeURIComponent(args.requestNumber)}`,
+        { method: 'GET' },
+      );
+      return toolResult({ ok: true, request: reviewRequest(response?.request) });
+    },
+  );
+
+  server.registerTool(
+    'list_change_request_revisions',
+    {
+      title: 'List change request revisions',
+      description:
+        'List the immutable retained revisions and source commits for a native DroneHub change request. This is public, read-only review access.',
+      inputSchema: { requestNumber: z.number().int().positive() },
+    },
+    async (args) => {
+      const response = await requestJson(
+        `/api/change-requests/${encodeURIComponent(args.requestNumber)}/revisions`,
+        { method: 'GET' },
+      );
+      return toolResult({ ok: true, revisions: response?.revisions ?? [] });
+    },
+  );
+
+  server.registerTool(
+    'get_change_request_changes',
+    {
+      title: 'Get change request changes',
+      description:
+        'List files and line counts in an immutable change-request revision. Omit revision for the current revision. This is public, read-only review access.',
+      inputSchema: {
+        requestNumber: z.number().int().positive(),
+        revision: z.number().int().positive().optional(),
+      },
+    },
+    async (args) => {
+      const query = args.revision ? `?revision=${encodeURIComponent(args.revision)}` : '';
+      const response = await requestJson(
+        `/api/change-requests/${encodeURIComponent(args.requestNumber)}/changes${query}`,
+        { method: 'GET' },
+      );
+      return toolResult({
+        ok: true,
+        request: reviewRequest(response?.request),
+        revision: response?.revision,
+        counts: response?.counts,
+        entries: response?.entries ?? [],
+      });
+    },
+  );
+
+  server.registerTool(
+    'get_change_request_diff',
+    {
+      title: 'Get change request file diff',
+      description:
+        'Read the revision-pinned diff for one repository-relative file in a native change request. This is public, read-only review access.',
+      inputSchema: {
+        requestNumber: z.number().int().positive(),
+        path: z.string(),
+        revision: z.number().int().positive().optional(),
+        contextLines: z.number().int().min(0).max(200).optional(),
+      },
+    },
+    async (args) => {
+      const query = new URLSearchParams({ path: args.path });
+      if (args.revision) query.set('revision', String(args.revision));
+      if (args.contextLines !== undefined) query.set('contextLines', String(args.contextLines));
+      const response = await requestJson(
+        `/api/change-requests/${encodeURIComponent(args.requestNumber)}/diff?${query.toString()}`,
+        { method: 'GET' },
+      );
+      return toolResult({
+        ok: true,
+        revision: response?.revision,
+        baseSha: response?.baseSha,
+        headSha: response?.headSha,
+        path: response?.path,
+        diff: response?.diff ?? '',
+        truncated: response?.truncated === true,
+        isBinary: response?.isBinary === true,
+      });
+    },
+  );
+
+  server.registerTool(
+    'prepare_change_request_review',
+    {
+      title: 'Prepare change request review',
+      description:
+        'Create or reuse an isolated worktree containing an exact change-request revision squash-merged onto the freshly fetched destination. Use the returned path to inspect full code and run builds or tests. This never edits or merges the change request. Container chats automatically review in their own drone.',
+      inputSchema: {
+        requestNumber: z.number().int().positive(),
+        revision: z.number().int().positive().optional(),
+        drone: z.string().optional(),
+      },
+    },
+    async (args) => {
+      const reviewerDroneRef = reviewDroneRef(context, args.drone);
+      const response = await requestJson(
+        `/api/change-requests/${encodeURIComponent(args.requestNumber)}/review-workspace`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            revision: args.revision,
+            reviewerDroneRef,
+          }),
+        },
+        120_000,
+      );
+      return toolResult({
+        ok: true,
+        workspace: response?.workspace,
+        instructions:
+          'Review the exact code at workspace.path. Inspect repository guidance first, then run the relevant build and tests there. Bind your verbal conclusion to workspace.revision, workspace.destinationBranch, workspace.destinationSha, and workspace.candidateTreeSha. Do not claim the current change request was reviewed when workspace.isCurrentRevision is false. If fixes are needed, edit workspace.path, commit every change there, and call update_change_request_from_review with requestNumber and workspace.workspaceId; do not use refreshSnapshot for those edits.',
+      });
+    },
+  );
+
+  server.registerTool(
     'create_change_request',
     {
       title: 'Create change request',
@@ -63,7 +192,7 @@ export function registerChangeRequestMcpTools(
     {
       title: 'Update change request',
       description:
-        'Refresh a native DroneHub change request, identified by its integer requestNumber, from the latest committed source and optionally change its title, description, or destination branch.',
+        'Update any native DroneHub change request by integer requestNumber. Title, description, and destination edits do not refresh its code unless refreshSnapshot is explicitly true. This never grants merge authority.',
       inputSchema: {
         requestNumber: z.number().int().positive(),
         title: z.string().optional(),
@@ -73,7 +202,6 @@ export function registerChangeRequestMcpTools(
       },
     },
     async (args) => {
-      await requireOwnedChangeRequest(context, requestJson, args.requestNumber);
       const response = await requestJson(
         `/api/change-requests/${encodeURIComponent(args.requestNumber)}`,
         {
@@ -82,13 +210,48 @@ export function registerChangeRequestMcpTools(
             title: args.title,
             description: args.description,
             destinationBranch: args.destinationBranch,
-            refreshSnapshot: args.refreshSnapshot,
+            refreshSnapshot: args.refreshSnapshot === true,
             actor: changeRequestActor(context),
           }),
         },
         120_000,
       );
-      return toolResult(response);
+      return toolResult({ ok: true, request: reviewRequest(response?.request) });
+    },
+  );
+
+  server.registerTool(
+    'update_change_request_from_review',
+    {
+      title: 'Update change request from review',
+      description:
+        'Publish committed code changes from a prepared review workspace as a new immutable revision of its change request. The workspace must be clean and committed, descend from its prepared candidate, and match the current revision and destination branch. Container chats automatically use their own drone.',
+      inputSchema: {
+        requestNumber: z.number().int().positive(),
+        workspaceId: z.string().min(1),
+        drone: z.string().optional(),
+      },
+    },
+    async (args) => {
+      const reviewerDroneRef = reviewDroneRef(context, args.drone);
+      const response = await requestJson(
+        `/api/change-requests/${encodeURIComponent(args.requestNumber)}/review-workspace/promote`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            workspaceId: args.workspaceId,
+            reviewerDroneRef,
+            actor: changeRequestActor(context),
+          }),
+        },
+        120_000,
+      );
+      return toolResult({
+        ok: true,
+        request: reviewRequest(response?.request),
+        instructions:
+          'A new immutable change-request revision was created. Prepare a fresh review workspace for the new revision before reporting it safe to merge.',
+      });
     },
   );
 
@@ -115,10 +278,20 @@ export function registerChangeRequestMcpTools(
     {
       title: 'Merge change request',
       description:
-        'Directly squash-merge a native DroneHub change request, identified by its integer requestNumber, to its destination branch using the host Git identity and credentials.',
+        'Directly squash-merge a native DroneHub change request, identified by its integer requestNumber, to its destination branch using the host Git identity and credentials. After prepare_change_request_review, pass that workspace revision, destinationBranch, destinationSha, and candidateTreeSha as the matching expected fields so a changed candidate is rejected.',
       inputSchema: {
         requestNumber: z.number().int().positive(),
         commitMessage: z.string().optional(),
+        expectedRevision: z.number().int().positive().optional(),
+        expectedDestinationBranch: z.string().min(1).optional(),
+        expectedDestinationSha: z
+          .string()
+          .regex(/^[0-9a-fA-F]{40}$/)
+          .optional(),
+        expectedCandidateTreeSha: z
+          .string()
+          .regex(/^[0-9a-fA-F]{40}$/)
+          .optional(),
       },
     },
     async (args) => {
@@ -130,6 +303,10 @@ export function registerChangeRequestMcpTools(
             method: 'POST',
             body: JSON.stringify({
               commitMessage: args.commitMessage,
+              expectedRevision: args.expectedRevision,
+              expectedDestinationBranch: args.expectedDestinationBranch,
+              expectedDestinationSha: args.expectedDestinationSha,
+              expectedCandidateTreeSha: args.expectedCandidateTreeSha,
               actor: changeRequestActor(context),
             }),
           },
@@ -207,4 +384,20 @@ export function changeRequestIsWithinWriteScope(
 
 function cleanString(value: unknown): string {
   return String(value ?? '').trim();
+}
+
+function reviewDroneRef(context: ChangeRequestMcpContext, requestedDrone: unknown): string {
+  if (context.principal.kind === 'chat') return context.principal.droneId;
+  if (context.principal.kind === 'drone' && context.principal.droneId) {
+    return context.principal.droneId;
+  }
+  const drone = cleanString(requestedDrone);
+  if (!drone) throw new Error('drone is required when preparing a review outside a drone chat');
+  return drone;
+}
+
+function reviewRequest(value: any): any {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const { repoRoot: _repoRoot, snapshotRef: _snapshotRef, ...request } = value;
+  return request;
 }

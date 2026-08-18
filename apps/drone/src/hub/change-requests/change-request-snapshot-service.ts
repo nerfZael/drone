@@ -135,7 +135,11 @@ export class ChangeRequestSnapshotService {
       .trim()
       .toLowerCase();
     if (runtime === 'host') {
-      const status = await this.git(repoRoot, ['status', '--porcelain']);
+      const status = await this.git(repoRoot, [
+        'status',
+        '--porcelain',
+        '--untracked-files=all',
+      ]);
       if (status.stdout.trim()) {
         throw new ChangeRequestError(
           'Commit the host working tree before creating or updating a change request.',
@@ -169,7 +173,7 @@ export class ChangeRequestSnapshotService {
         const status = await this.deps.runGitInDrone({
           container: containerName,
           repoPathInContainer,
-          args: ['status', '--porcelain'],
+          args: ['status', '--porcelain', '--untracked-files=all'],
         });
         if (status.code !== 0)
           throw new ChangeRequestError(status.stderr || 'Unable to inspect drone repository.', 500);

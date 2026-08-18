@@ -19,6 +19,8 @@ import {
   CHANGE_REQUEST_CHAT_WRITE_TOOL_NAMES,
   CHANGE_REQUEST_MANAGE_TOOL_NAMES,
   CHANGE_REQUEST_MERGE_TOOL_NAME,
+  CHANGE_REQUEST_PUBLIC_REVIEW_TOOL_NAMES,
+  CHANGE_REQUEST_PUBLIC_UPDATE_TOOL_NAMES,
   CHANGE_REQUEST_WRITE_SCOPED_TOOL_NAMES,
 } from './change-requests/change-request-tool-names';
 import { normalizeChangeRequestSubscriptionId } from './subscriptions/change-request-subscription-events';
@@ -2223,6 +2225,8 @@ const DRONE_PRINCIPAL_TOOLS = new Set([
   'create_chat',
   'send_message',
   'read_chat',
+  ...CHANGE_REQUEST_PUBLIC_REVIEW_TOOL_NAMES,
+  ...CHANGE_REQUEST_PUBLIC_UPDATE_TOOL_NAMES,
   ...WORKFLOW_MCP_TOOL_NAMES,
 ]);
 
@@ -2283,6 +2287,12 @@ export function authorizeDroneHubMcpTool(context: DroneHubMcpServerContext, tool
     throw new Error(`MCP principal ${principal.name} is not authorized for ${tool}`);
   }
   const refs = assertedDroneRefs(args);
+  if (CHANGE_REQUEST_PUBLIC_REVIEW_TOOL_NAMES.some((name) => name === tool) && refs.length === 0) {
+    return;
+  }
+  if (CHANGE_REQUEST_PUBLIC_UPDATE_TOOL_NAMES.some((name) => name === tool) && refs.length === 0) {
+    return;
+  }
   if ((tool === 'list_drones' || tool === 'speak') && refs.length === 0) return;
   if (refs.length === 0 || refs.some((ref) => ref !== scopedDroneId)) {
     throw new Error(`MCP principal ${principal.name} is scoped to drone ${scopedDroneId}`);

@@ -20,6 +20,12 @@ import type { ChangeRequestRepository } from './change-request-repository';
 import { ChangeRequestOperationLock } from './change-request-operation-lock';
 import { ChangeRequestObjectStore } from './change-request-object-store';
 import {
+  ChangeRequestReviewWorkspaceService,
+  type ChangeRequestReviewPromotion,
+  type ChangeRequestReviewWorkspace,
+  type ChangeRequestReviewWorkspaceDependencies,
+} from './change-request-review-workspace';
+import {
   ChangeRequestSnapshotService,
   type ChangeRequestSnapshot,
   type ChangeRequestSnapshotDependencies,
@@ -53,7 +59,7 @@ export type ChangeRequestServiceDependencies = ChangeRequestSnapshotDependencies
       closeAfterNativeCompletion: (record: ChangeRequestRecord) => Promise<void>;
       refreshAfterNativeAssessment: (record: ChangeRequestRecord) => Promise<void>;
     };
-  };
+  } & Pick<ChangeRequestReviewWorkspaceDependencies, 'copyToContainer' | 'runCommandInDrone'>;
 
 const MAX_TITLE_LENGTH = 240;
 const MAX_DESCRIPTION_LENGTH = 20_000;
@@ -90,12 +96,14 @@ export class ChangeRequestService {
   private readonly snapshotService: ChangeRequestSnapshotService;
   private readonly directMerger: ChangeRequestDirectMerger;
   private readonly objectStore: ChangeRequestObjectStore;
+  private readonly reviewWorkspaceService: ChangeRequestReviewWorkspaceService;
 
   constructor(private readonly deps: ChangeRequestServiceDependencies) {
     this.operationLock = deps.operationLock ?? new ChangeRequestOperationLock();
     this.snapshotService = new ChangeRequestSnapshotService(deps);
     this.objectStore = new ChangeRequestObjectStore(deps);
     this.directMerger = new ChangeRequestDirectMerger(deps);
+    this.reviewWorkspaceService = new ChangeRequestReviewWorkspaceService(deps);
     this.lifecycle =
       deps.lifecycle ??
       new ChangeRequestLifecycle({
@@ -169,6 +177,66 @@ export class ChangeRequestService {
 
   async get(requestNumberRaw: unknown): Promise<ChangeRequestView> {
     return await this.view(this.requiredRecord(requestNumberRaw));
+  }
+
+  async prepareReviewWorkspace(input: {
+    requestNumber: unknown;
+    revision?: unknown;
+    reviewerDroneRef: string;
+  }): Promise<ChangeRequestReviewWorkspace> {
+    const id = this.requiredRecord(input.requestNumber).id;
+    return await this.withLock(id, () => this.reviewWorkspaceService.prepare(input));
+  }
+
+  async updateFromReviewWorkspace(input: {
+    requestNumber: unknown;
+    workspaceId: string;
+    reviewerDroneRef: string;
+    actor: ChangeRequestActor;
+  }): Promise<ChangeRequestView> {
+    const id = this.requiredRecord(input.requestNumber).id;
+    return await this.withLock(id, async () => {
+      const current = this.requiredOpenRecord(id);
+      let promotion: ChangeRequestReviewPromotion | null = null;
+      let updated: ChangeRequestRecord;
+      try {
+        promotion = await this.reviewWorkspaceService.capturePromotion({
+          record: current,
+          workspaceId: input.workspaceId,
+          reviewerDroneRef: input.reviewerDroneRef,
+        });
+        const updatedAt = this.deps.now();
+        updated = await this.deps.repository.updateWithRevision(
+          id,
+          {
+            baseSha: promotion.baseSha,
+            snapshotRef: promotion.snapshotRef,
+            snapshotSha: promotion.snapshotSha,
+            sourceHeadSha: promotion.sourceHeadSha,
+            revision: current.revision + 1,
+            lastError: null,
+            updatedAt,
+          },
+          {
+            number: current.revision + 1,
+            baseBranch: current.baseBranch,
+            baseSha: promotion.baseSha,
+            snapshotRef: promotion.snapshotRef,
+            snapshotSha: promotion.snapshotSha,
+            sourceRef: promotion.sourceRef,
+            sourceHeadSha: promotion.sourceHeadSha,
+            objectStorePath: promotion.objectStorePath,
+            createdBy: normalizeChangeRequestActor(input.actor),
+            createdAt: updatedAt,
+          },
+        );
+      } catch (error) {
+        if (promotion) await this.reviewWorkspaceService.discardPromotion(current, promotion);
+        throw error;
+      }
+      await this.deps.githubMirrorLifecycle?.syncAfterNativeUpdate(updated);
+      return await this.view(this.requiredRecord(id));
+    });
   }
 
   async revisions(requestNumberRaw: unknown): Promise<ChangeRequestRevisionView[]> {
@@ -307,12 +375,69 @@ export class ChangeRequestService {
 
   async merge(
     requestNumberRaw: unknown,
-    input: { actor: ChangeRequestActor; commitMessage?: string },
+    input: {
+      actor: ChangeRequestActor;
+      commitMessage?: string;
+      expectedRevision?: number;
+      expectedDestinationBranch?: string;
+      expectedDestinationSha?: string;
+      expectedCandidateTreeSha?: string;
+    },
   ): Promise<ChangeRequestView> {
     const id = this.requiredRecord(requestNumberRaw).id;
     return await this.withLock(id, async () => {
       const current = this.requiredOpenRecord(id);
       const revision = this.currentRevision(current);
+      const expectedDestinationBranch = input.expectedDestinationBranch
+        ? normalizeChangeRequestBranch(input.expectedDestinationBranch)
+        : '';
+      const expectedDestinationSha = String(input.expectedDestinationSha ?? '')
+        .trim()
+        .toLowerCase();
+      const expectedCandidateTreeSha = String(input.expectedCandidateTreeSha ?? '')
+        .trim()
+        .toLowerCase();
+      const reviewPins = [
+        input.expectedRevision !== undefined,
+        Boolean(expectedDestinationBranch),
+        Boolean(expectedDestinationSha),
+        Boolean(expectedCandidateTreeSha),
+      ];
+      if (reviewPins.some(Boolean) && !reviewPins.every(Boolean)) {
+        throw new ChangeRequestError(
+          'Reviewed merges require expectedRevision, expectedDestinationBranch, expectedDestinationSha, and expectedCandidateTreeSha together.',
+          400,
+          'review_pins_incomplete',
+        );
+      }
+      if (
+        (expectedDestinationSha && !/^[0-9a-f]{40}$/.test(expectedDestinationSha)) ||
+        (expectedCandidateTreeSha && !/^[0-9a-f]{40}$/.test(expectedCandidateTreeSha))
+      ) {
+        throw new ChangeRequestError('Reviewed merge SHAs must be 40 hexadecimal characters.');
+      }
+      if (input.expectedRevision !== undefined && input.expectedRevision !== revision.number) {
+        throw new ChangeRequestError(
+          'The change request revision changed after the reviewed candidate was prepared. Prepare and review it again before merging.',
+          409,
+          'review_candidate_outdated',
+          { expectedRevision: input.expectedRevision, revision: revision.number },
+        );
+      }
+      if (
+        expectedDestinationBranch &&
+        expectedDestinationBranch !== current.destinationBranch
+      ) {
+        throw new ChangeRequestError(
+          'The destination branch changed after the reviewed candidate was prepared. Prepare and review it again before merging.',
+          409,
+          'review_candidate_outdated',
+          {
+            expectedDestinationBranch,
+            destinationBranch: current.destinationBranch,
+          },
+        );
+      }
       const destinationLock = `destination:${path.resolve(current.repoRoot)}:${current.destinationBranch}`;
       return await this.operationLock.withLock(destinationLock, async () => {
         let attemptId: string | null = null;
@@ -339,6 +464,8 @@ export class ChangeRequestService {
                 updatedAt: now,
               });
             },
+            expectedDestinationSha || undefined,
+            expectedCandidateTreeSha || undefined,
           );
           pushed = true;
           const merged = await this.lifecycle.completeMerge(current, {

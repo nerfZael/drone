@@ -161,11 +161,127 @@ describe('Drone Hub MCP principal authorization', () => {
       'merge_change_request',
       { requestNumber: 1 },
     )).not.toThrow();
+    const reviewOnlyPrincipal = {
+      ...principal,
+      accessScope: {
+        ...principal.accessScope,
+        changeRequestCreate: false,
+        changeRequestMerge: false,
+      },
+    };
+    expect(() => authorizeDroneHubMcpTool(
+      { principal: reviewOnlyPrincipal },
+      'get_change_request_changes',
+      { requestNumber: 99 },
+    )).not.toThrow();
+    expect(() => authorizeDroneHubMcpTool(
+      { principal: reviewOnlyPrincipal },
+      'update_change_request',
+      { requestNumber: 99 },
+    )).not.toThrow();
+    expect(() => authorizeDroneHubMcpTool(
+      { principal: reviewOnlyPrincipal },
+      'prepare_change_request_review',
+      { requestNumber: 99 },
+    )).not.toThrow();
+    expect(() => authorizeDroneHubMcpTool(
+      { principal: reviewOnlyPrincipal },
+      'update_change_request_from_review',
+      { requestNumber: 99, workspaceId: 'workspace-id' },
+    )).not.toThrow();
+  });
+
+  test('exposes public review tools without change-request ownership checks', async () => {
+    const tools = new Map<string, (args: any) => Promise<any>>();
+    const requests: Array<{ pathname: string; method: string; body?: any }> = [];
+    registerChangeRequestMcpTools(
+      {
+        registerTool(name: string, _config: any, handler: (args: any) => Promise<any>) {
+          tools.set(name, handler);
+        },
+      } as any,
+      {
+        context: {
+          principal: {
+            kind: 'chat',
+            tokenId: 'chat:reviewer:default',
+            name: 'Reviewer / default',
+            droneId: 'reviewer-drone',
+            chatName: 'default',
+            chatId: 'reviewer-chat',
+            accessScope: normalizeMcpChatAccessScope(
+              { changeRequestCreate: false, changeRequestMerge: false },
+              'reviewer-drone',
+            ),
+            selectedDroneRefs: ['reviewer-drone'],
+          },
+        },
+        requestJson: async (pathname, init) => {
+          requests.push({
+            pathname,
+            method: init?.method ?? 'GET',
+            body: init?.body ? JSON.parse(String(init.body)) : undefined,
+          });
+          if (pathname.endsWith('/changes')) {
+            return {
+              request: { number: 8, repoRoot: '/host/private', title: 'Review me' },
+              revision: { number: 2 },
+              counts: { changed: 1 },
+              entries: [{ path: 'src/index.ts' }],
+            };
+          }
+          if (pathname.endsWith('/review-workspace')) {
+            return {
+              workspace: {
+                requestNumber: 8,
+                path: '/work/review',
+                revision: 2,
+                workspaceId: 'cr-8-r2-aaaaaaaaaaaa-bbbbbbbbbbbb',
+              },
+            };
+          }
+          return { request: { number: 8, repoRoot: '/host/private', title: 'Review me' } };
+        },
+        toolResult: (value) => value,
+      },
+    );
+
+    const metadata = await tools.get('get_change_request')!({ requestNumber: 8 });
+    expect(metadata.request.repoRoot).toBeUndefined();
+    const changes = await tools.get('get_change_request_changes')!({ requestNumber: 8 });
+    expect(changes.entries).toEqual([{ path: 'src/index.ts' }]);
+    const prepared = await tools.get('prepare_change_request_review')!({ requestNumber: 8 });
+    expect(prepared.workspace.path).toBe('/work/review');
+    expect(prepared.instructions).toContain('update_change_request_from_review');
+    const promoted = await tools.get('update_change_request_from_review')!({
+      requestNumber: 8,
+      workspaceId: prepared.workspace.workspaceId,
+    });
+    expect(promoted.instructions).toContain('Prepare a fresh review workspace');
+    expect(requests).toEqual([
+      { pathname: '/api/change-requests/8', method: 'GET', body: undefined },
+      { pathname: '/api/change-requests/8/changes', method: 'GET', body: undefined },
+      {
+        pathname: '/api/change-requests/8/review-workspace',
+        method: 'POST',
+        body: { reviewerDroneRef: 'reviewer-drone' },
+      },
+      {
+        pathname: '/api/change-requests/8/review-workspace/promote',
+        method: 'POST',
+        body: {
+          workspaceId: 'cr-8-r2-aaaaaaaaaaaa-bbbbbbbbbbbb',
+          reviewerDroneRef: 'reviewer-drone',
+          actor: { kind: 'chat', id: 'reviewer-chat', label: 'reviewer-drone/default' },
+        },
+      },
+    ]);
   });
 
   test('addresses change requests by integer number in MCP tools', async () => {
     let updateTool: { config: any; handler: (args: any) => Promise<any> } | null = null;
     const paths: string[] = [];
+    let updateBody: any = null;
     registerChangeRequestMcpTools(
       {
         registerTool(name: string, config: any, handler: (args: any) => Promise<any>) {
@@ -176,9 +292,18 @@ describe('Drone Hub MCP principal authorization', () => {
         context: {
           principal: { kind: 'host', tokenId: 'host', name: 'Host token' },
         },
-        requestJson: async (pathname) => {
+        requestJson: async (pathname, init) => {
           paths.push(pathname);
-          return { ok: true, request: { number: 7, droneId: 'drone-a', droneName: 'Drone A' } };
+          updateBody = init?.body ? JSON.parse(String(init.body)) : null;
+          return {
+            ok: true,
+            request: {
+              number: 7,
+              droneId: 'drone-a',
+              droneName: 'Drone A',
+              repoRoot: '/host/private',
+            },
+          };
         },
         toolResult: (value) => value,
       },
@@ -188,8 +313,13 @@ describe('Drone Hub MCP principal authorization', () => {
     expect(updateTool!.config.inputSchema.requestNumber.safeParse(7).success).toBe(true);
     expect(updateTool!.config.inputSchema.requestNumber.safeParse('7').success).toBe(false);
     expect(updateTool!.config.inputSchema.requestId).toBeUndefined();
-    await updateTool!.handler({ requestNumber: 7, title: 'Use the public number' });
-    expect(paths).toEqual(['/api/change-requests/7', '/api/change-requests/7']);
+    const result = await updateTool!.handler({ requestNumber: 7, title: 'Use the public number' });
+    expect(paths).toEqual(['/api/change-requests/7']);
+    expect(result.request.repoRoot).toBeUndefined();
+    expect(updateBody).toMatchObject({
+      title: 'Use the public number',
+      refreshSnapshot: false,
+    });
   });
 
   test('uses the stable chat id for change-request ownership', () => {

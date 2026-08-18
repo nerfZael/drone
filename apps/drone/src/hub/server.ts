@@ -5477,6 +5477,13 @@ async function startDroneHubApiServerWithLifecycle(
     gitTopLevel,
     dvmRepoHeadSha,
     runGitInDrone,
+    copyToContainer: (containerName, sourcePath, destinationPath, options) =>
+      dvmCopyToContainer(containerName, sourcePath, destinationPath, options),
+    runCommandInDrone: ({ containerName, command, args, timeoutMs }) =>
+      dvmExec(containerName, command, args, {
+        timeoutMs,
+        containerAlreadyReady: true,
+      }),
     runHostCommand,
     deleteHostRefBestEffort,
     storagePath: droneRootPath,

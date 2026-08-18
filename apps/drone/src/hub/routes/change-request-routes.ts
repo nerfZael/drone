@@ -102,6 +102,33 @@ export function registerChangeRequestRoutes(
     json(200, { ok: true, revisions });
   });
 
+  route.post(
+    '/api/change-requests/:requestNumber/review-workspace',
+    async ({ params, readJson, json }) => {
+      const body = await readJson<Record<string, unknown>>();
+      const workspace = await service().prepareReviewWorkspace({
+        requestNumber: params.requestNumber,
+        revision: body.revision,
+        reviewerDroneRef: String(body.reviewerDroneRef ?? body.drone ?? ''),
+      });
+      json(201, { ok: true, workspace });
+    },
+  );
+
+  route.post(
+    '/api/change-requests/:requestNumber/review-workspace/promote',
+    async ({ params, readJson, json }) => {
+      const body = await readJson<Record<string, unknown>>();
+      const request = await service().updateFromReviewWorkspace({
+        requestNumber: params.requestNumber,
+        workspaceId: String(body.workspaceId ?? ''),
+        reviewerDroneRef: String(body.reviewerDroneRef ?? body.drone ?? ''),
+        actor: requestActor(body.actor),
+      });
+      json(200, { ok: true, request });
+    },
+  );
+
   route.post('/api/change-requests/:requestNumber/refresh-assessment', async ({ params, json }) => {
     const request = await service().refreshAssessment(params.requestNumber);
     json(200, { ok: true, request });
@@ -130,6 +157,18 @@ export function registerChangeRequestRoutes(
     const request = await service().merge(params.requestNumber, {
       actor: requestActor(body.actor),
       commitMessage: typeof body.commitMessage === 'string' ? body.commitMessage : undefined,
+      expectedRevision:
+        typeof body.expectedRevision === 'number' ? body.expectedRevision : undefined,
+      expectedDestinationBranch:
+        typeof body.expectedDestinationBranch === 'string'
+          ? body.expectedDestinationBranch
+          : undefined,
+      expectedDestinationSha:
+        typeof body.expectedDestinationSha === 'string' ? body.expectedDestinationSha : undefined,
+      expectedCandidateTreeSha:
+        typeof body.expectedCandidateTreeSha === 'string'
+          ? body.expectedCandidateTreeSha
+          : undefined,
     });
     json(200, { ok: true, request });
   });

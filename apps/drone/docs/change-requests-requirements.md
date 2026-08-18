@@ -15,8 +15,10 @@ The native model intentionally stays focused:
 - open, merged, and closed stored states, with stale and conflicted calculated when read;
 - an explicit destination branch that defaults to the request's base branch;
 - direct squash merge only;
-- separate per-chat permissions for creating/managing and merging requests;
+- separate per-chat permissions for creating/closing and merging requests, with updates available to every agent;
 - user controls and file/diff review inside DroneHub;
+- public, read-only agent review of metadata, revisions, changed files, and diffs;
+- isolated container review worktrees for inspecting, executing, and optionally fixing an exact prepared merge candidate;
 - retained review history with no retention settings yet;
 - optional user-only GitHub mirroring for one request at a time;
 - provider-neutral publication persistence with GitHub as the current adapter;
@@ -42,13 +44,16 @@ The native model intentionally stays focused:
 - The source working tree must be clean. The chat or user commits the work before capturing it.
 - Creating or updating a request does not give the container host Git or GitHub credentials.
 - Every refresh captures against a freshly resolved base and retains earlier revisions for historical review.
+- A reviewer can publish committed fixes from its isolated review workspace as a new immutable revision. This does not modify the original source checkout or grant merge authority.
 
 ## Permissions and merge policy
 
-Creating/managing and merging are separate per-chat permissions:
+Creating/closing and merging are separate per-chat permissions. Updating an open request is available to every agent:
 
-- **Create and update change requests:** enabled by default. This also permits refreshing, retargeting, and closing requests owned by that chat.
+- **Create and close change requests:** enabled by default for requests owned by that chat.
+- **Update change requests:** every agent may edit metadata, retarget, or explicitly refresh any open request. Updating does not grant close or merge authority.
 - **Merge change requests:** disabled by default. When enabled, the chat may merge one of its own requests when explicitly instructed.
+- **Review change requests:** available to every agent without CR management or merge permission. The review tools themselves do not mutate or merge a request.
 - The user can always use the DroneHub UI actions.
 - Host credentials are used inside DroneHub and are never handed to the chat or container.
 - Approvals, checks, and background “merge automatically when checks pass” behavior are not included.
@@ -86,20 +91,36 @@ Creating/managing and merging are separate per-chat permissions:
 
 ## MCP tools
 
-The initial focused tools are:
+Public review tools are:
+
+- `get_change_request`
+- `list_change_request_revisions`
+- `get_change_request_changes`
+- `get_change_request_diff`
+- `prepare_change_request_review`
+
+`prepare_change_request_review` freshly resolves the destination, prepares the same squash result used by native merge, and materializes it as an isolated hidden worktree in the reviewing chat's container. The agent can inspect complete files and run repository-specific builds, tests, or programs there. The returned revision, destination branch, destination SHA, and candidate tree SHA identify exactly what was reviewed. Review is conversational: DroneHub does not store an approval or automatically gate merging on the result.
+
+If review finds a problem, the agent edits the returned path and commits every change there. It then calls `update_change_request_from_review` with the returned `workspaceId`. DroneHub accepts only a clean workspace whose HEAD descends from the exact prepared candidate and whose CR revision and destination branch are still current. The result is a new immutable CR revision containing the complete corrected tree. The agent must prepare and test that new revision before declaring it safe to merge. `refreshSnapshot: true` is not used for this workflow because it recaptures the original CR source checkout instead.
+
+Mutation tools are:
 
 - `create_change_request`
 - `update_change_request`
+- `update_change_request_from_review`
 - `close_change_request`
 - `merge_change_request`
 
-A managed chat can only update, close, or merge a request belonging to that same chat and drone. Change-request permissions are checked separately from ordinary read/write/execute drone scope.
+Any agent can update an open request, including publishing committed fixes from its own prepared review workspace. A managed chat can only close or merge a request belonging to that same chat and drone, and merge remains separately permission-gated. For MCP callers, snapshot refresh is explicit: omitting `refreshSnapshot` edits metadata only, while `refreshSnapshot: true` recaptures the request's configured source checkout.
+
+When a reviewed agent is later instructed and permitted to merge, it passes the reviewed revision, destination branch, destination SHA, and candidate tree SHA to `merge_change_request`. DroneHub rejects the merge if the request was retargeted, the destination moved, the revision changed, or the recomputed squash tree differs from the inspected code. The four review pins are accepted together or omitted together; user-driven and deliberately unreviewed merges omit them.
 
 ## Cleanup and disk usage
 
-- Temporary bundles, import refs, and merge worktrees are removed after each operation.
-- Each request retains its source and review refs in isolated Hub-managed bare Git storage; no permanent worktree is kept.
-- Closing or merging keeps immutable revisions reviewable. Temporary bundles, import refs, and worktrees are still removed immediately.
+- Temporary bundles, import refs, and host-side preparation/merge worktrees are removed after each operation.
+- Each request retains its source and review refs in isolated Hub-managed bare Git storage; no permanent host worktree is kept.
+- Container review worktrees are keyed by request revision, destination branch, snapshot SHA, destination SHA, and candidate SHA and are reused for the same candidate. Automatic review-workspace garbage collection is not included yet.
+- Closing or merging keeps immutable revisions reviewable. Temporary bundles, import refs, and host worktrees are still removed immediately.
 - DroneHub deletes a remote mirror branch after its linked pull request is closed or merged only when the stored mirror record proves that DroneHub created and owns that branch.
 - Deleting the source drone does not delete an open request in the first version because its snapshot is already independent.
 - Missing or damaged snapshots are reported clearly.
