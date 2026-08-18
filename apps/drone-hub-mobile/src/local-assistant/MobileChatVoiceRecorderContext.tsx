@@ -6,22 +6,21 @@ import { useMobileContinuousVoice } from './use-mobile-continuous-voice';
 import { MobileMicrophoneCoordinator } from './mobile-microphone-coordinator';
 import {
   resolveMobileVoiceSession,
+  type MobileRecordedVoiceSessionOwner,
   type MobileVoiceSession,
 } from './mobile-voice-session';
 
 type MobileChatVoiceRecorderContextValue = {
   session: MobileVoiceSession;
-  getSession(): MobileVoiceSession;
   continuousVoice: ReturnType<typeof useMobileContinuousVoice>;
   continuousDictation: ReturnType<typeof useMobileContinuousDictation>;
   error: string;
   getError(): string;
   setError: React.Dispatch<React.SetStateAction<string>>;
-  startVoiceMessageRecording(): Promise<boolean>;
-  startCompanionRecording(): Promise<boolean>;
-  toggleRecordingPause(): void;
-  discardRecording(): Promise<void>;
-  stopRecordingForTranscript(): Promise<string>;
+  startRecording(owner: MobileRecordedVoiceSessionOwner): Promise<boolean>;
+  toggleRecordingPause(owner: MobileRecordedVoiceSessionOwner): void;
+  discardRecording(owner: MobileRecordedVoiceSessionOwner): Promise<void>;
+  stopRecordingForTranscript(owner: MobileRecordedVoiceSessionOwner): Promise<string>;
 };
 
 const MobileChatVoiceRecorderContext =
@@ -67,8 +66,7 @@ export function MobileChatVoiceRecorderProvider({ children }: { children: React.
   });
   const continuousDictation = useMobileContinuousDictation(continuousVoice);
   const session = resolveMobileVoiceSession({
-    recordingOwner: recorder.sessionOwner,
-    recordingStatus: recorder.status,
+    recordingSession: recorder.session,
     recordingDurationMillis: recorder.durationMillis,
     continuousStatus: continuousVoice.status,
     continuousTargetKey: continuousVoice.targetKey,
@@ -77,28 +75,15 @@ export function MobileChatVoiceRecorderProvider({ children }: { children: React.
     continuousDurationMillis: continuousVoice.durationMillis,
     microphoneAvailable: microphoneOwner === null,
   });
-  const sessionRef = React.useRef(session);
-  sessionRef.current = session;
-  const getSession = React.useCallback(() => sessionRef.current, []);
   const getError = React.useCallback(() => errorRef.current, []);
-  const startVoiceMessageRecording = React.useCallback(
-    () => recorder.startRecording('single-shot'),
-    [recorder.startRecording],
-  );
-  const startCompanionRecording = React.useCallback(
-    () => recorder.startRecording('companion'),
-    [recorder.startRecording],
-  );
   const value: MobileChatVoiceRecorderContextValue = {
     session,
-    getSession,
     continuousVoice,
     continuousDictation,
     error,
     getError,
     setError: setSharedError,
-    startVoiceMessageRecording,
-    startCompanionRecording,
+    startRecording: recorder.startRecording,
     toggleRecordingPause: recorder.toggleRecordingPause,
     discardRecording: recorder.discardRecording,
     stopRecordingForTranscript: recorder.stopRecordingForTranscript,
