@@ -161,6 +161,7 @@ import {
 import { promoteNewDroneChatAction, sendInNewDroneChatAction } from './droneHub/app/chat-api';
 import {
   chatInputDraftKeyForDroneChat,
+  droneChatQueueKey,
   droneHomePath,
   isDroneStartingOrSeeding,
   makeId,
@@ -169,6 +170,10 @@ import {
   resolveChatNameForDrone,
   suggestNextDroneChatName,
 } from './droneHub/app/helpers';
+import {
+  publishThenSendShortcutDraftChat,
+  shortcutDraftChatDisposition,
+} from './droneHub/app/shortcut-draft-chat';
 import { allocateUntitledDisplayName } from './droneHub/app/name-helpers';
 import { createTerminalPaneSessionsState } from './droneHub/terminal/terminal-tabs-state';
 import { useTerminalPaneSessions } from './droneHub/terminal/use-terminal-pane-sessions';
@@ -2038,6 +2043,18 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     if (!ids[selectedDrone]) ids[selectedDrone] = makeId();
     return ids[selectedDrone];
   }, [selectedDrone]);
+  const shortcutDraftChatsRef = React.useRef(
+    new Map<
+      string,
+      {
+        droneId: string;
+        chatName: string;
+        wasActivated: boolean;
+        submissionInFlight: boolean;
+        preserveOnLeave: boolean;
+      }
+    >(),
+  );
   const autoRenameChatFromFirstPromptRef = React.useRef<
     (droneId: string, chatName: string, prompt: string) => void
   >(() => {});
@@ -2059,7 +2076,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     interruptionResolutionErrorById,
     requestStopResponse,
     selectedIsResponding,
-    sendPromptText,
+    sendPromptText: sendPromptTextBase,
     sendingPrompt,
     stopResponseError,
     stoppingResponse,
@@ -2092,6 +2109,41 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     requestJson,
     onAutoRenameChatFromFirstPrompt: handleAutoRenameChatFromFirstPrompt,
   });
+  const sendPromptText = React.useCallback(
+    async (payload: ChatSendPayload, context: ChatSendContext): Promise<boolean> => {
+      const droneId = String(selectedDrone ?? '').trim();
+      const chatName = String(selectedChat ?? '').trim() || 'default';
+      const key = droneChatQueueKey(droneId, chatName);
+      const tracked = shortcutDraftChatsRef.current.get(key);
+      if (!tracked) return await sendPromptTextBase(payload, context);
+      tracked.submissionInFlight = true;
+
+      const url = `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/publish`;
+      return await publishThenSendShortcutDraftChat({
+        publish: async () => {
+          await requestJson<{ ok: true }>(url, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({}),
+          });
+        },
+        send: async () => {
+          shortcutDraftChatsRef.current.delete(key);
+          return await sendPromptTextBase(payload, context);
+        },
+        onPublishError: (error) => {
+          tracked.submissionInFlight = false;
+          tracked.preserveOnLeave = true;
+          const message = String(error instanceof Error ? error.message : error ?? '').trim();
+          showShortcutToast(
+            message || 'The draft chat could not be published, so the message was not sent.',
+            'Draft chat could not be published',
+          );
+        },
+      });
+    },
+    [requestJson, selectedChat, selectedDrone, sendPromptTextBase, showShortcutToast],
+  );
   React.useEffect(() => {
     if (!selectedDrone) return;
     scrollChatToBottom();
@@ -2615,14 +2667,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       resolveCurrentSelectionDraftContext,
     ],
   );
-  const openSelectionScopedDraftChatComposer = React.useCallback(
-    (parentDroneIdRaw?: string | null): boolean => {
+  const openCurrentGroupDraftChatComposer = React.useCallback(
+    (): boolean => {
+      if (selectedGroupMultiChat) return false;
       const selectionDraftContext = resolveCurrentSelectionDraftContext();
       if (!selectionDraftContext) return false;
       openDraftChatComposerBase({
         repoPath: selectionDraftContext.repoPath,
         group: selectionDraftContext.group,
-        parentDroneId: String(parentDroneIdRaw ?? '').trim() || undefined,
       });
       applyRememberedNewDronePreferences(selectionDraftContext.repoPath);
       return true;
@@ -2631,11 +2683,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       applyRememberedNewDronePreferences,
       openDraftChatComposerBase,
       resolveCurrentSelectionDraftContext,
+      selectedGroupMultiChat,
     ],
-  );
-  const openChildDraftChatComposer = React.useCallback(
-    (): boolean => openSelectionScopedDraftChatComposer(currentDrone?.id),
-    [currentDrone?.id, openSelectionScopedDraftChatComposer],
   );
   React.useEffect(() => {
     if (!companionWorkspace) return;
@@ -3919,6 +3968,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         select?: boolean;
         copyFromChat?: string;
         mode?: 'copy-config' | 'fork';
+        draft?: boolean;
       },
     ): Promise<{ ok: boolean; chatName?: string; error?: string | null }> => {
       const latestDrone = droneByIdRef.current[drone.id] ?? drone;
@@ -4064,19 +4114,85 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     [promotingNewChatActionById, requestJson, selectDroneChat, selectedChat, selectedDrone],
   );
   const createDroneChatFromShortcut = React.useCallback(async (): Promise<boolean> => {
-    if (!currentDrone) return false;
+    if (!currentDrone || selectedGroupMultiChat) return false;
     const sourceChatName = resolveChatNameForDrone(currentDrone, selectedChat);
-    const sourceDraftKey = chatInputDraftKeyForDroneChat(currentDrone.id, sourceChatName);
-    const sourcePrompt = String(
-      useDroneHubUiStore.getState().chatInputDrafts[sourceDraftKey] ?? '',
-    ).trim();
-    const result = await createUntitledDroneChat(currentDrone, { copyFromChat: sourceChatName });
+    const result = await createUntitledDroneChat(currentDrone, {
+      copyFromChat: sourceChatName,
+      draft: true,
+      select: false,
+    });
     const chatName = String(result.chatName ?? '').trim();
-    if (result.ok && chatName && sourcePrompt) {
-      void suggestAndRenameDroneChatFromMessage(currentDrone.id, chatName, sourcePrompt);
+    if (result.ok && chatName) {
+      const key = droneChatQueueKey(currentDrone.id, chatName);
+      shortcutDraftChatsRef.current.set(key, {
+        droneId: currentDrone.id,
+        chatName,
+        wasActivated: false,
+        submissionInFlight: false,
+        preserveOnLeave: false,
+      });
+      selectDroneChat(currentDrone.id, chatName);
+    }
+    if (!result.ok && result.error) {
+      showShortcutToast(result.error, 'Draft chat could not be created');
     }
     return result.ok === true;
-  }, [createUntitledDroneChat, currentDrone, selectedChat, suggestAndRenameDroneChatFromMessage]);
+  }, [
+    createUntitledDroneChat,
+    currentDrone,
+    selectDroneChat,
+    selectedChat,
+    selectedGroupMultiChat,
+    showShortcutToast,
+  ]);
+  const cloneDroneChatFromShortcut = React.useCallback(async (): Promise<boolean> => {
+    if (!currentDrone || selectedGroupMultiChat) return false;
+    const sourceChatName = resolveChatNameForDrone(currentDrone, selectedChat);
+    const result = await cloneDroneChat(currentDrone.id, sourceChatName);
+    const chatName = String(result.chatName ?? '').trim();
+    if (result.ok && chatName) selectDroneChat(currentDrone.id, chatName);
+    return result.ok === true;
+  }, [cloneDroneChat, currentDrone, selectDroneChat, selectedChat, selectedGroupMultiChat]);
+  React.useEffect(() => {
+    if (shortcutDraftChatsRef.current.size === 0) return;
+    for (const [key, tracked] of shortcutDraftChatsRef.current) {
+      const active =
+        String(selectedDrone ?? '').trim() === tracked.droneId &&
+        (String(selectedChat ?? '').trim() || 'default') === tracked.chatName;
+      if (active) tracked.wasActivated = true;
+      const drone = droneByIdRef.current[tracked.droneId];
+      const chatKnown = Boolean(drone?.chats?.includes(tracked.chatName));
+      const stillDraft = !chatKnown || drone?.draftChats?.[tracked.chatName] === true;
+      const draftKey = chatInputDraftKeyForDroneChat(tracked.droneId, tracked.chatName);
+      const hasDraftContent = Boolean(
+        String(useDroneHubUiStore.getState().chatInputDrafts[draftKey] ?? '').trim(),
+      ) || tracked.preserveOnLeave;
+      const disposition = shortcutDraftChatDisposition({
+        active,
+        wasActivated: tracked.wasActivated,
+        stillDraft,
+        hasDraftContent,
+        submissionInFlight: tracked.submissionInFlight,
+      });
+      if (disposition === 'wait') continue;
+
+      shortcutDraftChatsRef.current.delete(key);
+      if (disposition === 'retain') continue;
+      const url = `/api/drones/${encodeURIComponent(tracked.droneId)}/chats/${encodeURIComponent(tracked.chatName)}`;
+      void requestJson<{ ok: true }>(url, { method: 'DELETE' }).catch((error: unknown) => {
+        console.warn('[DroneHub] abandoned shortcut draft chat cleanup failed', {
+          droneId: tracked.droneId,
+          chatName: tracked.chatName,
+          error,
+        });
+      });
+    }
+  }, [
+    drones,
+    requestJson,
+    selectedChat,
+    selectedDrone,
+  ]);
   const toggleSelectedDronePinnedFromShortcut = React.useCallback((): boolean => {
     if (selectedDronePinShortcutBusyRef.current) return true;
     const mutation = resolveSelectedDronePinMutation({
@@ -4182,8 +4298,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setDroneErrorModal,
     openHome,
     openDraftChatComposer,
-    openChildDraftChatComposer,
+    openCurrentGroupDraftChatComposer,
     createDroneChatFromShortcut,
+    cloneDroneChatFromShortcut,
     toggleSelectedDronePinnedFromShortcut,
     moveSelectedDroneToTopFromShortcut,
     toggleSelectedDronesToDoFromShortcut,
@@ -4205,7 +4322,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setDraftNameSuggestionError,
     draftNameSuggestSeqRef,
     rightPanelTab,
-    visibleToolTabs,
     requestRightPanelTab,
     setSidebarCollapsed,
     shortcutBindings,

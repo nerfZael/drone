@@ -2,8 +2,9 @@ export type ShortcutActionId =
   | 'openHome'
   | 'createDraftDrone'
   | 'createDraftGroup'
-  | 'createChildDraftDrone'
+  | 'createDraftDroneInCurrentGroup'
   | 'createDroneChat'
+  | 'cloneDroneChat'
   | 'toggleSelectedDronePinned'
   | 'moveSelectedDroneToTop'
   | 'toggleSelectedDronesToDo'
@@ -51,8 +52,8 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   },
   {
     id: 'createDraftDrone',
-    label: 'Create new drone',
-    description: 'Opens the quick single-drone composer.',
+    label: 'Create root drone',
+    description: 'Opens the new-drone composer at the root of the current repository.',
   },
   {
     id: 'createDraftGroup',
@@ -60,14 +61,19 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     description: 'Creates a temporary untitled group at the top of the sidebar for inline naming.',
   },
   {
-    id: 'createChildDraftDrone',
-    label: 'Create child drone',
-    description: 'Opens the quick single-drone composer as a child of the selected drone.',
+    id: 'createDraftDroneInCurrentGroup',
+    label: 'Create drone in current group',
+    description: 'Opens the new-drone composer in the selected drone\'s group.',
   },
   {
     id: 'createDroneChat',
-    label: 'Create new chat',
-    description: 'Creates a new chat on the selected drone, opens it immediately, and focuses the composer.',
+    label: 'Create draft chat',
+    description: 'Creates a draft chat on the selected drone and focuses its composer.',
+  },
+  {
+    id: 'cloneDroneChat',
+    label: 'Clone current chat',
+    description: 'Clones the selected drone\'s current chat and opens the clone.',
   },
   {
     id: 'toggleSelectedDronePinned',
@@ -180,8 +186,9 @@ const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   openHome: { key: 'v', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   createDraftDrone: { key: '1', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   createDraftGroup: { key: 'e', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  createChildDraftDrone: { key: '3', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  createDroneChat: { key: '2', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  createDraftDroneInCurrentGroup: { key: '2', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  createDroneChat: { key: '3', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  cloneDroneChat: { key: '4', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleSelectedDronePinned: { key: 'q', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   moveSelectedDroneToTop: { key: 'w', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleSelectedDronesToDo: null,
@@ -302,8 +309,9 @@ export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
     openHome: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openHome),
     createDraftDrone: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createDraftDrone),
     createDraftGroup: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createDraftGroup),
-    createChildDraftDrone: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createChildDraftDrone),
+    createDraftDroneInCurrentGroup: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createDraftDroneInCurrentGroup),
     createDroneChat: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createDroneChat),
+    cloneDroneChat: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.cloneDroneChat),
     toggleSelectedDronePinned: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleSelectedDronePinned),
     moveSelectedDroneToTop: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.moveSelectedDroneToTop),
     toggleSelectedDronesToDo: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleSelectedDronesToDo),

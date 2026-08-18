@@ -761,9 +761,9 @@ function migrateLegacyShortcutBindings(value: unknown): unknown {
     };
     changed = true;
   }
-  const hasCreateChildDraftDroneBinding = Object.prototype.hasOwnProperty.call(
+  const hasCreateCurrentGroupDraftDroneBinding = Object.prototype.hasOwnProperty.call(
     next,
-    'createChildDraftDrone',
+    'createDraftDroneInCurrentGroup',
   );
   const usesLegacyCreateChatShortcut = isExactShortcutBinding(next.createDroneChat, {
     key: 'q',
@@ -782,12 +782,12 @@ function migrateLegacyShortcutBindings(value: unknown): unknown {
     shift: false,
   });
   if (
-    !hasCreateChildDraftDroneBinding &&
+    !hasCreateCurrentGroupDraftDroneBinding &&
     usesLegacyCreateChatShortcut &&
     usesCurrentUnreadShortcut
   ) {
-    next.createChildDraftDrone = {
-      key: 'q',
+    next.createDraftDroneInCurrentGroup = {
+      key: '2',
       mod: false,
       ctrl: false,
       meta: false,
@@ -804,10 +804,31 @@ function migrateLegacyShortcutBindings(value: unknown): unknown {
     };
     changed = true;
   }
+  if (
+    !hasCreateCurrentGroupDraftDroneBinding &&
+    isExactShortcutBinding(next.createChildDraftDrone, {
+      key: '3',
+      mod: false,
+      ctrl: false,
+      meta: false,
+      alt: false,
+      shift: false,
+    })
+  ) {
+    next.createDraftDroneInCurrentGroup = {
+      key: '2',
+      mod: false,
+      ctrl: false,
+      meta: false,
+      alt: false,
+      shift: false,
+    };
+    changed = true;
+  }
   const currentDefaultMigrations: Array<[keyof ShortcutBindingMap, string, string]> = [
     ['createDraftDrone', 'tab', '1'],
-    ['createChildDraftDrone', 'q', '3'],
     ['createDroneChat', 'w', '2'],
+    ['createDroneChat', '2', '3'],
   ];
   for (const [actionId, previousKey, nextKey] of currentDefaultMigrations) {
     if (

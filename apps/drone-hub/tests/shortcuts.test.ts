@@ -10,7 +10,7 @@ import {
 } from '../src/droneHub/app/shortcuts';
 
 describe('shortcut defaults', () => {
-  test('uses 1/2/3 for drone creation, E for group creation, and Q/W for selected-drone organization', () => {
+  test('uses 1/2/3/4 for root drone, grouped drone, draft chat, and chat clone', () => {
     const defaults = cloneDefaultShortcutBindings();
     expect(defaults.createDraftDrone).toEqual({
       key: '1',
@@ -28,8 +28,8 @@ describe('shortcut defaults', () => {
       alt: false,
       shift: false,
     });
-    expect(defaults.createChildDraftDrone).toEqual({
-      key: '3',
+    expect(defaults.createDraftDroneInCurrentGroup).toEqual({
+      key: '2',
       mod: false,
       ctrl: false,
       meta: false,
@@ -37,7 +37,15 @@ describe('shortcut defaults', () => {
       shift: false,
     });
     expect(defaults.createDroneChat).toEqual({
-      key: '2',
+      key: '3',
+      mod: false,
+      ctrl: false,
+      meta: false,
+      alt: false,
+      shift: false,
+    });
+    expect(defaults.cloneDroneChat).toEqual({
+      key: '4',
       mod: false,
       ctrl: false,
       meta: false,

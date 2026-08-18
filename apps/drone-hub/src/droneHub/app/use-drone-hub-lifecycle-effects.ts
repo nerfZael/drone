@@ -3,7 +3,6 @@ import type { DroneSummary, PendingPrompt, TranscriptItem } from '../types';
 import type { DraftChatState, DroneErrorModalState, StartupSeedState } from './app-types';
 import type { RightPanelTab } from './app-config';
 import { isStartupSeedFresh } from './app-config';
-import { isUngroupedGroupName } from '../../domain';
 import type { ShortcutActionId, ShortcutBindingMap } from './shortcuts';
 import { SHORTCUT_DEFINITIONS, isShortcutMatch } from './shortcuts';
 import { isDroneStartingOrSeeding } from './helpers';
@@ -48,8 +47,9 @@ type UseDroneHubLifecycleEffectsArgs = {
   setDroneErrorModal: Setter<DroneErrorModalState | null>;
   openHome: () => void;
   openDraftChatComposer: (opts?: { repoPath?: string | null; group?: string | null }) => void;
-  openChildDraftChatComposer: () => boolean;
+  openCurrentGroupDraftChatComposer: () => boolean;
   createDroneChatFromShortcut: () => Promise<boolean>;
+  cloneDroneChatFromShortcut: () => Promise<boolean>;
   toggleSelectedDronePinnedFromShortcut: () => boolean;
   moveSelectedDroneToTopFromShortcut: () => boolean;
   toggleSelectedDronesToDoFromShortcut: () => boolean;
@@ -71,7 +71,6 @@ type UseDroneHubLifecycleEffectsArgs = {
   setDraftNameSuggestionError: Setter<string | null>;
   draftNameSuggestSeqRef: React.MutableRefObject<number>;
   rightPanelTab: RightPanelTab;
-  visibleToolTabs: RightPanelTab[];
   requestRightPanelTab: (tab: RightPanelTab) => void;
   setSidebarCollapsed: Setter<boolean>;
   shortcutBindings: ShortcutBindingMap;
@@ -110,8 +109,9 @@ export function useDroneHubLifecycleEffects({
   setDroneErrorModal,
   openHome,
   openDraftChatComposer,
-  openChildDraftChatComposer,
+  openCurrentGroupDraftChatComposer,
   createDroneChatFromShortcut,
+  cloneDroneChatFromShortcut,
   toggleSelectedDronePinnedFromShortcut,
   moveSelectedDroneToTopFromShortcut,
   toggleSelectedDronesToDoFromShortcut,
@@ -133,7 +133,6 @@ export function useDroneHubLifecycleEffects({
   setDraftNameSuggestionError,
   draftNameSuggestSeqRef,
   rightPanelTab,
-  visibleToolTabs,
   requestRightPanelTab,
   setSidebarCollapsed,
   shortcutBindings,
@@ -239,75 +238,17 @@ export function useDroneHubLifecycleEffects({
 
     const isSidebarHovered = (): boolean => Boolean(document.querySelector('[data-drone-sidebar-root]:hover'));
 
-    const getHoveredSidebarCreateContext = (): {
-      kind: 'repo' | 'group';
-      repoPath: string;
-      groupName: string;
-    } | null => {
-      const hovered = document.querySelector<HTMLElement>('[data-drone-sidebar-group]:hover');
-      if (!hovered) return null;
-      const kindRaw = String(hovered.dataset.droneSidebarGroupKind ?? '').trim().toLowerCase();
-      const kind: 'repo' | 'group' = kindRaw === 'repo' ? 'repo' : 'group';
-      return {
-        kind,
-        repoPath: String(hovered.dataset.droneSidebarRepoPath ?? '').trim(),
-        groupName: String(hovered.dataset.droneSidebarGroupName ?? '').trim(),
-      };
-    };
-
-    const isCanvasOpen = (): boolean => {
-      return visibleToolTabs.includes('canvas');
-    };
-
-    const focusCanvasAndCreateDraft = (event: KeyboardEvent): boolean => {
-      if (!isCanvasOpen()) return false;
-      const visibleViewports = Array.from(
-        document.querySelectorAll<HTMLElement>('[data-drone-canvas-viewport="1"]'),
-      ).filter((el) => el.getClientRects().length > 0);
-      if (visibleViewports.length === 0) return false;
-      const targetViewport = visibleViewports.find((el) => el.matches(':hover')) ?? visibleViewports[0];
-      targetViewport.focus({ preventScroll: true });
-      targetViewport.dispatchEvent(
-        new KeyboardEvent('keydown', {
-          key: event.key,
-          ctrlKey: event.ctrlKey,
-          metaKey: event.metaKey,
-          altKey: event.altKey,
-          shiftKey: event.shiftKey,
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
-      return true;
-    };
-
     const shortcutActionHandlers: Record<ShortcutActionId, (event: KeyboardEvent) => boolean> = {
       openHome: () => {
         openHome();
         return true;
       },
-      createDraftDrone: (event) => {
-        if (focusCanvasAndCreateDraft(event)) return true;
-        const hovered = getHoveredSidebarCreateContext();
-        if (!hovered) {
-          openDraftChatComposer();
-          return true;
-        }
-        if (hovered.kind === 'repo') {
-          // Explicitly pass empty path for the virtual "ungrouped repo" bucket.
-          openDraftChatComposer({ repoPath: hovered.repoPath, group: '' });
-          return true;
-        }
-        const group = isUngroupedGroupName(hovered.groupName) ? '' : hovered.groupName;
-        if (hovered.repoPath) {
-          openDraftChatComposer({ repoPath: hovered.repoPath, group });
-        } else {
-          openDraftChatComposer({ group });
-        }
+      createDraftDrone: () => {
+        openDraftChatComposer({ group: '' });
         return true;
       },
       createDraftGroup: () => requestSidebarGroupDraft(),
-      createChildDraftDrone: () => openChildDraftChatComposer(),
+      createDraftDroneInCurrentGroup: () => openCurrentGroupDraftChatComposer(),
       createDroneChat: () => {
         if (!currentDrone) return false;
         void (async () => {
@@ -315,6 +256,11 @@ export function useDroneHubLifecycleEffects({
           if (!created) return;
           focusPrimaryChatInputWithRetry();
         })();
+        return true;
+      },
+      cloneDroneChat: () => {
+        if (!currentDrone) return false;
+        void cloneDroneChatFromShortcut();
         return true;
       },
       toggleSelectedDronePinned: () => toggleSelectedDronePinnedFromShortcut(),
@@ -535,8 +481,9 @@ export function useDroneHubLifecycleEffects({
     canApplyCompanionProposal,
     openHome,
     openDraftChatComposer,
-    openChildDraftChatComposer,
+    openCurrentGroupDraftChatComposer,
     createDroneChatFromShortcut,
+    cloneDroneChatFromShortcut,
     toggleSelectedDronePinnedFromShortcut,
     moveSelectedDroneToTopFromShortcut,
     toggleSelectedDronesToDoFromShortcut,
@@ -552,7 +499,6 @@ export function useDroneHubLifecycleEffects({
     toggleVoiceClipboardRecording,
     toggleContinuousDictation,
     toggleFileDictation,
-    visibleToolTabs,
   ]);
 
   React.useEffect(() => {

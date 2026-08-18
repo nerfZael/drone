@@ -123,10 +123,10 @@ describe('editable shortcut dispatch', () => {
     ).toBe(false);
   });
 
-  test('does not allow child-drone shortcut from chat inputs', () => {
+  test('does not allow current-group drone shortcut from chat inputs', () => {
     expect(
       shouldDispatchEditableShortcutAction({
-        matchedActionId: 'createChildDraftDrone',
+        matchedActionId: 'createDraftDroneInCurrentGroup',
         targetInPrimaryChatInput: true,
         targetInCanvasMessageInput: false,
         targetInAssistantChatInput: false,
@@ -134,7 +134,7 @@ describe('editable shortcut dispatch', () => {
     ).toBe(false);
     expect(
       shouldDispatchEditableShortcutAction({
-        matchedActionId: 'createChildDraftDrone',
+        matchedActionId: 'createDraftDroneInCurrentGroup',
         targetInPrimaryChatInput: false,
         targetInCanvasMessageInput: true,
         targetInAssistantChatInput: false,

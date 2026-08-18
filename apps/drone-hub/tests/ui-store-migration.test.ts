@@ -15,6 +15,7 @@ import {
   reconcileUiPreferencesReload,
   restoreUiPreferencesFromPersistedStorage,
 } from '../src/droneHub/app/use-ui-preferences-settings';
+import { sanitizeShortcutBindings } from '../src/droneHub/app/shortcuts';
 
 describe('drone hub ui store migration', () => {
   test('does not publish store updates for equivalent normalized sidebar orders', () => {
@@ -664,7 +665,7 @@ describe('drone hub ui store migration', () => {
     expect(snapshot.sidebarNodeOrderByParent.root).toEqual(['drone:b', 'drone:a']);
   });
 
-  test('migrates former creation defaults to 1/2/3', () => {
+  test('migrates former creation defaults to 1/2/3/4', () => {
     const migrated = migrateDroneHubUiPersistedState(
       {
         shortcutBindings: {
@@ -697,7 +698,7 @@ describe('drone hub ui store migration', () => {
       12,
     );
 
-    expect(migrated.shortcutBindings).toMatchObject({
+    expect(sanitizeShortcutBindings(migrated.shortcutBindings)).toMatchObject({
       createDraftDrone: {
         key: '1',
         mod: false,
@@ -706,15 +707,16 @@ describe('drone hub ui store migration', () => {
         alt: false,
         shift: false,
       },
-      createChildDraftDrone: {
-        key: '3',
+      createDraftDroneInCurrentGroup: {
+        key: '2',
         mod: false,
         ctrl: false,
         meta: false,
         alt: false,
         shift: false,
       },
-      createDroneChat: { key: '2', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+      createDroneChat: { key: '3', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+      cloneDroneChat: { key: '4', mod: false, ctrl: false, meta: false, alt: false, shift: false },
       markSelectedDronesUnread: {
         key: 'z',
         mod: false,
@@ -723,6 +725,43 @@ describe('drone hub ui store migration', () => {
         alt: false,
         shift: false,
       },
+    });
+  });
+
+  test('migrates the immediately previous 1/2/3 defaults without changing custom bindings', () => {
+    const migratedDefaults = migrateDroneHubUiPersistedState(
+      {
+        shortcutBindings: {
+          createDraftDrone: { key: '1', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+          createChildDraftDrone: { key: '3', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+          createDroneChat: { key: '2', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+        },
+      },
+      12,
+    );
+    expect(sanitizeShortcutBindings(migratedDefaults.shortcutBindings)).toMatchObject({
+      createDraftDrone: { key: '1', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+      createDraftDroneInCurrentGroup: { key: '2', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+      createDroneChat: { key: '3', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+      cloneDroneChat: { key: '4', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+    });
+
+    const migratedCustom = migrateDroneHubUiPersistedState(
+      {
+        shortcutBindings: {
+          createDraftDrone: { key: 'h', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+          createDraftDroneInCurrentGroup: { key: 'j', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+          createDroneChat: { key: 'k', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+          cloneDroneChat: { key: 'l', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+        },
+      },
+      12,
+    );
+    expect(sanitizeShortcutBindings(migratedCustom.shortcutBindings)).toMatchObject({
+      createDraftDrone: { key: 'h' },
+      createDraftDroneInCurrentGroup: { key: 'j' },
+      createDroneChat: { key: 'k' },
+      cloneDroneChat: { key: 'l' },
     });
   });
 
