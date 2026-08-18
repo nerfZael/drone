@@ -376,7 +376,6 @@ export function DraftChatWorkspace({
         promptError={draftCreateError}
         waiting={false}
         autoFocus={
-          !draftCreating &&
           !draftAutoRenaming &&
           !draftChat.prompt &&
           visibleQueuedDraftPrompts.length === 0
@@ -384,6 +383,7 @@ export function DraftChatWorkspace({
         attachmentsEnabled
         continuousVoiceEnabled={false}
         alwaysExpanded
+        editorCtrlEnterBehavior="new-chat"
         onDraftContentChange={onDraftContentChange}
         composerLeadingControls={
           <AgentComposerPicker
@@ -431,7 +431,6 @@ export function DraftChatWorkspace({
         onSend={async (payload: ChatSendPayload, context: ChatSendContext) => {
           if (!draftChat.prompt) {
             return await onStartDraftPrompt(payload, {
-              keepComposerOpen: context.trigger === 'keyboard' && context.deliveryMode === 'queue',
               deliveryMode: context.deliveryMode,
             });
           }
@@ -454,6 +453,15 @@ export function DraftChatWorkspace({
           onSetDraftCreateError(null);
           return true;
         }}
+        onSendInNewChat={
+          !draftChat.prompt
+            ? async (payload: ChatSendPayload, context: ChatSendContext) =>
+                await onStartDraftPrompt(payload, {
+                  keepComposerOpen: true,
+                  deliveryMode: context.deliveryMode,
+                })
+            : undefined
+        }
       />
     </div>
   );

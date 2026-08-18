@@ -163,6 +163,8 @@ export type ChatInputDraftContent = {
   attachments: readonly DraftChatAttachment[];
 };
 
+export type ChatEditorCtrlEnterBehavior = 'queue' | 'new-chat';
+
 export type ChatInputProps = {
   resetKey: string;
   draftPersistenceKey?: string;
@@ -188,6 +190,7 @@ export type ChatInputProps = {
   alwaysExpanded?: boolean;
   allowSendWhileWaiting?: boolean;
   continuousVoiceEnabled?: boolean;
+  editorCtrlEnterBehavior?: ChatEditorCtrlEnterBehavior;
   onSend: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
   onSendInNewChat?: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
   onPublish?: () => Promise<boolean> | boolean;
@@ -221,6 +224,7 @@ export function ChatInput({
   alwaysExpanded = false,
   allowSendWhileWaiting = false,
   continuousVoiceEnabled = true,
+  editorCtrlEnterBehavior = 'queue',
   onSend,
   onSendInNewChat,
   onPublish,
@@ -1307,9 +1311,16 @@ export function ChatInput({
                   onChange={setDraft}
                   onSelectionChange={rememberComposerSelection}
                   onFocus={activateContinuousDictationComposer}
-                  onSendQueued={() =>
-                    sendNow({ trigger: 'keyboard', deliveryMode: 'queue' })
-                  }
+                  onSendQueued={() => {
+                    if (editorCtrlEnterBehavior === 'new-chat' && onSendInNewChat) {
+                      sendNow(
+                        { trigger: 'keyboard', deliveryMode: 'asap' },
+                        onSendInNewChat,
+                      );
+                      return;
+                    }
+                    sendNow({ trigger: 'keyboard', deliveryMode: 'queue' });
+                  }}
                   ariaLabel={`Edit message for ${droneName}`}
                 />
               </div>

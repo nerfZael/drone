@@ -28,6 +28,27 @@ describe('new drone automatic drafts', () => {
     );
   });
 
+  test('desktop reserves keep-open creation for Ctrl/Command+Enter', () => {
+    const workspaceSource = readFileSync(
+      new URL('../src/droneHub/app/DraftChatWorkspace.tsx', import.meta.url),
+      'utf8',
+    );
+    const chatInputSource = readFileSync(
+      new URL('../src/droneHub/chat/ChatInput.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(workspaceSource).toContain('editorCtrlEnterBehavior="new-chat"');
+    expect(workspaceSource).toContain('onSendInNewChat=');
+    expect(workspaceSource).toContain('keepComposerOpen: true');
+    expect(workspaceSource).not.toContain(
+      "keepComposerOpen: context.trigger === 'keyboard' && context.deliveryMode === 'queue'",
+    );
+    expect(chatInputSource).toContain(
+      "editorCtrlEnterBehavior === 'new-chat' && onSendInNewChat",
+    );
+  });
+
   test('mobile removes the header toggle and saves before leaving the new-drone screen', () => {
     const mobileRoot = new URL('../../drone-hub-mobile/src/', import.meta.url);
     const headerSource = readFileSync(new URL('shell/MeshApp.tsx', mobileRoot), 'utf8');
