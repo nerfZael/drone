@@ -21,7 +21,6 @@ import { transcribeMobileVoiceRecording } from './mobile-groq-transcription';
 import type {
   MobileMicrophoneCoordinator,
   MobileMicrophoneLease,
-  MobileMicrophoneOwner,
 } from './mobile-microphone-coordinator';
 import {
   MOBILE_GROQ_TRANSCRIPTION_MAX_BYTES,
@@ -30,6 +29,7 @@ import {
   shouldCancelMobileVoiceWhenInactive,
   type MobileVoiceRecordingStatus,
 } from './mobile-voice-transcription-model';
+import type { MobileRecordedVoiceSessionOwner } from './mobile-voice-session';
 
 const MOBILE_VOICE_RECORDING_OPTIONS = {
   ...RecordingPresets.HIGH_QUALITY,
@@ -85,6 +85,8 @@ export function useMobileChatVoiceRecorder({
 }) {
   const [status, setStatus] = React.useState<MobileVoiceRecordingStatus>('idle');
   const statusRef = React.useRef<MobileVoiceRecordingStatus>('idle');
+  const [sessionOwner, setSessionOwnerState] =
+    React.useState<MobileRecordedVoiceSessionOwner | null>(null);
   const generationRef = React.useRef(0);
   const mountedRef = React.useRef(false);
   const startPromiseRef = React.useRef<Promise<void> | null>(null);
@@ -96,7 +98,14 @@ export function useMobileChatVoiceRecorder({
 
   const setStatusValue = React.useCallback((next: MobileVoiceRecordingStatus) => {
     statusRef.current = next;
-    if (mountedRef.current) setStatus(next);
+    if (mountedRef.current) {
+      setStatus(next);
+      if (next === 'idle') setSessionOwnerState(null);
+    }
+  }, []);
+
+  const setSessionOwner = React.useCallback((owner: MobileRecordedVoiceSessionOwner) => {
+    if (mountedRef.current) setSessionOwnerState(owner);
   }, []);
 
   const deactivateRecordingMode = React.useCallback(async () => {
@@ -146,7 +155,7 @@ export function useMobileChatVoiceRecorder({
       generationRef.current += 1;
       transcribeAbortRef.current?.abort();
       transcribeAbortRef.current = null;
-      statusRef.current = 'idle';
+      setStatusValue('idle');
       const failedRecorder = recorderRef.current;
       const uri = event.uri;
       if (failedRecorder) {
@@ -160,7 +169,6 @@ export function useMobileChatVoiceRecorder({
         void releaseMicrophone();
       }
       if (mountedRef.current) {
-        setStatus('idle');
         onError(
           next.error?.trim() ||
             (next.url
@@ -227,7 +235,7 @@ export function useMobileChatVoiceRecorder({
     onError('');
   }, [onError, recorder, releaseMicrophone, setStatusValue]);
 
-  const startRecordingOperation = React.useCallback(async (owner: MobileMicrophoneOwner) => {
+  const startRecordingOperation = React.useCallback(async (owner: MobileRecordedVoiceSessionOwner) => {
     if (statusRef.current !== 'idle') return;
     const microphoneLease = microphoneCoordinator.acquire(owner);
     if (!microphoneLease) {
@@ -242,6 +250,7 @@ export function useMobileChatVoiceRecorder({
       return;
     }
     microphoneLeaseRef.current = microphoneLease;
+    setSessionOwner(owner);
     const generation = generationRef.current + 1;
     generationRef.current = generation;
     const staleUri = recordingUriRef.current;
@@ -310,9 +319,9 @@ export function useMobileChatVoiceRecorder({
       setStatusValue('idle');
       onError(error?.message ?? String(error));
     }
-  }, [microphoneCoordinator, onError, recorder, releaseMicrophone, setStatusValue]);
+  }, [microphoneCoordinator, onError, recorder, releaseMicrophone, setSessionOwner, setStatusValue]);
 
-  const startRecording = React.useCallback(async (owner: MobileMicrophoneOwner = 'single-shot') => {
+  const startRecording = React.useCallback(async (owner: MobileRecordedVoiceSessionOwner) => {
     if (startPromiseRef.current || statusRef.current !== 'idle') return false;
     const promise = startRecordingOperation(owner);
     startPromiseRef.current = promise;
@@ -422,6 +431,7 @@ export function useMobileChatVoiceRecorder({
 
   return {
     status,
+    sessionOwner,
     durationMillis: status === 'starting' || status === 'idle' ? 0 : recorderState.durationMillis,
     startRecording,
     toggleRecordingPause,

@@ -24,10 +24,7 @@ import {
 import { useMesh } from '../mesh/MeshContext';
 import { useSharedMobileChatVoiceRecorder } from './MobileChatVoiceRecorderContext';
 import { createMobileCompanionTransport } from './mobile-companion-transport';
-import {
-  mobileCompanionOwnsMicrophone,
-  resolveMobileCompanionVoiceStatus,
-} from './mobile-companion-voice-model';
+import { resolveMobileCompanionVoiceStatus } from './mobile-voice-session';
 
 export type MobileCompanionEditorTarget = {
   id: string;
@@ -83,15 +80,7 @@ const MobileCompanionContext = React.createContext<MobileCompanionContextValue |
 export function MobileCompanionProvider({ children }: { children: React.ReactNode }) {
   const mesh = useMesh();
   const voice = useSharedMobileChatVoiceRecorder();
-  const companionOwnsMicrophone = mobileCompanionOwnsMicrophone(voice.microphoneOwner);
-  const [companionVoiceSessionActive, setCompanionVoiceSessionActiveState] =
-    React.useState(false);
-  const companionVoiceSessionActiveRef = React.useRef(false);
-  const setCompanionVoiceSessionActive = React.useCallback((active: boolean) => {
-    companionVoiceSessionActiveRef.current = active;
-    setCompanionVoiceSessionActiveState(active);
-  }, []);
-  const companionVoiceActive = companionOwnsMicrophone || companionVoiceSessionActive;
+  const companionVoiceActive = voice.session.kind === 'companion';
   const controllerRef = React.useRef<CompanionClientController | null>(null);
   if (!controllerRef.current) {
     controllerRef.current = new CompanionClientController({ createId: Crypto.randomUUID });
@@ -339,8 +328,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     if (proposalExecutingRef.current) return;
     activeTargetDeviceIdRef.current = '';
     await controller.close();
-    if (companionVoiceSessionActiveRef.current) await voice.discardRecording();
-    setCompanionVoiceSessionActive(false);
+    if (voice.getSession().kind === 'companion') await voice.discardRecording();
     proposalRevisionRef.current += 1;
     proposalExecutionGenerationRef.current += 1;
     proposalRef.current = null;
@@ -351,7 +339,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     setProposalDefaultRepoPath(null);
     proposalExecutingRef.current = false;
     setProposalExecuting(false);
-  }, [controller, setCompanionVoiceSessionActive, voice.discardRecording]);
+  }, [controller, voice.discardRecording, voice.getSession]);
 
   React.useEffect(() => {
     const activeTargetDeviceId = activeTargetDeviceIdRef.current;
@@ -401,19 +389,18 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
   const toggle = React.useCallback(async () => {
     if (
       companionVoiceActive &&
-      (voice.status === 'starting' || voice.status === 'transcribing')
+      (voice.session.status === 'starting' || voice.session.status === 'transcribing')
     ) {
       return;
     }
-    if (companionVoiceActive && voice.status === 'recording') {
+    if (voice.session.kind === 'companion' && voice.session.status === 'recording') {
       const token = controller.getToken();
       const messageId = Crypto.randomUUID();
-      const audioDurationMs = voice.durationMillis;
+      const audioDurationMs = voice.session.durationMillis;
       const transcriptionStartedAt = performance.now();
       const text = await voice.stopRecordingForTranscript();
       const transcriptionMs = Math.max(0, performance.now() - transcriptionStartedAt);
       if (!controller.isCurrent(token)) return;
-      setCompanionVoiceSessionActive(false);
       if (!text.trim()) {
         controller.reportVoiceError(voice.getError());
         return;
@@ -428,9 +415,9 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       controller.fail(unavailableReason || 'Companion is unavailable.');
       return;
     }
-    if (voice.microphoneOwner || voice.status !== 'idle') {
+    if (voice.session.kind !== 'idle' || !voice.session.microphoneAvailable) {
       controller.fail(
-        voice.microphoneOwner === 'continuous'
+        voice.session.kind === 'continuous'
           ? 'Continuous voice is already using the microphone.'
           : 'A voice message is already using the microphone.',
       );
@@ -439,11 +426,9 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     activeTargetDeviceIdRef.current = activeTarget.targetDeviceId;
     voice.setError('');
     const token = controller.getToken();
-    setCompanionVoiceSessionActive(true);
-    const started = await voice.startRecording('companion');
+    const started = await voice.startCompanionRecording();
     if (!controller.isCurrent(token)) return;
     if (!started) {
-      setCompanionVoiceSessionActive(false);
       controller.reportVoiceError(
         voice.getError() || 'The microphone could not start. Check microphone and Groq settings.',
       );
@@ -454,7 +439,6 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     companionVoiceActive,
     controller,
     run,
-    setCompanionVoiceSessionActive,
     unavailableReason,
     voice,
   ]);
@@ -463,12 +447,12 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     if (
       !companionVoiceActive ||
       !voice.error.trim() ||
-      !['starting', 'recording', 'stopped', 'transcribing'].includes(voice.status)
+      !['starting', 'recording', 'stopped', 'transcribing'].includes(voice.session.status)
     ) {
       return;
     }
     controller.reportVoiceError(voice.error);
-  }, [companionVoiceActive, controller, voice.error, voice.status]);
+  }, [companionVoiceActive, controller, voice.error, voice.session.status]);
 
   React.useEffect(() => {
     if (state.status === 'cancelled' || state.status === 'error' || state.status === 'idle') {
@@ -486,18 +470,14 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       proposalExecutionGenerationRef.current += 1;
       proposalExecutingRef.current = false;
       void controller.close();
-      if (companionVoiceSessionActiveRef.current) void voice.discardRecording();
+      if (voice.getSession().kind === 'companion') void voice.discardRecording();
     },
-    [controller, voice.discardRecording],
+    [controller, voice.discardRecording, voice.getSession],
   );
 
-  const effectiveStatus = resolveMobileCompanionVoiceStatus({
-    companionStatus: state.status,
-    companionVoiceSessionActive,
-    microphoneOwner: voice.microphoneOwner,
-    voiceStatus: voice.status,
-  });
-  const effectiveDurationMillis = companionVoiceActive ? voice.durationMillis : 0;
+  const effectiveStatus = resolveMobileCompanionVoiceStatus(state.status, voice.session);
+  const effectiveDurationMillis =
+    voice.session.kind === 'companion' ? voice.session.durationMillis : 0;
 
   const value = React.useMemo<MobileCompanionContextValue>(
     () => ({

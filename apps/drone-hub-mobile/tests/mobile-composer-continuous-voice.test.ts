@@ -4,11 +4,15 @@ import { resolveMobileComposerContinuousVoiceState } from '../src/local-assistan
 describe('mobile composer continuous voice', () => {
   const activeDictation = {
     targetKey: 'drone-a:chat-a',
-    voiceTargetKey: 'drone-a:chat-a',
-    voiceStatus: 'listening' as const,
-    pendingCount: 1,
-    durationMillis: 500,
-    dictationTargetKey: 'drone-a:chat-a',
+    session: {
+      kind: 'continuous' as const,
+      mode: 'dictation' as const,
+      targetKey: 'drone-a:chat-a',
+      status: 'listening' as const,
+      pendingCount: 1,
+      durationMillis: 500,
+      microphoneAvailable: false,
+    },
   };
 
   test('describes dictation owned by the current composer', () => {
@@ -24,7 +28,7 @@ describe('mobile composer continuous voice', () => {
     expect(
       resolveMobileComposerContinuousVoiceState({
         ...activeDictation,
-        dictationTargetKey: null,
+        session: { ...activeDictation.session, mode: 'steering' },
       }),
     ).toMatchObject({ kind: 'steering', mode: 'steering', owned: true });
   });
@@ -33,8 +37,11 @@ describe('mobile composer continuous voice', () => {
     expect(
       resolveMobileComposerContinuousVoiceState({
         ...activeDictation,
-        voiceTargetKey: 'drone-b:chat-b',
-        dictationTargetKey: null,
+        session: {
+          ...activeDictation.session,
+          mode: 'steering',
+          targetKey: 'drone-b:chat-b',
+        },
       }),
     ).toMatchObject({ kind: 'elsewhere', owned: false, elsewhere: true });
   });
@@ -42,10 +49,13 @@ describe('mobile composer continuous voice', () => {
   test('keeps stopped dictation distinct from a completely idle composer', () => {
     const stopped = {
       ...activeDictation,
-      voiceTargetKey: null,
-      voiceStatus: 'idle' as const,
-      pendingCount: 0,
-      durationMillis: 0,
+      session: {
+        ...activeDictation.session,
+        status: 'idle' as const,
+        pendingCount: 0,
+        durationMillis: 0,
+        microphoneAvailable: true,
+      },
     };
     expect(resolveMobileComposerContinuousVoiceState(stopped)).toMatchObject({
       kind: 'dictation',
@@ -55,8 +65,8 @@ describe('mobile composer continuous voice', () => {
     });
     expect(
       resolveMobileComposerContinuousVoiceState({
-        ...stopped,
-        dictationTargetKey: null,
+        targetKey: stopped.targetKey,
+        session: { kind: 'idle', status: 'idle', microphoneAvailable: true },
       }),
     ).toMatchObject({ kind: 'idle', owned: false, elsewhere: false });
   });

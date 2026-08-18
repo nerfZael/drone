@@ -1,0 +1,93 @@
+import { describe, expect, test } from 'bun:test';
+import {
+  resolveMobileCompanionVoiceStatus,
+  resolveMobileVoiceSession,
+} from '../src/local-assistant/mobile-voice-session';
+
+const idleInput = {
+  recordingOwner: null,
+  recordingStatus: 'idle' as const,
+  recordingDurationMillis: 0,
+  continuousStatus: 'idle' as const,
+  continuousTargetKey: null,
+  continuousDictationTargetKey: null,
+  continuousPendingCount: 0,
+  continuousDurationMillis: 0,
+  microphoneAvailable: true,
+};
+
+describe('mobile voice session', () => {
+  test('keeps a recording owner for the complete logical session', () => {
+    const session = resolveMobileVoiceSession({
+      ...idleInput,
+      recordingOwner: 'companion',
+      recordingStatus: 'transcribing',
+      recordingDurationMillis: 1_500,
+    });
+
+    expect(session).toEqual({
+      kind: 'companion',
+      status: 'transcribing',
+      durationMillis: 1_500,
+      microphoneAvailable: true,
+    });
+    expect(resolveMobileCompanionVoiceStatus('idle', session)).toBe('transcribing');
+  });
+
+  test('does not turn another recording into Companion activity', () => {
+    const session = resolveMobileVoiceSession({
+      ...idleInput,
+      recordingOwner: 'single-shot',
+      recordingStatus: 'recording',
+    });
+
+    expect(session.kind).toBe('single-shot');
+    expect(resolveMobileCompanionVoiceStatus('idle', session)).toBe('idle');
+  });
+
+  test('normalizes paused and unexpectedly stopped Companion recordings', () => {
+    const paused = resolveMobileVoiceSession({
+      ...idleInput,
+      recordingOwner: 'companion',
+      recordingStatus: 'paused',
+    });
+    const stopped = resolveMobileVoiceSession({
+      ...idleInput,
+      recordingOwner: 'companion',
+      recordingStatus: 'stopped',
+    });
+
+    expect(resolveMobileCompanionVoiceStatus('idle', paused)).toBe('recording');
+    expect(resolveMobileCompanionVoiceStatus('idle', stopped)).toBe('transcribing');
+  });
+
+  test('describes continuous mode and target in the shared snapshot', () => {
+    expect(
+      resolveMobileVoiceSession({
+        ...idleInput,
+        continuousStatus: 'listening',
+        continuousTargetKey: 'drone-a:chat-a',
+        continuousDictationTargetKey: 'drone-a:chat-a',
+        continuousPendingCount: 2,
+        continuousDurationMillis: 750,
+        microphoneAvailable: false,
+      }),
+    ).toEqual({
+      kind: 'continuous',
+      mode: 'dictation',
+      status: 'listening',
+      targetKey: 'drone-a:chat-a',
+      pendingCount: 2,
+      durationMillis: 750,
+      microphoneAvailable: false,
+    });
+  });
+
+  test('keeps physical cleanup separate from logical ownership', () => {
+    expect(resolveMobileVoiceSession({ ...idleInput, microphoneAvailable: false })).toEqual({
+      kind: 'idle',
+      status: 'idle',
+      microphoneAvailable: false,
+    });
+  });
+});
