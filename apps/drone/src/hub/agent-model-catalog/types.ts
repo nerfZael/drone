@@ -55,8 +55,6 @@ export type AgentModelCatalogRuntime = {
     timeoutMs: number,
   ): Promise<AgentCatalogCommandResult>;
   runHost(command: string, timeoutMs: number): Promise<AgentCatalogCommandResult>;
-  readHostFile(path: string): Promise<string>;
-  hostHomeDirectory(): string;
   hostModelListCommand(agentId: BuiltinAgentId): string | null;
   ensureContainerAgent?(
     agentId: BuiltinAgentId,

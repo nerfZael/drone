@@ -1,4 +1,3 @@
-import path from 'node:path';
 import { normalizeExternalModelCatalogModels } from '@drone/assistant-chat';
 
 import { agentModelCatalogAdapter, modelListCommands } from './adapters';
@@ -109,21 +108,15 @@ export class AgentModelCatalogService {
   }
 
   private async readHostCodexModelCache(): Promise<AgentModelCatalogResult['models'] | null> {
-    const candidates = Array.from(
-      new Set([
-        path.join(this.runtime.hostHomeDirectory(), '.codex', 'models_cache.json'),
-        '/root/.codex/models_cache.json',
-      ]),
-    );
-    for (const candidate of candidates) {
-      try {
-        const models = parseCodexModelCache(await this.runtime.readHostFile(candidate));
-        if (models.length > 0) return models;
-      } catch {
-        // Continue through the small, explicit fallback list.
-      }
+    const command = agentModelCatalogAdapter('codex').modelCacheCommand;
+    if (!command) return null;
+    try {
+      const result = await this.runtime.runHost(command, this.runtime.timeoutMs());
+      const models = result.code === 0 ? parseCodexModelCache(String(result.stdout ?? '')) : [];
+      return models.length > 0 ? models : null;
+    } catch {
+      return null;
     }
-    return null;
   }
 
   private readCache(key: string): AgentModelCatalogCacheEntry | null {

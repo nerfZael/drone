@@ -65,24 +65,25 @@ describe('agent model catalog', () => {
   test('uses an updated Codex cache even while the Drone Hub catalog is still fresh', async () => {
     const discoveredAt = '2026-01-01T00:00:00.000Z';
     let containerCalls = 0;
+    const hostCommands: string[] = [];
     const runtime: AgentModelCatalogRuntime = {
       async runContainer() {
         containerCalls += 1;
         return { code: 1 };
       },
-      async runHost() {
-        return { code: 1 };
+      async runHost(command) {
+        hostCommands.push(command);
+        return {
+          code: 0,
+          stdout: JSON.stringify({
+            models: [
+              { slug: 'gpt-5.6-sol', display_name: 'GPT-5.6-Sol', visibility: 'list' },
+              { slug: 'gpt-5.6-terra', display_name: 'GPT-5.6-Terra', visibility: 'list' },
+              { slug: 'gpt-5.6-luna', display_name: 'GPT-5.6-Luna', visibility: 'list' },
+            ],
+          }),
+        };
       },
-      async readHostFile() {
-        return JSON.stringify({
-          models: [
-            { slug: 'gpt-5.6-sol', display_name: 'GPT-5.6-Sol', visibility: 'list' },
-            { slug: 'gpt-5.6-terra', display_name: 'GPT-5.6-Terra', visibility: 'list' },
-            { slug: 'gpt-5.6-luna', display_name: 'GPT-5.6-Luna', visibility: 'list' },
-          ],
-        });
-      },
-      hostHomeDirectory: () => '/tmp',
       hostModelListCommand: () => null,
       timeoutMs: () => 1_000,
       now: () => Date.parse('2026-01-01T00:01:00.000Z'),
@@ -110,6 +111,9 @@ describe('agent model catalog', () => {
     ]);
     expect(result.source).toBe('live');
     expect(containerCalls).toBe(0);
+    expect(hostCommands).toHaveLength(1);
+    expect(hostCommands[0]).toContain('CODEX_HOME');
+    expect(hostCommands[0]).toContain('/dvm-data/home/.codex/models_cache.json');
   });
 
   test('uses Codex visibility and priority metadata', () => {
@@ -189,10 +193,6 @@ describe('agent model catalog', () => {
       async runHost() {
         return { code: 1 };
       },
-      async readHostFile() {
-        throw new Error('not found');
-      },
-      hostHomeDirectory: () => '/tmp',
       hostModelListCommand: () => null,
       timeoutMs: () => 1_000,
     };
@@ -238,10 +238,6 @@ describe('agent model catalog', () => {
         }
         return { code: 1 };
       },
-      async readHostFile() {
-        throw new Error('not found');
-      },
-      hostHomeDirectory: () => '/tmp',
       hostModelListCommand: () => null,
       timeoutMs: () => 1_000,
     };
@@ -287,10 +283,6 @@ describe('agent model catalog', () => {
       async runHost() {
         return { code: 1 };
       },
-      async readHostFile() {
-        throw new Error('not found');
-      },
-      hostHomeDirectory: () => '/tmp',
       hostModelListCommand: () => null,
       timeoutMs: () => 1_000,
       now: () => now,
@@ -327,10 +319,6 @@ describe('agent model catalog', () => {
       async runHost() {
         return { code: 1 };
       },
-      async readHostFile() {
-        throw new Error('not found');
-      },
-      hostHomeDirectory: () => '/tmp',
       hostModelListCommand: () => null,
       timeoutMs: () => 1_000,
     };
@@ -373,10 +361,6 @@ describe('agent model catalog', () => {
       async runHost() {
         return { code: 1, stderr: 'error' };
       },
-      async readHostFile() {
-        throw new Error('not found');
-      },
-      hostHomeDirectory: () => '/tmp',
       hostModelListCommand: () => null,
       timeoutMs: () => 1_000,
     };
@@ -409,10 +393,6 @@ describe('agent model catalog', () => {
         }
         return { code: 1 };
       },
-      async readHostFile() {
-        throw new Error('not found');
-      },
-      hostHomeDirectory: () => '/tmp',
       hostModelListCommand: () => null,
       timeoutMs: () => 1_000,
     };
