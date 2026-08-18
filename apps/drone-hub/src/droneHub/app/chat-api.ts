@@ -320,6 +320,7 @@ export async function fetchDroneChatTranscript(
   }
   qs.set('transcript', 'selected');
   qs.set('pending', 'none');
+  qs.set('transcriptMeta', '0');
   const data = await requestJson<{ ok: true; transcripts: TranscriptItem[] }>(
     `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/state?${qs.toString()}`,
   );
@@ -344,6 +345,7 @@ export async function fetchDroneChatState(
     qs.set('transcript', 'tail');
   }
   qs.set('subscriptions', 'true');
+  qs.set('transcriptMeta', '0');
   const data = await requestJson<{
     ok: true;
     chatId?: string | null;
@@ -377,6 +379,7 @@ export async function fetchDroneChatTranscriptCached(opts: {
   }
   qs.set('transcript', 'selected');
   qs.set('pending', 'none');
+  qs.set('transcriptMeta', '0');
   const url = `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/state?${qs.toString()}`;
   const headers = new Headers();
   const etag = String(opts.etag ?? '').trim();

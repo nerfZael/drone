@@ -127,6 +127,24 @@ describeSocketSuite('chat management api', () => {
     expect((listed.data?.chats ?? []).includes('review')).toBe(true);
   });
 
+  test('can omit legacy turns from chat metadata', async () => {
+    const droneId = 'drone-chat-compact-metadata';
+    await seedDrone(droneId);
+
+    const compatible = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default`,
+    );
+    expect(compatible.r.status).toBe(200);
+    expect(compatible.data?.turns).toEqual([]);
+
+    const compact = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default?turns=0`,
+    );
+    expect(compact.r.status).toBe(200);
+    expect(compact.data?.turns).toBeUndefined();
+    expect(compact.data?.agent).toBeDefined();
+  });
+
   test('marks a canonical chat read when the lifecycle projection has no chat aggregate', async () => {
     const droneId = 'canonical-chat-read';
     const now = new Date().toISOString();

@@ -136,6 +136,31 @@ export function normalizeChatLoadTelemetry(raw: unknown): Record<string, unknown
   };
 }
 
+function serializeChatLoadTelemetryForLog(
+  telemetry: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!Array.isArray(telemetry.requests)) return telemetry;
+  return {
+    ...telemetry,
+    requests: telemetry.requests.map((rawRequest) => {
+      if (!rawRequest || typeof rawRequest !== 'object' || Array.isArray(rawRequest)) {
+        return rawRequest;
+      }
+      const request = rawRequest as Record<string, unknown>;
+      const serverTiming = request.serverTiming;
+      if (!serverTiming || typeof serverTiming !== 'object' || Array.isArray(serverTiming)) {
+        return request;
+      }
+      return {
+        ...request,
+        // Console inspection truncates objects nested inside the requests array to
+        // `[Object]`. Keep the phases machine-readable in persisted hub logs.
+        serverTiming: JSON.stringify(serverTiming),
+      };
+    }),
+  };
+}
+
 export interface OperationalRouteDependencies {
   resolveDroneOrPendingForReadRef: ServiceFunction;
   loadCanonicalActiveModel: ServiceFunction;
@@ -207,7 +232,11 @@ export function registerOperationalRoutes(
       json(400, { ok: false, error: 'invalid chat load telemetry' });
       return;
     }
-    hubLog(telemetry.status === 'completed' ? 'info' : 'warn', 'chat load timing', telemetry);
+    hubLog(
+      telemetry.status === 'completed' ? 'info' : 'warn',
+      'chat load timing',
+      serializeChatLoadTelemetryForLog(telemetry),
+    );
     json(202, { ok: true });
   });
 

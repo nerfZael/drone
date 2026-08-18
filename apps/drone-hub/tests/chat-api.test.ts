@@ -166,7 +166,7 @@ describe('chat api request scopes', () => {
     );
 
     expect(urls).toEqual([
-      '/api/drones/drone%20one/chats/default/state?turn=all&tail=50&transcript=tail&subscriptions=true',
+      '/api/drones/drone%20one/chats/default/state?turn=all&tail=50&transcript=tail&subscriptions=true&transcriptMeta=0',
     ]);
     expect(result.transcripts).toHaveLength(1);
     expect(result.pending).toHaveLength(1);
@@ -185,7 +185,7 @@ describe('chat api request scopes', () => {
     );
 
     expect(urls).toEqual([
-      '/api/drones/drone-1/chats/chat%20one/state?turn=all&transcript=selected&pending=none',
+      '/api/drones/drone-1/chats/chat%20one/state?turn=all&transcript=selected&pending=none&transcriptMeta=0',
     ]);
   });
 });

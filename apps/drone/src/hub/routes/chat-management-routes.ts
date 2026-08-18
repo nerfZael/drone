@@ -7,6 +7,7 @@ import {
   chatRenameBodySchema,
 } from '../chat-route-schemas';
 import type { AgentApprovalPolicy, AgentPermissionMode, ChatAgentConfig } from '../chat-types';
+import { parseBoolParam } from '../hub-format';
 import { readJsonBody, sendJson as json } from '../hub-http';
 import { normalizeMcpChatAccessScope } from '../mcp-chat-access';
 import { parseRequestSchema } from '../request-schema';
@@ -825,6 +826,7 @@ export function createChatManagementRouteHandler(
         const chatName = decodeURIComponent(parts[4]);
         const timer = createRequestTimer();
         try {
+          const includeTurns = parseBoolParam(u.searchParams.get('turns'), true);
           const resolvedTarget = await resolveCanonicalDroneOrPendingForReadRef(droneRef);
           timer.mark('resolve');
           if (!resolvedTarget || resolvedTarget.kind === 'pending') {
@@ -892,7 +894,7 @@ export function createChatManagementRouteHandler(
               drone,
               chatEntry,
             ),
-            turns: (chatEntry as any).turns ?? [],
+            ...(includeTurns ? { turns: (chatEntry as any).turns ?? [] } : {}),
             readState,
             sessionName: hubChatSessionName(chatName || 'default'),
             createdAt: chatEntry.createdAt,

@@ -167,7 +167,7 @@ export function useChatConfigState({
     setLoadingChatInfo(true);
     setChatInfoError(null);
     fetchJson<any>(
-      `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(selectedChat)}`,
+      `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(selectedChat)}?turns=0`,
     )
       .then((data) => {
         if (!mounted) return;
