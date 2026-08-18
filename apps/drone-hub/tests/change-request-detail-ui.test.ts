@@ -20,7 +20,16 @@ describe('change request presentation', () => {
     expect(cards).toContain('<MergedChangeRequestIcon />');
     expect(cards).toContain('changeRequestStatePillClassName(status)');
     expect(cards).toContain('title={`Open ${title}`}');
+    expect(cards).toContain('getRepositoryChangeRequestByNumber(droneId, requestNumber)');
     expect(cards).not.toContain('Open in change requests');
+  });
+
+  test('loads the repository-wide change request collection for the selected drone context', () => {
+    const dock = source('../src/droneHub/changeRequests/DroneChangeRequestsDock.tsx');
+    const api = source('../src/droneHub/changeRequests/change-request-api.ts');
+
+    expect(dock).toContain('listRepositoryChangeRequests(droneId)');
+    expect(api).toContain('/api/change-requests?droneId=${encodeURIComponent(droneId)}');
   });
 
   test('keeps native review selection isolated from pull-request navigation state', () => {

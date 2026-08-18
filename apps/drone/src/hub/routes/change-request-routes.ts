@@ -1,4 +1,5 @@
 import type { ServerResponse } from 'node:http';
+import path from 'node:path';
 
 import { ChangeRequestError } from '../change-requests/change-request-error';
 import type { ChangeRequestGithubMirrorService } from '../change-requests/change-request-github-mirror-service';
@@ -52,9 +53,10 @@ export function registerChangeRequestRoutes(
     json(200, { ok: true, requests });
   });
 
-  route.get('/api/change-requests/events', ({ req, res, url }) => {
+  route.get('/api/change-requests/events', async ({ req, res, url }) => {
     const droneId = url.searchParams.get('droneId')?.trim();
     if (!droneId) throw new ChangeRequestError('droneId is required');
+    const repoRoot = await service().repositoryRootForDrone(droneId);
     openHubSseStream({
       request: req,
       response: res,
@@ -62,7 +64,13 @@ export function registerChangeRequestRoutes(
       connectedData: { ok: true, droneId, at: deps.nowIso() },
       subscribe: () =>
         deps.subscribeToChanges?.((event) => {
-          if (event.request.droneId !== droneId || res.destroyed || res.writableEnded) return;
+          if (
+            path.resolve(event.request.repoRoot) !== repoRoot ||
+            res.destroyed ||
+            res.writableEnded
+          ) {
+            return;
+          }
           deps.writeSseEvent(res, 'change_request_changed', {
             droneId: event.request.droneId,
             requestNumber: event.requestNumber,

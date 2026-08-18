@@ -13,7 +13,7 @@ import { ChangeRequestDetail } from './ChangeRequestDetail';
 import {
   changeRequestEventsUrl,
   createChangeRequest,
-  listChangeRequests,
+  listRepositoryChangeRequests,
 } from './change-request-api';
 import {
   consumeRequestedChangeRequest,
@@ -127,7 +127,7 @@ export function DroneChangeRequestsDock({
       if (!silent) setLoading(true);
       setError(null);
       try {
-        const loaded = await listChangeRequests(droneId);
+        const loaded = await listRepositoryChangeRequests(droneId);
         setRequests(loaded);
         const queuedRequestNumber = consumeRequestedChangeRequest(droneId);
         const requestedNumber = requestedNumberRef.current ?? queuedRequestNumber;

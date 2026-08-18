@@ -9,7 +9,7 @@ type RequestPayload = { ok: true; request: ChangeRequestView };
 type ChangesPayload = Pick<ChangeRequestChanges, 'counts' | 'entries' | 'revision'> & { ok: true };
 export type GithubMirrorMergeMethod = 'merge' | 'squash' | 'rebase';
 
-export function listChangeRequests(droneId: string): Promise<ChangeRequestView[]> {
+export function listRepositoryChangeRequests(droneId: string): Promise<ChangeRequestView[]> {
   return requestJson<{ ok: true; requests: ChangeRequestView[] }>(
     `/api/change-requests?droneId=${encodeURIComponent(droneId)}`,
   ).then((payload) => payload.requests);
@@ -19,7 +19,7 @@ export function changeRequestEventsUrl(droneId: string): string {
   return `/api/change-requests/events?droneId=${encodeURIComponent(droneId)}`;
 }
 
-export function getChangeRequestByNumber(
+export function getRepositoryChangeRequestByNumber(
   droneId: string,
   requestNumber: number,
 ): Promise<ChangeRequestView> {

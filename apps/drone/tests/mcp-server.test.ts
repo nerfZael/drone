@@ -322,6 +322,33 @@ describe('Drone Hub MCP principal authorization', () => {
     });
   });
 
+  test('tells assistants how to link a newly created change request in chat', async () => {
+    let createTool: { config: any; handler: (args: any) => Promise<any> } | null = null;
+    registerChangeRequestMcpTools(
+      {
+        registerTool(name: string, config: any, handler: (args: any) => Promise<any>) {
+          if (name === 'create_change_request') createTool = { config, handler };
+        },
+      } as any,
+      {
+        context: {
+          principal: { kind: 'host', tokenId: 'host', name: 'Host token' },
+        },
+        requestJson: async () => ({
+          ok: true,
+          request: { number: 42, title: 'Link this request' },
+        }),
+        toolResult: (value) => value,
+      },
+    );
+
+    expect(createTool).not.toBeNull();
+    expect(createTool!.config.description).toContain('CR #<number>');
+    const result = await createTool!.handler({ drone: 'drone-a', title: 'Link this request' });
+    expect(result.instructions).toContain('Write CR #42 in your chat response');
+    expect(result.instructions).toContain('interactive card');
+  });
+
   test('uses the stable chat id for change-request ownership', () => {
     const principal = {
       kind: 'chat' as const,

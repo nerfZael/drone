@@ -4,7 +4,7 @@ import type { ChangeRequestView } from '@drone/hub-model/change-requests';
 import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
 import {
   closeChangeRequest,
-  getChangeRequestByNumber,
+  getRepositoryChangeRequestByNumber,
   mergeChangeRequest,
 } from '../changeRequests/change-request-api';
 import { requestOpenChangeRequest } from '../changeRequests/change-request-navigation';
@@ -68,7 +68,7 @@ function LinkedChangeRequestCard({
     setRequest(null);
     setLoading(true);
     setError(null);
-    getChangeRequestByNumber(droneId, requestNumber)
+    getRepositoryChangeRequestByNumber(droneId, requestNumber)
       .then((loaded) => {
         if (!cancelled) setRequest(loaded);
       })

@@ -450,11 +450,13 @@ describe('ChangeRequestService', () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'drone-change-request-test-'));
     const origin = path.join(tempRoot, 'origin.git');
     const repoRoot = path.join(tempRoot, 'repo');
+    const unrelatedRepo = path.join(tempRoot, 'unrelated');
     const upstreamRepo = path.join(tempRoot, 'upstream');
     const storageRoot = path.join(tempRoot, 'storage');
     try {
       await run('git', ['init', '--bare', origin]);
       await run('git', ['init', '-b', 'main', repoRoot]);
+      await run('git', ['init', '-b', 'main', unrelatedRepo]);
       await git(repoRoot, ['config', 'user.name', 'Host User']);
       await git(repoRoot, ['config', 'user.email', 'host@example.test']);
       await git(repoRoot, ['remote', 'add', 'origin', origin]);
@@ -473,18 +475,21 @@ describe('ChangeRequestService', () => {
       let failedWorktreeRemove = false;
       const service = new ChangeRequestService({
         repository,
-        resolveDrone: async () => ({
-          kind: 'real',
-          id: 'drone-1',
-          drone: {
-            id: 'drone-1',
-            name: 'Test drone',
-            runtime: 'host',
-            repoPath: repoRoot,
-            repo: { baseRef: 'main' },
-            chats: { default: { id: 'chat-1' } },
-          },
-        }),
+        resolveDrone: async (ref) => {
+          const resolvedRepoPath = ref === 'unrelated-drone' ? unrelatedRepo : repoRoot;
+          return {
+            kind: 'real',
+            id: ref,
+            drone: {
+              id: ref,
+              name: ref === 'drone-1' ? 'Test drone' : ref,
+              runtime: 'host',
+              repoPath: resolvedRepoPath,
+              repo: { baseRef: 'main' },
+              chats: { default: { id: 'chat-1' } },
+            },
+          };
+        },
         withLockedDroneContainer: async () => {
           throw new Error('container access was not expected');
         },
@@ -554,9 +559,16 @@ describe('ChangeRequestService', () => {
         total: 3,
       });
       expect((await service.getByNumber(created.number, 'drone-1')).number).toBe(created.number);
-      await expect(service.getByNumber(created.number, 'another-drone')).rejects.toThrow(
+      expect((await service.getByNumber(created.number, 'sibling-drone')).number).toBe(
+        created.number,
+      );
+      expect(
+        (await service.list({ droneId: 'sibling-drone' })).map((request) => request.number),
+      ).toEqual([created.number]);
+      await expect(service.getByNumber(created.number, 'unrelated-drone')).rejects.toThrow(
         `unknown change request: #${created.number}`,
       );
+      expect(await service.list({ droneId: 'unrelated-drone' })).toEqual([]);
       expect((await service.changes(created.number)).entries.map((entry) => entry.path)).toEqual([
         'feature.txt',
         'image.bin',

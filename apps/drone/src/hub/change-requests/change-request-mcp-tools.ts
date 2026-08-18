@@ -154,7 +154,7 @@ export function registerChangeRequestMcpTools(
     {
       title: 'Create change request',
       description:
-        'Capture the current committed changes as a native DroneHub change request. This does not create a GitHub pull request.',
+        'Capture the current committed changes as a native DroneHub change request. This does not create a GitHub pull request. After creation, reference the returned number as CR #<number> in chat so DroneHub renders a linked change-request card.',
       inputSchema: {
         drone: z.string().optional(),
         chat: z.string().optional(),
@@ -183,7 +183,15 @@ export function registerChangeRequestMcpTools(
         },
         120_000,
       );
-      return toolResult(response);
+      const requestNumber = Number(response?.request?.number);
+      const reference =
+        Number.isSafeInteger(requestNumber) && requestNumber > 0
+          ? `CR #${requestNumber}`
+          : 'CR #<number>';
+      return toolResult({
+        ...response,
+        instructions: `Write ${reference} in your chat response (no URL is needed) so DroneHub renders the created change request as an interactive card.`,
+      });
     },
   );
 

@@ -24,6 +24,7 @@ describe('change request live updates', () => {
     expect(routes).toContain("'/api/change-requests/events'");
     expect(routes).toContain("'change_request_changed'");
     expect(routes).toContain('deps.subscribeToChanges?.((event) =>');
+    expect(routes).toContain('path.resolve(event.request.repoRoot) !== repoRoot');
     expect(routes).not.toContain('publishChange');
     expect(service).toContain("'change_request.updated'");
     expect(repository).toContain('change_request_event_outbox');

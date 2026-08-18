@@ -253,13 +253,27 @@ export class ChangeRequestService {
     if (!Number.isSafeInteger(number) || number <= 0) {
       throw new ChangeRequestError('change request number must be a positive integer');
     }
-    const droneId = String(droneIdRaw ?? '').trim();
-    if (!droneId) throw new ChangeRequestError('droneId is required');
+    const repoRoot = await this.repositoryRootForDrone(droneIdRaw);
     const record = this.deps.repository.getByNumber(number);
-    if (!record || record.droneId !== droneId) {
+    if (!record || path.resolve(record.repoRoot) !== repoRoot) {
       throw new ChangeRequestError(`unknown change request: #${number}`, 404, 'not_found');
     }
     return await this.view(record);
+  }
+
+  async repositoryRootForDrone(droneIdRaw: unknown): Promise<string> {
+    const droneId = String(droneIdRaw ?? '').trim();
+    if (!droneId) throw new ChangeRequestError('droneId is required');
+    const resolved = await this.deps.resolveDrone(droneId);
+    if (!resolved) {
+      throw new ChangeRequestError(`unknown drone: ${droneId}`, 404, 'drone_not_found');
+    }
+    if (resolved.kind !== 'real') {
+      throw new ChangeRequestError(`drone is still starting: ${droneId}`, 409, 'drone_starting');
+    }
+    const repoPath = String(resolved.drone?.repoPath ?? '').trim();
+    if (!repoPath) throw new ChangeRequestError('drone has no attached repository');
+    return path.resolve(await this.deps.gitTopLevel(repoPath));
   }
 
   async list(
@@ -269,8 +283,14 @@ export class ChangeRequestService {
       status?: ChangeRequestStatus;
     } = {},
   ): Promise<ChangeRequestView[]> {
+    const repoRoot = filters.droneId ? await this.repositoryRootForDrone(filters.droneId) : null;
+    const records = this.deps.repository.list({
+      ...(repoRoot ? {} : { droneId: filters.droneId }),
+      chatName: filters.chatName,
+      status: filters.status,
+    });
     return await mapWithConcurrency(
-      this.deps.repository.list(filters),
+      repoRoot ? records.filter((record) => path.resolve(record.repoRoot) === repoRoot) : records,
       ASSESSMENT_CONCURRENCY,
       (record) => this.view(record),
     );
