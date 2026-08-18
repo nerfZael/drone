@@ -5,6 +5,13 @@ import type { MobileVoiceRecordingStatus } from './mobile-voice-transcription-mo
 
 export type MobileRecordedVoiceSessionOwner = 'single-shot' | 'companion';
 
+export type MobileRecordedVoiceSession =
+  | { kind: 'idle'; status: 'idle' }
+  | {
+      kind: MobileRecordedVoiceSessionOwner;
+      status: Exclude<MobileVoiceRecordingStatus, 'idle'>;
+    };
+
 export type MobileVoiceSession = { microphoneAvailable: boolean } & (
   | {
       kind: 'idle';
@@ -26,8 +33,7 @@ export type MobileVoiceSession = { microphoneAvailable: boolean } & (
 );
 
 export function resolveMobileVoiceSession(input: {
-  recordingOwner: MobileRecordedVoiceSessionOwner | null;
-  recordingStatus: MobileVoiceRecordingStatus;
+  recordingSession: MobileRecordedVoiceSession;
   recordingDurationMillis: number;
   continuousStatus: MobileContinuousVoiceStatus;
   continuousTargetKey: string | null;
@@ -36,10 +42,9 @@ export function resolveMobileVoiceSession(input: {
   continuousDurationMillis: number;
   microphoneAvailable: boolean;
 }): MobileVoiceSession {
-  if (input.recordingOwner && input.recordingStatus !== 'idle') {
+  if (input.recordingSession.kind !== 'idle') {
     return {
-      kind: input.recordingOwner,
-      status: input.recordingStatus,
+      ...input.recordingSession,
       durationMillis: input.recordingDurationMillis,
       microphoneAvailable: input.microphoneAvailable,
     };
