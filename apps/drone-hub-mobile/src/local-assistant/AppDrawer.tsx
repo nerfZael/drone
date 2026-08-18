@@ -1781,8 +1781,10 @@ export function AppDrawer(props: AppDrawerProps) {
 
 function DrawerVoiceRecordingIndicator() {
   const companion = useMobileCompanion();
-  const { error, status, durationMillis, microphoneOwner, discardRecording, stopRecordingForTranscript } =
+  const { error, session, discardRecording, stopRecordingForTranscript } =
     useSharedMobileChatVoiceRecorder();
+  const status = session.kind === 'single-shot' ? session.status : ('idle' as const);
+  const durationMillis = session.kind === 'single-shot' ? session.durationMillis : 0;
   const [copying, setCopying] = React.useState(false);
   const [copyError, setCopyError] = React.useState('');
   const actionTokenRef = React.useRef(0);
@@ -1849,7 +1851,7 @@ function DrawerVoiceRecordingIndicator() {
     }
   }, [canStop, copying, stopRecordingForTranscript]);
 
-  if (!visible || microphoneOwner === 'companion' || companion.status !== 'idle') return null;
+  if (!visible || session.kind === 'companion' || companion.status !== 'idle') return null;
   return (
     <View style={styles.voiceFooter}>
       <View style={styles.voiceFooterStatus}>

@@ -7,6 +7,7 @@ import {
 import { resolveMobileComposerContinuousVoiceState } from './resolve-mobile-composer-continuous-voice-state';
 import type { useMobileContinuousDictation } from './use-mobile-continuous-dictation';
 import type { useMobileContinuousVoice } from './use-mobile-continuous-voice';
+import type { MobileVoiceSession } from './mobile-voice-session';
 
 type MobileContinuousDictation = ReturnType<typeof useMobileContinuousDictation>;
 type MobileContinuousVoice = ReturnType<typeof useMobileContinuousVoice>;
@@ -25,6 +26,7 @@ export function useMobileComposerContinuousVoice({
   onSend,
   onError,
   startBlocked,
+  session,
   continuousVoice,
   continuousDictation,
 }: {
@@ -34,6 +36,7 @@ export function useMobileComposerContinuousVoice({
   onSend: MobileComposerSend;
   onError(message: string): void;
   startBlocked: boolean;
+  session: MobileVoiceSession;
   continuousVoice: MobileContinuousVoice;
   continuousDictation: MobileContinuousDictation;
 }) {
@@ -42,25 +45,17 @@ export function useMobileComposerContinuousVoice({
   const cancelInFlightRef = React.useRef(false);
   const state = resolveMobileComposerContinuousVoiceState({
     targetKey,
-    voiceTargetKey: continuousVoice.targetKey,
-    voiceStatus: continuousVoice.status,
-    pendingCount: continuousVoice.pendingCount,
-    durationMillis: continuousVoice.durationMillis,
-    dictationTargetKey: continuousDictation.targetKey,
+    session,
   });
   const stateRef = React.useRef(state);
   stateRef.current = state;
   const lifecycleRef = React.useRef({
     targetKey,
-    voiceTargetKey: continuousVoice.targetKey,
-    voiceStatus: continuousVoice.status,
-    dictationTargetKey: continuousDictation.targetKey,
+    session,
   });
   lifecycleRef.current = {
     targetKey,
-    voiceTargetKey: continuousVoice.targetKey,
-    voiceStatus: continuousVoice.status,
-    dictationTargetKey: continuousDictation.targetKey,
+    session,
   };
 
   const actionsRef = React.useRef({
@@ -81,12 +76,15 @@ export function useMobileComposerContinuousVoice({
   const leaveTarget = React.useCallback(
     async (previousTargetKey: string, nextTargetKey: string) => {
       const current = lifecycleRef.current;
+      const continuousSession =
+        current.session.kind === 'continuous' ? current.session : null;
       const action = resolveMobileContinuousDictationNavigationAction({
         previousTargetKey,
         nextTargetKey,
-        dictationTargetKey: current.dictationTargetKey,
-        continuousVoiceTargetKey: current.voiceTargetKey,
-        continuousVoiceIdle: current.voiceStatus === 'idle',
+        dictationTargetKey:
+          continuousSession?.mode === 'dictation' ? continuousSession.targetKey : null,
+        continuousVoiceTargetKey: continuousSession?.targetKey ?? null,
+        continuousVoiceIdle: !continuousSession || continuousSession.status === 'idle',
       });
       const controls = actionsRef.current;
       controls.clearError();

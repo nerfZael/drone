@@ -1,4 +1,5 @@
 import type { MobileContinuousVoiceStatus } from './mobile-continuous-voice-lifecycle';
+import type { MobileVoiceSession } from './mobile-voice-session';
 
 type MobileComposerContinuousVoiceStateBase = {
   status: MobileContinuousVoiceStatus;
@@ -34,19 +35,18 @@ export type MobileComposerContinuousVoiceState =
 
 export function resolveMobileComposerContinuousVoiceState(input: {
   targetKey: string;
-  voiceTargetKey: string | null;
-  voiceStatus: MobileContinuousVoiceStatus;
-  pendingCount: number;
-  durationMillis: number;
-  dictationTargetKey: string | null;
+  session: MobileVoiceSession;
 }): MobileComposerContinuousVoiceState {
-  const voiceActive = input.voiceStatus !== 'idle';
-  const voiceOwned = voiceActive && input.voiceTargetKey === input.targetKey;
-  const dictationOwned = input.dictationTargetKey === input.targetKey;
+  const continuousSession = input.session.kind === 'continuous' ? input.session : null;
+  const voiceActive = Boolean(continuousSession && continuousSession.status !== 'idle');
+  const voiceOwned = Boolean(voiceActive && continuousSession?.targetKey === input.targetKey);
+  const dictationOwned = Boolean(
+    continuousSession?.mode === 'dictation' && continuousSession.targetKey === input.targetKey,
+  );
   const activity = {
-    status: input.voiceStatus,
-    pendingCount: input.pendingCount,
-    durationMillis: input.durationMillis,
+    status: continuousSession?.status ?? ('idle' as const),
+    pendingCount: continuousSession?.pendingCount ?? 0,
+    durationMillis: continuousSession?.durationMillis ?? 0,
   };
   if (dictationOwned) {
     return {
