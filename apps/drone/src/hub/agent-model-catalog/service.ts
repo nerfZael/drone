@@ -54,6 +54,29 @@ export class AgentModelCatalogService {
   async get(request: AgentModelCatalogRequest): Promise<AgentModelCatalogResult> {
     const key = cacheKey(request);
     const cached = this.readCache(key);
+    // Codex refreshes this file independently, so check it before applying the Hub cache TTL.
+    const currentCodexModels =
+      request.agentId === 'codex' ? await this.readHostCodexModelCache() : null;
+    if (currentCodexModels) {
+      if (
+        !request.forceRefresh &&
+        cached &&
+        JSON.stringify(cached.models) === JSON.stringify(currentCodexModels)
+      ) {
+        return resultFromEntry(cached, 'cache');
+      }
+      const entry: AgentModelCatalogCacheEntry = {
+        key,
+        agentId: request.agentId,
+        runtime: 'host',
+        models: currentCodexModels,
+        discoveredAt: new Date(this.runtime.now?.() ?? Date.now()).toISOString(),
+        installationFingerprint: 'host:codex-cache',
+      };
+      this.failedRefreshes.delete(key);
+      await this.remember(entry);
+      return resultFromEntry(entry, 'live');
+    }
     const now = this.runtime.now?.() ?? Date.now();
     const age = cached ? now - Date.parse(cached.discoveredAt) : Number.POSITIVE_INFINITY;
     const ttl = cached?.models.length ? SUCCESS_TTL_MS : FAILURE_TTL_MS;
@@ -83,6 +106,24 @@ export class AgentModelCatalogService {
       return resultFromEntry(cached, 'cache', true);
     }
     return this.refresh(key, request, cached);
+  }
+
+  private async readHostCodexModelCache(): Promise<AgentModelCatalogResult['models'] | null> {
+    const candidates = Array.from(
+      new Set([
+        path.join(this.runtime.hostHomeDirectory(), '.codex', 'models_cache.json'),
+        '/root/.codex/models_cache.json',
+      ]),
+    );
+    for (const candidate of candidates) {
+      try {
+        const models = parseCodexModelCache(await this.runtime.readHostFile(candidate));
+        if (models.length > 0) return models;
+      } catch {
+        // Continue through the small, explicit fallback list.
+      }
+    }
+    return null;
   }
 
   private readCache(key: string): AgentModelCatalogCacheEntry | null {
@@ -237,20 +278,6 @@ export class AgentModelCatalogService {
         }
       }
 
-      if (request.agentId === 'codex') {
-        const candidate = path.join(
-          this.runtime.hostHomeDirectory(),
-          '.codex',
-          'models_cache.json',
-        );
-        try {
-          const models = parseCodexModelCache(await this.runtime.readHostFile(candidate));
-          if (models.length > 0) return { models, installationFingerprint };
-        } catch {
-          // Fall through to the normal no-models result.
-        }
-      }
-
       return {
         models: [],
         installationFingerprint,
@@ -305,23 +332,6 @@ export class AgentModelCatalogService {
       if (result.code === 0) {
         const models = parseCodexModelCache(String(result.stdout ?? ''));
         if (models.length > 0) return { models, installationFingerprint };
-      }
-    }
-
-    if (request.agentId === 'codex') {
-      const candidates = Array.from(
-        new Set([
-          path.join(this.runtime.hostHomeDirectory(), '.codex', 'models_cache.json'),
-          '/root/.codex/models_cache.json',
-        ]),
-      );
-      for (const candidate of candidates) {
-        try {
-          const models = parseCodexModelCache(await this.runtime.readHostFile(candidate));
-          if (models.length > 0) return { models, installationFingerprint };
-        } catch {
-          // Continue through the small, explicit fallback list.
-        }
       }
     }
 
