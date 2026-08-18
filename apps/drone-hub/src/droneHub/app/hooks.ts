@@ -1,4 +1,5 @@
 import React from 'react';
+import { observeChatLoadRequest, responseTextBytes } from './chat-load-telemetry';
 
 function buildUnexpectedHtmlError(url: string): string {
   const path = String(url ?? '').trim();
@@ -161,27 +162,44 @@ export function resolvePollIntervalMs(intervalMs: number, hiddenMinMs: number = 
 }
 
 export async function fetchJson<T>(url: string): Promise<T> {
-  const r = await fetch(url);
-  const text = await r.text();
+  const observation = observeChatLoadRequest(url);
+  let r: Response;
+  let text = '';
+  let parseMs = 0;
+  try {
+    r = await fetch(url);
+    observation?.response(r);
+    text = await r.text();
+  } catch (error) {
+    observation?.fail(error);
+    throw error;
+  }
   const contentType = String(r.headers.get('content-type') ?? '').toLowerCase();
   const looksHtml = contentType.includes('text/html') || /^\s*</.test(text);
   let data: any = null;
   if (text) {
+    const parseStartedAt = performance.now();
     try {
       data = JSON.parse(text);
     } catch {
+      parseMs = performance.now() - parseStartedAt;
+      observation?.fail(new Error('invalid JSON'));
       if (looksHtml) throw new Error(buildUnexpectedHtmlError(url));
       if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
       throw new Error(`Expected JSON from ${url}, but response was not valid JSON.`);
     }
+    parseMs = performance.now() - parseStartedAt;
   }
   if (!r.ok) {
+    observation?.finish({ responseBytes: responseTextBytes(text), parseMs });
     const message = data?.error ? String(data.error) : `${r.status} ${r.statusText}`;
     throw new Error(message);
   }
   if (data == null) {
+    observation?.fail(new Error('empty response'));
     throw new Error(`Expected JSON from ${url}, but response body was empty.`);
   }
+  observation?.finish({ responseBytes: responseTextBytes(text), parseMs });
   return data as T;
 }
 

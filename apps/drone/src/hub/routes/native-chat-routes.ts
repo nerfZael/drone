@@ -12,6 +12,15 @@ export type NativeChatRouteDependencies = {
   resolveDroneOrPendingForReadRef: (
     ref: string,
   ) => Promise<{ id: string; kind?: string; drone?: any } | null>;
+  createRequestTimer?: () => {
+    mark: (name: string) => void;
+    setHeader: (res: any) => void;
+  };
+  logSlowHubRequest?: (
+    label: string,
+    timer: any,
+    meta?: Record<string, unknown>,
+  ) => void;
 };
 
 export function registerNativeChatRoutes(
@@ -58,11 +67,15 @@ export function registerNativeChatRoutes(
 
   apiRouter.post(
     '/api/drones/:droneRef/chats/:chatName/native',
-    async ({ params, url, json: respond }) => {
+    async ({ params, url, res, json: respond }) => {
+      const timer = deps.createRequestTimer?.();
+      let droneRef = '';
+      let chatName = 'default';
       try {
-        const droneRef = decodeURIComponent(params.droneRef);
-        const chatName = decodeURIComponent(params.chatName) || 'default';
+        droneRef = decodeURIComponent(params.droneRef);
+        chatName = decodeURIComponent(params.chatName) || 'default';
         const { resolved, chat, chatId } = await resolveNativeChat(droneRef, chatName);
+        timer?.mark('resolve');
         const snapshot = await deps.nativeChatLifecycle.ensure({
           id: chatId,
           droneId: resolved.id,
@@ -73,10 +86,23 @@ export function registerNativeChatRoutes(
           agentPermissionMode: chat?.agentPermissionMode,
           approvalPolicy: chat?.approvalPolicy,
         });
+        timer?.mark('ensure');
         const includeHistory = url.searchParams.get('includeHistory') === '1';
         const initialHistory = includeHistory
           ? await deps.nativeChatHistoryPage(chatId, { limit: 200 }).catch(() => undefined)
           : undefined;
+        if (includeHistory) timer?.mark('history');
+        timer?.mark('format');
+        timer?.setHeader(res);
+        if (timer) {
+          deps.logSlowHubRequest?.('native chat bootstrap', timer, {
+            droneId: resolved.id,
+            chatName,
+            includeHistory,
+            historyCount: initialHistory?.entries?.length ?? 0,
+            status: 200,
+          });
+        }
         respond(200, {
           ...snapshot,
           nativeChatId: chatId,
@@ -87,6 +113,16 @@ export function registerNativeChatRoutes(
       } catch (error: any) {
         const message = String(error?.message ?? error);
         const status = Number(error?.statusCode ?? 0) || (/unknown (drone|chat)/i.test(message) ? 404 : 400);
+        timer?.mark('error');
+        timer?.setHeader(res);
+        if (timer) {
+          deps.logSlowHubRequest?.('native chat bootstrap', timer, {
+            droneRef,
+            chatName,
+            status,
+            error: message,
+          });
+        }
         respond(status, { ok: false, error: message });
       }
     },

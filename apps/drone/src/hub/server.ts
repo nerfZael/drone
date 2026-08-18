@@ -5494,6 +5494,8 @@ async function startDroneHubApiServerWithLifecycle(
     getChatEntry,
     inferChatAgent,
     resolveDroneOrPendingForReadRef,
+    createRequestTimer,
+    logSlowHubRequest,
   });
 
   registerWhiteboardRoutes(apiRouter, {

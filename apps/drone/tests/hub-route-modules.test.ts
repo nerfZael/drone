@@ -6,6 +6,7 @@ import { createDroneLifecycleRouteHandler } from '../src/hub/routes/drone-lifecy
 import { registerFleetRoutes } from '../src/hub/routes/fleet-routes';
 import { registerGroupRoutes } from '../src/hub/routes/group-routes';
 import { registerOperationalRoutes } from '../src/hub/routes/operational-routes';
+import { registerNativeChatRoutes } from '../src/hub/routes/native-chat-routes';
 import { registerSettingsRoutes } from '../src/hub/routes/settings-routes';
 import { registerSidebarRoutes } from '../src/hub/routes/sidebar-routes';
 import { registerSystemRoutes } from '../src/hub/routes/system-routes';
@@ -250,6 +251,103 @@ describe('extracted Hub route modules', () => {
         },
       },
     ]);
+  });
+
+  test('accepts bounded chat load telemetry and writes one structured timing log', async () => {
+    const logs: any[] = [];
+    const { router, request, responses } = routeHarness({
+      version: 1,
+      navigationId: 'navigation-1',
+      source: 'chat',
+      target: { droneId: 'drone-alpha', chatName: 'default' },
+      startedAt: '2026-08-18T10:00:00.000Z',
+      durationMs: 42.25,
+      status: 'completed',
+      surface: 'transcript',
+      agentKind: 'builtin:codex',
+      runtime: 'container',
+      cacheStatus: 'miss',
+      itemCount: 4,
+      milestones: { click: 0, content_painted: 42.25, injected: 9 },
+      requests: [{
+        name: 'chat_state',
+        startMs: 3,
+        durationMs: 20,
+        fetchMs: 12,
+        bodyMs: 7,
+        parseMs: 1,
+        status: 200,
+        responseBytes: 1024,
+        outcome: 'completed',
+        serverTiming: { lifecycle: 2, rows: 5 },
+      }],
+    });
+    registerOperationalRoutes(router, {
+      resolveDroneOrPendingForReadRef: async () => null,
+      loadCanonicalActiveModel: async () => ({ drones: {} }),
+      summarizeAssistantChatIdle: () => null,
+      resolveGroqApiKeySettings: async () => ({ apiKey: null }),
+      resolveSpeechSettings: async () => ({ enabled: false, muted: true, volume: 1, voice: 'troy' }),
+      emitAssistantUiAction: () => {},
+      hubLog: (level, message, meta) => logs.push({ level, message, meta }),
+    });
+
+    expect(await request('POST', '/api/telemetry/chat-load')).toBe(true);
+    expect(responses).toEqual([{ status: 202, body: { ok: true } }]);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({
+      level: 'info',
+      message: 'chat load timing',
+      meta: {
+        navigationId: 'navigation-1',
+        durationMs: 42.3,
+        milestones: { click: 0, content_painted: 42.3 },
+        requests: [{ name: 'chat_state', serverTiming: { lifecycle: 2, rows: 5 } }],
+      },
+    });
+    expect(logs[0].meta.milestones).not.toHaveProperty('injected');
+  });
+
+  test('adds resolve, ensure, and history phases to Built-in chat bootstrap', async () => {
+    const headers = new Map<string, string>();
+    const responses: Array<{ status: number; body: any }> = [];
+    const router = new HubRouter(
+      (_res, status, body) => responses.push({ status, body }),
+      async () => null,
+    );
+    registerNativeChatRoutes(router, {
+      resolveDroneOrPendingForReadRef: async () => ({ id: 'drone-1', kind: 'real', drone: {} }),
+      getChatEntry: async () => ({ chat: { id: 'thread-1' } }),
+      inferChatAgent: () => ({ kind: 'native' }),
+      nativeChatLifecycle: { ensure: async () => ({ ok: true, threads: [] }) },
+      nativeChatHistoryPage: async () => ({
+        version: 1,
+        threadId: 'thread-1',
+        sessionId: null,
+        entries: [],
+        page: { limit: 200, beforeCursor: null, hasOlder: false },
+      }),
+      createRequestTimer: () => {
+        const phases: string[] = [];
+        return {
+          mark: (name: string) => phases.push(name),
+          setHeader: (res: any) => res.setHeader('server-timing', phases.join(',')),
+        };
+      },
+    });
+
+    expect(
+      await router.handle(
+        { method: 'POST', headers: {} } as any,
+        { setHeader: (name: string, value: string) => headers.set(name, value) } as any,
+        new URL('http://hub.test/api/drones/drone-1/chats/default/native?includeHistory=1'),
+      ),
+    ).toBe(true);
+    expect(headers.get('server-timing')).toBe('resolve,ensure,history,format');
+    expect(responses[0]).toMatchObject({
+      status: 200,
+      body: { nativeChatId: 'thread-1', initialHistory: { entries: [] } },
+    });
   });
 
   test('returns a queued speech job before GROQ synthesis finishes', async () => {

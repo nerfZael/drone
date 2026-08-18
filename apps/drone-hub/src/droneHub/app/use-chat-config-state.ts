@@ -15,6 +15,7 @@ import {
 import { isDroneStartingOrSeeding } from './helpers';
 import { fetchJson, isNotFoundError } from './hooks';
 import { useAgentModelCatalog } from './use-agent-model-catalog';
+import { markChatLoadConfigResolved, type ChatLoadSurface } from './chat-load-telemetry';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 
@@ -24,6 +25,12 @@ type UseChatConfigStateArgs = {
   droneById: Record<string, DroneSummary>;
   requestJson: RequestJsonFn;
 };
+
+function chatLoadSurfaceForAgent(agent: ChatAgentConfig | null | undefined): ChatLoadSurface {
+  if (agent?.kind === 'native') return 'native';
+  if (agent?.kind === 'custom') return 'cli';
+  return 'transcript';
+}
 
 export function useChatConfigState({
   selectedDrone,
@@ -164,14 +171,30 @@ export function useChatConfigState({
     )
       .then((data) => {
         if (!mounted) return;
-        setChatInfo(normalizeChatInfoPayload(data));
+        const nextChatInfo = normalizeChatInfoPayload(data);
+        setChatInfo(nextChatInfo);
         setChatInfoError(null);
+        markChatLoadConfigResolved(
+          { droneId: selectedDrone, chatName: selectedChat },
+          {
+            surface: chatLoadSurfaceForAgent(nextChatInfo.agent),
+            agentKind:
+              nextChatInfo.agent.kind === 'builtin'
+                ? `builtin:${nextChatInfo.agent.id}`
+                : nextChatInfo.agent.kind,
+            runtime: selectedDroneRuntime,
+          },
+        );
       })
       .catch((e: any) => {
         if (!mounted) return;
         const msg = e?.message ?? String(e);
         setChatInfo(null);
         setChatInfoError(isNotFoundError(e) ? null : msg);
+        markChatLoadConfigResolved(
+          { droneId: selectedDrone, chatName: selectedChat },
+          { surface: 'unavailable', runtime: selectedDroneRuntime, status: 'error' },
+        );
       })
       .finally(() => {
         if (!mounted) return;
@@ -189,6 +212,7 @@ export function useChatConfigState({
     selectedDroneStartupFailed,
     selectedDroneHasChatList,
     selectedDroneChatsKey,
+    selectedDroneRuntime,
   ]);
 
   const setChatAgent = React.useCallback(

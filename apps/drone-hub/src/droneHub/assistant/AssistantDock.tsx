@@ -26,6 +26,10 @@ import { assignedDroneIdsFromData } from '../app/drone-hub-dnd-utils';
 import { createCanvasChatNodeId } from '../app/app-config';
 import { chatInputDraftKeyForDroneChat } from '../app/helpers';
 import { usePendingPromptInterruption } from '../app/use-pending-prompt-interruption';
+import {
+  markChatLoadContentCommitted,
+  markChatLoadPrimaryResolved,
+} from '../app/chat-load-telemetry';
 import { clientTimeZone } from '../app/client-time-zone';
 import {
   beginLocalChatBusy,
@@ -697,8 +701,25 @@ export function AssistantDock({
           );
         }
         applySnapshot(next);
+        if (options.includeHistory) {
+          markChatLoadPrimaryResolved(
+            { droneId: nativeDroneId, chatName: nativeChatName },
+            {
+              surface: 'native',
+              status: 'completed',
+              cacheStatus: 'none',
+              itemCount: next.initialHistory?.entries?.length ?? 0,
+            },
+          );
+        }
       } catch (err: any) {
         if (!options.silent) setError(err?.message ?? String(err));
+        if (options.includeHistory) {
+          markChatLoadPrimaryResolved(
+            { droneId: nativeDroneId, chatName: nativeChatName },
+            { surface: 'native', status: 'error', cacheStatus: 'none' },
+          );
+        }
       } finally {
         if (!options.silent) setLoading(false);
       }
@@ -856,6 +877,14 @@ export function AssistantDock({
     setBootstrapHistory(null);
     void refresh({ includeHistory: true });
   }, [nativeChatName, nativeDroneId, refresh]);
+
+  React.useEffect(() => {
+    if (loading || (!snapshot && !error)) return;
+    markChatLoadContentCommitted(
+      { droneId: nativeDroneId, chatName: nativeChatName },
+      'native',
+    );
+  }, [error, loading, nativeChatName, nativeDroneId, snapshot]);
 
   React.useEffect(() => {
     let cancelled = false;

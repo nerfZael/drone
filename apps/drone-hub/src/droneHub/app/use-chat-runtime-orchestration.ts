@@ -29,6 +29,10 @@ import { beginRecordBusyKey, removeRecordKey } from './keyed-record-state';
 import { beginLocalChatBusy } from './use-drone-hub-runtime-store';
 import { usePendingPromptInterruption } from './use-pending-prompt-interruption';
 import type { QueuedPrompt } from './use-queued-prompts-state';
+import {
+  markChatLoadCacheHit,
+  markChatLoadPrimaryResolved,
+} from './chat-load-telemetry';
 
 type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
 
@@ -373,6 +377,13 @@ export function useChatRuntimeOrchestration({
     const cachedTranscript = shouldPrimeTranscriptLoading
       ? readFreshChatRuntimeCache(chatTranscriptCache, selectedChatCacheKey)
       : null;
+    if (cachedTranscript && selectedDrone && selectedChat) {
+      markChatLoadCacheHit(
+        { droneId: selectedDrone, chatName: selectedChat },
+        'transcript',
+        cachedTranscript.transcripts.length,
+      );
+    }
     resetSessionOutputState();
     setLoadingTranscript(shouldPrimeTranscriptLoading && !cachedTranscript);
     transcriptsRef.current = cachedTranscript?.transcripts ?? null;
@@ -888,6 +899,9 @@ export function useChatRuntimeOrchestration({
       busy = true;
       let keepLoading = false;
       let retrySoon = false;
+      const cacheWasVisible = Boolean(
+        readFreshChatRuntimeCache(chatTranscriptCache, selectedChatCacheKey),
+      );
       const initial = transcriptsRef.current === null && !transcriptErrorRef.current;
       if (initial && mounted) setLoadingTranscript(true);
       try {
@@ -908,6 +922,15 @@ export function useChatRuntimeOrchestration({
         );
         setTranscriptError(null);
         consecutiveTransientFailures = 0;
+        markChatLoadPrimaryResolved(
+          { droneId: selectedDrone, chatName: selectedChat },
+          {
+            surface: 'transcript',
+            status: 'completed',
+            cacheStatus: cacheWasVisible ? 'hit' : 'miss',
+            itemCount: data.transcripts.length,
+          },
+        );
       } catch (e: any) {
         if (!mounted) return;
         if (isNotFoundError(e)) {
@@ -915,6 +938,10 @@ export function useChatRuntimeOrchestration({
           setTranscripts((prev) => (Array.isArray(prev) && prev.length === 0 ? prev : []));
           setTranscriptError(null);
           consecutiveTransientFailures = 0;
+          markChatLoadPrimaryResolved(
+            { droneId: selectedDrone, chatName: selectedChat },
+            { surface: 'transcript', status: 'completed', cacheStatus: 'miss', itemCount: 0 },
+          );
         } else if (isTransientDroneStartupError(e)) {
           keepLoading = true;
           retrySoon = true;
@@ -933,6 +960,10 @@ export function useChatRuntimeOrchestration({
         } else {
           consecutiveTransientFailures = 0;
           setTranscriptError(e?.message ?? String(e));
+          markChatLoadPrimaryResolved(
+            { droneId: selectedDrone, chatName: selectedChat },
+            { surface: 'transcript', status: 'error', cacheStatus: 'miss' },
+          );
         }
       } finally {
         if (mounted && !keepLoading) setLoadingTranscript(false);
@@ -1050,6 +1081,15 @@ export function useChatRuntimeOrchestration({
           sessionOffsetRef.current = null;
           setSessionError(null);
           setSessionText((prev) => (prev === nextPlain ? prev : nextPlain));
+          markChatLoadPrimaryResolved(
+            { droneId: selectedDrone, chatName: selectedChat },
+            {
+              surface: 'cli',
+              status: 'completed',
+              cacheStatus: 'none',
+              itemCount: nextPlain ? 1 : 0,
+            },
+          );
         } else {
           if (initial) {
             qs.set('tail', '200');
@@ -1072,6 +1112,15 @@ export function useChatRuntimeOrchestration({
           if (initial) {
             sessionTextRef.current = chunkPlain;
             setSessionText(chunkPlain);
+            markChatLoadPrimaryResolved(
+              { droneId: selectedDrone, chatName: selectedChat },
+              {
+                surface: 'cli',
+                status: 'completed',
+                cacheStatus: 'none',
+                itemCount: chunkPlain ? 1 : 0,
+              },
+            );
           } else if (chunkPlain) {
             bumpCliTyping();
             setSessionText((prev) => {
@@ -1089,6 +1138,10 @@ export function useChatRuntimeOrchestration({
           setSessionError(null);
         } else {
           setSessionError(formatDroneRuntimeError(e));
+          markChatLoadPrimaryResolved(
+            { droneId: selectedDrone, chatName: selectedChat },
+            { surface: 'cli', status: 'error', cacheStatus: 'none' },
+          );
         }
       } finally {
         if (mounted && !keepLoading) setLoadingSession(false);

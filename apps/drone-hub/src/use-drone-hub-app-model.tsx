@@ -86,6 +86,7 @@ import {
   type DroneSelectionClickOptions,
 } from './droneHub/app/drone-selection-helpers';
 import { useDroneSelectionState } from './droneHub/app/use-drone-selection-state';
+import { markChatLoadSelectionCommitted } from './droneHub/app/chat-load-telemetry';
 import {
   SIDEBAR_VISIBLE_MULTI_CHAT_GROUP,
   useSidebarViewModel,
@@ -1605,6 +1606,13 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [selectDroneChatBase],
   );
+  React.useEffect(() => {
+    if (!selectedDrone) return;
+    markChatLoadSelectionCommitted({
+      droneId: selectedDrone,
+      chatName: selectedChat || 'default',
+    });
+  }, [selectedChat, selectedDrone]);
   const {
     cloneDrone,
     cloneDroneWithoutSelection,

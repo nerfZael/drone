@@ -11,6 +11,130 @@ import type { CompanionTelemetryService } from '../companion/companion-telemetry
 type ServiceFunction = (...args: any[]) => any;
 const GROQ_SPEECH_TIMEOUT_MS = 30_000;
 const GROQ_SPEECH_QUEUE_MAX_JOBS = 100;
+const CHAT_LOAD_MILESTONES = new Set([
+  'click',
+  'selection_committed',
+  'cached_content_available',
+  'config_loaded',
+  'config_failed',
+  'primary_content_loaded',
+  'primary_content_failed',
+  'content_committed',
+  'content_painted',
+  'timed_out',
+]);
+
+function boundedTelemetryText(value: unknown, maxLength: number): string {
+  const text = String(value ?? '').trim();
+  if (!text || text.length > maxLength || /[\u0000-\u001f\u007f]/.test(text)) return '';
+  return text;
+}
+
+function boundedTelemetryMs(value: unknown, max = 300_000): number | undefined {
+  const duration = Number(value);
+  if (!Number.isFinite(duration) || duration < 0 || duration > max) return undefined;
+  return Math.round(duration * 10) / 10;
+}
+
+export function normalizeChatLoadTelemetry(raw: unknown): Record<string, unknown> | null {
+  const body = raw && typeof raw === 'object' ? (raw as any) : null;
+  if (!body || body.version !== 1) return null;
+  const navigationId = boundedTelemetryText(body.navigationId, 128);
+  const droneId = boundedTelemetryText(body.target?.droneId, 160);
+  const chatName = boundedTelemetryText(body.target?.chatName, 160);
+  const durationMs = boundedTelemetryMs(body.durationMs);
+  const startedAt = boundedTelemetryText(body.startedAt, 64);
+  const source = ['drone', 'chat', 'programmatic'].includes(body.source) ? body.source : null;
+  const status = ['completed', 'error', 'superseded', 'timeout'].includes(body.status)
+    ? body.status
+    : null;
+  const surface = ['transcript', 'cli', 'native', 'unavailable'].includes(body.surface)
+    ? body.surface
+    : null;
+  if (!navigationId || !droneId || !chatName || durationMs === undefined || !source || !status) {
+    return null;
+  }
+  const milestones = Object.fromEntries(
+    Object.entries(body.milestones && typeof body.milestones === 'object' ? body.milestones : {})
+      .filter(([name]) => CHAT_LOAD_MILESTONES.has(name))
+      .flatMap(([name, value]) => {
+        const duration = boundedTelemetryMs(value);
+        return duration === undefined ? [] : [[name, duration]];
+      }),
+  );
+  const requests = (Array.isArray(body.requests) ? body.requests : [])
+    .slice(0, 24)
+    .flatMap((item: any) => {
+      const name = boundedTelemetryText(item?.name, 48);
+      const requestDurationMs = boundedTelemetryMs(item?.durationMs);
+      const startMs = boundedTelemetryMs(item?.startMs);
+      const outcome = ['completed', 'error', 'aborted'].includes(item?.outcome)
+        ? item.outcome
+        : null;
+      if (!name || requestDurationMs === undefined || startMs === undefined || !outcome) return [];
+      const serverTiming = Object.fromEntries(
+        Object.entries(
+          item?.serverTiming && typeof item.serverTiming === 'object' ? item.serverTiming : {},
+        )
+          .slice(0, 24)
+          .flatMap(([phase, value]) => {
+            const phaseName = boundedTelemetryText(phase, 48);
+            const phaseDuration = boundedTelemetryMs(value);
+            return phaseName && phaseDuration !== undefined ? [[phaseName, phaseDuration]] : [];
+          }),
+      );
+      const optionalDuration = (value: unknown) => boundedTelemetryMs(value);
+      const statusCode = Number(item?.status);
+      const responseBytes = Number(item?.responseBytes);
+      return [
+        {
+          name,
+          startMs,
+          durationMs: requestDurationMs,
+          outcome,
+          ...(optionalDuration(item?.fetchMs) !== undefined
+            ? { fetchMs: optionalDuration(item.fetchMs) }
+            : {}),
+          ...(optionalDuration(item?.bodyMs) !== undefined
+            ? { bodyMs: optionalDuration(item.bodyMs) }
+            : {}),
+          ...(optionalDuration(item?.parseMs) !== undefined
+            ? { parseMs: optionalDuration(item.parseMs) }
+            : {}),
+          ...(Number.isInteger(statusCode) && statusCode >= 100 && statusCode <= 599
+            ? { status: statusCode }
+            : {}),
+          ...(Number.isSafeInteger(responseBytes) &&
+          responseBytes >= 0 &&
+          responseBytes <= 100_000_000
+            ? { responseBytes }
+            : {}),
+          ...(Object.keys(serverTiming).length > 0 ? { serverTiming } : {}),
+        },
+      ];
+    });
+  const itemCount = Number(body.itemCount);
+  return {
+    version: 1,
+    navigationId,
+    source,
+    target: { droneId, chatName },
+    ...(startedAt ? { startedAt } : {}),
+    durationMs,
+    status,
+    ...(surface ? { surface } : {}),
+    agentKind: boundedTelemetryText(body.agentKind, 64) || null,
+    runtime: body.runtime === 'host' || body.runtime === 'container' ? body.runtime : null,
+    cacheStatus: ['hit', 'miss', 'none'].includes(body.cacheStatus)
+      ? body.cacheStatus
+      : 'none',
+    ...(Number.isSafeInteger(itemCount) && itemCount >= 0 && itemCount <= 100_000
+      ? { itemCount }
+      : {}),
+    milestones,
+    requests,
+  };
+}
 
 export interface OperationalRouteDependencies {
   resolveDroneOrPendingForReadRef: ServiceFunction;
@@ -76,6 +200,16 @@ export function registerOperationalRoutes(
       cancel: () => settle(null),
     };
   };
+
+  apiRouter.post('/api/telemetry/chat-load', async ({ readJson, json }) => {
+    const telemetry = normalizeChatLoadTelemetry(await readJson());
+    if (!telemetry) {
+      json(400, { ok: false, error: 'invalid chat load telemetry' });
+      return;
+    }
+    hubLog(telemetry.status === 'completed' ? 'info' : 'warn', 'chat load timing', telemetry);
+    json(202, { ok: true });
+  });
 
   apiRouter.post('/api/chats/idle/status', async ({ readJson, json }) => {
     const body = await readJson<any>();

@@ -1,3 +1,8 @@
+import {
+  observeChatLoadRequest,
+  responseTextBytes,
+} from './app/chat-load-telemetry';
+
 function buildUnexpectedHtmlError(url: string): string {
   const path = String(url ?? '').trim();
   if (path.startsWith('/api/')) {
@@ -8,15 +13,28 @@ function buildUnexpectedHtmlError(url: string): string {
 
 export async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
-  const r = await fetch(url, { ...init, headers });
-  const text = await r.text();
+  const observation = observeChatLoadRequest(url);
+  let r: Response;
+  let text = '';
+  let parseMs = 0;
+  try {
+    r = await fetch(url, { ...init, headers });
+    observation?.response(r);
+    text = await r.text();
+  } catch (error) {
+    observation?.fail(error);
+    throw error;
+  }
   const contentType = String(r.headers.get('content-type') ?? '').toLowerCase();
   const looksHtml = contentType.includes('text/html') || /^\s*</.test(text);
   let data: any = null;
   if (text) {
+    const parseStartedAt = performance.now();
     try {
       data = JSON.parse(text);
     } catch {
+      parseMs = performance.now() - parseStartedAt;
+      observation?.fail(new Error('invalid JSON'));
       if (looksHtml) {
         const err = new Error(buildUnexpectedHtmlError(url)) as Error & { status?: number; data?: any };
         err.status = r.status;
@@ -29,8 +47,10 @@ export async function requestJson<T>(url: string, init?: RequestInit): Promise<T
       err.status = r.status;
       throw err;
     }
+    parseMs = performance.now() - parseStartedAt;
   }
   if (!r.ok) {
+    observation?.finish({ responseBytes: responseTextBytes(text), parseMs });
     const msg =
       data?.error ??
       (Array.isArray(data?.errors) && data.errors.length > 0
@@ -44,6 +64,7 @@ export async function requestJson<T>(url: string, init?: RequestInit): Promise<T
     throw err;
   }
   if (data == null) {
+    observation?.fail(new Error('empty response'));
     const err = new Error(`Expected JSON from ${url}, but response body was empty.`) as Error & {
       status?: number;
       data?: any;
@@ -52,6 +73,7 @@ export async function requestJson<T>(url: string, init?: RequestInit): Promise<T
     err.data = data;
     throw err;
   }
+  observation?.finish({ responseBytes: responseTextBytes(text), parseMs });
   return data as T;
 }
 

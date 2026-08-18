@@ -28,6 +28,7 @@ import type { MarkdownFileReference } from '../chat/MarkdownMessage';
 import { StatusBadge } from '../overview';
 import { TypingDots } from '../overview/icons';
 import { requestJson } from '../http';
+import { markChatLoadContentCommitted } from './chat-load-telemetry';
 import type {
   AgentApprovalPolicy,
   AgentPermissionMode,
@@ -983,6 +984,33 @@ export function SelectedDroneWorkspace({
     sessionText,
     transcripts,
     visiblePendingPromptsWithStartup.length,
+  ]);
+  React.useEffect(() => {
+    const target = { droneId: currentDrone.id, chatName: activeChatName };
+    if (chatConfigPending) return;
+    if (chatConfigFailed) {
+      markChatLoadContentCommitted(target, 'unavailable');
+      return;
+    }
+    if (nativeChatActive) return;
+    if (chatUiMode === 'transcript') {
+      if (!loadingTranscript && (transcripts !== null || Boolean(transcriptError))) {
+        markChatLoadContentCommitted(target, 'transcript');
+      }
+      return;
+    }
+    if (!loadingSession) markChatLoadContentCommitted(target, 'cli');
+  }, [
+    activeChatName,
+    chatConfigFailed,
+    chatConfigPending,
+    chatUiMode,
+    currentDrone.id,
+    loadingSession,
+    loadingTranscript,
+    nativeChatActive,
+    transcriptError,
+    transcripts,
   ]);
   const [workspacePaneHeaderMode, setWorkspacePaneHeaderModeState] =
     React.useState<WorkspacePaneHeaderMode>(() => readWorkspacePaneHeaderMode());

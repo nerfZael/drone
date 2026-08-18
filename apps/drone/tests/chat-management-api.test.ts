@@ -856,6 +856,9 @@ describeSocketSuite('chat management api', () => {
       { method: 'POST' },
     );
     expect(opened.r.status).toBe(200);
+    expect(opened.r.headers.get('server-timing')).toContain('resolve;dur=');
+    expect(opened.r.headers.get('server-timing')).toContain('ensure;dur=');
+    expect(opened.r.headers.get('server-timing')).toContain('history;dur=');
     expect(opened.data?.nativeChatId).toBe(identity.data?.nativeChatId);
     expect(String(opened.data?.nativeChatId ?? '')).toMatch(/^[0-9a-f-]{36}$/i);
     expect(opened.data?.initialHistory).toEqual({

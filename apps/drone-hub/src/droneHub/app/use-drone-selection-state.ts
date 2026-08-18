@@ -11,6 +11,7 @@ import {
   type DroneSelectionClickOptions,
 } from './drone-selection-helpers';
 import type { DroneSummary } from '../types';
+import { beginChatLoadNavigation } from './chat-load-telemetry';
 
 const PENDING_SELECTED_CHAT_GRACE_MS = 5_000;
 
@@ -94,6 +95,7 @@ export function useDroneSelectionState({
   const activeRepoSelectionPending =
     activeRepoPathChanged || pendingActiveRepoPathRef.current === normalizedActiveRepoPath;
   const manualEmptySelectionRef = React.useRef(false);
+  const explicitChatSelectionRef = React.useRef(false);
   const retainedDroneIdSet = React.useMemo(
     () =>
       new Set(
@@ -186,6 +188,12 @@ export function useDroneSelectionState({
         selectionAnchorRef.current = id;
         return;
       }
+      if (!opts?.toggle && !opts?.range && !explicitChatSelectionRef.current) {
+        beginChatLoadNavigation({
+          target: { droneId: id, chatName: nextChat },
+          source: 'drone',
+        });
+      }
       setAppView('workspace');
       setHomeOpen(false);
       setSelectedGroupMultiChat(null);
@@ -238,10 +246,26 @@ export function useDroneSelectionState({
       const droneId = String(droneIdRaw ?? '').trim();
       if (!droneId) return;
       const chatName = String(chatNameRaw ?? '').trim() || 'default';
-      selectDroneCard(droneId);
-      setSelectedChat(chatName);
+      const alreadySelected =
+        selectedDrone === droneId &&
+        (String(selectedChat ?? '').trim() || 'default') === chatName &&
+        !homeOpen &&
+        !draftChat;
+      if (!alreadySelected) {
+        beginChatLoadNavigation({
+          target: { droneId, chatName },
+          source: 'chat',
+        });
+      }
+      explicitChatSelectionRef.current = true;
+      try {
+        selectDroneCard(droneId);
+        setSelectedChat(chatName);
+      } finally {
+        explicitChatSelectionRef.current = false;
+      }
     },
-    [selectDroneCard, setSelectedChat],
+    [draftChat, homeOpen, selectDroneCard, selectedChat, selectedDrone, setSelectedChat],
   );
 
   const setDroneSelectionFromSidebarFolder = React.useCallback(
