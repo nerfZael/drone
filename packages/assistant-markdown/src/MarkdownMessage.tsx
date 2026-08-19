@@ -551,6 +551,7 @@ export type MarkdownCodeBlockRenderer = (input: {
 export type MarkdownMessageProps = {
   text: string;
   className?: string;
+  sourceLineOffset?: number;
   onOpenFileReference?: (ref: MarkdownFileReference) => void;
   onOpenLink?: (href: string) => boolean;
   textMentionLinks?: MarkdownTextMentionLink[];
@@ -768,6 +769,7 @@ type MarkdownCodeRenderContextValue = {
   renderMentionChildren: (children: React.ReactNode) => React.ReactNode;
   renderBlockCopyAction: MarkdownMessageProps['renderBlockCopyAction'];
   normalizedText: string;
+  sourceLineOffset: number | undefined;
   tableModes: Record<string, TableMode>;
   setTableMode: (tableId: string, mode: TableMode) => void;
   tableSorts: Record<string, TableSortState>;
@@ -776,6 +778,26 @@ type MarkdownCodeRenderContextValue = {
 };
 
 const MarkdownCodeRenderContext = React.createContext<MarkdownCodeRenderContextValue | null>(null);
+
+function markdownSourceRangeAttributes(node: unknown, sourceLineOffset: number | undefined) {
+  if (sourceLineOffset == null) return {};
+  const position = (node as {
+    position?: {
+      start?: { line?: number };
+      end?: { line?: number };
+    };
+  } | null)?.position;
+  const startLine = Number(position?.start?.line);
+  const endLine = Number(position?.end?.line);
+  if (!Number.isInteger(startLine) || startLine <= 0) return {};
+  return {
+    'data-markdown-source-start': startLine + sourceLineOffset,
+    'data-markdown-source-end':
+      Number.isInteger(endLine) && endLine >= startLine
+        ? endLine + sourceLineOffset
+        : startLine + sourceLineOffset,
+  };
+}
 
 function StableMarkdownCode({
   children,
@@ -840,10 +862,11 @@ function StableMarkdownCode({
 
 function StableMarkdownPre({
   children,
-  node: _node,
+  node,
   ...props
 }: React.ComponentProps<'pre'> & { node?: unknown }) {
   const context = React.useContext(MarkdownCodeRenderContext);
+  const sourceRange = markdownSourceRangeAttributes(node, context?.sourceLineOffset);
   const childList = React.Children.toArray(children);
   const onlyChild = childList.length === 1 ? childList[0] : null;
   if (
@@ -851,10 +874,14 @@ function StableMarkdownPre({
     (context?.renderCodeBlock ||
       (onlyChild.props as Record<string, unknown>)['data-markdown-code-block'] === true)
   ) {
-    return <div className="dh-markdown-block dh-markdown-block--wide">{onlyChild}</div>;
+    return (
+      <div className="dh-markdown-block dh-markdown-block--wide" {...sourceRange}>
+        {onlyChild}
+      </div>
+    );
   }
   return (
-    <div className="dh-markdown-block dh-markdown-block--wide">
+    <div className="dh-markdown-block dh-markdown-block--wide" {...sourceRange}>
       <pre {...props}>{children}</pre>
     </div>
   );
@@ -863,14 +890,22 @@ function StableMarkdownPre({
 type MarkdownElementProps<Tag extends keyof React.JSX.IntrinsicElements> =
   React.ComponentProps<Tag> & { node?: unknown };
 
-function StableMarkdownParagraph({ children, node: _node, ...props }: MarkdownElementProps<'p'>) {
+function StableMarkdownParagraph({ children, node, ...props }: MarkdownElementProps<'p'>) {
   const context = React.useContext(MarkdownCodeRenderContext);
-  return <p {...props}>{context?.renderMentionChildren(children) ?? children}</p>;
+  return (
+    <p {...props} {...markdownSourceRangeAttributes(node, context?.sourceLineOffset)}>
+      {context?.renderMentionChildren(children) ?? children}
+    </p>
+  );
 }
 
-function StableMarkdownListItem({ children, node: _node, ...props }: MarkdownElementProps<'li'>) {
+function StableMarkdownListItem({ children, node, ...props }: MarkdownElementProps<'li'>) {
   const context = React.useContext(MarkdownCodeRenderContext);
-  return <li {...props}>{context?.renderMentionChildren(children) ?? children}</li>;
+  return (
+    <li {...props} {...markdownSourceRangeAttributes(node, context?.sourceLineOffset)}>
+      {context?.renderMentionChildren(children) ?? children}
+    </li>
+  );
 }
 
 function StableMarkdownTableCell({ children, node: _node, ...props }: MarkdownElementProps<'td'>) {
@@ -926,34 +961,58 @@ function StableMarkdownTableHeader({
   );
 }
 
-function StableMarkdownHeading1({ children, node: _node, ...props }: MarkdownElementProps<'h1'>) {
+function StableMarkdownHeading1({ children, node, ...props }: MarkdownElementProps<'h1'>) {
   const context = React.useContext(MarkdownCodeRenderContext);
-  return <h1 {...props}>{context?.renderMentionChildren(children) ?? children}</h1>;
+  return (
+    <h1 {...props} {...markdownSourceRangeAttributes(node, context?.sourceLineOffset)}>
+      {context?.renderMentionChildren(children) ?? children}
+    </h1>
+  );
 }
 
-function StableMarkdownHeading2({ children, node: _node, ...props }: MarkdownElementProps<'h2'>) {
+function StableMarkdownHeading2({ children, node, ...props }: MarkdownElementProps<'h2'>) {
   const context = React.useContext(MarkdownCodeRenderContext);
-  return <h2 {...props}>{context?.renderMentionChildren(children) ?? children}</h2>;
+  return (
+    <h2 {...props} {...markdownSourceRangeAttributes(node, context?.sourceLineOffset)}>
+      {context?.renderMentionChildren(children) ?? children}
+    </h2>
+  );
 }
 
-function StableMarkdownHeading3({ children, node: _node, ...props }: MarkdownElementProps<'h3'>) {
+function StableMarkdownHeading3({ children, node, ...props }: MarkdownElementProps<'h3'>) {
   const context = React.useContext(MarkdownCodeRenderContext);
-  return <h3 {...props}>{context?.renderMentionChildren(children) ?? children}</h3>;
+  return (
+    <h3 {...props} {...markdownSourceRangeAttributes(node, context?.sourceLineOffset)}>
+      {context?.renderMentionChildren(children) ?? children}
+    </h3>
+  );
 }
 
-function StableMarkdownHeading4({ children, node: _node, ...props }: MarkdownElementProps<'h4'>) {
+function StableMarkdownHeading4({ children, node, ...props }: MarkdownElementProps<'h4'>) {
   const context = React.useContext(MarkdownCodeRenderContext);
-  return <h4 {...props}>{context?.renderMentionChildren(children) ?? children}</h4>;
+  return (
+    <h4 {...props} {...markdownSourceRangeAttributes(node, context?.sourceLineOffset)}>
+      {context?.renderMentionChildren(children) ?? children}
+    </h4>
+  );
 }
 
-function StableMarkdownHeading5({ children, node: _node, ...props }: MarkdownElementProps<'h5'>) {
+function StableMarkdownHeading5({ children, node, ...props }: MarkdownElementProps<'h5'>) {
   const context = React.useContext(MarkdownCodeRenderContext);
-  return <h5 {...props}>{context?.renderMentionChildren(children) ?? children}</h5>;
+  return (
+    <h5 {...props} {...markdownSourceRangeAttributes(node, context?.sourceLineOffset)}>
+      {context?.renderMentionChildren(children) ?? children}
+    </h5>
+  );
 }
 
-function StableMarkdownHeading6({ children, node: _node, ...props }: MarkdownElementProps<'h6'>) {
+function StableMarkdownHeading6({ children, node, ...props }: MarkdownElementProps<'h6'>) {
   const context = React.useContext(MarkdownCodeRenderContext);
-  return <h6 {...props}>{context?.renderMentionChildren(children) ?? children}</h6>;
+  return (
+    <h6 {...props} {...markdownSourceRangeAttributes(node, context?.sourceLineOffset)}>
+      {context?.renderMentionChildren(children) ?? children}
+    </h6>
+  );
 }
 
 function StableMarkdownAnchor({
@@ -1009,7 +1068,11 @@ function StableMarkdownBlockquote({
   const kind = detectCalloutKind(children);
   const cleanedChildren = kind ? stripLeadingCalloutMarker(children) : children;
   const blockquote = (
-    <blockquote data-callout={kind ?? undefined} {...props}>
+    <blockquote
+      data-callout={kind ?? undefined}
+      {...props}
+      {...markdownSourceRangeAttributes(node, context?.sourceLineOffset)}
+    >
       {kind ? (
         <span className="dh-markdown-callout-label" aria-label={`${CALLOUT_LABEL[kind]} callout`}>
           {CALLOUT_LABEL[kind]}
@@ -1041,6 +1104,7 @@ function StableMarkdownTable({
   return (
     <MarkdownTable
       {...props}
+      {...markdownSourceRangeAttributes(node, context?.sourceLineOffset)}
       mode={mode}
       sort={sort}
       onModeChange={(nextMode) => context?.setTableMode(tableId, nextMode)}
@@ -1086,6 +1150,7 @@ const MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkBreaks];
 export function MarkdownMessage({
   text,
   className,
+  sourceLineOffset,
   onOpenFileReference,
   onOpenLink,
   textMentionLinks,
@@ -1159,6 +1224,7 @@ export function MarkdownMessage({
       renderMentionChildren,
       renderBlockCopyAction,
       normalizedText,
+      sourceLineOffset,
       tableModes,
       setTableMode,
       tableSorts,
@@ -1173,6 +1239,7 @@ export function MarkdownMessage({
       renderBlockCopyAction,
       renderCodeBlock,
       renderMentionChildren,
+      sourceLineOffset,
       setTableMode,
       setTableSort,
       tableModes,

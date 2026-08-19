@@ -3,11 +3,15 @@ export type MarkdownOutlineSection = {
   level: number;
   title: string;
   content: string;
+  headingStartLine: number;
+  headingEndLine: number;
+  contentStartLine: number;
   children: MarkdownOutlineSection[];
 };
 
 export type MarkdownOutline = {
   preamble: string;
+  preambleStartLine: number;
   sections: MarkdownOutlineSection[];
   sectionIds: string[];
 };
@@ -19,12 +23,18 @@ type HeadingMatch = {
   title: string;
 };
 
-function trimSectionContent(lines: string[]): string {
+function trimSectionContent(
+  lines: string[],
+  sourceStartIndex: number,
+): { text: string; startLine: number } {
   let start = 0;
   let end = lines.length;
   while (start < end && !lines[start]?.trim()) start += 1;
   while (end > start && !lines[end - 1]?.trim()) end -= 1;
-  return lines.slice(start, end).join('\n');
+  return {
+    text: lines.slice(start, end).join('\n'),
+    startLine: sourceStartIndex + start + 1,
+  };
 }
 
 function atxHeading(line: string): Pick<HeadingMatch, 'level' | 'title'> | null {
@@ -109,14 +119,16 @@ export function parseMarkdownOutline(rawText: string): MarkdownOutline {
   const lines = String(rawText ?? '').replace(/\r\n?/g, '\n').split('\n');
   const headings = findHeadings(lines);
   if (headings.length === 0) {
+    const preamble = trimSectionContent(lines, 0);
     return {
-      preamble: trimSectionContent(lines),
+      preamble: preamble.text,
+      preambleStartLine: preamble.startLine,
       sections: [],
       sectionIds: [],
     };
   }
 
-  const preamble = trimSectionContent(lines.slice(0, headings[0]?.line ?? 0));
+  const preamble = trimSectionContent(lines.slice(0, headings[0]?.line ?? 0), 0);
   const roots: MarkdownOutlineSection[] = [];
   const stack: MarkdownOutlineSection[] = [];
   const sectionIds: string[] = [];
@@ -125,13 +137,19 @@ export function parseMarkdownOutline(rawText: string): MarkdownOutline {
   headings.forEach((heading, index) => {
     const nextHeading = headings[index + 1];
     const id = stableHeadingId(heading, headingOccurrences);
+    const contentSourceStart = heading.endLine + 1;
+    const content = trimSectionContent(
+      lines.slice(contentSourceStart, nextHeading?.line ?? lines.length),
+      contentSourceStart,
+    );
     const section: MarkdownOutlineSection = {
       id,
       level: heading.level,
       title: heading.title || 'Untitled heading',
-      content: trimSectionContent(
-        lines.slice(heading.endLine + 1, nextHeading?.line ?? lines.length),
-      ),
+      content: content.text,
+      headingStartLine: heading.line + 1,
+      headingEndLine: heading.endLine + 1,
+      contentStartLine: content.startLine,
       children: [],
     };
 
@@ -145,5 +163,10 @@ export function parseMarkdownOutline(rawText: string): MarkdownOutline {
     sectionIds.push(id);
   });
 
-  return { preamble, sections: roots, sectionIds };
+  return {
+    preamble: preamble.text,
+    preambleStartLine: preamble.startLine,
+    sections: roots,
+    sectionIds,
+  };
 }

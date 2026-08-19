@@ -29,8 +29,12 @@ describe('markdown outline', () => {
     expect(outline.sections).toHaveLength(2);
     expect(outline.sections[0]?.title).toBe('Alpha');
     expect(outline.sections[0]?.content).toBe('Alpha intro.');
+    expect(outline.sections[0]?.headingStartLine).toBe(3);
+    expect(outline.sections[0]?.contentStartLine).toBe(5);
     expect(outline.sections[0]?.children[0]?.title).toBe('Child');
     expect(outline.sections[0]?.children[0]?.content).toBe('Child content.');
+    expect(outline.sections[0]?.children[0]?.headingStartLine).toBe(7);
+    expect(outline.sections[0]?.children[0]?.contentStartLine).toBe(9);
     expect(outline.sections[1]?.title).toBe('Beta');
   });
 
@@ -75,12 +79,16 @@ describe('markdown outline', () => {
     expect(html).not.toContain('>Collapse all</button>');
     expect(html).toContain('aria-expanded="true"');
     expect(html).not.toContain('<svg');
-    expect(html).toContain('<h1 class="dh-markdown-outline__heading"><button');
-    expect(html).toContain('<h2 class="dh-markdown-outline__heading"><button');
+    expect(html).toMatch(/<h1 class="dh-markdown-outline__heading"[^>]*><button/);
+    expect(html).toMatch(/<h2 class="dh-markdown-outline__heading"[^>]*><button/);
     expect(html).toContain('>Alpha</span></button></h1>');
     expect(html).toContain('Alpha content.');
     expect(html).toContain('>Child</');
     expect(html).toContain('Child content.');
+    expect(html).toContain('data-markdown-source-start="1"');
+    expect(html).toContain('data-markdown-source-start="3"');
+    expect(html).toContain('data-markdown-source-start="5"');
+    expect(html).toContain('data-markdown-source-start="7"');
   });
 
   test('is visually just the regular preview when there are no headings', () => {

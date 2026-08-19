@@ -2,6 +2,7 @@ export type {
   ChangeRequestActor,
   ChangeRequestAssessment,
   ChangeRequestChanges,
+  ChangeRequestCheckoutApplication,
   ChangeRequestCreateInput,
   ChangeRequestFileChange,
   ChangeRequestGithubMirrorRecord,

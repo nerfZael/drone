@@ -65,4 +65,14 @@ describe('change request presentation', () => {
     expect(api).toContain('/revisions`');
     expect(api).toContain('revision=${encodeURIComponent(revision)}');
   });
+
+  test('offers a non-committing host apply action separately from merge', () => {
+    const detail = source('../src/droneHub/changeRequests/ChangeRequestDetail.tsx');
+    const api = source('../src/droneHub/changeRequests/change-request-api.ts');
+
+    expect(detail).toContain('Apply to host');
+    expect(detail).toContain('No commit will be created and nothing will be pushed.');
+    expect(detail).toContain('applyChangeRequestToHost(request.number');
+    expect(api).toContain('/apply-to-host`');
+  });
 });

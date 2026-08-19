@@ -131,6 +131,43 @@ describe('OpenedDroneFilePanel', () => {
     expect(chatEditorSource).toContain('scrollbar: DRONE_HUB_MONACO_SCROLLBAR_OPTIONS');
   });
 
+  test('navigates and briefly highlights line-linked files in the appropriate view', () => {
+    const editorSource = readFileSync(
+      new URL('../src/droneHub/files/OpenedDroneFilePanel.tsx', import.meta.url),
+      'utf8',
+    );
+    const styles = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+
+    expect(editorSource).toContain(
+      '}, [activeFilePath, activeFileViewModeKey, fileMime, openedEditorIsText]);',
+    );
+    expect(editorSource).not.toContain(
+      '}, [activeFilePath, fileMime, fileNavigationSeq, openedEditorIsText]);',
+    );
+    expect(editorSource).toContain('openedTextModeByPathRef.current.get(activeFileViewModeKey)');
+    expect(editorSource).toContain('openedTextModeByPathRef.current.set(activeFileViewModeKey, mode)');
+    expect(editorSource).toContain("className: 'dh-editor-target-line-highlight'");
+    expect(editorSource).toContain('editor.revealPositionInCenter?.({ lineNumber: line, column })');
+    expect(editorSource).toContain('targetLine={fileTargetLine}');
+    expect(editorSource).toContain('targetNavigationSeq={fileNavigationSeq}');
+    expect(styles).toContain('.monaco-editor .dh-editor-target-line-highlight');
+    expect(styles).toContain('@keyframes dh-editor-target-line-highlight');
+    expect(styles).toContain('.dh-markdown-preview-target-line');
+
+    const markdownPreview = renderPanel(
+      makeFile({
+        path: '/work/repo/README.md',
+        name: 'README.md',
+        mime: 'text/markdown',
+        content: '# Readme\n\nTarget paragraph.',
+        targetLine: 3,
+      }),
+      true,
+    );
+    expect(markdownPreview).toContain('dh-markdown-outline');
+    expect(markdownPreview).not.toContain('Plain text editor');
+  });
+
   test('uses the tab strip as the only file header', () => {
     const html = renderPanel(makeFile({ dirty: true }), true);
 

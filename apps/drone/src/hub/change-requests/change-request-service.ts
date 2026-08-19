@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 
 import type { RunResult } from '../../host/dvm';
+import { ChangeRequestCheckoutApplier } from './change-request-checkout-applier';
 import {
   ChangeRequestDirectMerger,
   type ChangeRequestDirectMergerDependencies,
@@ -32,6 +33,7 @@ import {
 } from './change-request-snapshot-service';
 import type {
   ChangeRequestActor,
+  ChangeRequestCheckoutApplication,
   ChangeRequestChanges,
   ChangeRequestCreateInput,
   ChangeRequestFileChange,
@@ -95,6 +97,7 @@ export class ChangeRequestService {
   private readonly lifecycle: ChangeRequestLifecycle;
   private readonly snapshotService: ChangeRequestSnapshotService;
   private readonly directMerger: ChangeRequestDirectMerger;
+  private readonly checkoutApplier: ChangeRequestCheckoutApplier;
   private readonly objectStore: ChangeRequestObjectStore;
   private readonly reviewWorkspaceService: ChangeRequestReviewWorkspaceService;
 
@@ -103,6 +106,7 @@ export class ChangeRequestService {
     this.snapshotService = new ChangeRequestSnapshotService(deps);
     this.objectStore = new ChangeRequestObjectStore(deps);
     this.directMerger = new ChangeRequestDirectMerger(deps);
+    this.checkoutApplier = new ChangeRequestCheckoutApplier(deps);
     this.reviewWorkspaceService = new ChangeRequestReviewWorkspaceService(deps);
     this.lifecycle =
       deps.lifecycle ??
@@ -393,6 +397,37 @@ export class ChangeRequestService {
     });
   }
 
+  async applyToHostCheckout(
+    requestNumberRaw: unknown,
+    input: { droneId: unknown; expectedRevision?: number },
+  ): Promise<ChangeRequestCheckoutApplication> {
+    const id = this.requiredRecord(requestNumberRaw).id;
+    return await this.withLock(id, async () => {
+      const current = this.requiredOpenRecord(id);
+      const revision = this.currentRevision(current);
+      if (input.expectedRevision !== undefined && input.expectedRevision !== revision.number) {
+        throw new ChangeRequestError(
+          'The change request revision changed before it could be applied. Review the latest revision and try again.',
+          409,
+          'review_candidate_outdated',
+          { expectedRevision: input.expectedRevision, revision: revision.number },
+        );
+      }
+      const checkoutRoot = await this.repositoryRootForDrone(input.droneId);
+      if (path.resolve(current.repoRoot) !== checkoutRoot) {
+        throw new ChangeRequestError(
+          'The selected host checkout belongs to a different repository.',
+          409,
+          'checkout_repository_mismatch',
+        );
+      }
+      return await this.operationLock.withLock(`checkout:${checkoutRoot}`, async () => {
+        const receipt = await this.checkoutApplier.apply(current, revision, checkoutRoot);
+        return { ...receipt, request: await this.view(this.requiredRecord(id)) };
+      });
+    });
+  }
+
   async merge(
     requestNumberRaw: unknown,
     input: {
@@ -444,10 +479,7 @@ export class ChangeRequestService {
           { expectedRevision: input.expectedRevision, revision: revision.number },
         );
       }
-      if (
-        expectedDestinationBranch &&
-        expectedDestinationBranch !== current.destinationBranch
-      ) {
+      if (expectedDestinationBranch && expectedDestinationBranch !== current.destinationBranch) {
         throw new ChangeRequestError(
           'The destination branch changed after the reviewed candidate was prepared. Prepare and review it again before merging.',
           409,

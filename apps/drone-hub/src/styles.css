@@ -1165,6 +1165,24 @@ code, pre {
   text-underline-offset: 2px;
 }
 
+.dh-markdown-preview-target-line {
+  border-radius: 3px;
+  scroll-margin-block: 30vh;
+  animation: dh-markdown-preview-target-line 1.8s ease-out forwards;
+}
+
+@keyframes dh-markdown-preview-target-line {
+  0%, 55% {
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    box-shadow: -.35rem 0 0 color-mix(in srgb, var(--accent) 18%, transparent),
+      inset 2px 0 0 var(--accent);
+  }
+  100% {
+    background: transparent;
+    box-shadow: -.35rem 0 0 transparent, inset 2px 0 0 transparent;
+  }
+}
+
 @media (max-width: 680px) {
   .dh-markdown-outline__document {
     padding-right: 12px;
@@ -1693,6 +1711,23 @@ code, pre {
 .dh-markdown button.dh-inline-code-file-link:focus-visible code {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+.monaco-editor .dh-editor-target-line-highlight {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+  animation: dh-editor-target-line-highlight 1.8s ease-out forwards;
+}
+
+@keyframes dh-editor-target-line-highlight {
+  0%, 55% {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+  100% {
+    background: transparent;
+    box-shadow: inset 2px 0 0 transparent;
+  }
 }
 
 .dh-markdown ul,

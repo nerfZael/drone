@@ -1,5 +1,10 @@
 # Cross-checkout change requests
 
+> Implementation is specified in
+> [`change-requests-v2-implementation-plan.md`](./change-requests-v2-implementation-plan.md).
+> That plan extends this design with Hub-authoritative local-only branches and defines the destructive
+> replacement of the current experimental implementation.
+
 ## Decision
 
 Model every host checkout, container checkout, and linked Git worktree as a **repository checkout**. Creating a native change request explicitly names one source checkout and one existing authoritative destination branch.
@@ -79,9 +84,7 @@ Use one record for both a main checkout and a linked worktree:
 type RepositoryCheckout = {
   id: string;
   repositoryId: string;
-  location:
-    | { kind: 'host' }
-    | { kind: 'container'; droneId: string };
+  location: { kind: 'host' } | { kind: 'container'; droneId: string };
   path: string;
   managedByDroneHub: boolean;
 };
@@ -190,15 +193,17 @@ Merge directly inside the bare review repository without a temporary checkout or
 2. Fetch and record the latest authoritative destination SHA using host credentials.
 3. Run `git merge-tree --write-tree --name-only -z --messages <destination> <snapshot>`.
 4. Treat exit code `0` as a clean merge, `1` as a conflict, and every other exit code as an operational failure. For a conflict, parse the NUL-delimited path records, leave the CR open, and retain the messages for display; do not infer conflicts by inspecting the result tree.
-5. Create the squash commit with `git commit-tree <tree> -p <destination>` using the host identity and requested message. Create this auditable commit even when the tree is unchanged so completion still uses the same exact compare-and-swap path.
-6. Create a private merge-attempt ref so the prepared commit cannot be garbage-collected.
-7. Persist a prepared merge-attempt record containing request, revision, destination, expected destination SHA, prepared commit SHA, and actor.
-8. Push the prepared ref with `--force-with-lease=refs/heads/<branch>:<expected-sha>` and an explicit `<prepared-ref>:refs/heads/<branch>` refspec.
-9. Create the durable merged ref, mark the CR and merge attempt completed, and only then remove the temporary merge-attempt ref. Recovery performs the same promotion after an interrupted successful push.
+5. Create squash commit `M` with `git commit-tree <tree> -p <destination>` using the host identity and requested message. Its only parent must be the freshly observed destination `O`.
+6. Independently verify that `M` has exactly one parent equal to `O`, that `O` is an ancestor of `M`, and that `M` has the reviewed candidate tree.
+7. Create a private merge-attempt ref for `M` and a durable branch-history `before` ref for `O` so neither commit can be garbage-collected.
+8. Persist a prepared merge-attempt record containing request, revision, destination, expected destination SHA, prepared commit SHA, actor, and history refs.
+9. Push the prepared ref to `refs/heads/<branch>` with an ordinary non-force push. Do not use `--force`, `--force-with-lease`, a `+` refspec, branch deletion, or an arbitrary caller-supplied refspec.
+10. Read the remote branch back and require `M`, or during recovery a descendant containing `M`, before treating the push as successful.
+11. Create durable merged and branch-history `after` refs for `M`, mark the CR and merge attempt completed, and only then remove the temporary merge-attempt ref. Retain the before/after refs for audit and revert.
 
-The exact lease makes the remote update a compare-and-swap operation. A concurrent destination update fails instead of being overwritten.
+The squash shape makes the CR one auditable commit and makes reversion straightforward, but it is not the branch-safety mechanism. The parent, ancestry, tree, normal-push, and remote read-back checks prevent an unrelated commit from replacing the branch. A concurrent destination update makes the ordinary push non-fast-forward, so the remote rejects it.
 
-An explicit lease rejection is a completed concurrent-update failure. A transport error or interrupted push is inconclusive: keep the attempt and its private ref in `prepared` state until remote inspection proves whether the update happened.
+An explicit non-fast-forward rejection is a completed concurrent-update failure. A transport error or interrupted push is inconclusive: keep the attempt and its private ref in `prepared` state until remote inspection proves whether the update happened.
 
 On startup, reconcile every prepared attempt:
 
@@ -221,6 +226,24 @@ Synchronization is a separate best-effort job after merge:
 8. Record `synced`, `sync_required`, `unavailable`, or `diverged` with a clear reason and remove the temporary bundle.
 
 Any failed check leaves the checkout untouched. The user can retry synchronization after cleaning, switching, or restarting it.
+
+## Apply staged to checkout without merging
+
+Applying is a first-class alternative to authoritative merge, not a merge method. DroneHub computes
+the squash candidate against the selected checkout's exact current `HEAD`, transfers the candidate
+through the checkout adapter, preflights the complete binary delta, and applies it to the checkout's
+index and working tree. It does not create a commit, push, or move any local or remote ref, and the CR
+remains open.
+
+The target must be an authorized checkout for the same repository, attached to the CR destination
+branch, clean, and unchanged between inspection and application. After applying, `git write-tree`
+must equal the prepared candidate tree. Record a receipt containing the request revision, checkout,
+observed `HEAD`, candidate tree, paths, actor, and timestamp. Do not label this receipt as merged and
+do not infer an exact merge from a later user-authored commit unless authoritative history is verified.
+
+This is the recommended default for manual-review workflows and can be the only allowed DroneHub
+landing action on protected branches. It removes remote mutation from DroneHub's apply path; the user
+retains responsibility for any later commit and ordinary protected push.
 
 ## Runtime adapters and security boundary
 
@@ -286,7 +309,7 @@ The current implementation already has:
 - bundle capture from containers;
 - immutable revisions, source commit metadata, diffs, and file review;
 - stale and conflict assessment using `merge-tree`;
-- squash merge and exact force-with-lease pushes;
+- squash merge and exact force-with-lease pushes, which v2 replaces with verified ordinary fast-forward pushes;
 - destination locks;
 - prepared merge attempts and startup recovery;
 - host-side Git identity and credentials;
@@ -318,7 +341,7 @@ The feature is still experimental and has one user, so this change does not need
 - Source and destination with no common history: reject creation or retargeting.
 - Repository or Git object-format mismatch: reject creation, refresh, or retargeting.
 - Missing required Git or LFS objects: reject capture.
-- Destination changed during merge: fail the exact lease and reassess.
+- Destination changed during merge: let the ordinary push fail as non-fast-forward and reassess.
 - Merge conflict: leave the CR open and report paths.
 - Interrupted push or persistence: reconcile the prepared attempt on startup.
 - Dirty, switched, missing, stopped, or diverged sync checkout: keep the CR merged and report the sync state.
@@ -329,7 +352,7 @@ The feature is still experimental and has one user, so this change does not need
 1. Repository IDs, checkout discovery, registration, and catalog.
 2. Repository-level review stores and full-bundle explicit checkout capture.
 3. Worktree-free merge with prepared-attempt recovery.
-4. Host and container synchronization adapters.
+4. Host and container staged-apply and synchronization adapters.
 5. Incremental bundle optimization.
 6. Integration-chat permissions and final UX.
 7. Host-mediated LFS support only if rejecting new LFS objects proves insufficient.
@@ -342,6 +365,8 @@ Unit-test capture, review-store, merge, and synchronization services independent
 - source mutation during capture;
 - retargeting across branches with shared, diverged, and unrelated history;
 - dirty, behind, switched, and diverged destination checkouts;
+- staged apply leaves `HEAD`, refs, remote state, and CR status unchanged while producing the exact
+  candidate tree in the selected checkout index;
 - stopped containers and deleted checkouts;
 - process interruption before and after remote push;
 - shallow, partial, LFS, submodule, and non-default object-format cases;
@@ -370,6 +395,6 @@ Unit-test capture, review-store, merge, and synchronization services independent
 - [Git merge-tree](https://git-scm.com/docs/git-merge-tree) performs a real merge and writes the result as a tree without touching a checkout or index.
 - [Git commit-tree](https://git-scm.com/docs/git-commit-tree) creates the final single-parent squash commit directly from that tree.
 - [Transactional update-ref](https://git-scm.com/docs/git-update-ref) creates related private refs together while checking their expected old values.
-- [Exact force-with-lease](https://git-scm.com/docs/git-push#Documentation/git-push.txt---force-with-leaseltrefnamegtltexpectgt) updates the remote only when its branch still has the observed value.
+- [Git push](https://git-scm.com/docs/git-push) rejects a normal branch update when it is not a fast-forward.
 - [Fast-forward-only merge](https://git-scm.com/docs/git-merge#Documentation/git-merge.txt---ff-only) safely advances a follower checkout only when its history has not diverged.
 - [Git LFS](https://git-lfs.com/) stores large-file payloads outside the Git object database, requiring a separate availability policy.

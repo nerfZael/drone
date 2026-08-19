@@ -23,6 +23,7 @@ import { requestJson } from '../http';
 import { RequestOverview } from '../requests/RequestOverview';
 import { ChangeRequestGithubMirrorPanel } from './ChangeRequestGithubMirrorPanel';
 import {
+  applyChangeRequestToHost,
   closeChangeRequest,
   loadChangeRequestChanges,
   loadChangeRequestDiff,
@@ -68,6 +69,7 @@ export function ChangeRequestDetail({
 }) {
   const confirm = useAppConfirmDialog();
   const [error, setError] = React.useState<string | null>(null);
+  const [notice, setNotice] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
   const [editing, setEditing] = React.useState(false);
   const [detailTab, setDetailTab] = React.useState<'overview' | 'files'>('overview');
@@ -91,6 +93,7 @@ export function ChangeRequestDetail({
     setShowMirror(false);
     setShowHistory(false);
     setError(null);
+    setNotice(null);
     setDraftTitle(request.title);
     setDraftDescription(request.description);
     setDraftDestination(request.destinationBranch);
@@ -174,6 +177,7 @@ export function ChangeRequestDetail({
     async (action: string, operation: () => Promise<ChangeRequestView>) => {
       setBusy(action);
       setError(null);
+      setNotice(null);
       try {
         const updated = await operation();
         onChange(updated);
@@ -279,6 +283,35 @@ export function ChangeRequestDetail({
     void mutate('merge', () => mergeChangeRequest(request.number));
   }, [confirm, mutate, request.destinationBranch, request.number]);
 
+  const applyToHost = React.useCallback(async () => {
+    if (
+      !(await confirm({
+        title: 'Apply change request to host?',
+        message: `Stage the current revision in the host checkout on ${request.destinationBranch}? No commit will be created and nothing will be pushed.`,
+        confirmLabel: 'Apply to host',
+      }))
+    )
+      return;
+    setBusy('apply-to-host');
+    setError(null);
+    setNotice(null);
+    try {
+      const application = await applyChangeRequestToHost(request.number, {
+        droneId,
+        expectedRevision: request.revision,
+      });
+      setNotice(
+        application.applied
+          ? `Staged ${application.stagedFiles.length} ${application.stagedFiles.length === 1 ? 'file' : 'files'} in ${application.destinationBranch}. No commit was created or pushed.`
+          : `The reviewed changes are already present in ${application.destinationBranch}. No commit was created or pushed.`,
+      );
+    } catch (cause: unknown) {
+      setError(errorMessage(cause));
+    } finally {
+      setBusy(null);
+    }
+  }, [confirm, droneId, request.destinationBranch, request.number, request.revision]);
+
   const close = React.useCallback(async () => {
     if (
       !(await confirm({
@@ -342,6 +375,14 @@ export function ChangeRequestDetail({
           </UiToolbarButton>
           {isOpen ? (
             <>
+              <UiToolbarButton
+                size="xsmall"
+                loading={busy === 'apply-to-host'}
+                disabled={actionDisabled || !repoAttached}
+                onClick={() => void applyToHost()}
+              >
+                Apply to host
+              </UiToolbarButton>
               <UiToolbarButton
                 size="xsmall"
                 onClick={() => setEditing((value) => !value)}
@@ -503,6 +544,7 @@ export function ChangeRequestDetail({
         <UiPanelStatusStrip tone="danger">{request.lastError}</UiPanelStatusStrip>
       ) : null}
       {error ? <UiPanelStatusStrip tone="danger">{error}</UiPanelStatusStrip> : null}
+      {notice ? <UiPanelStatusStrip tone="success">{notice}</UiPanelStatusStrip> : null}
       {showMirror ? (
         <div className="border-t border-[var(--border-subtle)] px-2 pb-2">
           <ChangeRequestGithubMirrorPanel

@@ -8,6 +8,8 @@ type MarkdownOutlinePreviewProps = {
   text: string;
   onOpenLink?: (href: string) => boolean;
   expansionCommand?: MarkdownOutlineExpansionCommand | null;
+  targetLine?: number | null;
+  targetNavigationSeq?: number;
 };
 
 const HEADING_REMARK_PLUGINS = [remarkGfm];
@@ -31,6 +33,45 @@ export type MarkdownOutlineExpansionCommand = {
   action: 'collapse' | 'expand';
   sequence: number;
 };
+
+function sectionPathForLine(
+  sections: MarkdownOutlineSection[],
+  targetLine: number,
+): string[] {
+  let bestHeadingLine = -1;
+  let bestPath: string[] = [];
+  const visit = (section: MarkdownOutlineSection, parentPath: string[]) => {
+    const path = [...parentPath, section.id];
+    if (section.headingStartLine <= targetLine && section.headingStartLine > bestHeadingLine) {
+      bestHeadingLine = section.headingStartLine;
+      bestPath = path;
+    }
+    section.children.forEach((child) => visit(child, path));
+  };
+  sections.forEach((section) => visit(section, []));
+  return bestPath;
+}
+
+function previewElementForLine(root: HTMLElement, targetLine: number): HTMLElement | null {
+  let best: { element: HTMLElement; distance: number; span: number } | null = null;
+  const elements = root.querySelectorAll<HTMLElement>('[data-markdown-source-start]');
+  for (const element of elements) {
+    const start = Number(element.dataset.markdownSourceStart);
+    const end = Number(element.dataset.markdownSourceEnd ?? start);
+    if (!Number.isInteger(start) || !Number.isInteger(end)) continue;
+    const distance =
+      targetLine < start ? start - targetLine : targetLine > end ? targetLine - end : 0;
+    const span = Math.max(0, end - start);
+    if (
+      !best ||
+      distance < best.distance ||
+      (distance === best.distance && span <= best.span)
+    ) {
+      best = { element, distance, span };
+    }
+  }
+  return best?.element ?? null;
+}
 
 function ExpandArrow() {
   return (
@@ -87,7 +128,11 @@ function OutlineSection({
   const headingTag = `h${Math.min(6, Math.max(1, section.level))}` as keyof React.JSX.IntrinsicElements;
   const heading = React.createElement(
     headingTag,
-    { className: 'dh-markdown-outline__heading' },
+    {
+      className: 'dh-markdown-outline__heading',
+      'data-markdown-source-start': section.headingStartLine,
+      'data-markdown-source-end': section.headingEndLine,
+    },
     canToggle ? (
       <button
         type="button"
@@ -116,6 +161,7 @@ function OutlineSection({
           <MarkdownMessage
             text={section.content}
             className="dh-markdown--agent dh-markdown--preserve-edge-margins"
+            sourceLineOffset={section.contentStartLine - 1}
             onOpenLink={onOpenLink}
             preferOpenLinkBeforeModifiedClick
           />
@@ -143,8 +189,13 @@ export function MarkdownOutlinePreview({
   text,
   onOpenLink,
   expansionCommand,
+  targetLine,
+  targetNavigationSeq = 0,
 }: MarkdownOutlinePreviewProps) {
   const idPrefix = React.useId();
+  const previewRef = React.useRef<HTMLDivElement | null>(null);
+  const highlightedElementRef = React.useRef<HTMLElement | null>(null);
+  const highlightTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const outline = React.useMemo(() => parseMarkdownOutline(text), [text]);
   const [expandedIds, setExpandedIds] = React.useState<Set<string>>(
     () => new Set(outline.sectionIds),
@@ -155,6 +206,13 @@ export function MarkdownOutlinePreview({
     return onlyRoot && onlyRoot.children.length > 0 ? onlyRoot : null;
   }, [outline.sections]);
   const collapsibleIds = outline.sectionIds;
+  const targetSectionPath = React.useMemo(
+    () =>
+      targetLine && targetLine > 0
+        ? sectionPathForLine(outline.sections, targetLine)
+        : [],
+    [outline.sections, targetLine],
+  );
 
   React.useEffect(() => {
     const previousSectionIds = previousSectionIdsRef.current;
@@ -175,6 +233,47 @@ export function MarkdownOutlinePreview({
     );
   }, [expansionCommand?.sequence]);
 
+  React.useEffect(() => {
+    if (!targetLine || targetLine <= 0) return;
+    if (targetSectionPath.length > 0) {
+      setExpandedIds((previous) => {
+        if (targetSectionPath.every((id) => previous.has(id))) return previous;
+        const next = new Set(previous);
+        targetSectionPath.forEach((id) => next.add(id));
+        return next;
+      });
+    }
+
+    const revealTimer = window.setTimeout(() => {
+      const root = previewRef.current;
+      if (!root) return;
+      const target = previewElementForLine(root, targetLine);
+      if (!target) return;
+      highlightedElementRef.current?.classList.remove('dh-markdown-preview-target-line');
+      if (highlightTimerRef.current != null) clearTimeout(highlightTimerRef.current);
+      target.classList.remove('dh-markdown-preview-target-line');
+      void target.offsetWidth;
+      target.classList.add('dh-markdown-preview-target-line');
+      highlightedElementRef.current = target;
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      highlightTimerRef.current = setTimeout(() => {
+        target.classList.remove('dh-markdown-preview-target-line');
+        if (highlightedElementRef.current === target) highlightedElementRef.current = null;
+        highlightTimerRef.current = null;
+      }, 1_800);
+    }, 0);
+
+    return () => {
+      clearTimeout(revealTimer);
+      if (highlightTimerRef.current != null) {
+        clearTimeout(highlightTimerRef.current);
+        highlightTimerRef.current = null;
+      }
+      highlightedElementRef.current?.classList.remove('dh-markdown-preview-target-line');
+      highlightedElementRef.current = null;
+    };
+  }, [targetLine, targetNavigationSeq, targetSectionPath, text]);
+
   const toggleSection = React.useCallback((id: string) => {
     setExpandedIds((previous) => {
       const next = new Set(previous);
@@ -186,10 +285,14 @@ export function MarkdownOutlinePreview({
 
   if (outline.sections.length === 0) {
     return (
-      <div className="h-full w-full overflow-auto bg-[var(--panel-alt)] px-4 py-4">
+      <div
+        ref={previewRef}
+        className="h-full w-full overflow-auto bg-[var(--panel-alt)] px-4 py-4"
+      >
         <MarkdownMessage
           text={text}
           className="dh-markdown--agent dh-markdown--document"
+          sourceLineOffset={outline.preambleStartLine - 1}
           onOpenLink={onOpenLink}
           preferOpenLinkBeforeModifiedClick
         />
@@ -198,13 +301,14 @@ export function MarkdownOutlinePreview({
   }
 
   return (
-    <div className="dh-markdown-outline">
+    <div ref={previewRef} className="dh-markdown-outline">
       <div className="dh-markdown dh-markdown--agent dh-markdown--document dh-markdown-outline__document">
         {outline.preamble ? (
           <div className="dh-markdown-outline__preamble">
             <MarkdownMessage
               text={outline.preamble}
               className="dh-markdown--agent"
+              sourceLineOffset={outline.preambleStartLine - 1}
               onOpenLink={onOpenLink}
               preferOpenLinkBeforeModifiedClick
             />

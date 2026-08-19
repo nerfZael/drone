@@ -1,4 +1,5 @@
 import type {
+  ChangeRequestCheckoutApplication,
   ChangeRequestChanges,
   ChangeRequestRevisionView,
   ChangeRequestView,
@@ -92,6 +93,20 @@ export function mergeChangeRequest(
     actor: userActor(),
     commitMessage,
   });
+}
+
+export function applyChangeRequestToHost(
+  requestNumber: number,
+  input: { droneId: string; expectedRevision: number },
+): Promise<ChangeRequestCheckoutApplication> {
+  return requestJson<{ ok: true; application: ChangeRequestCheckoutApplication }>(
+    `${requestPath(requestNumber)}/apply-to-host`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    },
+  ).then((payload) => payload.application);
 }
 
 export function closeChangeRequest(requestNumber: number): Promise<ChangeRequestView> {

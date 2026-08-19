@@ -132,6 +132,21 @@ export type ChangeRequestChanges = {
   entries: ChangeRequestFileChange[];
 };
 
+/**
+ * Receipt for materializing the current reviewed revision in a local checkout.
+ * Applying never creates a commit, pushes a ref, or completes the request.
+ */
+export type ChangeRequestCheckoutApplication = {
+  request: ChangeRequestView;
+  revision: number;
+  checkoutRoot: string;
+  destinationBranch: string;
+  checkoutHeadSha: string;
+  candidateTreeSha: string;
+  applied: boolean;
+  stagedFiles: string[];
+};
+
 export type ChangeRequestCreateInput = {
   droneRef: string;
   chatName?: string;

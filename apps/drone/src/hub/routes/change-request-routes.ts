@@ -160,6 +160,19 @@ export function registerChangeRequestRoutes(
     json(200, { ok: true, request });
   });
 
+  route.post(
+    '/api/change-requests/:requestNumber/apply-to-host',
+    async ({ params, readJson, json }) => {
+      const body = await readJson<Record<string, unknown>>();
+      const application = await service().applyToHostCheckout(params.requestNumber, {
+        droneId: body.droneId,
+        expectedRevision:
+          typeof body.expectedRevision === 'number' ? body.expectedRevision : undefined,
+      });
+      json(200, { ok: true, application });
+    },
+  );
+
   route.post('/api/change-requests/:requestNumber/merge', async ({ params, readJson, json }) => {
     const body = await readJson<Record<string, unknown>>();
     const request = await service().merge(params.requestNumber, {

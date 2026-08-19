@@ -296,6 +296,7 @@ export function OpenedDroneFilePanel({
     revision: fileRevision,
   } = file;
   const activeFilePath = String(filePath ?? '').trim();
+  const activeFileViewModeKey = JSON.stringify([droneId, activeFilePath]);
   const openedEditorIsText = (fileKind ?? 'text') === 'text';
   const openedFileIsLargeText = fileKind === 'large-text';
   const openedFileIsMarkdown = openedEditorIsText && isMarkdownFile(activeFilePath, fileMime);
@@ -305,6 +306,7 @@ export function OpenedDroneFilePanel({
       ? defaultTextFileViewModeForFile(activeFilePath, fileMime)
       : 'edit',
   );
+  const openedTextModeByPathRef = React.useRef(new Map<string, TextFileViewMode>());
   const [markdownOutlineExpansionCommand, setMarkdownOutlineExpansionCommand] =
     React.useState<MarkdownOutlineExpansionCommand | null>(null);
   const [previewContentsCopied, setPreviewContentsCopied] = React.useState(false);
@@ -312,6 +314,11 @@ export function OpenedDroneFilePanel({
   const panelRef = React.useRef<HTMLDivElement | null>(null);
   const [fullScreen, setFullScreen] = React.useState(false);
   const editorRef = React.useRef<MonacoEditorInstance | null>(null);
+  const editorTargetHighlightRef = React.useRef<{
+    editor: MonacoEditorInstance;
+    decorationIds: string[];
+  } | null>(null);
+  const editorTargetHighlightTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const companionContentRef = React.useRef({ path: activeFilePath, content: fileContent ?? '', revision: 0 });
   if (
     companionContentRef.current.path !== activeFilePath ||
@@ -385,9 +392,20 @@ export function OpenedDroneFilePanel({
       setOpenedTextMode('edit');
       return;
     }
-    setOpenedTextMode(defaultTextFileViewModeForFile(activeFilePath, fileMime));
+    setOpenedTextMode(
+      openedTextModeByPathRef.current.get(activeFileViewModeKey) ??
+        defaultTextFileViewModeForFile(activeFilePath, fileMime),
+    );
     setMarkdownOutlineExpansionCommand(null);
-  }, [activeFilePath, fileMime, fileNavigationSeq, openedEditorIsText]);
+  }, [activeFilePath, activeFileViewModeKey, fileMime, openedEditorIsText]);
+
+  const setOpenedTextModeForActiveFile = React.useCallback(
+    (mode: TextFileViewMode) => {
+      if (activeFilePath) openedTextModeByPathRef.current.set(activeFileViewModeKey, mode);
+      setOpenedTextMode(mode);
+    },
+    [activeFilePath, activeFileViewModeKey],
+  );
 
   React.useEffect(() => {
     setPreviewContentsCopied(false);
@@ -524,6 +542,17 @@ export function OpenedDroneFilePanel({
       : '';
     return `/api/drones/${encodeURIComponent(droneId)}/fs/media?path=${encodeURIComponent(activeFilePath)}${revisionQuery}`;
   }, [activeFilePath, droneId, fileKind, fileRevision]);
+  const clearEditorTargetHighlight = React.useCallback(() => {
+    if (editorTargetHighlightTimerRef.current != null) {
+      clearTimeout(editorTargetHighlightTimerRef.current);
+      editorTargetHighlightTimerRef.current = null;
+    }
+    const highlight = editorTargetHighlightRef.current;
+    editorTargetHighlightRef.current = null;
+    if (highlight?.editor.getModel?.()) {
+      highlight.editor.deltaDecorations(highlight.decorationIds, []);
+    }
+  }, []);
   const applyEditorCursorTarget = React.useCallback(() => {
     if (!openedFileEditorVisible || !activeFilePath || !fileTargetLine) return;
     const editor = editorRef.current;
@@ -542,8 +571,31 @@ export function OpenedDroneFilePanel({
     );
     editor.setPosition?.({ lineNumber: line, column });
     editor.revealPositionInCenter?.({ lineNumber: line, column });
+    clearEditorTargetHighlight();
+    const decorationIds = editor.deltaDecorations([], [
+      {
+        range: {
+          startLineNumber: line,
+          startColumn: 1,
+          endLineNumber: line,
+          endColumn: 1,
+        },
+        options: {
+          isWholeLine: true,
+          className: 'dh-editor-target-line-highlight',
+        },
+      },
+    ]);
+    editorTargetHighlightRef.current = { editor, decorationIds };
+    editorTargetHighlightTimerRef.current = setTimeout(clearEditorTargetHighlight, 1_800);
     editor.focus?.();
-  }, [activeFilePath, fileTargetColumn, fileTargetLine, openedFileEditorVisible]);
+  }, [
+    activeFilePath,
+    clearEditorTargetHighlight,
+    fileTargetColumn,
+    fileTargetLine,
+    openedFileEditorVisible,
+  ]);
   const handleEditorChange = React.useCallback<NonNullable<MonacoEditorProps['onChange']>>(
     (next) => {
       const content = next ?? '';
@@ -577,8 +629,13 @@ export function OpenedDroneFilePanel({
   );
 
   React.useEffect(() => {
-    if (!openedFileEditorVisible) editorRef.current = null;
-  }, [openedFileEditorVisible]);
+    if (!openedFileEditorVisible) {
+      clearEditorTargetHighlight();
+      editorRef.current = null;
+    }
+  }, [clearEditorTargetHighlight, openedFileEditorVisible]);
+
+  React.useEffect(() => clearEditorTargetHighlight, [clearEditorTargetHighlight]);
 
   React.useEffect(() => {
     languageRequestSeqRef.current += 1;
@@ -854,10 +911,10 @@ export function OpenedDroneFilePanel({
                       type="button"
                       onClick={() => {
                         if (openedFileShowsPreview) {
-                          setOpenedTextMode('edit');
+                          setOpenedTextModeForActiveFile('edit');
                           setMarkdownOutlineExpansionCommand(null);
                         } else {
-                          setOpenedTextMode('preview');
+                          setOpenedTextModeForActiveFile('preview');
                           setMarkdownOutlineExpansionCommand(null);
                         }
                       }}
@@ -1002,6 +1059,8 @@ export function OpenedDroneFilePanel({
                 text={fileContent ?? ''}
                 onOpenLink={openMarkdownPreviewLink}
                 expansionCommand={markdownOutlineExpansionCommand}
+                targetLine={fileTargetLine}
+                targetNavigationSeq={fileNavigationSeq}
               />
             ) : openedFileShowsHtmlPreview ? (
               <IsolatedHtmlPreview source={fileContent ?? ''} fileName={fileName} />
