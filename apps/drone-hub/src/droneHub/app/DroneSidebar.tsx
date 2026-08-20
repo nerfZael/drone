@@ -146,8 +146,6 @@ import {
   FileDictationSidebarIndicator,
   FileDictationSidebarRailButton,
 } from '../files/FileDictationSidebarIndicator';
-import { useCompanion } from '../companion/CompanionContext';
-import { buildCompanionSidebarProjection } from '../companion/companion-sidebar-projection';
 
 const SIDEBAR_EXPANDED_WIDTH_PX = 308;
 const SIDEBAR_COLLAPSED_RAIL_WIDTH_PX = 40;
@@ -995,7 +993,6 @@ export function DroneSidebar({
   readOnlyDisabledDroneReasonById = {},
   readOnlyDroneStatusHintById = {},
 }: DroneSidebarProps) {
-  const companion = useCompanion();
   const continuousDictation = useContinuousDictation();
   const activeComposer = useActiveComposer();
   const [pinnedSidebarTopTarget, setPinnedSidebarTopTarget] =
@@ -1328,36 +1325,6 @@ export function DroneSidebar({
       optimisticSidebarGroups,
     ],
   );
-  const companionSidebarProjection = React.useMemo(
-    () =>
-      buildCompanionSidebarProjection({
-        proposal: companion?.proposal ?? null,
-        execution: companion?.proposalExecution ?? null,
-        progress: companion?.proposalExecutionProgress ?? null,
-        defaultRepoPath: companion?.proposalDefaultRepoPath ?? null,
-        sidebarDrones: optimisticSidebarDronesFilteredByRepo,
-        allDrones,
-        sidebarGroups: optimisticSidebarGroups,
-        repoScopedGroupPathsByRepoGroup,
-        sidebarGroupCreatedAtByName,
-        sidebarGroupingMode: sidebarCapabilities.headerActions
-          ? 'repos'
-          : effectiveSidebarGroupingMode,
-      }),
-    [
-      allDrones,
-      companion?.proposal,
-      companion?.proposalDefaultRepoPath,
-      companion?.proposalExecution,
-      companion?.proposalExecutionProgress,
-      effectiveSidebarGroupingMode,
-      optimisticSidebarDronesFilteredByRepo,
-      optimisticSidebarGroups,
-      repoScopedGroupPathsByRepoGroup,
-      sidebarGroupCreatedAtByName,
-      sidebarCapabilities.headerActions,
-    ],
-  );
   const activeChatName = String(selectedChat ?? '').trim() || 'default';
   const pinnedDensityClasses = sidebarDensityClasses(sidebarDensityMode);
   const visibleDraftSidebarPlaceholder = React.useMemo(() => {
@@ -1403,15 +1370,14 @@ export function DroneSidebar({
     draftSidebarPlaceholderDrone,
     hiddenSidebarGroupTokenSet,
     isRepoGroupingMode,
-    optimisticSidebarDronesFilteredByRepo: companionSidebarProjection.sidebarDrones,
-    optimisticSidebarGroups: companionSidebarProjection.sidebarGroups,
-    repoScopedGroupPathsByRepoGroup:
-      companionSidebarProjection.repoScopedGroupPathsByRepoGroup,
+    optimisticSidebarDronesFilteredByRepo,
+    optimisticSidebarGroups,
+    repoScopedGroupPathsByRepoGroup,
     showHiddenSidebarGroups,
     sidebarGroupIdByName,
     sidebarGroupOrder,
     sidebarGroupingMode: effectiveSidebarGroupingMode,
-    sidebarGroupCreatedAtByName: companionSidebarProjection.sidebarGroupCreatedAtByName,
+    sidebarGroupCreatedAtByName,
   });
   const addToGroupOptions = React.useMemo(
     () =>
@@ -1439,22 +1405,20 @@ export function DroneSidebar({
         sidebarFolderTree,
         sidebarGroups: renderSidebarGroups,
         sidebarGroupOrder,
-        repoScopedGroupPathsByRepoGroup:
-          companionSidebarProjection.repoScopedGroupPathsByRepoGroup,
+        repoScopedGroupPathsByRepoGroup,
         sidebarDroneOrderByGroup,
         sidebarNodeOrderByParent,
-        sidebarGroupCreatedAtByName:
-          companionSidebarProjection.sidebarGroupCreatedAtByName,
+        sidebarGroupCreatedAtByName,
         sidebarGroupIdByName,
       }),
     [
       renderSidebarGroups,
-      companionSidebarProjection.repoScopedGroupPathsByRepoGroup,
+      repoScopedGroupPathsByRepoGroup,
       sidebarDroneOrderByGroup,
       sidebarFolderTree,
       sidebarGroupOrder,
       sidebarNodeOrderByParent,
-      companionSidebarProjection.sidebarGroupCreatedAtByName,
+      sidebarGroupCreatedAtByName,
       sidebarGroupIdByName,
     ],
   );
@@ -2083,18 +2047,16 @@ export function DroneSidebar({
       sidebarGroupOrder,
       sidebarDroneOrderByGroup,
       sidebarNodeOrderByParent,
-      sidebarGroupCreatedAtByName:
-        companionSidebarProjection.sidebarGroupCreatedAtByName,
+      sidebarGroupCreatedAtByName,
       sidebarGroupIdByName,
-      repoScopedGroupPathsByRepoGroup:
-        companionSidebarProjection.repoScopedGroupPathsByRepoGroup,
+      repoScopedGroupPathsByRepoGroup,
     });
   }, [
     activeRepositoryNavigationItem,
-    companionSidebarProjection.repoScopedGroupPathsByRepoGroup,
+    repoScopedGroupPathsByRepoGroup,
     sidebarDroneById,
     sidebarDroneOrderByGroup,
-    companionSidebarProjection.sidebarGroupCreatedAtByName,
+    sidebarGroupCreatedAtByName,
     sidebarGroupIdByName,
     sidebarGroupOrder,
     sidebarNodeOrderByParent,
@@ -2123,14 +2085,10 @@ export function DroneSidebar({
         ? buildSidebarFolderTree(
             activeRepositoryModel.groups,
             sidebarGroupOrder,
-            companionSidebarProjection.sidebarGroupCreatedAtByName,
+            sidebarGroupCreatedAtByName,
           )
         : null,
-    [
-      activeRepositoryModel,
-      companionSidebarProjection.sidebarGroupCreatedAtByName,
-      sidebarGroupOrder,
-    ],
+    [activeRepositoryModel, sidebarGroupCreatedAtByName, sidebarGroupOrder],
   );
   const onSidebarWheel = React.useCallback(
     (event: React.WheelEvent<HTMLElement>) => {
@@ -3264,9 +3222,7 @@ export function DroneSidebar({
                       displayRootNodeId={
                         sidebarCapabilities.headerActions ? activeRepositoryRootNodeId : null
                       }
-                      sidebarGroupCreatedAtByName={
-                        companionSidebarProjection.sidebarGroupCreatedAtByName
-                      }
+                      sidebarGroupCreatedAtByName={sidebarGroupCreatedAtByName}
                       sidebarDensityMode={sidebarDensityMode}
                       sidebarFolderTree={
                         sidebarCapabilities.headerActions && activeRepositoryFolderTree
@@ -3275,10 +3231,7 @@ export function DroneSidebar({
                       }
                       sidebarGroupOrder={sidebarGroupOrder}
                       sidebarDndEnabled={sidebarDndEnabled}
-                      repoScopedGroupPathsByRepoGroup={
-                        companionSidebarProjection.repoScopedGroupPathsByRepoGroup
-                      }
-                      companionProposalPreview={companionSidebarProjection.marks}
+                      repoScopedGroupPathsByRepoGroup={repoScopedGroupPathsByRepoGroup}
                       sidebarDroneOrderByGroup={sidebarDroneOrderByGroup}
                       sidebarNodeOrderByParent={sidebarNodeOrderByParent}
                       sidebarChatOrderByDrone={sidebarChatOrderByDrone}
