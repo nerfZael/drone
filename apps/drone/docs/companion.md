@@ -158,7 +158,7 @@ The proposal supports creating, renaming, and deleting groups, drones, and chats
 
 Desktop and mobile Companion use the same proposal document and validation contract. Desktop shows the review card beside the Companion window; mobile shows it inside the Companion overlay. Neither surface executes proposal edits until the user explicitly applies the reviewed proposal.
 
-While a desktop proposal is awaiting review, the Drone Hub sidebar projects non-interactive shadow rows directly into the tree positions their structural changes will occupy. New and cloned groups, drones, and chats use translucent dashed rows; renames show the current and proposed names in the existing row; removals use a destructive strike-through treatment. Completed rows disappear during execution as real sidebar state takes their place, and discarding or closing the proposal removes the projections. Preview rows never participate in selection, drag and drop, counts, filtering, or persistence.
+The proposal card is the single preview surface for pending operations. It shows each structural change and its execution status without inserting speculative groups, drones, or chats into the live sidebar model. The sidebar continues to render confirmed and ordinary optimistic application state, and applied proposal changes appear there through the normal registry refresh.
 
 Applying a patch must preserve user undo. For Monaco-backed composer and file editors, expose an edit method on the registered target that uses `pushUndoStop`, `executeEdits`, and `pushUndoStop` instead of replacing the React `value`; one Ctrl/Cmd+Z should revert the whole Companion patch. For controlled textareas, keep an app-owned Companion undo snapshot and intercept Ctrl/Cmd+Z when the current revision still matches the patched result. Clear that snapshot when the composer is sent, reset, or replaced. Browser tests must cover user typing before and after the patch. Do not claim undo support from `setDraft` or `setOpenedFileContent` alone.
 
@@ -213,7 +213,7 @@ Every completed or failed message also writes a structured `Companion message ti
 - It can propose multiple durable draft drones without publishing or starting them; approved drafts appear in their selected repositories and groups, subject to normal sidebar filtering and ordering.
 - It can propose true chat-history clones separately from configuration-only chat copies, and can clone ready container drones while rejecting host-drone clones.
 - Optional runtime, branch, volume, agent, provider/model/reasoning, permission, and approval overrides are reviewed explicitly and leave saved defaults in effect when omitted.
-- Pending structural operations appear as non-interactive sidebar shadows, including clone sources and rename mappings, and disappear immediately when the proposal is discarded or replaced by real state.
+- Pending structural operations remain in the proposal card until they are applied or discarded; the sidebar shows them after they become real state.
 - Companion can propose creation, deletion, and renaming of chats, and can open an existing chat or highlight matching drones immediately, but it cannot perform generic navigation.
 - The proposal card exposes exact prompts, messages, delivery mode, and repository scope before approval; every execution attempt is single-shot, and a failed or partial proposal must be discarded before creating a fresh retry.
 - A changed composer is never overwritten, and one browser cannot receive another browser's tool calls.
