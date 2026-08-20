@@ -83,6 +83,27 @@ export type CodexPromptRunSummary = Pick<
   | 'error'
 >;
 
+export type CodexPromptEnqueueDisposition = 'started' | 'steered' | 'queued';
+
+export type CodexPromptSteeringDiagnostic = {
+  outcome: 'accepted' | 'unavailable' | 'rejected';
+  reason?:
+    | 'no-active-run'
+    | 'missing-active-turn'
+    | 'missing-thread'
+    | 'message-not-found'
+    | 'turn-steer-rejected';
+  activeRunId?: string;
+  activeTurnId?: string;
+  threadId?: string;
+  error?: string;
+};
+
+export type CodexPromptEnqueueResult = {
+  disposition: CodexPromptEnqueueDisposition;
+  steering?: CodexPromptSteeringDiagnostic;
+};
+
 type PendingApprovalCallback = {
   approval: CodexPendingApproval;
   requestId: number | string;
@@ -146,22 +167,26 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     this.options = options;
   }
 
-  async enqueue(message: TMessage): Promise<'started' | 'steered' | 'queued'> {
+  async enqueue(message: TMessage): Promise<CodexPromptEnqueueResult> {
     const spec = message.codexAppServer;
     const session = this.sessions.get(spec.sessionKey) ?? this.createSession(spec);
     return await this.serialize(session, async () => {
       session.lastUsedAt = Date.now();
-      if (message.deliveryMode === 'asap' && (await this.steerActiveRun(session, message.id))) {
-        return 'steered' as const;
+      const steering =
+        message.deliveryMode === 'asap'
+          ? await this.steerActiveRun(session, message.id)
+          : undefined;
+      if (steering?.outcome === 'accepted') {
+        return { disposition: 'steered' as const, steering };
       }
       if (session.activeRun || session.startingRun) {
         if (!session.queuedMessageIds.includes(message.id)) {
           session.queuedMessageIds.push(message.id);
         }
-        return 'queued' as const;
+        return { disposition: 'queued' as const, ...(steering ? { steering } : {}) };
       }
       await this.startRun(session, message.id);
-      return 'started' as const;
+      return { disposition: 'started' as const, ...(steering ? { steering } : {}) };
     });
   }
 
@@ -697,11 +722,37 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     }
   }
 
-  private async steerActiveRun(session: CodexRunSession, messageId: string): Promise<boolean> {
+  private async steerActiveRun(
+    session: CodexRunSession,
+    messageId: string,
+  ): Promise<CodexPromptSteeringDiagnostic> {
     const run = session.activeRun;
-    if (!run || !session.activeTurnId || !session.threadId) return false;
+    if (!run) return { outcome: 'unavailable', reason: 'no-active-run' };
+    if (!session.activeTurnId) {
+      return {
+        outcome: 'unavailable',
+        reason: 'missing-active-turn',
+        activeRunId: run.id,
+      };
+    }
+    if (!session.threadId) {
+      return {
+        outcome: 'unavailable',
+        reason: 'missing-thread',
+        activeRunId: run.id,
+        activeTurnId: session.activeTurnId,
+      };
+    }
     const message = await this.options.loadMessage(messageId);
-    if (!message) return false;
+    if (!message) {
+      return {
+        outcome: 'unavailable',
+        reason: 'message-not-found',
+        activeRunId: run.id,
+        activeTurnId: session.activeTurnId,
+        threadId: session.threadId,
+      };
+    }
     try {
       await session.connection.call('turn/steer', {
         threadId: session.threadId,
@@ -709,8 +760,15 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
         input: promptInput(message.codexAppServer),
         clientUserMessageId: message.id,
       });
-    } catch {
-      return false;
+    } catch (error) {
+      return {
+        outcome: 'rejected',
+        reason: 'turn-steer-rejected',
+        activeRunId: run.id,
+        activeTurnId: session.activeTurnId,
+        threadId: session.threadId,
+        error: errorMessage(error),
+      };
     }
     const updatedAt = this.now();
     const previousResponseMessageId = run.responseMessageId;
@@ -742,7 +800,12 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
       });
     });
     session.activeRun = updatedRun;
-    return true;
+    return {
+      outcome: 'accepted',
+      activeRunId: run.id,
+      activeTurnId: session.activeTurnId,
+      threadId: session.threadId,
+    };
   }
 
   private async completeTurn(

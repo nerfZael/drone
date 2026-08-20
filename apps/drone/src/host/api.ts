@@ -13,6 +13,25 @@ export type DroneDaemonConnection = {
   token?: string | null;
 };
 
+export type CodexPromptEnqueueResponse = {
+  ok: boolean;
+  id: string;
+  state: string;
+  disposition?: 'started' | 'steered' | 'queued';
+  steering?: {
+    outcome: 'accepted' | 'unavailable' | 'rejected';
+    reason?: string;
+    activeRunId?: string;
+    activeTurnId?: string;
+    threadId?: string;
+    error?: string;
+  };
+  threadId?: string;
+  turnId?: string;
+  runId?: string;
+  note?: string;
+};
+
 export class DroneDaemonUnavailableError extends Error {
   readonly code = 'daemon_unavailable';
 
@@ -430,7 +449,13 @@ export async function codexPromptEnqueue(
   },
   options?: { signal?: AbortSignal },
 ) {
-  return await req(client, 'POST', '/v1/codex/enqueue', payload, options);
+  return (await req(
+    client,
+    'POST',
+    '/v1/codex/enqueue',
+    payload,
+    options,
+  )) as CodexPromptEnqueueResponse;
 }
 
 export async function promptGet(client: DroneClient, id: string) {

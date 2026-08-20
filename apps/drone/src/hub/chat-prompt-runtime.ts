@@ -547,6 +547,27 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       ...(opts.model ? { model: opts.model } : {}),
       ...(opts.effort ? { effort: opts.effort } : {}),
     };
+    const enqueueAtDaemon = async () => {
+      const result = await droneCodexPromptEnqueue(client, payload, { signal: opts.signal });
+      if (opts.deliveryMode === 'asap') {
+        const disposition = String(result?.disposition ?? '').trim() || 'unknown';
+        const steering =
+          result?.steering && typeof result.steering === 'object' ? result.steering : null;
+        hubLog(disposition === 'steered' ? 'info' : 'warn', 'Codex ASAP delivery result', {
+          droneId,
+          promptId: opts.id,
+          sessionKey: opts.sessionKey,
+          disposition,
+          daemonState: String(result?.state ?? '').trim() || 'unknown',
+          ...(String(result?.runId ?? '').trim() ? { runId: String(result.runId).trim() } : {}),
+          ...(String(result?.turnId ?? '').trim()
+            ? { responseTurnId: String(result.turnId).trim() }
+            : {}),
+          ...(steering ? { steering } : {}),
+        });
+      }
+      return result;
+    };
     const upgradeHostDaemon = async () => {
       const oldPid = Number(d?.host?.pid);
       if (!Number.isFinite(oldPid) || oldPid <= 0) {
@@ -597,24 +618,20 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       });
     };
     try {
-      await measurePromptDeliveryPhase(
-        opts.timing,
-        'daemonEnqueueRequest',
-        async () => await droneCodexPromptEnqueue(client, payload, { signal: opts.signal }),
-      );
+      await measurePromptDeliveryPhase(opts.timing, 'daemonEnqueueRequest', enqueueAtDaemon);
       ensureDaemonPromptEventSubscription(droneId);
     } catch (e: any) {
       const msg = e?.message ?? String(e);
       if (runtime === 'container' && isNotFoundErrorMessage(msg)) {
         await upgradeDroneDaemonInContainer({ containerName, containerPort: d.containerPort });
         await waitForDroneDaemonReady(client, daemonReadyAfterUpgradeTimeoutMs, opts.signal);
-        await droneCodexPromptEnqueue(client, payload, { signal: opts.signal });
+        await enqueueAtDaemon();
         ensureDaemonPromptEventSubscription(droneId);
         return;
       }
       if (runtime === 'host' && isNotFoundErrorMessage(msg)) {
         await upgradeHostDaemon();
-        await droneCodexPromptEnqueue(client, payload, { signal: opts.signal });
+        await enqueueAtDaemon();
         ensureDaemonPromptEventSubscription(droneId);
         return;
       }

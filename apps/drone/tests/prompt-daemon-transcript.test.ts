@@ -1146,6 +1146,11 @@ readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line
     return;
   }
   if (message.method === 'turn/steer') {
+    const prompt = String(message.params?.input?.[0]?.text ?? '');
+    if (prompt.includes('Reject steering')) {
+      send({ id: message.id, error: { code: -32000, message: 'turn is no longer active' } });
+      return;
+    }
     send({ id: message.id, result: { turnId: activeTurnId } });
     return;
   }
@@ -1203,12 +1208,48 @@ readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line
     const steerOneId = `codex-steer-one-${port}`;
     const steerTwoId = `codex-steer-two-${port}`;
     expect((await enqueue(rootId, 'Initial request', 'queue')).disposition).toBe('started');
-    expect((await enqueue(steerOneId, 'First ASAP correction', 'asap')).disposition).toBe(
-      'steered',
+    const steerOneResult = await enqueue(steerOneId, 'First ASAP correction', 'asap');
+    expect(steerOneResult).toMatchObject({
+      disposition: 'steered',
+      steering: {
+        outcome: 'accepted',
+        activeRunId: rootId,
+        activeTurnId: 'turn-steering-1',
+        threadId: 'thread-steering',
+      },
+    });
+    const steerTwoResult = await enqueue(steerTwoId, 'Second ASAP correction', 'asap');
+    expect(steerTwoResult).toMatchObject({
+      disposition: 'steered',
+      steering: {
+        outcome: 'accepted',
+        activeRunId: rootId,
+        activeTurnId: 'turn-steering-1',
+        threadId: 'thread-steering',
+      },
+    });
+
+    const rejectedSteerId = `codex-steer-rejected-${port}`;
+    const rejectedSteerResult = await enqueue(rejectedSteerId, 'Reject steering', 'asap');
+    expect(rejectedSteerResult).toMatchObject({
+      disposition: 'queued',
+      steering: {
+        outcome: 'rejected',
+        reason: 'turn-steer-rejected',
+        activeRunId: rootId,
+        activeTurnId: 'turn-steering-1',
+        threadId: 'thread-steering',
+        error: 'turn is no longer active',
+      },
+    });
+    const rejectedCancelResponse = await fetch(
+      `${baseUrl}/v1/prompts/${encodeURIComponent(rejectedSteerId)}/cancel`,
+      {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}` },
+      },
     );
-    expect((await enqueue(steerTwoId, 'Second ASAP correction', 'asap')).disposition).toBe(
-      'steered',
-    );
+    expect(rejectedCancelResponse.status).toBe(200);
 
     const [liveRoot, liveSteerOne, liveSteerTwo] = await Promise.all([
       waitForRunningPromptJob(
@@ -1274,6 +1315,26 @@ readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line
       expect(persistedMessage.codexAppServer.runId).toBe(rootId);
       expect(persistedMessage.codexAppServer).not.toHaveProperty('outputOwner');
     }
+    const persistedSteerTwo = JSON.parse(
+      fs.readFileSync(path.join(dataDir, 'prompts', 'jobs', `${steerTwoId}.json`), 'utf8'),
+    );
+    expect(persistedSteerTwo.diagnostics.codexEnqueue).toMatchObject({
+      requestedDeliveryMode: 'asap',
+      disposition: 'steered',
+      steering: { outcome: 'accepted', activeRunId: rootId },
+    });
+    const persistedRejectedSteer = JSON.parse(
+      fs.readFileSync(path.join(dataDir, 'prompts', 'jobs', `${rejectedSteerId}.json`), 'utf8'),
+    );
+    expect(persistedRejectedSteer.diagnostics.codexEnqueue).toMatchObject({
+      requestedDeliveryMode: 'asap',
+      disposition: 'queued',
+      steering: {
+        outcome: 'rejected',
+        reason: 'turn-steer-rejected',
+        error: 'turn is no longer active',
+      },
+    });
 
     const rootMessagePath = path.join(dataDir, 'prompts', 'jobs', `${rootId}.json`);
     const partiallyPersistedRoot = JSON.parse(fs.readFileSync(rootMessagePath, 'utf8'));
@@ -1296,10 +1357,11 @@ readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line
       sandboxPolicy: { type: 'workspaceWrite' },
     });
     const steering = requests.filter((request) => request.method === 'turn/steer');
-    expect(steering).toHaveLength(2);
+    expect(steering).toHaveLength(3);
     expect(steering.map((request) => request.params.clientUserMessageId)).toEqual([
       steerOneId,
       steerTwoId,
+      rejectedSteerId,
     ]);
     expect(steering.every((request) => request.params.expectedTurnId === 'turn-steering-1')).toBe(
       true,
@@ -1307,9 +1369,10 @@ readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line
 
     const canceledActiveId = `codex-cancel-active-${port}`;
     const afterCanceledId = `codex-after-cancel-${port}`;
-    expect((await enqueue(canceledActiveId, 'Cancel this active turn', 'queue')).disposition).toBe(
-      'started',
-    );
+    expect(await enqueue(canceledActiveId, 'Cancel this active turn', 'asap')).toMatchObject({
+      disposition: 'started',
+      steering: { outcome: 'unavailable', reason: 'no-active-run' },
+    });
     expect((await enqueue(afterCanceledId, 'Run after cancellation', 'queue')).disposition).toBe(
       'queued',
     );

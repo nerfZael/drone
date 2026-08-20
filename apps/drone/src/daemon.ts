@@ -26,9 +26,11 @@ import { selectNextPromptJobId } from './prompt-job-scheduling';
 import {
   CodexPromptRunManager,
   codexPromptRunSummary,
+  type CodexPromptEnqueueDisposition,
   type CodexPromptRun,
   type CodexPromptRunSummary,
   type CodexPromptSpec,
+  type CodexPromptSteeringDiagnostic,
 } from './codex-prompt-run-manager';
 
 const execFileAsync = promisify(execFile);
@@ -56,6 +58,12 @@ type PromptJobDiagnostics = {
   wrapperRuntimeMs?: number;
   wrapperExitAfterTranscriptTerminalMs?: number;
   jobRuntimeMs?: number;
+  codexEnqueue?: {
+    decidedAt: string;
+    requestedDeliveryMode: 'queue' | 'asap';
+    disposition: CodexPromptEnqueueDisposition;
+    steering?: CodexPromptSteeringDiagnostic;
+  };
 };
 
 type SessionProbeStatus = 'alive' | 'missing' | 'unknown';
@@ -1746,7 +1754,24 @@ async function main() {
           json(res, 200, { ok: true, id, state: existing.state, note: 'already exists' });
           return;
         }
-        const disposition = await codexPromptRuns.enqueue(job);
+        const enqueueResult = await codexPromptRuns.enqueue(job);
+        const decidedAt = nowIso();
+        await withPromptMutationLock(async () => {
+          const latest = await loadPromptJob(promptsDir, id);
+          if (!latest) return;
+          await savePromptJob(promptsDir, {
+            ...latest,
+            diagnostics: {
+              ...latest.diagnostics,
+              codexEnqueue: {
+                decidedAt,
+                requestedDeliveryMode: deliveryMode,
+                disposition: enqueueResult.disposition,
+                ...(enqueueResult.steering ? { steering: enqueueResult.steering } : {}),
+              },
+            },
+          });
+        });
         const current = await loadPromptJob(promptsDir, id);
         const projected = current?.codexAppServer
           ? await projectCodexPromptJob(promptsDir, current as CodexPromptJob)
@@ -1755,7 +1780,8 @@ async function main() {
           ok: true,
           id,
           state: projected?.state ?? job.state,
-          disposition,
+          disposition: enqueueResult.disposition,
+          ...(enqueueResult.steering ? { steering: enqueueResult.steering } : {}),
           ...(projected?.codexAppServer?.threadId
             ? { threadId: projected.codexAppServer.threadId }
             : {}),
