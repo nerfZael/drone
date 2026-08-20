@@ -218,4 +218,34 @@ describe('sidebar optimistic ops', () => {
     expect(optimisticGroups.map((group) => group.group).sort()).toEqual(['Ungrouped', 'bravo']);
     expect(optimisticGroups.find((group) => group.group === 'bravo')?.items.map((item) => item.id)).toEqual(['moving']);
   });
+
+  test('preserves canonical group identity while optimistically renaming an empty folder', () => {
+    const baseGroups = [
+      {
+        groupId: 'group-stable',
+        group: 'alpha',
+        label: 'alpha',
+        kind: 'group' as const,
+        items: [],
+      },
+    ];
+    const ops: SidebarOptimisticOp[] = [
+      {
+        id: 'nest',
+        kind: 'rename_group',
+        sourceGroup: 'alpha',
+        targetGroup: 'parent/alpha',
+      },
+    ];
+
+    expect(applySidebarOptimisticOpsToGroups(baseGroups, [], ops)).toEqual([
+      {
+        groupId: 'group-stable',
+        group: 'parent/alpha',
+        label: 'parent/alpha',
+        kind: 'group',
+        items: [],
+      },
+    ]);
+  });
 });

@@ -1,7 +1,9 @@
 import {
   parseSidebarMoveCommandRequest,
+  type SidebarMoveCanonicalGroup,
   type SidebarMoveCommandRequest,
   type SidebarMoveCommandResult,
+  type SidebarMoveCommandStage,
 } from '@drone/device-protocol';
 import {
   applySidebarMove,
@@ -23,7 +25,7 @@ export type SidebarCommandOperations = {
   setDroneGroup(droneIds: string[], group: string | null): Promise<Record<string, unknown>>;
   renameGroup(input: {
     repoPath: string;
-    oldName: string;
+    groupRef: string;
     newName: string;
   }): Promise<Record<string, unknown>>;
   readUiPreferences(): Promise<SidebarSettingsSnapshot>;
@@ -39,8 +41,8 @@ export function createSidebarCommandService(application: HubServices): SidebarCo
       await application.fleet.setDroneParent({ droneRef: droneId, parentRef: parentId }),
     setDroneGroup: async (droneIds, group) =>
       await application.groups.setDroneGroup({ droneIds, group }),
-    renameGroup: async ({ repoPath, oldName, newName }) =>
-      await application.groups.rename({ groupRef: oldName, repoPath, newName }),
+    renameGroup: async ({ repoPath, groupRef, newName }) =>
+      await application.groups.rename({ groupRef, repoPath, newName }),
     readUiPreferences: async () => await application.settings.uiPreferences.read(),
     writeUiPreferences: async ({ uiPreferences, expectedVersion }) =>
       await application.settings.uiPreferences.update({
@@ -84,6 +86,8 @@ export class SidebarCommandService {
 
   private async executeMove(request: SidebarMoveCommandRequest): Promise<SidebarCommandResult> {
     let membershipResult: Record<string, unknown> = {};
+    let membershipStage: SidebarMoveCommandStage = { status: 'not-required' };
+    let canonicalGroup: SidebarMoveCanonicalGroup | null = null;
     if (request.intent.kind === 'move-into-folder') {
       const destination = sidebarMoveDestination(request.intent);
       if (!destination) {
@@ -91,41 +95,75 @@ export class SidebarCommandService {
           code: 'INVALID_REQUEST',
         });
       }
-      if (request.intent.itemKind === 'drone') {
-        const movingDroneIds = sidebarMoveDroneIds(request.intent);
-        if (request.intent.targetParentDroneId !== undefined) {
-          for (const droneId of movingDroneIds) {
-            await this.operations.setDroneParent(droneId, request.intent.targetParentDroneId);
+      try {
+        if (request.intent.itemKind === 'drone') {
+          const movingDroneIds = sidebarMoveDroneIds(request.intent);
+          if (request.intent.targetParentDroneId !== undefined) {
+            for (const droneId of movingDroneIds) {
+              await this.operations.setDroneParent(droneId, request.intent.targetParentDroneId);
+            }
           }
-        }
-        const result = await this.operations.setDroneGroup(movingDroneIds, destination.targetGroup);
-        const rejected = Array.isArray(result.rejected) ? result.rejected : [];
-        if (rejected.length) {
-          throw Object.assign(
-            new Error(String(object(rejected[0]).error ?? 'drone could not be moved')),
-            { code: 'OPERATION_FAILED' },
+          const result = await this.operations.setDroneGroup(
+            movingDroneIds,
+            destination.targetGroup,
+          );
+          const rejected = Array.isArray(result.rejected) ? result.rejected : [];
+          if (rejected.length) {
+            const rejectedMessage = String(
+              object(rejected[0]).error ?? 'drone could not be moved',
+            );
+            throw Object.assign(new Error(rejectedMessage), {
+              code: /invalid drone id/i.test(rejectedMessage)
+                ? 'INVALID_REQUEST'
+                : 'OPERATION_FAILED',
+            });
+          }
+          membershipResult = object(result);
+        } else {
+          membershipResult = object(
+            await this.operations.renameGroup({
+              repoPath: request.intent.repoPath,
+              groupRef: request.intent.sourceGroupId ?? request.intent.sourceGroup,
+              newName: destination.nextGroup!,
+            }),
+          );
+          canonicalGroup = canonicalGroupFromRename(
+            membershipResult,
+            request.intent.sourceGroupId,
+            request.intent.repoPath,
+            destination.nextGroup!,
           );
         }
-        membershipResult = object(result);
-      } else {
-        membershipResult = object(
-          await this.operations.renameGroup({
-            repoPath: request.intent.repoPath,
-            oldName: request.intent.sourceGroup,
-            newName: destination.nextGroup!,
-          }),
-        );
+        membershipStage = { status: 'applied' };
+      } catch (error) {
+        if ((error as { code?: unknown })?.code === 'INVALID_REQUEST') throw error;
+        const message = errorMessage(error);
+        return {
+          ...membershipResult,
+          ok: false,
+          mutationId: request.mutationId,
+          code: 'MEMBERSHIP_UPDATE_FAILED',
+          error: message,
+          stages: {
+            membership: { status: 'failed', error: message },
+            layout: { status: 'not-attempted' },
+          },
+          canonical: { group: canonicalGroup, sidebar: null },
+        };
       }
     }
 
+    let latestSidebar: SidebarSettingsSnapshot | null = null;
+    let lastLayoutError: unknown = null;
     for (let attempt = 0; attempt < 4; attempt += 1) {
-      const current = await this.operations.readUiPreferences();
-      const currentPreferences = object(current.uiPreferences);
-      const nextLayout = applySidebarMove(
-        normalizeSidebarLayout(currentPreferences),
-        request.intent,
-      );
       try {
+        const current = await this.operations.readUiPreferences();
+        latestSidebar = current;
+        const currentPreferences = object(current.uiPreferences);
+        const nextLayout = applySidebarMove(
+          normalizeSidebarLayout(currentPreferences),
+          request.intent,
+        );
         const saved = await this.operations.writeUiPreferences({
           uiPreferences: {
             ...currentPreferences,
@@ -133,24 +171,76 @@ export class SidebarCommandService {
           },
           expectedVersion: currentExpectedVersion(current.version),
         });
+        const uiPreferences = {
+          ...object(saved.uiPreferences),
+          ...normalizeSidebarLayout(saved.uiPreferences),
+        };
+        const version = currentExpectedVersion(saved.version) ?? null;
         return {
           ...membershipResult,
           ...saved,
           ok: true,
           mutationId: request.mutationId,
-          version: currentExpectedVersion(saved.version) ?? null,
-          uiPreferences: {
-            ...object(saved.uiPreferences),
-            ...normalizeSidebarLayout(saved.uiPreferences),
+          version,
+          uiPreferences,
+          stages: {
+            membership: membershipStage,
+            layout: { status: 'applied' },
+          },
+          canonical: {
+            group: canonicalGroup,
+            sidebar: { version, uiPreferences },
           },
         };
       } catch (error: any) {
+        lastLayoutError = error;
         const conflict = error?.code === 'HUB_409' || error?.statusCode === 409;
-        if (!conflict || attempt === 3) throw error;
+        if (!conflict || attempt === 3) break;
       }
     }
-    throw new Error('Failed to apply sidebar move');
+    const message = errorMessage(lastLayoutError ?? new Error('Failed to apply sidebar move'));
+    return {
+      ...membershipResult,
+      ok: false,
+      mutationId: request.mutationId,
+      code: 'LAYOUT_UPDATE_FAILED',
+      error: message,
+      stages: {
+        membership: membershipStage,
+        layout: { status: 'failed', error: message },
+      },
+      canonical: {
+        group: canonicalGroup,
+        sidebar: latestSidebar
+          ? {
+              version: currentExpectedVersion(latestSidebar.version) ?? null,
+              uiPreferences: {
+                ...object(latestSidebar.uiPreferences),
+                ...normalizeSidebarLayout(latestSidebar.uiPreferences),
+              },
+            }
+          : null,
+      },
+    };
   }
+}
+
+function canonicalGroupFromRename(
+  result: Record<string, unknown>,
+  sourceGroupId: string | null | undefined,
+  repoPathRaw: string,
+  nextNameRaw: string,
+): SidebarMoveCanonicalGroup | null {
+  const id = String(result.id ?? sourceGroupId ?? '').trim();
+  const repoPath = String(result.repoPath ?? repoPathRaw ?? '').trim();
+  const name = String(result.newName ?? nextNameRaw ?? '').trim();
+  return id && name ? { id, repoPath, name } : null;
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) return error.message.trim();
+  const message = String(error ?? '').trim();
+  return message || 'Sidebar move failed';
 }
 
 function object(value: unknown): Record<string, unknown> {

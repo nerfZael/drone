@@ -6,9 +6,35 @@ import {
 } from './ordering';
 import type {
   BuildRepoSidebarGroupsArgs,
+  CanonicalSidebarGroup,
+  SidebarRepoScopedGroupIndex,
   SidebarTreeDrone,
   SidebarTreeGroup,
 } from './types';
+
+export function buildSidebarRepoScopedGroupIndex(
+  groups: readonly CanonicalSidebarGroup[],
+): SidebarRepoScopedGroupIndex {
+  const pathsByRepoGroup: Record<string, string[]> = {};
+  const idsByPathByRepoGroup: Record<string, Record<string, string>> = {};
+  const createdAtByPathByRepoGroup: Record<string, Record<string, string | null>> = {};
+
+  for (const group of groups) {
+    const id = String(group?.id ?? '').trim();
+    const name = String(group?.name ?? '').trim();
+    const repoPath = String(group?.repoPath ?? '').trim();
+    if (!id || !name || isUngroupedGroupName(name)) continue;
+    const repoGroup = repoPath ? `repo:${repoPath}` : 'repo:ungrouped';
+    const paths = (pathsByRepoGroup[repoGroup] ??= []);
+    if (!paths.includes(name)) paths.push(name);
+    (idsByPathByRepoGroup[repoGroup] ??= {})[name] = id;
+    (createdAtByPathByRepoGroup[repoGroup] ??= {})[name] =
+      String(group.createdAt ?? '').trim() || null;
+  }
+
+  for (const paths of Object.values(pathsByRepoGroup)) paths.sort((a, b) => a.localeCompare(b));
+  return { pathsByRepoGroup, idsByPathByRepoGroup, createdAtByPathByRepoGroup };
+}
 
 function repoPathToLabel(repoPathRaw: string): string {
   const repoPath = String(repoPathRaw ?? '').trim();

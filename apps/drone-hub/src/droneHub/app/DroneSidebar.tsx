@@ -1,14 +1,16 @@
 import React from 'react';
+import type { SidebarMoveCommandResult } from '@drone/device-protocol';
 import { createPortal } from 'react-dom';
 import { useDroppable } from '@dnd-kit/core';
 import {
+  buildSidebarRepoScopedGroupIndex,
   buildRepoSidebarModel,
   resolvePinnedSidebarDrones,
   type SidebarMoveIntent,
   type SidebarCommandQueue,
 } from '@drone/hub-model/sidebar';
 import { isUngroupedGroupName } from '../../domain';
-import type { DroneSummary, RepoSummary } from '../types';
+import type { DroneSummary, GroupSummary, RepoSummary } from '../types';
 import {
   DroneCard,
   SidebarApprovalStatusIndicator,
@@ -77,11 +79,6 @@ import {
   type SidebarTreeFolderNode,
   type SidebarTreeNode,
 } from './sidebar-node-tree';
-import {
-  groupSidebarRepoScopedGroupsByRepoGroup,
-  removeSidebarRepoScopedGroupMapKeysByPrefix,
-  rewriteSidebarRepoScopedGroupMapKeysByPrefix,
-} from './sidebar-repo-scoped-groups';
 import {
   mergeVisibleSidebarNodeOrderByParent,
   removeSidebarRepoScopedNodeOrderByGroupPrefix,
@@ -840,6 +837,7 @@ export type DroneSidebarProps = {
   settingBaseImages: Record<string, boolean>;
   movingDroneGroups: boolean;
   sidebarGroups: SidebarGroup[];
+  canonicalGroups: GroupSummary[];
   sidebarGroupCreatedAtByName: Record<string, string | null>;
   sidebarGroupIdByName: Record<string, string>;
   sidebarHiddenGroupCount: number;
@@ -883,7 +881,9 @@ export type DroneSidebarProps = {
   ) => Promise<DroneInlineRenameResult> | DroneInlineRenameResult;
   onSetDroneBaseImage: (droneId: string) => void;
   onSetDronePinned: (droneId: string, pinned: boolean) => Promise<boolean>;
-  onMoveSidebar: (intent: SidebarMoveIntent) => Promise<boolean>;
+  onMoveSidebar: (
+    intent: SidebarMoveIntent,
+  ) => Promise<SidebarMoveCommandResult>;
   sidebarCommandQueue: SidebarCommandQueue;
   uiPreferencesReady: boolean;
   onDeleteDrone: (droneId: string) => void;
@@ -944,6 +944,7 @@ export function DroneSidebar({
   settingBaseImages,
   movingDroneGroups,
   sidebarGroups,
+  canonicalGroups,
   sidebarGroupCreatedAtByName,
   sidebarGroupIdByName,
   sidebarHiddenGroupCount,
@@ -1048,7 +1049,6 @@ export function DroneSidebar({
     showRecentDronesOnly,
     sidebarDockSide,
     sidebarGroupOrder,
-    sidebarRepoScopedGroupByPath,
     sidebarDroneOrderByGroup,
     sidebarNodeOrderByParent,
     sidebarChatOrderByDrone,
@@ -1065,7 +1065,6 @@ export function DroneSidebar({
     setPinnedSidebarCollapsed,
     setCollapsedGroups,
     setSidebarGroupOrder,
-    setSidebarRepoScopedGroupByPath,
     setSidebarDroneOrderByGroup,
     setSidebarNodeOrderByParent,
     setSidebarChatOrderByDrone,
@@ -1170,10 +1169,11 @@ export function DroneSidebar({
     if (!sidebarCapabilities.headerActions || sidebarGroupingMode === 'groups') return;
     setSidebarGroupingMode('groups');
   }, [setSidebarGroupingMode, sidebarCapabilities.headerActions, sidebarGroupingMode]);
-  const repoScopedGroupPathsByRepoGroup = React.useMemo(
-    () => groupSidebarRepoScopedGroupsByRepoGroup(sidebarRepoScopedGroupByPath),
-    [sidebarRepoScopedGroupByPath],
+  const canonicalGroupIndex = React.useMemo(
+    () => buildSidebarRepoScopedGroupIndex(canonicalGroups),
+    [canonicalGroups],
   );
+  const canonicalRepoScopedGroupPathsByRepoGroup = canonicalGroupIndex.pathsByRepoGroup;
   const visibleFolderNodeOrderByParent = React.useMemo(() => {
     const baseSidebarFolderTree = buildSidebarFolderTree(
       sidebarGroups,
@@ -1184,7 +1184,7 @@ export function DroneSidebar({
       sidebarFolderTree: baseSidebarFolderTree,
       sidebarGroups,
       sidebarGroupOrder,
-      repoScopedGroupPathsByRepoGroup,
+      repoScopedGroupPathsByRepoGroup: canonicalRepoScopedGroupPathsByRepoGroup,
       sidebarDroneOrderByGroup,
       sidebarNodeOrderByParent,
       sidebarGroupCreatedAtByName,
@@ -1197,7 +1197,7 @@ export function DroneSidebar({
       ]),
     );
   }, [
-    repoScopedGroupPathsByRepoGroup,
+    canonicalRepoScopedGroupPathsByRepoGroup,
     sidebarDroneOrderByGroup,
     sidebarGroupOrder,
     sidebarGroups,
@@ -1215,14 +1215,14 @@ export function DroneSidebar({
       sidebarFolderTree: folderTree,
       sidebarGroups,
       sidebarGroupOrder,
-      repoScopedGroupPathsByRepoGroup,
+      repoScopedGroupPathsByRepoGroup: canonicalRepoScopedGroupPathsByRepoGroup,
       sidebarDroneOrderByGroup,
       sidebarNodeOrderByParent,
       sidebarGroupCreatedAtByName,
       sidebarGroupIdByName,
     }).childIdsByParent;
   }, [
-    repoScopedGroupPathsByRepoGroup,
+    canonicalRepoScopedGroupPathsByRepoGroup,
     sidebarDroneOrderByGroup,
     sidebarGroupOrder,
     sidebarGroups,
@@ -1255,18 +1255,6 @@ export function DroneSidebar({
     setSidebarNodeOrderByParent,
     uiPreferencesReady,
   ]);
-  const handleRenameGroup = React.useCallback(
-    async (group: string, nextName?: string) => {
-      const ok = await onRenameGroup(group, nextName);
-      const targetGroup = String(nextName ?? '').trim();
-      if (!ok || !targetGroup) return ok;
-      setSidebarRepoScopedGroupByPath((prev) =>
-        rewriteSidebarRepoScopedGroupMapKeysByPrefix(prev, group, targetGroup),
-      );
-      return ok;
-    },
-    [onRenameGroup, setSidebarRepoScopedGroupByPath],
-  );
   const handleDeleteGroup = React.useCallback(
     async (
       group: string,
@@ -1281,25 +1269,13 @@ export function DroneSidebar({
       if (!ok || opts?.kind === 'repo') return ok;
       if (scopedRepoPath) {
         const repoGroupPath = `repo:${scopedRepoPath}`;
-        setSidebarRepoScopedGroupByPath((prev) =>
-          removeSidebarRepoScopedGroupMapKeysByPrefix(prev, group, repoGroupPath),
-        );
         setSidebarNodeOrderByParent((prev) =>
           removeSidebarRepoScopedNodeOrderByGroupPrefix(prev, repoGroupPath, group),
         );
-        return ok;
       }
-      setSidebarRepoScopedGroupByPath((prev) =>
-        removeSidebarRepoScopedGroupMapKeysByPrefix(prev, group),
-      );
       return ok;
     },
-    [
-      activeRepoPath,
-      onDeleteGroup,
-      setSidebarNodeOrderByParent,
-      setSidebarRepoScopedGroupByPath,
-    ],
+    [activeRepoPath, onDeleteGroup, setSidebarNodeOrderByParent],
   );
   const {
     optimisticSidebarGroups,
@@ -1319,13 +1295,39 @@ export function DroneSidebar({
     setSidebarGroupOrder,
     onCreateGroup,
     onCreateGroupAndMove,
-    onRenameGroup: handleRenameGroup,
+    onRenameGroup,
     onMoveDronesToGroup,
     onReparentDronesToParent,
     onMoveSidebar,
     sidebarCommandQueue,
     onSidebarMutationError: setPinError,
   });
+  const repoScopedGroupPathsByRepoGroup = React.useMemo(
+    () => {
+      const repoGroupId = activeRepoPath ? `repo:${activeRepoPath}` : 'repo:ungrouped';
+      const canonicalGroupIds = new Set(
+        Object.values(canonicalGroupIndex.idsByPathByRepoGroup[repoGroupId] ?? {}),
+      );
+      const activeGroupPaths = optimisticSidebarGroups
+        .filter((group) => {
+          if (group.kind !== 'group' || isUngroupedGroupName(group.group)) return false;
+          if (activeRepoPath) return true;
+          if (group.groupId && canonicalGroupIds.has(group.groupId)) return true;
+          return group.items.some((drone) => !String(drone.repoPath ?? '').trim());
+        })
+        .map((group) => group.group);
+      return {
+        ...canonicalRepoScopedGroupPathsByRepoGroup,
+        [repoGroupId]: activeGroupPaths,
+      };
+    },
+    [
+      activeRepoPath,
+      canonicalGroupIndex.idsByPathByRepoGroup,
+      canonicalRepoScopedGroupPathsByRepoGroup,
+      optimisticSidebarGroups,
+    ],
+  );
   const companionSidebarProjection = React.useMemo(
     () =>
       buildCompanionSidebarProjection({
@@ -1535,7 +1537,6 @@ export function DroneSidebar({
     runOptimisticCreateGroup,
     runOptimisticRenameGroup,
     selectedDrone,
-    setSidebarRepoScopedGroupByPath,
     setSidebarNodeOrderByParent,
     getRenderedSidebarNodeTree,
     sidebarDroneById,
@@ -1804,6 +1805,9 @@ export function DroneSidebar({
       sidebarGroupCreatedAtByName,
       sidebarGroupIdByName,
       repoScopedGroupPathsByRepoGroup,
+      repoScopedGroupCreatedAtByPathByRepoGroup:
+        canonicalGroupIndex.createdAtByPathByRepoGroup,
+      repoScopedGroupIdByPathByRepoGroup: canonicalGroupIndex.idsByPathByRepoGroup,
     });
     const { effectiveMutedDroneIdSet } = resolveEffectiveSidebarMuteSets(
       model.nodeTree,
@@ -1827,6 +1831,8 @@ export function DroneSidebar({
     mutedDroneIdSet,
     mutedSidebarGroupIdSet,
     repoScopedGroupPathsByRepoGroup,
+    canonicalGroupIndex.createdAtByPathByRepoGroup,
+    canonicalGroupIndex.idsByPathByRepoGroup,
     repos,
     sidebarDroneOrderByGroup,
     sidebarDrones,
@@ -1866,6 +1872,8 @@ export function DroneSidebar({
         activeDroneId,
         overDroneId,
         placement,
+      }).then((result) => {
+        if (!result.ok) setPinError(`Could not update the sidebar: ${result.error}`);
       });
     },
     onPrepareDroneDragStart,

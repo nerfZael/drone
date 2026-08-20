@@ -631,6 +631,7 @@ export function useDroneHubRegistryData({
     reposLoading,
     registeredRepoPaths,
     registeredRepoPathSet,
+    registryGroups,
     registryGroupNames,
     registryGroupCreatedAtByName,
     registryGroupIdByName,

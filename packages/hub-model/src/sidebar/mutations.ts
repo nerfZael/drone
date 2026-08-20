@@ -56,6 +56,7 @@ export type SidebarMoveIntoFolderIntent =
       kind: 'move-into-folder';
       itemKind: 'folder';
       repoPath: string;
+      sourceGroupId?: string | null;
       sourceGroup: string;
       sourceNodeId: string;
       sourceParentId: string;

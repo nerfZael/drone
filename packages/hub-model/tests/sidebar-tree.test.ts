@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  buildSidebarRepoScopedGroupIndex,
   buildRepoSidebarModel,
   buildSidebarNodeTree,
   sidebarDroneNodeId,
@@ -23,6 +24,45 @@ function buildRepoTree(
 }
 
 describe('canonical sidebar tree', () => {
+  test('derives repository folder ownership from canonical groups', () => {
+    expect(
+      buildSidebarRepoScopedGroupIndex([
+        {
+          id: 'group-parent',
+          repoPath: '/repo',
+          name: 'Bug Finding',
+          createdAt: '2026-08-20T09:04:42Z',
+        },
+        {
+          id: 'group-child',
+          repoPath: '/repo',
+          name: 'Bug Finding/Experiments',
+          createdAt: '2026-08-20T09:04:49Z',
+        },
+        { id: 'group-local', repoPath: '', name: 'Local', createdAt: null },
+      ]),
+    ).toEqual({
+      pathsByRepoGroup: {
+        'repo:/repo': ['Bug Finding', 'Bug Finding/Experiments'],
+        'repo:ungrouped': ['Local'],
+      },
+      idsByPathByRepoGroup: {
+        'repo:/repo': {
+          'Bug Finding': 'group-parent',
+          'Bug Finding/Experiments': 'group-child',
+        },
+        'repo:ungrouped': { Local: 'group-local' },
+      },
+      createdAtByPathByRepoGroup: {
+        'repo:/repo': {
+          'Bug Finding': '2026-08-20T09:04:42Z',
+          'Bug Finding/Experiments': '2026-08-20T09:04:49Z',
+        },
+        'repo:ungrouped': { Local: null },
+      },
+    });
+  });
+
   test('keeps new direct drones ahead of saved repo anchors on every client', () => {
     const repoRootId = sidebarFolderNodeId('repo:/repo');
     const modelFolderId = sidebarFolderNodeId('repo-scope:repo:/repo:model-work');

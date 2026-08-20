@@ -68,6 +68,7 @@
         "@dnd-kit/utilities": "^3.2.2",
         "@drone/assistant-chat": "workspace:*",
         "@drone/assistant-markdown": "workspace:*",
+        "@drone/device-protocol": "workspace:*",
         "@drone/file-icons": "workspace:*",
         "@drone/hub-model": "workspace:*",
         "@excalidraw/excalidraw": "^0.18.1",

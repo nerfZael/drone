@@ -1,4 +1,5 @@
 import React from 'react';
+import type { SidebarMoveCommandResult } from '@drone/device-protocol';
 import {
   type SidebarCommandQueue,
   type SidebarMoveIntent,
@@ -51,7 +52,9 @@ type UseSidebarOptimisticGroupsArgs = {
   onRenameGroup: (group: string, nextName?: string) => MaybePromise<boolean>;
   onMoveDronesToGroup: (group: string, droneIds: string[]) => Promise<MoveDronesToGroupResult>;
   onReparentDronesToParent: (parentDroneId: string | null, droneIds: string[]) => Promise<ReparentDronesResult>;
-  onMoveSidebar: (intent: SidebarMoveIntent) => Promise<boolean>;
+  onMoveSidebar: (
+    intent: SidebarMoveIntent,
+  ) => Promise<SidebarMoveCommandResult>;
   sidebarCommandQueue: SidebarCommandQueue;
   onSidebarMutationError: (message: string | null) => void;
 };
@@ -164,12 +167,20 @@ export function useSidebarOptimisticGroups({
       );
       if (op) setPendingSidebarOps((prev) => [...prev, op]);
       try {
-        const ok = await onMoveSidebar(intent);
+        const result = await onMoveSidebar(intent);
+        const ok = result.ok;
+        const membershipApplied = result.stages.membership.status === 'applied';
         if (!ok && op) {
-          setPendingSidebarOps((prev) => prev.filter((pending) => pending.id !== op.id));
+          if (!membershipApplied) {
+            setPendingSidebarOps((prev) => prev.filter((pending) => pending.id !== op.id));
+          }
         }
         if (!ok) {
-          onSidebarMutationError('Could not update the sidebar. Your latest change was not saved.');
+          onSidebarMutationError(
+            membershipApplied
+              ? `The item moved, but its sidebar ordering was not saved: ${result.error}`
+              : `Could not update the sidebar: ${result.error}`,
+          );
         }
         return ok;
       } catch (error) {

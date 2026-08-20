@@ -751,6 +751,9 @@ export function DronesScreen({
             intent: request,
           });
           if (targetIdRef.current !== destinationId) return false;
+          if (result?.ok !== true) {
+            throw new Error(String(result?.error ?? 'Sidebar move failed'));
+          }
           const savedVersion =
             Number.isSafeInteger(result?.version) && Number(result.version) >= 0
               ? Number(result.version)
@@ -2346,6 +2349,9 @@ export function DronesScreen({
             mutationId: commandId,
             intent,
           });
+          if (result?.ok !== true) {
+            throw new Error(String(result?.error ?? 'Sidebar move failed'));
+          }
           if (targetIdRef.current === destinationId) {
             const savedPreferenceVersion =
               Number.isSafeInteger(result?.version) && Number(result.version) >= 0

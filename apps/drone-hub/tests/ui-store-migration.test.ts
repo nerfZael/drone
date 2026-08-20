@@ -18,6 +18,19 @@ import {
 import { sanitizeShortcutBindings } from '../src/droneHub/app/shortcuts';
 
 describe('drone hub ui store migration', () => {
+  test('drops the legacy path-keyed repository group cache', () => {
+    const migrated = migrateDroneHubUiPersistedState(
+      {
+        sidebarRepoScopedGroupByPath: {
+          Experiments: 'repo:/work/repo',
+        },
+      },
+      18,
+    );
+
+    expect(migrated).not.toHaveProperty('sidebarRepoScopedGroupByPath');
+  });
+
   test('does not publish store updates for equivalent normalized sidebar orders', () => {
     const previous = useDroneHubUiStore.getState();
     const previousWarn = console.warn;

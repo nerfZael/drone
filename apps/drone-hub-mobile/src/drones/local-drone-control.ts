@@ -9,7 +9,11 @@ import {
   parseSidebarMoveCommandRequest,
   type DroneControlOperation,
 } from '@drone/device-protocol';
-import { applySidebarMove, normalizeSidebarLayout } from '@drone/hub-model/sidebar';
+import {
+  applySidebarMove,
+  normalizeSidebarLayout,
+  sidebarMoveDestination,
+} from '@drone/hub-model/sidebar';
 import { useLocalAssistant } from '../local-assistant/LocalAssistantContext';
 import { useMesh } from '../mesh/MeshContext';
 import { loadLocalAssistantSettings } from '../local-assistant/local-assistant-settings';
@@ -536,6 +540,50 @@ function useLocalDroneControlValue() {
             command.intent.kind === 'move-into-folder'
               ? applyOptimisticMobileSidebarMove(dronesRef.current, command.intent)
               : dronesRef.current;
+          let nextGroups = groupsRef.current;
+          let canonicalGroup: { id: string; repoPath: string; name: string } | null = null;
+          if (
+            command.intent.kind === 'move-into-folder' &&
+            command.intent.itemKind === 'folder'
+          ) {
+            const folderIntent = command.intent;
+            const destination = sidebarMoveDestination(folderIntent);
+            const source = groupsRef.current.find(
+              (group) =>
+                group.id === folderIntent.sourceGroupId ||
+                group.name === folderIntent.sourceGroup,
+            );
+            if (!destination?.nextGroup || !source) {
+              throw new Error(`Unknown group: ${folderIntent.sourceGroup}`);
+            }
+            const inMovedTree = (name: string) =>
+              name === source.name || name.startsWith(`${source.name}/`);
+            const movedName = (name: string) =>
+              name === source.name
+                ? destination.nextGroup!
+                : `${destination.nextGroup}${name.slice(source.name.length)}`;
+            const movedNames = new Set(
+              groupsRef.current
+                .filter((group) => inMovedTree(group.name))
+                .map((group) => movedName(group.name)),
+            );
+            if (
+              groupsRef.current.some(
+                (group) => !inMovedTree(group.name) && movedNames.has(group.name),
+              )
+            ) {
+              throw new Error(`A group already exists under: ${destination.nextGroup}`);
+            }
+            nextGroups = groupsRef.current.map((group) =>
+              inMovedTree(group.name) ? { ...group, name: movedName(group.name) } : group,
+            );
+            canonicalGroup = {
+              id: source.id,
+              repoPath: '',
+              name: destination.nextGroup,
+            };
+          }
+          const groupsChanged = nextGroups !== groupsRef.current;
           const nextOrder = {
             sidebarNodeOrderByParent: nextLayout.sidebarNodeOrderByParent,
             sidebarChatOrderByDrone: nextLayout.sidebarChatOrderByDrone,
@@ -550,17 +598,35 @@ function useLocalDroneControlValue() {
               LOCAL_PINNED_DRONES_KEY,
               JSON.stringify(nextLayout.pinnedDroneIds),
             ),
+            ...(!groupsChanged
+              ? []
+              : [AsyncStorage.setItem(LOCAL_GROUPS_KEY, JSON.stringify(nextGroups))]),
           ]);
           dronesRef.current = nextDrones;
+          groupsRef.current = nextGroups;
           sidebarOrderRef.current = nextOrder;
           pinnedDroneIdsRef.current = nextLayout.pinnedDroneIds;
           setDrones(nextDrones);
+          if (groupsChanged) setGroups(nextGroups);
           setPinnedDroneIds(nextLayout.pinnedDroneIds);
           return {
             ok: true,
             mutationId: command.mutationId,
             version: null,
             uiPreferences: nextLayout,
+            stages: {
+              membership: {
+                status:
+                  command.intent.kind === 'move-into-folder'
+                    ? ('applied' as const)
+                    : ('not-required' as const),
+              },
+              layout: { status: 'applied' as const },
+            },
+            canonical: {
+              group: canonicalGroup,
+              sidebar: { version: null, uiPreferences: nextLayout },
+            },
           };
         });
         writeRef.current = write.then(

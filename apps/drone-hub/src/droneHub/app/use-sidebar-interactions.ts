@@ -75,7 +75,6 @@ type UseSidebarInteractionsArgs = {
   ) => Promise<CreateGroupResult>;
   runOptimisticRenameGroup: (group: string, nextName?: string) => Promise<boolean>;
   selectedDrone: string | null;
-  setSidebarRepoScopedGroupByPath: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setSidebarNodeOrderByParent: React.Dispatch<React.SetStateAction<Record<string, string[]>>>;
   getRenderedSidebarNodeTree: () => SidebarNodeTreeModel | null;
   sidebarDroneById: Record<string, DroneSummary>;
@@ -98,7 +97,6 @@ export function useSidebarInteractions({
   runOptimisticCreateGroup,
   runOptimisticRenameGroup,
   selectedDrone,
-  setSidebarRepoScopedGroupByPath,
   setSidebarNodeOrderByParent,
   getRenderedSidebarNodeTree,
   sidebarDroneById,
@@ -293,12 +291,6 @@ export function useSidebarInteractions({
         return;
       }
       const repoGroupPath = draft.repoGroupPath;
-      if (repoGroupPath) {
-        setSidebarRepoScopedGroupByPath((prev: Record<string, string>) => {
-          if (prev[nextPath] === repoGroupPath) return prev;
-          return { ...prev, [nextPath]: repoGroupPath };
-        });
-      }
       setSidebarNodeOrderByParent((prev) =>
         placeCreatedSidebarFolderBeforeNode(
           prev,
@@ -334,7 +326,6 @@ export function useSidebarInteractions({
     runOptimisticCreateGroup,
     runOptimisticRenameGroup,
     setSidebarNodeOrderByParent,
-    setSidebarRepoScopedGroupByPath,
   ]);
 
   const blurFolderEditor = React.useCallback(() => {

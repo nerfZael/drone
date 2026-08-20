@@ -97,6 +97,11 @@ truth.
 The UI must identify Hub-owned branches clearly. It must never silently choose a diverged checkout
 as the authority for an existing branch.
 
+Repository policy may protect selected origin branches from direct DroneHub merges. A protected
+branch remains a valid CR destination so it can be reviewed, published as a pull request, or applied
+staged to a checkout, but DroneHub never updates that origin branch through the native direct-merge
+path. Protecting a branch applies immediately to existing open CRs as well as newly created CRs.
+
 ### 4. Squash is the merge shape, not the branch safety mechanism
 
 Every merge produces one squash commit `M` whose sole parent is the freshly observed destination
@@ -268,15 +273,6 @@ create_change_request({
 Rules:
 
 - `sourceCheckout` is required and must be visible and capturable by the caller.
-
-### Apply and merge actions
-
-The UI exposes three distinct actions: **Preview in review workspace**, **Apply staged to checkout**,
-and **Merge authoritative branch**. Applying requires checkout-write permission but not remote-merge
-permission. Automated remote merge remains a separately authorized action and may be disabled by
-repository or branch policy. For protected branches, repository policy may make apply the default or
-the only DroneHub landing action.
-
 - Source and destination checkout, when supplied, must have the same `repositoryId`.
 - The source must be clean, committed, and on an attached branch.
 - `destinationAuthority` defaults to `origin` when the branch exists there.
@@ -284,6 +280,68 @@ the only DroneHub landing action.
   an already registered Hub-authority branch.
 - Selecting a destination checkout requests synchronization after merge.
 - The returned result instructs the agent to include `CR #<number>` in its response.
+
+### Apply and merge actions
+
+The UI exposes three distinct actions: **Preview in review workspace**, **Apply staged to checkout**,
+and **Merge authoritative branch**. Applying requires checkout-write permission but not remote-merge
+permission. Automated remote merge remains a separately authorized action and may be disabled by
+repository or branch policy. For protected origin branches, native direct merge is unavailable while
+staged apply and provider pull-request publication remain available.
+
+### Protected origin branches
+
+Store structured change-request policy per repository and edit it alongside that repository's
+environment settings. It is repository metadata, not an environment variable or secret.
+
+```ts
+type RepositoryChangeRequestPolicy = {
+  version: 1;
+  protectedOriginBranches: string[];
+};
+```
+
+Entries are exact branch names or validated glob patterns such as `main`, `production`, and
+`release/*`. Matching is case-sensitive. `*` matches within one slash-delimited branch segment;
+reject `**`, negation, character classes, braces, extglobs, backslashes, empty segments, invalid refs,
+and ambiguous patterns. Normalize branch names before matching and never interpret a caller-supplied
+pattern during a merge. Compile and validate policy when it is saved. An empty list permits native
+direct origin merge on every otherwise-authorized branch.
+
+For a protected origin branch:
+
+- native **Merge authoritative branch** is unavailable in the UI and rejected by the service;
+- `merge_change_request` returns `direct_merge_protected_branch` before preparing a commit or
+  acquiring remote credentials;
+- publishing or updating a pull request targeting the branch remains allowed;
+- merging that provider pull request remains allowed only through the provider API, so provider
+  branch rules and required checks remain authoritative;
+- **Apply staged to checkout** remains allowed and still creates no commit or push;
+- a human may commit and push outside DroneHub using their own Git identity;
+- no API, MCP argument, role, or administrator flag can bypass the policy for a single operation.
+
+Protection is evaluated again immediately before every origin mutation. A policy change therefore
+blocks already-open CRs without recapturing them. Retargeting or changing authority never carries a
+previous allow decision forward. The UI explains that direct DroneHub merge is disabled and offers
+**Publish pull request** and **Apply staged to checkout** instead.
+
+Policy writes and native origin merges serialize on `repository-policy:<repositoryId>`. A merge holds
+that lock from its first policy read through the origin update; a settings write acquires it before
+persisting new policy. Therefore, once a policy-save response succeeds, no earlier in-flight native
+merge can subsequently move a newly protected branch. Existing catalog rows receive
+`{"version":1,"protectedOriginBranches":[]}` during the coordinated v2 rebuild.
+
+Expose authorized repository-policy `GET` and `PATCH` endpoints for the settings UI. Policy mutation
+is user/admin configuration, not an agent MCP capability. CR list/detail and MCP read results include
+server-derived landing methods such as `direct_origin_merge`, `provider_pull_request`, and
+`apply_staged`; clients never derive permission by matching patterns themselves.
+
+Application policy alone is not an independent security boundary against a defect that bypasses the
+application. Production deployments should use a dedicated DroneHub remote identity and configure
+provider branch protection so that identity cannot push, force-push, delete, or bypass rules on the
+same protected branches. A user's separate identity may retain manual-push permission. When remote
+enforcement is configured, DroneHub may still push CR head branches and create pull requests without
+being able to move their protected base branches.
 
 ### Update and retarget
 
@@ -326,6 +384,7 @@ catalog_repositories
   github_repo                TEXT
   environment_json           TEXT
   agents_json                TEXT
+  change_request_policy_json TEXT NOT NULL
   added_at                   TEXT NOT NULL
   updated_at                 TEXT NOT NULL
 ```
@@ -439,6 +498,7 @@ Create these boundaries under `apps/drone/src/hub/change-requests/`:
 - `checkout-adapters/host-checkout-adapter.ts`.
 - `checkout-adapters/container-checkout-adapter.ts`.
 - `branch-authority.ts`: common compare-and-swap interface.
+- `repository-change-request-policy.ts`: policy validation, matching, and landing-method decisions.
 - `origin-branch-authority.ts`.
 - `hub-branch-authority.ts`.
 - `repository-review-store.ts`: per-repository bare store and private refs.
@@ -500,29 +560,40 @@ Checkout and repository-store locks are never held simultaneously.
 
 ### Merge
 
-1. Acquire `repositoryId + authority + destinationBranch` lock.
-2. Acquire the repository-store lock.
-3. Refresh and resolve the latest authoritative SHA.
-4. Reject mismatched review pins.
-5. Run `merge-tree`; distinguish conflict exit code from operational failure.
-6. Create squash commit `M` with `commit-tree`, giving it exactly one parent: the latest destination
+1. Acquire `repository-policy:<repositoryId>`, then the
+   `repositoryId + authority + destinationBranch` lock.
+2. Read repository policy and reject a protected origin destination before preparing a commit or
+   resolving remote credentials.
+3. Acquire the repository-store lock.
+4. Refresh and resolve the latest authoritative SHA.
+5. Reject mismatched review pins.
+6. Run `merge-tree`; distinguish conflict exit code from operational failure.
+7. Create squash commit `M` with `commit-tree`, giving it exactly one parent: the latest destination
    `O`.
-7. Verify the parent list, `O..M` ancestry, prepared tree, and all review pins independently.
-8. Create the private prepared ref for `M` and a durable branch-history `before` ref for `O`.
-9. Persist a prepared attempt before external mutation.
-10. Compare-and-swap the authority:
+8. Verify the parent list, `O..M` ancestry, prepared tree, and all review pins independently.
+9. Create the private prepared ref for `M` and a durable branch-history `before` ref for `O`.
+10. Persist a prepared attempt before external mutation.
+11. Recheck the held policy snapshot immediately before authority mutation. Policy cannot change
+    while its lock is held.
+12. Compare-and-swap the authority:
     - push `<prepared-ref>:refs/heads/<branch>` normally, without force, for `origin`;
     - transactionally `update-ref <branch> M O` for Hub authority after the ancestry checks.
-11. Read the authoritative ref back. Require `M`, or during recovery a descendant containing `M`,
+13. Read the authoritative ref back. Require `M`, or during recovery a descendant containing `M`,
     before treating the update as successful.
-12. Create durable merged and branch-history `after` refs for `M`, then mark the CR and attempt
+14. Create durable merged and branch-history `after` refs for `M`, then mark the CR and attempt
     completed.
-13. Remove only the temporary prepared ref. Retain before/after history refs for rollback and audit.
-14. Create a pending sync record for the requested destination checkout.
-15. Release locks, then run or enqueue synchronization.
+15. Remove only the temporary prepared ref. Retain before/after history refs for rollback and audit.
+16. Create a pending sync record for the requested destination checkout.
+17. Release locks, then run or enqueue synchronization.
 
 No normal merge path may invoke `--force`, `--force-with-lease`, a `+` refspec, branch deletion, or an
 unvalidated arbitrary refspec.
+
+If protection rejects a prepared but unpushed attempt, mark it failed with `policy_changed`, remove
+its temporary prepared and unused history refs, and leave the CR open. Startup recovery may inspect a
+protected origin branch: if the prepared commit was already pushed, complete persistence without
+moving the branch; if origin still equals the expected old SHA, fail the attempt and never retry the
+push; if inspection is inconclusive, retain the attempt for later read-only reconciliation.
 
 ### Revert and recovery history
 
@@ -623,6 +694,7 @@ This is build order, not a gradual production migration.
 - Add checkout records, discovery, fingerprints, and authorization.
 - Replace shared hub-model CR types with v2 types.
 - Define checkout adapter and branch-authority interfaces.
+- Add repository change-request policy storage, validation, and matching.
 - Add checkout catalog API and MCP tool.
 - Add contract tests before Git orchestration work begins.
 
@@ -675,6 +747,11 @@ diverged checkouts remain unchanged.
 - Present apply and merge as separate actions, keep applied CRs open, and display the application
   receipt without calling it merged.
 - Add destination checkout and authority selectors.
+- Add protected-origin-branch settings beside repository environment settings.
+- Hide direct merge for protected origin targets, explain the policy, and keep pull-request
+  publication and staged apply available.
+- Return server-derived allowed landing methods in CR API and MCP views; do not duplicate policy
+  matching in clients.
 - Add branch-scoped merge permission and checkout-sync permission.
 - Add a separate checkout-apply permission; it never implies authority mutation permission.
 - Update GitHub publication to read v2 revision and target fields.
@@ -696,6 +773,7 @@ Exit criteria: a fresh v2 system starts with zero CRs and no reachable v1 storag
 Use these lock keys:
 
 - checkout mutation: `checkout:<checkoutId>`;
+- repository policy: `repository-policy:<repositoryId>`;
 - review store: `repository-store:<repositoryId>`;
 - authoritative branch: `branch:<repositoryId>:<authority>:<branch>`;
 - CR mutation: `change-request:<requestId>`.
@@ -703,8 +781,9 @@ Use these lock keys:
 Global order when more than one lock is unavoidable:
 
 1. CR mutation;
-2. authoritative branch;
-3. repository store.
+2. repository policy;
+3. authoritative branch;
+4. repository store.
 
 Checkout locks must not overlap repository-store locks. Object transfer is staged between those
 critical sections. Sync similarly exports before acquiring the checkout lock.
@@ -715,6 +794,11 @@ and test builds.
 ## Security and integrity rules
 
 - Resolve only registered repository and checkout IDs; never accept arbitrary Git paths.
+- Validate protected-branch policy on write and evaluate it server-side at every origin mutation;
+  never trust UI visibility or a create-time allow decision.
+- Provide no per-operation protected-branch bypass in HTTP, MCP, internal service, or recovery APIs.
+- Use a dedicated least-privilege DroneHub remote identity and mirror protected-branch restrictions
+  at the provider whenever direct origin merging is enabled for any repository branch.
 - Enforce source read/capture, CR management, merge, and destination-sync permissions separately.
 - Keep host remote credentials out of containers.
 - Disable hooks for automated commits and fast-forwards.
@@ -736,6 +820,9 @@ and test builds.
 - full and incremental bundle verification;
 - immutable revision ref transactions and compensation;
 - origin and Hub authority compare-and-swap behavior;
+- exact and glob protected-branch matching, invalid-policy rejection, and normalization;
+- protected-origin rejection at merge preparation, immediately before mutation, and during recovery;
+- policy changes that block already-open CRs without blocking staged apply or pull-request publication;
 - rejection of non-fast-forward, multi-parent, wrong-parent, wrong-tree, and arbitrary-ref updates;
 - retained before/after refs and revert-CR construction;
 - structured `merge-tree` result and conflict parsing;
@@ -770,6 +857,9 @@ may change, and `git write-tree` must equal the prepared candidate tree.
 - source deletion after capture;
 - destination mutation during merge;
 - attempted unrelated-history branch replacement;
+- protecting a branch while its CR is open or while a merge waits for the branch lock;
+- attempts to bypass protection through HTTP, MCP, retargeting, authority changes, stale cached
+  policy, conversion of provider publication into a native push, and startup recovery;
 - force-capable option or refspec rejection;
 - two concurrent CRs targeting one branch;
 - interruption before prepared-attempt persistence;
@@ -796,12 +886,13 @@ Expose diagnostics in the CR detail view:
 - repository and source checkout labels;
 - immutable revision number and source HEAD;
 - destination authority and observed SHA;
+- protected-origin policy and the allowed landing methods;
 - merge-attempt state;
 - requested checkout sync state and last safe error;
 - retry actions when the user can resolve the condition.
 
 Metrics should include operation latency, transferred bundle bytes, conflict rate, non-fast-forward
-rejection, recovery outcomes, and sync-state counts.
+rejection, protected-branch rejection, recovery outcomes, and sync-state counts.
 
 ## Definition of done
 
@@ -811,6 +902,9 @@ The replacement is complete when:
 - a CR can be captured from any registered host/container checkout or worktree;
 - origin-backed and Hub-backed destination branches both use compare-and-swap updates;
 - origin merges use ordinary fast-forward pushes and no force-capable option;
+- protected origin branches can be reviewed and published as pull requests or applied staged, but no
+  native direct-merge or recovery path can move them;
+- changing protected-branch policy takes effect for existing CRs before the next origin mutation;
 - every merge retains its before and after SHAs and can produce a reviewable revert CR;
 - merged commits survive deletion of every participating checkout;
 - requested host/container destinations safely synchronize or report an actionable state;

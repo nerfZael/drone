@@ -27,6 +27,10 @@ export function buildSidebarRepositoryNavigationModel<TStateSummary>(args: {
   sidebarGroupCreatedAtByName?: Readonly<Record<string, string | null>>;
   sidebarGroupIdByName?: Readonly<Record<string, string>>;
   repoScopedGroupPathsByRepoGroup?: Readonly<Record<string, string[]>>;
+  repoScopedGroupCreatedAtByPathByRepoGroup?: Readonly<
+    Record<string, Record<string, string | null>>
+  >;
+  repoScopedGroupIdByPathByRepoGroup?: Readonly<Record<string, Record<string, string>>>;
 }): SidebarRepositoryNavigationModel<TStateSummary> {
   const model = buildRepoSidebarModel({
     drones: [...args.drones],
@@ -39,6 +43,12 @@ export function buildSidebarRepositoryNavigationModel<TStateSummary>(args: {
     sidebarGroupCreatedAtByName: { ...(args.sidebarGroupCreatedAtByName ?? {}) },
     sidebarGroupIdByName: { ...(args.sidebarGroupIdByName ?? {}) },
     repoScopedGroupPathsByRepoGroup: { ...(args.repoScopedGroupPathsByRepoGroup ?? {}) },
+    repoScopedGroupCreatedAtByPathByRepoGroup: {
+      ...(args.repoScopedGroupCreatedAtByPathByRepoGroup ?? {}),
+    },
+    repoScopedGroupIdByPathByRepoGroup: {
+      ...(args.repoScopedGroupIdByPathByRepoGroup ?? {}),
+    },
   });
   return {
     ...model,
@@ -67,6 +77,10 @@ export function buildSidebarRepositoryNavigationItems<TStateSummary>(args: {
   sidebarGroupCreatedAtByName?: Readonly<Record<string, string | null>>;
   sidebarGroupIdByName?: Readonly<Record<string, string>>;
   repoScopedGroupPathsByRepoGroup?: Readonly<Record<string, string[]>>;
+  repoScopedGroupCreatedAtByPathByRepoGroup?: Readonly<
+    Record<string, Record<string, string | null>>
+  >;
+  repoScopedGroupIdByPathByRepoGroup?: Readonly<Record<string, Record<string, string>>>;
 }): Array<SidebarRepositoryNavigationItem<TStateSummary>> {
   return buildSidebarRepositoryNavigationModel(args).items;
 }

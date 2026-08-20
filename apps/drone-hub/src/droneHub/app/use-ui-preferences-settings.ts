@@ -1,5 +1,6 @@
 import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
+import type { SidebarMoveCommandResult } from '@drone/device-protocol';
 import type {
   SidebarDensityMode,
   SidebarGroupingMode,
@@ -46,7 +47,7 @@ export type UseUiPreferencesSettingsResult = {
   reloadPinnedDrones: () => Promise<void>;
   setDronePinned: (droneId: string, pinned: boolean) => Promise<boolean>;
   setDronesPinned: (droneIds: readonly string[], pinned: boolean) => Promise<boolean>;
-  moveSidebar: (intent: SidebarMoveIntent) => Promise<boolean>;
+  moveSidebar: (intent: SidebarMoveIntent) => Promise<SidebarMoveCommandResult>;
 };
 
 const SAVE_DEBOUNCE_MS = 400;
@@ -799,7 +800,7 @@ export function useUiPreferencesSettings({
   }, [reloadUiPreferences, requestJson, sidebarCommandRevision, snapshot]);
 
   const moveSidebar = React.useCallback(
-    (intent: SidebarMoveIntent): Promise<boolean> => {
+    (intent: SidebarMoveIntent): Promise<SidebarMoveCommandResult> => {
       const commandSeq = sidebarCommandSeqRef.current + 1;
       sidebarCommandSeqRef.current = commandSeq;
       const commandId = `desktop:${Date.now()}:${commandSeq}`;
@@ -816,9 +817,9 @@ export function useUiPreferencesSettings({
         ...sidebarLayoutPatch(optimisticLayout, intent),
       });
 
-      const write = async (): Promise<boolean> => {
+      const write = async (): Promise<SidebarMoveCommandResult> => {
         try {
-          const data = await requestJson<UiPreferencesSettingsResponse & { mutationId: string }>(
+          const data = await requestJson<SidebarMoveCommandResult>(
             '/api/sidebar/move',
             {
               method: 'POST',
@@ -829,6 +830,25 @@ export function useUiPreferencesSettings({
               }),
             },
           );
+          if (!data.ok) {
+            sidebarJournalRef.current = settleSidebarOptimisticCommand(
+              sidebarJournalRef.current,
+              commandId,
+            );
+            const canonicalSidebar = data.canonical.sidebar;
+            if (canonicalSidebar) {
+              const backend = normalizeUiPreferencesSnapshot(
+                canonicalSidebar.uiPreferences,
+              );
+              lastSavedSnapshotRef.current = backend;
+              lastSavedSerializedRef.current = serializeUiPreferencesSnapshot(backend);
+              lastSavedVersionRef.current = canonicalSidebar.version;
+              applyUiPreferences(rebasePendingSidebarCommands(backend));
+            } else {
+              await reloadUiPreferences({ discardSidebarIntent: intent });
+            }
+            return data;
+          }
           const backend = normalizeUiPreferencesSnapshot(data.uiPreferences);
           const current = normalizeUiPreferencesSnapshot(useDroneHubUiStore.getState());
           const reconciled = lastSavedSnapshotRef.current
@@ -847,14 +867,36 @@ export function useUiPreferencesSettings({
           lastSavedSerializedRef.current = serializeUiPreferencesSnapshot(backend);
           lastSavedVersionRef.current = data.version;
           applyUiPreferences(rebasePendingSidebarCommands(reconciled));
-          return true;
-        } catch {
+          return data;
+        } catch (error) {
           sidebarJournalRef.current = settleSidebarOptimisticCommand(
             sidebarJournalRef.current,
             commandId,
           );
-          await reloadUiPreferences({ discardSidebarIntent: intent });
-          return false;
+          const message =
+            error instanceof Error && error.message.trim()
+              ? error.message.trim()
+              : 'The sidebar update failed.';
+          console.error('[DroneHub] sidebar move failed', { intent, error });
+          try {
+            await reloadUiPreferences({ discardSidebarIntent: intent });
+          } catch (reloadError) {
+            console.error('[DroneHub] sidebar reload after failed move failed', {
+              intent,
+              error: reloadError,
+            });
+          }
+          return {
+            ok: false,
+            mutationId: commandId,
+            code: 'REQUEST_FAILED',
+            error: message,
+            stages: {
+              membership: { status: 'unknown', error: message },
+              layout: { status: 'unknown', error: message },
+            },
+            canonical: { group: null, sidebar: null },
+          };
         } finally {
           pendingSidebarCommandsRef.current = Math.max(
             0,
@@ -881,7 +923,9 @@ export function useUiPreferencesSettings({
     (droneIdsRaw: readonly string[], pinned: boolean): Promise<boolean> => {
       const droneIds = normalizeOrderedStringList(droneIdsRaw);
       if (droneIds.length === 0) return Promise.resolve(false);
-      return moveSidebar({ kind: 'set-pinned', droneIds, pinned });
+      return moveSidebar({ kind: 'set-pinned', droneIds, pinned }).then(
+        (result) => result.ok,
+      );
     },
     [moveSidebar],
   );

@@ -143,11 +143,11 @@ export function applySidebarOptimisticOpsToGroups(
     }));
   }
 
-  const baseGroupKinds = new Map<string, SidebarGroup['kind']>();
+  const baseGroupsByName = new Map<string, SidebarGroup>();
   const groupNames = new Set<string>();
   for (const group of groups) {
     if (group.kind !== 'group') continue;
-    baseGroupKinds.set(group.group, group.kind);
+    baseGroupsByName.set(group.group, group);
     groupNames.add(group.group);
   }
 
@@ -158,15 +158,25 @@ export function applySidebarOptimisticOpsToGroups(
     }
     if (op.kind === 'rename_group') {
       const renamed = new Set<string>();
+      const renamedBaseGroupsByName = new Map<string, SidebarGroup>();
       for (const groupName of groupNames) {
         if (isSameOrDescendantSidebarGroupPath(groupName, op.sourceGroup)) {
-          renamed.add(rewriteSidebarGroupPathPrefix(groupName, op.sourceGroup, op.targetGroup));
+          const nextGroupName = rewriteSidebarGroupPathPrefix(groupName, op.sourceGroup, op.targetGroup);
+          renamed.add(nextGroupName);
+          const baseGroup = baseGroupsByName.get(groupName);
+          if (baseGroup) renamedBaseGroupsByName.set(nextGroupName, baseGroup);
           continue;
         }
         renamed.add(groupName);
+        const baseGroup = baseGroupsByName.get(groupName);
+        if (baseGroup) renamedBaseGroupsByName.set(groupName, baseGroup);
       }
       groupNames.clear();
       for (const groupName of renamed) groupNames.add(groupName);
+      baseGroupsByName.clear();
+      for (const [groupName, baseGroup] of renamedBaseGroupsByName) {
+        baseGroupsByName.set(groupName, baseGroup);
+      }
     }
   }
 
@@ -183,12 +193,16 @@ export function applySidebarOptimisticOpsToGroups(
     itemsByGroup.set(groupName, items);
   }
 
-  return Array.from(groupNames).map((groupName) => ({
-    group: groupName,
-    label: groupName,
-    kind: baseGroupKinds.get(groupName) ?? 'group',
-    items: itemsByGroup.get(groupName) ?? [],
-  }));
+  return Array.from(groupNames).map((groupName) => {
+    const baseGroup = baseGroupsByName.get(groupName);
+    return {
+      groupId: baseGroup?.groupId,
+      group: groupName,
+      label: groupName,
+      kind: baseGroup?.kind ?? 'group',
+      items: itemsByGroup.get(groupName) ?? [],
+    };
+  });
 }
 
 export function pruneSatisfiedSidebarOptimisticOps(

@@ -145,6 +145,42 @@ describe('sidebar drop planner', () => {
     });
   });
 
+  test('keeps the stable group id and normalizes the repo-less root for empty folder moves', () => {
+    const repoLessTree = nodeTree({
+      [root]: [sourceFolderId, targetFolderId],
+    });
+    const source = repoLessTree.nodesById[sourceFolderId];
+    const target = repoLessTree.nodesById[targetFolderId];
+    if (source?.kind !== 'folder' || target?.kind !== 'folder') throw new Error('missing folders');
+    source.groupId = 'source-group-id';
+    source.repoGroupPath = 'repo:ungrouped';
+    target.repoGroupPath = 'repo:ungrouped';
+
+    expect(
+      planSidebarDrop({
+        active: {
+          type: 'sidebar-folder',
+          groupId: 'source-group-id',
+          folderNodeId: sourceFolderId,
+          folderPath: 'Source',
+          groupKind: 'group',
+          label: 'Source',
+        },
+        target: { kind: 'folder-body', folderNodeId: targetFolderId, insertionTarget: null },
+        nodeTree: repoLessTree,
+        droneById: {},
+        sidebarChatOrderByDrone: {},
+      })?.intent,
+    ).toMatchObject({
+      kind: 'move-into-folder',
+      itemKind: 'folder',
+      repoPath: '',
+      sourceGroupId: 'source-group-id',
+      sourceGroup: 'Source',
+      targetGroup: 'Target',
+    });
+  });
+
   test('only reorders repository roots when the final hovered node is another root', () => {
     const repoSourceId = sidebarFolderNodeId('repo:first');
     const repoTargetId = sidebarFolderNodeId('repo:second');

@@ -189,7 +189,8 @@ export function planSidebarDrop({
     intent: {
       kind: 'move-into-folder',
       itemKind: 'folder',
-      repoPath: String(sourceNode.repoGroupPath ?? '').replace(/^repo:/, ''),
+      repoPath: repoPathFromGroupPath(sourceNode.repoGroupPath),
+      sourceGroupId: active.groupId ?? sourceNode.groupId ?? null,
       sourceGroup: active.folderPath,
       sourceNodeId: sourceNode.id,
       sourceParentId,
@@ -203,6 +204,12 @@ export function planSidebarDrop({
       placement: commandPlacement(resolvedTarget.placement),
     },
   };
+}
+
+function repoPathFromGroupPath(repoGroupPathRaw: string | null | undefined): string {
+  const repoGroupPath = String(repoGroupPathRaw ?? '').trim();
+  if (!repoGroupPath || repoGroupPath === 'repo:ungrouped') return '';
+  return repoGroupPath.replace(/^repo:/, '');
 }
 
 export function sidebarNodeAllowsDropInside(

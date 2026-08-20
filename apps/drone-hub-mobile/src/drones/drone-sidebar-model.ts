@@ -15,6 +15,7 @@ import {
 import type { AgentRunFileChanges } from '@blip/protocol';
 import {
   buildRepoSidebarModel,
+  buildSidebarRepoScopedGroupIndex,
   compareSidebarDronesByNewestFirst,
   orderSidebarEntries,
   sidebarFolderNodeId,
@@ -663,18 +664,7 @@ export function buildMobileDroneRepoGroups(
   drones: MobileDroneSummary[],
   order: MobileDroneSidebarOrder = EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
 ): MobileDroneRepoGroup[] {
-  const repoScopedGroupPathsByRepoGroup: Record<string, string[]> = {};
-  const repoScopedGroupIdByPathByRepoGroup: Record<string, Record<string, string>> = {};
-  const repoScopedGroupCreatedAtByPathByRepoGroup: Record<
-    string,
-    Record<string, string | null>
-  > = {};
-  for (const group of order.groups ?? []) {
-    const repoGroup = group.repoPath ? `repo:${group.repoPath}` : 'repo:ungrouped';
-    (repoScopedGroupPathsByRepoGroup[repoGroup] ??= []).push(group.name);
-    (repoScopedGroupIdByPathByRepoGroup[repoGroup] ??= {})[group.name] = group.id;
-    (repoScopedGroupCreatedAtByPathByRepoGroup[repoGroup] ??= {})[group.name] = group.createdAt;
-  }
+  const canonicalGroupIndex = buildSidebarRepoScopedGroupIndex(order.groups ?? []);
   const { groups, nodeTree: tree } = buildRepoSidebarModel({
     drones,
     registeredRepoPaths: order.registeredRepoPaths,
@@ -682,9 +672,10 @@ export function buildMobileDroneRepoGroups(
     sidebarGroupOrder: order.sidebarGroupOrder,
     sidebarNodeOrderByParent: order.sidebarNodeOrderByParent,
     sidebarGroupCreatedAtByName: order.groupCreatedAtByName,
-    repoScopedGroupPathsByRepoGroup,
-    repoScopedGroupIdByPathByRepoGroup,
-    repoScopedGroupCreatedAtByPathByRepoGroup,
+    repoScopedGroupPathsByRepoGroup: canonicalGroupIndex.pathsByRepoGroup,
+    repoScopedGroupIdByPathByRepoGroup: canonicalGroupIndex.idsByPathByRepoGroup,
+    repoScopedGroupCreatedAtByPathByRepoGroup:
+      canonicalGroupIndex.createdAtByPathByRepoGroup,
   });
   const dronesById = new Map(drones.map((drone) => [String(drone.id ?? '').trim(), drone]));
 

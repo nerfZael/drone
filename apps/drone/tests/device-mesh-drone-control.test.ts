@@ -21,10 +21,10 @@ function sidebarOperations(
       moved: droneIds.map((id) => ({ id, group })),
       rejected: [],
     }),
-    renameGroup: async ({ repoPath, oldName, newName }) => ({
+    renameGroup: async ({ repoPath, groupRef, newName }) => ({
       ok: true,
       repoPath,
-      oldName,
+      oldName: groupRef,
       newName,
       renamed: true,
     }),
@@ -514,6 +514,152 @@ describe('device mesh drone summaries', () => {
       'preferences:read:40',
       'preferences:write:40',
     ]);
+  });
+
+  test('uses a stable group reference for an empty folder move', async () => {
+    const renames: unknown[] = [];
+    const sidebarCommands = new SidebarCommandService(
+      sidebarOperations({
+        renameGroup: async (input) => {
+          renames.push(input);
+          return { ok: true, renamed: true };
+        },
+      }),
+    );
+
+    await expect(
+      sidebarCommands.move({
+        mutationId: 'move-empty-folder',
+        intent: {
+          kind: 'move-into-folder',
+          itemKind: 'folder',
+          repoPath: '/work/repo',
+          sourceGroupId: 'group-stable-id',
+          sourceGroup: 'Experiments',
+          sourceNodeId: 'folder:Experiments',
+          sourceParentId: 'root',
+          sourceSiblingNodeIds: ['folder:Experiments', 'folder:Bug Finding'],
+          targetGroup: 'Bug Finding',
+          targetParentId: 'folder:Bug Finding',
+          targetSiblingNodeIds: [],
+          placement: 'inside',
+        },
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      stages: {
+        membership: { status: 'applied' },
+        layout: { status: 'applied' },
+      },
+      canonical: {
+        group: {
+          id: 'group-stable-id',
+          repoPath: '/work/repo',
+          name: 'Bug Finding/Experiments',
+        },
+        sidebar: { version: 1 },
+      },
+    });
+
+    expect(renames).toEqual([
+      {
+        repoPath: '/work/repo',
+        groupRef: 'group-stable-id',
+        newName: 'Bug Finding/Experiments',
+      },
+    ]);
+  });
+
+  test('reports a recoverable staged result when membership succeeds but layout fails', async () => {
+    let renameCount = 0;
+    let layoutAvailable = false;
+    const sidebarCommands = new SidebarCommandService(
+      sidebarOperations({
+        renameGroup: async ({ repoPath, groupRef, newName }) => {
+          renameCount += 1;
+          return {
+            ok: true,
+            id: groupRef,
+            repoPath,
+            oldName: 'Experiments',
+            newName,
+            renamed: true,
+          };
+        },
+        readUiPreferences: async () => ({
+          version: 7,
+          uiPreferences: { sidebarNodeOrderByParent: { root: ['folder:Experiments'] } },
+        }),
+        writeUiPreferences: async ({ uiPreferences }) => {
+          if (!layoutAvailable) throw new Error('preferences unavailable');
+          return { version: 8, uiPreferences };
+        },
+      }),
+    );
+
+    const result = await sidebarCommands.move({
+      mutationId: 'move-empty-folder-partial',
+      intent: {
+        kind: 'move-into-folder',
+        itemKind: 'folder',
+        repoPath: '/work/repo',
+        sourceGroupId: 'group-stable-id',
+        sourceGroup: 'Experiments',
+        sourceNodeId: 'folder:Experiments',
+        sourceParentId: 'root',
+        sourceSiblingNodeIds: ['folder:Experiments', 'folder:Bug Finding'],
+        targetGroup: 'Bug Finding',
+        targetParentId: 'folder:Bug Finding',
+        targetSiblingNodeIds: [],
+        placement: 'inside',
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: 'LAYOUT_UPDATE_FAILED',
+      error: 'preferences unavailable',
+      stages: {
+        membership: { status: 'applied' },
+        layout: { status: 'failed', error: 'preferences unavailable' },
+      },
+      canonical: {
+        group: {
+          id: 'group-stable-id',
+          repoPath: '/work/repo',
+          name: 'Bug Finding/Experiments',
+        },
+        sidebar: { version: 7 },
+      },
+    });
+    expect(renameCount).toBe(1);
+
+    layoutAvailable = true;
+    const retry = await sidebarCommands.move({
+      mutationId: 'move-empty-folder-partial-retry',
+      intent: {
+        kind: 'move-into-folder',
+        itemKind: 'folder',
+        repoPath: '/work/repo',
+        sourceGroupId: 'group-stable-id',
+        sourceGroup: 'Experiments',
+        sourceNodeId: 'folder:Experiments',
+        sourceParentId: 'root',
+        sourceSiblingNodeIds: ['folder:Experiments', 'folder:Bug Finding'],
+        targetGroup: 'Bug Finding',
+        targetParentId: 'folder:Bug Finding',
+        targetSiblingNodeIds: [],
+        placement: 'inside',
+      },
+    });
+    expect(retry).toMatchObject({
+      ok: true,
+      stages: {
+        membership: { status: 'applied' },
+        layout: { status: 'applied' },
+      },
+    });
+    expect(renameCount).toBe(2);
   });
 
   test('serializes concurrent sidebar commands so each reads the prior committed revision', async () => {

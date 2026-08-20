@@ -99,13 +99,17 @@ export function parseDroneHubDragData(value: unknown): DroneHubDragData | null {
   if (!value || typeof value !== 'object') return null;
   const type = String((value as DroneHubDragData).type ?? '').trim();
   if (type === 'sidebar-folder') {
+    const groupIdRaw = (value as SidebarFolderDragData).groupId;
+    const groupId = typeof groupIdRaw === 'string' && groupIdRaw.trim()
+      ? groupIdRaw.trim()
+      : null;
     const folderNodeId = String((value as SidebarFolderDragData).folderNodeId ?? '').trim();
     const folderPath = String((value as SidebarFolderDragData).folderPath ?? '').trim();
     const groupKind = (value as SidebarFolderDragData).groupKind;
     const label = String((value as SidebarFolderDragData).label ?? '').trim();
     if (!folderNodeId || !folderPath || !label) return null;
     if (groupKind !== 'group' && groupKind !== 'repo') return null;
-    return { type: 'sidebar-folder', folderNodeId, folderPath, groupKind, label };
+    return { type: 'sidebar-folder', groupId, folderNodeId, folderPath, groupKind, label };
   }
   if (type === 'sidebar-group') {
     const groupRef = (value as SidebarGroupDragData).groupRef;

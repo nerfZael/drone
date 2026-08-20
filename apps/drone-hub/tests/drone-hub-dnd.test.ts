@@ -3,7 +3,7 @@ import {
   assignedDroneIdsFromData,
   resolveAssignedDroneIdsFromTransfer,
 } from '../src/droneHub/app/drone-hub-dnd-utils';
-import { resolveSidebarDroneDragIds } from '../src/droneHub/app/drone-hub-dnd';
+import { parseDroneHubDragData, resolveSidebarDroneDragIds } from '../src/droneHub/app/drone-hub-dnd';
 import { DRONE_CHAT_DND_MIME, DRONE_DND_MIME, createCanvasChatNodeId } from '../src/droneHub/app/app-config';
 
 describe('drone hub assignment drag helpers', () => {
@@ -48,6 +48,26 @@ describe('drone hub assignment drag helpers', () => {
 });
 
 describe('sidebar drone drag selection', () => {
+  test('preserves the stable group id for folder drags', () => {
+    expect(
+      parseDroneHubDragData({
+        type: 'sidebar-folder',
+        groupId: ' group-123 ',
+        folderNodeId: 'folder:Experiments',
+        folderPath: 'Experiments',
+        groupKind: 'group',
+        label: 'Experiments',
+      }),
+    ).toEqual({
+      type: 'sidebar-folder',
+      groupId: 'group-123',
+      folderNodeId: 'folder:Experiments',
+      folderPath: 'Experiments',
+      groupKind: 'group',
+      label: 'Experiments',
+    });
+  });
+
   test('plain dragging an unselected drone replaces the existing selection', () => {
     expect(
       resolveSidebarDroneDragIds({

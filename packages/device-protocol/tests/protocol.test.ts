@@ -175,6 +175,31 @@ describe('device protocol', () => {
         },
       }),
     ).toThrow('placement');
+    expect(
+      parseSidebarMoveCommandRequest({
+        mutationId: 'move-folder-id',
+        intent: {
+          kind: 'move-into-folder',
+          itemKind: 'folder',
+          repoPath: '/repo',
+          sourceGroupId: ' group-id ',
+          sourceGroup: 'Review',
+          sourceNodeId: 'folder:Review',
+          sourceParentId: 'root',
+          sourceSiblingNodeIds: ['folder:Review'],
+          targetGroup: 'Done',
+          targetParentId: 'folder:Done',
+          targetSiblingNodeIds: [],
+          placement: 'inside',
+        },
+      }),
+    ).toMatchObject({
+      intent: {
+        itemKind: 'folder',
+        sourceGroupId: 'group-id',
+        sourceGroup: 'Review',
+      },
+    });
     expect(() =>
       parseSidebarMoveCommandRequest({
         mutationId: 'move-3',
@@ -191,6 +216,23 @@ describe('device protocol', () => {
         },
       }),
     ).toThrow('targetGroup');
+    expect(() =>
+      parseSidebarMoveCommandRequest({
+        mutationId: 'move-invalid-drone-id',
+        intent: {
+          kind: 'move-into-folder',
+          itemKind: 'drone',
+          repoPath: '/repo',
+          droneId: 'host',
+          droneIds: ['x'.repeat(129)],
+          sourceParentId: 'root',
+          sourceSiblingNodeIds: ['drone:host'],
+          targetGroup: 'Review',
+          targetParentId: 'folder:Review',
+          targetSiblingNodeIds: [],
+        },
+      }),
+    ).toThrow('invalid drone id');
     expect(
       parseSidebarMoveCommandRequest({
         mutationId: 'pin-1',

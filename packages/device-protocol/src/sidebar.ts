@@ -22,12 +22,48 @@ export type SidebarMoveCommandRequest = {
   intent: SidebarMoveIntent;
 };
 
-export type SidebarMoveCommandResult = {
-  ok: true;
-  mutationId: string;
-  version: number | null;
-  uiPreferences: SidebarLayoutState & Record<string, unknown>;
+export type SidebarMoveCommandStage = {
+  status: 'not-required' | 'not-attempted' | 'applied' | 'failed' | 'unknown';
+  error?: string;
 };
+
+export type SidebarMoveCanonicalGroup = {
+  id: string;
+  repoPath: string;
+  name: string;
+};
+
+export type SidebarMoveCanonicalState = {
+  group: SidebarMoveCanonicalGroup | null;
+  sidebar: {
+    version: number | null;
+    uiPreferences: SidebarLayoutState & Record<string, unknown>;
+  } | null;
+};
+
+type SidebarMoveCommandResultBase = {
+  mutationId: string;
+  stages: {
+    membership: SidebarMoveCommandStage;
+    layout: SidebarMoveCommandStage;
+  };
+  canonical: SidebarMoveCanonicalState;
+};
+
+export type SidebarMoveCommandResult =
+  | (SidebarMoveCommandResultBase & {
+      ok: true;
+      version: number | null;
+      uiPreferences: SidebarLayoutState & Record<string, unknown>;
+    })
+  | (SidebarMoveCommandResultBase & {
+      ok: false;
+      code:
+        | 'MEMBERSHIP_UPDATE_FAILED'
+        | 'LAYOUT_UPDATE_FAILED'
+        | 'REQUEST_FAILED';
+      error: string;
+    });
 
 export function parseSidebarMoveCommandRequest(value: unknown): SidebarMoveCommandRequest {
   const source = record(value);
@@ -108,13 +144,19 @@ export function parseSidebarMoveCommandRequest(value: unknown): SidebarMoveComma
       placement: placement(rawIntent.placement, true),
     } as const;
     if (itemKind === 'drone') {
+      const droneId = text(rawIntent.droneId, 'intent.droneId');
+      const droneIds =
+        rawIntent.droneIds == null
+          ? undefined
+          : texts(rawIntent.droneIds, 'intent.droneIds');
+      if (droneId.length > 128 || droneIds?.some((id) => id.length > 128)) {
+        invalidSidebarMove('intent contains an invalid drone id');
+      }
       intent = {
         ...common,
         itemKind,
-        droneId: text(rawIntent.droneId, 'intent.droneId'),
-        ...(rawIntent.droneIds == null
-          ? {}
-          : { droneIds: texts(rawIntent.droneIds, 'intent.droneIds') }),
+        droneId,
+        ...(droneIds === undefined ? {} : { droneIds }),
         ...(rawIntent.targetParentDroneId === undefined
           ? {}
           : {
@@ -128,6 +170,14 @@ export function parseSidebarMoveCommandRequest(value: unknown): SidebarMoveComma
       intent = {
         ...common,
         itemKind,
+        ...(rawIntent.sourceGroupId === undefined
+          ? {}
+          : {
+              sourceGroupId: nullableText(
+                rawIntent.sourceGroupId,
+                'intent.sourceGroupId',
+              ),
+            }),
         sourceGroup: text(rawIntent.sourceGroup, 'intent.sourceGroup'),
         sourceNodeId: text(rawIntent.sourceNodeId, 'intent.sourceNodeId'),
       };

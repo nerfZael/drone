@@ -52,6 +52,8 @@ export async function renameGroup(
   if (existing.name === newName) {
     return {
       ok: true,
+      id: existing.id,
+      repoPath: existing.repoPath,
       oldName: existing.name,
       newName,
       renamed: false,

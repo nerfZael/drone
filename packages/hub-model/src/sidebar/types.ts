@@ -1,5 +1,18 @@
 export type SidebarTreeGroupKind = 'group' | 'repo';
 
+export type CanonicalSidebarGroup = {
+  id: string;
+  repoPath: string;
+  name: string;
+  createdAt?: string | null;
+};
+
+export type SidebarRepoScopedGroupIndex = {
+  pathsByRepoGroup: Record<string, string[]>;
+  idsByPathByRepoGroup: Record<string, Record<string, string>>;
+  createdAtByPathByRepoGroup: Record<string, Record<string, string | null>>;
+};
+
 export type SidebarTreeDrone = {
   id: string;
   name: string;
