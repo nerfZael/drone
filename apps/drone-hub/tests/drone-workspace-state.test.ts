@@ -107,6 +107,18 @@ describe('per-drone workspace state', () => {
     expect(chatSurface).toContain('className="relative min-h-0 flex-1 overflow-hidden"');
   });
 
+  test('opens the Changes tool for an agent-run diff request', () => {
+    const selectedWorkspace = readAppSource('app/SelectedDroneWorkspace.tsx');
+
+    expect(selectedWorkspace).toContain(
+      'window.addEventListener(CHANGES_OPEN_AGENT_RUN_EVENT, openAgentRunChanges)',
+    );
+    expect(selectedWorkspace).toContain("requestRightPanelTab('changes')");
+    expect(selectedWorkspace).toContain(
+      'window.removeEventListener(CHANGES_OPEN_AGENT_RUN_EVENT, openAgentRunChanges)',
+    );
+  });
+
   test('creates a fresh workspace with only the required chat panel', () => {
     const addedPanels: Array<{ id?: string; component?: string }> = [];
     let clearCount = 0;
