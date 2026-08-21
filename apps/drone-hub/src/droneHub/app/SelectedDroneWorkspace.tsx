@@ -70,7 +70,10 @@ import {
 } from './chat-selection-model';
 import type { RepoOpErrorMeta } from './helpers';
 import type { DroneDeleteMode } from './settings-types';
-import { requestChangesPullRequest } from '../changes/navigation';
+import {
+  CHANGES_OPEN_AGENT_RUN_EVENT,
+  requestChangesPullRequest,
+} from '../changes/navigation';
 import {
   OPEN_CHANGE_REQUEST_EVENT,
   type OpenChangeRequestDetail,
@@ -1045,6 +1048,11 @@ export function SelectedDroneWorkspace({
 
   const openPullRequestsTab = React.useCallback(() => {
     requestRightPanelTab('prs');
+  }, [requestRightPanelTab]);
+  React.useEffect(() => {
+    const openAgentRunChanges = () => requestRightPanelTab('changes');
+    window.addEventListener(CHANGES_OPEN_AGENT_RUN_EVENT, openAgentRunChanges);
+    return () => window.removeEventListener(CHANGES_OPEN_AGENT_RUN_EVENT, openAgentRunChanges);
   }, [requestRightPanelTab]);
   React.useEffect(() => {
     const openChangeRequest = (event: Event) => {
