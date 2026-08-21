@@ -159,13 +159,18 @@ function revisionFromInsert(input: ChangeRequestInsert): ChangeRequestRevisionIn
 export async function runCommand(
   command: string,
   args: string[],
-  options: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number } = {},
+  options: {
+    cwd?: string;
+    env?: NodeJS.ProcessEnv;
+    timeoutMs?: number;
+    input?: string | Buffer;
+  } = {},
 ): Promise<RunResult> {
   return await new Promise((resolve) => {
     const child = spawn(command, args, {
       cwd: options.cwd,
       env: options.env,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: [options.input == null ? 'ignore' : 'pipe', 'pipe', 'pipe'],
     });
     let stdout = '';
     let stderr = '';
@@ -177,6 +182,10 @@ export async function runCommand(
     });
     child.on('error', (error) => resolve({ code: 1, stdout, stderr: error.message }));
     child.on('close', (code) => resolve({ code: code ?? 1, stdout, stderr }));
+    child.stdin?.on('error', () => {
+      // The process may reject input after exiting early.
+    });
+    if (options.input != null) child.stdin?.end(options.input);
   });
 }
 

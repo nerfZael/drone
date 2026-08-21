@@ -9,7 +9,6 @@ import {
 } from './change-request-direct-merger';
 import { ChangeRequestError } from './change-request-error';
 import {
-  changeRequestConflictFiles,
   normalizeChangeRequestBranch,
   resolveChangeRequestBranch,
   resolveChangeRequestCommit,
@@ -20,6 +19,7 @@ import { ChangeRequestLifecycle, normalizeChangeRequestActor } from './change-re
 import type { ChangeRequestRepository } from './change-request-repository';
 import { ChangeRequestOperationLock } from './change-request-operation-lock';
 import { ChangeRequestObjectStore } from './change-request-object-store';
+import { prepareChangeRequestCandidate } from './prepare-change-request-candidate';
 import {
   ChangeRequestReviewWorkspaceService,
   type ChangeRequestReviewPromotion,
@@ -854,29 +854,21 @@ export class ChangeRequestService {
         lastError: `Base branch is unavailable: ${record.baseBranch}`,
       };
     }
-    const mergeTree = await this.deps.runHostCommand(
-      'git',
-      [
-        '-C',
-        gitRoot,
-        'merge-tree',
-        '--write-tree',
-        '--messages',
-        destinationSha,
-        revision.snapshotRef,
-      ],
-      { timeoutMs: 30_000 },
-    );
-    const combined = `${mergeTree.stdout}\n${mergeTree.stderr}`.trim();
+    const candidate = await prepareChangeRequestCandidate(this.deps.runHostCommand, {
+      gitRoot,
+      baseSha: destinationSha,
+      snapshotRef: revision.snapshotRef,
+      timeoutMs: 30_000,
+    });
     return {
       ...publicRecord,
       githubMirror,
       lineStats,
       stale: destinationSha !== revision.baseSha,
-      conflicted: mergeTree.code !== 0,
+      conflicted: candidate.status === 'conflicted',
       destinationExists: Boolean(destinationRef),
       destinationSha,
-      conflictFiles: mergeTree.code === 0 ? [] : changeRequestConflictFiles(combined),
+      conflictFiles: candidate.status === 'conflicted' ? candidate.conflictFiles : [],
     };
   }
 

@@ -170,6 +170,13 @@ describe('ChangeRequestService', () => {
       expect(await git(first.path, ['rev-parse', 'HEAD^'])).toBe(baseSha);
       expect(await git(reviewerRepo, ['rev-parse', 'HEAD'])).toBe(reviewerHeadBefore);
       expect(await git(reviewerRepo, ['status', '--porcelain'])).toBe('');
+      expect(
+        await git(sourceRepo, [
+          'for-each-ref',
+          '--format=%(refname)',
+          'refs/drone/review-preparations',
+        ]),
+      ).toBe('');
 
       const second = await service.prepareReviewWorkspace({
         requestNumber: created.number,
@@ -336,19 +343,10 @@ describe('ChangeRequestService', () => {
         expectedCandidateTreeSha: nextReview.candidateTreeSha,
       });
       expect(merged.status).toBe('merged');
-      expect(await git(origin, ['show', 'refs/heads/main:feature.txt'])).toBe(
-        'reviewed and fixed',
-      );
+      expect(await git(origin, ['show', 'refs/heads/main:feature.txt'])).toBe('reviewed and fixed');
       expect(
-        (
-          await run('git', [
-            '-C',
-            origin,
-            'cat-file',
-            '-e',
-            'refs/heads/main:hook-injected.txt',
-          ])
-        ).code,
+        (await run('git', ['-C', origin, 'cat-file', '-e', 'refs/heads/main:hook-injected.txt']))
+          .code,
       ).not.toBe(0);
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
@@ -472,7 +470,7 @@ describe('ChangeRequestService', () => {
       await git(repoRoot, ['commit', '-m', 'container-authored change']);
 
       const repository = new MemoryChangeRequestRepository();
-      let failedWorktreeRemove = false;
+      let usedChangeRequestWorktree = false;
       const service = new ChangeRequestService({
         repository,
         resolveDrone: async (ref) => {
@@ -524,10 +522,7 @@ describe('ChangeRequestService', () => {
           throw new Error('container git was not expected');
         },
         runHostCommand: async (command, args, options) => {
-          if (args.includes('worktree') && args.includes('remove')) {
-            failedWorktreeRemove = true;
-            throw new Error('simulated worktree cleanup failure');
-          }
+          if (args.includes('worktree')) usedChangeRequestWorktree = true;
           return await run(command, args, {
             cwd: options?.cwd,
             timeoutMs: options?.timeoutMs,
@@ -671,8 +666,7 @@ describe('ChangeRequestService', () => {
       expect(merged.status).toBe('merged');
       expect(merged.snapshotSha).toBe(updated.snapshotSha);
       expect(merged.mergeCommitSha).toMatch(/^[0-9a-f]{40}$/);
-      expect(failedWorktreeRemove).toBe(true);
-      expect(await fs.readdir(path.join(storageRoot, 'change-request-worktrees'))).toEqual([]);
+      expect(usedChangeRequestWorktree).toBe(false);
       expect(await git(repoRoot, ['branch', '--show-current'])).toBe(sourceBranchBeforeMerge);
       expect(await git(repoRoot, ['status', '--porcelain'])).toBe('');
       expect(await git(origin, ['show', 'refs/heads/integration/42:feature.txt'])).toBe(
