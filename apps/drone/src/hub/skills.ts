@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import * as yaml from 'js-yaml';
 
 import type { DroneRegistry } from '../host/registry';
 import { loadRegistry, loadRegistryRawSnapshot, updateRegistry } from '../host/registry';
@@ -63,6 +64,18 @@ export type SkillRecord = {
   overlays?: SkillOverlaySet;
   createdAt: string;
   updatedAt: string;
+};
+
+export type EditableSkillPackageFile = {
+  path: string;
+  content: string;
+  kind?: SkillFileKind;
+};
+
+export type EditableSkillPackageInput = {
+  slug?: string;
+  files?: EditableSkillPackageFile[];
+  overlays?: SkillOverlaySet;
 };
 
 export type SkillProjectionAgent = 'portable' | 'codex' | 'claude' | 'cursor' | 'opencode';
@@ -161,18 +174,75 @@ function inferSkillFileKindFromPath(filePath: string): SkillFileKind {
   return 'extra';
 }
 
-function normalizeSkillFiles(raw: unknown): SkillFileEntry[] {
+function normalizeEditablePackageFilePath(raw: unknown): string {
+  const text = String(raw ?? '')
+    .trim()
+    .replace(/\\/g, '/');
+  if (!text) throw new Error('missing file path');
+  if (
+    text.startsWith('/') ||
+    text.endsWith('/') ||
+    /[\u0000-\u001f\u007f]/.test(text) ||
+    text.split('/').includes('..')
+  ) {
+    throw new Error(`invalid file path: ${text}`);
+  }
+  const normalized = path.posix.normalize(text);
+  if (
+    !normalized ||
+    normalized === '.' ||
+    normalized.startsWith('../') ||
+    normalized.includes('/../')
+  ) {
+    throw new Error(`invalid file path: ${text}`);
+  }
+  return normalized;
+}
+
+function assertEditablePackageFileTree(filePaths: Iterable<string>): void {
+  const paths = new Set(filePaths);
+  for (const filePath of paths) {
+    const parts = filePath.split('/');
+    for (let index = 1; index < parts.length; index += 1) {
+      const parentPath = parts.slice(0, index).join('/');
+      if (paths.has(parentPath)) {
+        throw new Error(`invalid file tree: ${parentPath} is both a file and a directory`);
+      }
+    }
+  }
+}
+
+function normalizeSkillFiles(raw: unknown, strictPaths = false): SkillFileEntry[] {
   if (!Array.isArray(raw)) return [];
   const out: SkillFileEntry[] = [];
   const seen = new Set<string>();
   for (const item of raw) {
-    if (!item || typeof item !== 'object') continue;
-    const filePath = normalizeSkillFilePath((item as any).path);
+    if (!item || typeof item !== 'object') {
+      if (strictPaths) throw new Error('invalid skill file');
+      continue;
+    }
+    const filePath = strictPaths
+      ? normalizeEditablePackageFilePath((item as any).path)
+      : normalizeSkillFilePath((item as any).path);
+    if (filePath === 'SKILL.md') throw new Error('SKILL.md is managed by the Hub');
     if (seen.has(filePath)) throw new Error(`duplicate file path: ${filePath}`);
+    if (strictPaths && typeof (item as any).content !== 'string') {
+      throw new Error(`invalid file content: ${filePath}`);
+    }
     const content = typeof (item as any).content === 'string' ? (item as any).content : '';
     const rawKind = String((item as any).kind ?? '')
       .trim()
       .toLowerCase();
+    if (
+      strictPaths &&
+      rawKind &&
+      rawKind !== 'script' &&
+      rawKind !== 'reference' &&
+      rawKind !== 'asset' &&
+      rawKind !== 'extra'
+    ) {
+      throw new Error(`invalid file kind for ${filePath}: ${rawKind}`);
+    }
     const kind: SkillFileKind =
       rawKind === 'script' || rawKind === 'reference' || rawKind === 'asset' || rawKind === 'extra'
         ? rawKind
@@ -180,6 +250,7 @@ function normalizeSkillFiles(raw: unknown): SkillFileEntry[] {
     out.push({ path: filePath, content, kind });
     seen.add(filePath);
   }
+  if (strictPaths) assertEditablePackageFileTree(out.map((file) => file.path));
   out.sort((a, b) => a.path.localeCompare(b.path));
   return out;
 }
@@ -235,8 +306,9 @@ function normalizeCursorOverlay(raw: unknown): SkillCursorOverlay | undefined {
 
 function normalizeCodexOverlay(raw: unknown): SkillCodexOverlay | undefined {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
-  const openaiYaml = normalizeOptionalString((raw as any).openaiYaml);
-  return openaiYaml ? { openaiYaml } : undefined;
+  if (!Object.prototype.hasOwnProperty.call(raw, 'openaiYaml')) return undefined;
+  if (typeof (raw as any).openaiYaml !== 'string') return undefined;
+  return { openaiYaml: String((raw as any).openaiYaml).trim() };
 }
 
 function normalizeSkillOverlays(raw: unknown): SkillOverlaySet | undefined {
@@ -371,7 +443,7 @@ function normalizeIncomingSkillInput(input: any, existing?: SkillRecord): SkillR
   const createdAt = existing?.createdAt ?? new Date().toISOString();
   const files =
     input && Object.prototype.hasOwnProperty.call(input, 'files')
-      ? normalizeSkillFiles(input.files)
+      ? normalizeSkillFiles(input.files, true)
       : (existing?.files ?? []);
   const metadata =
     input && Object.prototype.hasOwnProperty.call(input, 'metadata')
@@ -446,6 +518,196 @@ export async function updateSkillRecord(idRaw: string, input: any): Promise<Skil
     reg.skills[id] = record;
   });
   return record;
+}
+
+type ParsedEditableSkillPackage = {
+  slug?: string;
+  name: string;
+  description: string;
+  license?: string;
+  compatibility?: string;
+  metadata?: Record<string, string>;
+  markdownBody: string;
+  files: SkillFileEntry[];
+  codexOpenaiYaml?: string;
+  replaceAgentOverlays: boolean;
+  agentOverlays?: SkillOverlaySet;
+};
+
+const EDITABLE_SKILL_FRONTMATTER_KEYS = new Set([
+  'name',
+  'description',
+  'license',
+  'compatibility',
+  'metadata',
+]);
+
+function parseEditableSkillMarkdown(markdownRaw: string): {
+  frontmatter: Record<string, unknown>;
+  body: string;
+} {
+  const source = String(markdownRaw ?? '')
+    .replace(/^\uFEFF/, '')
+    .replace(/\r\n?/g, '\n');
+  if (!source.startsWith('---\n')) {
+    throw new Error('invalid SKILL.md: missing YAML frontmatter');
+  }
+  const match = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(source);
+  if (!match) throw new Error('invalid SKILL.md: unclosed YAML frontmatter');
+  let parsed: unknown;
+  try {
+    parsed = yaml.load(match[1] ?? '');
+  } catch (error: any) {
+    throw new Error(`invalid SKILL.md YAML: ${error?.message ?? String(error)}`);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('invalid SKILL.md: frontmatter must be a YAML object');
+  }
+  const frontmatter = parsed as Record<string, unknown>;
+  const unsupported = Object.keys(frontmatter).find(
+    (key) => !EDITABLE_SKILL_FRONTMATTER_KEYS.has(key),
+  );
+  if (unsupported) {
+    throw new Error(`invalid SKILL.md: unsupported portable frontmatter field: ${unsupported}`);
+  }
+  return {
+    frontmatter,
+    body: source.slice(match[0].length).trim(),
+  };
+}
+
+function editableMetadata(raw: unknown): Record<string, string> | undefined {
+  if (raw == null) return undefined;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('invalid SKILL.md: metadata must be a YAML object');
+  }
+  const entries = new Map<string, string>();
+  for (const [keyRaw, value] of Object.entries(raw)) {
+    const key = String(keyRaw ?? '').trim();
+    if (!key) throw new Error('invalid SKILL.md: metadata keys must not be empty');
+    if (entries.has(key)) {
+      throw new Error(`invalid SKILL.md: duplicate metadata key after normalization: ${key}`);
+    }
+    if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') {
+      throw new Error(`invalid SKILL.md: metadata.${key} must be a scalar value`);
+    }
+    const normalizedValue = String(value).trim();
+    if (normalizedValue) entries.set(key, normalizedValue);
+  }
+  return entries.size > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+function parseEditableSkillPackage(input: EditableSkillPackageInput): ParsedEditableSkillPackage {
+  if (!Array.isArray(input?.files)) throw new Error('missing skill package files');
+  const filesByPath = new Map<string, { content: string; kind: SkillFileKind }>();
+  for (const file of input.files) {
+    if (!file || typeof file !== 'object') throw new Error('invalid skill package file');
+    const filePath = normalizeEditablePackageFilePath((file as any).path);
+    if (filesByPath.has(filePath)) throw new Error(`duplicate file path: ${filePath}`);
+    const content = (file as any).content;
+    if (typeof content !== 'string') throw new Error(`invalid file content: ${filePath}`);
+    const rawKind = String((file as any).kind ?? '')
+      .trim()
+      .toLowerCase();
+    if (
+      rawKind &&
+      rawKind !== 'script' &&
+      rawKind !== 'reference' &&
+      rawKind !== 'asset' &&
+      rawKind !== 'extra'
+    ) {
+      throw new Error(`invalid file kind for ${filePath}: ${rawKind}`);
+    }
+    const kind: SkillFileKind =
+      rawKind === 'script' || rawKind === 'reference' || rawKind === 'asset' || rawKind === 'extra'
+        ? rawKind
+        : inferSkillFileKindFromPath(filePath);
+    filesByPath.set(filePath, { content, kind });
+  }
+  assertEditablePackageFileTree(filesByPath.keys());
+  const skillMarkdown = filesByPath.get('SKILL.md')?.content;
+  if (skillMarkdown == null) throw new Error('missing SKILL.md');
+  const parsed = parseEditableSkillMarkdown(skillMarkdown);
+  const name = normalizeNonEmptyString(parsed.frontmatter.name, 'SKILL.md name');
+  const description = normalizeNonEmptyString(
+    parsed.frontmatter.description,
+    'SKILL.md description',
+  );
+  const license = normalizeOptionalString(parsed.frontmatter.license);
+  const compatibility = normalizeOptionalString(parsed.frontmatter.compatibility);
+  const metadata = editableMetadata(parsed.frontmatter.metadata);
+  const codexOpenaiYaml = filesByPath.has('agents/openai.yaml')
+    ? filesByPath.get('agents/openai.yaml')?.content.trim()
+    : undefined;
+  const replaceAgentOverlays = Object.prototype.hasOwnProperty.call(input, 'overlays');
+  const agentOverlays = replaceAgentOverlays ? normalizeSkillOverlays(input.overlays) : undefined;
+  const files = Array.from(filesByPath, ([filePath, file]) => ({ filePath, ...file }))
+    .filter(({ filePath }) => filePath !== 'SKILL.md' && filePath !== 'agents/openai.yaml')
+    .map(({ filePath, content, kind }) => ({
+      path: filePath,
+      content,
+      kind,
+    }))
+    .sort((left, right) => left.path.localeCompare(right.path));
+  return {
+    ...(normalizeOptionalString(input.slug) ? { slug: normalizeSkillSlug(input.slug) } : {}),
+    name,
+    description,
+    ...(license ? { license } : {}),
+    ...(compatibility ? { compatibility } : {}),
+    ...(metadata ? { metadata } : {}),
+    markdownBody: parsed.body,
+    files,
+    ...(codexOpenaiYaml !== undefined ? { codexOpenaiYaml } : {}),
+    replaceAgentOverlays,
+    ...(agentOverlays ? { agentOverlays } : {}),
+  };
+}
+
+function skillInputFromEditablePackage(
+  parsed: ParsedEditableSkillPackage,
+  existing?: SkillRecord,
+): Record<string, unknown> {
+  const existingOverlays = existing?.overlays;
+  const agentOverlays = parsed.replaceAgentOverlays ? parsed.agentOverlays : existingOverlays;
+  const overlays: SkillOverlaySet = {
+    ...(agentOverlays?.claude ? { claude: agentOverlays.claude } : {}),
+    ...(agentOverlays?.cursor ? { cursor: agentOverlays.cursor } : {}),
+    ...((agentOverlays?.opencode ?? existingOverlays?.opencode)
+      ? { opencode: agentOverlays?.opencode ?? existingOverlays?.opencode }
+      : {}),
+    ...(parsed.codexOpenaiYaml !== undefined
+      ? { codex: { openaiYaml: parsed.codexOpenaiYaml } }
+      : {}),
+  };
+  return {
+    name: parsed.name,
+    slug: parsed.slug ?? existing?.slug ?? parsed.name,
+    description: parsed.description,
+    license: parsed.license ?? '',
+    compatibility: parsed.compatibility ?? '',
+    metadata: parsed.metadata,
+    markdownBody: parsed.markdownBody,
+    files: parsed.files,
+    overlays: Object.keys(overlays).length > 0 ? overlays : undefined,
+  };
+}
+
+export async function createSkillFromEditablePackage(
+  input: EditableSkillPackageInput,
+): Promise<SkillRecord> {
+  const parsed = parseEditableSkillPackage(input);
+  return await createSkill(skillInputFromEditablePackage(parsed));
+}
+
+export async function updateSkillFromEditablePackage(
+  idRaw: string,
+  input: EditableSkillPackageInput,
+): Promise<SkillRecord> {
+  const existing = await getSkillById(idRaw);
+  if (!existing) throw new Error(`unknown skill: ${String(idRaw ?? '').trim()}`);
+  const parsed = parseEditableSkillPackage(input);
+  return await updateSkillRecord(existing.id, skillInputFromEditablePackage(parsed, existing));
 }
 
 export async function deleteSkillRecord(idRaw: string): Promise<boolean> {
@@ -569,9 +831,10 @@ function buildSkillFileMap(
   for (const file of skill.files) {
     out.set(file.path, { content: file.content, kind: file.kind });
   }
-  if (agent === 'codex' && skill.overlays?.codex?.openaiYaml) {
+  if (agent === 'codex' && skill.overlays?.codex?.openaiYaml != null) {
+    const openaiYaml = String(skill.overlays.codex.openaiYaml).replace(/\s+$/, '');
     out.set('agents/openai.yaml', {
-      content: `${String(skill.overlays.codex.openaiYaml).replace(/\s+$/, '')}\n`,
+      content: openaiYaml ? `${openaiYaml}\n` : '',
       kind: 'managed',
     });
   }

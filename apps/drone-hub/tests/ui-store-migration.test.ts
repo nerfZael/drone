@@ -778,7 +778,7 @@ describe('drone hub ui store migration', () => {
     });
   });
 
-  test('moves the former default E shortcut from to-do tagging to group creation', () => {
+  test('moves the former default E shortcut from to-do tagging to voice discard', () => {
     const migrated = migrateDroneHubUiPersistedState(
       {
         shortcutBindings: {
@@ -796,7 +796,8 @@ describe('drone hub ui store migration', () => {
     );
 
     expect(migrated.shortcutBindings).toMatchObject({
-      createDraftGroup: {
+      createDraftGroup: null,
+      discardChatVoiceRecording: {
         key: 'e',
         mod: false,
         ctrl: false,
@@ -808,7 +809,7 @@ describe('drone hub ui store migration', () => {
     });
   });
 
-  test('moves the former default R shortcut from pull requests to continuous dictation', () => {
+  test('moves the former default R shortcut through to the new composer bindings', () => {
     const migrated = migrateDroneHubUiPersistedState({
       shortcutBindings: {
         openPullRequestsTab: {
@@ -824,6 +825,14 @@ describe('drone hub ui store migration', () => {
 
     expect(migrated.shortcutBindings).toMatchObject({
       toggleContinuousDictation: {
+        key: 't',
+        mod: false,
+        ctrl: false,
+        meta: false,
+        alt: false,
+        shift: false,
+      },
+      clearChatComposer: {
         key: 'r',
         mod: false,
         ctrl: false,

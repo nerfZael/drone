@@ -2307,8 +2307,8 @@ export function AssistantDock({
   }
 
   return (
-    <div data-assistant-dock-root="true" className="flex h-full min-h-0">
-      <div className="relative flex min-w-0 flex-1 flex-col outline-none">
+    <div data-assistant-dock-root="true" className="flex h-full min-h-0 w-full overflow-hidden">
+      <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden outline-none">
         {droneHubPermissionsOpen && activeThread ? (
           <div className="absolute inset-0 z-20 overflow-y-auto bg-[var(--panel-alt)]">
             <DroneHubPermissionsView
@@ -2417,7 +2417,7 @@ export function AssistantDock({
         ) : (
           <div
             ref={setDroneReferenceDropNodeRef}
-            className={`flex min-h-0 flex-1 flex-col ${
+            className={`flex h-0 min-h-0 flex-1 flex-col overflow-hidden ${
               droneReferenceDropActive ? 'ring-1 ring-inset ring-[var(--accent-muted)]' : ''
             }`}
           >

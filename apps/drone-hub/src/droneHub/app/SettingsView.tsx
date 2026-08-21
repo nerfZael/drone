@@ -175,8 +175,11 @@ export function SettingsView({
       if (!window.confirm('Discard unsaved Companion settings?')) return;
       void companion.load();
     }
+    if (skillLibrary.draftDirty) {
+      if (!window.confirm('Discard unsaved skill edits?')) return;
+    }
     onBackToWorkspace();
-  }, [activeTab, companion, onBackToWorkspace]);
+  }, [activeTab, companion, onBackToWorkspace, skillLibrary.draftDirty]);
 
   const handleRefreshAll = React.useCallback(() => {
     if (skillLibrary.draftDirty) {

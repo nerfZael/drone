@@ -76,4 +76,47 @@ describe('ActiveComposerRegistry', () => {
     });
     expect(registry.readActiveComposer().content).toBe('changed');
   });
+
+  test('routes composer shortcuts to the active eligible composer', () => {
+    const registry = new ActiveComposerRegistry();
+    const actions: string[] = [];
+    registry.register({
+      ...composer('first', { eligible: true }),
+      toggleVoiceRecording: () => {
+        actions.push('first:record');
+        return true;
+      },
+    });
+    registry.register({
+      ...composer('second', { eligible: true }),
+      toggleVoiceRecording: () => {
+        actions.push('second:record');
+        return true;
+      },
+      toggleVoiceRecordingPause: () => {
+        actions.push('second:pause');
+        return true;
+      },
+      discardVoiceRecording: () => {
+        actions.push('second:discard');
+        return true;
+      },
+      clearComposer: () => {
+        actions.push('second:clear');
+        return true;
+      },
+    });
+    registry.focus('second');
+
+    expect(registry.toggleVoiceRecording()).toBe(true);
+    expect(registry.toggleVoiceRecordingPause()).toBe(true);
+    expect(registry.discardVoiceRecording()).toBe(true);
+    expect(registry.clearComposer()).toBe(true);
+    expect(actions).toEqual([
+      'second:record',
+      'second:pause',
+      'second:discard',
+      'second:clear',
+    ]);
+  });
 });

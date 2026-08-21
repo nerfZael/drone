@@ -91,6 +91,22 @@ describe('per-drone workspace state', () => {
     expect(selectedWorkspace).toContain('onVisibleToolTabsChange={onVisibleToolTabsChange}');
   });
 
+  test('contains agent chat within the available workspace height', () => {
+    const assistantDock = readAppSource('assistant/AssistantDock.tsx');
+    const selectedWorkspace = readAppSource('app/SelectedDroneWorkspace.tsx');
+    const chatSurface = readAppSource('chat/ChatSurface.tsx');
+
+    expect(assistantDock).toContain(
+      'className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden outline-none"',
+    );
+    expect(assistantDock).toContain('className={`flex h-0 min-h-0 flex-1 flex-col overflow-hidden ${');
+    expect(selectedWorkspace).toContain(
+      'className="relative flex h-0 min-h-0 flex-1 flex-col overflow-hidden"',
+    );
+    expect(chatSurface).toContain('flex-1 flex-col overflow-hidden bg-[var(--chat-background)]');
+    expect(chatSurface).toContain('className="relative min-h-0 flex-1 overflow-hidden"');
+  });
+
   test('creates a fresh workspace with only the required chat panel', () => {
     const addedPanels: Array<{ id?: string; component?: string }> = [];
     let clearCount = 0;

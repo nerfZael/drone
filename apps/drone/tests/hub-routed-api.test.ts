@@ -145,4 +145,53 @@ describeSocketSuite('routed Hub APIs', () => {
     expect(removed.response.status).toBe(200);
     expect(removed.data.id).toBe(skillId);
   });
+
+  test('routes editable skill package creation and updates', async () => {
+    const created = await apiFetch(
+      '/api/skills/package',
+      jsonRequest('POST', {
+        slug: 'routed-package',
+        files: [
+          {
+            path: 'SKILL.md',
+            content:
+              '---\nname: Routed Package\ndescription: Created from virtual files.\n---\n\nInitial body.\n',
+          },
+          { path: 'references/guide.md', content: '# Guide\n' },
+        ],
+      }),
+    );
+    expect(created.response.status).toBe(201);
+    expect(created.data.skill.slug).toBe('routed-package');
+
+    const skillId = created.data.skill.id;
+    const updated = await apiFetch(
+      `/api/skills/${encodeURIComponent(skillId)}/package`,
+      jsonRequest('PUT', {
+        slug: 'updated-package',
+        files: [
+          {
+            path: 'SKILL.md',
+            content:
+              '---\nname: Updated Package\ndescription: Updated from virtual files.\n---\n\nUpdated body.\n',
+          },
+          { path: 'scripts/run.sh', content: '#!/usr/bin/env bash\n' },
+        ],
+      }),
+    );
+    expect(updated.response.status).toBe(200);
+    expect(updated.data.skill.slug).toBe('updated-package');
+    expect(updated.data.skill.files[0].kind).toBe('script');
+
+    const invalid = await apiFetch(
+      `/api/skills/${encodeURIComponent(skillId)}/package`,
+      jsonRequest('PUT', {
+        files: [{ path: 'SKILL.md', content: 'No frontmatter' }],
+      }),
+    );
+    expect(invalid.response.status).toBe(400);
+    expect(invalid.data.error).toContain('invalid SKILL.md');
+
+    await apiFetch(`/api/skills/${encodeURIComponent(skillId)}`, { method: 'DELETE' });
+  });
 });

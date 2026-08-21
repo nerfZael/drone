@@ -3,6 +3,7 @@ import {
   cloneDefaultShortcutBindings,
   formatShortcutBinding,
   isShortcutMatch,
+  migrateChatComposerShortcuts,
   migrateCompanionShortcut,
   migrateFormerPullRequestsShortcut,
   sanitizeShortcutBindings,
@@ -20,14 +21,7 @@ describe('shortcut defaults', () => {
       alt: false,
       shift: false,
     });
-    expect(defaults.createDraftGroup).toEqual({
-      key: 'e',
-      mod: false,
-      ctrl: false,
-      meta: false,
-      alt: false,
-      shift: false,
-    });
+    expect(defaults.createDraftGroup).toBeNull();
     expect(defaults.createDraftDroneInCurrentGroup).toEqual({
       key: '2',
       mod: false,
@@ -52,22 +46,8 @@ describe('shortcut defaults', () => {
       alt: false,
       shift: false,
     });
-    expect(defaults.toggleSelectedDronePinned).toEqual({
-      key: 'q',
-      mod: false,
-      ctrl: false,
-      meta: false,
-      alt: false,
-      shift: false,
-    });
-    expect(defaults.moveSelectedDroneToTop).toEqual({
-      key: 'w',
-      mod: false,
-      ctrl: false,
-      meta: false,
-      alt: false,
-      shift: false,
-    });
+    expect(defaults.toggleSelectedDronePinned).toBeNull();
+    expect(defaults.moveSelectedDroneToTop).toBeNull();
     expect(defaults.toggleSelectedDronesToDo).toBeNull();
     expect(defaults.markSelectedDronesUnread).toEqual({
       key: 'z',
@@ -102,8 +82,40 @@ describe('shortcut defaults', () => {
         shiftKey: false,
       }),
     ).toBe(true);
-    expect(defaults.toggleContinuousDictation).toEqual({
+    expect(defaults.toggleChatVoiceRecording).toEqual({
+      key: 'q',
+      mod: false,
+      ctrl: false,
+      meta: false,
+      alt: false,
+      shift: false,
+    });
+    expect(defaults.toggleChatVoiceRecordingPause).toEqual({
+      key: 'w',
+      mod: false,
+      ctrl: false,
+      meta: false,
+      alt: false,
+      shift: false,
+    });
+    expect(defaults.discardChatVoiceRecording).toEqual({
+      key: 'e',
+      mod: false,
+      ctrl: false,
+      meta: false,
+      alt: false,
+      shift: false,
+    });
+    expect(defaults.clearChatComposer).toEqual({
       key: 'r',
+      mod: false,
+      ctrl: false,
+      meta: false,
+      alt: false,
+      shift: false,
+    });
+    expect(defaults.toggleContinuousDictation).toEqual({
+      key: 't',
       mod: false,
       ctrl: false,
       meta: false,
@@ -119,6 +131,7 @@ describe('shortcut defaults', () => {
       shift: false,
     });
     expect(defaults.openPullRequestsTab).toBeNull();
+    expect(defaults.openTerminalTab).toBeNull();
     expect(defaults.toggleCompanion).toEqual({
       key: '`',
       mod: false,
@@ -245,7 +258,47 @@ describe('shortcut defaults', () => {
     });
   });
 
-  test('keeps the Changes editor E binding available for the global create-group action', () => {
+  test('moves the former QWERT shortcuts to chat composer voice controls', () => {
+    expect(migrateChatComposerShortcuts({
+      toggleSelectedDronePinned: { key: 'q', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+      moveSelectedDroneToTop: { key: 'w', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+      createDraftGroup: { key: 'e', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+      toggleContinuousDictation: { key: 'r', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+      openTerminalTab: { key: 't', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+    })).toMatchObject({
+      toggleSelectedDronePinned: null,
+      moveSelectedDroneToTop: null,
+      createDraftGroup: null,
+      toggleChatVoiceRecording: { key: 'q' },
+      toggleChatVoiceRecordingPause: { key: 'w' },
+      discardChatVoiceRecording: { key: 'e' },
+      clearChatComposer: { key: 'r' },
+      toggleContinuousDictation: { key: 't' },
+      openTerminalTab: null,
+    });
+  });
+
+  test('preserves customized bindings while adding the composer shortcuts', () => {
+    expect(migrateChatComposerShortcuts({
+      toggleSelectedDronePinned: { key: 'q', mod: true, ctrl: false, meta: false, alt: false, shift: false },
+      moveSelectedDroneToTop: { key: 'j', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+      createDraftGroup: null,
+      toggleContinuousDictation: { key: 'u', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+      openTerminalTab: { key: 'y', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+    })).toMatchObject({
+      toggleSelectedDronePinned: { key: 'q', mod: true },
+      moveSelectedDroneToTop: { key: 'j' },
+      createDraftGroup: null,
+      toggleContinuousDictation: { key: 'u' },
+      openTerminalTab: { key: 'y' },
+      toggleChatVoiceRecording: { key: 'q', mod: false },
+      toggleChatVoiceRecordingPause: { key: 'w' },
+      discardChatVoiceRecording: { key: 'e' },
+      clearChatComposer: { key: 'r' },
+    });
+  });
+
+  test('keeps E available to the global shortcut while the Changes editor is open', () => {
     const changesDockSource = readFileSync(
       new URL('../src/droneHub/changes/DroneChangesDock.tsx', import.meta.url),
       'utf8',

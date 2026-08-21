@@ -8,6 +8,10 @@ export type ActiveComposer = {
   appendTranscript(text: string): void;
   readSnapshot?(): CompanionTextSnapshot;
   applyContent?(baseRevision: string, content: string): { ok: true; revision: string };
+  toggleVoiceRecording?(): boolean;
+  toggleVoiceRecordingPause?(): boolean;
+  discardVoiceRecording?(): boolean;
+  clearComposer?(): boolean;
 };
 
 type ActiveComposerContextValue = {
@@ -22,6 +26,10 @@ type ActiveComposerContextValue = {
     baseRevision: string,
     content: string,
   ): { ok: true; revision: string };
+  toggleVoiceRecording(): boolean;
+  toggleVoiceRecordingPause(): boolean;
+  discardVoiceRecording(): boolean;
+  clearComposer(): boolean;
 };
 
 const ActiveComposerContext = React.createContext<ActiveComposerContextValue | null>(null);
@@ -85,6 +93,22 @@ export class ActiveComposerRegistry {
     return active.applyContent(baseRevision, content);
   }
 
+  toggleVoiceRecording(): boolean {
+    return this.runActiveAction('toggleVoiceRecording');
+  }
+
+  toggleVoiceRecordingPause(): boolean {
+    return this.runActiveAction('toggleVoiceRecordingPause');
+  }
+
+  discardVoiceRecording(): boolean {
+    return this.runActiveAction('discardVoiceRecording');
+  }
+
+  clearComposer(): boolean {
+    return this.runActiveAction('clearComposer');
+  }
+
   private resolveReadable(): ActiveComposer {
     const current = this.activeId ? this.composers.get(this.activeId) : null;
     if (current?.readSnapshot && (current.isReadable?.() ?? current.isEligible())) return current;
@@ -94,6 +118,14 @@ export class ActiveComposerRegistry {
     const composer = candidates[candidates.length - 1];
     if (!composer) throw new Error('NO_ACTIVE_COMPOSER');
     return composer;
+  }
+
+  private runActiveAction(
+    action: 'toggleVoiceRecording' | 'toggleVoiceRecordingPause' | 'discardVoiceRecording' | 'clearComposer',
+  ): boolean {
+    const targetId = this.ensureTargetId();
+    const composer = targetId ? this.composers.get(targetId) : null;
+    return composer?.[action]?.() ?? false;
   }
 
   private setActiveId(next: string | null): void {
@@ -128,6 +160,16 @@ export function ActiveComposerProvider({ children }: { children: React.ReactNode
       registry.applyComposer(targetId, baseRevision, content),
     [registry],
   );
+  const toggleVoiceRecording = React.useCallback(() => registry.toggleVoiceRecording(), [registry]);
+  const toggleVoiceRecordingPause = React.useCallback(
+    () => registry.toggleVoiceRecordingPause(),
+    [registry],
+  );
+  const discardVoiceRecording = React.useCallback(
+    () => registry.discardVoiceRecording(),
+    [registry],
+  );
+  const clearComposer = React.useCallback(() => registry.clearComposer(), [registry]);
   const value = React.useMemo<ActiveComposerContextValue>(
     () => ({
       activeComposerId,
@@ -137,15 +179,23 @@ export function ActiveComposerProvider({ children }: { children: React.ReactNode
       appendTranscript,
       readActiveComposer,
       applyComposer,
+      toggleVoiceRecording,
+      toggleVoiceRecordingPause,
+      discardVoiceRecording,
+      clearComposer,
     }),
     [
       activeComposerId,
       appendTranscript,
       applyComposer,
+      clearComposer,
+      discardVoiceRecording,
       ensureTargetId,
       focusComposer,
       readActiveComposer,
       registerComposer,
+      toggleVoiceRecording,
+      toggleVoiceRecordingPause,
     ],
   );
   return <ActiveComposerContext.Provider value={value}>{children}</ActiveComposerContext.Provider>;

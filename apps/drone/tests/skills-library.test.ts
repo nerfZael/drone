@@ -7,12 +7,15 @@ import { describe, expect, test } from 'bun:test';
 import { resetDroneRootDirForTests } from '../src/host/paths';
 import {
   createSkill,
+  createSkillFromEditablePackage,
   deleteSkillRecord,
   listSkills,
   listSkillsFromRegistry,
   renderSkillMarkdown,
+  renderSkillProjectionPackages,
   syncSkillLibraryToHostTargets,
   updateSkillRecord,
+  updateSkillFromEditablePackage,
   type SkillRecord,
 } from '../src/hub/skills';
 
@@ -124,6 +127,167 @@ describe('skills library registry CRUD', () => {
 
       const deleted = await deleteSkillRecord(created.id);
       expect(deleted).toBe(true);
+      expect(await listSkills()).toHaveLength(0);
+    });
+  });
+});
+
+describe('editable skill packages', () => {
+  test('creates and updates a skill from an in-memory package', async () => {
+    await withTempHomes(async () => {
+      const created = await createSkillFromEditablePackage({
+        slug: 'virtual-review',
+        files: [
+          {
+            path: 'SKILL.md',
+            content: [
+              '---',
+              'name: Virtual Review',
+              'description: Edit skills as virtual folders.',
+              'license: MIT',
+              'metadata:',
+              '  owner: platform',
+              '  priority: 2',
+              '---',
+              '',
+              '# Review',
+              '',
+              'Read the package before editing.',
+              '',
+            ].join('\n'),
+          },
+          { path: 'scripts/check.sh', content: '#!/usr/bin/env bash\necho check\n' },
+          { path: 'tools/custom.sh', content: 'custom\n', kind: 'script' },
+          { path: 'agents/openai.yaml', content: 'tools:\n  - bash\n' },
+        ],
+      });
+
+      expect(created.slug).toBe('virtual-review');
+      expect(created.markdownBody).toContain('Read the package');
+      expect(created.metadata).toEqual({ owner: 'platform', priority: '2' });
+      expect(created.files).toEqual([
+        {
+          path: 'scripts/check.sh',
+          content: '#!/usr/bin/env bash\necho check\n',
+          kind: 'script',
+        },
+        {
+          path: 'tools/custom.sh',
+          content: 'custom\n',
+          kind: 'script',
+        },
+      ]);
+      expect(created.overlays?.codex?.openaiYaml).toContain('tools:');
+
+      const withAgentSettings = await updateSkillRecord(created.id, {
+        overlays: {
+          ...created.overlays,
+          claude: { userInvocable: true, allowedTools: ['Read'] },
+          cursor: { disableModelInvocation: true },
+        },
+      });
+      const updated = await updateSkillFromEditablePackage(withAgentSettings.id, {
+        slug: 'renamed-review',
+        files: [
+          {
+            path: 'SKILL.md',
+            content:
+              '---\nname: Renamed Review\ndescription: Updated through files mode.\n---\n\nUpdated body.\n',
+          },
+          { path: 'references/guide.md', content: '# Guide\n' },
+        ],
+      });
+
+      expect(updated.slug).toBe('renamed-review');
+      expect(updated.files.map((file) => file.path)).toEqual(['references/guide.md']);
+      expect(updated.overlays?.codex).toBeUndefined();
+      expect(updated.overlays?.claude?.userInvocable).toBe(true);
+      expect(updated.overlays?.cursor?.disableModelInvocation).toBe(true);
+
+      const replacedOverlays = await updateSkillFromEditablePackage(updated.id, {
+        files: [
+          {
+            path: 'SKILL.md',
+            content:
+              '---\nname: Renamed Review\ndescription: Updated through files mode.\n---\n\nUpdated body.\n',
+          },
+        ],
+        overlays: {
+          claude: { model: 'sonnet' },
+        },
+      });
+
+      expect(replacedOverlays.overlays?.claude).toEqual({ model: 'sonnet' });
+      expect(replacedOverlays.overlays?.cursor).toBeUndefined();
+
+      const emptyCodexFile = await createSkillFromEditablePackage({
+        files: [
+          {
+            path: 'SKILL.md',
+            content: '---\nname: Empty Codex\ndescription: Keep an empty managed file.\n---\n',
+          },
+          { path: 'agents/openai.yaml', content: '' },
+        ],
+      });
+      expect(emptyCodexFile.overlays?.codex?.openaiYaml).toBe('');
+      expect(
+        renderSkillProjectionPackages([emptyCodexFile], 'codex').find(
+          (entry) => entry.slug === 'empty-codex',
+        )?.files,
+      ).toContainEqual({ path: 'agents/openai.yaml', content: '', executable: false });
+    });
+  });
+
+  test('rejects unsafe paths and unsupported portable frontmatter without changing the skill', async () => {
+    await withTempHomes(async () => {
+      await expect(
+        createSkillFromEditablePackage({
+          files: [
+            { path: 'SKILL.md', content: '---\nname: Unsafe\ndescription: Unsafe package.\n---\n' },
+            { path: '../outside.txt', content: 'nope' },
+          ],
+        }),
+      ).rejects.toThrow('invalid file path');
+
+      await expect(
+        createSkillFromEditablePackage({
+          files: [
+            { path: 'SKILL.md', content: '---\nname: Kind\ndescription: Bad kind.\n---\n' },
+            { path: 'tools/run.sh', content: 'run', kind: 'executable' as any },
+          ],
+        }),
+      ).rejects.toThrow('invalid file kind');
+
+      await expect(
+        createSkillFromEditablePackage({
+          files: [
+            { path: 'SKILL.md', content: '---\nname: Conflict\ndescription: Bad tree.\n---\n' },
+            { path: 'references', content: 'file' },
+            { path: 'references/guide.md', content: 'nested' },
+          ],
+        }),
+      ).rejects.toThrow('invalid file tree');
+
+      await expect(
+        createSkillFromEditablePackage({
+          files: [
+            { path: 'SKILL.md', content: '---\nname: Trailing\ndescription: Bad path.\n---\n' },
+            { path: 'references/', content: 'bad' },
+          ],
+        }),
+      ).rejects.toThrow('invalid file path');
+
+      await expect(
+        createSkillFromEditablePackage({
+          files: [
+            {
+              path: 'SKILL.md',
+              content:
+                '---\nname: Unsupported\ndescription: Unsupported field.\nunknown-field: true\n---\n',
+            },
+          ],
+        }),
+      ).rejects.toThrow('unsupported portable frontmatter field');
       expect(await listSkills()).toHaveLength(0);
     });
   });

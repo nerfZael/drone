@@ -15,6 +15,8 @@ import { useDropdownDismiss } from '../../ui/dropdown';
 import { requestSidebarGroupDraft } from './sidebar-group-draft-events';
 import { requestSidebarRootDroneDraft } from './sidebar-drone-draft-events';
 import { useContinuousDictation } from '../chat/ContinuousDictationContext';
+import { useActiveComposer } from '../chat/ActiveComposerContext';
+import { isChatVoiceShortcutDoubleTap } from '../chat/chat-voice-shortcut';
 import { toggleCurrentChatComposerEditorMode } from '../chat/chat-composer-editor-mode-shortcut';
 import { useFileDictation } from '../files/FileDictationContext';
 import { useCompanion } from '../companion/CompanionContext';
@@ -173,6 +175,17 @@ export function useDroneHubLifecycleEffects({
     !['starting', 'recording', 'transcribing', 'working'].includes(companion.status),
   );
   const lastCompanionShortcutAtRef = React.useRef(0);
+  const lastChatVoiceShortcutAtRef = React.useRef(0);
+  const pendingRootVoiceDraftFocusKeyRef = React.useRef<string | null | undefined>(undefined);
+  const pendingRootVoiceFrameRef = React.useRef<number | null>(null);
+  const cancelPendingRootVoiceStart = React.useCallback((): boolean => {
+    const hadPendingDraft = pendingRootVoiceDraftFocusKeyRef.current !== undefined;
+    const pendingFrame = pendingRootVoiceFrameRef.current;
+    pendingRootVoiceDraftFocusKeyRef.current = undefined;
+    pendingRootVoiceFrameRef.current = null;
+    if (pendingFrame !== null) window.cancelAnimationFrame(pendingFrame);
+    return hadPendingDraft || pendingFrame !== null;
+  }, []);
   const runCompanionShortcut = React.useCallback((): boolean => {
     if (!toggleCompanionRecording) return false;
     const now = Date.now();
@@ -186,10 +199,40 @@ export function useDroneHubLifecycleEffects({
     return true;
   }, [closeCompanion, toggleCompanionRecording]);
   const toggleContinuousDictation = useContinuousDictation()?.toggle;
+  const activeComposer = useActiveComposer();
+  const toggleActiveComposerVoiceRecording = activeComposer.toggleVoiceRecording;
   const toggleFileDictation = useFileDictation()?.toggle;
   const outputScrollContextRef = React.useRef<string>('');
   useDropdownDismiss(terminalMenuRef, terminalMenuOpen, setTerminalMenuOpen);
   useDropdownDismiss(headerOverflowRef, headerOverflowOpen, setHeaderOverflowOpen);
+
+  React.useEffect(() => {
+    const previousFocusKey = pendingRootVoiceDraftFocusKeyRef.current;
+    if (previousFocusKey === undefined) return;
+    const nextFocusKey = draftChat?.focusKey ?? null;
+    if (!nextFocusKey || nextFocusKey === previousFocusKey) return;
+    pendingRootVoiceDraftFocusKeyRef.current = undefined;
+
+    const frame = window.requestAnimationFrame(() => {
+      pendingRootVoiceFrameRef.current = null;
+      const primaryInput = document.querySelector<HTMLElement>(
+        '[data-chat-input-focus-id="primary-chat"]',
+      );
+      if (!primaryInput || primaryInput.getClientRects().length === 0) return;
+      primaryInput.focus();
+      if (primaryInput instanceof HTMLTextAreaElement) {
+        const end = primaryInput.value.length;
+        primaryInput.setSelectionRange(end, end);
+      }
+      toggleActiveComposerVoiceRecording();
+    });
+    pendingRootVoiceFrameRef.current = frame;
+    return () => {
+      if (pendingRootVoiceFrameRef.current !== frame) return;
+      window.cancelAnimationFrame(frame);
+      pendingRootVoiceFrameRef.current = null;
+    };
+  }, [draftChat?.focusKey, toggleActiveComposerVoiceRecording]);
 
   React.useEffect(() => {
     if (!droneErrorModal) return;
@@ -224,6 +267,29 @@ export function useDroneHubLifecycleEffects({
           focusPrimaryChatInputWithRetry(remainingAttempts - 1);
         });
       }, 30);
+    };
+
+    const openRootDraftAndStartVoiceRecording = () => {
+      cancelPendingRootVoiceStart();
+      pendingRootVoiceDraftFocusKeyRef.current = draftChat?.focusKey ?? null;
+      activeComposer.discardVoiceRecording();
+      if (!requestSidebarRootDroneDraft()) openDraftChatComposer({ group: '' });
+    };
+
+    const runChatVoiceShortcut = (): boolean => {
+      if (cancelPendingRootVoiceStart()) {
+        lastChatVoiceShortcutAtRef.current = 0;
+        return true;
+      }
+      const now = Date.now();
+      if (isChatVoiceShortcutDoubleTap(lastChatVoiceShortcutAtRef.current, now)) {
+        lastChatVoiceShortcutAtRef.current = 0;
+        openRootDraftAndStartVoiceRecording();
+        return true;
+      }
+      const handled = activeComposer.toggleVoiceRecording();
+      lastChatVoiceShortcutAtRef.current = now;
+      return handled;
     };
 
     const openRightPanelTabFromShortcut = (tab: RightPanelTab) => {
@@ -271,6 +337,13 @@ export function useDroneHubLifecycleEffects({
       // These actions run in the capture handler below so editor shortcut boundaries
       // cannot swallow them and dialogs can explicitly suppress them.
       toggleChatComposerEditorMode: () => false,
+      toggleChatVoiceRecording: () => runChatVoiceShortcut(),
+      toggleChatVoiceRecordingPause: () => activeComposer.toggleVoiceRecordingPause(),
+      discardChatVoiceRecording: () => {
+        const canceledPendingStart = cancelPendingRootVoiceStart();
+        return activeComposer.discardVoiceRecording() || canceledPendingStart;
+      },
+      clearChatComposer: () => activeComposer.clearComposer(),
       toggleContinuousDictation: () => {
         if (!toggleContinuousDictation) return false;
         void toggleContinuousDictation();
@@ -479,6 +552,8 @@ export function useDroneHubLifecycleEffects({
     currentDrone,
     runCompanionShortcut,
     applyCompanionProposal,
+    activeComposer,
+    cancelPendingRootVoiceStart,
     canApplyCompanionProposal,
     openHome,
     openDraftChatComposer,

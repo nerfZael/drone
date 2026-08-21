@@ -2276,7 +2276,7 @@ export function SelectedDroneWorkspace({
                   />
                 </div>
               ) : null}
-              <div className="relative flex min-h-0 flex-1 flex-col">
+              <div className="relative flex h-0 min-h-0 flex-1 flex-col overflow-hidden">
                 {showDroneStartupFailureEmptyState ? (
                   <EmptyState
                     icon={<IconChat className="h-8 w-8 text-[var(--red)]" />}

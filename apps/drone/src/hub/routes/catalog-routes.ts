@@ -2,10 +2,12 @@ import { parseBoolParam } from '../hub-format';
 import type { HubRouter } from '../hub-router';
 import {
   createSkill,
+  createSkillFromEditablePackage,
   deleteSkillRecord,
   getSkillById,
   listSkills,
   updateSkillRecord,
+  updateSkillFromEditablePackage,
 } from '../skills';
 import {
   createMcpServer,
@@ -57,6 +59,16 @@ export function registerCatalogRoutes(apiRouter: HubRouter, deps: CatalogRouteDe
     }
   });
 
+  apiRouter.post('/api/skills/package', async ({ readJson, json: respond }) => {
+    const body = await readJson();
+    try {
+      respond(201, { ok: true, skill: await createSkillFromEditablePackage(body) });
+    } catch (error: any) {
+      const message = errorMessage(error);
+      respond(createCatalogStatus(message), { ok: false, error: message });
+    }
+  });
+
   apiRouter.get('/api/skills/:skillId', async ({ params, fail, json: respond }) => {
     const skill = await getSkillById(params.skillId);
     if (!skill) fail(404, `unknown skill: ${params.skillId}`);
@@ -67,6 +79,20 @@ export function registerCatalogRoutes(apiRouter: HubRouter, deps: CatalogRouteDe
     const body = await readJson();
     try {
       respond(200, { ok: true, skill: await updateSkillRecord(params.skillId, body) });
+    } catch (error: any) {
+      const message = errorMessage(error);
+      const status = /unknown skill/i.test(message) ? 404 : createCatalogStatus(message);
+      respond(status, { ok: false, error: message });
+    }
+  });
+
+  apiRouter.put('/api/skills/:skillId/package', async ({ params, readJson, json: respond }) => {
+    const body = await readJson();
+    try {
+      respond(200, {
+        ok: true,
+        skill: await updateSkillFromEditablePackage(params.skillId, body),
+      });
     } catch (error: any) {
       const message = errorMessage(error);
       const status = /unknown skill/i.test(message) ? 404 : createCatalogStatus(message);

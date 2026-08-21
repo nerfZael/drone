@@ -255,6 +255,10 @@ export function ChatInput({
   const applyCompanionComposerRef = React.useRef<(baseRevision: string, content: string) => { ok: true; revision: string }>(() => {
     throw new Error('COMPOSER_NOT_AVAILABLE');
   });
+  const toggleVoiceRecordingShortcutRef = React.useRef<() => boolean>(() => false);
+  const toggleVoiceRecordingPauseShortcutRef = React.useRef<() => boolean>(() => false);
+  const discardVoiceRecordingShortcutRef = React.useRef<() => boolean>(() => false);
+  const clearComposerShortcutRef = React.useRef<() => boolean>(() => false);
   const voiceActionInFlightRef = React.useRef(false);
   const voiceActionTokenRef = React.useRef(0);
   const persistenceKey = String(draftPersistenceKey ?? '').trim();
@@ -328,6 +332,10 @@ export function ChatInput({
       appendTranscript: (text) => appendContinuousDictationRef.current(text),
       readSnapshot: () => readCompanionComposerRef.current(),
       applyContent: (baseRevision, content) => applyCompanionComposerRef.current(baseRevision, content),
+      toggleVoiceRecording: () => toggleVoiceRecordingShortcutRef.current(),
+      toggleVoiceRecordingPause: () => toggleVoiceRecordingPauseShortcutRef.current(),
+      discardVoiceRecording: () => discardVoiceRecordingShortcutRef.current(),
+      clearComposer: () => clearComposerShortcutRef.current(),
     });
   }, [
     activeComposerTargetId,
@@ -981,6 +989,60 @@ export function ChatInput({
       endVoiceAction(actionToken);
     }
   }
+
+  function toggleVoiceRecordingFromShortcut(): boolean {
+    if (composerLocked || continuousVoiceActive || microphoneOwnedElsewhere) return false;
+    if (voiceRecordingStatus === 'idle') {
+      readComposerSelection();
+      setCompactVoiceRecording(false);
+      void startVoiceRecording();
+      return true;
+    }
+    if (voiceRecordingStatus === 'starting' || voiceRecordingCanPauseOrStop) {
+      void stopVoiceRecordingAndFillDraft();
+      return true;
+    }
+    return voiceRecordingStatus === 'transcribing';
+  }
+
+  function toggleVoiceRecordingPauseFromShortcut(): boolean {
+    if (!voiceRecordingCanPauseOrStop || voiceActionInFlight) return false;
+    toggleVoiceRecordingPause();
+    return true;
+  }
+
+  function discardVoiceRecordingFromShortcut(): boolean {
+    if (!voiceRecordingActive) return false;
+    voiceActionTokenRef.current += 1;
+    voiceActionInFlightRef.current = false;
+    setVoiceActionInFlight(false);
+    void discardVoiceRecording();
+    return true;
+  }
+
+  function clearComposerFromShortcut(): boolean {
+    if (composerLocked || voiceRecordingActive || !draftRef.current) return false;
+    const before = draftRef.current;
+    readComposerSelection();
+    if (editorMode) {
+      if (!editorRef.current?.applyCompanionEdit('')) return false;
+    } else {
+      setDraft('');
+      companionUndoRef.current = {
+        before,
+        after: '',
+        afterRevision: String(draftRevisionRef.current),
+      };
+    }
+    rememberComposerSelection({ start: 0, end: 0 });
+    window.requestAnimationFrame(() => focusComposerAtSelection({ start: 0, end: 0 }));
+    return true;
+  }
+
+  toggleVoiceRecordingShortcutRef.current = toggleVoiceRecordingFromShortcut;
+  toggleVoiceRecordingPauseShortcutRef.current = toggleVoiceRecordingPauseFromShortcut;
+  discardVoiceRecordingShortcutRef.current = discardVoiceRecordingFromShortcut;
+  clearComposerShortcutRef.current = clearComposerFromShortcut;
 
   const sendNow = (
     context: ChatSendContext,

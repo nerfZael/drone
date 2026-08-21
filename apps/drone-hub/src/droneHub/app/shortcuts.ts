@@ -10,6 +10,10 @@ export type ShortcutActionId =
   | 'toggleSelectedDronesToDo'
   | 'focusPrimaryChatInput'
   | 'toggleChatComposerEditorMode'
+  | 'toggleChatVoiceRecording'
+  | 'toggleChatVoiceRecordingPause'
+  | 'discardChatVoiceRecording'
+  | 'clearChatComposer'
   | 'toggleContinuousDictation'
   | 'toggleFileDictation'
   | 'toggleCompanion'
@@ -101,6 +105,26 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     description: 'Toggles full text editor mode for the chat composer that currently has focus.',
   },
   {
+    id: 'toggleChatVoiceRecording',
+    label: 'Record voice message',
+    description: 'Starts a voice message in the active chat composer, or stops and transcribes it. Double-tap to create a root drone and record there.',
+  },
+  {
+    id: 'toggleChatVoiceRecordingPause',
+    label: 'Pause voice recording',
+    description: 'Pauses or resumes the active chat composer voice recording.',
+  },
+  {
+    id: 'discardChatVoiceRecording',
+    label: 'Discard voice recording',
+    description: 'Cancels and discards the active chat composer voice recording.',
+  },
+  {
+    id: 'clearChatComposer',
+    label: 'Clear chat composer',
+    description: 'Clears the active chat composer. Focus it and use Ctrl/Cmd+Z to undo.',
+  },
+  {
     id: 'toggleContinuousDictation',
     label: 'Toggle continuous dictation',
     description: 'Starts or stops continuous dictation in the active chat composer.',
@@ -185,16 +209,20 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
 const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   openHome: { key: 'v', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   createDraftDrone: { key: '1', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  createDraftGroup: { key: 'e', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  createDraftGroup: null,
   createDraftDroneInCurrentGroup: { key: '2', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   createDroneChat: { key: '3', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   cloneDroneChat: { key: '4', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  toggleSelectedDronePinned: { key: 'q', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  moveSelectedDroneToTop: { key: 'w', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  toggleSelectedDronePinned: null,
+  moveSelectedDroneToTop: null,
   toggleSelectedDronesToDo: null,
   focusPrimaryChatInput: { key: 'enter', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleChatComposerEditorMode: { key: 'e', mod: false, ctrl: true, meta: false, alt: false, shift: false },
-  toggleContinuousDictation: { key: 'r', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  toggleChatVoiceRecording: { key: 'q', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  toggleChatVoiceRecordingPause: { key: 'w', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  discardChatVoiceRecording: { key: 'e', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  clearChatComposer: { key: 'r', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  toggleContinuousDictation: { key: 't', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleFileDictation: { key: 'd', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleCompanion: { key: '`', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   applyCompanionProposal: { key: 'capslock', mod: false, ctrl: false, meta: false, alt: false, shift: false },
@@ -209,7 +237,7 @@ const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   openBrowserTab: { key: 'b', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openFilesTab: { key: 'f', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openQuickOpen: { key: 'p', mod: true, ctrl: false, meta: false, alt: false, shift: false },
-  openTerminalTab: { key: 't', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  openTerminalTab: null,
 };
 
 type KeyboardEventLike = Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey'>;
@@ -300,6 +328,68 @@ export function migrateCompanionShortcut(value: unknown): unknown {
   };
 }
 
+export function migrateChatComposerShortcuts(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const raw = value as Record<string, unknown>;
+  const next = { ...raw };
+  let changed = false;
+  const unmodified = (key: string): ShortcutBinding => ({
+    key,
+    mod: false,
+    ctrl: false,
+    meta: false,
+    alt: false,
+    shift: false,
+  });
+  const addAction = (actionId: ShortcutActionId, binding: ShortcutBinding) => {
+    if (Object.prototype.hasOwnProperty.call(raw, actionId)) return;
+    next[actionId] = binding;
+    changed = true;
+  };
+
+  if (!Object.prototype.hasOwnProperty.call(raw, 'toggleChatVoiceRecording')) {
+    addAction('toggleChatVoiceRecording', unmodified('q'));
+    if (isSameShortcutBinding(raw.toggleSelectedDronePinned, unmodified('q'))) {
+      next.toggleSelectedDronePinned = null;
+    }
+  }
+  if (!Object.prototype.hasOwnProperty.call(raw, 'toggleChatVoiceRecordingPause')) {
+    addAction('toggleChatVoiceRecordingPause', unmodified('w'));
+    if (isSameShortcutBinding(raw.moveSelectedDroneToTop, unmodified('w'))) {
+      next.moveSelectedDroneToTop = null;
+    }
+  }
+  if (!Object.prototype.hasOwnProperty.call(raw, 'discardChatVoiceRecording')) {
+    addAction('discardChatVoiceRecording', unmodified('e'));
+    if (isSameShortcutBinding(raw.createDraftGroup, unmodified('e'))) {
+      next.createDraftGroup = null;
+    }
+  }
+  if (!Object.prototype.hasOwnProperty.call(raw, 'clearChatComposer')) {
+    addAction('clearChatComposer', unmodified('r'));
+    if (isSameShortcutBinding(raw.toggleContinuousDictation, unmodified('r'))) {
+      next.toggleContinuousDictation = unmodified('t');
+    }
+    if (isSameShortcutBinding(raw.openTerminalTab, unmodified('t'))) {
+      next.openTerminalTab = null;
+    }
+  }
+  return changed ? next : value;
+}
+
+function isSameShortcutBinding(value: unknown, expected: ShortcutBinding): boolean {
+  const binding = sanitizeShortcutBinding(value, null);
+  return Boolean(
+    binding &&
+      binding.key === expected.key &&
+      binding.mod === expected.mod &&
+      binding.ctrl === expected.ctrl &&
+      binding.meta === expected.meta &&
+      binding.alt === expected.alt &&
+      binding.shift === expected.shift,
+  );
+}
+
 function cloneShortcutBinding(binding: ShortcutBinding | null): ShortcutBinding | null {
   return binding ? { ...binding } : null;
 }
@@ -317,6 +407,10 @@ export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
     toggleSelectedDronesToDo: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleSelectedDronesToDo),
     focusPrimaryChatInput: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.focusPrimaryChatInput),
     toggleChatComposerEditorMode: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleChatComposerEditorMode),
+    toggleChatVoiceRecording: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleChatVoiceRecording),
+    toggleChatVoiceRecordingPause: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleChatVoiceRecordingPause),
+    discardChatVoiceRecording: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.discardChatVoiceRecording),
+    clearChatComposer: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.clearChatComposer),
     toggleContinuousDictation: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleContinuousDictation),
     toggleFileDictation: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleFileDictation),
     toggleCompanion: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleCompanion),
