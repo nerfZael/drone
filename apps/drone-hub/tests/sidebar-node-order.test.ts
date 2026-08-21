@@ -7,6 +7,7 @@ import {
   placeCreatedSidebarFolderBeforeNode,
   removeSidebarRepoScopedNodeOrderByGroupPrefix,
   renameSidebarNodeOrderByParentGroupPrefix,
+  renameSidebarRepoScopedNodeOrderByGroupPrefix,
   sidebarChatRefFromNodeId,
   sidebarChatSidebarNodeId,
   sidebarDroneIdFromNodeId,
@@ -243,6 +244,43 @@ describe('sidebar-node-order', () => {
       ),
     ).toEqual({
       [repoRootId]: [keptId],
+    });
+  });
+
+  test('renames ordering entries only inside the targeted repository', () => {
+    const targetRepoGroupPath = 'repo:/work/target';
+    const otherRepoGroupPath = 'repo:/work/other';
+    const targetRootId = sidebarFolderNodeId(targetRepoGroupPath);
+    const otherRootId = sidebarFolderNodeId(otherRepoGroupPath);
+    const targetGroupId = sidebarFolderNodeId(
+      `repo-scope:${targetRepoGroupPath}:Review`,
+    );
+    const targetChildId = sidebarFolderNodeId(
+      `repo-scope:${targetRepoGroupPath}:Review/Child`,
+    );
+    const otherGroupId = sidebarFolderNodeId(
+      `repo-scope:${otherRepoGroupPath}:Review`,
+    );
+
+    expect(
+      renameSidebarRepoScopedNodeOrderByGroupPrefix(
+        {
+          [targetRootId]: [targetGroupId],
+          [targetGroupId]: [targetChildId],
+          [otherRootId]: [otherGroupId],
+        },
+        targetRepoGroupPath,
+        'Review',
+        'Approved',
+      ),
+    ).toEqual({
+      [targetRootId]: [
+        sidebarFolderNodeId(`repo-scope:${targetRepoGroupPath}:Approved`),
+      ],
+      [sidebarFolderNodeId(`repo-scope:${targetRepoGroupPath}:Approved`)]: [
+        sidebarFolderNodeId(`repo-scope:${targetRepoGroupPath}:Approved/Child`),
+      ],
+      [otherRootId]: [otherGroupId],
     });
   });
 

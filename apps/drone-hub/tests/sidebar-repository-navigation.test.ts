@@ -48,6 +48,9 @@ describe('desktop sidebar repository navigation', () => {
     expect(treeSource).toContain(
       '!isVirtualGroup && folderDroneSelected && folderDroneIds.length > 0',
     );
+    expect(treeSource).toContain('const repoPath = sidebarRepoPathFromGroupPath(node.repoGroupPath);');
+    expect(treeSource).toContain('group: isVirtualGroup ? \'\' : folderPath');
+    expect(treeSource).toContain('onOpenGroupMultiChat(multiChatTarget)');
   });
 
   test('builds repository drill-in rows instead of repository group nodes', () => {

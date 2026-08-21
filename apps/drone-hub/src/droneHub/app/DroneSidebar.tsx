@@ -97,7 +97,11 @@ import type { SidebarGroup } from './use-sidebar-view-model';
 import type { DroneSelectionClickOptions } from './drone-selection-helpers';
 import { sidebarInlineSectionKey, type SidebarInlineSectionKind } from './sidebar-inline-sections';
 import { useSidebarOptimisticGroups } from './use-sidebar-optimistic-groups';
-import type { MoveDronesToGroupResult } from './use-group-management';
+import type {
+  DeleteGroupOptions,
+  GroupMutationScope,
+  MoveDronesToGroupResult,
+} from './use-group-management';
 import type { DroneDeleteMode, SidebarDensityMode, SidebarGroupingMode } from './settings-types';
 import { isSidebarGroupCollapsed } from './is-sidebar-group-collapsed';
 import {
@@ -109,6 +113,7 @@ import {
   sidebarSelectionEdgeClass,
 } from '../sidebar/presentation';
 import { useSidebarReadModel } from './use-sidebar-read-model';
+import { sidebarRepoGroupPathFromRepoPath } from './sidebar-repository-scope';
 import { buildSidebarRepositoryNavigationModel } from './sidebar-repository-navigation';
 import {
   useSidebarInteractions,
@@ -899,18 +904,23 @@ export type DroneSidebarProps = {
   onMoveDronesToGroup: (group: string, droneIds: string[]) => Promise<MoveDronesToGroupResult>;
   onCreateGroup: (
     group: string,
+    scope?: Pick<GroupMutationScope, 'repoPath'>,
   ) => Promise<{ ok: boolean; error: string | null }> | { ok: boolean; error: string | null };
   onCreateGroupAndMove: (
     group: string,
     droneIds: string[],
   ) => Promise<{ ok: boolean; error: string | null }>;
   onToggleGroupCollapsed: (group: string) => void;
-  onRenameGroup: (group: string, nextName?: string) => Promise<boolean> | boolean;
+  onRenameGroup: (
+    group: string,
+    nextName?: string,
+    scope?: GroupMutationScope,
+  ) => Promise<boolean> | boolean;
   onOpenGroupMultiChat: (group: string) => void;
   onDeleteGroup: (
     group: string,
     count: number,
-    opts?: { kind?: 'group' | 'repo'; label?: string; repoPath?: string | null },
+    opts?: DeleteGroupOptions,
   ) => Promise<boolean> | boolean;
   onPrepareDroneDragStart: (droneId: string, draggedDroneIds?: readonly string[]) => void;
   onOpenReposModal: () => void;
@@ -1257,16 +1267,19 @@ export function DroneSidebar({
     async (
       group: string,
       count: number,
-      opts?: { kind?: 'group' | 'repo'; label?: string; repoPath?: string | null },
+      opts?: DeleteGroupOptions,
     ) => {
       const ok = await onDeleteGroup(group, count, opts);
       const scopedRepoPath =
         opts?.kind === 'group' || !opts?.kind
           ? String(opts?.repoPath ?? activeRepoPath ?? '').trim()
           : '';
+      const hasRepoScope =
+        (opts?.kind === 'group' || !opts?.kind) &&
+        Object.prototype.hasOwnProperty.call(opts ?? {}, 'repoPath');
       if (!ok || opts?.kind === 'repo') return ok;
-      if (scopedRepoPath) {
-        const repoGroupPath = `repo:${scopedRepoPath}`;
+      if (hasRepoScope) {
+        const repoGroupPath = sidebarRepoGroupPathFromRepoPath(scopedRepoPath);
         setSidebarNodeOrderByParent((prev) =>
           removeSidebarRepoScopedNodeOrderByGroupPrefix(prev, repoGroupPath, group),
         );
@@ -1366,6 +1379,7 @@ export function DroneSidebar({
     renderSidebarGroups,
     sidebarFolderTree,
     sidebarDroneById,
+    visibleRepoScopedGroupPathsByRepoGroup,
     visibleSidebarFolderPathSet,
   } = useSidebarReadModel({
     draftSidebarPlaceholderDrone,
@@ -1374,6 +1388,7 @@ export function DroneSidebar({
     optimisticSidebarDronesFilteredByRepo,
     optimisticSidebarGroups,
     repoScopedGroupPathsByRepoGroup,
+    repoScopedGroupIdByPathByRepoGroup: canonicalGroupIndex.idsByPathByRepoGroup,
     showHiddenSidebarGroups,
     sidebarGroupIdByName,
     sidebarGroupOrder,
@@ -1406,7 +1421,10 @@ export function DroneSidebar({
         sidebarFolderTree,
         sidebarGroups: renderSidebarGroups,
         sidebarGroupOrder,
-        repoScopedGroupPathsByRepoGroup,
+        repoScopedGroupPathsByRepoGroup: visibleRepoScopedGroupPathsByRepoGroup,
+        repoScopedGroupCreatedAtByPathByRepoGroup:
+          canonicalGroupIndex.createdAtByPathByRepoGroup,
+        repoScopedGroupIdByPathByRepoGroup: canonicalGroupIndex.idsByPathByRepoGroup,
         sidebarDroneOrderByGroup,
         sidebarNodeOrderByParent,
         sidebarGroupCreatedAtByName,
@@ -1414,13 +1432,15 @@ export function DroneSidebar({
       }),
     [
       renderSidebarGroups,
-      repoScopedGroupPathsByRepoGroup,
+      canonicalGroupIndex.createdAtByPathByRepoGroup,
+      canonicalGroupIndex.idsByPathByRepoGroup,
       sidebarDroneOrderByGroup,
       sidebarFolderTree,
       sidebarGroupOrder,
       sidebarNodeOrderByParent,
       sidebarGroupCreatedAtByName,
       sidebarGroupIdByName,
+      visibleRepoScopedGroupPathsByRepoGroup,
     ],
   );
   const renderedSidebarNodeTreeRef = React.useRef<SidebarNodeTreeModel | null>(null);
@@ -3283,7 +3303,7 @@ export function DroneSidebar({
                       }
                       sidebarGroupOrder={sidebarGroupOrder}
                       sidebarDndEnabled={sidebarDndEnabled}
-                      repoScopedGroupPathsByRepoGroup={repoScopedGroupPathsByRepoGroup}
+                      repoScopedGroupPathsByRepoGroup={visibleRepoScopedGroupPathsByRepoGroup}
                       sidebarDroneOrderByGroup={sidebarDroneOrderByGroup}
                       sidebarNodeOrderByParent={sidebarNodeOrderByParent}
                       sidebarChatOrderByDrone={sidebarChatOrderByDrone}
@@ -3313,6 +3333,7 @@ export function DroneSidebar({
                       hiddenSidebarGroupTokenSet={hiddenSidebarGroupTokenSet}
                       selectedGroupMultiChat={selectedGroupMultiChat}
                       onOpenFolderCreate={openFolderCreate}
+                      onOpenDraftDrone={onOpenDraftChatComposer}
                       onStartRenameFolder={startRenameFolder}
                       onFolderEditorValueChange={updateFolderEditorValue}
                       onSubmitFolderEditor={submitFolderEditor}
