@@ -5,7 +5,6 @@ import path from 'node:path';
 import type { RunResult } from '../../host/dvm';
 import { ChangeRequestError } from './change-request-error';
 import {
-  changeRequestConflictFiles,
   resolveChangeRequestBranch,
   resolveChangeRequestCommit,
   runChangeRequestGit,
@@ -13,6 +12,7 @@ import {
   type RunHostCommand,
 } from './change-request-git';
 import { ChangeRequestObjectStore } from './change-request-object-store';
+import { prepareChangeRequestCandidate } from './prepare-change-request-candidate';
 import type { ChangeRequestRepository } from './change-request-repository';
 import type { ResolvedChangeRequestDrone } from './change-request-snapshot-service';
 import type { ChangeRequestRecord, ChangeRequestRevisionRecord } from './change-request-types';
@@ -94,6 +94,7 @@ type PreparedCandidate = Omit<
   'workspaceId' | 'reviewerDroneId' | 'reviewerDroneName' | 'path' | 'reused'
 > & {
   bundlePath: string;
+  bundleRef: string;
 };
 
 /**
@@ -288,44 +289,27 @@ export class ChangeRequestReviewWorkspaceService {
 
     const runId = `${Date.now().toString(36)}-${crypto.randomBytes(4).toString('hex')}`;
     const safeRequest = safeChangeRequestRefSegment(record.id);
-    const worktreePath = this.deps.storagePath(
-      'change-request-review-preparations',
-      `${safeRequest}-${runId}`,
-    );
     const bundleDirectory = this.deps.storagePath('change-request-review-bundles');
     const bundlePath = path.join(bundleDirectory, `${safeRequest}-${runId}.bundle`);
-    await fs.mkdir(path.dirname(worktreePath), { recursive: true });
+    const bundleRef = `refs/drone/review-preparations/${safeRequest}-${runId}`;
     await fs.mkdir(bundleDirectory, { recursive: true });
     try {
-      await this.git(
+      const candidate = await prepareChangeRequestCandidate(this.deps.runHostCommand, {
         gitRoot,
-        ['worktree', 'add', '--detach', worktreePath, destinationSha],
-        REVIEW_TIMEOUT_MS,
-      );
-      const merged = await this.deps.runHostCommand(
-        'git',
-        ['-C', worktreePath, 'merge', '--squash', '--no-commit', revision.snapshotRef],
-        { timeoutMs: REVIEW_TIMEOUT_MS },
-      );
-      if (merged.code !== 0) {
+        baseSha: destinationSha,
+        snapshotRef: revision.snapshotRef,
+        timeoutMs: REVIEW_TIMEOUT_MS,
+      });
+      if (candidate.status === 'conflicted') {
         throw new ChangeRequestError(
           'The change request conflicts with its destination.',
           409,
           'merge_conflict',
-          { conflictFiles: changeRequestConflictFiles(`${merged.stdout}\n${merged.stderr}`) },
+          { conflictFiles: candidate.conflictFiles },
         );
       }
-      const staged = await this.deps.runHostCommand('git', [
-        '-C',
-        worktreePath,
-        'diff',
-        '--cached',
-        '--quiet',
-      ]);
       let candidateSha = destinationSha;
-      if (staged.code === 1) {
-        const disabledHooksPath = this.deps.storagePath('disabled-git-hooks');
-        await fs.mkdir(disabledHooksPath, { recursive: true });
+      if (candidate.changed) {
         const identity = {
           ...process.env,
           GIT_AUTHOR_NAME: 'DroneHub Review',
@@ -339,13 +323,11 @@ export class ChangeRequestReviewWorkspaceService {
           'git',
           [
             '-C',
-            worktreePath,
-            '-c',
-            `core.hooksPath=${disabledHooksPath}`,
-            '-c',
-            'commit.gpgsign=false',
-            'commit',
-            '--no-verify',
+            gitRoot,
+            'commit-tree',
+            candidate.candidateTreeSha,
+            '-p',
+            destinationSha,
             '-m',
             `chore(drone): review change request #${record.number} revision ${revision.number}`,
           ],
@@ -358,24 +340,10 @@ export class ChangeRequestReviewWorkspaceService {
             'git_failed',
           );
         }
-        candidateSha = (
-          await this.git(worktreePath, ['rev-parse', 'HEAD'], REVIEW_TIMEOUT_MS)
-        ).stdout
-          .trim()
-          .toLowerCase();
-      } else if (staged.code !== 0) {
-        throw new ChangeRequestError(
-          staged.stderr || staged.stdout || 'Unable to inspect the review candidate.',
-          409,
-          'git_failed',
-        );
+        candidateSha = committed.stdout.trim().toLowerCase();
       }
-      const candidateTreeSha = (
-        await this.git(worktreePath, ['rev-parse', `${candidateSha}^{tree}`], REVIEW_TIMEOUT_MS)
-      ).stdout
-        .trim()
-        .toLowerCase();
-      await this.git(worktreePath, ['bundle', 'create', bundlePath, 'HEAD'], REVIEW_TIMEOUT_MS);
+      await this.git(gitRoot, ['update-ref', bundleRef, candidateSha], REVIEW_TIMEOUT_MS);
+      await this.git(gitRoot, ['bundle', 'create', bundlePath, bundleRef], REVIEW_TIMEOUT_MS);
       return {
         requestNumber: record.number,
         revision: revision.number,
@@ -386,20 +354,17 @@ export class ChangeRequestReviewWorkspaceService {
         destinationBranch: record.destinationBranch,
         destinationSha,
         candidateSha,
-        candidateTreeSha,
+        candidateTreeSha: candidate.candidateTreeSha,
         bundlePath,
+        bundleRef,
       };
     } catch (error) {
       await fs.rm(bundlePath, { force: true }).catch(() => {});
       throw error;
     } finally {
       await this.deps
-        .runHostCommand('git', ['-C', gitRoot, 'worktree', 'remove', '--force', worktreePath], {
-          timeoutMs: 30_000,
-        })
+        .runHostCommand('git', ['-C', gitRoot, 'update-ref', '-d', bundleRef])
         .catch(() => null);
-      await fs.rm(worktreePath, { recursive: true, force: true }).catch(() => {});
-      await this.deps.runHostCommand('git', ['-C', gitRoot, 'worktree', 'prune']).catch(() => null);
     }
   }
 
@@ -592,7 +557,7 @@ export class ChangeRequestReviewWorkspaceService {
               '--no-tags',
               '--force',
               containerBundlePath,
-              `HEAD:${reviewRef}`,
+              `${candidate.bundleRef}:${reviewRef}`,
             ],
             REVIEW_TIMEOUT_MS,
           );
@@ -813,7 +778,7 @@ export class ChangeRequestReviewWorkspaceService {
 }
 
 function withoutBundle(candidate: PreparedCandidate) {
-  const { bundlePath: _bundlePath, ...result } = candidate;
+  const { bundlePath: _bundlePath, bundleRef: _bundleRef, ...result } = candidate;
   return result;
 }
 
@@ -842,7 +807,9 @@ function parseWorkspaceId(value: string): {
 } {
   const match = String(value ?? '')
     .trim()
-    .match(/^cr-([1-9]\d*)-r([1-9]\d*)-([0-9a-f]{64})-([0-9a-f]{40})-([0-9a-f]{40})-([0-9a-f]{40})$/);
+    .match(
+      /^cr-([1-9]\d*)-r([1-9]\d*)-([0-9a-f]{64})-([0-9a-f]{40})-([0-9a-f]{40})-([0-9a-f]{40})$/,
+    );
   if (!match) {
     throw new ChangeRequestError('Invalid review workspace identifier.', 400);
   }

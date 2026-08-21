@@ -4,7 +4,12 @@ import { ChangeRequestError } from './change-request-error';
 export type RunHostCommand = (
   command: string,
   args: string[],
-  options?: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number },
+  options?: {
+    cwd?: string;
+    env?: NodeJS.ProcessEnv;
+    timeoutMs?: number;
+    input?: string | Buffer;
+  },
 ) => Promise<RunResult>;
 
 export async function runChangeRequestGit(
