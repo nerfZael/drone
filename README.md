@@ -5,7 +5,6 @@ A Bun + Turborepo monorepo for running and managing **agent-enabled “drone” 
 - **`dvm`** (`apps/dvm`): CLI for managing Docker containers as “VM-like” machines, including tmux-backed persistent sessions and optional agent setup.
 - **`drone`** (`apps/drone`): host CLI + in-container daemon that exposes a local REST API for controlling processes/sessions inside a container (implemented on top of `dvm`).
 - **`drone-hub`** (`apps/drone-hub`): web UI for listing/grouping drones and interacting with them (Vite/React).
-- **`looped`** (`apps/looped`): scaffolded minimal loop harness wrapper for repeatedly running an agentic CLI prompt.
 - **`drone-sdk`** (`packages/drone-sdk`): TypeScript SDK for creating drones, working with groups and chats, and sending prompts through Drone Hub.
 
 ## Repo layout
@@ -13,7 +12,6 @@ A Bun + Turborepo monorepo for running and managing **agent-enabled “drone” 
 - **`apps/dvm/`**: DVM CLI and scripts
 - **`apps/drone/`**: Drone CLI + daemon
 - **`apps/drone-hub/`**: Drone Hub UI
-- **`apps/looped/`**: Looped CLI scaffold
 - **`packages/drone-sdk/`**: Drone SDK package
 
 ## Prerequisites
@@ -36,7 +34,6 @@ bun run build
 # install CLI commands into your shell PATH
 npm link ./apps/dvm
 npm link ./apps/drone
-npm link ./apps/looped
 ```
 
 If the commands are not found, ensure your npm global bin is on `PATH`:
@@ -55,9 +52,6 @@ dvm --help
 
 # drone
 drone --help
-
-# looped
-looped --help
 ```
 
 Typical flow:
@@ -103,9 +97,6 @@ bun run vsn
 
 # Voice Stream Next desktop client
 bun run vsn:desktop
-
-# looped dev (ts-node)
-bun run looped -- --help
 ```
 
 ## Notes on security
@@ -119,4 +110,5 @@ For details, see `apps/drone/README.md`.
 - **Drone**: `apps/drone/README.md`
 - **DVM**: `apps/dvm/README.md`
 - **Drone Hub UI**: `apps/drone-hub/README.md`
-- **Looped**: `apps/looped/README.md`
+
+Note: The `looped` app has been removed from this repository.
