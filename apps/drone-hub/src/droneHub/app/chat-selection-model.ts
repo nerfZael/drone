@@ -47,6 +47,14 @@ export function chatConfigResolutionState(input: {
   return input.loading ? 'loading' : 'unavailable';
 }
 
+export function genericChatComposerAvailable(input: {
+  nativeChatActive: boolean;
+  chatConfigResolution: ReturnType<typeof chatConfigResolutionState>;
+}): boolean {
+  if (input.nativeChatActive) return false;
+  return input.chatConfigResolution === 'ready' || input.chatConfigResolution === 'drone-error';
+}
+
 export function shouldShowDroneStartupFailureEmptyState(input: {
   startupFailed: boolean;
   transcriptCount: number;

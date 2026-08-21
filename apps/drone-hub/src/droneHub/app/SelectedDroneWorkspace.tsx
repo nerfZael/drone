@@ -66,6 +66,7 @@ import { rightPanelHeaderTabs, type RightPanelTab } from './app-config';
 import type { ChatModelOption, StartupSeedState } from './app-types';
 import {
   chatConfigResolutionState,
+  genericChatComposerAvailable,
   shouldShowDroneStartupFailureEmptyState,
 } from './chat-selection-model';
 import type { RepoOpErrorMeta } from './helpers';
@@ -903,10 +904,10 @@ export function SelectedDroneWorkspace({
     transcriptCount: transcripts?.length ?? 0,
     pendingPromptCount: visiblePendingPromptsWithStartup.length,
   });
-  const genericChatActive =
-    !nativeChatActive &&
-    !chatConfigFailed &&
-    (currentChatIsDraft || !hasChats || chatRuntimeMetadataAvailable);
+  const genericChatActive = genericChatComposerAvailable({
+    nativeChatActive,
+    chatConfigResolution,
+  });
   const chatComposerControlsAvailable = genericChatActive || nativeChatActive;
   const selectedChatDockerSnapshotBusy = React.useMemo(
     () =>
@@ -2284,7 +2285,7 @@ export function SelectedDroneWorkspace({
                   />
                 </div>
               ) : null}
-              <div className="relative flex h-0 min-h-0 flex-1 flex-col overflow-hidden">
+              <div className="relative flex min-h-0 flex-1 flex-col">
                 {showDroneStartupFailureEmptyState ? (
                   <EmptyState
                     icon={<IconChat className="h-8 w-8 text-[var(--red)]" />}

@@ -3,6 +3,7 @@ import {
   chatNamesForConfigSelection,
   chatConfigResolutionState,
   chatInfoForSelection,
+  genericChatComposerAvailable,
   shouldShowDroneStartupFailureEmptyState,
 } from '../src/droneHub/app/chat-selection-model';
 import {
@@ -104,6 +105,27 @@ describe('native chat selection state', () => {
         loading: false,
       }),
     ).toBe('unavailable');
+  });
+
+  test('keeps the external composer available with history when the drone is in error', () => {
+    expect(
+      genericChatComposerAvailable({
+        nativeChatActive: false,
+        chatConfigResolution: 'drone-error',
+      }),
+    ).toBe(true);
+    expect(
+      genericChatComposerAvailable({
+        nativeChatActive: false,
+        chatConfigResolution: 'unavailable',
+      }),
+    ).toBe(false);
+    expect(
+      genericChatComposerAvailable({
+        nativeChatActive: true,
+        chatConfigResolution: 'drone-error',
+      }),
+    ).toBe(false);
   });
 
   test('shows a drone startup failure instead of a chat metadata error', () => {
