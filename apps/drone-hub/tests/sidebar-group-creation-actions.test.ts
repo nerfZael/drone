@@ -26,7 +26,7 @@ describe('sidebar group creation actions', () => {
     expect(cardSource).toContain("label: 'New group'");
     expect(cardSource).toContain('onSelect: () => onCreateGroup?.()');
     expect(treeSource).toContain(
-      'onCreateGroup={actionsEnabled ? () => onCreateGroupBeforeDrone(drone) : undefined}',
+      'onCreateGroup={actionsEnabled && !repositoryRootView ? () => onCreateGroupBeforeDrone(drone) : undefined}',
     );
   });
 

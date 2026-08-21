@@ -902,7 +902,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       sidebarReposCollapsed: false,
       sidebarAutoMinimize: false,
       showRecentDronesOnly: false,
-      sidebarGroupingMode: 'repos',
+      sidebarGroupingMode: 'groups',
       sidebarDensityMode: 'default',
       sidebarDockSide: 'left',
       pinnedSidebarPlacement: 'bottom',

@@ -1,7 +1,20 @@
 export type SidebarFolderSelectionOptions = {
   selectDrones?: boolean;
   toggle?: boolean;
+  folderNodeId?: string;
 };
+
+export function sidebarFolderCollapseKey(
+  folder: {
+    path: string;
+    groupPath?: string | null;
+    repoGroupPath?: string | null;
+  },
+  repositoryRootView: boolean,
+): string {
+  if (repositoryRootView && folder.repoGroupPath) return String(folder.path ?? '').trim();
+  return String(folder.groupPath ?? folder.path ?? '').trim();
+}
 
 export function isSidebarFolderRowSelected(args: {
   folderNodeId: string;
@@ -9,10 +22,10 @@ export function isSidebarFolderRowSelected(args: {
   selectedSidebarNodeId: string | null;
   selectedFolderPath: string | null;
 }): boolean {
-  return (
-    args.selectedSidebarNodeId === args.folderNodeId ||
-    args.selectedFolderPath === args.folderPath
-  );
+  if (String(args.selectedSidebarNodeId ?? '').startsWith('folder:')) {
+    return args.selectedSidebarNodeId === args.folderNodeId;
+  }
+  return args.selectedFolderPath === args.folderPath;
 }
 
 function normalizeDroneIds(ids: readonly string[]): string[] {

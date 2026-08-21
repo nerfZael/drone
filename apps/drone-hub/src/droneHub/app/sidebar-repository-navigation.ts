@@ -1,5 +1,6 @@
 import {
   buildRepoSidebarModel,
+  sidebarFolderNodeId,
   type RepoSidebarModel,
 } from '@drone/hub-model/sidebar';
 import type { DroneSummary, RepoSummary } from '../types';
@@ -50,9 +51,16 @@ export function buildSidebarRepositoryNavigationModel<TStateSummary>(args: {
       ...(args.repoScopedGroupIdByPathByRepoGroup ?? {}),
     },
   });
+  const groupByNodeId = new Map(
+    model.groups.map((group) => [sidebarFolderNodeId(group.group), group] as const),
+  );
+  const orderedGroups = model.nodeTree.rootChildIds.flatMap((nodeId) => {
+    const group = groupByNodeId.get(nodeId);
+    return group ? [group] : [];
+  });
   return {
     ...model,
-    items: model.groups.map((group) => {
+    items: orderedGroups.map((group) => {
       const repoPath = group.group === 'repo:ungrouped'
         ? ''
         : group.group.slice('repo:'.length);

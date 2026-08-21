@@ -101,6 +101,15 @@ export function planSidebarDrop({
   if (!sourceNode || !targetNode || sourceNode.id === targetNode.id) {
     return { ...preview, intent: null };
   }
+  const sourceRepoGroupPath = sidebarTreeNodeRepoGroupPath(sourceNode);
+  const targetRepoGroupPath = sidebarTreeNodeRepoGroupPath(targetNode);
+  if (
+    sourceRepoGroupPath &&
+    targetRepoGroupPath &&
+    sourceRepoGroupPath !== targetRepoGroupPath
+  ) {
+    return null;
+  }
 
   const targetParentId =
     resolvedTarget.placement === 'into' && targetNode.kind === 'folder'
@@ -210,6 +219,11 @@ function repoPathFromGroupPath(repoGroupPathRaw: string | null | undefined): str
   const repoGroupPath = String(repoGroupPathRaw ?? '').trim();
   if (!repoGroupPath || repoGroupPath === 'repo:ungrouped') return '';
   return repoGroupPath.replace(/^repo:/, '');
+}
+
+function sidebarTreeNodeRepoGroupPath(node: SidebarTreeNode): string | null {
+  if (isVirtualRepoRootNode(node)) return node.path;
+  return String(node.repoGroupPath ?? '').trim() || null;
 }
 
 export function sidebarNodeAllowsDropInside(

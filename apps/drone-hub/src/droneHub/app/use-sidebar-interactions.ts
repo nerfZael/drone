@@ -446,15 +446,18 @@ export function useSidebarInteractions({
     [runOptimisticRenameGroup],
   );
 
-  const handleGroupedSelectFolder = React.useCallback((path: string) => {
+  const handleGroupedSelectFolder = React.useCallback((path: string, folderNodeId?: string) => {
     setSelectedFolderPath(path);
-    setSelectedSidebarNodeId(sidebarFolderNodeId(path));
+    setSelectedSidebarNodeId(folderNodeId || sidebarFolderNodeId(path));
   }, []);
 
-  const clearGroupedFolderSelection = React.useCallback((pathRaw?: string) => {
+  const clearGroupedFolderSelection = React.useCallback((pathRaw?: string, folderNodeIdRaw?: string) => {
     const path = String(pathRaw ?? '').trim();
+    const folderNodeId = String(folderNodeIdRaw ?? '').trim();
     setSelectedFolderPath((prev) => (!path || prev === path ? null : prev));
-    setSelectedSidebarNodeId((prev) => (!path || prev === sidebarFolderNodeId(path) ? null : prev));
+    setSelectedSidebarNodeId((prev) =>
+      !path || prev === (folderNodeId || sidebarFolderNodeId(path)) ? null : prev,
+    );
   }, []);
 
   const handleGroupedSelectDroneCard = React.useCallback(

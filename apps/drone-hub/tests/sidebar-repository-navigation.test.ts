@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { sidebarDroneNodeId, sidebarFolderNodeId } from '@drone/hub-model/sidebar';
+import { readFileSync } from 'node:fs';
+import {
+  SIDEBAR_ROOT_PARENT_ID,
+  sidebarDroneNodeId,
+  sidebarFolderNodeId,
+} from '@drone/hub-model/sidebar';
 import type { DroneSummary, RepoSummary } from '../src/droneHub/types';
 import {
   buildSidebarRepositoryNavigationItems,
@@ -22,6 +27,29 @@ function drone(id: string, repoPath: string, createdAt = '2026-07-20T10:00:00.00
 }
 
 describe('desktop sidebar repository navigation', () => {
+  test('offers a persistent repository-groups view backed by the grouped tree', () => {
+    const sidebarSource = readFileSync(
+      new URL('../src/droneHub/app/DroneSidebar.tsx', import.meta.url),
+      'utf8',
+    );
+    const treeSource = readFileSync(
+      new URL('../src/droneHub/app/GroupedSidebarTree.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(sidebarSource).toContain("id: 'repository-groups'");
+    expect(sidebarSource).toContain("label: 'Show repositories as groups'");
+    expect(sidebarSource).toContain("setSidebarGroupingMode(isRepoGroupingMode ? 'groups' : 'repos')");
+    expect(sidebarSource).toContain(
+      'repositoryRootView={sidebarCapabilities.headerActions && isRepoGroupingMode}',
+    );
+    expect(treeSource).toContain("node.path === 'repo:ungrouped'");
+    expect(treeSource).toContain('<IconFolderGit className=');
+    expect(treeSource).toContain(
+      '!isVirtualGroup && folderDroneSelected && folderDroneIds.length > 0',
+    );
+  });
+
   test('builds repository drill-in rows instead of repository group nodes', () => {
     const repos: RepoSummary[] = [
       { path: '/work/zeta', addedAt: null, remoteUrl: null, github: null },
@@ -97,6 +125,30 @@ describe('desktop sidebar repository navigation', () => {
 
     expect(items.map((item) => item.id)).toEqual([
       'repo:/work/zeta',
+      'repo:/work/alpha',
+    ]);
+  });
+
+  test('keeps root drag order when returning to drill-in navigation', () => {
+    const items = buildSidebarRepositoryNavigationItems({
+      repos: [
+        { path: '/work/alpha', addedAt: null, remoteUrl: null, github: null },
+        { path: '/work/zeta', addedAt: null, remoteUrl: null, github: null },
+      ],
+      drones: [drone('loose', '')],
+      summarize: (drones) => drones.length,
+      sidebarNodeOrderByParent: {
+        [SIDEBAR_ROOT_PARENT_ID]: [
+          sidebarFolderNodeId('repo:/work/zeta'),
+          sidebarFolderNodeId('repo:ungrouped'),
+          sidebarFolderNodeId('repo:/work/alpha'),
+        ],
+      },
+    });
+
+    expect(items.map((item) => item.id)).toEqual([
+      'repo:/work/zeta',
+      'repo:ungrouped',
       'repo:/work/alpha',
     ]);
   });

@@ -121,6 +121,7 @@ import { isDroneStartingOrSeeding } from './helpers';
 import { AddDroneToGroupDialog } from './AddDroneToGroupDialog';
 import {
   resolveSidebarFolderDroneSelection,
+  sidebarFolderCollapseKey,
   type SidebarFolderSelectionOptions,
 } from './sidebar-folder-selection';
 import {
@@ -147,7 +148,7 @@ import {
   FileDictationSidebarRailButton,
 } from '../files/FileDictationSidebarIndicator';
 
-const SIDEBAR_EXPANDED_WIDTH_PX = 308;
+const SIDEBAR_EXPANDED_WIDTH_PX = 328;
 const SIDEBAR_COLLAPSED_RAIL_WIDTH_PX = 40;
 const AUTO_MINIMIZE_COLLAPSE_DELAY_MS = 90;
 const AUTO_MINIMIZE_EXPAND_DELAY_MS = 120;
@@ -536,12 +537,17 @@ function flattenReadOnlyTreeDroneOrder(
 function collectSidebarFolderDroneIds(
   nodeTree: SidebarNodeTreeModel,
   folderPathRaw: string,
+  folderNodeIdRaw?: string,
 ): string[] {
   const folderPath = String(folderPathRaw ?? '').trim();
-  if (!folderPath) return [];
-  const folderNode = Object.values(nodeTree.nodesById).find(
-    (node): node is SidebarTreeFolderNode => node.kind === 'folder' && node.path === folderPath,
-  );
+  const folderNodeId = String(folderNodeIdRaw ?? '').trim();
+  const directNode = folderNodeId ? nodeTree.nodesById[folderNodeId] : null;
+  const folderNode = directNode?.kind === 'folder'
+    ? directNode
+    : Object.values(nodeTree.nodesById).find(
+        (node): node is SidebarTreeFolderNode =>
+          node.kind === 'folder' && node.path === folderPath,
+      );
   if (!folderNode) return [];
   const out: string[] = [];
   const seen = new Set<string>();
@@ -1130,9 +1136,8 @@ export function DroneSidebar({
     () => new Set(hiddenSidebarGroups),
     [hiddenSidebarGroups],
   );
-  const effectiveSidebarGroupingMode = sidebarCapabilities.headerActions
-    ? 'groups'
-    : (sidebarGroupingModeOverride ?? sidebarGroupingMode);
+  const effectiveSidebarGroupingMode =
+    sidebarGroupingModeOverride ?? sidebarGroupingMode;
   const isRepoGroupingMode = effectiveSidebarGroupingMode === 'repos';
   const pinnedDroneIdSet = React.useMemo(() => new Set(pinnedDroneIds), [pinnedDroneIds]);
   const mutedSidebarGroupIdSet = React.useMemo(
@@ -1162,10 +1167,6 @@ export function DroneSidebar({
     },
     [onSetDronePinned],
   );
-  React.useEffect(() => {
-    if (!sidebarCapabilities.headerActions || sidebarGroupingMode === 'groups') return;
-    setSidebarGroupingMode('groups');
-  }, [setSidebarGroupingMode, sidebarCapabilities.headerActions, sidebarGroupingMode]);
   const canonicalGroupIndex = React.useMemo(
     () => buildSidebarRepoScopedGroupIndex(canonicalGroups),
     [canonicalGroups],
@@ -1508,7 +1509,11 @@ export function DroneSidebar({
   });
   const handleGroupedSelectFolderWithDrones = React.useCallback(
     (path: string, opts?: SidebarFolderSelectionOptions) => {
-      const folderDroneIds = collectSidebarFolderDroneIds(staticReadOnlyNodeTree, path);
+      const folderDroneIds = collectSidebarFolderDroneIds(
+        staticReadOnlyNodeTree,
+        path,
+        opts?.folderNodeId,
+      );
       const next = resolveSidebarFolderDroneSelection({
         selectedDroneIds,
         folderDroneIds,
@@ -1519,9 +1524,9 @@ export function DroneSidebar({
         folderDroneIds.length > 0 &&
         folderDroneIds.every((droneId) => selectedDroneIds.includes(droneId));
       if (toggledOff) {
-        clearGroupedFolderSelection(path);
+        clearGroupedFolderSelection(path, opts?.folderNodeId);
       } else {
-        handleGroupedSelectFolder(path);
+        handleGroupedSelectFolder(path, opts?.folderNodeId);
       }
       onSetDroneSelectionFromFolder(next, { preserveActive: Boolean(opts?.toggle) });
     },
@@ -1847,6 +1852,18 @@ export function DroneSidebar({
     setActiveSidebarRepoId(null);
     setActiveRepoPath('');
   }, [setActiveRepoPath]);
+  React.useEffect(() => {
+    if (!sidebarCapabilities.headerActions || !isRepoGroupingMode) return;
+    if (repositoryOverviewOpen && !activeRepoPath && !activeSidebarRepoId) return;
+    openRepositoryOverview();
+  }, [
+    activeRepoPath,
+    activeSidebarRepoId,
+    isRepoGroupingMode,
+    openRepositoryOverview,
+    repositoryOverviewOpen,
+    sidebarCapabilities.headerActions,
+  ]);
   const openRepositoryNavigationItem = React.useCallback(
     (item: (typeof repositoryNavigationItems)[number]) => {
       setRepositoryOverviewOpen(false);
@@ -1867,6 +1884,10 @@ export function DroneSidebar({
   );
   const openPinnedDroneRepository = React.useCallback(
     (drone: DroneSummary): boolean => {
+      if (isRepoGroupingMode) {
+        openRepositoryOverview();
+        return true;
+      }
       const repoPath = String(drone.repoPath ?? '').trim();
       const repositoryItem = repositoryNavigationItems.find(
         (item) => item.repoPath === repoPath,
@@ -1875,7 +1896,12 @@ export function DroneSidebar({
       openRepositoryNavigationItem(repositoryItem);
       return true;
     },
-    [openRepositoryNavigationItem, repositoryNavigationItems],
+    [
+      isRepoGroupingMode,
+      openRepositoryNavigationItem,
+      openRepositoryOverview,
+      repositoryNavigationItems,
+    ],
   );
   const selectPinnedDroneCard = React.useCallback(
     (drone: DroneSummary, opts?: DroneSelectionClickOptions) => {
@@ -2065,9 +2091,11 @@ export function DroneSidebar({
     ? sidebarFolderNodeId(activeRepositoryNavigationItem.id)
     : null;
   const renderedSidebarNodeTree = sidebarCapabilities.headerActions
-    ? repositoryOverviewOpen
-      ? null
-      : activeRepositoryModel?.nodeTree ?? null
+    ? isRepoGroupingMode
+      ? staticReadOnlyNodeTree
+      : repositoryOverviewOpen
+        ? null
+        : activeRepositoryModel?.nodeTree ?? null
     : staticReadOnlyNodeTree;
   React.useLayoutEffect(() => {
     renderedSidebarNodeTreeRef.current = renderedSidebarNodeTree;
@@ -2173,6 +2201,7 @@ export function DroneSidebar({
         !folderEditor &&
         !event.repeat &&
         sidebarCapabilities.actions &&
+        !isRepoGroupingMode &&
         event.key === 'Delete'
       ) {
         if (
@@ -2296,22 +2325,30 @@ export function DroneSidebar({
       if (folderEditor) return;
 
       if (!selectedFolderPath || !visibleSidebarFolderPathSet.has(selectedFolderPath)) return;
+      const currentNodeTree = getRenderedSidebarNodeTree() ?? staticReadOnlyNodeTree;
+      const selectedFolderNode = selectedSidebarNodeId
+        ? currentNodeTree.nodesById[selectedSidebarNodeId]
+        : null;
+      const selectedFolderCollapseKey =
+        selectedFolderNode?.kind === 'folder'
+          ? sidebarFolderCollapseKey(selectedFolderNode, isRepoGroupingMode)
+          : selectedFolderPath;
 
       if (
         event.key === 'ArrowLeft' &&
-        !isSidebarGroupCollapsed(collapsedGroups, selectedFolderPath)
+        !isSidebarGroupCollapsed(collapsedGroups, selectedFolderCollapseKey)
       ) {
         event.preventDefault();
-        onToggleGroupCollapsed(selectedFolderPath);
+        onToggleGroupCollapsed(selectedFolderCollapseKey);
         return;
       }
 
       if (
         event.key === 'ArrowRight' &&
-        isSidebarGroupCollapsed(collapsedGroups, selectedFolderPath)
+        isSidebarGroupCollapsed(collapsedGroups, selectedFolderCollapseKey)
       ) {
         event.preventDefault();
-        onToggleGroupCollapsed(selectedFolderPath);
+        onToggleGroupCollapsed(selectedFolderCollapseKey);
       }
     };
 
@@ -2397,6 +2434,14 @@ export function DroneSidebar({
     selectionRole: 'checkbox',
     checked: showRecentDronesOnly,
   });
+  if (sidebarCapabilities.headerActions) {
+    sidebarOptionsEntries.push({
+      id: 'repository-groups',
+      label: 'Show repositories as groups',
+      selectionRole: 'checkbox',
+      checked: isRepoGroupingMode,
+    });
+  }
   if (sidebarCapabilities.actions) {
     sidebarOptionsEntries.push({
       id: 'hidden',
@@ -2503,7 +2548,7 @@ export function DroneSidebar({
         ) : null}
 
         <div
-          className="dh-sidebar-scrollbar flex-1 min-h-0 overflow-x-hidden overflow-y-auto px-2 pt-0 pb-1.5 [--sidebar-selection-edge-offset:-0.5rem]"
+          className="dh-sidebar-scrollbar flex-1 min-h-0 overflow-x-hidden overflow-y-auto px-1 pt-1 pb-1.5 [--sidebar-selection-edge-offset:-0.25rem]"
           style={{
             WebkitOverflowScrolling: 'touch',
             overscrollBehaviorY: 'contain',
@@ -2984,11 +3029,12 @@ export function DroneSidebar({
               ) : null}
             </PinnedSidebarPlacementSlot>
             {sidebarCapabilities.headerActions &&
+            !isRepoGroupingMode &&
             !repositoryOverviewOpen &&
             activeRepositoryNavigationItem ? (
               <div
                 data-sidebar-active-repository-header="true"
-                className={`group/active-repository sticky top-0 z-20 -mx-2 mb-2 flex h-10 w-[calc(100%+1rem)] flex-shrink-0 items-center border-b border-[var(--border-subtle)] bg-[var(--sidebar-bg)] pr-1.5 transition-colors ${
+                className={`group/active-repository sticky top-0 z-20 -mx-1 mb-2 flex h-10 w-[calc(100%+0.5rem)] flex-shrink-0 items-center border-b border-[var(--border-subtle)] bg-[var(--sidebar-bg)] pr-1.5 transition-colors ${
                   pinnedSidebarPlacement === 'top' && globalPinnedDrones.length > 0
                     ? 'border-t'
                     : ''
@@ -3065,7 +3111,7 @@ export function DroneSidebar({
                 </button>
               </div>
             ) : null}
-            {sidebarCapabilities.headerActions && repositoryOverviewOpen ? (
+            {sidebarCapabilities.headerActions && repositoryOverviewOpen && !isRepoGroupingMode ? (
               <div className="flex flex-col py-1 pb-6">
                 {repositoryNavigationItems.map((item) => {
                   const containsSelectedDrone = Boolean(selectedDrone) && item.repoPath === selectedDroneRepoPath;
@@ -3212,20 +3258,26 @@ export function DroneSidebar({
                   <>
                     <GroupedSidebarTree
                       sidebarGroups={
-                        sidebarCapabilities.headerActions && activeRepositoryModel
+                        sidebarCapabilities.headerActions && !isRepoGroupingMode && activeRepositoryModel
                           ? activeRepositoryModel.groups
                           : renderSidebarGroups
                       }
                       nodeTreeOverride={
-                        sidebarCapabilities.headerActions ? activeRepositoryModel?.nodeTree : null
+                        sidebarCapabilities.headerActions
+                          ? isRepoGroupingMode
+                            ? staticReadOnlyNodeTree
+                            : activeRepositoryModel?.nodeTree
+                          : null
                       }
                       displayRootNodeId={
-                        sidebarCapabilities.headerActions ? activeRepositoryRootNodeId : null
+                        sidebarCapabilities.headerActions && !isRepoGroupingMode
+                          ? activeRepositoryRootNodeId
+                          : null
                       }
                       sidebarGroupCreatedAtByName={sidebarGroupCreatedAtByName}
                       sidebarDensityMode={sidebarDensityMode}
                       sidebarFolderTree={
-                        sidebarCapabilities.headerActions && activeRepositoryFolderTree
+                        sidebarCapabilities.headerActions && !isRepoGroupingMode && activeRepositoryFolderTree
                           ? activeRepositoryFolderTree
                           : sidebarFolderTree
                       }
@@ -3310,6 +3362,7 @@ export function DroneSidebar({
                       onPrepareDroneDragStart={handleGroupedPrepareDroneDragStart}
                       onReparentDronesToParent={runOptimisticReparentDronesToParent}
                       actionsEnabled={sidebarCapabilities.actions}
+                      repositoryRootView={sidebarCapabilities.headerActions && isRepoGroupingMode}
                     />
                   </>
                   {sidebarCapabilities.dragAndDrop &&
@@ -3389,6 +3442,11 @@ export function DroneSidebar({
                 onSelect={(id) => {
                   if (id === 'dock-side') toggleSidebarDockSide();
                   else if (id === 'recent') setShowRecentDronesOnly((prev) => !prev);
+                  else if (id === 'repository-groups') {
+                    closeFolderEditor();
+                    setSidebarGroupingMode(isRepoGroupingMode ? 'groups' : 'repos');
+                    openRepositoryOverview();
+                  }
                   else if (id === 'hidden') setShowHiddenSidebarGroups((prev) => !prev);
                   else if (id === 'auto-minimize') setSidebarAutoMinimize((prev) => !prev);
                 }}

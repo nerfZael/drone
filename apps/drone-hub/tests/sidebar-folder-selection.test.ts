@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   isSidebarFolderRowSelected,
   resolveSidebarFolderDroneSelection,
+  sidebarFolderCollapseKey,
 } from '../src/droneHub/app/sidebar-folder-selection';
 
 describe('sidebar folder drone selection', () => {
@@ -24,6 +25,28 @@ describe('sidebar folder drone selection', () => {
         selectedFolderPath: 'Group A',
       }),
     ).toBe(true);
+
+    expect(
+      isSidebarFolderRowSelected({
+        folderNodeId: 'folder:repo-scope:repo:/work/b:Shared',
+        folderPath: 'Shared',
+        selectedSidebarNodeId: 'folder:repo-scope:repo:/work/a:Shared',
+        selectedFolderPath: 'Shared',
+      }),
+    ).toBe(false);
+  });
+
+  test('scopes nested collapse state by repository in the all-repositories view', () => {
+    const folder = {
+      path: 'repo-scope:repo:/work/alpha:Shared',
+      groupPath: 'Shared',
+      repoGroupPath: 'repo:/work/alpha',
+    };
+
+    expect(sidebarFolderCollapseKey(folder, true)).toBe(
+      'repo-scope:repo:/work/alpha:Shared',
+    );
+    expect(sidebarFolderCollapseKey(folder, false)).toBe('Shared');
   });
 
   test('plain click clears drone selection without selecting the folder contents', () => {

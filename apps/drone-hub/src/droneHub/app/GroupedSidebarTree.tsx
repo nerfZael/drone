@@ -18,12 +18,13 @@ import { createCanvasChatNodeId } from './app-config';
 import { droneChatRequiresApproval, normalizedDroneChats } from './chat-node-helpers';
 import { createSidebarChatDragData, parseDroneHubDragData, useDroneHubActiveDrag, type SidebarDroneDragData } from './drone-hub-dnd';
 import { isDroneStartingOrSeeding } from './helpers';
-import { IconChevron, IconColumns, IconEye, IconEyeOff, IconPencil, IconPlus, IconSpinner, IconTrash } from './icons';
+import { IconChevron, IconColumns, IconEye, IconEyeOff, IconFolderGit, IconFolderOutline, IconPencil, IconPlus, IconSpinner, IconTrash } from './icons';
 import { isSidebarGroupCollapsed } from './is-sidebar-group-collapsed';
 import type { DroneSelectionClickOptions } from './drone-selection-helpers';
 import { sidebarInlineSectionKey, type SidebarInlineSectionKind } from './sidebar-inline-sections';
 import {
   isSidebarFolderRowSelected,
+  sidebarFolderCollapseKey,
   type SidebarFolderSelectionOptions,
 } from './sidebar-folder-selection';
 import { buildSidebarDroneTree, type SidebarDroneTree } from './sidebar-drone-tree';
@@ -207,6 +208,7 @@ type GroupedSidebarTreeProps = {
     opts?: { targetGroup?: string | null },
   ) => Promise<{ ok: boolean; error?: string | null; reparentedIds?: string[]; rollbackOptimistic?: () => void }>;
   actionsEnabled?: boolean;
+  repositoryRootView?: boolean;
 };
 
 type TreeDropPlacement = SidebarTreeDropPlacement;
@@ -403,6 +405,7 @@ function flattenVisibleDroneOrderFromNodeTree(
   nodeTree: SidebarNodeTreeModel,
   collapsedGroups: Record<string, boolean>,
   rootNodeIds: readonly string[] = nodeTree.rootChildIds,
+  repositoryRootView = false,
 ): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -414,8 +417,8 @@ function flattenVisibleDroneOrderFromNodeTree(
       out.push(node.droneId);
     }
     if (node.kind === 'folder') {
-      const folderPath = groupedFolderPathFromNode(node);
-      if (isSidebarGroupCollapsed(collapsedGroups, folderPath ?? '')) return;
+      const collapseKey = sidebarFolderCollapseKey(node, repositoryRootView);
+      if (isSidebarGroupCollapsed(collapsedGroups, collapseKey)) return;
     }
     for (const childId of nodeTree.childIdsByParent[node.id] ?? []) visit(childId);
   };
@@ -888,6 +891,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
     mutedChatIdSet,
     onMoveSidebar,
     actionsEnabled = true,
+    repositoryRootView = false,
   } = useGroupedSidebarTreeContext();
   const densityClasses = sidebarDensityClasses(sidebarDensityMode);
   const drone = droneById[node.droneId];
@@ -1083,8 +1087,8 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
                 : undefined
             }
             onClone={actionsEnabled ? () => onCloneDrone(drone) : undefined}
-            onAddToGroup={actionsEnabled ? () => onAddDroneToGroup(drone) : undefined}
-            onCreateGroup={actionsEnabled ? () => onCreateGroupBeforeDrone(drone) : undefined}
+            onAddToGroup={actionsEnabled && !repositoryRootView ? () => onAddDroneToGroup(drone) : undefined}
+            onCreateGroup={actionsEnabled && !repositoryRootView ? () => onCreateGroupBeforeDrone(drone) : undefined}
             onRename={actionsEnabled ? (newName) => onRenameDrone(drone.id, newName) : undefined}
             inlineRenameRequestKey={
               inlineRenameDroneRequest?.droneId === drone.id
@@ -1410,6 +1414,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
     mutedChatIdSet,
     onMoveSidebar,
     actionsEnabled = true,
+    repositoryRootView = false,
   } = useGroupedSidebarTreeContext();
   const densityClasses = sidebarDensityClasses(sidebarDensityMode);
   const folderRenameErrorId = React.useId();
@@ -1425,7 +1430,13 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
   const groupMuteId = sidebarFolderMuteId(node);
   const directlyMuted = mutedSidebarGroupIdSet.has(groupMuteId);
   const muted = effectiveMutedSidebarGroupIdSet.has(node.id);
-  const collapsed = isSidebarGroupCollapsed(collapsedGroups, folderPath);
+  const collapseKey = sidebarFolderCollapseKey(node, repositoryRootView);
+  const collapsed = isSidebarGroupCollapsed(collapsedGroups, collapseKey);
+  const folderTitle = isVirtualGroup
+    ? node.path === 'repo:ungrouped'
+      ? 'Drones without a repository'
+      : node.path.slice('repo:'.length)
+    : folderPath;
   const folderDroneIds = React.useMemo(() => collectSidebarTreeDroneIds(nodeTree, node.id), [node.id, nodeTree]);
   const stateSummary = React.useMemo<SidebarGroupStateSummary>(() => {
     const summary: SidebarGroupStateSummary = { approval: 0, unread: 0, working: 0 };
@@ -1494,8 +1505,14 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
     selectedFolderPath,
   });
   const isHiddenGroup = hiddenSidebarGroupTokenSet.has(groupToken);
-  const showEditorInline = folderEditor?.targetPath === folderPath && folderEditor.mode === 'rename';
-  const showCreateInline = (folderEditor?.anchorPath ?? folderEditor?.parentPath) === folderPath && folderEditor?.mode === 'create';
+  const showEditorInline =
+    !repositoryRootView &&
+    folderEditor?.targetPath === folderPath &&
+    folderEditor.mode === 'rename';
+  const showCreateInline =
+    !repositoryRootView &&
+    (folderEditor?.anchorPath ?? folderEditor?.parentPath) === folderPath &&
+    folderEditor?.mode === 'create';
   const childIds = nodeTree.childIdsByParent[node.id] ?? [];
   const hasSelectedDirectChild = childIds.some((childId) => {
     const child = nodeTree.nodesById[childId];
@@ -1508,7 +1525,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
   const { attributes, listeners, isDragging, setNodeRef: setDragNodeRef } = useDraggable({
     id: `sidebar-folder:${node.id}`,
     data:
-      folderDroneSelected && folderDroneIds.length > 0
+      !isVirtualGroup && folderDroneSelected && folderDroneIds.length > 0
         ? {
             type: 'sidebar-drone',
             droneId: folderDroneIds[0],
@@ -1554,9 +1571,9 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
     setSelectedSidebarNodeId(node.id);
     onSelectFolder(folderPath, opts);
     if (!opts?.selectDrones) {
-      onToggleGroupCollapsed(folderPath);
+      onToggleGroupCollapsed(collapseKey);
     }
-  }, [folderPath, node.id, onSelectFolder, onToggleGroupCollapsed, setSelectedSidebarNodeId, shouldSuppressClick]);
+  }, [collapseKey, folderPath, node.id, onSelectFolder, onToggleGroupCollapsed, setSelectedSidebarNodeId, shouldSuppressClick]);
   const handleFolderDelete = React.useCallback(() => {
     void onDeleteGroup(folderPath, node.totalDroneCount, {
       kind: node.groupKind,
@@ -1670,7 +1687,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
                 : 'border border-transparent'
           } ${isDragging ? 'opacity-60' : isHiddenGroup ? 'opacity-70' : ''}`}
           onContextMenu={(event) => {
-            if (!actionsEnabled || event.target instanceof HTMLInputElement) return;
+            if (!actionsEnabled || repositoryRootView || event.target instanceof HTMLInputElement) return;
             event.preventDefault();
             event.stopPropagation();
             if (!isSelected) onSelectFolder(folderPath);
@@ -1737,6 +1754,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
                 handleFolderClick({
                   selectDrones: toggle || event.shiftKey,
                   toggle,
+                  folderNodeId: node.id,
                 });
               }}
               onKeyDown={(event) => {
@@ -1744,6 +1762,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
                   event.key !== 'Delete' ||
                   event.repeat ||
                   !actionsEnabled ||
+                  repositoryRootView ||
                   !isSelected ||
                   deletingGroups[folderPath] ||
                   renamingGroups[folderPath] ||
@@ -1763,7 +1782,14 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
                   strokeWidth={1.25}
                   className={`flex-shrink-0 ${densityClasses.folderChevron}`}
                 />
-                <span className={`${sidebarFolderLabelClass} ${densityClasses.folderLabel}`} title={folderPath}>
+                {isVirtualGroup ? (
+                  node.path === 'repo:ungrouped' ? (
+                    <IconFolderOutline className="h-3.5 w-3.5 flex-shrink-0 text-[var(--sidebar-meta-fg)]" />
+                  ) : (
+                    <IconFolderGit className="h-3.5 w-3.5 flex-shrink-0 text-[var(--sidebar-action-fg)]" />
+                  )
+                ) : null}
+                <span className={`${sidebarFolderLabelClass} ${densityClasses.folderLabel}`} title={folderTitle}>
                   {node.label}
                 </span>
                 {muted ? <SidebarMutedStatusIndicator /> : collapsed ? <SidebarGroupStateCounts summary={stateSummary} /> : null}
@@ -1792,7 +1818,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
           <GroupedSidebarChildEntries
             childIds={childIds}
             groupPath={folderPath}
-            showCreateInline={actionsEnabled && showCreateInline}
+            showCreateInline={actionsEnabled && !repositoryRootView && showCreateInline}
           />
         </GroupedSidebarFolderBodyDropZone>
       ) : null}
@@ -1871,8 +1897,13 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
     [mutedDroneIdSet, mutedSidebarGroupIdSet, nodeTree],
   );
   const visibleDroneOrder = React.useMemo(
-    () => flattenVisibleDroneOrderFromNodeTree(nodeTree, props.collapsedGroups, displayedRootChildIds),
-    [displayedRootChildIds, nodeTree, props.collapsedGroups],
+    () => flattenVisibleDroneOrderFromNodeTree(
+      nodeTree,
+      props.collapsedGroups,
+      displayedRootChildIds,
+      props.repositoryRootView === true,
+    ),
+    [displayedRootChildIds, nodeTree, props.collapsedGroups, props.repositoryRootView],
   );
 
   const orderedGroupItemsByPath = React.useMemo(() => {
@@ -2132,6 +2163,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       props.onToggleDroneSection,
       props.renamingDrones,
       props.renamingGroups,
+      props.repositoryRootView,
       props.repoScopedGroupPathsByRepoGroup,
       props.selectedDrone,
       props.selectedDroneIds,
@@ -2181,6 +2213,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
         groupPath={null}
         showCreateInline={
           props.actionsEnabled !== false &&
+          props.repositoryRootView !== true &&
           props.folderEditor?.mode === 'create' &&
           props.folderEditor.parentPath === null
         }

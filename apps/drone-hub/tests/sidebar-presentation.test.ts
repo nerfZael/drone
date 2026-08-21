@@ -102,7 +102,7 @@ describe('sidebar presentation', () => {
       'utf8',
     );
 
-    expect(sidebarSource).toContain('const SIDEBAR_EXPANDED_WIDTH_PX = 308;');
+    expect(sidebarSource).toContain('const SIDEBAR_EXPANDED_WIDTH_PX = 328;');
     expect(sidebarSource).toContain('style={{ width: SIDEBAR_EXPANDED_WIDTH_PX }}');
     expect(sidebarSource).toContain('`min(${SIDEBAR_EXPANDED_WIDTH_PX}px, 100vw)`');
   });
@@ -208,9 +208,9 @@ describe('sidebar presentation', () => {
     );
 
     expect(sidebarSource).toContain('overflow-x-hidden overflow-y-auto');
-    expect(sidebarSource).toContain('px-2 pt-0 pb-1.5');
+    expect(sidebarSource).toContain('px-1 pt-1 pb-1.5');
     expect(sidebarSource).not.toContain('overflow-y-auto px-2 py-1.5');
-    expect(sidebarSource).toContain('[--sidebar-selection-edge-offset:-0.5rem]');
+    expect(sidebarSource).toContain('[--sidebar-selection-edge-offset:-0.25rem]');
     expect(sidebarSource).toContain('className={`flex flex-col gap-0 ${sidebarListSelectClass}`}');
     expect(sidebarSource).toContain('<div className="flex flex-col gap-0">');
     expect(sidebarSource).toContain('<div className="flex flex-col gap-0">\n                  <>');
@@ -248,7 +248,7 @@ describe('sidebar presentation', () => {
     expect(groupedTreeSource).toContain('strokeWidth={1.25}');
     expect(groupedTreeSource).toContain('densityClasses.folderChevron');
     expect(groupedTreeSource).toContain('onSelectFolder(folderPath, opts);');
-    expect(groupedTreeSource).toContain('onToggleGroupCollapsed(folderPath);');
+    expect(groupedTreeSource).toContain('onToggleGroupCollapsed(collapseKey);');
     expect(groupedTreeSource).not.toContain('GROUPED_FOLDER_SINGLE_CLICK_DELAY_MS');
     expect(groupedTreeSource).not.toContain('scheduleFolderSingleClick');
     expect(groupedTreeSource).not.toContain('Empty folder.');
@@ -279,7 +279,7 @@ describe('sidebar presentation', () => {
     );
 
     expect(sidebarSource).toContain(
-      'group/active-repository sticky top-0 z-20 -mx-2 mb-2',
+      'group/active-repository sticky top-0 z-20 -mx-1 mb-2',
     );
   });
 
@@ -362,7 +362,7 @@ describe('sidebar presentation', () => {
     );
 
     expect(sidebarSource).toContain(
-      'group/active-repository sticky top-0 z-20 -mx-2 mb-2 flex h-10 w-[calc(100%+1rem)] flex-shrink-0 items-center border-b border-[var(--border-subtle)] bg-[var(--sidebar-bg)]',
+      'group/active-repository sticky top-0 z-20 -mx-1 mb-2 flex h-10 w-[calc(100%+0.5rem)] flex-shrink-0 items-center border-b border-[var(--border-subtle)] bg-[var(--sidebar-bg)]',
     );
     expect(sidebarSource).toContain(
       "pinnedSidebarPlacement === 'top' && globalPinnedDrones.length > 0",

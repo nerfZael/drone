@@ -181,6 +181,47 @@ describe('sidebar drop planner', () => {
     });
   });
 
+  test('rejects nested item drops across repository roots', () => {
+    const repoTree = nodeTree({
+      [root]: [sourceFolderId, targetFolderId, sidebarDroneNodeId('a')],
+    });
+    const source = repoTree.nodesById[sourceFolderId];
+    const target = repoTree.nodesById[targetFolderId];
+    const drone = repoTree.nodesById[sidebarDroneNodeId('a')];
+    if (source?.kind !== 'folder' || target?.kind !== 'folder' || drone?.kind !== 'drone') {
+      throw new Error('missing repository-scoped nodes');
+    }
+    source.repoGroupPath = 'repo:/first';
+    target.repoGroupPath = 'repo:/second';
+    drone.repoGroupPath = 'repo:/first';
+
+    const shared = {
+      nodeTree: repoTree,
+      droneById: drones('a'),
+      sidebarChatOrderByDrone: {},
+    };
+    expect(
+      planSidebarDrop({
+        ...shared,
+        active: {
+          type: 'sidebar-folder',
+          folderNodeId: sourceFolderId,
+          folderPath: 'Source',
+          groupKind: 'group',
+          label: 'Source',
+        },
+        target: { kind: 'folder-body', folderNodeId: targetFolderId, insertionTarget: null },
+      }),
+    ).toBeNull();
+    expect(
+      planSidebarDrop({
+        ...shared,
+        active: droneDrag('a'),
+        target: { kind: 'folder-body', folderNodeId: targetFolderId, insertionTarget: null },
+      }),
+    ).toBeNull();
+  });
+
   test('only reorders repository roots when the final hovered node is another root', () => {
     const repoSourceId = sidebarFolderNodeId('repo:first');
     const repoTargetId = sidebarFolderNodeId('repo:second');

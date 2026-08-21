@@ -1786,7 +1786,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           .map((part) => part.trim())
           .filter(Boolean);
         for (let index = 0; index < parts.length; index += 1) {
-          groups.add(parts.slice(0, index + 1).join('/'));
+          const groupPath = parts.slice(0, index + 1).join('/');
+          groups.add(groupPath);
+          const repoGroupPath = String(drone.repoPath ?? '').trim()
+            ? `repo:${String(drone.repoPath ?? '').trim()}`
+            : 'repo:ungrouped';
+          groups.add(`repo-scope:${repoGroupPath}:${groupPath}`);
         }
         const repoPath = String(drone.repoPath ?? '').trim();
         groups.add(repoPath ? `repo:${repoPath}` : 'repo:ungrouped');
