@@ -1,9 +1,5 @@
 import { ChangeRequestError } from './change-request-error';
-import {
-  changeRequestConflictFiles,
-  runChangeRequestGit,
-  type RunHostCommand,
-} from './change-request-git';
+import { runChangeRequestGit, type RunHostCommand } from './change-request-git';
 
 export type PreparedChangeRequestCandidate =
   | {
@@ -40,6 +36,8 @@ export async function prepareChangeRequestCandidate(
       input.gitRoot,
       'merge-tree',
       '--write-tree',
+      '--name-only',
+      '-z',
       '--messages',
       input.baseSha,
       input.snapshotRef,
@@ -47,12 +45,13 @@ export async function prepareChangeRequestCandidate(
     { timeoutMs },
   );
   const output = `${merged.stdout}\n${merged.stderr}`.trim();
-  const candidateTreeSha = firstObjectId(merged.stdout);
+  const parsed = parseMergeTreeOutput(merged.stdout);
+  const candidateTreeSha = parsed.candidateTreeSha;
   if (merged.code === 1 && candidateTreeSha) {
     return {
       status: 'conflicted',
       baseSha: input.baseSha,
-      conflictFiles: changeRequestConflictFiles(output),
+      conflictFiles: parsed.conflictFiles,
     };
   }
   if (merged.code !== 0) {
@@ -88,10 +87,20 @@ export async function prepareChangeRequestCandidate(
   };
 }
 
-function firstObjectId(output: string): string | null {
-  for (const line of output.split(/\r?\n/)) {
-    const value = line.trim().toLowerCase();
-    if (/^[0-9a-f]{40}$/.test(value)) return value;
-  }
-  return null;
+function parseMergeTreeOutput(output: string): {
+  candidateTreeSha: string | null;
+  conflictFiles: string[];
+} {
+  const fields = output.split('\0');
+  const candidateTreeSha = fields[0]?.trim().toLowerCase() ?? '';
+  const conflictSectionEnd = fields.indexOf('', 1);
+  const conflictFiles = [
+    ...new Set(
+      fields.slice(1, conflictSectionEnd < 0 ? fields.length : conflictSectionEnd).filter(Boolean),
+    ),
+  ].sort((left, right) => left.localeCompare(right));
+  return {
+    candidateTreeSha: /^[0-9a-f]{40}$/.test(candidateTreeSha) ? candidateTreeSha : null,
+    conflictFiles,
+  };
 }

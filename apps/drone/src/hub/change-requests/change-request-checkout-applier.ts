@@ -1,12 +1,9 @@
-import crypto from 'node:crypto';
-import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { ChangeRequestError } from './change-request-error';
 import {
   changeRequestConflictFiles,
   runChangeRequestGit,
-  safeChangeRequestRefSegment,
   type RunHostCommand,
 } from './change-request-git';
 import { prepareChangeRequestCandidate } from './prepare-change-request-candidate';
@@ -14,7 +11,6 @@ import type { ChangeRequestRecord, ChangeRequestRevisionRecord } from './change-
 
 export type ChangeRequestCheckoutApplierDependencies = {
   runHostCommand: RunHostCommand;
-  storagePath: (...segments: string[]) => string;
 };
 
 export type ChangeRequestCheckoutApplicationReceipt = {
@@ -69,85 +65,72 @@ export class ChangeRequestCheckoutApplier {
         stagedFiles: [],
       };
     }
-    const runId = `${Date.now().toString(36)}-${crypto.randomBytes(4).toString('hex')}`;
-    const patchDirectory = this.deps.storagePath(
-      'change-request-apply-patches',
-      `${safeChangeRequestRefSegment(record.id)}-${runId}`,
+    const diff = await this.git(checkoutRoot, [
+      'diff',
+      '--binary',
+      '--full-index',
+      '--find-renames',
+      '--no-color',
+      '--no-ext-diff',
+      initial.headSha,
+      candidate.candidateTreeSha,
+    ]);
+    const stagedFiles = splitNullTerminated(
+      (
+        await this.git(checkoutRoot, [
+          'diff',
+          '--name-only',
+          '-z',
+          initial.headSha,
+          candidate.candidateTreeSha,
+        ])
+      ).stdout,
     );
-    const patchPath = path.join(patchDirectory, 'candidate.diff');
-    await fs.mkdir(patchDirectory, { recursive: true });
-
-    try {
-      const diff = await this.git(checkoutRoot, [
-        'diff',
-        '--binary',
-        '--full-index',
-        '--find-renames',
-        '--no-color',
-        '--no-ext-diff',
-        initial.headSha,
-        candidate.candidateTreeSha,
-      ]);
-      const stagedFiles = splitNullTerminated(
-        (
-          await this.git(checkoutRoot, [
-            'diff',
-            '--name-only',
-            '-z',
-            initial.headSha,
-            candidate.candidateTreeSha,
-          ])
-        ).stdout,
+    const beforeApply = await this.assertCheckoutReady(checkoutRoot, record.destinationBranch);
+    if (beforeApply.headSha !== initial.headSha) {
+      throw new ChangeRequestError(
+        'The host checkout changed while the change request was being prepared. Try again.',
+        409,
+        'checkout_changed',
       );
-      await fs.writeFile(patchPath, diff.stdout, 'utf8');
-      const beforeApply = await this.assertCheckoutReady(checkoutRoot, record.destinationBranch);
-      if (beforeApply.headSha !== initial.headSha) {
-        throw new ChangeRequestError(
-          'The host checkout changed while the change request was being prepared. Try again.',
-          409,
-          'checkout_changed',
-        );
-      }
-      const checked = await this.deps.runHostCommand(
-        'git',
-        ['-C', checkoutRoot, 'apply', '--check', '--index', '--whitespace=nowarn', patchPath],
-        { timeoutMs: APPLY_TIMEOUT_MS },
-      );
-      if (checked.code !== 0) throw checkoutApplyError(checked, false);
-
-      const applied = await this.deps.runHostCommand(
-        'git',
-        ['-C', checkoutRoot, 'apply', '--index', '--whitespace=nowarn', patchPath],
-        { timeoutMs: APPLY_TIMEOUT_MS },
-      );
-      if (applied.code !== 0) throw checkoutApplyError(applied, true);
-
-      const appliedTreeSha = (await this.git(checkoutRoot, ['write-tree'])).stdout
-        .trim()
-        .toLowerCase();
-      if (appliedTreeSha !== candidate.candidateTreeSha) {
-        throw new ChangeRequestError(
-          'The staged host tree differs from the prepared change-request candidate. Inspect the checkout before continuing.',
-          409,
-          'checkout_apply_tree_changed',
-          {
-            expectedCandidateTreeSha: candidate.candidateTreeSha,
-            candidateTreeSha: appliedTreeSha,
-          },
-        );
-      }
-      return {
-        revision: revision.number,
-        checkoutRoot,
-        destinationBranch: record.destinationBranch,
-        checkoutHeadSha: initial.headSha,
-        candidateTreeSha: candidate.candidateTreeSha,
-        applied: true,
-        stagedFiles,
-      };
-    } finally {
-      await fs.rm(patchDirectory, { recursive: true, force: true }).catch(() => {});
     }
+    const checked = await this.deps.runHostCommand(
+      'git',
+      ['-C', checkoutRoot, 'apply', '--check', '--index', '--whitespace=nowarn', '-'],
+      { timeoutMs: APPLY_TIMEOUT_MS, input: diff.stdout },
+    );
+    if (checked.code !== 0) throw checkoutApplyError(checked, false);
+
+    const applied = await this.deps.runHostCommand(
+      'git',
+      ['-C', checkoutRoot, 'apply', '--index', '--whitespace=nowarn', '-'],
+      { timeoutMs: APPLY_TIMEOUT_MS, input: diff.stdout },
+    );
+    if (applied.code !== 0) throw checkoutApplyError(applied, true);
+
+    const appliedTreeSha = (await this.git(checkoutRoot, ['write-tree'])).stdout
+      .trim()
+      .toLowerCase();
+    if (appliedTreeSha !== candidate.candidateTreeSha) {
+      throw new ChangeRequestError(
+        'The staged host tree differs from the prepared change-request candidate. Inspect the checkout before continuing.',
+        409,
+        'checkout_apply_tree_changed',
+        {
+          expectedCandidateTreeSha: candidate.candidateTreeSha,
+          candidateTreeSha: appliedTreeSha,
+        },
+      );
+    }
+    return {
+      revision: revision.number,
+      checkoutRoot,
+      destinationBranch: record.destinationBranch,
+      checkoutHeadSha: initial.headSha,
+      candidateTreeSha: candidate.candidateTreeSha,
+      applied: true,
+      stagedFiles,
+    };
   }
 
   private async assertCheckoutReady(

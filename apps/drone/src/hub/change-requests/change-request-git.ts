@@ -4,7 +4,12 @@ import { ChangeRequestError } from './change-request-error';
 export type RunHostCommand = (
   command: string,
   args: string[],
-  options?: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number },
+  options?: {
+    cwd?: string;
+    env?: NodeJS.ProcessEnv;
+    timeoutMs?: number;
+    input?: string | Buffer;
+  },
 ) => Promise<RunResult>;
 
 export async function runChangeRequestGit(
@@ -54,11 +59,16 @@ export async function resolveChangeRequestBranch(
 
 export function changeRequestConflictFiles(text: string): string[] {
   const files = new Set<string>();
-  for (const line of text.split(/\r?\n/)) {
-    const pathMatch = line.match(/CONFLICT\s+\([^)]+\):\s+.*\s+in\s+(.+)$/i);
-    const fallbackMatch = line.match(/CONFLICT\s+\([^)]+\):\s+(.+)$/i);
-    const file = String(pathMatch?.[1] ?? fallbackMatch?.[1] ?? '').trim();
-    if (file) files.add(file);
+  const patterns = [
+    /CONFLICT\s+\([^)]+\):\s+.*\s+in\s+(.+)$/gim,
+    /CONFLICT\s+\([^)]+\):\s+(.+)$/gim,
+  ];
+  for (const pattern of patterns) {
+    let match: RegExpExecArray | null = null;
+    while ((match = pattern.exec(text))) {
+      const file = String(match[1] ?? '').trim();
+      if (file) files.add(file);
+    }
   }
   return [...files].sort((left, right) => left.localeCompare(right));
 }

@@ -15,7 +15,6 @@ describe('ChangeRequestCheckoutApplier', () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'drone-cr-apply-test-'));
     const origin = path.join(tempRoot, 'origin.git');
     const checkoutRoot = path.join(tempRoot, 'host');
-    const storageRoot = path.join(tempRoot, 'storage');
     try {
       await run('git', ['init', '--bare', origin]);
       await run('git', ['init', '-b', 'main', checkoutRoot]);
@@ -53,8 +52,18 @@ describe('ChangeRequestCheckoutApplier', () => {
       });
       const applier = new ChangeRequestCheckoutApplier({
         runHostCommand: run,
-        storagePath: (...segments) => path.join(storageRoot, ...segments),
       });
+
+      await fs.writeFile(path.join(checkoutRoot, 'README.md'), 'destination change\n');
+      await git(checkoutRoot, ['commit', '-am', 'conflicting destination change']);
+      const conflictingHead = await git(checkoutRoot, ['rev-parse', 'HEAD']);
+      await expect(applier.apply(record, revision, checkoutRoot)).rejects.toMatchObject({
+        code: 'checkout_apply_conflict',
+        details: { conflictFiles: ['README.md'] },
+      });
+      expect(await git(checkoutRoot, ['rev-parse', 'HEAD'])).toBe(conflictingHead);
+      expect(await git(checkoutRoot, ['status', '--porcelain'])).toBe('');
+      await git(checkoutRoot, ['reset', '--hard', baseSha]);
 
       const receipt = await applier.apply(record, revision, checkoutRoot);
 
@@ -82,7 +91,11 @@ describe('ChangeRequestCheckoutApplier', () => {
       expect(
         (await run('git', ['-C', origin, 'cat-file', '-e', 'refs/heads/main:feature.bin'])).code,
       ).not.toBe(0);
-      expect(await fs.readdir(path.join(storageRoot, 'change-request-apply-patches'))).toEqual([]);
+
+      await git(checkoutRoot, ['commit', '-m', 'manually accept staged candidate']);
+      const alreadyPresent = await applier.apply(record, revision, checkoutRoot);
+      expect(alreadyPresent).toMatchObject({ applied: false, stagedFiles: [] });
+      expect(await git(checkoutRoot, ['status', '--porcelain'])).toBe('');
 
       await git(checkoutRoot, ['reset', '--hard', 'HEAD']);
       await git(checkoutRoot, ['checkout', 'source']);
