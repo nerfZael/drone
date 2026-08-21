@@ -3,8 +3,8 @@ import type { ChatSendContext, ChatSendPayload } from '../chat';
 import type { DroneSummary } from '../types';
 import { sendDroneChatPrompt } from './chat-api';
 import { isDroneStartingOrSeeding, resolveChatNameForDrone } from './helpers';
-import { SIDEBAR_VISIBLE_MULTI_CHAT_GROUP, type SidebarGroup } from './use-sidebar-view-model';
-import { isSameOrDescendantSidebarGroupPath } from './sidebar-group-paths';
+import type { SidebarGroup } from './use-sidebar-view-model';
+import { resolveSelectedGroupMultiChatData } from './sidebar-group-multi-chat';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 
@@ -34,27 +34,11 @@ export function useGroupBroadcast({
   >(null);
 
   const selectedGroupMultiChatData = React.useMemo(
-    () => {
-      if (!selectedGroupMultiChat) return null;
-      if (selectedGroupMultiChat === SIDEBAR_VISIBLE_MULTI_CHAT_GROUP) {
-        return {
-          group: SIDEBAR_VISIBLE_MULTI_CHAT_GROUP,
-          label: 'Visible in Sidebar',
-          kind: 'group' as const,
-          items: sidebarVisibleDrones,
-        };
-      }
-      const exact = sidebarGroups.find((g) => g.group === selectedGroupMultiChat);
-      if (exact?.kind === 'repo') return exact;
-      const matches = sidebarGroups.filter((g) => isSameOrDescendantSidebarGroupPath(g.group, selectedGroupMultiChat));
-      if (matches.length === 0) return exact ?? null;
-      return {
-        group: selectedGroupMultiChat,
-        label: exact?.label ?? selectedGroupMultiChat,
-        kind: 'group' as const,
-        items: matches.flatMap((group) => group.items),
-      };
-    },
+    () => resolveSelectedGroupMultiChatData(
+      selectedGroupMultiChat,
+      sidebarGroups,
+      sidebarVisibleDrones,
+    ),
     [selectedGroupMultiChat, sidebarGroups, sidebarVisibleDrones],
   );
 

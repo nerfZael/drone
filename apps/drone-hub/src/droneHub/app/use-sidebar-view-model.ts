@@ -21,8 +21,6 @@ export type SidebarGroup = {
   items: DroneSummary[];
 };
 
-export const SIDEBAR_VISIBLE_MULTI_CHAT_GROUP = '__sidebar-visible-drones__';
-
 export function shouldShowSidebarGroup(
   group: Pick<SidebarGroup, 'items'>,
   opts: {

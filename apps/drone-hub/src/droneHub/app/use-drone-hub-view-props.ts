@@ -138,7 +138,7 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
         ...prev,
         [group]: !isSidebarGroupCollapsed(prev, group),
       })),
-    onRenameGroup: (group, nextName) => renameGroup(group, nextName),
+    onRenameGroup: (group, nextName, scope) => renameGroup(group, nextName, scope),
     onOpenGroupMultiChat: (group) => {
       openGroupMultiChat(group);
     },

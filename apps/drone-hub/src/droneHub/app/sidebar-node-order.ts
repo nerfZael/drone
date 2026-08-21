@@ -299,6 +299,40 @@ export function removeSidebarRepoScopedNodeOrderByGroupPrefix(
   return changed ? out : map;
 }
 
+export function renameSidebarRepoScopedNodeOrderByGroupPrefix(
+  map: Record<string, string[]>,
+  repoGroupPathRaw: string,
+  currentGroupRaw: string,
+  nextGroupRaw: string,
+): Record<string, string[]> {
+  const repoGroupPath = String(repoGroupPathRaw ?? '').trim();
+  const currentGroup = String(currentGroupRaw ?? '').trim();
+  const nextGroup = String(nextGroupRaw ?? '').trim();
+  if (!repoGroupPath || !currentGroup || !nextGroup || currentGroup === nextGroup) return map;
+
+  const currentPrefix = `repo-scope:${repoGroupPath}:${currentGroup}`;
+  const nextPrefix = `repo-scope:${repoGroupPath}:${nextGroup}`;
+  const renameNodeId = (nodeIdRaw: string): string => {
+    const nodePath = sidebarFolderPathFromNodeId(nodeIdRaw);
+    if (!nodePath || (nodePath !== currentPrefix && !nodePath.startsWith(`${currentPrefix}/`))) {
+      return nodeIdRaw;
+    }
+    return sidebarFolderNodeId(`${nextPrefix}${nodePath.slice(currentPrefix.length)}`);
+  };
+
+  let changed = false;
+  const out: Record<string, string[]> = {};
+  for (const [parentId, order] of Object.entries(map)) {
+    const nextParentId = renameNodeId(parentId);
+    const nextOrder = normalizeSidebarGroupOrder(order.map(renameNodeId));
+    if (nextParentId !== parentId || nextOrder.some((entry, index) => entry !== order[index])) {
+      changed = true;
+    }
+    out[nextParentId] = normalizeSidebarGroupOrder([...(out[nextParentId] ?? []), ...nextOrder]);
+  }
+  return changed ? out : map;
+}
+
 export function removeDroneIdsFromSidebarNodeOrderByParent(
   map: Record<string, string[]>,
   droneIdsRaw: string[],

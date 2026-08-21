@@ -6,12 +6,13 @@ import {
 } from '@drone/hub-model/sidebar';
 import type { DroneSummary } from '../types';
 import type { SidebarGroup } from './use-sidebar-view-model';
-import type { MoveDronesToGroupResult } from './use-group-management';
+import type { GroupMutationScope, MoveDronesToGroupResult } from './use-group-management';
 import {
   insertSidebarGroupOrderToken,
   removeSidebarGroupOrderToken,
   type SidebarGroupCreatePlacement,
 } from './sidebar-group-order';
+import { hasSidebarRepoPathScope } from './sidebar-repository-scope';
 import {
   applySidebarOptimisticOpsToDrones,
   applySidebarOptimisticOpsToGroups,
@@ -47,9 +48,16 @@ type UseSidebarOptimisticGroupsArgs = {
   deletingGroups: Record<string, boolean>;
   sidebarGroupOrder: string[];
   setSidebarGroupOrder: React.Dispatch<React.SetStateAction<string[]>>;
-  onCreateGroup: (group: string) => MaybePromise<CreateGroupResult>;
+  onCreateGroup: (
+    group: string,
+    scope?: Pick<GroupMutationScope, 'repoPath'>,
+  ) => MaybePromise<CreateGroupResult>;
   onCreateGroupAndMove: (group: string, droneIds: string[]) => Promise<MoveDronesToGroupResult>;
-  onRenameGroup: (group: string, nextName?: string) => MaybePromise<boolean>;
+  onRenameGroup: (
+    group: string,
+    nextName?: string,
+    scope?: GroupMutationScope,
+  ) => MaybePromise<boolean>;
   onMoveDronesToGroup: (group: string, droneIds: string[]) => Promise<MoveDronesToGroupResult>;
   onReparentDronesToParent: (parentDroneId: string | null, droneIds: string[]) => Promise<ReparentDronesResult>;
   onMoveSidebar: (
@@ -88,19 +96,30 @@ export function useSidebarOptimisticGroups({
   }, [sidebarDronesFilteredByRepo, sidebarGroups]);
 
   const runOptimisticCreateGroup = React.useCallback(
-    async (groupRaw: string, opts?: { placement?: SidebarGroupCreatePlacement }) => {
+    async (
+      groupRaw: string,
+      opts?: { placement?: SidebarGroupCreatePlacement; repoPath?: string | null },
+    ) => {
       const group = String(groupRaw ?? '').trim();
       if (!group) return { ok: false, error: 'Group name is required.' };
       const placement = opts?.placement ?? 'start';
-      setSidebarGroupOrder((prev) =>
-        insertSidebarGroupOrderToken(prev, sidebarGroups, { group, kind: 'group' }, placement),
-      );
-      const opId = createOptimisticSidebarOpId();
-      setPendingSidebarOps((prev) => [...prev, { id: opId, kind: 'create_group', group }]);
+      const repoScoped = hasSidebarRepoPathScope(opts);
+      const opId = repoScoped ? null : createOptimisticSidebarOpId();
+      if (opId) {
+        setSidebarGroupOrder((prev) =>
+          insertSidebarGroupOrderToken(prev, sidebarGroups, { group, kind: 'group' }, placement),
+        );
+        setPendingSidebarOps((prev) => [...prev, { id: opId, kind: 'create_group', group }]);
+      }
       const result = await sidebarCommandQueue.enqueue(
-        async () => await onCreateGroup(group),
+        async () => await onCreateGroup(
+          group,
+          repoScoped
+            ? { repoPath: opts?.repoPath }
+            : undefined,
+        ),
       );
-      if (!result.ok) {
+      if (!result.ok && opId) {
         setPendingSidebarOps((prev) => prev.filter((op) => op.id !== opId));
         setSidebarGroupOrder((prev) => removeSidebarGroupOrderToken(prev, { group, kind: 'group' }));
       }
@@ -110,17 +129,23 @@ export function useSidebarOptimisticGroups({
   );
 
   const runOptimisticRenameGroup = React.useCallback(
-    async (groupRaw: string, nextNameRaw?: string, _opts?: { skipNodeOrderUpdate?: boolean }) => {
+    async (
+      groupRaw: string,
+      nextNameRaw?: string,
+      opts?: GroupMutationScope & { skipNodeOrderUpdate?: boolean },
+    ) => {
       const group = String(groupRaw ?? '').trim();
       const nextName = String(nextNameRaw ?? '').trim();
       if (!group || !nextName || group === nextName) return false;
 
-      const opId = createOptimisticSidebarOpId();
-      setPendingSidebarOps((prev) => [...prev, { id: opId, kind: 'rename_group', sourceGroup: group, targetGroup: nextName }]);
+      const opId = hasSidebarRepoPathScope(opts) ? null : createOptimisticSidebarOpId();
+      if (opId) {
+        setPendingSidebarOps((prev) => [...prev, { id: opId, kind: 'rename_group', sourceGroup: group, targetGroup: nextName }]);
+      }
       const ok = await sidebarCommandQueue.enqueue(
-        async () => await onRenameGroup(group, nextName),
+        async () => await onRenameGroup(group, nextName, opts),
       );
-      if (!ok) {
+      if (!ok && opId) {
         setPendingSidebarOps((prev) => prev.filter((op) => op.id !== opId));
       }
       return ok;
