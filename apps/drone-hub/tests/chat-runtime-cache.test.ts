@@ -65,13 +65,18 @@ describe('chat runtime cache', () => {
     expect(readFreshChatRuntimeCache(firstKey)).toBeNull();
   });
 
-  test('moves the complete snapshot when a chat is renamed', () => {
+  test('moves only the source snapshot when a chat is renamed', () => {
     const oldKey = chatRuntimeCacheKey('drone-1', 'old-name');
     const newKey = chatRuntimeCacheKey('drone-1', 'new-name');
     writeChatRuntimeCache(oldKey, {
       chatInfo: chatInfo('old-name', { kind: 'native' }),
       pending: [{ id: 'pending-1' } as any],
       transcripts: [{ id: 'turn-1' } as any],
+    });
+    writeChatRuntimeCache(newKey, {
+      chatInfo: chatInfo('new-name', { kind: 'custom', id: 'stale-target' }),
+      pending: [{ id: 'stale-target-pending' } as any],
+      transcripts: [{ id: 'stale-target-turn' } as any],
     });
 
     renameChatRuntimeCache('drone-1', 'old-name', 'new-name');
@@ -84,17 +89,42 @@ describe('chat runtime cache', () => {
     });
   });
 
-  test('expires config and content together after the revisit window', () => {
+  test('invalidates a stale destination when the renamed source was not cached', () => {
+    const newKey = chatRuntimeCacheKey('drone-1', 'new-name');
+    writeChatRuntimeCache(newKey, {
+      chatInfo: chatInfo('new-name', { kind: 'builtin', id: 'stale-target' }),
+      transcripts: [{ id: 'stale-target-turn' } as any],
+    });
+
+    renameChatRuntimeCache('drone-1', 'uncached-old-name', 'new-name');
+
+    expect(readFreshChatRuntimeCache(newKey)).toBeNull();
+  });
+
+  test('refreshes config with content and expires the combined snapshot together', () => {
     const key = chatRuntimeCacheKey('drone-1', 'default');
+    const cachedChatInfo = chatInfo('default', { kind: 'builtin', id: 'blip' });
     writeChatRuntimeCache(
       key,
       {
-        chatInfo: chatInfo('default', { kind: 'builtin', id: 'blip' }),
+        chatInfo: cachedChatInfo,
         transcripts: [],
       },
       10,
     );
+    writeChatRuntimeCache(
+      key,
+      {
+        chatInfo: cachedChatInfo,
+        transcripts: [{ id: 'new-turn' } as any],
+      },
+      10 + CHAT_RUNTIME_CACHE_TTL_MS - 1,
+    );
 
-    expect(readFreshChatRuntimeCache(key, 10 + CHAT_RUNTIME_CACHE_TTL_MS)).toBeNull();
+    expect(readFreshChatRuntimeCache(key, 10 + CHAT_RUNTIME_CACHE_TTL_MS)).toMatchObject({
+      chatInfo: { chat: 'default', agent: { kind: 'builtin', id: 'blip' } },
+      transcripts: [{ id: 'new-turn' }],
+    });
+    expect(readFreshChatRuntimeCache(key, 10 + 2 * CHAT_RUNTIME_CACHE_TTL_MS - 1)).toBeNull();
   });
 });

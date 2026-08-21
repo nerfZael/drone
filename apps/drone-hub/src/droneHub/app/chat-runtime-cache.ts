@@ -86,27 +86,21 @@ export function renameChatRuntimeCache(
   const newKey = chatRuntimeCacheKey(droneId, newChatName);
   if (!oldKey || !newKey || oldKey === newKey) return;
   const oldEntry = cache.get(oldKey);
-  if (!oldEntry) return;
-  const newEntry = cache.get(newKey) ?? {};
-  if (oldEntry.pending && (!newEntry.pending || oldEntry.pending.atMs >= newEntry.pending.atMs)) {
-    newEntry.pending = oldEntry.pending;
+  if (!oldEntry) {
+    cache.delete(newKey);
+    return;
   }
-  if (
-    oldEntry.transcripts &&
-    (!newEntry.transcripts || oldEntry.transcripts.atMs >= newEntry.transcripts.atMs)
-  ) {
-    newEntry.transcripts = oldEntry.transcripts;
-  }
+  const renamedEntry = { ...oldEntry };
   const oldChatInfo = oldEntry.chatInfo;
-  if (oldChatInfo && (!newEntry.chatInfo || oldChatInfo.atMs >= newEntry.chatInfo.atMs)) {
-    newEntry.chatInfo = {
+  if (oldChatInfo) {
+    renamedEntry.chatInfo = {
       atMs: oldChatInfo.atMs,
       value: { ...oldChatInfo.value, chat: String(newChatName).trim() || 'default' },
     };
   }
   cache.delete(oldKey);
   cache.delete(newKey);
-  cache.set(newKey, newEntry);
+  cache.set(newKey, renamedEntry);
 }
 
 export const chatRuntimeCacheTesting = {

@@ -159,4 +159,52 @@ describe('chat load telemetry', () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  test('waits for cached config to reconcile when fresh content was not cached', async () => {
+    const originalFetch = globalThis.fetch;
+    const reports: any[] = [];
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      reports.push(JSON.parse(String(init?.body ?? '{}')));
+      return new Response(JSON.stringify({ ok: true }), { status: 202 });
+    }) as typeof fetch;
+    try {
+      beginChatLoadNavigation({ target, source: 'chat' });
+      markChatLoadConfigResolved(target, {
+        surface: 'transcript',
+        agentKind: 'builtin:codex',
+        runtime: 'container',
+        source: 'cache',
+      });
+      markChatLoadPrimaryResolved(target, {
+        surface: 'transcript',
+        cacheStatus: 'miss',
+        itemCount: 4,
+      });
+      markChatLoadContentCommitted(target, 'transcript');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(reports).toHaveLength(0);
+
+      markChatLoadConfigResolved(target, {
+        surface: 'transcript',
+        agentKind: 'builtin:codex',
+        runtime: 'container',
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(reports).toHaveLength(1);
+      expect(reports[0]).toMatchObject({
+        status: 'completed',
+        cacheStatus: 'miss',
+        milestones: {
+          cached_config_available: expect.any(Number),
+          config_reconciled: expect.any(Number),
+          primary_content_loaded: expect.any(Number),
+          content_painted: expect.any(Number),
+        },
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });

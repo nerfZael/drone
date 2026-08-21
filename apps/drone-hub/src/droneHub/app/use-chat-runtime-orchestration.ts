@@ -225,6 +225,8 @@ export function useChatRuntimeOrchestration({
   const sessionTextRef = React.useRef<string>('');
   const selectedDroneRef = React.useRef(selectedDrone);
   const selectedChatRef = React.useRef(selectedChat);
+  const selectedChatInfoRef = React.useRef({ key: selectedChatCacheKey, value: chatInfo });
+  selectedChatInfoRef.current = { key: selectedChatCacheKey, value: chatInfo };
   const transcriptStateKeyRef = React.useRef(selectedChatCacheKey);
   const sessionStateKeyRef = React.useRef(selectedChatCacheKey);
   const optimisticPendingPromptsChatKeyRef = React.useRef(selectedChatCacheKey);
@@ -917,10 +919,15 @@ export function useChatRuntimeOrchestration({
           tail: INITIAL_TRANSCRIPT_TAIL_TURNS,
         });
         if (!mounted) return;
+        const currentChatInfo =
+          selectedChatInfoRef.current.key === selectedChatCacheKey
+            ? selectedChatInfoRef.current.value
+            : null;
         writeChatRuntimeCache(selectedChatCacheKey, {
           transcripts: data.transcripts,
+          pending: data.pending,
+          ...(currentChatInfo ? { chatInfo: currentChatInfo } : {}),
         });
-        writeChatRuntimeCache(selectedChatCacheKey, { pending: data.pending });
         setPendingRespForChat({ key: selectedChatCacheKey, pending: data.pending });
         setTranscripts((prev) =>
           sameTranscriptItems(prev, data.transcripts) ? prev : data.transcripts,
@@ -940,7 +947,15 @@ export function useChatRuntimeOrchestration({
         if (!mounted) return;
         if (isNotFoundError(e)) {
           // Treat 404 as "no transcript yet" to avoid a scary error state for brand new chats.
-          writeChatRuntimeCache(selectedChatCacheKey, { transcripts: [], pending: [] });
+          const currentChatInfo =
+            selectedChatInfoRef.current.key === selectedChatCacheKey
+              ? selectedChatInfoRef.current.value
+              : null;
+          writeChatRuntimeCache(selectedChatCacheKey, {
+            transcripts: [],
+            pending: [],
+            ...(currentChatInfo ? { chatInfo: currentChatInfo } : {}),
+          });
           setTranscripts((prev) => (Array.isArray(prev) && prev.length === 0 ? prev : []));
           setTranscriptError(null);
           consecutiveTransientFailures = 0;

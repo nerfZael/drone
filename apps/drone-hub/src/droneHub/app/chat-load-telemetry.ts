@@ -162,10 +162,8 @@ function maybeComplete(span: ChatLoadSpan): void {
   if (activeSpan !== span || !span.surface || span.paintScheduled) return;
   const primary = span.primaryBySurface[span.surface];
   if (!primary || !span.committedSurfaces.has(span.surface)) return;
-  if (
-    span.cachedSurfaces.has(span.surface) &&
-    (!span.freshPrimarySurfaces.has(span.surface) || !span.freshConfigResolved)
-  ) {
+  if (span.cachedConfigUsed && !span.freshConfigResolved) return;
+  if (span.cachedSurfaces.has(span.surface) && !span.freshPrimarySurfaces.has(span.surface)) {
     return;
   }
   mark(span, 'content_committed');
