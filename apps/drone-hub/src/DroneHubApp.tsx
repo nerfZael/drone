@@ -19,6 +19,7 @@ import { EditorZoomController } from './droneHub/files/editor-zoom';
 import { FileDictationProvider } from './droneHub/files/FileDictationContext';
 import { CompanionWorkspaceProvider } from './droneHub/companion/CompanionWorkspaceContext';
 import { CompanionProvider } from './droneHub/companion/CompanionContext';
+import { NavigationSizeController } from './droneHub/app/NavigationSizeController';
 
 function LocalDroneHubAppContent() {
   const { sidebarProps, overlaysProps, workspaceContentProps } = useDroneHubAppModel();
@@ -82,6 +83,7 @@ export default function DroneHubApp() {
   return (
     <DesktopDeviceProvider>
       <EditorZoomController />
+      <NavigationSizeController />
       <AppConfirmDialogProvider>
         <ActiveComposerProvider>
           <CompanionWorkspaceProvider>

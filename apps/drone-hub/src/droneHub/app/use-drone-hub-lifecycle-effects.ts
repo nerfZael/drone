@@ -13,6 +13,7 @@ import {
 import { APP_SHORTCUT_BOUNDARY_SELECTOR } from './AppShortcutBoundary';
 import { useDropdownDismiss } from '../../ui/dropdown';
 import { requestSidebarGroupDraft } from './sidebar-group-draft-events';
+import { requestSidebarRootDroneDraft } from './sidebar-drone-draft-events';
 import { useContinuousDictation } from '../chat/ContinuousDictationContext';
 import { toggleCurrentChatComposerEditorMode } from '../chat/chat-composer-editor-mode-shortcut';
 import { useFileDictation } from '../files/FileDictationContext';
@@ -244,7 +245,7 @@ export function useDroneHubLifecycleEffects({
         return true;
       },
       createDraftDrone: () => {
-        openDraftChatComposer({ group: '' });
+        if (!requestSidebarRootDroneDraft()) openDraftChatComposer({ group: '' });
         return true;
       },
       createDraftGroup: () => requestSidebarGroupDraft(),

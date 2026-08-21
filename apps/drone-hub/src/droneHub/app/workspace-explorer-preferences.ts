@@ -3,10 +3,10 @@ import { profileStorageKey } from '../../profile-storage';
 export const WORKSPACE_EXPLORER_WIDTH_MIN_PX = 180;
 export const WORKSPACE_EXPLORER_WIDTH_DEFAULT_PX = 240;
 export const WORKSPACE_EXPLORER_WIDTH_MAX_PX = 480;
-export const WORKSPACE_EXPLORER_ZOOM_MIN = 0.85;
+export const WORKSPACE_EXPLORER_ZOOM_MIN = 0.5;
 export const WORKSPACE_EXPLORER_ZOOM_DEFAULT = 1;
-export const WORKSPACE_EXPLORER_ZOOM_MAX = 1.2;
-export const WORKSPACE_EXPLORER_ZOOM_STEP = 0.1;
+export const WORKSPACE_EXPLORER_ZOOM_MAX = 2;
+export const WORKSPACE_EXPLORER_ZOOM_STEP = 0.05;
 
 export const WORKSPACE_EXPLORER_WIDTH_STORAGE_KEY = profileStorageKey('droneHub.workspaceExplorerWidthPx');
 export const WORKSPACE_EXPLORER_ZOOM_STORAGE_KEY = profileStorageKey('droneHub.workspaceExplorerZoom');
@@ -14,6 +14,7 @@ export const WORKSPACE_EXPLORER_ZOOM_STORAGE_KEY = profileStorageKey('droneHub.w
 const LEGACY_CHANGES_EXPLORER_WIDTH_STORAGE_KEY = profileStorageKey('droneHub.changesExplorerWidthPx');
 const LEGACY_CHANGES_EXPLORER_ZOOM_STORAGE_KEY = profileStorageKey('droneHub.changesExplorerZoom');
 const LEGACY_EDITOR_EXPLORER_LAYOUT_STORAGE_KEY = profileStorageKey('droneHub.editorExplorerLayout');
+const workspaceExplorerZoomListeners = new Set<() => void>();
 
 function readStorage(key: string): string | null {
   if (typeof localStorage === 'undefined') return null;
@@ -83,4 +84,10 @@ export function readWorkspaceExplorerZoom(): number {
 
 export function writeWorkspaceExplorerZoom(zoom: number): void {
   writeStorage(WORKSPACE_EXPLORER_ZOOM_STORAGE_KEY, String(clampWorkspaceExplorerZoom(zoom)));
+  for (const listener of workspaceExplorerZoomListeners) listener();
+}
+
+export function subscribeWorkspaceExplorerZoom(listener: () => void): () => void {
+  workspaceExplorerZoomListeners.add(listener);
+  return () => workspaceExplorerZoomListeners.delete(listener);
 }

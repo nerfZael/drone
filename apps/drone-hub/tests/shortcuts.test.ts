@@ -254,4 +254,20 @@ describe('shortcut defaults', () => {
     expect(changesDockSource).not.toContain("key === 'e'");
     expect(changesDockSource).not.toContain('Open in editor (E)');
   });
+
+  test('resolves the root-drone shortcut repository through the sidebar selection', () => {
+    const lifecycleSource = readFileSync(
+      new URL('../src/droneHub/app/use-drone-hub-lifecycle-effects.ts', import.meta.url),
+      'utf8',
+    );
+    const sidebarSource = readFileSync(
+      new URL('../src/droneHub/app/DroneSidebar.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(lifecycleSource).toContain('requestSidebarRootDroneDraft()');
+    expect(sidebarSource).toContain(
+      "onOpenDraftChatComposer({ ...selectedDroneDraftLocation, group: '' })",
+    );
+  });
 });

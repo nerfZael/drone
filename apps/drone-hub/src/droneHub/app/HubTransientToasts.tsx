@@ -3,7 +3,6 @@ import {
   useDroneHubRuntimeStore,
   type RepoApplyProgress,
 } from './use-drone-hub-runtime-store';
-import { DesktopZoomToast } from './DesktopZoomToast';
 
 type NameSuggestToast = {
   id: string;
@@ -40,7 +39,6 @@ export function HubTransientToasts({
 
   return (
     <>
-      <DesktopZoomToast />
       <RepoApplyProgressToast
         progress={repoApplyProgress}
         stackedToastCount={nameSuggestToast ? 1 : 0}

@@ -1569,7 +1569,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
   const handleFolderClick = React.useCallback((opts?: SidebarFolderSelectionOptions) => {
     if (shouldSuppressClick()) return;
     setSelectedSidebarNodeId(node.id);
-    onSelectFolder(folderPath, opts);
+    onSelectFolder(folderPath, { ...opts, folderNodeId: node.id });
     if (!opts?.selectDrones) {
       onToggleGroupCollapsed(collapseKey);
     }
@@ -1690,7 +1690,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
             if (!actionsEnabled || repositoryRootView || event.target instanceof HTMLInputElement) return;
             event.preventDefault();
             event.stopPropagation();
-            if (!isSelected) onSelectFolder(folderPath);
+            if (!isSelected) onSelectFolder(folderPath, { folderNodeId: node.id });
             setSelectedSidebarNodeId(node.id);
             setContextMenuPosition({ x: event.clientX, y: event.clientY });
           }}

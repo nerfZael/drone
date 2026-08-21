@@ -10,7 +10,7 @@ interface ImportMeta {
 
 interface Window {
   readonly droneHubDesktop?: {
-    onZoomChanged(callback: (payload: { percent?: unknown }) => void): () => void;
+    onNavigationZoom(callback: (payload: { action?: unknown }) => void): () => void;
   };
 }
 

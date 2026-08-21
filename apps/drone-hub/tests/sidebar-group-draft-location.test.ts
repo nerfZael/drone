@@ -276,4 +276,113 @@ describe('sidebar drone draft location', () => {
       group: '',
     });
   });
+
+  test('uses the exact repository root selected in repository grouping mode', () => {
+    const repoPath = '/repos/example';
+    const repoGroupPath = `repo:${repoPath}`;
+    const repoNodeId = sidebarFolderNodeId(repoGroupPath);
+    const nodeTree: SidebarNodeTreeModel = {
+      nodesById: {
+        [repoNodeId]: {
+          id: repoNodeId,
+          kind: 'folder',
+          path: repoGroupPath,
+          groupPath: null,
+          repoGroupPath,
+          label: 'example',
+          groupKind: 'repo',
+          parentId: SIDEBAR_ROOT_PARENT_ID,
+          depth: 0,
+          totalDroneCount: 0,
+          directDroneCount: 0,
+        },
+      },
+      childIdsByParent: { [SIDEBAR_ROOT_PARENT_ID]: [repoNodeId], [repoNodeId]: [] },
+      rootChildIds: [repoNodeId],
+      folderNodeByPath: {},
+    };
+
+    expect(
+      resolveSidebarDroneDraftLocation({
+        selectedSidebarNodeId: repoNodeId,
+        nodeTree,
+        selectedFolderPath: repoGroupPath,
+        visibleFolderPaths: new Set([repoGroupPath]),
+        fallbackRepoPath: '',
+      }),
+    ).toEqual({ group: '', repoPath });
+  });
+
+  test('keeps same-named selected groups scoped to their exact repository', () => {
+    const repoPath = '/repos/b';
+    const repoGroupPath = `repo:${repoPath}`;
+    const groupPath = 'Review';
+    const scopedPath = `repo-scope:${repoGroupPath}:${groupPath}`;
+    const groupNodeId = sidebarFolderNodeId(scopedPath);
+    const nodeTree: SidebarNodeTreeModel = {
+      nodesById: {
+        [groupNodeId]: {
+          id: groupNodeId,
+          kind: 'folder',
+          path: scopedPath,
+          groupPath,
+          repoGroupPath,
+          label: groupPath,
+          groupKind: 'group',
+          parentId: sidebarFolderNodeId(repoGroupPath),
+          depth: 1,
+          totalDroneCount: 0,
+          directDroneCount: 0,
+        },
+      },
+      childIdsByParent: { [groupNodeId]: [] },
+      rootChildIds: [],
+      folderNodeByPath: {},
+    };
+
+    expect(
+      resolveSidebarDroneDraftLocation({
+        selectedSidebarNodeId: groupNodeId,
+        nodeTree,
+        selectedFolderPath: groupPath,
+        visibleFolderPaths: new Set([groupPath]),
+        selectedDrone: { group: groupPath, repoPath: '/repos/a' },
+      }),
+    ).toEqual({ group: groupPath, repoPath });
+  });
+
+  test('selecting the repository-less root explicitly clears repository context', () => {
+    const repoGroupPath = 'repo:ungrouped';
+    const repoNodeId = sidebarFolderNodeId(repoGroupPath);
+    const nodeTree: SidebarNodeTreeModel = {
+      nodesById: {
+        [repoNodeId]: {
+          id: repoNodeId,
+          kind: 'folder',
+          path: repoGroupPath,
+          groupPath: null,
+          repoGroupPath,
+          label: 'Ungrouped',
+          groupKind: 'repo',
+          parentId: SIDEBAR_ROOT_PARENT_ID,
+          depth: 0,
+          totalDroneCount: 0,
+          directDroneCount: 0,
+        },
+      },
+      childIdsByParent: { [SIDEBAR_ROOT_PARENT_ID]: [repoNodeId], [repoNodeId]: [] },
+      rootChildIds: [repoNodeId],
+      folderNodeByPath: {},
+    };
+
+    expect(
+      resolveSidebarDroneDraftLocation({
+        selectedSidebarNodeId: repoNodeId,
+        nodeTree,
+        selectedFolderPath: repoGroupPath,
+        visibleFolderPaths: new Set([repoGroupPath]),
+        fallbackRepoPath: '/repos/stale',
+      }),
+    ).toEqual({ group: '', repoPath: '' });
+  });
 });

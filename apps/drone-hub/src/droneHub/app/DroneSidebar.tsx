@@ -134,6 +134,10 @@ import {
   SIDEBAR_GROUP_DRAFT_REQUEST_EVENT,
 } from './sidebar-group-draft-events';
 import {
+  markSidebarRootDroneDraftRequestHandled,
+  SIDEBAR_ROOT_DRONE_DRAFT_REQUEST_EVENT,
+} from './sidebar-drone-draft-events';
+import {
   resolveSidebarDroneDraftLocation,
   resolveSidebarGroupDraftLocation,
 } from './sidebar-group-draft-location';
@@ -147,6 +151,13 @@ import {
   FileDictationSidebarIndicator,
   FileDictationSidebarRailButton,
 } from '../files/FileDictationSidebarIndicator';
+import {
+  clampWorkspaceExplorerZoom,
+  readWorkspaceExplorerZoom,
+  subscribeWorkspaceExplorerZoom,
+  WORKSPACE_EXPLORER_ZOOM_STEP,
+  writeWorkspaceExplorerZoom,
+} from './workspace-explorer-preferences';
 
 const SIDEBAR_EXPANDED_WIDTH_PX = 328;
 const SIDEBAR_COLLAPSED_RAIL_WIDTH_PX = 40;
@@ -154,7 +165,6 @@ const AUTO_MINIMIZE_COLLAPSE_DELAY_MS = 90;
 const AUTO_MINIMIZE_EXPAND_DELAY_MS = 120;
 const AUTO_MINIMIZE_REOPEN_GUARD_MS = 220;
 const SIDEBAR_DND_IDLE_DISABLE_DELAY_MS = 1500;
-const SIDEBAR_DENSITY_MODE_ORDER: SidebarDensityMode[] = ['compact', 'default', 'comfortable'];
 
 function ContinuousDictationIcon({ active }: { active: boolean }) {
   return (
@@ -238,19 +248,6 @@ function resolveDroneSidebarCapabilities(
     ...DEFAULT_DRONE_SIDEBAR_CAPABILITIES,
     ...(capabilities ?? {}),
   };
-}
-
-function stepSidebarDensityMode(
-  current: SidebarDensityMode,
-  direction: -1 | 1,
-): SidebarDensityMode {
-  const currentIndex = SIDEBAR_DENSITY_MODE_ORDER.indexOf(current);
-  const safeIndex = currentIndex >= 0 ? currentIndex : 1;
-  const nextIndex = Math.max(
-    0,
-    Math.min(SIDEBAR_DENSITY_MODE_ORDER.length - 1, safeIndex + direction),
-  );
-  return SIDEBAR_DENSITY_MODE_ORDER[nextIndex] ?? 'default';
 }
 
 function SidebarRepositoryStateCount({
@@ -1005,6 +1002,19 @@ export function DroneSidebar({
     React.useState<HTMLDivElement | null>(null);
   const [pinnedSidebarBottomTarget, setPinnedSidebarBottomTarget] =
     React.useState<HTMLDivElement | null>(null);
+  const [navigationItemZoom, setNavigationItemZoom] =
+    React.useState(readWorkspaceExplorerZoom);
+  React.useEffect(
+    () =>
+      subscribeWorkspaceExplorerZoom(() =>
+        setNavigationItemZoom(readWorkspaceExplorerZoom()),
+      ),
+    [],
+  );
+  const navigationItemScaleStyle = React.useMemo<React.CSSProperties>(
+    () => ({ zoom: navigationItemZoom }),
+    [navigationItemZoom],
+  );
   const approvalRequiredByChatNodeId = useDroneHubRuntimeStore(
     (state) => state.approvalRequiredByChatNodeId,
   );
@@ -1062,7 +1072,6 @@ export function DroneSidebar({
     showHiddenSidebarGroups,
     setAppView,
     setSidebarGroupingMode,
-    setSidebarDensityMode,
     setSidebarDockSide,
     setPinnedSidebarPlacement,
     setPinnedSidebarCollapsed,
@@ -1987,6 +1996,8 @@ export function DroneSidebar({
   const selectedDroneDraftLocation = React.useMemo(
     () =>
       resolveSidebarDroneDraftLocation({
+        selectedSidebarNodeId,
+        nodeTree: staticReadOnlyNodeTree,
         selectedFolderPath,
         visibleFolderPaths: visibleSidebarFolderPathSet,
         selectedDrone: selectedCreateContextDrone,
@@ -1998,11 +2009,22 @@ export function DroneSidebar({
       activeRepositoryNavigationItem,
       selectedCreateContextDrone,
       selectedFolderPath,
+      selectedSidebarNodeId,
+      staticReadOnlyNodeTree,
       visibleSidebarFolderPathSet,
     ],
   );
   const openDraftDroneFromSidebarSelection = React.useCallback(() => {
     onOpenDraftChatComposer(selectedDroneDraftLocation);
+  }, [onOpenDraftChatComposer, selectedDroneDraftLocation]);
+  React.useEffect(() => {
+    const onRequest = (event: Event) => {
+      if (event.defaultPrevented) return;
+      onOpenDraftChatComposer({ ...selectedDroneDraftLocation, group: '' });
+      markSidebarRootDroneDraftRequestHandled(event);
+    };
+    window.addEventListener(SIDEBAR_ROOT_DRONE_DRAFT_REQUEST_EVENT, onRequest);
+    return () => window.removeEventListener(SIDEBAR_ROOT_DRONE_DRAFT_REQUEST_EVENT, onRequest);
   }, [onOpenDraftChatComposer, selectedDroneDraftLocation]);
   const openGroupDraftAtNode = React.useCallback((anchorNodeId: string | null): boolean => {
     if (!sidebarCapabilities.actions || isRepoGroupingMode) return false;
@@ -2124,9 +2146,13 @@ export function DroneSidebar({
       const direction = event.deltaY < 0 ? 1 : event.deltaY > 0 ? -1 : 0;
       if (!direction) return;
       event.preventDefault();
-      setSidebarDensityMode((current) => stepSidebarDensityMode(current, direction));
+      writeWorkspaceExplorerZoom(
+        clampWorkspaceExplorerZoom(
+          readWorkspaceExplorerZoom() + direction * WORKSPACE_EXPLORER_ZOOM_STEP,
+        ),
+      );
     },
-    [setSidebarDensityMode],
+    [],
   );
   const toggleSidebarDockSide = React.useCallback(() => {
     setSidebarDockSide((current) => (current === 'right' ? 'left' : 'right'));
@@ -2539,6 +2565,7 @@ export function DroneSidebar({
           <div
             ref={setPinnedSidebarTopTarget}
             data-sidebar-pinned-top-slot="true"
+            style={navigationItemScaleStyle}
             className={`flex-shrink-0 px-2 [--sidebar-selection-edge-offset:-0.5rem] ${
               repositoryOverviewOpen || !activeRepositoryNavigationItem
                 ? 'border-b border-[var(--border-subtle)]'
@@ -2555,6 +2582,7 @@ export function DroneSidebar({
             touchAction: 'pan-y',
           }}
         >
+          <div data-sidebar-navigation-items="true" style={navigationItemScaleStyle}>
           {dronesError && (
             <UiPanelStatusStrip tone="danger" className="mx-2 mb-2 rounded border">
               Failed to load drones: {dronesError}
@@ -3385,12 +3413,14 @@ export function DroneSidebar({
               </>
             )}
           </div>
+          </div>
         </div>
 
         {pinnedSidebarPlacement === 'bottom' ? (
           <div
             ref={setPinnedSidebarBottomTarget}
             data-sidebar-pinned-bottom-slot="true"
+            style={navigationItemScaleStyle}
             className="flex-shrink-0 px-2 [--sidebar-selection-edge-offset:-0.5rem]"
           />
         ) : null}

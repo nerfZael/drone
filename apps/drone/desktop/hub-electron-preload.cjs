@@ -1,12 +1,12 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-const ZOOM_CHANGED_CHANNEL = 'drone-hub:zoom-changed';
+const NAVIGATION_ZOOM_CHANNEL = 'drone-hub:navigation-zoom';
 
 contextBridge.exposeInMainWorld('droneHubDesktop', {
-  onZoomChanged(callback) {
+  onNavigationZoom(callback) {
     if (typeof callback !== 'function') return () => {};
     const listener = (_event, payload) => callback(payload);
-    ipcRenderer.on(ZOOM_CHANGED_CHANNEL, listener);
-    return () => ipcRenderer.removeListener(ZOOM_CHANGED_CHANNEL, listener);
+    ipcRenderer.on(NAVIGATION_ZOOM_CHANNEL, listener);
+    return () => ipcRenderer.removeListener(NAVIGATION_ZOOM_CHANNEL, listener);
   },
 });

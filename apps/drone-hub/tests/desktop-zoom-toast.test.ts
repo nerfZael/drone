@@ -1,15 +1,54 @@
 import { describe, expect, test } from 'bun:test';
-import { normalizeDesktopZoomPercent } from '../src/droneHub/app/DesktopZoomToast';
+import {
+  nextNavigationExplorerZoom,
+  navigationZoomActionForKeyboardEvent,
+  normalizeNavigationZoomAction,
+} from '../src/droneHub/app/NavigationSizeController';
 
-describe('desktop zoom toast', () => {
-  test('accepts valid desktop zoom notifications', () => {
-    expect(normalizeDesktopZoomPercent(110)).toBe(110);
-    expect(normalizeDesktopZoomPercent('125')).toBe(125);
+describe('desktop navigation sizing', () => {
+  test('accepts only supported shortcut actions', () => {
+    expect(normalizeNavigationZoomAction('in')).toBe('in');
+    expect(normalizeNavigationZoomAction('out')).toBe('out');
+    expect(normalizeNavigationZoomAction('reset')).toBe('reset');
+    expect(normalizeNavigationZoomAction('larger')).toBeNull();
   });
 
-  test('ignores malformed or implausible notifications', () => {
-    expect(normalizeDesktopZoomPercent(undefined)).toBeNull();
-    expect(normalizeDesktopZoomPercent('not-a-number')).toBeNull();
-    expect(normalizeDesktopZoomPercent(400)).toBeNull();
+  test('captures browser zoom keys for navigation sizing', () => {
+    expect(navigationZoomActionForKeyboardEvent({
+      altKey: false,
+      code: 'Equal',
+      ctrlKey: true,
+      key: '+',
+      metaKey: false,
+    })).toBe('in');
+    expect(navigationZoomActionForKeyboardEvent({
+      altKey: false,
+      code: 'Minus',
+      ctrlKey: false,
+      key: '-',
+      metaKey: true,
+    })).toBe('out');
+    expect(navigationZoomActionForKeyboardEvent({
+      altKey: false,
+      code: 'Digit0',
+      ctrlKey: true,
+      key: '0',
+      metaKey: false,
+    })).toBe('reset');
+    expect(navigationZoomActionForKeyboardEvent({
+      altKey: false,
+      code: 'Equal',
+      ctrlKey: false,
+      key: '=',
+      metaKey: false,
+    })).toBeNull();
+  });
+
+  test('steps, clamps, and resets navigation item zoom', () => {
+    expect(nextNavigationExplorerZoom(1, 'in')).toBe(1.05);
+    expect(nextNavigationExplorerZoom(1, 'out')).toBe(0.95);
+    expect(nextNavigationExplorerZoom(2, 'in')).toBe(2);
+    expect(nextNavigationExplorerZoom(0.5, 'out')).toBe(0.5);
+    expect(nextNavigationExplorerZoom(0.5, 'reset')).toBe(1);
   });
 });

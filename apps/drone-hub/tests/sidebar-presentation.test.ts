@@ -105,6 +105,8 @@ describe('sidebar presentation', () => {
     expect(sidebarSource).toContain('const SIDEBAR_EXPANDED_WIDTH_PX = 328;');
     expect(sidebarSource).toContain('style={{ width: SIDEBAR_EXPANDED_WIDTH_PX }}');
     expect(sidebarSource).toContain('`min(${SIDEBAR_EXPANDED_WIDTH_PX}px, 100vw)`');
+    expect(sidebarSource).toContain('() => ({ zoom: navigationItemZoom })');
+    expect(sidebarSource).not.toContain('width: `${100 / navigationItemZoom}%`');
   });
 
   test('uses one density contract for every sidebar renderer', () => {
@@ -247,7 +249,9 @@ describe('sidebar presentation', () => {
     expect(groupedTreeSource).toContain('down={!collapsed}');
     expect(groupedTreeSource).toContain('strokeWidth={1.25}');
     expect(groupedTreeSource).toContain('densityClasses.folderChevron');
-    expect(groupedTreeSource).toContain('onSelectFolder(folderPath, opts);');
+    expect(groupedTreeSource).toContain(
+      'onSelectFolder(folderPath, { ...opts, folderNodeId: node.id });',
+    );
     expect(groupedTreeSource).toContain('onToggleGroupCollapsed(collapseKey);');
     expect(groupedTreeSource).not.toContain('GROUPED_FOLDER_SINGLE_CLICK_DELAY_MS');
     expect(groupedTreeSource).not.toContain('scheduleFolderSingleClick');

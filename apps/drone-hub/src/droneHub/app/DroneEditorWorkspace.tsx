@@ -6,6 +6,7 @@ import {
   clampWorkspaceExplorerZoom,
   readWorkspaceExplorerWidth,
   readWorkspaceExplorerZoom,
+  subscribeWorkspaceExplorerZoom,
   WORKSPACE_EXPLORER_WIDTH_DEFAULT_PX,
   WORKSPACE_EXPLORER_WIDTH_MAX_PX,
   WORKSPACE_EXPLORER_WIDTH_MIN_PX,
@@ -34,6 +35,11 @@ export function DroneEditorWorkspace({ explorer, editor }: DroneEditorWorkspaceP
   const resizePointerIdRef = React.useRef<number | null>(null);
   const [layout, setLayout] = React.useState<StoredExplorerLayout>(readExplorerLayout);
   const [explorerZoom, setExplorerZoom] = React.useState(readWorkspaceExplorerZoom);
+
+  React.useEffect(
+    () => subscribeWorkspaceExplorerZoom(() => setExplorerZoom(readWorkspaceExplorerZoom())),
+    [],
+  );
 
   React.useEffect(() => {
     writeWorkspaceExplorerZoom(explorerZoom);

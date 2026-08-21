@@ -33,6 +33,7 @@ import {
   type DroneFilesContextMenuState,
 } from './DroneFilesContextMenu';
 import { buildFileExplorerTree, type FileExplorerNode } from './tree';
+import { clampWorkspaceExplorerZoom } from '../app/workspace-explorer-preferences';
 
 const CHILD_DIRECTORY_CACHE_MAX_AGE_MS = 5 * 60_000;
 const FS_LIST_REQUEST_TIMEOUT_MS = 12_000;
@@ -190,15 +191,15 @@ export function DroneFilesDock({
   readOnly?: boolean;
   zoom?: number;
 }) {
-  const explorerZoom = Math.max(0.85, Math.min(1.2, Number.isFinite(zoom) ? zoom : 1));
-  const explorerRowHeightPx = Math.max(19, Math.round(22 * explorerZoom));
-  const explorerTextSizePx = Math.max(11, Math.round(13 * explorerZoom * 10) / 10);
-  const explorerLineHeightPx = Math.max(16, Math.round(20 * explorerZoom));
-  const explorerIconSlotPx = Math.max(14, Math.round(16 * explorerZoom));
-  const explorerFileIconPx = Math.max(13, Math.round(15 * explorerZoom));
-  const explorerChevronPx = Math.max(10, Math.round(12 * explorerZoom));
-  const explorerIndentPx = Math.max(6, Math.round(8 * explorerZoom));
-  const explorerGuideOffsetPx = Math.max(9, Math.round(11 * explorerZoom));
+  const explorerZoom = clampWorkspaceExplorerZoom(Number.isFinite(zoom) ? zoom : 1);
+  const explorerRowHeightPx = Math.round(22 * explorerZoom);
+  const explorerTextSizePx = Math.round(13 * explorerZoom * 10) / 10;
+  const explorerLineHeightPx = Math.round(20 * explorerZoom);
+  const explorerIconSlotPx = Math.round(16 * explorerZoom);
+  const explorerFileIconPx = Math.round(15 * explorerZoom * 10) / 10;
+  const explorerChevronPx = Math.round(12 * explorerZoom * 10) / 10;
+  const explorerIndentPx = Math.round(8 * explorerZoom * 10) / 10;
+  const explorerGuideOffsetPx = Math.round(11 * explorerZoom * 10) / 10;
   const explorerRowGeometryStyle: React.CSSProperties = {
     height: `${explorerRowHeightPx}px`,
     fontSize: `${explorerTextSizePx}px`,

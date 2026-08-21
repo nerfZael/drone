@@ -52,7 +52,9 @@ describe('sidebar group creation actions', () => {
     expect(treeSource).toContain(
       'setContextMenuPosition({ x: event.clientX, y: event.clientY });',
     );
-    expect(treeSource).toContain('if (!isSelected) onSelectFolder(folderPath);');
+    expect(treeSource).toContain(
+      'if (!isSelected) onSelectFolder(folderPath, { folderNodeId: node.id });',
+    );
     expect(treeSource).toContain("label: isVirtualGroup ? 'New group' : 'New subfolder'");
     expect(treeSource).toContain("label: isHiddenGroup ? 'Unhide group' : 'Hide group'");
     expect(treeSource).toContain("label: 'Open multi-chat'");

@@ -52,7 +52,16 @@ export type SidebarDroneDraftLocation = {
   repoPath?: string;
 };
 
+function repoPathFromSidebarGroupPath(repoGroupPathRaw: string): string | null {
+  const repoGroupPath = String(repoGroupPathRaw ?? '').trim();
+  if (!repoGroupPath) return null;
+  if (repoGroupPath === 'repo:ungrouped') return '';
+  return repoGroupPath.startsWith('repo:') ? repoGroupPath.slice('repo:'.length) : null;
+}
+
 export function resolveSidebarDroneDraftLocation(args: {
+  selectedSidebarNodeId?: string | null;
+  nodeTree?: SidebarNodeTreeModel | null;
   selectedFolderPath: string | null;
   visibleFolderPaths: Iterable<string>;
   selectedDrone?: {
@@ -66,6 +75,20 @@ export function resolveSidebarDroneDraftLocation(args: {
     Array.from(args.visibleFolderPaths, (path) => String(path ?? '').trim()).filter(Boolean),
   );
   const selectedFolderPath = String(args.selectedFolderPath ?? '').trim();
+  const selectedSidebarNodeId = String(args.selectedSidebarNodeId ?? '').trim();
+  const selectedNode = selectedSidebarNodeId
+    ? args.nodeTree?.nodesById[selectedSidebarNodeId]
+    : null;
+  const selectedNodeRepoPath = repoPathFromSidebarGroupPath(
+    selectedNode?.repoGroupPath ?? '',
+  );
+  if (selectedNode && selectedNodeRepoPath != null) {
+    const rawNodeGroup = String(selectedNode.groupPath ?? '').trim();
+    return {
+      group: !rawNodeGroup || isUngroupedGroupName(rawNodeGroup) ? '' : rawNodeGroup,
+      repoPath: selectedNodeRepoPath,
+    };
+  }
   const selectedDroneGroupRaw = String(args.selectedDrone?.group ?? '').trim();
   const selectedDroneGroup = isUngroupedGroupName(selectedDroneGroupRaw)
     ? ''

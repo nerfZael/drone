@@ -27,6 +27,7 @@ import {
   clampWorkspaceExplorerZoom as clampExplorerZoom,
   readWorkspaceExplorerWidth,
   readWorkspaceExplorerZoom,
+  subscribeWorkspaceExplorerZoom,
   WORKSPACE_EXPLORER_WIDTH_DEFAULT_PX as EXPLORER_SIDEBAR_DEFAULT_WIDTH_PX,
   WORKSPACE_EXPLORER_WIDTH_MAX_PX as EXPLORER_SIDEBAR_MAX_WIDTH_PX,
   WORKSPACE_EXPLORER_WIDTH_MIN_PX as EXPLORER_SIDEBAR_MIN_WIDTH_PX,
@@ -614,6 +615,10 @@ function LiveDroneChangesDock({
   const splitLayoutRef = React.useRef<HTMLDivElement | null>(null);
   const [explorerManualWidthPx, setExplorerManualWidthPx] = React.useState<number>(readWorkspaceExplorerWidth);
   const [explorerZoom, setExplorerZoom] = React.useState<number>(readWorkspaceExplorerZoom);
+  React.useEffect(
+    () => subscribeWorkspaceExplorerZoom(() => setExplorerZoom(readWorkspaceExplorerZoom())),
+    [],
+  );
   const editorZoomLevel = useEditorZoomLevel();
   const [explorerWidthPx, setExplorerWidthPx] = React.useState(EXPLORER_SIDEBAR_DEFAULT_WIDTH_PX);
   const [explorerResizing, setExplorerResizing] = React.useState(false);
@@ -644,14 +649,14 @@ function LiveDroneChangesDock({
   const commitInflightRef = React.useRef<Set<string>>(new Set());
   const mountedRef = React.useRef(true);
   const dockRootRef = React.useRef<HTMLDivElement | null>(null);
-  const explorerRowHeightPx = Math.max(21, Math.round(24 * explorerZoom));
-  const explorerIconSizePx = Math.max(12, Math.round(13 * explorerZoom));
-  const explorerLeadingSlotPx = Math.max(explorerIconSizePx, Math.round(14 * explorerZoom));
-  const explorerTextSizePx = Math.max(11, Math.round(12 * explorerZoom * 10) / 10);
-  const explorerMetaTextSizePx = Math.max(8.5, Math.round(9.5 * explorerZoom * 10) / 10);
-  const explorerIndentBasePx = Math.max(4, Math.round(5 * explorerZoom));
-  const explorerIndentStepPx = Math.max(8, Math.round(10 * explorerZoom));
-  const explorerBadgeHeightPx = Math.max(14, Math.round(15 * explorerZoom));
+  const explorerRowHeightPx = Math.round(24 * explorerZoom);
+  const explorerIconSizePx = Math.round(13 * explorerZoom * 10) / 10;
+  const explorerLeadingSlotPx = Math.round(14 * explorerZoom * 10) / 10;
+  const explorerTextSizePx = Math.round(12 * explorerZoom * 10) / 10;
+  const explorerMetaTextSizePx = Math.round(9.5 * explorerZoom * 10) / 10;
+  const explorerIndentBasePx = Math.round(5 * explorerZoom * 10) / 10;
+  const explorerIndentStepPx = Math.round(10 * explorerZoom * 10) / 10;
+  const explorerBadgeHeightPx = Math.round(15 * explorerZoom * 10) / 10;
 
   const queryClient = useQueryClient();
   const {
