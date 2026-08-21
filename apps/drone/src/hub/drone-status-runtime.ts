@@ -15,8 +15,28 @@ type DroneStatusRuntimeDependencies = {
   normalizeDroneId: (value: unknown) => string;
   normalizeRuntime: (value: unknown) => string;
   onChanged: (source: string) => void;
+  onTiming?: (timing: DroneStatusRefreshTiming) => void;
   readStatus: (client: any) => Promise<any>;
   resolveHostPort: (containerName: string, containerPort: number) => Promise<number | null>;
+};
+
+export type DroneStatusRefreshTiming = {
+  source: string;
+  droneCount: number;
+  changedCount: number;
+  totalMs: number;
+  phases: Array<{
+    name: 'loadModel' | 'probeStatuses' | 'resolvePorts' | 'readStatuses' | 'notify';
+    durationMs: number;
+    operationCount?: number;
+  }>;
+};
+
+type DroneStatusProbeTiming = {
+  portLookupMs: number;
+  portLookupCount: number;
+  statusReadMs: number;
+  statusReadCount: number;
 };
 
 const STATUS_REFRESH_CONCURRENCY = 4;
@@ -59,27 +79,63 @@ export function createDroneStatusRuntime(deps: DroneStatusRuntimeDependencies) {
   }
 
   async function refresh(source: string): Promise<void> {
+    const startedAt = performance.now();
+    const phases: DroneStatusRefreshTiming['phases'] = [];
+    let droneCount = 0;
+    let changedCount = 0;
     try {
+      let phaseStartedAt = performance.now();
       const model = await deps.loadModel();
+      phases.push({ name: 'loadModel', durationMs: performance.now() - phaseStartedAt });
       const drones = Object.values(model?.drones ?? {}) as any[];
+      droneCount = drones.length;
+      phaseStartedAt = performance.now();
+      const probeTiming: DroneStatusProbeTiming = {
+        portLookupMs: 0,
+        portLookupCount: 0,
+        statusReadMs: 0,
+        statusReadCount: 0,
+      };
       const changed = await mapConcurrent(drones, STATUS_REFRESH_CONCURRENCY, async (drone) =>
-        refreshEntry(drone),
+        refreshEntry(drone, probeTiming),
       );
-      if (changed.some(Boolean)) deps.onChanged(source);
+      phases.push({ name: 'probeStatuses', durationMs: performance.now() - phaseStartedAt });
+      phases.push({
+        name: 'resolvePorts',
+        durationMs: probeTiming.portLookupMs,
+        operationCount: probeTiming.portLookupCount,
+      });
+      phases.push({
+        name: 'readStatuses',
+        durationMs: probeTiming.statusReadMs,
+        operationCount: probeTiming.statusReadCount,
+      });
+      changedCount = changed.filter(Boolean).length;
+      phaseStartedAt = performance.now();
+      if (changedCount > 0) deps.onChanged(source);
+      phases.push({ name: 'notify', durationMs: performance.now() - phaseStartedAt });
     } catch (error: any) {
       deps.log('warn', 'drone status refresh failed', {
         source,
         error: error?.message ?? String(error),
       });
+    } finally {
+      deps.onTiming?.({
+        source,
+        droneCount,
+        changedCount,
+        totalMs: performance.now() - startedAt,
+        phases,
+      });
     }
   }
 
-  async function refreshEntry(drone: any): Promise<boolean> {
+  async function refreshEntry(drone: any, timing: DroneStatusProbeTiming): Promise<boolean> {
     const key = cacheKey(drone);
     const previous = cache.get(key);
     let next: CachedDroneStatusSummary;
     try {
-      next = await probe(drone);
+      next = await probe(drone, timing);
     } catch (error: any) {
       next = {
         hostPort:
@@ -96,29 +152,44 @@ export function createDroneStatusRuntime(deps: DroneStatusRuntimeDependencies) {
     return !sameSummary(previous, next);
   }
 
-  async function probe(drone: any): Promise<CachedDroneStatusSummary> {
+  async function probe(
+    drone: any,
+    timing: DroneStatusProbeTiming,
+  ): Promise<CachedDroneStatusSummary> {
     const runtime = deps.normalizeRuntime(drone?.runtime);
     const containerName = String(drone?.containerName ?? drone?.name ?? '').trim();
-    const hostPort =
-      typeof drone.hostPort === 'number' && Number.isFinite(drone.hostPort)
-        ? drone.hostPort
-        : runtime === 'host'
-          ? null
-          : await deps.resolveHostPort(
-              containerName || String(drone.name ?? ''),
-              drone.containerPort,
-            );
+    let hostPort: number | null;
+    if (typeof drone.hostPort === 'number' && Number.isFinite(drone.hostPort)) {
+      hostPort = drone.hostPort;
+    } else if (runtime === 'host') {
+      hostPort = null;
+    } else {
+      const portLookupStartedAt = performance.now();
+      try {
+        hostPort = await deps.resolveHostPort(
+          containerName || String(drone.name ?? ''),
+          drone.containerPort,
+        );
+      } finally {
+        timing.portLookupMs += performance.now() - portLookupStartedAt;
+        timing.portLookupCount += 1;
+      }
+    }
 
     let statusOk = false;
     let status: any = null;
     let statusError: string | null = null;
     const token = typeof drone.token === 'string' ? drone.token : '';
     if (hostPort && token) {
+      const statusReadStartedAt = performance.now();
       try {
         status = await deps.readStatus(deps.makeClient(hostPort, token));
         statusOk = true;
       } catch (error: any) {
         statusError = error?.message ?? String(error);
+      } finally {
+        timing.statusReadMs += performance.now() - statusReadStartedAt;
+        timing.statusReadCount += 1;
       }
     } else if (!hostPort) {
       statusError =
@@ -168,7 +239,7 @@ export function createDroneStatusRuntime(deps: DroneStatusRuntimeDependencies) {
     }
   }
 
-  return { cachedForEntry, schedule, start, stop };
+  return { cachedForEntry, refreshNow: refresh, schedule, start, stop };
 }
 
 async function mapConcurrent<T, R>(

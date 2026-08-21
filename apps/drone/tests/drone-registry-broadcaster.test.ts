@@ -15,8 +15,10 @@ describe('drone registry broadcaster', () => {
       preferenceVersion: 1,
     };
     const events: Array<{ event: string; data: any }> = [];
+    const timings: any[] = [];
     const broadcaster = new DroneRegistryBroadcaster({
       buildSnapshot: async () => snapshot,
+      onTiming: (timing) => timings.push(timing),
       writeSseEvent: (_response, event, data) => events.push({ event, data }),
     });
     broadcaster.clients.add({ destroyed: false, writableEnded: false } as any);
@@ -48,6 +50,11 @@ describe('drone registry broadcaster', () => {
         preferenceUpdatedAt: snapshot.preferenceUpdatedAt,
         preferenceVersion: 2,
       },
+    });
+    expect(timings.at(-1)).toMatchObject({
+      droneCount: 1,
+      event: 'delta',
+      phases: [{ name: 'buildSnapshot' }, { name: 'format' }, { name: 'broadcast' }],
     });
   });
 

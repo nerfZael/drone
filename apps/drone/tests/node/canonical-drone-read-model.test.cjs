@@ -11,6 +11,7 @@ const { resetDroneRootDirForTests } = require('../../dist/host/paths.js');
 const {
   readCanonicalActiveDroneModel,
   readCanonicalDroneLifecycleModel,
+  readCanonicalDroneSummaryModel,
 } = require('../../dist/hub/canonical-drone-read-model.js');
 const { upsertChatInStore, upsertTranscriptTurnInStore } = require('../../dist/hub/transcript-store.js');
 
@@ -70,6 +71,7 @@ test('canonical active drone read model assembles summaries without writes or co
         updatedAt: '2026-07-10T10:03:30.000Z',
         messages: [{ id: 'activity-1', role: 'assistant', content: 'large live activity' }],
       },
+      dockerSnapshot: { status: 'creating', imageRef: 'benchmark-image' },
     },
   });
   await getPromptQueueRepository().enqueue({
@@ -86,6 +88,8 @@ test('canonical active drone read model assembles summaries without writes or co
         updatedAt: '2026-07-10T10:04:30.000Z',
         messages: [{ id: 'activity-2', role: 'assistant', content: 'large queued activity' }],
       },
+      action: { type: 'send-in-new-chat', chatName: 'review' },
+      approvals: [{ id: 'approval-1', status: 'pending' }],
     },
   });
   await getPromptQueueRepository().enqueue({
@@ -120,6 +124,59 @@ test('canonical active drone read model assembles summaries without writes or co
   );
   assert.equal(model.pending['drone-b'].phase, 'starting');
   assert.equal(readCanonicalDroneLifecycleModel().drones['drone-a'].chats, undefined);
+
+  const summaryPhases = [];
+  const summary = readCanonicalDroneSummaryModel((phase) => summaryPhases.push(phase));
+  const summaryChat = summary.drones['drone-a'].chats.default;
+  assert.equal(summaryChat.turns.length, 1);
+  assert.equal(summaryChat.turns[0].at, '2026-07-10T10:03:00.000Z');
+  assert.deepEqual(summaryChat.turns[0].dockerSnapshot, { status: 'creating' });
+  assert.equal(summaryChat.turns[0].output, undefined);
+  assert.deepEqual(summaryChat.pendingPrompts[0].activity, {
+    updatedAt: '2026-07-10T10:04:30.000Z',
+  });
+  assert.deepEqual(summaryChat.pendingPrompts[0].action, {
+    type: 'send-in-new-chat',
+    chatName: 'review',
+  });
+  assert.deepEqual(summaryChat.pendingPrompts[0].approvals, [
+    { id: 'approval-1', status: 'pending' },
+  ]);
+  assert.ok(summaryPhases.some((phase) => phase.name === 'turns' && phase.rowCount === 1));
+  assert.ok(summaryPhases.some((phase) => phase.name === 'prompts' && phase.rowCount === 1));
+});
+
+test('canonical summary read model keeps a large fleet plus startup and draft drones', async () => {
+  useTempDataDir();
+  const lifecycle = await getDroneLifecycleRepository();
+  for (let index = 0; index < 144; index += 1) {
+    await lifecycle.upsert('real', `drone-${index}`, {
+      id: `drone-${index}`,
+      name: `Drone ${index}`,
+      runtime: 'host',
+      createdAt: new Date(index * 1_000).toISOString(),
+    });
+  }
+  await lifecycle.upsert('pending', 'starting-drone', {
+    id: 'starting-drone',
+    name: 'Starting Drone',
+    runtime: 'container',
+    phase: 'starting',
+  });
+  await lifecycle.upsert('pending', 'draft-drone', {
+    id: 'draft-drone',
+    name: 'Draft Drone',
+    runtime: 'container',
+    phase: 'draft',
+    draft: true,
+  });
+
+  const model = readCanonicalDroneSummaryModel();
+
+  assert.equal(Object.keys(model.drones).length, 144);
+  assert.equal(model.pending['starting-drone'].phase, 'starting');
+  assert.equal(model.pending['draft-drone'].phase, 'draft');
+  assert.equal(model.pending['draft-drone'].draft, true);
 });
 
 test('canonical active drone read model bounds history', async () => {
@@ -175,6 +232,7 @@ test('canonical active drone read model tolerates a malformed stored payload', a
     turn: { id: 'turn-1', at: '2026-07-10T10:00:00.000Z', prompt: 'hello', ok: true, output: 'world' },
   });
   await requireHubDatabase().writeTransaction('corrupt turn fixture', (connection) => {
+    connection.exec('DROP TRIGGER active_chat_message_search_turn_update');
     connection.prepare(`UPDATE canonical_chat_turns SET turn_json = '{malformed'
       WHERE drone_id = 'drone-a' AND chat_name = 'default' AND turn_id = 'turn-1'`).run();
   });

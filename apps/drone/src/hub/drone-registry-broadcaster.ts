@@ -9,6 +9,13 @@ export type DroneRegistrySnapshot = {
   preferenceVersion?: number | null;
 };
 
+export type DroneRegistryBroadcastTiming = {
+  totalMs: number;
+  droneCount: number;
+  event: 'none' | 'snapshot' | 'delta' | 'stream-error';
+  phases: Array<{ name: 'buildSnapshot' | 'format' | 'broadcast'; durationMs: number }>;
+};
+
 export class DroneRegistryBroadcaster {
   readonly clients = new Set<ServerResponse>();
 
@@ -27,6 +34,7 @@ export class DroneRegistryBroadcaster {
   constructor(
     private readonly deps: {
       buildSnapshot: () => Promise<DroneRegistrySnapshot>;
+      onTiming?: (timing: DroneRegistryBroadcastTiming) => void;
       writeSseEvent: (response: ServerResponse, event: string, data: any) => void;
     },
   ) {}
@@ -52,13 +60,21 @@ export class DroneRegistryBroadcaster {
       return this.lastSnapshot;
     }
     this.busy = true;
+    const startedAt = performance.now();
+    const phases: DroneRegistryBroadcastTiming['phases'] = [];
+    let droneCount = 0;
+    let publishedEvent: DroneRegistryBroadcastTiming['event'] = 'none';
     try {
+      let phaseStartedAt = performance.now();
       const snapshot = await this.deps.buildSnapshot();
+      phases.push({ name: 'buildSnapshot', durationMs: performance.now() - phaseStartedAt });
+      droneCount = snapshot.drones.length;
       // A refresh requested while this snapshot was being assembled means the underlying state
       // may already be newer. Publishing both would make clients briefly render the stale state
       // before the guaranteed follow-up refresh. Leave the current baseline untouched and let
       // that follow-up publish the coherent snapshot instead.
       if (this.refreshPending) return snapshot;
+      phaseStartedAt = performance.now();
       const nextById = new Map(
         snapshot.drones
           .map((drone) => [String(drone?.id ?? '').trim(), JSON.stringify(drone)] as const)
@@ -71,7 +87,11 @@ export class DroneRegistryBroadcaster {
         this.lastPreferencesSerialized = JSON.stringify(snapshot.uiPreferences ?? {});
         this.lastGroupsSerialized = JSON.stringify(snapshot.groups ?? []);
         this.lastById = nextById;
+        phases.push({ name: 'format', durationMs: performance.now() - phaseStartedAt });
+        phaseStartedAt = performance.now();
         this.broadcast('snapshot', snapshot);
+        phases.push({ name: 'broadcast', durationMs: performance.now() - phaseStartedAt });
+        publishedEvent = 'snapshot';
         return snapshot;
       }
 
@@ -97,7 +117,9 @@ export class DroneRegistryBroadcaster {
       this.lastPreferencesSerialized = preferencesSerialized;
       this.lastGroupsSerialized = groupsSerialized;
       this.lastById = nextById;
+      phases.push({ name: 'format', durationMs: performance.now() - phaseStartedAt });
       if (upserts.length > 0 || removedIds.length > 0 || preferencesChanged || groupsChanged) {
+        phaseStartedAt = performance.now();
         this.broadcast('delta', {
           ok: true,
           upserts,
@@ -108,12 +130,23 @@ export class DroneRegistryBroadcaster {
           preferenceUpdatedAt: snapshot.preferenceUpdatedAt ?? null,
           preferenceVersion: snapshot.preferenceVersion ?? null,
         });
+        phases.push({ name: 'broadcast', durationMs: performance.now() - phaseStartedAt });
+        publishedEvent = 'delta';
       }
       return snapshot;
     } catch (error: any) {
+      const phaseStartedAt = performance.now();
       this.broadcast('stream-error', { ok: false, error: error?.message ?? String(error) });
+      phases.push({ name: 'broadcast', durationMs: performance.now() - phaseStartedAt });
+      publishedEvent = 'stream-error';
       return null;
     } finally {
+      this.deps.onTiming?.({
+        totalMs: performance.now() - startedAt,
+        droneCount,
+        event: publishedEvent,
+        phases,
+      });
       this.busy = false;
       if (this.refreshPending) {
         const broadcastSnapshot = this.pendingBroadcastSnapshot;

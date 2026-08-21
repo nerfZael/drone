@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import type { AgentApprovalPolicy, AgentPermissionMode } from './chat-types';
 import { parseDroneAgentsMdOverride } from './agents-config';
-import { readJsonBody, sendJson as json } from './hub-http';
+import { readJsonBody, sendJson as json, sendSerializedJson } from './hub-http';
 import { getPromptQueueRepository } from '../host/prompt-queue-repository';
 import type { DroneRuntime } from '../host/runtime';
 import type { ChatImageAttachment } from './chat-attachments';
@@ -1438,11 +1438,13 @@ function createDroneProvisioningServiceHandler(
         scheduleDroneStatusRefresh('api:drones', 0);
         const timer = createRequestTimer();
         try {
-          const { drones } = await buildDroneRegistrySnapshot('api:drones');
+          const { drones } = await buildDroneRegistrySnapshot('api:drones', timer);
           timer.mark('snapshot');
+          const data = JSON.stringify({ ok: true, drones }, null, 2);
+          timer.mark('serialize');
           timer.setHeader(res);
           logSlowHubRequest('drone list', timer, { status: 200, count: drones.length });
-          json(res, 200, { ok: true, drones });
+          sendSerializedJson(res, 200, data);
         } catch (e: any) {
           timer.mark('error');
           timer.setHeader(res);

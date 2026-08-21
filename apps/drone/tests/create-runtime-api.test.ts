@@ -94,6 +94,56 @@ describeSocketSuite('create runtime api', () => {
     expect(String(resp.data?.rejected?.[0]?.error ?? '')).toContain('invalid runtime');
   });
 
+  test('lists startup and draft drones with detailed snapshot timing', async () => {
+    const createdAt = '2026-08-21T10:00:00.000Z';
+    await updateRegistry((registry: any) => {
+      registry.pending = {
+        ...(registry.pending ?? {}),
+        'list-starting-drone': {
+          id: 'list-starting-drone',
+          name: 'List Starting Drone',
+          runtime: 'container',
+          phase: 'starting',
+          createdAt,
+        },
+        'list-draft-drone': {
+          id: 'list-draft-drone',
+          name: 'List Draft Drone',
+          runtime: 'container',
+          phase: 'draft',
+          draft: true,
+          createdAt,
+        },
+      };
+    });
+
+    try {
+      const response = await apiFetch('/api/drones');
+      expect(response.r.status).toBe(200);
+      expect(
+        response.data?.drones?.find((drone: any) => drone.id === 'list-starting-drone'),
+      ).toMatchObject({
+        hubPhase: 'starting',
+        statusChecking: false,
+      });
+      expect(
+        response.data?.drones?.find((drone: any) => drone.id === 'list-draft-drone'),
+      ).toMatchObject({
+        draft: true,
+        hubPhase: 'draft',
+        statusChecking: false,
+      });
+      const serverTiming = response.r.headers.get('server-timing') ?? '';
+      expect(serverTiming).toContain('snapshotSources;dur=');
+      expect(serverTiming).toContain('serialize;dur=');
+    } finally {
+      await updateRegistry((registry: any) => {
+        delete registry.pending?.['list-starting-drone'];
+        delete registry.pending?.['list-draft-drone'];
+      });
+    }
+  });
+
   test('single create returns and persists initial message run state', async () => {
     const resp = await apiFetch('/api/drones', {
       method: 'POST',

@@ -518,6 +518,17 @@ export const CHAT_STORE_MIGRATIONS: readonly HubDatabaseMigration[] = [
       createActiveChatMessageSearch(connection);
     },
   },
+  {
+    version: 10,
+    name: 'index turns with docker snapshots',
+    migrate(connection) {
+      connection.exec(`
+        CREATE INDEX idx_canonical_chat_turns_docker_snapshot
+          ON canonical_chat_turns (drone_id, chat_name)
+          WHERE instr(turn_json, '"dockerSnapshot"') > 0;
+      `);
+    },
+  },
 ];
 
 function createActiveChatMessageSearch(connection: HubDatabaseConnection): void {

@@ -2611,16 +2611,20 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     droneId: string;
     chatName: string;
     entry: any;
+    preferEntry?: boolean;
   }): boolean {
-    const stored = readChatFromStore({
-      droneId: normalizeDroneIdentity(opts.droneId),
-      chatName: normalizeChatName(opts.chatName),
-    });
-    const pending = Array.isArray(stored?.chat?.pendingPrompts)
-      ? stored.chat.pendingPrompts
-      : Array.isArray(opts.entry?.pendingPrompts)
-        ? opts.entry.pendingPrompts
-        : [];
+    const stored = opts.preferEntry
+      ? null
+      : readChatFromStore({
+          droneId: normalizeDroneIdentity(opts.droneId),
+          chatName: normalizeChatName(opts.chatName),
+        });
+    const pending =
+      !opts.preferEntry && Array.isArray(stored?.chat?.pendingPrompts)
+        ? stored.chat.pendingPrompts
+        : Array.isArray(opts.entry?.pendingPrompts)
+          ? opts.entry.pendingPrompts
+          : [];
     return pending.some(
       (prompt: any) =>
         Array.isArray(prompt?.approvals) &&
