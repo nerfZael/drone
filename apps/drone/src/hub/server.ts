@@ -509,6 +509,7 @@ import { permanentlyDeleteCanonicalDrone } from './drone-deletion-service';
 import {
   readCanonicalActiveDroneModel,
   readCanonicalDroneLifecycleModel,
+  readCanonicalDroneSummaryModel,
 } from './canonical-drone-read-model';
 import {
   commitDroneMetadataPatch,
@@ -780,6 +781,9 @@ function createRequestTimer() {
   let last = start;
   const items: Array<{ name: string; dur: number }> = [];
   return {
+    record(name: string, durationMs: number) {
+      items.push({ name, dur: Math.max(0, durationMs) });
+    },
     mark(name: string) {
       const now = process.hrtime.bigint();
       items.push({ name, dur: Number(now - last) / 1_000_000 });
@@ -4460,6 +4464,25 @@ async function startDroneHubApiServerWithLifecycle(
   let droneSummaryMaintenanceLastStartedAt = 0;
   let droneSummaryMaintenanceStopped = false;
   let canonicalActiveModelCache: { loadedAtMs: number; model: any } | null = null;
+  let canonicalSummaryModelCache: { loadedAtMs: number; model: any } | null = null;
+
+  function hubPerformanceDebugEnabled(): boolean {
+    return String(process.env.DRONE_HUB_PERF_DEBUG ?? '').trim() === '1';
+  }
+
+  function logSynchronousHubWork(
+    label: string,
+    durationMs: number,
+    meta: Record<string, unknown>,
+  ): void {
+    if (durationMs < 100 && !hubPerformanceDebugEnabled()) return;
+    hubLog(durationMs >= 100 ? 'warn' : 'info', 'hub synchronous work timing', {
+      label,
+      durationMs: Math.round(durationMs * 10) / 10,
+      eventLoopBlockedMs: Math.round(durationMs * 10) / 10,
+      ...meta,
+    });
+  }
 
   async function loadCanonicalActiveModel(): Promise<any> {
     if ((globalThis as any).Bun) return await loadRegistry();
@@ -4469,7 +4492,14 @@ async function startDroneHubApiServerWithLifecycle(
     ) {
       return canonicalActiveModelCache.model;
     }
-    const model = readCanonicalActiveDroneModel() ?? (await loadRegistry());
+    const phases: Array<{ name: string; durationMs: number; rowCount: number }> = [];
+    const readStartedAt = performance.now();
+    const activeModel = readCanonicalActiveDroneModel((phase) => phases.push(phase));
+    const readDurationMs = performance.now() - readStartedAt;
+    if (activeModel) {
+      logSynchronousHubWork('canonical active drone read', readDurationMs, { phases });
+    }
+    const model = activeModel ?? (await loadRegistry());
     canonicalActiveModelCache = { loadedAtMs: Date.now(), model };
     return model;
   }
@@ -4477,6 +4507,36 @@ async function startDroneHubApiServerWithLifecycle(
   async function loadCanonicalLifecycleModel(): Promise<any> {
     if ((globalThis as any).Bun) return await loadRegistry();
     return readCanonicalDroneLifecycleModel() ?? (await loadRegistry());
+  }
+
+  async function loadCanonicalSummaryModel(timing?: {
+    record: (name: string, durationMs: number) => void;
+  }): Promise<any> {
+    if ((globalThis as any).Bun) return await loadRegistry();
+    if (
+      canonicalSummaryModelCache &&
+      Date.now() - canonicalSummaryModelCache.loadedAtMs < CANONICAL_ACTIVE_MODEL_CACHE_TTL_MS
+    ) {
+      return canonicalSummaryModelCache.model;
+    }
+    const phases: Array<{ name: string; durationMs: number; rowCount: number }> = [];
+    const readStartedAt = performance.now();
+    const summaryModel = readCanonicalDroneSummaryModel((phase) => {
+      phases.push(phase);
+      const timingName = `sqlite${phase.name[0].toUpperCase()}${phase.name.slice(1)}`;
+      timing?.record(timingName, phase.durationMs);
+    });
+    const readDurationMs = performance.now() - readStartedAt;
+    if (summaryModel) {
+      logSynchronousHubWork('canonical drone summary read', readDurationMs, { phases });
+    }
+    const projectionStartedAt = performance.now();
+    const model = summaryModel ?? (await loadRegistry());
+    if (!summaryModel) {
+      timing?.record('compatibilityProjection', performance.now() - projectionStartedAt);
+    }
+    canonicalSummaryModelCache = { loadedAtMs: Date.now(), model };
+    return model;
   }
 
   async function mapDroneRegistrySummaryConcurrent<T, R>(
@@ -4499,12 +4559,23 @@ async function startDroneHubApiServerWithLifecycle(
   }
 
   const droneStatusRuntime = createDroneStatusRuntime({
-    loadModel: loadCanonicalActiveModel,
+    loadModel: loadCanonicalLifecycleModel,
     log: hubLog,
     makeClient,
     normalizeDroneId: normalizeDroneIdentity,
     normalizeRuntime: normalizeDroneRuntime,
     onChanged: (source) => scheduleDroneRegistryBroadcasterRefresh(source === 'startup' ? 0 : 50),
+    onTiming: (timing) => {
+      if (timing.totalMs < 250 && !hubPerformanceDebugEnabled()) return;
+      hubLog(timing.totalMs >= 250 ? 'warn' : 'info', 'drone status refresh timing', {
+        ...timing,
+        totalMs: Math.round(timing.totalMs * 10) / 10,
+        phases: timing.phases.map((phase) => ({
+          ...phase,
+          durationMs: Math.round(phase.durationMs * 10) / 10,
+        })),
+      });
+    },
     readStatus: droneStatus,
     resolveHostPort,
   });
@@ -4516,7 +4587,9 @@ async function startDroneHubApiServerWithLifecycle(
     droneSummaryRegistryCacheLoad = null;
   }
 
-  async function loadDroneRegistryForSummary(): Promise<any> {
+  async function loadDroneRegistryForSummary(timing?: {
+    record: (name: string, durationMs: number) => void;
+  }): Promise<any> {
     if (
       droneSummaryRegistryCache &&
       Date.now() - droneSummaryRegistryCache.loadedAtMs < DRONE_SUMMARY_REGISTRY_CACHE_TTL_MS
@@ -4525,7 +4598,7 @@ async function startDroneHubApiServerWithLifecycle(
     }
     if (!droneSummaryRegistryCacheLoad) {
       const loadEpoch = droneSummaryRegistryCacheEpoch;
-      const loadPromise = loadCanonicalActiveModel()
+      const loadPromise = loadCanonicalSummaryModel(timing)
         .then((registry) => {
           if (loadEpoch === droneSummaryRegistryCacheEpoch) {
             droneSummaryRegistryCache = { loadedAtMs: Date.now(), registry };
@@ -4811,16 +4884,41 @@ async function startDroneHubApiServerWithLifecycle(
     if (droneSummaryMaintenanceTask) return droneSummaryMaintenanceTask;
     droneSummaryMaintenanceLastStartedAt = Date.now();
     const task = (async () => {
+      const startedAt = performance.now();
+      const phases: Array<{ name: string; durationMs: number }> = [];
+      const record = (name: string, phaseStartedAt: number) => {
+        phases.push({ name, durationMs: performance.now() - phaseStartedAt });
+      };
       try {
-        const regAny: any = await loadCanonicalActiveModel();
+        let phaseStartedAt = performance.now();
+        const regAny: any = await loadCanonicalSummaryModel();
+        record('loadModel', phaseStartedAt);
+        phaseStartedAt = performance.now();
         enqueueDroneRegistryReconcilers(regAny);
+        record('enqueueReconcilers', phaseStartedAt);
+        phaseStartedAt = performance.now();
         await reconcileSeedingPromptCompletion(regAny);
+        record('reconcileSeeding', phaseStartedAt);
+        phaseStartedAt = performance.now();
         await autoClearStaleRepoConflictHubErrors(regAny);
+        record('clearRepoConflicts', phaseStartedAt);
       } catch (e: any) {
         hubLog('warn', 'drone summary maintenance failed', {
           source,
           error: e?.message ?? String(e),
         });
+      } finally {
+        const totalMs = performance.now() - startedAt;
+        if (totalMs >= 250 || hubPerformanceDebugEnabled()) {
+          hubLog(totalMs >= 250 ? 'warn' : 'info', 'drone summary maintenance timing', {
+            source,
+            totalMs: Math.round(totalMs * 10) / 10,
+            phases: phases.map((phase) => ({
+              ...phase,
+              durationMs: Math.round(phase.durationMs * 10) / 10,
+            })),
+          });
+        }
       }
     })().finally(() => {
       if (droneSummaryMaintenanceTask === task) {
@@ -4871,8 +4969,11 @@ async function startDroneHubApiServerWithLifecycle(
     (droneSummaryMaintenanceTimeout as any).unref?.();
   }
 
-  async function loadPreparedDroneRegistryForSummary(source: string): Promise<any> {
-    const regAny = await loadDroneRegistryForSummary();
+  async function loadPreparedDroneRegistryForSummary(
+    source: string,
+    timing?: { record: (name: string, durationMs: number) => void },
+  ): Promise<any> {
+    const regAny = await loadDroneRegistryForSummary(timing);
     if (registryNeedsDroneSummaryMaintenance(regAny)) {
       scheduleDroneSummaryMaintenance(source, 0);
     }
@@ -5028,7 +5129,12 @@ async function startDroneHubApiServerWithLifecycle(
       if (
         agent.kind === 'builtin' &&
         agent.id === 'codex' &&
-        chatRequiresCodexApprovalForSummary({ droneId, chatName, entry: chatEntry })
+        chatRequiresCodexApprovalForSummary({
+          droneId,
+          chatName,
+          entry: chatEntry,
+          preferEntry: true,
+        })
       ) {
         return [chatName];
       }
@@ -5099,12 +5205,24 @@ async function startDroneHubApiServerWithLifecycle(
     };
   }
 
-  async function buildDroneRegistrySnapshot(source: string): Promise<DroneRegistrySnapshot> {
+  async function buildDroneRegistrySnapshot(
+    source: string,
+    timing?: { record: (name: string, durationMs: number) => void },
+  ): Promise<DroneRegistrySnapshot> {
+    const snapshotStartedAt = performance.now();
+    const phases: Array<{ name: string; durationMs: number }> = [];
+    const record = (name: string, startedAt: number) => {
+      const durationMs = performance.now() - startedAt;
+      phases.push({ name, durationMs });
+      timing?.record(name, durationMs);
+    };
+    const sourcesStartedAt = performance.now();
     const [regAny, canonicalGroups, preferences] = await Promise.all([
-      loadPreparedDroneRegistryForSummary(source),
+      loadPreparedDroneRegistryForSummary(source, timing),
       listCanonicalGroups(),
       hubApplication.settings.uiPreferences.read(),
     ]);
+    record('snapshotSources', sourcesStartedAt);
     const groupIdByScopeAndName = new Map(
       canonicalGroups.map((group) => [`${group.repoPath}\0${group.name}`, group.id]),
     );
@@ -5120,11 +5238,16 @@ async function startDroneHubApiServerWithLifecycle(
         return chatId ? [chatId] : [];
       }),
     );
+    const nativeActivityStartedAt = performance.now();
     const canonicalMessageAtByChatId =
       await blipAssistantHost.latestMessageTimestamps(nativeChatIds);
+    record('nativeActivity', nativeActivityStartedAt);
+    const readStatesStartedAt = performance.now();
     const readStatesByDroneId = listChatReadStatesForDronesFromStore({
       droneIds: realDrones.map((drone: any) => normalizeDroneIdentity(drone?.id)).filter(Boolean),
     });
+    record('readStates', readStatesStartedAt);
+    const summariesStartedAt = performance.now();
     const realSummaries = await mapDroneRegistrySummaryConcurrent(
       realDrones,
       DRONE_STATUS_SUMMARY_CONCURRENCY,
@@ -5138,7 +5261,9 @@ async function startDroneHubApiServerWithLifecycle(
         );
       },
     );
+    record('summaries', summariesStartedAt);
 
+    const formattingStartedAt = performance.now();
     const byId = new Map<string, any>();
     for (const p of pendingSummaries) {
       const id = String(p?.id ?? '').trim();
@@ -5165,7 +5290,7 @@ async function startDroneHubApiServerWithLifecycle(
             }
           : drone;
       });
-    return {
+    const snapshot: DroneRegistrySnapshot = {
       ok: true,
       drones,
       groups: canonicalGroups,
@@ -5173,6 +5298,21 @@ async function startDroneHubApiServerWithLifecycle(
       preferenceUpdatedAt: preferences.updatedAt,
       preferenceVersion: preferences.version,
     };
+    record('snapshotFormat', formattingStartedAt);
+    const totalMs = performance.now() - snapshotStartedAt;
+    timing?.record('snapshotTotal', totalMs);
+    if (totalMs >= 250 || hubPerformanceDebugEnabled()) {
+      hubLog(totalMs >= 250 ? 'warn' : 'info', 'drone registry snapshot timing', {
+        source,
+        count: drones.length,
+        durationMs: Math.round(totalMs * 10) / 10,
+        phases: phases.map((phase) => ({
+          name: phase.name,
+          durationMs: Math.round(phase.durationMs * 10) / 10,
+        })),
+      });
+    }
+    return snapshot;
   }
 
   const droneChatBroadcaster = new DroneChatBroadcaster({
@@ -5184,6 +5324,25 @@ async function startDroneHubApiServerWithLifecycle(
   });
   const droneRegistryBroadcaster = new DroneRegistryBroadcaster({
     buildSnapshot: async () => await buildDroneRegistrySnapshot('api:drones-events'),
+    onTiming: (timing) => {
+      const synchronousMs = timing.phases
+        .filter((phase) => phase.name !== 'buildSnapshot')
+        .reduce((total, phase) => total + phase.durationMs, 0);
+      logSynchronousHubWork('drone registry broadcaster formatting', synchronousMs, {
+        event: timing.event,
+        droneCount: timing.droneCount,
+        phases: timing.phases,
+      });
+      if (timing.totalMs < 250 && !hubPerformanceDebugEnabled()) return;
+      hubLog(timing.totalMs >= 250 ? 'warn' : 'info', 'drone registry broadcaster timing', {
+        ...timing,
+        totalMs: Math.round(timing.totalMs * 10) / 10,
+        phases: timing.phases.map((phase) => ({
+          ...phase,
+          durationMs: Math.round(phase.durationMs * 10) / 10,
+        })),
+      });
+    },
     writeSseEvent: writeHubSseEvent,
   });
   registerBackgroundResource('drone projection broadcasters', async () => {
@@ -5207,6 +5366,7 @@ async function startDroneHubApiServerWithLifecycle(
 
   const notifyCanonicalDroneRegistryWrite = () => {
     canonicalActiveModelCache = null;
+    canonicalSummaryModelCache = null;
     invalidateDroneSummaryRegistryCache();
     scheduleDroneSummaryMaintenance('registry-write', 0);
     scheduleDroneStatusRefresh('registry-write', 0);
@@ -5220,6 +5380,7 @@ async function startDroneHubApiServerWithLifecycle(
   );
   const notifyCanonicalDroneSummaryChange = () => {
     canonicalActiveModelCache = null;
+    canonicalSummaryModelCache = null;
     invalidateDroneSummaryRegistryCache();
     scheduleDroneRegistryBroadcasterRefresh();
   };

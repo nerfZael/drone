@@ -5,7 +5,11 @@ export type HubJsonResponder = (res: ServerResponse, status: number, body: unkno
 
 export function sendJson(res: ServerResponse, status: number, body: unknown): void {
   if (res.writableEnded) return;
-  const data = JSON.stringify(body, null, 2);
+  sendSerializedJson(res, status, JSON.stringify(body, null, 2));
+}
+
+export function sendSerializedJson(res: ServerResponse, status: number, data: string): void {
+  if (res.writableEnded) return;
   res.statusCode = status;
   res.setHeader('content-type', 'application/json; charset=utf-8');
   res.setHeader('cache-control', 'no-store');

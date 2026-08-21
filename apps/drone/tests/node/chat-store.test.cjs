@@ -105,7 +105,16 @@ describe('canonical chat and transcript repository', () => {
       requireHubDatabase().read((connection) =>
         connection.prepare("SELECT COUNT(*) AS count FROM hub_schema_migrations WHERE scope = 'chats'").get().count,
       ),
-      7,
+      10,
+    );
+    assert.ok(
+      requireHubDatabase().read((connection) =>
+        connection
+          .prepare(
+            "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_canonical_chat_turns_docker_snapshot'",
+          )
+          .get(),
+      ),
     );
   });
 
