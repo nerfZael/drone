@@ -5,7 +5,10 @@ import { createEditorRouteHandler } from '../src/hub/routes/editor-routes';
 import { createDroneLifecycleRouteHandler } from '../src/hub/routes/drone-lifecycle-routes';
 import { registerFleetRoutes } from '../src/hub/routes/fleet-routes';
 import { registerGroupRoutes } from '../src/hub/routes/group-routes';
-import { registerOperationalRoutes } from '../src/hub/routes/operational-routes';
+import {
+  normalizeChatLoadTelemetry,
+  registerOperationalRoutes,
+} from '../src/hub/routes/operational-routes';
 import { registerNativeChatRoutes } from '../src/hub/routes/native-chat-routes';
 import { registerSettingsRoutes } from '../src/hub/routes/settings-routes';
 import { registerSidebarRoutes } from '../src/hub/routes/sidebar-routes';
@@ -306,6 +309,151 @@ describe('extracted Hub route modules', () => {
       },
     });
     expect(logs[0].meta.milestones).not.toHaveProperty('injected');
+  });
+
+  test('normalizes bounded version 2 browser timing diagnostics', async () => {
+    const logs: any[] = [];
+    const oversizedLongTasks = Array.from({ length: 55 }, (_, index) => ({
+      startMs: index,
+      durationMs: 50,
+      overlapMs: 25,
+      leaked: 'ignored',
+    }));
+    const { router, request, responses } = routeHarness({
+      version: 2,
+      navigationId: 'navigation-v2',
+      source: 'chat',
+      target: { droneId: 'drone-alpha', chatName: 'default' },
+      durationMs: 1500,
+      status: 'completed',
+      surface: 'transcript',
+      cacheStatus: 'hit',
+      milestones: {
+        click: 0,
+        cached_content_available: 2,
+        cached_content_displayed: 5,
+        cached_content_painted: 20,
+        fresh_content_resolved: 1400,
+        fresh_content_painted: 1490,
+      },
+      content: {
+        cached: { availabilityMs: 2, displayMs: 5, paintMs: 20, itemCount: 4 },
+        fresh: { status: 'completed', resolutionMs: 1400, paintMs: 1490, itemCount: 5 },
+      },
+      capabilities: { resourceTiming: 'supported', longTasks: 'supported' },
+      longTasks: oversizedLongTasks,
+      longTaskCount: 55,
+      longTasksDropped: 5,
+      resourceEntriesDropped: 3,
+      requests: [
+        {
+          name: 'chat_state',
+          startMs: 20,
+          durationMs: 1390,
+          outcome: 'completed',
+          resourceTimingStatus: 'collected',
+          resourceTiming: {
+            startMs: 20.12,
+            durationMs: 1388.88,
+            initiatorType: 'fetch',
+            nextHopProtocol: 'h2',
+            deliveryType: 'cache',
+            workerStartMs: 1,
+            fetchStartMs: 2,
+            requestStartMs: 10,
+            responseStartMs: 1300,
+            responseEndMs: 1389,
+            transferSize: 0,
+            encodedBodySize: 1024,
+            decodedBodySize: 2048,
+            name: 'https://secret.example/private',
+            headers: { authorization: 'secret' },
+          },
+        },
+      ],
+    });
+    registerOperationalRoutes(router, {
+      resolveDroneOrPendingForReadRef: async () => null,
+      loadCanonicalActiveModel: async () => ({ drones: {} }),
+      summarizeAssistantChatIdle: () => null,
+      resolveGroqApiKeySettings: async () => ({ apiKey: null }),
+      resolveSpeechSettings: async () => ({
+        enabled: false,
+        muted: true,
+        volume: 1,
+        voice: 'troy',
+      }),
+      emitAssistantUiAction: () => {},
+      hubLog: (level, message, meta) => logs.push({ level, message, meta }),
+    });
+
+    expect(await request('POST', '/api/telemetry/chat-load')).toBe(true);
+    expect(responses).toEqual([{ status: 202, body: { ok: true } }]);
+    expect(logs[0].meta.longTasks).toHaveLength(50);
+    const loggedResourceTiming = logs[0].meta.requests[0].resourceTiming;
+    expect(typeof loggedResourceTiming).toBe('string');
+    expect(String(loggedResourceTiming).includes('secret')).toBe(false);
+    expect(String(loggedResourceTiming).includes('headers')).toBe(false);
+    expect(logs[0].meta).toMatchObject({
+      version: 2,
+      content: {
+        cached: { availabilityMs: 2, displayMs: 5, paintMs: 20, itemCount: 4 },
+        fresh: { status: 'completed', resolutionMs: 1400, paintMs: 1490, itemCount: 5 },
+      },
+      capabilities: { resourceTiming: 'supported', longTasks: 'supported' },
+      longTaskCount: 55,
+      longTasksDropped: 5,
+      resourceEntriesDropped: 3,
+      requests: [
+        {
+          resourceTimingStatus: 'collected',
+          resourceTiming: expect.any(String),
+        },
+      ],
+    });
+  });
+
+  test('drops inconsistent version 2 browser timing diagnostics', () => {
+    const normalized = normalizeChatLoadTelemetry({
+      version: 2,
+      navigationId: 'navigation-v2-invalid-fields',
+      source: 'chat',
+      target: { droneId: 'drone-alpha', chatName: 'default' },
+      durationMs: 100,
+      status: 'completed',
+      content: {
+        cached: { availabilityMs: '2', displayMs: null, itemCount: '4' },
+      },
+      longTasks: [
+        { startMs: 1, durationMs: 49, overlapMs: 50 },
+        { startMs: 2, durationMs: 50, overlapMs: 51 },
+        { startMs: 3, durationMs: 50, overlapMs: 20 },
+      ],
+      longTaskCount: '3',
+      requests: [
+        {
+          name: 'chat_state',
+          startMs: 1,
+          durationMs: 10,
+          outcome: 'completed',
+          resourceTimingStatus: 'collected',
+          resourceTiming: { startMs: null, durationMs: '10', nextHopProtocol: { value: 'h2' } },
+        },
+      ],
+    }) as any;
+
+    expect(normalized.content).toEqual({});
+    expect(normalized.longTasks).toEqual([{ startMs: 3, durationMs: 50, overlapMs: 20 }]);
+    expect(normalized.longTaskCount).toBe(1);
+    expect(normalized.requests).toEqual([
+      {
+        name: 'chat_state',
+        startMs: 1,
+        durationMs: 10,
+        outcome: 'completed',
+        resourceTimingStatus: 'not_found',
+      },
+    ]);
   });
 
   test('adds resolve, ensure, and history phases to Built-in chat bootstrap', async () => {

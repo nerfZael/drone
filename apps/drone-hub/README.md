@@ -88,6 +88,21 @@ diff -u /tmp/drone-hub-size-before.txt /tmp/drone-hub-size-after.txt
 
 This is intended as a local regression check for work such as lazy-loading Monaco, xterm, changes, assistant, and canvas code. It is not part of the required monorepo-wide checks.
 
+## Chat navigation telemetry
+
+The browser sends versioned, bounded chat-load telemetry to `/api/telemetry/chat-load`. Version 2 adds:
+
+- Resource Timing offsets for matching chat requests: worker, redirect, fetch, DNS, connection, TLS, request, interim response, response start, and response end when the browser exposes them. It also includes body/transfer sizes, initiator type, next-hop protocol, and delivery type.
+- Long tasks that overlap the active navigation, with their navigation-relative start, full duration, and overlap duration.
+- Separate cached-content availability, display, and paint timings, followed by fresh-content resolution, commit (when React reports one), and paint timings.
+- Capability and missing-entry statuses, plus dropped-record counts when application bounds are reached. Requests are capped at 24, retained resource candidates at 48, and long-task records at 50 per navigation.
+
+Resource URLs are used only inside the browser to correlate a timing entry with a known navigation request. URLs, query strings, headers, Resource Timing names, Long Task names, and Long Task attribution are not sent. The server accepts versions 1 and 2 and normalizes only known fields.
+
+These fields can show where browser-visible time accumulated: before fetch, in service-worker dispatch, DNS/connection/TLS setup, between request start and first response bytes, during response transfer, or while an overlapping main-thread task ran. A non-zero worker timestamp proves that the measured request entered the service-worker timing path. Connection phase boundaries describe what the browser exposed; only a positive difference between their start and end shows measured time in that phase. Equal boundaries can indicate connection reuse or no separately measured work. Cached-content fields prove when Drone Hub found and displayed its own transcript cache; they are separate from HTTP cache signals.
+
+They cannot, by themselves, prove which network hop, proxy, or server consumed request-to-response wait time; whether an omitted zero-valued phase means reuse, unsupported timing, or unavailable detail; or that a zero transfer size was definitely an HTTP cache hit. `nextHopProtocol` describes the browser's next hop, not necessarily the upstream server connection. Long Tasks report browser-defined tasks of at least 50 ms and show overlap, but do not prove that a particular task delayed a request or paint. Missing Resource Timing can mean an unavailable API, a full/evicted buffer, delayed entry creation, or failed correlation. React commit and double-`requestAnimationFrame` paint milestones are scheduling markers, not proof that pixels reached the screen, especially in hidden or throttled tabs.
+
 Current baseline from June 6, 2026:
 
 ```text

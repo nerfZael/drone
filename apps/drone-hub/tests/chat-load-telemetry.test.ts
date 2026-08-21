@@ -24,6 +24,114 @@ describe('chat load telemetry', () => {
         'lifecycle;dur=1.25, rows;desc="read";dur=8.4, invalid;dur=-1',
       ),
     ).toEqual({ lifecycle: 1.3, rows: 8.4 });
+    const phases = chatLoadTelemetryTesting.parseServerTiming(
+      [
+        '__proto__;dur=1',
+        'constructor;dur=1',
+        ...Array.from({ length: 30 }, (_, index) => `phase_${index};dur=${index}`),
+      ].join(','),
+    );
+    expect(Object.keys(phases ?? {})).toHaveLength(24);
+    expect(Object.prototype.hasOwnProperty.call(phases, '__proto__')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(phases, 'constructor')).toBe(false);
+  });
+
+  test('extracts supported Resource Timing fields without retaining the resource URL', () => {
+    const entry = {
+      name: 'https://hub.example/api/drones/secret/chats/private/state?token=secret',
+      entryType: 'resource',
+      startTime: 100,
+      duration: 80,
+      initiatorType: 'fetch',
+      nextHopProtocol: 'h2',
+      deliveryType: 'cache',
+      workerStart: 105,
+      fetchStart: 110,
+      domainLookupStart: 112,
+      domainLookupEnd: 114,
+      connectStart: 114,
+      secureConnectionStart: 116,
+      connectEnd: 120,
+      requestStart: 125,
+      responseStart: 170,
+      responseEnd: 180,
+      transferSize: 0,
+      encodedBodySize: 512,
+      decodedBodySize: 1024,
+    } as PerformanceResourceTiming;
+
+    const timing = chatLoadTelemetryTesting.resourceTimingFromEntry(entry, 90);
+    expect(timing).toEqual({
+      startMs: 10,
+      durationMs: 80,
+      initiatorType: 'fetch',
+      nextHopProtocol: 'h2',
+      deliveryType: 'cache',
+      workerStartMs: 5,
+      fetchStartMs: 10,
+      domainLookupStartMs: 12,
+      domainLookupEndMs: 14,
+      connectStartMs: 14,
+      secureConnectionStartMs: 16,
+      connectEndMs: 20,
+      requestStartMs: 25,
+      responseStartMs: 70,
+      responseEndMs: 80,
+      transferSize: 0,
+      encodedBodySize: 512,
+      decodedBodySize: 1024,
+    });
+    expect(JSON.stringify(timing)).not.toContain('secret');
+    expect(timing).not.toHaveProperty('name');
+  });
+
+  test('correlates the closest unused Resource Timing entry within the request window', () => {
+    const makeEntry = (startTime: number) =>
+      ({
+        name: 'http://localhost/api/drones/drone-1/chats/default/state',
+        entryType: 'resource',
+        startTime,
+        duration: 10,
+      }) as PerformanceResourceTiming;
+    const earlier = makeEntry(100);
+    const closest = makeEntry(199);
+    const entries = [earlier, closest, makeEntry(700)];
+    const used = new Set<string>();
+
+    expect(
+      chatLoadTelemetryTesting.correlateResourceEntry(
+        entries,
+        ['http://localhost/api/drones/drone-1/chats/default/state'],
+        200,
+        used,
+      ),
+    ).toBe(closest);
+    expect(
+      chatLoadTelemetryTesting.correlateResourceEntry(
+        entries,
+        ['http://localhost/api/drones/drone-1/chats/other/state'],
+        200,
+        used,
+      ),
+    ).toBeUndefined();
+  });
+
+  test('rejects buffered Resource Timing entries that started before navigation', () => {
+    expect(
+      chatLoadTelemetryTesting.resourceStartedDuringNavigation({ startTime: 99 }, 100),
+    ).toBe(false);
+    expect(
+      chatLoadTelemetryTesting.resourceStartedDuringNavigation({ startTime: 100 }, 100),
+    ).toBe(true);
+  });
+
+  test('clips a long task to its overlap with the navigation', () => {
+    expect(
+      chatLoadTelemetryTesting.longTaskFromEntry({ startTime: 90, duration: 30 }, 100, 120),
+    ).toEqual({ startMs: 0, durationMs: 30, overlapMs: 20 });
+    expect(
+      chatLoadTelemetryTesting.longTaskFromEntry({ startTime: 50, duration: 10 }, 100, 120),
+    ).toBeUndefined();
   });
 
   test('correlates target requests and reports after primary content is painted', async () => {
@@ -60,7 +168,7 @@ describe('chat load telemetry', () => {
 
       expect(reports).toHaveLength(1);
       expect(reports[0]).toMatchObject({
-        version: 1,
+        version: 2,
         source: 'chat',
         target,
         status: 'completed',
@@ -85,11 +193,150 @@ describe('chat load telemetry', () => {
             parseMs: 0.2,
             outcome: 'completed',
             serverTiming: { lifecycle: 2.5, rows: 4 },
+            resourceTimingStatus: expect.any(String),
           },
         ],
+        capabilities: {
+          resourceTiming: expect.any(String),
+          longTasks: expect.any(String),
+        },
       });
     } finally {
       globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('reports cached display separately from fresh resolution and paint', async () => {
+    const originalFetch = globalThis.fetch;
+    const reports: any[] = [];
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      reports.push(JSON.parse(String(init?.body ?? '{}')));
+      return new Response('{}', { status: 202 });
+    }) as typeof fetch;
+    try {
+      beginChatLoadNavigation({ target, source: 'chat' });
+      markChatLoadCacheHit(target, 'transcript', 8);
+      markChatLoadContentCommitted(target, 'transcript');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      markChatLoadConfigResolved(target, { surface: 'transcript' });
+      markChatLoadPrimaryResolved(target, {
+        surface: 'transcript',
+        cacheStatus: 'hit',
+        itemCount: 9,
+      });
+      markChatLoadContentCommitted(target, 'transcript');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(reports).toHaveLength(1);
+      expect(reports[0]).toMatchObject({
+        version: 2,
+        content: {
+          cached: {
+            availabilityMs: expect.any(Number),
+            displayMs: expect.any(Number),
+            paintMs: expect.any(Number),
+            itemCount: 8,
+          },
+          fresh: {
+            status: 'completed',
+            resolutionMs: expect.any(Number),
+            commitMs: expect.any(Number),
+            paintMs: expect.any(Number),
+            itemCount: 9,
+          },
+        },
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('bounds observed long tasks and tolerates unavailable browser APIs', async () => {
+    const originalFetch = globalThis.fetch;
+    const originalObserver = globalThis.PerformanceObserver;
+    const reports: any[] = [];
+    const observers: Array<{ type: string; emit: (entries: PerformanceEntry[]) => void }> = [];
+    class MockPerformanceObserver {
+      static supportedEntryTypes = ['resource', 'longtask'];
+      private callback: PerformanceObserverCallback;
+      private records: PerformanceEntry[] = [];
+      constructor(callback: PerformanceObserverCallback) {
+        this.callback = callback;
+      }
+      observe(options: PerformanceObserverInit) {
+        const observer = {
+          type: String(options.type ?? ''),
+          emit: (entries: PerformanceEntry[]) => {
+            this.callback(
+              { getEntries: () => entries } as PerformanceObserverEntryList,
+              this as any,
+            );
+          },
+        };
+        observers.push(observer);
+      }
+      takeRecords() {
+        return this.records.splice(0);
+      }
+      disconnect() {}
+    }
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      reports.push(JSON.parse(String(init?.body ?? '{}')));
+      return new Response('{}', { status: 202 });
+    }) as typeof fetch;
+    globalThis.PerformanceObserver = MockPerformanceObserver as any;
+    try {
+      beginChatLoadNavigation({ target, source: 'programmatic' });
+      const taskStart = performance.now() - 1;
+      const longTaskObserver = observers.find((observer) => observer.type === 'longtask');
+      longTaskObserver?.emit(
+        Array.from(
+          { length: chatLoadTelemetryTesting.maxLongTasks + 5 },
+          (_, index) => ({ startTime: taskStart, duration: 50 + index }) as PerformanceEntry,
+        ),
+      );
+      markChatLoadConfigResolved(target, { surface: 'transcript' });
+      markChatLoadPrimaryResolved(target, { surface: 'transcript' });
+      markChatLoadContentCommitted(target, 'transcript');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(reports[0].longTasks).toHaveLength(chatLoadTelemetryTesting.maxLongTasks);
+      expect(reports[0].longTaskCount).toBe(chatLoadTelemetryTesting.maxLongTasks + 5);
+      expect(reports[0].longTasksDropped).toBe(5);
+    } finally {
+      globalThis.fetch = originalFetch;
+      globalThis.PerformanceObserver = originalObserver;
+    }
+
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      reports.push(JSON.parse(String(init?.body ?? '{}')));
+      return new Response('{}', { status: 202 });
+    }) as typeof fetch;
+    globalThis.PerformanceObserver = undefined as any;
+    const getEntriesByNameDescriptor = Object.getOwnPropertyDescriptor(
+      performance,
+      'getEntriesByName',
+    );
+    Object.defineProperty(performance, 'getEntriesByName', {
+      configurable: true,
+      value: undefined,
+    });
+    try {
+      beginChatLoadNavigation({ target, source: 'programmatic' });
+      markChatLoadConfigResolved(target, { surface: 'transcript' });
+      markChatLoadPrimaryResolved(target, { surface: 'transcript' });
+      markChatLoadContentCommitted(target, 'transcript');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(reports.at(-1).capabilities.longTasks).toBe('unavailable');
+      expect(reports.at(-1).capabilities.resourceTiming).toBe('unavailable');
+    } finally {
+      globalThis.fetch = originalFetch;
+      globalThis.PerformanceObserver = originalObserver;
+      if (getEntriesByNameDescriptor) {
+        Object.defineProperty(performance, 'getEntriesByName', getEntriesByNameDescriptor);
+      } else {
+        delete (performance as any).getEntriesByName;
+      }
     }
   });
 
