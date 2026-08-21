@@ -16,6 +16,11 @@ import { isDroneStartingOrSeeding } from './helpers';
 import { fetchJson, isNotFoundError } from './hooks';
 import { useAgentModelCatalog } from './use-agent-model-catalog';
 import { markChatLoadConfigResolved, type ChatLoadSurface } from './chat-load-telemetry';
+import {
+  deleteChatRuntimeCache,
+  readFreshChatRuntimeCache,
+  writeChatRuntimeCache,
+} from './chat-runtime-cache';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 
@@ -38,26 +43,67 @@ export function useChatConfigState({
   droneById,
   requestJson,
 }: UseChatConfigStateArgs) {
+  const selectedChatInfoKey = chatSelectionKey(selectedDrone, selectedChat);
+  const selectedDroneSummary = selectedDrone ? (droneById[selectedDrone] ?? null) : null;
+  const hasSelectedDroneSummary = selectedDroneSummary !== null;
+  const selectedDroneHubPhase = selectedDroneSummary?.hubPhase ?? null;
+  const selectedDroneProvisioning = isDroneStartingOrSeeding(selectedDroneHubPhase);
+  const selectedDroneStartupFailed = selectedDroneHubPhase === 'error';
+  const selectedDroneHasChatList = Array.isArray(selectedDroneSummary?.chats);
+  const selectedDroneChatsKey = React.useMemo(() => {
+    return chatNamesForConfigSelection({
+      chats: selectedDroneSummary?.chats,
+      workflowChats: selectedDroneSummary?.workflowChats,
+    }).join('\u0000');
+  }, [selectedDroneSummary?.chats, selectedDroneSummary?.workflowChats]);
+  const selectedChatListed =
+    !selectedDroneHasChatList || selectedDroneChatsKey.split('\u0000').includes(selectedChat);
+  const selectedChatIsDraft =
+    selectedDroneSummary?.draft === true ||
+    selectedDroneSummary?.hubPhase === 'draft' ||
+    selectedDroneSummary?.draftChats?.[selectedChat || 'default'] === true;
+  const chatConfigEligible =
+    hasSelectedDroneSummary &&
+    !selectedDroneProvisioning &&
+    !selectedDroneStartupFailed &&
+    !selectedChatIsDraft &&
+    selectedChatListed;
+  const cachedChatInfo =
+    chatConfigEligible
+      ? (readFreshChatRuntimeCache(selectedChatInfoKey)?.chatInfo ?? null)
+      : null;
   const [chatInfoState, setChatInfoState] = React.useState<{
     key: string;
     value: ChatInfo | null;
   }>({ key: '', value: null });
-  const selectedChatInfoKey = chatSelectionKey(selectedDrone, selectedChat);
-  const chatInfo = chatInfoForSelection(
-    chatInfoState.value,
-    chatInfoState.key,
-    selectedDrone,
-    selectedChat,
-  );
+  const chatInfo = chatConfigEligible
+    ? chatInfoForSelection(
+        chatInfoState.value,
+        chatInfoState.key,
+        selectedDrone,
+        selectedChat,
+      ) ??
+      chatInfoForSelection(
+        cachedChatInfo,
+        selectedChatInfoKey,
+        selectedDrone,
+        selectedChat,
+      )
+    : null;
   const setChatInfo = React.useCallback<React.Dispatch<React.SetStateAction<ChatInfo | null>>>(
     (next) => {
-      setChatInfoState((previous) => ({
-        key: selectedChatInfoKey,
-        value:
+      setChatInfoState((previous) => {
+        const value =
           typeof next === 'function'
-            ? next(previous.key === selectedChatInfoKey ? previous.value : null)
-            : next,
-      }));
+            ? next(
+                previous.key === selectedChatInfoKey
+                  ? previous.value
+                  : (readFreshChatRuntimeCache(selectedChatInfoKey)?.chatInfo ?? null),
+              )
+            : next;
+        if (value) writeChatRuntimeCache(selectedChatInfoKey, { chatInfo: value });
+        return { key: selectedChatInfoKey, value };
+      });
     },
     [selectedChatInfoKey],
   );
@@ -104,12 +150,6 @@ export function useChatConfigState({
     | 'blip'
     | null = chatInfo?.agent?.kind === 'builtin' ? chatInfo.agent.id : null;
 
-  const selectedDroneSummary = selectedDrone ? (droneById[selectedDrone] ?? null) : null;
-  const hasSelectedDroneSummary = selectedDroneSummary !== null;
-  const selectedDroneHubPhase = selectedDroneSummary?.hubPhase ?? null;
-  const selectedDroneProvisioning = isDroneStartingOrSeeding(selectedDroneHubPhase);
-  const selectedDroneStartupFailed = selectedDroneHubPhase === 'error';
-  const selectedDroneHasChatList = Array.isArray(selectedDroneSummary?.chats);
   const selectedDroneRuntime =
     String(selectedDroneSummary?.runtime ?? '')
       .trim()
@@ -124,13 +164,6 @@ export function useChatConfigState({
       hasSelectedDroneSummary &&
       !selectedDroneProvisioning,
   });
-  const selectedDroneChatsKey = React.useMemo(() => {
-    return chatNamesForConfigSelection({
-      chats: selectedDroneSummary?.chats,
-      workflowChats: selectedDroneSummary?.workflowChats,
-    }).join('\u0000');
-  }, [selectedDroneSummary?.chats, selectedDroneSummary?.workflowChats]);
-
   React.useEffect(() => {
     if (!selectedDrone || !selectedChat) {
       setChatInfo(null);
@@ -157,13 +190,28 @@ export function useChatConfigState({
       return;
     }
     // Avoid 404 spam: don't fetch chat info until the chat exists on this drone.
-    if (selectedDroneHasChatList && !selectedDroneChatsKey.split('\u0000').includes(selectedChat)) {
+    if (!selectedChatListed) {
+      deleteChatRuntimeCache(selectedChatInfoKey);
       setChatInfo(null);
       setChatInfoError(null);
       setLoadingChatInfo(false);
       return;
     }
     let mounted = true;
+    if (cachedChatInfo) {
+      markChatLoadConfigResolved(
+        { droneId: selectedDrone, chatName: selectedChat },
+        {
+          surface: chatLoadSurfaceForAgent(cachedChatInfo.agent),
+          agentKind:
+            cachedChatInfo.agent.kind === 'builtin'
+              ? `builtin:${cachedChatInfo.agent.id}`
+              : cachedChatInfo.agent.kind,
+          runtime: selectedDroneRuntime,
+          source: 'cache',
+        },
+      );
+    }
     setLoadingChatInfo(true);
     setChatInfoError(null);
     fetchJson<any>(
@@ -172,6 +220,16 @@ export function useChatConfigState({
       .then((data) => {
         if (!mounted) return;
         const nextChatInfo = normalizeChatInfoPayload(data);
+        if (
+          !chatInfoForSelection(
+            nextChatInfo,
+            selectedChatInfoKey,
+            selectedDrone,
+            selectedChat,
+          )
+        ) {
+          throw new Error('Chat metadata response did not match the selected chat.');
+        }
         setChatInfo(nextChatInfo);
         setChatInfoError(null);
         markChatLoadConfigResolved(
@@ -189,11 +247,22 @@ export function useChatConfigState({
       .catch((e: any) => {
         if (!mounted) return;
         const msg = e?.message ?? String(e);
-        setChatInfo(null);
+        if (isNotFoundError(e)) deleteChatRuntimeCache(selectedChatInfoKey);
+        setChatInfo(isNotFoundError(e) ? null : cachedChatInfo);
         setChatInfoError(isNotFoundError(e) ? null : msg);
         markChatLoadConfigResolved(
           { droneId: selectedDrone, chatName: selectedChat },
-          { surface: 'unavailable', runtime: selectedDroneRuntime, status: 'error' },
+          cachedChatInfo && !isNotFoundError(e)
+            ? {
+                surface: chatLoadSurfaceForAgent(cachedChatInfo.agent),
+                agentKind:
+                  cachedChatInfo.agent.kind === 'builtin'
+                    ? `builtin:${cachedChatInfo.agent.id}`
+                    : cachedChatInfo.agent.kind,
+                runtime: selectedDroneRuntime,
+                status: 'error',
+              }
+            : { surface: 'unavailable', runtime: selectedDroneRuntime, status: 'error' },
         );
       })
       .finally(() => {
@@ -212,6 +281,8 @@ export function useChatConfigState({
     selectedDroneStartupFailed,
     selectedDroneHasChatList,
     selectedDroneChatsKey,
+    selectedChatInfoKey,
+    selectedChatListed,
     selectedDroneRuntime,
   ]);
 

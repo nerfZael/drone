@@ -42,6 +42,13 @@ function emptyState(identity: string, droneId: string): ChatMcpAccessState {
   };
 }
 
+export function shouldLoadChatMcpAccess(
+  permissionsOpen: boolean,
+  chatSupportsMcpAccess = true,
+): boolean {
+  return permissionsOpen && chatSupportsMcpAccess;
+}
+
 export function withChatMcpScopeMode(
   accessScope: NativeChatAccessScope,
   kind: 'read' | 'write' | 'execute',

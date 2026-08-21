@@ -54,6 +54,17 @@ describe('native chat selection state', () => {
     ).toBeNull();
   });
 
+  test('does not reuse metadata whose payload belongs to another chat name', () => {
+    const previousChat = {
+      name: 'capabilities-and-tools',
+      chat: 'first',
+      agent: { kind: 'native' },
+    } as any;
+    expect(
+      chatInfoForSelection(previousChat, `${drone.id}\u0000second`, drone.id, 'second'),
+    ).toBeNull();
+  });
+
   test('uses matching native chat metadata immediately when available', () => {
     const nativeChat = {
       name: 'capabilities-and-tools',

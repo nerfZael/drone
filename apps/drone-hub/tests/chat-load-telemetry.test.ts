@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import {
   beginChatLoadNavigation,
   chatLoadTelemetryTesting,
+  markChatLoadCacheHit,
   markChatLoadConfigResolved,
   markChatLoadContentCommitted,
   markChatLoadPrimaryResolved,
@@ -95,5 +96,67 @@ describe('chat load telemetry', () => {
   test('ignores requests for another chat', () => {
     beginChatLoadNavigation({ target, source: 'drone' });
     expect(observeChatLoadRequest('/api/drones/drone-1/chats/other/state')).toBeNull();
+  });
+
+  test('records cached display before fresh config and content reconcile', async () => {
+    const originalFetch = globalThis.fetch;
+    const reports: any[] = [];
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      reports.push(JSON.parse(String(init?.body ?? '{}')));
+      return new Response(JSON.stringify({ ok: true }), { status: 202 });
+    }) as typeof fetch;
+    try {
+      beginChatLoadNavigation({ target, source: 'chat' });
+      markChatLoadSelectionCommitted(target);
+      markChatLoadConfigResolved(target, {
+        surface: 'transcript',
+        agentKind: 'builtin:codex',
+        runtime: 'container',
+        source: 'cache',
+      });
+      markChatLoadCacheHit(target, 'transcript', 8);
+      markChatLoadContentCommitted(target, 'transcript');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(reports).toHaveLength(0);
+
+      markChatLoadConfigResolved(target, {
+        surface: 'transcript',
+        agentKind: 'builtin:codex',
+        runtime: 'container',
+      });
+      markChatLoadPrimaryResolved(target, {
+        surface: 'transcript',
+        cacheStatus: 'hit',
+        itemCount: 9,
+      });
+      markChatLoadContentCommitted(target, 'transcript');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(reports).toHaveLength(1);
+      const cachedPainted = reports[0].milestones.cached_content_painted;
+      const freshReconciled = reports[0].milestones.fresh_content_reconciled;
+      expect(typeof cachedPainted).toBe('number');
+      expect(typeof freshReconciled).toBe('number');
+      expect(cachedPainted).toBeLessThanOrEqual(freshReconciled);
+      expect(reports[0]).toMatchObject({
+        status: 'completed',
+        surface: 'transcript',
+        cacheStatus: 'hit',
+        itemCount: 9,
+        milestones: {
+          cached_config_available: expect.any(Number),
+          cached_content_available: expect.any(Number),
+          cached_content_committed: expect.any(Number),
+          cached_content_painted: expect.any(Number),
+          config_reconciled: expect.any(Number),
+          fresh_content_reconciled: expect.any(Number),
+          content_committed: expect.any(Number),
+          content_painted: expect.any(Number),
+        },
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
