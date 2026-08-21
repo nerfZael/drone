@@ -4087,7 +4087,12 @@ async function startDroneHubApiServerWithLifecycle(
   const apiToken = String(opts.apiToken ?? '').trim();
   if (!apiToken) throw new Error('missing hub API token');
   const mcpToken = String(opts.mcpToken ?? '').trim();
-  if (mcpToken) await revokeLegacyProjectedDroneMcpTokens();
+  if (mcpToken) {
+    await revokeLegacyProjectedDroneMcpTokens();
+    // Complete the one-time catalog migration before the request listener starts.
+    // Latency-sensitive MCP access reads can then stay canonical and read-only.
+    await listMcpServers();
+  }
   const renameDroneCommand = createRenameDroneCommand({
     displayNameMaxLength: DRONE_DISPLAY_NAME_MAX_LEN,
     findDroneIdByRef,
