@@ -120,13 +120,17 @@ export function createDroneStatusRuntime(deps: DroneStatusRuntimeDependencies) {
         error: error?.message ?? String(error),
       });
     } finally {
-      deps.onTiming?.({
-        source,
-        droneCount,
-        changedCount,
-        totalMs: performance.now() - startedAt,
-        phases,
-      });
+      try {
+        deps.onTiming?.({
+          source,
+          droneCount,
+          changedCount,
+          totalMs: performance.now() - startedAt,
+          phases,
+        });
+      } catch {
+        // Diagnostics must not change refresh behavior.
+      }
     }
   }
 
@@ -269,6 +273,7 @@ function sameSummary(
   return (
     left.hostPort === right.hostPort &&
     left.statusOk === right.statusOk &&
+    JSON.stringify(left.status) === JSON.stringify(right.status) &&
     (left.statusError ?? '') === (right.statusError ?? '') &&
     Boolean(left.statusChecking) === Boolean(right.statusChecking)
   );

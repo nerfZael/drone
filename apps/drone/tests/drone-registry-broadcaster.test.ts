@@ -135,4 +135,26 @@ describe('drone registry broadcaster', () => {
       },
     });
   });
+
+  test('continues refreshing when timing diagnostics fail', async () => {
+    let buildCount = 0;
+    const events: string[] = [];
+    const broadcaster = new DroneRegistryBroadcaster({
+      buildSnapshot: async () => ({
+        ok: true,
+        drones: [{ id: 'drone-1', version: ++buildCount }],
+      }),
+      onTiming: () => {
+        throw new Error('timing failed');
+      },
+      writeSseEvent: (_response, event) => events.push(event),
+    });
+    broadcaster.clients.add({ destroyed: false, writableEnded: false } as any);
+
+    await broadcaster.refresh();
+    await broadcaster.refresh();
+
+    expect(buildCount).toBe(2);
+    expect(events).toEqual(['snapshot', 'delta']);
+  });
 });

@@ -22,6 +22,7 @@ describe('drone status runtime', () => {
     const timings: any[] = [];
     let activeProbes = 0;
     let maxActiveProbes = 0;
+    let processRunning = true;
     const failingPorts = new Set<number>();
     const runtime = createDroneStatusRuntime({
       loadModel: async () => ({ drones }),
@@ -37,7 +38,7 @@ describe('drone status runtime', () => {
         await new Promise((resolve) => setTimeout(resolve, 1));
         activeProbes -= 1;
         if (failingPorts.has(hostPort)) throw new Error('offline');
-        return { state: 'ready' };
+        return { state: 'ready', process: { running: processRunning } };
       },
       resolveHostPort: async () => null,
     });
@@ -49,7 +50,7 @@ describe('drone status runtime', () => {
     expect(runtime.cachedForEntry(drones['drone-0'])).toMatchObject({
       hostPort: 10_000,
       statusOk: true,
-      status: { state: 'ready' },
+      status: { state: 'ready', process: { running: true } },
       statusError: null,
     });
     expect(timings[0]).toMatchObject({
@@ -64,9 +65,13 @@ describe('drone status runtime', () => {
     await runtime.refreshNow('unchanged');
     expect(changedSources).toEqual(['first']);
 
+    processRunning = false;
+    await runtime.refreshNow('status-payload-update');
+    expect(changedSources).toEqual(['first', 'status-payload-update']);
+
     failingPorts.add(10_000);
     await runtime.refreshNow('status-update');
-    expect(changedSources).toEqual(['first', 'status-update']);
+    expect(changedSources).toEqual(['first', 'status-payload-update', 'status-update']);
     expect(runtime.cachedForEntry(drones['drone-0'])).toMatchObject({
       statusOk: false,
       statusError: 'offline',
@@ -102,5 +107,23 @@ describe('drone status runtime', () => {
       statusChecking: true,
     });
     expect(probes).toBe(0);
+  });
+
+  test('ignores timing callback failures', async () => {
+    const runtime = createDroneStatusRuntime({
+      loadModel: async () => ({ drones: {} }),
+      log: () => {},
+      makeClient: () => ({}),
+      normalizeDroneId: (value) => String(value ?? ''),
+      normalizeRuntime: (value) => String(value ?? ''),
+      onChanged: () => {},
+      onTiming: () => {
+        throw new Error('timing failed');
+      },
+      readStatus: async () => ({}),
+      resolveHostPort: async () => null,
+    });
+
+    await runtime.refreshNow('timing-failure');
   });
 });

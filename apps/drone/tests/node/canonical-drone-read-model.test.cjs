@@ -179,6 +179,43 @@ test('canonical summary read model keeps a large fleet plus startup and draft dr
   assert.equal(model.pending['draft-drone'].draft, true);
 });
 
+test('canonical summary read model compares offset timestamps chronologically', async () => {
+  useTempDataDir();
+  const lifecycle = await getDroneLifecycleRepository();
+  await lifecycle.upsert('real', 'drone-a', {
+    id: 'drone-a',
+    name: 'Drone A',
+    runtime: 'host',
+  });
+  await upsertChatInStore({ droneId: 'drone-a', chatName: 'default', chatEntry: {} });
+  await upsertTranscriptTurnInStore({
+    droneId: 'drone-a',
+    chatName: 'default',
+    turn: {
+      id: 'turn-early',
+      at: '2026-01-01T10:00:00+14:00',
+      prompt: 'earlier',
+      ok: true,
+      output: 'earlier',
+    },
+  });
+  await upsertTranscriptTurnInStore({
+    droneId: 'drone-a',
+    chatName: 'default',
+    turn: {
+      id: 'turn-late',
+      at: '2026-01-01T00:30:00-12:00',
+      prompt: 'later',
+      ok: true,
+      output: 'later',
+    },
+  });
+
+  const model = readCanonicalDroneSummaryModel();
+
+  assert.equal(model.drones['drone-a'].chats.default.turns[0].at, '2026-01-01T12:30:00.000Z');
+});
+
 test('canonical active drone read model bounds history', async () => {
   useTempDataDir();
   const lifecycle = await getDroneLifecycleRepository();
@@ -233,10 +270,12 @@ test('canonical active drone read model tolerates a malformed stored payload', a
   });
   await requireHubDatabase().writeTransaction('corrupt turn fixture', (connection) => {
     connection.exec('DROP TRIGGER active_chat_message_search_turn_update');
-    connection.prepare(`UPDATE canonical_chat_turns SET turn_json = '{malformed'
+    connection.prepare(`UPDATE canonical_chat_turns SET turn_json = '{malformed "dockerSnapshot"'
       WHERE drone_id = 'drone-a' AND chat_name = 'default' AND turn_id = 'turn-1'`).run();
   });
 
   const turns = readCanonicalActiveDroneModel().drones['drone-a'].chats.default.turns;
   assert.deepEqual(turns, [{}]);
+  const summaryTurns = readCanonicalDroneSummaryModel().drones['drone-a'].chats.default.turns;
+  assert.deepEqual(summaryTurns, [{ at: '2026-07-10T10:00:00.000Z' }]);
 });

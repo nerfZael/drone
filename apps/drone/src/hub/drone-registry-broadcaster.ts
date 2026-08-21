@@ -141,12 +141,16 @@ export class DroneRegistryBroadcaster {
       publishedEvent = 'stream-error';
       return null;
     } finally {
-      this.deps.onTiming?.({
-        totalMs: performance.now() - startedAt,
-        droneCount,
-        event: publishedEvent,
-        phases,
-      });
+      try {
+        this.deps.onTiming?.({
+          totalMs: performance.now() - startedAt,
+          droneCount,
+          event: publishedEvent,
+          phases,
+        });
+      } catch {
+        // Diagnostics must not wedge future refreshes.
+      }
       this.busy = false;
       if (this.refreshPending) {
         const broadcastSnapshot = this.pendingBroadcastSnapshot;

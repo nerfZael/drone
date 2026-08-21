@@ -36,7 +36,7 @@ type PromptRow = {
 type SummaryTurnRow = {
   drone_id: string;
   chat_name: string;
-  latest_at: string | null;
+  latest_julian_day: number | null;
 };
 
 type ActiveSnapshotRow = {
@@ -104,6 +104,14 @@ function parseObject(raw: string): Record<string, any> {
   } catch {
     return {};
   }
+}
+
+function isoFromJulianDay(raw: number | null): string | null {
+  const julianDay = Number(raw);
+  if (!Number.isFinite(julianDay) || julianDay <= 0) return null;
+  const unixMs = Math.round((julianDay - 2_440_587.5) * 86_400_000);
+  const value = new Date(unixMs);
+  return Number.isFinite(value.getTime()) ? value.toISOString() : null;
 }
 
 function hasTable(connection: HubDatabaseConnection, table: string): boolean {
@@ -377,7 +385,11 @@ export function readCanonicalDroneSummaryModel(
           connection
             .prepare(
               `SELECT drone_id,chat_name,
-                MAX(MAX(COALESCE(completed_at, ''), COALESCE(prompt_at, ''), at)) AS latest_at
+                MAX(MAX(
+                  COALESCE(julianday(completed_at), 0),
+                  COALESCE(julianday(prompt_at), 0),
+                  COALESCE(julianday(at), 0)
+                )) AS latest_julian_day
               FROM canonical_chat_turns
               GROUP BY drone_id,chat_name
               ORDER BY drone_id,chat_name`,
@@ -389,7 +401,8 @@ export function readCanonicalDroneSummaryModel(
       for (const row of turnRows) {
         const chat = chats.get(chatKey(row.drone_id, row.chat_name));
         if (!chat) continue;
-        chat.turns.push(row.latest_at ? { at: row.latest_at } : {});
+        const latestAt = isoFromJulianDay(row.latest_julian_day);
+        chat.turns.push(latestAt ? { at: latestAt } : {});
       }
       onPhase?.({
         name: 'turnParsing',
