@@ -24,6 +24,16 @@ describe('chat load telemetry', () => {
         'lifecycle;dur=1.25, rows;desc="read";dur=8.4, invalid;dur=-1',
       ),
     ).toEqual({ lifecycle: 1.3, rows: 8.4 });
+    const phases = chatLoadTelemetryTesting.parseServerTiming(
+      [
+        '__proto__;dur=1',
+        'constructor;dur=1',
+        ...Array.from({ length: 30 }, (_, index) => `phase_${index};dur=${index}`),
+      ].join(','),
+    );
+    expect(Object.keys(phases ?? {})).toHaveLength(24);
+    expect(Object.prototype.hasOwnProperty.call(phases, '__proto__')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(phases, 'constructor')).toBe(false);
   });
 
   test('extracts supported Resource Timing fields without retaining the resource URL', () => {
@@ -104,6 +114,15 @@ describe('chat load telemetry', () => {
         used,
       ),
     ).toBeUndefined();
+  });
+
+  test('rejects buffered Resource Timing entries that started before navigation', () => {
+    expect(
+      chatLoadTelemetryTesting.resourceStartedDuringNavigation({ startTime: 99 }, 100),
+    ).toBe(false);
+    expect(
+      chatLoadTelemetryTesting.resourceStartedDuringNavigation({ startTime: 100 }, 100),
+    ).toBe(true);
   });
 
   test('clips a long task to its overlap with the navigation', () => {

@@ -5,7 +5,10 @@ import { createEditorRouteHandler } from '../src/hub/routes/editor-routes';
 import { createDroneLifecycleRouteHandler } from '../src/hub/routes/drone-lifecycle-routes';
 import { registerFleetRoutes } from '../src/hub/routes/fleet-routes';
 import { registerGroupRoutes } from '../src/hub/routes/group-routes';
-import { registerOperationalRoutes } from '../src/hub/routes/operational-routes';
+import {
+  normalizeChatLoadTelemetry,
+  registerOperationalRoutes,
+} from '../src/hub/routes/operational-routes';
 import { registerNativeChatRoutes } from '../src/hub/routes/native-chat-routes';
 import { registerSettingsRoutes } from '../src/hub/routes/settings-routes';
 import { registerSidebarRoutes } from '../src/hub/routes/sidebar-routes';
@@ -408,6 +411,49 @@ describe('extracted Hub route modules', () => {
         },
       ],
     });
+  });
+
+  test('drops inconsistent version 2 browser timing diagnostics', () => {
+    const normalized = normalizeChatLoadTelemetry({
+      version: 2,
+      navigationId: 'navigation-v2-invalid-fields',
+      source: 'chat',
+      target: { droneId: 'drone-alpha', chatName: 'default' },
+      durationMs: 100,
+      status: 'completed',
+      content: {
+        cached: { availabilityMs: '2', displayMs: null, itemCount: '4' },
+      },
+      longTasks: [
+        { startMs: 1, durationMs: 49, overlapMs: 50 },
+        { startMs: 2, durationMs: 50, overlapMs: 51 },
+        { startMs: 3, durationMs: 50, overlapMs: 20 },
+      ],
+      longTaskCount: '3',
+      requests: [
+        {
+          name: 'chat_state',
+          startMs: 1,
+          durationMs: 10,
+          outcome: 'completed',
+          resourceTimingStatus: 'collected',
+          resourceTiming: { startMs: null, durationMs: '10', nextHopProtocol: { value: 'h2' } },
+        },
+      ],
+    }) as any;
+
+    expect(normalized.content).toEqual({});
+    expect(normalized.longTasks).toEqual([{ startMs: 3, durationMs: 50, overlapMs: 20 }]);
+    expect(normalized.longTaskCount).toBe(1);
+    expect(normalized.requests).toEqual([
+      {
+        name: 'chat_state',
+        startMs: 1,
+        durationMs: 10,
+        outcome: 'completed',
+        resourceTimingStatus: 'not_found',
+      },
+    ]);
   });
 
   test('adds resolve, ensure, and history phases to Built-in chat bootstrap', async () => {

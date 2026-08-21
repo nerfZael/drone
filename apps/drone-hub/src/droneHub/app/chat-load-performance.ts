@@ -309,6 +309,13 @@ export function longTaskFromEntry(
   };
 }
 
+export function resourceStartedDuringNavigation(
+  entry: Pick<PerformanceEntry, 'startTime'>,
+  navigationStartedMonoMs: number,
+): boolean {
+  return Number.isFinite(entry.startTime) && entry.startTime >= navigationStartedMonoMs;
+}
+
 function addResourceEntries(
   state: ChatLoadPerformanceState,
   entries: PerformanceEntry[],
@@ -318,7 +325,7 @@ function addResourceEntries(
   for (const entry of entries as ResourceTimingLike[]) {
     if (
       !isNavigationResource(entry.name) ||
-      entry.startTime < navigationStartedMonoMs - RESOURCE_START_MATCH_TOLERANCE_MS
+      !resourceStartedDuringNavigation(entry, navigationStartedMonoMs)
     ) {
       continue;
     }

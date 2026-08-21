@@ -64,6 +64,10 @@ function boundedTelemetryMs(value: unknown, max = 300_000): number | undefined {
   return Math.round(duration * 10) / 10;
 }
 
+function boundedV2TelemetryMs(value: unknown, max = 300_000): number | undefined {
+  return typeof value === 'number' ? boundedTelemetryMs(value, max) : undefined;
+}
+
 export function normalizeChatLoadTelemetry(raw: unknown): Record<string, unknown> | null {
   const body = raw && typeof raw === 'object' ? (raw as any) : null;
   if (!body || (body.version !== 1 && body.version !== 2)) return null;
@@ -120,27 +124,34 @@ export function normalizeChatLoadTelemetry(raw: unknown): Record<string, unknown
         item?.resourceTiming && typeof item.resourceTiming === 'object' ? item.resourceTiming : {},
       )) {
         if (RESOURCE_TIMING_MS_FIELDS.has(field)) {
-          const duration = boundedTelemetryMs(value);
+          const duration = boundedV2TelemetryMs(value);
           if (duration !== undefined) resourceTiming[field] = duration;
           continue;
         }
         if (RESOURCE_TIMING_SIZE_FIELDS.has(field)) {
-          const size = Number(value);
+          const size = typeof value === 'number' ? value : Number.NaN;
           if (Number.isSafeInteger(size) && size >= 0 && size <= 100_000_000) {
             resourceTiming[field] = size;
           }
           continue;
         }
         if (['initiatorType', 'nextHopProtocol', 'deliveryType'].includes(field)) {
-          const text = boundedTelemetryText(value, field === 'nextHopProtocol' ? 32 : 24);
+          const text =
+            typeof value === 'string'
+              ? boundedTelemetryText(value, field === 'nextHopProtocol' ? 32 : 24)
+              : '';
           if (text) resourceTiming[field] = text;
         }
       }
-      const resourceTimingStatus = ['collected', 'not_found', 'unavailable'].includes(
-        item?.resourceTimingStatus,
-      )
-        ? item.resourceTimingStatus
-        : null;
+      const hasCompleteResourceTiming =
+        typeof resourceTiming.startMs === 'number' &&
+        typeof resourceTiming.durationMs === 'number';
+      const resourceTimingStatus =
+        item?.resourceTimingStatus === 'collected' && hasCompleteResourceTiming
+          ? 'collected'
+          : item?.resourceTimingStatus === 'unavailable'
+            ? 'unavailable'
+            : 'not_found';
       return [
         {
           name,
@@ -165,8 +176,8 @@ export function normalizeChatLoadTelemetry(raw: unknown): Record<string, unknown
             ? { responseBytes }
             : {}),
           ...(Object.keys(serverTiming).length > 0 ? { serverTiming } : {}),
-          ...(version === 2 && resourceTimingStatus ? { resourceTimingStatus } : {}),
-          ...(version === 2 && Object.keys(resourceTiming).length > 0 ? { resourceTiming } : {}),
+          ...(version === 2 ? { resourceTimingStatus } : {}),
+          ...(version === 2 && resourceTimingStatus === 'collected' ? { resourceTiming } : {}),
         },
       ];
     });
@@ -213,10 +224,10 @@ export function normalizeChatLoadTelemetry(raw: unknown): Record<string, unknown
     if (!input) return null;
     const phase: Record<string, unknown> = {};
     for (const field of fields) {
-      const duration = boundedTelemetryMs(input[field]);
+      const duration = boundedV2TelemetryMs(input[field]);
       if (duration !== undefined) phase[field] = duration;
     }
-    const count = Number(input.itemCount);
+    const count = typeof input.itemCount === 'number' ? input.itemCount : Number.NaN;
     if (Number.isSafeInteger(count) && count >= 0 && count <= 100_000) {
       phase.itemCount = count;
     }
@@ -247,22 +258,30 @@ export function normalizeChatLoadTelemetry(raw: unknown): Record<string, unknown
   const longTasks = (Array.isArray(body.longTasks) ? body.longTasks : [])
     .slice(0, 50)
     .flatMap((task: any) => {
-      const startMs = boundedTelemetryMs(task?.startMs);
-      const taskDurationMs = boundedTelemetryMs(task?.durationMs);
-      const overlapMs = boundedTelemetryMs(task?.overlapMs);
-      if (startMs === undefined || taskDurationMs === undefined || overlapMs === undefined)
+      const startMs = boundedV2TelemetryMs(task?.startMs);
+      const taskDurationMs = boundedV2TelemetryMs(task?.durationMs);
+      const overlapMs = boundedV2TelemetryMs(task?.overlapMs);
+      if (
+        startMs === undefined ||
+        taskDurationMs === undefined ||
+        overlapMs === undefined ||
+        overlapMs <= 0 ||
+        overlapMs > taskDurationMs
+      ) {
         return [];
+      }
       return [{ startMs, durationMs: taskDurationMs, overlapMs }];
     });
   normalized.longTasks = longTasks;
-  const longTaskCount = Number(body.longTaskCount);
+  const longTaskCount = typeof body.longTaskCount === 'number' ? body.longTaskCount : Number.NaN;
   normalized.longTaskCount =
     Number.isSafeInteger(longTaskCount) &&
     longTaskCount >= longTasks.length &&
     longTaskCount <= 10_000
       ? longTaskCount
       : longTasks.length;
-  const longTasksDropped = Number(body.longTasksDropped);
+  const longTasksDropped =
+    typeof body.longTasksDropped === 'number' ? body.longTasksDropped : Number.NaN;
   if (
     Number.isSafeInteger(longTasksDropped) &&
     longTasksDropped > 0 &&
@@ -270,7 +289,8 @@ export function normalizeChatLoadTelemetry(raw: unknown): Record<string, unknown
   ) {
     normalized.longTasksDropped = longTasksDropped;
   }
-  const resourceEntriesDropped = Number(body.resourceEntriesDropped);
+  const resourceEntriesDropped =
+    typeof body.resourceEntriesDropped === 'number' ? body.resourceEntriesDropped : Number.NaN;
   if (
     Number.isSafeInteger(resourceEntriesDropped) &&
     resourceEntriesDropped > 0 &&

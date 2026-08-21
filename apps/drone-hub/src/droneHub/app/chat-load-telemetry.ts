@@ -3,6 +3,7 @@ import {
   correlateResourceEntry,
   longTaskFromEntry,
   MAX_CHAT_LOAD_LONG_TASKS,
+  resourceStartedDuringNavigation,
   resourceTimingFromEntry,
   startChatLoadPerformance,
   stopChatLoadPerformance,
@@ -67,6 +68,7 @@ type ChatLoadSpan = {
 
 const CHAT_LOAD_TIMEOUT_MS = 30_000;
 const MAX_REQUEST_RECORDS = 24;
+const MAX_SERVER_TIMING_PHASES = 24;
 let activeSpan: ChatLoadSpan | null = null;
 
 function monotonicNow(): number {
@@ -116,13 +118,23 @@ function mark(span: ChatLoadSpan, name: string, at = monotonicNow()): void {
 
 function serverTimingFromHeader(raw: string | null): Record<string, number> | undefined {
   const timing: Record<string, number> = {};
+  let phaseCount = 0;
   for (const entry of String(raw ?? '').split(',')) {
     const [nameRaw, ...params] = entry.trim().split(';');
     const name = String(nameRaw ?? '').trim();
-    if (!/^[a-zA-Z0-9_.-]{1,48}$/.test(name)) continue;
+    if (
+      !/^[a-zA-Z0-9_.-]{1,48}$/.test(name) ||
+      ['__proto__', 'constructor', 'prototype'].includes(name)
+    ) {
+      continue;
+    }
     const durationParam = params.find((param) => /^\s*dur=/i.test(param));
     const duration = Number(String(durationParam ?? '').replace(/^\s*dur=/i, ''));
     if (!Number.isFinite(duration) || duration < 0) continue;
+    if (!Object.prototype.hasOwnProperty.call(timing, name)) {
+      if (phaseCount >= MAX_SERVER_TIMING_PHASES) continue;
+      phaseCount += 1;
+    }
     timing[name] = roundedMs(duration);
   }
   return Object.keys(timing).length > 0 ? timing : undefined;
@@ -538,6 +550,7 @@ export const chatLoadTelemetryTesting = {
   resourceTimingFromEntry,
   correlateResourceEntry,
   longTaskFromEntry,
+  resourceStartedDuringNavigation,
   maxLongTasks: MAX_CHAT_LOAD_LONG_TASKS,
   reset() {
     if (activeSpan) {
