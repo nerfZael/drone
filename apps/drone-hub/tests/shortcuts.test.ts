@@ -6,6 +6,7 @@ import {
   migrateChatComposerShortcuts,
   migrateCompanionShortcut,
   migrateFormerPullRequestsShortcut,
+  sanitizeSingleShortcutBinding,
   sanitizeShortcutBindings,
   shortcutBindingFromKeyboardEvent,
 } from '../src/droneHub/app/shortcuts';
@@ -205,6 +206,20 @@ describe('shortcut defaults', () => {
       alt: true,
       shift: false,
     });
+  });
+
+  test('preserves an explicit unbound value when updating one shortcut', () => {
+    const current = {
+      key: 'q',
+      mod: false,
+      ctrl: false,
+      meta: false,
+      alt: false,
+      shift: false,
+    };
+
+    expect(sanitizeSingleShortcutBinding(null, current)).toBeNull();
+    expect(sanitizeSingleShortcutBinding(undefined, current)).toEqual(current);
   });
 
   test('moves the former default R binding from pull requests to continuous dictation', () => {

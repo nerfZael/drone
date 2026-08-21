@@ -282,6 +282,7 @@ function sanitizeShortcutBinding(value: unknown, fallback: ShortcutBinding | nul
 }
 
 export function sanitizeSingleShortcutBinding(value: unknown, fallback: ShortcutBinding | null = null): ShortcutBinding | null {
+  if (value === null) return null;
   return sanitizeShortcutBinding(value, fallback);
 }
 
