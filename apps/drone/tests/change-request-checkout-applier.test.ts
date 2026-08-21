@@ -82,9 +82,6 @@ describe('ChangeRequestCheckoutApplier', () => {
       expect(
         (await run('git', ['-C', origin, 'cat-file', '-e', 'refs/heads/main:feature.bin'])).code,
       ).not.toBe(0);
-      expect(await fs.readdir(path.join(storageRoot, 'change-request-apply-worktrees'))).toEqual(
-        [],
-      );
       expect(await fs.readdir(path.join(storageRoot, 'change-request-apply-patches'))).toEqual([]);
 
       await git(checkoutRoot, ['reset', '--hard', 'HEAD']);

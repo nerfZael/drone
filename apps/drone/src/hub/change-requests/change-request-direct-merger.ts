@@ -1,21 +1,15 @@
-import crypto from 'node:crypto';
-import fs from 'node:fs/promises';
-import path from 'node:path';
-
 import { ChangeRequestError } from './change-request-error';
 import {
-  changeRequestConflictFiles,
   resolveChangeRequestBranch,
   resolveChangeRequestCommit,
   runChangeRequestGit,
-  safeChangeRequestRefSegment,
   type RunHostCommand,
 } from './change-request-git';
+import { prepareChangeRequestCandidate } from './prepare-change-request-candidate';
 import type { ChangeRequestRecord, ChangeRequestRevisionRecord } from './change-request-types';
 
 export type ChangeRequestDirectMergerDependencies = {
   runHostCommand: RunHostCommand;
-  storagePath: (...segments: string[]) => string;
 };
 
 const MERGE_TIMEOUT_MS = 120_000;
@@ -75,116 +69,78 @@ export class ChangeRequestDirectMerger {
         { expectedDestinationSha: expectedTarget, destinationSha: targetSha },
       );
     }
-    const worktreePath = this.worktreePath(record.id);
-    await fs.mkdir(path.dirname(worktreePath), { recursive: true });
-    try {
-      await this.git(
-        gitRoot,
-        ['worktree', 'add', '--detach', worktreePath, targetSha],
-        MERGE_TIMEOUT_MS,
+    const candidate = await prepareChangeRequestCandidate(this.deps.runHostCommand, {
+      gitRoot,
+      baseSha: targetSha,
+      snapshotRef: snapshotRef!,
+      timeoutMs: MERGE_TIMEOUT_MS,
+    });
+    if (candidate.status === 'conflicted') {
+      throw new ChangeRequestError(
+        'The change request conflicts with its destination.',
+        409,
+        'merge_conflict',
+        { conflictFiles: candidate.conflictFiles },
       );
-      const merged = await this.deps.runHostCommand(
-        'git',
-        ['-C', worktreePath, 'merge', '--squash', '--no-commit', snapshotRef!],
-        { timeoutMs: MERGE_TIMEOUT_MS },
+    }
+    const expectedTree = String(expectedCandidateTreeSha ?? '')
+      .trim()
+      .toLowerCase();
+    if (expectedTree && candidate.candidateTreeSha !== expectedTree) {
+      throw new ChangeRequestError(
+        'The prepared merge tree differs from the reviewed candidate. Prepare and review it again before merging.',
+        409,
+        'review_candidate_outdated',
+        {
+          expectedCandidateTreeSha: expectedTree,
+          candidateTreeSha: candidate.candidateTreeSha,
+        },
       );
-      if (merged.code !== 0) {
-        throw new ChangeRequestError(
-          'The change request conflicts with its destination.',
-          409,
-          'merge_conflict',
-          { conflictFiles: changeRequestConflictFiles(`${merged.stdout}\n${merged.stderr}`) },
-        );
-      }
-      const staged = await this.deps.runHostCommand('git', [
-        '-C',
-        worktreePath,
-        'diff',
-        '--cached',
-        '--quiet',
-      ]);
-      if (staged.code !== 0 && staged.code !== 1) {
-        throw new ChangeRequestError(staged.stderr || 'Unable to inspect the prepared merge.', 500);
-      }
-      const preparedTreeSha = (await this.git(worktreePath, ['write-tree'])).stdout
-        .trim()
-        .toLowerCase();
-      const expectedTree = String(expectedCandidateTreeSha ?? '')
-        .trim()
-        .toLowerCase();
-      if (expectedTree && preparedTreeSha !== expectedTree) {
-        throw new ChangeRequestError(
-          'The prepared merge tree differs from the reviewed candidate. Prepare and review it again before merging.',
-          409,
-          'review_candidate_outdated',
-          { expectedCandidateTreeSha: expectedTree, candidateTreeSha: preparedTreeSha },
-        );
-      }
-      let mergeCommitSha = targetSha;
-      if (staged.code === 1) {
-        const disabledHooksPath = this.deps.storagePath('disabled-git-hooks');
-        await fs.mkdir(disabledHooksPath, { recursive: true });
-        await this.git(
-          worktreePath,
-          [
-            '-c',
-            `core.hooksPath=${disabledHooksPath}`,
-            '-c',
-            'commit.gpgsign=false',
-            'commit',
-            '--no-verify',
-            '-m',
-            requiredCommitMessage(commitMessage),
-          ],
-          MERGE_TIMEOUT_MS,
-        );
-        mergeCommitSha = (await this.git(worktreePath, ['rev-parse', 'HEAD'])).stdout
-          .trim()
-          .toLowerCase();
-        const committedTreeSha = (
-          await this.git(worktreePath, ['rev-parse', `${mergeCommitSha}^{tree}`])
+    }
+    const mergeCommitSha = candidate.changed
+      ? (
+          await this.git(
+            gitRoot,
+            [
+              'commit-tree',
+              candidate.candidateTreeSha,
+              '-p',
+              targetSha,
+              '-m',
+              requiredCommitMessage(commitMessage),
+            ],
+            MERGE_TIMEOUT_MS,
+          )
         ).stdout
           .trim()
-          .toLowerCase();
-        if (committedTreeSha !== preparedTreeSha) {
-          throw new ChangeRequestError(
-            'The merge tree changed while its commit was being created.',
-            409,
-            'merge_tree_changed',
-          );
-        }
-      }
-      await onPrepared?.({ expectedTargetSha: targetSha, mergeCommitSha });
-      await this.git(
-        worktreePath,
-        [
-          'push',
-          destinationRef
-            ? `--force-with-lease=refs/heads/${record.destinationBranch}:${targetSha}`
-            : `--force-with-lease=refs/heads/${record.destinationBranch}:`,
-          'origin',
-          `HEAD:refs/heads/${record.destinationBranch}`,
-        ],
-        MERGE_TIMEOUT_MS,
+          .toLowerCase()
+      : targetSha;
+    const committedTreeSha = (
+      await this.git(gitRoot, ['rev-parse', `${mergeCommitSha}^{tree}`])
+    ).stdout
+      .trim()
+      .toLowerCase();
+    if (committedTreeSha !== candidate.candidateTreeSha) {
+      throw new ChangeRequestError(
+        'The merge tree changed while its commit was being created.',
+        409,
+        'merge_tree_changed',
       );
-      return mergeCommitSha;
-    } finally {
-      await this.deps
-        .runHostCommand('git', ['-C', gitRoot, 'worktree', 'remove', '--force', worktreePath], {
-          timeoutMs: 30_000,
-        })
-        .catch(() => null);
-      await fs.rm(worktreePath, { recursive: true, force: true }).catch(() => {});
-      await this.deps.runHostCommand('git', ['-C', gitRoot, 'worktree', 'prune']).catch(() => null);
     }
-  }
-
-  private worktreePath(internalId: string): string {
-    const runId = `${Date.now().toString(36)}-${crypto.randomBytes(4).toString('hex')}`;
-    return this.deps.storagePath(
-      'change-request-worktrees',
-      `${safeChangeRequestRefSegment(internalId)}-${runId}`,
+    await onPrepared?.({ expectedTargetSha: targetSha, mergeCommitSha });
+    await this.git(
+      gitRoot,
+      [
+        'push',
+        destinationRef
+          ? `--force-with-lease=refs/heads/${record.destinationBranch}:${targetSha}`
+          : `--force-with-lease=refs/heads/${record.destinationBranch}:`,
+        'origin',
+        `${mergeCommitSha}:refs/heads/${record.destinationBranch}`,
+      ],
+      MERGE_TIMEOUT_MS,
     );
+    return mergeCommitSha;
   }
 
   private git(repoRoot: string, args: string[], timeoutMs = 30_000) {

@@ -9,6 +9,7 @@ import {
   safeChangeRequestRefSegment,
   type RunHostCommand,
 } from './change-request-git';
+import { prepareChangeRequestCandidate } from './prepare-change-request-candidate';
 import type { ChangeRequestRecord, ChangeRequestRevisionRecord } from './change-request-types';
 
 export type ChangeRequestCheckoutApplierDependencies = {
@@ -30,8 +31,8 @@ const APPLY_TIMEOUT_MS = 120_000;
 
 /**
  * Materializes a CR's squash result in a clean host checkout without committing
- * or updating any ref. The candidate is prepared away from the user's checkout,
- * then applied to both its index and working tree as one preflighted patch.
+ * or updating any ref. The candidate is computed as a tree, then applied to both
+ * the checkout's index and working tree as one preflighted patch.
  */
 export class ChangeRequestCheckoutApplier {
   constructor(private readonly deps: ChangeRequestCheckoutApplierDependencies) {}
@@ -43,63 +44,61 @@ export class ChangeRequestCheckoutApplier {
   ): Promise<ChangeRequestCheckoutApplicationReceipt> {
     const checkoutRoot = path.resolve(checkoutRootRaw);
     const initial = await this.assertCheckoutReady(checkoutRoot, record.destinationBranch);
+    const candidate = await prepareChangeRequestCandidate(this.deps.runHostCommand, {
+      gitRoot: checkoutRoot,
+      baseSha: initial.headSha,
+      snapshotRef: revision.snapshotRef,
+      timeoutMs: APPLY_TIMEOUT_MS,
+    });
+    if (candidate.status === 'conflicted') {
+      throw new ChangeRequestError(
+        `The change request conflicts with the host checkout's ${record.destinationBranch} branch.`,
+        409,
+        'checkout_apply_conflict',
+        { conflictFiles: candidate.conflictFiles },
+      );
+    }
+    if (!candidate.changed) {
+      return {
+        revision: revision.number,
+        checkoutRoot,
+        destinationBranch: record.destinationBranch,
+        checkoutHeadSha: initial.headSha,
+        candidateTreeSha: candidate.candidateTreeSha,
+        applied: false,
+        stagedFiles: [],
+      };
+    }
     const runId = `${Date.now().toString(36)}-${crypto.randomBytes(4).toString('hex')}`;
-    const label = `${safeChangeRequestRefSegment(record.id)}-${runId}`;
-    const worktreePath = this.deps.storagePath('change-request-apply-worktrees', label);
-    const patchDirectory = this.deps.storagePath('change-request-apply-patches', label);
+    const patchDirectory = this.deps.storagePath(
+      'change-request-apply-patches',
+      `${safeChangeRequestRefSegment(record.id)}-${runId}`,
+    );
     const patchPath = path.join(patchDirectory, 'candidate.diff');
-    await fs.mkdir(path.dirname(worktreePath), { recursive: true });
     await fs.mkdir(patchDirectory, { recursive: true });
 
     try {
-      await this.git(
-        checkoutRoot,
-        ['worktree', 'add', '--detach', worktreePath, initial.headSha],
-        APPLY_TIMEOUT_MS,
-      );
-      const merged = await this.deps.runHostCommand(
-        'git',
-        ['-C', worktreePath, 'merge', '--squash', '--no-commit', revision.snapshotRef],
-        { timeoutMs: APPLY_TIMEOUT_MS },
-      );
-      if (merged.code !== 0) {
-        throw new ChangeRequestError(
-          `The change request conflicts with the host checkout's ${record.destinationBranch} branch.`,
-          409,
-          'checkout_apply_conflict',
-          { conflictFiles: changeRequestConflictFiles(`${merged.stdout}\n${merged.stderr}`) },
-        );
-      }
-
-      const candidateTreeSha = (await this.git(worktreePath, ['write-tree'])).stdout
-        .trim()
-        .toLowerCase();
-      const diff = await this.git(worktreePath, [
+      const diff = await this.git(checkoutRoot, [
         'diff',
-        '--cached',
         '--binary',
         '--full-index',
         '--find-renames',
         '--no-color',
         '--no-ext-diff',
         initial.headSha,
+        candidate.candidateTreeSha,
       ]);
       const stagedFiles = splitNullTerminated(
-        (await this.git(worktreePath, ['diff', '--cached', '--name-only', '-z', initial.headSha]))
-          .stdout,
+        (
+          await this.git(checkoutRoot, [
+            'diff',
+            '--name-only',
+            '-z',
+            initial.headSha,
+            candidate.candidateTreeSha,
+          ])
+        ).stdout,
       );
-      if (!diff.stdout) {
-        return {
-          revision: revision.number,
-          checkoutRoot,
-          destinationBranch: record.destinationBranch,
-          checkoutHeadSha: initial.headSha,
-          candidateTreeSha,
-          applied: false,
-          stagedFiles: [],
-        };
-      }
-
       await fs.writeFile(patchPath, diff.stdout, 'utf8');
       const beforeApply = await this.assertCheckoutReady(checkoutRoot, record.destinationBranch);
       if (beforeApply.headSha !== initial.headSha) {
@@ -126,12 +125,15 @@ export class ChangeRequestCheckoutApplier {
       const appliedTreeSha = (await this.git(checkoutRoot, ['write-tree'])).stdout
         .trim()
         .toLowerCase();
-      if (appliedTreeSha !== candidateTreeSha) {
+      if (appliedTreeSha !== candidate.candidateTreeSha) {
         throw new ChangeRequestError(
           'The staged host tree differs from the prepared change-request candidate. Inspect the checkout before continuing.',
           409,
           'checkout_apply_tree_changed',
-          { expectedCandidateTreeSha: candidateTreeSha, candidateTreeSha: appliedTreeSha },
+          {
+            expectedCandidateTreeSha: candidate.candidateTreeSha,
+            candidateTreeSha: appliedTreeSha,
+          },
         );
       }
       return {
@@ -139,25 +141,12 @@ export class ChangeRequestCheckoutApplier {
         checkoutRoot,
         destinationBranch: record.destinationBranch,
         checkoutHeadSha: initial.headSha,
-        candidateTreeSha,
+        candidateTreeSha: candidate.candidateTreeSha,
         applied: true,
         stagedFiles,
       };
     } finally {
-      await this.deps
-        .runHostCommand(
-          'git',
-          ['-C', checkoutRoot, 'worktree', 'remove', '--force', worktreePath],
-          {
-            timeoutMs: 30_000,
-          },
-        )
-        .catch(() => null);
-      await fs.rm(worktreePath, { recursive: true, force: true }).catch(() => {});
       await fs.rm(patchDirectory, { recursive: true, force: true }).catch(() => {});
-      await this.deps
-        .runHostCommand('git', ['-C', checkoutRoot, 'worktree', 'prune'])
-        .catch(() => null);
     }
   }
 
