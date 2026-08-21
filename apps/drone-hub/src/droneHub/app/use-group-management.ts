@@ -12,16 +12,26 @@ import {
 } from './sidebar-group-order';
 import {
   removeSidebarNodeOrderByParentGroupPrefix,
+  renameSidebarRepoScopedNodeOrderByGroupPrefix,
   renameSidebarNodeOrderByParentGroupPrefix,
 } from './sidebar-node-order';
 import {
   isSameOrDescendantSidebarGroupPath,
-  rewriteSidebarGroupPathPrefix,
 } from './sidebar-group-paths';
 import {
   removeCollapsedGroupKeysByPrefix,
   renameCollapsedGroupKeysByPrefix,
 } from './sidebar-collapsed-groups';
+import {
+  hasSidebarRepoPathScope,
+  sidebarGroupMutationKey,
+  sidebarRepoGroupPathFromRepoPath,
+  sidebarRepoScopedGroupPath,
+} from './sidebar-repository-scope';
+import {
+  selectedGroupMultiChatTargetsGroup,
+  renameSelectedGroupMultiChatGroup,
+} from './sidebar-group-multi-chat';
 
 type UseGroupManagementArgs = {
   sidebarCommandQueue: SidebarCommandQueue;
@@ -46,10 +56,14 @@ export type MoveDronesToGroupResult = {
   groupCreated?: boolean;
 };
 
-type DeleteGroupOptions = {
+export type GroupMutationScope = {
+  groupId?: string | null;
+  repoPath?: string | null;
+};
+
+export type DeleteGroupOptions = GroupMutationScope & {
   kind?: 'group' | 'repo';
   label?: string;
-  repoPath?: string | null;
 };
 
 export function useGroupManagement({
@@ -76,11 +90,21 @@ export function useGroupManagement({
   const confirmDelete = useAppConfirmDialog();
 
   const renameGroup = React.useCallback(
-    async (groupRaw: string, nextNameRaw?: string): Promise<boolean> => {
+    async (
+      groupRaw: string,
+      nextNameRaw?: string,
+      scope?: GroupMutationScope,
+    ): Promise<boolean> => {
       const group = String(groupRaw ?? '').trim();
       if (!group) return false;
       if (isUngroupedGroupName(group)) return false;
-      if (renamingGroups[group]) return false;
+      const repoPath = resolveScopedRepoPath(activeRepoPath, scope);
+      const repoScoped = hasSidebarRepoPathScope(scope);
+      const repoGroupPath = repoScoped
+        ? sidebarRepoGroupPathFromRepoPath(repoPath)
+        : null;
+      const mutationKey = sidebarGroupMutationKey(group, repoGroupPath);
+      if (renamingGroups[mutationKey]) return false;
 
       const next = typeof nextNameRaw === 'string' ? nextNameRaw : window.prompt(`Rename group "${group}" to:`, group);
       const newName = String(next ?? '').trim();
@@ -91,50 +115,69 @@ export function useGroupManagement({
         return false;
       }
 
-      setRenamingGroups((prev) => ({ ...prev, [group]: true }));
+      const groupId = String(scope?.groupId ?? groupIdByName[group] ?? '').trim();
+      setRenamingGroups((prev) => ({ ...prev, [mutationKey]: true }));
       try {
         await requestJson<{ ok: true; id: string; oldName: string; newName: string; renamed: boolean }>(
-          `/api/groups/${encodeURIComponent(groupIdByName[group] ?? group)}/rename`,
+          `/api/groups/${encodeURIComponent(groupId || group)}/rename`,
           {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ newName, repoPath: activeRepoPath }),
+            body: JSON.stringify({ newName, repoPath }),
           },
         );
 
         // Keep per-group UI state aligned after rename.
-        setCollapsedGroups((prev) => renameCollapsedGroupKeysByPrefix(prev, group, newName));
-        setDeletingGroups((prev) => {
-          if (!(group in prev)) return prev;
-          const nextMap = { ...prev };
-          delete nextMap[group];
-          nextMap[newName] = false;
-          return nextMap;
-        });
-        setSidebarGroupOrder((prev) =>
-          renameSidebarGroupTokenListByPrefix(
-            prev,
-            { group, kind: 'group' },
-            { group: newName, kind: 'group' },
-          ),
+        const currentCollapsePath = repoGroupPath
+          ? sidebarRepoScopedGroupPath(repoGroupPath, group)
+          : group;
+        const nextCollapsePath = repoGroupPath
+          ? sidebarRepoScopedGroupPath(repoGroupPath, newName)
+          : newName;
+        setCollapsedGroups((prev) =>
+          renameCollapsedGroupKeysByPrefix(prev, currentCollapsePath, nextCollapsePath),
         );
-        setHiddenSidebarGroups((prev) =>
-          renameSidebarGroupTokenListByPrefix(
-            prev,
-            { group, kind: 'group' },
-            { group: newName, kind: 'group' },
-          ),
+        if (!repoScoped) {
+          setSidebarGroupOrder((prev) =>
+            renameSidebarGroupTokenListByPrefix(
+              prev,
+              { group, kind: 'group' },
+              { group: newName, kind: 'group' },
+            ),
+          );
+          setHiddenSidebarGroups((prev) =>
+            renameSidebarGroupTokenListByPrefix(
+              prev,
+              { group, kind: 'group' },
+              { group: newName, kind: 'group' },
+            ),
+          );
+          setSidebarDroneOrderByGroup((prev) =>
+            renameSidebarEntryOrderMapKeysByPrefix(
+              prev,
+              { group, kind: 'group' },
+              { group: newName, kind: 'group' },
+            ),
+          );
+        }
+        setSidebarNodeOrderByParent((prev) =>
+          repoScoped
+            ? renameSidebarRepoScopedNodeOrderByGroupPrefix(
+                prev,
+                sidebarRepoGroupPathFromRepoPath(repoPath),
+                group,
+                newName,
+              )
+            : renameSidebarNodeOrderByParentGroupPrefix(prev, group, newName),
         );
-        setSidebarDroneOrderByGroup((prev) =>
-          renameSidebarEntryOrderMapKeysByPrefix(
-            prev,
-            { group, kind: 'group' },
-            { group: newName, kind: 'group' },
-          ),
+        const nextSelectedGroupMultiChat = renameSelectedGroupMultiChatGroup(
+          selectedGroupMultiChat,
+          group,
+          newName,
+          repoGroupPath,
         );
-        setSidebarNodeOrderByParent((prev) => renameSidebarNodeOrderByParentGroupPrefix(prev, group, newName));
-        if (selectedGroupMultiChat && isSameOrDescendantSidebarGroupPath(selectedGroupMultiChat, group)) {
-          setSelectedGroupMultiChat(rewriteSidebarGroupPathPrefix(selectedGroupMultiChat, group, newName));
+        if (nextSelectedGroupMultiChat !== selectedGroupMultiChat) {
+          setSelectedGroupMultiChat(nextSelectedGroupMultiChat);
         }
         return true;
       } catch (e: any) {
@@ -144,10 +187,9 @@ export function useGroupManagement({
         return false;
       } finally {
         setRenamingGroups((prev) => {
-          if (!prev[group] && !prev[newName]) return prev;
+          if (!prev[mutationKey]) return prev;
           const nextMap = { ...prev };
-          delete nextMap[group];
-          delete nextMap[newName];
+          delete nextMap[mutationKey];
           return nextMap;
         });
       }
@@ -169,14 +211,20 @@ export function useGroupManagement({
   const deleteGroup = React.useCallback(
     async (groupRaw: string, countHint?: number, opts?: DeleteGroupOptions): Promise<boolean> => {
       const group = String(groupRaw ?? '').trim();
-      if (!group || deletingGroups[group]) return false;
       const targetKind = opts?.kind === 'repo' ? 'repo' : 'group';
       const groupLabel = String(opts?.label ?? group).trim() || group;
       const targetRepoPath = targetKind === 'repo' ? String(opts?.repoPath ?? '').trim() : '';
       const scopedRepoPath =
         targetKind === 'group'
-          ? String(opts?.repoPath ?? activeRepoPath ?? '').trim()
+          ? resolveScopedRepoPath(activeRepoPath, opts)
           : '';
+      const repoScoped = targetKind === 'group' && hasSidebarRepoPathScope(opts);
+      const repoGroupPath = repoScoped
+        ? sidebarRepoGroupPathFromRepoPath(scopedRepoPath)
+        : null;
+      const mutationKey = sidebarGroupMutationKey(group, repoGroupPath);
+      if (!group || deletingGroups[mutationKey]) return false;
+      const targetGroupId = String(opts?.groupId ?? groupIdByName[group] ?? '').trim();
       const ok = await confirmDelete(buildSidebarGroupDeleteConfirmation({
         kind: targetKind,
         label: groupLabel,
@@ -220,7 +268,7 @@ export function useGroupManagement({
           return changed ? nextMap : prev;
         });
       }
-      setDeletingGroups((prev) => ({ ...prev, [group]: true }));
+      setDeletingGroups((prev) => ({ ...prev, [mutationKey]: true }));
       return await sidebarCommandQueue.enqueue(async () => {
         try {
         if (targetKind === 'repo') {
@@ -257,9 +305,9 @@ export function useGroupManagement({
           }
         } else {
           const query = `?repoPath=${encodeURIComponent(scopedRepoPath)}`;
-          await requestJson(`/api/groups/${encodeURIComponent(groupIdByName[group] ?? group)}${query}`, { method: 'DELETE' });
+          await requestJson(`/api/groups/${encodeURIComponent(targetGroupId || group)}${query}`, { method: 'DELETE' });
         }
-        if (!scopedRepoPath) {
+        if (!repoScoped) {
           const deletedStableTokens = new Set(
             Object.entries(groupIdByName)
               .filter(([name]) => isSameOrDescendantSidebarGroupPath(name, group))
@@ -288,7 +336,7 @@ export function useGroupManagement({
           });
           setSidebarNodeOrderByParent((prev) => removeSidebarNodeOrderByParentGroupPrefix(prev, group));
         }
-        if (selectedGroupMultiChat && isSameOrDescendantSidebarGroupPath(selectedGroupMultiChat, group)) {
+        if (selectedGroupMultiChatTargetsGroup(selectedGroupMultiChat, group, repoGroupPath)) {
           setSelectedGroupMultiChat(null);
         }
         return true;
@@ -309,9 +357,9 @@ export function useGroupManagement({
         return false;
         } finally {
         setDeletingGroups((prev) => {
-          if (!prev[group]) return prev;
+          if (!prev[mutationKey]) return prev;
           const nextMap = { ...prev };
-          delete nextMap[group];
+          delete nextMap[mutationKey];
           return nextMap;
         });
         }
@@ -458,7 +506,7 @@ export function useGroupManagement({
   );
 
   const createGroup = React.useCallback(
-    async (targetGroupLabel: string) => {
+    async (targetGroupLabel: string, scope?: Pick<GroupMutationScope, 'repoPath'>) => {
       const target = String(targetGroupLabel ?? '').trim();
       if (!target) {
         const msg = 'Group name is required.';
@@ -473,10 +521,11 @@ export function useGroupManagement({
 
       setGroupMoveError(null);
       try {
+        const repoPath = resolveScopedRepoPath(activeRepoPath, scope);
         await requestJson<{ ok: true; name: string; createdAt: string }>(`/api/groups`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ name: target, repoPath: activeRepoPath }),
+          body: JSON.stringify({ name: target, repoPath }),
         });
         return { ok: true, error: null };
       } catch (e: any) {
@@ -501,4 +550,11 @@ export function useGroupManagement({
     moveDronesToGroup,
     createGroupAndMove,
   };
+}
+
+function resolveScopedRepoPath(
+  activeRepoPath: string,
+  scope: Pick<GroupMutationScope, 'repoPath'> | undefined,
+): string {
+  return String(hasSidebarRepoPathScope(scope) ? scope?.repoPath ?? '' : activeRepoPath ?? '').trim();
 }

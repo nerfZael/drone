@@ -55,15 +55,35 @@ describe('sidebar group creation actions', () => {
     expect(treeSource).toContain(
       'if (!isSelected) onSelectFolder(folderPath, { folderNodeId: node.id });',
     );
+    expect(treeSource).not.toContain(
+      'if (!actionsEnabled || repositoryRootView || event.target instanceof HTMLInputElement) return;',
+    );
+    expect(treeSource).toContain('setSelectedSidebarNodeId(node.id);');
     expect(treeSource).toContain("label: isVirtualGroup ? 'New group' : 'New subfolder'");
-    expect(treeSource).toContain("label: isHiddenGroup ? 'Unhide group' : 'Hide group'");
+    expect(treeSource).toContain("id: 'new-drone'");
+    expect(treeSource).toContain("'repository' : 'group'");
     expect(treeSource).toContain("label: 'Open multi-chat'");
     expect(treeSource).toContain("label: 'Delete group'");
     expect(treeSource).toContain("shortcut: 'Delete'");
     expect(treeSource).toContain('shortcutBindings.createDraftGroup');
     expect(treeSource).toContain('shortcutBindings.openHoveredGroupMultiChat');
     expect(treeSource).toContain('separatorBefore: true');
+    expect(treeSource).toContain('...(!isVirtualGroup');
+    expect(treeSource).toContain('deletingGroups[mutationKey]');
+    expect(treeSource).toContain('renamingGroups[mutationKey]');
     expect(treeSource).not.toContain('data-sidebar-folder-actions');
+  });
+
+  test('does not retain global optimistic operations for repository-scoped edits', () => {
+    const source = readFileSync(
+      new URL('../src/droneHub/app/use-sidebar-optimistic-groups.ts', import.meta.url),
+      'utf8',
+    );
+
+    expect(source).toContain('const opId = repoScoped ? null : createOptimisticSidebarOpId();');
+    expect(source).toContain(
+      'const opId = hasSidebarRepoPathScope(opts) ? null : createOptimisticSidebarOpId();',
+    );
   });
 
   test('deletes a selected group with the Delete key without requiring pointer hover', () => {

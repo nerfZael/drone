@@ -56,12 +56,20 @@ import { sidebarGroupBaseName } from './sidebar-group-paths';
 import type { DroneDeleteMode, SidebarDensityMode } from './settings-types';
 import type { SidebarMoveIntent } from '@drone/hub-model/sidebar';
 import { useChatApprovalRequired } from './use-drone-hub-runtime-store';
-import type { MoveDronesToGroupResult } from './use-group-management';
+import type {
+  DeleteGroupOptions,
+  GroupMutationScope,
+  MoveDronesToGroupResult,
+} from './use-group-management';
 import type { SidebarGroup } from './use-sidebar-view-model';
 import { SidebarContextMenu, type SidebarContextMenuItem } from './SidebarContextMenu';
 import { formatShortcutBinding } from './shortcuts';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 import { resolveEffectiveSidebarMuteSets, sidebarFolderMuteId } from './sidebar-mute';
+import {
+  sidebarGroupMutationKey,
+  sidebarRepoPathFromGroupPath,
+} from './sidebar-repository-scope';
 import {
   sidebarChatLabelClass,
   sidebarChatRowTone,
@@ -77,9 +85,12 @@ type FolderEditorState = {
   anchorPath: string | null;
   beforeNodeId: string | null;
   targetPath: string | null;
+  targetNodeId: string | null;
   value: string;
   error: string | null;
   pending: boolean;
+  repoGroupPath: string | null;
+  targetGroupId: string | null;
 };
 
 type ChatEditorState = {
@@ -132,9 +143,20 @@ type GroupedSidebarTreeProps = {
   selectedGroupMultiChat: string | null;
   onOpenFolderCreate: (
     parentPath: string | null,
-    opts?: { anchorPath?: string | null; beforeNodeId?: string | null; repoGroupPath?: string | null },
+    opts?: {
+      anchorPath?: string | null;
+      beforeNodeId?: string | null;
+      parentCollapseKey?: string | null;
+      repoGroupPath?: string | null;
+    },
   ) => void;
-  onStartRenameFolder: (path: string) => void;
+  onStartRenameFolder: (
+    path: string,
+    scope?: GroupMutationScope & {
+      folderNodeId?: string | null;
+      repoGroupPath?: string | null;
+    },
+  ) => void;
   onFolderEditorValueChange: (next: string) => void;
   onSubmitFolderEditor: () => void;
   onBlurFolderEditor: () => void;
@@ -146,8 +168,9 @@ type GroupedSidebarTreeProps = {
   onDeleteGroup: (
     group: string,
     count: number,
-    opts?: { kind?: 'group' | 'repo'; label?: string; repoPath?: string | null },
+    opts?: DeleteGroupOptions,
   ) => Promise<boolean> | boolean;
+  onOpenDraftDrone: (opts?: { repoPath?: string | null; group?: string | null }) => void;
   busyChatNodeIdSet: Set<string>;
   approvalRequiredByChatNodeId: Record<string, boolean>;
   unreadAgentMessageByChatNodeId: Record<string, boolean>;
@@ -1398,6 +1421,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
     dragOverTreeTarget,
     dragOverFolderBodyId,
     onOpenFolderCreate,
+    onOpenDraftDrone,
     onStartRenameFolder,
     toggleSidebarGroupHidden,
     onOpenGroupMultiChat,
@@ -1420,6 +1444,8 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
   const folderRenameErrorId = React.useId();
   const folderPath = folderGroupPath(node) ?? node.path;
   const isVirtualGroup = node.groupKind === 'repo' && !node.groupPath;
+  const repoPath = sidebarRepoPathFromGroupPath(node.repoGroupPath);
+  const mutationKey = sidebarGroupMutationKey(folderPath, node.repoGroupPath);
   const allowVirtualRepoReorderDrop =
     isVirtualGroup && activeDrag?.type === 'sidebar-folder' && activeDrag.groupKind === 'repo';
   const groupRef = React.useMemo(
@@ -1506,12 +1532,13 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
   });
   const isHiddenGroup = hiddenSidebarGroupTokenSet.has(groupToken);
   const showEditorInline =
-    !repositoryRootView &&
+    !isVirtualGroup &&
     folderEditor?.targetPath === folderPath &&
-    folderEditor.mode === 'rename';
+    (!folderEditor?.targetNodeId || folderEditor.targetNodeId === node.id) &&
+    folderEditor?.mode === 'rename';
   const showCreateInline =
-    !repositoryRootView &&
     (folderEditor?.anchorPath ?? folderEditor?.parentPath) === folderPath &&
+    (!folderEditor?.repoGroupPath || folderEditor.repoGroupPath === node.repoGroupPath) &&
     folderEditor?.mode === 'create';
   const childIds = nodeTree.childIdsByParent[node.id] ?? [];
   const hasSelectedDirectChild = childIds.some((childId) => {
@@ -1578,13 +1605,21 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
     void onDeleteGroup(folderPath, node.totalDroneCount, {
       kind: node.groupKind,
       label: node.label,
-      repoPath:
-        isVirtualGroup && node.path.startsWith('repo:') && node.path !== 'repo:ungrouped'
-          ? node.path.slice('repo:'.length)
-          : null,
+      groupId: node.groupId,
+      ...(repoPath != null ? { repoPath } : {}),
     });
-  }, [folderPath, isVirtualGroup, node.groupKind, node.label, node.path, node.totalDroneCount, onDeleteGroup]);
+  }, [folderPath, node.groupId, node.groupKind, node.label, node.totalDroneCount, onDeleteGroup, repoPath]);
+  const multiChatTarget = node.repoGroupPath && node.groupPath ? node.path : folderPath;
   const contextMenuItems: SidebarContextMenuItem[] = [
+    {
+      id: 'new-drone',
+      label: 'New drone',
+      icon: <IconPlus className="h-3.5 w-3.5 text-[var(--accent)]" />,
+      onSelect: () => onOpenDraftDrone({
+        ...(repoPath != null ? { repoPath } : {}),
+        group: isVirtualGroup ? '' : folderPath,
+      }),
+    },
     {
       id: 'new-group',
       label: isVirtualGroup ? 'New group' : 'New subfolder',
@@ -1596,10 +1631,14 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
         onOpenFolderCreate(
           isVirtualGroup ? null : folderPath,
           isVirtualGroup
-            ? { anchorPath: folderPath, repoGroupPath: node.repoGroupPath }
+            ? {
+                anchorPath: folderPath,
+                parentCollapseKey: collapseKey,
+                repoGroupPath: node.repoGroupPath,
+              }
             : node.repoGroupPath
-              ? { repoGroupPath: node.repoGroupPath }
-              : undefined,
+              ? { parentCollapseKey: collapseKey, repoGroupPath: node.repoGroupPath }
+              : { parentCollapseKey: collapseKey },
         ),
     },
     ...(!isVirtualGroup
@@ -1608,18 +1647,25 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
           label: 'Rename',
           shortcut: 'F2',
           separatorBefore: true,
-          icon: renamingGroups[folderPath] ? (
+          icon: renamingGroups[mutationKey] ? (
             <IconSpinner className="h-3.5 w-3.5 text-[var(--info)]" />
           ) : (
             <IconPencil className="h-3.5 w-3.5 text-[var(--info)]" />
           ),
-          disabled: Boolean(deletingGroups[folderPath]) || Boolean(renamingGroups[folderPath]),
-          onSelect: () => onStartRenameFolder(folderPath),
+          disabled: Boolean(deletingGroups[mutationKey]) || Boolean(renamingGroups[mutationKey]),
+          onSelect: () => onStartRenameFolder(folderPath, {
+            folderNodeId: node.id,
+            groupId: node.groupId,
+            repoGroupPath: node.repoGroupPath,
+            ...(repoPath != null ? { repoPath } : {}),
+          }),
         } satisfies SidebarContextMenuItem]
       : []),
     {
       id: 'mute',
-      label: directlyMuted ? 'Unmute group' : 'Mute group',
+      label: directlyMuted
+        ? `Unmute ${isVirtualGroup ? 'repository' : 'group'}`
+        : `Mute ${isVirtualGroup ? 'repository' : 'group'}`,
       separatorBefore: true,
       icon: <SidebarMutedStatusIndicator className="h-3.5 w-3.5" />,
       onSelect: () => void onMoveSidebar({
@@ -1631,8 +1677,9 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
     },
     {
       id: 'visibility',
-      label: isHiddenGroup ? 'Unhide group' : 'Hide group',
-      separatorBefore: isVirtualGroup,
+      label: isHiddenGroup
+        ? `Unhide ${isVirtualGroup ? 'repository' : 'group'}`
+        : `Hide ${isVirtualGroup ? 'repository' : 'group'}`,
       icon: isHiddenGroup ? (
         <IconEye className="h-3.5 w-3.5 text-[var(--accent)]" />
       ) : (
@@ -1647,23 +1694,26 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
         ? formatShortcutBinding(shortcutBindings.openHoveredGroupMultiChat)
         : undefined,
       separatorBefore: true,
+      disabled: node.totalDroneCount === 0,
       icon: <IconColumns className="h-3.5 w-3.5 text-[var(--accent)]" />,
-      onSelect: () => onOpenGroupMultiChat(folderPath),
+      onSelect: () => onOpenGroupMultiChat(multiChatTarget),
     },
-    {
-      id: 'delete',
-      label: 'Delete group',
-      shortcut: 'Delete',
-      separatorBefore: true,
-      icon: deletingGroups[folderPath] ? (
-        <IconSpinner className="h-3.5 w-3.5" />
-      ) : (
-        <IconTrash className="h-3.5 w-3.5" />
-      ),
-      disabled: Boolean(deletingGroups[folderPath]) || Boolean(renamingGroups[folderPath]),
-      tone: 'danger',
-      onSelect: handleFolderDelete,
-    },
+    ...(!isVirtualGroup
+      ? [{
+          id: 'delete',
+          label: 'Delete group',
+          shortcut: 'Delete',
+          separatorBefore: true,
+          icon: deletingGroups[mutationKey] ? (
+            <IconSpinner className="h-3.5 w-3.5" />
+          ) : (
+            <IconTrash className="h-3.5 w-3.5" />
+          ),
+          disabled: Boolean(deletingGroups[mutationKey]) || Boolean(renamingGroups[mutationKey]),
+          tone: 'danger',
+          onSelect: handleFolderDelete,
+        } satisfies SidebarContextMenuItem]
+      : []),
   ];
 
   return (
@@ -1687,7 +1737,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
                 : 'border border-transparent'
           } ${isDragging ? 'opacity-60' : isHiddenGroup ? 'opacity-70' : ''}`}
           onContextMenu={(event) => {
-            if (!actionsEnabled || repositoryRootView || event.target instanceof HTMLInputElement) return;
+            if (!actionsEnabled || event.target instanceof HTMLInputElement) return;
             event.preventDefault();
             event.stopPropagation();
             if (!isSelected) onSelectFolder(folderPath, { folderNodeId: node.id });
@@ -1762,10 +1812,10 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
                   event.key !== 'Delete' ||
                   event.repeat ||
                   !actionsEnabled ||
-                  repositoryRootView ||
+                  isVirtualGroup ||
                   !isSelected ||
-                  deletingGroups[folderPath] ||
-                  renamingGroups[folderPath] ||
+                  deletingGroups[mutationKey] ||
+                  renamingGroups[mutationKey] ||
                   (node.groupKind === 'group' && isUngroupedGroupName(node.groupPath ?? folderPath))
                 ) {
                   if (!folderDndDisabled) listeners?.onKeyDown?.(event);
@@ -1818,7 +1868,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
           <GroupedSidebarChildEntries
             childIds={childIds}
             groupPath={folderPath}
-            showCreateInline={actionsEnabled && !repositoryRootView && showCreateInline}
+            showCreateInline={actionsEnabled && showCreateInline}
           />
         </GroupedSidebarFolderBodyDropZone>
       ) : null}
@@ -2141,6 +2191,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       props.onCreateGroupBeforeDrone,
       props.onOpenCreateDroneChat,
       props.onOpenDroneErrorModal,
+      props.onOpenDraftDrone,
       props.onOpenFolderCreate,
       props.onOpenGroupMultiChat,
       props.onPrepareDroneDragStart,

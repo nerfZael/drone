@@ -92,10 +92,8 @@ import {
   deleteChatRuntimeCache,
   renameChatRuntimeCache,
 } from './droneHub/app/chat-runtime-cache';
-import {
-  SIDEBAR_VISIBLE_MULTI_CHAT_GROUP,
-  useSidebarViewModel,
-} from './droneHub/app/use-sidebar-view-model';
+import { useSidebarViewModel } from './droneHub/app/use-sidebar-view-model';
+import { SIDEBAR_VISIBLE_MULTI_CHAT_GROUP } from './droneHub/app/sidebar-group-multi-chat';
 import { useChatConfigState } from './droneHub/app/use-chat-config-state';
 import {
   hasSpawnContextPreferencesForRepo,

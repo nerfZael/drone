@@ -19,6 +19,11 @@ import type { DroneSelectionClickOptions } from './drone-selection-helpers';
 import { isSidebarGroupCollapsed } from './is-sidebar-group-collapsed';
 import { normalizedDroneChats } from './chat-node-helpers';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
+import type { GroupMutationScope } from './use-group-management';
+import {
+  sidebarRepoPathFromGroupPath,
+  sidebarRepoScopedGroupPath,
+} from './sidebar-repository-scope';
 
 export type FolderEditorState = {
   mode: 'create' | 'rename';
@@ -26,7 +31,9 @@ export type FolderEditorState = {
   anchorPath: string | null;
   beforeNodeId: string | null;
   targetPath: string | null;
+  targetNodeId: string | null;
   repoGroupPath: string | null;
+  targetGroupId: string | null;
   value: string;
   error: string | null;
   pending: boolean;
@@ -71,9 +78,13 @@ type UseSidebarInteractionsArgs = {
   optimisticSidebarDronesFilteredByRepo: DroneSummary[];
   runOptimisticCreateGroup: (
     group: string,
-    opts?: { placement?: 'start' | 'end' },
+    opts?: { placement?: 'start' | 'end'; repoPath?: string | null },
   ) => Promise<CreateGroupResult>;
-  runOptimisticRenameGroup: (group: string, nextName?: string) => Promise<boolean>;
+  runOptimisticRenameGroup: (
+    group: string,
+    nextName?: string,
+    scope?: GroupMutationScope,
+  ) => Promise<boolean>;
   selectedDrone: string | null;
   setSidebarNodeOrderByParent: React.Dispatch<React.SetStateAction<Record<string, string[]>>>;
   getRenderedSidebarNodeTree: () => SidebarNodeTreeModel | null;
@@ -121,7 +132,7 @@ export function useSidebarInteractions({
   const folderEditorFocusKey = React.useMemo(
     () =>
       folderEditor
-        ? `${folderEditor.mode}:${folderEditor.parentPath ?? ''}:${folderEditor.anchorPath ?? ''}:${folderEditor.beforeNodeId ?? ''}:${folderEditor.targetPath ?? ''}:${folderEditor.repoGroupPath ?? ''}`
+        ? `${folderEditor.mode}:${folderEditor.parentPath ?? ''}:${folderEditor.anchorPath ?? ''}:${folderEditor.beforeNodeId ?? ''}:${folderEditor.targetPath ?? ''}:${folderEditor.targetNodeId ?? ''}:${folderEditor.repoGroupPath ?? ''}`
         : null,
     [folderEditor],
   );
@@ -215,6 +226,7 @@ export function useSidebarInteractions({
       opts?: {
         anchorPath?: string | null;
         beforeNodeId?: string | null;
+        parentCollapseKey?: string | null;
         repoGroupPath?: string | null;
         initialValue?: string;
         dismissOnBlur?: boolean;
@@ -223,9 +235,10 @@ export function useSidebarInteractions({
       const parentPath = String(parentPathRaw ?? '').trim() || null;
       const anchorPath = String(opts?.anchorPath ?? '').trim() || parentPath;
       const beforeNodeId = String(opts?.beforeNodeId ?? '').trim() || null;
+      const parentCollapseKey = String(opts?.parentCollapseKey ?? '').trim() || parentPath;
       const repoGroupPath = String(opts?.repoGroupPath ?? '').trim() || null;
-      if (parentPath && isSidebarGroupCollapsed(collapsedGroups, parentPath)) {
-        onToggleGroupCollapsed(parentPath);
+      if (parentCollapseKey && isSidebarGroupCollapsed(collapsedGroups, parentCollapseKey)) {
+        onToggleGroupCollapsed(parentCollapseKey);
       }
       if (!beforeNodeId) setSelectedFolderPath(anchorPath);
       setChatEditor(null);
@@ -235,7 +248,9 @@ export function useSidebarInteractions({
         anchorPath,
         beforeNodeId,
         targetPath: null,
+        targetNodeId: null,
         repoGroupPath,
+        targetGroupId: null,
         value: String(opts?.initialValue ?? ''),
         error: null,
         pending: false,
@@ -245,7 +260,10 @@ export function useSidebarInteractions({
     [collapsedGroups, onToggleGroupCollapsed],
   );
 
-  const startRenameFolder = React.useCallback((groupRaw: string) => {
+  const startRenameFolder = React.useCallback((
+    groupRaw: string,
+    scope?: GroupMutationScope & { folderNodeId?: string | null; repoGroupPath?: string | null },
+  ) => {
     const group = String(groupRaw ?? '').trim();
     if (!group || isUngroupedGroupName(group)) return;
     setSelectedFolderPath(group);
@@ -256,7 +274,9 @@ export function useSidebarInteractions({
       anchorPath: group,
       beforeNodeId: null,
       targetPath: group,
-      repoGroupPath: null,
+      targetNodeId: String(scope?.folderNodeId ?? '').trim() || null,
+      repoGroupPath: String(scope?.repoGroupPath ?? '').trim() || null,
+      targetGroupId: String(scope?.groupId ?? '').trim() || null,
       value: sidebarGroupBaseName(group),
       error: null,
       pending: false,
@@ -283,8 +303,10 @@ export function useSidebarInteractions({
 
     setFolderEditor((prev: FolderEditorState | null) => (prev ? { ...prev, pending: true, error: null } : prev));
     if (draft.mode === 'create') {
+      const repoPath = sidebarRepoPathFromGroupPath(draft.repoGroupPath);
       const result = await runOptimisticCreateGroup(nextPath, {
         placement: 'start',
+        ...(repoPath != null ? { repoPath } : {}),
       });
       if (!result.ok) {
         setFolderEditor((prev: FolderEditorState | null) => (prev ? { ...prev, pending: false, error: result.error || 'Create folder failed.' } : prev));
@@ -301,19 +323,35 @@ export function useSidebarInteractions({
         ),
       );
       setSelectedFolderPath(nextPath);
-      setSelectedSidebarNodeId(isRepoGroupingMode ? null : sidebarFolderNodeId(nextPath));
+      setSelectedSidebarNodeId(sidebarFolderNodeId(
+        isRepoGroupingMode && repoGroupPath
+          ? sidebarRepoScopedGroupPath(repoGroupPath, nextPath)
+          : nextPath,
+      ));
       setFolderEditor(null);
       return;
     }
 
     try {
-      const ok = await runOptimisticRenameGroup(draft.targetPath ?? '', nextPath);
+      const repoPath = sidebarRepoPathFromGroupPath(draft.repoGroupPath);
+      const ok = await runOptimisticRenameGroup(
+        draft.targetPath ?? '',
+        nextPath,
+        {
+          ...(repoPath != null ? { repoPath } : {}),
+          ...(draft.targetGroupId ? { groupId: draft.targetGroupId } : {}),
+        },
+      );
       if (!ok) {
         setFolderEditor((prev: FolderEditorState | null) => (prev ? { ...prev, pending: false } : prev));
         return;
       }
       setSelectedFolderPath(nextPath);
-      setSelectedSidebarNodeId(isRepoGroupingMode ? null : sidebarFolderNodeId(nextPath));
+      setSelectedSidebarNodeId(sidebarFolderNodeId(
+        isRepoGroupingMode && draft.repoGroupPath
+          ? sidebarRepoScopedGroupPath(draft.repoGroupPath, nextPath)
+          : nextPath,
+      ));
       setFolderEditor(null);
     } catch (error: any) {
       const message = String(error?.message ?? error ?? '').trim();
