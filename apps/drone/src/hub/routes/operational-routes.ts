@@ -17,6 +17,7 @@ const CHAT_LOAD_MILESTONES = new Set([
   'cached_config_available',
   'cached_content_available',
   'cached_content_committed',
+  'cached_content_displayed',
   'cached_content_painted',
   'config_loaded',
   'config_failed',
@@ -25,10 +26,31 @@ const CHAT_LOAD_MILESTONES = new Set([
   'primary_content_loaded',
   'primary_content_failed',
   'fresh_content_reconciled',
+  'fresh_content_resolved',
+  'fresh_content_committed',
+  'fresh_content_painted',
   'content_committed',
   'content_painted',
   'timed_out',
 ]);
+const RESOURCE_TIMING_MS_FIELDS = new Set([
+  'startMs',
+  'durationMs',
+  'workerStartMs',
+  'redirectStartMs',
+  'redirectEndMs',
+  'fetchStartMs',
+  'domainLookupStartMs',
+  'domainLookupEndMs',
+  'connectStartMs',
+  'secureConnectionStartMs',
+  'connectEndMs',
+  'requestStartMs',
+  'firstInterimResponseStartMs',
+  'responseStartMs',
+  'responseEndMs',
+]);
+const RESOURCE_TIMING_SIZE_FIELDS = new Set(['transferSize', 'encodedBodySize', 'decodedBodySize']);
 
 function boundedTelemetryText(value: unknown, maxLength: number): string {
   const text = String(value ?? '').trim();
@@ -44,7 +66,8 @@ function boundedTelemetryMs(value: unknown, max = 300_000): number | undefined {
 
 export function normalizeChatLoadTelemetry(raw: unknown): Record<string, unknown> | null {
   const body = raw && typeof raw === 'object' ? (raw as any) : null;
-  if (!body || body.version !== 1) return null;
+  if (!body || (body.version !== 1 && body.version !== 2)) return null;
+  const version = body.version as 1 | 2;
   const navigationId = boundedTelemetryText(body.navigationId, 128);
   const droneId = boundedTelemetryText(body.target?.droneId, 160);
   const chatName = boundedTelemetryText(body.target?.chatName, 160);
@@ -92,6 +115,32 @@ export function normalizeChatLoadTelemetry(raw: unknown): Record<string, unknown
       const optionalDuration = (value: unknown) => boundedTelemetryMs(value);
       const statusCode = Number(item?.status);
       const responseBytes = Number(item?.responseBytes);
+      const resourceTiming: Record<string, number | string> = {};
+      for (const [field, value] of Object.entries(
+        item?.resourceTiming && typeof item.resourceTiming === 'object' ? item.resourceTiming : {},
+      )) {
+        if (RESOURCE_TIMING_MS_FIELDS.has(field)) {
+          const duration = boundedTelemetryMs(value);
+          if (duration !== undefined) resourceTiming[field] = duration;
+          continue;
+        }
+        if (RESOURCE_TIMING_SIZE_FIELDS.has(field)) {
+          const size = Number(value);
+          if (Number.isSafeInteger(size) && size >= 0 && size <= 100_000_000) {
+            resourceTiming[field] = size;
+          }
+          continue;
+        }
+        if (['initiatorType', 'nextHopProtocol', 'deliveryType'].includes(field)) {
+          const text = boundedTelemetryText(value, field === 'nextHopProtocol' ? 32 : 24);
+          if (text) resourceTiming[field] = text;
+        }
+      }
+      const resourceTimingStatus = ['collected', 'not_found', 'unavailable'].includes(
+        item?.resourceTimingStatus,
+      )
+        ? item.resourceTimingStatus
+        : null;
       return [
         {
           name,
@@ -116,12 +165,14 @@ export function normalizeChatLoadTelemetry(raw: unknown): Record<string, unknown
             ? { responseBytes }
             : {}),
           ...(Object.keys(serverTiming).length > 0 ? { serverTiming } : {}),
+          ...(version === 2 && resourceTimingStatus ? { resourceTimingStatus } : {}),
+          ...(version === 2 && Object.keys(resourceTiming).length > 0 ? { resourceTiming } : {}),
         },
       ];
     });
   const itemCount = Number(body.itemCount);
-  return {
-    version: 1,
+  const normalized: Record<string, unknown> = {
+    version,
     navigationId,
     source,
     target: { droneId, chatName },
@@ -140,6 +191,94 @@ export function normalizeChatLoadTelemetry(raw: unknown): Record<string, unknown
     milestones,
     requests,
   };
+  if (version === 1) return normalized;
+
+  const contentInput =
+    body.content && typeof body.content === 'object' && !Array.isArray(body.content)
+      ? body.content
+      : {};
+  const cachedInput =
+    contentInput.cached &&
+    typeof contentInput.cached === 'object' &&
+    !Array.isArray(contentInput.cached)
+      ? contentInput.cached
+      : null;
+  const freshInput =
+    contentInput.fresh &&
+    typeof contentInput.fresh === 'object' &&
+    !Array.isArray(contentInput.fresh)
+      ? contentInput.fresh
+      : null;
+  const normalizeContentPhase = (input: any, fields: string[]): Record<string, unknown> | null => {
+    if (!input) return null;
+    const phase: Record<string, unknown> = {};
+    for (const field of fields) {
+      const duration = boundedTelemetryMs(input[field]);
+      if (duration !== undefined) phase[field] = duration;
+    }
+    const count = Number(input.itemCount);
+    if (Number.isSafeInteger(count) && count >= 0 && count <= 100_000) {
+      phase.itemCount = count;
+    }
+    return Object.keys(phase).length > 0 ? phase : null;
+  };
+  const cached = normalizeContentPhase(cachedInput, ['availabilityMs', 'displayMs', 'paintMs']);
+  const fresh = normalizeContentPhase(freshInput, ['resolutionMs', 'commitMs', 'paintMs']);
+  if (fresh && ['completed', 'error'].includes(freshInput?.status)) {
+    fresh.status = freshInput.status;
+  }
+  normalized.content = {
+    ...(cached ? { cached } : {}),
+    ...(fresh ? { fresh } : {}),
+  };
+
+  const capabilitiesInput =
+    body.capabilities && typeof body.capabilities === 'object' && !Array.isArray(body.capabilities)
+      ? body.capabilities
+      : {};
+  normalized.capabilities = {
+    resourceTiming: ['supported', 'unavailable'].includes(capabilitiesInput.resourceTiming)
+      ? capabilitiesInput.resourceTiming
+      : 'unavailable',
+    longTasks: ['supported', 'unavailable', 'observer_error'].includes(capabilitiesInput.longTasks)
+      ? capabilitiesInput.longTasks
+      : 'unavailable',
+  };
+  const longTasks = (Array.isArray(body.longTasks) ? body.longTasks : [])
+    .slice(0, 50)
+    .flatMap((task: any) => {
+      const startMs = boundedTelemetryMs(task?.startMs);
+      const taskDurationMs = boundedTelemetryMs(task?.durationMs);
+      const overlapMs = boundedTelemetryMs(task?.overlapMs);
+      if (startMs === undefined || taskDurationMs === undefined || overlapMs === undefined)
+        return [];
+      return [{ startMs, durationMs: taskDurationMs, overlapMs }];
+    });
+  normalized.longTasks = longTasks;
+  const longTaskCount = Number(body.longTaskCount);
+  normalized.longTaskCount =
+    Number.isSafeInteger(longTaskCount) &&
+    longTaskCount >= longTasks.length &&
+    longTaskCount <= 10_000
+      ? longTaskCount
+      : longTasks.length;
+  const longTasksDropped = Number(body.longTasksDropped);
+  if (
+    Number.isSafeInteger(longTasksDropped) &&
+    longTasksDropped > 0 &&
+    longTasksDropped <= 10_000
+  ) {
+    normalized.longTasksDropped = longTasksDropped;
+  }
+  const resourceEntriesDropped = Number(body.resourceEntriesDropped);
+  if (
+    Number.isSafeInteger(resourceEntriesDropped) &&
+    resourceEntriesDropped > 0 &&
+    resourceEntriesDropped <= 10_000
+  ) {
+    normalized.resourceEntriesDropped = resourceEntriesDropped;
+  }
+  return normalized;
 }
 
 function serializeChatLoadTelemetryForLog(
@@ -154,14 +293,17 @@ function serializeChatLoadTelemetryForLog(
       }
       const request = rawRequest as Record<string, unknown>;
       const serverTiming = request.serverTiming;
-      if (!serverTiming || typeof serverTiming !== 'object' || Array.isArray(serverTiming)) {
-        return request;
-      }
+      const resourceTiming = request.resourceTiming;
       return {
         ...request,
         // Console inspection truncates objects nested inside the requests array to
         // `[Object]`. Keep the phases machine-readable in persisted hub logs.
-        serverTiming: JSON.stringify(serverTiming),
+        ...(serverTiming && typeof serverTiming === 'object' && !Array.isArray(serverTiming)
+          ? { serverTiming: JSON.stringify(serverTiming) }
+          : {}),
+        ...(resourceTiming && typeof resourceTiming === 'object' && !Array.isArray(resourceTiming)
+          ? { resourceTiming: JSON.stringify(resourceTiming) }
+          : {}),
       };
     }),
   };

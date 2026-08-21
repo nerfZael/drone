@@ -1,3 +1,15 @@
+import {
+  collectChatLoadResourceTiming,
+  correlateResourceEntry,
+  longTaskFromEntry,
+  MAX_CHAT_LOAD_LONG_TASKS,
+  resourceTimingFromEntry,
+  startChatLoadPerformance,
+  stopChatLoadPerformance,
+  type ChatLoadPerformanceState,
+  type ResourceTimingRecord,
+} from './chat-load-performance';
+
 export type ChatLoadSurface = 'transcript' | 'cli' | 'native' | 'unavailable';
 
 export type ChatLoadTarget = {
@@ -23,6 +35,8 @@ type ChatLoadRequestRecord = {
   status?: number;
   responseBytes?: number;
   serverTiming?: Record<string, number>;
+  resourceTimingStatus: 'collected' | 'not_found' | 'unavailable';
+  resourceTiming?: ResourceTimingRecord;
   outcome: 'completed' | 'error' | 'aborted';
 };
 
@@ -45,7 +59,9 @@ type ChatLoadSpan = {
   cachedConfigUsed: boolean;
   freshConfigResolved: boolean;
   freshConfigFailed: boolean;
-  paintScheduled: boolean;
+  cacheBySurface: Partial<Record<ChatLoadSurface, { itemCount?: number }>>;
+  freshPaintScheduled: boolean;
+  performance: ChatLoadPerformanceState;
   timeout: ReturnType<typeof setTimeout> | null;
 };
 
@@ -61,6 +77,12 @@ function monotonicNow(): number {
 
 function roundedMs(value: number): number {
   return Math.max(0, Math.round(value * 10) / 10);
+}
+
+function boundedText(value: unknown, maxLength: number): string | undefined {
+  const text = String(value ?? '').trim();
+  if (!text || text.length > maxLength || /[\u0000-\u001f\u007f]/.test(text)) return undefined;
+  return text;
 }
 
 function cleanTarget(target: ChatLoadTarget): ChatLoadTarget {
@@ -106,14 +128,57 @@ function serverTimingFromHeader(raw: string | null): Record<string, number> | un
   return Object.keys(timing).length > 0 ? timing : undefined;
 }
 
+function contentTelemetry(span: ChatLoadSpan): Record<string, unknown> {
+  const cache = span.surface ? span.cacheBySurface[span.surface] : undefined;
+  const fresh =
+    span.surface && span.freshPrimarySurfaces.has(span.surface)
+      ? span.primaryBySurface[span.surface]
+      : undefined;
+  return {
+    ...(cache
+      ? {
+          cached: {
+            availabilityMs: span.milestones.cached_content_available,
+            ...(span.milestones.cached_content_displayed !== undefined
+              ? { displayMs: span.milestones.cached_content_displayed }
+              : {}),
+            ...(span.milestones.cached_content_painted !== undefined
+              ? { paintMs: span.milestones.cached_content_painted }
+              : {}),
+            ...(cache.itemCount !== undefined ? { itemCount: cache.itemCount } : {}),
+          },
+        }
+      : {}),
+    ...(fresh
+      ? {
+          fresh: {
+            status: fresh.status,
+            resolutionMs: span.milestones.fresh_content_resolved,
+            ...(span.milestones.fresh_content_committed !== undefined
+              ? { commitMs: span.milestones.fresh_content_committed }
+              : {}),
+            ...(span.milestones.fresh_content_painted !== undefined
+              ? { paintMs: span.milestones.fresh_content_painted }
+              : {}),
+            ...(fresh.itemCount !== undefined ? { itemCount: fresh.itemCount } : {}),
+          },
+        }
+      : {}),
+  };
+}
+
 function report(span: ChatLoadSpan, status: ChatLoadStatus): void {
   if (activeSpan === span) activeSpan = null;
   if (span.timeout) clearTimeout(span.timeout);
   span.timeout = null;
   const finishedAt = monotonicNow();
+  stopChatLoadPerformance(span.performance, span.startedMonoMs, finishedAt, (rawUrl) => {
+    const url = requestUrl(rawUrl);
+    return Boolean(url && requestMatchesTarget(url, span.target));
+  });
   const primary = span.surface ? span.primaryBySurface[span.surface] : undefined;
   const payload = {
-    version: 1,
+    version: 2,
     navigationId: span.id,
     source: span.source,
     target: span.target,
@@ -127,6 +192,21 @@ function report(span: ChatLoadSpan, status: ChatLoadStatus): void {
     itemCount: primary?.itemCount,
     milestones: span.milestones,
     requests: span.requests,
+    content: contentTelemetry(span),
+    capabilities: {
+      resourceTiming: span.performance.resourceTimingSupported ? 'supported' : 'unavailable',
+      longTasks: span.performance.longTaskStatus,
+    },
+    longTasks: span.performance.longTasks,
+    longTaskCount: span.performance.longTaskCount,
+    ...(span.performance.longTaskCount > span.performance.longTasks.length
+      ? {
+          longTasksDropped: span.performance.longTaskCount - span.performance.longTasks.length,
+        }
+      : {}),
+    ...(span.performance.resourceEntriesDropped > 0
+      ? { resourceEntriesDropped: span.performance.resourceEntriesDropped }
+      : {}),
   };
   if (typeof fetch !== 'function') return;
   void fetch('/api/telemetry/chat-load', {
@@ -149,6 +229,7 @@ function maybeMarkCachedContentDisplayed(span: ChatLoadSpan, surface: ChatLoadSu
   }
   span.cachedPaintScheduledSurfaces.add(surface);
   mark(span, 'cached_content_committed');
+  mark(span, 'cached_content_displayed');
   const afterPaint = () => {
     if (activeSpan === span && !span.freshPrimarySurfaces.has(surface)) {
       mark(span, 'cached_content_painted');
@@ -159,7 +240,7 @@ function maybeMarkCachedContentDisplayed(span: ChatLoadSpan, surface: ChatLoadSu
 }
 
 function maybeComplete(span: ChatLoadSpan): void {
-  if (activeSpan !== span || !span.surface || span.paintScheduled) return;
+  if (activeSpan !== span || !span.surface || span.freshPaintScheduled) return;
   const primary = span.primaryBySurface[span.surface];
   if (!primary || !span.committedSurfaces.has(span.surface)) return;
   if (span.cachedConfigUsed && !span.freshConfigResolved) return;
@@ -167,9 +248,10 @@ function maybeComplete(span: ChatLoadSpan): void {
     return;
   }
   mark(span, 'content_committed');
-  span.paintScheduled = true;
+  span.freshPaintScheduled = true;
   const afterPaint = () => {
     if (activeSpan !== span) return;
+    mark(span, 'fresh_content_painted');
     mark(span, 'content_painted');
     report(span, primary.status === 'completed' && !span.freshConfigFailed ? 'completed' : 'error');
   };
@@ -187,12 +269,13 @@ export function beginChatLoadNavigation(input: {
   const target = cleanTarget(input.target);
   if (!target.droneId) return null;
   if (activeSpan) report(activeSpan, 'superseded');
+  const startedMonoMs = monotonicNow();
   const span: ChatLoadSpan = {
     id: makeId(),
     source: input.source,
     target,
     startedAt: new Date().toISOString(),
-    startedMonoMs: monotonicNow(),
+    startedMonoMs,
     milestones: { click: 0 },
     requests: [],
     surface: null,
@@ -206,7 +289,15 @@ export function beginChatLoadNavigation(input: {
     cachedConfigUsed: false,
     freshConfigResolved: false,
     freshConfigFailed: false,
-    paintScheduled: false,
+    cacheBySurface: {},
+    freshPaintScheduled: false,
+    performance: startChatLoadPerformance({
+      navigationStartedMonoMs: startedMonoMs,
+      isNavigationResource: (rawUrl) => {
+        const url = requestUrl(rawUrl);
+        return Boolean(url && requestMatchesTarget(url, target));
+      },
+    }),
     timeout: null,
   };
   activeSpan = span;
@@ -231,10 +322,16 @@ export function markChatLoadCacheHit(
   const span = activeFor(target);
   if (!span) return;
   span.cachedSurfaces.add(surface);
+  const cachedItemCount = Number.isFinite(itemCount)
+    ? Math.max(0, Math.floor(Number(itemCount)))
+    : undefined;
   span.primaryBySurface[surface] = {
     status: 'completed',
     cacheStatus: 'hit',
-    ...(Number.isFinite(itemCount) ? { itemCount } : {}),
+    ...(cachedItemCount !== undefined ? { itemCount: cachedItemCount } : {}),
+  };
+  span.cacheBySurface[surface] = {
+    ...(cachedItemCount !== undefined ? { itemCount: cachedItemCount } : {}),
   };
   mark(span, 'cached_content_available');
   maybeMarkCachedContentDisplayed(span, surface);
@@ -275,7 +372,10 @@ export function markChatLoadConfigResolved(
   maybeMarkCachedContentDisplayed(span, input.surface);
   if (input.surface === 'unavailable') {
     span.primaryBySurface.unavailable = { status: 'error', cacheStatus: 'none' };
-    span.freshPrimarySurfaces.add('unavailable');
+    if (input.source !== 'cache') {
+      span.freshPrimarySurfaces.add('unavailable');
+      mark(span, 'fresh_content_resolved');
+    }
     mark(span, 'primary_content_failed');
   } else if (
     input.source !== 'cache' &&
@@ -305,6 +405,7 @@ export function markChatLoadPrimaryResolved(
   };
   span.freshPrimarySurfaces.add(input.surface);
   if (span.cachedSurfaces.has(input.surface)) mark(span, 'fresh_content_reconciled');
+  mark(span, 'fresh_content_resolved');
   if (span.surface === input.surface) {
     mark(span, input.status === 'error' ? 'primary_content_failed' : 'primary_content_loaded');
   }
@@ -319,6 +420,9 @@ export function markChatLoadContentCommitted(
   if (!span) return;
   span.committedSurfaces.add(surface);
   maybeMarkCachedContentDisplayed(span, surface);
+  if (span.freshPrimarySurfaces.has(surface)) {
+    mark(span, 'fresh_content_committed');
+  }
   maybeComplete(span);
 }
 
@@ -339,6 +443,15 @@ function requestMatchesTarget(url: URL, target: ChatLoadTarget): boolean {
   return url.pathname === expected || url.pathname.startsWith(`${expected}/`);
 }
 
+function requestUrl(raw: string): URL | null {
+  if (typeof URL === 'undefined') return null;
+  try {
+    return new URL(raw, typeof location !== 'undefined' ? location.href : 'http://localhost');
+  } catch {
+    return null;
+  }
+}
+
 export type ChatLoadRequestObservation = {
   response: (response: Response) => void;
   finish: (input?: { responseBytes?: number; parseMs?: number }) => void;
@@ -347,18 +460,15 @@ export type ChatLoadRequestObservation = {
 
 export function observeChatLoadRequest(urlRaw: string): ChatLoadRequestObservation | null {
   const span = activeSpan;
-  if (!span || typeof URL === 'undefined') return null;
-  let url: URL;
-  try {
-    url = new URL(urlRaw, typeof location !== 'undefined' ? location.href : 'http://localhost');
-  } catch {
-    return null;
-  }
+  if (!span) return null;
+  const url = requestUrl(urlRaw);
+  if (!url) return null;
   if (!requestMatchesTarget(url, span.target)) return null;
   const startedAt = monotonicNow();
   let responseAt: number | null = null;
   let responseStatus: number | undefined;
   let timing: Record<string, number> | undefined;
+  let responseUrl: string | undefined;
   let finished = false;
   const complete = (
     outcome: ChatLoadRequestRecord['outcome'],
@@ -372,6 +482,16 @@ export function observeChatLoadRequest(urlRaw: string): ChatLoadRequestObservati
     const parseMs = Number.isFinite(input?.parseMs) ? roundedMs(Number(input?.parseMs)) : undefined;
     const bodyMs =
       responseAt == null ? undefined : roundedMs(finishedAt - responseAt - (parseMs ?? 0));
+    const resource = collectChatLoadResourceTiming({
+      state: span.performance,
+      requestUrls: [url.href, responseUrl].filter(Boolean) as string[],
+      requestStartedAt: startedAt,
+      navigationStartedMonoMs: span.startedMonoMs,
+      isNavigationResource: (rawUrl) => {
+        const candidateUrl = requestUrl(rawUrl);
+        return Boolean(candidateUrl && requestMatchesTarget(candidateUrl, span.target));
+      },
+    });
     span.requests.push({
       name: requestName(url),
       startMs: roundedMs(startedAt - span.startedMonoMs),
@@ -384,6 +504,8 @@ export function observeChatLoadRequest(urlRaw: string): ChatLoadRequestObservati
         ? { responseBytes: Math.max(0, Math.floor(Number(input?.responseBytes))) }
         : {}),
       ...(timing ? { serverTiming: timing } : {}),
+      resourceTimingStatus: resource.status,
+      ...(resource.timing ? { resourceTiming: resource.timing } : {}),
       outcome,
     });
   };
@@ -391,6 +513,7 @@ export function observeChatLoadRequest(urlRaw: string): ChatLoadRequestObservati
     response(response) {
       responseAt = monotonicNow();
       responseStatus = response.status;
+      responseUrl = boundedText(response.url, 2_048);
       timing = serverTimingFromHeader(response.headers.get('server-timing'));
     },
     finish(input) {
@@ -412,8 +535,20 @@ export function responseTextBytes(text: string): number {
 
 export const chatLoadTelemetryTesting = {
   parseServerTiming: serverTimingFromHeader,
+  resourceTimingFromEntry,
+  correlateResourceEntry,
+  longTaskFromEntry,
+  maxLongTasks: MAX_CHAT_LOAD_LONG_TASKS,
   reset() {
-    if (activeSpan?.timeout) clearTimeout(activeSpan.timeout);
+    if (activeSpan) {
+      if (activeSpan.timeout) clearTimeout(activeSpan.timeout);
+      stopChatLoadPerformance(
+        activeSpan.performance,
+        activeSpan.startedMonoMs,
+        monotonicNow(),
+        () => false,
+      );
+    }
     activeSpan = null;
   },
 };
