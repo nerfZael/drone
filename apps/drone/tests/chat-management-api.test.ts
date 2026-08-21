@@ -679,14 +679,25 @@ describeSocketSuite('chat management api', () => {
     expect(clearedInfo.data?.reasoning).toBeNull();
   });
 
-  test('stores native-shaped Drone Hub access on the chat and assigns old chats a stable id', async () => {
+  test('reads and stores native-shaped Drone Hub access with route timing', async () => {
     const droneId = 'drone-chat-mcp-access';
     await seedDrone(droneId);
+    await upsertChatInStore({
+      droneId,
+      chatName: 'default',
+      chatEntry: {
+        createdAt: new Date().toISOString(),
+        agent: { kind: 'builtin', id: 'cursor' },
+      },
+    });
 
     const initial = await apiFetch(
       `/api/drones/${encodeURIComponent(droneId)}/chats/default/mcp-access`,
     );
     expect(initial.r.status).toBe(200);
+    expect(initial.r.headers.get('server-timing')).toContain('resolve;dur=');
+    expect(initial.r.headers.get('server-timing')).toContain('read;dur=');
+    expect(initial.r.headers.get('server-timing')).toContain('availability;dur=');
     expect(initial.data?.accessScope).toMatchObject({
       readMode: 'all',
       writeMode: 'selected',
@@ -775,6 +786,51 @@ describeSocketSuite('chat management api', () => {
       },
     );
     expect(invalid.r.status).toBe(400);
+  });
+
+  test('GET MCP access returns 404 without creating a missing chat while PUT still creates it', async () => {
+    const droneId = 'drone-chat-mcp-access-missing';
+    const unknownDrone = await apiFetch(
+      '/api/drones/missing-mcp-access-drone/chats/default/mcp-access',
+    );
+    expect(unknownDrone.r.status).toBe(404);
+    expect(unknownDrone.data?.error).toBe('unknown drone: missing-mcp-access-drone');
+
+    await seedDrone(droneId);
+
+    const missing = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/missing/mcp-access`,
+    );
+    expect(missing.r.status).toBe(404);
+    expect(missing.data?.error).toBe('unknown chat: missing');
+    expect(missing.r.headers.get('server-timing')).toContain('resolve;dur=');
+    expect(missing.r.headers.get('server-timing')).toContain('read;dur=');
+
+    const afterRead = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats`);
+    expect(afterRead.data?.chats).not.toContain('missing');
+
+    const created = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/missing/mcp-access`,
+      {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          accessScope: {
+            readMode: 'selected',
+            writeMode: 'selected',
+            executeMode: 'selected',
+            droneIds: [],
+          },
+        }),
+      },
+    );
+    expect(created.r.status).toBe(200);
+
+    const afterWrite = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/missing/mcp-access`,
+    );
+    expect(afterWrite.r.status).toBe(200);
+    expect(afterWrite.data?.accessScope?.droneIds).toContain(droneId);
   });
 
   test('locks every agent change after chat history exists', async () => {

@@ -141,6 +141,7 @@ import {
   markChatUnreadInStore,
   patchChatMetadataInStore,
   readChatFromStore,
+  readChatMetadataFromStore,
   readDroneChatCleanupProjectionFromStore,
   readChatReadStateFromStore,
   readChatRowsFromStore,
@@ -446,6 +447,7 @@ import {
   createMcpServer,
   deleteMcpServerRecord,
   getMcpServerById,
+  listCanonicalMcpServersForRead,
   listMcpServers,
   renderMcpProjection,
   type McpServerRecord,
@@ -1872,6 +1874,13 @@ function createMcpProjectionFeature() {
     );
   }
 
+  async function isManagedChatMcpAvailableForRead(): Promise<boolean> {
+    if (!config?.signingSecret) return false;
+    return (await listCanonicalMcpServersForRead()).some(
+      (server) => isDroneHubMcpServer(server) && server.enabled !== false,
+    );
+  }
+
   async function mcpServersForProjection(opts: {
     runtime: 'host' | 'container';
     droneId?: string;
@@ -1994,6 +2003,7 @@ function createMcpProjectionFeature() {
   return {
     bindConfig,
     isManagedChatMcpAvailable,
+    isManagedChatMcpAvailableForRead,
     resolveManagedChatMcpEnv,
     syncMcpServersForDrone,
     syncManagedFilesForDrone,
@@ -3925,6 +3935,7 @@ async function startDroneHubApiServerWithLifecycle(
   const {
     bindConfig: bindMcpProjectionConfig,
     isManagedChatMcpAvailable,
+    isManagedChatMcpAvailableForRead,
     syncMcpServersForDrone,
     syncSkillLibraryForDrone,
   } = mcpProjectionFeature;
@@ -5842,6 +5853,7 @@ async function startDroneHubApiServerWithLifecycle(
     importResolvedDroneChatsToStore,
     inferChatAgent,
     isManagedChatMcpAvailable,
+    isManagedChatMcpAvailableForRead,
     isDraftChatEntry,
     isSafePromptId,
     isStaleDockerExecErrorMessage,
@@ -5887,6 +5899,7 @@ async function startDroneHubApiServerWithLifecycle(
     pushPendingPrompt,
     pushPendingStartupPrompt,
     readChatFromStore,
+    readChatMetadataFromStore,
     readChatReadStateFromStore,
     readChatSnapshot,
     resolveInterruptedPendingPrompt,
