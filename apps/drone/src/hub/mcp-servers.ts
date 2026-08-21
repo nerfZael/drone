@@ -262,6 +262,13 @@ export async function listMcpServers(): Promise<McpServerRecord[]> {
   return listMcpServersFromRegistry(reg);
 }
 
+/** Canonical SQLite hot-path read. Bun keeps its compatibility-store fallback. */
+export async function listCanonicalMcpServersForRead(): Promise<McpServerRecord[]> {
+  const store = await canonicalMcpServerStore();
+  if (store) return store.listMcpServers<McpServerRecord>();
+  return await listMcpServers();
+}
+
 export async function getMcpServerById(idRaw: string): Promise<McpServerRecord | null> {
   const id = String(idRaw ?? '').trim();
   if (!id) return null;

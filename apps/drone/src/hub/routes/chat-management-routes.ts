@@ -34,6 +34,7 @@ type ChatManagementRouteDependencyName =
   | 'importResolvedDroneChatsToStore'
   | 'inferChatAgent'
   | 'isManagedChatMcpAvailable'
+  | 'isManagedChatMcpAvailableForRead'
   | 'isDraftChatEntry'
   | 'listChatReadStatesFromStore'
   | 'listChatsFromStore'
@@ -59,6 +60,7 @@ type ChatManagementRouteDependencyName =
   | 'projectCanonicalChatToRegistry'
   | 'projectCanonicalChatsToRegistry'
   | 'readChatFromStore'
+  | 'readChatMetadataFromStore'
   | 'readChatReadStateFromStore'
   | 'removeDockerSnapshotImagesBestEffort'
   | 'renameNativeChatSession'
@@ -119,6 +121,7 @@ export function createChatManagementRouteHandler(
     importResolvedDroneChatsToStore,
     inferChatAgent,
     isManagedChatMcpAvailable,
+    isManagedChatMcpAvailableForRead,
     isDraftChatEntry,
     listChatReadStatesFromStore,
     listChatsFromStore,
@@ -144,6 +147,7 @@ export function createChatManagementRouteHandler(
     projectCanonicalChatToRegistry,
     projectCanonicalChatsToRegistry,
     readChatFromStore,
+    readChatMetadataFromStore,
     readChatReadStateFromStore,
     removeDockerSnapshotImagesBestEffort,
     renameNativeChatSession,
@@ -759,6 +763,65 @@ export function createChatManagementRouteHandler(
       ) {
         const droneRef = decodeURIComponent(parts[2]);
         const chatName = decodeURIComponent(parts[4]) || 'default';
+        if (method === 'GET') {
+          const timer = createRequestTimer();
+          try {
+            const resolved = await resolveCanonicalDroneOrPendingForReadRef(droneRef);
+            timer.mark('resolve');
+            if (!resolved || resolved.kind === 'pending') {
+              const status = resolved?.kind === 'pending' ? 409 : 404;
+              const error =
+                resolved?.kind === 'pending'
+                  ? `drone "${droneRef}" is still starting`
+                  : `unknown drone: ${droneRef}`;
+              timer.setHeader(res);
+              logSlowHubRequest('chat MCP access', timer, { droneRef, chatName, status });
+              json(res, status, { ok: false, error });
+              return;
+            }
+            const droneId = resolved.id;
+            const stored = readChatMetadataFromStore({ droneId, chatName });
+            timer.mark('read');
+            if (!stored.available) {
+              throw new Error('canonical chat store is unavailable');
+            }
+            if (!stored.chat) {
+              timer.setHeader(res);
+              logSlowHubRequest('chat MCP access', timer, {
+                droneId,
+                chatName,
+                status: 404,
+              });
+              json(res, 404, { ok: false, error: `unknown chat: ${chatName}` });
+              return;
+            }
+            const available = await isManagedChatMcpAvailableForRead();
+            timer.mark('availability');
+            timer.setHeader(res);
+            logSlowHubRequest('chat MCP access', timer, { droneId, chatName, status: 200 });
+            json(res, 200, {
+              ok: true,
+              available,
+              accessScope: normalizeMcpChatAccessScope(
+                stored.chat.droneHubMcpAccessScope,
+                droneId,
+              ),
+            });
+            return;
+          } catch (error: any) {
+            const message = error?.message ?? String(error);
+            const status = /unknown drone|unknown chat/i.test(message) ? 404 : 500;
+            timer.setHeader(res);
+            logSlowHubRequest('chat MCP access', timer, {
+              droneRef,
+              chatName,
+              status,
+              error: message,
+            });
+            json(res, status, { ok: false, error: message });
+            return;
+          }
+        }
         try {
           const resolved = await resolveDroneOrRespond(res, droneRef);
           if (!resolved) return;

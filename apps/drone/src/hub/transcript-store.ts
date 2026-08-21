@@ -91,6 +91,11 @@ export type ChatReadRows = {
 };
 export type ChatStoreImportResult = { available: boolean; sourceHash: string };
 export type ChatStoreReadResult = { available: boolean; chat: any | null; sourceHash: string };
+export type ChatMetadataReadResult = {
+  available: boolean;
+  chat: Record<string, unknown> | null;
+  sourceHash: string;
+};
 export type ChatStoreListResult = { available: boolean; chats: string[] };
 export type ActiveChatSearchResult = {
   droneId: string;
@@ -1828,6 +1833,19 @@ export class ChatTranscriptRepository {
     });
   }
 
+  readChatMetadata(opts: { droneId: string; chatName: string }): ChatMetadataReadResult {
+    return this.database.read((connection) => {
+      const row = this.chatRow(connection, opts.droneId, opts.chatName);
+      if (!row) return { available: true, chat: null, sourceHash: '' };
+      const chat = metadata(parseJson(row.metadata_json));
+      return {
+        available: true,
+        chat: chat && typeof chat === 'object' ? chat : {},
+        sourceHash: row.source_hash,
+      };
+    });
+  }
+
   readDroneCleanupProjection(opts: { droneId: string }): DroneChatCleanupProjection {
     return this.database.read((connection) => {
       const chats: Record<string, any> = {};
@@ -3055,6 +3073,18 @@ export async function markChatUnreadInStore(opts: {
 export function readChatFromStore(opts: { droneId: string; chatName: string }): ChatStoreReadResult {
   const store = repository();
   return store ? store.readChat(opts) : memoryReadChat(opts.droneId, opts.chatName);
+}
+
+export function readChatMetadataFromStore(opts: {
+  droneId: string;
+  chatName: string;
+}): ChatMetadataReadResult {
+  const store = repository();
+  if (store) return store.readChatMetadata(opts);
+  const row = memoryChats.get(key(opts.droneId, opts.chatName));
+  return row
+    ? { available: true, chat: { ...row.metadata }, sourceHash: row.sourceHash }
+    : { available: true, chat: null, sourceHash: '' };
 }
 
 export function readDroneChatCleanupProjectionFromStore(

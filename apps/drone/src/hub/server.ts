@@ -141,6 +141,7 @@ import {
   markChatUnreadInStore,
   patchChatMetadataInStore,
   readChatFromStore,
+  readChatMetadataFromStore,
   readDroneChatCleanupProjectionFromStore,
   readChatReadStateFromStore,
   readChatRowsFromStore,
@@ -446,6 +447,7 @@ import {
   createMcpServer,
   deleteMcpServerRecord,
   getMcpServerById,
+  listCanonicalMcpServersForRead,
   listMcpServers,
   renderMcpProjection,
   type McpServerRecord,
@@ -1876,6 +1878,13 @@ function createMcpProjectionFeature() {
     );
   }
 
+  async function isManagedChatMcpAvailableForRead(): Promise<boolean> {
+    if (!config?.signingSecret) return false;
+    return (await listCanonicalMcpServersForRead()).some(
+      (server) => isDroneHubMcpServer(server) && server.enabled !== false,
+    );
+  }
+
   async function mcpServersForProjection(opts: {
     runtime: 'host' | 'container';
     droneId?: string;
@@ -1998,6 +2007,7 @@ function createMcpProjectionFeature() {
   return {
     bindConfig,
     isManagedChatMcpAvailable,
+    isManagedChatMcpAvailableForRead,
     resolveManagedChatMcpEnv,
     syncMcpServersForDrone,
     syncManagedFilesForDrone,
@@ -3929,6 +3939,7 @@ async function startDroneHubApiServerWithLifecycle(
   const {
     bindConfig: bindMcpProjectionConfig,
     isManagedChatMcpAvailable,
+    isManagedChatMcpAvailableForRead,
     syncMcpServersForDrone,
     syncSkillLibraryForDrone,
   } = mcpProjectionFeature;
@@ -4080,7 +4091,12 @@ async function startDroneHubApiServerWithLifecycle(
   const apiToken = String(opts.apiToken ?? '').trim();
   if (!apiToken) throw new Error('missing hub API token');
   const mcpToken = String(opts.mcpToken ?? '').trim();
-  if (mcpToken) await revokeLegacyProjectedDroneMcpTokens();
+  if (mcpToken) {
+    await revokeLegacyProjectedDroneMcpTokens();
+    // Complete the one-time catalog migration before the request listener starts.
+    // Latency-sensitive MCP access reads can then stay canonical and read-only.
+    await listMcpServers();
+  }
   const renameDroneCommand = createRenameDroneCommand({
     displayNameMaxLength: DRONE_DISPLAY_NAME_MAX_LEN,
     findDroneIdByRef,
@@ -6003,6 +6019,7 @@ async function startDroneHubApiServerWithLifecycle(
     importResolvedDroneChatsToStore,
     inferChatAgent,
     isManagedChatMcpAvailable,
+    isManagedChatMcpAvailableForRead,
     isDraftChatEntry,
     isSafePromptId,
     isStaleDockerExecErrorMessage,
@@ -6048,6 +6065,7 @@ async function startDroneHubApiServerWithLifecycle(
     pushPendingPrompt,
     pushPendingStartupPrompt,
     readChatFromStore,
+    readChatMetadataFromStore,
     readChatReadStateFromStore,
     readChatSnapshot,
     resolveInterruptedPendingPrompt,
