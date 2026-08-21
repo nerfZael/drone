@@ -88,6 +88,11 @@ import {
 import { useDroneSelectionState } from './droneHub/app/use-drone-selection-state';
 import { markChatLoadSelectionCommitted } from './droneHub/app/chat-load-telemetry';
 import {
+  chatRuntimeCacheKey,
+  deleteChatRuntimeCache,
+  renameChatRuntimeCache,
+} from './droneHub/app/chat-runtime-cache';
+import {
   SIDEBAR_VISIBLE_MULTI_CHAT_GROUP,
   useSidebarViewModel,
 } from './droneHub/app/use-sidebar-view-model';
@@ -235,13 +240,13 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     localBusyChatCountByNodeId,
     unreadAgentMessageByChatNodeId,
     lastAgentSnippetByChatNodeId,
-    transcripts,
-    transcriptError,
-    loadingTranscript,
+    transcripts: runtimeTranscripts,
+    transcriptError: runtimeTranscriptError,
+    loadingTranscript: runtimeLoadingTranscript,
     optimisticPendingPrompts,
-    sessionText,
-    sessionError,
-    loadingSession,
+    sessionText: runtimeSessionText,
+    sessionError: runtimeSessionError,
+    loadingSession: runtimeLoadingSession,
     pinnedToBottom,
     setOptimisticallyDeletedDrones,
     setStartupSeedByDrone,
@@ -2075,6 +2080,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     cancellingPendingPromptById,
     canStopResponse,
     chatUiMode,
+    loadingSession,
+    loadingTranscript,
     promptError,
     requestCancelPendingPrompt,
     requestResolvePendingPromptInterruption,
@@ -2082,10 +2089,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     interruptionResolutionErrorById,
     requestStopResponse,
     selectedIsResponding,
+    sessionError,
+    sessionText,
     sendPromptText: sendPromptTextBase,
     sendingPrompt,
     stopResponseError,
     stoppingResponse,
+    transcriptError,
+    transcripts,
     visiblePendingPromptsWithStartup,
   } = useChatRuntimeOrchestration({
     chatInfo,
@@ -2096,12 +2107,16 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     queuedPromptsByDroneChat,
     getQueuedPromptsForKey,
     flushingQueuedKeysRef,
+    loadingSession: runtimeLoadingSession,
+    loadingTranscript: runtimeLoadingTranscript,
     selectedChat,
     selectedDrone,
     selectedDroneIdentity,
+    sessionError: runtimeSessionError,
+    sessionText: runtimeSessionText,
     startupSeedByDrone,
-    transcriptError,
-    transcripts,
+    transcriptError: runtimeTranscriptError,
+    transcripts: runtimeTranscripts,
     setLoadingSession,
     setLoadingTranscript,
     setOptimisticPendingPrompts,
@@ -2990,6 +3005,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
               `/api/drones/${encodeURIComponent(operation.droneId)}/chats/${encodeURIComponent(operation.chatName)}`,
               { method: 'DELETE' },
             );
+            deleteChatRuntimeCache(
+              chatRuntimeCacheKey(operation.droneId, operation.chatName),
+            );
             return { droneId: operation.droneId, chatName: operation.chatName };
           },
           renameChat: async (operation) => {
@@ -3000,6 +3018,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
                 headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({ newName: operation.newName }),
               },
+            );
+            renameChatRuntimeCache(
+              operation.droneId,
+              operation.chatName,
+              operation.newName,
             );
             return {
               droneId: operation.droneId,
@@ -3783,6 +3806,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             body: JSON.stringify({ newName }),
           },
         );
+        renameChatRuntimeCache(droneId, chatName, newName);
         setSidebarChatOrderByDrone((prev) => {
           const currentOrder = prev[droneId];
           if (!currentOrder || !currentOrder.includes(chatName)) return prev;
@@ -3862,6 +3886,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
                 body: JSON.stringify({ newName: candidate }),
               },
             );
+            renameChatRuntimeCache(droneId, chatName, candidate);
             const oldCanvasNodeId = createCanvasChatNodeId(droneId, chatName);
             const newCanvasNodeId = createCanvasChatNodeId(droneId, candidate);
             if (oldCanvasNodeId && newCanvasNodeId) {
@@ -4395,6 +4420,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}`,
           { method: 'DELETE' },
         );
+        deleteChatRuntimeCache(chatRuntimeCacheKey(droneId, chatName));
         setSidebarChatOrderByDrone((prev) => {
           const currentOrder = prev[droneId];
           if (!currentOrder || !currentOrder.includes(chatName)) return prev;

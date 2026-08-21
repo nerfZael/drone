@@ -53,7 +53,7 @@ import {
   sendDroneChatPrompt,
 } from './chat-api';
 import { subscribeDroneChatEvents } from './chat-events';
-import { useChatMcpAccess } from './use-chat-mcp-access';
+import { shouldLoadChatMcpAccess, useChatMcpAccess } from './use-chat-mcp-access';
 import { parseDroneHubDragData, useDroneHubActiveDrag } from './drone-hub-dnd';
 import { assignedDroneIdsFromData } from './drone-hub-dnd-utils';
 import { DroneHubPermissionsView } from './DroneHubPermissionsView';
@@ -172,7 +172,11 @@ export function GroupMultiChatColumn({
   const disabledByProvisioning = isDroneStartingOrSeeding(drone.hubPhase);
   const fullTranscriptLoadedRef = React.useRef(false);
   const activeDroneHubDrag = useDroneHubActiveDrag();
-  const chatMcpAccess = useChatMcpAccess(drone.id, chatName, true);
+  const chatMcpAccess = useChatMcpAccess(
+    drone.id,
+    chatName,
+    shouldLoadChatMcpAccess(droneHubPermissionsOpen),
+  );
   const chatMcpAccessDropId = `group-chat-mcp-access:${drone.id}:${chatName}`;
   const { isOver: chatMcpAccessDropIsOver, setNodeRef: setChatMcpAccessDropNodeRef } = useDroppable(
     { id: chatMcpAccessDropId },

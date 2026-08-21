@@ -39,6 +39,12 @@ type ChatLoadSpan = {
   runtime: 'host' | 'container' | null;
   primaryBySurface: Partial<Record<ChatLoadSurface, PrimaryResult>>;
   committedSurfaces: Set<ChatLoadSurface>;
+  cachedSurfaces: Set<ChatLoadSurface>;
+  freshPrimarySurfaces: Set<ChatLoadSurface>;
+  cachedPaintScheduledSurfaces: Set<ChatLoadSurface>;
+  cachedConfigUsed: boolean;
+  freshConfigResolved: boolean;
+  freshConfigFailed: boolean;
   paintScheduled: boolean;
   timeout: ReturnType<typeof setTimeout> | null;
 };
@@ -131,16 +137,41 @@ function report(span: ChatLoadSpan, status: ChatLoadStatus): void {
   }).catch(() => undefined);
 }
 
+function maybeMarkCachedContentDisplayed(span: ChatLoadSpan, surface: ChatLoadSurface): void {
+  if (
+    activeSpan !== span ||
+    !span.cachedSurfaces.has(surface) ||
+    !span.committedSurfaces.has(surface) ||
+    span.freshPrimarySurfaces.has(surface) ||
+    span.cachedPaintScheduledSurfaces.has(surface)
+  ) {
+    return;
+  }
+  span.cachedPaintScheduledSurfaces.add(surface);
+  mark(span, 'cached_content_committed');
+  const afterPaint = () => {
+    if (activeSpan === span && !span.freshPrimarySurfaces.has(surface)) {
+      mark(span, 'cached_content_painted');
+    }
+  };
+  if (typeof requestAnimationFrame !== 'function') queueMicrotask(afterPaint);
+  else requestAnimationFrame(() => requestAnimationFrame(afterPaint));
+}
+
 function maybeComplete(span: ChatLoadSpan): void {
   if (activeSpan !== span || !span.surface || span.paintScheduled) return;
   const primary = span.primaryBySurface[span.surface];
   if (!primary || !span.committedSurfaces.has(span.surface)) return;
+  if (span.cachedConfigUsed && !span.freshConfigResolved) return;
+  if (span.cachedSurfaces.has(span.surface) && !span.freshPrimarySurfaces.has(span.surface)) {
+    return;
+  }
   mark(span, 'content_committed');
   span.paintScheduled = true;
   const afterPaint = () => {
     if (activeSpan !== span) return;
     mark(span, 'content_painted');
-    report(span, primary.status === 'completed' ? 'completed' : 'error');
+    report(span, primary.status === 'completed' && !span.freshConfigFailed ? 'completed' : 'error');
   };
   if (typeof requestAnimationFrame !== 'function') {
     queueMicrotask(afterPaint);
@@ -169,6 +200,12 @@ export function beginChatLoadNavigation(input: {
     runtime: null,
     primaryBySurface: {},
     committedSurfaces: new Set(),
+    cachedSurfaces: new Set(),
+    freshPrimarySurfaces: new Set(),
+    cachedPaintScheduledSurfaces: new Set(),
+    cachedConfigUsed: false,
+    freshConfigResolved: false,
+    freshConfigFailed: false,
     paintScheduled: false,
     timeout: null,
   };
@@ -188,12 +225,19 @@ export function markChatLoadSelectionCommitted(target: ChatLoadTarget): void {
 
 export function markChatLoadCacheHit(
   target: ChatLoadTarget,
-  _surface: ChatLoadSurface,
-  _itemCount?: number,
+  surface: ChatLoadSurface,
+  itemCount?: number,
 ): void {
   const span = activeFor(target);
   if (!span) return;
+  span.cachedSurfaces.add(surface);
+  span.primaryBySurface[surface] = {
+    status: 'completed',
+    cacheStatus: 'hit',
+    ...(Number.isFinite(itemCount) ? { itemCount } : {}),
+  };
   mark(span, 'cached_content_available');
+  maybeMarkCachedContentDisplayed(span, surface);
 }
 
 export function markChatLoadConfigResolved(
@@ -203,6 +247,7 @@ export function markChatLoadConfigResolved(
     agentKind?: string | null;
     runtime?: 'host' | 'container' | null;
     status?: 'completed' | 'error';
+    source?: 'cache' | 'fresh';
   },
 ): void {
   const span = activeFor(target);
@@ -210,11 +255,33 @@ export function markChatLoadConfigResolved(
   span.surface = input.surface;
   span.agentKind = String(input.agentKind ?? '').trim() || null;
   span.runtime = input.runtime ?? null;
-  mark(span, input.status === 'error' ? 'config_failed' : 'config_loaded');
+  if (input.source === 'cache') {
+    span.cachedConfigUsed = true;
+    mark(span, 'cached_config_available');
+  } else {
+    span.freshConfigResolved = true;
+    span.freshConfigFailed = input.status === 'error';
+    mark(
+      span,
+      span.cachedConfigUsed
+        ? input.status === 'error'
+          ? 'config_reconcile_failed'
+          : 'config_reconciled'
+        : input.status === 'error'
+          ? 'config_failed'
+          : 'config_loaded',
+    );
+  }
+  maybeMarkCachedContentDisplayed(span, input.surface);
   if (input.surface === 'unavailable') {
     span.primaryBySurface.unavailable = { status: 'error', cacheStatus: 'none' };
+    span.freshPrimarySurfaces.add('unavailable');
     mark(span, 'primary_content_failed');
-  } else if (span.primaryBySurface[input.surface]) {
+  } else if (
+    input.source !== 'cache' &&
+    span.primaryBySurface[input.surface] &&
+    span.freshPrimarySurfaces.has(input.surface)
+  ) {
     mark(span, 'primary_content_loaded');
   }
   maybeComplete(span);
@@ -236,6 +303,8 @@ export function markChatLoadPrimaryResolved(
     cacheStatus: input.cacheStatus ?? 'miss',
     ...(Number.isFinite(input.itemCount) ? { itemCount: input.itemCount } : {}),
   };
+  span.freshPrimarySurfaces.add(input.surface);
+  if (span.cachedSurfaces.has(input.surface)) mark(span, 'fresh_content_reconciled');
   if (span.surface === input.surface) {
     mark(span, input.status === 'error' ? 'primary_content_failed' : 'primary_content_loaded');
   }
@@ -249,6 +318,7 @@ export function markChatLoadContentCommitted(
   const span = activeFor(target);
   if (!span) return;
   span.committedSurfaces.add(surface);
+  maybeMarkCachedContentDisplayed(span, surface);
   maybeComplete(span);
 }
 

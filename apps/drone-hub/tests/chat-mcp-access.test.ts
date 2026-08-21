@@ -1,11 +1,18 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  shouldLoadChatMcpAccess,
   withChatMcpScopeMode,
   withChatMcpSelectedDrones,
 } from '../src/droneHub/app/use-chat-mcp-access';
 
 describe('chat MCP access scope', () => {
+  test('loads access only after the permissions UI opens for an eligible chat', () => {
+    expect(shouldLoadChatMcpAccess(false, true)).toBe(false);
+    expect(shouldLoadChatMcpAccess(true, false)).toBe(false);
+    expect(shouldLoadChatMcpAccess(true, true)).toBe(true);
+  });
+
   test('updates one access mode without changing the selected drones', () => {
     expect(
       withChatMcpScopeMode(

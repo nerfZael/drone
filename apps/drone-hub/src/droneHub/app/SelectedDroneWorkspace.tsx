@@ -114,7 +114,7 @@ import {
 } from './chat-timeline-items';
 import { timelineUserFollowUps } from './chat-timeline-follow-ups';
 import { pendingPromptShowsWorkingState } from './optimistic-pending-prompts';
-import { useChatMcpAccess } from './use-chat-mcp-access';
+import { shouldLoadChatMcpAccess, useChatMcpAccess } from './use-chat-mcp-access';
 import { parseDroneHubDragData } from './drone-hub-dnd';
 import { assignedDroneIdsFromData } from './drone-hub-dnd-utils';
 import { DroneHubPermissionsView } from './DroneHubPermissionsView';
@@ -1019,7 +1019,10 @@ export function SelectedDroneWorkspace({
   const chatMcpAccess = useChatMcpAccess(
     currentDrone.id,
     activeChatName,
-    !nativeChatActive && hasChats && chatUiMode === 'transcript',
+    shouldLoadChatMcpAccess(
+      droneHubPermissionsOpen,
+      !nativeChatActive && hasChats && chatUiMode === 'transcript',
+    ),
   );
   const chatMcpAccessDropId = `chat-mcp-access:${currentDrone.id}:${activeChatName}`;
   const { isOver: chatMcpAccessDropActive, setNodeRef: setChatMcpAccessDropNodeRef } = useDroppable(

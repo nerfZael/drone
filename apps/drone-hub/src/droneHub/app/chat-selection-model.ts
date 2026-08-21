@@ -29,7 +29,10 @@ export function chatInfoForSelection(
   chatNameRaw: string | null | undefined,
 ): ChatInfo | null {
   if (!chatInfo) return null;
-  return chatInfoKey === chatSelectionKey(droneIdRaw, chatNameRaw) ? chatInfo : null;
+  const expectedKey = chatSelectionKey(droneIdRaw, chatNameRaw);
+  const expectedChatName = String(chatNameRaw ?? '').trim() || 'default';
+  const payloadChatName = String(chatInfo.chat ?? '').trim() || 'default';
+  return chatInfoKey === expectedKey && payloadChatName === expectedChatName ? chatInfo : null;
 }
 
 export function chatConfigResolutionState(input: {
