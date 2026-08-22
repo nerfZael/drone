@@ -1506,7 +1506,8 @@ export function formatCodexJobFailure(
 ): string {
   const stdout = String(stdoutRaw ?? '').trim();
   const stderr = String(stderrRaw ?? '').trim();
-  const fallback = String(fallbackRaw ?? '').trim() || 'Codex turn failed.';
+  const specificFallback = String(fallbackRaw ?? '').trim();
+  const fallback = specificFallback || 'Codex turn failed.';
   const merged = [stderr, stdout].filter(Boolean).join('\n');
   if (!merged) return fallback;
 
@@ -1555,7 +1556,19 @@ export function formatCodexJobFailure(
 
   if (explicitErrors.length > 0) return explicitErrors.join('\n');
   const lifecycleOnly = parsedCount > 0 && !nonLifecycleEventSeen && !nonJsonLineSeen;
-  if (lifecycleOnly) return 'Codex turn started but exited before producing a response.';
+  if (lifecycleOnly) {
+    // A durable job error describes why the lifecycle stopped. Preserve it
+    // unless the caller merely used the captured stream itself as fallback.
+    if (
+      specificFallback &&
+      specificFallback !== stdout &&
+      specificFallback !== stderr &&
+      specificFallback !== merged
+    ) {
+      return specificFallback;
+    }
+    return 'Codex turn started but exited before producing a response.';
+  }
   return fallback;
 }
 

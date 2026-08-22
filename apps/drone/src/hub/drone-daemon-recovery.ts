@@ -53,6 +53,17 @@ export class DroneDaemonRecovery<TClient = unknown> {
   async #recover(
     target: DroneDaemonRecoveryTarget<TClient>,
   ): Promise<DroneDaemonRecoveryResult> {
+    // The first probe can fail transiently when the host is busy. Confirm the
+    // daemon is still unreachable inside the per-drone single flight before
+    // replacing it; restarting an otherwise healthy daemon interrupts every
+    // in-flight App Server turn it owns.
+    try {
+      await this.deps.probe(target.client);
+      return { recovered: false };
+    } catch (error) {
+      if (!this.deps.shouldRecoverProbeError(error)) throw error;
+    }
+
     if (target.runtime === 'host') {
       const pid = await this.deps.launchHost({
         droneId: target.droneId,

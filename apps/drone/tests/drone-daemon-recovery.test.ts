@@ -76,6 +76,26 @@ describe('lazy drone daemon recovery', () => {
     expect(recoveries).toBe(0);
   });
 
+  test('does not restart after one transient probe failure', async () => {
+    let probes = 0;
+    let recoveries = 0;
+    const recovery = new DroneDaemonRecovery(
+      dependencies({
+        probe: async () => {
+          probes += 1;
+          if (probes === 1) throw new Error('request timeout after 3000ms');
+        },
+        ensureContainer: async () => {
+          recoveries += 1;
+        },
+      }),
+    );
+
+    await expect(recovery.ensure(target())).resolves.toEqual({ recovered: false });
+    expect(probes).toBe(2);
+    expect(recoveries).toBe(0);
+  });
+
   test('single-flights concurrent recovery for the same container drone', async () => {
     let containerRecoveries = 0;
     let readyChecks = 0;

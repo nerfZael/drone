@@ -32,6 +32,7 @@ import {
   type CodexPromptSpec,
   type CodexPromptSteeringDiagnostic,
 } from './codex-prompt-run-manager';
+import { codexDaemonRestartRecoveryAction } from './codex-daemon-restart';
 
 const execFileAsync = promisify(execFile);
 
@@ -1481,6 +1482,7 @@ async function main() {
   let promptMutationTail: Promise<void> = Promise.resolve();
   let promptPumpInFlight: Promise<void> | null = null;
   const promptLateRecoveryLastChecked = new Map<string, number>();
+  const codexRestartResumesInFlight = new Set<string>();
 
   async function withPromptMutationLock<T>(run: () => Promise<T>): Promise<T> {
     const result = promptMutationTail.then(run, run);
@@ -1555,8 +1557,29 @@ async function main() {
       if (!job) continue;
       if (job.codexAppServer && (job.state === 'queued' || job.state === 'running')) {
         const owned = codexPromptRuns.ownsMessage(job as CodexPromptJob);
-        const createdMs = Date.parse(job.createdAt);
-        if (!owned && Number.isFinite(createdMs) && Date.now() - createdMs > 2_000) {
+        const action = codexDaemonRestartRecoveryAction({
+          state: job.state,
+          owned: owned || codexRestartResumesInFlight.has(job.id),
+          createdAt: job.createdAt,
+        });
+        if (action === 'resume-queued') {
+          // Queued work has not started and is safe to resume. Schedule outside
+          // the prompt mutation lock because enqueue persists its own run state.
+          codexRestartResumesInFlight.add(job.id);
+          setImmediate(() => {
+            void codexPromptRuns
+              .enqueue(job as CodexPromptJob)
+              .catch((error) => {
+                // startRun normally persists its own failure; keep an explicit
+                // daemon diagnostic for failures before a run can be created.
+                // eslint-disable-next-line no-console
+                console.error(
+                  `Codex queued prompt resume failed for ${job.id}: ${String(error?.message ?? error)}`,
+                );
+              })
+              .finally(() => codexRestartResumesInFlight.delete(job.id));
+          });
+        } else if (action === 'fail-running') {
           await codexPromptRuns.failInterrupted(
             job as CodexPromptJob,
             'Codex App Server session was interrupted by a daemon restart',

@@ -371,8 +371,17 @@ export async function managedDroneSync(
   );
 }
 
-export async function health(client: DroneClient) {
-  return await req(client, 'GET', '/v1/health');
+export async function health(
+  client: DroneClient,
+  options?: { timeoutMs?: number; signal?: AbortSignal },
+) {
+  return await consumeResponse(
+    client,
+    'GET',
+    '/v1/health',
+    options,
+    async (response) => await response.json(),
+  );
 }
 
 export async function status(

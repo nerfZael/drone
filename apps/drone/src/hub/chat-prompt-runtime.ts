@@ -77,6 +77,7 @@ type ChatPromptRuntimeDependencyName =
   | 'droneCodexPromptEnqueue'
   | 'dronePromptEnqueue'
   | 'dronePromptGet'
+  | 'droneHealth'
   | 'droneStatus'
   | 'droneRuntime'
   | 'dvmExec'
@@ -226,6 +227,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     droneCodexPromptEnqueue,
     dronePromptEnqueue,
     dronePromptGet,
+    droneHealth,
     droneStatus,
     droneRuntime,
     dvmExec,
@@ -331,7 +333,10 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
 
   const daemonRecovery = new DroneDaemonRecovery({
     probe: async (client) => {
-      await droneStatus(client, { timeoutMs: 1_000 });
+      // Health is an event-loop liveness check. Status also probes tmux-backed
+      // process state, which can be slow under a burst of concurrent chats and
+      // must not be used as evidence that the daemon itself is dead.
+      await droneHealth(client, { timeoutMs: 3_000 });
     },
     shouldRecoverProbeError: (error) => !(error instanceof DroneApiRequestError),
     ensureContainer: async ({ containerName, containerPort }) => {

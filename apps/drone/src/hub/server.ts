@@ -3186,6 +3186,7 @@ function createHubRuntimeGraph(
     dronePromptEnqueue,
     droneCodexPromptEnqueue,
     dronePromptGet,
+    droneHealth,
     droneStatus,
     droneRuntime,
     dvmExec,

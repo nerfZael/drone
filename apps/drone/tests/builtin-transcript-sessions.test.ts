@@ -721,6 +721,21 @@ describe('formatTranscriptJobFailure', () => {
     ).toBe('Codex turn started but exited before producing a response. (exit 1)');
   });
 
+  test('preserves a durable daemon interruption over lifecycle-only output', () => {
+    expect(
+      formatTranscriptJobFailure({
+        agentId: 'codex',
+        stdoutRaw: [
+          '{"type":"thread.started","thread_id":"thread_123"}',
+          '{"type":"turn.started"}',
+        ].join('\n'),
+        stderrRaw: '',
+        fallbackRaw: 'Codex App Server session was interrupted by a daemon restart',
+        exitCode: 1,
+      }),
+    ).toBe('Codex App Server session was interrupted by a daemon restart (exit 1)');
+  });
+
   test('preserves existing error details for non-codex agents', () => {
     expect(
       formatTranscriptJobFailure({
