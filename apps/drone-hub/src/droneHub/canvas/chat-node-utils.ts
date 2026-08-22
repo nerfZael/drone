@@ -3,6 +3,7 @@ import {
   DRONE_DND_MIME,
   createCanvasChatNodeId,
   parseCanvasChatNodeId,
+  parseCanvasDroneNodeId,
   type CanvasChatRef,
 } from '../app/app-config';
 
@@ -152,9 +153,11 @@ export function collectUniqueChatTargets(nodeIds: string[]): CanvasChatRef[] {
     const nodeId = String(rawId ?? '').trim();
     if (!nodeId) continue;
     const ref = parseCanvasChatNodeId(nodeId);
-    if (!ref) continue;
-    if (out.some((x) => x.droneId === ref.droneId && x.chatName === ref.chatName)) continue;
-    out.push(ref);
+    const canvasDroneId = parseCanvasDroneNodeId(nodeId);
+    const target = ref ?? (canvasDroneId ? { droneId: canvasDroneId, chatName: 'default' } : null);
+    if (!target) continue;
+    if (out.some((x) => x.droneId === target.droneId && x.chatName === target.chatName)) continue;
+    out.push(target);
   }
   return out;
 }

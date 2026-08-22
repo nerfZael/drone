@@ -148,6 +148,9 @@
   --canvas-related-subtle: rgba(123, 188, 255, .16);
   --canvas-assigned: rgba(255, 193, 90, .92);
   --canvas-assigned-muted: rgba(255, 193, 90, .74);
+  --canvas-chat-owner: rgba(99, 226, 183, .58);
+  --canvas-chat-owner-muted: rgba(99, 226, 183, .32);
+  --canvas-chat-owner-subtle: rgba(99, 226, 183, .14);
   --assistant-bubble: var(--accent-subtle);
   --assistant-bubble-border: var(--accent-border);
   --assistant-bubble-fade: var(--accent-subtle);
@@ -400,6 +403,9 @@
   --canvas-related-subtle: rgba(137, 180, 250, .16);
   --canvas-assigned: rgba(249, 226, 175, .92);
   --canvas-assigned-muted: rgba(249, 226, 175, .74);
+  --canvas-chat-owner: rgba(166, 227, 161, .58);
+  --canvas-chat-owner-muted: rgba(166, 227, 161, .32);
+  --canvas-chat-owner-subtle: rgba(166, 227, 161, .14);
   --glow-accent: none;
   --glow-accent-strong: none;
   --glow-user: none;

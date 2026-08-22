@@ -7,7 +7,7 @@ import {
 export type CanvasRelationshipEdge = {
   key: string;
   path: string;
-  variant: 'lineage' | 'assigned';
+  variant: 'lineage' | 'assigned' | 'chat-owner';
 };
 
 type RelationshipCanvasNode = {
@@ -16,6 +16,8 @@ type RelationshipCanvasNode = {
 
 type BuildCanvasRelationshipEdgesParams = {
   preferredNodeByDroneId: Record<string, RelationshipCanvasNode>;
+  droneNodeByDroneId?: Record<string, RelationshipCanvasNode>;
+  chatNodesByDroneId?: Record<string, RelationshipCanvasNode[]>;
   renderedNodeBoundsById: Record<string, CanvasRect>;
   fallbackNodeBoundsById: Record<string, CanvasRect>;
   fleetParentIdByDroneId: Record<string, string>;
@@ -24,12 +26,29 @@ type BuildCanvasRelationshipEdgesParams = {
 
 export function buildCanvasRelationshipEdges({
   preferredNodeByDroneId,
+  droneNodeByDroneId = {},
+  chatNodesByDroneId = {},
   renderedNodeBoundsById,
   fallbackNodeBoundsById,
   fleetParentIdByDroneId,
   fleetAssignedIdsByDroneId,
 }: BuildCanvasRelationshipEdgesParams): CanvasRelationshipEdge[] {
   const edges: CanvasRelationshipEdge[] = [];
+
+  for (const [droneId, droneNode] of Object.entries(droneNodeByDroneId)) {
+    const source = renderedNodeBoundsById[droneNode.droneId] ?? fallbackNodeBoundsById[droneNode.droneId];
+    if (!source) continue;
+    for (const chatNode of chatNodesByDroneId[droneId] ?? []) {
+      const target = renderedNodeBoundsById[chatNode.droneId] ?? fallbackNodeBoundsById[chatNode.droneId];
+      if (!target) continue;
+      const { startX, startY, endX, endY } = resolveLineageEndpoint(source, target);
+      edges.push({
+        key: `${droneNode.droneId}~>${chatNode.droneId}`,
+        path: buildLineagePath(startX, startY, endX, endY),
+        variant: 'chat-owner',
+      });
+    }
+  }
 
   for (const [childDroneId, parentDroneId] of Object.entries(fleetParentIdByDroneId)) {
     const childNode = preferredNodeByDroneId[childDroneId];

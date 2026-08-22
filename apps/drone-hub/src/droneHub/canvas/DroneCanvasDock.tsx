@@ -17,19 +17,20 @@ import type { DroneSummary } from '../types';
 import { IconTune } from '../app/icons';
 import {
   createCanvasChatNodeId,
+  createCanvasDroneNodeId,
   parseCanvasChatNodeId,
+  parseCanvasDroneNodeId,
 } from '../app/app-config';
 import {
   dispatchCanvasAssignmentPreview,
   resolveFleetAssignmentTargetFromPoint,
 } from '../app/fleet-assignment-events';
 import {
-  draggedCanvasChatNodeIdsFromData,
+  draggedCanvasNodeIdsFromData,
   parseDroneHubDragData,
   useDroneHubActiveDrag,
 } from '../app/drone-hub-dnd';
 import { isShortcutMatch } from '../app/shortcuts';
-import { resolveCanvasChatDisplay } from '../app/chat-node-helpers';
 import { repoPathLabel } from '../app/repo-path-label';
 import { buildSpawnModelMenuEntries, getSpawnModelTriggerLabel } from '../app/spawn-model-history';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
@@ -40,9 +41,12 @@ import {
   sortChatNodeIdsForDestructiveDelete,
 } from './chat-node-utils';
 import {
+  buildOptimisticChatCloneCanvasNodes,
   buildOptimisticCloneCanvasNodes,
+  collectCloneableChatsFromCanvasSelection,
   collectCloneableDroneIdsFromCanvasSelection,
   collectCloneSourceNodeIdByDroneId,
+  type CanvasChatCloneSource,
 } from './clone-shortcuts';
 import {
   DRAFT_CANVAS_NODE_PREFIX,
@@ -61,6 +65,7 @@ import {
 } from './relationship-edges';
 
 const NODE_HEIGHT_PX = 54;
+const CHAT_NODE_HEIGHT_PX = 38;
 const DROP_STACK_SPACING_Y_PX = 48;
 const DRAG_MOVE_THRESHOLD_PX = 3;
 const DOT_GRID_BASE_SPACING_PX = 32;
@@ -130,7 +135,7 @@ function resolveCanvasAssignmentDropTarget(
   const draggedDroneIds = Array.from(
     new Set(
       nodeIds
-        .map((nodeId) => parseCanvasChatNodeId(nodeId)?.droneId ?? '')
+        .map((nodeId) => parseCanvasChatNodeId(nodeId)?.droneId ?? parseCanvasDroneNodeId(nodeId) ?? '')
         .filter(Boolean),
     ),
   );
@@ -219,6 +224,10 @@ function isEditableElement(target: EventTarget | null): boolean {
 
 function createDraftNodeId(): string {
   return `${DRAFT_CANVAS_NODE_PREFIX}${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function getNodeHeightPx(nodeIdRaw: string): number {
+  return parseCanvasChatNodeId(nodeIdRaw) ? CHAT_NODE_HEIGHT_PX : NODE_HEIGHT_PX;
 }
 
 function getNodeWidthPx(labelRaw: string, secondaryLabelRaw?: string): number {
@@ -329,7 +338,6 @@ function renderNodeUnreadIndicator(state: DroneCanvasIndicatorState | null): Rea
 export function DroneCanvasDock({
   droneById,
   droneNameById,
-  sidebarOrderedChatNodeIds,
   sidebarSelectedChatNodeId,
   droneRepoById,
   fleetParentIdByDroneId,
@@ -342,6 +350,7 @@ export function DroneCanvasDock({
   onCreateCanvasDroneFromDraft,
   onRenameChat,
   onDeleteChat,
+  onCloneChat,
   onCloneDrone,
   spawnAgentMenuEntries,
   spawnAgentKey,
@@ -358,7 +367,6 @@ export function DroneCanvasDock({
 }: {
   droneById: Record<string, DroneSummary>;
   droneNameById: Record<string, string>;
-  sidebarOrderedChatNodeIds: string[];
   sidebarSelectedChatNodeId?: string | null;
   droneRepoById: Record<string, string>;
   fleetParentIdByDroneId: Record<string, string>;
@@ -394,6 +402,10 @@ export function DroneCanvasDock({
     droneId: string,
     chatName: string,
   ) => Promise<{ ok: boolean; deletedDrone?: boolean; error?: string | null }>;
+  onCloneChat?: (
+    droneId: string,
+    chatName: string,
+  ) => Promise<{ ok: boolean; chatName?: string; error?: string | null }>;
   onCloneDrone?: (
     drone: DroneSummary,
   ) => Promise<{ ok: boolean; droneId?: string; droneName?: string }> | { ok: boolean; droneId?: string; droneName?: string };
@@ -425,7 +437,6 @@ export function DroneCanvasDock({
     replaceNodeId,
     setDraftPromptForNode,
     setDraftRepoLabelForNode,
-    syncNodeLabels,
     setSelectedDroneIds,
     toggleSelectedDroneId,
     clearSelection,
@@ -448,7 +459,6 @@ export function DroneCanvasDock({
       replaceNodeId: s.replaceNodeId,
       setDraftPromptForNode: s.setDraftPromptForNode,
       setDraftRepoLabelForNode: s.setDraftRepoLabelForNode,
-      syncNodeLabels: s.syncNodeLabels,
       setSelectedDroneIds: s.setSelectedDroneIds,
       toggleSelectedDroneId: s.toggleSelectedDroneId,
       clearSelection: s.clearSelection,
@@ -461,6 +471,7 @@ export function DroneCanvasDock({
   const worldLayerRef = React.useRef<HTMLDivElement | null>(null);
   const lineageMarkerId = React.useId();
   const assignedMarkerId = React.useId();
+  const chatOwnerMarkerId = React.useId();
   const nodeDragRef = React.useRef<NodeDragState | null>(null);
   const panDragRef = React.useRef<PanDragState | null>(null);
   const marqueeDragRef = React.useRef<MarqueeDragState | null>(null);
@@ -469,6 +480,7 @@ export function DroneCanvasDock({
   const inlineRenameInputRef = React.useRef<HTMLInputElement | null>(null);
   const copiedDroneIdsRef = React.useRef<string[]>([]);
   const copiedSourceNodeIdByDroneIdRef = React.useRef<Record<string, string>>({});
+  const copiedChatSourcesRef = React.useRef<CanvasChatCloneSource[]>([]);
   const suppressNodeClickRef = React.useRef(false);
   const [dragOverCanvas, setDragOverCanvas] = React.useState(false);
   const activeDroneHubDrag = useDroneHubActiveDrag();
@@ -508,18 +520,26 @@ export function DroneCanvasDock({
         out[node.droneId] = getNodeWidthPx(node.label);
         continue;
       }
+      const canvasDroneId = parseCanvasDroneNodeId(node.droneId);
+      if (canvasDroneId) {
+        const droneLabel = String(effectiveDroneNameById[canvasDroneId] ?? '').trim() || canvasDroneId;
+        out[node.droneId] = getNodeWidthPx(droneLabel, 'Drone');
+        continue;
+      }
       const chatRef = parseCanvasChatNodeId(node.droneId);
       if (!chatRef) {
         out[node.droneId] = getNodeWidthPx(node.label);
         continue;
       }
-      const drone = droneById[chatRef.droneId];
-      const droneLabel = String(effectiveDroneNameById[chatRef.droneId] ?? '').trim() || chatRef.droneId;
-      const { primaryLabel, secondaryLabel } = resolveCanvasChatDisplay(drone, chatRef.chatName, droneLabel);
-      out[node.droneId] = getNodeWidthPx(primaryLabel, secondaryLabel);
+      out[node.droneId] = getNodeWidthPx(chatRef.chatName);
     }
     return out;
   }, [droneById, effectiveDroneNameById, nodes]);
+  const nodeHeightByDroneId = React.useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const node of nodes) out[node.droneId] = getNodeHeightPx(node.droneId);
+    return out;
+  }, [nodes]);
   const fallbackNodeBoundsById = React.useMemo(() => {
     const out: Record<string, CanvasRect> = {};
     for (const node of nodes) {
@@ -527,18 +547,37 @@ export function DroneCanvasDock({
         x: node.x,
         y: node.y,
         width: nodeWidthByDroneId[node.droneId] ?? NODE_MIN_WIDTH_PX,
-        height: NODE_HEIGHT_PX,
+        height: nodeHeightByDroneId[node.droneId] ?? NODE_HEIGHT_PX,
       };
     }
     return out;
-  }, [nodeWidthByDroneId, nodes]);
-  const preferredNodeByDroneId = React.useMemo(() => {
+  }, [nodeHeightByDroneId, nodeWidthByDroneId, nodes]);
+  const droneNodeByDroneId = React.useMemo(() => {
     const out: Record<string, (typeof nodes)[number]> = {};
+    for (const node of nodes) {
+      if (isCanvasDraftNodeId(node.droneId)) continue;
+      const canvasDroneId = parseCanvasDroneNodeId(node.droneId);
+      if (canvasDroneId && !out[canvasDroneId]) out[canvasDroneId] = node;
+    }
+    return out;
+  }, [nodes]);
+  const chatNodesByDroneId = React.useMemo(() => {
+    const out: Record<string, Array<(typeof nodes)[number]>> = {};
+    for (const node of nodes) {
+      const chatRef = parseCanvasChatNodeId(node.droneId);
+      if (!chatRef) continue;
+      (out[chatRef.droneId] ??= []).push(node);
+    }
+    return out;
+  }, [nodes]);
+  const preferredNodeByDroneId = React.useMemo(() => {
+    const out: Record<string, (typeof nodes)[number]> = { ...droneNodeByDroneId };
     for (const node of nodes) {
       if (isCanvasDraftNodeId(node.droneId)) continue;
       const chatRef = parseCanvasChatNodeId(node.droneId);
       if (!chatRef) continue;
       const current = out[chatRef.droneId];
+      if (current && parseCanvasDroneNodeId(current.droneId)) continue;
       if (!current) {
         out[chatRef.droneId] = node;
         continue;
@@ -549,10 +588,12 @@ export function DroneCanvasDock({
       }
     }
     return out;
-  }, [nodes]);
+  }, [droneNodeByDroneId, nodes]);
   const relationshipEdges = React.useMemo(() => {
     return buildCanvasRelationshipEdges({
       preferredNodeByDroneId,
+      droneNodeByDroneId,
+      chatNodesByDroneId,
       renderedNodeBoundsById,
       fallbackNodeBoundsById,
       fleetParentIdByDroneId,
@@ -560,6 +601,8 @@ export function DroneCanvasDock({
     });
   }, [
     fallbackNodeBoundsById,
+    chatNodesByDroneId,
+    droneNodeByDroneId,
     fleetAssignedIdsByDroneId,
     fleetParentIdByDroneId,
     preferredNodeByDroneId,
@@ -583,13 +626,14 @@ export function DroneCanvasDock({
     if (isCanvasDraftNodeId(selectedNodeId)) {
       return String(nodesByDroneId[selectedNodeId]?.label ?? '').trim() || 'Untitled';
     }
+    const canvasDroneId = parseCanvasDroneNodeId(selectedNodeId);
+    if (canvasDroneId) {
+      return String(effectiveDroneNameById[canvasDroneId] ?? '').trim() || canvasDroneId;
+    }
     const chatRef = parseCanvasChatNodeId(selectedNodeId);
     if (!chatRef) return null;
-    const drone = droneById[chatRef.droneId];
-    const droneLabel = String(effectiveDroneNameById[chatRef.droneId] ?? '').trim() || chatRef.droneId;
-    const { primaryLabel, secondaryLabel } = resolveCanvasChatDisplay(drone, chatRef.chatName, droneLabel);
-    return secondaryLabel ? `${secondaryLabel} / ${primaryLabel}` : primaryLabel;
-  }, [droneById, effectiveDroneNameById, nodesByDroneId, selectedDroneIds]);
+    return chatRef.chatName;
+  }, [effectiveDroneNameById, nodesByDroneId, selectedDroneIds]);
   const controlsDisabled = messageSending;
   const normalizedSpawnAgentKey = String(spawnAgentKey ?? '').trim();
   const normalizedSpawnModel = String(spawnModel ?? '');
@@ -781,7 +825,7 @@ export function DroneCanvasDock({
         if (result.deletedDrone) {
           const toRemove = nodeOrder.filter((candidateId) => {
             const ref = parseCanvasChatNodeId(candidateId);
-            return Boolean(ref && ref.droneId === chatRef.droneId);
+            return ref?.droneId === chatRef.droneId || parseCanvasDroneNodeId(candidateId) === chatRef.droneId;
           });
           if (toRemove.length > 0) removeNodes(toRemove);
           return;
@@ -924,7 +968,10 @@ export function DroneCanvasDock({
 
   React.useEffect(() => {
     const legacyNodeIds = nodeOrder.filter(
-      (nodeId) => !isCanvasDraftNodeId(nodeId) && !parseCanvasChatNodeId(nodeId),
+      (nodeId) =>
+        !isCanvasDraftNodeId(nodeId) &&
+        !parseCanvasChatNodeId(nodeId) &&
+        !parseCanvasDroneNodeId(nodeId),
     );
     if (legacyNodeIds.length === 0) return;
     for (const legacyNodeId of legacyNodeIds) {
@@ -941,6 +988,14 @@ export function DroneCanvasDock({
     const updates: Array<{ droneId: string; label: string; x: number; y: number }> = [];
     for (const node of nodes) {
       if (isCanvasDraftNodeId(node.droneId)) continue;
+      const canvasDroneId = parseCanvasDroneNodeId(node.droneId);
+      if (canvasDroneId) {
+        const label = String(effectiveDroneNameById[canvasDroneId] ?? '').trim() || canvasDroneId;
+        if (node.label !== label) {
+          updates.push({ droneId: node.droneId, label, x: node.x, y: node.y });
+        }
+        continue;
+      }
       const chatRef = parseCanvasChatNodeId(node.droneId);
       if (!chatRef) continue;
       if (node.label === chatRef.chatName) continue;
@@ -948,11 +1003,7 @@ export function DroneCanvasDock({
     }
     if (updates.length === 0) return;
     upsertNodes(updates);
-  }, [nodes, upsertNodes]);
-
-  React.useEffect(() => {
-    syncNodeLabels(droneNameById);
-  }, [droneNameById, syncNodeLabels]);
+  }, [effectiveDroneNameById, nodes, upsertNodes]);
 
   React.useEffect(() => {
     setOptimisticDroneNameById((prev) => {
@@ -983,6 +1034,11 @@ export function DroneCanvasDock({
     if (!nodesByDroneId[sidebarId]) return;
     lastSyncedSidebarSelectionRef.current = sidebarId;
     if (selectedDroneIds.length === 1 && selectedDroneIds[0] === sidebarId) return;
+    if (selectedDroneIds.length === 1) {
+      const selectedCanvasDroneId = parseCanvasDroneNodeId(selectedDroneIds[0]);
+      const sidebarChatDroneId = parseCanvasChatNodeId(sidebarId)?.droneId ?? null;
+      if (selectedCanvasDroneId && selectedCanvasDroneId === sidebarChatDroneId) return;
+    }
     setSelectedDroneIds([sidebarId]);
   }, [
     draggingNodeId,
@@ -1033,7 +1089,7 @@ export function DroneCanvasDock({
           const draggedDroneIds = Array.from(
             new Set(
               nodeDrag.droneIds
-                .map((nodeId) => parseCanvasChatNodeId(nodeId)?.droneId ?? '')
+                .map((nodeId) => parseCanvasChatNodeId(nodeId)?.droneId ?? parseCanvasDroneNodeId(nodeId) ?? '')
                 .filter(Boolean),
             ),
           );
@@ -1256,7 +1312,7 @@ export function DroneCanvasDock({
           x: node.x,
           y: node.y,
           width: nodeWidthByDroneId[node.droneId] ?? NODE_MIN_WIDTH_PX,
-          height: NODE_HEIGHT_PX,
+          height: nodeHeightByDroneId[node.droneId] ?? NODE_HEIGHT_PX,
         }));
       const claimPlacement = (
         anchorX: number,
@@ -1264,7 +1320,7 @@ export function DroneCanvasDock({
         width: number,
       ): { x: number; y: number } => {
         const stepX = Math.max(48, Math.round(width * 0.72));
-        const stepY = NODE_HEIGHT_PX + 18;
+        const stepY = CHAT_NODE_HEIGHT_PX + 18;
         for (const offset of SPAWN_OFFSETS) {
           const candidateX = Math.round((anchorX + offset.x * stepX) * 10) / 10;
           const candidateY = Math.round((anchorY + offset.y * stepY) * 10) / 10;
@@ -1273,7 +1329,7 @@ export function DroneCanvasDock({
               candidateX - SPAWN_COLLISION_MARGIN_PX,
               candidateY - SPAWN_COLLISION_MARGIN_PX,
               width + SPAWN_COLLISION_MARGIN_PX * 2,
-              NODE_HEIGHT_PX + SPAWN_COLLISION_MARGIN_PX * 2,
+              CHAT_NODE_HEIGHT_PX + SPAWN_COLLISION_MARGIN_PX * 2,
               rect.x,
               rect.y,
               rect.width,
@@ -1364,7 +1420,7 @@ export function DroneCanvasDock({
                 x: node.x,
                 y: node.y,
                 width: getNodeWidthPx(firstLabel),
-                height: NODE_HEIGHT_PX,
+                height: CHAT_NODE_HEIGHT_PX,
               });
 
               for (let i = 1; i < created.length; i += 1) {
@@ -1382,7 +1438,7 @@ export function DroneCanvasDock({
                   x: placement.x,
                   y: placement.y,
                   width,
-                  height: NODE_HEIGHT_PX,
+                  height: CHAT_NODE_HEIGHT_PX,
                 });
                 spawnedAdditionalIds.push(spawned.nodeId);
               }
@@ -1454,6 +1510,7 @@ export function DroneCanvasDock({
     focusMessageInput,
     focusViewport,
     messageSending,
+    nodeHeightByDroneId,
     nodeWidthByDroneId,
     nodes,
     setDraftPromptForNode,
@@ -1534,6 +1591,11 @@ export function DroneCanvasDock({
       }
       setSelectedDroneIds([droneId]);
       if (!isCanvasDraftNodeId(droneId)) {
+        const canvasDroneId = parseCanvasDroneNodeId(droneId);
+        if (canvasDroneId) {
+          onActivateChat?.(canvasDroneId, 'default');
+          return;
+        }
         const chatRef = parseCanvasChatNodeId(droneId);
         if (!chatRef) return;
         onActivateChat?.(chatRef.droneId, chatRef.chatName);
@@ -1647,7 +1709,10 @@ export function DroneCanvasDock({
     (event: DragMoveEvent | DragOverEvent) => {
       const activeData = parseDroneHubDragData(event.active.data.current);
       const overType = String(event.over?.data.current?.type ?? '').trim();
-      const acceptsCanvasDrop = activeData?.type === 'sidebar-drone' || activeData?.type === 'sidebar-chat';
+      const acceptsCanvasDrop =
+        activeData?.type === 'sidebar-drone' ||
+        activeData?.type === 'sidebar-pinned-drone' ||
+        activeData?.type === 'sidebar-chat';
       setDragOverCanvas(Boolean(acceptsCanvasDrop && overType === 'canvas-drop'));
     },
     [],
@@ -1663,7 +1728,7 @@ export function DroneCanvasDock({
       const overType = String(event.over?.data.current?.type ?? '').trim();
       setDragOverCanvas(false);
       if (overType !== 'canvas-drop') return;
-      const ids = draggedCanvasChatNodeIdsFromData(activeData, sidebarOrderedChatNodeIds);
+      const ids = draggedCanvasNodeIdsFromData(activeData);
       if (ids.length === 0) return;
       const viewport = viewportRef.current;
       if (!viewport) return;
@@ -1676,19 +1741,25 @@ export function DroneCanvasDock({
       upsertNodes(
         ids.map((nodeId, idx) => {
           const chatRef = parseCanvasChatNodeId(nodeId);
-          const label = String(chatRef?.chatName ?? '').trim() || 'default';
+          const canvasDroneId = parseCanvasDroneNodeId(nodeId);
+          const label = chatRef
+            ? chatRef.chatName
+            : canvasDroneId
+              ? String(effectiveDroneNameById[canvasDroneId] ?? '').trim() || canvasDroneId
+              : 'Untitled';
           const width = getNodeWidthPx(label);
+          const height = getNodeHeightPx(nodeId);
           return {
             droneId: nodeId,
             label,
             x: origin.x - width / 2,
-            y: origin.y - NODE_HEIGHT_PX / 2 + idx * DROP_STACK_SPACING_Y_PX,
+            y: origin.y - height / 2 + idx * DROP_STACK_SPACING_Y_PX,
           };
         }),
       );
       setSelectedDroneIds(ids);
     },
-    [panX, panY, scale, setSelectedDroneIds, sidebarOrderedChatNodeIds, upsertNodes],
+    [effectiveDroneNameById, panX, panY, scale, setSelectedDroneIds, upsertNodes],
   );
 
   useDndMonitor({
@@ -1735,33 +1806,37 @@ export function DroneCanvasDock({
     setSelectionBox(null);
   }, []);
 
-  const copySelectedDronesForClone = React.useCallback((): string[] => {
+  const copySelectedCanvasNodesForClone = React.useCallback((): number => {
     const copiedDroneIds = collectCloneableDroneIdsFromCanvasSelection(selectedDroneIds);
     const sourceNodeIdByDroneId = collectCloneSourceNodeIdByDroneId(selectedDroneIds);
+    const copiedChats = collectCloneableChatsFromCanvasSelection(selectedDroneIds);
     copiedDroneIdsRef.current = copiedDroneIds;
     copiedSourceNodeIdByDroneIdRef.current = sourceNodeIdByDroneId;
-    return copiedDroneIds;
+    copiedChatSourcesRef.current = copiedChats;
+    return copiedDroneIds.length + copiedChats.length;
   }, [selectedDroneIds]);
 
-  const pasteCopiedDronesAsClones = React.useCallback(() => {
-    if (!onCloneDrone) return;
+  const pasteCopiedCanvasNodesAsClones = React.useCallback(() => {
     const copiedDroneIds = copiedDroneIdsRef.current.slice();
-    if (copiedDroneIds.length === 0) return;
+    const copiedChats = copiedChatSourcesRef.current.slice();
+    if (copiedDroneIds.length === 0 && copiedChats.length === 0) return;
     const sourceNodeIdByDroneId = { ...copiedSourceNodeIdByDroneIdRef.current };
     void (async () => {
       const cloneResults: Array<{ sourceDroneId: string; cloneDroneId?: string | null; cloneDroneName?: string | null }> = [];
-      for (const raw of copiedDroneIds) {
-        const sourceDroneId = String(raw ?? '').trim();
-        if (!sourceDroneId) continue;
-        const drone = droneById[sourceDroneId];
-        if (!drone) continue;
-        const result = await onCloneDrone(drone);
-        if (!result?.ok) continue;
-        cloneResults.push({
-          sourceDroneId,
-          cloneDroneId: result.droneId ?? null,
-          cloneDroneName: result.droneName ?? null,
-        });
+      if (onCloneDrone) {
+        for (const raw of copiedDroneIds) {
+          const sourceDroneId = String(raw ?? '').trim();
+          if (!sourceDroneId) continue;
+          const drone = droneById[sourceDroneId];
+          if (!drone) continue;
+          const result = await onCloneDrone(drone);
+          if (!result?.ok) continue;
+          cloneResults.push({
+            sourceDroneId,
+            cloneDroneId: result.droneId ?? null,
+            cloneDroneName: result.droneName ?? null,
+          });
+        }
       }
       const optimistic = buildOptimisticCloneCanvasNodes({
         copiedDroneIdsRaw: copiedDroneIds,
@@ -1774,9 +1849,28 @@ export function DroneCanvasDock({
       if (Object.keys(optimistic.optimisticDroneNameById).length > 0) {
         setOptimisticDroneNameById((prev) => ({ ...prev, ...optimistic.optimisticDroneNameById }));
       }
-      if (optimistic.nodes.length > 0) upsertNodes(optimistic.nodes);
+      const chatCloneResults: Array<{ sourceNodeId: string; chatName?: string | null }> = [];
+      if (onCloneChat) {
+        for (const source of copiedChats) {
+          const result = await onCloneChat(source.droneId, source.chatName);
+          if (!result?.ok) continue;
+          chatCloneResults.push({ sourceNodeId: source.nodeId, chatName: result.chatName ?? null });
+        }
+      }
+      const chatNodes = buildOptimisticChatCloneCanvasNodes({
+        sources: copiedChats,
+        cloneResults: chatCloneResults,
+        nodesById: nodesByDroneId,
+        cloneOffsetXPx: CLONE_OFFSET_X_PX,
+        cloneOffsetYPx: CLONE_OFFSET_Y_PX,
+      });
+      const pastedNodes = [...optimistic.nodes, ...chatNodes];
+      if (pastedNodes.length > 0) {
+        upsertNodes(pastedNodes);
+        setSelectedDroneIds(pastedNodes.map((node) => node.droneId));
+      }
     })();
-  }, [droneById, nodesByDroneId, onCloneDrone, upsertNodes]);
+  }, [droneById, nodesByDroneId, onCloneChat, onCloneDrone, setSelectedDroneIds, upsertNodes]);
 
   const onViewportKeyDown = React.useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -1803,8 +1897,8 @@ export function DroneCanvasDock({
       const isPrimaryMod = event.ctrlKey || event.metaKey;
 
       if (!event.repeat && isPrimaryMod && !event.altKey && !event.shiftKey && key === 'c') {
-        const copiedDroneIds = copySelectedDronesForClone();
-        if (copiedDroneIds.length > 0) {
+        const copiedNodeCount = copySelectedCanvasNodesForClone();
+        if (copiedNodeCount > 0) {
           event.preventDefault();
           event.stopPropagation();
         }
@@ -1812,10 +1906,10 @@ export function DroneCanvasDock({
       }
 
       if (!event.repeat && isPrimaryMod && !event.altKey && !event.shiftKey && key === 'v') {
-        if (copiedDroneIdsRef.current.length > 0) {
+        if (copiedDroneIdsRef.current.length > 0 || copiedChatSourcesRef.current.length > 0) {
           event.preventDefault();
           event.stopPropagation();
-          pasteCopiedDronesAsClones();
+          pasteCopiedCanvasNodesAsClones();
         }
         return;
       }
@@ -1877,7 +1971,7 @@ export function DroneCanvasDock({
     [
       clearSelection,
       closeMessageBar,
-      copySelectedDronesForClone,
+      copySelectedCanvasNodesForClone,
       createDraftShortcutBinding,
       messageBarExpanded,
       nodeOrder,
@@ -1886,7 +1980,7 @@ export function DroneCanvasDock({
       deleteChatNode,
       createDraftNearViewportCenter,
       focusPrimaryChatInputShortcutBinding,
-      pasteCopiedDronesAsClones,
+      pasteCopiedCanvasNodesAsClones,
       removeNodes,
       selectedDroneIds,
       setSelectedDroneIds,
@@ -2112,58 +2206,85 @@ export function DroneCanvasDock({
                 >
                   <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--canvas-assigned)" />
                 </marker>
+                <marker
+                  id={chatOwnerMarkerId}
+                  viewBox="0 0 10 10"
+                  refX="5"
+                  refY="5"
+                  markerWidth="6"
+                  markerHeight="6"
+                  orient="auto"
+                >
+                  <circle cx="5" cy="5" r="3" fill="var(--canvas-chat-owner)" />
+                </marker>
               </defs>
               {relationshipEdges.map((edge) => (
                 <path
                   key={edge.key}
                   d={edge.path}
                   fill="none"
-                  stroke={edge.variant === 'assigned' ? 'var(--canvas-assigned-muted)' : 'var(--canvas-related-muted)'}
-                  strokeWidth={edge.variant === 'assigned' ? '1.5' : '1.8'}
+                  stroke={
+                    edge.variant === 'chat-owner'
+                      ? 'var(--canvas-chat-owner-muted)'
+                      : edge.variant === 'assigned'
+                        ? 'var(--canvas-assigned-muted)'
+                        : 'var(--canvas-related-muted)'
+                  }
+                  strokeWidth={edge.variant === 'chat-owner' ? '2' : edge.variant === 'assigned' ? '1.5' : '1.8'}
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  strokeDasharray={edge.variant === 'assigned' ? '7 5' : undefined}
-                  markerEnd={`url(#${edge.variant === 'assigned' ? assignedMarkerId : lineageMarkerId})`}
+                  strokeDasharray={edge.variant === 'chat-owner' ? '2 5' : edge.variant === 'assigned' ? '7 5' : undefined}
+                  markerEnd={`url(#${
+                    edge.variant === 'chat-owner'
+                      ? chatOwnerMarkerId
+                      : edge.variant === 'assigned'
+                        ? assignedMarkerId
+                        : lineageMarkerId
+                  })`}
                 />
               ))}
             </svg>
           ) : null}
           {nodes.map((node) => {
             const draftNode = isCanvasDraftNodeId(node.droneId);
+            const canvasDroneId = draftNode ? null : parseCanvasDroneNodeId(node.droneId);
+            const droneNode = Boolean(canvasDroneId);
             const chatRef = draftNode ? null : parseCanvasChatNodeId(node.droneId);
-            const chatDroneId = chatRef?.droneId ?? null;
+            const nodeDroneId = canvasDroneId ?? chatRef?.droneId ?? null;
             const selected = selectedDroneIdSet.has(node.droneId);
             const dragging = draggingNodeId === node.droneId;
             const inlineEditing = inlineRenamingDroneId === node.droneId;
             const assignmentHoverTarget = assignmentHoverNodeId === node.droneId && assignmentHoverTargetCount > 0;
-            const isActiveSidebarChat = !draftNode && node.droneId === sidebarSelectedChatNodeId;
-            const indicatorState = draftNode ? null : chatNodeStateById[node.droneId] ?? null;
+            const isActiveSidebarChat = Boolean(chatRef && node.droneId === sidebarSelectedChatNodeId);
+            const indicatorState = draftNode
+              ? null
+              : droneNode && canvasDroneId
+                ? chatNodeStateById[createCanvasChatNodeId(canvasDroneId, 'default')] ?? null
+                : chatNodeStateById[node.droneId] ?? null;
             const lastAgentSnippet = indicatorState?.lastAgentSnippet ?? null;
             const indicator = renderNodeIndicator(indicatorState);
             const unreadIndicator = renderNodeUnreadIndicator(indicatorState);
             const nodeWidth = nodeWidthByDroneId[node.droneId] ?? NODE_MIN_WIDTH_PX;
+            const nodeHeight = nodeHeightByDroneId[node.droneId] ?? NODE_HEIGHT_PX;
             const repoLabel = draftNode
               ? String(draftRepoLabelByNodeId[node.droneId] ?? '').trim()
-              : chatDroneId
-                ? String(droneRepoById[chatDroneId] ?? '').trim()
+              : nodeDroneId
+                ? String(droneRepoById[nodeDroneId] ?? '').trim()
                 : '';
-            const repoBranch = !draftNode && chatDroneId
-              ? String(droneById[chatDroneId]?.repoBranch ?? '').trim()
+            const repoBranch = !draftNode && nodeDroneId
+              ? String(droneById[nodeDroneId]?.repoBranch ?? '').trim()
               : '';
-            const chatDroneLabel = chatDroneId
-              ? String(effectiveDroneNameById[chatDroneId] ?? '').trim() || chatDroneId
+            const canvasDroneLabel = canvasDroneId
+              ? String(effectiveDroneNameById[canvasDroneId] ?? '').trim() || canvasDroneId
               : '';
-            const chatDisplay =
-              !draftNode && chatDroneId && chatRef
-                ? resolveCanvasChatDisplay(droneById[chatDroneId], chatRef.chatName, chatDroneLabel)
-                : null;
             return (
               <button
                 key={node.droneId}
                 type="button"
                 data-canvas-node="1"
                 data-drone-id={node.droneId}
-                data-fleet-assignment-owner-id={!draftNode && chatDroneId ? chatDroneId : undefined}
+                data-canvas-node-kind={draftNode ? 'draft' : droneNode ? 'drone' : 'chat'}
+                data-fleet-assignment-owner-id={!draftNode && nodeDroneId ? nodeDroneId : undefined}
                 ref={(el) => {
                   if (el) nodeElementByDroneIdRef.current[node.droneId] = el;
                   else delete nodeElementByDroneIdRef.current[node.droneId];
@@ -2174,20 +2295,24 @@ export function DroneCanvasDock({
                 aria-pressed={selected}
                 className={`group/canvas-node absolute relative overflow-visible rounded-[var(--radius-medium)] border text-left px-2.5 shadow-[0_10px_20px_var(--shadow-color)] transition-[border-color,background-color,box-shadow] duration-100 flex items-center ${
                   dragging
-                    ? 'border-[var(--accent)] bg-[var(--accent-subtle)]'
+                    ? 'border-[var(--accent)] bg-[var(--panel-raised)] shadow-[inset_0_0_0_1px_var(--accent-muted),0_14px_26px_var(--shadow-color)]'
                     : assignmentHoverTarget
                       ? 'border-[var(--accent)] bg-[var(--panel-raised)] shadow-[0_0_0_1px_var(--canvas-related-subtle),0_16px_28px_var(--shadow-color)]'
                     : selected || inlineEditing
-                      ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]'
+                      ? 'border-[var(--accent-muted)] bg-[var(--panel-raised)] shadow-[inset_0_0_0_1px_var(--accent-subtle),0_10px_20px_var(--shadow-color)]'
                       : draftNode
                         ? 'border-[var(--user-border)] bg-[var(--panel-overlay-soft)] hover:border-[var(--muted)]'
-                        : 'border-[var(--border)] bg-[var(--panel-overlay)] hover:border-[var(--accent-muted)]'
+                        : droneNode
+                          ? droneById[canvasDroneId ?? '']?.runtime === 'host'
+                            ? 'border-[var(--canvas-chat-owner-muted)] bg-[linear-gradient(135deg,var(--canvas-chat-owner-subtle),var(--panel-overlay)_58%)] shadow-[inset_0_0_0_1px_var(--canvas-chat-owner-subtle),0_12px_24px_var(--shadow-color)] hover:border-[var(--canvas-chat-owner)]'
+                            : 'border-[var(--canvas-chat-owner-muted)] bg-[var(--panel-overlay)] shadow-[inset_0_0_0_1px_var(--canvas-chat-owner-subtle),0_12px_24px_var(--shadow-color)] hover:border-[var(--canvas-chat-owner)]'
+                          : 'border-[var(--border)] bg-[var(--panel-overlay)] hover:border-[var(--accent-muted)]'
                 }`}
                 style={{
                   left: 0,
                   top: 0,
                   width: nodeWidth,
-                  height: NODE_HEIGHT_PX,
+                  height: nodeHeight,
                   transform: `translate3d(${node.x}px, ${node.y}px, 0)`,
                   willChange: dragging ? 'transform' : undefined,
                 }}
@@ -2280,13 +2405,18 @@ export function DroneCanvasDock({
                       </span>
                     </span>
                   ) : (
-                    <span className="block">
-                      <span className="block truncate text-[var(--text-12-5)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
-                        {chatDisplay?.primaryLabel ?? node.label}
+                    <span className={`flex min-w-0 items-center ${droneNode ? 'gap-2' : ''}`}>
+                      {droneNode ? (
+                        <span className="flex-shrink-0 rounded-[4px] border border-[var(--canvas-chat-owner-muted)] bg-[var(--canvas-chat-owner-subtle)] px-1.5 py-[1px] text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-[0.1em] text-[var(--canvas-chat-owner)]">
+                          Drone
+                        </span>
+                      ) : null}
+                      <span className="min-w-0 flex-1 truncate text-[var(--text-12-5)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
+                        {droneNode ? canvasDroneLabel : chatRef?.chatName ?? node.label}
                       </span>
-                      {!draftNode && chatDisplay?.secondaryLabel ? (
-                        <span className="block truncate text-[var(--text-10)] text-[var(--muted-dim)]">
-                          {chatDisplay.secondaryLabel}
+                      {droneNode && canvasDroneId ? (
+                        <span className="flex-shrink-0 text-[var(--text-9)] font-mono uppercase text-[var(--muted-dim)]">
+                          {droneById[canvasDroneId]?.runtime === 'host' ? 'Host' : 'Container'}
                         </span>
                       ) : null}
                     </span>
@@ -2344,7 +2474,7 @@ export function DroneCanvasDock({
             title="Drone Canvas"
             description={
               <>
-                <span className="block">Drag one or more chats from the sidebar and drop them here.</span>
+                <span className="block">Drag drones or chats from the sidebar and drop them here.</span>
                 <span className="mt-1 block">
                   Double-click creates a draft. Ctrl-click toggles selection; left drag selects.
                 </span>
@@ -2353,6 +2483,9 @@ export function DroneCanvasDock({
                 </span>
                 <span className="mt-1 block">
                   Ctrl/Cmd+A selects all nodes. Right-click drag pans; the wheel zooms.
+                </span>
+                <span className="mt-1 block">
+                  Copy/paste clones chat cards as chats and drone cards as drones.
                 </span>
               </>
             }

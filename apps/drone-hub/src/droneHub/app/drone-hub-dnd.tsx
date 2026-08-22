@@ -9,7 +9,7 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
-import { createCanvasChatNodeId } from './app-config';
+import { createCanvasChatNodeId, createCanvasDroneNodeId } from './app-config';
 import type { SidebarGroupOrderKind } from './sidebar-group-order';
 import { expandDroneIdsToChatNodeIds, orderChatNodeIdsBySidebar } from '../canvas/chat-node-utils';
 import { DroneCard } from '../overview';
@@ -178,6 +178,23 @@ export function draggedCanvasChatNodeIdsFromData(
   return orderChatNodeIdsBySidebar(
     expandDroneIdsToChatNodeIds(data.droneIds, sidebarOrderedChatNodeIds),
     sidebarOrderedChatNodeIds,
+  );
+}
+
+export function draggedCanvasNodeIdsFromData(data: DroneHubDragData | null): string[] {
+  if (!data) return [];
+  if (data.type === 'sidebar-chat') return [data.nodeId];
+  if (data.type === 'sidebar-pinned-drone') {
+    const nodeId = createCanvasDroneNodeId(data.droneId);
+    return nodeId ? [nodeId] : [];
+  }
+  if (data.type !== 'sidebar-drone') return [];
+  return Array.from(
+    new Set(
+      data.droneIds
+        .map((droneId) => createCanvasDroneNodeId(droneId))
+        .filter(Boolean),
+    ),
   );
 }
 

@@ -108,7 +108,6 @@ type RightPanelTabContentProps = {
   tab: RightPanelTab;
   paneKey: 'top' | 'bottom' | 'single';
   selectedChat: string;
-  orderedCanvasChatNodeIds: string[];
   droneById: Record<string, DroneSummary>;
   droneNameById: Record<string, string>;
   droneRepoById: Record<string, string>;
@@ -159,6 +158,10 @@ type RightPanelTabContentProps = {
   onCloneCanvasDrone: (
     drone: DroneSummary,
   ) => Promise<{ ok: boolean; droneId?: string; droneName?: string }> | { ok: boolean; droneId?: string; droneName?: string };
+  onCloneCanvasChat: (
+    droneId: string,
+    chatName: string,
+  ) => Promise<{ ok: boolean; chatName?: string; error?: string | null }>;
   canvasSpawnAgentMenuEntries: UiMenuSelectEntry[];
   canvasSpawnAgentKey: string;
   onCanvasSpawnAgentKeyChange: (next: string) => void;
@@ -259,7 +262,6 @@ export function RightPanelTabContent({
   tab,
   paneKey,
   selectedChat,
-  orderedCanvasChatNodeIds,
   droneById,
   droneNameById,
   droneRepoById,
@@ -274,6 +276,7 @@ export function RightPanelTabContent({
   onRenameCanvasChat,
   onDeleteCanvasChat,
   onCloneCanvasDrone,
+  onCloneCanvasChat,
   canvasSpawnAgentMenuEntries,
   canvasSpawnAgentKey,
   onCanvasSpawnAgentKeyChange,
@@ -422,7 +425,6 @@ export function RightPanelTabContent({
             <DroneCanvasDock
               droneById={droneById}
               droneNameById={droneNameById}
-              sidebarOrderedChatNodeIds={orderedCanvasChatNodeIds}
               sidebarSelectedChatNodeId={currentCanvasChatNodeId}
               droneRepoById={droneRepoById}
               fleetParentIdByDroneId={fleetParentIdByDroneId}
@@ -435,6 +437,7 @@ export function RightPanelTabContent({
               onCreateCanvasDroneFromDraft={onCreateCanvasDroneFromDraft}
               onRenameChat={onRenameCanvasChat}
               onDeleteChat={onDeleteCanvasChat}
+              onCloneChat={onCloneCanvasChat}
               onCloneDrone={onCloneCanvasDrone}
               spawnAgentMenuEntries={canvasSpawnAgentMenuEntries}
               spawnAgentKey={canvasSpawnAgentKey}

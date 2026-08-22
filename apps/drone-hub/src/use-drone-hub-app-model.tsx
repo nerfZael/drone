@@ -4461,26 +4461,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     if (!repoPath) return '';
     return repoPath.split(/[\\/]/).filter(Boolean).pop() || repoPath;
   }, [chatHeaderRepoPath]);
-  const orderedCanvasChatNodeIds = React.useMemo(() => {
-    const droneById = new Map(drones.map((drone) => [drone.id, drone] as const));
-    const out: string[] = [];
-    for (const droneId of orderedDroneIds) {
-      const drone = droneById.get(droneId);
-      if (!drone) continue;
-      const chats = orderSidebarEntries(
-        normalizedDroneChats(drone, { includeDefaultWhenEmpty: true }),
-        sidebarChatOrderByDrone[droneId] ?? [],
-        (chatName) => chatName,
-      );
-      for (const chatName of chats) {
-        if (!chatName) continue;
-        const nodeId = createCanvasChatNodeId(droneId, chatName);
-        if (!nodeId || out.includes(nodeId)) continue;
-        out.push(nodeId);
-      }
-    }
-    return out;
-  }, [drones, orderedDroneIds, sidebarChatOrderByDrone]);
   const selectedCanvasChatNodeId = React.useMemo(() => {
     const droneId = String(selectedDrone ?? '').trim();
     if (!droneId) return null;
@@ -4518,7 +4498,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           tab={tab}
           paneKey={paneKey}
           selectedChat={selectedChat}
-          orderedCanvasChatNodeIds={orderedCanvasChatNodeIds}
           droneById={droneById}
           droneNameById={droneNameById}
           droneRepoById={droneRepoById}
@@ -4534,6 +4513,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           onCreateCanvasDroneFromDraft={createCanvasDroneFromDraft}
           onRenameCanvasChat={renameCanvasChat}
           onDeleteCanvasChat={deleteCanvasChat}
+          onCloneCanvasChat={cloneDroneChat}
           onCloneCanvasDrone={cloneDroneWithoutSelection}
           canvasSpawnAgentMenuEntries={spawnAgentMenuEntries}
           canvasSpawnAgentKey={spawnAgentKey}
@@ -4678,7 +4658,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       createCanvasDroneFromDraft,
       renameCanvasChat,
       deleteCanvasChat,
-      cloneDrone,
+      cloneDroneChat,
+      cloneDroneWithoutSelection,
       canvasDraftRepoLabel,
       defaultFsPathForCurrentDrone,
       droneById,
@@ -4689,7 +4670,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       chatNodeStateById,
       onActivateChatFromCanvas,
       openDroneDropActionModal,
-      orderedCanvasChatNodeIds,
       filesPane,
       fsEntries,
       fsError,

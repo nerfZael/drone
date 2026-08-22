@@ -80,11 +80,30 @@ export function parseRightPanelTab(raw: unknown, fallback: RightPanelTab): Right
 
 const CANVAS_CHAT_NODE_PREFIX = 'chat:';
 const CANVAS_CHAT_NODE_SEPARATOR = '::';
+const CANVAS_DRONE_NODE_PREFIX = 'drone:';
 
 export type CanvasChatRef = {
   droneId: string;
   chatName: string;
 };
+
+export function createCanvasDroneNodeId(droneIdRaw: string): string {
+  const droneId = String(droneIdRaw ?? '').trim();
+  if (!droneId) return '';
+  return `${CANVAS_DRONE_NODE_PREFIX}${encodeURIComponent(droneId)}`;
+}
+
+export function parseCanvasDroneNodeId(nodeIdRaw: string): string | null {
+  const nodeId = String(nodeIdRaw ?? '').trim();
+  if (!nodeId.startsWith(CANVAS_DRONE_NODE_PREFIX)) return null;
+  const encodedDroneId = nodeId.slice(CANVAS_DRONE_NODE_PREFIX.length);
+  if (!encodedDroneId) return null;
+  try {
+    return decodeURIComponent(encodedDroneId).trim() || null;
+  } catch {
+    return null;
+  }
+}
 
 export function createCanvasChatNodeId(droneIdRaw: string, chatNameRaw: string): string {
   const droneId = String(droneIdRaw ?? '').trim();

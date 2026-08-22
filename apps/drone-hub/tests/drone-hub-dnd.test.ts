@@ -3,8 +3,8 @@ import {
   assignedDroneIdsFromData,
   resolveAssignedDroneIdsFromTransfer,
 } from '../src/droneHub/app/drone-hub-dnd-utils';
-import { parseDroneHubDragData, resolveSidebarDroneDragIds } from '../src/droneHub/app/drone-hub-dnd';
-import { DRONE_CHAT_DND_MIME, DRONE_DND_MIME, createCanvasChatNodeId } from '../src/droneHub/app/app-config';
+import { draggedCanvasNodeIdsFromData, parseDroneHubDragData, resolveSidebarDroneDragIds } from '../src/droneHub/app/drone-hub-dnd';
+import { DRONE_CHAT_DND_MIME, DRONE_DND_MIME, createCanvasChatNodeId, createCanvasDroneNodeId } from '../src/droneHub/app/app-config';
 
 describe('drone hub assignment drag helpers', () => {
   test('resolves sidebar chat drags into their underlying drone id', () => {
@@ -48,6 +48,34 @@ describe('drone hub assignment drag helpers', () => {
 });
 
 describe('sidebar drone drag selection', () => {
+  test('keeps drone and chat drops as different canvas node kinds', () => {
+    expect(
+      draggedCanvasNodeIdsFromData({
+        type: 'sidebar-drone',
+        droneId: 'alpha',
+        droneIds: ['alpha', 'beta'],
+        groupOrderKey: null,
+        label: 'Alpha',
+      }),
+    ).toEqual([createCanvasDroneNodeId('alpha'), createCanvasDroneNodeId('beta')]);
+    expect(
+      draggedCanvasNodeIdsFromData({
+        type: 'sidebar-chat',
+        droneId: 'alpha',
+        chatName: 'review',
+        nodeId: createCanvasChatNodeId('alpha', 'review'),
+        label: 'review',
+      }),
+    ).toEqual([createCanvasChatNodeId('alpha', 'review')]);
+    expect(
+      draggedCanvasNodeIdsFromData({
+        type: 'sidebar-pinned-drone',
+        droneId: 'pinned',
+        label: 'Pinned',
+      }),
+    ).toEqual([createCanvasDroneNodeId('pinned')]);
+  });
+
   test('preserves the stable group id for folder drags', () => {
     expect(
       parseDroneHubDragData({
