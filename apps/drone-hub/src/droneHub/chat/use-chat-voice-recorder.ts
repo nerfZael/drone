@@ -61,7 +61,7 @@ export function insertVoiceTranscriptAtSelection(
 
   const before = draft.slice(0, start);
   const after = draft.slice(end);
-  const prefix = before && !/\s$/.test(before) ? ' ' : '';
+  const prefix = before && !/\n$/.test(before) ? '\n' : '';
   const suffix = after && !/^\s/.test(after) ? ' ' : '';
   const inserted = `${prefix}${cleanTranscript}`;
 

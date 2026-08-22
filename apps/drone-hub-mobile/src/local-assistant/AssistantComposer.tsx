@@ -427,11 +427,7 @@ export function AssistantComposer({
   );
 
   const stopVoiceAndFillDraft = React.useCallback(async () => {
-    const nextDraft = await stopVoiceForAction('append');
-    if (nextDraft) {
-      suppressInputFocusRef.current = false;
-      requestAnimationFrame(() => inputRef.current?.focus());
-    }
+    await stopVoiceForAction('append');
   }, [stopVoiceForAction]);
 
   const changeText = React.useCallback(

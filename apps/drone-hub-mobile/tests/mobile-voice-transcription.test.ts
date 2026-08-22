@@ -84,20 +84,20 @@ describe('mobile voice transcription', () => {
     ).toBe(true);
   });
 
-  test('appends a transcript to an existing draft like the desktop composer', () => {
+  test('appends a transcript on a new line like the desktop composer', () => {
     expect(mergeMobileDraftWithVoiceTranscript('', '  hello world  ')).toBe('hello world');
     expect(mergeMobileDraftWithVoiceTranscript('typed draft  ', 'voice text')).toBe(
-      'typed draft voice text',
+      'typed draft\nvoice text',
     );
     expect(mergeMobileDraftWithVoiceTranscript('typed draft\n\n', 'voice text')).toBe(
-      'typed draft voice text',
+      'typed draft\nvoice text',
     );
     expect(
       mergeMobileDraftWithVoiceTranscript(
         mergeMobileDraftWithVoiceTranscript('typed draft', 'first segment'),
         'second segment',
       ),
-    ).toBe('typed draft first segment second segment');
+    ).toBe('typed draft\nfirst segment\nsecond segment');
     expect(mergeMobileDraftWithVoiceTranscript('typed draft', '   ')).toBe('typed draft');
   });
 
@@ -125,8 +125,8 @@ describe('mobile voice transcription', () => {
         action: 'append',
       }),
     ).toEqual({
-      message: 'first recording second recording',
-      nextDraft: 'first recording second recording',
+      message: 'first recording\nsecond recording',
+      nextDraft: 'first recording\nsecond recording',
     });
   });
 

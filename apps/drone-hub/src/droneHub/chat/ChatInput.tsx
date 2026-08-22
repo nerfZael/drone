@@ -996,9 +996,6 @@ export function ChatInput({
     }
     if (result.draft === before) {
       setAttachmentError((current) => current || 'No speech detected.');
-    } else {
-      const insertionSelection = { start: result.caret, end: result.caret };
-      window.requestAnimationFrame(() => focusComposerAtSelection(insertionSelection));
     }
   }
 

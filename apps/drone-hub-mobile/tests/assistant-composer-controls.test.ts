@@ -22,4 +22,18 @@ describe('mobile assistant composer controls', () => {
     expect(microphoneIconIndex).toBeGreaterThan(-1);
     expect(continuousIconIndex).toBeLessThan(microphoneIconIndex);
   });
+
+  test('does not focus the composer after a recording is transcribed', () => {
+    const source = readFileSync(
+      new URL('../src/local-assistant/AssistantComposer.tsx', import.meta.url),
+      'utf8',
+    );
+    const start = source.indexOf('const stopVoiceAndFillDraft = React.useCallback');
+    const end = source.indexOf('const changeText = React.useCallback', start);
+    const stopAndTranscribeSource = source.slice(start, end);
+
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    expect(stopAndTranscribeSource).not.toContain('.focus()');
+  });
 });

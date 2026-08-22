@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import {
   floatToPcm16,
   formatChatVoiceDuration,
@@ -16,25 +17,29 @@ function readAscii(view: DataView, offset: number, length: number): string {
 }
 
 describe('chat voice recorder helpers', () => {
-  test('merges voice transcript after existing draft text with one space', () => {
+  test('merges voice transcript onto a new line after existing draft text', () => {
     expect(mergeDraftWithVoiceTranscript('', ' hello world ')).toBe('hello world');
-    expect(mergeDraftWithVoiceTranscript('existing draft  ', 'new transcript')).toBe('existing draft new transcript');
-    expect(mergeDraftWithVoiceTranscript('existing draft\n\n', 'new transcript')).toBe('existing draft new transcript');
+    expect(mergeDraftWithVoiceTranscript('existing draft  ', 'new transcript')).toBe('existing draft\nnew transcript');
+    expect(mergeDraftWithVoiceTranscript('existing draft\n\n', 'new transcript')).toBe('existing draft\nnew transcript');
     expect(mergeDraftWithVoiceTranscript('existing draft', '   ')).toBe('existing draft');
   });
 
   test('inserts a voice transcript at the caret or over the selected text', () => {
     expect(insertVoiceTranscriptAtSelection('hello world', 'there', 5)).toEqual({
-      value: 'hello there world',
+      value: 'hello\nthere world',
       caret: 11,
     });
     expect(insertVoiceTranscriptAtSelection('hello old world', 'new', 6, 9)).toEqual({
-      value: 'hello new world',
-      caret: 9,
+      value: 'hello \nnew world',
+      caret: 10,
     });
     expect(insertVoiceTranscriptAtSelection('first\nsecond', 'inserted', 6)).toEqual({
       value: 'first\ninserted second',
       caret: 14,
+    });
+    expect(insertVoiceTranscriptAtSelection('existing draft', 'new transcript', 14)).toEqual({
+      value: 'existing draft\nnew transcript',
+      caret: 29,
     });
   });
 
@@ -56,5 +61,20 @@ describe('chat voice recorder helpers', () => {
   test('formats recording duration like the mobile composer', () => {
     expect(formatChatVoiceDuration(0)).toBe('0:00');
     expect(formatChatVoiceDuration(65_900)).toBe('1:05');
+  });
+
+  test('does not focus the composer after a recording is transcribed', () => {
+    const source = readFileSync(
+      new URL('../src/droneHub/chat/ChatInput.tsx', import.meta.url),
+      'utf8',
+    );
+    const start = source.indexOf('async function stopVoiceRecordingAndFillDraft()');
+    const end = source.indexOf('function toggleVoiceRecordingFromShortcut()', start);
+    const stopAndTranscribeSource = source.slice(start, end);
+
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    expect(stopAndTranscribeSource).not.toContain('focusComposerAtSelection');
+    expect(stopAndTranscribeSource).not.toContain('.focus()');
   });
 });

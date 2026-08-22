@@ -48,7 +48,7 @@ export function mergeMobileDraftWithVoiceTranscript(
   if (!cleanTranscript) return draft;
   const cleanDraft = draft.trimEnd();
   if (!cleanDraft) return cleanTranscript;
-  return `${cleanDraft} ${cleanTranscript}`;
+  return `${cleanDraft}\n${cleanTranscript}`;
 }
 
 export function resolveMobileVoiceTranscriptDraft(input: {
