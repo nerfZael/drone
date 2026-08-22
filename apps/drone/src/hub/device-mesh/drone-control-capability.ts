@@ -64,6 +64,17 @@ function textListMap(value: unknown): Record<string, string[]> {
   );
 }
 
+function textMap(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).flatMap(([keyRaw, valueRaw]) => {
+      const key = String(keyRaw ?? '').trim();
+      const item = String(valueRaw ?? '').trim();
+      return key && item ? [[key, item] as const] : [];
+    }),
+  );
+}
+
 function optionalText(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   return value.trim() || undefined;
@@ -759,6 +770,9 @@ export function createDroneControlCapability(
             sidebarDroneOrderByGroup: textListMap(preferences.sidebarDroneOrderByGroup),
             sidebarNodeOrderByParent: textListMap(preferences.sidebarNodeOrderByParent),
             sidebarChatOrderByDrone: textListMap(preferences.sidebarChatOrderByDrone),
+            sidebarChatGroupPathsByDrone: textListMap(preferences.sidebarChatGroupPathsByDrone),
+            sidebarChatGroupByChat: textMap(preferences.sidebarChatGroupByChat),
+            sidebarChatNodeOrderByParent: textListMap(preferences.sidebarChatNodeOrderByParent),
             pinnedDroneIds: textList(preferences.pinnedDroneIds),
             mutedSidebarGroupIds: textList(preferences.mutedSidebarGroupIds),
             mutedDroneIds: textList(preferences.mutedDroneIds),

@@ -135,6 +135,9 @@ export type MobileDroneSidebarOrder = {
   sidebarDroneOrderByGroup: Record<string, string[]>;
   sidebarNodeOrderByParent: Record<string, string[]>;
   sidebarChatOrderByDrone: Record<string, string[]>;
+  sidebarChatGroupPathsByDrone: Record<string, string[]>;
+  sidebarChatGroupByChat: Record<string, string>;
+  sidebarChatNodeOrderByParent: Record<string, string[]>;
   pinnedDroneIds: string[];
   mutedSidebarGroupIds: string[];
   mutedDroneIds: string[];
@@ -241,6 +244,9 @@ export const EMPTY_MOBILE_DRONE_SIDEBAR_ORDER: MobileDroneSidebarOrder = {
   sidebarDroneOrderByGroup: {},
   sidebarNodeOrderByParent: {},
   sidebarChatOrderByDrone: {},
+  sidebarChatGroupPathsByDrone: {},
+  sidebarChatGroupByChat: {},
+  sidebarChatNodeOrderByParent: {},
   pinnedDroneIds: [],
   mutedSidebarGroupIds: [],
   mutedDroneIds: [],
@@ -309,6 +315,15 @@ function nullableStringMap(value: unknown): Record<string, string | null> {
     Object.entries(value)
       .map(([key, item]) => [text(key), text(item) || null] as const)
       .filter(([key]) => Boolean(key)),
+  );
+}
+
+function stringMap(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value)
+      .map(([key, item]) => [text(key), text(item)] as const)
+      .filter(([key, item]) => Boolean(key && item)),
   );
 }
 
@@ -523,6 +538,9 @@ export function normalizeMobileDroneListPayload(raw: unknown): NormalizedMobileD
       sidebarDroneOrderByGroup: stringListMap(sidebar.sidebarDroneOrderByGroup),
       sidebarNodeOrderByParent: stringListMap(sidebar.sidebarNodeOrderByParent),
       sidebarChatOrderByDrone: stringListMap(sidebar.sidebarChatOrderByDrone),
+      sidebarChatGroupPathsByDrone: stringListMap(sidebar.sidebarChatGroupPathsByDrone),
+      sidebarChatGroupByChat: stringMap(sidebar.sidebarChatGroupByChat),
+      sidebarChatNodeOrderByParent: stringListMap(sidebar.sidebarChatNodeOrderByParent),
       pinnedDroneIds: stringList(sidebar.pinnedDroneIds),
       mutedSidebarGroupIds: stringList(sidebar.mutedSidebarGroupIds),
       mutedDroneIds: stringList(sidebar.mutedDroneIds),

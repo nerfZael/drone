@@ -115,6 +115,17 @@ function normalizeBooleanRecord(value: unknown): Record<string, boolean> {
   return out;
 }
 
+function normalizeStringRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).flatMap(([keyRaw, itemRaw]) => {
+      const key = String(keyRaw ?? '').trim();
+      const item = String(itemRaw ?? '').trim();
+      return key && item ? [[key, item] as const] : [];
+    }),
+  );
+}
+
 function normalizeUiPreferencesSnapshot(
   value: Partial<UiPreferencesSnapshot> | null | undefined,
 ): UiPreferencesSnapshot {
@@ -127,6 +138,9 @@ function normalizeUiPreferencesSnapshot(
     sidebarDroneOrderByGroup: normalizeOrderedStringMap(value?.sidebarDroneOrderByGroup),
     sidebarNodeOrderByParent: normalizeOrderedStringMap(value?.sidebarNodeOrderByParent),
     sidebarChatOrderByDrone: normalizeOrderedStringMap(value?.sidebarChatOrderByDrone),
+    sidebarChatGroupPathsByDrone: normalizeOrderedStringMap(value?.sidebarChatGroupPathsByDrone),
+    sidebarChatGroupByChat: normalizeStringRecord(value?.sidebarChatGroupByChat),
+    sidebarChatNodeOrderByParent: normalizeOrderedStringMap(value?.sidebarChatNodeOrderByParent),
     pinnedDroneIds: normalizeOrderedStringList(value?.pinnedDroneIds),
     mutedSidebarGroupIds: normalizeOrderedStringList(value?.mutedSidebarGroupIds),
     mutedDroneIds: normalizeOrderedStringList(value?.mutedDroneIds),
@@ -247,6 +261,21 @@ export function mergeUiPreferencesChanges(
       local.sidebarChatOrderByDrone,
       remote.sidebarChatOrderByDrone,
     ),
+    sidebarChatGroupPathsByDrone: mergeOrderedStringMapChanges(
+      base.sidebarChatGroupPathsByDrone,
+      local.sidebarChatGroupPathsByDrone,
+      remote.sidebarChatGroupPathsByDrone,
+    ),
+    sidebarChatGroupByChat: mergeRecordChanges(
+      base.sidebarChatGroupByChat,
+      local.sidebarChatGroupByChat,
+      remote.sidebarChatGroupByChat,
+    ),
+    sidebarChatNodeOrderByParent: mergeOrderedStringMapChanges(
+      base.sidebarChatNodeOrderByParent,
+      local.sidebarChatNodeOrderByParent,
+      remote.sidebarChatNodeOrderByParent,
+    ),
     pinnedDroneIds: localValue('pinnedDroneIds'),
     mutedSidebarGroupIds: localValue('mutedSidebarGroupIds'),
     mutedDroneIds: localValue('mutedDroneIds'),
@@ -277,6 +306,9 @@ function hasMeaningfulUiPreferencesSnapshot(value: UiPreferencesSnapshot): boole
     Object.keys(value.sidebarDroneOrderByGroup).length > 0 ||
     Object.keys(value.sidebarNodeOrderByParent).length > 0 ||
     Object.keys(value.sidebarChatOrderByDrone).length > 0 ||
+    Object.keys(value.sidebarChatGroupPathsByDrone).length > 0 ||
+    Object.keys(value.sidebarChatGroupByChat).length > 0 ||
+    Object.keys(value.sidebarChatNodeOrderByParent).length > 0 ||
     value.pinnedDroneIds.length > 0 ||
     value.mutedSidebarGroupIds.length > 0 ||
     value.mutedDroneIds.length > 0 ||
@@ -324,6 +356,18 @@ function mergeUiPreferencesForRecovery(
       Object.keys(base.sidebarChatOrderByDrone).length > 0
         ? base.sidebarChatOrderByDrone
         : rescue.sidebarChatOrderByDrone,
+    sidebarChatGroupPathsByDrone:
+      Object.keys(base.sidebarChatGroupPathsByDrone).length > 0
+        ? base.sidebarChatGroupPathsByDrone
+        : rescue.sidebarChatGroupPathsByDrone,
+    sidebarChatGroupByChat:
+      Object.keys(base.sidebarChatGroupByChat).length > 0
+        ? base.sidebarChatGroupByChat
+        : rescue.sidebarChatGroupByChat,
+    sidebarChatNodeOrderByParent:
+      Object.keys(base.sidebarChatNodeOrderByParent).length > 0
+        ? base.sidebarChatNodeOrderByParent
+        : rescue.sidebarChatNodeOrderByParent,
     pinnedDroneIds: base.pinnedDroneIds.length > 0 ? base.pinnedDroneIds : rescue.pinnedDroneIds,
     mutedSidebarGroupIds:
       base.mutedSidebarGroupIds.length > 0
@@ -434,6 +478,9 @@ export function useUiPreferencesSettings({
     sidebarDroneOrderByGroup,
     sidebarNodeOrderByParent,
     sidebarChatOrderByDrone,
+    sidebarChatGroupPathsByDrone,
+    sidebarChatGroupByChat,
+    sidebarChatNodeOrderByParent,
     pinnedDroneIds,
     mutedSidebarGroupIds,
     mutedDroneIds,
@@ -455,6 +502,9 @@ export function useUiPreferencesSettings({
     setSidebarDroneOrderByGroup,
     setSidebarNodeOrderByParent,
     setSidebarChatOrderByDrone,
+    setSidebarChatGroupPathsByDrone,
+    setSidebarChatGroupByChat,
+    setSidebarChatNodeOrderByParent,
     setPinnedDroneIds,
     setMutedSidebarGroupIds,
     setMutedDroneIds,
@@ -477,6 +527,9 @@ export function useUiPreferencesSettings({
       sidebarDroneOrderByGroup: s.sidebarDroneOrderByGroup,
       sidebarNodeOrderByParent: s.sidebarNodeOrderByParent,
       sidebarChatOrderByDrone: s.sidebarChatOrderByDrone,
+      sidebarChatGroupPathsByDrone: s.sidebarChatGroupPathsByDrone,
+      sidebarChatGroupByChat: s.sidebarChatGroupByChat,
+      sidebarChatNodeOrderByParent: s.sidebarChatNodeOrderByParent,
       pinnedDroneIds: s.pinnedDroneIds,
       mutedSidebarGroupIds: s.mutedSidebarGroupIds,
       mutedDroneIds: s.mutedDroneIds,
@@ -498,6 +551,9 @@ export function useUiPreferencesSettings({
       setSidebarDroneOrderByGroup: s.setSidebarDroneOrderByGroup,
       setSidebarNodeOrderByParent: s.setSidebarNodeOrderByParent,
       setSidebarChatOrderByDrone: s.setSidebarChatOrderByDrone,
+      setSidebarChatGroupPathsByDrone: s.setSidebarChatGroupPathsByDrone,
+      setSidebarChatGroupByChat: s.setSidebarChatGroupByChat,
+      setSidebarChatNodeOrderByParent: s.setSidebarChatNodeOrderByParent,
       setPinnedDroneIds: s.setPinnedDroneIds,
       setMutedSidebarGroupIds: s.setMutedSidebarGroupIds,
       setMutedDroneIds: s.setMutedDroneIds,
@@ -538,6 +594,9 @@ export function useUiPreferencesSettings({
       setSidebarDroneOrderByGroup(normalized.sidebarDroneOrderByGroup);
       setSidebarNodeOrderByParent(normalized.sidebarNodeOrderByParent);
       setSidebarChatOrderByDrone(normalized.sidebarChatOrderByDrone);
+      setSidebarChatGroupPathsByDrone(normalized.sidebarChatGroupPathsByDrone);
+      setSidebarChatGroupByChat(normalized.sidebarChatGroupByChat);
+      setSidebarChatNodeOrderByParent(normalized.sidebarChatNodeOrderByParent);
       setPinnedDroneIds(normalized.pinnedDroneIds);
       setMutedSidebarGroupIds(normalized.mutedSidebarGroupIds);
       setMutedDroneIds(normalized.mutedDroneIds);
@@ -570,6 +629,9 @@ export function useUiPreferencesSettings({
       setCollapsedDroneSections,
       setHiddenSidebarGroups,
       setSidebarChatOrderByDrone,
+      setSidebarChatGroupPathsByDrone,
+      setSidebarChatGroupByChat,
+      setSidebarChatNodeOrderByParent,
       setPinnedDroneIds,
       setMutedSidebarGroupIds,
       setMutedDroneIds,
@@ -623,6 +685,9 @@ export function useUiPreferencesSettings({
         sidebarDroneOrderByGroup,
         sidebarNodeOrderByParent,
         sidebarChatOrderByDrone,
+        sidebarChatGroupPathsByDrone,
+        sidebarChatGroupByChat,
+        sidebarChatNodeOrderByParent,
         pinnedDroneIds,
         mutedSidebarGroupIds,
         mutedDroneIds,
@@ -645,6 +710,9 @@ export function useUiPreferencesSettings({
       repoCreateRemoteBranch,
       sidebarDensityMode,
       sidebarChatOrderByDrone,
+      sidebarChatGroupPathsByDrone,
+      sidebarChatGroupByChat,
+      sidebarChatNodeOrderByParent,
       pinnedDroneIds,
       mutedSidebarGroupIds,
       mutedDroneIds,

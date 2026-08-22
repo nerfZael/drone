@@ -143,6 +143,9 @@ export type UiPreferencesSettings = {
   sidebarDroneOrderByGroup: Record<string, string[]>;
   sidebarNodeOrderByParent: Record<string, string[]>;
   sidebarChatOrderByDrone: Record<string, string[]>;
+  sidebarChatGroupPathsByDrone: Record<string, string[]>;
+  sidebarChatGroupByChat: Record<string, string>;
+  sidebarChatNodeOrderByParent: Record<string, string[]>;
   pinnedDroneIds: string[];
   mutedSidebarGroupIds: string[];
   mutedDroneIds: string[];
@@ -425,6 +428,17 @@ function normalizeBooleanRecord(value: unknown): Record<string, boolean> {
   return out;
 }
 
+function normalizeStringRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const out: Record<string, string> = {};
+  for (const [keyRaw, itemRaw] of Object.entries(value as Record<string, unknown>)) {
+    const key = String(keyRaw ?? '').trim();
+    const item = String(itemRaw ?? '').trim();
+    if (key && item) out[key] = item;
+  }
+  return out;
+}
+
 function sanitizeUiPreferencesSettings(value: unknown): UiPreferencesSettings {
   const raw = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
   return {
@@ -436,6 +450,9 @@ function sanitizeUiPreferencesSettings(value: unknown): UiPreferencesSettings {
     sidebarDroneOrderByGroup: normalizeOrderedStringMap(raw.sidebarDroneOrderByGroup),
     sidebarNodeOrderByParent: normalizeOrderedStringMap(raw.sidebarNodeOrderByParent),
     sidebarChatOrderByDrone: normalizeOrderedStringMap(raw.sidebarChatOrderByDrone),
+    sidebarChatGroupPathsByDrone: normalizeOrderedStringMap(raw.sidebarChatGroupPathsByDrone),
+    sidebarChatGroupByChat: normalizeStringRecord(raw.sidebarChatGroupByChat),
+    sidebarChatNodeOrderByParent: normalizeOrderedStringMap(raw.sidebarChatNodeOrderByParent),
     pinnedDroneIds: normalizeOrderedStringList(raw.pinnedDroneIds),
     mutedSidebarGroupIds: normalizeOrderedStringList(raw.mutedSidebarGroupIds),
     mutedDroneIds: normalizeOrderedStringList(raw.mutedDroneIds),

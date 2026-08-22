@@ -323,6 +323,11 @@ describe('canonical UI preferences settings', () => {
       sidebarGroupOrder: ['alpha', 'beta', 'alpha', '', '  '],
       sidebarDroneOrderByGroup: { alpha: ['drone-a', 'drone-b', 'drone-a'], '': ['ignored'] },
       sidebarChatOrderByDrone: { 'drone-a': ['default', 'review', 'default'] },
+      sidebarChatGroupPathsByDrone: { 'drone-a': ['Work', 'Work/Backend', 'Work'] },
+      sidebarChatGroupByChat: { 'chat:drone-a:review': 'Work/Backend', '': 'ignored' },
+      sidebarChatNodeOrderByParent: {
+        'chat-root:drone-a': ['chat-folder:drone-a:Work', 'chat:drone-a:default'],
+      },
       pinnedDroneIds: ['drone-b', 'drone-a', 'drone-b', ''],
       hiddenSidebarGroups: ['archive', 'archive', ''],
       autoDelete: true,
@@ -355,6 +360,15 @@ describe('canonical UI preferences settings', () => {
     });
     assert.deepEqual(resolved.uiPreferences.sidebarChatOrderByDrone, {
       'drone-a': ['default', 'review'],
+    });
+    assert.deepEqual(resolved.uiPreferences.sidebarChatGroupPathsByDrone, {
+      'drone-a': ['Work', 'Work/Backend'],
+    });
+    assert.deepEqual(resolved.uiPreferences.sidebarChatGroupByChat, {
+      'chat:drone-a:review': 'Work/Backend',
+    });
+    assert.deepEqual(resolved.uiPreferences.sidebarChatNodeOrderByParent, {
+      'chat-root:drone-a': ['chat-folder:drone-a:Work', 'chat:drone-a:default'],
     });
     assert.deepEqual(resolved.uiPreferences.pinnedDroneIds, ['drone-b', 'drone-a']);
     assert.deepEqual(resolved.uiPreferences.hiddenSidebarGroups, ['archive']);

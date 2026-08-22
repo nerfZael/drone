@@ -41,9 +41,20 @@ import {
   type MobileDroneTreeNode,
 } from '../drones/drone-sidebar-model';
 import {
+  buildSidebarChatTree,
+  flattenSidebarChatTreeChatNodeIds,
+  normalizeSidebarChatGroupPath,
   resolvePinnedSidebarDrones,
+  sidebarChatGroupBaseName,
+  sidebarChatGroupNodeId,
+  sidebarChatGroupParentPath,
+  sidebarChatNodeId,
+  sidebarChatRootNodeId,
   sidebarDroneNodeId,
   sidebarFolderNodeId,
+  type SidebarChatTreeFolderNode,
+  type SidebarChatTreeModel,
+  type SidebarChatTreeNode,
 } from '@drone/hub-model/sidebar';
 import {
   firstMobileSidebarInsertionTarget,
@@ -152,6 +163,11 @@ type DrawerChatActionTarget = {
   chatName: string;
 };
 
+type DrawerChatGroupActionTarget = {
+  drone: MobileDroneSummary;
+  path: string | null;
+};
+
 type DrawerMuteActionTarget =
   | { kind: 'chat'; drone: MobileDroneSummary; chatName: string }
   | { kind: 'drone'; drone: MobileDroneSummary }
@@ -164,6 +180,15 @@ const DrawerWorkingPhaseContext = React.createContext<Animated.Value | null>(nul
 const DrawerSidebarReorderContext = React.createContext<
   ((request: MobileSidebarMutationRequest) => void) | null
 >(null);
+const DrawerChatTreeContext = React.createContext<{
+  sidebar: MobileDroneSidebarOrder;
+  expandedGroupIds: ReadonlySet<string>;
+  selectedChatNodeIds: ReadonlySet<string>;
+  toggleGroup(groupId: string): void;
+  toggleChatSelection(droneId: string, chatName: string): void;
+  clearChatSelection(): void;
+  openGroupActions(target: DrawerChatGroupActionTarget): void;
+} | null>(null);
 const DrawerSidebarMuteContext = React.createContext<{
   effectiveGroupIds: ReadonlySet<string>;
   effectiveDroneIds: ReadonlySet<string>;
@@ -778,6 +803,11 @@ function DrawerDroneChatRow({
   activeDroneId,
   activeChatName,
   selectionWashInset,
+  depth = 0,
+  parentPath = null,
+  siblingNodeIds,
+  orderedChatNodeIds,
+  canReorder,
   onOpenActions,
   onSelect,
 }: {
@@ -788,11 +818,19 @@ function DrawerDroneChatRow({
   activeDroneId: string;
   activeChatName: string;
   selectionWashInset: number;
+  depth?: number;
+  parentPath?: string | null;
+  siblingNodeIds?: string[];
+  orderedChatNodeIds: string[];
+  canReorder: boolean;
   onOpenActions?(target: DrawerChatActionTarget): void;
   onSelect(droneId: string, chatName: string): void;
 }) {
   const reorderSidebar = React.useContext(DrawerSidebarReorderContext);
   const muteContext = React.useContext(DrawerSidebarMuteContext);
+  const chatTreeContext = React.useContext(DrawerChatTreeContext);
+  const sidebarNodeId = sidebarChatNodeId(drone.id, chatName);
+  const multiSelected = Boolean(chatTreeContext?.selectedChatNodeIds.has(sidebarNodeId));
   const selected = drone.id === activeDroneId && chatName === activeChatName;
   const suppressPressAfterLongPressRef = React.useRef(false);
   const draft = drone.draftChats?.[chatName] === true;
@@ -812,34 +850,58 @@ function DrawerDroneChatRow({
       ? 'Unread'
       : switchStateLabel(displayState);
   const reorderChat = React.useCallback(
-    (overChatName: string, placement: 'before' | 'inside' | 'after') => {
-      if (placement === 'inside') return;
+    (overNodeId: string, placement: 'before' | 'inside' | 'after', target?: MobileSidebarDragTargetData) => {
+      const targetPath = placement === 'inside'
+        ? target?.folderPath ?? null
+        : target?.parentGroupPath ?? null;
+      const selectedIds = chatTreeContext?.selectedChatNodeIds.has(sidebarNodeId)
+        ? orderedChatNodeIds.filter((id) => chatTreeContext.selectedChatNodeIds.has(id))
+        : [sidebarNodeId];
       reorderSidebar?.({
-        kind: 'chat',
+        kind: 'chat-tree-move',
         droneId: drone.id,
-        chatNames,
-        activeChatName: chatName,
-        overChatName,
+        itemKind: 'chat',
+        activeNodeId: sidebarNodeId,
+        activeNodeIds: selectedIds,
+        sourcePath: parentPath,
+        sourceSiblingNodeIds: siblingNodeIds ?? chatNames.map((name) => sidebarChatNodeId(drone.id, name)),
+        targetPath,
+        targetSiblingNodeIds: target?.siblingItemIds ?? [],
+        ...(placement === 'inside' ? {} : { overNodeId }),
         placement,
       });
     },
-    [chatName, chatNames, drone.id, reorderSidebar],
+    [chatNames, chatTreeContext, drone.id, orderedChatNodeIds, parentPath, reorderSidebar, siblingNodeIds, sidebarNodeId],
   );
   const moveChat = React.useCallback(
     (direction: 'up' | 'down') => {
-      const index = chatNames.indexOf(chatName);
-      const overChatName = chatNames[index + (direction === 'up' ? -1 : 1)];
-      if (!overChatName) return;
-      reorderChat(overChatName, direction === 'up' ? 'before' : 'after');
+      const siblings = siblingNodeIds ?? chatNames.map((name) => sidebarChatNodeId(drone.id, name));
+      const index = siblings.indexOf(sidebarNodeId);
+      const overNodeId = siblings[index + (direction === 'up' ? -1 : 1)];
+      if (!overNodeId) return;
+      reorderChat(
+        overNodeId,
+        direction === 'up' ? 'before' : 'after',
+        { parentGroupPath: parentPath, siblingItemIds: siblings },
+      );
     },
-    [chatName, chatNames, reorderChat],
+    [chatNames, drone.id, parentPath, reorderChat, siblingNodeIds, sidebarNodeId],
   );
   return (
-    <MobileSidebarDragTarget scope={dragScope} itemId={chatName}>
+    <MobileSidebarDragTarget
+      scope={dragScope}
+      treeScope={`chat-tree:${drone.id}`}
+      itemId={sidebarNodeId}
+      data={{
+        parentId: parentPath ? sidebarChatGroupNodeId(drone.id, parentPath) : sidebarChatRootNodeId(drone.id),
+        parentGroupPath: parentPath,
+        siblingItemIds: siblingNodeIds ?? [],
+      }}
+    >
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`${drone.name} / ${chatName}, ${stateLabel}`}
-        accessibilityState={{ selected }}
+        accessibilityState={{ selected: selected || multiSelected }}
         delayLongPress={600}
         onLongPress={() => {
           if (!onOpenActions) return;
@@ -857,10 +919,16 @@ function DrawerDroneChatRow({
             suppressPressAfterLongPressRef.current = false;
             return;
           }
-          onSelect(drone.id, chatName);
+          if (chatTreeContext?.selectedChatNodeIds.size) {
+            chatTreeContext.toggleChatSelection(drone.id, chatName);
+          } else {
+            onSelect(drone.id, chatName);
+          }
         }}
         style={({ pressed }) => [
           styles.droneChatRow,
+          { paddingLeft: 8 + depth * 10 },
+          multiSelected && styles.switchItemRowActive,
           pressed && !selected && styles.sidebarRowPressed,
         ]}
       >
@@ -869,10 +937,11 @@ function DrawerDroneChatRow({
         ) : null}
         {selected ? <View style={styles.sidebarSelectionEdge} /> : null}
         <SwitchItemStatusIndicator state={displayState} unread={unread} muted={muted} showReadyAnchor />
-        {reorderSidebar && chatNames.length > 1 ? (
+        {reorderSidebar && canReorder ? (
           <MobileSidebarDragArea
             scope={dragScope}
-            itemId={chatName}
+            treeScope={`chat-tree:${drone.id}`}
+            itemId={sidebarNodeId}
             label={`${drone.name} / ${chatName} chat`}
             onDrop={reorderChat}
             onMoveAccessibility={moveChat}
@@ -898,6 +967,163 @@ function DrawerDroneChatRow({
         )}
         {draft ? <Text style={styles.droneChatDraftBadge}>Draft</Text> : null}
       </Pressable>
+    </MobileSidebarDragTarget>
+  );
+}
+
+function DrawerDroneChatTreeEntry({
+  drone,
+  node,
+  tree,
+  allChatNames,
+  orderedChatNodeIds,
+  depth,
+  activeDroneId,
+  activeChatName,
+  selectionWashInset,
+  onOpenChatActions,
+  onSelect,
+}: {
+  drone: MobileDroneSummary;
+  node: SidebarChatTreeNode;
+  tree: SidebarChatTreeModel;
+  allChatNames: string[];
+  orderedChatNodeIds: string[];
+  depth: number;
+  activeDroneId: string;
+  activeChatName: string;
+  selectionWashInset: number;
+  onOpenChatActions?(target: DrawerChatActionTarget): void;
+  onSelect(droneId: string, chatName: string): void;
+}) {
+  const reorderSidebar = React.useContext(DrawerSidebarReorderContext);
+  const chatTreeContext = React.useContext(DrawerChatTreeContext);
+  if (node.kind === 'chat') {
+    const parent = node.parentId === tree.rootId ? null : tree.nodesById[node.parentId];
+    const parentPath = parent?.kind === 'folder' ? parent.path : null;
+    return (
+      <DrawerDroneChatRow
+        drone={drone}
+        chatName={node.chatName}
+        chatNames={allChatNames}
+        dragScope={`chat-parent:${node.parentId}`}
+        parentPath={parentPath}
+        siblingNodeIds={tree.childIdsByParent[node.parentId] ?? []}
+        orderedChatNodeIds={orderedChatNodeIds}
+        canReorder={Object.keys(tree.nodesById).length > 1}
+        activeDroneId={activeDroneId}
+        activeChatName={activeChatName}
+        selectionWashInset={selectionWashInset + depth * 10}
+        depth={depth}
+        onOpenActions={onOpenChatActions}
+        onSelect={onSelect}
+      />
+    );
+  }
+  const groupId = node.id;
+  const expanded = Boolean(chatTreeContext?.expandedGroupIds.has(groupId));
+  const parentPath = sidebarChatGroupParentPath(node.path);
+  const childIds = tree.childIdsByParent[node.id] ?? [];
+  const dragScope = `chat-parent:${node.parentId}`;
+  const reorderGroup = (
+    overNodeId: string,
+    placement: 'before' | 'inside' | 'after',
+    target?: MobileSidebarDragTargetData,
+  ) => {
+    const targetPath = placement === 'inside'
+      ? target?.folderPath ?? null
+      : target?.parentGroupPath ?? null;
+    reorderSidebar?.({
+      kind: 'chat-tree-move',
+      droneId: drone.id,
+      itemKind: 'folder',
+      activeNodeId: node.id,
+      sourcePath: parentPath,
+      sourceSiblingNodeIds: tree.childIdsByParent[node.parentId] ?? [],
+      targetPath,
+      targetSiblingNodeIds: target?.siblingItemIds ?? [],
+      ...(placement === 'inside' ? {} : { overNodeId }),
+      placement,
+    });
+  };
+  const moveGroup = (direction: 'up' | 'down') => {
+    const siblings = tree.childIdsByParent[node.parentId] ?? [];
+    const index = siblings.indexOf(node.id);
+    const overNodeId = siblings[index + (direction === 'up' ? -1 : 1)];
+    if (!overNodeId) return;
+    reorderGroup(
+      overNodeId,
+      direction === 'up' ? 'before' : 'after',
+      { parentGroupPath: parentPath, siblingItemIds: siblings },
+    );
+  };
+  return (
+    <MobileSidebarDragTarget
+      scope={dragScope}
+      treeScope={`chat-tree:${drone.id}`}
+      itemId={node.id}
+      canDropInside
+      data={{
+        parentId: node.parentId,
+        parentGroupPath: parentPath,
+        siblingItemIds: tree.childIdsByParent[node.parentId] ?? [],
+        folderPath: node.path,
+        childItemIds: childIds,
+      }}
+    >
+      <View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ expanded }}
+          accessibilityLabel={`${expanded ? 'Collapse' : 'Expand'} ${node.label} chat group`}
+          delayLongPress={600}
+          onLongPress={() => chatTreeContext?.openGroupActions({ drone, path: node.path })}
+          onPress={() => chatTreeContext?.toggleGroup(groupId)}
+          style={({ pressed }) => [
+            styles.droneChatRow,
+            { paddingLeft: 8 + depth * 10 },
+            pressed && styles.sidebarRowPressed,
+          ]}
+        >
+          <SidebarTreeChevronIcon
+            color={colors.sidebarMutedDim}
+            size={14}
+            strokeWidth={1.25}
+            expanded={expanded}
+          />
+          <SidebarFolderOutlineIcon color={colors.sidebarMutedDim} size={14} />
+          {reorderSidebar ? (
+            <MobileSidebarDragArea
+              scope={dragScope}
+              treeScope={`chat-tree:${drone.id}`}
+              itemId={node.id}
+              label={`${node.label} chat group`}
+              onDrop={reorderGroup}
+              onMoveAccessibility={moveGroup}
+            >
+              <Text numberOfLines={1} style={[styles.droneChatLabel, styles.draggableRowLabel]}>{node.label}</Text>
+            </MobileSidebarDragArea>
+          ) : (
+            <Text numberOfLines={1} style={styles.droneChatLabel}>{node.label}</Text>
+          )}
+        </Pressable>
+        {expanded ? childIds.map((childId) => (
+          <DrawerDroneChatTreeEntry
+            key={childId}
+            drone={drone}
+            node={tree.nodesById[childId]!}
+            tree={tree}
+            allChatNames={allChatNames}
+            orderedChatNodeIds={orderedChatNodeIds}
+            depth={depth + 1}
+            activeDroneId={activeDroneId}
+            activeChatName={activeChatName}
+            selectionWashInset={selectionWashInset}
+            onOpenChatActions={onOpenChatActions}
+            onSelect={onSelect}
+          />
+        )) : null}
+      </View>
     </MobileSidebarDragTarget>
   );
 }
@@ -948,12 +1174,24 @@ function DrawerDroneNode({
   const reorderSidebar = React.useContext(DrawerSidebarReorderContext);
   const muteContext = React.useContext(DrawerSidebarMuteContext);
   const companionHighlightedDroneIds = React.useContext(DrawerCompanionHighlightContext);
+  const chatTreeContext = React.useContext(DrawerChatTreeContext);
   const suppressPressAfterLongPressRef = React.useRef(false);
   const { drone } = node;
   const companionHighlighted = companionHighlightedDroneIds.has(drone.id);
   const chats = orderedMobileDroneChats(drone, sidebarChatOrderByDrone[drone.id]);
+  const chatTree = React.useMemo(() => buildSidebarChatTree({
+    droneId: drone.id,
+    chatNames: chats,
+    groupPaths: chatTreeContext?.sidebar.sidebarChatGroupPathsByDrone[drone.id] ?? [],
+    groupByChat: chatTreeContext?.sidebar.sidebarChatGroupByChat ?? {},
+    nodeOrderByParent: chatTreeContext?.sidebar.sidebarChatNodeOrderByParent ?? {},
+  }), [chatTreeContext?.sidebar.sidebarChatGroupByChat, chatTreeContext?.sidebar.sidebarChatGroupPathsByDrone, chatTreeContext?.sidebar.sidebarChatNodeOrderByParent, chats, drone.id]);
+  const orderedChatNodeIds = React.useMemo(
+    () => flattenSidebarChatTreeChatNodeIds(chatTree),
+    [chatTree],
+  );
   const selected = drone.id === activeDroneId;
-  const hasMultipleChats = chats.length > 1;
+  const hasMultipleChats = chats.length > 1 || chatTree.rootChildIds.some((id) => chatTree.nodesById[id]?.kind === 'folder');
   const chatSectionExpanded = !collapsedDroneIds.has(drone.id);
   const isChatDisclosure = showChats && hasMultipleChats;
   const hasActiveChildChat = selected && showChats && hasMultipleChats;
@@ -1251,7 +1489,7 @@ function DrawerDroneNode({
           </View>
         </Pressable>
       </MobileSidebarDragTarget>
-      {showChats && chats.length > 1 ? (
+      {showChats && hasMultipleChats ? (
         chatSectionExpanded ? (
           <View
             style={[
@@ -1260,17 +1498,19 @@ function DrawerDroneNode({
               hasActiveChildChat && styles.droneChatRailVisible,
             ]}
           >
-            {chats.map((chatName) => (
-              <DrawerDroneChatRow
-                key={`${drone.id}:${chatName}`}
+            {chatTree.rootChildIds.map((childId) => (
+              <DrawerDroneChatTreeEntry
+                key={childId}
                 drone={drone}
-                chatName={chatName}
-                chatNames={chats}
-                dragScope={`${dragScope}:chat:${drone.id}`}
+                node={chatTree.nodesById[childId]!}
+                tree={chatTree}
+                allChatNames={chats}
+                orderedChatNodeIds={orderedChatNodeIds}
+                depth={0}
                 activeDroneId={activeDroneId}
                 activeChatName={activeChatName}
                 selectionWashInset={drawerTreeRowPaddingLeft(depth) + 8}
-                onOpenActions={operation ? undefined : onOpenChatActions}
+                onOpenChatActions={operation ? undefined : onOpenChatActions}
                 onSelect={onSelect}
               />
             ))}
@@ -2106,17 +2346,32 @@ function AppDrawerView({
   );
   const [activeRepoId, setActiveRepoId] = React.useState<string | null>(null);
   const alignedActiveDroneSelectionKeyRef = React.useRef<string | null>(null);
-  const { expandedFolderIds, toggleFolder } = useMobileSidebarExpandedFolderIds();
+  const {
+    expandedFolderIds,
+    toggleFolder,
+    rewriteFolderPrefix,
+    removeFolderPrefix,
+  } = useMobileSidebarExpandedFolderIds();
   const { collapsedDroneIds, toggleDrone } = useMobileSidebarCollapsedDroneIds();
   const [selectedContainerDroneId, setSelectedContainerDroneId] = React.useState('');
   const [chatActionTarget, setChatActionTarget] = React.useState<DrawerChatActionTarget | null>(
     null,
   );
+  const [chatGroupActionTarget, setChatGroupActionTarget] = React.useState<DrawerChatGroupActionTarget | null>(null);
+  const [selectedChatNodeIds, setSelectedChatNodeIds] = React.useState<Set<string>>(new Set());
+  const [chatGroupEditor, setChatGroupEditor] = React.useState<{
+    mode: 'create' | 'rename';
+    drone: MobileDroneSummary;
+    parentPath: string | null;
+    path: string | null;
+    value: string;
+  } | null>(null);
   const [muteActionTarget, setMuteActionTarget] = React.useState<DrawerMuteActionTarget | null>(null);
   const [chatEditor, setChatEditor] = React.useState<{
     mode: 'create' | 'rename';
     target: DrawerChatActionTarget;
     value: string;
+    groupPath?: string | null;
   } | null>(null);
   const [deleteChatTarget, setDeleteChatTarget] = React.useState<DrawerChatActionTarget | null>(
     null,
@@ -2132,6 +2387,9 @@ function AppDrawerView({
     setDeleteChatTarget(null);
     setChatMutationError(null);
     setMuteActionTarget(null);
+    setChatGroupActionTarget(null);
+    setChatGroupEditor(null);
+    setSelectedChatNodeIds(new Set());
   }, [activeDeviceId]);
   React.useEffect(() => {
     if (open || chatMutationBusy) return;
@@ -2139,7 +2397,24 @@ function AppDrawerView({
     setChatEditor(null);
     setDeleteChatTarget(null);
     setChatMutationError(null);
+    setChatGroupActionTarget(null);
+    setChatGroupEditor(null);
+    setMuteActionTarget(null);
+    setSelectedChatNodeIds(new Set());
   }, [chatMutationBusy, open]);
+  React.useEffect(() => {
+    const available = new Set(
+      drones.flatMap((drone) =>
+        orderedMobileDroneChats(
+          drone,
+          droneSidebarOrder.sidebarChatOrderByDrone[drone.id],
+        ).map((chatName) => sidebarChatNodeId(drone.id, chatName))),
+    );
+    setSelectedChatNodeIds((current) => {
+      const next = new Set([...current].filter((nodeId) => available.has(nodeId)));
+      return next.size === current.size ? current : next;
+    });
+  }, [droneSidebarOrder.sidebarChatOrderByDrone, drones]);
   const activeRepo = droneGroups.find((group) => group.id === activeRepoId) ?? null;
   const globalPinnedDrones = React.useMemo(
     () => resolvePinnedSidebarDrones(drones, droneSidebarOrder.pinnedDroneIds),
@@ -2179,6 +2454,28 @@ function AppDrawerView({
     },
     [dronesReachable, onCreateDroneChat, onDeleteDroneChat, onRenameDroneChat, onReorderSidebar],
   );
+  const toggleChatSelection = React.useCallback((droneId: string, chatName: string) => {
+    const nodeId = sidebarChatNodeId(droneId, chatName);
+    const droneChatNodeIds = new Set(
+      (drones.find((drone) => drone.id === droneId)?.chats ?? [])
+        .map((name) => sidebarChatNodeId(droneId, name)),
+    );
+    setSelectedChatNodeIds((current) => {
+      const next = new Set([...current].filter((id) => droneChatNodeIds.has(id)));
+      if (next.has(nodeId)) next.delete(nodeId);
+      else next.add(nodeId);
+      return next;
+    });
+  }, [drones]);
+  const chatTreeContextValue = React.useMemo(() => ({
+    sidebar: droneSidebarOrder,
+    expandedGroupIds: expandedFolderIds,
+    selectedChatNodeIds,
+    toggleGroup: toggleFolder,
+    toggleChatSelection,
+    clearChatSelection: () => setSelectedChatNodeIds(new Set()),
+    openGroupActions: setChatGroupActionTarget,
+  }), [droneSidebarOrder, expandedFolderIds, selectedChatNodeIds, toggleChatSelection, toggleFolder]);
   const submitChatEditor = React.useCallback(async () => {
     if (!chatEditor || chatMutationBusy) return;
     const nextName = chatEditor.value.trim();
@@ -2215,6 +2512,46 @@ function AppDrawerView({
           )) === true;
       }
       if (!applied) return;
+      const previousNodeId = sidebarChatNodeId(chatEditor.target.drone.id, chatEditor.target.chatName);
+      const destinationPath = chatEditor.groupPath !== undefined
+        ? chatEditor.groupPath
+        : droneSidebarOrder.sidebarChatGroupByChat[previousNodeId] ?? null;
+      const nextNodeId = sidebarChatNodeId(chatEditor.target.drone.id, nextName);
+      if (previousNodeId !== nextNodeId && onReorderSidebar) {
+        const tree = buildSidebarChatTree({
+          droneId: chatEditor.target.drone.id,
+          chatNames: [...chatEditor.target.drone.chats, nextName],
+          groupPaths: droneSidebarOrder.sidebarChatGroupPathsByDrone[chatEditor.target.drone.id] ?? [],
+          groupByChat: droneSidebarOrder.sidebarChatGroupByChat,
+          nodeOrderByParent: droneSidebarOrder.sidebarChatNodeOrderByParent,
+        });
+        const targetParentId = destinationPath
+          ? sidebarChatGroupNodeId(chatEditor.target.drone.id, destinationPath)
+          : tree.rootId;
+        onReorderSidebar({
+          kind: 'chat-tree-move',
+          droneId: chatEditor.target.drone.id,
+          itemKind: 'chat',
+          activeNodeId: nextNodeId,
+          sourcePath: null,
+          sourceSiblingNodeIds: [nextNodeId, ...tree.rootChildIds],
+          targetPath: destinationPath,
+          targetSiblingNodeIds: tree.childIdsByParent[targetParentId] ?? [],
+          overNodeId: previousNodeId,
+          placement: 'before',
+        });
+      }
+      if (
+        chatEditor.mode === 'rename' &&
+        previousNodeId !== nextNodeId &&
+        onReorderSidebar
+      ) {
+        onReorderSidebar({
+          kind: 'chat-tree-remove',
+          droneId: chatEditor.target.drone.id,
+          nodeIds: [previousNodeId],
+        });
+      }
       setSelectedContainerDroneId('');
       onSelectDroneChat?.(chatEditor.target.drone.id, nextName);
       setChatEditor(null);
@@ -2223,23 +2560,69 @@ function AppDrawerView({
     } finally {
       setChatMutationBusy(false);
     }
-  }, [chatEditor, chatMutationBusy, onCreateDroneChat, onRenameDroneChat, onSelectDroneChat]);
+  }, [chatEditor, chatMutationBusy, droneSidebarOrder, onCreateDroneChat, onRenameDroneChat, onReorderSidebar, onSelectDroneChat]);
   const confirmDeleteChat = React.useCallback(async () => {
     if (!deleteChatTarget || chatMutationBusy || !onDeleteDroneChat) return;
     setChatMutationBusy(true);
     setChatMutationError(null);
     try {
-      await onDeleteDroneChat(deleteChatTarget.drone.id, deleteChatTarget.chatName);
+      const targetNodeId = sidebarChatNodeId(
+        deleteChatTarget.drone.id,
+        deleteChatTarget.chatName,
+      );
+      const selectedNames = selectedChatNodeIds.has(targetNodeId)
+        ? deleteChatTarget.drone.chats.filter((name) =>
+            name !== 'default' &&
+            selectedChatNodeIds.has(sidebarChatNodeId(deleteChatTarget.drone.id, name)))
+        : [];
+      const names = selectedNames.length
+        ? selectedNames
+        : deleteChatTarget.chatName === 'default' ? [] : [deleteChatTarget.chatName];
+      const failedNames: string[] = [];
+      for (const name of names) {
+        const deleted = await onDeleteDroneChat(deleteChatTarget.drone.id, name);
+        if (deleted && onReorderSidebar) {
+          onReorderSidebar({
+            kind: 'chat-tree-remove',
+            droneId: deleteChatTarget.drone.id,
+            nodeIds: [sidebarChatNodeId(deleteChatTarget.drone.id, name)],
+          });
+        }
+        if (!deleted) failedNames.push(name);
+      }
+      if (failedNames.length) {
+        setSelectedChatNodeIds(new Set(failedNames.map((name) =>
+          sidebarChatNodeId(deleteChatTarget.drone.id, name))));
+        setDeleteChatTarget({ ...deleteChatTarget, chatName: failedNames[0]! });
+        setChatMutationError(
+          failedNames.length === 1
+            ? `Could not delete “${failedNames[0]}”.`
+            : `Could not delete ${failedNames.length} chats.`,
+        );
+        return;
+      }
+      setSelectedChatNodeIds(new Set());
       setDeleteChatTarget(null);
     } catch (error: any) {
       setChatMutationError(String(error?.message ?? error ?? 'Could not delete chat.'));
     } finally {
       setChatMutationBusy(false);
     }
-  }, [chatMutationBusy, deleteChatTarget, onDeleteDroneChat]);
+  }, [chatMutationBusy, deleteChatTarget, onDeleteDroneChat, onReorderSidebar, selectedChatNodeIds]);
   const chatContextActions = React.useMemo<ContextMenuAction[]>(() => {
     if (!chatActionTarget) return [];
     const actions: ContextMenuAction[] = [];
+    const chatNodeId = sidebarChatNodeId(chatActionTarget.drone.id, chatActionTarget.chatName);
+    const defaultChatNodeId = sidebarChatNodeId(chatActionTarget.drone.id, 'default');
+    const droneChatNodeIds = new Set(chatActionTarget.drone.chats.map((name) =>
+      sidebarChatNodeId(chatActionTarget.drone.id, name)));
+    const selectedInDrone = selectedChatNodeIds.has(chatNodeId)
+      ? [...selectedChatNodeIds].filter((id) => droneChatNodeIds.has(id))
+      : [];
+    actions.push({
+      label: selectedChatNodeIds.has(chatNodeId) ? 'Deselect chat' : 'Select chat',
+      onPress: () => toggleChatSelection(chatActionTarget.drone.id, chatActionTarget.chatName),
+    });
     if (onReorderSidebar) {
       const targetId = mobileSidebarChatId(chatActionTarget.drone.id, chatActionTarget.chatName);
       const directlyMuted = mutedChatIdSet.has(targetId);
@@ -2266,6 +2649,18 @@ function AppDrawerView({
         },
       });
     }
+    if (onReorderSidebar) {
+      actions.push({
+        label: 'Create chat group',
+        onPress: () => setChatGroupEditor({
+          mode: 'create',
+          drone: chatActionTarget.drone,
+          parentPath: droneSidebarOrder.sidebarChatGroupByChat[chatNodeId] ?? null,
+          path: null,
+          value: '',
+        }),
+      });
+    }
     if (chatActionTarget.chatName !== 'default' && onRenameDroneChat) {
       actions.push({
         label: 'Rename chat',
@@ -2279,9 +2674,11 @@ function AppDrawerView({
         },
       });
     }
-    if (chatActionTarget.chatName !== 'default' && onDeleteDroneChat) {
+    if ((chatActionTarget.chatName !== 'default' || selectedInDrone.some((id) => id !== defaultChatNodeId)) && onDeleteDroneChat) {
       actions.push({
-        label: 'Delete chat',
+        label: selectedInDrone.filter((id) => id !== defaultChatNodeId).length > 1
+          ? `Delete ${selectedInDrone.filter((id) => id !== defaultChatNodeId).length} selected chats`
+          : 'Delete chat',
         destructive: true,
         onPress: () => {
           setChatMutationError(null);
@@ -2290,7 +2687,87 @@ function AppDrawerView({
       });
     }
     return actions;
-  }, [chatActionTarget, mutedChatIdSet, onCreateDroneChat, onDeleteDroneChat, onRenameDroneChat, onReorderSidebar]);
+  }, [chatActionTarget, droneSidebarOrder.sidebarChatGroupByChat, mutedChatIdSet, onCreateDroneChat, onDeleteDroneChat, onRenameDroneChat, onReorderSidebar, selectedChatNodeIds, toggleChatSelection]);
+
+  const chatGroupContextActions = React.useMemo<ContextMenuAction[]>(() => {
+    if (!chatGroupActionTarget || !onReorderSidebar) return [];
+    const { drone, path } = chatGroupActionTarget;
+    const actions: ContextMenuAction[] = [];
+    if (path && onCreateDroneChat) {
+      actions.push({
+        label: 'Create chat',
+        onPress: () => setChatEditor({
+          mode: 'create',
+          target: { drone, chatName: drone.chats[0] ?? 'default' },
+          value: suggestNextMobileDroneChatName(drone.chats),
+          groupPath: path,
+        }),
+      });
+    }
+    actions.push({
+      label: path ? 'Create subgroup' : 'Create group',
+      onPress: () => setChatGroupEditor({ mode: 'create', drone, parentPath: path, path: null, value: '' }),
+    });
+    if (path) {
+      actions.push({
+        label: 'Rename group',
+        onPress: () => setChatGroupEditor({
+          mode: 'rename',
+          drone,
+          parentPath: sidebarChatGroupParentPath(path),
+          path,
+          value: sidebarChatGroupBaseName(path),
+        }),
+      });
+      actions.push({
+        label: 'Delete group',
+        destructive: true,
+        onPress: () => {
+          onReorderSidebar({ kind: 'chat-group-delete', droneId: drone.id, path });
+          removeFolderPrefix(sidebarChatGroupNodeId(drone.id, path));
+        },
+      });
+    }
+    return actions;
+  }, [chatGroupActionTarget, onCreateDroneChat, onReorderSidebar, removeFolderPrefix]);
+
+  const submitChatGroupEditor = React.useCallback(() => {
+    if (!chatGroupEditor || !onReorderSidebar) return;
+    const name = normalizeSidebarChatGroupPath(chatGroupEditor.value);
+    if (!name || name.includes('/')) {
+      setChatMutationError('Enter one group name without slashes.');
+      return;
+    }
+    const nextPath = [chatGroupEditor.parentPath, name].filter(Boolean).join('/');
+    const existingTree = buildSidebarChatTree({
+      droneId: chatGroupEditor.drone.id,
+      chatNames: chatGroupEditor.drone.chats,
+      groupPaths: droneSidebarOrder.sidebarChatGroupPathsByDrone[chatGroupEditor.drone.id] ?? [],
+      groupByChat: droneSidebarOrder.sidebarChatGroupByChat,
+      nodeOrderByParent: droneSidebarOrder.sidebarChatNodeOrderByParent,
+    });
+    if (chatGroupEditor.mode === 'rename' && nextPath === chatGroupEditor.path) {
+      setChatGroupEditor(null);
+      setChatMutationError(null);
+      return;
+    }
+    if (existingTree.nodesById[sidebarChatGroupNodeId(chatGroupEditor.drone.id, nextPath)]) {
+      setChatMutationError('A group with that name already exists.');
+      return;
+    }
+    onReorderSidebar(chatGroupEditor.mode === 'create'
+      ? { kind: 'chat-group-create', droneId: chatGroupEditor.drone.id, path: nextPath }
+      : { kind: 'chat-group-rename', droneId: chatGroupEditor.drone.id, path: chatGroupEditor.path!, newPath: nextPath });
+    if (chatGroupEditor.mode === 'rename' && chatGroupEditor.path) {
+      const oldGroupId = sidebarChatGroupNodeId(chatGroupEditor.drone.id, chatGroupEditor.path);
+      rewriteFolderPrefix(
+        oldGroupId,
+        sidebarChatGroupNodeId(chatGroupEditor.drone.id, nextPath),
+      );
+    }
+    setChatGroupEditor(null);
+    setChatMutationError(null);
+  }, [chatGroupEditor, droneSidebarOrder, onReorderSidebar, rewriteFolderPrefix]);
   const muteContextActions = React.useMemo<ContextMenuAction[]>(() => {
     if (!muteActionTarget || !onReorderSidebar) return [];
     if (muteActionTarget.kind === 'drone') {
@@ -2302,6 +2779,16 @@ function AppDrawerView({
           kind: 'set-muted', targetKind: 'drone', targetId, muted: !directlyMuted,
         }),
       }];
+      actions.push({
+        label: 'Create chat group',
+        onPress: () => setChatGroupEditor({
+          mode: 'create',
+          drone: muteActionTarget.drone,
+          parentPath: null,
+          path: null,
+          value: '',
+        }),
+      });
       const chats = orderedMobileDroneChats(
         muteActionTarget.drone,
         droneSidebarOrder.sidebarChatOrderByDrone[targetId],
@@ -2440,6 +2927,7 @@ function AppDrawerView({
     <DrawerWorkingPhaseContext.Provider value={workingPhase}>
       <DrawerSidebarReorderContext.Provider value={onReorderSidebar ?? null}>
         <DrawerSidebarMuteContext.Provider value={muteContextValue}>
+          <DrawerChatTreeContext.Provider value={chatTreeContextValue}>
           <DrawerCompanionHighlightContext.Provider value={companionHighlightSet}>
             <MobileSidebarDragDropProvider>
           <View
@@ -2716,6 +3204,12 @@ function AppDrawerView({
             actions={muteContextActions}
             onClose={() => setMuteActionTarget(null)}
           />
+          <ContextMenu
+            visible={Boolean(chatGroupActionTarget)}
+            title={chatGroupActionTarget?.path ? sidebarChatGroupBaseName(chatGroupActionTarget.path) : 'Chat groups'}
+            actions={chatGroupContextActions}
+            onClose={() => setChatGroupActionTarget(null)}
+          />
           <TextInputDialog
             visible={Boolean(chatEditor)}
             title={chatEditor?.mode === 'rename' ? 'Rename chat' : 'Create chat'}
@@ -2745,12 +3239,33 @@ function AppDrawerView({
             }}
             onConfirm={() => void submitChatEditor()}
           />
+          <TextInputDialog
+            visible={Boolean(chatGroupEditor)}
+            title={chatGroupEditor?.mode === 'rename' ? 'Rename chat group' : 'Create chat group'}
+            message={chatGroupEditor?.parentPath ? `Inside ${sidebarChatGroupBaseName(chatGroupEditor.parentPath)}` : `Organize chats in ${chatGroupEditor?.drone.name ?? 'this drone'}.`}
+            value={chatGroupEditor?.value ?? ''}
+            error={chatMutationError}
+            confirmLabel={chatGroupEditor?.mode === 'rename' ? 'Rename' : 'Create'}
+            maxLength={64}
+            onChangeText={(value) => {
+              setChatMutationError(null);
+              setChatGroupEditor((current) => current ? { ...current, value } : current);
+            }}
+            onCancel={() => { setChatGroupEditor(null); setChatMutationError(null); }}
+            onConfirm={submitChatGroupEditor}
+          />
           <ConfirmDialog
             visible={Boolean(deleteChatTarget)}
             title="Delete chat?"
             message={
               chatMutationError ||
-              `Delete “${deleteChatTarget?.chatName ?? ''}” from ${deleteChatTarget?.drone.name ?? 'this drone'}?`
+              (deleteChatTarget &&
+              selectedChatNodeIds.has(sidebarChatNodeId(deleteChatTarget.drone.id, deleteChatTarget.chatName)) &&
+              selectedChatNodeIds.size > 1
+                ? `Delete ${deleteChatTarget.drone.chats.filter((name) =>
+                    name !== 'default' &&
+                    selectedChatNodeIds.has(sidebarChatNodeId(deleteChatTarget.drone.id, name))).length} selected chats? The default chat will be kept.`
+                : `Delete “${deleteChatTarget?.chatName ?? ''}” from ${deleteChatTarget?.drone.name ?? 'this drone'}?`)
             }
             confirmLabel="Delete"
             destructive
@@ -2765,6 +3280,7 @@ function AppDrawerView({
           />
             </MobileSidebarDragDropProvider>
           </DrawerCompanionHighlightContext.Provider>
+          </DrawerChatTreeContext.Provider>
         </DrawerSidebarMuteContext.Provider>
       </DrawerSidebarReorderContext.Provider>
     </DrawerWorkingPhaseContext.Provider>

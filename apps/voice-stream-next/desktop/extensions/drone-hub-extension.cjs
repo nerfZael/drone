@@ -504,6 +504,17 @@ function normalizeOrderedStringMap(value) {
   return out;
 }
 
+function normalizeStringMap(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const out = {};
+  for (const [keyRaw, valueRaw] of Object.entries(value)) {
+    const key = cleanString(keyRaw);
+    const text = cleanString(valueRaw);
+    if (key && text) out[key] = text;
+  }
+  return out;
+}
+
 function normalizeUiPreferences(value) {
   const raw = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   return {
@@ -516,6 +527,9 @@ function normalizeUiPreferences(value) {
     sidebarDroneOrderByGroup: normalizeOrderedStringMap(raw.sidebarDroneOrderByGroup),
     sidebarNodeOrderByParent: normalizeOrderedStringMap(raw.sidebarNodeOrderByParent),
     sidebarChatOrderByDrone: normalizeOrderedStringMap(raw.sidebarChatOrderByDrone),
+    sidebarChatGroupPathsByDrone: normalizeOrderedStringMap(raw.sidebarChatGroupPathsByDrone),
+    sidebarChatGroupByChat: normalizeStringMap(raw.sidebarChatGroupByChat),
+    sidebarChatNodeOrderByParent: normalizeOrderedStringMap(raw.sidebarChatNodeOrderByParent),
     pinnedDroneIds: normalizeOrderedStringList(raw.pinnedDroneIds),
     hiddenSidebarGroups: normalizeOrderedStringList(raw.hiddenSidebarGroups),
     spawnAgentKey: cleanString(raw.spawnAgentKey, DEFAULT_CREATE_DRONE_PREFERENCES.spawnAgentKey),

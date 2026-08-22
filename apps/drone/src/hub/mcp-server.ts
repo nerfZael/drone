@@ -580,6 +580,17 @@ function normalizeBooleanRecord(value: unknown): Record<string, boolean> {
   return out;
 }
 
+function normalizeStringRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).flatMap(([keyRaw, itemRaw]) => {
+      const key = cleanString(keyRaw);
+      const item = cleanString(itemRaw);
+      return key && item ? [[key, item] as const] : [];
+    }),
+  );
+}
+
 function normalizeUiPreferences(value: unknown) {
   const raw = value && typeof value === 'object' && !Array.isArray(value) ? value as any : {};
   return {
@@ -591,6 +602,9 @@ function normalizeUiPreferences(value: unknown) {
     sidebarDroneOrderByGroup: normalizeOrderedStringMap(raw.sidebarDroneOrderByGroup),
     sidebarNodeOrderByParent: normalizeOrderedStringMap(raw.sidebarNodeOrderByParent),
     sidebarChatOrderByDrone: normalizeOrderedStringMap(raw.sidebarChatOrderByDrone),
+    sidebarChatGroupPathsByDrone: normalizeOrderedStringMap(raw.sidebarChatGroupPathsByDrone),
+    sidebarChatGroupByChat: normalizeStringRecord(raw.sidebarChatGroupByChat),
+    sidebarChatNodeOrderByParent: normalizeOrderedStringMap(raw.sidebarChatNodeOrderByParent),
     pinnedDroneIds: normalizeOrderedStringList(raw.pinnedDroneIds),
     mutedSidebarGroupIds: normalizeOrderedStringList(raw.mutedSidebarGroupIds),
     mutedDroneIds: normalizeOrderedStringList(raw.mutedDroneIds),

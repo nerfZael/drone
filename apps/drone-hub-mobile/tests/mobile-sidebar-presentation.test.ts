@@ -406,7 +406,9 @@ describe('mobile sidebar presentation', () => {
       'const hasVisibleActiveChildChat = hasActiveChildChat && chatSectionExpanded;',
     );
     expect(source).toContain('sidebarChatOrderByDrone[drone.id]');
-    expect(source).toContain('showChats && chats.length > 1 ? (');
+    expect(source).toContain('showChats && hasMultipleChats ? (');
+    expect(source).toContain('buildSidebarChatTree({');
+    expect(source).toContain('<DrawerDroneChatTreeEntry');
     expect(source).toContain('const isChatDisclosure = showChats && hasMultipleChats;');
     expect(source).toContain('const chatSectionExpanded = !collapsedDroneIds.has(drone.id);');
     expect(source).toContain('if (isChatDisclosure) {');
@@ -459,7 +461,7 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain('onSelectDroneChat?.(');
     expect(source).toContain("label: 'Create chat'");
     expect(source).toContain("label: 'Rename chat'");
-    expect(source).toContain("label: 'Delete chat'");
+    expect(source).toContain(": 'Delete chat'");
     expect(source).toContain('<TextInputDialog');
     expect(source).toContain('<ConfirmDialog');
     expect(source).toContain('repoNavigationHead: {\n    minHeight: 48,\n    marginBottom: 8,');

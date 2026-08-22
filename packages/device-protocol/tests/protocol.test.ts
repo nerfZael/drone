@@ -157,6 +157,62 @@ describe('device protocol', () => {
         placement: 'before',
       },
     });
+    expect(
+      parseSidebarMoveCommandRequest({
+        mutationId: 'chat-tree-1',
+        intent: {
+          kind: 'chat-tree-move',
+          droneId: ' host ',
+          itemKind: 'chat',
+          activeNodeId: 'chat:host:review',
+          activeNodeIds: ['chat:host:review', 'chat:host:notes', 'chat:host:review'],
+          sourcePath: null,
+          sourceSiblingNodeIds: ['chat:host:review', 'chat:host:notes'],
+          targetPath: ' Work ',
+          targetSiblingNodeIds: [],
+          placement: 'inside',
+        },
+      }),
+    ).toEqual({
+      mutationId: 'chat-tree-1',
+      intent: {
+        kind: 'chat-tree-move',
+        droneId: 'host',
+        itemKind: 'chat',
+        activeNodeId: 'chat:host:review',
+        activeNodeIds: ['chat:host:review', 'chat:host:notes'],
+        sourcePath: null,
+        sourceSiblingNodeIds: ['chat:host:review', 'chat:host:notes'],
+        targetPath: 'Work',
+        targetSiblingNodeIds: [],
+        placement: 'inside',
+      },
+    });
+    expect(
+      parseSidebarMoveCommandRequest({
+        mutationId: 'chat-group-1',
+        intent: {
+          kind: 'chat-group-rename',
+          droneId: 'host',
+          path: 'Work',
+          newPath: 'Projects',
+        },
+      }),
+    ).toMatchObject({
+      intent: { kind: 'chat-group-rename', path: 'Work', newPath: 'Projects' },
+    });
+    expect(
+      parseSidebarMoveCommandRequest({
+        mutationId: 'chat-remove-1',
+        intent: {
+          kind: 'chat-tree-remove',
+          droneId: 'host',
+          nodeIds: ['chat:host:old', 'chat:host:old'],
+        },
+      }),
+    ).toMatchObject({
+      intent: { kind: 'chat-tree-remove', nodeIds: ['chat:host:old'] },
+    });
     expect(() =>
       parseSidebarMoveCommandRequest({
         mutationId: 'move-2',

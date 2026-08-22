@@ -15,6 +15,7 @@ import { expandDroneIdsToChatNodeIds, orderChatNodeIdsBySidebar } from '../canva
 import { DroneCard } from '../overview';
 import { IconFolder } from './icons';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
+import { sidebarChatNodeId } from '@drone/hub-model/sidebar';
 
 export type SidebarFolderDragData = {
   type: 'sidebar-folder';
@@ -57,6 +58,16 @@ export type SidebarChatDragData = {
   droneId: string;
   chatName: string;
   nodeId: string;
+  chatNames?: string[];
+  sidebarNodeIds?: string[];
+  label: string;
+};
+
+export type SidebarChatFolderDragData = {
+  type: 'sidebar-chat-folder';
+  droneId: string;
+  path: string;
+  sidebarNodeId: string;
   label: string;
 };
 
@@ -65,7 +76,8 @@ export type DroneHubDragData =
   | SidebarGroupDragData
   | SidebarDroneDragData
   | SidebarPinnedDroneDragData
-  | SidebarChatDragData;
+  | SidebarChatDragData
+  | SidebarChatFolderDragData;
 
 export function resolveSidebarDroneDragIds(args: {
   draggedDroneId: string;
@@ -147,8 +159,25 @@ export function parseDroneHubDragData(value: unknown): DroneHubDragData | null {
     const chatName = String((value as SidebarChatDragData).chatName ?? '').trim() || 'default';
     const nodeId = String((value as SidebarChatDragData).nodeId ?? '').trim();
     const label = String((value as SidebarChatDragData).label ?? '').trim();
+    const rawChatNames = (value as SidebarChatDragData).chatNames;
+    const rawSidebarNodeIds = (value as SidebarChatDragData).sidebarNodeIds;
+    const chatNames = Array.isArray(rawChatNames)
+      ? rawChatNames.map((item) => String(item ?? '').trim()).filter(Boolean)
+      : [chatName];
+    const sidebarNodeIds = Array.isArray(rawSidebarNodeIds)
+      ? rawSidebarNodeIds.map((item) => String(item ?? '').trim()).filter(Boolean)
+      : [];
     if (!droneId || !nodeId || !label) return null;
-    return { type: 'sidebar-chat', droneId, chatName, nodeId, label };
+    return { type: 'sidebar-chat', droneId, chatName, nodeId, chatNames, sidebarNodeIds, label };
+  }
+  if (type === 'sidebar-chat-folder') {
+    const source = value as SidebarChatFolderDragData;
+    const droneId = String(source.droneId ?? '').trim();
+    const path = String(source.path ?? '').trim();
+    const sidebarNodeId = String(source.sidebarNodeId ?? '').trim();
+    const label = String(source.label ?? '').trim();
+    if (!droneId || !path || !sidebarNodeId || !label) return null;
+    return { type: 'sidebar-chat-folder', droneId, path, sidebarNodeId, label };
   }
   return null;
 }
@@ -157,6 +186,7 @@ export function draggedDroneIdsFromData(data: DroneHubDragData | null): string[]
   if (!data) return [];
   if (data.type === 'sidebar-folder') return [];
   if (data.type === 'sidebar-chat') return [];
+  if (data.type === 'sidebar-chat-folder') return [];
   if (data.type === 'sidebar-pinned-drone') return [];
   return Array.from(new Set(data.droneIds.map((item) => String(item ?? '').trim()).filter(Boolean)));
 }
@@ -167,7 +197,11 @@ export function draggedCanvasChatNodeIdsFromData(
 ): string[] {
   if (!data) return [];
   if (data.type === 'sidebar-folder') return [];
-  if (data.type === 'sidebar-chat') return [data.nodeId];
+  if (data.type === 'sidebar-chat') {
+    return (data.chatNames?.length ? data.chatNames : [data.chatName])
+      .map((chatName) => createCanvasChatNodeId(data.droneId, chatName));
+  }
+  if (data.type === 'sidebar-chat-folder') return [];
   if (data.type === 'sidebar-pinned-drone') return [];
   if (data.type === 'sidebar-drone') {
     return orderChatNodeIdsBySidebar(
@@ -183,7 +217,11 @@ export function draggedCanvasChatNodeIdsFromData(
 
 export function draggedCanvasNodeIdsFromData(data: DroneHubDragData | null): string[] {
   if (!data) return [];
-  if (data.type === 'sidebar-chat') return [data.nodeId];
+  if (data.type === 'sidebar-chat') {
+    return (data.chatNames?.length ? data.chatNames : [data.chatName])
+      .map((chatName) => createCanvasChatNodeId(data.droneId, chatName));
+  }
+  if (data.type === 'sidebar-chat-folder') return [];
   if (data.type === 'sidebar-pinned-drone') {
     const nodeId = createCanvasDroneNodeId(data.droneId);
     return nodeId ? [nodeId] : [];
@@ -203,7 +241,11 @@ function dragPreviewLabel(data: DroneHubDragData): { title: string; detail: stri
     return { title: data.label, detail: 'Folder' };
   }
   if (data.type === 'sidebar-chat') {
-    return { title: data.label, detail: 'Chat' };
+    const chatNames = data.chatNames?.length ? data.chatNames : [data.chatName];
+    return { title: chatNames.length > 1 ? `${chatNames.length} chats` : data.label, detail: 'Chat' };
+  }
+  if (data.type === 'sidebar-chat-folder') {
+    return { title: data.label, detail: 'Chat group' };
   }
   if (data.type === 'sidebar-drone' || data.type === 'sidebar-pinned-drone') {
     const count = data.type === 'sidebar-drone' ? data.droneIds.length : 1;
@@ -232,7 +274,7 @@ function ActiveDragPreview({ data }: { data: DroneHubDragData }) {
       </div>
     );
   }
-  if (data.type === 'sidebar-chat') {
+  if (data.type === 'sidebar-chat' || data.type === 'sidebar-chat-folder') {
     return (
       <div className="pointer-events-none w-[220px] rounded border border-[var(--accent-muted)] bg-[var(--panel-overlay)] px-2 py-1.5 shadow-[0_18px_44px_var(--shadow-color)]">
         <div className="flex items-center gap-1.5 text-[var(--text-11)] text-[var(--fg-secondary)]">
@@ -383,17 +425,25 @@ export function useDroneHubActiveDrag(): DroneHubDragData | null {
   return React.useContext(DroneHubActiveDragContext);
 }
 
-export function createSidebarChatDragData(droneIdRaw: string, chatNameRaw: string, label: string): SidebarChatDragData | null {
+export function createSidebarChatDragData(
+  droneIdRaw: string,
+  chatNameRaw: string,
+  label: string,
+  selectedChatNames: readonly string[] = [],
+): SidebarChatDragData | null {
   const droneId = String(droneIdRaw ?? '').trim();
   const chatName = String(chatNameRaw ?? '').trim() || 'default';
   const nodeId = createCanvasChatNodeId(droneId, chatName);
   const safeLabel = String(label ?? '').trim();
+  const chatNames = [...new Set([...selectedChatNames, chatName].map((item) => String(item ?? '').trim()).filter(Boolean))];
   if (!droneId || !nodeId || !safeLabel) return null;
   return {
     type: 'sidebar-chat',
     droneId,
     chatName,
     nodeId,
+    chatNames,
+    sidebarNodeIds: chatNames.map((name) => sidebarChatNodeId(droneId, name)),
     label: safeLabel,
   };
 }

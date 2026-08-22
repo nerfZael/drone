@@ -141,6 +141,9 @@ type DroneRegistryV1 = {
       sidebarDroneOrderByGroup?: Record<string, string[]>;
       sidebarNodeOrderByParent?: Record<string, string[]>;
       sidebarChatOrderByDrone?: Record<string, string[]>;
+      sidebarChatGroupPathsByDrone?: Record<string, string[]>;
+      sidebarChatGroupByChat?: Record<string, string>;
+      sidebarChatNodeOrderByParent?: Record<string, string[]>;
       pinnedDroneIds?: string[];
       mutedSidebarGroupIds?: string[];
       mutedDroneIds?: string[];

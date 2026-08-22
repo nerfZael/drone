@@ -14,6 +14,7 @@ export type {
   SidebarSetPinnedIntent,
   SidebarSetMutedIntent,
   SidebarMuteTargetKind,
+  SidebarChatTreeIntent,
 } from '@drone/hub-model';
 
 /** One user gesture, expressed as intent rather than client-computed persisted state. */
@@ -96,6 +97,62 @@ export function parseSidebarMoveCommandRequest(value: unknown): SidebarMoveComma
       activeChatName: text(rawIntent.activeChatName, 'intent.activeChatName'),
       overChatName: text(rawIntent.overChatName, 'intent.overChatName'),
       placement: placement(rawIntent.placement),
+    };
+  } else if (kind === 'chat-tree-entry') {
+    intent = {
+      kind,
+      parentId: text(rawIntent.parentId, 'intent.parentId'),
+      siblingNodeIds: texts(rawIntent.siblingNodeIds, 'intent.siblingNodeIds'),
+      activeNodeId: text(rawIntent.activeNodeId, 'intent.activeNodeId'),
+      overNodeId: text(rawIntent.overNodeId, 'intent.overNodeId'),
+      placement: placement(rawIntent.placement),
+    };
+  } else if (kind === 'chat-tree-move') {
+    const itemKind = text(rawIntent.itemKind, 'intent.itemKind');
+    if (itemKind !== 'chat' && itemKind !== 'folder') {
+      invalidSidebarMove('intent.itemKind must be chat or folder');
+    }
+    intent = {
+      kind,
+      droneId: text(rawIntent.droneId, 'intent.droneId'),
+      itemKind,
+      activeNodeId: text(rawIntent.activeNodeId, 'intent.activeNodeId'),
+      ...(rawIntent.activeNodeIds == null
+        ? {}
+        : { activeNodeIds: texts(rawIntent.activeNodeIds, 'intent.activeNodeIds') }),
+      sourcePath: nullableText(rawIntent.sourcePath, 'intent.sourcePath'),
+      sourceSiblingNodeIds: texts(rawIntent.sourceSiblingNodeIds, 'intent.sourceSiblingNodeIds'),
+      targetPath: nullableText(rawIntent.targetPath, 'intent.targetPath'),
+      targetSiblingNodeIds: texts(rawIntent.targetSiblingNodeIds, 'intent.targetSiblingNodeIds'),
+      ...(rawIntent.overNodeId == null
+        ? {}
+        : { overNodeId: text(rawIntent.overNodeId, 'intent.overNodeId') }),
+      placement: placement(rawIntent.placement, true),
+    };
+  } else if (kind === 'chat-group-create') {
+    intent = {
+      kind,
+      droneId: text(rawIntent.droneId, 'intent.droneId'),
+      path: text(rawIntent.path, 'intent.path'),
+    };
+  } else if (kind === 'chat-group-rename') {
+    intent = {
+      kind,
+      droneId: text(rawIntent.droneId, 'intent.droneId'),
+      path: text(rawIntent.path, 'intent.path'),
+      newPath: text(rawIntent.newPath, 'intent.newPath'),
+    };
+  } else if (kind === 'chat-group-delete') {
+    intent = {
+      kind,
+      droneId: text(rawIntent.droneId, 'intent.droneId'),
+      path: text(rawIntent.path, 'intent.path'),
+    };
+  } else if (kind === 'chat-tree-remove') {
+    intent = {
+      kind,
+      droneId: text(rawIntent.droneId, 'intent.droneId'),
+      nodeIds: texts(rawIntent.nodeIds, 'intent.nodeIds'),
     };
   } else if (kind === 'pinned-drone') {
     intent = {

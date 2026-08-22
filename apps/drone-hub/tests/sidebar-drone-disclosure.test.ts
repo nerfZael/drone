@@ -18,7 +18,7 @@ describe('multi-chat drone disclosure', () => {
       'utf8',
     );
 
-    expect(source).toContain("const hasChatSection = chats.length > 1;");
+    expect(source).toContain("const hasChatSection = chats.length > 1 || hasChatGroups");
     expect(source).toContain('onSelectDroneContainer(drone.id);');
     expect(source).toContain(
       'onSelectDroneCard(drone.id, { ...rowOpts, orderedDroneIds: visibleDroneOrder });',
@@ -28,7 +28,7 @@ describe('multi-chat drone disclosure', () => {
     expect(source).toContain(
       'disclosureExpanded={hasChatSection ? chatSectionExpanded : undefined}',
     );
-    expect(source).toContain('(chats.length > 1 && chatSectionExpanded)');
+    expect(source).toContain('(hasChatSection && chatSectionExpanded)');
   });
 
   test('gives every child chat full state and a focused context menu', () => {
@@ -53,7 +53,7 @@ describe('multi-chat drone disclosure', () => {
     expect(chatRows).toContain("label: 'Clone chat'");
     expect(chatRows).toContain("label: 'Rename chat'");
     expect(chatRows).toContain("shortcut: 'F2'");
-    expect(chatRows).toContain("label: 'Delete chat'");
+    expect(chatRows).toContain(": 'Delete chat'");
     expect(chatRows).toContain('const chatActionsDisabled =');
     expect(chatRows).toContain("disabled: chatName === 'default' || chatActionsDisabled");
     expect(chatRows).not.toContain('group-hover/chat-row:pr-14');

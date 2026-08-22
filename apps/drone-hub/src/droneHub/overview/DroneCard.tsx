@@ -50,6 +50,7 @@ type DroneCardProps = {
   onClone?: () => void;
   onCloneChat?: () => void;
   onCreateChat?: () => void;
+  onCreateChatGroup?: () => void;
   onAddToGroup?: () => void;
   onCreateGroup?: () => void;
   onRename?: DroneInlineRenameHandler;
@@ -496,6 +497,7 @@ function areDroneCardPropsEqual(a: DroneCardProps, b: DroneCardProps): boolean {
     Boolean(a.onClone) === Boolean(b.onClone) &&
     Boolean(a.onCloneChat) === Boolean(b.onCloneChat) &&
     Boolean(a.onCreateChat) === Boolean(b.onCreateChat) &&
+    Boolean(a.onCreateChatGroup) === Boolean(b.onCreateChatGroup) &&
     Boolean(a.onAddToGroup) === Boolean(b.onAddToGroup) &&
     Boolean(a.onCreateGroup) === Boolean(b.onCreateGroup) &&
     Boolean(a.onRename) === Boolean(b.onRename) &&
@@ -555,6 +557,7 @@ export const DroneCard = React.memo(function DroneCard({
   onClone,
   onCloneChat,
   onCreateChat,
+  onCreateChatGroup,
   onAddToGroup,
   onCreateGroup,
   onRename,
@@ -602,6 +605,7 @@ export const DroneCard = React.memo(function DroneCard({
   const canClone = typeof onClone === 'function';
   const canCloneChat = typeof onCloneChat === 'function';
   const canCreateChat = typeof onCreateChat === 'function';
+  const canCreateChatGroup = typeof onCreateChatGroup === 'function';
   const canAddToGroup = typeof onAddToGroup === 'function';
   const canCreateGroup = typeof onCreateGroup === 'function';
   const canRename = typeof onRename === 'function';
@@ -796,6 +800,15 @@ export const DroneCard = React.memo(function DroneCard({
       icon: <IconPlus className="h-3.5 w-3.5 text-[var(--accent)]" />,
       disabled: Boolean(createChatDisabled),
       onSelect: () => onCreateChat?.(),
+    });
+  }
+  if (canCreateChatGroup) {
+    actionMenuItems.push({
+      id: 'create-chat-group',
+      label: 'Create chat group',
+      icon: <IconFolder className="h-3.5 w-3.5 text-[var(--accent)]" />,
+      disabled: Boolean(createChatDisabled),
+      onSelect: () => onCreateChatGroup?.(),
     });
   }
   if (canCloneChat) {

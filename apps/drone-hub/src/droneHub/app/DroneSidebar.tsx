@@ -4,8 +4,12 @@ import { createPortal } from 'react-dom';
 import { useDroppable } from '@dnd-kit/core';
 import {
   buildSidebarRepoScopedGroupIndex,
+  buildSidebarChatTree,
   buildRepoSidebarModel,
   resolvePinnedSidebarDrones,
+  type SidebarChatTreeFolderNode,
+  type SidebarChatTreeModel,
+  type SidebarChatTreeNode,
   type SidebarMoveIntent,
   type SidebarCommandQueue,
 } from '@drone/hub-model/sidebar';
@@ -218,6 +222,64 @@ function pinnedDroneRepoLabel(repoPathRaw: string, navigationLabel?: string): st
   if (!repoPath) return 'Ungrouped';
   const parts = repoPath.split(/[\\/]/).filter(Boolean);
   return parts[parts.length - 1] ?? repoPath;
+}
+
+function pinnedChatGroupCollapseKey(droneId: string, path: string): string {
+  return `chat-group:${droneId}:${path}`;
+}
+
+function PinnedChatTreeEntries({
+  tree,
+  nodeIds,
+  depth,
+  collapsedSections,
+  setCollapsedSections,
+  renderChat,
+}: {
+  tree: SidebarChatTreeModel;
+  nodeIds: readonly string[];
+  depth: number;
+  collapsedSections: Record<string, boolean>;
+  setCollapsedSections: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+  renderChat(node: Extract<SidebarChatTreeNode, { kind: 'chat' }>): React.ReactNode;
+}) {
+  return nodeIds.map((nodeId) => {
+    const node = tree.nodesById[nodeId];
+    if (!node) return null;
+    if (node.kind === 'chat') return renderChat(node);
+    const folder = node as SidebarChatTreeFolderNode;
+    const collapseKey = pinnedChatGroupCollapseKey(tree.droneId, folder.path);
+    const collapsed = collapsedSections[collapseKey] === true;
+    return (
+      <div key={folder.id} className="flex flex-col gap-0" style={depth ? { paddingLeft: 10 } : undefined}>
+        <button
+          type="button"
+          onClick={() => setCollapsedSections((current) => ({
+            ...current,
+            [collapseKey]: !collapsed,
+          }))}
+          className="flex min-h-7 min-w-0 items-center gap-1 rounded px-1 text-left text-[var(--text-11)] text-[var(--sidebar-subitem-fg)] hover:bg-[var(--surface-hover)]"
+          aria-expanded={!collapsed}
+        >
+          <IconChevron className={`h-3.5 w-3.5 flex-shrink-0 transition-transform ${collapsed ? '' : 'rotate-90'}`} />
+          <IconFolderOutline className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)]" />
+          <span className="min-w-0 flex-1 truncate font-mono">{folder.label}</span>
+        </button>
+        {!collapsed ? (
+          <div className="border-l border-[var(--border-subtle)]">
+            <PinnedChatTreeEntries
+              tree={tree}
+              nodeIds={tree.childIdsByParent[folder.id] ?? []}
+              depth={depth + 1}
+              collapsedSections={collapsedSections}
+              setCollapsedSections={setCollapsedSections}
+              renderChat={renderChat}
+            />
+          </div>
+        ) : null}
+      </div>
+    );
+  });
 }
 
 export type DroneSidebarCapabilities = {
@@ -1075,6 +1137,9 @@ export function DroneSidebar({
     sidebarDroneOrderByGroup,
     sidebarNodeOrderByParent,
     sidebarChatOrderByDrone,
+    sidebarChatGroupPathsByDrone,
+    sidebarChatGroupByChat,
+    sidebarChatNodeOrderByParent,
     mutedSidebarGroupIds,
     mutedDroneIds,
     mutedChatIds,
@@ -2842,11 +2907,22 @@ export function DroneSidebar({
                       sidebarChatOrderByDrone[droneId] ?? [],
                       (chatName) => chatName,
                     );
-                    const hasOnlyDefaultChat = chats.length === 1 && chats[0] === 'default';
+                    const pinnedChatTree = buildSidebarChatTree({
+                      droneId,
+                      chatNames: chats,
+                      groupPaths: sidebarChatGroupPathsByDrone[droneId] ?? [],
+                      groupByChat: sidebarChatGroupByChat,
+                      nodeOrderByParent: sidebarChatNodeOrderByParent,
+                    });
+                    const hasChatGroups = pinnedChatTree.rootChildIds.some(
+                      (nodeId) => pinnedChatTree.nodesById[nodeId]?.kind === 'folder',
+                    );
+                    const hasOnlyDefaultChat =
+                      chats.length === 1 && chats[0] === 'default' && !hasChatGroups;
                     const collapsedChatMuteId = sidebarChatSidebarNodeId(droneId, 'default');
                     const collapsedChatMuted =
                       hasOnlyDefaultChat && mutedChatIdSet.has(collapsedChatMuteId);
-                    const hasChatSection = chats.length > 1;
+                    const hasChatSection = chats.length > 1 || hasChatGroups;
                     const chatSectionExpanded =
                       collapsedDroneSections[sidebarInlineSectionKey(droneId, 'chats')] !== true;
                     const hasActiveChildChat = selectedDrone === droneId && hasChatSection;
@@ -2999,7 +3075,14 @@ export function DroneSidebar({
                                 data-sidebar-guide-selected={hasActiveChildChat ? 'true' : undefined}
                                 className={`${pinnedDensityClasses.chatIndent} dh-sidebar-drone-chat-body flex flex-col gap-0.5 border-l`}
                               >
-                                {chats.map((chatName) => {
+                                <PinnedChatTreeEntries
+                                  tree={pinnedChatTree}
+                                  nodeIds={pinnedChatTree.rootChildIds}
+                                  depth={0}
+                                  collapsedSections={collapsedDroneSections}
+                                  setCollapsedSections={setCollapsedDroneSections}
+                                  renderChat={(chatNode) => {
+                                  const chatName = chatNode.chatName;
                                   const active = selectedDrone === droneId && activeChatName === chatName;
                                   const chatNodeId = createCanvasChatNodeId(droneId, chatName);
                                   const chatSidebarId = sidebarChatSidebarNodeId(droneId, chatName);
@@ -3063,7 +3146,8 @@ export function DroneSidebar({
                                       ) : null}
                                     </button>
                                   );
-                                })}
+                                  }}
+                                />
                               </div>
                             ) : null}
                           </div>

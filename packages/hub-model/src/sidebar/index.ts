@@ -10,3 +10,4 @@ export * from './pinned-drones';
 export * from './mutations';
 export * from './optimistic-journal';
 export * from './command-queue';
+export * from './chat-groups';

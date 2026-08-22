@@ -81,6 +81,17 @@ function localStringListMap(value: unknown): Record<string, string[]> {
   );
 }
 
+function localStringMap(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).flatMap(([keyRaw, itemRaw]) => {
+      const key = String(keyRaw ?? '').trim();
+      const item = String(itemRaw ?? '').trim();
+      return key && item ? [[key, item] as const] : [];
+    }),
+  );
+}
+
 function fileRevision(bytes: Uint8Array): string {
   return `sha256:${Array.from(sha256(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
 }
@@ -180,6 +191,9 @@ function useLocalDroneControlValue() {
   const sidebarOrderRef = React.useRef({
     sidebarNodeOrderByParent: {} as Record<string, string[]>,
     sidebarChatOrderByDrone: {} as Record<string, string[]>,
+    sidebarChatGroupPathsByDrone: {} as Record<string, string[]>,
+    sidebarChatGroupByChat: {} as Record<string, string>,
+    sidebarChatNodeOrderByParent: {} as Record<string, string[]>,
     mutedSidebarGroupIds: [] as string[],
     mutedDroneIds: [] as string[],
     mutedChatIds: [] as string[],
@@ -278,6 +292,9 @@ function useLocalDroneControlValue() {
         return {
           sidebarNodeOrderByParent: localStringListMap(source.sidebarNodeOrderByParent),
           sidebarChatOrderByDrone: localStringListMap(source.sidebarChatOrderByDrone),
+          sidebarChatGroupPathsByDrone: localStringListMap(source.sidebarChatGroupPathsByDrone),
+          sidebarChatGroupByChat: localStringMap(source.sidebarChatGroupByChat),
+          sidebarChatNodeOrderByParent: localStringListMap(source.sidebarChatNodeOrderByParent),
           mutedSidebarGroupIds: Array.isArray(source.mutedSidebarGroupIds)
             ? [...new Set(source.mutedSidebarGroupIds.map((id) => String(id ?? '').trim()).filter(Boolean))]
             : [],
@@ -292,6 +309,9 @@ function useLocalDroneControlValue() {
       .catch(() => ({
         sidebarNodeOrderByParent: {},
         sidebarChatOrderByDrone: {},
+        sidebarChatGroupPathsByDrone: {},
+        sidebarChatGroupByChat: {},
+        sidebarChatNodeOrderByParent: {},
         mutedSidebarGroupIds: [],
         mutedDroneIds: [],
         mutedChatIds: [],
@@ -418,6 +438,9 @@ function useLocalDroneControlValue() {
             sidebarDroneOrderByGroup: {},
             sidebarNodeOrderByParent: sidebarOrderRef.current.sidebarNodeOrderByParent,
             sidebarChatOrderByDrone: sidebarOrderRef.current.sidebarChatOrderByDrone,
+            sidebarChatGroupPathsByDrone: sidebarOrderRef.current.sidebarChatGroupPathsByDrone,
+            sidebarChatGroupByChat: sidebarOrderRef.current.sidebarChatGroupByChat,
+            sidebarChatNodeOrderByParent: sidebarOrderRef.current.sidebarChatNodeOrderByParent,
             pinnedDroneIds: pinnedDroneIdsRef.current,
             mutedSidebarGroupIds: sidebarOrderRef.current.mutedSidebarGroupIds,
             mutedDroneIds: sidebarOrderRef.current.mutedDroneIds,
@@ -587,6 +610,9 @@ function useLocalDroneControlValue() {
           const nextOrder = {
             sidebarNodeOrderByParent: nextLayout.sidebarNodeOrderByParent,
             sidebarChatOrderByDrone: nextLayout.sidebarChatOrderByDrone,
+            sidebarChatGroupPathsByDrone: nextLayout.sidebarChatGroupPathsByDrone,
+            sidebarChatGroupByChat: nextLayout.sidebarChatGroupByChat,
+            sidebarChatNodeOrderByParent: nextLayout.sidebarChatNodeOrderByParent,
             mutedSidebarGroupIds: nextLayout.mutedSidebarGroupIds,
             mutedDroneIds: nextLayout.mutedDroneIds,
             mutedChatIds: nextLayout.mutedChatIds,

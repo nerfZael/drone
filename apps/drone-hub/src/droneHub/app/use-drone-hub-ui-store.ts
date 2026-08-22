@@ -94,6 +94,9 @@ type DroneHubUiState = {
   sidebarDroneOrderByGroup: Record<string, string[]>;
   sidebarNodeOrderByParent: Record<string, string[]>;
   sidebarChatOrderByDrone: Record<string, string[]>;
+  sidebarChatGroupPathsByDrone: Record<string, string[]>;
+  sidebarChatGroupByChat: Record<string, string>;
+  sidebarChatNodeOrderByParent: Record<string, string[]>;
   pinnedDroneIds: string[];
   mutedSidebarGroupIds: string[];
   mutedDroneIds: string[];
@@ -160,6 +163,9 @@ type DroneHubUiState = {
   setSidebarDroneOrderByGroup: (next: Updater<Record<string, string[]>>) => void;
   setSidebarNodeOrderByParent: (next: Updater<Record<string, string[]>>) => void;
   setSidebarChatOrderByDrone: (next: Updater<Record<string, string[]>>) => void;
+  setSidebarChatGroupPathsByDrone: (next: Updater<Record<string, string[]>>) => void;
+  setSidebarChatGroupByChat: (next: Updater<Record<string, string>>) => void;
+  setSidebarChatNodeOrderByParent: (next: Updater<Record<string, string[]>>) => void;
   setPinnedDroneIds: (next: Updater<string[]>) => void;
   setMutedSidebarGroupIds: (next: Updater<string[]>) => void;
   setMutedDroneIds: (next: Updater<string[]>) => void;
@@ -337,6 +343,9 @@ type DroneHubUiPersistedState = Pick<
   | 'sidebarDroneOrderByGroup'
   | 'sidebarNodeOrderByParent'
   | 'sidebarChatOrderByDrone'
+  | 'sidebarChatGroupPathsByDrone'
+  | 'sidebarChatGroupByChat'
+  | 'sidebarChatNodeOrderByParent'
   | 'pinnedDroneIds'
   | 'mutedSidebarGroupIds'
   | 'mutedDroneIds'
@@ -601,6 +610,26 @@ function sameOrderedStringMap(
         sameOrderedStringList(left[key] ?? [], right[key] ?? []),
     )
   );
+}
+
+function normalizeStringRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const out: Record<string, string> = {};
+  for (const [keyRaw, itemRaw] of Object.entries(value as Record<string, unknown>)) {
+    const key = String(keyRaw ?? '').trim();
+    const item = String(itemRaw ?? '').trim();
+    if (key && item) out[key] = item;
+  }
+  return out;
+}
+
+function sameStringRecord(
+  left: Readonly<Record<string, string>>,
+  right: Readonly<Record<string, string>>,
+): boolean {
+  const keys = Object.keys(left);
+  return keys.length === Object.keys(right).length &&
+    keys.every((key) => left[key] === right[key]);
 }
 
 function normalizeAppView(value: unknown): AppView {
@@ -915,6 +944,9 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       sidebarDroneOrderByGroup: {},
       sidebarNodeOrderByParent: {},
       sidebarChatOrderByDrone: {},
+      sidebarChatGroupPathsByDrone: {},
+      sidebarChatGroupByChat: {},
+      sidebarChatNodeOrderByParent: {},
       pinnedDroneIds: [],
       mutedSidebarGroupIds: [],
       mutedDroneIds: [],
@@ -1040,6 +1072,27 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           return sameOrderedStringMap(s.sidebarChatOrderByDrone, value)
             ? s
             : { sidebarChatOrderByDrone: value };
+        }),
+      setSidebarChatGroupPathsByDrone: (next) =>
+        set((s) => {
+          const value = normalizeOrderedStringMap(resolveNext(s.sidebarChatGroupPathsByDrone, next));
+          return sameOrderedStringMap(s.sidebarChatGroupPathsByDrone, value)
+            ? s
+            : { sidebarChatGroupPathsByDrone: value };
+        }),
+      setSidebarChatGroupByChat: (next) =>
+        set((s) => {
+          const value = normalizeStringRecord(resolveNext(s.sidebarChatGroupByChat, next));
+          return sameStringRecord(s.sidebarChatGroupByChat, value)
+            ? s
+            : { sidebarChatGroupByChat: value };
+        }),
+      setSidebarChatNodeOrderByParent: (next) =>
+        set((s) => {
+          const value = normalizeOrderedStringMap(resolveNext(s.sidebarChatNodeOrderByParent, next));
+          return sameOrderedStringMap(s.sidebarChatNodeOrderByParent, value)
+            ? s
+            : { sidebarChatNodeOrderByParent: value };
         }),
       setPinnedDroneIds: (next) =>
         set((s) => {
@@ -1402,6 +1455,9 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         sidebarDroneOrderByGroup: state.sidebarDroneOrderByGroup,
         sidebarNodeOrderByParent: state.sidebarNodeOrderByParent,
         sidebarChatOrderByDrone: state.sidebarChatOrderByDrone,
+        sidebarChatGroupPathsByDrone: state.sidebarChatGroupPathsByDrone,
+        sidebarChatGroupByChat: state.sidebarChatGroupByChat,
+        sidebarChatNodeOrderByParent: state.sidebarChatNodeOrderByParent,
         pinnedDroneIds: state.pinnedDroneIds,
         mutedSidebarGroupIds: state.mutedSidebarGroupIds,
         mutedDroneIds: state.mutedDroneIds,
@@ -1495,6 +1551,15 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           sidebarChatOrderByDrone: normalizeOrderedStringMap(
             persisted.sidebarChatOrderByDrone ?? currentState.sidebarChatOrderByDrone,
           ),
+          sidebarChatGroupPathsByDrone: normalizeOrderedStringMap(
+            persisted.sidebarChatGroupPathsByDrone ?? currentState.sidebarChatGroupPathsByDrone,
+          ),
+          sidebarChatGroupByChat: normalizeStringRecord(
+            persisted.sidebarChatGroupByChat ?? currentState.sidebarChatGroupByChat,
+          ),
+          sidebarChatNodeOrderByParent: normalizeOrderedStringMap(
+            persisted.sidebarChatNodeOrderByParent ?? currentState.sidebarChatNodeOrderByParent,
+          ),
           pinnedDroneIds: normalizeSidebarGroupOrder(
             persisted.pinnedDroneIds ?? currentState.pinnedDroneIds,
           ),
@@ -1567,6 +1632,9 @@ export function useDroneHubAppModelUiState() {
       sidebarDroneOrderByGroup: s.sidebarDroneOrderByGroup,
       sidebarNodeOrderByParent: s.sidebarNodeOrderByParent,
       sidebarChatOrderByDrone: s.sidebarChatOrderByDrone,
+      sidebarChatGroupPathsByDrone: s.sidebarChatGroupPathsByDrone,
+      sidebarChatGroupByChat: s.sidebarChatGroupByChat,
+      sidebarChatNodeOrderByParent: s.sidebarChatNodeOrderByParent,
       pinnedDroneIds: s.pinnedDroneIds,
       hiddenSidebarGroups: s.hiddenSidebarGroups,
       showHiddenSidebarGroups: s.showHiddenSidebarGroups,
@@ -1683,6 +1751,9 @@ export function useDroneSidebarUiState() {
       sidebarDroneOrderByGroup: s.sidebarDroneOrderByGroup,
       sidebarNodeOrderByParent: s.sidebarNodeOrderByParent,
       sidebarChatOrderByDrone: s.sidebarChatOrderByDrone,
+      sidebarChatGroupPathsByDrone: s.sidebarChatGroupPathsByDrone,
+      sidebarChatGroupByChat: s.sidebarChatGroupByChat,
+      sidebarChatNodeOrderByParent: s.sidebarChatNodeOrderByParent,
       mutedSidebarGroupIds: s.mutedSidebarGroupIds,
       mutedDroneIds: s.mutedDroneIds,
       mutedChatIds: s.mutedChatIds,

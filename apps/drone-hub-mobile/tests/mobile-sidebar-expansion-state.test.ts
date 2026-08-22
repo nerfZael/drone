@@ -66,7 +66,9 @@ describe('mobile sidebar expansion state', () => {
     );
     expect(hookSource).toContain('if (loadedRef.current) persist(next);');
     expect(drawerSource).toContain('const collapsed = !expandedFolderIds.has(folder.id);');
-    expect(drawerSource).toContain('useMobileSidebarExpandedFolderIds();');
+    expect(drawerSource).toContain('} = useMobileSidebarExpandedFolderIds();');
+    expect(drawerSource).toContain('rewriteFolderPrefix(');
+    expect(drawerSource).toContain('removeFolderPrefix(');
     expect(drawerSource).not.toContain('setExpandedFolderIds(new Set());');
     expect(droneHookSource).toContain(
       'AsyncStorage.getItem(MOBILE_SIDEBAR_COLLAPSED_DRONE_IDS_STORAGE_KEY)',

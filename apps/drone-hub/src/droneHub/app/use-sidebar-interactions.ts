@@ -1,7 +1,12 @@
 import React from 'react';
 import { isUngroupedGroupName } from '../../domain';
 import type { DroneSummary } from '../types';
-import type { SidebarMoveIntent } from '@drone/hub-model/sidebar';
+import {
+  buildSidebarChatTree,
+  sidebarChatGroupNodeId,
+  sidebarChatNodeId,
+  type SidebarMoveIntent,
+} from '@drone/hub-model/sidebar';
 import { joinSidebarGroupPath, isSameOrDescendantSidebarGroupPath, sidebarGroupBaseName, sidebarGroupParentPath } from './sidebar-group-paths';
 import {
   observeSidebarSelectionForExpansion,
@@ -18,6 +23,7 @@ import type { SidebarNodeTreeModel } from './sidebar-node-tree';
 import type { DroneSelectionClickOptions } from './drone-selection-helpers';
 import { isSidebarGroupCollapsed } from './is-sidebar-group-collapsed';
 import { normalizedDroneChats } from './chat-node-helpers';
+import { orderSidebarEntries } from './sidebar-group-order';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 import type { GroupMutationScope } from './use-group-management';
 import {
@@ -423,6 +429,47 @@ export function useSidebarInteractions({
     const nextChatName = String(result.chatName ?? chatName).trim() || chatName;
     const previousMuteId = sidebarChatSidebarNodeId(draft.droneId, targetChatName);
     const nextMuteId = sidebarChatSidebarNodeId(draft.droneId, nextChatName);
+    const previousChatNodeId = sidebarChatNodeId(draft.droneId, targetChatName);
+    const nextChatNodeId = sidebarChatNodeId(draft.droneId, nextChatName);
+    const sidebarState = useDroneHubUiStore.getState();
+    const previousChatGroup = sidebarState.sidebarChatGroupByChat[previousChatNodeId] ?? null;
+    if (previousChatNodeId !== nextChatNodeId && onMoveSidebar) {
+      const drone = optimisticSidebarDronesFilteredByRepo.find((item) => item.id === draft.droneId);
+      const orderedChatNames = orderSidebarEntries(
+        drone ? normalizedDroneChats(drone) : [targetChatName],
+        sidebarState.sidebarChatOrderByDrone[draft.droneId] ?? [],
+        (name) => name,
+      );
+      const previousTree = buildSidebarChatTree({
+        droneId: draft.droneId,
+        chatNames: orderedChatNames,
+        groupPaths: sidebarState.sidebarChatGroupPathsByDrone[draft.droneId] ?? [],
+        groupByChat: sidebarState.sidebarChatGroupByChat,
+        nodeOrderByParent: sidebarState.sidebarChatNodeOrderByParent,
+      });
+      const targetParentId = previousChatGroup
+        ? sidebarChatGroupNodeId(draft.droneId, previousChatGroup)
+        : previousTree.rootId;
+      await onMoveSidebar({
+        kind: 'chat-tree-move',
+        droneId: draft.droneId,
+        itemKind: 'chat',
+        activeNodeId: nextChatNodeId,
+        sourcePath: null,
+        sourceSiblingNodeIds: [nextChatNodeId, ...previousTree.rootChildIds],
+        targetPath: previousChatGroup,
+        targetSiblingNodeIds: previousTree.childIdsByParent[targetParentId] ?? [],
+        overNodeId: previousChatNodeId,
+        placement: 'before',
+      });
+    }
+    if (previousChatNodeId !== nextChatNodeId && onMoveSidebar) {
+      await onMoveSidebar({
+        kind: 'chat-tree-remove',
+        droneId: draft.droneId,
+        nodeIds: [previousChatNodeId],
+      });
+    }
     if (
       previousMuteId !== nextMuteId &&
       useDroneHubUiStore.getState().mutedChatIds.includes(previousMuteId) &&

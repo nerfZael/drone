@@ -69,6 +69,9 @@ describe('canonical sidebar mutations', () => {
     expect(chats).toEqual({
       sidebarNodeOrderByParent: { root: ['drone:b', 'drone:a'] },
       sidebarChatOrderByDrone: { a: ['review', 'default'] },
+      sidebarChatGroupPathsByDrone: {},
+      sidebarChatGroupByChat: {},
+      sidebarChatNodeOrderByParent: {},
       pinnedDroneIds: ['a', 'b'],
       mutedSidebarGroupIds: [],
       mutedDroneIds: [],
