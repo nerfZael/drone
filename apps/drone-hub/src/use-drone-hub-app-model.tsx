@@ -119,6 +119,10 @@ import {
   saveDesktopNewDronePreferences,
 } from './droneHub/app/new-drone-preferences';
 import {
+  buildNewChatConfiguration,
+  buildNewChatCreatePayload,
+} from './droneHub/app/new-chat-creation';
+import {
   resolveNewDroneContextFromCurrentSelection,
   shouldInheritNewDroneContextFromCurrentSelection,
 } from './droneHub/app/new-drone-context';
@@ -3952,43 +3956,80 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     ): Promise<{ ok: boolean; chatName?: string; error?: string | null }> => {
       const droneId = String(drone?.id ?? '').trim();
       if (!droneId) return { ok: false, error: 'Missing drone id.' };
-      const availableChats =
-        Array.isArray(drone?.chats) && drone.chats.length > 0 ? drone.chats : ['default'];
       const chatName = String(chatNameRaw ?? '').trim();
       if (!chatName) {
         return { ok: false, error: 'Chat name is required.' };
       }
       const requestedCopyFromChat = String(opts?.copyFromChat ?? '').trim();
-      const copyFromChat =
-        requestedCopyFromChat ||
-        (selectedDrone === droneId
-          ? String(selectedChat ?? '').trim() || 'default'
-          : availableChats.includes('default')
-            ? 'default'
-            : (availableChats[0] ?? 'default'));
+      const copyFromChat = requestedCopyFromChat;
+      let createdChat = false;
       try {
         await requestJson<{ ok: true }>(`/api/drones/${encodeURIComponent(droneId)}/chats`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
+          body: JSON.stringify(buildNewChatCreatePayload({
             name: chatName,
-            ...(availableChats.length > 0 ? { copyFromChat } : {}),
-            ...(availableChats.length > 0
-              ? { mode: opts?.mode === 'fork' ? 'fork' : 'copy-config' }
-              : {}),
-            ...(opts?.draft === true ? { draft: true } : {}),
-          }),
+            copyFromChat,
+            mode: opts?.mode,
+            draft: opts?.draft,
+          })),
         });
+        createdChat = true;
+        if (!copyFromChat) {
+          const repoPath = normalizeCreateRepoPath(drone.repoPath);
+          const rememberedPreferences = loadDesktopNewDronePreferences(repoPath);
+          const basePreferences =
+            rememberedPreferences ?? normalizeDesktopNewDronePreferences({});
+          if (!basePreferences) throw new Error('Could not resolve new-chat preferences.');
+          const spawnContexts = useDroneHubUiStore.getState().spawnContextByRepoKey;
+          const creationPreferences = resolveCompanionDroneCreationPreferences({
+            remembered: rememberedPreferences,
+            defaults: basePreferences,
+            spawnContext: resolveSpawnContextPreferencesForRepo(spawnContexts, repoPath),
+            hasSpawnContext: hasSpawnContextPreferencesForRepo(spawnContexts, repoPath),
+          });
+          const configuration = buildNewChatConfiguration(
+            creationPreferences,
+            resolveAgentKeyToConfig,
+          );
+          await requestJson(
+            `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/config`,
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(configuration),
+            },
+          );
+          if (configuration.model) rememberSeenModels([configuration.model]);
+        }
         if (opts?.select !== false) {
           setSelectedDrone(droneId);
           setSelectedChat(chatName);
         }
         return { ok: true, chatName, error: null };
       } catch (err: any) {
+        if (createdChat) {
+          try {
+            await requestJson(
+              `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}`,
+              { method: 'DELETE' },
+            );
+            deleteChatRuntimeCache(chatRuntimeCacheKey(droneId, chatName));
+          } catch {
+            // Preserve the configuration error; rollback is best-effort.
+          }
+        }
         return { ok: false, error: err?.message ?? String(err) };
       }
     },
-    [requestJson, selectedChat, selectedDrone, setSelectedChat, setSelectedDrone],
+    [
+      normalizeCreateRepoPath,
+      rememberSeenModels,
+      requestJson,
+      resolveAgentKeyToConfig,
+      setSelectedChat,
+      setSelectedDrone,
+    ],
   );
   const createUntitledDroneChat = React.useCallback(
     async (
@@ -4144,9 +4185,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   );
   const createDroneChatFromShortcut = React.useCallback(async (): Promise<boolean> => {
     if (!currentDrone || selectedGroupMultiChat) return false;
-    const sourceChatName = resolveChatNameForDrone(currentDrone, selectedChat);
     const result = await createUntitledDroneChat(currentDrone, {
-      copyFromChat: sourceChatName,
       draft: true,
       select: false,
     });
@@ -4170,7 +4209,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     createUntitledDroneChat,
     currentDrone,
     selectDroneChat,
-    selectedChat,
     selectedGroupMultiChat,
     showShortcutToast,
   ]);
