@@ -1025,6 +1025,11 @@ function DrawerDroneChatTreeEntry({
   const parentPath = sidebarChatGroupParentPath(node.path);
   const childIds = tree.childIdsByParent[node.id] ?? [];
   const dragScope = `chat-parent:${node.parentId}`;
+  const hasSelectedDirectChat = childIds.some((childId) => {
+    const child = tree.nodesById[childId];
+    return child?.kind === 'chat' &&
+      drone.id === activeDroneId && child.chatName === activeChatName;
+  });
   const reorderGroup = (
     overNodeId: string,
     placement: 'before' | 'inside' | 'after',
@@ -1075,54 +1080,66 @@ function DrawerDroneChatTreeEntry({
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ expanded }}
-          accessibilityLabel={`${expanded ? 'Collapse' : 'Expand'} ${node.label} chat group`}
+          accessibilityLabel={`${expanded ? 'Collapse' : 'Expand'} ${node.label} group`}
           delayLongPress={600}
           onLongPress={() => chatTreeContext?.openGroupActions({ drone, path: node.path })}
           onPress={() => chatTreeContext?.toggleGroup(groupId)}
           style={({ pressed }) => [
-            styles.droneChatRow,
+            styles.groupRow,
             { paddingLeft: 8 + depth * 10 },
             pressed && styles.sidebarRowPressed,
           ]}
         >
-          <SidebarTreeChevronIcon
-            color={colors.sidebarMutedDim}
-            size={14}
-            strokeWidth={1.25}
-            expanded={expanded}
-          />
-          <SidebarFolderOutlineIcon color={colors.sidebarMutedDim} size={14} />
+          <View style={styles.folderChevronSlot}>
+            <SidebarTreeChevronIcon
+              color={colors.sidebarMutedDim}
+              size={16}
+              strokeWidth={1.25}
+              expanded={expanded}
+              style={styles.folderChevron}
+            />
+          </View>
           {reorderSidebar ? (
             <MobileSidebarDragArea
               scope={dragScope}
               treeScope={`chat-tree:${drone.id}`}
               itemId={node.id}
-              label={`${node.label} chat group`}
+              label={`${node.label} group`}
               onDrop={reorderGroup}
               onMoveAccessibility={moveGroup}
             >
-              <Text numberOfLines={1} style={[styles.droneChatLabel, styles.draggableRowLabel]}>{node.label}</Text>
+              <Text numberOfLines={1} style={[styles.groupName, styles.draggableRowLabel]}>{node.label}</Text>
             </MobileSidebarDragArea>
           ) : (
-            <Text numberOfLines={1} style={styles.droneChatLabel}>{node.label}</Text>
+            <Text numberOfLines={1} style={styles.groupName}>{node.label}</Text>
           )}
         </Pressable>
-        {expanded ? childIds.map((childId) => (
-          <DrawerDroneChatTreeEntry
-            key={childId}
-            drone={drone}
-            node={tree.nodesById[childId]!}
-            tree={tree}
-            allChatNames={allChatNames}
-            orderedChatNodeIds={orderedChatNodeIds}
-            depth={depth + 1}
-            activeDroneId={activeDroneId}
-            activeChatName={activeChatName}
-            selectionWashInset={selectionWashInset}
-            onOpenChatActions={onOpenChatActions}
-            onSelect={onSelect}
-          />
-        )) : null}
+        {expanded ? (
+          <View style={styles.groupChildren}>
+            {hasSelectedDirectChat ? (
+              <View
+                pointerEvents="none"
+                style={[styles.groupChildrenGuide, { left: 8 + depth * 10 + 8 }]}
+              />
+            ) : null}
+            {childIds.map((childId) => (
+              <DrawerDroneChatTreeEntry
+                key={childId}
+                drone={drone}
+                node={tree.nodesById[childId]!}
+                tree={tree}
+                allChatNames={allChatNames}
+                orderedChatNodeIds={orderedChatNodeIds}
+                depth={depth + 1}
+                activeDroneId={activeDroneId}
+                activeChatName={activeChatName}
+                selectionWashInset={selectionWashInset}
+                onOpenChatActions={onOpenChatActions}
+                onSelect={onSelect}
+              />
+            ))}
+          </View>
+        ) : null}
       </View>
     </MobileSidebarDragTarget>
   );
@@ -2649,9 +2666,9 @@ function AppDrawerView({
         },
       });
     }
-    if (onReorderSidebar) {
+    if (onReorderSidebar && chatActionTarget.drone.chats.length > 1) {
       actions.push({
-        label: 'Create chat group',
+        label: 'Create group',
         onPress: () => setChatGroupEditor({
           mode: 'create',
           drone: chatActionTarget.drone,
@@ -2704,10 +2721,12 @@ function AppDrawerView({
         }),
       });
     }
-    actions.push({
-      label: path ? 'Create subgroup' : 'Create group',
-      onPress: () => setChatGroupEditor({ mode: 'create', drone, parentPath: path, path: null, value: '' }),
-    });
+    if (drone.chats.length > 1) {
+      actions.push({
+        label: 'Create group',
+        onPress: () => setChatGroupEditor({ mode: 'create', drone, parentPath: path, path: null, value: '' }),
+      });
+    }
     if (path) {
       actions.push({
         label: 'Rename group',
@@ -2779,20 +2798,22 @@ function AppDrawerView({
           kind: 'set-muted', targetKind: 'drone', targetId, muted: !directlyMuted,
         }),
       }];
-      actions.push({
-        label: 'Create chat group',
-        onPress: () => setChatGroupEditor({
-          mode: 'create',
-          drone: muteActionTarget.drone,
-          parentPath: null,
-          path: null,
-          value: '',
-        }),
-      });
       const chats = orderedMobileDroneChats(
         muteActionTarget.drone,
         droneSidebarOrder.sidebarChatOrderByDrone[targetId],
       );
+      if (chats.length > 1) {
+        actions.push({
+          label: 'Create group',
+          onPress: () => setChatGroupEditor({
+            mode: 'create',
+            drone: muteActionTarget.drone,
+            parentPath: null,
+            path: null,
+            value: '',
+          }),
+        });
+      }
       if (chats.length === 1) {
         const chatTargetId = mobileSidebarChatId(targetId, chats[0]!);
         if (mutedChatIdSet.has(chatTargetId)) {
@@ -3241,7 +3262,7 @@ function AppDrawerView({
           />
           <TextInputDialog
             visible={Boolean(chatGroupEditor)}
-            title={chatGroupEditor?.mode === 'rename' ? 'Rename chat group' : 'Create chat group'}
+            title={chatGroupEditor?.mode === 'rename' ? 'Rename group' : 'Create group'}
             message={chatGroupEditor?.parentPath ? `Inside ${sidebarChatGroupBaseName(chatGroupEditor.parentPath)}` : `Organize chats in ${chatGroupEditor?.drone.name ?? 'this drone'}.`}
             value={chatGroupEditor?.value ?? ''}
             error={chatMutationError}

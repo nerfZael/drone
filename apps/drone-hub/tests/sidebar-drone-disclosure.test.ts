@@ -61,6 +61,33 @@ describe('multi-chat drone disclosure', () => {
     expect(chatRows).not.toContain('pointer-events-none absolute inset-y-0 right-0');
   });
 
+  test('offers normal groups only for drones with multiple chats', () => {
+    const treeSource = readFileSync(
+      new URL('../src/droneHub/app/GroupedSidebarTree.tsx', import.meta.url),
+      'utf8',
+    );
+    const cardSource = readFileSync(
+      new URL('../src/droneHub/overview/DroneCard.tsx', import.meta.url),
+      'utf8',
+    );
+    const groupRows = treeSource.slice(
+      treeSource.indexOf('const GroupedSidebarChatFolderRow'),
+      treeSource.indexOf('function GroupedSidebarChatGroupEditor'),
+    );
+
+    expect(cardSource).toContain("label: 'Create group'");
+    expect(cardSource).not.toContain("label: 'Create chat group'");
+    expect(treeSource).toContain(
+      'onCreateChatGroup={actionsEnabled && chats.length > 1 ? () => createChatGroup(drone.id) : undefined}',
+    );
+    expect(treeSource).toContain('const canCreateChatGroups = normalizedDroneChats(drone).length > 1;');
+    expect(groupRows).toContain('<IconChevron');
+    expect(groupRows).toContain('down={!collapsed}');
+    expect(groupRows).not.toContain('<IconFolderOutline');
+    expect(groupRows).toContain("label: 'Create group'");
+    expect(groupRows).not.toContain("label: 'Create subgroup'");
+  });
+
   test('aligns a grouped multi-chat selection edge with its parent guide', () => {
     const source = readFileSync(
       new URL('../src/droneHub/app/GroupedSidebarTree.tsx', import.meta.url),

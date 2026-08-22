@@ -622,6 +622,7 @@ export const DroneCard = React.memo(function DroneCard({
     canClone ||
     canCloneChat ||
     canCreateChat ||
+    canCreateChatGroup ||
     canAddToGroup ||
     canCreateGroup ||
     canRename ||
@@ -805,8 +806,8 @@ export const DroneCard = React.memo(function DroneCard({
   if (canCreateChatGroup) {
     actionMenuItems.push({
       id: 'create-chat-group',
-      label: 'Create chat group',
-      icon: <IconFolder className="h-3.5 w-3.5 text-[var(--accent)]" />,
+      label: 'Create group',
+      icon: <IconPlus className="h-3.5 w-3.5 text-[var(--accent)]" />,
       disabled: Boolean(createChatDisabled),
       onSelect: () => onCreateChatGroup?.(),
     });

@@ -533,6 +533,17 @@ describe('mobile sidebar presentation', () => {
       "groupName: { color: colors.sidebarHeadingFg, fontSize: 13, fontWeight: '400', flex: 1 }",
     );
     expect(source).toContain('groupRow: {\n    minHeight: 36,');
+    const chatGroupRows = source.slice(
+      source.indexOf('function DrawerDroneChatTreeEntry'),
+      source.indexOf('function DrawerDroneNode'),
+    );
+    expect(chatGroupRows).toContain('styles.groupRow');
+    expect(chatGroupRows).toContain('<View style={styles.folderChevronSlot}>');
+    expect(chatGroupRows).not.toContain('<SidebarFolderOutlineIcon');
+    expect(chatGroupRows).toContain('styles.groupChildrenGuide');
+    expect(source).not.toContain("label: 'Create chat group'");
+    expect(source).toContain('if (onReorderSidebar && chatActionTarget.drone.chats.length > 1)');
+    expect(source).toContain('if (chats.length > 1) {');
   });
 
   test('shows pinned drones first and keeps pinning in the chat header menu', () => {

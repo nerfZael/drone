@@ -630,6 +630,7 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
     Boolean(settingBaseImages[drone.id]) ||
     isDroneStartingOrSeeding(drone.hubPhase);
   const draft = drone.draftChats?.[chatName] === true;
+  const canCreateChatGroups = normalizedDroneChats(drone).length > 1;
   const reorderPreviewClass =
     dragOverChat?.key === `${drone.id}:${chatName}`
       ? dragOverChat.placement === 'before'
@@ -705,7 +706,7 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
   }
 
   return (
-    <div ref={chatDropDisabled ? undefined : setDropNodeRef} style={depth ? { paddingLeft: 10 } : undefined} className={`flex flex-col gap-0.5 transition-[margin] duration-150 ${reorderPreviewClass}`}>
+    <div ref={chatDropDisabled ? undefined : setDropNodeRef} data-sidebar-chat-depth={depth} className={`flex flex-col gap-0.5 transition-[margin] duration-150 ${reorderPreviewClass}`}>
       <div className="relative flex items-stretch gap-1 group/chat-row">
         {dragOverChat?.key === `${drone.id}:${chatName}` ? <TreeDropGuide placement={dragOverChat.placement} /> : null}
         <button
@@ -782,13 +783,13 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
               disabled: chatActionsDisabled,
               onSelect: () => onOpenCreateDroneChat(drone),
             },
-            {
+            ...(canCreateChatGroups ? [{
               id: 'create-chat-group',
               label: 'Create group',
-              icon: <IconFolderOutline className="h-3.5 w-3.5 text-[var(--accent)]" />,
+              icon: <IconPlus className="h-3.5 w-3.5 text-[var(--accent)]" />,
               disabled: chatActionsDisabled,
               onSelect: () => createChatGroup(drone.id, parentPath),
-            },
+            } satisfies SidebarContextMenuItem] : []),
             {
               id: 'clone-chat',
               label: 'Clone chat',
@@ -869,7 +870,7 @@ const GroupedSidebarChatRowStatic = React.memo(function GroupedSidebarChatRowSta
   const chatState = sidebarChatDisplayState(drone, chatBusy, approvalRequired);
   const chatStateLabel = muted ? 'Muted' : sidebarDroneStateLabel(chatState, chatUnread);
   return (
-    <div className="flex flex-col gap-0.5" style={depth ? { paddingLeft: 10 } : undefined}>
+    <div className="flex flex-col gap-0.5" data-sidebar-chat-depth={depth}>
       <div className="relative flex items-stretch gap-1 group/chat-row">
         <button
           type="button"
@@ -933,7 +934,10 @@ const GroupedSidebarChatFolderRow = React.memo(function GroupedSidebarChatFolder
   depth: number;
 }) {
   const {
+    sidebarDensityMode,
     sidebarDndEnabled,
+    selectedSidebarNodeId,
+    setSelectedSidebarNodeId,
     collapsedDroneSections,
     setCollapsedDroneSections,
     chatTreeEditor,
@@ -945,10 +949,12 @@ const GroupedSidebarChatFolderRow = React.memo(function GroupedSidebarChatFolder
     onMoveSidebar,
     actionsEnabled = true,
   } = useGroupedSidebarTreeContext();
+  const densityClasses = sidebarDensityClasses(sidebarDensityMode);
   const activeDrag = useDroneHubActiveDrag();
   const [contextMenuPosition, setContextMenuPosition] = React.useState<{ x: number; y: number } | null>(null);
   const collapseKey = chatGroupCollapseKey(drone.id, node.path);
   const collapsed = collapsedDroneSections[collapseKey] === true;
+  const selected = selectedSidebarNodeId === node.id;
   const dndDisabled = !sidebarDndEnabled || isOptimistic;
   const { attributes, listeners, isDragging, setNodeRef: setDragNodeRef } = useDraggable({
     id: `sidebar-chat-folder:${node.id}`,
@@ -982,6 +988,8 @@ const GroupedSidebarChatFolderRow = React.memo(function GroupedSidebarChatFolder
     chatTreeEditor.droneId === drone.id && chatTreeEditor.path === node.path;
   const creating = chatTreeEditor?.mode === 'create' &&
     chatTreeEditor.droneId === drone.id && chatTreeEditor.parentPath === node.path;
+  const canCreateNestedGroups = Object.values(tree.nodesById)
+    .filter((entry) => entry.kind === 'chat').length > 1;
   const submitRename = () => {
     if (!editing) return;
     const name = normalizeSidebarChatGroupPath(chatTreeEditor.value);
@@ -1025,12 +1033,16 @@ const GroupedSidebarChatFolderRow = React.memo(function GroupedSidebarChatFolder
     });
   };
   return (
-    <div className="flex flex-col gap-0" style={depth ? { paddingLeft: 10 } : undefined}>
+    <div className="flex flex-col gap-0">
       <div ref={setNodeRef} className={`relative flex items-center gap-1 ${isDragging ? 'opacity-35' : ''}`}>
         {editing ? (
-          <div className="flex min-h-7 min-w-0 flex-1 items-center gap-1 rounded px-1 text-[var(--text-11)] text-[var(--sidebar-subitem-fg)]">
-            <IconChevron className={`h-3.5 w-3.5 flex-shrink-0 transition-transform ${collapsed ? '' : 'rotate-90'}`} />
-            <IconFolderOutline className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)]" />
+          <div className={`relative flex min-w-0 flex-1 items-center gap-1.5 rounded text-[var(--sidebar-subitem-fg)] ${densityClasses.folderRow} ${densityClasses.folderPaddingX} ${selected ? 'dh-sidebar-row-selected' : ''}`}>
+            {selected ? <span className={sidebarSelectionEdgeClass} /> : null}
+            <IconChevron
+              down={!collapsed}
+              strokeWidth={1.25}
+              className={`flex-shrink-0 ${densityClasses.folderChevron}`}
+            />
             <input
               autoFocus
               value={chatTreeEditor.value}
@@ -1047,7 +1059,7 @@ const GroupedSidebarChatFolderRow = React.memo(function GroupedSidebarChatFolder
                 }
               }}
               className="min-w-0 flex-1 border-0 bg-transparent p-0 outline-none"
-              aria-label="Chat group name"
+              aria-label="Group name"
             />
           </div>
         ) : (
@@ -1055,25 +1067,49 @@ const GroupedSidebarChatFolderRow = React.memo(function GroupedSidebarChatFolder
             type="button"
             {...(dndDisabled ? {} : attributes as unknown as Record<string, unknown>)}
             {...(dndDisabled ? {} : listeners as unknown as Record<string, unknown>)}
-            onClick={() => setCollapsedDroneSections((prev) => ({ ...prev, [collapseKey]: !collapsed }))}
+            onClick={() => {
+              setSelectedSidebarNodeId(node.id);
+              setCollapsedDroneSections((prev) => ({ ...prev, [collapseKey]: !collapsed }));
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'F2' && actionsEnabled) {
+                event.preventDefault();
+                event.stopPropagation();
+                renameChatGroup(drone.id, node.path);
+                return;
+              }
+              if (event.key === 'Delete' && actionsEnabled) {
+                event.preventDefault();
+                event.stopPropagation();
+                deleteChatGroup(drone.id, node.path);
+                return;
+              }
+              if (!dndDisabled) listeners?.onKeyDown?.(event);
+            }}
             onContextMenu={(event) => {
               if (!actionsEnabled) return;
               event.preventDefault();
               event.stopPropagation();
+              setSelectedSidebarNodeId(node.id);
               setContextMenuPosition({ x: event.clientX, y: event.clientY });
             }}
-            className={`flex min-h-7 min-w-0 flex-1 items-center gap-1 rounded px-1 text-left text-[var(--text-11)] text-[var(--sidebar-subitem-fg)] hover:bg-[var(--surface-hover)] ${dndDisabled ? '' : 'cursor-grab touch-none active:cursor-grabbing'}`}
+            className={`dh-sidebar-row-interactive relative flex min-w-0 flex-1 items-center gap-1.5 rounded border border-transparent text-left text-[var(--sidebar-subitem-fg)] hover:text-[var(--sidebar-fg)] ${densityClasses.folderRow} ${densityClasses.folderPaddingX} ${selected ? 'dh-sidebar-row-selected' : ''} ${dndDisabled ? '' : 'cursor-grab touch-none active:cursor-grabbing'}`}
             aria-expanded={!collapsed}
+            aria-selected={selected}
           >
-            <IconChevron className={`h-3.5 w-3.5 flex-shrink-0 transition-transform ${collapsed ? '' : 'rotate-90'}`} />
-            <IconFolderOutline className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)]" />
-            <span className="min-w-0 flex-1 truncate font-mono">{node.label}</span>
+            {selected ? <span className={sidebarSelectionEdgeClass} /> : null}
+            <IconChevron
+              down={!collapsed}
+              strokeWidth={1.25}
+              className={`flex-shrink-0 ${densityClasses.folderChevron}`}
+            />
+            <span className={`${sidebarFolderLabelClass} ${densityClasses.folderLabel}`}>{node.label}</span>
           </button>
         )}
       </div>
       {chatTreeEditor?.error && editing ? <div className="pl-8 text-[var(--text-9)] text-[var(--red)]">{chatTreeEditor.error}</div> : null}
       {!collapsed ? (
-        <div className="border-l border-[var(--border-subtle)]">
+        <div className={densityClasses.folderBody}>
           {creating ? <GroupedSidebarChatGroupEditor droneId={drone.id} parentPath={node.path} depth={depth + 1} /> : null}
           {(tree.childIdsByParent[node.id] ?? []).map((childId) => (
             <GroupedSidebarChatTreeEntry
@@ -1094,7 +1130,7 @@ const GroupedSidebarChatFolderRow = React.memo(function GroupedSidebarChatFolder
           label={`Actions for ${node.label}`}
           items={[
             { id: 'create-chat', label: 'Create chat', icon: <IconPlus className="h-3.5 w-3.5" />, onSelect: () => void createChatInGroup(drone, node.path) },
-            { id: 'create-group', label: 'Create subgroup', icon: <IconFolderOutline className="h-3.5 w-3.5" />, onSelect: () => createChatGroup(drone.id, node.path) },
+            ...(canCreateNestedGroups ? [{ id: 'create-group', label: 'Create group', icon: <IconPlus className="h-3.5 w-3.5" />, onSelect: () => createChatGroup(drone.id, node.path) } satisfies SidebarContextMenuItem] : []),
             { id: 'rename-group', label: 'Rename group', separatorBefore: true, icon: <IconPencil className="h-3.5 w-3.5" />, onSelect: () => renameChatGroup(drone.id, node.path) },
             { id: 'delete-group', label: 'Delete group', separatorBefore: true, icon: <IconTrash className="h-3.5 w-3.5" />, tone: 'danger', onSelect: () => deleteChatGroup(drone.id, node.path) },
           ]}
@@ -1127,9 +1163,9 @@ function GroupedSidebarChatGroupEditor({ droneId, parentPath, depth }: { droneId
     });
   };
   return (
-    <div style={depth ? { paddingLeft: 10 } : undefined} className="flex flex-col gap-0.5 px-1 py-0.5">
+    <div data-sidebar-chat-depth={depth} className="flex flex-col gap-0.5 px-1 py-0.5">
       <div className="flex min-h-7 items-center gap-1">
-        <IconFolderOutline className="h-3.5 w-3.5" />
+        <IconChevron className="h-3.5 w-3.5 text-[var(--muted-dim)] opacity-72" strokeWidth={1.25} />
         <input
           autoFocus
           value={chatTreeEditor.value}
@@ -1408,7 +1444,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
                   }
                 : undefined
             }
-            onCreateChatGroup={actionsEnabled ? () => createChatGroup(drone.id) : undefined}
+            onCreateChatGroup={actionsEnabled && chats.length > 1 ? () => createChatGroup(drone.id) : undefined}
             onCloneChat={
               actionsEnabled && hasOnlyDefaultChat
                 ? () => void onCloneDroneChat(drone.id, 'default')
@@ -2307,6 +2343,11 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       return next.length === current.length ? current : next;
     });
   }, [chatTreeByDrone]);
+
+  React.useEffect(() => {
+    if (!props.selectedSidebarNodeId || selectedChatNodeIdSet.has(props.selectedSidebarNodeId)) return;
+    setSelectedChatNodeIds([]);
+  }, [props.selectedSidebarNodeId, selectedChatNodeIdSet]);
 
   const selectChatNode = React.useCallback((droneId: string, chatName: string, event: Pick<React.MouseEvent, 'ctrlKey' | 'metaKey' | 'shiftKey'>) => {
     const nodeId = sidebarChatNodeId(droneId, chatName);

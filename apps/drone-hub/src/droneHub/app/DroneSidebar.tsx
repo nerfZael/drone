@@ -261,8 +261,7 @@ function PinnedChatTreeEntries({
           className="flex min-h-7 min-w-0 items-center gap-1 rounded px-1 text-left text-[var(--text-11)] text-[var(--sidebar-subitem-fg)] hover:bg-[var(--surface-hover)]"
           aria-expanded={!collapsed}
         >
-          <IconChevron className={`h-3.5 w-3.5 flex-shrink-0 transition-transform ${collapsed ? '' : 'rotate-90'}`} />
-          <IconFolderOutline className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)]" />
+          <IconChevron down={!collapsed} strokeWidth={1.25} className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)] opacity-72" />
           <span className="min-w-0 flex-1 truncate font-mono">{folder.label}</span>
         </button>
         {!collapsed ? (
