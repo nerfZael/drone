@@ -8,6 +8,7 @@ export type ActiveComposer = {
   appendTranscript(text: string): void;
   readSnapshot?(): CompanionTextSnapshot;
   applyContent?(baseRevision: string, content: string): { ok: true; revision: string };
+  sendMessage?(): boolean;
   toggleVoiceRecording?(): boolean;
   toggleVoiceRecordingPause?(): boolean;
   discardVoiceRecording?(): boolean;
@@ -26,6 +27,7 @@ type ActiveComposerContextValue = {
     baseRevision: string,
     content: string,
   ): { ok: true; revision: string };
+  sendMessage(): boolean;
   toggleVoiceRecording(): boolean;
   toggleVoiceRecordingPause(): boolean;
   discardVoiceRecording(): boolean;
@@ -97,6 +99,10 @@ export class ActiveComposerRegistry {
     return this.runActiveAction('toggleVoiceRecording');
   }
 
+  sendMessage(): boolean {
+    return this.runActiveAction('sendMessage');
+  }
+
   toggleVoiceRecordingPause(): boolean {
     return this.runActiveAction('toggleVoiceRecordingPause');
   }
@@ -121,7 +127,7 @@ export class ActiveComposerRegistry {
   }
 
   private runActiveAction(
-    action: 'toggleVoiceRecording' | 'toggleVoiceRecordingPause' | 'discardVoiceRecording' | 'clearComposer',
+    action: 'sendMessage' | 'toggleVoiceRecording' | 'toggleVoiceRecordingPause' | 'discardVoiceRecording' | 'clearComposer',
   ): boolean {
     const targetId = this.ensureTargetId();
     const composer = targetId ? this.composers.get(targetId) : null;
@@ -160,6 +166,7 @@ export function ActiveComposerProvider({ children }: { children: React.ReactNode
       registry.applyComposer(targetId, baseRevision, content),
     [registry],
   );
+  const sendMessage = React.useCallback(() => registry.sendMessage(), [registry]);
   const toggleVoiceRecording = React.useCallback(() => registry.toggleVoiceRecording(), [registry]);
   const toggleVoiceRecordingPause = React.useCallback(
     () => registry.toggleVoiceRecordingPause(),
@@ -179,6 +186,7 @@ export function ActiveComposerProvider({ children }: { children: React.ReactNode
       appendTranscript,
       readActiveComposer,
       applyComposer,
+      sendMessage,
       toggleVoiceRecording,
       toggleVoiceRecordingPause,
       discardVoiceRecording,
@@ -194,6 +202,7 @@ export function ActiveComposerProvider({ children }: { children: React.ReactNode
       focusComposer,
       readActiveComposer,
       registerComposer,
+      sendMessage,
       toggleVoiceRecording,
       toggleVoiceRecordingPause,
     ],

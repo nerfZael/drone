@@ -56,6 +56,17 @@ describe('editable shortcut dispatch', () => {
     expect(out).toBe(false);
   });
 
+  test('does not send the composer when S is typed into it', () => {
+    const out = shouldDispatchEditableShortcutAction({
+      matchedActionId: 'sendActiveChatComposer',
+      matchedShortcutKey: 's',
+      targetInPrimaryChatInput: true,
+      targetInCanvasMessageInput: false,
+      targetInAssistantChatInput: false,
+    });
+    expect(out).toBe(false);
+  });
+
   test('allows Quick Open from any editable input', () => {
     const out = shouldDispatchEditableShortcutAction({
       matchedActionId: 'openQuickOpen',

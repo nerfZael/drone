@@ -62,6 +62,7 @@ import {
   markCurrentChatComposerEditorModeTarget,
   registerChatComposerEditorModeTarget,
 } from './chat-composer-editor-mode-shortcut';
+import { ChatVoiceSendCoordinator } from './chat-voice-send-coordinator';
 
 const CHAT_INPUT_TEXTAREA_MIN_HEIGHT_PX = 36;
 const CHAT_INPUT_TEXTAREA_MAX_HEIGHT_PX = 160;
@@ -199,6 +200,11 @@ export type ChatInputProps = {
   stopping?: boolean;
 };
 
+type PendingChatSend = {
+  context: ChatSendContext;
+  submit: ChatInputProps['onSend'];
+};
+
 export function ChatInput({
   resetKey,
   draftPersistenceKey,
@@ -255,12 +261,14 @@ export function ChatInput({
   const applyCompanionComposerRef = React.useRef<(baseRevision: string, content: string) => { ok: true; revision: string }>(() => {
     throw new Error('COMPOSER_NOT_AVAILABLE');
   });
+  const sendMessageShortcutRef = React.useRef<() => boolean>(() => false);
   const toggleVoiceRecordingShortcutRef = React.useRef<() => boolean>(() => false);
   const toggleVoiceRecordingPauseShortcutRef = React.useRef<() => boolean>(() => false);
   const discardVoiceRecordingShortcutRef = React.useRef<() => boolean>(() => false);
   const clearComposerShortcutRef = React.useRef<() => boolean>(() => false);
-  const voiceActionInFlightRef = React.useRef(false);
-  const voiceActionTokenRef = React.useRef(0);
+  const voiceSendCoordinatorRef = React.useRef(
+    new ChatVoiceSendCoordinator<PendingChatSend>(),
+  );
   const persistenceKey = String(draftPersistenceKey ?? '').trim();
   const persistedDraft = useDroneHubUiStore((state) =>
     persistenceKey ? state.chatInputDrafts[persistenceKey] ?? '' : '',
@@ -332,6 +340,7 @@ export function ChatInput({
       appendTranscript: (text) => appendContinuousDictationRef.current(text),
       readSnapshot: () => readCompanionComposerRef.current(),
       applyContent: (baseRevision, content) => applyCompanionComposerRef.current(baseRevision, content),
+      sendMessage: () => sendMessageShortcutRef.current(),
       toggleVoiceRecording: () => toggleVoiceRecordingShortcutRef.current(),
       toggleVoiceRecordingPause: () => toggleVoiceRecordingPauseShortcutRef.current(),
       discardVoiceRecording: () => discardVoiceRecordingShortcutRef.current(),
@@ -580,8 +589,7 @@ export function ChatInput({
   }, [editorMode]);
 
   React.useEffect(() => {
-    voiceActionTokenRef.current += 1;
-    voiceActionInFlightRef.current = false;
+    voiceSendCoordinatorRef.current.cancel();
     setVoiceActionInFlight(false);
     void discardVoiceRecording();
   }, [discardVoiceRecording, resetKey]);
@@ -589,8 +597,7 @@ export function ChatInput({
   React.useEffect(() => {
     if (!voiceRecordingActive) return;
     if (!composerLocked) return;
-    voiceActionTokenRef.current += 1;
-    voiceActionInFlightRef.current = false;
+    voiceSendCoordinatorRef.current.cancel();
     setVoiceActionInFlight(false);
     void discardVoiceRecording();
   }, [composerLocked, discardVoiceRecording, voiceRecordingActive]);
@@ -937,26 +944,25 @@ export function ChatInput({
     return restored;
   }
 
-  function beginVoiceAction(): number | null {
-    if (voiceActionInFlightRef.current) return null;
-    const token = voiceActionTokenRef.current + 1;
-    voiceActionTokenRef.current = token;
-    voiceActionInFlightRef.current = true;
+  function beginVoiceAction(actionWillSend = false): number | null {
+    const token = voiceSendCoordinatorRef.current.begin(actionWillSend);
+    if (token == null) return null;
     setVoiceActionInFlight(true);
     return token;
   }
 
-  function endVoiceAction(token: number) {
-    if (voiceActionTokenRef.current !== token) return;
-    voiceActionInFlightRef.current = false;
+  function endVoiceAction(token: number): PendingChatSend | null {
+    if (!voiceSendCoordinatorRef.current.isCurrent(token)) return null;
+    const pendingSend = voiceSendCoordinatorRef.current.finish(token);
     setVoiceActionInFlight(false);
+    return pendingSend;
   }
 
   async function stopVoiceRecordingAndAppendDraft(
     actionToken: number,
   ): Promise<{ draft: string; caret: number } | null> {
     const transcript = await stopVoiceRecordingForTranscript();
-    if (voiceActionTokenRef.current !== actionToken) return null;
+    if (!voiceSendCoordinatorRef.current.isCurrent(actionToken)) return null;
     if (!transcript) {
       return { draft: draftRef.current, caret: composerSelectionRef.current.end };
     }
@@ -975,18 +981,24 @@ export function ChatInput({
   async function stopVoiceRecordingAndFillDraft() {
     const actionToken = beginVoiceAction();
     if (actionToken == null) return;
+    const before = draftRef.current;
+    let result: { draft: string; caret: number } | null = null;
+    let pendingSend: PendingChatSend | null = null;
     try {
-      const before = draftRef.current;
-      const result = await stopVoiceRecordingAndAppendDraft(actionToken);
-      if (result == null) return;
-      if (result.draft === before) {
-        setAttachmentError((current) => current || 'No speech detected.');
-      } else {
-        const insertionSelection = { start: result.caret, end: result.caret };
-        window.requestAnimationFrame(() => focusComposerAtSelection(insertionSelection));
-      }
+      result = await stopVoiceRecordingAndAppendDraft(actionToken);
     } finally {
-      endVoiceAction(actionToken);
+      pendingSend = endVoiceAction(actionToken);
+    }
+    if (result == null) return;
+    if (pendingSend) {
+      await submitCurrentComposer(pendingSend.context, pendingSend.submit, true);
+      return;
+    }
+    if (result.draft === before) {
+      setAttachmentError((current) => current || 'No speech detected.');
+    } else {
+      const insertionSelection = { start: result.caret, end: result.caret };
+      window.requestAnimationFrame(() => focusComposerAtSelection(insertionSelection));
     }
   }
 
@@ -1013,8 +1025,7 @@ export function ChatInput({
 
   function discardVoiceRecordingFromShortcut(): boolean {
     if (!voiceRecordingActive) return false;
-    voiceActionTokenRef.current += 1;
-    voiceActionInFlightRef.current = false;
+    voiceSendCoordinatorRef.current.cancel();
     setVoiceActionInFlight(false);
     void discardVoiceRecording();
     return true;
@@ -1044,15 +1055,38 @@ export function ChatInput({
   discardVoiceRecordingShortcutRef.current = discardVoiceRecordingFromShortcut;
   clearComposerShortcutRef.current = clearComposerFromShortcut;
 
-  const sendNow = (
+  async function submitCurrentComposer(
     context: ChatSendContext,
     submit: ChatInputProps['onSend'] = onSend,
-  ) => {
-    if (composerLocked) return;
+    transcribingVoiceRecording = false,
+  ): Promise<void> {
+    const snapshot = takeSubmissionSnapshot();
+    if (!snapshot) {
+      if (transcribingVoiceRecording) {
+        setAttachmentError((current) => current || 'No speech detected.');
+      }
+      return;
+    }
+    await submitPromptSnapshot(snapshot, context, submit);
+  }
+
+  function sendNow(
+    context: ChatSendContext,
+    submit: ChatInputProps['onSend'] = onSend,
+  ): boolean {
+    if (composerLocked) return false;
+    const sendRequest = { context, submit };
+    const disposition = voiceSendCoordinatorRef.current.requestSend(sendRequest);
+    if (disposition !== 'run-now') return true;
+    if (
+      !voiceRecordingActive &&
+      !draftRef.current.trim() &&
+      attachmentsRef.current.length === 0
+    ) return false;
     void (async () => {
       const transcribingVoiceRecording = voiceRecordingActive;
       if (voiceRecordingActive) {
-        const actionToken = beginVoiceAction();
+        const actionToken = beginVoiceAction(true);
         if (actionToken == null) return;
         try {
           const result = await stopVoiceRecordingAndAppendDraft(actionToken);
@@ -1061,16 +1095,16 @@ export function ChatInput({
           endVoiceAction(actionToken);
         }
       }
-      const snapshot = takeSubmissionSnapshot();
-      if (!snapshot) {
-        if (transcribingVoiceRecording) {
-          setAttachmentError((current) => current || 'No speech detected.');
-        }
-        return;
-      }
-      await submitPromptSnapshot(snapshot, context, submit);
+      await submitCurrentComposer(context, submit, transcribingVoiceRecording);
     })();
-  };
+    return true;
+  }
+
+  sendMessageShortcutRef.current = () =>
+    sendNow({
+      trigger: 'keyboard',
+      deliveryMode: DEFAULT_CHAT_MESSAGE_DELIVERY_MODE,
+    });
 
   const sendButtonLabel =
     showStopAction && !showSeparateStopAction

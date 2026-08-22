@@ -9,6 +9,7 @@ export type ShortcutActionId =
   | 'moveSelectedDroneToTop'
   | 'toggleSelectedDronesToDo'
   | 'focusPrimaryChatInput'
+  | 'sendActiveChatComposer'
   | 'toggleChatComposerEditorMode'
   | 'toggleChatVoiceRecording'
   | 'toggleChatVoiceRecordingPause'
@@ -98,6 +99,11 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     id: 'focusPrimaryChatInput',
     label: 'Focus chat input',
     description: 'Focuses the primary chat input.',
+  },
+  {
+    id: 'sendActiveChatComposer',
+    label: 'Send chat message',
+    description: 'Sends the active chat composer, stopping and transcribing a voice message first when needed.',
   },
   {
     id: 'toggleChatComposerEditorMode',
@@ -217,6 +223,7 @@ const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   moveSelectedDroneToTop: null,
   toggleSelectedDronesToDo: null,
   focusPrimaryChatInput: { key: 'enter', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  sendActiveChatComposer: { key: 's', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleChatComposerEditorMode: { key: 'e', mod: false, ctrl: true, meta: false, alt: false, shift: false },
   toggleChatVoiceRecording: { key: 'q', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleChatVoiceRecordingPause: { key: 'w', mod: false, ctrl: false, meta: false, alt: false, shift: false },
@@ -229,7 +236,7 @@ const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   toggleVoiceClipboardRecording: null,
   markSelectedDronesUnread: { key: 'z', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleSidebarCollapsed: { key: 'a', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  toggleRightPanelWidth: { key: 's', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  toggleRightPanelWidth: null,
   openHoveredGroupMultiChat: { key: 'g', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openPullRequestsTab: null,
   openChangesTab: { key: 'c', mod: false, ctrl: false, meta: false, alt: false, shift: false },
@@ -375,6 +382,12 @@ export function migrateChatComposerShortcuts(value: unknown): unknown {
       next.openTerminalTab = null;
     }
   }
+  if (!Object.prototype.hasOwnProperty.call(raw, 'sendActiveChatComposer')) {
+    addAction('sendActiveChatComposer', unmodified('s'));
+    if (isSameShortcutBinding(raw.toggleRightPanelWidth, unmodified('s'))) {
+      next.toggleRightPanelWidth = null;
+    }
+  }
   return changed ? next : value;
 }
 
@@ -407,6 +420,7 @@ export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
     moveSelectedDroneToTop: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.moveSelectedDroneToTop),
     toggleSelectedDronesToDo: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleSelectedDronesToDo),
     focusPrimaryChatInput: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.focusPrimaryChatInput),
+    sendActiveChatComposer: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.sendActiveChatComposer),
     toggleChatComposerEditorMode: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleChatComposerEditorMode),
     toggleChatVoiceRecording: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleChatVoiceRecording),
     toggleChatVoiceRecordingPause: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleChatVoiceRecordingPause),

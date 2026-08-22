@@ -334,6 +334,7 @@ export function useDroneHubLifecycleEffects({
       moveSelectedDroneToTop: () => moveSelectedDroneToTopFromShortcut(),
       toggleSelectedDronesToDo: () => toggleSelectedDronesToDoFromShortcut(),
       focusPrimaryChatInput: () => focusPrimaryChatInput(),
+      sendActiveChatComposer: () => activeComposer.sendMessage(),
       // These actions run in the capture handler below so editor shortcut boundaries
       // cannot swallow them and dialogs can explicitly suppress them.
       toggleChatComposerEditorMode: () => false,

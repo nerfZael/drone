@@ -66,6 +66,15 @@ describe('shortcut defaults', () => {
       alt: false,
       shift: false,
     });
+    expect(defaults.sendActiveChatComposer).toEqual({
+      key: 's',
+      mod: false,
+      ctrl: false,
+      meta: false,
+      alt: false,
+      shift: false,
+    });
+    expect(defaults.toggleRightPanelWidth).toBeNull();
     expect(defaults.toggleChatComposerEditorMode).toEqual({
       key: 'e',
       mod: false,
@@ -290,6 +299,28 @@ describe('shortcut defaults', () => {
       clearChatComposer: { key: 'r' },
       toggleContinuousDictation: { key: 't' },
       openTerminalTab: null,
+    });
+  });
+
+  test('moves the former S workspace shortcut to send chat message', () => {
+    expect(migrateChatComposerShortcuts({
+      toggleRightPanelWidth: {
+        key: 's', mod: false, ctrl: false, meta: false, alt: false, shift: false,
+      },
+    })).toMatchObject({
+      sendActiveChatComposer: { key: 's', mod: false },
+      toggleRightPanelWidth: null,
+    });
+  });
+
+  test('preserves a customized workspace shortcut when adding send chat message', () => {
+    expect(migrateChatComposerShortcuts({
+      toggleRightPanelWidth: {
+        key: 'j', mod: false, ctrl: false, meta: false, alt: false, shift: false,
+      },
+    })).toMatchObject({
+      sendActiveChatComposer: { key: 's', mod: false },
+      toggleRightPanelWidth: { key: 'j', mod: false },
     });
   });
 

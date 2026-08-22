@@ -89,6 +89,10 @@ describe('ActiveComposerRegistry', () => {
     });
     registry.register({
       ...composer('second', { eligible: true }),
+      sendMessage: () => {
+        actions.push('second:send');
+        return true;
+      },
       toggleVoiceRecording: () => {
         actions.push('second:record');
         return true;
@@ -108,11 +112,13 @@ describe('ActiveComposerRegistry', () => {
     });
     registry.focus('second');
 
+    expect(registry.sendMessage()).toBe(true);
     expect(registry.toggleVoiceRecording()).toBe(true);
     expect(registry.toggleVoiceRecordingPause()).toBe(true);
     expect(registry.discardVoiceRecording()).toBe(true);
     expect(registry.clearComposer()).toBe(true);
     expect(actions).toEqual([
+      'second:send',
       'second:record',
       'second:pause',
       'second:discard',
