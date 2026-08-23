@@ -4,9 +4,11 @@ import {
   buildSidebarChatTree,
   flattenSidebarChatTreeChatNodeIds,
   normalizeSidebarLayout,
+  resolveEffectiveSidebarChatMuteSets,
   sidebarChatGroupNodeId,
   sidebarChatNodeId,
   sidebarChatRootNodeId,
+  sidebarChatTreeChatNamesInGroup,
 } from '../src/sidebar';
 
 describe('sidebar chat groups', () => {
@@ -42,6 +44,31 @@ describe('sidebar chat groups', () => {
       sidebarChatNodeId('alpha', 'review'),
       sidebarChatNodeId('alpha', 'default'),
     ]);
+    expect(sidebarChatTreeChatNamesInGroup(
+      tree,
+      sidebarChatGroupNodeId('alpha', 'Work'),
+    )).toEqual(['api']);
+  });
+
+  test('inherits chat-group muting through nested chat groups', () => {
+    const tree = buildSidebarChatTree({
+      droneId: 'alpha',
+      chatNames: ['default', 'api', 'review'],
+      groupPaths: ['Work', 'Work/Backend'],
+      groupByChat: {
+        [sidebarChatNodeId('alpha', 'api')]: 'Work/Backend',
+        [sidebarChatNodeId('alpha', 'review')]: 'Work',
+      },
+    });
+    const workId = sidebarChatGroupNodeId('alpha', 'Work');
+    const backendId = sidebarChatGroupNodeId('alpha', 'Work/Backend');
+    const resolved = resolveEffectiveSidebarChatMuteSets(tree, new Set([workId]));
+
+    expect(resolved.effectiveMutedChatGroupIdSet).toEqual(new Set([workId, backendId]));
+    expect(resolved.effectiveMutedChatIdSet).toEqual(new Set([
+      sidebarChatNodeId('alpha', 'api'),
+      sidebarChatNodeId('alpha', 'review'),
+    ]));
   });
 
   test('moves multiple selected chats into a folder while preserving selection order', () => {
@@ -102,6 +129,61 @@ describe('sidebar chat groups', () => {
     });
     expect(layout.sidebarChatGroupPathsByDrone.alpha).toEqual(['Projects']);
     expect(layout.sidebarChatGroupByChat[apiId]).toBe('Projects');
+  });
+
+  test('keeps chat-group mute targets aligned with group rename and deletion', () => {
+    const workId = sidebarChatGroupNodeId('alpha', 'Work');
+    const backendId = sidebarChatGroupNodeId('alpha', 'Work/Backend');
+    let layout = normalizeSidebarLayout({
+      sidebarChatGroupPathsByDrone: { alpha: ['Work', 'Work/Backend'] },
+      mutedChatIds: [workId, backendId, sidebarChatNodeId('alpha', 'review')],
+    });
+
+    layout = applySidebarMove(layout, {
+      kind: 'chat-group-rename',
+      droneId: 'alpha',
+      path: 'Work',
+      newPath: 'Projects',
+    });
+    expect(layout.mutedChatIds).toEqual([
+      sidebarChatGroupNodeId('alpha', 'Projects'),
+      sidebarChatGroupNodeId('alpha', 'Projects/Backend'),
+      sidebarChatNodeId('alpha', 'review'),
+    ]);
+
+    layout = applySidebarMove(layout, {
+      kind: 'chat-group-delete',
+      droneId: 'alpha',
+      path: 'Projects',
+    });
+    expect(layout.mutedChatIds).toEqual([sidebarChatNodeId('alpha', 'review')]);
+  });
+
+  test('keeps chat-group mute targets aligned when a group is moved', () => {
+    const rootId = sidebarChatRootNodeId('alpha');
+    const archiveId = sidebarChatGroupNodeId('alpha', 'Archive');
+    const workId = sidebarChatGroupNodeId('alpha', 'Work');
+    const backendId = sidebarChatGroupNodeId('alpha', 'Work/Backend');
+    const layout = applySidebarMove(normalizeSidebarLayout({
+      sidebarChatGroupPathsByDrone: { alpha: ['Archive', 'Work', 'Work/Backend'] },
+      sidebarChatNodeOrderByParent: { [rootId]: [archiveId, workId] },
+      mutedChatIds: [workId, backendId],
+    }), {
+      kind: 'chat-tree-move',
+      droneId: 'alpha',
+      itemKind: 'folder',
+      activeNodeId: workId,
+      sourcePath: null,
+      sourceSiblingNodeIds: [archiveId, workId],
+      targetPath: 'Archive',
+      targetSiblingNodeIds: [],
+      placement: 'inside',
+    });
+
+    expect(layout.mutedChatIds).toEqual([
+      sidebarChatGroupNodeId('alpha', 'Archive/Work'),
+      sidebarChatGroupNodeId('alpha', 'Archive/Work/Backend'),
+    ]);
   });
 
   test('materializes inferred parents before mutating a nested group', () => {

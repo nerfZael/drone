@@ -172,6 +172,50 @@ export function flattenSidebarChatTreeChatNodeIds(tree: SidebarChatTreeModel): s
   return nodeIds;
 }
 
+export function sidebarChatTreeChatNamesInGroup(
+  tree: SidebarChatTreeModel,
+  groupNodeId: string,
+): string[] {
+  const chatNames: string[] = [];
+  const visit = (parentId: string) => {
+    for (const childId of tree.childIdsByParent[parentId] ?? []) {
+      const child = tree.nodesById[childId];
+      if (!child) continue;
+      if (child.kind === 'chat') chatNames.push(child.chatName);
+      else visit(child.id);
+    }
+  };
+  visit(groupNodeId);
+  return chatNames;
+}
+
+export function resolveEffectiveSidebarChatMuteSets(
+  tree: SidebarChatTreeModel,
+  mutedChatIds: ReadonlySet<string>,
+): {
+  effectiveMutedChatGroupIdSet: Set<string>;
+  effectiveMutedChatIdSet: Set<string>;
+} {
+  const effectiveGroups = new Set<string>();
+  const effectiveChats = new Set<string>();
+  const visit = (nodeId: string, inheritedMuted: boolean) => {
+    const node = tree.nodesById[nodeId];
+    if (!node) return;
+    const muted = inheritedMuted || mutedChatIds.has(node.id);
+    if (node.kind === 'chat') {
+      if (muted) effectiveChats.add(node.id);
+      return;
+    }
+    if (muted) effectiveGroups.add(node.id);
+    for (const childId of tree.childIdsByParent[node.id] ?? []) visit(childId, muted);
+  };
+  for (const rootId of tree.rootChildIds) visit(rootId, false);
+  return {
+    effectiveMutedChatGroupIdSet: effectiveGroups,
+    effectiveMutedChatIdSet: effectiveChats,
+  };
+}
+
 function uniqueStrings(values: unknown): string[] {
   return Array.isArray(values)
     ? [...new Set(values.map((value) => String(value ?? '').trim()).filter(Boolean))]

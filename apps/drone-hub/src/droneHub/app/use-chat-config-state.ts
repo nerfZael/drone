@@ -8,6 +8,7 @@ import type {
 import { normalizeChatInfoPayload } from '../../domain';
 import type { DroneSummary } from '../types';
 import {
+  chatMetadataEligibleForSelection,
   chatInfoForSelection,
   chatNamesForConfigSelection,
   chatSelectionKey,
@@ -29,6 +30,7 @@ type UseChatConfigStateArgs = {
   selectedChat: string;
   droneById: Record<string, DroneSummary>;
   requestJson: RequestJsonFn;
+  beforeConfigMutation?: (droneId: string, chatName: string) => Promise<boolean>;
 };
 
 function chatLoadSurfaceForAgent(agent: ChatAgentConfig | null | undefined): ChatLoadSurface {
@@ -42,6 +44,7 @@ export function useChatConfigState({
   selectedChat,
   droneById,
   requestJson,
+  beforeConfigMutation,
 }: UseChatConfigStateArgs) {
   const selectedChatInfoKey = chatSelectionKey(selectedDrone, selectedChat);
   const selectedDroneSummary = selectedDrone ? (droneById[selectedDrone] ?? null) : null;
@@ -58,16 +61,14 @@ export function useChatConfigState({
   }, [selectedDroneSummary?.chats, selectedDroneSummary?.workflowChats]);
   const selectedChatListed =
     !selectedDroneHasChatList || selectedDroneChatsKey.split('\u0000').includes(selectedChat);
-  const selectedChatIsDraft =
-    selectedDroneSummary?.draft === true ||
-    selectedDroneSummary?.hubPhase === 'draft' ||
-    selectedDroneSummary?.draftChats?.[selectedChat || 'default'] === true;
-  const chatConfigEligible =
-    hasSelectedDroneSummary &&
-    !selectedDroneProvisioning &&
-    !selectedDroneStartupFailed &&
-    !selectedChatIsDraft &&
-    selectedChatListed;
+  // Draft chats already have durable, configurable chat entries. Their metadata
+  // must remain available so pre-publish agent and model changes can update the UI.
+  const chatConfigEligible = chatMetadataEligibleForSelection({
+    hasDroneSummary: hasSelectedDroneSummary,
+    droneProvisioning: selectedDroneProvisioning,
+    droneStartupFailed: selectedDroneStartupFailed,
+    chatListed: selectedChatListed,
+  });
   const cachedChatInfo =
     chatConfigEligible
       ? (readFreshChatRuntimeCache(selectedChatInfoKey)?.chatInfo ?? null)
@@ -290,6 +291,9 @@ export function useChatConfigState({
     async (agent: ChatAgentConfig) => {
       if (!selectedDrone) return;
       const chat = selectedChat || 'default';
+      if (beforeConfigMutation && !(await beforeConfigMutation(selectedDrone, chat))) {
+        throw new Error('The draft chat could not be created.');
+      }
       const readOnlySupported =
         agent.kind === 'native' ||
         (agent.kind === 'builtin' && (agent.id === 'codex' || agent.id === 'blip'));
@@ -330,13 +334,16 @@ export function useChatConfigState({
       }));
       setChatInfoError(null);
     },
-    [requestJson, selectedChat, selectedDrone],
+    [beforeConfigMutation, requestJson, selectedChat, selectedDrone],
   );
 
   const setChatModelSettings = React.useCallback(
     async (settings: { model?: string | null; reasoning?: string | null }) => {
       if (!selectedDrone) return;
       const chat = selectedChat || 'default';
+      if (beforeConfigMutation && !(await beforeConfigMutation(selectedDrone, chat))) {
+        throw new Error('The draft chat could not be created.');
+      }
       const hasModel = Object.prototype.hasOwnProperty.call(settings, 'model');
       const hasReasoning = Object.prototype.hasOwnProperty.call(settings, 'reasoning');
       const model = String(settings.model ?? '').trim() || null;
@@ -374,13 +381,16 @@ export function useChatConfigState({
       }));
       setChatInfoError(null);
     },
-    [requestJson, selectedChat, selectedDrone],
+    [beforeConfigMutation, requestJson, selectedChat, selectedDrone],
   );
 
   const setChatAgentPermissionMode = React.useCallback(
     async (agentPermissionMode: AgentPermissionMode) => {
       if (!selectedDrone) return;
       const chat = selectedChat || 'default';
+      if (beforeConfigMutation && !(await beforeConfigMutation(selectedDrone, chat))) {
+        throw new Error('The draft chat could not be created.');
+      }
       await requestJson(
         `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(chat)}/config`,
         {
@@ -407,13 +417,16 @@ export function useChatConfigState({
       }));
       setChatInfoError(null);
     },
-    [requestJson, selectedChat, selectedDrone],
+    [beforeConfigMutation, requestJson, selectedChat, selectedDrone],
   );
 
   const setChatApprovalPolicy = React.useCallback(
     async (approvalPolicy: AgentApprovalPolicy) => {
       if (!selectedDrone) return;
       const chat = selectedChat || 'default';
+      if (beforeConfigMutation && !(await beforeConfigMutation(selectedDrone, chat))) {
+        throw new Error('The draft chat could not be created.');
+      }
       await requestJson(
         `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(chat)}/config`,
         {
@@ -440,13 +453,16 @@ export function useChatConfigState({
       }));
       setChatInfoError(null);
     },
-    [requestJson, selectedChat, selectedDrone],
+    [beforeConfigMutation, requestJson, selectedChat, selectedDrone],
   );
 
   const setDockerSnapshotAfterAgentMessageEnabled = React.useCallback(
     async (enabled: boolean) => {
       if (!selectedDrone) return;
       const chat = selectedChat || 'default';
+      if (beforeConfigMutation && !(await beforeConfigMutation(selectedDrone, chat))) {
+        throw new Error('The draft chat could not be created.');
+      }
       await requestJson(
         `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(chat)}/config`,
         {
@@ -472,7 +488,7 @@ export function useChatConfigState({
       }));
       setChatInfoError(null);
     },
-    [requestJson, selectedChat, selectedDrone],
+    [beforeConfigMutation, requestJson, selectedChat, selectedDrone],
   );
 
   const handleSetAgentFailure = React.useCallback((prefix: string, err: any) => {

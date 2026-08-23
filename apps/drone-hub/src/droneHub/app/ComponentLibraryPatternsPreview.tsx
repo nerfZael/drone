@@ -312,7 +312,6 @@ function SidebarPattern() {
                 selectionRole: 'checkbox',
                 checked: recentOnly,
               },
-              { id: 'hidden', label: 'Show hidden groups' },
               { kind: 'separator', id: 'layout' },
               { id: 'side', label: 'Dock sidebar right' },
             ]}

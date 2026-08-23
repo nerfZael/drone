@@ -462,6 +462,13 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain("label: 'Create chat'");
     expect(source).toContain("label: 'Rename chat'");
     expect(source).toContain(": 'Delete chat'");
+    expect(source).toContain("label: directlyMuted ? 'Unmute group' : 'Mute group'");
+    expect(source).toContain("label: 'Delete chats in group'");
+    expect(source).toContain('setDeleteChatGroupTarget({');
+    expect(source).not.toContain('setSelectedChatNodeIds(new Set(groupChatNames');
+    expect(source).toContain('resolveEffectiveSidebarChatMuteSets(tree, mutedChatIdSet)');
+    expect(source).toContain('muteContext?.effectiveChatIds.has(');
+    expect(source).not.toContain("label: 'Hide group'");
     expect(source).toContain('<TextInputDialog');
     expect(source).toContain('<ConfirmDialog');
     expect(source).toContain('resolveMobileChatDeletePlan({');
@@ -472,6 +479,7 @@ describe('mobile sidebar presentation', () => {
     expect(deleteFlow).not.toContain('window.confirm');
     expect(deleteFlow).not.toContain('Alert.alert');
     expect(deleteFlow).toContain('for (const name of deleteChatPlan.chatNames)');
+    expect(deleteFlow).toContain('catch {');
     expect(source).toContain('repoNavigationHead: {\n    minHeight: 48,\n    marginBottom: 8,');
     expect(source).not.toContain('showChats={false}');
     expect(source).toContain('color: colors.sidebarSubitemFg,');

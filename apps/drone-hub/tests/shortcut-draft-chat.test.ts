@@ -1,10 +1,34 @@
 import { describe, expect, test } from 'bun:test';
 import {
   publishThenSendShortcutDraftChat,
+  shouldRetainOptimisticallyHiddenDraftChat,
   shortcutDraftChatDisposition,
 } from '../src/droneHub/app/shortcut-draft-chat';
 
 describe('shortcut draft chat lifecycle', () => {
+  test('keeps an abandoned draft hidden while creation and deletion reconcile', () => {
+    expect(shouldRetainOptimisticallyHiddenDraftChat({
+      abandoned: true,
+      cleanupComplete: false,
+      authoritativeChatPresent: false,
+    })).toBe(true);
+    expect(shouldRetainOptimisticallyHiddenDraftChat({
+      abandoned: false,
+      cleanupComplete: false,
+      authoritativeChatPresent: true,
+    })).toBe(true);
+    expect(shouldRetainOptimisticallyHiddenDraftChat({
+      abandoned: true,
+      cleanupComplete: true,
+      authoritativeChatPresent: true,
+    })).toBe(true);
+    expect(shouldRetainOptimisticallyHiddenDraftChat({
+      abandoned: true,
+      cleanupComplete: true,
+      authoritativeChatPresent: false,
+    })).toBe(false);
+  });
+
   test('waits while a blank draft is still selected', () => {
     expect(
       shortcutDraftChatDisposition({

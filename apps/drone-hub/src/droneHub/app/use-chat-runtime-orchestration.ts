@@ -127,6 +127,20 @@ export function localQueuedPromptStateWhileFlushing(
   return drone?.draft === true || drone?.hubPhase === 'draft' ? 'queued' : 'sending';
 }
 
+export function startupAgentForChatSelection(input: {
+  agent: ChatAgentConfig | null | undefined;
+  startupChatName: string | null | undefined;
+  selectedChat: string | null | undefined;
+  droneHubPhase: string | null | undefined;
+}): ChatAgentConfig | null {
+  if (!input.agent) return null;
+  const startupChatName = String(input.startupChatName ?? '').trim() || 'default';
+  const selectedChat = String(input.selectedChat ?? '').trim() || 'default';
+  return isDroneStartingOrSeeding(input.droneHubPhase) || startupChatName === selectedChat
+    ? input.agent
+    : null;
+}
+
 export function visiblePendingPromptsForAgent(opts: {
   agentKind: ChatAgentConfig['kind'] | null | undefined;
   chatUiMode: 'transcript' | 'cli';
@@ -350,10 +364,13 @@ export function useChatRuntimeOrchestration({
     [selectedDrone, startupSeedByDrone],
   );
   const startupAgentForSelectedDrone =
-    selectedDroneSummary &&
-    isDroneStartingOrSeeding(selectedDroneSummary.hubPhase) &&
-    startupSeedForSelectedDrone?.agent
-      ? startupSeedForSelectedDrone.agent
+    selectedDroneSummary
+      ? startupAgentForChatSelection({
+          agent: startupSeedForSelectedDrone?.agent,
+          startupChatName: startupSeedForSelectedDrone?.chatName,
+          selectedChat,
+          droneHubPhase: selectedDroneSummary.hubPhase,
+        })
       : null;
   const chatUiMode = chatUiModeForAgent(chatInfo?.agent ?? startupAgentForSelectedDrone ?? null);
   const sendingPrompt = chatHasInFlightPrompt(

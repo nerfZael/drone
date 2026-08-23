@@ -35,6 +35,20 @@ export function chatInfoForSelection(
   return chatInfoKey === expectedKey && payloadChatName === expectedChatName ? chatInfo : null;
 }
 
+export function chatMetadataEligibleForSelection(input: {
+  hasDroneSummary: boolean;
+  droneProvisioning: boolean;
+  droneStartupFailed: boolean;
+  chatListed: boolean;
+}): boolean {
+  return (
+    input.hasDroneSummary &&
+    !input.droneProvisioning &&
+    !input.droneStartupFailed &&
+    input.chatListed
+  );
+}
+
 export function chatConfigResolutionState(input: {
   currentChatIsDraft: boolean;
   hasChats: boolean;

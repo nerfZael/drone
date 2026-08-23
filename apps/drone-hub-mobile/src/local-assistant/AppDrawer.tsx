@@ -45,11 +45,13 @@ import {
   flattenSidebarChatTreeChatNodeIds,
   normalizeSidebarChatGroupPath,
   resolvePinnedSidebarDrones,
+  resolveEffectiveSidebarChatMuteSets,
   sidebarChatGroupBaseName,
   sidebarChatGroupNodeId,
   sidebarChatGroupParentPath,
   sidebarChatNodeId,
   sidebarChatRootNodeId,
+  sidebarChatTreeChatNamesInGroup,
   sidebarDroneNodeId,
   sidebarFolderNodeId,
   type SidebarChatTreeFolderNode,
@@ -169,6 +171,12 @@ type DrawerChatGroupActionTarget = {
   path: string | null;
 };
 
+type DrawerChatGroupDeleteTarget = {
+  path: string;
+  chatNames: string[];
+  defaultChatKept: boolean;
+};
+
 type DrawerMuteActionTarget =
   | { kind: 'chat'; drone: MobileDroneSummary; chatName: string }
   | { kind: 'drone'; drone: MobileDroneSummary }
@@ -194,6 +202,8 @@ const DrawerSidebarMuteContext = React.createContext<{
   effectiveGroupIds: ReadonlySet<string>;
   effectiveDroneIds: ReadonlySet<string>;
   mutedChatIds: ReadonlySet<string>;
+  effectiveChatGroupIds: ReadonlySet<string>;
+  effectiveChatIds: ReadonlySet<string>;
   openActions?(target: DrawerMuteActionTarget): void;
 } | null>(null);
 const DrawerCompanionHighlightContext = React.createContext<ReadonlySet<string>>(new Set());
@@ -837,7 +847,7 @@ function DrawerDroneChatRow({
   const draft = drone.draftChats?.[chatName] === true;
   const muted = Boolean(
     muteContext?.effectiveDroneIds.has(drone.id) ||
-      muteContext?.mutedChatIds.has(mobileSidebarChatId(drone.id, chatName)),
+      muteContext?.effectiveChatIds.has(mobileSidebarChatId(drone.id, chatName)),
   );
   const unread = !muted && !selected && (drone.unreadChats?.includes(chatName) ?? false);
   const displayState = mobileDroneChatDisplayState(
@@ -998,6 +1008,7 @@ function DrawerDroneChatTreeEntry({
   onSelect(droneId: string, chatName: string): void;
 }) {
   const reorderSidebar = React.useContext(DrawerSidebarReorderContext);
+  const muteContext = React.useContext(DrawerSidebarMuteContext);
   const chatTreeContext = React.useContext(DrawerChatTreeContext);
   if (node.kind === 'chat') {
     const parent = node.parentId === tree.rootId ? null : tree.nodesById[node.parentId];
@@ -1023,6 +1034,7 @@ function DrawerDroneChatTreeEntry({
   }
   const groupId = node.id;
   const expanded = Boolean(chatTreeContext?.expandedGroupIds.has(groupId));
+  const muted = Boolean(muteContext?.effectiveChatGroupIds.has(groupId));
   const parentPath = sidebarChatGroupParentPath(node.path);
   const childIds = tree.childIdsByParent[node.id] ?? [];
   const dragScope = `chat-parent:${node.parentId}`;
@@ -1081,7 +1093,7 @@ function DrawerDroneChatTreeEntry({
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ expanded }}
-          accessibilityLabel={`${expanded ? 'Collapse' : 'Expand'} ${node.label} group`}
+          accessibilityLabel={`${expanded ? 'Collapse' : 'Expand'} ${node.label} group${muted ? ', muted' : ''}`}
           delayLongPress={600}
           onLongPress={() => chatTreeContext?.openGroupActions({ drone, path: node.path })}
           onPress={() => chatTreeContext?.toggleGroup(groupId)}
@@ -1114,6 +1126,7 @@ function DrawerDroneChatTreeEntry({
           ) : (
             <Text numberOfLines={1} style={styles.groupName}>{node.label}</Text>
           )}
+          {muted ? <MutedStatusIndicator /> : null}
         </Pressable>
         {expanded ? (
           <View style={styles.groupChildren}>
@@ -1223,7 +1236,7 @@ function DrawerDroneNode({
   const collapsedChatMuted = Boolean(
     !hasMultipleChats &&
       chats.length === 1 &&
-      muteContext?.mutedChatIds.has(mobileSidebarChatId(drone.id, chats[0]!)),
+      muteContext?.effectiveChatIds.has(mobileSidebarChatId(drone.id, chats[0]!)),
   );
   const muted = Boolean(muteContext?.effectiveDroneIds.has(drone.id) || collapsedChatMuted);
   const isDraft = drone.draft === true || drone.phase.trim().toLowerCase() === 'draft';
@@ -1232,7 +1245,7 @@ function DrawerDroneNode({
     () => {
       if (muted) return EMPTY_MOBILE_DRONE_STATE_SUMMARY;
       const unmutedChats = drone.chats.filter(
-        (chatName) => !muteContext?.mutedChatIds.has(mobileSidebarChatId(drone.id, chatName)),
+        (chatName) => !muteContext?.effectiveChatIds.has(mobileSidebarChatId(drone.id, chatName)),
       );
       const unmutedSet = new Set(unmutedChats);
       const unmutedApprovalChats = (drone.approvalChats ?? []).filter((chatName) =>
@@ -1621,7 +1634,7 @@ function DrawerDroneFolder({
       folder.roots,
       folder.children,
       muteContext?.effectiveDroneIds,
-      muteContext?.mutedChatIds,
+      muteContext?.effectiveChatIds,
     ),
     [folder.children, folder.roots, muteContext],
   );
@@ -2326,6 +2339,30 @@ function AppDrawerView({
     () => new Set(droneSidebarOrder.mutedChatIds),
     [droneSidebarOrder.mutedChatIds],
   );
+  const { effectiveMutedChatGroupIds, effectiveMutedChatIds } = React.useMemo(() => {
+    const effectiveGroups = new Set<string>();
+    const effectiveChats = new Set<string>();
+    for (const drone of drones) {
+      const chats = orderedMobileDroneChats(
+        drone,
+        droneSidebarOrder.sidebarChatOrderByDrone[drone.id],
+      );
+      const tree = buildSidebarChatTree({
+        droneId: drone.id,
+        chatNames: chats,
+        groupPaths: droneSidebarOrder.sidebarChatGroupPathsByDrone[drone.id] ?? [],
+        groupByChat: droneSidebarOrder.sidebarChatGroupByChat,
+        nodeOrderByParent: droneSidebarOrder.sidebarChatNodeOrderByParent,
+      });
+      const resolved = resolveEffectiveSidebarChatMuteSets(tree, mutedChatIdSet);
+      for (const groupId of resolved.effectiveMutedChatGroupIdSet) effectiveGroups.add(groupId);
+      for (const chatId of resolved.effectiveMutedChatIdSet) effectiveChats.add(chatId);
+    }
+    return {
+      effectiveMutedChatGroupIds: effectiveGroups,
+      effectiveMutedChatIds: effectiveChats,
+    };
+  }, [droneSidebarOrder, drones, mutedChatIdSet]);
   const { effectiveMutedGroupIds, effectiveMutedDroneIds } = React.useMemo(() => {
     const effectiveGroups = new Set<string>();
     const effectiveDrones = new Set(mutedDroneIdSet);
@@ -2356,11 +2393,11 @@ function AppDrawerView({
             group.roots,
             group.folders,
             effectiveMutedDroneIds,
-            mutedChatIdSet,
+            effectiveMutedChatIds,
           ),
         ]),
       ),
-    [droneGroups, effectiveMutedDroneIds, mutedChatIdSet],
+    [droneGroups, effectiveMutedChatIds, effectiveMutedDroneIds],
   );
   const [activeRepoId, setActiveRepoId] = React.useState<string | null>(null);
   const alignedActiveDroneSelectionKeyRef = React.useRef<string | null>(null);
@@ -2394,6 +2431,8 @@ function AppDrawerView({
   const [deleteChatTarget, setDeleteChatTarget] = React.useState<DrawerChatActionTarget | null>(
     null,
   );
+  const [deleteChatGroupTarget, setDeleteChatGroupTarget] =
+    React.useState<DrawerChatGroupDeleteTarget | null>(null);
   const [chatMutationBusy, setChatMutationBusy] = React.useState(false);
   const [chatMutationError, setChatMutationError] = React.useState<string | null>(null);
   React.useEffect(() => {
@@ -2403,6 +2442,7 @@ function AppDrawerView({
     setChatActionTarget(null);
     setChatEditor(null);
     setDeleteChatTarget(null);
+    setDeleteChatGroupTarget(null);
     setChatMutationError(null);
     setMuteActionTarget(null);
     setChatGroupActionTarget(null);
@@ -2414,6 +2454,7 @@ function AppDrawerView({
     setChatActionTarget(null);
     setChatEditor(null);
     setDeleteChatTarget(null);
+    setDeleteChatGroupTarget(null);
     setChatMutationError(null);
     setChatGroupActionTarget(null);
     setChatGroupEditor(null);
@@ -2581,21 +2622,34 @@ function AppDrawerView({
   }, [chatEditor, chatMutationBusy, droneSidebarOrder, onCreateDroneChat, onRenameDroneChat, onReorderSidebar, onSelectDroneChat]);
   const deleteChatPlan = React.useMemo(() => {
     if (!deleteChatTarget) return { chatNames: [], defaultChatKept: false };
+    if (deleteChatGroupTarget) {
+      return {
+        chatNames: deleteChatGroupTarget.chatNames,
+        defaultChatKept: deleteChatGroupTarget.defaultChatKept,
+      };
+    }
     return resolveMobileChatDeletePlan({
       droneId: deleteChatTarget.drone.id,
       chatNames: deleteChatTarget.drone.chats,
       targetChatName: deleteChatTarget.chatName,
       selectedChatNodeIds,
     });
-  }, [deleteChatTarget, selectedChatNodeIds]);
+  }, [deleteChatGroupTarget, deleteChatTarget, selectedChatNodeIds]);
   const confirmDeleteChat = React.useCallback(async () => {
     if (!deleteChatTarget || chatMutationBusy || !onDeleteDroneChat) return;
     setChatMutationBusy(true);
     setChatMutationError(null);
     try {
       const failedNames: string[] = [];
+      const deletedNames: string[] = [];
       for (const name of deleteChatPlan.chatNames) {
-        const deleted = await onDeleteDroneChat(deleteChatTarget.drone.id, name);
+        let deleted = false;
+        try {
+          deleted = await onDeleteDroneChat(deleteChatTarget.drone.id, name);
+        } catch {
+          // Continue through the group so one failed request does not prevent the
+          // remaining chats from being deleted. Failed names stay available to retry.
+        }
         if (deleted && onReorderSidebar) {
           onReorderSidebar({
             kind: 'chat-tree-remove',
@@ -2603,11 +2657,22 @@ function AppDrawerView({
             nodeIds: [sidebarChatNodeId(deleteChatTarget.drone.id, name)],
           });
         }
-        if (!deleted) failedNames.push(name);
+        if (deleted) deletedNames.push(name);
+        else failedNames.push(name);
+      }
+      if (deleteChatGroupTarget && deletedNames.length > 0) {
+        const deletedNodeIds = new Set(deletedNames.map((name) =>
+          sidebarChatNodeId(deleteChatTarget.drone.id, name)));
+        setSelectedChatNodeIds((current) =>
+          new Set([...current].filter((nodeId) => !deletedNodeIds.has(nodeId))));
       }
       if (failedNames.length) {
-        setSelectedChatNodeIds(new Set(failedNames.map((name) =>
-          sidebarChatNodeId(deleteChatTarget.drone.id, name))));
+        if (deleteChatGroupTarget) {
+          setDeleteChatGroupTarget({ ...deleteChatGroupTarget, chatNames: failedNames });
+        } else {
+          setSelectedChatNodeIds(new Set(failedNames.map((name) =>
+            sidebarChatNodeId(deleteChatTarget.drone.id, name))));
+        }
         setDeleteChatTarget({ ...deleteChatTarget, chatName: failedNames[0]! });
         setChatMutationError(
           failedNames.length === 1
@@ -2616,14 +2681,17 @@ function AppDrawerView({
         );
         return;
       }
-      setSelectedChatNodeIds(new Set());
+      if (!deleteChatGroupTarget) {
+        setSelectedChatNodeIds(new Set());
+      }
       setDeleteChatTarget(null);
+      setDeleteChatGroupTarget(null);
     } catch (error: any) {
       setChatMutationError(String(error?.message ?? error ?? 'Could not delete chat.'));
     } finally {
       setChatMutationBusy(false);
     }
-  }, [chatMutationBusy, deleteChatPlan, deleteChatTarget, onDeleteDroneChat, onReorderSidebar]);
+  }, [chatMutationBusy, deleteChatGroupTarget, deleteChatPlan, deleteChatTarget, onDeleteDroneChat, onReorderSidebar]);
   const chatContextActions = React.useMemo<ContextMenuAction[]>(() => {
     if (!chatActionTarget) return [];
     const actions: ContextMenuAction[] = [];
@@ -2697,6 +2765,7 @@ function AppDrawerView({
         destructive: true,
         onPress: () => {
           setChatMutationError(null);
+          setDeleteChatGroupTarget(null);
           setDeleteChatTarget(chatActionTarget);
         },
       });
@@ -2726,6 +2795,21 @@ function AppDrawerView({
       });
     }
     if (path) {
+      const groupNodeId = sidebarChatGroupNodeId(drone.id, path);
+      const directlyMuted = mutedChatIdSet.has(groupNodeId);
+      const chatTree = buildSidebarChatTree({
+        droneId: drone.id,
+        chatNames: orderedMobileDroneChats(
+          drone,
+          droneSidebarOrder.sidebarChatOrderByDrone[drone.id],
+        ),
+        groupPaths: droneSidebarOrder.sidebarChatGroupPathsByDrone[drone.id] ?? [],
+        groupByChat: droneSidebarOrder.sidebarChatGroupByChat,
+        nodeOrderByParent: droneSidebarOrder.sidebarChatNodeOrderByParent,
+      });
+      const groupChatNames = sidebarChatTreeChatNamesInGroup(chatTree, groupNodeId);
+      const deletableChatNames = groupChatNames
+        .filter((chatName) => chatName !== 'default');
       actions.push({
         label: 'Rename group',
         onPress: () => setChatGroupEditor({
@@ -2737,6 +2821,29 @@ function AppDrawerView({
         }),
       });
       actions.push({
+        label: directlyMuted ? 'Unmute group' : 'Mute group',
+        onPress: () => onReorderSidebar({
+          kind: 'set-muted',
+          targetKind: 'chat',
+          targetId: groupNodeId,
+          muted: !directlyMuted,
+        }),
+      });
+      if (deletableChatNames.length > 0 && onDeleteDroneChat) {
+        actions.push({
+          label: 'Delete chats in group',
+          destructive: true,
+          onPress: () => {
+            setDeleteChatGroupTarget({
+              path,
+              chatNames: deletableChatNames,
+              defaultChatKept: groupChatNames.includes('default'),
+            });
+            setDeleteChatTarget({ drone, chatName: deletableChatNames[0]! });
+          },
+        });
+      }
+      actions.push({
         label: 'Delete group',
         destructive: true,
         onPress: () => {
@@ -2746,7 +2853,15 @@ function AppDrawerView({
       });
     }
     return actions;
-  }, [chatGroupActionTarget, onCreateDroneChat, onReorderSidebar, removeFolderPrefix]);
+  }, [
+    chatGroupActionTarget,
+    droneSidebarOrder,
+    mutedChatIdSet,
+    onCreateDroneChat,
+    onDeleteDroneChat,
+    onReorderSidebar,
+    removeFolderPrefix,
+  ]);
 
   const submitChatGroupEditor = React.useCallback(() => {
     if (!chatGroupEditor || !onReorderSidebar) return;
@@ -2851,8 +2966,17 @@ function AppDrawerView({
     effectiveGroupIds: effectiveMutedGroupIds,
     effectiveDroneIds: effectiveMutedDroneIds,
     mutedChatIds: mutedChatIdSet,
+    effectiveChatGroupIds: effectiveMutedChatGroupIds,
+    effectiveChatIds: effectiveMutedChatIds,
     openActions: onReorderSidebar ? setMuteActionTarget : undefined,
-  }), [effectiveMutedDroneIds, effectiveMutedGroupIds, mutedChatIdSet, onReorderSidebar]);
+  }), [
+    effectiveMutedChatGroupIds,
+    effectiveMutedChatIds,
+    effectiveMutedDroneIds,
+    effectiveMutedGroupIds,
+    mutedChatIdSet,
+    onReorderSidebar,
+  ]);
   const pinnedDronesSection = (
     <DrawerPinnedDrones
       drones={globalPinnedDrones}
@@ -3275,21 +3399,26 @@ function AppDrawerView({
           />
           <ConfirmDialog
             visible={Boolean(deleteChatTarget)}
-            title={deleteChatPlan.chatNames.length > 1
-              ? `Delete ${deleteChatPlan.chatNames.length} chats?`
-              : 'Delete chat?'}
+            title={deleteChatGroupTarget
+              ? `Delete chats in “${sidebarChatGroupBaseName(deleteChatGroupTarget.path)}”?`
+              : deleteChatPlan.chatNames.length > 1
+                ? `Delete ${deleteChatPlan.chatNames.length} chats?`
+                : 'Delete chat?'}
             message={
               chatMutationError ||
-              (deleteChatPlan.chatNames.length > 1
-                ? `Delete ${deleteChatPlan.chatNames.length} selected chats from ${deleteChatTarget?.drone.name ?? 'this drone'}?${deleteChatPlan.defaultChatKept ? ' The default chat will be kept.' : ''}`
-                : `Delete “${deleteChatPlan.chatNames[0] ?? ''}” from ${deleteChatTarget?.drone.name ?? 'this drone'}?`)
+              (deleteChatGroupTarget
+                ? `Delete ${deleteChatPlan.chatNames.length === 1 ? 'the 1 chat' : `all ${deleteChatPlan.chatNames.length} chats`} in this group and its subgroups from ${deleteChatTarget?.drone.name ?? 'this drone'}? The group and its subgroups are not deleted.${deleteChatPlan.defaultChatKept ? ' The default chat will be kept.' : ''}`
+                : deleteChatPlan.chatNames.length > 1
+                  ? `Delete ${deleteChatPlan.chatNames.length} selected chats from ${deleteChatTarget?.drone.name ?? 'this drone'}?${deleteChatPlan.defaultChatKept ? ' The default chat will be kept.' : ''}`
+                  : `Delete “${deleteChatPlan.chatNames[0] ?? ''}” from ${deleteChatTarget?.drone.name ?? 'this drone'}?`)
             }
-            confirmLabel={deleteChatPlan.chatNames.length > 1 ? 'Delete chats' : 'Delete'}
+            confirmLabel={deleteChatGroupTarget || deleteChatPlan.chatNames.length > 1 ? 'Delete chats' : 'Delete'}
             destructive
             busy={chatMutationBusy}
             onCancel={() => {
               if (!chatMutationBusy) {
                 setDeleteChatTarget(null);
+                setDeleteChatGroupTarget(null);
                 setChatMutationError(null);
               }
             }}

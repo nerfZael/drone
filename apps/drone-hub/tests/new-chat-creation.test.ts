@@ -90,9 +90,33 @@ describe('new chat creation defaults', () => {
       modelSource.indexOf('const createDraftDroneChat'),
       modelSource.indexOf('const createDroneChatFromShortcut'),
     );
-    expect(draftCreator).toContain('createUntitledDroneChat(drone, {');
+    expect(draftCreator).toContain('addOptimisticDraftChat(latestDrone.id, chatName)');
+    expect(draftCreator).toContain('selectDroneChat(latestDrone.id, chatName)');
+    expect(draftCreator).toContain('const creationPromise = (async ()');
     expect(draftCreator).toContain('draft: true');
-    expect(draftCreator).toContain('selectDroneChat(drone.id, chatName)');
+    expect(draftCreator).toContain('void creationPromise');
+    expect(draftCreator).toContain('return true');
+    expect(draftCreator.indexOf('selectDroneChat(latestDrone.id, chatName)')).toBeLessThan(
+      draftCreator.indexOf('await createDroneChat(latestDrone, chatName'),
+    );
+    expect(draftCreator).toContain('tracked.abandoned');
+
+    const cleanupFlow = modelSource.slice(
+      modelSource.indexOf('const disposition = shortcutDraftChatDisposition'),
+      modelSource.indexOf('const toggleSelectedDronePinnedFromShortcut'),
+    );
+    expect(cleanupFlow).toContain(
+      'hideOptimisticallyRemovedDraftChat(tracked.droneId, tracked.chatName)',
+    );
+    expect(cleanupFlow.indexOf('hideOptimisticallyRemovedDraftChat')).toBeLessThan(
+      cleanupFlow.indexOf('deleteAbandonedDraftChat(key, tracked)'),
+    );
+    const deleteHelper = modelSource.slice(
+      modelSource.indexOf('const deleteAbandonedDraftChat'),
+      modelSource.indexOf('const autoRenameChatFromFirstPromptRef'),
+    );
+    expect(deleteHelper).toContain("method: 'DELETE'");
+    expect(deleteHelper).toContain('current.cleanupComplete = true');
 
     const shortcutCreator = modelSource.slice(
       modelSource.indexOf('const createDroneChatFromShortcut'),
@@ -118,7 +142,7 @@ describe('new chat creation defaults', () => {
       'utf8',
     );
     const createFlow = modelSource.slice(
-      modelSource.indexOf('const createDroneChat ='),
+      modelSource.indexOf('const resolveNewChatConfiguration ='),
       modelSource.indexOf('const createUntitledDroneChat'),
     );
     expect(createFlow).toContain('resolveCompanionDroneCreationPreferences({');

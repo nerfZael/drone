@@ -6,6 +6,7 @@ import {
   buildSidebarRepoScopedGroupIndex,
   buildSidebarChatTree,
   buildRepoSidebarModel,
+  resolveEffectiveSidebarChatMuteSets,
   resolvePinnedSidebarDrones,
   type SidebarChatTreeFolderNode,
   type SidebarChatTreeModel,
@@ -70,7 +71,6 @@ import {
   migrateSidebarGroupOrderToIds,
   orderSidebarEntries,
   orderSidebarGroups,
-  sidebarGroupOrderToken,
 } from './sidebar-group-order';
 import {
   buildSidebarFolderTree,
@@ -95,7 +95,6 @@ import {
 } from './sidebar-node-order';
 import {
   useDroneHubActiveDrag,
-  type SidebarDragGroupRef,
 } from './drone-hub-dnd';
 import type { SidebarGroup } from './use-sidebar-view-model';
 import type { DroneSelectionClickOptions } from './drone-selection-helpers';
@@ -176,6 +175,7 @@ const AUTO_MINIMIZE_COLLAPSE_DELAY_MS = 90;
 const AUTO_MINIMIZE_EXPAND_DELAY_MS = 120;
 const AUTO_MINIMIZE_REOPEN_GUARD_MS = 220;
 const SIDEBAR_DND_IDLE_DISABLE_DELAY_MS = 1500;
+const NO_HIDDEN_SIDEBAR_GROUP_TOKENS = new Set<string>();
 
 function ContinuousDictationIcon({ active }: { active: boolean }) {
   return (
@@ -236,6 +236,7 @@ function PinnedChatTreeEntries({
   depth,
   collapsedSections,
   setCollapsedSections,
+  mutedGroupIds,
   renderChat,
 }: {
   tree: SidebarChatTreeModel;
@@ -243,6 +244,7 @@ function PinnedChatTreeEntries({
   depth: number;
   collapsedSections: Record<string, boolean>;
   setCollapsedSections: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+  mutedGroupIds: ReadonlySet<string>;
   renderChat(node: Extract<SidebarChatTreeNode, { kind: 'chat' }>): React.ReactNode;
 }) {
   return nodeIds.map((nodeId) => {
@@ -252,6 +254,7 @@ function PinnedChatTreeEntries({
     const folder = node as SidebarChatTreeFolderNode;
     const collapseKey = pinnedChatGroupCollapseKey(tree.droneId, folder.path);
     const collapsed = collapsedSections[collapseKey] === true;
+    const muted = mutedGroupIds.has(folder.id);
     return (
       <div key={folder.id} className="flex flex-col gap-0" style={depth ? { paddingLeft: 10 } : undefined}>
         <button
@@ -262,9 +265,11 @@ function PinnedChatTreeEntries({
           }))}
           className="flex min-h-7 min-w-0 items-center gap-1 rounded px-1 text-left text-[var(--text-11)] text-[var(--sidebar-subitem-fg)] hover:bg-[var(--surface-hover)]"
           aria-expanded={!collapsed}
+          aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${folder.label} group${muted ? ', muted' : ''}`}
         >
           <IconChevron down={!collapsed} strokeWidth={1.25} className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)] opacity-72" />
           <span className="min-w-0 flex-1 truncate font-mono">{folder.label}</span>
+          {muted ? <SidebarMutedStatusIndicator /> : null}
         </button>
         {!collapsed ? (
           <div className="border-l border-[var(--border-subtle)]">
@@ -274,6 +279,7 @@ function PinnedChatTreeEntries({
               depth={depth + 1}
               collapsedSections={collapsedSections}
               setCollapsedSections={setCollapsedSections}
+              mutedGroupIds={mutedGroupIds}
               renderChat={renderChat}
             />
           </div>
@@ -1027,7 +1033,6 @@ export function DroneSidebar({
   canonicalGroups,
   sidebarGroupCreatedAtByName,
   sidebarGroupIdByName,
-  sidebarHiddenGroupCount,
   collapsedGroups,
   deletingGroups,
   renamingGroups,
@@ -1152,8 +1157,6 @@ export function DroneSidebar({
     mutedSidebarGroupIds,
     mutedDroneIds,
     mutedChatIds,
-    hiddenSidebarGroups,
-    showHiddenSidebarGroups,
     setAppView,
     setSidebarGroupingMode,
     setSidebarDockSide,
@@ -1165,8 +1168,6 @@ export function DroneSidebar({
     setSidebarNodeOrderByParent,
     setSidebarChatOrderByDrone,
     setPinnedDroneIds,
-    setHiddenSidebarGroups,
-    setShowHiddenSidebarGroups,
     setSelectedDrone,
     setSelectedDroneIds,
     setSelectedChat,
@@ -1182,14 +1183,12 @@ export function DroneSidebar({
   React.useEffect(() => {
     if (Object.keys(sidebarGroupIdByName).length === 0) return;
     setSidebarGroupOrder((current) => migrateSidebarGroupOrderToIds(current, sidebarGroupIdByName));
-    setHiddenSidebarGroups((current) => migrateSidebarGroupOrderToIds(current, sidebarGroupIdByName));
     setSidebarDroneOrderByGroup((current) =>
       migrateSidebarGroupEntryOrderMapToIds(current, sidebarGroupIdByName),
     );
   }, [
     setSidebarDroneOrderByGroup,
     setSidebarGroupOrder,
-    setHiddenSidebarGroups,
     sidebarGroupIdByName,
   ]);
   const activeDrag = useDroneHubActiveDrag();
@@ -1225,10 +1224,7 @@ export function DroneSidebar({
   const [sidebarDockDragPreviewSide, setSidebarDockDragPreviewSide] = React.useState<
     'left' | 'right' | null
   >(null);
-  const hiddenSidebarGroupTokenSet = React.useMemo(
-    () => new Set(hiddenSidebarGroups),
-    [hiddenSidebarGroups],
-  );
+  const hiddenSidebarGroupTokenSet = NO_HIDDEN_SIDEBAR_GROUP_TOKENS;
   const effectiveSidebarGroupingMode =
     sidebarGroupingModeOverride ?? sidebarGroupingMode;
   const isRepoGroupingMode = effectiveSidebarGroupingMode === 'repos';
@@ -1472,7 +1468,7 @@ export function DroneSidebar({
     optimisticSidebarGroups,
     repoScopedGroupPathsByRepoGroup,
     repoScopedGroupIdByPathByRepoGroup: canonicalGroupIndex.idsByPathByRepoGroup,
-    showHiddenSidebarGroups,
+    showHiddenSidebarGroups: true,
     sidebarGroupIdByName,
     sidebarGroupOrder,
     sidebarGroupingMode: effectiveSidebarGroupingMode,
@@ -1799,17 +1795,6 @@ export function DroneSidebar({
     [clearExpandTimer],
   );
 
-  const toggleSidebarGroupHidden = React.useCallback(
-    (target: SidebarDragGroupRef) => {
-      const token = sidebarGroupOrderToken(target);
-      setHiddenSidebarGroups((prev) => {
-        const hasToken = prev.includes(token);
-        if (hasToken) return prev.filter((item) => item !== token);
-        return [...prev, token];
-      });
-    },
-    [setHiddenSidebarGroups],
-  );
   const collapsedRailInteractive = sidebarCollapsed;
   const showExternalMoveTargets = !isRepoGroupingMode && activeDraggedDroneIds.length > 0;
   const { setNodeRef: setUngroupedDropNodeRef } = useDroppable({
@@ -1827,8 +1812,24 @@ export function DroneSidebar({
     let unread = 0;
     for (const drone of drones) {
       if (effectiveMutedDroneIds.has(drone.id)) continue;
-      const chats = (drone.chats.length > 0 ? drone.chats : ['default']).filter(
-        (chatName) => !mutedChatIdSet.has(sidebarChatSidebarNodeId(drone.id, chatName)),
+      const orderedChats = orderSidebarEntries(
+        normalizedDroneChats(drone, { includeDefaultWhenEmpty: true }),
+        sidebarChatOrderByDrone[drone.id] ?? [],
+        (chatName) => chatName,
+      );
+      const chatTree = buildSidebarChatTree({
+        droneId: drone.id,
+        chatNames: orderedChats,
+        groupPaths: sidebarChatGroupPathsByDrone[drone.id] ?? [],
+        groupByChat: sidebarChatGroupByChat,
+        nodeOrderByParent: sidebarChatNodeOrderByParent,
+      });
+      const effectiveMutedChatIds = resolveEffectiveSidebarChatMuteSets(
+        chatTree,
+        mutedChatIdSet,
+      ).effectiveMutedChatIdSet;
+      const chats = orderedChats.filter(
+        (chatName) => !effectiveMutedChatIds.has(sidebarChatSidebarNodeId(drone.id, chatName)),
       );
       if (chats.length === 0) continue;
       const droneApprovalRequired = chats.some((chatName) =>
@@ -1865,6 +1866,10 @@ export function DroneSidebar({
     deletingDrones,
     mutedChatIdSet,
     mutedDroneIdSet,
+    sidebarChatGroupByChat,
+    sidebarChatGroupPathsByDrone,
+    sidebarChatNodeOrderByParent,
+    sidebarChatOrderByDrone,
     unreadAgentMessageByChatNodeId,
   ]);
   const repositoryNavigationModel = React.useMemo(() => {
@@ -2563,16 +2568,6 @@ export function DroneSidebar({
       checked: isRepoGroupingMode,
     });
   }
-  if (sidebarCapabilities.actions) {
-    sidebarOptionsEntries.push({
-      id: 'hidden',
-      label: `Show hidden groups${
-        sidebarHiddenGroupCount > 0 ? ` (${sidebarHiddenGroupCount})` : ''
-      }`,
-      selectionRole: 'checkbox',
-      checked: showHiddenSidebarGroups,
-    });
-  }
   if (sidebarCapabilities.collapseControl) {
     sidebarOptionsEntries.push({
       id: 'auto-minimize',
@@ -2924,14 +2919,21 @@ export function DroneSidebar({
                       groupByChat: sidebarChatGroupByChat,
                       nodeOrderByParent: sidebarChatNodeOrderByParent,
                     });
+                    const pinnedChatMuteSets = resolveEffectiveSidebarChatMuteSets(
+                      pinnedChatTree,
+                      mutedChatIdSet,
+                    );
                     const hasChatGroups = pinnedChatTree.rootChildIds.some(
                       (nodeId) => pinnedChatTree.nodesById[nodeId]?.kind === 'folder',
                     );
                     const hasOnlyDefaultChat =
                       chats.length === 1 && chats[0] === 'default' && !hasChatGroups;
                     const collapsedChatMuteId = sidebarChatSidebarNodeId(droneId, 'default');
-                    const collapsedChatMuted =
+                    const collapsedChatDirectlyMuted =
                       hasOnlyDefaultChat && mutedChatIdSet.has(collapsedChatMuteId);
+                    const collapsedChatMuted =
+                      hasOnlyDefaultChat &&
+                      pinnedChatMuteSets.effectiveMutedChatIdSet.has(collapsedChatMuteId);
                     const hasChatSection = chats.length > 1 || hasChatGroups;
                     const chatSectionExpanded =
                       collapsedDroneSections[sidebarInlineSectionKey(droneId, 'chats')] !== true;
@@ -3006,7 +3008,7 @@ export function DroneSidebar({
                               }
                               collapsedChatMuted={collapsedChatMuted}
                               onUnmuteCollapsedChat={
-                                collapsedChatMuted
+                                collapsedChatDirectlyMuted
                                   ? () => void runOptimisticMoveSidebar({
                                       kind: 'set-muted',
                                       targetKind: 'chat',
@@ -3091,13 +3093,15 @@ export function DroneSidebar({
                                   depth={0}
                                   collapsedSections={collapsedDroneSections}
                                   setCollapsedSections={setCollapsedDroneSections}
+                                  mutedGroupIds={pinnedChatMuteSets.effectiveMutedChatGroupIdSet}
                                   renderChat={(chatNode) => {
                                   const chatName = chatNode.chatName;
                                   const active = selectedDrone === droneId && activeChatName === chatName;
                                   const chatNodeId = createCanvasChatNodeId(droneId, chatName);
                                   const chatSidebarId = sidebarChatSidebarNodeId(droneId, chatName);
                                   const chatMuted =
-                                    mutedDroneIdSet.has(droneId) || mutedChatIdSet.has(chatSidebarId);
+                                    mutedDroneIdSet.has(droneId) ||
+                                    pinnedChatMuteSets.effectiveMutedChatIdSet.has(chatSidebarId);
                                   const chatBusy =
                                     (drone.busyChats ?? []).includes(chatName) ||
                                     busyChatNodeIdSet.has(chatNodeId);
@@ -3463,7 +3467,6 @@ export function DroneSidebar({
                       onCancelFolderEditor={closeFolderEditor}
                       folderEditor={folderEditor}
                       folderEditorInputRef={folderEditorInputRef}
-                      toggleSidebarGroupHidden={toggleSidebarGroupHidden}
                       onOpenGroupMultiChat={onOpenGroupMultiChat}
                       onDeleteGroup={handleDeleteGroup}
                       onDeleteDronesInGroup={onDeleteDronesInGroup}
@@ -3593,7 +3596,6 @@ export function DroneSidebar({
                     setSidebarGroupingMode(isRepoGroupingMode ? 'groups' : 'repos');
                     openRepositoryOverview();
                   }
-                  else if (id === 'hidden') setShowHiddenSidebarGroups((prev) => !prev);
                   else if (id === 'auto-minimize') setSidebarAutoMinimize((prev) => !prev);
                 }}
                 panelClassName="w-[240px]"

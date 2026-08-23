@@ -185,11 +185,21 @@ export function sidebarLayoutPatch(
     intent.kind === 'chat-group-delete' ||
     intent.kind === 'chat-tree-remove'
   ) {
-    return {
+    const patch: SidebarLayoutPatch = {
       sidebarChatGroupPathsByDrone: layout.sidebarChatGroupPathsByDrone,
       sidebarChatGroupByChat: layout.sidebarChatGroupByChat,
       sidebarChatNodeOrderByParent: layout.sidebarChatNodeOrderByParent,
     };
+    const rewritesChatGroupMuteIds =
+      intent.kind === 'chat-group-rename' ||
+      intent.kind === 'chat-group-delete' ||
+      (intent.kind === 'chat-tree-move' &&
+        intent.itemKind === 'folder' &&
+        normalizeSidebarChatGroupPath(intent.sourcePath) !==
+          normalizeSidebarChatGroupPath(intent.targetPath));
+    return rewritesChatGroupMuteIds
+      ? { ...patch, mutedChatIds: layout.mutedChatIds }
+      : patch;
   }
   if (intent.kind === 'pinned-drone' || intent.kind === 'set-pinned') {
     return { pinnedDroneIds: layout.pinnedDroneIds };
@@ -543,6 +553,7 @@ export function applySidebarChatTreeIntent<T extends SidebarLayoutState>(
         ]),
       ),
       sidebarChatNodeOrderByParent: nextOrder,
+      mutedChatIds: cleanStrings(layout.mutedChatIds).map(rewriteNodeId),
     };
   }
   if (intent.kind === 'chat-group-delete') {
@@ -601,6 +612,9 @@ export function applySidebarChatTreeIntent<T extends SidebarLayoutState>(
       },
       sidebarChatGroupByChat: nextAssignments,
       sidebarChatNodeOrderByParent: cleanStringMap(nextOrder),
+      mutedChatIds: cleanStrings(layout.mutedChatIds).filter(
+        (id) => id !== deletedNodeId && !id.startsWith(`${deletedNodeId}/`),
+      ),
     };
   }
 
@@ -720,6 +734,7 @@ export function applySidebarChatTreeIntent<T extends SidebarLayoutState>(
       ]),
     ),
     sidebarChatNodeOrderByParent: rewrittenOrder,
+    mutedChatIds: cleanStrings(layout.mutedChatIds).map(rewriteNodeId),
   };
 }
 

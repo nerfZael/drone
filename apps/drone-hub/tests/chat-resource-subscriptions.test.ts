@@ -249,5 +249,26 @@ describe('chat resource subscription presentation', () => {
     expect(html).toContain('Pull request · acme/widgets#42');
     expect(html).not.toContain('Deploy after merge.');
     expect(html).not.toContain('dronehub_event_notification');
+
+    const chatPrompt = renderEventNotificationPrompt({
+      events: [
+        {
+          provider: 'drone-hub',
+          resourceType: 'chat',
+          resourceId: '415ee2a4-f0b4-49da-b3e0-23d7096f5090',
+          eventType: 'chat.idle',
+          summary: 'Workstream 2 / 02 Character Models became idle.',
+          providerContent: {
+            chatLabel: 'Workstream 2 / 02 Character Models',
+            chatId: '415ee2a4-f0b4-49da-b3e0-23d7096f5090',
+          },
+        },
+      ],
+    });
+    const chatHtml = renderToStaticMarkup(
+      React.createElement(SubscriptionEventMessage, { prompt: chatPrompt }),
+    );
+    expect(chatHtml).toContain('Chat idle');
+    expect(chatHtml).toContain('Chat · Workstream 2 / 02 Character Models');
   });
 });

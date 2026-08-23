@@ -126,6 +126,7 @@ import {
 import {
   buildNewChatConfiguration,
   buildNewChatCreatePayload,
+  type NewChatConfiguration,
 } from './droneHub/app/new-chat-creation';
 import {
   resolveNewDroneContextFromCurrentSelection,
@@ -182,8 +183,10 @@ import {
   resolveChatNameForDrone,
   suggestNextDroneChatName,
 } from './droneHub/app/helpers';
+
 import {
   publishThenSendShortcutDraftChat,
+  shouldRetainOptimisticallyHiddenDraftChat,
   shortcutDraftChatDisposition,
 } from './droneHub/app/shortcut-draft-chat';
 import { allocateUntitledDisplayName } from './droneHub/app/name-helpers';
@@ -192,6 +195,7 @@ import { useTerminalPaneSessions } from './droneHub/terminal/use-terminal-pane-s
 import type { DronePortMapping, DroneSummary, PortReachabilityByHostPort } from './droneHub/types';
 
 const EMPTY_VISIBLE_TOOL_TABS: RightPanelTab[] = [];
+const NO_HIDDEN_SIDEBAR_GROUPS: string[] = [];
 
 type PreviewPaneKey = 'single' | 'top' | 'bottom';
 type PreviewPaneSnapshot = {
@@ -283,8 +287,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     sidebarNodeOrderByParent,
     sidebarChatOrderByDrone,
     pinnedDroneIds,
-    hiddenSidebarGroups,
-    showHiddenSidebarGroups,
     terminalEmulator,
     homeOpen,
     selectedDrone,
@@ -382,6 +384,37 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const [highlightedDroneIds, setHighlightedDroneIds] = React.useState<Set<string>>(
     () => new Set(),
   );
+  const [optimisticDraftChatNamesByDrone, setOptimisticDraftChatNamesByDrone] =
+    React.useState<Record<string, string[]>>({});
+  const [optimisticallyHiddenDraftChatNamesByDrone, setOptimisticallyHiddenDraftChatNamesByDrone] =
+    React.useState<Record<string, string[]>>({});
+  const newDraftChatsRef = React.useRef(
+    new Map<
+      string,
+      {
+        droneId: string;
+        chatName: string;
+        wasActivated: boolean;
+        submissionInFlight: boolean;
+        preserveOnLeave: boolean;
+        serverCreated: boolean;
+        abandoned: boolean;
+        cleanupInFlight: boolean;
+        cleanupComplete: boolean;
+        creationPromise: Promise<boolean> | null;
+      }
+    >(),
+  );
+  const waitForDraftChatCreation = React.useCallback(
+    async (droneId: string, chatName: string): Promise<boolean> => {
+      const tracked = newDraftChatsRef.current.get(droneChatQueueKey(droneId, chatName));
+      if (!tracked) return true;
+      if (tracked.abandoned) return false;
+      const created = tracked.creationPromise ? await tracked.creationPromise : true;
+      return created && !tracked.abandoned;
+    },
+    [],
+  );
   const highlightClearTimerRef = React.useRef<number | null>(null);
   const droneByIdRef = React.useRef<Record<string, DroneSummary>>({});
   const {
@@ -436,14 +469,85 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     () =>
       drones.map((drone) => {
         const optimisticName = String(optimisticallyRenamedDrones[drone.id] ?? '').trim();
-        return optimisticName && optimisticName !== drone.name
-          ? { ...drone, name: optimisticName }
-          : drone;
+        const optimisticChatNames = optimisticDraftChatNamesByDrone[drone.id] ?? [];
+        const hiddenChatNameSet = new Set(
+          optimisticallyHiddenDraftChatNamesByDrone[drone.id] ?? [],
+        );
+        if (!optimisticName && optimisticChatNames.length === 0 && hiddenChatNameSet.size === 0) {
+          return drone;
+        }
+        const chats = Array.from(
+          new Set([
+            ...(drone.chats ?? []).filter((chatName) => !hiddenChatNameSet.has(chatName)),
+            ...optimisticChatNames.filter((chatName) => !hiddenChatNameSet.has(chatName)),
+          ]),
+        );
+        const draftChats = Object.fromEntries(
+          Object.entries({
+            ...(drone.draftChats ?? {}),
+            ...Object.fromEntries(optimisticChatNames.map((chatName) => [chatName, true])),
+          }).filter(([chatName]) => !hiddenChatNameSet.has(chatName)),
+        );
+        return {
+          ...drone,
+          ...(optimisticName && optimisticName !== drone.name ? { name: optimisticName } : {}),
+          chats,
+          draftChats,
+        };
       }),
-    [drones, optimisticallyRenamedDrones],
+    [
+      drones,
+      optimisticDraftChatNamesByDrone,
+      optimisticallyHiddenDraftChatNamesByDrone,
+      optimisticallyRenamedDrones,
+    ],
+  );
+  const sidebarDisplayDroneById = React.useMemo(
+    () => Object.fromEntries(sidebarDisplayDrones.map((drone) => [drone.id, drone])),
+    [sidebarDisplayDrones],
   );
   React.useEffect(() => {
-    droneByIdRef.current = droneById;
+    droneByIdRef.current = sidebarDisplayDroneById;
+  }, [sidebarDisplayDroneById]);
+  React.useEffect(() => {
+    setOptimisticDraftChatNamesByDrone((current) => {
+      let changed = false;
+      const next: Record<string, string[]> = {};
+      for (const [droneId, chatNames] of Object.entries(current)) {
+        const authoritativeChatNames = new Set(droneById[droneId]?.chats ?? []);
+        const pending = chatNames.filter((chatName) => !authoritativeChatNames.has(chatName));
+        if (pending.length !== chatNames.length) changed = true;
+        if (pending.length > 0) next[droneId] = pending;
+      }
+      return changed ? next : current;
+    });
+  }, [droneById]);
+  React.useEffect(() => {
+    for (const [key, tracked] of newDraftChatsRef.current) {
+      if (!tracked.abandoned || !tracked.cleanupComplete) continue;
+      const authoritativeChatNames = droneById[tracked.droneId]?.chats ?? [];
+      if (!authoritativeChatNames.includes(tracked.chatName)) {
+        newDraftChatsRef.current.delete(key);
+      }
+    }
+    setOptimisticallyHiddenDraftChatNamesByDrone((current) => {
+      let changed = false;
+      const next: Record<string, string[]> = {};
+      for (const [droneId, chatNames] of Object.entries(current)) {
+        const authoritativeChatNames = new Set(droneById[droneId]?.chats ?? []);
+        const stillPresent = chatNames.filter((chatName) => {
+          const tracked = newDraftChatsRef.current.get(droneChatQueueKey(droneId, chatName));
+          return shouldRetainOptimisticallyHiddenDraftChat({
+            abandoned: tracked?.abandoned === true,
+            cleanupComplete: tracked?.cleanupComplete === true,
+            authoritativeChatPresent: authoritativeChatNames.has(chatName),
+          });
+        });
+        if (stillPresent.length !== chatNames.length) changed = true;
+        if (stillPresent.length > 0) next[droneId] = stillPresent;
+      }
+      return changed ? next : current;
+    });
   }, [droneById]);
   React.useEffect(() => {
     const authoritativeApprovals: Record<string, boolean> = {};
@@ -624,8 +728,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     deletingGroups,
     sidebarGroupOrder,
     sidebarDroneOrderByGroup,
-    hiddenSidebarGroups,
-    showHiddenSidebarGroups,
+    hiddenSidebarGroups: NO_HIDDEN_SIDEBAR_GROUPS,
+    showHiddenSidebarGroups: true,
     drones: sidebarDisplayDrones,
     startupSeedByDrone,
     optimisticallyDeletedDrones,
@@ -879,6 +983,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     selectedChat,
     droneById,
     requestJson,
+    beforeConfigMutation: waitForDraftChatCreation,
   });
   const chatUiModeRef = React.useRef<'transcript' | 'cli'>('transcript');
 
@@ -1605,7 +1710,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     activeRepoPath,
     homeOpen,
     draftChat,
-    droneById,
+    droneById: sidebarDisplayDroneById,
     dronesReady: !dronesLoading && !dronesError,
     dronesFilteredByRepoIdSet,
     visibleDronesFilteredByRepo: sidebarDronesFilteredByRepo,
@@ -1756,7 +1861,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     [cloneDrone],
   );
 
-  const currentDrone = selectedDrone ? (droneById[selectedDrone] ?? null) : null;
+  const currentDrone = selectedDrone ? (sidebarDisplayDroneById[selectedDrone] ?? null) : null;
   const currentDroneId = currentDrone?.id ?? '';
   const visibleToolTabs =
     visibleToolTabsByDrone[currentDroneId] ?? EMPTY_VISIBLE_TOOL_TABS;
@@ -2081,17 +2186,101 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     if (!ids[selectedDrone]) ids[selectedDrone] = makeId();
     return ids[selectedDrone];
   }, [selectedDrone]);
-  const newDraftChatsRef = React.useRef(
-    new Map<
-      string,
-      {
+  const addOptimisticDraftChat = React.useCallback((droneId: string, chatName: string) => {
+    setOptimisticallyHiddenDraftChatNamesByDrone((current) => {
+      const currentNames = current[droneId] ?? [];
+      if (!currentNames.includes(chatName)) return current;
+      const nextNames = currentNames.filter((name) => name !== chatName);
+      const next = { ...current };
+      if (nextNames.length > 0) next[droneId] = nextNames;
+      else delete next[droneId];
+      return next;
+    });
+    setOptimisticDraftChatNamesByDrone((current) => {
+      const currentNames = current[droneId] ?? [];
+      if (currentNames.includes(chatName)) return current;
+      return { ...current, [droneId]: [...currentNames, chatName] };
+    });
+  }, []);
+  const removeOptimisticDraftChat = React.useCallback((droneId: string, chatName: string) => {
+    setOptimisticDraftChatNamesByDrone((current) => {
+      const currentNames = current[droneId] ?? [];
+      if (!currentNames.includes(chatName)) return current;
+      const nextNames = currentNames.filter((name) => name !== chatName);
+      const next = { ...current };
+      if (nextNames.length > 0) next[droneId] = nextNames;
+      else delete next[droneId];
+      return next;
+    });
+  }, []);
+  const hideOptimisticallyRemovedDraftChat = React.useCallback(
+    (droneId: string, chatName: string) => {
+      setOptimisticallyHiddenDraftChatNamesByDrone((current) => {
+        const currentNames = current[droneId] ?? [];
+        if (currentNames.includes(chatName)) return current;
+        return { ...current, [droneId]: [...currentNames, chatName] };
+      });
+    },
+    [],
+  );
+  const unhideOptimisticallyRemovedDraftChat = React.useCallback(
+    (droneId: string, chatName: string) => {
+      setOptimisticallyHiddenDraftChatNamesByDrone((current) => {
+        const currentNames = current[droneId] ?? [];
+        if (!currentNames.includes(chatName)) return current;
+        const nextNames = currentNames.filter((name) => name !== chatName);
+        const next = { ...current };
+        if (nextNames.length > 0) next[droneId] = nextNames;
+        else delete next[droneId];
+        return next;
+      });
+    },
+    [],
+  );
+  const clearStartupSeedForChat = React.useCallback((droneId: string, chatName: string) => {
+    setStartupSeedByDrone((current) => {
+      if (current[droneId]?.chatName !== chatName) return current;
+      const next = { ...current };
+      delete next[droneId];
+      return next;
+    });
+  }, [setStartupSeedByDrone]);
+  const deleteAbandonedDraftChat = React.useCallback(
+    (
+      key: string,
+      tracked: {
         droneId: string;
         chatName: string;
-        wasActivated: boolean;
-        submissionInFlight: boolean;
-        preserveOnLeave: boolean;
-      }
-    >(),
+        abandoned: boolean;
+        cleanupInFlight: boolean;
+      },
+    ) => {
+      if (tracked.cleanupInFlight) return;
+      tracked.abandoned = true;
+      tracked.cleanupInFlight = true;
+      clearStartupSeedForChat(tracked.droneId, tracked.chatName);
+      const url = `/api/drones/${encodeURIComponent(tracked.droneId)}/chats/${encodeURIComponent(tracked.chatName)}`;
+      void requestJson<{ ok: true }>(url, { method: 'DELETE' })
+        .then(() => {
+          tracked.cleanupInFlight = false;
+          const current = newDraftChatsRef.current.get(key);
+          if (current) current.cleanupComplete = true;
+        })
+        .catch((error: unknown) => {
+          newDraftChatsRef.current.delete(key);
+          unhideOptimisticallyRemovedDraftChat(tracked.droneId, tracked.chatName);
+          console.warn('[DroneHub] abandoned new draft chat cleanup failed', {
+            droneId: tracked.droneId,
+            chatName: tracked.chatName,
+            error,
+          });
+        });
+    },
+    [
+      clearStartupSeedForChat,
+      requestJson,
+      unhideOptimisticallyRemovedDraftChat,
+    ],
   );
   const autoRenameChatFromFirstPromptRef = React.useRef<
     (droneId: string, chatName: string, prompt: string) => void
@@ -2165,6 +2354,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const tracked = newDraftChatsRef.current.get(key);
       if (!tracked) return await sendPromptTextBase(payload, context);
       tracked.submissionInFlight = true;
+
+      if (tracked.creationPromise && !(await tracked.creationPromise)) {
+        tracked.submissionInFlight = false;
+        return false;
+      }
 
       const url = `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/publish`;
       return await publishThenSendShortcutDraftChat({
@@ -3964,6 +4158,24 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     [requestJson, setSelectedChat, setSidebarChatOrderByDrone, showNameSuggestionFailureToast],
   );
   autoRenameChatFromFirstPromptRef.current = suggestAndRenameDroneChatFromMessage;
+  const resolveNewChatConfiguration = React.useCallback(
+    (drone: DroneSummary): NewChatConfiguration => {
+      const repoPath = normalizeCreateRepoPath(drone.repoPath);
+      const rememberedPreferences = loadDesktopNewDronePreferences(repoPath);
+      const basePreferences =
+        rememberedPreferences ?? normalizeDesktopNewDronePreferences({});
+      if (!basePreferences) throw new Error('Could not resolve new-chat preferences.');
+      const spawnContexts = useDroneHubUiStore.getState().spawnContextByRepoKey;
+      const creationPreferences = resolveCompanionDroneCreationPreferences({
+        remembered: rememberedPreferences,
+        defaults: basePreferences,
+        spawnContext: resolveSpawnContextPreferencesForRepo(spawnContexts, repoPath),
+        hasSpawnContext: hasSpawnContextPreferencesForRepo(spawnContexts, repoPath),
+      });
+      return buildNewChatConfiguration(creationPreferences, resolveAgentKeyToConfig);
+    },
+    [normalizeCreateRepoPath, resolveAgentKeyToConfig],
+  );
   const createDroneChat = React.useCallback(
     async (
       drone: DroneSummary,
@@ -3973,6 +4185,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         select?: boolean;
         copyFromChat?: string;
         mode?: 'copy-config' | 'fork';
+        configuration?: NewChatConfiguration;
       },
     ): Promise<{ ok: boolean; chatName?: string; error?: string | null }> => {
       const droneId = String(drone?.id ?? '').trim();
@@ -3983,6 +4196,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       }
       const requestedCopyFromChat = String(opts?.copyFromChat ?? '').trim();
       const copyFromChat = requestedCopyFromChat;
+      const configuration = !copyFromChat
+        ? (opts?.configuration ?? resolveNewChatConfiguration(drone))
+        : null;
       let createdChat = false;
       try {
         await requestJson<{ ok: true }>(`/api/drones/${encodeURIComponent(droneId)}/chats`, {
@@ -3996,23 +4212,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           })),
         });
         createdChat = true;
-        if (!copyFromChat) {
-          const repoPath = normalizeCreateRepoPath(drone.repoPath);
-          const rememberedPreferences = loadDesktopNewDronePreferences(repoPath);
-          const basePreferences =
-            rememberedPreferences ?? normalizeDesktopNewDronePreferences({});
-          if (!basePreferences) throw new Error('Could not resolve new-chat preferences.');
-          const spawnContexts = useDroneHubUiStore.getState().spawnContextByRepoKey;
-          const creationPreferences = resolveCompanionDroneCreationPreferences({
-            remembered: rememberedPreferences,
-            defaults: basePreferences,
-            spawnContext: resolveSpawnContextPreferencesForRepo(spawnContexts, repoPath),
-            hasSpawnContext: hasSpawnContextPreferencesForRepo(spawnContexts, repoPath),
-          });
-          const configuration = buildNewChatConfiguration(
-            creationPreferences,
-            resolveAgentKeyToConfig,
-          );
+        if (configuration) {
           await requestJson(
             `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/config`,
             {
@@ -4057,11 +4257,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       }
     },
     [
-      normalizeCreateRepoPath,
       rememberStartupSeed,
       rememberSeenModels,
       requestJson,
-      resolveAgentKeyToConfig,
+      resolveNewChatConfiguration,
       setSelectedChat,
       setSelectedDrone,
     ],
@@ -4219,30 +4418,99 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     [promotingNewChatActionById, requestJson, selectDroneChat, selectedChat, selectedDrone],
   );
   const createDraftDroneChat = React.useCallback(async (drone: DroneSummary): Promise<boolean> => {
-    const result = await createUntitledDroneChat(drone, {
+    const latestDrone = droneByIdRef.current[drone.id] ?? drone;
+    const reservedChatNames = [...newDraftChatsRef.current.values()]
+      .filter((tracked) => tracked.droneId === latestDrone.id)
+      .map((tracked) => tracked.chatName);
+    const chatName = suggestNextDroneChatName([
+      ...(latestDrone.chats ?? []),
+      ...reservedChatNames,
+    ]);
+    let configuration: NewChatConfiguration;
+    try {
+      configuration = resolveNewChatConfiguration(latestDrone);
+    } catch (error: unknown) {
+      showShortcutToast(
+        error instanceof Error ? error.message : String(error),
+        'Draft chat could not be created',
+      );
+      return false;
+    }
+    const key = droneChatQueueKey(latestDrone.id, chatName);
+    const previousSelection = {
+      droneId: String(useDroneHubUiStore.getState().selectedDrone ?? '').trim(),
+      chatName: String(useDroneHubUiStore.getState().selectedChat ?? '').trim() || 'default',
+    };
+    const tracked = {
+      droneId: latestDrone.id,
+      chatName,
+      wasActivated: true,
+      submissionInFlight: false,
+      preserveOnLeave: false,
+      serverCreated: false,
+      abandoned: false,
+      cleanupInFlight: false,
+      cleanupComplete: false,
+      creationPromise: null as Promise<boolean> | null,
+    };
+    newDraftChatsRef.current.set(key, tracked);
+    addOptimisticDraftChat(latestDrone.id, chatName);
+    rememberStartupSeed([{ id: latestDrone.id, name: latestDrone.name }], {
+      runtime: latestDrone.runtime === 'host' ? 'host' : 'container',
       draft: true,
-      select: false,
+      agent: configuration.agent,
+      model: configuration.model ?? null,
+      reasoning: configuration.reasoning ?? null,
+      agentPermissionMode: configuration.agentPermissionMode,
+      approvalPolicy: configuration.approvalPolicy,
+      prompt: '',
+      chatName,
+      group: latestDrone.group ?? null,
+      repoPath: latestDrone.repoPath ?? null,
     });
-    const chatName = String(result.chatName ?? '').trim();
-    if (result.ok && chatName) {
-      const key = droneChatQueueKey(drone.id, chatName);
-      newDraftChatsRef.current.set(key, {
-        droneId: drone.id,
-        chatName,
-        wasActivated: false,
-        submissionInFlight: false,
-        preserveOnLeave: false,
+    selectDroneChat(latestDrone.id, chatName);
+
+    const creationPromise = (async (): Promise<boolean> => {
+      const result = await createDroneChat(latestDrone, chatName, {
+        draft: true,
+        select: false,
+        configuration,
       });
-      selectDroneChat(drone.id, chatName);
-    }
-    if (!result.ok && result.error) {
-      showShortcutToast(result.error, 'Draft chat could not be created');
-    }
-    return result.ok === true;
+      tracked.serverCreated = result.ok === true;
+      if (!result.ok) {
+        newDraftChatsRef.current.delete(key);
+        removeOptimisticDraftChat(latestDrone.id, chatName);
+        unhideOptimisticallyRemovedDraftChat(latestDrone.id, chatName);
+        clearStartupSeedForChat(latestDrone.id, chatName);
+        const uiState = useDroneHubUiStore.getState();
+        if (
+          uiState.selectedDrone === latestDrone.id &&
+          (String(uiState.selectedChat ?? '').trim() || 'default') === chatName
+        ) {
+          selectDroneChat(previousSelection.droneId || latestDrone.id, previousSelection.chatName);
+        }
+        if (result.error) showShortcutToast(result.error, 'Draft chat could not be created');
+        return false;
+      }
+      if (tracked.abandoned) {
+        deleteAbandonedDraftChat(key, tracked);
+      }
+      return true;
+    })();
+    tracked.creationPromise = creationPromise;
+    void creationPromise;
+    return true;
   }, [
-    createUntitledDroneChat,
+    addOptimisticDraftChat,
+    clearStartupSeedForChat,
+    createDroneChat,
+    deleteAbandonedDraftChat,
+    rememberStartupSeed,
+    removeOptimisticDraftChat,
+    resolveNewChatConfiguration,
     selectDroneChat,
     showShortcutToast,
+    unhideOptimisticallyRemovedDraftChat,
   ]);
   const createDroneChatFromShortcut = React.useCallback(async (): Promise<boolean> => {
     if (!currentDrone || selectedGroupMultiChat) return false;
@@ -4279,20 +4547,26 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       });
       if (disposition === 'wait') continue;
 
-      newDraftChatsRef.current.delete(key);
-      if (disposition === 'retain') continue;
-      const url = `/api/drones/${encodeURIComponent(tracked.droneId)}/chats/${encodeURIComponent(tracked.chatName)}`;
-      void requestJson<{ ok: true }>(url, { method: 'DELETE' }).catch((error: unknown) => {
-        console.warn('[DroneHub] abandoned new draft chat cleanup failed', {
-          droneId: tracked.droneId,
-          chatName: tracked.chatName,
-          error,
-        });
-      });
+      if (disposition === 'retain' && !tracked.serverCreated) continue;
+      if (disposition === 'retain') {
+        newDraftChatsRef.current.delete(key);
+        continue;
+      }
+      removeOptimisticDraftChat(tracked.droneId, tracked.chatName);
+      hideOptimisticallyRemovedDraftChat(tracked.droneId, tracked.chatName);
+      clearStartupSeedForChat(tracked.droneId, tracked.chatName);
+      if (!tracked.serverCreated) {
+        tracked.abandoned = true;
+        continue;
+      }
+      deleteAbandonedDraftChat(key, tracked);
     }
   }, [
     drones,
-    requestJson,
+    clearStartupSeedForChat,
+    deleteAbandonedDraftChat,
+    hideOptimisticallyRemovedDraftChat,
+    removeOptimisticDraftChat,
     selectedChat,
     selectedDrone,
   ]);
@@ -4486,6 +4760,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           chatNames: [chatName],
           droneLabel,
           deleteMode,
+          draftChatNames: drone?.draftChats?.[chatName] === true ? [chatName] : [],
         }));
         if (!confirmed) return { ok: false, error: '' };
       }

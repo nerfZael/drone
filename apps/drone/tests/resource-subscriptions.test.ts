@@ -556,6 +556,35 @@ describe('chat subscription transitions', () => {
     expect(failed.events.map((event) => event.eventType)).toEqual(['chat.failed']);
   });
 
+  test('includes human chat and drone names while retaining the chat ID', () => {
+    const namedLocation = {
+      chatId: 'target-chat',
+      droneId: 'drone-b',
+      droneName: 'Workstream 2',
+      chatName: '02 Character Models',
+      droneChatCount: 3,
+    };
+    const idle = detectChatSubscriptionChanges(
+      { ...chatSubscription, cursor: { ...chatSubscription.cursor, idleArmed: true } },
+      namedLocation,
+      {
+        idle: true,
+        reason: 'settled',
+        latest: { id: 'named-run', role: 'assistant', status: 'sent' },
+      },
+    );
+
+    expect(idle.events[0]).toMatchObject({
+      summary: 'Workstream 2 / 02 Character Models became idle.',
+      providerContent: {
+        chatLabel: 'Workstream 2 / 02 Character Models',
+        chatId: 'target-chat',
+        droneName: 'Workstream 2',
+        chatName: '02 Character Models',
+      },
+    });
+  });
+
   test('uses a stable idle event ID when no latest message ID is available', () => {
     const armed = {
       ...chatSubscription,

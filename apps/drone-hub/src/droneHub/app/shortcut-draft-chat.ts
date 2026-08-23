@@ -1,5 +1,13 @@
 export type ShortcutDraftChatDisposition = 'wait' | 'delete' | 'retain';
 
+export function shouldRetainOptimisticallyHiddenDraftChat(input: {
+  abandoned: boolean;
+  cleanupComplete: boolean;
+  authoritativeChatPresent: boolean;
+}): boolean {
+  return (input.abandoned && !input.cleanupComplete) || input.authoritativeChatPresent;
+}
+
 export function shortcutDraftChatDisposition(input: {
   active: boolean;
   wasActivated: boolean;

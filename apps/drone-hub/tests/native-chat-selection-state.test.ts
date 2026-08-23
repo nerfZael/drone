@@ -3,6 +3,7 @@ import {
   chatNamesForConfigSelection,
   chatConfigResolutionState,
   chatInfoForSelection,
+  chatMetadataEligibleForSelection,
   genericChatComposerAvailable,
   shouldShowDroneStartupFailureEmptyState,
 } from '../src/droneHub/app/chat-selection-model';
@@ -10,6 +11,7 @@ import {
   chatHasInFlightPrompt,
   localQueuedPromptStateWhileFlushing,
   shouldFlushLocalQueuedPrompts,
+  startupAgentForChatSelection,
   visiblePendingPromptsForAgent,
 } from '../src/droneHub/app/use-chat-runtime-orchestration';
 
@@ -20,6 +22,22 @@ const drone = {
 } as any;
 
 describe('native chat selection state', () => {
+  test('uses the optimistic chat seed to choose the correct initial surface', () => {
+    const nativeAgent = { kind: 'native' as const };
+    expect(startupAgentForChatSelection({
+      agent: nativeAgent,
+      startupChatName: 'Untitled 1',
+      selectedChat: 'Untitled 1',
+      droneHubPhase: 'ready',
+    })).toEqual(nativeAgent);
+    expect(startupAgentForChatSelection({
+      agent: nativeAgent,
+      startupChatName: 'Untitled 1',
+      selectedChat: 'default',
+      droneHubPhase: 'ready',
+    })).toBeNull();
+  });
+
   test('keeps an in-flight send scoped to its originating drone chat', () => {
     const inFlightByChat = {
       'drone-a::default': 1,
@@ -37,6 +55,17 @@ describe('native chat selection state', () => {
         workflowChats: ['workflow-run-planner', 'workflow-run-analyst'],
       }),
     ).toEqual(['default', 'workflow-run-analyst', 'workflow-run-planner']);
+  });
+
+  test('allows listed draft chats to load their configurable metadata', () => {
+    expect(
+      chatMetadataEligibleForSelection({
+        hasDroneSummary: true,
+        droneProvisioning: false,
+        droneStartupFailed: false,
+        chatListed: true,
+      }),
+    ).toBe(true);
   });
 
   test('does not reuse chat metadata from the previously selected drone', () => {

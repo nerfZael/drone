@@ -5,6 +5,7 @@ import {
   mergeVisibleSidebarNodeOrderByParent,
   normalizeSidebarLayout,
   reorderSidebarEntries,
+  sidebarLayoutPatch,
 } from '../src/sidebar';
 
 describe('canonical sidebar mutations', () => {
@@ -110,6 +111,32 @@ describe('canonical sidebar mutations', () => {
       targetId: 'alpha',
       muted: false,
     }).mutedDroneIds).toEqual([]);
+  });
+
+  test('patches chat mute ids only when a chat-group path changes', () => {
+    const layout = normalizeSidebarLayout({ mutedChatIds: ['chat:alpha:review'] });
+    const chatMove = {
+      kind: 'chat-tree-move' as const,
+      droneId: 'alpha',
+      itemKind: 'chat' as const,
+      activeNodeId: 'chat:alpha:review',
+      sourcePath: null,
+      sourceSiblingNodeIds: ['chat:alpha:review'],
+      targetPath: 'Work',
+      targetSiblingNodeIds: [],
+      placement: 'inside' as const,
+    };
+    const groupRename = {
+      kind: 'chat-group-rename' as const,
+      droneId: 'alpha',
+      path: 'Work',
+      newPath: 'Projects',
+    };
+
+    expect(sidebarLayoutPatch(layout, chatMove)).not.toHaveProperty('mutedChatIds');
+    expect(sidebarLayoutPatch(layout, groupRename).mutedChatIds).toEqual([
+      'chat:alpha:review',
+    ]);
   });
 
   test('rebases one dragged item without replaying stale sibling order', () => {

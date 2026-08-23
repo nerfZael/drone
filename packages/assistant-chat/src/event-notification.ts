@@ -241,8 +241,41 @@ export function eventNotificationResourceLabel(input: {
   resourceType?: unknown;
   resourceId?: unknown;
   providerContentText?: unknown;
+  summary?: unknown;
 }): string {
   const type = eventNotificationResourceTypeLabel(input.resourceType);
+  if (String(input.resourceType ?? '').trim() === 'chat') {
+    try {
+      const content = JSON.parse(String(input.providerContentText ?? '')) as Record<
+        string,
+        unknown
+      >;
+      const chatLabel = String(content?.chatLabel ?? '').trim();
+      if (chatLabel) return `${type} · ${chatLabel}`;
+      const droneName = String(content?.droneName ?? '').trim();
+      const chatName = String(content?.chatName ?? '').trim();
+      const label = [droneName, chatName].filter(Boolean).join(' / ');
+      if (label) return `${type} · ${label}`;
+    } catch {
+      // Fall through to summary and resource-ID compatibility fallbacks.
+    }
+
+    // Notifications written before chat labels were included still carry the
+    // chat name after the final slash in their trusted summary.
+    const summaryTarget = String(input.summary ?? '')
+      .trim()
+      .replace(/ (?:became idle|failed its latest run)\.?$/i, '');
+    const separatorIndex = summaryTarget.lastIndexOf('/');
+    const chatName = separatorIndex >= 0 ? summaryTarget.slice(separatorIndex + 1).trim() : '';
+    if (chatName) {
+      const droneLabel = summaryTarget.slice(0, separatorIndex).trim();
+      const legacyOpaqueDroneId =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          droneLabel,
+        );
+      return `${type} · ${legacyOpaqueDroneId ? chatName : summaryTarget}`;
+    }
+  }
   if (String(input.resourceType ?? '').trim() === 'cron') {
     try {
       const content = JSON.parse(String(input.providerContentText ?? '')) as Record<

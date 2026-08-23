@@ -965,7 +965,7 @@ function chatEvent(
   causeId: string,
 ): ResourceEvent {
   const occurredAt = validIso(status.latest?.at, new Date().toISOString());
-  const chatLabel = `${location.droneId}/${location.chatName}`;
+  const chatLabel = chatResourceSubscriptionLabel(location);
   return {
     id: crypto.randomUUID(),
     providerEventId: `drone-hub:${subscription.resourceId}:${eventType}:${causeId}`,
@@ -980,6 +980,10 @@ function chatEvent(
         ? `${chatLabel} became idle.`
         : `${chatLabel} failed its latest run.`,
     providerContent: {
+      chatLabel,
+      chatId: location.chatId,
+      droneName: String(location.droneName ?? '').trim() || location.droneId,
+      chatName: location.chatName,
       latestMessage: String(status.latest?.text ?? '').slice(0, 8_000),
       latestMessageId: String(status.latest?.id ?? '').trim() || null,
       reason: status.reason,

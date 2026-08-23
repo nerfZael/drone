@@ -50,6 +50,32 @@ describe('event notification prompts', () => {
     expect(eventNotificationResourceTypeLabel('change_request')).toBe('Change request');
     expect(
       eventNotificationResourceLabel({
+        resourceType: 'chat',
+        resourceId: '415ee2a4-f0b4-49da-b3e0-23d7096f5090',
+        providerContentText: JSON.stringify({
+          chatLabel: 'Workstream 2 / 02 Character Models',
+          chatId: '415ee2a4-f0b4-49da-b3e0-23d7096f5090',
+        }),
+      }),
+    ).toBe('Chat · Workstream 2 / 02 Character Models');
+    expect(
+      eventNotificationResourceLabel({
+        resourceType: 'chat',
+        resourceId: '415ee2a4-f0b4-49da-b3e0-23d7096f5090',
+        summary: 'Workstream 2 / 02 Character Models became idle.',
+        providerContentText: '{}',
+      }),
+    ).toBe('Chat · Workstream 2 / 02 Character Models');
+    expect(
+      eventNotificationResourceLabel({
+        resourceType: 'chat',
+        resourceId: '415ee2a4-f0b4-49da-b3e0-23d7096f5090',
+        summary: 'a4aa46d4-94f8-4af9-8bdc-7b5d17801e9d/02 Character Models became idle.',
+        providerContentText: '{}',
+      }),
+    ).toBe('Chat · 02 Character Models');
+    expect(
+      eventNotificationResourceLabel({
         resourceType: 'change_request',
         resourceId: '42',
         providerContentText: JSON.stringify({
@@ -90,6 +116,17 @@ describe('event notification prompts', () => {
     ]);
     expect(eventNotificationDataFields('{truncated')).toEqual([
       { label: 'Details', value: '{truncated' },
+    ]);
+    expect(
+      eventNotificationDataFields(
+        JSON.stringify({
+          chatLabel: 'Workstream 2 / 02 Character Models',
+          chatId: '415ee2a4-f0b4-49da-b3e0-23d7096f5090',
+        }),
+      ),
+    ).toEqual([
+      { label: 'Chat label', value: 'Workstream 2 / 02 Character Models' },
+      { label: 'Chat ID', value: '415ee2a4-f0b4-49da-b3e0-23d7096f5090' },
     ]);
   });
 
