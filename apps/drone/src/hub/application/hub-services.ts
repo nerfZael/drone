@@ -18,6 +18,7 @@ export type HubServices = {
     list: typeof listGroups;
     create: typeof createGroup;
     delete: DeleteGroupCommand;
+    deleteDrones: DeleteGroupCommand;
     rename: typeof renameGroup;
     setDroneGroup: typeof setDroneGroup;
   };
@@ -58,6 +59,15 @@ export function createHttpHubServices(request: HubServiceRequest): HubServices {
       delete: async (input) =>
         await request(
           `/api/groups/${encodeURIComponent(input.groupRef)}?${new URLSearchParams({
+            repoPath: input.repoPath,
+            keepVolume: String(input.keepVolume),
+            forget: String(input.forget),
+          }).toString()}`,
+          { method: 'DELETE' },
+        ),
+      deleteDrones: async (input) =>
+        await request(
+          `/api/groups/${encodeURIComponent(input.groupRef)}/drones?${new URLSearchParams({
             repoPath: input.repoPath,
             keepVolume: String(input.keepVolume),
             forget: String(input.forget),

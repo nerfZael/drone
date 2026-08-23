@@ -19,6 +19,12 @@ describe('HTTP Hub services adapter', () => {
       keepVolume: false,
       forget: true,
     });
+    await services.groups.deleteDrones({
+      groupRef: 'group/id',
+      repoPath: '/repo',
+      keepVolume: false,
+      forget: true,
+    });
     await services.groups.rename({
       groupRef: 'group/id',
       repoPath: '/repo',
@@ -43,6 +49,7 @@ describe('HTTP Hub services adapter', () => {
       ['GET', '/api/groups?repoPath=%2Frepo+path'],
       ['POST', '/api/groups'],
       ['DELETE', '/api/groups/group%2Fid?repoPath=%2Frepo&keepVolume=false&forget=true'],
+      ['DELETE', '/api/groups/group%2Fid/drones?repoPath=%2Frepo&keepVolume=false&forget=true'],
       ['POST', '/api/groups/group%2Fid/rename'],
       ['POST', '/api/drones/group-set'],
       ['POST', '/api/fleet/actors/drone%2Fa/parent'],
@@ -58,7 +65,7 @@ describe('HTTP Hub services adapter', () => {
       name: 'Review',
       repoPath: '/repo',
     });
-    expect(JSON.parse(String(calls[13]?.init?.body))).toEqual({
+    expect(JSON.parse(String(calls[14]?.init?.body))).toEqual({
       uiPreferences: { pinnedDroneIds: ['drone-a'] },
       expectedVersion: 2,
       notificationMode: 'sidebar_snapshot',

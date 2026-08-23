@@ -102,6 +102,56 @@ describe('Hub application services', () => {
     expect(deletedGroups).toEqual([['/repo', 'Review']]);
   });
 
+  test('deletes only drones in a group hierarchy when preserving its groups', async () => {
+    const removedDroneIds: string[] = [];
+    const deletedGroups: unknown[] = [];
+    const command = createDeleteGroupCommand({
+      listCanonicalGroups: async () => [
+        { id: 'group-id', repoPath: '/repo', name: 'Review' },
+        { id: 'nested-id', repoPath: '/repo', name: 'Review/Nested' },
+      ],
+      loadRegistry: async () => ({
+        drones: {
+          direct: { name: 'Direct', repoPath: '/repo', group: 'Review' },
+          nested: { name: 'Nested', repoPath: '/repo', group: 'Review/Nested' },
+          sibling: { name: 'Sibling', repoPath: '/repo', group: 'Other' },
+          otherRepo: { name: 'Other repo', repoPath: '/other', group: 'Review' },
+        },
+        pending: {},
+      }),
+      normalizeDroneIdentity: (value) => String(value ?? '').trim(),
+      deleteCanonicalGroupArtifacts: async (...args) => {
+        deletedGroups.push(args);
+      },
+      dequeueProvisioning: () => undefined,
+      removeDroneById: async ({ id }) => {
+        removedDroneIds.push(id);
+        return { removedRegistry: true };
+      },
+      deleteCanonicalDroneLifecycleBatch: async () => undefined,
+    });
+
+    const result = await command({
+      groupRef: 'group-id',
+      repoPath: '/ignored',
+      keepVolume: false,
+      forget: true,
+      preserveGroup: true,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      group: 'Review',
+      removed: [
+        { id: 'direct', name: 'Direct' },
+        { id: 'nested', name: 'Nested' },
+      ],
+      deletedGroup: false,
+    });
+    expect(removedDroneIds).toEqual(['direct', 'nested']);
+    expect(deletedGroups).toEqual([]);
+  });
+
   test('sets a fleet parent through one canonical command', async () => {
     let persisted: any = null;
     const result = await setDroneParent(

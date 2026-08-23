@@ -97,6 +97,7 @@ import {
 } from './MobileSidebarDragDrop';
 import { resolveMobileSidebarRepositoryAlignment } from './mobile-sidebar-repository-navigation';
 import { useMobileCompanion } from './MobileCompanionContext';
+import { resolveMobileChatDeletePlan } from './mobile-chat-delete';
 
 export function appDrawerWidth(windowWidth: number): number {
   return Math.max(0, windowWidth);
@@ -2578,25 +2579,22 @@ function AppDrawerView({
       setChatMutationBusy(false);
     }
   }, [chatEditor, chatMutationBusy, droneSidebarOrder, onCreateDroneChat, onRenameDroneChat, onReorderSidebar, onSelectDroneChat]);
+  const deleteChatPlan = React.useMemo(() => {
+    if (!deleteChatTarget) return { chatNames: [], defaultChatKept: false };
+    return resolveMobileChatDeletePlan({
+      droneId: deleteChatTarget.drone.id,
+      chatNames: deleteChatTarget.drone.chats,
+      targetChatName: deleteChatTarget.chatName,
+      selectedChatNodeIds,
+    });
+  }, [deleteChatTarget, selectedChatNodeIds]);
   const confirmDeleteChat = React.useCallback(async () => {
     if (!deleteChatTarget || chatMutationBusy || !onDeleteDroneChat) return;
     setChatMutationBusy(true);
     setChatMutationError(null);
     try {
-      const targetNodeId = sidebarChatNodeId(
-        deleteChatTarget.drone.id,
-        deleteChatTarget.chatName,
-      );
-      const selectedNames = selectedChatNodeIds.has(targetNodeId)
-        ? deleteChatTarget.drone.chats.filter((name) =>
-            name !== 'default' &&
-            selectedChatNodeIds.has(sidebarChatNodeId(deleteChatTarget.drone.id, name)))
-        : [];
-      const names = selectedNames.length
-        ? selectedNames
-        : deleteChatTarget.chatName === 'default' ? [] : [deleteChatTarget.chatName];
       const failedNames: string[] = [];
-      for (const name of names) {
+      for (const name of deleteChatPlan.chatNames) {
         const deleted = await onDeleteDroneChat(deleteChatTarget.drone.id, name);
         if (deleted && onReorderSidebar) {
           onReorderSidebar({
@@ -2625,7 +2623,7 @@ function AppDrawerView({
     } finally {
       setChatMutationBusy(false);
     }
-  }, [chatMutationBusy, deleteChatTarget, onDeleteDroneChat, onReorderSidebar, selectedChatNodeIds]);
+  }, [chatMutationBusy, deleteChatPlan, deleteChatTarget, onDeleteDroneChat, onReorderSidebar]);
   const chatContextActions = React.useMemo<ContextMenuAction[]>(() => {
     if (!chatActionTarget) return [];
     const actions: ContextMenuAction[] = [];
@@ -3277,18 +3275,16 @@ function AppDrawerView({
           />
           <ConfirmDialog
             visible={Boolean(deleteChatTarget)}
-            title="Delete chat?"
+            title={deleteChatPlan.chatNames.length > 1
+              ? `Delete ${deleteChatPlan.chatNames.length} chats?`
+              : 'Delete chat?'}
             message={
               chatMutationError ||
-              (deleteChatTarget &&
-              selectedChatNodeIds.has(sidebarChatNodeId(deleteChatTarget.drone.id, deleteChatTarget.chatName)) &&
-              selectedChatNodeIds.size > 1
-                ? `Delete ${deleteChatTarget.drone.chats.filter((name) =>
-                    name !== 'default' &&
-                    selectedChatNodeIds.has(sidebarChatNodeId(deleteChatTarget.drone.id, name))).length} selected chats? The default chat will be kept.`
-                : `Delete “${deleteChatTarget?.chatName ?? ''}” from ${deleteChatTarget?.drone.name ?? 'this drone'}?`)
+              (deleteChatPlan.chatNames.length > 1
+                ? `Delete ${deleteChatPlan.chatNames.length} selected chats from ${deleteChatTarget?.drone.name ?? 'this drone'}?${deleteChatPlan.defaultChatKept ? ' The default chat will be kept.' : ''}`
+                : `Delete “${deleteChatPlan.chatNames[0] ?? ''}” from ${deleteChatTarget?.drone.name ?? 'this drone'}?`)
             }
-            confirmLabel="Delete"
+            confirmLabel={deleteChatPlan.chatNames.length > 1 ? 'Delete chats' : 'Delete'}
             destructive
             busy={chatMutationBusy}
             onCancel={() => {

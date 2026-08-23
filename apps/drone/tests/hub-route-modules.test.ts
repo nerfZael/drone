@@ -721,6 +721,17 @@ describe('extracted Hub route modules', () => {
             total: 0,
           };
         },
+        deleteDrones: async (input: unknown) => {
+          deletions.push(input);
+          return {
+            ok: true,
+            group: 'Review',
+            repoPath: '/repo',
+            removed: [{ id: 'drone-id', name: 'Drone' }],
+            total: 1,
+            deletedGroup: false,
+          };
+        },
       },
     } as any);
 
@@ -730,7 +741,19 @@ describe('extracted Hub route modules', () => {
         '/api/groups/group-id?repoPath=%2Frepo&keepVolume=1&forget=false',
       ),
     ).toBe(true);
+    expect(
+      await request(
+        'DELETE',
+        '/api/groups/group-id/drones?repoPath=%2Frepo&keepVolume=1&forget=false',
+      ),
+    ).toBe(true);
     expect(deletions).toEqual([
+      {
+        groupRef: 'group-id',
+        repoPath: '/repo',
+        keepVolume: true,
+        forget: false,
+      },
       {
         groupRef: 'group-id',
         repoPath: '/repo',
@@ -747,6 +770,17 @@ describe('extracted Hub route modules', () => {
           repoPath: '/repo',
           removed: [],
           total: 0,
+        },
+      },
+      {
+        status: 200,
+        body: {
+          ok: true,
+          group: 'Review',
+          repoPath: '/repo',
+          removed: [{ id: 'drone-id', name: 'Drone' }],
+          total: 1,
+          deletedGroup: false,
         },
       },
     ]);

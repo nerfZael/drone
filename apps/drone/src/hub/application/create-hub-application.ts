@@ -28,6 +28,7 @@ export function createHubApplication(input: {
 }) {
   const events = input.events ?? new HubApplicationEvents();
   const uiPreferences = new UiPreferencesService(events);
+  const deleteGroup = createDeleteGroupCommand(input.deleteGroupDependencies);
   const services: HubServices = {
     repositories: {
       list: listRepositories,
@@ -35,7 +36,12 @@ export function createHubApplication(input: {
     groups: {
       list: listGroups,
       create: createGroup,
-      delete: createDeleteGroupCommand(input.deleteGroupDependencies),
+      delete: deleteGroup,
+      deleteDrones: async (deleteInput) =>
+        await deleteGroup({
+          ...deleteInput,
+          preserveGroup: true,
+        }),
       rename: renameGroup,
       setDroneGroup,
     },

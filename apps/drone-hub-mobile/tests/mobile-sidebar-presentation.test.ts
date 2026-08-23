@@ -464,6 +464,14 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain(": 'Delete chat'");
     expect(source).toContain('<TextInputDialog');
     expect(source).toContain('<ConfirmDialog');
+    expect(source).toContain('resolveMobileChatDeletePlan({');
+    const deleteFlow = source.slice(
+      source.indexOf('const deleteChatPlan'),
+      source.indexOf('const chatContextActions'),
+    );
+    expect(deleteFlow).not.toContain('window.confirm');
+    expect(deleteFlow).not.toContain('Alert.alert');
+    expect(deleteFlow).toContain('for (const name of deleteChatPlan.chatNames)');
     expect(source).toContain('repoNavigationHead: {\n    minHeight: 48,\n    marginBottom: 8,');
     expect(source).not.toContain('showChats={false}');
     expect(source).toContain('color: colors.sidebarSubitemFg,');

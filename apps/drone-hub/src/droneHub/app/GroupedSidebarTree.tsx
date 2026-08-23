@@ -68,6 +68,7 @@ import {
 } from '@drone/hub-model/sidebar';
 import { useChatApprovalRequired } from './use-drone-hub-runtime-store';
 import type {
+  DeleteDronesInGroupOptions,
   DeleteGroupOptions,
   GroupMutationScope,
   MoveDronesToGroupResult,
@@ -90,6 +91,11 @@ import {
   sidebarSelectionEdgeClass,
 } from '../sidebar/presentation';
 import { selectSidebarChatNodes } from './sidebar-chat-selection';
+import {
+  buildSidebarChatDeleteConfirmation,
+  type DeleteDroneChatOptions,
+} from './sidebar-chat-delete-confirmation';
+import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
 
 type FolderEditorState = {
   mode: 'create' | 'rename';
@@ -182,6 +188,10 @@ type GroupedSidebarTreeProps = {
     count: number,
     opts?: DeleteGroupOptions,
   ) => Promise<boolean> | boolean;
+  onDeleteDronesInGroup: (
+    group: string,
+    opts?: DeleteDronesInGroupOptions,
+  ) => Promise<boolean> | boolean;
   onOpenDraftDrone: (opts?: { repoPath?: string | null; group?: string | null }) => void;
   busyChatNodeIdSet: Set<string>;
   approvalRequiredByChatNodeId: Record<string, boolean>;
@@ -197,6 +207,7 @@ type GroupedSidebarTreeProps = {
   onDeleteDroneChat: (
     droneId: string,
     chatName: string,
+    opts?: DeleteDroneChatOptions,
   ) => Promise<{ ok: boolean; deletedDrone?: boolean; error?: string | null }>;
   onCloneDrone: (drone: DroneSummary) => void;
   onAddDroneToGroup: (drone: DroneSummary) => void;
@@ -1777,6 +1788,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
     toggleSidebarGroupHidden,
     onOpenGroupMultiChat,
     onDeleteGroup,
+    onDeleteDronesInGroup,
     droneById,
     busyChatNodeIdSet,
     approvalRequiredByChatNodeId,
@@ -1960,6 +1972,13 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
       ...(repoPath != null ? { repoPath } : {}),
     });
   }, [folderPath, node.groupId, node.groupKind, node.label, node.totalDroneCount, onDeleteGroup, repoPath]);
+  const handleFolderDronesDelete = React.useCallback(() => {
+    void onDeleteDronesInGroup(folderPath, {
+      label: node.label,
+      groupId: node.groupId,
+      ...(repoPath != null ? { repoPath } : {}),
+    });
+  }, [folderPath, node.groupId, node.label, onDeleteDronesInGroup, repoPath]);
   const multiChatTarget = node.repoGroupPath && node.groupPath ? node.path : folderPath;
   const contextMenuItems: SidebarContextMenuItem[] = [
     {
@@ -2050,20 +2069,37 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
       onSelect: () => onOpenGroupMultiChat(multiChatTarget),
     },
     ...(!isVirtualGroup
-      ? [{
-          id: 'delete',
-          label: 'Delete group',
-          shortcut: 'Delete',
-          separatorBefore: true,
-          icon: deletingGroups[mutationKey] ? (
-            <IconSpinner className="h-3.5 w-3.5" />
-          ) : (
-            <IconTrash className="h-3.5 w-3.5" />
-          ),
-          disabled: Boolean(deletingGroups[mutationKey]) || Boolean(renamingGroups[mutationKey]),
-          tone: 'danger',
-          onSelect: handleFolderDelete,
-        } satisfies SidebarContextMenuItem]
+      ? [
+          {
+            id: 'delete-drones',
+            label: 'Delete drones in group',
+            separatorBefore: true,
+            icon: deletingGroups[mutationKey] ? (
+              <IconSpinner className="h-3.5 w-3.5" />
+            ) : (
+              <IconTrash className="h-3.5 w-3.5" />
+            ),
+            disabled:
+              node.totalDroneCount === 0 ||
+              Boolean(deletingGroups[mutationKey]) ||
+              Boolean(renamingGroups[mutationKey]),
+            tone: 'danger',
+            onSelect: handleFolderDronesDelete,
+          } satisfies SidebarContextMenuItem,
+          {
+            id: 'delete',
+            label: 'Delete group',
+            shortcut: 'Delete',
+            icon: deletingGroups[mutationKey] ? (
+              <IconSpinner className="h-3.5 w-3.5" />
+            ) : (
+              <IconTrash className="h-3.5 w-3.5" />
+            ),
+            disabled: Boolean(deletingGroups[mutationKey]) || Boolean(renamingGroups[mutationKey]),
+            tone: 'danger',
+            onSelect: handleFolderDelete,
+          } satisfies SidebarContextMenuItem,
+        ]
       : []),
   ];
 
@@ -2239,6 +2275,7 @@ function GroupedSidebarNodeEntry({ nodeId, groupPath }: { nodeId: string; groupP
 }
 
 export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
+  const confirmDelete = useAppConfirmDialog();
   const mutedSidebarGroupIds = useDroneHubUiStore((state) => state.mutedSidebarGroupIds);
   const mutedDroneIds = useDroneHubUiStore((state) => state.mutedDroneIds);
   const mutedChatIds = useDroneHubUiStore((state) => state.mutedChatIds);
@@ -2460,7 +2497,11 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
   const shouldSuppressClick = React.useCallback(() => Date.now() < suppressClicksUntilRef.current, []);
 
   const handleDeleteChat = React.useCallback(
-    async (droneIdRaw: string, chatNameRaw: string) => {
+    async (
+      droneIdRaw: string,
+      chatNameRaw: string,
+      opts?: DeleteDroneChatOptions,
+    ) => {
       const droneId = String(droneIdRaw ?? '').trim();
       const chatName = String(chatNameRaw ?? '').trim();
       if (!droneId || !chatName || chatName === 'default') return false;
@@ -2468,7 +2509,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       if (deletingChats[key]) return false;
       setDeletingChats((prev) => ({ ...prev, [key]: true }));
       try {
-        const result = await onDeleteDroneChat(droneId, chatName);
+        const result = await onDeleteDroneChat(droneId, chatName, opts);
         if (!result.ok && result.error) {
           window.alert(result.error);
         } else if (result.ok) {
@@ -2509,15 +2550,22 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       .map((node) => node.chatName) : [];
     const names = (selectedNames.length ? selectedNames : [fallbackChatName]).filter((name) => name !== 'default');
     if (!names.length) return;
-    if (names.length > 1 && !window.confirm(`Delete ${names.length} selected chats?`)) return;
+    const defaultChatKept = selectedChatNodeIdSet.has(sidebarChatNodeId(droneId, 'default'));
+    const confirmed = await confirmDelete(buildSidebarChatDeleteConfirmation({
+      chatNames: names,
+      droneLabel: props.uiDroneName(droneById[droneId]?.name ?? droneId),
+      deleteMode: props.deleteMode,
+      defaultChatKept,
+    }));
+    if (!confirmed) return;
     const deletedIds = new Set<string>();
     for (const chatName of names) {
-      if (await handleDeleteChat(droneId, chatName)) {
+      if (await handleDeleteChat(droneId, chatName, { confirmed: true })) {
         deletedIds.add(sidebarChatNodeId(droneId, chatName));
       }
     }
     setSelectedChatNodeIds((current) => current.filter((id) => !deletedIds.has(id)));
-  }, [chatTreeByDrone, flattenedChatNodeIds, handleDeleteChat, selectedChatNodeIdSet]);
+  }, [chatTreeByDrone, confirmDelete, droneById, flattenedChatNodeIds, handleDeleteChat, props.deleteMode, props.uiDroneName, selectedChatNodeIdSet]);
 
   React.useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -2769,6 +2817,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       props.onDeleteDrone,
       props.onDeleteDroneChat,
       props.onDeleteGroup,
+      props.onDeleteDronesInGroup,
       props.onFolderEditorValueChange,
       props.onMoveDronesToGroup,
       props.onCloneDrone,

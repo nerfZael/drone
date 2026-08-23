@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import type { ChatAgentConfig } from '../src/domain';
 import {
   buildNewChatConfiguration,
@@ -78,5 +79,62 @@ describe('new chat creation defaults', () => {
       agentPermissionMode: 'execute',
       approvalPolicy: 'ask',
     });
+  });
+
+  test('uses one immediate draft flow for the shortcut and drone context menu', () => {
+    const modelSource = readFileSync(
+      new URL('../src/use-drone-hub-app-model.tsx', import.meta.url),
+      'utf8',
+    );
+    const draftCreator = modelSource.slice(
+      modelSource.indexOf('const createDraftDroneChat'),
+      modelSource.indexOf('const createDroneChatFromShortcut'),
+    );
+    expect(draftCreator).toContain('createUntitledDroneChat(drone, {');
+    expect(draftCreator).toContain('draft: true');
+    expect(draftCreator).toContain('selectDroneChat(drone.id, chatName)');
+
+    const shortcutCreator = modelSource.slice(
+      modelSource.indexOf('const createDroneChatFromShortcut'),
+      modelSource.indexOf('const cloneDroneChatFromShortcut'),
+    );
+    expect(shortcutCreator).toContain('createDraftDroneChat(currentDrone)');
+
+    const sidebarSource = readFileSync(
+      new URL('../src/droneHub/app/use-sidebar-interactions.ts', import.meta.url),
+      'utf8',
+    );
+    const contextMenuCreator = sidebarSource.slice(
+      sidebarSource.indexOf('const openDroneChatCreate'),
+      sidebarSource.indexOf('const startRenameDroneChat'),
+    );
+    expect(contextMenuCreator).toContain('onCreateDraftDroneChat(drone)');
+    expect(contextMenuCreator).not.toContain("mode: 'create'");
+  });
+
+  test('keeps remembered configuration visible on the new draft', () => {
+    const modelSource = readFileSync(
+      new URL('../src/use-drone-hub-app-model.tsx', import.meta.url),
+      'utf8',
+    );
+    const createFlow = modelSource.slice(
+      modelSource.indexOf('const createDroneChat ='),
+      modelSource.indexOf('const createUntitledDroneChat'),
+    );
+    expect(createFlow).toContain('resolveCompanionDroneCreationPreferences({');
+    expect(createFlow).toContain('rememberStartupSeed([{ id: droneId, name: drone.name }]');
+    expect(createFlow).toContain('reasoning: configuration.reasoning ?? null');
+    expect(createFlow).toContain('approvalPolicy: configuration.approvalPolicy');
+
+    const rememberedSettingsSync = modelSource.slice(
+      modelSource.indexOf("const droneId = String(selectedDrone ?? '').trim();", modelSource.indexOf('lastSyncedCanvasRepoContextRef')),
+      modelSource.indexOf('const selectedChatUsesDroneBusyStatus'),
+    );
+    expect(rememberedSettingsSync).toContain(
+      "spawnReasoning: String(effectiveChatInfo.reasoning ?? '').trim()",
+    );
+    expect(rememberedSettingsSync).toContain(
+      "spawnApprovalPolicy: effectiveChatInfo.approvalPolicy ?? 'ask'",
+    );
   });
 });

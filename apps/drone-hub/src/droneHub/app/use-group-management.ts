@@ -5,7 +5,10 @@ import type { DroneSummary } from '../types';
 import { isUngroupedGroupName } from '../../domain';
 import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
 import { isNotFoundError } from './hooks';
-import { buildSidebarGroupDeleteConfirmation } from './sidebar-group-delete-confirmation';
+import {
+  buildSidebarGroupDeleteConfirmation,
+  buildSidebarGroupDronesDeleteConfirmation,
+} from './sidebar-group-delete-confirmation';
 import {
   renameSidebarEntryOrderMapKeysByPrefix,
   renameSidebarGroupTokenListByPrefix,
@@ -32,6 +35,7 @@ import {
   selectedGroupMultiChatTargetsGroup,
   renameSelectedGroupMultiChatGroup,
 } from './sidebar-group-multi-chat';
+import { sidebarGroupDroneIds } from './sidebar-group-drone-targets';
 
 type UseGroupManagementArgs = {
   sidebarCommandQueue: SidebarCommandQueue;
@@ -48,6 +52,13 @@ type UseGroupManagementArgs = {
   setHiddenSidebarGroups: React.Dispatch<React.SetStateAction<string[]>>;
   selectedGroupMultiChat: string | null;
   setSelectedGroupMultiChat: React.Dispatch<React.SetStateAction<string | null>>;
+  onDronesDeleted: (droneIds: string[]) => void;
+};
+
+type DeleteGroupDronesResponse = {
+  ok: boolean;
+  removed?: Array<{ id?: string; name?: string }>;
+  errors?: Array<{ id?: string; name?: string; error?: string }>;
 };
 
 export type MoveDronesToGroupResult = {
@@ -66,6 +77,10 @@ export type DeleteGroupOptions = GroupMutationScope & {
   label?: string;
 };
 
+export type DeleteDronesInGroupOptions = GroupMutationScope & {
+  label?: string;
+};
+
 export function useGroupManagement({
   sidebarCommandQueue,
   activeRepoPath,
@@ -81,6 +96,7 @@ export function useGroupManagement({
   setHiddenSidebarGroups,
   selectedGroupMultiChat,
   setSelectedGroupMultiChat,
+  onDronesDeleted,
 }: UseGroupManagementArgs) {
   const [groupMoveError, setGroupMoveError] = React.useState<string | null>(null);
   const [pendingGroupMoveCount, setPendingGroupMoveCount] = React.useState(0);
@@ -384,6 +400,148 @@ export function useGroupManagement({
     ],
   );
 
+  const deleteDronesInGroup = React.useCallback(
+    async (groupRaw: string, opts?: DeleteDronesInGroupOptions): Promise<boolean> => {
+      const group = String(groupRaw ?? '').trim();
+      const groupLabel = String(opts?.label ?? group).trim() || group;
+      const scopedRepoPath = resolveScopedRepoPath(activeRepoPath, opts);
+      const repoGroupPath = hasSidebarRepoPathScope(opts)
+        ? sidebarRepoGroupPathFromRepoPath(scopedRepoPath)
+        : null;
+      const mutationKey = sidebarGroupMutationKey(group, repoGroupPath);
+      if (!group || deletingGroups[mutationKey]) return false;
+
+      const targetIds = sidebarGroupDroneIds(drones, group, scopedRepoPath);
+      if (targetIds.length === 0) return false;
+
+      const ok = await confirmDelete(
+        buildSidebarGroupDronesDeleteConfirmation({
+          label: groupLabel,
+          countHint: targetIds.length,
+          repoPath: scopedRepoPath,
+        }),
+      );
+      if (!ok) return false;
+
+      const addedByThisDelete = new Set(targetIds.filter((id) => !optimisticallyDeletedDrones[id]));
+      setOptimisticallyDeletedDrones((prev) => {
+        const nextMap = { ...prev };
+        let changed = false;
+        for (const id of targetIds) {
+          if (nextMap[id]) continue;
+          nextMap[id] = true;
+          changed = true;
+        }
+        return changed ? nextMap : prev;
+      });
+      setDeletingGroups((prev) => ({ ...prev, [mutationKey]: true }));
+
+      return await sidebarCommandQueue.enqueue(async () => {
+        try {
+          const targetGroupRef = String(opts?.groupId ?? '').trim() || group;
+          const query = new URLSearchParams({ repoPath: scopedRepoPath }).toString();
+          let response: DeleteGroupDronesResponse;
+          try {
+            response = await requestJson<DeleteGroupDronesResponse>(
+              `/api/groups/${encodeURIComponent(targetGroupRef)}/drones?${query}`,
+              { method: 'DELETE' },
+            );
+          } catch (error: any) {
+            const partial = error?.data;
+            if (!partial || !Array.isArray(partial.removed)) throw error;
+            response = partial as DeleteGroupDronesResponse;
+          }
+
+          const removedIds = Array.from(
+            new Set(
+              (response.removed ?? []).map((item) => String(item?.id ?? '').trim()).filter(Boolean),
+            ),
+          );
+          const removedIdSet = new Set(removedIds);
+          const failedTargetIds = targetIds.filter((id) => !removedIdSet.has(id));
+          if (removedIds.length > 0) {
+            setOptimisticallyDeletedDrones((prev) => {
+              const nextMap = { ...prev };
+              let changed = false;
+              for (const id of removedIds) {
+                if (nextMap[id]) continue;
+                nextMap[id] = true;
+                changed = true;
+              }
+              return changed ? nextMap : prev;
+            });
+          }
+          if (failedTargetIds.length > 0) {
+            setOptimisticallyDeletedDrones((prev) => {
+              const nextMap = { ...prev };
+              let changed = false;
+              for (const id of failedTargetIds) {
+                if (!addedByThisDelete.has(id) || !nextMap[id]) continue;
+                delete nextMap[id];
+                changed = true;
+              }
+              return changed ? nextMap : prev;
+            });
+          }
+          if (removedIds.length > 0) {
+            try {
+              onDronesDeleted(removedIds);
+            } catch (cleanupError) {
+              console.error('[DroneHub] group drone client cleanup failed', {
+                group,
+                removedIds,
+                error: cleanupError,
+              });
+            }
+          }
+
+          const errors = Array.isArray(response.errors) ? response.errors : [];
+          if (!response.ok || errors.length > 0) {
+            const failedCount = errors.length || failedTargetIds.length;
+            const deletedCount = removedIds.length;
+            window.alert(
+              deletedCount === 0
+                ? `Failed to delete ${failedCount} drone${failedCount === 1 ? '' : 's'} from “${groupLabel}”.`
+                : `Deleted ${deletedCount} drone${deletedCount === 1 ? '' : 's'} from “${groupLabel}”, but ${failedCount} failed.`,
+            );
+          }
+          return response.ok;
+        } catch (error: any) {
+          console.error('[DroneHub] delete group drones failed', { group, error });
+          setOptimisticallyDeletedDrones((prev) => {
+            const nextMap = { ...prev };
+            let changed = false;
+            for (const id of addedByThisDelete) {
+              if (!nextMap[id]) continue;
+              delete nextMap[id];
+              changed = true;
+            }
+            return changed ? nextMap : prev;
+          });
+          window.alert(String(error?.message ?? '').trim() || 'Delete drones failed.');
+          return false;
+        } finally {
+          setDeletingGroups((prev) => {
+            if (!prev[mutationKey]) return prev;
+            const nextMap = { ...prev };
+            delete nextMap[mutationKey];
+            return nextMap;
+          });
+        }
+      });
+    },
+    [
+      activeRepoPath,
+      confirmDelete,
+      deletingGroups,
+      drones,
+      onDronesDeleted,
+      optimisticallyDeletedDrones,
+      setOptimisticallyDeletedDrones,
+      sidebarCommandQueue,
+    ],
+  );
+
   const moveDronesToGroup = React.useCallback(
     async (targetGroupLabel: string, rawDroneNames: string[]) => {
       const target = String(targetGroupLabel ?? '').trim();
@@ -546,6 +704,7 @@ export function useGroupManagement({
     renamingGroups,
     renameGroup,
     deleteGroup,
+    deleteDronesInGroup,
     createGroup,
     moveDronesToGroup,
     createGroupAndMove,

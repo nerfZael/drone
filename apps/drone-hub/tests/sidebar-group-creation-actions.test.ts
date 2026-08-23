@@ -64,6 +64,13 @@ describe('sidebar group creation actions', () => {
     expect(treeSource).toContain("'repository' : 'group'");
     expect(treeSource).toContain("label: 'Open multi-chat'");
     expect(treeSource).toContain("label: 'Delete group'");
+    expect(treeSource).toContain("label: 'Delete drones in group'");
+    expect(treeSource.indexOf("label: 'Delete drones in group'")).toBeLessThan(
+      treeSource.indexOf(
+        "label: 'Delete group'",
+        treeSource.indexOf("label: 'Delete drones in group'"),
+      ),
+    );
     expect(treeSource).toContain("shortcut: 'Delete'");
     expect(treeSource).toContain('shortcutBindings.createDraftGroup');
     expect(treeSource).toContain('shortcutBindings.openHoveredGroupMultiChat');
@@ -72,6 +79,18 @@ describe('sidebar group creation actions', () => {
     expect(treeSource).toContain('deletingGroups[mutationKey]');
     expect(treeSource).toContain('renamingGroups[mutationKey]');
     expect(treeSource).not.toContain('data-sidebar-folder-actions');
+
+    const groupManagementSource = readFileSync(
+      new URL('../src/droneHub/app/use-group-management.ts', import.meta.url),
+      'utf8',
+    );
+    expect(groupManagementSource).toContain(
+      '`/api/groups/${encodeURIComponent(targetGroupRef)}/drones?${query}`',
+    );
+    expect(groupManagementSource).toContain(
+      'sidebarGroupDroneIds(drones, group, scopedRepoPath)',
+    );
+    expect(groupManagementSource).toContain('onDronesDeleted(removedIds)');
   });
 
   test('does not retain global optimistic operations for repository-scoped edits', () => {

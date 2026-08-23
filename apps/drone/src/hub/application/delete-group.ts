@@ -13,6 +13,7 @@ export type DeleteGroupInput = {
   repoPath: string;
   keepVolume: boolean;
   forget: boolean;
+  preserveGroup?: boolean;
 };
 
 export type DeleteGroupResult = {
@@ -72,6 +73,7 @@ async function deleteGroup(
     throw new ResourceNotFoundError(`unknown group: ${groupRef}`);
   }
   const group = referencedGroup?.name ?? groupRef;
+  const preserveGroup = input.preserveGroup === true;
   const wantsUngrouped = isUngroupedGroupName(group);
   const repoPath = referencedGroup?.repoPath ?? requestedRepoPath;
   const registry = await dependencies.loadRegistry();
@@ -99,7 +101,7 @@ async function deleteGroup(
 
   if (targets.length === 0) {
     if (!groupExists) throw new ResourceNotFoundError(`unknown group (or empty): ${group}`);
-    if (!wantsUngrouped) {
+    if (!wantsUngrouped && !preserveGroup) {
       await dependencies.deleteCanonicalGroupArtifacts(repoPath, group).catch(() => undefined);
     }
     return {
@@ -108,7 +110,7 @@ async function deleteGroup(
       repoPath,
       removed: [],
       total: 0,
-      deletedGroup: !wantsUngrouped,
+      deletedGroup: !wantsUngrouped && !preserveGroup,
     };
   }
 
@@ -146,7 +148,7 @@ async function deleteGroup(
       pendingDeleted.map((droneId) => ({ state: 'pending', droneId })),
       { ignoreMissing: true },
     );
-    if (!wantsUngrouped) {
+    if (!wantsUngrouped && !preserveGroup) {
       await dependencies.deleteCanonicalGroupArtifacts(repoPath, group);
     }
   } catch {
@@ -158,7 +160,7 @@ async function deleteGroup(
     repoPath,
     removed,
     total: targets.length,
-    deletedGroup: !wantsUngrouped,
+    deletedGroup: !wantsUngrouped && !preserveGroup,
   };
 }
 

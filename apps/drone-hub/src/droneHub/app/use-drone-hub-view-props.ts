@@ -42,6 +42,7 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     selectDroneCard,
     selectDroneChat,
     createDroneChat,
+    createDraftDroneChat,
     cloneDroneChat,
     cloningChatKeys,
     renameCanvasChat,
@@ -63,6 +64,7 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     renameGroup,
     openGroupMultiChat,
     deleteGroup,
+    deleteDronesInGroup,
     prepareSidebarDroneDragStart,
     setReposModalOpen,
     setRenderedSidebarNodeTree,
@@ -111,12 +113,14 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     },
     onCreateDroneChat: async (drone, chatName, opts) =>
       await createDroneChat(drone, chatName, opts),
+    onCreateDraftDroneChat: async (drone) => await createDraftDroneChat(drone),
     onCloneDroneChat: async (droneId, chatName) =>
       await cloneDroneChat(droneId, chatName),
     cloningChatKeys,
     onRenameDroneChat: async (droneId, chatName, newName) =>
       await renameCanvasChat(droneId, chatName, newName),
-    onDeleteDroneChat: async (droneId, chatName) => await deleteCanvasChat(droneId, chatName),
+    onDeleteDroneChat: async (droneId, chatName, opts) =>
+      await deleteCanvasChat(droneId, chatName, opts),
     onCloneDrone: cloneDroneFromSidebar,
     onRenameDrone: async (droneId, newName) =>
       await renameDroneTo(droneId, newName, { showAlert: false }),
@@ -143,6 +147,7 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
       openGroupMultiChat(group);
     },
     onDeleteGroup: async (group, count, opts) => await deleteGroup(group, count, opts),
+    onDeleteDronesInGroup: async (group, opts) => await deleteDronesInGroup(group, opts),
     onPrepareDroneDragStart: prepareSidebarDroneDragStart,
     onOpenReposModal: () => setReposModalOpen(true),
     onRenderedNodeTreeChange: setRenderedSidebarNodeTree,

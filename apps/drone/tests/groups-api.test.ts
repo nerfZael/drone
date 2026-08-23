@@ -230,6 +230,75 @@ describeSocketSuite('groups api (decoupled from drone count)', () => {
     ).toBe(false);
   });
 
+  test('deleting group drones preserves the group hierarchy and sibling drones', async () => {
+    const nested = await apiFetch('/api/groups', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'drone-only/nested', repoPath: '/tmp/drone-only' }),
+    });
+    expect(nested.r.status).toBe(201);
+    const groupsBefore = await apiFetch(
+      `/api/groups?repoPath=${encodeURIComponent('/tmp/drone-only')}`,
+    );
+    const parent = groupsBefore.data?.groups?.find((group: any) => group?.name === 'drone-only');
+    expect(parent?.id).toBeTruthy();
+
+    await updateRegistry((registry: any) => {
+      registry.pending ??= {};
+      registry.pending['drone-only-direct'] = {
+        id: 'drone-only-direct',
+        name: 'drone-only-direct',
+        group: 'drone-only',
+        repoPath: '/tmp/drone-only',
+        createdAt: new Date().toISOString(),
+      };
+      registry.pending['drone-only-nested'] = {
+        id: 'drone-only-nested',
+        name: 'drone-only-nested',
+        group: 'drone-only/nested',
+        repoPath: '/tmp/drone-only',
+        createdAt: new Date().toISOString(),
+      };
+      registry.pending['drone-only-sibling'] = {
+        id: 'drone-only-sibling',
+        name: 'drone-only-sibling',
+        group: 'sibling',
+        repoPath: '/tmp/drone-only',
+        createdAt: new Date().toISOString(),
+      };
+    });
+
+    const deleted = await apiFetch(`/api/groups/${encodeURIComponent(parent.id)}/drones`, {
+      method: 'DELETE',
+    });
+    expect(deleted.r.status).toBe(200);
+    expect(deleted.data).toMatchObject({
+      ok: true,
+      deletedGroup: false,
+      total: 2,
+    });
+    expect(deleted.data?.removed?.map((item: any) => item.id).sort()).toEqual([
+      'drone-only-direct',
+      'drone-only-nested',
+    ]);
+
+    const groupsAfter = await apiFetch(
+      `/api/groups?repoPath=${encodeURIComponent('/tmp/drone-only')}`,
+    );
+    expect(
+      groupsAfter.data?.groups
+        ?.filter((group: any) => group?.name?.startsWith('drone-only'))
+        .map((group: any) => [group.name, group.totalCount]),
+    ).toEqual([
+      ['drone-only', 0],
+      ['drone-only/nested', 0],
+    ]);
+    const registry: any = await loadRegistry();
+    expect(registry.pending['drone-only-direct']).toBeUndefined();
+    expect(registry.pending['drone-only-nested']).toBeUndefined();
+    expect(registry.pending['drone-only-sibling']).toBeTruthy();
+  });
+
   test('can assign drones to groups and validates group names', async () => {
     await updateRegistry((reg: any) => {
       reg.drones = reg.drones ?? {};

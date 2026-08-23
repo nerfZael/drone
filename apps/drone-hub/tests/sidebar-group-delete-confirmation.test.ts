@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { buildSidebarGroupDeleteConfirmation } from '../src/droneHub/app/sidebar-group-delete-confirmation';
+import {
+  buildSidebarGroupDeleteConfirmation,
+  buildSidebarGroupDronesDeleteConfirmation,
+} from '../src/droneHub/app/sidebar-group-delete-confirmation';
 
 describe('sidebar group delete confirmation', () => {
   test('describes deleting an empty repository-scoped group without implying other repos are affected', () => {
@@ -40,6 +43,19 @@ describe('sidebar group delete confirmation', () => {
     expect(confirmation.title).toBe('Delete drones in “alpha”?');
     expect(confirmation.message).toContain('all 1 drone attached to /work/alpha');
     expect(confirmation.message).toContain('The repository itself is not deleted.');
+    expect(confirmation.confirmLabel).toBe('Delete drones');
+  });
+
+  test('makes drone-only group deletion explicit about preserving nested groups', () => {
+    const confirmation = buildSidebarGroupDronesDeleteConfirmation({
+      label: 'review',
+      countHint: 3,
+      repoPath: '/work/alpha',
+    });
+
+    expect(confirmation.title).toBe('Delete drones in “review”?');
+    expect(confirmation.message).toContain('all 3 drones in this group and its subgroups');
+    expect(confirmation.message).toContain('The group and its subgroups are not deleted.');
     expect(confirmation.confirmLabel).toBe('Delete drones');
   });
 });

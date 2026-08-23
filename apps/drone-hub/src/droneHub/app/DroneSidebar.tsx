@@ -102,12 +102,14 @@ import type { DroneSelectionClickOptions } from './drone-selection-helpers';
 import { sidebarInlineSectionKey, type SidebarInlineSectionKind } from './sidebar-inline-sections';
 import { useSidebarOptimisticGroups } from './use-sidebar-optimistic-groups';
 import type {
+  DeleteDronesInGroupOptions,
   DeleteGroupOptions,
   GroupMutationScope,
   MoveDronesToGroupResult,
 } from './use-group-management';
 import type { DroneDeleteMode, SidebarDensityMode, SidebarGroupingMode } from './settings-types';
 import { isSidebarGroupCollapsed } from './is-sidebar-group-collapsed';
+import type { DeleteDroneChatOptions } from './sidebar-chat-delete-confirmation';
 import {
   sidebarChatLabelClass,
   sidebarChatRowTone,
@@ -925,6 +927,7 @@ export type DroneSidebarProps = {
   onDeleteDroneChat: (
     droneId: string,
     chatName: string,
+    opts?: DeleteDroneChatOptions,
   ) => Promise<{ ok: boolean; deletedDrone?: boolean; error?: string | null }>;
   onCloneDrone: (drone: DroneSummary) => void;
   onCreateDroneChat: (
@@ -932,6 +935,7 @@ export type DroneSidebarProps = {
     chatName: string,
     opts?: { draft?: boolean },
   ) => Promise<{ ok: boolean; chatName?: string; error?: string | null }>;
+  onCreateDraftDroneChat: (drone: DroneSummary) => Promise<boolean>;
   onCloneDroneChat: (
     droneId: string,
     chatName: string,
@@ -979,6 +983,10 @@ export type DroneSidebarProps = {
     group: string,
     count: number,
     opts?: DeleteGroupOptions,
+  ) => Promise<boolean> | boolean;
+  onDeleteDronesInGroup: (
+    group: string,
+    opts?: DeleteDronesInGroupOptions,
   ) => Promise<boolean> | boolean;
   onPrepareDroneDragStart: (droneId: string, draggedDroneIds?: readonly string[]) => void;
   onOpenReposModal: () => void;
@@ -1036,6 +1044,7 @@ export function DroneSidebar({
   onDeleteDroneChat,
   onCloneDrone,
   onCreateDroneChat,
+  onCreateDraftDroneChat,
   onCloneDroneChat,
   cloningChatKeys,
   onRenameDroneChat,
@@ -1055,6 +1064,7 @@ export function DroneSidebar({
   onRenameGroup,
   onOpenGroupMultiChat,
   onDeleteGroup,
+  onDeleteDronesInGroup,
   onPrepareDroneDragStart,
   onOpenReposModal,
   onSetDroneSelectionFromFolder,
@@ -1586,6 +1596,7 @@ export function DroneSidebar({
     draftSidebarPlaceholderDroneId: DRAFT_SIDEBAR_PLACEHOLDER_ID,
     isRepoGroupingMode,
     onCreateDroneChat,
+    onCreateDraftDroneChat,
     onRenameDroneChat,
     onMoveSidebar: runOptimisticMoveSidebar,
     onSelectDroneCard,
@@ -3455,6 +3466,7 @@ export function DroneSidebar({
                       toggleSidebarGroupHidden={toggleSidebarGroupHidden}
                       onOpenGroupMultiChat={onOpenGroupMultiChat}
                       onDeleteGroup={handleDeleteGroup}
+                      onDeleteDronesInGroup={onDeleteDronesInGroup}
                       busyChatNodeIdSet={busyChatNodeIdSet}
                       approvalRequiredByChatNodeId={approvalRequiredByChatNodeId}
                       unreadAgentMessageByChatNodeId={unreadAgentMessageByChatNodeId}

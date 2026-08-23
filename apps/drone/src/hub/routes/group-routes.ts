@@ -45,6 +45,18 @@ export function registerGroupRoutes(router: HubRouter, deps: GroupRouteDependenc
     );
   });
 
+  router.delete('/api/groups/:groupName/drones', async ({ params, url, json }) => {
+    const keepVolume = parseBoolParam(url.searchParams.get('keepVolume'), false);
+    const forget = parseBoolParam(url.searchParams.get('forget'), true);
+    const result = await groups.deleteDrones({
+      groupRef: params.groupName,
+      repoPath: String(url.searchParams.get('repoPath') ?? '').trim(),
+      keepVolume,
+      forget,
+    });
+    json(result.ok ? 200 : 500, result);
+  });
+
   router.delete('/api/groups/:groupName', async ({ params, url, json }) => {
     const keepVolume = parseBoolParam(url.searchParams.get('keepVolume'), false);
     const forget = parseBoolParam(url.searchParams.get('forget'), true);

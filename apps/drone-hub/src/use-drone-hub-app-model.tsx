@@ -12,6 +12,7 @@ import {
   normalizeChatInfoPayload,
 } from './domain';
 import { requestJson } from './droneHub/http';
+import { useAppConfirmDialog } from './ui/AppConfirmDialog';
 import { disposeDroneWorkspaceState } from './droneHub/workspace-state-events';
 import { activeProfileStorageId, persistProfileStorageIdOverride } from './profile-storage';
 import {
@@ -86,6 +87,10 @@ import {
   type DroneSelectionClickOptions,
 } from './droneHub/app/drone-selection-helpers';
 import { useDroneSelectionState } from './droneHub/app/use-drone-selection-state';
+import {
+  buildSidebarChatDeleteConfirmation,
+  type DeleteDroneChatOptions,
+} from './droneHub/app/sidebar-chat-delete-confirmation';
 import { markChatLoadSelectionCommitted } from './droneHub/app/chat-load-telemetry';
 import {
   chatRuntimeCacheKey,
@@ -233,6 +238,7 @@ function droneHubBusyDebugEnabled(): boolean {
 
 export function useDroneHubAppModel(): DroneHubAppModel {
   const companionWorkspace = useCompanionWorkspace();
+  const confirmDelete = useAppConfirmDialog();
   const sidebarCommandQueueRef = React.useRef<ReturnType<typeof createSidebarCommandQueue> | null>(null);
   if (!sidebarCommandQueueRef.current) sidebarCommandQueueRef.current = createSidebarCommandQueue();
   const sidebarCommandQueue = sidebarCommandQueueRef.current;
@@ -518,6 +524,48 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     requestJson,
     repoPaths: [chatHeaderRepoPath],
   });
+  const removeDeletedDronesFromClientState = React.useCallback(
+    (droneIdsRaw: string[]) => {
+      const droneIds = Array.from(
+        new Set(droneIdsRaw.map((id) => String(id ?? '').trim()).filter(Boolean)),
+      );
+      if (droneIds.length === 0) return;
+      const droneIdSet = new Set(droneIds);
+      for (const droneId of droneIds) disposeDroneWorkspaceState(droneId);
+      setSidebarChatOrderByDrone((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        for (const droneId of droneIds) {
+          if (!(droneId in next)) continue;
+          delete next[droneId];
+          changed = true;
+        }
+        return changed ? next : prev;
+      });
+      setSidebarDroneOrderByGroup((prev) => {
+        let changed = false;
+        const next: Record<string, string[]> = {};
+        for (const [key, entries] of Object.entries(prev)) {
+          const filtered = entries.filter((entry) => !droneIdSet.has(entry));
+          if (filtered.length !== entries.length) changed = true;
+          if (filtered.length > 0) next[key] = filtered;
+        }
+        return changed ? next : prev;
+      });
+      setSidebarNodeOrderByParent((prev) =>
+        removeDroneIdsFromSidebarNodeOrderByParent(prev, droneIds),
+      );
+
+      const canvasState = useDroneCanvasStore.getState();
+      const nodeIdsToRemove = Object.keys(canvasState.nodesByDroneId ?? {}).filter((nodeId) => {
+        if (droneIdSet.has(nodeId)) return true;
+        const ref = parseCanvasChatNodeId(nodeId);
+        return Boolean(ref && droneIdSet.has(ref.droneId));
+      });
+      if (nodeIdsToRemove.length > 0) canvasState.removeNodes(nodeIdsToRemove);
+    },
+    [setSidebarChatOrderByDrone, setSidebarDroneOrderByGroup, setSidebarNodeOrderByParent],
+  );
   const {
     groupMoveError,
     setGroupMoveError,
@@ -527,6 +575,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     createGroup: createSidebarGroup,
     renameGroup,
     deleteGroup,
+    deleteDronesInGroup,
     moveDronesToGroup,
     createGroupAndMove,
   } = useGroupManagement({
@@ -544,6 +593,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setHiddenSidebarGroups,
     selectedGroupMultiChat,
     setSelectedGroupMultiChat,
+    onDronesDeleted: removeDeletedDronesFromClientState,
   });
   const {
     queuedPromptsByDroneChat,
@@ -761,7 +811,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const shellTerminalPrewarmReadyRef = React.useRef<Set<string>>(new Set());
   const shellTerminalPrewarmInFlightRef = React.useRef<Set<string>>(new Set());
   const lastSyncedCanvasRepoContextRef = React.useRef<string>('');
-  const lastSyncedCanvasAgentModelContextRef = React.useRef<string>('');
   const previousUnreadChatNodeIdSetRef = React.useRef<Set<string>>(new Set());
   const manuallyMarkedUnreadChatsRef = React.useRef<Map<string, ManualUnreadMarker>>(new Map());
   const readAcknowledgementsInFlightRef = React.useRef<Set<string>>(new Set());
@@ -1063,34 +1112,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       if (!droneId) return false;
       const deleted = await deleteDroneBase(droneId, opts);
       if (!deleted) return false;
-      disposeDroneWorkspaceState(droneId);
-      setSidebarChatOrderByDrone((prev) => {
-        if (!(droneId in prev)) return prev;
-        const next = { ...prev };
-        delete next[droneId];
-        return next;
-      });
-      setSidebarDroneOrderByGroup((prev) => {
-        let changed = false;
-        const next: Record<string, string[]> = {};
-        for (const [key, entries] of Object.entries(prev)) {
-          const filtered = entries.filter((entry) => entry !== droneId);
-          if (filtered.length !== entries.length) changed = true;
-          if (filtered.length > 0) next[key] = filtered;
-        }
-        return changed ? next : prev;
-      });
-      setSidebarNodeOrderByParent((prev) =>
-        removeDroneIdsFromSidebarNodeOrderByParent(prev, [droneId]),
-      );
+      removeDeletedDronesFromClientState([droneId]);
       return true;
     },
-    [
-      deleteDroneBase,
-      setSidebarChatOrderByDrone,
-      setSidebarDroneOrderByGroup,
-      setSidebarNodeOrderByParent,
-    ],
+    [deleteDroneBase, removeDeletedDronesFromClientState],
   );
   const [droneDeleteConfirm, setDroneDeleteConfirmState] =
     React.useState<DroneDeleteConfirmState | null>(null);
@@ -2056,7 +2081,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     if (!ids[selectedDrone]) ids[selectedDrone] = makeId();
     return ids[selectedDrone];
   }, [selectedDrone]);
-  const shortcutDraftChatsRef = React.useRef(
+  const newDraftChatsRef = React.useRef(
     new Map<
       string,
       {
@@ -2137,7 +2162,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const droneId = String(selectedDrone ?? '').trim();
       const chatName = String(selectedChat ?? '').trim() || 'default';
       const key = droneChatQueueKey(droneId, chatName);
-      const tracked = shortcutDraftChatsRef.current.get(key);
+      const tracked = newDraftChatsRef.current.get(key);
       if (!tracked) return await sendPromptTextBase(payload, context);
       tracked.submissionInFlight = true;
 
@@ -2151,7 +2176,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           });
         },
         send: async () => {
-          shortcutDraftChatsRef.current.delete(key);
+          newDraftChatsRef.current.delete(key);
           return await sendPromptTextBase(payload, context);
         },
         onPublishError: (error) => {
@@ -3147,12 +3172,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   React.useEffect(() => {
     const droneId = String(selectedDrone ?? '').trim();
     const chatName = String(selectedChat ?? '').trim() || 'default';
-    if (!droneId) {
-      lastSyncedCanvasAgentModelContextRef.current = '';
-      return;
-    }
-    const contextKey = `${droneId}\u0000${chatName}`;
-    if (lastSyncedCanvasAgentModelContextRef.current === contextKey) return;
+    if (!droneId) return;
     const selectedDroneName = String(currentDrone?.name ?? '').trim();
     const chatInfoDroneName = String(effectiveChatInfo?.name ?? '').trim();
     const chatInfoChatName = String(effectiveChatInfo?.chat ?? '').trim() || 'default';
@@ -3175,9 +3195,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     updateSpawnContextForRepo(currentDroneRepoAttached ? currentDroneRepoPath : '', {
       spawnAgentKey: nextAgentKey,
       spawnModel: nextModel,
+      spawnReasoning: String(effectiveChatInfo.reasoning ?? '').trim(),
       spawnAgentPermissionMode: effectiveChatInfo.agentPermissionMode ?? 'execute',
+      spawnApprovalPolicy: effectiveChatInfo.approvalPolicy ?? 'ask',
     });
-    lastSyncedCanvasAgentModelContextRef.current = contextKey;
   }, [
     currentDroneRepoAttached,
     currentDroneRepoPath,
@@ -4001,6 +4022,19 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             },
           );
           if (configuration.model) rememberSeenModels([configuration.model]);
+          rememberStartupSeed([{ id: droneId, name: drone.name }], {
+            runtime: drone.runtime === 'host' ? 'host' : 'container',
+            draft: opts?.draft === true,
+            agent: configuration.agent,
+            model: configuration.model ?? null,
+            reasoning: configuration.reasoning ?? null,
+            agentPermissionMode: configuration.agentPermissionMode,
+            approvalPolicy: configuration.approvalPolicy,
+            prompt: '',
+            chatName,
+            group: drone.group ?? null,
+            repoPath: drone.repoPath ?? null,
+          });
         }
         if (opts?.select !== false) {
           setSelectedDrone(droneId);
@@ -4024,6 +4058,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [
       normalizeCreateRepoPath,
+      rememberStartupSeed,
       rememberSeenModels,
       requestJson,
       resolveAgentKeyToConfig,
@@ -4183,23 +4218,22 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [promotingNewChatActionById, requestJson, selectDroneChat, selectedChat, selectedDrone],
   );
-  const createDroneChatFromShortcut = React.useCallback(async (): Promise<boolean> => {
-    if (!currentDrone || selectedGroupMultiChat) return false;
-    const result = await createUntitledDroneChat(currentDrone, {
+  const createDraftDroneChat = React.useCallback(async (drone: DroneSummary): Promise<boolean> => {
+    const result = await createUntitledDroneChat(drone, {
       draft: true,
       select: false,
     });
     const chatName = String(result.chatName ?? '').trim();
     if (result.ok && chatName) {
-      const key = droneChatQueueKey(currentDrone.id, chatName);
-      shortcutDraftChatsRef.current.set(key, {
-        droneId: currentDrone.id,
+      const key = droneChatQueueKey(drone.id, chatName);
+      newDraftChatsRef.current.set(key, {
+        droneId: drone.id,
         chatName,
         wasActivated: false,
         submissionInFlight: false,
         preserveOnLeave: false,
       });
-      selectDroneChat(currentDrone.id, chatName);
+      selectDroneChat(drone.id, chatName);
     }
     if (!result.ok && result.error) {
       showShortcutToast(result.error, 'Draft chat could not be created');
@@ -4207,11 +4241,13 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     return result.ok === true;
   }, [
     createUntitledDroneChat,
-    currentDrone,
     selectDroneChat,
-    selectedGroupMultiChat,
     showShortcutToast,
   ]);
+  const createDroneChatFromShortcut = React.useCallback(async (): Promise<boolean> => {
+    if (!currentDrone || selectedGroupMultiChat) return false;
+    return await createDraftDroneChat(currentDrone);
+  }, [createDraftDroneChat, currentDrone, selectedGroupMultiChat]);
   const cloneDroneChatFromShortcut = React.useCallback(async (): Promise<boolean> => {
     if (!currentDrone || selectedGroupMultiChat) return false;
     const sourceChatName = resolveChatNameForDrone(currentDrone, selectedChat);
@@ -4221,8 +4257,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     return result.ok === true;
   }, [cloneDroneChat, currentDrone, selectDroneChat, selectedChat, selectedGroupMultiChat]);
   React.useEffect(() => {
-    if (shortcutDraftChatsRef.current.size === 0) return;
-    for (const [key, tracked] of shortcutDraftChatsRef.current) {
+    if (newDraftChatsRef.current.size === 0) return;
+    for (const [key, tracked] of newDraftChatsRef.current) {
       const active =
         String(selectedDrone ?? '').trim() === tracked.droneId &&
         (String(selectedChat ?? '').trim() || 'default') === tracked.chatName;
@@ -4243,11 +4279,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       });
       if (disposition === 'wait') continue;
 
-      shortcutDraftChatsRef.current.delete(key);
+      newDraftChatsRef.current.delete(key);
       if (disposition === 'retain') continue;
       const url = `/api/drones/${encodeURIComponent(tracked.droneId)}/chats/${encodeURIComponent(tracked.chatName)}`;
       void requestJson<{ ok: true }>(url, { method: 'DELETE' }).catch((error: unknown) => {
-        console.warn('[DroneHub] abandoned shortcut draft chat cleanup failed', {
+        console.warn('[DroneHub] abandoned new draft chat cleanup failed', {
           droneId: tracked.droneId,
           chatName: tracked.chatName,
           error,
@@ -4419,6 +4455,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     async (
       droneIdRaw: string,
       chatNameRaw: string,
+      opts?: DeleteDroneChatOptions,
     ): Promise<{ ok: boolean; deletedDrone?: boolean; error?: string | null }> => {
       const droneId = String(droneIdRaw ?? '').trim();
       const chatName = String(chatNameRaw ?? '').trim() || 'default';
@@ -4444,12 +4481,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       }
 
       const droneLabel = drone ? uiDroneName(drone.name) : droneId;
-      const confirmed = window.confirm(
-        deleteMode === 'archive'
-          ? `Archive chat "${chatName}" from "${droneLabel}"?\n\nYou can restore it from Settings > Archive before it auto-deletes.`
-          : `Delete chat "${chatName}" from "${droneLabel}"?`,
-      );
-      if (!confirmed) return { ok: false, error: '' };
+      if (opts?.confirmed !== true) {
+        const confirmed = await confirmDelete(buildSidebarChatDeleteConfirmation({
+          chatNames: [chatName],
+          droneLabel,
+          deleteMode,
+        }));
+        if (!confirmed) return { ok: false, error: '' };
+      }
 
       try {
         await requestJson<{ ok: true; deletedChat: string }>(
@@ -4483,6 +4522,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [
       deleteActionSettingsState.deleteSettings,
+      confirmDelete,
       drones,
       requestDeleteDrones,
       requestJson,
@@ -4894,6 +4934,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     selectDroneCard,
     selectDroneChat,
     createDroneChat,
+    createDraftDroneChat,
     cloneDroneChat,
     cloningChatKeys,
     renameCanvasChat,
@@ -4916,6 +4957,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     openGroupMultiChat,
     openSidebarVisibleMultiChat,
     deleteGroup,
+    deleteDronesInGroup,
     prepareSidebarDroneDragStart,
     setReposModalOpen,
     setRenderedSidebarNodeTree,

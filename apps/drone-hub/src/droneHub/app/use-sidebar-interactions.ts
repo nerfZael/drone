@@ -72,6 +72,7 @@ type UseSidebarInteractionsArgs = {
     chatName: string,
     opts?: { draft?: boolean },
   ) => Promise<{ ok: boolean; chatName?: string; error?: string | null }>;
+  onCreateDraftDroneChat: (drone: DroneSummary) => Promise<boolean>;
   onRenameDroneChat: (
     droneId: string,
     chatName: string,
@@ -105,6 +106,7 @@ export function useSidebarInteractions({
   draftSidebarPlaceholderDroneId,
   isRepoGroupingMode,
   onCreateDroneChat,
+  onCreateDraftDroneChat,
   onRenameDroneChat,
   onMoveSidebar,
   onSelectDroneCard,
@@ -191,20 +193,11 @@ export function useSidebarInteractions({
   const openDroneChatCreate = React.useCallback((drone: DroneSummary) => {
     const droneId = String(drone?.id ?? '').trim();
     if (!droneId) return;
-    const existingChats = Array.isArray(drone?.chats) && drone.chats.length > 0 ? drone.chats : ['default'];
-    const seedName = `chat-${Math.max(1, existingChats.length + 1)}`;
     setSelectedSidebarNodeId(sidebarDroneNodeId(droneId));
     setFolderEditor(null);
-    setChatEditor({
-      mode: 'create',
-      droneId,
-      targetChatName: null,
-      value: seedName,
-      createAsDraft: false,
-      error: null,
-      pending: false,
-    });
-  }, []);
+    setChatEditor(null);
+    void onCreateDraftDroneChat(drone);
+  }, [onCreateDraftDroneChat]);
 
   const startRenameDroneChat = React.useCallback((droneIdRaw: string, chatNameRaw: string) => {
     const droneId = String(droneIdRaw ?? '').trim();
