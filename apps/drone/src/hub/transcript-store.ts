@@ -1252,6 +1252,25 @@ export class ChatTranscriptRepository {
         if (!source) throw new Error(`unknown chat: ${opts.copyFromChatName}`);
       }
       const entry = opts.createEntry(source);
+      // Prompt queue rows are keyed by the mutable chat name rather than the
+      // chat's stable id. An archived chat can therefore leave rows behind
+      // that would otherwise be projected onto a new chat reusing its name.
+      // Clear that old active state only after entry construction succeeds so
+      // a failed create does not mutate the archived chat's restore state.
+      const hasPrompts = connection
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'prompts'")
+        .get();
+      if (hasPrompts) {
+        connection.prepare('DELETE FROM prompts WHERE drone_id = ? AND chat_name = ?')
+          .run(opts.droneId, opts.chatName);
+      }
+      const hasPromptQueuePauses = connection
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'prompt_queue_pauses'")
+        .get();
+      if (hasPromptQueuePauses) {
+        connection.prepare('DELETE FROM prompt_queue_pauses WHERE drone_id = ? AND chat_name = ?')
+          .run(opts.droneId, opts.chatName);
+      }
       this.writeChatWithConnection(connection, opts.droneId, opts.chatName, entry);
       if (opts.copyFromChatName) {
         markCurrentReadForBootstrap(connection, opts.droneId, opts.chatName);

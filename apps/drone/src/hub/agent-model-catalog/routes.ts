@@ -70,7 +70,11 @@ export function registerAgentModelCatalogRoutes(
       String(url.searchParams.get('runtime') ?? '').trim() === 'host' ? 'host' : 'container';
     const forceRefresh = parseBoolParam(url.searchParams.get('refresh'), false);
     if (requestedAgent === 'native') {
-      const catalog = await deps.nativeModelCatalog();
+      const requestedProvider = String(url.searchParams.get('provider') ?? '').trim().toLowerCase();
+      if (requestedProvider && !['openai', 'codex', 'gemini'].includes(requestedProvider)) {
+        return fail(400, 'provider must be openai, codex, or gemini');
+      }
+      const catalog = await deps.nativeModelCatalog(requestedProvider || undefined);
       json(200, { ok: true, agent: 'native', runtime, ...catalog, source: 'native' });
       return;
     }

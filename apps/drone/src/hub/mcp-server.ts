@@ -6,6 +6,21 @@ import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { RegisteredTool } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { allocateUntitledChatName } from '@drone/assistant-chat';
+import {
+  applySidebarMove,
+  buildSidebarChatTree,
+  isSameOrDescendantSidebarChatGroupPath,
+  normalizeSidebarChatGroupPath,
+  normalizeSidebarLayout,
+  sidebarChatGroupBaseName,
+  sidebarChatGroupNodeId,
+  sidebarChatGroupParentPath,
+  sidebarChatNodeId,
+  sidebarLayoutPatch,
+  type SidebarChatTreeModel,
+  type SidebarMoveIntent,
+} from '@drone/hub-model';
 import { z } from 'zod';
 
 import {
@@ -323,6 +338,17 @@ function normalizeAgent(value: unknown): { kind: 'builtin'; id: string } | null 
   if (!id) return null;
   if (!['cursor', 'codex', 'claude', 'opencode', 'pi', 'blip'].includes(id)) throw new Error(`Unsupported built-in agent: ${value}`);
   return { kind: 'builtin', id };
+}
+
+type McpConfigurableChatAgent =
+  | { kind: 'native' }
+  | { kind: 'builtin'; id: string };
+
+function normalizeConfigurableChatAgent(value: unknown): McpConfigurableChatAgent | null {
+  const id = cleanString(value).toLowerCase();
+  if (!id) return null;
+  if (id === 'native') return { kind: 'native' };
+  return normalizeAgent(id);
 }
 
 function normalizeRepoBranchSource(value: unknown, fallback = 'host'): 'host' | 'remote' {
@@ -789,6 +815,7 @@ async function writeUiPreferences(
   const response = await services.settings.uiPreferences.update({
     uiPreferences: normalized,
     expectedVersion,
+    notificationMode: 'sidebar-snapshot',
   });
   return normalizeUiPreferences(response?.uiPreferences);
 }
@@ -806,6 +833,235 @@ async function updateUiPreferences(
     }
   }
   throw new Error('Failed to update UI preferences');
+}
+
+type McpChatListEntry = {
+  name: string;
+  resourceId?: string;
+  draft?: true;
+};
+
+type McpChatTreeSnapshot = {
+  drone: {
+    id: string;
+    name: string;
+    repoPath: string;
+  };
+  chats: McpChatListEntry[];
+  tree: SidebarChatTreeModel;
+};
+
+function normalizeMcpChatList(response: any): McpChatListEntry[] {
+  const draftByChat: Record<string, boolean> =
+    response?.draftChats && typeof response.draftChats === 'object' && !Array.isArray(response.draftChats)
+      ? Object.fromEntries(
+          Object.entries(response.draftChats)
+            .map(([name, draft]) => [cleanString(name), draft === true] as const)
+            .filter(([name, draft]) => Boolean(name) && draft),
+        )
+      : {};
+  const chatIdByName = Object.fromEntries(
+    (Array.isArray(response?.chatDetails) ? response.chatDetails : [])
+      .map((item: any) => [cleanString(item?.chat ?? item?.name), cleanString(item?.chatId)] as const)
+      .filter(([name, id]: readonly [string, string]) => Boolean(name && id)),
+  );
+  for (const item of Array.isArray(response?.chatDetails) ? response.chatDetails : []) {
+    const name = cleanString(item?.chat ?? item?.name);
+    if (name && item?.draft === true) draftByChat[name] = true;
+  }
+  return (Array.isArray(response?.chats) ? response.chats : [])
+    .map((item: any) => {
+      const name = typeof item === 'string'
+        ? cleanString(item)
+        : cleanString(item?.chat ?? item?.name);
+      if (!name) return null;
+      const resourceId =
+        (typeof item === 'object' ? cleanString(item?.chatId ?? item?.id) : '') ||
+        chatIdByName[name];
+      return {
+        name,
+        ...(resourceId ? { resourceId } : {}),
+        ...((typeof item === 'object' && item?.draft === true) || draftByChat[name]
+          ? { draft: true as const }
+          : {}),
+      };
+    })
+    .filter((entry: McpChatListEntry | null): entry is McpChatListEntry => Boolean(entry));
+}
+
+async function readMcpChatTreeSnapshot(
+  droneRef: string,
+  services: HubServices,
+): Promise<McpChatTreeSnapshot> {
+  const [resolved] = await resolveDroneRefs([droneRef]);
+  if (!resolved?.found) throw new Error(`unknown drone: ${droneRef}`);
+  const [response, preferences] = await Promise.all([
+    requestJson(`/api/drones/${encodeURIComponent(resolved.id)}/chats`, { method: 'GET' }),
+    readUiPreferences(services),
+  ]);
+  const listedChats = normalizeMcpChatList(response);
+  const chatByName = new Map(listedChats.map((chat) => [chat.name, chat]));
+  const orderedNames = normalizeOrderedStringList([
+    ...(preferences.uiPreferences.sidebarChatOrderByDrone[resolved.id] ?? []),
+    ...listedChats.map((chat) => chat.name),
+  ]).filter((name) => chatByName.has(name));
+  const chats = orderedNames.map((name) => chatByName.get(name)!);
+  const tree = buildSidebarChatTree({
+    droneId: resolved.id,
+    chatNames: chats.map((chat) => chat.name),
+    groupPaths: preferences.uiPreferences.sidebarChatGroupPathsByDrone[resolved.id] ?? [],
+    groupByChat: preferences.uiPreferences.sidebarChatGroupByChat,
+    nodeOrderByParent: preferences.uiPreferences.sidebarChatNodeOrderByParent,
+  });
+  return {
+    drone: {
+      id: resolved.id,
+      name: resolved.name,
+      repoPath: resolved.repoPath,
+    },
+    chats,
+    tree,
+  };
+}
+
+function serializeMcpChatTree(snapshot: McpChatTreeSnapshot) {
+  const chatByName = new Map(snapshot.chats.map((chat) => [chat.name, chat]));
+  const serializeNode = (nodeId: string): any => {
+    const node = snapshot.tree.nodesById[nodeId];
+    if (!node) return null;
+    if (node.kind === 'chat') {
+      const chat = chatByName.get(node.chatName);
+      return {
+        kind: 'chat',
+        name: node.chatName,
+        ...(chat?.resourceId ? { resourceId: chat.resourceId } : {}),
+        ...(chat?.draft ? { draft: true } : {}),
+      };
+    }
+    return {
+      kind: 'group',
+      name: node.label,
+      path: node.path,
+      children: (snapshot.tree.childIdsByParent[node.id] ?? [])
+        .map(serializeNode)
+        .filter(Boolean),
+    };
+  };
+  return snapshot.tree.rootChildIds.map(serializeNode).filter(Boolean);
+}
+
+async function applyMcpChatTreeIntent(
+  intent: SidebarMoveIntent,
+  services: HubServices,
+) {
+  return updateUiPreferences((current) => {
+    const nextLayout = applySidebarMove(normalizeSidebarLayout(current), intent);
+    return normalizeUiPreferences({
+      ...current,
+      ...sidebarLayoutPatch(nextLayout, intent),
+    });
+  }, services);
+}
+
+function requireChatGroupPath(value: unknown, fieldName: string): string {
+  const path = normalizeSidebarChatGroupPath(value);
+  if (!path) throw new Error(`${fieldName} is required`);
+  return path;
+}
+
+function findMcpChatTreeAnchor(args: {
+  snapshot: McpChatTreeSnapshot;
+  targetPath: string;
+  beforeChat?: unknown;
+  afterChat?: unknown;
+  beforeGroup?: unknown;
+  afterGroup?: unknown;
+}) {
+  const anchors = [
+    { value: cleanString(args.beforeChat), kind: 'chat' as const, placement: 'before' as const },
+    { value: cleanString(args.afterChat), kind: 'chat' as const, placement: 'after' as const },
+    { value: normalizeSidebarChatGroupPath(args.beforeGroup), kind: 'group' as const, placement: 'before' as const },
+    { value: normalizeSidebarChatGroupPath(args.afterGroup), kind: 'group' as const, placement: 'after' as const },
+  ].filter((anchor) => anchor.value);
+  if (anchors.length > 1) {
+    throw new Error('use only one of beforeChat, afterChat, beforeGroup, or afterGroup');
+  }
+  if (anchors.length === 0) return { overNodeId: undefined, placement: 'inside' as const };
+  const anchor = anchors[0]!;
+  const overNodeId = anchor.kind === 'chat'
+    ? sidebarChatNodeId(args.snapshot.drone.id, anchor.value)
+    : sidebarChatGroupNodeId(args.snapshot.drone.id, anchor.value);
+  const node = args.snapshot.tree.nodesById[overNodeId];
+  if (!node) throw new Error(`unknown ${anchor.kind}: ${anchor.value}`);
+  const targetParentId = args.targetPath
+    ? sidebarChatGroupNodeId(args.snapshot.drone.id, args.targetPath)
+    : args.snapshot.tree.rootId;
+  if (node.parentId !== targetParentId) {
+    throw new Error(`${anchor.kind} is not directly inside the target group: ${anchor.value}`);
+  }
+  return { overNodeId, placement: anchor.placement };
+}
+
+function buildMcpChatTreeMoveIntent(args: {
+  snapshot: McpChatTreeSnapshot;
+  itemKind: 'chat' | 'folder';
+  activeNodeIds: string[];
+  targetGroup?: unknown;
+  beforeChat?: unknown;
+  afterChat?: unknown;
+  beforeGroup?: unknown;
+  afterGroup?: unknown;
+}): SidebarMoveIntent {
+  const { snapshot } = args;
+  const activeNodeId = args.activeNodeIds[0]!;
+  const activeNode = snapshot.tree.nodesById[activeNodeId];
+  if (!activeNode) throw new Error('the item to move does not exist');
+  const targetPath = normalizeSidebarChatGroupPath(args.targetGroup);
+  if (targetPath && !snapshot.tree.nodesById[sidebarChatGroupNodeId(snapshot.drone.id, targetPath)]) {
+    throw new Error(`unknown chat group: ${targetPath}`);
+  }
+  if (args.itemKind === 'folder' && activeNode.kind === 'folder') {
+    if (targetPath && isSameOrDescendantSidebarChatGroupPath(targetPath, activeNode.path)) {
+      throw new Error(`cannot move chat group ${activeNode.path} into itself or its descendant`);
+    }
+    const nextPath = normalizeSidebarChatGroupPath(
+      [targetPath, sidebarChatGroupBaseName(activeNode.path)].filter(Boolean).join('/'),
+    );
+    if (
+      nextPath !== activeNode.path &&
+      snapshot.tree.nodesById[sidebarChatGroupNodeId(snapshot.drone.id, nextPath)]
+    ) {
+      throw new Error(`chat group already exists: ${nextPath}`);
+    }
+  }
+  const sourcePath = activeNode.kind === 'chat'
+    ? normalizeSidebarChatGroupPath(
+        activeNode.parentId === snapshot.tree.rootId
+          ? ''
+          : (snapshot.tree.nodesById[activeNode.parentId] as any)?.path,
+      )
+    : normalizeSidebarChatGroupPath(sidebarChatGroupParentPath(activeNode.path));
+  const sourceParentId = activeNode.parentId;
+  const targetParentId = targetPath
+    ? sidebarChatGroupNodeId(snapshot.drone.id, targetPath)
+    : snapshot.tree.rootId;
+  const anchor = findMcpChatTreeAnchor({ ...args, targetPath });
+  if (anchor.overNodeId && args.activeNodeIds.includes(anchor.overNodeId)) {
+    throw new Error('cannot position an item relative to itself');
+  }
+  return {
+    kind: 'chat-tree-move',
+    droneId: snapshot.drone.id,
+    itemKind: args.itemKind,
+    activeNodeId,
+    ...(args.itemKind === 'chat' ? { activeNodeIds: args.activeNodeIds } : {}),
+    sourcePath: sourcePath || null,
+    sourceSiblingNodeIds: snapshot.tree.childIdsByParent[sourceParentId] ?? [],
+    targetPath: targetPath || null,
+    targetSiblingNodeIds: snapshot.tree.childIdsByParent[targetParentId] ?? [],
+    ...(anchor.overNodeId ? { overNodeId: anchor.overNodeId } : {}),
+    placement: anchor.placement,
+  };
 }
 
 async function listGroups(
@@ -1061,6 +1317,17 @@ function agentFromPreferenceKey(value: string) {
   return normalizeAgent(String(value || '').replace(/^builtin:/, ''));
 }
 
+function chatAgentFromPreferenceKey(value: string): McpConfigurableChatAgent | null {
+  const key = String(value || '').trim();
+  if (key === 'native') return { kind: 'native' };
+  if (key.startsWith('custom:')) {
+    throw new Error(
+      'The last-used custom agent is local to the Drone Hub UI and cannot be resolved by MCP. Pass agent explicitly.',
+    );
+  }
+  return normalizeConfigurableChatAgent(key.replace(/^builtin:/, ''));
+}
+
 type McpToolRegistrationContext = {
   principal: McpTokenIdentity;
   allowedWriteDroneRefs?: string[];
@@ -1307,6 +1574,41 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
         ...repo,
         droneCount: droneCounts.get(cleanString(repo.path)) ?? 0,
       })),
+    });
+  });
+
+  server.registerTool('list_agent_models', {
+    title: 'List agent models',
+    description: 'List models available to a Drone Hub agent. Each model includes its supported reasoningLevels and defaultReasoningLevel when the agent reports them. For agent="native", provider may select the Built-in OpenAI, Codex, or Gemini catalog. Container discovery reflects agents installed in Drone Hub drones; host discovery reflects agents installed on the Hub host. Use refresh only when a cached catalog may be stale.',
+    inputSchema: {
+      agent: z.enum(['native', 'cursor', 'codex', 'claude', 'opencode', 'pi', 'blip']),
+      provider: z.enum(['openai', 'codex', 'gemini']).optional(),
+      runtime: z.enum(['container', 'host']).optional(),
+      refresh: z.boolean().optional(),
+    },
+  }, async (args) => {
+    const agent = normalizeConfigurableChatAgent(args.agent);
+    if (!agent) throw new Error(`unsupported agent: ${args.agent}`);
+    const agentId = agent.kind === 'native' ? 'native' : agent.id;
+    if (args.provider != null && agent.kind !== 'native') {
+      throw new Error('provider is only available with agent="native" (the Drone Hub Built-in agent)');
+    }
+    const runtime = args.runtime ?? 'container';
+    const query = new URLSearchParams({ agent: agentId, runtime });
+    if (args.provider) query.set('provider', args.provider);
+    if (args.refresh === true) query.set('refresh', '1');
+    const response = await requestJson(`/api/model-catalog?${query.toString()}`, { method: 'GET' });
+    return toolResult({
+      ok: true,
+      agent: agentId,
+      runtime,
+      models: Array.isArray(response?.models) ? response.models : [],
+      source: cleanString(response?.source) || 'none',
+      ...(response?.provider ? { provider: response.provider } : {}),
+      ...(response?.defaultModel ? { defaultModel: response.defaultModel } : {}),
+      ...(response?.discoveredAt ? { discoveredAt: response.discoveredAt } : {}),
+      ...(response?.stale === true ? { stale: true } : {}),
+      ...(response?.error ? { error: cleanString(response.error) } : {}),
     });
   });
 
@@ -1744,6 +2046,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
       groupId: z.string().optional(),
       agent: z.enum(['cursor', 'codex', 'claude', 'opencode', 'pi', 'blip']).optional(),
       model: z.string().optional(),
+      reasoning: z.string().optional(),
       agentPermissionMode: z.enum(['read', 'write', 'execute']).optional(),
       approvalPolicy: z
         .enum(['ask', 'auto', 'none'])
@@ -1786,6 +2089,9 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     if (args.approvalPolicy != null && !seedAgentIsCodex) {
       throw new Error('approvalPolicy is only available for Codex drones');
     }
+    if (args.reasoning != null && !seedAgentSupportsAccess) {
+      throw new Error('reasoning is only available for Codex and Blip drones');
+    }
     const requestedPermissionMode = args.agentPermissionMode ?? 'execute';
     const seedAgentPermissionMode = seedAgentSupportsAccess ? requestedPermissionMode : 'execute';
     const seedAgentSupportsApproval = seedAgentIsCodex;
@@ -1795,7 +2101,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
       ? 'ask'
       : requestedApprovalPolicy;
     const seedReasoning = seedAgent?.kind === 'builtin' && (seedAgent.id === 'codex' || seedAgent.id === 'blip')
-      ? defaults.spawnReasoning
+      ? args.reasoning == null ? defaults.spawnReasoning : cleanString(args.reasoning)
       : '';
     const repoBranchSource = normalizeRepoBranchSource(args.repoBranchSource, defaults.repoBranchSource);
     const remoteBranchRaw = args.remoteBranch == null ? defaults.repoCreateRemoteBranch : cleanString(args.remoteBranch);
@@ -1912,79 +2218,566 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     inputSchema: { drone: z.string() },
   }, async (args) => {
     const response = await requestJson(`/api/drones/${encodeURIComponent(args.drone)}/chats`, { method: 'GET' });
-    const draftByChat: Record<string, boolean> =
-      response?.draftChats && typeof response.draftChats === 'object' && !Array.isArray(response.draftChats)
-        ? Object.fromEntries(
-            Object.entries(response.draftChats)
-              .map(([name, draft]) => [cleanString(name), draft === true] as const)
-              .filter(([name, draft]) => Boolean(name) && draft),
-          )
-        : {};
-    const chatIdByName = Object.fromEntries(
-      (Array.isArray(response?.chatDetails) ? response.chatDetails : [])
-        .map(
-          (item: any) =>
-            [cleanString(item?.chat ?? item?.name), cleanString(item?.chatId)] as const,
-        )
-        .filter(([name, id]: readonly [string, string]) => Boolean(name && id)),
-    );
-    for (const item of Array.isArray(response?.chatDetails) ? response.chatDetails : []) {
-      const name = cleanString(item?.chat ?? item?.name);
-      if (name && item?.draft === true) draftByChat[name] = true;
-    }
     return toolResult({
       ok: true,
       drone: args.drone,
-      chats: Array.isArray(response?.chats)
-        ? response.chats
-            .map((item: any) => {
-              const name = typeof item === 'string' ? cleanString(item) : cleanString(item?.chat ?? item?.name);
-              const resourceId =
-                (typeof item === 'object' ? cleanString(item?.chatId ?? item?.id) : '') ||
-                chatIdByName[name];
-              return name
-                ? {
-                    name,
-                    ...(resourceId ? { resourceId } : {}),
-                    ...((typeof item === 'object' && item?.draft === true) || draftByChat[name]
-                      ? { draft: true }
-                      : {}),
-                  }
-                : null;
-            })
-            .filter(Boolean)
-        : [],
+      chats: normalizeMcpChatList(response),
+    });
+  });
+
+  server.registerTool('get_chat_tree', {
+    title: 'Get drone chat tree',
+    description: 'Get the ordered chat and nested chat-group tree for a Drone Hub drone.',
+    inputSchema: { drone: z.string() },
+  }, async (args) => {
+    const snapshot = await readMcpChatTreeSnapshot(args.drone, context.hubServices);
+    return toolResult({
+      ok: true,
+      drone: snapshot.drone,
+      tree: serializeMcpChatTree(snapshot),
     });
   });
 
   server.registerTool('create_chat', {
     title: 'Create drone chat',
-    description: 'Create a chat for a Drone Hub drone.',
-    inputSchema: { drone: z.string(), chat: z.string(), draft: z.boolean().optional() },
+    description: 'Create and configure a chat for a Drone Hub drone. When settings are omitted, the most recently used settings for that drone repository are inherited. When chat is omitted, an Untitled name is allocated for a draft-style workflow. Use agent="codex" for a Codex CLI chat and omit provider. Use agent="native" for a Drone Hub Built-in chat; only that agent accepts provider="openai", "codex", or "gemini".',
+    inputSchema: {
+      drone: z.string(),
+      chat: z.string().optional(),
+      draft: z.boolean().optional(),
+      agent: z
+        .enum(['native', 'cursor', 'codex', 'claude', 'opencode', 'pi', 'blip'])
+        .describe('Chat runtime. "native" means the Drone Hub Built-in agent; "codex" means the Codex CLI agent.')
+        .optional(),
+      provider: z
+        .enum(['openai', 'codex', 'gemini'])
+        .describe('Model provider for agent="native" only. Omit this field for agent="codex" and every other agent.')
+        .optional(),
+      model: z.string().optional(),
+      reasoning: z.string().optional(),
+      agentPermissionMode: z.enum(['read', 'write', 'execute']).optional(),
+      approvalPolicy: z.enum(['ask', 'auto', 'none']).optional(),
+      group: z.string().optional(),
+      beforeChat: z.string().optional(),
+      afterChat: z.string().optional(),
+      beforeGroup: z.string().optional(),
+      afterGroup: z.string().optional(),
+    },
   }, async (args) => {
     await requireContainerDroneForManagedChat(context, args.drone, 'create chats');
+    const [resolved] = await resolveDroneRefs([args.drone]);
+    if (!resolved?.found) throw new Error(`unknown drone: ${args.drone}`);
+    const defaults = await createDronePreferences(context.hubServices, resolved.repoPath);
+    const agent = args.agent == null
+      ? chatAgentFromPreferenceKey(defaults.spawnAgentKey)
+      : normalizeConfigurableChatAgent(args.agent);
+    const isNative = agent?.kind === 'native';
+    const isCodex = agent?.kind === 'builtin' && agent.id === 'codex';
+    const supportsAccess = isNative ||
+      (agent?.kind === 'builtin' && (agent.id === 'codex' || agent.id === 'blip'));
+    const supportsApproval = isNative || isCodex;
+    if (
+      args.agentPermissionMode != null &&
+      args.agentPermissionMode !== 'execute' &&
+      !supportsAccess
+    ) {
+      throw new Error('agentPermissionMode is only available for Built-in, Codex, and Blip chats');
+    }
+    if (
+      args.approvalPolicy != null &&
+      (!supportsApproval || (args.approvalPolicy === 'auto' && !isCodex))
+    ) {
+      throw new Error(
+        'approvalPolicy is only available for Built-in and Codex chats; auto is Codex-only',
+      );
+    }
+    if (args.reasoning != null && !supportsAccess) {
+      throw new Error('reasoning is only available for Built-in, Codex, and Blip chats');
+    }
+    if (args.provider != null && !isNative) {
+      throw new Error(
+        'provider is only available with agent="native" (the Drone Hub Built-in agent); omit provider when agent="codex"',
+      );
+    }
+    const model = args.model == null ? defaults.spawnModel : cleanString(args.model);
+    const reasoning = supportsAccess
+      ? args.reasoning == null ? defaults.spawnReasoning : cleanString(args.reasoning)
+      : '';
+    const agentPermissionMode = supportsAccess
+      ? args.agentPermissionMode ?? defaults.spawnAgentPermissionMode
+      : undefined;
+    const requestedApprovalPolicy = args.approvalPolicy ?? defaults.spawnApprovalPolicy;
+    const approvalPolicy = supportsApproval
+      ? requestedApprovalPolicy === 'auto' && !isCodex
+        ? 'ask'
+        : requestedApprovalPolicy
+      : undefined;
+
+    const layoutRequested = Boolean(
+      cleanString(args.group) ||
+      cleanString(args.beforeChat) ||
+      cleanString(args.afterChat) ||
+      cleanString(args.beforeGroup) ||
+      cleanString(args.afterGroup),
+    );
+    const destinationSnapshot = layoutRequested
+      ? await readMcpChatTreeSnapshot(resolved.id, context.hubServices)
+      : null;
+    if (destinationSnapshot) {
+      const targetPath = normalizeSidebarChatGroupPath(args.group);
+      if (
+        targetPath &&
+        !destinationSnapshot.tree.nodesById[sidebarChatGroupNodeId(resolved.id, targetPath)]
+      ) {
+        throw new Error(`unknown chat group: ${targetPath}`);
+      }
+      findMcpChatTreeAnchor({
+        snapshot: destinationSnapshot,
+        targetPath,
+        beforeChat: args.beforeChat,
+        afterChat: args.afterChat,
+        beforeGroup: args.beforeGroup,
+        afterGroup: args.afterGroup,
+      });
+    }
+
+    let listed: any = null;
+    let chat = cleanString(args.chat);
+    const generatedName = !chat;
+    const createAsDraft = args.draft ?? generatedName;
+    if (!chat) {
+      if (destinationSnapshot) {
+        chat = allocateUntitledChatName(destinationSnapshot.chats.map((entry) => entry.name));
+      } else {
+        listed = await requestJson(`/api/drones/${encodeURIComponent(resolved.id)}/chats`, {
+          method: 'GET',
+        });
+        chat = allocateUntitledChatName(normalizeMcpChatList(listed).map((entry) => entry.name));
+      }
+    }
     let created = true;
-    let result: any = await requestJson(`/api/drones/${encodeURIComponent(args.drone)}/chats`, {
-      method: 'POST',
-      body: JSON.stringify({ name: args.chat, ...(args.draft === true ? { draft: true } : {}) }),
-    }).catch((error: any) => {
-      if (error?.status !== 409) throw error;
-      created = false;
-    });
+    let result: any = null;
+    let createConflictError: any = null;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      try {
+        result = await requestJson(`/api/drones/${encodeURIComponent(resolved.id)}/chats`, {
+          method: 'POST',
+          // Stage every MCP-created chat as a draft until its requested
+          // configuration has been applied. That makes rollback a hard delete
+          // even when the user's normal delete mode is archive.
+          body: JSON.stringify({ name: chat, draft: true }),
+        });
+        break;
+      } catch (error: any) {
+        if (error?.status !== 409) throw error;
+        createConflictError = error;
+        const conflictedChat = chat;
+        listed = await requestJson(`/api/drones/${encodeURIComponent(resolved.id)}/chats`, {
+          method: 'GET',
+        });
+        const existingChats = normalizeMcpChatList(listed);
+        const existingChat = existingChats.find((entry) => entry.name === conflictedChat);
+        if (!existingChat) throw error;
+        if (!generatedName) {
+          created = false;
+          result = {
+            chat: existingChat.name,
+            chatId: existingChat.resourceId,
+            draft: existingChat.draft === true,
+          };
+          break;
+        }
+        chat = allocateUntitledChatName(existingChats.map((entry) => entry.name));
+        if (attempt === 19) throw new Error('could not allocate an available chat name');
+      }
+    }
+    if (!created && !result) throw createConflictError ?? new Error(`chat already exists: ${chat}`);
+    const config = {
+      ...(agent ? { agent } : {}),
+      ...(args.provider ? { provider: args.provider } : {}),
+      ...(model ? { model } : {}),
+      ...(reasoning ? { reasoning } : {}),
+      ...(agentPermissionMode ? { agentPermissionMode } : {}),
+      ...(approvalPolicy ? { approvalPolicy } : {}),
+    };
+    if (created) {
+      try {
+        await requestJson(
+          `/api/drones/${encodeURIComponent(resolved.id)}/chats/${encodeURIComponent(chat)}/config`,
+          { method: 'POST', body: JSON.stringify(config) },
+        );
+        if (!createAsDraft) {
+          await requestJson(
+            `/api/drones/${encodeURIComponent(resolved.id)}/chats/${encodeURIComponent(chat)}/publish`,
+            { method: 'POST' },
+          );
+          result = { ...result, draft: false };
+        }
+      } catch (setupError: any) {
+        try {
+          await requestJson(
+            `/api/drones/${encodeURIComponent(resolved.id)}/chats/${encodeURIComponent(chat)}`,
+            { method: 'DELETE' },
+          );
+        } catch (rollbackError: any) {
+          throw new Error(
+            `chat setup failed: ${setupError?.message ?? String(setupError)}; rollback failed: ${rollbackError?.message ?? String(rollbackError)}`,
+          );
+        }
+        throw new Error(`chat setup failed; the new chat was rolled back: ${setupError?.message ?? String(setupError)}`);
+      }
+    }
     if (!result?.chatId) {
-      const listed = await requestJson(`/api/drones/${encodeURIComponent(args.drone)}/chats`, {
+      listed = await requestJson(`/api/drones/${encodeURIComponent(resolved.id)}/chats`, {
         method: 'GET',
       });
       result = (Array.isArray(listed?.chatDetails) ? listed.chatDetails : []).find(
-        (item: any) => cleanString(item?.chat ?? item?.name) === cleanString(args.chat),
-      );
+        (item: any) => cleanString(item?.chat ?? item?.name) === chat,
+      ) ?? result;
+    }
+    let layoutWarning = '';
+    if (created && layoutRequested) {
+      try {
+        const snapshot = await readMcpChatTreeSnapshot(resolved.id, context.hubServices);
+        const intent = buildMcpChatTreeMoveIntent({
+          snapshot,
+          itemKind: 'chat',
+          activeNodeIds: [sidebarChatNodeId(resolved.id, chat)],
+          targetGroup: args.group,
+          beforeChat: args.beforeChat,
+          afterChat: args.afterChat,
+          beforeGroup: args.beforeGroup,
+          afterGroup: args.afterGroup,
+        });
+        await applyMcpChatTreeIntent(intent, context.hubServices);
+      } catch (error: any) {
+        layoutWarning = `The chat was created and configured, but its sidebar placement could not be saved: ${error?.message ?? String(error)}`;
+      }
     }
     return toolResult({
       ok: true,
-      drone: args.drone,
-      chat: args.chat,
+      drone: { id: resolved.id, name: resolved.name },
+      chat,
       created,
+      draft: created ? createAsDraft : undefined,
       resourceId: cleanString(result?.chatId) || undefined,
+      settingsApplied: created,
+      settings: created ? config : undefined,
+      ...(!created
+        ? { warning: 'The chat already existed, so its settings were not changed.' }
+        : layoutWarning
+          ? { warning: layoutWarning }
+          : {}),
+    });
+  });
+
+  server.registerTool('rename_chat', {
+    title: 'Rename drone chat',
+    description: 'Rename a non-default chat while preserving its sidebar group, order, and mute state.',
+    inputSchema: { drone: z.string(), chat: z.string(), newName: z.string() },
+  }, async (args) => {
+    const snapshot = await readMcpChatTreeSnapshot(args.drone, context.hubServices);
+    const chat = cleanString(args.chat);
+    const newName = cleanString(args.newName);
+    if (chat === 'default') throw new Error('cannot rename default chat');
+    if (!snapshot.chats.some((entry) => entry.name === chat)) throw new Error(`unknown chat: ${chat}`);
+    if (!newName) throw new Error('newName is required');
+    if (newName === chat) {
+      return toolResult({ ok: true, drone: snapshot.drone, oldChat: chat, chat, renamed: false });
+    }
+    if (snapshot.chats.some((entry) => entry.name === newName)) throw new Error(`chat already exists: ${newName}`);
+    const response = await requestJson(
+      `/api/drones/${encodeURIComponent(snapshot.drone.id)}/chats/${encodeURIComponent(chat)}/rename`,
+      { method: 'POST', body: JSON.stringify({ newName }) },
+    );
+    const oldNodeId = sidebarChatNodeId(snapshot.drone.id, chat);
+    const newNodeId = sidebarChatNodeId(snapshot.drone.id, newName);
+    let layoutWarning = '';
+    try {
+      await updateUiPreferences((current) => {
+        const nextGroupByChat = { ...current.sidebarChatGroupByChat };
+        const group = nextGroupByChat[oldNodeId];
+        delete nextGroupByChat[oldNodeId];
+        if (group) nextGroupByChat[newNodeId] = group;
+        const nextNodeOrder = Object.fromEntries(
+          Object.entries(current.sidebarChatNodeOrderByParent).map(([parentId, nodeIds]) => [
+            parentId,
+            normalizeOrderedStringList(nodeIds.map((nodeId) => nodeId === oldNodeId ? newNodeId : nodeId)),
+          ]),
+        );
+        return normalizeUiPreferences({
+          ...current,
+          sidebarChatOrderByDrone: {
+            ...current.sidebarChatOrderByDrone,
+            [snapshot.drone.id]: normalizeOrderedStringList(
+              (current.sidebarChatOrderByDrone[snapshot.drone.id] ?? [])
+                .map((name) => name === chat ? newName : name),
+            ),
+          },
+          sidebarChatGroupByChat: nextGroupByChat,
+          sidebarChatNodeOrderByParent: nextNodeOrder,
+          mutedChatIds: normalizeOrderedStringList(
+            current.mutedChatIds.map((nodeId) => nodeId === oldNodeId ? newNodeId : nodeId),
+          ),
+        });
+      }, context.hubServices);
+    } catch (error: any) {
+      layoutWarning = `The chat was renamed, but its sidebar metadata could not be migrated: ${error?.message ?? String(error)}`;
+    }
+    return toolResult({
+      ok: true,
+      drone: snapshot.drone,
+      oldChat: chat,
+      chat: cleanString(response?.chat, newName),
+      renamed: true,
+      ...(layoutWarning ? { warning: layoutWarning } : {}),
+    });
+  });
+
+  server.registerTool('delete_chat', {
+    title: 'Delete drone chat',
+    description: 'Delete or archive a non-default chat according to Drone Hub delete settings and remove its sidebar metadata.',
+    inputSchema: { drone: z.string(), chat: z.string() },
+  }, async (args) => {
+    const snapshot = await readMcpChatTreeSnapshot(args.drone, context.hubServices);
+    const chat = cleanString(args.chat);
+    if (chat === 'default') throw new Error('cannot delete default chat');
+    const targetChat = snapshot.chats.find((entry) => entry.name === chat);
+    if (!targetChat) throw new Error(`unknown chat: ${chat}`);
+    const principal = chatPrincipal(context);
+    if (
+      principal?.droneId === snapshot.drone.id &&
+      (
+        (cleanString(principal.chatId) && cleanString(principal.chatId) === targetChat.resourceId) ||
+        ((!cleanString(principal.chatId) || !targetChat.resourceId) && principal.chatName === chat)
+      )
+    ) {
+      throw new Error('cannot delete the chat that is currently running this MCP client');
+    }
+    const response = await requestJson(
+      `/api/drones/${encodeURIComponent(snapshot.drone.id)}/chats/${encodeURIComponent(chat)}`,
+      { method: 'DELETE' },
+    );
+    const nodeId = sidebarChatNodeId(snapshot.drone.id, chat);
+    let layoutWarning = '';
+    try {
+      await updateUiPreferences((current) => {
+        const intent: SidebarMoveIntent = {
+          kind: 'chat-tree-remove',
+          droneId: snapshot.drone.id,
+          nodeIds: [nodeId],
+        };
+        const nextLayout = applySidebarMove(normalizeSidebarLayout(current), intent);
+        return normalizeUiPreferences({
+          ...current,
+          ...sidebarLayoutPatch(nextLayout, intent),
+          sidebarChatOrderByDrone: {
+            ...current.sidebarChatOrderByDrone,
+            [snapshot.drone.id]: (current.sidebarChatOrderByDrone[snapshot.drone.id] ?? [])
+              .filter((name) => name !== chat),
+          },
+          mutedChatIds: current.mutedChatIds.filter((id) => id !== nodeId),
+        });
+      }, context.hubServices);
+    } catch (error: any) {
+      layoutWarning = `The chat was ${response?.archivedChat ? 'archived' : 'deleted'}, but its sidebar metadata could not be removed: ${error?.message ?? String(error)}`;
+    }
+    return toolResult({
+      ok: true,
+      drone: snapshot.drone,
+      chat,
+      disposition: response?.archivedChat ? 'archived' : 'deleted',
+      raw: response,
+      ...(layoutWarning ? { warning: layoutWarning } : {}),
+    });
+  });
+
+  server.registerTool('create_chat_group', {
+    title: 'Create chat group',
+    description: 'Create a chat group, optionally nested below another chat group.',
+    inputSchema: { drone: z.string(), group: z.string(), parentGroup: z.string().optional() },
+  }, async (args) => {
+    const snapshot = await readMcpChatTreeSnapshot(args.drone, context.hubServices);
+    const parentGroup = normalizeSidebarChatGroupPath(args.parentGroup);
+    const groupName = requireChatGroupPath(args.group, 'group');
+    if (parentGroup && !snapshot.tree.nodesById[sidebarChatGroupNodeId(snapshot.drone.id, parentGroup)]) {
+      throw new Error(`unknown parent chat group: ${parentGroup}`);
+    }
+    if (parentGroup && groupName.includes('/')) throw new Error('group must be a single name when parentGroup is supplied');
+    const path = normalizeSidebarChatGroupPath([parentGroup, groupName].filter(Boolean).join('/'));
+    if (snapshot.tree.nodesById[sidebarChatGroupNodeId(snapshot.drone.id, path)]) {
+      throw new Error(`chat group already exists: ${path}`);
+    }
+    const saved = await applyMcpChatTreeIntent(
+      { kind: 'chat-group-create', droneId: snapshot.drone.id, path },
+      context.hubServices,
+    );
+    if (!(saved.sidebarChatGroupPathsByDrone[snapshot.drone.id] ?? []).includes(path)) {
+      throw new Error(`chat group was not created: ${path}`);
+    }
+    return toolResult({ ok: true, drone: snapshot.drone, group: path });
+  });
+
+  server.registerTool('rename_chat_group', {
+    title: 'Rename chat group',
+    description: 'Rename or relocate a chat group and all nested chats/groups.',
+    inputSchema: {
+      drone: z.string(),
+      group: z.string(),
+      newName: z.string().optional(),
+      newGroup: z.string().optional(),
+    },
+  }, async (args) => {
+    const snapshot = await readMcpChatTreeSnapshot(args.drone, context.hubServices);
+    const group = requireChatGroupPath(args.group, 'group');
+    if (!snapshot.tree.nodesById[sidebarChatGroupNodeId(snapshot.drone.id, group)]) {
+      throw new Error(`unknown chat group: ${group}`);
+    }
+    if (cleanString(args.newName) && cleanString(args.newGroup)) throw new Error('use either newName or newGroup, not both');
+    const newName = normalizeSidebarChatGroupPath(args.newName);
+    if (newName.includes('/')) throw new Error('newName must be a single group name; use newGroup for a full path');
+    const parent = sidebarChatGroupParentPath(group);
+    const newGroup = normalizeSidebarChatGroupPath(args.newGroup) ||
+      normalizeSidebarChatGroupPath([parent, newName].filter(Boolean).join('/'));
+    if (!newGroup) throw new Error('newName or newGroup is required');
+    if (newGroup === group) {
+      return toolResult({ ok: true, drone: snapshot.drone, oldGroup: group, group, renamed: false });
+    }
+    if (isSameOrDescendantSidebarChatGroupPath(newGroup, group)) {
+      throw new Error(`cannot move chat group ${group} into itself or its descendant`);
+    }
+    if (snapshot.tree.nodesById[sidebarChatGroupNodeId(snapshot.drone.id, newGroup)]) {
+      throw new Error(`chat group already exists: ${newGroup}`);
+    }
+    const saved = await applyMcpChatTreeIntent({
+      kind: 'chat-group-rename',
+      droneId: snapshot.drone.id,
+      path: group,
+      newPath: newGroup,
+    }, context.hubServices);
+    const savedGroupPaths = saved.sidebarChatGroupPathsByDrone[snapshot.drone.id] ?? [];
+    if (
+      !savedGroupPaths.includes(newGroup) ||
+      savedGroupPaths.some((path) => isSameOrDescendantSidebarChatGroupPath(path, group))
+    ) {
+      throw new Error(`chat group was not renamed: ${group}`);
+    }
+    return toolResult({ ok: true, drone: snapshot.drone, oldGroup: group, group: newGroup, renamed: true });
+  });
+
+  server.registerTool('delete_chat_group', {
+    title: 'Delete chat group',
+    description: 'Delete a chat group without deleting its chats; contained chats are promoted to the parent group.',
+    inputSchema: { drone: z.string(), group: z.string() },
+  }, async (args) => {
+    const snapshot = await readMcpChatTreeSnapshot(args.drone, context.hubServices);
+    const group = requireChatGroupPath(args.group, 'group');
+    if (!snapshot.tree.nodesById[sidebarChatGroupNodeId(snapshot.drone.id, group)]) {
+      throw new Error(`unknown chat group: ${group}`);
+    }
+    const saved = await applyMcpChatTreeIntent(
+      { kind: 'chat-group-delete', droneId: snapshot.drone.id, path: group },
+      context.hubServices,
+    );
+    if (
+      (saved.sidebarChatGroupPathsByDrone[snapshot.drone.id] ?? [])
+        .some((path) => isSameOrDescendantSidebarChatGroupPath(path, group))
+    ) {
+      throw new Error(`chat group was not deleted: ${group}`);
+    }
+    return toolResult({
+      ok: true,
+      drone: snapshot.drone,
+      deletedGroup: group,
+      chatsDeleted: false,
+    });
+  });
+
+  server.registerTool('move_chats', {
+    title: 'Move or reorder chats',
+    description: 'Move one or more chats into a chat group or the root, optionally positioning them before or after a direct child.',
+    inputSchema: {
+      drone: z.string(),
+      chats: z.array(z.string()).min(1),
+      targetGroup: z.string().optional(),
+      beforeChat: z.string().optional(),
+      afterChat: z.string().optional(),
+      beforeGroup: z.string().optional(),
+      afterGroup: z.string().optional(),
+    },
+  }, async (args) => {
+    const snapshot = await readMcpChatTreeSnapshot(args.drone, context.hubServices);
+    const chats = normalizeOrderedStringList(args.chats);
+    const unknown = chats.filter((chat) => !snapshot.chats.some((entry) => entry.name === chat));
+    if (unknown.length) throw new Error(`unknown chat${unknown.length === 1 ? '' : 's'}: ${unknown.join(', ')}`);
+    const activeNodeIds = chats.map((chat) => sidebarChatNodeId(snapshot.drone.id, chat));
+    const intent = buildMcpChatTreeMoveIntent({
+      snapshot,
+      itemKind: 'chat',
+      activeNodeIds,
+      targetGroup: args.targetGroup,
+      beforeChat: args.beforeChat,
+      afterChat: args.afterChat,
+      beforeGroup: args.beforeGroup,
+      afterGroup: args.afterGroup,
+    });
+    const saved = await applyMcpChatTreeIntent(intent, context.hubServices);
+    const targetGroup = normalizeSidebarChatGroupPath(args.targetGroup);
+    if (activeNodeIds.some((nodeId) =>
+      normalizeSidebarChatGroupPath(saved.sidebarChatGroupByChat[nodeId]) !== targetGroup)) {
+      throw new Error('one or more chats were not moved to the target group');
+    }
+    const updated = await readMcpChatTreeSnapshot(snapshot.drone.id, context.hubServices);
+    return toolResult({ ok: true, drone: snapshot.drone, chats, tree: serializeMcpChatTree(updated) });
+  });
+
+  server.registerTool('move_chat_group', {
+    title: 'Move or reorder chat group',
+    description: 'Move a chat group into another group or the root, optionally positioning it before or after a direct child.',
+    inputSchema: {
+      drone: z.string(),
+      group: z.string(),
+      targetGroup: z.string().optional(),
+      beforeChat: z.string().optional(),
+      afterChat: z.string().optional(),
+      beforeGroup: z.string().optional(),
+      afterGroup: z.string().optional(),
+    },
+  }, async (args) => {
+    const snapshot = await readMcpChatTreeSnapshot(args.drone, context.hubServices);
+    const group = requireChatGroupPath(args.group, 'group');
+    const nodeId = sidebarChatGroupNodeId(snapshot.drone.id, group);
+    if (!snapshot.tree.nodesById[nodeId]) throw new Error(`unknown chat group: ${group}`);
+    const intent = buildMcpChatTreeMoveIntent({
+      snapshot,
+      itemKind: 'folder',
+      activeNodeIds: [nodeId],
+      targetGroup: args.targetGroup,
+      beforeChat: args.beforeChat,
+      afterChat: args.afterChat,
+      beforeGroup: args.beforeGroup,
+      afterGroup: args.afterGroup,
+    });
+    const saved = await applyMcpChatTreeIntent(intent, context.hubServices);
+    const targetGroup = normalizeSidebarChatGroupPath(args.targetGroup);
+    const movedGroup = normalizeSidebarChatGroupPath(
+      [targetGroup, sidebarChatGroupBaseName(group)].filter(Boolean).join('/'),
+    );
+    const savedGroupPaths = saved.sidebarChatGroupPathsByDrone[snapshot.drone.id] ?? [];
+    if (
+      !savedGroupPaths.includes(movedGroup) ||
+      (movedGroup !== group &&
+        savedGroupPaths.some((path) => isSameOrDescendantSidebarChatGroupPath(path, group)))
+    ) {
+      throw new Error(`chat group was not moved: ${group}`);
+    }
+    const updated = await readMcpChatTreeSnapshot(snapshot.drone.id, context.hubServices);
+    return toolResult({
+      ok: true,
+      drone: snapshot.drone,
+      oldGroup: group,
+      group: movedGroup,
+      tree: serializeMcpChatTree(updated),
     });
   });
 
@@ -2190,6 +2983,13 @@ const WRITE_SCOPED_TOOLS = new Set([
   'rename_drones',
   'reorder_drones',
   'create_chat',
+  'rename_chat',
+  'delete_chat',
+  'create_chat_group',
+  'rename_chat_group',
+  'delete_chat_group',
+  'move_chats',
+  'move_chat_group',
   'send_message',
   ...CHANGE_REQUEST_WRITE_SCOPED_TOOL_NAMES,
   ...WORKFLOW_WRITE_SCOPED_TOOL_NAMES,
@@ -2213,6 +3013,13 @@ const CHAT_WRITE_SCOPED_TOOLS = new Set([
   'create_whiteboard',
   'update_whiteboard',
   'create_chat',
+  'rename_chat',
+  'delete_chat',
+  'create_chat_group',
+  'rename_chat_group',
+  'delete_chat_group',
+  'move_chats',
+  'move_chat_group',
   ...CHANGE_REQUEST_CHAT_WRITE_TOOL_NAMES,
 ]);
 
@@ -2224,6 +3031,7 @@ function chatAccessKindForTool(tool: string): McpChatAccessKind {
 
 const DRONE_PRINCIPAL_TOOLS = new Set([
   'list_drones',
+  'list_agent_models',
   'open_drone_chat',
   'open_drone',
   'highlight_drones',
@@ -2236,7 +3044,15 @@ const DRONE_PRINCIPAL_TOOLS = new Set([
   'open_whiteboard',
   'close_whiteboard',
   'list_chats',
+  'get_chat_tree',
   'create_chat',
+  'rename_chat',
+  'delete_chat',
+  'create_chat_group',
+  'rename_chat_group',
+  'delete_chat_group',
+  'move_chats',
+  'move_chat_group',
   'send_message',
   'read_chat',
   ...CHANGE_REQUEST_PUBLIC_REVIEW_TOOL_NAMES,
@@ -2307,7 +3123,7 @@ export function authorizeDroneHubMcpTool(context: DroneHubMcpServerContext, tool
   if (CHANGE_REQUEST_PUBLIC_UPDATE_TOOL_NAMES.some((name) => name === tool) && refs.length === 0) {
     return;
   }
-  if ((tool === 'list_drones' || tool === 'speak') && refs.length === 0) return;
+  if ((tool === 'list_drones' || tool === 'list_agent_models' || tool === 'speak') && refs.length === 0) return;
   if (refs.length === 0 || refs.some((ref) => ref !== scopedDroneId)) {
     throw new Error(`MCP principal ${principal.name} is scoped to drone ${scopedDroneId}`);
   }

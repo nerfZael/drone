@@ -455,6 +455,51 @@ describe('agent model catalog', () => {
     });
   });
 
+  test('passes an explicit provider to native model discovery', async () => {
+    const responses: Array<{ status: number; body: any }> = [];
+    const providers: Array<string | undefined> = [];
+    const router = new HubRouter(
+      (_response, status, body) => responses.push({ status, body }),
+      async () => ({}),
+    );
+    registerAgentModelCatalogRoutes(router, {
+      normalizeBuiltinAgentId: () => null,
+      nativeModelCatalog: async (provider?: string) => {
+        providers.push(provider);
+        return {
+          provider,
+          models: [{
+            provider,
+            id: 'gemini-model',
+            reasoningLevels: ['high'],
+            defaultReasoningLevel: 'high',
+          }],
+        };
+      },
+      loadRegistry: async () => ({ drones: {} }),
+      droneRuntime: () => 'container',
+      hostAgentInstalled: async () => false,
+      discoverModels: async () => ({ models: [] }),
+    });
+
+    await router.handle(
+      { method: 'GET' } as any,
+      {} as any,
+      new URL('http://hub.test/api/model-catalog?agent=native&provider=gemini'),
+    );
+
+    expect(providers).toEqual(['gemini']);
+    expect(responses[0]).toMatchObject({
+      status: 200,
+      body: {
+        ok: true,
+        agent: 'native',
+        provider: 'gemini',
+        models: [{ id: 'gemini-model', reasoningLevels: ['high'] }],
+      },
+    });
+  });
+
   test('uses another shared container when the first catalog probe fails', async () => {
     const responses: Array<{ status: number; body: any }> = [];
     const calls: Array<{ containerName: string; forceRefresh: boolean }> = [];

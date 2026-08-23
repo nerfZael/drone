@@ -5715,12 +5715,12 @@ async function startDroneHubApiServerWithLifecycle(
 
   registerAgentModelCatalogRoutes(apiRouter, {
     normalizeBuiltinAgentId,
-    nativeModelCatalog: async () => {
+    nativeModelCatalog: async (requestedProvider?: LlmProviderId) => {
       const [snapshot, effectiveProvider] = await Promise.all([
         assistantService.defaultSettings(),
         resolveEffectiveLlmProvider(),
       ]);
-      const provider = effectiveProvider.provider;
+      const provider = requestedProvider ?? effectiveProvider.provider;
       const models = buildNativeModelCatalog(snapshot.models, snapshot.defaultModel, provider);
       const configuredDefault =
         snapshot.defaultModel.provider === provider

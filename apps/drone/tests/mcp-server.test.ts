@@ -51,6 +51,7 @@ describe('Drone Hub MCP principal authorization', () => {
 
   test('allows a drone principal to use its own chats', () => {
     expect(() => authorizeDroneHubMcpTool(dronePrincipal, 'read_chat', { drone: 'drone-a' })).not.toThrow();
+    expect(() => authorizeDroneHubMcpTool(dronePrincipal, 'list_agent_models', { agent: 'codex' })).not.toThrow();
     expect(() => authorizeDroneHubMcpTool(dronePrincipal, 'list_workflows', { drone: 'drone-a' })).not.toThrow();
     expect(() => authorizeDroneHubMcpTool(dronePrincipal, 'execute_workflow', {
       drone: 'drone-a',
@@ -91,7 +92,21 @@ describe('Drone Hub MCP principal authorization', () => {
     };
     const scoped = { principal: chatPrincipal };
     expect(() => authorizeDroneHubMcpTool(scoped, 'read_chat', { drone: 'drone-b' })).not.toThrow();
-    expect(() => authorizeDroneHubMcpTool(scoped, 'create_chat', { drone: 'drone-b' })).toThrow('write scope');
+    expect(() => authorizeDroneHubMcpTool(scoped, 'get_chat_tree', { drone: 'drone-b' })).not.toThrow();
+    for (const tool of [
+      'create_chat',
+      'rename_chat',
+      'delete_chat',
+      'create_chat_group',
+      'rename_chat_group',
+      'delete_chat_group',
+      'move_chats',
+      'move_chat_group',
+    ]) {
+      expect(() => authorizeDroneHubMcpTool(scoped, tool, { drone: 'drone-b' })).toThrow(
+        'write scope',
+      );
+    }
     expect(() => authorizeDroneHubMcpTool(scoped, 'send_message', { drone: 'drone-b' })).toThrow('execute scope');
     expect(() => authorizeDroneHubMcpTool(scoped, 'send_message', { drone: 'Drone A' })).not.toThrow();
     expect(() => authorizeDroneHubMcpTool(scoped, 'create_drone', { name: 'Child' })).not.toThrow();
@@ -415,6 +430,116 @@ describe('Drone Hub assistant MCP transport', () => {
       const displayedMcpNames = ASSISTANT_TOOL_SUMMARIES.filter((tool) => tool.group?.kind === 'mcp' && tool.group.id === 'drone-hub').map((tool) => tool.name).sort();
       expect(displayedMcpNames).toEqual(catalogNames);
       await client.close();
+    });
+  });
+
+  test('lists agent models with their supported reasoning levels', async () => {
+    await withTempDroneDataDir('drone-assistant-mcp-models-', async () => {
+      const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
+      const previousToken = process.env.DRONE_TOKEN;
+      const previousFetch = globalThis.fetch;
+      const requests: Array<{
+        agent: string | null;
+        provider: string | null;
+        runtime: string | null;
+        refresh: string | null;
+      }> = [];
+      globalThis.fetch = (async (input) => {
+        const url = new URL(
+          typeof input === 'string' ? input : input instanceof URL ? input : input.url,
+        );
+        if (url.pathname !== '/api/model-catalog') {
+          return Response.json({ ok: false, error: 'unexpected request' }, { status: 500 });
+        }
+        requests.push({
+          agent: url.searchParams.get('agent'),
+          provider: url.searchParams.get('provider'),
+          runtime: url.searchParams.get('runtime'),
+          refresh: url.searchParams.get('refresh'),
+        });
+        if (url.searchParams.get('agent') === 'native') {
+          return Response.json({
+            ok: true,
+            agent: 'native',
+            runtime: 'container',
+            provider: 'gemini',
+            source: 'native',
+            defaultModel: { provider: 'gemini', model: 'gemini-2.5-pro', thinkingLevel: 'high' },
+            models: [{
+              provider: 'gemini',
+              id: 'gemini-2.5-pro',
+              label: 'Gemini 2.5 Pro',
+              reasoningLevels: ['medium', 'high'],
+              defaultReasoningLevel: 'high',
+            }],
+          });
+        }
+        return Response.json({
+          ok: true,
+          agent: 'codex',
+          runtime: 'host',
+          source: 'live',
+          discoveredAt: '2026-08-23T12:00:00.000Z',
+          models: [{
+            id: 'gpt-5.6-sol',
+            label: 'GPT-5.6 SOL',
+            reasoningLevels: ['low', 'medium', 'high'],
+            defaultReasoningLevel: 'medium',
+          }],
+        });
+      }) as typeof fetch;
+      process.env.DRONE_HUB_BASE_URL = 'http://drone-hub.test';
+      process.env.DRONE_TOKEN = 'model-catalog-test-token';
+      let client: Awaited<ReturnType<typeof createInProcessDroneHubMcpClient>> | null = null;
+      try {
+        client = await createInProcessDroneHubMcpClient({ correlationId: 'thread-models' });
+        const result = await client.callTool({
+          name: 'list_agent_models',
+          arguments: { agent: 'codex', runtime: 'host', refresh: true },
+        });
+        expect(result.isError).not.toBe(true);
+        expect(result.structuredContent).toMatchObject({
+          ok: true,
+          agent: 'codex',
+          runtime: 'host',
+          source: 'live',
+          models: [{
+            id: 'gpt-5.6-sol',
+            reasoningLevels: ['low', 'medium', 'high'],
+            defaultReasoningLevel: 'medium',
+          }],
+        });
+        const native = await client.callTool({
+          name: 'list_agent_models',
+          arguments: { agent: 'native', provider: 'gemini' },
+        });
+        expect(native.structuredContent).toMatchObject({
+          ok: true,
+          agent: 'native',
+          provider: 'gemini',
+          models: [{
+            id: 'gemini-2.5-pro',
+            reasoningLevels: ['medium', 'high'],
+            defaultReasoningLevel: 'high',
+          }],
+        });
+        const invalidProvider = await client.callTool({
+          name: 'list_agent_models',
+          arguments: { agent: 'codex', provider: 'codex' },
+        });
+        expect(invalidProvider.isError).toBe(true);
+        expect(requests).toEqual([
+          { agent: 'codex', provider: null, runtime: 'host', refresh: '1' },
+          { agent: 'native', provider: 'gemini', runtime: 'container', refresh: null },
+        ]);
+      } finally {
+        await client?.close();
+        globalThis.fetch = previousFetch;
+        if (previousBaseUrl == null) delete process.env.DRONE_HUB_BASE_URL;
+        else process.env.DRONE_HUB_BASE_URL = previousBaseUrl;
+        if (previousToken == null) delete process.env.DRONE_TOKEN;
+        else process.env.DRONE_TOKEN = previousToken;
+      }
     });
   });
 
@@ -1220,6 +1345,20 @@ describe('Drone Hub assistant MCP transport', () => {
         expect(JSON.stringify(rejectedPermissionMode.content)).toContain(
           'agentPermissionMode is only available for Codex and Blip drones',
         );
+        const rejectedReasoning = await client.callTool({
+          name: 'create_drone',
+          arguments: {
+            name: 'Invalid Cursor reasoning draft',
+            draft: true,
+            repoPath,
+            agent: 'cursor',
+            reasoning: 'high',
+          },
+        });
+        expect(rejectedReasoning.isError).toBe(true);
+        expect(JSON.stringify(rejectedReasoning.content)).toContain(
+          'reasoning is only available for Codex and Blip drones',
+        );
         const acceptedExecuteMode = await client.callTool({
           name: 'create_drone',
           arguments: {
@@ -1242,6 +1381,395 @@ describe('Drone Hub assistant MCP transport', () => {
         expect(
           createRequests,
         ).toHaveLength(2);
+      } finally {
+        await client?.close();
+        globalThis.fetch = previousFetch;
+        if (previousBaseUrl == null) delete process.env.DRONE_HUB_BASE_URL;
+        else process.env.DRONE_HUB_BASE_URL = previousBaseUrl;
+        if (previousToken == null) delete process.env.DRONE_TOKEN;
+        else process.env.DRONE_TOKEN = previousToken;
+      }
+    });
+  });
+
+  test('configures chats and manages the complete nested chat tree', async () => {
+    await withTempDroneDataDir('drone-assistant-mcp-chat-tree-', async () => {
+      const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
+      const previousToken = process.env.DRONE_TOKEN;
+      const previousFetch = globalThis.fetch;
+      const repoPath = process.cwd();
+      const chatNames = ['default'];
+      const chatIds = new Map([['default', 'chat-default']]);
+      const draftChats = new Set<string>();
+      const configRequests: Array<{ chat: string; body: any }> = [];
+      const stagedCreateChats: string[] = [];
+      const publishedChats: string[] = [];
+      const rolledBackDraftChats: string[] = [];
+      const preferenceNotificationModes: unknown[] = [];
+      let version = 1;
+      let uiPreferences: any = {
+        spawnContextByRepoKey: {
+          [repoPath]: {
+            spawnAgentKey: 'builtin:codex',
+            spawnModel: 'gpt-5.6-sol',
+            spawnReasoning: 'high',
+            spawnAgentPermissionMode: 'execute',
+            spawnApprovalPolicy: 'none',
+          },
+        },
+      };
+      globalThis.fetch = (async (input, init) => {
+        const url = new URL(
+          typeof input === 'string' ? input : input instanceof URL ? input : input.url,
+        );
+        const method = String(init?.method ?? 'GET').toUpperCase();
+        const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
+        if (url.pathname === '/api/drones/summary' && method === 'GET') {
+          return Response.json({
+            ok: true,
+            drones: [{ id: 'drone-1', name: 'Drone one', runtime: 'container', repoPath }],
+          });
+        }
+        if (url.pathname === '/api/settings/ui-preferences' && method === 'GET') {
+          return Response.json({ ok: true, version, uiPreferences });
+        }
+        if (url.pathname === '/api/settings/ui-preferences' && method === 'POST') {
+          if (body.expectedVersion !== version) {
+            return Response.json({ ok: false, error: 'version conflict' }, { status: 409 });
+          }
+          version += 1;
+          preferenceNotificationModes.push(body.notificationMode);
+          uiPreferences = body.uiPreferences;
+          return Response.json({ ok: true, version, uiPreferences });
+        }
+        if (url.pathname === '/api/drones/drone-1/chats' && method === 'GET') {
+          return Response.json({
+            ok: true,
+            chats: [...chatNames],
+            chatDetails: chatNames.map((chat) => ({
+              chat,
+              chatId: chatIds.get(chat),
+              draft: draftChats.has(chat),
+            })),
+          });
+        }
+        if (url.pathname === '/api/drones/drone-1/chats' && method === 'POST') {
+          if (body.name === 'blocked-conflict') {
+            return Response.json(
+              { ok: false, error: 'chat creation is temporarily locked' },
+              { status: 409 },
+            );
+          }
+          if (chatNames.includes(body.name)) {
+            return Response.json({ ok: false, error: 'chat already exists' }, { status: 409 });
+          }
+          chatNames.push(body.name);
+          chatIds.set(body.name, `chat-${chatNames.length}`);
+          if (body.draft === true) {
+            draftChats.add(body.name);
+            stagedCreateChats.push(body.name);
+          }
+          return Response.json(
+            { ok: true, chat: body.name, chatId: chatIds.get(body.name) },
+            { status: 201 },
+          );
+        }
+        const configMatch = url.pathname.match(/^\/api\/drones\/drone-1\/chats\/([^/]+)\/config$/);
+        if (configMatch && method === 'POST') {
+          const chat = decodeURIComponent(configMatch[1]!);
+          if (chat === 'will-rollback') {
+            return Response.json({ ok: false, error: 'configuration rejected' }, { status: 500 });
+          }
+          configRequests.push({ chat, body });
+          return Response.json({ ok: true, chat, ...body });
+        }
+        const publishMatch = url.pathname.match(/^\/api\/drones\/drone-1\/chats\/([^/]+)\/publish$/);
+        if (publishMatch && method === 'POST') {
+          const chat = decodeURIComponent(publishMatch[1]!);
+          if (!draftChats.delete(chat)) {
+            return Response.json({ ok: false, error: 'chat is not a draft' }, { status: 409 });
+          }
+          publishedChats.push(chat);
+          return Response.json({ ok: true, chat, draft: false, published: true });
+        }
+        const renameMatch = url.pathname.match(/^\/api\/drones\/drone-1\/chats\/([^/]+)\/rename$/);
+        if (renameMatch && method === 'POST') {
+          const chat = decodeURIComponent(renameMatch[1]!);
+          const index = chatNames.indexOf(chat);
+          if (index < 0) return Response.json({ ok: false, error: 'unknown chat' }, { status: 404 });
+          chatNames[index] = body.newName;
+          chatIds.set(body.newName, chatIds.get(chat)!);
+          chatIds.delete(chat);
+          if (draftChats.delete(chat)) draftChats.add(body.newName);
+          return Response.json({ ok: true, oldChat: chat, chat: body.newName });
+        }
+        const deleteMatch = url.pathname.match(/^\/api\/drones\/drone-1\/chats\/([^/]+)$/);
+        if (deleteMatch && method === 'DELETE') {
+          const chat = decodeURIComponent(deleteMatch[1]!);
+          const index = chatNames.indexOf(chat);
+          if (index < 0) return Response.json({ ok: false, error: 'unknown chat' }, { status: 404 });
+          if (draftChats.has(chat)) rolledBackDraftChats.push(chat);
+          chatNames.splice(index, 1);
+          chatIds.delete(chat);
+          draftChats.delete(chat);
+          return Response.json({ ok: true, deletedChat: chat, chats: [...chatNames] });
+        }
+        return Response.json(
+          { ok: false, error: `unexpected request: ${method} ${url.pathname}` },
+          { status: 500 },
+        );
+      }) as typeof fetch;
+      process.env.DRONE_HUB_BASE_URL = 'http://drone-hub.test';
+      process.env.DRONE_TOKEN = 'chat-tree-test-token';
+      let client: Awaited<ReturnType<typeof createInProcessDroneHubMcpClient>> | null = null;
+      try {
+        client = await createInProcessDroneHubMcpClient({ correlationId: 'thread-chat-tree' });
+
+        const explicitlyConfigured = await client.callTool({
+          name: 'create_chat',
+          arguments: {
+            drone: 'Drone one',
+            chat: 'configured',
+            agent: 'codex',
+            model: 'gpt-explicit',
+            reasoning: 'medium',
+            agentPermissionMode: 'write',
+            approvalPolicy: 'auto',
+          },
+        });
+        expect(explicitlyConfigured.isError).not.toBe(true);
+        expect(configRequests[0]).toEqual({
+          chat: 'configured',
+          body: {
+            agent: { kind: 'builtin', id: 'codex' },
+            model: 'gpt-explicit',
+            reasoning: 'medium',
+            agentPermissionMode: 'write',
+            approvalPolicy: 'auto',
+          },
+        });
+        expect(stagedCreateChats).toContain('configured');
+        expect(publishedChats).toContain('configured');
+        expect(draftChats).not.toContain('configured');
+        const redundantCodexProvider = await client.callTool({
+          name: 'create_chat',
+          arguments: {
+            drone: 'drone-1',
+            chat: 'invalid-provider',
+            agent: 'codex',
+            provider: 'codex',
+          },
+        });
+        expect(redundantCodexProvider.isError).toBe(true);
+        const redundantCodexProviderError = redundantCodexProvider.content
+          .map((item: any) => item?.text ?? '')
+          .join('\n');
+        expect(redundantCodexProviderError).toContain(
+          'agent="native" (the Drone Hub Built-in agent)',
+        );
+        expect(redundantCodexProviderError).toContain('omit provider when agent="codex"');
+        expect(chatNames).not.toContain('invalid-provider');
+        const alreadyExists = await client.callTool({
+          name: 'create_chat',
+          arguments: { drone: 'drone-1', chat: 'configured' },
+        });
+        expect(alreadyExists.structuredContent).toMatchObject({
+          ok: true,
+          chat: 'configured',
+          created: false,
+          settingsApplied: false,
+        });
+        expect(configRequests).toHaveLength(1);
+
+        const rejectedConflict = await client.callTool({
+          name: 'create_chat',
+          arguments: { drone: 'drone-1', chat: 'blocked-conflict' },
+        });
+        expect(rejectedConflict.isError).toBe(true);
+        expect(JSON.stringify(rejectedConflict.content)).toContain(
+          'chat creation is temporarily locked',
+        );
+
+        const owningChatClient = await createInProcessDroneHubMcpClient({
+          correlationId: 'thread-chat-tree-owner',
+          principal: {
+            kind: 'chat',
+            tokenId: 'chat:drone-1:configured',
+            name: 'Drone one / configured',
+            droneId: 'drone-1',
+            chatName: 'configured',
+            chatId: chatIds.get('configured')!,
+            accessScope: {
+              readMode: 'selected',
+              writeMode: 'selected',
+              executeMode: 'selected',
+              droneIds: ['drone-1'],
+              updatedAt: '2026-08-23T00:00:00.000Z',
+            },
+            selectedDroneRefs: ['drone-1', 'Drone one'],
+          },
+        });
+        try {
+          const selfDelete = await owningChatClient.callTool({
+            name: 'delete_chat',
+            arguments: { drone: 'drone-1', chat: 'configured' },
+          });
+          expect(selfDelete.isError).toBe(true);
+          expect(JSON.stringify(selfDelete.content)).toContain(
+            'cannot delete the chat that is currently running this MCP client',
+          );
+          expect(chatNames).toContain('configured');
+        } finally {
+          await owningChatClient.close();
+        }
+
+        Object.assign(uiPreferences.spawnContextByRepoKey[repoPath], {
+          spawnAgentKey: 'native',
+          spawnModel: 'gpt-5.6-sol',
+          spawnReasoning: 'high',
+          spawnAgentPermissionMode: 'read',
+          spawnApprovalPolicy: 'none',
+        });
+        const nativeInherited = await client.callTool({
+          name: 'create_chat',
+          arguments: { drone: 'drone-1', chat: 'native-inherited', provider: 'codex' },
+        });
+        expect(nativeInherited.isError).not.toBe(true);
+        expect(configRequests[1]).toEqual({
+          chat: 'native-inherited',
+          body: {
+            agent: { kind: 'native' },
+            provider: 'codex',
+            model: 'gpt-5.6-sol',
+            reasoning: 'high',
+            agentPermissionMode: 'read',
+            approvalPolicy: 'none',
+          },
+        });
+        expect((await client.callTool({
+          name: 'delete_chat',
+          arguments: { drone: 'drone-1', chat: 'native-inherited' },
+        })).isError).not.toBe(true);
+        Object.assign(uiPreferences.spawnContextByRepoKey[repoPath], {
+          spawnAgentKey: 'builtin:codex',
+          spawnAgentPermissionMode: 'execute',
+        });
+
+        const inherited = await client.callTool({
+          name: 'create_chat',
+          arguments: { drone: 'drone-1' },
+        });
+        expect(inherited.structuredContent).toMatchObject({
+          ok: true,
+          chat: 'Untitled 1',
+          created: true,
+          draft: true,
+          settingsApplied: true,
+        });
+        expect(configRequests[2]).toEqual({
+          chat: 'Untitled 1',
+          body: {
+            agent: { kind: 'builtin', id: 'codex' },
+            model: 'gpt-5.6-sol',
+            reasoning: 'high',
+            agentPermissionMode: 'execute',
+            approvalPolicy: 'none',
+          },
+        });
+        const reorderedChats = await client.callTool({
+          name: 'move_chats',
+          arguments: { drone: 'drone-1', chats: ['Untitled 1'], beforeChat: 'default' },
+        });
+        expect((reorderedChats.structuredContent as any)?.tree?.[0]).toMatchObject({
+          kind: 'chat',
+          name: 'Untitled 1',
+        });
+
+        const rolledBack = await client.callTool({
+          name: 'create_chat',
+          arguments: { drone: 'drone-1', chat: 'will-rollback' },
+        });
+        expect(rolledBack.isError).toBe(true);
+        expect(JSON.stringify(rolledBack.content)).toContain('the new chat was rolled back');
+        expect(chatNames).not.toContain('will-rollback');
+        expect(rolledBackDraftChats).toContain('will-rollback');
+
+        expect((await client.callTool({
+          name: 'create_chat_group',
+          arguments: { drone: 'drone-1', group: 'Work' },
+        })).isError).not.toBe(true);
+        expect((await client.callTool({
+          name: 'create_chat_group',
+          arguments: { drone: 'drone-1', group: 'Backend', parentGroup: 'Work' },
+        })).isError).not.toBe(true);
+        const descendantMove = await client.callTool({
+          name: 'move_chat_group',
+          arguments: { drone: 'drone-1', group: 'Work', targetGroup: 'Work/Backend' },
+        });
+        expect(descendantMove.isError).toBe(true);
+        expect(JSON.stringify(descendantMove.content)).toContain('into itself or its descendant');
+        expect((await client.callTool({
+          name: 'move_chat_group',
+          arguments: { drone: 'drone-1', group: 'Work', beforeChat: 'Untitled 1' },
+        })).structuredContent).toMatchObject({ ok: true, oldGroup: 'Work', group: 'Work' });
+        expect((await client.callTool({
+          name: 'move_chats',
+          arguments: { drone: 'drone-1', chats: ['configured'], targetGroup: 'Work/Backend' },
+        })).isError).not.toBe(true);
+
+        const groupedTree = await client.callTool({
+          name: 'get_chat_tree',
+          arguments: { drone: 'drone-1' },
+        });
+        expect((groupedTree.structuredContent as any)?.tree?.[0]).toMatchObject({
+          kind: 'group',
+          path: 'Work',
+          children: [{
+            kind: 'group',
+            path: 'Work/Backend',
+            children: [{ kind: 'chat', name: 'configured' }],
+          }],
+        });
+
+        expect((await client.callTool({
+          name: 'rename_chat_group',
+          arguments: { drone: 'drone-1', group: 'Work/Backend', newName: 'API' },
+        })).isError).not.toBe(true);
+        expect((await client.callTool({
+          name: 'move_chat_group',
+          arguments: { drone: 'drone-1', group: 'Work/API' },
+        })).isError).not.toBe(true);
+        expect((await client.callTool({
+          name: 'delete_chat_group',
+          arguments: { drone: 'drone-1', group: 'API' },
+        })).structuredContent).toMatchObject({ ok: true, chatsDeleted: false });
+
+        expect((await client.callTool({
+          name: 'rename_chat',
+          arguments: { drone: 'drone-1', chat: 'configured', newName: 'review' },
+        })).isError).not.toBe(true);
+        expect((await client.callTool({
+          name: 'delete_chat',
+          arguments: { drone: 'drone-1', chat: 'review' },
+        })).structuredContent).toMatchObject({ ok: true, chat: 'review', disposition: 'deleted' });
+        expect((await client.callTool({
+          name: 'move_chats',
+          arguments: { drone: 'drone-1', chats: ['Untitled 1'], afterChat: 'default' },
+        })).isError).not.toBe(true);
+
+        const finalTree = await client.callTool({
+          name: 'get_chat_tree',
+          arguments: { drone: 'drone-1' },
+        });
+        expect(finalTree.structuredContent).toMatchObject({
+          tree: [
+            { kind: 'group', path: 'Work', children: [] },
+            { kind: 'chat', name: 'default' },
+            { kind: 'chat', name: 'Untitled 1', draft: true },
+          ],
+        });
+        expect(preferenceNotificationModes.length).toBeGreaterThan(0);
+        expect(preferenceNotificationModes.every((mode) => mode === 'sidebar_snapshot')).toBe(true);
       } finally {
         await client?.close();
         globalThis.fetch = previousFetch;
@@ -1410,6 +1938,12 @@ describe('Drone Hub assistant MCP transport', () => {
         }
         if (url.pathname === '/api/drones/child-1/chats' && method === 'POST') {
           return Response.json({ ok: true, chat: body.name }, { status: 201 });
+        }
+        if (url.pathname === '/api/drones/child-1/chats/review/config' && method === 'POST') {
+          return Response.json({ ok: true, chat: 'review' });
+        }
+        if (url.pathname === '/api/drones/child-1/chats/review/publish' && method === 'POST') {
+          return Response.json({ ok: true, chat: 'review', draft: false, published: true });
         }
         if (url.pathname === '/api/drones/child-1/chats/default/prompt' && method === 'POST') {
           return Response.json({ ok: true, id: 'child-1', promptId: 'prompt-1', pendingState: 'queued' });

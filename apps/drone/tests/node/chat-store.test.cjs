@@ -445,6 +445,51 @@ describe('canonical chat and transcript repository', () => {
     assert.deepEqual(listArchivedChatsFromStore({ droneId: 'drone-1' }).archivedChats, []);
   });
 
+  test('recreating an archived chat name does not inherit its prompt queue history', async () => {
+    tempDataDir('archive-name-reuse');
+    await upsertChatInStore({ droneId: 'drone-1', chatName: 'default', chatEntry: legacyChat('default') });
+    await upsertChatInStore({ droneId: 'drone-1', chatName: 'review', chatEntry: legacyChat('review') });
+    const prompts = getPromptQueueRepository();
+    await prompts.enqueue({
+      droneId: 'drone-1',
+      chatName: 'review',
+      prompt: {
+        id: 'old-prompt',
+        at: '2026-01-01T00:01:00.000Z',
+        prompt: 'old work',
+        state: 'queued',
+      },
+    });
+
+    const archived = await archiveChatInStore({
+      droneId: 'drone-1',
+      chatName: 'review',
+      archivedAt: '2026-02-01T00:00:00.000Z',
+      deleteAt: '2026-02-02T00:00:00.000Z',
+      archiveRetention: '1d',
+    });
+    assert.deepEqual(archived.archivedChat.chat.pendingPrompts.map((prompt) => prompt.id), ['old-prompt']);
+
+    const created = await createChatInStore({
+      droneId: 'drone-1',
+      chatName: 'review',
+      createEntry: () => ({
+        ...legacyChat('new review'),
+        id: 'new-chat-id',
+        agent: { kind: 'native' },
+      }),
+    });
+
+    assert.equal(created.chat.id, 'new-chat-id');
+    assert.deepEqual(created.chat.turns, []);
+    assert.deepEqual(created.chat.pendingPrompts, []);
+    assert.equal(prompts.get({ droneId: 'drone-1', chatName: 'review', promptId: 'old-prompt' }), null);
+    assert.deepEqual(
+      listArchivedChatsFromStore({ droneId: 'drone-1' }).archivedChats[0].chat.pendingPrompts.map((prompt) => prompt.id),
+      ['old-prompt'],
+    );
+  });
+
   test('delete and rename tombstones prevent stale imports from resurrecting old names', async () => {
     tempDataDir('tombstones');
     await upsertChatInStore({ droneId: 'drone-1', chatName: 'review', chatEntry: legacyChat('review') });
