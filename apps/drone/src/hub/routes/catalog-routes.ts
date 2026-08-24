@@ -16,6 +16,7 @@ import {
   listMcpServers,
   updateMcpServerRecord,
 } from '../mcp-servers';
+import { listMcpServerTools } from '../mcp-server-tools';
 import {
   createMcpAccessToken,
   getMcpAccessTokenById,
@@ -127,6 +128,24 @@ export function registerCatalogRoutes(apiRouter: HubRouter, deps: CatalogRouteDe
     } catch (error: any) {
       const message = errorMessage(error);
       respond(/not enabled/i.test(message) ? 503 : 500, { ok: false, error: message });
+    }
+  });
+
+  apiRouter.get('/api/mcp-servers/:serverId/tools', async ({ params, fail, json: respond }) => {
+    const server = await getMcpServerById(params.serverId);
+    if (!server) return fail(404, `unknown MCP server: ${params.serverId}`);
+    try {
+      respond(200, {
+        ok: true,
+        serverId: server.id,
+        tools: await listMcpServerTools(server),
+      });
+    } catch (error: any) {
+      const message = errorMessage(error);
+      respond(/timed? out|timeout/i.test(message) ? 504 : 502, {
+        ok: false,
+        error: message,
+      });
     }
   });
 

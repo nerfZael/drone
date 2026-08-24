@@ -19,9 +19,14 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
     mcpHostTokenName,
     mcpTokenRevealValue,
     selectedMcpServerId,
+    selectedMcpServer,
+    mcpServerTools,
+    mcpServerToolsLoading,
+    mcpServerToolsError,
     mcpDraft,
     mcpDraftDirty,
     loadMcpServers,
+    loadMcpServerTools,
     loadMcpAccessTokens,
     setMcpHostTokenName,
     createHostMcpToken,
@@ -387,6 +392,86 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
               <span className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Headers JSON</span>
               <textarea value={mcpDraft.headersJson} onChange={(e) => updateMcpDraftField('headersJson', e.target.value)} disabled={mcpDraft.transport !== 'http'} className={`${textareaClassName()} min-h-[110px] ${mcpDraft.transport !== 'http' ? 'opacity-40 cursor-not-allowed' : ''}`} placeholder={'{\n  "Authorization": "Bearer {env:GITHUB_TOKEN}"\n}'} />
             </label>
+          </div>
+
+          <div className="dh-settings-subsection">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <div className="flex items-center gap-2">
+                  <div className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
+                    Advertised tools
+                  </div>
+                  {selectedMcpServer && !mcpServerToolsLoading && !mcpServerToolsError ? (
+                    <div className="text-[var(--text-10)] tabular-nums text-[var(--muted-dim)]">
+                      {mcpServerTools.length}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="mt-1 text-[var(--text-11)] text-[var(--muted-dim)]">
+                  Tools reported by this server through the MCP protocol.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => void loadMcpServerTools(selectedMcpServer?.id)}
+                disabled={!selectedMcpServer || mcpServerToolsLoading}
+                className={buttonClassName(
+                  'secondary',
+                  !selectedMcpServer || mcpServerToolsLoading,
+                )}
+                style={{ fontFamily: 'var(--display)' }}
+              >
+                {mcpServerToolsLoading ? 'Loading...' : 'Refresh tools'}
+              </button>
+            </div>
+
+            {!selectedMcpServer ? (
+              <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-4 text-[var(--text-11)] text-[var(--muted-dim)]">
+                Save this server before loading its tools.
+              </div>
+            ) : mcpServerToolsError ? (
+              <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-11)] text-[var(--red)]">
+                {mcpServerToolsError}
+              </div>
+            ) : mcpServerToolsLoading ? (
+              <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-4 text-[var(--text-11)] text-[var(--muted-dim)]">
+                Asking {selectedMcpServer.name} for its tool catalog...
+              </div>
+            ) : mcpServerTools.length === 0 ? (
+              <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-4 text-[var(--text-11)] text-[var(--muted-dim)]">
+                This server did not advertise any tools.
+              </div>
+            ) : (
+              <div className="max-h-[420px] overflow-y-auto rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)]">
+                {mcpServerTools.map((tool) => (
+                  <div
+                    key={tool.name}
+                    className="border-b border-[var(--border-subtle)] px-3 py-2 last:border-b-0"
+                  >
+                    <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                      <div className="font-mono text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
+                        {tool.name}
+                      </div>
+                      {tool.title && tool.title !== tool.name ? (
+                        <div className="text-[var(--text-10)] text-[var(--muted)]">
+                          {tool.title}
+                        </div>
+                      ) : null}
+                    </div>
+                    {tool.description ? (
+                      <div className="mt-1 text-[var(--text-10)] leading-snug text-[var(--muted-dim)]">
+                        {tool.description}
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            )}
+            {selectedMcpServer && mcpDraftDirty ? (
+              <div className="text-[var(--text-10)] text-[var(--accent)]">
+                This catalog reflects the saved connection. Save your edits to reload it.
+              </div>
+            ) : null}
           </div>
 
           <div className="dh-settings-subsection">

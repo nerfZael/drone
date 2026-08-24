@@ -116,6 +116,17 @@ describeSocketSuite('Drone Hub MCP HTTP endpoint', () => {
     expect(data.server.headers.Authorization).toStartWith('Bearer dhmcp_');
     expect(data.server.headers.Authorization).not.toBe(`Bearer ${mcpToken}`);
 
+    const toolsResponse = await fetch(
+      `${baseUrl}/api/mcp-servers/${encodeURIComponent(data.server.id)}/tools`,
+      { headers: { authorization: `Bearer ${apiToken}` } },
+    );
+    expect(toolsResponse.status).toBe(200);
+    const toolsData: any = await toolsResponse.json();
+    expect(toolsData.serverId).toBe(data.server.id);
+    expect(toolsData.tools.map((tool: any) => tool.name)).toContain('create_chat');
+    expect(toolsData.tools.map((tool: any) => tool.name)).toContain('move_chats');
+    expect(toolsData.tools.map((tool: any) => tool.name)).toContain('set_drone_group');
+
     const presetToken = String(data.server.headers.Authorization).replace(/^Bearer\s+/, '');
     const init = await fetch(`${baseUrl}/mcp`, {
       method: 'POST',

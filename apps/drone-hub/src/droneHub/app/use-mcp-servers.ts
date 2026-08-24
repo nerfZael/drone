@@ -10,6 +10,7 @@ import {
   type McpServerDraft,
   type McpServerDraftScalarKey,
   type McpServerRecord,
+  type McpServerToolSummary,
 } from './mcp-server-library-model';
 import { settingsErrorMessage, settingsQueryError, settingsQueryKey, useSettingsQuery } from './settings-query';
 
@@ -35,6 +36,12 @@ export type McpAccessTokenSummary = {
 type McpServerMutationResponse = {
   ok: true;
   server: McpServerRecord;
+};
+
+type McpServerToolsResponse = {
+  ok: true;
+  serverId: string;
+  tools: McpServerToolSummary[];
 };
 
 type McpTokensListResponse = {
@@ -78,7 +85,11 @@ export function useMcpServers(requestJson: RequestJsonFn) {
   const [selectedMcpServerId, setSelectedMcpServerId] = React.useState<string | null>(null);
   const [mcpDraft, setMcpDraft] = React.useState<McpServerDraft>(() => createEmptyMcpServerDraft());
   const [baselineDraft, setBaselineDraft] = React.useState<McpServerDraft>(() => createEmptyMcpServerDraft());
+  const [mcpServerTools, setMcpServerTools] = React.useState<McpServerToolSummary[]>([]);
+  const [mcpServerToolsLoading, setMcpServerToolsLoading] = React.useState(false);
+  const [mcpServerToolsError, setMcpServerToolsError] = React.useState<string | null>(null);
   const selectedMcpServerIdRef = React.useRef<string | null>(selectedMcpServerId);
+  const toolsRequestIdRef = React.useRef(0);
 
   React.useEffect(() => {
     selectedMcpServerIdRef.current = selectedMcpServerId;
@@ -97,10 +108,40 @@ export function useMcpServers(requestJson: RequestJsonFn) {
     () => mcpServers.find((server) => server.id === selectedMcpServerId) ?? null,
     [mcpServers, selectedMcpServerId],
   );
+  const selectedMcpServerUpdatedAt = selectedMcpServer?.updatedAt;
 
   const mcpDraftDirty = React.useMemo(
     () => sanitizeMcpDraftForComparison(mcpDraft) !== sanitizeMcpDraftForComparison(baselineDraft),
     [baselineDraft, mcpDraft],
+  );
+
+  const loadMcpServerTools = React.useCallback(
+    async (serverIdRaw?: string) => {
+      const serverId = String(serverIdRaw ?? selectedMcpServerIdRef.current ?? '').trim();
+      const requestId = ++toolsRequestIdRef.current;
+      if (!serverId) {
+        setMcpServerTools([]);
+        setMcpServerToolsLoading(false);
+        setMcpServerToolsError(null);
+        return;
+      }
+      setMcpServerTools([]);
+      setMcpServerToolsLoading(true);
+      setMcpServerToolsError(null);
+      try {
+        const data = await requestJson<McpServerToolsResponse>(
+          `/api/mcp-servers/${encodeURIComponent(serverId)}/tools`,
+        );
+        if (requestId !== toolsRequestIdRef.current) return;
+        setMcpServerTools(data.tools ?? []);
+      } catch (error) {
+        if (requestId !== toolsRequestIdRef.current) return;
+        setMcpServerToolsError(settingsErrorMessage(error));
+      } finally {
+        if (requestId === toolsRequestIdRef.current) setMcpServerToolsLoading(false);
+      }
+    },
+    [requestJson],
   );
 
   const applySelectedServer = React.useCallback((server: McpServerRecord | null) => {
@@ -118,6 +159,17 @@ export function useMcpServers(requestJson: RequestJsonFn) {
       null;
     applySelectedServer(nextSelected);
   }, [applySelectedServer, mcpServers, serversQuery.data]);
+
+  React.useEffect(() => {
+    if (!selectedMcpServerId) {
+      void loadMcpServerTools();
+      return;
+    }
+    void loadMcpServerTools(selectedMcpServerId);
+    return () => {
+      toolsRequestIdRef.current += 1;
+    };
+  }, [loadMcpServerTools, selectedMcpServerId, selectedMcpServerUpdatedAt]);
 
   const loadMcpServers = React.useCallback(async () => {
     setQueryErrorDismissed(false);
@@ -318,9 +370,13 @@ export function useMcpServers(requestJson: RequestJsonFn) {
     mcpTokenRevealValue,
     selectedMcpServerId,
     selectedMcpServer,
+    mcpServerTools,
+    mcpServerToolsLoading,
+    mcpServerToolsError,
     mcpDraft,
     mcpDraftDirty,
     loadMcpServers,
+    loadMcpServerTools,
     loadMcpAccessTokens,
     setMcpHostTokenName,
     createHostMcpToken,

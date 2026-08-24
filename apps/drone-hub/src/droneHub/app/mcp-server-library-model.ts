@@ -17,6 +17,12 @@ export type McpServerRecord = {
   updatedAt: string;
 };
 
+export type McpServerToolSummary = {
+  name: string;
+  title?: string;
+  description?: string;
+};
+
 export type McpServerDraft = {
   id: string | null;
   name: string;
