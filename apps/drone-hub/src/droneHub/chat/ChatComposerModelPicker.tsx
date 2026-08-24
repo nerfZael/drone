@@ -22,6 +22,7 @@ export type ChatComposerModelPickerConfig = {
   searchPlaceholder?: string;
   triggerLabel?: string;
   allowCustomModel?: boolean;
+  requireExplicitModelSelection?: boolean;
   statusMessage?: string;
   title?: string;
   menuPlacement?: 'above' | 'below';
@@ -83,6 +84,7 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
     searchPlaceholder = 'Search models',
     triggerLabel: triggerLabelOverride,
     allowCustomModel = false,
+    requireExplicitModelSelection = false,
     statusMessage,
     title = showReasoning ? 'Choose model and reasoning' : 'Choose model',
     menuPlacement = 'above',
@@ -96,9 +98,9 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
 
   React.useEffect(() => {
     if (!open) return;
-    setModelsOpen(!showReasoning);
+    setModelsOpen(!showReasoning || (requireExplicitModelSelection && !currentModel));
     setSearchQuery('');
-  }, [currentModel, open, showReasoning]);
+  }, [currentModel, open, requireExplicitModelSelection, showReasoning]);
 
   const availableModels = uniqueModels(options);
   const exactCurrentModel = availableModels.find(
@@ -106,20 +108,28 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
   );
   const selectedModel =
     exactCurrentModel ||
-    availableModels.find((option) => option.id === currentModel) ||
-    (!currentModel ? availableModels[0] : undefined);
+    (!requireExplicitModelSelection
+      ? availableModels.find((option) => option.id === currentModel) ||
+        (!currentModel ? availableModels[0] : undefined)
+      : undefined);
   const selectedProvider = selectedModel?.provider || currentProvider;
   const selectedModelId = selectedModel?.id ?? currentModel;
-  const selectedReasoning = currentThinkingLevel || selectedModel?.thinkingLevel || 'low';
-  const currentName = selectedModel?.name || selectedModelId || 'Auto';
-  const choices = options.some(
+  const modelListOpen = modelsOpen || (requireExplicitModelSelection && !selectedModelId);
+  const selectedReasoning =
+    currentThinkingLevel || selectedModel?.thinkingLevel ||
+    (requireExplicitModelSelection ? '' : 'low');
+  const currentName =
+    selectedModel?.name || selectedModelId ||
+    (requireExplicitModelSelection ? 'Choose model' : 'Auto');
+  const hasSupportedCurrentSelection = options.some(
     (option) =>
       option.provider === selectedProvider &&
       option.id === selectedModelId &&
       (!option.thinkingLevel ||
         !currentThinkingLevel ||
         option.thinkingLevel === currentThinkingLevel),
-  )
+  );
+  const choices = !selectedModelId || hasSupportedCurrentSelection
     ? options
     : [
         {
@@ -140,7 +150,11 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
         .filter((value): value is string => Boolean(value)),
     ),
   ];
-  const visibleReasoning = reasoningLevels.length > 0 ? reasoningLevels : DEFAULT_REASONING_LEVELS;
+  const visibleReasoning = reasoningLevels.length > 0
+    ? reasoningLevels
+    : requireExplicitModelSelection && !selectedModelId
+      ? []
+      : DEFAULT_REASONING_LEVELS;
   const models = uniqueModels(choices);
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const visibleModels = normalizedQuery
@@ -150,7 +164,7 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
     : models;
   const triggerLabel =
     triggerLabelOverride ??
-    `${modelName(currentName)}${showReasoning ? ` (${formatReasoningLabel(selectedReasoning)})` : ''}`;
+    `${modelName(currentName)}${showReasoning && selectedReasoning ? ` (${formatReasoningLabel(selectedReasoning)})` : ''}`;
   const customModelId =
     allowCustomModel &&
     normalizedQuery &&
@@ -161,6 +175,10 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
       : '';
 
   const selectReasoning = (thinkingLevel: string) => {
+    if (!selectedModelId) {
+      setModelsOpen(true);
+      return;
+    }
     const exact = choices.find(
       (choice) =>
         choice.provider === selectedProvider &&
@@ -221,11 +239,11 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
         >
           <div className="flex min-h-9 flex-shrink-0 items-center px-3">
             <div className="text-[.8125rem] font-semibold text-[var(--fg-strong)]">
-              {showReasoning && !modelsOpen ? 'Reasoning' : 'Model'}
+              {showReasoning && !modelListOpen ? 'Reasoning' : 'Model'}
             </div>
           </div>
 
-          {showReasoning && !modelsOpen ? (
+          {showReasoning && !modelListOpen && selectedModelId ? (
             <div className="flex flex-wrap items-center gap-1 px-2 pb-2">
               {visibleReasoning.map((level) => {
                 const active = level === selectedReasoning;
@@ -257,10 +275,10 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
             <span className="min-w-0 truncate text-[.75rem] font-medium text-[var(--chat-composer-fg)]">
               {currentName}
             </span>
-            <span className="text-[var(--accent)]"><ChevronIcon up={modelsOpen} /></span>
+            <span className="text-[var(--accent)]"><ChevronIcon up={modelListOpen} /></span>
           </button>
 
-          {modelsOpen ? (
+          {modelListOpen ? (
             <>
               {searchable ? (
                 <div className="flex-shrink-0 px-2 pb-1.5">

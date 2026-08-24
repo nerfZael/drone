@@ -27,6 +27,23 @@ function record(
 }
 
 describe('Companion telemetry', () => {
+  test('marks a warm session as cold when its runtime configuration is rebuilt', async () => {
+    const telemetry = new CompanionTelemetryService();
+    const run = telemetry.begin({
+      messageId: 'reconfigured-message',
+      runId: 'reconfigured-run',
+      transport: 'websocket',
+      coldStart: false,
+    });
+    run.markColdStart();
+    await run.finish('completed');
+
+    expect(telemetry.list()[0]).toMatchObject({
+      messageId: 'reconfigured-message',
+      coldStart: true,
+    });
+  });
+
   test('uses the Blip terminal status captured by the raw event tap', async () => {
     const telemetry = new CompanionTelemetryService();
     const run = telemetry.begin({

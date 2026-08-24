@@ -40,6 +40,19 @@ export function isDroneStartingOrSeeding(hubPhase: string | null | undefined): b
   return hubPhase === 'draft' || isDroneProvisioningPhase(hubPhase);
 }
 
+export function isDroneContainerStopped(drone: DroneSummary): boolean {
+  if ((drone.runtime ?? 'container') === 'host') return false;
+  if (drone.statusChecking || drone.statusOk !== false || drone.hostPort != null) return false;
+  if (isDroneStartingOrSeeding(drone.hubPhase)) return false;
+
+  const statusError = String(drone.statusError ?? '').trim().toLowerCase();
+  return (
+    statusError.includes('container likely stopped') ||
+    (statusError.includes('container') &&
+      (statusError.includes('not running') || statusError.includes('stopped')))
+  );
+}
+
 export function shouldReadChatRuntimeForHubPhase(hubPhase: string | null | undefined): boolean {
   // Failed pending drones still expose a read-only chat snapshot containing the
   // persisted initial prompt and startup error.

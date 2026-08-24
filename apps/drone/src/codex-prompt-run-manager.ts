@@ -527,14 +527,19 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
   ): Promise<void> {
     await this.serialize(session, async () => {
       session.lastUsedAt = Date.now();
-      const threadId = String(
+      const notificationThreadId = String(
         notification.params?.threadId ?? notification.params?.thread?.id ?? '',
       ).trim();
-      if (threadId) session.threadId = threadId;
+      const belongsToRootThread =
+        !notificationThreadId ||
+        !session.threadId ||
+        notificationThreadId === session.threadId;
       const turnId = String(
         notification.params?.turnId ?? notification.params?.turn?.id ?? '',
       ).trim();
-      if (notification.method === 'turn/started' && turnId) session.activeTurnId = turnId;
+      if (belongsToRootThread && notification.method === 'turn/started' && turnId) {
+        session.activeTurnId = turnId;
+      }
       const itemId = String(notification.params?.item?.id ?? '').trim();
       let translatedNotification = notification;
       if (notification.method === 'item/started' && itemId) {
@@ -585,10 +590,22 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
         );
       }
       const currentRun = session.activeRun ?? session.startingRun;
-      if (currentRun && turnId && notification.method !== 'turn/completed') {
+      if (
+        currentRun &&
+        belongsToRootThread &&
+        turnId &&
+        notification.method !== 'turn/completed'
+      ) {
         session.observedTurnIds.add(turnId);
       }
-      const events = translateCodexAppServerNotification(translatedNotification);
+      const isLifecycleNotification =
+        notification.method === 'thread/started' ||
+        notification.method === 'turn/started' ||
+        notification.method === 'turn/completed';
+      const events =
+        belongsToRootThread || !isLifecycleNotification
+          ? translateCodexAppServerNotification(translatedNotification)
+          : [];
       if (currentRun && events.length > 0) {
         const updated = await this.options.mutate(() =>
           this.options.appendRunEvents(currentRun, events),
@@ -601,7 +618,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
           session,
           (pending) => !turnId || pending.approval.turnId === turnId,
         );
-        await this.completeTurn(session, notification);
+        if (belongsToRootThread) await this.completeTurn(session, notification);
       }
     });
   }
@@ -618,9 +635,17 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
           sandbox: spec.sandbox,
           model: spec.model,
         });
-        session.threadId = String(resumed?.thread?.id ?? session.threadId);
-        session.threadReady = true;
-        return session.threadId;
+        const parentThreadId = String(resumed?.thread?.parentThreadId ?? '').trim();
+        if (!parentThreadId) {
+          session.threadId = String(resumed?.thread?.id ?? session.threadId);
+          session.threadReady = true;
+          return session.threadId;
+        }
+        // Older Drone builds could persist a subagent notification as the chat's
+        // session id. Resume succeeds for that thread, but direct turns do not.
+        // Drop the poisoned binding and create a new root thread below.
+        session.threadId = null;
+        session.threadReady = false;
       } catch (error) {
         if (!isMissingThreadError(error)) throw error;
         session.threadId = null;
@@ -673,25 +698,44 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     });
     session.startingRun = run;
     try {
-      const threadId = await this.ensureThread(session, message.codexAppServer);
+      let threadId = await this.ensureThread(session, message.codexAppServer);
       const sandboxPolicy = sandboxPolicyForMode(message.codexAppServer.sandbox);
       run = await this.options.mutate(() =>
         this.options.appendRunEvents(run, [{ type: 'thread.started', thread_id: threadId }]),
       );
-      const response = await session.connection.call('turn/start', {
-        threadId,
-        input: promptInput(message.codexAppServer),
-        clientUserMessageId: message.id,
-        ...(message.codexAppServer.model ? { model: message.codexAppServer.model } : {}),
-        ...(message.codexAppServer.effort ? { effort: message.codexAppServer.effort } : {}),
-        ...(message.codexAppServer.approvalPolicy
-          ? { approvalPolicy: message.codexAppServer.approvalPolicy }
-          : {}),
-        ...(message.codexAppServer.approvalsReviewer
-          ? { approvalsReviewer: message.codexAppServer.approvalsReviewer }
-          : {}),
-        ...(sandboxPolicy ? { sandboxPolicy } : {}),
-      });
+      const startTurn = async (targetThreadId: string) =>
+        await session.connection.call('turn/start', {
+          threadId: targetThreadId,
+          input: promptInput(message.codexAppServer),
+          clientUserMessageId: message.id,
+          ...(message.codexAppServer.model ? { model: message.codexAppServer.model } : {}),
+          ...(message.codexAppServer.effort ? { effort: message.codexAppServer.effort } : {}),
+          ...(message.codexAppServer.approvalPolicy
+            ? { approvalPolicy: message.codexAppServer.approvalPolicy }
+            : {}),
+          ...(message.codexAppServer.approvalsReviewer
+            ? { approvalsReviewer: message.codexAppServer.approvalsReviewer }
+            : {}),
+          ...(sandboxPolicy ? { sandboxPolicy } : {}),
+        });
+      let response: any;
+      try {
+        response = await startTurn(threadId);
+      } catch (error) {
+        if (!isDirectSubagentInputError(error)) throw error;
+        // Some Codex App Server versions resume a sub-agent thread without
+        // returning parentThreadId and only identify it when direct input is
+        // attempted. Retry this queued message once on a fresh root thread.
+        session.threadId = null;
+        session.threadReady = false;
+        session.activeTurnId = null;
+        session.observedTurnIds.clear();
+        threadId = await this.ensureThread(session, message.codexAppServer);
+        run = await this.options.mutate(() =>
+          this.options.appendRunEvents(run, [{ type: 'thread.started', thread_id: threadId }]),
+        );
+        response = await startTurn(threadId);
+      }
       const turnId = String(response?.turn?.id ?? session.activeTurnId ?? '').trim();
       if (!turnId) throw new Error('Codex App Server did not return a turn id');
       session.activeTurnId = turnId;
@@ -815,6 +859,12 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     const run = session.activeRun;
     if (!run) return;
     const turn = notification.params?.turn ?? {};
+    const notificationThreadId = String(
+      notification.params?.threadId ?? notification.params?.thread?.id ?? '',
+    ).trim();
+    if (notificationThreadId && run.threadId && notificationThreadId !== run.threadId) {
+      return;
+    }
     const notificationTurnId = String(turn?.id ?? '').trim();
     if (
       session.activeTurnId &&
@@ -832,7 +882,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
       state: runState,
       finishedAt,
       updatedAt: finishedAt,
-      threadId: session.threadId ?? run.threadId,
+      threadId: run.threadId ?? session.threadId ?? undefined,
       turnId: notificationTurnId || session.activeTurnId || run.turnId,
       ...(runState === 'failed' ? { error: errorMessage(turn?.error ?? 'Codex turn failed') } : {}),
     };
@@ -1139,4 +1189,8 @@ function isMissingThreadError(raw: unknown): boolean {
   return /(?:thread|rollout).*(?:not found|does not exist|missing|unknown)|(?:not found|missing).*(?:thread|rollout)/i.test(
     errorMessage(raw),
   );
+}
+
+function isDirectSubagentInputError(raw: unknown): boolean {
+  return /direct app-server input is not allowed for .*sub-agents/i.test(errorMessage(raw));
 }

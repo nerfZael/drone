@@ -17,7 +17,7 @@ import { IconClone } from '../overview/icons';
 import { createCanvasChatNodeId } from './app-config';
 import { droneChatRequiresApproval, normalizedDroneChats } from './chat-node-helpers';
 import { createSidebarChatDragData, parseDroneHubDragData, useDroneHubActiveDrag, type SidebarDroneDragData } from './drone-hub-dnd';
-import { isDroneStartingOrSeeding } from './helpers';
+import { isDroneContainerStopped, isDroneStartingOrSeeding } from './helpers';
 import { IconChevron, IconColumns, IconFolderGit, IconFolderOutline, IconPencil, IconPlus, IconSpinner, IconTrash } from './icons';
 import { isSidebarGroupCollapsed } from './is-sidebar-group-collapsed';
 import type { DroneSelectionClickOptions } from './drone-selection-helpers';
@@ -203,6 +203,7 @@ type GroupedSidebarTreeProps = {
   deleteMode: DroneDeleteMode;
   renamingDrones: Record<string, boolean>;
   settingBaseImages: Record<string, boolean>;
+  startingDrones: Record<string, boolean>;
   movingDroneGroups: boolean;
   sidebarOptimisticDroneIdSet: Set<string>;
   uiDroneName: (nameRaw: string) => string;
@@ -244,6 +245,7 @@ type GroupedSidebarTreeProps = {
   ) => Promise<DroneInlineRenameResult> | DroneInlineRenameResult;
   inlineRenameDroneRequest: { droneId: string; key: number } | null;
   onSetDroneBaseImage: (droneId: string) => void;
+  onStartDroneContainer: (droneId: string) => void;
   pinnedDroneIdSet: ReadonlySet<string>;
   pinningDroneIds: ReadonlySet<string>;
   onSetDronePinned: (droneId: string, pinned: boolean) => Promise<void>;
@@ -1263,6 +1265,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
     deleteMode,
     renamingDrones,
     settingBaseImages,
+    startingDrones,
     collapsedDroneSections,
     setCollapsedDroneSections,
     onToggleDroneSection,
@@ -1289,6 +1292,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
     onRenameDrone,
     inlineRenameDroneRequest,
     onSetDroneBaseImage,
+    onStartDroneContainer,
     pinnedDroneIdSet,
     pinningDroneIds,
     onSetDronePinned,
@@ -1423,6 +1427,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
   const handleDeleteDrone = React.useCallback(() => {
     onDeleteDroneRef.current(drone.id);
   }, [drone.id]);
+  const canStartContainer = actionsEnabled && isDroneContainerStopped(drone);
   const reorderPreviewClass =
     dragOverTreeTarget?.nodeId === node.id
       ? dragOverTreeTarget.placement === 'before'
@@ -1465,7 +1470,9 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
             busy={showBusy}
             approvalRequired={hasOnlyDefaultChat && defaultChatApprovalRequired}
             operationLabel={
-              deletingDrones[drone.id]
+              startingDrones[drone.id]
+                ? 'Starting'
+                : deletingDrones[drone.id]
                 ? ((deleteOperationModeById[drone.id] ?? deleteMode) === 'archive' ? 'Archiving' : 'Deleting')
                 : undefined
             }
@@ -1514,6 +1521,9 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
                 : 0
             }
             onSetBaseImage={actionsEnabled ? () => onSetDroneBaseImage(drone.id) : undefined}
+            onStartContainer={
+              canStartContainer ? () => onStartDroneContainer(drone.id) : undefined
+            }
             pinned={pinnedDroneIdSet.has(drone.id)}
             muted={muted || defaultChatMuted}
             collapsedChatMuted={defaultChatMuted}
@@ -1550,6 +1560,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
               Boolean(deletingDrones[drone.id]) ||
               Boolean(renamingDrones[drone.id]) ||
               Boolean(settingBaseImages[drone.id]) ||
+              Boolean(startingDrones[drone.id]) ||
               String(drone.runtime ?? 'container').trim().toLowerCase() === 'host'
             }
             cloneChatBusy={Boolean(cloningChatKeys[`${drone.id}:default`])}
@@ -1560,6 +1571,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
               Boolean(deletingDrones[drone.id]) ||
               Boolean(renamingDrones[drone.id]) ||
               Boolean(settingBaseImages[drone.id]) ||
+              Boolean(startingDrones[drone.id]) ||
               isDroneStartingOrSeeding(drone.hubPhase)
             }
             createChatDisabled={
@@ -1567,6 +1579,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
               Boolean(deletingDrones[drone.id]) ||
               Boolean(renamingDrones[drone.id]) ||
               Boolean(settingBaseImages[drone.id]) ||
+              Boolean(startingDrones[drone.id]) ||
               isDroneStartingOrSeeding(drone.hubPhase)
             }
             addToGroupDisabled={
@@ -1575,12 +1588,14 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
               Boolean(deletingDrones[drone.id]) ||
               Boolean(renamingDrones[drone.id]) ||
               Boolean(settingBaseImages[drone.id]) ||
+              Boolean(startingDrones[drone.id]) ||
               isDroneStartingOrSeeding(drone.hubPhase)
             }
             renameDisabled={
               Boolean(deletingDrones[drone.id]) ||
               Boolean(renamingDrones[drone.id]) ||
-              Boolean(settingBaseImages[drone.id])
+              Boolean(settingBaseImages[drone.id]) ||
+              Boolean(startingDrones[drone.id])
             }
             renameBusy={Boolean(renamingDrones[drone.id])}
             setBaseImageDisabled={
@@ -1588,14 +1603,24 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
               Boolean(deletingDrones[drone.id]) ||
               Boolean(renamingDrones[drone.id]) ||
               Boolean(settingBaseImages[drone.id]) ||
+              Boolean(startingDrones[drone.id]) ||
               isDroneStartingOrSeeding(drone.hubPhase)
             }
             setBaseImageBusy={Boolean(settingBaseImages[drone.id])}
+            startContainerDisabled={
+              isOptimistic ||
+              Boolean(deletingDrones[drone.id]) ||
+              Boolean(renamingDrones[drone.id]) ||
+              Boolean(settingBaseImages[drone.id]) ||
+              Boolean(startingDrones[drone.id])
+            }
+            startContainerBusy={Boolean(startingDrones[drone.id])}
             deleteDisabled={
               isOptimistic ||
               Boolean(deletingDrones[drone.id]) ||
               Boolean(renamingDrones[drone.id]) ||
-              Boolean(settingBaseImages[drone.id])
+              Boolean(settingBaseImages[drone.id]) ||
+              Boolean(startingDrones[drone.id])
             }
             deleteBusy={Boolean(deletingDrones[drone.id])}
           />
@@ -2913,6 +2938,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       props.onSelectDroneChat,
       props.onSelectFolder,
       props.onSetDroneBaseImage,
+      props.onStartDroneContainer,
       props.onSetDronePinned,
       props.onStartRenameDroneChat,
       props.onStartRenameFolder,
@@ -2934,6 +2960,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       props.setCollapsedDroneSections,
       props.onMoveSidebar,
       props.settingBaseImages,
+      props.startingDrones,
       props.pinnedDroneIdSet,
       props.pinningDroneIds,
       props.sidebarChatOrderByDrone,

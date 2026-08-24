@@ -8,6 +8,7 @@ import {
   type ManagedDroneSyncPayload,
   unsignedManagedDroneState,
 } from './managed-drone-state';
+import { DRONE_DAEMON_CAPABILITIES } from './daemon-capabilities';
 import {
   DaemonHttpError,
   readLimitedJson,
@@ -624,6 +625,10 @@ export async function handleDaemonManagedStateRequest(input: {
 }): Promise<boolean> {
   if (input.pathname !== '/v1/managed-state' || input.method !== 'PUT') return false;
   const body = (await readLimitedJson(input.req)) as ManagedDroneSyncPayload;
-  sendJson(input.res, 200, { ok: true, ...(await applyManagedDroneState(body, input.dataDir)) });
+  sendJson(input.res, 200, {
+    ok: true,
+    capabilities: DRONE_DAEMON_CAPABILITIES,
+    ...(await applyManagedDroneState(body, input.dataDir)),
+  });
   return true;
 }

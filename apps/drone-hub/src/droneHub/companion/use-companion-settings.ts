@@ -1,12 +1,21 @@
 import React from 'react';
 
+export type CompanionProvider = 'openai' | 'codex' | 'gemini';
+
 export type CompanionSettingsDraft = {
-  schemaVersion: 2;
-  provider: 'openai' | 'codex' | 'gemini';
+  schemaVersion: 3;
+  provider: CompanionProvider;
   model: string;
   thinkingLevel: string;
   systemPrompt: string;
   enabledTools: string[];
+};
+
+export type CompanionModelOption = {
+  provider: CompanionProvider;
+  id: string;
+  name: string;
+  thinkingLevel: string;
 };
 
 export type CompanionSettingsResponse = {
@@ -22,14 +31,39 @@ export type CompanionSettingsResponse = {
     requires: string | null;
     description: string;
   }>;
-  models: Array<{
-    provider: 'openai' | 'codex' | 'gemini';
-    id: string;
-    name: string;
-    thinkingLevel: string;
-  }>;
+  models: CompanionModelOption[];
   credentials: Record<'openai' | 'codex' | 'gemini', boolean>;
 };
+
+export function isCompanionModelSelectionValid(
+  models: readonly CompanionModelOption[],
+  draft: Pick<CompanionSettingsDraft, 'provider' | 'model' | 'thinkingLevel'>,
+): boolean {
+  return models.some(
+    (model) =>
+      model.provider === draft.provider &&
+      model.id === draft.model &&
+      model.thinkingLevel === draft.thinkingLevel,
+  );
+}
+
+export function changeCompanionProvider(
+  models: readonly CompanionModelOption[],
+  draft: CompanionSettingsDraft,
+  provider: CompanionProvider,
+): CompanionSettingsDraft {
+  const currentSelectionExists = models.some(
+    (model) =>
+      model.provider === provider &&
+      model.id === draft.model &&
+      model.thinkingLevel === draft.thinkingLevel,
+  );
+  return {
+    ...draft,
+    provider,
+    ...(currentSelectionExists ? {} : { model: '', thinkingLevel: '' }),
+  };
+}
 
 type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
 

@@ -4,6 +4,7 @@ import { HUB_AGENT_MODEL_OPTIONS } from '../src/hub/llm-model-catalog';
 import {
   COMPANION_TOOL_SUMMARIES,
   DEFAULT_COMPANION_SETTINGS,
+  companionSettingsEqual,
   normalizeCompanionSettings,
 } from '../src/hub/companion/companion-config';
 
@@ -75,18 +76,49 @@ describe('Companion settings', () => {
     ]);
   });
 
-  test('drops unknown tools and falls back to a supported model combination', () => {
+  test('drops unknown tools without changing an explicit supported model combination', () => {
     const settings = normalizeCompanionSettings({
       provider: 'gemini',
-      model: 'not-a-model',
-      thinkingLevel: 'xhigh',
+      model: 'gemini-3.5-flash-lite',
+      thinkingLevel: 'high',
       systemPrompt: 'Custom',
       enabledTools: ['get_hub_overview', 'not_a_tool'],
     });
     expect(settings.provider).toBe('gemini');
     expect(settings.model).toBe('gemini-3.5-flash-lite');
-    expect(settings.thinkingLevel).toBe('minimal');
+    expect(settings.thinkingLevel).toBe('high');
     expect(settings.enabledTools).toEqual(['get_hub_overview']);
+  });
+
+  test('does not fall back from missing or unsupported provider and model selections', () => {
+    expect(normalizeCompanionSettings()).toEqual(DEFAULT_COMPANION_SETTINGS);
+    expect(() => normalizeCompanionSettings(null)).toThrow('Companion settings must be an object');
+    expect(() => normalizeCompanionSettings({
+      ...DEFAULT_COMPANION_SETTINGS,
+      enabledTools: null,
+    })).toThrow('Companion enabledTools must be an array of tool names');
+    expect(() => normalizeCompanionSettings({
+      model: DEFAULT_COMPANION_SETTINGS.model,
+      thinkingLevel: DEFAULT_COMPANION_SETTINGS.thinkingLevel,
+    })).toThrow('Companion provider must be openai, codex, or gemini');
+    expect(() => normalizeCompanionSettings({
+      ...DEFAULT_COMPANION_SETTINGS,
+      provider: 'gemini',
+      model: 'not-a-model',
+      thinkingLevel: 'xhigh',
+    })).toThrow('Companion model selection is not supported');
+  });
+
+  test('detects every settings change that requires refreshing an active Companion session', () => {
+    expect(companionSettingsEqual(DEFAULT_COMPANION_SETTINGS, DEFAULT_COMPANION_SETTINGS)).toBe(true);
+    expect(companionSettingsEqual(DEFAULT_COMPANION_SETTINGS, {
+      ...DEFAULT_COMPANION_SETTINGS,
+      provider: 'openai',
+    })).toBe(false);
+    expect(companionSettingsEqual(DEFAULT_COMPANION_SETTINGS, {
+      ...DEFAULT_COMPANION_SETTINGS,
+      enabledTools: DEFAULT_COMPANION_SETTINGS.enabledTools.slice(1),
+    })).toBe(false);
   });
 
   test('migrates the former default prompt that prohibited chat navigation', () => {

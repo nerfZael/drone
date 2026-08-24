@@ -17,6 +17,7 @@ import {
 import {
   COMPANION_RUNTIME_CONTRACT,
   COMPANION_TOOL_SUMMARIES,
+  companionSettingsEqual,
   readCompanionSettings,
   type CompanionBrowserToolName,
   type CompanionSettings,
@@ -159,11 +160,12 @@ export class CompanionRuntime {
     let runError: unknown;
     try {
       const existingContext = this.contexts.get(threadId);
-      const settings =
-        existingContext?.settings ??
-        (telemetry
-          ? await telemetry.measure('settingsMs', () => readCompanionSettings())
-          : await readCompanionSettings());
+      const settings = telemetry
+        ? await telemetry.measure('settingsMs', () => readCompanionSettings())
+        : await readCompanionSettings();
+      const settingsChanged = Boolean(
+        existingContext && !companionSettingsEqual(existingContext.settings, settings),
+      );
       telemetry?.setModel(settings);
       if (this.cancelledRunIds.has(runId)) throw new Error('Companion run cancelled');
       const credential = telemetry
@@ -176,6 +178,10 @@ export class CompanionRuntime {
       }
       if (this.cancelledRunIds.has(runId)) throw new Error('Companion run cancelled');
       if (existingContext) {
+        if (settingsChanged) {
+          this.host.invalidateThread(threadId);
+          existingContext.settings = settings;
+        }
         existingContext.callBrowser = this.instrumentBrowserCall(input.callBrowser, telemetry);
         existingContext.snapshots.clear();
       } else {
@@ -186,7 +192,8 @@ export class CompanionRuntime {
           snapshots: new Map(),
         });
       }
-      if (coldStart) {
+      if (coldStart || settingsChanged) {
+        if (settingsChanged) telemetry?.markColdStart();
         if (telemetry) {
           await telemetry.measure('handleSetupMs', () => this.host.prepareThread(threadId));
         } else {

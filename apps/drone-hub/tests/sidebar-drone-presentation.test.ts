@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { DroneSummary } from '../src/droneHub/types';
+import { isDroneContainerStopped } from '../src/droneHub/app/helpers';
 import {
   DroneCard,
   SidebarItemStateIndicator,
@@ -45,6 +46,24 @@ describe('desktop sidebar drone presentation', () => {
       'archiving',
     );
     expect(sidebarDroneDisplayState(drone(), false, 'Deleting')).toBe('deleting');
+  });
+
+  test('only identifies explicitly stopped container drones as startable', () => {
+    const stopped = drone({
+      statusOk: false,
+      statusError: 'no host port mapped (container likely stopped)',
+    });
+    expect(isDroneContainerStopped(stopped)).toBe(true);
+    expect(isDroneContainerStopped({ ...stopped, runtime: 'host' })).toBe(false);
+    expect(isDroneContainerStopped({ ...stopped, statusChecking: true })).toBe(false);
+    expect(isDroneContainerStopped({ ...stopped, hubPhase: 'starting' })).toBe(false);
+    expect(isDroneContainerStopped({ ...stopped, hostPort: 49152 })).toBe(false);
+    expect(
+      isDroneContainerStopped({
+        ...stopped,
+        statusError: 'request failed while the container is running',
+      }),
+    ).toBe(false);
   });
 
   test('uses mobile drawer labels, including unread idle drones', () => {
@@ -376,6 +395,7 @@ describe('desktop sidebar drone presentation', () => {
       "actionMenuPosition ? 'dh-sidebar-row-context-target' : ''",
     );
     expect(cardSource).toContain("label: 'Delete drone'");
+    expect(cardSource).toContain("label: 'Start container'");
     expect(cardSource).toContain("tone: 'danger'");
     expect(cardSource).not.toContain('<IconMore');
     expect(menuSource).toContain('createPortal(menu, document.body)');
@@ -390,6 +410,23 @@ describe('desktop sidebar drone presentation', () => {
     expect(cardSource).toContain("shortcut: 'Delete'");
     expect(cardSource).toContain("e.key === 'Delete'");
     expect(cardSource).toContain('onDelete?.();');
+  });
+
+  test('wires stopped-drone context actions to the lifecycle start endpoint', () => {
+    const mutationSource = readFileSync(
+      new URL('../src/droneHub/app/use-drone-mutation-actions.ts', import.meta.url),
+      'utf8',
+    );
+    const treeSource = readFileSync(
+      new URL('../src/droneHub/app/GroupedSidebarTree.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(mutationSource).toContain('/lifecycle/start`');
+    expect(mutationSource).toContain("method: 'POST'");
+    expect(treeSource).toContain('isDroneContainerStopped(drone)');
+    expect(treeSource).toContain("? 'Starting'");
+    expect(treeSource).toContain('startContainerBusy={Boolean(startingDrones[drone.id])}');
   });
 
   test('renames drones through a borderless inline editor that cancels on blur', () => {

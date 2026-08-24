@@ -22,6 +22,7 @@ import {
   readLimitedJson,
 } from './daemon-workspace';
 import { handleDaemonManagedStateRequest } from './daemon-managed-state';
+import { DRONE_DAEMON_CAPABILITIES } from './daemon-capabilities';
 import { selectNextPromptJobId } from './prompt-job-scheduling';
 import {
   CodexPromptRunManager,
@@ -1685,7 +1686,7 @@ async function main() {
           ok: true,
           name: 'drone-daemon',
           time: new Date().toISOString(),
-          capabilities: ['workspace-v1', 'managed-state-v1', 'codex-app-server-v1'],
+          capabilities: DRONE_DAEMON_CAPABILITIES,
         });
         return;
       }

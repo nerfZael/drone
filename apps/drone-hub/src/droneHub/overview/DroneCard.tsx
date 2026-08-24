@@ -7,6 +7,7 @@ import {
   IconClone,
   IconFolder,
   IconPin,
+  IconPlay,
   IconPlus,
   IconRename,
   IconSpinner,
@@ -56,6 +57,7 @@ type DroneCardProps = {
   onRename?: DroneInlineRenameHandler;
   inlineRenameRequestKey?: number;
   onSetBaseImage?: () => void;
+  onStartContainer?: () => void;
   onTogglePinned?: () => void;
   onToggleMuted?: (muted: boolean) => void;
   onUnmuteCollapsedChat?: () => void;
@@ -70,6 +72,8 @@ type DroneCardProps = {
   renameBusy?: boolean;
   setBaseImageDisabled?: boolean;
   setBaseImageBusy?: boolean;
+  startContainerDisabled?: boolean;
+  startContainerBusy?: boolean;
   pinned?: boolean;
   muted?: boolean;
   collapsedChatMuted?: boolean;
@@ -503,6 +507,7 @@ function areDroneCardPropsEqual(a: DroneCardProps, b: DroneCardProps): boolean {
     Boolean(a.onRename) === Boolean(b.onRename) &&
     (a.inlineRenameRequestKey ?? 0) === (b.inlineRenameRequestKey ?? 0) &&
     Boolean(a.onSetBaseImage) === Boolean(b.onSetBaseImage) &&
+    Boolean(a.onStartContainer) === Boolean(b.onStartContainer) &&
     Boolean(a.onTogglePinned) === Boolean(b.onTogglePinned) &&
     Boolean(a.onToggleMuted) === Boolean(b.onToggleMuted) &&
     Boolean(a.onUnmuteCollapsedChat) === Boolean(b.onUnmuteCollapsedChat) &&
@@ -517,6 +522,8 @@ function areDroneCardPropsEqual(a: DroneCardProps, b: DroneCardProps): boolean {
     Boolean(a.renameBusy) === Boolean(b.renameBusy) &&
     Boolean(a.setBaseImageDisabled) === Boolean(b.setBaseImageDisabled) &&
     Boolean(a.setBaseImageBusy) === Boolean(b.setBaseImageBusy) &&
+    Boolean(a.startContainerDisabled) === Boolean(b.startContainerDisabled) &&
+    Boolean(a.startContainerBusy) === Boolean(b.startContainerBusy) &&
     Boolean(a.pinned) === Boolean(b.pinned) &&
     Boolean(a.muted) === Boolean(b.muted) &&
     Boolean(a.collapsedChatMuted) === Boolean(b.collapsedChatMuted) &&
@@ -563,6 +570,7 @@ export const DroneCard = React.memo(function DroneCard({
   onRename,
   inlineRenameRequestKey,
   onSetBaseImage,
+  onStartContainer,
   onTogglePinned,
   onToggleMuted,
   onUnmuteCollapsedChat,
@@ -577,6 +585,8 @@ export const DroneCard = React.memo(function DroneCard({
   renameBusy,
   setBaseImageDisabled,
   setBaseImageBusy,
+  startContainerDisabled,
+  startContainerBusy,
   pinned,
   muted,
   collapsedChatMuted,
@@ -610,6 +620,7 @@ export const DroneCard = React.memo(function DroneCard({
   const canCreateGroup = typeof onCreateGroup === 'function';
   const canRename = typeof onRename === 'function';
   const canSetBaseImage = typeof onSetBaseImage === 'function';
+  const canStartContainer = typeof onStartContainer === 'function';
   const canTogglePinned = typeof onTogglePinned === 'function';
   const canToggleMuted = typeof onToggleMuted === 'function';
   const canUnmuteCollapsedChat =
@@ -627,6 +638,7 @@ export const DroneCard = React.memo(function DroneCard({
     canCreateGroup ||
     canRename ||
     canSetBaseImage ||
+    canStartContainer ||
     canDelete;
   const activeOperationLabel = String(operationLabel ?? '').trim();
   const [actionMenuPosition, setActionMenuPosition] = React.useState<{ x: number; y: number } | null>(null);
@@ -855,6 +867,20 @@ export const DroneCard = React.memo(function DroneCard({
       icon: <IconClone className="h-3.5 w-3.5 text-[var(--accent)]" />,
       disabled: Boolean(cloneDisabled),
       onSelect: () => onClone?.(),
+    });
+  }
+  if (canStartContainer) {
+    actionMenuItems.push({
+      id: 'start-container',
+      label: 'Start container',
+      separatorBefore: actionMenuItems.length > 0,
+      icon: startContainerBusy ? (
+        <IconSpinner className="h-3.5 w-3.5 text-[var(--yellow)]" />
+      ) : (
+        <IconPlay className="h-3.5 w-3.5 text-[var(--green)]" />
+      ),
+      disabled: Boolean(startContainerDisabled),
+      onSelect: () => onStartContainer?.(),
     });
   }
   if (canRename) {

@@ -1100,6 +1100,175 @@ readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line
     });
   }, 25_000);
 
+  test('keeps the root Codex thread active across subagent lifecycle notifications', async () => {
+    const port = await allocatePort();
+    const dataDir = path.join(tempRoot, `daemon-codex-subagent-thread-${port}`);
+    fs.mkdirSync(dataDir, { recursive: true });
+    const requestsPath = path.join(tempRoot, `codex-subagent-thread-requests-${port}.jsonl`);
+    const fakeServerPath = path.join(tempRoot, `fake-codex-subagent-thread-${port}.js`);
+    fs.writeFileSync(
+      fakeServerPath,
+      `
+const fs = require('node:fs');
+const readline = require('node:readline');
+const requestsPath = process.argv[2];
+let turnSequence = 0;
+const send = (message) => process.stdout.write(JSON.stringify(message) + '\\n');
+const record = (message) => fs.appendFileSync(requestsPath, JSON.stringify(message) + '\\n');
+readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line', (line) => {
+  const message = JSON.parse(line);
+  record(message);
+  if (message.method === 'initialize') {
+    send({ id: message.id, result: { userAgent: 'fake-codex-subagent-thread' } });
+    return;
+  }
+  if (message.method === 'initialized') return;
+  if (message.method === 'thread/resume') {
+    const threadId = message.params?.threadId;
+    // Real App Server versions can omit parentThreadId here even for a child.
+    send({ id: message.id, result: { thread: { id: threadId, turns: [] } } });
+    return;
+  }
+  if (message.method === 'thread/start') {
+    send({ id: message.id, result: { thread: { id: 'root-thread', turns: [] } } });
+    send({ method: 'thread/started', params: { thread: { id: 'root-thread', parentThreadId: null } } });
+    return;
+  }
+  if (message.method === 'turn/start') {
+    if (message.params?.threadId !== 'root-thread') {
+      send({ id: message.id, error: { code: -32000, message: 'direct app-server input is not allowed for multi-agent v2 sub-agents' } });
+      return;
+    }
+    const sequence = ++turnSequence;
+    const rootTurnId = 'root-turn-' + sequence;
+    send({ id: message.id, result: { turn: { id: rootTurnId, status: 'inProgress', items: [] } } });
+    send({ method: 'turn/started', params: { threadId: 'root-thread', turn: { id: rootTurnId, status: 'inProgress', items: [] } } });
+    if (sequence === 1) {
+      send({ method: 'thread/started', params: { thread: { id: 'child-thread', parentThreadId: 'root-thread' } } });
+      send({ method: 'turn/started', params: { threadId: 'child-thread', turn: { id: 'child-turn', status: 'inProgress', items: [] } } });
+      send({ method: 'turn/completed', params: { threadId: 'child-thread', turn: { id: 'child-turn', status: 'completed', items: [] } } });
+    }
+    setTimeout(() => {
+      send({ method: 'item/completed', params: { threadId: 'root-thread', turnId: rootTurnId, item: { id: 'root-answer-' + sequence, type: 'agentMessage', text: 'Root answer ' + sequence + '.' } } });
+      send({ method: 'turn/completed', params: { threadId: 'root-thread', turn: { id: rootTurnId, status: 'completed', items: [] } } });
+    }, sequence === 1 ? 500 : 10);
+  }
+});
+`,
+      'utf8',
+    );
+
+    const token = 'daemon-token';
+    const daemon = Bun.spawn(
+      [
+        process.execPath,
+        daemonEntry,
+        '--host',
+        '127.0.0.1',
+        '--port',
+        String(port),
+        '--data-dir',
+        dataDir,
+        '--token',
+        token,
+      ],
+      { cwd: process.cwd(), stdout: 'ignore', stderr: 'pipe' },
+    );
+    processes.push(daemon);
+    const baseUrl = `http://127.0.0.1:${port}`;
+    await waitForHealth(baseUrl, token, daemon);
+
+    const sessionKey = `subagent-thread-session-${port}`;
+    const enqueue = async (
+      id: string,
+      prompt: string,
+      existingThreadId?: string,
+      targetSessionKey = sessionKey,
+    ) => {
+      const response = await fetch(`${baseUrl}/v1/codex/enqueue`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          id,
+          sessionKey: targetSessionKey,
+          launchScript: `exec ${process.execPath} ${fakeServerPath} ${requestsPath}`,
+          prompt,
+          ...(existingThreadId ? { existingThreadId } : {}),
+        }),
+      });
+      expect(response.status).toBe(202);
+    };
+
+    const firstId = `codex-subagent-thread-first-${port}`;
+    await enqueue(firstId, 'Delegate part of this task.');
+    const first = await waitForPromptJob(baseUrl, token, firstId);
+    expect(first).toMatchObject({
+      codexAppServer: {
+        threadId: 'root-thread',
+        run: { state: 'done', threadId: 'root-thread', turnId: 'root-turn-1' },
+      },
+      transcript: {
+        threadId: 'root-thread',
+        message: 'Root answer 1.',
+        terminalEvent: 'turn.completed',
+      },
+    });
+
+    const secondId = `codex-subagent-thread-second-${port}`;
+    await enqueue(secondId, 'Continue in the same Hub chat.', first.codexAppServer.threadId);
+    const second = await waitForPromptJob(baseUrl, token, secondId);
+    expect(second).toMatchObject({
+      codexAppServer: {
+        threadId: 'root-thread',
+        run: { state: 'done', threadId: 'root-thread', turnId: 'root-turn-2' },
+      },
+      transcript: {
+        threadId: 'root-thread',
+        message: 'Root answer 2.',
+        terminalEvent: 'turn.completed',
+      },
+    });
+
+    const recoveredId = `codex-subagent-thread-recovered-${port}`;
+    await enqueue(
+      recoveredId,
+      'Recover this existing Hub chat.',
+      'child-thread',
+      `${sessionKey}-recovery`,
+    );
+    const recovered = await waitForPromptJob(baseUrl, token, recoveredId);
+    expect(recovered).toMatchObject({
+      codexAppServer: {
+        threadId: 'root-thread',
+        run: { state: 'done', threadId: 'root-thread', turnId: 'root-turn-1' },
+      },
+      transcript: {
+        threadId: 'root-thread',
+        message: 'Root answer 1.',
+        terminalEvent: 'turn.completed',
+      },
+    });
+
+    const requests = fs
+      .readFileSync(requestsPath, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(
+      requests
+        .filter((message) => message.method === 'turn/start')
+        .map((message) => message.params?.threadId),
+    ).toEqual(['root-thread', 'root-thread', 'child-thread', 'root-thread']);
+    expect(requests).toContainEqual({
+      id: expect.any(Number),
+      method: 'thread/resume',
+      params: expect.objectContaining({ threadId: 'child-thread' }),
+    });
+  }, 25_000);
+
   test('delivers every Codex ASAP prompt through same-turn App Server steering', async () => {
     const port = await allocatePort();
     const dataDir = path.join(tempRoot, `daemon-codex-steering-${port}`);

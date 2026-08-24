@@ -3,6 +3,7 @@ import {
   type ManagedDroneDesiredState,
 } from '../managed-drone-state';
 import { DroneApiRequestError, type DroneClient, type DroneDaemonConnection } from '../host/api';
+import { CODEX_ROOT_THREAD_RECOVERY_CAPABILITY } from '../daemon-capabilities';
 
 type SyncOptions = { droneId: string; droneEntry: any };
 
@@ -60,7 +61,7 @@ type ManagedDroneStateSyncDependencies = {
   onTiming?: (timing: ManagedDroneStateSyncTiming) => void;
 };
 
-const REQUIRED_CAPABILITY = 'managed-state-v1';
+const REQUIRED_CAPABILITY = CODEX_ROOT_THREAD_RECOVERY_CAPABILITY;
 
 export function createManagedDroneStateSyncService(deps: ManagedDroneStateSyncDependencies) {
   async function ensureCapability(
@@ -176,10 +177,23 @@ export function createManagedDroneStateSyncService(deps: ManagedDroneStateSyncDe
         const client = deps.daemonClientForDrone(droneEntry);
         record('resolveDaemonClient', performance.now() - clientStartedAt);
         try {
-          const response = await measure(
+          let response = await measure(
             'applyManagedStateRequest',
             async () => await deps.managedDroneSync(client, payload),
           );
+          const responseCapabilities = Array.isArray((response as any)?.capabilities)
+            ? (response as any).capabilities
+            : [];
+          if (
+            runtime === 'container' &&
+            !responseCapabilities.includes(REQUIRED_CAPABILITY)
+          ) {
+            await ensureCapability(droneEntry, client, measure);
+            response = await measure(
+              'retryManagedStateAfterDaemonUpgrade',
+              async () => await deps.managedDroneSync(client, payload),
+            );
+          }
           appliedFingerprint =
             String((response as any)?.fingerprint ?? '').trim() || payload.fingerprint;
           appliedChanged =

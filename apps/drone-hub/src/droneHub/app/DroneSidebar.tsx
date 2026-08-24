@@ -910,6 +910,7 @@ export type DroneSidebarProps = {
   deleteMode: DroneDeleteMode;
   renamingDrones: Record<string, boolean>;
   settingBaseImages: Record<string, boolean>;
+  startingDrones: Record<string, boolean>;
   movingDroneGroups: boolean;
   sidebarGroups: SidebarGroup[];
   canonicalGroups: GroupSummary[];
@@ -957,6 +958,7 @@ export type DroneSidebarProps = {
     newName: string,
   ) => Promise<DroneInlineRenameResult> | DroneInlineRenameResult;
   onSetDroneBaseImage: (droneId: string) => void;
+  onStartDroneContainer: (droneId: string) => void;
   onSetDronePinned: (droneId: string, pinned: boolean) => Promise<boolean>;
   onMoveSidebar: (
     intent: SidebarMoveIntent,
@@ -1028,6 +1030,7 @@ export function DroneSidebar({
   deleteMode,
   renamingDrones,
   settingBaseImages,
+  startingDrones,
   movingDroneGroups,
   sidebarGroups,
   canonicalGroups,
@@ -1055,6 +1058,7 @@ export function DroneSidebar({
   onRenameDroneChat,
   onRenameDrone,
   onSetDroneBaseImage,
+  onStartDroneContainer,
   onSetDronePinned,
   onMoveSidebar,
   sidebarCommandQueue,
@@ -3478,6 +3482,7 @@ export function DroneSidebar({
                       deleteMode={deleteMode}
                       renamingDrones={renamingDrones}
                       settingBaseImages={settingBaseImages}
+                      startingDrones={startingDrones}
                       movingDroneGroups={movingDroneGroups}
                       sidebarOptimisticDroneIdSet={sidebarOptimisticDroneIdSet}
                       uiDroneName={uiDroneName}
@@ -3501,6 +3506,7 @@ export function DroneSidebar({
                       onRenameDrone={onRenameDrone}
                       inlineRenameDroneRequest={inlineRenameDroneRequest}
                       onSetDroneBaseImage={onSetDroneBaseImage}
+                      onStartDroneContainer={onStartDroneContainer}
                       pinnedDroneIdSet={pinnedDroneIdSet}
                       pinningDroneIds={pinningDroneIds}
                       onSetDronePinned={setPinned}

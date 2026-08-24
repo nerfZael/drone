@@ -1,7 +1,7 @@
 import React from 'react';
 import type { StartupSeedState } from './app-types';
 import type { DroneSummary } from '../types';
-import { isDroneStartingOrSeeding } from './helpers';
+import { isDroneContainerStopped, isDroneStartingOrSeeding } from './helpers';
 import { parseCanvasChatNodeId } from './app-config';
 import type { DroneDeleteMode } from './settings-types';
 import { useDroneCanvasStore } from '../canvas/use-drone-canvas-store';
@@ -49,6 +49,7 @@ export function useDroneMutationActions({
   const [settingBaseImages, setSettingBaseImages] = React.useState<Record<string, boolean>>(
     {},
   );
+  const [startingDrones, setStartingDrones] = React.useState<Record<string, boolean>>({});
   const dronesRef = React.useRef(drones);
   React.useEffect(() => {
     dronesRef.current = drones;
@@ -75,7 +76,12 @@ export function useDroneMutationActions({
       if (!droneId || !newName || newName === currentName) {
         return { ok: false, error: 'no-op rename' };
       }
-      if (deletingDrones[droneId] || renamingDrones[droneId] || settingBaseImages[droneId]) {
+      if (
+        deletingDrones[droneId] ||
+        renamingDrones[droneId] ||
+        settingBaseImages[droneId] ||
+        startingDrones[droneId]
+      ) {
         return { ok: false, error: 'rename busy' };
       }
       if (newName.length > 80 || /[\r\n]/.test(newName)) {
@@ -151,6 +157,7 @@ export function useDroneMutationActions({
       setOptimisticallyRenamedDrones,
       setStartupSeedByDrone,
       settingBaseImages,
+      startingDrones,
     ],
   );
 
@@ -163,12 +170,14 @@ export function useDroneMutationActions({
         deleting: Boolean(deletingDrones[droneId]),
         renaming: Boolean(renamingDrones[droneId]),
         settingBaseImage: Boolean(settingBaseImages[droneId]),
+        starting: Boolean(startingDrones[droneId]),
         optimisticallyDeleted: Boolean(optimisticallyDeletedDrones[droneId]),
       };
       if (
         guardState.deleting ||
         guardState.renaming ||
         guardState.settingBaseImage ||
+        guardState.starting ||
         guardState.optimisticallyDeleted
       ) {
         console.warn('[DroneHub] delete drone request ignored because the drone is busy', {
@@ -232,6 +241,7 @@ export function useDroneMutationActions({
       optimisticallyDeletedDrones,
       renamingDrones,
       settingBaseImages,
+      startingDrones,
       requestJson,
       setOptimisticallyDeletedDrones,
       deleteMode,
@@ -243,12 +253,17 @@ export function useDroneMutationActions({
       const droneId = String(droneIdRaw ?? '').trim();
       if (!droneId) return;
       if (renameDroneLaunchRef.current) return;
-      if (deletingDrones[droneId] || renamingDrones[droneId] || settingBaseImages[droneId]) return;
+      if (
+        deletingDrones[droneId] ||
+        renamingDrones[droneId] ||
+        settingBaseImages[droneId] ||
+        startingDrones[droneId]
+      ) return;
       const currentName = String(drones.find((d) => d.id === droneId)?.name ?? '').trim() || droneId;
       renameDroneLaunchRef.current = false;
       setRenameDroneTarget({ id: droneId, currentName, error: null });
     },
-    [deletingDrones, drones, renamingDrones, settingBaseImages],
+    [deletingDrones, drones, renamingDrones, settingBaseImages, startingDrones],
   );
 
   const closeRenameDrone = React.useCallback(() => {
@@ -306,6 +321,7 @@ export function useDroneMutationActions({
         deletingDrones[droneId] ||
         renamingDrones[droneId] ||
         settingBaseImages[droneId] ||
+        startingDrones[droneId] ||
         optimisticallyDeletedDrones[droneId]
       ) {
         return;
@@ -336,7 +352,53 @@ export function useDroneMutationActions({
         });
       }
     },
-    [deletingDrones, drones, optimisticallyDeletedDrones, renamingDrones, requestJson, settingBaseImages],
+    [deletingDrones, drones, optimisticallyDeletedDrones, renamingDrones, requestJson, settingBaseImages, startingDrones],
+  );
+
+  const startDroneContainer = React.useCallback(
+    async (droneIdRaw: string): Promise<boolean> => {
+      const droneId = String(droneIdRaw ?? '').trim();
+      if (!droneId) return false;
+      const current = dronesRef.current.find((drone) => drone.id === droneId) ?? null;
+      if (!current || !isDroneContainerStopped(current)) return false;
+      if (
+        deletingDrones[droneId] ||
+        renamingDrones[droneId] ||
+        settingBaseImages[droneId] ||
+        startingDrones[droneId] ||
+        optimisticallyDeletedDrones[droneId]
+      ) {
+        return false;
+      }
+
+      setStartingDrones((previous) => ({ ...previous, [droneId]: true }));
+      try {
+        await requestJson(`/api/drones/${encodeURIComponent(droneId)}/lifecycle/start`, {
+          method: 'POST',
+        });
+        return true;
+      } catch (error: any) {
+        const message = error?.message ?? String(error);
+        console.error('[DroneHub] start drone container failed', { id: droneId, error });
+        window.alert(`Start container failed: ${message}`);
+        return false;
+      } finally {
+        setStartingDrones((previous) => {
+          if (!previous[droneId]) return previous;
+          const next = { ...previous };
+          delete next[droneId];
+          return next;
+        });
+      }
+    },
+    [
+      deletingDrones,
+      optimisticallyDeletedDrones,
+      renamingDrones,
+      requestJson,
+      settingBaseImages,
+      startingDrones,
+    ],
   );
 
   const reparentDronesToParent = React.useCallback(
@@ -372,7 +434,12 @@ export function useDroneMutationActions({
       const reparentedIds: string[] = [];
       const errors: string[] = [];
       for (const droneId of requestedDroneIds) {
-        if (deletingDrones[droneId] || renamingDrones[droneId] || settingBaseImages[droneId]) {
+        if (
+          deletingDrones[droneId] ||
+          renamingDrones[droneId] ||
+          settingBaseImages[droneId] ||
+          startingDrones[droneId]
+        ) {
           errors.push(`Drone "${droneId}" is busy.`);
           continue;
         }
@@ -433,7 +500,7 @@ export function useDroneMutationActions({
         reparentedIds,
       };
     },
-    [deletingDrones, renamingDrones, requestJson, settingBaseImages],
+    [deletingDrones, renamingDrones, requestJson, settingBaseImages, startingDrones],
   );
 
   const suggestAndRenameDraftDrone = React.useCallback(
@@ -550,12 +617,14 @@ export function useDroneMutationActions({
     renamingDrones,
     renameDroneTarget,
     settingBaseImages,
+    startingDrones,
     deleteDrone,
     renameDrone,
     closeRenameDrone,
     clearRenameDroneError,
     confirmRenameDrone,
     setDroneBaseImage,
+    startDroneContainer,
     reparentDronesToParent,
     renameDroneTo,
     suggestAndRenameDraftDrone,

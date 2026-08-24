@@ -70,7 +70,11 @@ describe('managed drone state sync service', () => {
       },
       managedDroneSync: async (_client, payload) => {
         appliedContents.push(payload.skillTargets[0]?.packages[0]?.files[0]?.content ?? '');
-        return { durationMs: 3.4, phases: { persistState: 1.2 } };
+        return {
+          capabilities: ['codex-root-thread-recovery-v1'],
+          durationMs: 3.4,
+          phases: { persistState: 1.2 },
+        };
       },
       upgradeDaemon: async () => {
         throw new Error('upgrade should not run');
@@ -140,7 +144,9 @@ describe('managed drone state sync service', () => {
       daemonHealth: async () => {
         healthCalls += 1;
         return {
-          capabilities: healthCalls === 1 ? ['workspace-v1'] : ['workspace-v1', 'managed-state-v1'],
+          capabilities: healthCalls === 1
+            ? ['workspace-v1']
+            : ['workspace-v1', 'managed-state-v1', 'codex-root-thread-recovery-v1'],
         };
       },
       managedDroneSync: async () => {
@@ -171,6 +177,70 @@ describe('managed drone state sync service', () => {
       healthCalls: 2,
       upgradeCalls: 1,
       readyCalls: 1,
+      syncCalls: 2,
+    });
+  });
+
+  test('upgrades a responsive legacy daemon before the prompt continues', async () => {
+    let healthCalls = 0;
+    let upgradeCalls = 0;
+    let syncCalls = 0;
+    const service = createManagedDroneStateSyncService({
+      normalizeDroneIdentity: (value) => String(value ?? '').trim(),
+      droneRuntime: () => 'container',
+      syncHostManagedFiles: async () => {},
+      listSkills: async () => [],
+      mcpServersForProjection: async () => [],
+      resolveAgentsFile: async () => null,
+      buildSkillTargets: () => [],
+      renderSkillPackages: () => [],
+      buildMcpTargets: () => [],
+      renderMcpProjection: () => ({
+        format: 'json',
+        managedNames: [],
+        rootKey: 'mcpServers',
+        entries: {},
+      }),
+      withDroneOpLock: createSerialLock(),
+      daemonClientForDrone: () => ({ baseUrl: 'http://127.0.0.1:1', token: 'token' }),
+      daemonHealth: async () => {
+        healthCalls += 1;
+        return {
+          capabilities: healthCalls === 1
+            ? ['workspace-v1', 'managed-state-v1', 'codex-app-server-v1']
+            : [
+                'workspace-v1',
+                'managed-state-v1',
+                'codex-app-server-v1',
+                'codex-root-thread-recovery-v1',
+              ],
+        };
+      },
+      managedDroneSync: async () => {
+        syncCalls += 1;
+        return syncCalls === 1
+          ? { capabilities: ['workspace-v1', 'managed-state-v1', 'codex-app-server-v1'] }
+          : { capabilities: ['codex-root-thread-recovery-v1'] };
+      },
+      upgradeDaemon: async () => {
+        upgradeCalls += 1;
+      },
+      waitForDaemonReady: async () => {},
+    });
+
+    await service.syncManagedFilesForDrone({
+      droneId: 'test',
+      droneEntry: {
+        hostPort: 1234,
+        token: 'token',
+        containerName: 'drone-test',
+        containerPort: 7777,
+      },
+    });
+
+    expect({ healthCalls, upgradeCalls, syncCalls }).toEqual({
+      healthCalls: 2,
+      upgradeCalls: 1,
       syncCalls: 2,
     });
   });

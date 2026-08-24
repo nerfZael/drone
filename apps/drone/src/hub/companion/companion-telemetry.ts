@@ -234,6 +234,7 @@ export class CompanionRunTelemetry {
   private blipTiming?: BlipSessionTiming;
   private contextUsage?: BlipContextUsage;
   private blipStatus?: string;
+  private coldStart: boolean;
 
   constructor(
     private readonly service: CompanionTelemetryService,
@@ -251,6 +252,7 @@ export class CompanionRunTelemetry {
   ) {
     this.startedEpochMs = input.receivedAtEpochMs ?? clock.epochMs();
     this.startedMonotonicMs = input.receivedAtMonotonicMs ?? clock.monotonicMs();
+    this.coldStart = input.coldStart;
   }
 
   setModel(input: { provider: string; model: string; thinkingLevel: string }): void {
@@ -275,6 +277,10 @@ export class CompanionRunTelemetry {
 
   markAgentRunStarted(): void {
     this.agentRunStartedMonotonicMs = this.clock.monotonicMs();
+  }
+
+  markColdStart(): void {
+    this.coldStart = true;
   }
 
   observe(event: BlipRuntimeEvent): void {
@@ -328,7 +334,7 @@ export class CompanionRunTelemetry {
       finishedAt: new Date(finishedEpochMs).toISOString(),
       durationMs,
       queueWaitMs: roundedMs(this.input.queueWaitMs ?? 0),
-      coldStart: this.input.coldStart,
+      coldStart: this.coldStart,
       ...(this.provider ? { provider: this.provider } : {}),
       ...(this.model ? { model: this.model } : {}),
       ...(this.thinkingLevel ? { thinkingLevel: this.thinkingLevel } : {}),

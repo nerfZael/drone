@@ -10,6 +10,14 @@ export function IconPlus({ className }: { className?: string }) {
   );
 }
 
+export function IconPlay({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M4 2.75a1 1 0 011.53-.848l7.5 4.75a1 1 0 010 1.696l-7.5 4.75A1 1 0 014 12.25v-9.5z" />
+    </svg>
+  );
+}
+
 export function IconMore({ className }: { className?: string }) {
   return (
     <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">

@@ -21,6 +21,7 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     deleteMode,
     renamingDrones,
     settingBaseImages,
+    startingDrones,
     movingDroneGroups,
     sidebarGroups,
     canonicalGroups,
@@ -50,6 +51,7 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     cloneDroneFromSidebar,
     renameDroneTo,
     setDroneBaseImage,
+    startDroneContainer,
     setDronePinned,
     moveSidebar,
     sidebarCommandQueue,
@@ -89,6 +91,7 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     deleteMode,
     renamingDrones,
     settingBaseImages,
+    startingDrones,
     movingDroneGroups,
     sidebarGroups,
     canonicalGroups,
@@ -126,6 +129,9 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
       await renameDroneTo(droneId, newName, { showAlert: false }),
     onSetDroneBaseImage: (droneId) => {
       void setDroneBaseImage(droneId);
+    },
+    onStartDroneContainer: (droneId) => {
+      void startDroneContainer(droneId);
     },
     onSetDronePinned: setDronePinned,
     onMoveSidebar: moveSidebar,

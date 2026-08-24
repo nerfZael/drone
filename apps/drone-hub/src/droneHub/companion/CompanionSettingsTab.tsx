@@ -1,8 +1,13 @@
 import React from 'react';
+import { UiSegmentedControl } from '../../ui/components';
 import { AssistantToolsPanel } from '../assistant/AssistantSettingsPanels';
 import type { AssistantToolSummary } from '../assistant/assistant-types';
 import { ChatComposerModelPicker } from '../chat/ChatComposerModelPicker';
-import { useCompanionSettings } from './use-companion-settings';
+import {
+  changeCompanionProvider,
+  isCompanionModelSelectionValid,
+  useCompanionSettings,
+} from './use-companion-settings';
 
 const PROVIDER_LABELS = { openai: 'OpenAI', codex: 'Codex', gemini: 'Gemini' } as const;
 
@@ -19,6 +24,10 @@ export function CompanionSettingsTab({ settings }: {
     description: tool.description,
     category: tool.category === 'chats' ? 'chats' : tool.category === 'actions' ? 'actions' : 'context',
   }));
+  const providerModels = data.models.filter((model) => model.provider === draft.provider);
+  const modelSelectionValid = isCompanionModelSelectionValid(data.models, draft);
+  const setProvider = (provider: typeof draft.provider) =>
+    setDraft(changeCompanionProvider(data.models, draft, provider));
   const setEnabledTools = (enabledTools: string[]) => setDraft({ ...draft, enabledTools });
   const toggleTools = (names: string[], enabled: boolean) => {
     const next = new Set(draft.enabledTools);
@@ -42,30 +51,54 @@ export function CompanionSettingsTab({ settings }: {
   return (
     <div className="max-w-3xl space-y-5">
       <section className="rounded border border-[var(--border)] bg-[var(--surface-inset-faint)] p-4">
-        <h3 className="text-sm font-semibold text-[var(--fg)]">Model</h3>
-        <p className="mt-1 text-xs text-[var(--muted)]">Choose the saved provider, model, and reasoning used by the next run.</p>
-        <div className="mt-3 inline-flex rounded border border-[var(--border-subtle)] bg-[var(--panel)]">
-          <ChatComposerModelPicker config={{
-            id: 'companion-settings-model',
-            currentProvider: draft.provider,
-            currentModel: draft.model,
-            currentThinkingLevel: draft.thinkingLevel,
-            options: data.models.map((model) => ({ ...model, name: `${model.name} · ${PROVIDER_LABELS[model.provider]}` })),
-            disabled: saving,
-            showReasoning: true,
-            searchable: true,
-            title: 'Choose Companion model and reasoning',
-            menuPlacement: 'below',
-            onSelect: (choice, selection) => setDraft({
-              ...draft,
-              provider: choice.provider as typeof draft.provider,
-              model: choice.id,
-              thinkingLevel: selection === 'reasoning'
-                ? String(choice.thinkingLevel ?? draft.thinkingLevel)
-                : String(choice.thinkingLevel ?? data.models.find((model) => model.provider === choice.provider && model.id === choice.id)?.thinkingLevel ?? 'medium'),
-            }),
-          }} />
+        <h3 className="text-sm font-semibold text-[var(--fg)]">Provider and model</h3>
+        <p className="mt-1 text-xs text-[var(--muted)]">
+          Companion always uses the provider selected here. It does not fall back to another provider or model.
+        </p>
+        <div className="mt-3">
+          <div className="mb-1.5 text-xs font-medium text-[var(--fg-secondary)]">Provider</div>
+          <UiSegmentedControl
+            label="Companion provider"
+            value={draft.provider}
+            options={[
+              { value: 'openai', label: 'OpenAI' },
+              { value: 'codex', label: 'Codex' },
+              { value: 'gemini', label: 'Gemini' },
+            ]}
+            onValueChange={setProvider}
+            disabled={saving}
+          />
         </div>
+        <div className="mt-3">
+          <div className="mb-1.5 text-xs font-medium text-[var(--fg-secondary)]">Model and reasoning</div>
+          <div className="inline-flex rounded border border-[var(--border-subtle)] bg-[var(--panel)]">
+            <ChatComposerModelPicker config={{
+              id: 'companion-settings-model',
+              currentProvider: draft.provider,
+              currentModel: draft.model,
+              currentThinkingLevel: draft.thinkingLevel,
+              options: providerModels,
+              disabled: saving,
+              showReasoning: true,
+              searchable: true,
+              requireExplicitModelSelection: true,
+              title: 'Choose Companion model and reasoning',
+              menuPlacement: 'below',
+              onSelect: (choice, selection) => setDraft({
+                ...draft,
+                model: choice.id,
+                thinkingLevel: selection === 'reasoning'
+                  ? String(choice.thinkingLevel ?? draft.thinkingLevel)
+                  : String(choice.thinkingLevel ?? providerModels.find((model) => model.id === choice.id)?.thinkingLevel ?? ''),
+              }),
+            }} />
+          </div>
+        </div>
+        {!modelSelectionValid ? (
+          <div className="mt-2 text-xs text-[var(--red)]">
+            Choose a model and reasoning level for {PROVIDER_LABELS[draft.provider]} before saving.
+          </div>
+        ) : null}
         {!providerHasCredentials ? <div className="mt-2 text-xs text-[var(--red)]">{PROVIDER_LABELS[draft.provider]} credentials are not configured. Runs will fail until they are added in General settings.</div> : null}
       </section>
 
@@ -97,7 +130,7 @@ export function CompanionSettingsTab({ settings }: {
       {error ? <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] p-3 text-xs text-[var(--red)]">{error}</div> : null}
       <div className="sticky bottom-3 flex items-center justify-end gap-3 rounded border border-[var(--border)] bg-[var(--panel)] px-3 py-2 shadow-lg">
         <span className="mr-auto text-xs text-[var(--muted)]">{saving ? 'Saving…' : saved && !dirty ? 'Saved' : dirty ? 'Unsaved changes' : 'Up to date'}</span>
-        <button type="button" disabled={!dirty || saving} onClick={() => void save()} className="rounded bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-[var(--accent-contrast)] disabled:opacity-40">Save</button>
+        <button type="button" disabled={!dirty || saving || !modelSelectionValid} onClick={() => void save()} className="rounded bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-[var(--accent-contrast)] disabled:opacity-40">Save</button>
       </div>
     </div>
   );
