@@ -69,11 +69,10 @@ export class DroneRegistryBroadcaster {
       const snapshot = await this.deps.buildSnapshot();
       phases.push({ name: 'buildSnapshot', durationMs: performance.now() - phaseStartedAt });
       droneCount = snapshot.drones.length;
-      // A refresh requested while this snapshot was being assembled means the underlying state
-      // may already be newer. Publishing both would make clients briefly render the stale state
-      // before the guaranteed follow-up refresh. Leave the current baseline untouched and let
-      // that follow-up publish the coherent snapshot instead.
-      if (this.refreshPending) return snapshot;
+      // Publish every completed snapshot even when another refresh arrived while it was being
+      // assembled. The pending refresh below will still follow with the newer state. Discarding
+      // this snapshot can starve the stream indefinitely when writes arrive faster than snapshot
+      // construction, leaving connected clients on an old busy/chat projection forever.
       phaseStartedAt = performance.now();
       const nextById = new Map(
         snapshot.drones

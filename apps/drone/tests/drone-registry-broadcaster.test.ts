@@ -88,7 +88,7 @@ describe('drone registry broadcaster', () => {
     });
   });
 
-  test('runs one follow-up refresh when a write arrives during snapshot construction', async () => {
+  test('publishes progress and runs a follow-up when a write arrives during snapshot construction', async () => {
     let releaseFirstBuild: () => void = () => {};
     const firstBuildBlocked = new Promise<void>((resolve) => {
       releaseFirstBuild = resolve;
@@ -98,6 +98,10 @@ describe('drone registry broadcaster', () => {
     let resolveSecondBuild: () => void = () => {};
     const secondBuildFinished = new Promise<void>((resolve) => {
       resolveSecondBuild = resolve;
+    });
+    let resolveLatestPublished: () => void = () => {};
+    const latestPublished = new Promise<void>((resolve) => {
+      resolveLatestPublished = resolve;
     });
     const events: Array<{ event: string; data: any }> = [];
     const broadcaster = new DroneRegistryBroadcaster({
@@ -113,7 +117,10 @@ describe('drone registry broadcaster', () => {
           preferenceVersion: versionAtStart,
         };
       },
-      writeSseEvent: (_response, event, data) => events.push({ event, data }),
+      writeSseEvent: (_response, event, data) => {
+        events.push({ event, data });
+        if (data?.preferenceVersion === 2) resolveLatestPublished();
+      },
     });
     broadcaster.clients.add({ destroyed: false, writableEnded: false } as any);
 
@@ -123,17 +130,84 @@ describe('drone registry broadcaster', () => {
     releaseFirstBuild();
     await firstRefresh;
     await secondBuildFinished;
-    await Promise.resolve();
+    await latestPublished;
 
     expect(buildCount).toBe(2);
-    expect(events).toHaveLength(1);
+    expect(events).toHaveLength(2);
     expect(events[0]).toMatchObject({
       event: 'snapshot',
       data: {
-        drones: [{ id: 'host', group: 'Review' }],
+        drones: [{ id: 'host', group: null }],
+        preferenceVersion: 1,
+      },
+    });
+    expect(events[1]).toMatchObject({
+      event: 'delta',
+      data: {
+        upserts: [{ id: 'host', group: 'Review' }],
         preferenceVersion: 2,
       },
     });
+  });
+
+  test('does not starve publishing when consecutive builds are superseded', async () => {
+    const releaseBuilds: Array<() => void> = [];
+    const buildStarted: Array<Promise<void>> = [];
+    const resolveBuildStarted: Array<() => void> = [];
+    for (let index = 0; index < 3; index += 1) {
+      buildStarted.push(
+        new Promise<void>((resolve) => {
+          resolveBuildStarted.push(resolve);
+        }),
+      );
+    }
+    let buildCount = 0;
+    const events: Array<{ event: string; data: any }> = [];
+    let resolveThirdPublished: () => void = () => {};
+    const thirdPublished = new Promise<void>((resolve) => {
+      resolveThirdPublished = resolve;
+    });
+    const broadcaster = new DroneRegistryBroadcaster({
+      buildSnapshot: async () => {
+        const version = ++buildCount;
+        resolveBuildStarted[version - 1]?.();
+        await new Promise<void>((resolve) => releaseBuilds.push(resolve));
+        return {
+          ok: true,
+          drones: [{ id: 'host', version }],
+          preferenceVersion: version,
+        };
+      },
+      writeSseEvent: (_response, event, data) => {
+        events.push({ event, data });
+        if (data?.preferenceVersion === 3) resolveThirdPublished();
+      },
+    });
+    broadcaster.clients.add({ destroyed: false, writableEnded: false } as any);
+
+    const firstRefresh = broadcaster.refresh({ broadcastSnapshot: true });
+    await buildStarted[0];
+    await broadcaster.refresh();
+    releaseBuilds.shift()?.();
+    await buildStarted[1];
+    await broadcaster.refresh();
+    releaseBuilds.shift()?.();
+    await buildStarted[2];
+
+    expect(events).toMatchObject([
+      {
+        event: 'snapshot',
+        data: { drones: [{ id: 'host', version: 1 }], preferenceVersion: 1 },
+      },
+      {
+        event: 'delta',
+        data: { upserts: [{ id: 'host', version: 2 }], preferenceVersion: 2 },
+      },
+    ]);
+
+    releaseBuilds.shift()?.();
+    await firstRefresh;
+    await thirdPublished;
   });
 
   test('continues refreshing when timing diagnostics fail', async () => {
