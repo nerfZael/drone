@@ -83,8 +83,51 @@ test('submitted answers retain distinct choice, custom, and skipped outcomes', a
       notes: 'Use the normal monitoring dashboard.',
     });
     assert.equal(service.get(request.id)?.status, 'submitted');
+    assert.deepEqual(service.listForChat('drone-a', 'default'), [service.get(request.id)]);
   } finally {
     service.close();
+  }
+});
+
+test('chat history includes resolved requests while the pending view remains filtered', async () => {
+  const { database, close } = memoryHubDatabase();
+  const service = new ChatQuestionRequestService(database);
+  try {
+    const submitted = await service.create({
+      droneId: 'drone-a',
+      chatName: 'default',
+      chatId: 'chat-a',
+      questions: [questions[0]],
+    });
+    await service.submit(submitted.id, {
+      responses: [{ questionId: 'delivery', outcome: 'choice', choiceId: 'safe' }],
+    });
+    const pending = await service.create({
+      droneId: 'drone-a',
+      chatName: 'default',
+      chatId: 'chat-a',
+      questions: [questions[1]],
+    });
+
+    const restoredService = new ChatQuestionRequestService(database);
+    const restored = restoredService.listForChat('drone-a', 'default');
+    restoredService.close();
+    assert.deepEqual(
+      restored.map((request) => request.id),
+      [submitted.id, pending.id],
+    );
+    assert.equal(restored[0]?.result?.status, 'submitted');
+    assert.deepEqual(
+      restored[0]?.result?.status === 'submitted' ? restored[0].result.responses : null,
+      [{ questionId: 'delivery', outcome: 'choice', choiceId: 'safe', label: 'Safe rollout' }],
+    );
+    assert.deepEqual(
+      service.listPending('drone-a', 'default').map((request) => request.id),
+      [pending.id],
+    );
+  } finally {
+    service.close();
+    close();
   }
 });
 

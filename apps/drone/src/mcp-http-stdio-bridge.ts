@@ -4,9 +4,15 @@ import process from 'node:process';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import type { RequestOptions } from '@modelcontextprotocol/sdk/shared/protocol.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+
+import {
+  INTERACTIVE_MCP_TOOL_TIMEOUT_MS,
+  isInteractiveMcpTool,
+} from './hub/mcp-interactive-timeout';
 
 const MCP_URL_ENV = 'DRONE_HUB_MCP_URL';
 const MCP_TOKEN_ENV = 'DRONE_HUB_MCP_TOKEN';
@@ -15,6 +21,16 @@ type ManagedMcpConnection = {
   url: URL;
   token: string;
 };
+
+export function mcpBridgeCallOptions(name: string, signal?: AbortSignal): RequestOptions {
+  return isInteractiveMcpTool(name)
+    ? {
+        signal,
+        timeout: INTERACTIVE_MCP_TOOL_TIMEOUT_MS,
+        maxTotalTimeout: INTERACTIVE_MCP_TOOL_TIMEOUT_MS,
+      }
+    : { signal };
+}
 
 export function managedMcpConnectionFromEnvironment(
   env: NodeJS.ProcessEnv = process.env,
@@ -53,14 +69,18 @@ export async function startMcpHttpStdioBridge(options?: {
     { name: 'Drone Hub managed chat bridge', version: '0.1.0' },
     { capabilities: { tools: {} } },
   );
-  local.setRequestHandler(
-    ListToolsRequestSchema,
-    async () => (remote ? await remote.listTools() : { tools: [] }),
+  local.setRequestHandler(ListToolsRequestSchema, async () =>
+    remote ? await remote.listTools() : { tools: [] },
   );
   if (remote) {
     local.setRequestHandler(
       CallToolRequestSchema,
-      async (request) => await remote.callTool(request.params),
+      async (request, extra) =>
+        await remote.callTool(
+          request.params,
+          undefined,
+          mcpBridgeCallOptions(request.params.name, extra.signal),
+        ),
     );
   }
   try {

@@ -5,8 +5,10 @@ import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
 
 import {
   managedMcpConnectionFromEnvironment,
+  mcpBridgeCallOptions,
   startMcpHttpStdioBridge,
 } from '../src/mcp-http-stdio-bridge';
+import { INTERACTIVE_MCP_TOOL_TIMEOUT_MS } from '../src/hub/mcp-interactive-timeout';
 
 class MemoryTransport implements Transport {
   peer: MemoryTransport | null = null;
@@ -34,6 +36,18 @@ function memoryTransportPair(): [MemoryTransport, MemoryTransport] {
 }
 
 describe('managed chat MCP bridge', () => {
+  test('allows interactive questions to wait beyond the MCP SDK default', () => {
+    const controller = new AbortController();
+    expect(mcpBridgeCallOptions('ask_questions', controller.signal)).toEqual({
+      signal: controller.signal,
+      timeout: INTERACTIVE_MCP_TOOL_TIMEOUT_MS,
+      maxTotalTimeout: INTERACTIVE_MCP_TOOL_TIMEOUT_MS,
+    });
+    expect(mcpBridgeCallOptions('list_drones', controller.signal)).toEqual({
+      signal: controller.signal,
+    });
+  });
+
   test('treats a complete managed-chat environment as an authenticated connection', () => {
     const connection = managedMcpConnectionFromEnvironment({
       DRONE_HUB_MCP_URL: 'http://127.0.0.1:8787/mcp',

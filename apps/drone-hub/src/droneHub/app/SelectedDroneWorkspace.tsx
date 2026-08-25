@@ -106,6 +106,7 @@ import { useFleetAssignmentDropState } from './use-fleet-assignment-drop-state';
 import { AssistantDock } from '../assistant/AssistantDock';
 import { CodexApprovalCard } from '../assistant/CodexApprovalCard';
 import { AssistantQuestionCard } from '../assistant/AssistantQuestionCard';
+import { AssistantQuestionResultCard } from '../assistant/AssistantQuestionResultCard';
 import {
   buildTranscriptExportFilename,
   formatTranscriptJson,
@@ -688,6 +689,7 @@ export function SelectedDroneWorkspace({
           `/api/chat-question-requests?${new URLSearchParams({
             droneId: currentDrone.id,
             chatName: activeChatName,
+            includeResolved: 'true',
           }).toString()}`,
         );
         if (active) setExternalQuestionRequests(response.requests ?? []);
@@ -713,7 +715,7 @@ export function SelectedDroneWorkspace({
       setExternalQuestionBusyId(request.id);
       setExternalQuestionError(null);
       try {
-        await requestJson(
+        const response = await requestJson<{ result: ChatQuestionRequest['result'] }>(
           `/api/chat-question-requests/${encodeURIComponent(request.id)}/${
             resolution.kind === 'submit' ? 'submit' : 'skip'
           }`,
@@ -727,9 +729,20 @@ export function SelectedDroneWorkspace({
             ),
           },
         );
-        setExternalQuestionRequests((current) =>
-          current.filter((candidate) => candidate.id !== request.id),
-        );
+        if (response.result) {
+          setExternalQuestionRequests((current) =>
+            current.map((candidate) =>
+              candidate.id === request.id
+                ? {
+                    ...candidate,
+                    status: response.result!.status,
+                    result: response.result,
+                    updatedAt: new Date().toISOString(),
+                  }
+                : candidate,
+            ),
+          );
+        }
       } catch (error) {
         setExternalQuestionError(
           String((error as any)?.message ?? error ?? '').trim() ||
@@ -740,6 +753,10 @@ export function SelectedDroneWorkspace({
       }
     },
     [],
+  );
+  const pendingExternalQuestionRequests = React.useMemo(
+    () => externalQuestionRequests.filter((request) => request.status === 'pending'),
+    [externalQuestionRequests],
   );
   const externalTimelineItems = React.useMemo(
     () => buildChatTimelineItems(transcripts ?? [], visiblePendingPromptsWithStartup),
@@ -996,7 +1013,7 @@ export function SelectedDroneWorkspace({
     : chatUiMode === 'transcript'
       ? selectedChatDockerSnapshotBusy ||
         visiblePendingPromptsWithStartup.some(pendingPromptShowsWorkingState) ||
-        externalQuestionRequests.length > 0
+        pendingExternalQuestionRequests.length > 0
       : showRespondingAsStatusInHeader || canStopResponse;
   const openChatErrorDetails = React.useCallback(() => {
     const message = String(chatInfoError ?? '').trim();
@@ -1535,23 +1552,26 @@ export function SelectedDroneWorkspace({
     externalTranscriptItems.push({
       key: `questions:${request.id}`,
       kind: 'approval',
-      content: (
-        <AssistantQuestionCard
-          request={request}
-          busy={externalQuestionBusyId === request.id}
-          error={externalQuestionError}
-          onSubmit={({ responses, notes }) =>
-            void resolveExternalQuestionRequest(request, {
-              kind: 'submit',
-              responses,
-              notes,
-            })
-          }
-          onSkip={(notes) =>
-            void resolveExternalQuestionRequest(request, { kind: 'skip', notes })
-          }
-        />
-      ),
+      content:
+        request.status === 'pending' ? (
+          <AssistantQuestionCard
+            request={request}
+            busy={externalQuestionBusyId === request.id}
+            error={externalQuestionError}
+            onSubmit={({ responses, notes }) =>
+              void resolveExternalQuestionRequest(request, {
+                kind: 'submit',
+                responses,
+                notes,
+              })
+            }
+            onSkip={(notes) =>
+              void resolveExternalQuestionRequest(request, { kind: 'skip', notes })
+            }
+          />
+        ) : (
+          <AssistantQuestionResultCard request={request} />
+        ),
     });
   }
   return (
@@ -2550,9 +2570,11 @@ export function SelectedDroneWorkspace({
                 <CliPendingPromptStrip items={visibleCliPendingPrompts} />
               ) : null}
 
-              {genericChatActive && chatUiMode === 'cli' && externalQuestionRequests.length > 0 ? (
+              {genericChatActive &&
+              chatUiMode === 'cli' &&
+              pendingExternalQuestionRequests.length > 0 ? (
                 <div className="mx-auto max-h-[40vh] w-full max-w-[var(--chat-prose-max)] space-y-3 overflow-auto px-6 py-3">
-                  {externalQuestionRequests.map((request) => (
+                  {pendingExternalQuestionRequests.map((request) => (
                     <AssistantQuestionCard
                       key={request.id}
                       request={request}

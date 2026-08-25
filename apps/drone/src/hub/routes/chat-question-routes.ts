@@ -3,7 +3,14 @@ import type { HubRouter } from '../hub-router';
 
 type ChatQuestionRoutesService = Pick<
   ChatQuestionRequestService,
-  'create' | 'get' | 'listPending' | 'skip' | 'skipPendingForChat' | 'submit' | 'waitForResult'
+  | 'create'
+  | 'get'
+  | 'listForChat'
+  | 'listPending'
+  | 'skip'
+  | 'skipPendingForChat'
+  | 'submit'
+  | 'waitForResult'
 >;
 
 export function registerChatQuestionRoutes(
@@ -19,7 +26,13 @@ export function registerChatQuestionRoutes(
     try {
       const droneId = String(url.searchParams.get('droneId') ?? '').trim();
       const chatName = String(url.searchParams.get('chatName') ?? '').trim() || 'default';
-      respond(200, { ok: true, requests: service.listPending(droneId, chatName) });
+      const includeResolved = url.searchParams.get('includeResolved') === 'true';
+      respond(200, {
+        ok: true,
+        requests: includeResolved
+          ? service.listForChat(droneId, chatName)
+          : service.listPending(droneId, chatName),
+      });
     } catch (error) {
       respondError(respond, error);
     }

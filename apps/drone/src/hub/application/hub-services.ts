@@ -14,6 +14,7 @@ import type {
   CreateChatQuestionRequestInput,
   ResolveChatQuestionRequestInput,
 } from '../chat-question-requests';
+import { INTERACTIVE_MCP_TOOL_TIMEOUT_MS } from '../mcp-interactive-timeout';
 
 export type HubServices = {
   repositories: {
@@ -42,6 +43,7 @@ export type HubServices = {
     | 'ask'
     | 'create'
     | 'get'
+    | 'listForChat'
     | 'listPending'
     | 'reconcileQueuedRequests'
     | 'setNativeResolver'
@@ -161,7 +163,7 @@ export function createHttpHubServices(request: HubServiceRequest): HubServices {
           return await request<any>(
             `/api/chat-question-requests/${encodeURIComponent(created.request.id)}/wait`,
             { method: 'POST', signal },
-            24 * 60 * 60 * 1_000,
+            INTERACTIVE_MCP_TOOL_TIMEOUT_MS,
           ).then((response) => response.result);
         } catch (error) {
           if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')) {
@@ -182,6 +184,9 @@ export function createHttpHubServices(request: HubServiceRequest): HubServices {
         throw new Error('synchronous question request reads are unavailable over HTTP');
       },
       listPending: () => {
+        throw new Error('synchronous question request lists are unavailable over HTTP');
+      },
+      listForChat: () => {
         throw new Error('synchronous question request lists are unavailable over HTTP');
       },
       reconcileQueuedRequests: async () => {
@@ -210,7 +215,7 @@ export function createHttpHubServices(request: HubServiceRequest): HubServices {
         await request<any>(
           `/api/chat-question-requests/${encodeURIComponent(requestId)}/wait`,
           { method: 'POST', signal },
-          24 * 60 * 60 * 1_000,
+          INTERACTIVE_MCP_TOOL_TIMEOUT_MS,
         ).then((response) => response.result),
     },
   };

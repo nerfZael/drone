@@ -8,6 +8,10 @@ import { loadRegistry, loadRegistryRawSnapshot, updateRegistry } from '../host/r
 import { getHubDatabase } from '../host/hub-database';
 import { getCatalogStore, type CatalogStore } from '../host/catalog-store';
 import { bashQuote } from './hub-format';
+import {
+  INTERACTIVE_MCP_TOOL_TIMEOUT_MS,
+  INTERACTIVE_MCP_TOOL_TIMEOUT_SECONDS,
+} from './mcp-interactive-timeout';
 
 const MCP_MANIFEST = '.drone-managed-mcp.json';
 const CODEX_MANAGED_START = '# drone-hub-managed-mcp-start';
@@ -464,6 +468,9 @@ function renderCodexMcpBlock(servers: McpServerRecord[]): string {
   ];
   for (const server of servers) {
     lines.push('', `[mcp_servers.${server.name}]`);
+    if (server.name === 'drone-hub') {
+      lines.push(`tool_timeout_sec = ${INTERACTIVE_MCP_TOOL_TIMEOUT_SECONDS}`);
+    }
     if (server.transport === 'http') {
       lines.push(`url = ${tomlString(server.url ?? '')}`);
       const { staticHeaders, envHeaders } = splitHeaderValues(server.headers);
@@ -508,6 +515,9 @@ function renderJsonMcpServer(agent: McpAgentId, server: McpServerRecord): any {
   if (server.transport === 'http') {
     return {
       ...(agent === 'claude' ? { type: 'http' } : {}),
+      ...(agent === 'claude' && server.name === 'drone-hub'
+        ? { timeout: INTERACTIVE_MCP_TOOL_TIMEOUT_MS }
+        : {}),
       url: server.url ?? '',
       ...(server.headers && Object.keys(server.headers).length > 0
         ? { headers: server.headers }
@@ -516,6 +526,9 @@ function renderJsonMcpServer(agent: McpAgentId, server: McpServerRecord): any {
   }
   return {
     ...(agent === 'claude' ? { type: 'stdio' } : {}),
+    ...(agent === 'claude' && server.name === 'drone-hub'
+      ? { timeout: INTERACTIVE_MCP_TOOL_TIMEOUT_MS }
+      : {}),
     command: server.command ?? '',
     ...(server.args && server.args.length > 0 ? { args: server.args } : {}),
     ...(server.env && Object.keys(server.env).length > 0 ? { env: server.env } : {}),

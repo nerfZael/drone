@@ -409,6 +409,30 @@ export class ChatQuestionRequestService {
     );
   }
 
+  listForChat(droneId: string, chatName: string, limit = 100): ChatQuestionRequest[] {
+    const safeLimit = Math.max(1, Math.min(500, Math.trunc(limit) || 100));
+    if (!this.database) {
+      return [...this.memory.values()]
+        .filter((request) => request.droneId === droneId && request.chatName === chatName)
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+        .slice(-safeLimit);
+    }
+    return this.database.read((connection) =>
+      (
+        connection
+          .prepare(
+            `SELECT * FROM (
+               SELECT rowid AS request_rowid, * FROM chat_question_requests
+               WHERE drone_id = ? AND chat_name = ?
+               ORDER BY created_at DESC, rowid DESC
+               LIMIT ?
+             ) ORDER BY created_at, request_rowid`,
+          )
+          .all(droneId, chatName, safeLimit) as Row[]
+      ).map(requestFromRow),
+    );
+  }
+
   async submit(
     requestId: string,
     input: ResolveChatQuestionRequestInput,

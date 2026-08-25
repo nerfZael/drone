@@ -121,6 +121,7 @@ describe('MCP server projection', () => {
       expect(codexText).toContain('url = "https://example.com/mcp"');
       expect(codexText).toContain('http_headers = { "Authorization" = "Bearer literal-token" }');
       expect(codexText).toContain('env_http_headers = { "X-Remote-Token" = "REMOTE_TOKEN" }');
+      expect(codexText).not.toContain('tool_timeout_sec = 86400');
 
       const cursor = JSON.parse(fs.readFileSync(cursorConfig, 'utf8'));
       expect(cursor.mcpServers.unmanaged.command).toBe('node');
@@ -135,6 +136,7 @@ describe('MCP server projection', () => {
       expect(claude.mcpServers.remote.type).toBe('http');
       expect(claude.mcpServers.remote.url).toBe('https://example.com/mcp');
       expect(claude.mcpServers.remote.headers.Authorization).toBe('Bearer literal-token');
+      expect(claude.mcpServers.github.timeout).toBeUndefined();
 
       const opencode = JSON.parse(fs.readFileSync(opencodeConfig, 'utf8'));
       expect(opencode.$schema).toBe('https://opencode.ai/config.json');
@@ -205,7 +207,32 @@ describe('MCP server projection', () => {
       expect(codexText).toContain('url = "https://developers.openai.com/mcp"');
       expect(codexText).toContain('# drone-hub-managed-mcp-start');
       expect(codexText).toContain('url = "http://host.docker.internal:8788/mcp"');
+      expect(codexText).toContain('tool_timeout_sec = 86400');
       expect(codexText).toContain('http_headers = { "Authorization" = "Bearer new-token" }');
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('gives the managed Drone Hub server an interactive timeout in Claude config', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-mcp-claude-timeout-'));
+    try {
+      const claudeConfig = path.join(tempRoot, '.claude.json');
+      await syncMcpServersToHostTargets({
+        targets: [{ agent: 'claude', configPath: claudeConfig }],
+        servers: [
+          sampleServer({
+            name: 'drone-hub',
+            command: 'node',
+            args: ['/opt/drone/mcp-http-stdio-bridge.js'],
+            env: undefined,
+            agents: ['claude'],
+          }),
+        ],
+      });
+
+      const claude = JSON.parse(fs.readFileSync(claudeConfig, 'utf8'));
+      expect(claude.mcpServers['drone-hub'].timeout).toBe(86_400_000);
     } finally {
       fs.rmSync(tempRoot, { recursive: true, force: true });
     }

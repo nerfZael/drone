@@ -8,14 +8,13 @@ describe('assistant question placement', () => {
       'utf8',
     );
 
-    expect(source).toContain("key: `questions:${request.id}`");
+    expect(source).toContain('key: `questions:${request.id}`');
     expect(source).toContain("kind: 'approval'");
     expect(source).toContain('externalQuestionRequests.length > 0,');
-    expect(source).toContain(
-      "genericChatActive && chatUiMode === 'cli' && externalQuestionRequests.length > 0",
-    );
-    expect(source).not.toContain(
-      'genericChatActive && externalQuestionRequests.length > 0 ? (',
-    );
+    expect(source).toContain("request.status === 'pending'");
+    expect(source).toContain('<AssistantQuestionResultCard request={request} />');
+    expect(source).toContain("chatUiMode === 'cli' &&");
+    expect(source).toContain('pendingExternalQuestionRequests.length > 0 ? (');
+    expect(source).not.toContain('genericChatActive && externalQuestionRequests.length > 0 ? (');
   });
 });
