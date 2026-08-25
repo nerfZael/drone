@@ -88,11 +88,14 @@ export function MobileQuestionRequestCard({
         const draft = drafts[question.id];
         return (
           <View key={question.id} style={styles.question}>
-            <View style={styles.questionHeader}>
-              <Text style={styles.questionTitle}>
-                {singleQuestion ? question.question : `${index + 1}. ${question.question}`}
-              </Text>
-              {singleQuestion ? (
+            <Text style={styles.questionTitle}>
+              {singleQuestion ? question.question : `${index + 1}. ${question.question}`}
+            </Text>
+            {singleQuestion ? (
+              <View style={styles.questionNavigationRow}>
+                <Text style={styles.questionCount}>
+                  {activeQuestionIndex + 1} of {questionCount}
+                </Text>
                 <View style={styles.questionNavigation}>
                   <Pressable
                     accessibilityRole="button"
@@ -108,9 +111,6 @@ export function MobileQuestionRequestCard({
                   >
                     <ChevronLeft color={colors.textSecondary} size={17} strokeWidth={2.2} />
                   </Pressable>
-                  <Text style={styles.questionCount}>
-                    {activeQuestionIndex + 1} of {questionCount}
-                  </Text>
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel="Next question"
@@ -126,8 +126,8 @@ export function MobileQuestionRequestCard({
                     <ChevronRight color={colors.textSecondary} size={17} strokeWidth={2.2} />
                   </Pressable>
                 </View>
-              ) : null}
-            </View>
+              </View>
+            ) : null}
             <Text style={styles.importance}>Importance {question.importance}/100</Text>
             {question.detailedExplanation ? (
               <NativeMarkdown text={question.detailedExplanation} />
@@ -262,7 +262,7 @@ export function MobileQuestionRequestCard({
           onPress={() => onSkip(notes.trim() || undefined)}
           style={styles.button}
         >
-          {notes.trim() ? 'Send note and skip' : 'Skip all'}
+          Skip all
         </Button>
         <Button
           disabled={locked || !complete}
@@ -320,14 +320,17 @@ const styles = StyleSheet.create({
   modeToggle: { minHeight: 32, justifyContent: 'center', paddingHorizontal: 8, borderRadius: 7 },
   modeToggleText: { color: colors.textSecondary, fontSize: 10, fontWeight: '700' },
   question: { gap: 7, paddingBottom: 4 },
-  questionHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   questionTitle: {
-    flex: 1,
-    minWidth: 0,
     color: colors.textStrong,
     fontSize: 14,
     fontWeight: '700',
     lineHeight: 20,
+  },
+  questionNavigationRow: {
+    minHeight: 38,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   questionNavigation: { flexDirection: 'row', alignItems: 'center', gap: 2 },
   navigationButton: {
@@ -337,7 +340,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: 8,
   },
-  questionCount: { minWidth: 42, color: colors.muted, fontSize: 10, textAlign: 'center' },
+  questionCount: { color: colors.muted, fontSize: 11 },
   importance: { color: colors.muted, fontSize: 10 },
   option: {
     flexDirection: 'row',

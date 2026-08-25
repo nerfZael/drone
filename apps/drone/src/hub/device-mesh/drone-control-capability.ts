@@ -23,7 +23,7 @@ import { localHubRequest, type LocalHubAccess } from './local-hub-request';
 import { meshJsonContentChunk } from './mesh-content-chunk';
 import type { MeshChatAttachmentStore } from './mesh-chat-attachment-store';
 import { fitMeshChatPayload } from './fit-mesh-chat-payload';
-import { compactNativeChatReadResponse } from './native-chat-response';
+import { compactChatQuestionRequests, compactNativeChatReadResponse } from './native-chat-response';
 import { submitNativeChatPrompt } from './native-chat-prompt';
 import type { SidebarCommandService } from '../sidebar-command-service';
 import { createHttpHubServices, type HubServices } from '../application/hub-services';
@@ -1336,17 +1336,20 @@ export function createDroneControlCapability(
         const subscriptions = contentOnlyRead
           ? []
           : compactChatSubscriptions(result?.subscriptions);
-        const pendingQuestionRequests = contentOnlyRead
+        const questionRequests = contentOnlyRead
           ? []
           : await localHubRequest(
               access,
               `/api/chat-question-requests?${new URLSearchParams({
                 droneId,
                 chatName,
+                includeResolved: 'true',
+                limit: '12',
               }).toString()}`,
-            ).then((response: any) =>
-              Array.isArray(response?.requests) ? response.requests.slice(-2) : [],
-            );
+            ).then((response: any) => compactChatQuestionRequests(response?.requests));
+        const pendingQuestionRequests = questionRequests.filter(
+          (request: any) => request?.status === 'pending',
+        );
         const marked = contentOnlyRead
           ? null
           : await localHubRequest(access, `${chatPath}/read`, {
@@ -1382,7 +1385,7 @@ export function createDroneControlCapability(
             : null;
           return compactNativeChatReadResponse({
             nativeChatId,
-            snapshot: { ...ensured, pendingQuestionRequests },
+            snapshot: { ...ensured, pendingQuestionRequests, questionRequests },
             history,
             metadata: {
               droneId,
@@ -1459,6 +1462,7 @@ export function createDroneControlCapability(
           reasoning: result.reasoning ?? null,
           pending,
           pendingQuestionRequests,
+          questionRequests,
           readState: marked?.readState ?? result?.readState ?? null,
           agentPermissionMode:
             result.agentPermissionMode === 'read' || result.agentPermissionMode === 'write'

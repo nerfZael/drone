@@ -133,6 +133,8 @@ export type NativeChatSnapshot = {
   threads: NativeChatThread[];
   pendingApprovals: NativeChatApproval[];
   pendingQuestionRequests: ChatQuestionRequest[];
+  /** Recent pending and resolved questionnaires for durable transcript presentation. */
+  questionRequests?: ChatQuestionRequest[];
   models: NativeAgentModelOption[];
   defaultModel: NativeAgentDefaultModel;
   defaultEnabledTools: string[];

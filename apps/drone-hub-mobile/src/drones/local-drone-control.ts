@@ -1058,6 +1058,7 @@ function useLocalDroneControlValue() {
             (approval) => approval.threadId === thread.id,
           ),
           pendingQuestionRequests: [],
+          questionRequests: [],
           pending:
             drone.draft === true || drone.draftChats?.[chatName] === true
               ? localDroneDraftPromptsForChat(drone, chatName).map((prompt) => ({

@@ -27,10 +27,15 @@ export function registerChatQuestionRoutes(
       const droneId = String(url.searchParams.get('droneId') ?? '').trim();
       const chatName = String(url.searchParams.get('chatName') ?? '').trim() || 'default';
       const includeResolved = url.searchParams.get('includeResolved') === 'true';
+      const requestedLimit = Number(url.searchParams.get('limit'));
       respond(200, {
         ok: true,
         requests: includeResolved
-          ? service.listForChat(droneId, chatName)
+          ? service.listForChat(
+              droneId,
+              chatName,
+              Number.isSafeInteger(requestedLimit) && requestedLimit > 0 ? requestedLimit : 100,
+            )
           : service.listPending(droneId, chatName),
       });
     } catch (error) {

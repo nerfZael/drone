@@ -17,6 +17,30 @@ describe('mobile question request card', () => {
     expect(source).toContain('minHeight: 46');
     expect(source).toContain('borderLeftColor: colors.accent');
     expect(source).toContain("backgroundColor: 'transparent'");
+    expect(source).toContain('styles.questionNavigationRow');
+    expect(source).not.toContain('questionHeader:');
+    expect(source).toContain('Skip all');
+  });
+
+  test('renders completed answers as a compact read-only mobile summary', () => {
+    const source = readFileSync(
+      new URL('../src/local-assistant/MobileQuestionResultCard.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(source).toContain('accessibilityRole="summary"');
+    expect(source).toContain('Answers submitted');
+    expect(source).toContain('Additional notes');
+    expect(source).toContain('responseText(responses.get(question.id))');
+    expect(source).not.toContain('Submit answers');
+
+    const screenSource = readFileSync(
+      new URL('../src/screens/DronesScreen.tsx', import.meta.url),
+      'utf8',
+    );
+    expect(screenSource).toContain('Array.isArray(result?.questionRequests)');
+    expect(screenSource).toContain('<MobileQuestionResultCard key={request.id} request={request} />');
+    expect(screenSource).toContain("request.status === 'pending'");
   });
 
   test('persists one display preference for every mobile questionnaire', () => {

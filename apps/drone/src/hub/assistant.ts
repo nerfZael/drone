@@ -1621,6 +1621,11 @@ export class HubAssistantService {
         targetThread.ownerDroneId ?? '',
         targetThread.ownerChatName ?? 'default',
       ),
+      questionRequests: getChatQuestionRequestService().listForChat(
+        targetThread.ownerDroneId ?? '',
+        targetThread.ownerChatName ?? 'default',
+        12,
+      ),
       models: await this.modelOptions(),
       defaultModel: { ...this.defaultModelSelection },
       defaultEnabledTools: [...this.defaultEnabledTools],
@@ -3255,6 +3260,11 @@ export class HubAssistantService {
       pendingQuestionRequests: getChatQuestionRequestService().listPending(
         targetThread.ownerDroneId ?? '',
         targetThread.ownerChatName ?? 'default',
+      ),
+      questionRequests: getChatQuestionRequestService().listForChat(
+        targetThread.ownerDroneId ?? '',
+        targetThread.ownerChatName ?? 'default',
+        12,
       ),
       models: [],
       defaultModel: { ...this.defaultModelSelection },

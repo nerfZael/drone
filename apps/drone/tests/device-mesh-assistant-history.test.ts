@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { MESH_CHAT_PAYLOAD_BYTES } from '@drone/device-protocol';
 import { boundedAssistantHistory } from '../src/hub/device-mesh/features/cross-device-assistant/bounded-assistant-history';
-import { compactNativeChatReadResponse } from '../src/hub/device-mesh/native-chat-response';
+import {
+  compactChatQuestionRequests,
+  compactNativeChatReadResponse,
+} from '../src/hub/device-mesh/native-chat-response';
 
 describe('mesh assistant history', () => {
   test('keeps responses below the mesh message budget', () => {
@@ -112,6 +115,32 @@ describe('mesh assistant history', () => {
           status: 'pending',
           args: { content: 'a'.repeat(30_000) },
         })),
+        questionRequests: Array.from({ length: 12 }, (_, index) => ({
+          id: `questions_${index}`,
+          droneId: 'drone_1',
+          chatName: 'default',
+          chatId: 'native_1',
+          toolName: 'ask_questions',
+          createdAt: `2026-08-26T10:${String(index).padStart(2, '0')}:00.000Z`,
+          updatedAt: `2026-08-26T10:${String(index).padStart(2, '0')}:30.000Z`,
+          status: 'submitted',
+          questions: Array.from({ length: 30 }, (_, questionIndex) => ({
+            id: `question_${questionIndex}`,
+            question: 'q'.repeat(1_000),
+            importance: 50,
+            choices: [{ id: 'yes', label: 'Yes', description: 'd'.repeat(1_000) }],
+          })),
+          result: {
+            status: 'submitted',
+            requestId: `questions_${index}`,
+            responses: Array.from({ length: 30 }, (_, questionIndex) => ({
+              questionId: `question_${questionIndex}`,
+              outcome: 'custom',
+              text: 'a'.repeat(4_000),
+            })),
+            notes: 'n'.repeat(8_000),
+          },
+        })),
         streamingMessages: [{ role: 'assistant', content: 's'.repeat(100_000) }],
       },
       history: {
@@ -129,6 +158,43 @@ describe('mesh assistant history', () => {
     expect(response.history.entries.at(-1).id).toBe('message_99');
     expect(response.thread?.queuedPrompts).toHaveLength(32);
     expect(response.pendingApprovals).toHaveLength(8);
+    expect(response.questionRequests.length).toBeGreaterThan(0);
+    expect(response.questionRequests.length).toBeLessThan(12);
+  });
+
+  test('keeps pending forms intact and compacts resolved questionnaires for mobile', () => {
+    const pending = {
+      id: 'questions_pending',
+      chatId: 'native_1',
+      status: 'pending',
+      questions: [
+        {
+          id: 'scope',
+          question: 'Which scope?',
+          detailedExplanation: 'The complete explanation must remain available while answering.',
+          importance: 90,
+          choices: [{ id: 'small', label: 'Small', description: 'A complete description.' }],
+        },
+      ],
+    };
+    const resolved = {
+      ...pending,
+      id: 'questions_resolved',
+      status: 'submitted',
+      result: {
+        status: 'submitted',
+        requestId: 'questions_resolved',
+        responses: [
+          { questionId: 'scope', outcome: 'custom', text: 'A carefully chosen custom scope.' },
+        ],
+      },
+    };
+
+    const compact = compactChatQuestionRequests([resolved, pending]);
+    expect(compact).toHaveLength(2);
+    expect(compact[0].questions[0].choices).toEqual([]);
+    expect(compact[0].result.responses[0].text).toBe('A carefully chosen custom scope.');
+    expect(compact[1]).toBe(pending);
   });
 
   test('preserves transfer result pairing and bounded progress details', () => {

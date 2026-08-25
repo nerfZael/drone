@@ -142,6 +142,7 @@ import {
   type MobileAssistantApproval,
 } from '../local-assistant/AssistantApprovalCard';
 import { MobileQuestionRequestCard } from '../local-assistant/MobileQuestionRequestCard';
+import { MobileQuestionResultCard } from '../local-assistant/MobileQuestionResultCard';
 import { CodexApprovalCard } from '../drones/CodexApprovalCard';
 import type { CodexApprovalDecision, CodexPendingApproval } from '@drone/assistant-chat';
 
@@ -440,9 +441,7 @@ export function DronesScreen({
   const [confirmAccessDiscard, setConfirmAccessDiscard] = React.useState(false);
   const [pendingApprovals, setPendingApprovals] = React.useState<MobileAssistantApproval[]>([]);
   const [approvalBusyId, setApprovalBusyId] = React.useState('');
-  const [pendingQuestionRequests, setPendingQuestionRequests] = React.useState<
-    ChatQuestionRequest[]
-  >([]);
+  const [questionRequests, setQuestionRequests] = React.useState<ChatQuestionRequest[]>([]);
   const [questionBusyId, setQuestionBusyId] = React.useState('');
   const [resolvedCodexApprovalIds, setResolvedCodexApprovalIds] = React.useState<Set<string>>(
     () => new Set(),
@@ -527,7 +526,7 @@ export function DronesScreen({
     setNativeChatId('');
     setNativeThread(null);
     setPendingApprovals([]);
-    setPendingQuestionRequests([]);
+    setQuestionRequests([]);
     setPendingPrompts([]);
     setAccessOpen(false);
     setAccessDirty(false);
@@ -990,8 +989,12 @@ export function DronesScreen({
     }
     setNativeThread(result?.thread ?? null);
     setPendingApprovals(Array.isArray(result?.pendingApprovals) ? result.pendingApprovals : []);
-    setPendingQuestionRequests(
-      Array.isArray(result?.pendingQuestionRequests) ? result.pendingQuestionRequests : [],
+    setQuestionRequests(
+      Array.isArray(result?.questionRequests)
+        ? result.questionRequests
+        : Array.isArray(result?.pendingQuestionRequests)
+          ? result.pendingQuestionRequests
+          : [],
     );
     const nextTurns = Array.isArray(result?.turns) ? result.turns : [];
     setTurns(nextTurns);
@@ -2713,15 +2716,24 @@ export function DronesScreen({
       requestId: request.id,
       ...resolution,
     })
-      .then(async () => {
+      .then(async (response: any) => {
         if (
           targetIdRef.current !== destinationId ||
           selectedRef.current?.id !== droneId ||
           chatNameRef.current !== activeChat
         )
           return;
-        setPendingQuestionRequests((current) =>
-          current.filter((item) => item.id !== request.id),
+        setQuestionRequests((current) =>
+          current.map((item) =>
+            item.id === request.id && response?.result
+              ? {
+                  ...item,
+                  status: response.result.status,
+                  result: response.result,
+                  updatedAt: new Date().toISOString(),
+                }
+              : item,
+          ),
         );
         await readChat(droneId, activeChat);
       })
@@ -3164,27 +3176,31 @@ export function DronesScreen({
                           onResolve={(decision) => resolveCodexApproval(approval, decision)}
                         />
                       ))}
-                      {pendingQuestionRequests.map((request) => (
-                        <MobileQuestionRequestCard
-                          key={request.id}
-                          request={request}
-                          busy={questionBusyId === request.id}
-                          disabled={!targetReachable}
-                          onSubmit={({ responses, notes }) =>
-                            resolveQuestionRequest(request, {
-                              action: 'submit',
-                              responses,
-                              ...(notes ? { notes } : {}),
-                            })
-                          }
-                          onSkip={(notes) =>
-                            resolveQuestionRequest(request, {
-                              action: 'skip',
-                              ...(notes ? { notes } : {}),
-                            })
-                          }
-                        />
-                      ))}
+                      {questionRequests.map((request) =>
+                        request.status === 'pending' ? (
+                          <MobileQuestionRequestCard
+                            key={request.id}
+                            request={request}
+                            busy={questionBusyId === request.id}
+                            disabled={!targetReachable}
+                            onSubmit={({ responses, notes }) =>
+                              resolveQuestionRequest(request, {
+                                action: 'submit',
+                                responses,
+                                ...(notes ? { notes } : {}),
+                              })
+                            }
+                            onSkip={(notes) =>
+                              resolveQuestionRequest(request, {
+                                action: 'skip',
+                                ...(notes ? { notes } : {}),
+                              })
+                            }
+                          />
+                        ) : (
+                          <MobileQuestionResultCard key={request.id} request={request} />
+                        ),
+                      )}
                     </ScrollView>
                     <View style={styles.composerMetadataRow}>
                       <View style={styles.composerMetadataLeading}>

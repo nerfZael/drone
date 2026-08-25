@@ -20,6 +20,92 @@ function boundedValue(value: unknown, maxBytes: number): unknown {
   return { truncated: true };
 }
 
+const RESOLVED_QUESTION_HISTORY_BYTES = 48 * 1024;
+
+function compactResolvedQuestionRequest(request: any): any {
+  const result = request?.result;
+  const rawQuestions = Array.isArray(request?.questions) ? request.questions : [];
+  const compactQuestionIds = new Map(
+    rawQuestions.map((question: any, index: number) => [String(question?.id ?? ''), `q${index}`]),
+  );
+  return {
+    id: String(request?.id ?? '').slice(0, 160),
+    droneId: String(request?.droneId ?? '').slice(0, 200),
+    chatName: String(request?.chatName ?? '').slice(0, 200),
+    chatId: String(request?.chatId ?? '').slice(0, 200),
+    toolName: String(request?.toolName ?? 'ask_questions').slice(0, 160),
+    createdAt: String(request?.createdAt ?? ''),
+    updatedAt: String(request?.updatedAt ?? ''),
+    status: result?.status === 'submitted' ? 'submitted' : 'skipped',
+    questions: rawQuestions.map((question: any, index: number) => ({
+      id: `q${index}`,
+      question: truncateUtf8(question?.question, 120),
+      importance: Math.max(1, Math.min(100, Number(question?.importance) || 50)),
+      choices: [],
+    })),
+    result:
+      result?.status === 'submitted'
+        ? {
+            status: 'submitted',
+            requestId: String(result?.requestId ?? request?.id ?? '').slice(0, 160),
+            responses: (Array.isArray(result?.responses) ? result.responses : []).map(
+              (response: any, index: number) =>
+                response?.outcome === 'choice'
+                  ? {
+                      questionId:
+                        compactQuestionIds.get(String(response?.questionId ?? '')) ?? `q${index}`,
+                      outcome: 'choice',
+                      choiceId: String(response?.choiceId ?? '').slice(0, 80),
+                      label: truncateUtf8(response?.label, 160),
+                    }
+                  : response?.outcome === 'custom'
+                    ? {
+                        questionId:
+                          compactQuestionIds.get(String(response?.questionId ?? '')) ?? `q${index}`,
+                        outcome: 'custom',
+                        text: truncateUtf8(response?.text, 192),
+                      }
+                    : {
+                        questionId:
+                          compactQuestionIds.get(String(response?.questionId ?? '')) ?? `q${index}`,
+                        outcome: 'skipped',
+                      },
+            ),
+            ...(result?.notes ? { notes: truncateUtf8(result.notes, 1_000) } : {}),
+          }
+        : {
+            status: 'skipped',
+            requestId: String(result?.requestId ?? request?.id ?? '').slice(0, 160),
+            reason:
+              result?.reason === 'queued_message_pending' || result?.reason === 'chat_stopped'
+                ? result.reason
+                : 'user_skipped',
+            ...(result?.notes ? { notes: truncateUtf8(result.notes, 1_000) } : {}),
+          },
+  };
+}
+
+/** Keep active forms intact, but send answer-only summaries for resolved mobile history. */
+export function compactChatQuestionRequests(value: unknown): any[] {
+  const requests = Array.isArray(value) ? value : [];
+  const pending = requests.filter((request) => request?.status === 'pending').slice(-2);
+  const resolved: any[] = [];
+  let resolvedBytes = 2;
+  for (const request of requests
+    .filter((candidate) => candidate?.status !== 'pending' && candidate?.result)
+    .slice(-12)
+    .reverse()) {
+    const compact = compactResolvedQuestionRequest(request);
+    const itemBytes = Buffer.byteLength(JSON.stringify(compact)) + 1;
+    if (resolved.length > 0 && resolvedBytes + itemBytes > RESOLVED_QUESTION_HISTORY_BYTES) break;
+    resolved.unshift(compact);
+    resolvedBytes += itemBytes;
+  }
+  return [...resolved, ...pending].sort((left, right) =>
+    String(left?.createdAt ?? '').localeCompare(String(right?.createdAt ?? '')),
+  );
+}
+
 function compactQueuedPrompt(prompt: any) {
   return {
     id: String(prompt?.id ?? '').slice(0, 160),
@@ -110,11 +196,12 @@ export function compactNativeChatReadResponse(input: {
       createdAt: String(approval?.createdAt ?? ''),
       status: 'pending',
     }));
-  const pendingQuestionRequests = (
-    Array.isArray(input.snapshot?.pendingQuestionRequests)
-      ? input.snapshot.pendingQuestionRequests
-      : []
-  )
+  const questionRequests = compactChatQuestionRequests(
+    Array.isArray(input.snapshot?.questionRequests)
+      ? input.snapshot.questionRequests
+      : input.snapshot?.pendingQuestionRequests,
+  ).filter((request: any) => String(request?.chatId ?? '') === input.nativeChatId);
+  const pendingQuestionRequests = questionRequests
     .filter(
       (request: any) =>
         String(request?.chatId ?? '') === input.nativeChatId && request?.status === 'pending',
@@ -132,6 +219,7 @@ export function compactNativeChatReadResponse(input: {
     streamingMessages,
     pendingApprovals,
     pendingQuestionRequests,
+    questionRequests,
     thread,
     pending,
   };
