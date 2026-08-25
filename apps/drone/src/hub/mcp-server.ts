@@ -1635,62 +1635,63 @@ async function grantCreatedDroneAccessBestEffort(
 }
 
 function registerTools(server: McpServer, context: McpToolRegistrationContext) {
-  const conversation = chatPrincipal(context);
-  if (conversation) {
-    server.registerTool(
-      'ask_questions',
-      {
-        title: 'Ask the user questions',
-        description:
-          'Pause this Drone Hub chat and ask the user one or more multiple-choice questions. Preserve question order. Each question may include an optional detailedExplanation with background, constraints, or the problem being decided, plus an optional importance integer from 1 to 100 that defaults to 50; importance never changes order. Mark at most one choice recommended=true per question. A recommended choice is preselected. Drone Hub always offers a custom-answer field and an explicit skip action for every question, so do not add an Other, Custom, None, or Skip choice yourself. The user may accept a choice, enter a custom answer, explicitly skip individual questions, add overall notes, or skip the whole request. If any message is queued for this chat, the request is automatically skipped and the queued message proceeds normally. Prefer a small focused set even though up to 99 questions are supported.',
-        inputSchema: {
-          questions: z
-            .array(
-              z.object({
-                id: z.string().min(1).max(120),
-                question: z.string().min(1).max(1_000),
-                detailedExplanation: z.string().max(4_000).optional(),
-                importance: z.number().int().min(1).max(100).optional().default(50),
-                choices: z
-                  .array(
-                    z.object({
-                      id: z.string().min(1).max(120),
-                      label: z.string().min(1).max(240),
-                      description: z.string().max(1_000).optional(),
-                      recommended: z.boolean().optional(),
-                    }),
-                  )
-                  .min(2)
-                  .max(12),
-              }),
-            )
-            .min(1)
-            .max(99),
-          _blip: z
-            .object({
-              sessionId: z.string().optional(),
-              toolCallId: z.string().optional(),
-            })
-            .optional(),
+  server.registerTool(
+    'ask_questions',
+    {
+      title: 'Ask the user questions',
+      description:
+        'Pause this Drone Hub chat and ask the user one or more multiple-choice questions. Preserve question order. Each question may include an optional detailedExplanation with background, constraints, or the problem being decided, plus an optional importance integer from 1 to 100 that defaults to 50; importance never changes order. Mark at most one choice recommended=true per question. A recommended choice is preselected. Drone Hub always offers a custom-answer field and an explicit skip action for every question, so do not add an Other, Custom, None, or Skip choice yourself. The user may accept a choice, enter a custom answer, explicitly skip individual questions, add overall notes, or skip the whole request. If any message is queued for this chat, the request is automatically skipped and the queued message proceeds normally. Prefer a small focused set even though up to 99 questions are supported.',
+      inputSchema: {
+        questions: z
+          .array(
+            z.object({
+              id: z.string().min(1).max(120),
+              question: z.string().min(1).max(1_000),
+              detailedExplanation: z.string().max(4_000).optional(),
+              importance: z.number().int().min(1).max(100).optional().default(50),
+              choices: z
+                .array(
+                  z.object({
+                    id: z.string().min(1).max(120),
+                    label: z.string().min(1).max(240),
+                    description: z.string().max(1_000).optional(),
+                    recommended: z.boolean().optional(),
+                  }),
+                )
+                .min(2)
+                .max(12),
+            }),
+          )
+          .min(1)
+          .max(99),
+        _blip: z
+          .object({
+            sessionId: z.string().optional(),
+            toolCallId: z.string().optional(),
+          })
+          .optional(),
+      },
+    },
+    async (args, extra) => {
+      const conversation = chatPrincipal(context);
+      if (!conversation) {
+        throw new Error('ask_questions requires a Drone Hub chat connection');
+      }
+      const result = await context.hubServices.questions.ask(
+        {
+          droneId: conversation.droneId,
+          chatName: conversation.chatName,
+          chatId: conversation.chatId,
+          ...(context.nativeThreadId ? { nativeThreadId: context.nativeThreadId } : {}),
+          ...(args._blip?.toolCallId ? { toolCallId: args._blip.toolCallId } : {}),
+          toolName: 'drone_hub__ask_questions',
+          questions: args.questions,
         },
-      },
-      async (args, extra) => {
-        const result = await context.hubServices.questions.ask(
-          {
-            droneId: conversation.droneId,
-            chatName: conversation.chatName,
-            chatId: conversation.chatId,
-            ...(context.nativeThreadId ? { nativeThreadId: context.nativeThreadId } : {}),
-            ...(args._blip?.toolCallId ? { toolCallId: args._blip.toolCallId } : {}),
-            toolName: 'drone_hub__ask_questions',
-            questions: args.questions,
-          },
-          extra.signal,
-        );
-        return toolResult(result);
-      },
-    );
-  }
+        extra.signal,
+      );
+      return toolResult(result);
+    },
+  );
 
   server.registerTool(
     'list_drones',

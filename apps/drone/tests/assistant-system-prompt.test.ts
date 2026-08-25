@@ -116,15 +116,18 @@ describe('assistant system prompt settings', () => {
     expect(ASSISTANT_TOOL_SUMMARIES.find((tool) => tool.name === 'read_file')?.group).toBeUndefined();
   });
 
-  test('keeps Drone Hub MCP tools available but disabled by default for new chats', async () => {
+  test('enables ask questions while keeping other Drone Hub MCP tools opt-in for new chats', async () => {
     await withTempDroneDataDir('assistant-mcp-tools-opt-in-', async () => {
       const service = makeAssistantService();
       const snapshot = await ensureTestNativeChat(service, { chatName: 'mcp opt in' });
       const available = snapshot.availableTools.map((tool) => tool.name);
       expect(available).toEqual(expect.arrayContaining(ASSISTANT_DRONE_HUB_MCP_TOOL_NAMES));
       expect(snapshot.defaultEnabledTools).toEqual(ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES);
+      expect(snapshot.threads[0]?.enabledTools).toContain('ask_questions');
       expect(snapshot.threads[0]?.enabledTools).not.toEqual(
-        expect.arrayContaining(ASSISTANT_DRONE_HUB_MCP_TOOL_NAMES),
+        expect.arrayContaining(
+          ASSISTANT_DRONE_HUB_MCP_TOOL_NAMES.filter((name) => name !== 'ask_questions'),
+        ),
       );
     });
   });
@@ -139,10 +142,15 @@ describe('assistant system prompt settings', () => {
       const implicitStored = stored?.threads?.find((thread) => thread.id === implicit.chatId);
       if (!stored || !existingStored || !implicitStored)
         throw new Error('missing stored assistant thread');
-      stored.defaultEnabledTools = [...ASSISTANT_PRE_MCP_OPT_IN_DEFAULT_ENABLED_TOOL_NAMES];
-      existingStored.enabledTools = [...ASSISTANT_PRE_MCP_OPT_IN_DEFAULT_ENABLED_TOOL_NAMES];
+      stored.defaultEnabledTools = ASSISTANT_PRE_MCP_OPT_IN_DEFAULT_ENABLED_TOOL_NAMES.filter(
+        (name) => name !== 'ask_questions',
+      );
+      existingStored.enabledTools = ASSISTANT_PRE_MCP_OPT_IN_DEFAULT_ENABLED_TOOL_NAMES.filter(
+        (name) => name !== 'ask_questions',
+      );
       delete implicitStored.enabledTools;
       delete stored.droneHubMcpDefaultOptInMigrationApplied;
+      delete stored.askQuestionsDefaultMigrationApplied;
       await saveAssistantState(stored);
 
       const reloaded = makeAssistantService();

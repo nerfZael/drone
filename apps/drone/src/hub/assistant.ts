@@ -154,6 +154,7 @@ type StoredAssistantState = {
   webSearchToolMigrationApplied?: boolean;
   fetchContentToolMigrationApplied?: boolean;
   droneHubMcpDefaultOptInMigrationApplied?: boolean;
+  askQuestionsDefaultMigrationApplied?: boolean;
   systemPrompt?: string;
   systemPromptUpdatedAt?: string;
   updatedAt?: string;
@@ -1075,6 +1076,7 @@ function serializeState(input: {
     webSearchToolMigrationApplied: true,
     fetchContentToolMigrationApplied: true,
     droneHubMcpDefaultOptInMigrationApplied: true,
+    askQuestionsDefaultMigrationApplied: true,
     ...(systemPrompt !== ASSISTANT_SYSTEM_PROMPT_DEFAULT
       ? {
           systemPrompt,
@@ -2844,7 +2846,13 @@ export class HubAssistantService {
     this.defaultEnabledTools =
       stored?.droneHubMcpDefaultOptInMigrationApplied === true
         ? storedDefaultEnabledTools
-        : storedDefaultEnabledTools.filter((name) => !droneHubMcpToolNames.has(name));
+        : storedDefaultEnabledTools.filter(
+            (name) => name === 'ask_questions' || !droneHubMcpToolNames.has(name),
+          );
+    const migrateAskQuestionsDefault = stored?.askQuestionsDefaultMigrationApplied !== true;
+    if (migrateAskQuestionsDefault && !this.defaultEnabledTools.includes('ask_questions')) {
+      this.defaultEnabledTools.push('ask_questions');
+    }
     const storedThreads = Array.isArray(stored?.threads) ? stored.threads : [];
     const storedFallbackProvider = normalizeProvider(
       storedThreads.find((thread: any) => thread && typeof thread === 'object')?.provider,
@@ -2867,6 +2875,13 @@ export class HubAssistantService {
       )
       .filter(Boolean) as AssistantThread[];
     this.threads = threads.filter((thread) => Boolean(thread.ownerDroneId));
+    if (migrateAskQuestionsDefault) {
+      for (const thread of this.threads) {
+        if (!thread.enabledTools.includes('ask_questions')) {
+          thread.enabledTools.push('ask_questions');
+        }
+      }
+    }
     this.loaded = true;
   }
 

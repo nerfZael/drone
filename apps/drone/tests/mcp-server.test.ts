@@ -428,7 +428,29 @@ describe('Drone Hub assistant MCP transport', () => {
       const catalog = await client.listTools();
       const catalogNames = catalog.tools.map((tool) => tool.name).sort();
       const displayedMcpNames = ASSISTANT_TOOL_SUMMARIES.filter((tool) => tool.group?.kind === 'mcp' && tool.group.id === 'drone-hub').map((tool) => tool.name).sort();
-      expect(displayedMcpNames.filter((name) => name !== 'ask_questions')).toEqual(catalogNames);
+      expect(displayedMcpNames).toEqual(catalogNames);
+      expect(catalog.tools.find((tool) => tool.name === 'ask_questions')?.description).toContain(
+        'custom-answer field',
+      );
+      const hostAskResult = await client.callTool({
+        name: 'ask_questions',
+        arguments: {
+          questions: [
+            {
+              id: 'scope',
+              question: 'Which scope?',
+              choices: [
+                { id: 'small', label: 'Small' },
+                { id: 'large', label: 'Large' },
+              ],
+            },
+          ],
+        },
+      });
+      expect(hostAskResult.isError).toBe(true);
+      expect((hostAskResult.content as any)?.[0]?.text).toContain(
+        'requires a Drone Hub chat connection',
+      );
       await client.close();
 
       const chatClient = await createInProcessDroneHubMcpClient({

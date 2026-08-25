@@ -65,40 +65,46 @@ export function AssistantQuestionCard({
   };
 
   return (
-    <section className="mx-3 rounded-[var(--radius-large)] border border-[var(--accent-muted)] bg-[var(--panel-raised)] p-4">
-      <div className="mb-4">
-        <div className="text-[var(--text-9)] font-[var(--weight-bold)] uppercase tracking-wider text-[var(--accent)]">
+    <section
+      className="relative min-w-0 border-l border-[var(--accent)] py-1 pl-4 pr-1 text-[var(--fg-secondary)]"
+      role="region"
+      aria-label="Questions from the agent"
+      aria-busy={busy || undefined}
+      data-assistant-question-card="true"
+    >
+      <div className="mb-3">
+        <div className="text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--fg-strong)]">
           Input requested
         </div>
-        <div className="mt-1 text-[var(--text-11)] text-[var(--muted)]">
+        <div className="mt-0.5 text-[var(--text-10)] text-[var(--fg-secondary)]">
           Review the recommendations, answer with something else, or skip any question.
         </div>
       </div>
-      <div className="space-y-5">
+      <div className="space-y-4">
         {request.questions.map((question, questionIndex) => {
           const response = responses[question.id];
           return (
-            <fieldset key={question.id} disabled={locked} className="space-y-2">
-              <legend className="text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--fg)]">
+            <fieldset key={question.id} disabled={locked} className="min-w-0 space-y-1.5">
+              <legend className="text-[var(--text-12)] font-[var(--weight-semibold)] leading-snug text-[var(--fg-strong)]">
                 {questionIndex + 1}. {question.question}
               </legend>
-              <div className="text-[var(--text-9)] text-[var(--muted-dim)]">
+              <div className="text-[var(--text-9)] text-[var(--muted)]">
                 Importance {question.importance}/100
               </div>
               {question.detailedExplanation ? (
                 <MarkdownMessage
                   text={question.detailedExplanation}
-                  className="text-[var(--text-11)] text-[var(--muted)]"
+                  className="text-[var(--text-10)] leading-relaxed text-[var(--fg-secondary)]"
                 />
               ) : null}
-              <div className="space-y-2">
+              <div className="space-y-1.5 pt-0.5">
                 {question.choices.map((choice) => (
                   <label
                     key={choice.id}
-                    className={`flex cursor-pointer gap-3 rounded border px-3 py-2 ${
+                    className={`flex cursor-pointer gap-2.5 rounded-[var(--radius-medium)] border px-2.5 py-1.5 transition-colors ${
                       response?.outcome === 'choice' && response.choiceId === choice.id
-                        ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]'
-                        : 'border-[var(--border-subtle)] bg-[var(--surface-softest)]'
+                        ? 'border-[var(--accent)] bg-[var(--surface-inset-strong)]'
+                        : 'border-[var(--border)] bg-[var(--surface-inset)] hover:border-[var(--accent-muted)]'
                     }`}
                   >
                     <input
@@ -112,25 +118,31 @@ export function AssistantQuestionCard({
                         }))
                       }
                     />
-                    <span className="min-w-0">
-                      <span className="font-[var(--weight-semibold)] text-[var(--fg)]">
+                    <span className="min-w-0 text-[var(--text-11)]">
+                      <span className="font-[var(--weight-semibold)] text-[var(--fg-strong)]">
                         {choice.label}
                       </span>
                       {choice.recommended ? (
-                        <span className="ml-2 rounded bg-[var(--accent-subtle)] px-1.5 py-0.5 text-[var(--text-8)] font-[var(--weight-bold)] uppercase text-[var(--accent)]">
+                        <span className="ml-2 rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-1.5 py-0.5 text-[var(--text-8)] font-[var(--weight-bold)] uppercase text-[var(--accent)]">
                           Recommended
                         </span>
                       ) : null}
                       {choice.description ? (
-                        <span className="mt-0.5 block text-[var(--text-10)] text-[var(--muted)]">
+                        <span className="mt-0.5 block text-[var(--text-10)] leading-snug text-[var(--fg-secondary)]">
                           {choice.description}
                         </span>
                       ) : null}
                     </span>
                   </label>
                 ))}
-                <label className="block rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-2">
-                  <span className="flex gap-3">
+                <label
+                  className={`block rounded-[var(--radius-medium)] border px-2.5 py-1.5 transition-colors ${
+                    response?.outcome === 'custom'
+                      ? 'border-[var(--accent)] bg-[var(--surface-inset-strong)]'
+                      : 'border-[var(--border)] bg-[var(--surface-inset)] hover:border-[var(--accent-muted)]'
+                  }`}
+                >
+                  <span className="flex gap-2.5">
                     <input
                       type="radio"
                       name={`${request.id}:${question.id}`}
@@ -142,7 +154,7 @@ export function AssistantQuestionCard({
                         }))
                       }
                     />
-                    <span className="font-[var(--weight-semibold)] text-[var(--fg)]">
+                    <span className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-strong)]">
                       Something else
                     </span>
                   </span>
@@ -159,7 +171,7 @@ export function AssistantQuestionCard({
                       }
                       rows={2}
                       placeholder="Type your answer"
-                      className="mt-2 w-full resize-y rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-1.5 text-[var(--text-11)] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
+                      className="mt-2 w-full resize-y rounded border border-[var(--border)] bg-[var(--panel)] px-2 py-1.5 text-[var(--text-11)] text-[var(--fg)] outline-none focus:border-[var(--accent)]"
                     />
                   ) : null}
                 </label>
@@ -171,10 +183,10 @@ export function AssistantQuestionCard({
                       [question.id]: { outcome: 'skipped' },
                     }))
                   }
-                  className={`rounded px-2 py-1 text-[var(--text-10)] ${
+                  className={`rounded px-2 py-1 text-[var(--text-10)] transition-colors ${
                     response?.outcome === 'skipped'
-                      ? 'bg-[var(--surface-active)] text-[var(--fg)]'
-                      : 'text-[var(--muted)] hover:text-[var(--fg)]'
+                      ? 'bg-[var(--surface-inset-strong)] font-[var(--weight-semibold)] text-[var(--fg-strong)]'
+                      : 'text-[var(--fg-secondary)] hover:bg-[var(--surface-strong)] hover:text-[var(--fg-strong)]'
                   }`}
                 >
                   {response?.outcome === 'skipped' ? 'Question skipped' : 'Skip this question'}
@@ -184,16 +196,16 @@ export function AssistantQuestionCard({
           );
         })}
       </div>
-      <label className="mt-5 block text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted)]">
+      <label className="mt-4 block text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
         Additional notes
         <textarea
           disabled={locked}
           maxLength={8_000}
           value={notes}
           onChange={(event) => setNotes(event.target.value)}
-          rows={3}
+          rows={2}
           placeholder="Optional context for the agent"
-          className="mt-1.5 w-full resize-y rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-2 text-[var(--text-11)] font-normal text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
+          className="mt-1.5 w-full resize-y rounded border border-[var(--border)] bg-[var(--surface-inset)] px-3 py-2 text-[var(--text-11)] font-normal text-[var(--fg)] outline-none focus:border-[var(--accent)]"
         />
       </label>
       {!complete ? (
@@ -206,12 +218,12 @@ export function AssistantQuestionCard({
           {error}
         </div>
       ) : null}
-      <div className="mt-4 flex justify-end gap-2">
+      <div className="mt-3 flex flex-wrap justify-end gap-2">
         <button
           type="button"
           disabled={locked}
           onClick={() => onSkip(notes.trim() || undefined)}
-          className="rounded border border-[var(--border-subtle)] px-3 py-2 text-[var(--text-10)] text-[var(--muted)] hover:text-[var(--fg)] disabled:opacity-50"
+          className="rounded border border-[var(--border)] bg-[var(--surface-inset)] px-3 py-1.5 text-[var(--text-10)] text-[var(--fg-secondary)] hover:border-[var(--accent-muted)] hover:text-[var(--fg-strong)] disabled:opacity-50"
         >
           {notes.trim() ? 'Send note and skip' : 'Skip all questions'}
         </button>
@@ -219,7 +231,7 @@ export function AssistantQuestionCard({
           type="button"
           disabled={locked || !complete}
           onClick={submit}
-          className="rounded bg-[var(--accent)] px-3 py-2 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--accent-contrast)] disabled:opacity-50"
+          className="rounded bg-[var(--accent)] px-3 py-1.5 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--accent-contrast)] hover:brightness-110 disabled:opacity-50"
         >
           Submit answers
         </button>

@@ -44,5 +44,9 @@ describe('AssistantQuestionCard', () => {
     expect(html).toContain('Something else');
     expect(html).toContain('Skip this question');
     expect(html).toContain('maxLength="8000"');
+    expect(html).toContain('data-assistant-question-card="true"');
+    expect(html).toContain('border-l border-[var(--accent)]');
+    expect(html).toContain('bg-[var(--surface-inset)]');
+    expect(html).not.toContain('bg-[var(--panel-raised)]');
   });
 });

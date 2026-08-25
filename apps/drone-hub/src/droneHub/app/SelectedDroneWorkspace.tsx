@@ -1531,6 +1531,29 @@ export function SelectedDroneWorkspace({
       }
     }
   }
+  for (const request of externalQuestionRequests) {
+    externalTranscriptItems.push({
+      key: `questions:${request.id}`,
+      kind: 'approval',
+      content: (
+        <AssistantQuestionCard
+          request={request}
+          busy={externalQuestionBusyId === request.id}
+          error={externalQuestionError}
+          onSubmit={({ responses, notes }) =>
+            void resolveExternalQuestionRequest(request, {
+              kind: 'submit',
+              responses,
+              notes,
+            })
+          }
+          onSkip={(notes) =>
+            void resolveExternalQuestionRequest(request, { kind: 'skip', notes })
+          }
+        />
+      ),
+    });
+  }
   return (
     <>
       {/* Header - spans full workspace width */}
@@ -2447,7 +2470,8 @@ export function SelectedDroneWorkspace({
                     }
                     hasContent={Boolean(
                       (transcripts && transcripts.length > 0) ||
-                      visiblePendingPromptsWithStartup.length > 0,
+                      visiblePendingPromptsWithStartup.length > 0 ||
+                      externalQuestionRequests.length > 0,
                     )}
                     emptyState={
                       <EmptyState
@@ -2526,8 +2550,8 @@ export function SelectedDroneWorkspace({
                 <CliPendingPromptStrip items={visibleCliPendingPrompts} />
               ) : null}
 
-              {genericChatActive && externalQuestionRequests.length > 0 ? (
-                <div className="mx-auto w-full max-w-[var(--chat-prose-max)] space-y-3 px-3 pb-3">
+              {genericChatActive && chatUiMode === 'cli' && externalQuestionRequests.length > 0 ? (
+                <div className="mx-auto max-h-[40vh] w-full max-w-[var(--chat-prose-max)] space-y-3 overflow-auto px-6 py-3">
                   {externalQuestionRequests.map((request) => (
                     <AssistantQuestionCard
                       key={request.id}

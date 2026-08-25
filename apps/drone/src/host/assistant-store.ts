@@ -22,6 +22,7 @@ export type StoredAssistantState = {
   webSearchToolMigrationApplied?: boolean;
   fetchContentToolMigrationApplied?: boolean;
   droneHubMcpDefaultOptInMigrationApplied?: boolean;
+  askQuestionsDefaultMigrationApplied?: boolean;
   systemPrompt?: string;
   systemPromptUpdatedAt?: string;
   updatedAt?: string;
@@ -41,6 +42,7 @@ function createAssistantSchema(connection: HubDatabaseConnection): void {
           web_search_tool_migration_applied INTEGER,
           fetch_content_tool_migration_applied INTEGER,
           drone_hub_mcp_default_opt_in_migration_applied INTEGER,
+          ask_questions_default_migration_applied INTEGER,
           system_prompt TEXT,
           system_prompt_updated_at TEXT,
           state_updated_at TEXT
@@ -173,6 +175,20 @@ export const ASSISTANT_STORE_MIGRATIONS: readonly HubDatabaseMigration[] = [
       );
     },
   },
+  {
+    version: 10,
+    name: 'enable ask questions for native chats',
+    migrate(connection) {
+      const columns = connection.prepare('PRAGMA table_info(assistant_preferences)').all() as Array<{
+        name?: string;
+      }>;
+      if (columns.some((column) => column.name === 'ask_questions_default_migration_applied'))
+        return;
+      connection.exec(
+        'ALTER TABLE assistant_preferences ADD COLUMN ask_questions_default_migration_applied INTEGER',
+      );
+    },
+  },
 ];
 
 type PreferenceRow = {
@@ -183,6 +199,7 @@ type PreferenceRow = {
   web_search_tool_migration_applied: number | null;
   fetch_content_tool_migration_applied: number | null;
   drone_hub_mcp_default_opt_in_migration_applied: number | null;
+  ask_questions_default_migration_applied: number | null;
   system_prompt: string | null;
   system_prompt_updated_at: string | null;
   state_updated_at: string | null;
@@ -272,9 +289,10 @@ function writeStateRows(connection: HubDatabaseConnection, state: StoredAssistan
       singleton, default_provider, default_model, default_thinking_level, default_enabled_tools_json,
       web_search_tool_migration_applied,
       fetch_content_tool_migration_applied, drone_hub_mcp_default_opt_in_migration_applied,
+      ask_questions_default_migration_applied,
       system_prompt, system_prompt_updated_at,
       state_updated_at
-    ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(singleton) DO UPDATE SET
       default_provider = excluded.default_provider,
       default_model = excluded.default_model,
@@ -283,6 +301,7 @@ function writeStateRows(connection: HubDatabaseConnection, state: StoredAssistan
       web_search_tool_migration_applied = excluded.web_search_tool_migration_applied,
       fetch_content_tool_migration_applied = excluded.fetch_content_tool_migration_applied,
       drone_hub_mcp_default_opt_in_migration_applied = excluded.drone_hub_mcp_default_opt_in_migration_applied,
+      ask_questions_default_migration_applied = excluded.ask_questions_default_migration_applied,
       system_prompt = excluded.system_prompt,
       system_prompt_updated_at = excluded.system_prompt_updated_at,
       state_updated_at = excluded.state_updated_at
@@ -293,6 +312,7 @@ function writeStateRows(connection: HubDatabaseConnection, state: StoredAssistan
        OR web_search_tool_migration_applied IS NOT excluded.web_search_tool_migration_applied
        OR fetch_content_tool_migration_applied IS NOT excluded.fetch_content_tool_migration_applied
        OR drone_hub_mcp_default_opt_in_migration_applied IS NOT excluded.drone_hub_mcp_default_opt_in_migration_applied
+       OR ask_questions_default_migration_applied IS NOT excluded.ask_questions_default_migration_applied
        OR system_prompt IS NOT excluded.system_prompt
        OR system_prompt_updated_at IS NOT excluded.system_prompt_updated_at
        OR state_updated_at IS NOT excluded.state_updated_at
@@ -306,6 +326,7 @@ function writeStateRows(connection: HubDatabaseConnection, state: StoredAssistan
       optionalBoolean(state.webSearchToolMigrationApplied),
       optionalBoolean(state.fetchContentToolMigrationApplied),
       optionalBoolean(state.droneHubMcpDefaultOptInMigrationApplied),
+      optionalBoolean(state.askQuestionsDefaultMigrationApplied),
       optionalText(state.systemPrompt),
       optionalText(state.systemPromptUpdatedAt),
       optionalText(state.updatedAt),
@@ -440,6 +461,10 @@ function readStateRows(connection: HubDatabaseConnection): StoredAssistantState 
       preferences.drone_hub_mcp_default_opt_in_migration_applied == null
         ? undefined
         : preferences.drone_hub_mcp_default_opt_in_migration_applied === 1,
+    askQuestionsDefaultMigrationApplied:
+      preferences.ask_questions_default_migration_applied == null
+        ? undefined
+        : preferences.ask_questions_default_migration_applied === 1,
     systemPrompt: preferences.system_prompt ?? undefined,
     systemPromptUpdatedAt: preferences.system_prompt_updated_at ?? undefined,
     updatedAt: preferences.state_updated_at ?? undefined,
