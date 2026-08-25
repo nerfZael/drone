@@ -30,7 +30,12 @@ describe("MCP tool provider", () => {
     const result = await tools[0]!.execute("call", {} as never);
 
     expect(tools[0]!.name).toBe("drone-hub__list_drones");
-    expect(calls).toEqual([{ name: "list_drones", arguments: { _blip: { sessionId: "session-one" } } }]);
+    expect(calls).toEqual([
+      {
+        name: "list_drones",
+        arguments: { _blip: { sessionId: "session-one", toolCallId: "call" } },
+      },
+    ]);
     expect(result.details).toEqual({ ok: true, drones: [{ id: "one" }] });
   });
 

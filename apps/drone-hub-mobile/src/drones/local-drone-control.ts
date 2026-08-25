@@ -1057,6 +1057,7 @@ function useLocalDroneControlValue() {
           pendingApprovals: assistant.pendingApprovals.filter(
             (approval) => approval.threadId === thread.id,
           ),
+          pendingQuestionRequests: [],
           pending:
             drone.draft === true || drone.draftChats?.[chatName] === true
               ? localDroneDraftPromptsForChat(drone, chatName).map((prompt) => ({

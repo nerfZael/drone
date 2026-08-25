@@ -1,6 +1,7 @@
 import React from 'react';
 import { AssistantMessageRow } from '../assistant/AssistantTranscript';
 import { ApprovalCard } from '../assistant/AssistantWorkflowCards';
+import { AssistantQuestionCard } from '../assistant/AssistantQuestionCard';
 import { ChatInput, EmptyState } from '../chat';
 import { IconChat, IconDrone, IconFolder } from '../icons';
 import { DeviceConnectionIndicator } from './DeviceConnectionIndicator';
@@ -398,6 +399,7 @@ function RemoteMain({
                 </div>
               ) : model.messages.length === 0 &&
                 model.pendingApprovals.length === 0 &&
+                model.pendingQuestionRequests.length === 0 &&
                 model.pendingCount === 0 ? (
                 <div className="flex flex-1 items-center justify-center text-center text-[var(--text-11)] text-[var(--muted)]">
                   Send a prompt to start this remote chat.
@@ -430,6 +432,27 @@ function RemoteMain({
                       />
                     );
                   })}
+                  {model.pendingQuestionRequests.map((request) => (
+                    <AssistantQuestionCard
+                      key={request.id}
+                      request={request}
+                      busy={model.questionBusyId === request.id}
+                      disabled={!routeAvailable}
+                      onSubmit={({ responses, notes }) =>
+                        void model.resolveQuestionRequest(request, {
+                          action: 'submit',
+                          responses,
+                          ...(notes ? { notes } : {}),
+                        })
+                      }
+                      onSkip={(notes) =>
+                        void model.resolveQuestionRequest(request, {
+                          action: 'skip',
+                          ...(notes ? { notes } : {}),
+                        })
+                      }
+                    />
+                  ))}
                   {model.pendingCount > 0 ? (
                     <div className="flex items-center gap-2 py-2 text-[var(--text-10)] text-[var(--muted)]">
                       <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--yellow)]" />

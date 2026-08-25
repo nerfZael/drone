@@ -9,6 +9,11 @@ import type { RenameDroneCommand } from '../drone-rename-command';
 import type { resolveDeleteActionSettingsResponse } from '../hub-settings';
 import type { DeleteGroupCommand } from './delete-group';
 import type { FleetActorService } from './fleet-actors';
+import type {
+  ChatQuestionRequestService,
+  CreateChatQuestionRequestInput,
+  ResolveChatQuestionRequestInput,
+} from '../chat-question-requests';
 
 export type HubServices = {
   repositories: {
@@ -32,6 +37,20 @@ export type HubServices = {
     readDeleteAction: typeof resolveDeleteActionSettingsResponse;
     uiPreferences: Pick<UiPreferencesService, 'read' | 'update'>;
   };
+  questions: Pick<
+    ChatQuestionRequestService,
+    | 'ask'
+    | 'create'
+    | 'get'
+    | 'listPending'
+    | 'reconcileQueuedRequests'
+    | 'setNativeResolver'
+    | 'subscribeResolved'
+    | 'skip'
+    | 'skipPendingForChat'
+    | 'submit'
+    | 'waitForResult'
+  >;
 };
 
 export type HubServiceRequest = <T>(
@@ -130,6 +149,69 @@ export function createHttpHubServices(request: HubServiceRequest): HubServices {
             }),
           }),
       },
+    },
+    questions: {
+      ask: async (input: CreateChatQuestionRequestInput, signal?: AbortSignal) => {
+        const created = await request<any>('/api/chat-question-requests', {
+          method: 'POST',
+          body: JSON.stringify(input),
+        });
+        if (created.request?.result) return created.request.result;
+        try {
+          return await request<any>(
+            `/api/chat-question-requests/${encodeURIComponent(created.request.id)}/wait`,
+            { method: 'POST', signal },
+            24 * 60 * 60 * 1_000,
+          ).then((response) => response.result);
+        } catch (error) {
+          if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')) {
+            await request<any>(
+              `/api/chat-question-requests/${encodeURIComponent(created.request.id)}/skip`,
+              { method: 'POST', body: JSON.stringify({ reason: 'chat_stopped' }) },
+            ).catch(() => {});
+          }
+          throw error;
+        }
+      },
+      create: async (input: CreateChatQuestionRequestInput) =>
+        await request<any>('/api/chat-question-requests', {
+          method: 'POST',
+          body: JSON.stringify(input),
+        }).then((response) => response.request),
+      get: () => {
+        throw new Error('synchronous question request reads are unavailable over HTTP');
+      },
+      listPending: () => {
+        throw new Error('synchronous question request lists are unavailable over HTTP');
+      },
+      reconcileQueuedRequests: async () => {
+        // Reconciliation belongs to the Hub process that owns the native runtime.
+      },
+      setNativeResolver: () => {
+        throw new Error('native question resolution is unavailable over HTTP');
+      },
+      subscribeResolved: () => () => {},
+      skip: async (requestId: string, reason: any, notes?: unknown) =>
+        await request<any>(`/api/chat-question-requests/${encodeURIComponent(requestId)}/skip`, {
+          method: 'POST',
+          body: JSON.stringify({ reason, notes }),
+        }).then((response) => response.result),
+      skipPendingForChat: async (droneId: string, chatName: string, reason: any) =>
+        await request<any>('/api/chat-question-requests/skip-pending', {
+          method: 'POST',
+          body: JSON.stringify({ droneId, chatName, reason }),
+        }).then((response) => response.results),
+      submit: async (requestId: string, input: ResolveChatQuestionRequestInput) =>
+        await request<any>(`/api/chat-question-requests/${encodeURIComponent(requestId)}/submit`, {
+          method: 'POST',
+          body: JSON.stringify(input),
+        }).then((response) => response.result),
+      waitForResult: async (requestId: string, signal?: AbortSignal) =>
+        await request<any>(
+          `/api/chat-question-requests/${encodeURIComponent(requestId)}/wait`,
+          { method: 'POST', signal },
+          24 * 60 * 60 * 1_000,
+        ).then((response) => response.result),
     },
   };
 }

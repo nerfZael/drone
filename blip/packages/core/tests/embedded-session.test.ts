@@ -380,6 +380,69 @@ describe('Embedded Blip session', () => {
     faux.unregister();
   });
 
+  test('accepts a supplied result for a suspended tool without executing the tool', async () => {
+    const workspace = await tempWorkspace();
+    const faux = registerFauxProvider({
+      api: 'faux-supplied-suspension-result',
+      provider: 'faux-supplied-suspension-result',
+      tokensPerSecond: 0,
+    });
+    faux.setResponses([
+      fauxAssistantMessage(fauxToolCall('ask', {}, { id: 'call_question' }), {
+        stopReason: 'toolUse',
+      }),
+      fauxAssistantMessage('Continued with the supplied answers.'),
+    ]);
+    let executions = 0;
+    const repository = new SessionStore(workspace);
+    const session = await createBlipSession({
+      workspaceRoot: workspace,
+      model: faux.getModel(),
+      permissionMode: 'workspace-write',
+      toolProfile: 'no-shell-workspace-write',
+      sessionRepository: repository,
+      tools: [
+        {
+          name: 'ask',
+          label: 'Ask',
+          description: 'Test supplied result',
+          parameters: Type.Object({}),
+          execute: async () => {
+            executions += 1;
+            return { content: [{ type: 'text', text: 'unexpected' }], details: {} };
+          },
+        },
+      ],
+      permissionPreflight: () => ({ status: 'suspend', reason: 'Waiting for input' }),
+    });
+    await session.prompt('Ask me');
+    const [pending] = await session.pendingToolSuspensions();
+
+    await session.resolveToolSuspension(pending!.id, {
+      kind: 'result',
+      content: [{ type: 'text', text: '{"status":"submitted"}' }],
+      details: { status: 'submitted' },
+    });
+
+    expect(executions).toBe(0);
+    expect(await session.pendingToolSuspensions()).toEqual([]);
+    expect(
+      (await repository.readToolSuspensions(session.state)).find(
+        (candidate) => candidate.id === pending!.id,
+      )?.status,
+    ).toBe('completed');
+    expect(await repository.readMessages(session.state)).toContainEqual(
+      expect.objectContaining({
+        role: 'toolResult',
+        toolCallId: 'call_question',
+        isError: false,
+        details: { status: 'submitted' },
+      }),
+    );
+    session.close();
+    faux.unregister();
+  });
+
   test('marks an uncertain in-flight mutation interrupted instead of replaying it on restart', async () => {
     const workspace = await tempWorkspace();
     const faux = registerFauxProvider({

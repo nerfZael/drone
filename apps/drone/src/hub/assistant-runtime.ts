@@ -805,6 +805,24 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
         permissionPreflight: async (request) => {
           let toolName = request.tool.replace(/^drone_hub__/, '');
           let args: any = request.args && typeof request.args === 'object' ? request.args : {};
+          if (toolName === 'ask_questions' && request.phase === 'initial') {
+            const questionRequest = await hubServices.questions.create({
+              droneId: ownerDroneId,
+              chatName: ownerChatName,
+              chatId: threadId,
+              nativeThreadId: threadId,
+              toolCallId: request.callId,
+              toolName: request.tool,
+              questions: args.questions,
+            });
+            if (questionRequest.result) return { status: 'allow' as const };
+            return {
+              status: 'suspend' as const,
+              id: questionRequest.id,
+              reason: 'Waiting for answers from the user.',
+              details: { questionRequest },
+            };
+          }
           if (toolName === 'send_message') {
             toolName = 'message_drone';
             args = { ...args, droneId: args.drone, chatName: args.chat };
@@ -867,7 +885,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
         .catch(() => {});
     }
   });
-  const unsubscribeDeviceMeshAssistantChanges = assistantService.subscribeChanges((event) => {
+  const unsubscribeAssistantChanges = assistantService.subscribeChanges((event) => {
     if (event.threadId) {
       void assistantService
         .nativeThreadOwner(event.threadId)
@@ -904,11 +922,35 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
   assistantService.setApprovalDecisionDelegate(async (threadId, approvalId, approved) => {
     await blipAssistantHost.beginToolSuspensionResolution(threadId, approvalId, approved);
   });
-  void blipAssistantHost.restorePendingApprovals().catch((error) => {
-    hubLog('warn', 'failed restoring durable assistant approvals', {
-      error: String(error instanceof Error ? error.message : error),
+  hubServices.questions.setNativeResolver(async (request, result) => {
+    if (!request.nativeThreadId) return;
+    await blipAssistantHost.beginToolSuspensionResult(request.nativeThreadId, request.id, {
+      text: JSON.stringify(result, null, 2),
+      details: result,
     });
   });
+  const unsubscribeQuestionChanges = hubServices.questions.subscribeResolved(({ request }) => {
+    if (!request.nativeThreadId) return;
+    void assistantService.notifyQuestionRequestResolved(request.nativeThreadId).catch((error) => {
+      hubLog('warn', 'failed broadcasting native question resolution', {
+        threadId: request.nativeThreadId,
+        requestId: request.id,
+        error: String(error instanceof Error ? error.message : error),
+      });
+    });
+  });
+  const unsubscribeDeviceMeshAssistantChanges = () => {
+    unsubscribeQuestionChanges();
+    unsubscribeAssistantChanges();
+  };
+  void blipAssistantHost
+    .restorePendingApprovals()
+    .then(() => hubServices.questions.reconcileQueuedRequests())
+    .catch((error) => {
+      hubLog('warn', 'failed restoring durable assistant inputs', {
+        error: String(error instanceof Error ? error.message : error),
+      });
+    });
   type AssistantPromptInput =
     | string
     | { text: string; images: Array<{ type: 'image'; data: string; mimeType: string }> };
@@ -982,8 +1024,6 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
       : input.prompt;
     const deliveryMode =
       input.deliveryMode ?? (await assistantService.promptDeliveryMode(input.threadId));
-    const steerImmediately =
-      deliveryMode === 'asap' && blipAssistantHost.isThreadRunning(input.threadId);
     const enqueueResult = await assistantService.enqueueThreadPromptWithResult(input.threadId, {
       id: input.promptId,
       prompt: input.prompt,
@@ -991,6 +1031,11 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
       deliveryMode,
       submissionSource: input.submissionSource,
     });
+    // Enqueueing can resolve a pending question request and resume the thread.
+    // Re-check after the durable queue event so an ASAP message can steer that
+    // resumed turn instead of waiting for it to finish.
+    const steerImmediately =
+      deliveryMode === 'asap' && blipAssistantHost.isThreadRunning(input.threadId);
     const queued = enqueueResult.prompt;
     await notifyNativePromptQueueChanged(input.threadId);
     // Prompt IDs are idempotency keys. A retry after an accepted request must

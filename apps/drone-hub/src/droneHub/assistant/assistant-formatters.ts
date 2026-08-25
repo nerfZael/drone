@@ -18,7 +18,8 @@ export function formatArtifactSize(bytesRaw: number): string {
 
 export function assistantThreadStatusTone(status: AssistantThreadStatus): string {
   if (status === 'running') return 'bg-[var(--green)]';
-  if (status === 'waiting_for_approval') return 'bg-[var(--accent)]';
+  if (status === 'waiting_for_approval' || status === 'waiting_for_input')
+    return 'bg-[var(--accent)]';
   if (status === 'error') return 'bg-[var(--red)]';
   return 'bg-[var(--muted-dim)]';
 }

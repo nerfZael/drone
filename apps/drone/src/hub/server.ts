@@ -299,6 +299,7 @@ import { registerAgentRunDiffRoutes } from './routes/agent-run-diff-routes';
 import { NativeChatLifecycle } from './assistant/native-chat-lifecycle';
 import { buildNativeModelCatalog } from './assistant/native-model-catalog';
 import { registerNativeChatRoutes } from './routes/native-chat-routes';
+import { registerChatQuestionRoutes } from './routes/chat-question-routes';
 import { registerCatalogRoutes } from './routes/catalog-routes';
 import { createChatRouteHandler } from './routes/chat-routes';
 import { createDroneLifecycleRouteHandler } from './routes/drone-lifecycle-routes';
@@ -5640,6 +5641,7 @@ async function startDroneHubApiServerWithLifecycle(
     saveAssistantArtifactUploads,
     updateStoredUserTimeZone,
   });
+  registerChatQuestionRoutes(apiRouter, hubApplication.questions);
   registerAgentRunDiffRoutes(apiRouter);
   const changeRequestFeature = registerChangeRequestFeature(apiRouter, {
     writeSseEvent: writeHubSseEvent,

@@ -248,6 +248,42 @@ export class BlipAssistantHost {
     }
   }
 
+  async beginToolSuspensionResult(
+    threadId: string,
+    suspensionId: string,
+    result: { text: string; details?: unknown; isError?: boolean },
+  ): Promise<void> {
+    const handle = await this.handle(threadId);
+    const suspension = (await handle.pendingToolSuspensions()).find(
+      (candidate) => candidate.id === suspensionId,
+    );
+    if (!suspension) throw new Error(`unknown tool suspension: ${suspensionId}`);
+    let settleAccepted: () => void = () => {};
+    let rejectAccepted: (error: unknown) => void = () => {};
+    const accepted = new Promise<void>((resolve, reject) => {
+      settleAccepted = resolve;
+      rejectAccepted = reject;
+    });
+    const unsubscribe = this.subscribeEvents(threadId, (event) => {
+      if (event.type === 'tool_call_resolved' && event.suspensionId === suspensionId) {
+        settleAccepted();
+      }
+    });
+    const running = handle.resolveToolSuspension(suspensionId, {
+      kind: 'result',
+      content: [{ type: 'text', text: result.text }],
+      details: result.details,
+      isError: result.isError,
+    });
+    void running.catch(rejectAccepted);
+    try {
+      await accepted;
+    } finally {
+      unsubscribe();
+      void running.catch(() => undefined);
+    }
+  }
+
   async restorePendingApprovals(): Promise<void> {
     const recovered = await this.repository.recoverToolSuspensionsByThread();
     for (const { threadId, suspension } of recovered) {

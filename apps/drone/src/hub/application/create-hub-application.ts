@@ -17,6 +17,7 @@ import {
   createFleetActorService,
   type FleetActorDependencies,
 } from './fleet-actors';
+import { getChatQuestionRequestService } from '../chat-question-requests';
 
 export type HubApplication = ReturnType<typeof createHubApplication>;
 
@@ -56,6 +57,7 @@ export function createHubApplication(input: {
       uiPreferences,
       readDeleteAction: resolveDeleteActionSettingsResponse,
     },
+    questions: getChatQuestionRequestService(),
   };
   return {
     events,

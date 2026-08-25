@@ -1,5 +1,10 @@
 import React from 'react';
-import type { AssistantMessage, NativeChatApproval } from '@drone/assistant-chat';
+import type {
+  AssistantMessage,
+  ChatQuestionRequest,
+  ChatQuestionResponse,
+  NativeChatApproval,
+} from '@drone/assistant-chat';
 import { requestJson, requestJsonWithTimeout } from '../http';
 import type { ChatAttachmentPayload } from '../chat/ChatInput';
 import { sendRemoteChatPrompt } from './remote-chat-attachments';
@@ -24,7 +29,8 @@ type RemoteControlOperation =
   | 'chat.read'
   | 'chat.prompt'
   | 'chat.stop'
-  | 'chat.approval.resolve';
+  | 'chat.approval.resolve'
+  | 'chat.questions.resolve';
 
 type RemoteControlResponse<T> = { ok: true; result: T };
 
@@ -184,6 +190,9 @@ export function useRemoteDroneHub(targetDeviceId: string, routeAvailable: boolea
   const [selectedChat, setSelectedChat] = React.useState('');
   const [messages, setMessages] = React.useState<AssistantMessage[]>([]);
   const [pendingApprovals, setPendingApprovals] = React.useState<NativeChatApproval[]>([]);
+  const [pendingQuestionRequests, setPendingQuestionRequests] = React.useState<
+    ChatQuestionRequest[]
+  >([]);
   const [nativeChatId, setNativeChatId] = React.useState('');
   const [attachmentMode, setAttachmentMode] = React.useState<'images' | 'files'>('images');
   const [pendingCount, setPendingCount] = React.useState(0);
@@ -192,6 +201,7 @@ export function useRemoteDroneHub(targetDeviceId: string, routeAvailable: boolea
   const [stopping, setStopping] = React.useState(false);
   const [creatingChat, setCreatingChat] = React.useState(false);
   const [approvalBusyId, setApprovalBusyId] = React.useState('');
+  const [questionBusyId, setQuestionBusyId] = React.useState('');
   const [listError, setListError] = React.useState<string | null>(null);
   const [chatError, setChatError] = React.useState<string | null>(null);
   const targetRef = React.useRef(targetDeviceId);
@@ -205,7 +215,8 @@ export function useRemoteDroneHub(targetDeviceId: string, routeAvailable: boolea
   const waiting = Boolean(
     selectedDrone?.busyChats.includes(selectedChat) ||
       pendingCount > 0 ||
-      pendingApprovals.length > 0,
+      pendingApprovals.length > 0 ||
+      pendingQuestionRequests.length > 0,
   );
 
   const loadDrones = React.useCallback(
@@ -273,6 +284,13 @@ export function useRemoteDroneHub(targetDeviceId: string, routeAvailable: boolea
               )
             : [],
         );
+        setPendingQuestionRequests(
+          Array.isArray(result?.pendingQuestionRequests)
+            ? result.pendingQuestionRequests.filter(
+                (request: ChatQuestionRequest) => request?.status === 'pending',
+              )
+            : [],
+        );
         setNativeChatId(text(result?.nativeChatId));
         setAttachmentMode(result?.agent?.kind === 'native' ? 'files' : 'images');
         setChatError(null);
@@ -294,6 +312,7 @@ export function useRemoteDroneHub(targetDeviceId: string, routeAvailable: boolea
     setSelectedChat('');
     setMessages([]);
     setPendingApprovals([]);
+    setPendingQuestionRequests([]);
     setNativeChatId('');
     setAttachmentMode('images');
     setListError(null);
@@ -330,6 +349,7 @@ export function useRemoteDroneHub(targetDeviceId: string, routeAvailable: boolea
     setSelectedChat(chatName);
     setMessages([]);
     setPendingApprovals([]);
+    setPendingQuestionRequests([]);
     setNativeChatId('');
     setAttachmentMode('images');
     setPendingCount(0);
@@ -488,6 +508,45 @@ export function useRemoteDroneHub(targetDeviceId: string, routeAvailable: boolea
     ],
   );
 
+  const resolveQuestionRequest = React.useCallback(
+    async (
+      request: ChatQuestionRequest,
+      resolution:
+        | { action: 'submit'; responses: ChatQuestionResponse[]; notes?: string }
+        | { action: 'skip'; notes?: string },
+    ) => {
+      if (!selectedDrone || !selectedChat || !routeAvailable || questionBusyId) return;
+      const target = targetDeviceId;
+      setQuestionBusyId(request.id);
+      setChatError(null);
+      try {
+        await remoteControl(target, 'chat.questions.resolve', {
+          droneId: selectedDrone.id,
+          chatName: selectedChat,
+          requestId: request.id,
+          ...resolution,
+        });
+        if (targetRef.current !== target) return;
+        setPendingQuestionRequests((current) =>
+          current.filter((item) => item.id !== request.id),
+        );
+        await loadChat(selectedDrone.id, selectedChat, true);
+      } catch (error: any) {
+        if (targetRef.current === target) setChatError(error?.message ?? String(error));
+      } finally {
+        if (targetRef.current === target) setQuestionBusyId('');
+      }
+    },
+    [
+      loadChat,
+      questionBusyId,
+      routeAvailable,
+      selectedChat,
+      selectedDrone,
+      targetDeviceId,
+    ],
+  );
+
   return {
     drones,
     selectedDrone,
@@ -495,6 +554,8 @@ export function useRemoteDroneHub(targetDeviceId: string, routeAvailable: boolea
     messages,
     pendingApprovals,
     approvalBusyId,
+    pendingQuestionRequests,
+    questionBusyId,
     attachmentMode,
     pendingCount,
     waiting,
@@ -511,5 +572,6 @@ export function useRemoteDroneHub(targetDeviceId: string, routeAvailable: boolea
     sendPrompt,
     stop,
     resolveApproval,
+    resolveQuestionRequest,
   };
 }

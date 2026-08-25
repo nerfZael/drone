@@ -1,6 +1,10 @@
 import React from 'react';
 import { useDndMonitor, useDroppable } from '@dnd-kit/core';
-import { normalizeChangeRequestPermissions } from '@drone/assistant-chat';
+import {
+  normalizeChangeRequestPermissions,
+  type ChatQuestionRequest,
+  type ChatQuestionResponse,
+} from '@drone/assistant-chat';
 import { requestJson } from '../http';
 import { MarkdownMessage } from '../chat/MarkdownMessage';
 import type { MarkdownTextMentionLink } from '../chat/MarkdownMessage';
@@ -69,6 +73,7 @@ import {
   ToolRunActivity,
 } from './AssistantTranscript';
 import { ApprovalCard } from './AssistantWorkflowCards';
+import { AssistantQuestionCard } from './AssistantQuestionCard';
 import { buildNativeAgentComposerControls } from './native-agent-composer-controls';
 import {
   resolveAssistantStartupPromptPresentation,
@@ -343,6 +348,7 @@ export function AssistantDock({
   const [scopeSyncError, setScopeSyncError] = React.useState<string | null>(null);
   const [droneNameById, setDroneNameById] = React.useState<AssistantDroneNameMap>({});
   const [approvalBusyId, setApprovalBusyId] = React.useState<string | null>(null);
+  const [questionBusyId, setQuestionBusyId] = React.useState<string | null>(null);
   const [queuedPromptBusyId, setQueuedPromptBusyId] = React.useState<string | null>(null);
   const [assistantStopBusy, setAssistantStopBusy] = React.useState(false);
   const [defaultModelBusy, setDefaultModelBusy] = React.useState(false);
@@ -476,6 +482,7 @@ export function AssistantDock({
   const hasHistory =
     blipSession.messages.length > 0 ||
     Boolean(activeThread?.queuedPrompts?.length) ||
+    Boolean(snapshot?.pendingQuestionRequests?.length) ||
     startupPromptPresentation.showOptimistic;
   React.useEffect(() => {
     if (hasHistory) onHistoryChange?.(true);
@@ -492,6 +499,13 @@ export function AssistantDock({
         (approval) => approval.threadId === activeThread?.id && approval.status === 'pending',
       ),
     [activeThread?.id, snapshot?.pendingApprovals],
+  );
+  const activeQuestionRequests = React.useMemo(
+    () =>
+      (snapshot?.pendingQuestionRequests ?? []).filter(
+        (request) => request.chatId === activeThread?.id && request.status === 'pending',
+      ),
+    [activeThread?.id, snapshot?.pendingQuestionRequests],
   );
   const activeApprovalStartedAt = React.useMemo(() => {
     const timestamps = activePendingApprovals
@@ -524,13 +538,15 @@ export function AssistantDock({
   const running =
     blipSession.running ||
     activeThread?.status === 'running' ||
-    activeThread?.status === 'waiting_for_approval';
+    activeThread?.status === 'waiting_for_approval' ||
+    activeThread?.status === 'waiting_for_input';
   useLocalChatBusy(nativeChatNodeId, running);
   const transcriptContentVersion = React.useMemo(
     () => [
       blipSession.messages,
       activeThread?.queuedPrompts,
       snapshot?.pendingApprovals,
+      snapshot?.pendingQuestionRequests,
       running,
       error,
       blipSession.runError,
@@ -546,6 +562,7 @@ export function AssistantDock({
       error,
       running,
       snapshot?.pendingApprovals,
+      snapshot?.pendingQuestionRequests,
     ],
   );
   const {
@@ -1505,6 +1522,44 @@ export function AssistantDock({
     [activeThread, applySnapshot, beginSnapshotMutation, snapshotMutationCurrent],
   );
 
+  const resolveQuestionRequest = React.useCallback(
+    async (
+      request: ChatQuestionRequest,
+      resolution:
+        | { kind: 'submit'; responses: ChatQuestionResponse[]; notes?: string }
+        | { kind: 'skip'; notes?: string },
+    ) => {
+      if (!activeThread) return;
+      const requestSeq = beginSnapshotMutation();
+      setQuestionBusyId(request.id);
+      try {
+        await requestJson(
+          `/api/chat-question-requests/${encodeURIComponent(request.id)}/${
+            resolution.kind === 'submit' ? 'submit' : 'skip'
+          }`,
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(
+              resolution.kind === 'submit'
+                ? { responses: resolution.responses, notes: resolution.notes }
+                : { reason: 'user_skipped', notes: resolution.notes },
+            ),
+          },
+        );
+        const next = await requestJson<AssistantSnapshot>(
+          `/api/assistant/threads/${encodeURIComponent(activeThread.id)}`,
+        );
+        if (snapshotMutationCurrent(requestSeq)) applySnapshot(next);
+      } catch (err: any) {
+        if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
+      } finally {
+        setQuestionBusyId((current) => (current === request.id ? null : current));
+      }
+    },
+    [activeThread, applySnapshot, beginSnapshotMutation, snapshotMutationCurrent],
+  );
+
   const setActiveModelAsDefault = React.useCallback(async () => {
     if (!activeThread) return;
     if (
@@ -2264,6 +2319,24 @@ export function AssistantDock({
       ),
     });
   }
+  for (const request of activeQuestionRequests) {
+    nativeTranscriptItems.push({
+      key: `questions:${request.id}`,
+      kind: 'approval',
+      content: (
+        <AssistantQuestionCard
+          request={request}
+          busy={questionBusyId === request.id}
+          onSubmit={({ responses, notes }) =>
+            void resolveQuestionRequest(request, { kind: 'submit', responses, notes })
+          }
+          onSkip={(notes) =>
+            void resolveQuestionRequest(request, { kind: 'skip', notes })
+          }
+        />
+      ),
+    });
+  }
   for (const prompt of visibleQueuedPrompts) {
     nativeTranscriptItems.push({
       key: `queued:${prompt.id}`,
@@ -2436,6 +2509,7 @@ export function AssistantDock({
                 startupPromptPresentation.showOptimistic ||
                 showWorking ||
                 activePendingApprovals.length > 0 ||
+                activeQuestionRequests.length > 0 ||
                 visibleQueuedPrompts.length > 0 ||
                 error ||
                 blipSession.runError ||

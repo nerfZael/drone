@@ -110,6 +110,16 @@ export function compactNativeChatReadResponse(input: {
       createdAt: String(approval?.createdAt ?? ''),
       status: 'pending',
     }));
+  const pendingQuestionRequests = (
+    Array.isArray(input.snapshot?.pendingQuestionRequests)
+      ? input.snapshot.pendingQuestionRequests
+      : []
+  )
+    .filter(
+      (request: any) =>
+        String(request?.chatId ?? '') === input.nativeChatId && request?.status === 'pending',
+    )
+    .slice(-2);
   const streamingMessages = compactStreamingMessages(input.snapshot);
   const pending = (thread?.queuedPrompts ?? []).map((prompt: any) => ({
     ...prompt,
@@ -121,6 +131,7 @@ export function compactNativeChatReadResponse(input: {
     nativeChatId: input.nativeChatId,
     streamingMessages,
     pendingApprovals,
+    pendingQuestionRequests,
     thread,
     pending,
   };

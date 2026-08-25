@@ -1,10 +1,16 @@
 import type { AssistantMessage } from './assistant-message-types.js';
 import type { ChatQueueAction } from './chat-queue-actions.js';
 import type { PromptQueueInterruption } from './pending-prompts.js';
+import type { ChatQuestionRequest } from './chat-question-request.js';
 
 export type NativeAgentProviderId = 'openai' | 'gemini' | 'codex';
 export type NativeAgentThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
-export type NativeChatStatus = 'idle' | 'running' | 'waiting_for_approval' | 'error';
+export type NativeChatStatus =
+  | 'idle'
+  | 'running'
+  | 'waiting_for_approval'
+  | 'waiting_for_input'
+  | 'error';
 export type NativePromptDeliveryMode = 'queue' | 'asap';
 export type AgentPermissionMode = 'read' | 'write' | 'execute';
 export type AgentApprovalPolicy = 'ask' | 'none';
@@ -126,6 +132,7 @@ export type NativeChatSnapshot = {
   chatId: string;
   threads: NativeChatThread[];
   pendingApprovals: NativeChatApproval[];
+  pendingQuestionRequests: ChatQuestionRequest[];
   models: NativeAgentModelOption[];
   defaultModel: NativeAgentDefaultModel;
   defaultEnabledTools: string[];

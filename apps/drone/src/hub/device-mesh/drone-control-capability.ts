@@ -26,10 +26,7 @@ import { fitMeshChatPayload } from './fit-mesh-chat-payload';
 import { compactNativeChatReadResponse } from './native-chat-response';
 import { submitNativeChatPrompt } from './native-chat-prompt';
 import type { SidebarCommandService } from '../sidebar-command-service';
-import {
-  createHttpHubServices,
-  type HubServices,
-} from '../application/hub-services';
+import { createHttpHubServices, type HubServices } from '../application/hub-services';
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
@@ -105,12 +102,7 @@ const CODEX_APPROVAL_METHODS = new Set([
   'applyPatchApproval',
 ]);
 const CODEX_APPROVAL_KINDS = new Set(['command_execution', 'file_change', 'permissions']);
-const CODEX_APPROVAL_DECISIONS = new Set([
-  'accept',
-  'acceptForSession',
-  'decline',
-  'cancel',
-]);
+const CODEX_APPROVAL_DECISIONS = new Set(['accept', 'acceptForSession', 'decline', 'cancel']);
 
 function compactApprovalDetails(value: unknown): { value?: unknown; truncated: boolean } {
   if (value == null) return { truncated: false };
@@ -155,9 +147,13 @@ function compactCodexApprovals(value: unknown): any[] | undefined {
     }
 
     const availableDecisions = Array.isArray(approval?.availableDecisions)
-      ? [...new Set(approval.availableDecisions.filter((decision: unknown) =>
-          CODEX_APPROVAL_DECISIONS.has(String(decision)),
-        ))]
+      ? [
+          ...new Set(
+            approval.availableDecisions.filter((decision: unknown) =>
+              CODEX_APPROVAL_DECISIONS.has(String(decision)),
+            ),
+          ),
+        ]
       : [];
     const item = compactApprovalDetails(approval?.item);
     const permissions = compactApprovalDetails(approval?.permissions);
@@ -380,7 +376,9 @@ export function deviceMeshDroneSummary(drone: any) {
         drone?.repo?.dest,
       ),
     ),
-    ...(String(drone?.runtime ?? 'container').trim().toLowerCase() === 'container'
+    ...(String(drone?.runtime ?? 'container')
+      .trim()
+      .toLowerCase() === 'container'
       ? { persistVolume: drone?.persistVolume !== false }
       : {}),
     fleetParentId: String(drone?.fleetParentId ?? '').trim() || null,
@@ -438,9 +436,7 @@ export function createDroneControlCapability(
   // consumers and older standalone integrations compatible without branching per operation.
   const hubServices =
     options?.hubServices ??
-    createHttpHubServices(async (pathname, init) =>
-      await localHubRequest(access, pathname, init),
-    );
+    createHttpHubServices(async (pathname, init) => await localHubRequest(access, pathname, init));
   type FileWatch = {
     droneId: string;
     path: string;
@@ -682,9 +678,7 @@ export function createDroneControlCapability(
         ]);
         if (dronesRequest.status === 'rejected') throw dronesRequest.reason;
         const result = dronesRequest.value;
-        const reposResult = object(
-          reposRequest.status === 'fulfilled' ? reposRequest.value : {},
-        );
+        const reposResult = object(reposRequest.status === 'fulfilled' ? reposRequest.value : {});
         const groupsResult = object(
           groupsRequest.status === 'fulfilled' ? groupsRequest.value : {},
         );
@@ -798,9 +792,8 @@ export function createDroneControlCapability(
         const seedAttachmentIds = Array.isArray(payload.seedAttachmentIds)
           ? payload.seedAttachmentIds.map((value) => String(value ?? '').trim()).filter(Boolean)
           : [];
-        let uploadedSeedAttachments: Awaited<
-          ReturnType<MeshChatAttachmentStore['attachments']>
-        > = [];
+        let uploadedSeedAttachments: Awaited<ReturnType<MeshChatAttachmentStore['attachments']>> =
+          [];
         if (seedAttachmentIds.length > 0) {
           if (!chatAttachments)
             throw Object.assign(new Error('mesh attachment uploads are unavailable'), {
@@ -853,8 +846,7 @@ export function createDroneControlCapability(
           payload.seedAgentPermissionMode === 'write'
             ? { seedAgentPermissionMode: payload.seedAgentPermissionMode }
             : {}),
-          ...(payload.seedApprovalPolicy === 'auto' ||
-          payload.seedApprovalPolicy === 'none'
+          ...(payload.seedApprovalPolicy === 'auto' || payload.seedApprovalPolicy === 'none'
             ? { seedApprovalPolicy: payload.seedApprovalPolicy }
             : {}),
           ...(optionalText(payload.seedPrompt)
@@ -985,11 +977,12 @@ export function createDroneControlCapability(
         }
         const chatName = requiredText(payload.name ?? payload.chatName, 'chatName');
         const copyFrom = optionalText(payload.copyFrom ?? payload.copyFromChat);
-        const mode = payload.mode === 'copy-config'
-          ? 'copy-config'
-          : payload.mode === 'fork'
-            ? 'fork'
-            : undefined;
+        const mode =
+          payload.mode === 'copy-config'
+            ? 'copy-config'
+            : payload.mode === 'fork'
+              ? 'fork'
+              : undefined;
         const result = await localHubRequest(access, `/api/drones/${encodedDrone}/chats`, {
           method: 'POST',
           body: JSON.stringify({
@@ -1343,6 +1336,17 @@ export function createDroneControlCapability(
         const subscriptions = contentOnlyRead
           ? []
           : compactChatSubscriptions(result?.subscriptions);
+        const pendingQuestionRequests = contentOnlyRead
+          ? []
+          : await localHubRequest(
+              access,
+              `/api/chat-question-requests?${new URLSearchParams({
+                droneId,
+                chatName,
+              }).toString()}`,
+            ).then((response: any) =>
+              Array.isArray(response?.requests) ? response.requests.slice(-2) : [],
+            );
         const marked = contentOnlyRead
           ? null
           : await localHubRequest(access, `${chatPath}/read`, {
@@ -1378,7 +1382,7 @@ export function createDroneControlCapability(
             : null;
           return compactNativeChatReadResponse({
             nativeChatId,
-            snapshot: ensured,
+            snapshot: { ...ensured, pendingQuestionRequests },
             history,
             metadata: {
               droneId,
@@ -1454,10 +1458,10 @@ export function createDroneControlCapability(
           model: result.model ?? null,
           reasoning: result.reasoning ?? null,
           pending,
+          pendingQuestionRequests,
           readState: marked?.readState ?? result?.readState ?? null,
           agentPermissionMode:
-            result.agentPermissionMode === 'read' ||
-            result.agentPermissionMode === 'write'
+            result.agentPermissionMode === 'read' || result.agentPermissionMode === 'write'
               ? result.agentPermissionMode
               : 'execute',
           approvalPolicy:
@@ -1643,6 +1647,40 @@ export function createDroneControlCapability(
           access,
           `/api/assistant/threads/${encodeURIComponent(nativeChatId)}/approvals/${encodeURIComponent(approvalId)}/${decision}`,
           { method: 'POST', body: '{}' },
+        );
+      }
+      if (operation === 'chat.questions.resolve') {
+        const requestId = requiredText(payload.requestId, 'requestId');
+        const requests = await localHubRequest(
+          access,
+          `/api/chat-question-requests?${new URLSearchParams({ droneId, chatName }).toString()}`,
+        );
+        if (
+          !(Array.isArray(requests?.requests) ? requests.requests : []).some(
+            (request: any) => String(request?.id ?? '') === requestId,
+          )
+        ) {
+          throw Object.assign(new Error('question request does not belong to this chat'), {
+            code: 'NOT_FOUND',
+          });
+        }
+        const action = requiredText(payload.action, 'action');
+        if (action !== 'submit' && action !== 'skip') {
+          throw Object.assign(new Error('action must be submit or skip'), {
+            code: 'INVALID_REQUEST',
+          });
+        }
+        return await localHubRequest(
+          access,
+          `/api/chat-question-requests/${encodeURIComponent(requestId)}/${action}`,
+          {
+            method: 'POST',
+            body: JSON.stringify(
+              action === 'submit'
+                ? { responses: payload.responses, notes: payload.notes }
+                : { reason: 'user_skipped', notes: payload.notes },
+            ),
+          },
         );
       }
       if (operation === 'chat.interruption.resolve') {

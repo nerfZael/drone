@@ -2,6 +2,8 @@ import React from 'react';
 import { createPortal } from 'react-dom';
 import { useDndMonitor, useDroppable } from '@dnd-kit/core';
 import type {
+  ChatQuestionRequest,
+  ChatQuestionResponse,
   CodexApprovalDecision,
   CodexPendingApproval,
   PromptQueueInterruptionResolution,
@@ -71,10 +73,7 @@ import {
 } from './chat-selection-model';
 import type { RepoOpErrorMeta } from './helpers';
 import type { DroneDeleteMode } from './settings-types';
-import {
-  CHANGES_OPEN_AGENT_RUN_EVENT,
-  requestChangesPullRequest,
-} from '../changes/navigation';
+import { CHANGES_OPEN_AGENT_RUN_EVENT, requestChangesPullRequest } from '../changes/navigation';
 import {
   OPEN_CHANGE_REQUEST_EVENT,
   type OpenChangeRequestDetail,
@@ -106,6 +105,7 @@ import { useHeaderRepoPullRequestSummary } from './HeaderPullRequestShortcuts';
 import { useFleetAssignmentDropState } from './use-fleet-assignment-drop-state';
 import { AssistantDock } from '../assistant/AssistantDock';
 import { CodexApprovalCard } from '../assistant/CodexApprovalCard';
+import { AssistantQuestionCard } from '../assistant/AssistantQuestionCard';
 import {
   buildTranscriptExportFilename,
   formatTranscriptJson,
@@ -669,6 +669,78 @@ export function SelectedDroneWorkspace({
   const selectedChatIsDraft = currentDrone.draftChats?.[activeChatName] === true;
   const currentDroneIsDraft = currentDrone.draft === true || currentDrone.hubPhase === 'draft';
   const currentChatIsDraft = currentDroneIsDraft || selectedChatIsDraft;
+  const [externalQuestionRequests, setExternalQuestionRequests] = React.useState<
+    ChatQuestionRequest[]
+  >([]);
+  const [externalQuestionBusyId, setExternalQuestionBusyId] = React.useState<string | null>(null);
+  const [externalQuestionError, setExternalQuestionError] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    setExternalQuestionBusyId(null);
+    setExternalQuestionError(null);
+    if (currentAgentKey === 'native' || currentChatIsDraft) {
+      setExternalQuestionRequests([]);
+      return;
+    }
+    let active = true;
+    const load = async () => {
+      try {
+        const response = await requestJson<{ requests?: ChatQuestionRequest[] }>(
+          `/api/chat-question-requests?${new URLSearchParams({
+            droneId: currentDrone.id,
+            chatName: activeChatName,
+          }).toString()}`,
+        );
+        if (active) setExternalQuestionRequests(response.requests ?? []);
+      } catch {
+        // The transcript and queue polling remain authoritative for connectivity errors.
+      }
+    };
+    void load();
+    const timer = window.setInterval(load, 2_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [activeChatName, currentAgentKey, currentChatIsDraft, currentDrone.id]);
+
+  const resolveExternalQuestionRequest = React.useCallback(
+    async (
+      request: ChatQuestionRequest,
+      resolution:
+        | { kind: 'submit'; responses: ChatQuestionResponse[]; notes?: string }
+        | { kind: 'skip'; notes?: string },
+    ) => {
+      setExternalQuestionBusyId(request.id);
+      setExternalQuestionError(null);
+      try {
+        await requestJson(
+          `/api/chat-question-requests/${encodeURIComponent(request.id)}/${
+            resolution.kind === 'submit' ? 'submit' : 'skip'
+          }`,
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(
+              resolution.kind === 'submit'
+                ? { responses: resolution.responses, notes: resolution.notes }
+                : { reason: 'user_skipped', notes: resolution.notes },
+            ),
+          },
+        );
+        setExternalQuestionRequests((current) =>
+          current.filter((candidate) => candidate.id !== request.id),
+        );
+      } catch (error) {
+        setExternalQuestionError(
+          String((error as any)?.message ?? error ?? '').trim() ||
+            'Unable to resolve the question request.',
+        );
+      } finally {
+        setExternalQuestionBusyId((current) => (current === request.id ? null : current));
+      }
+    },
+    [],
+  );
   const externalTimelineItems = React.useMemo(
     () => buildChatTimelineItems(transcripts ?? [], visiblePendingPromptsWithStartup),
     [transcripts, visiblePendingPromptsWithStartup],
@@ -898,7 +970,9 @@ export function SelectedDroneWorkspace({
   const chatConfigPending = chatConfigResolution === 'loading';
   const chatConfigFailed = chatConfigResolution === 'unavailable';
   const droneStartupFailed = chatConfigResolution === 'drone-error';
-  const droneStartupError = String(currentDrone.hubMessage ?? currentDrone.statusError ?? '').trim();
+  const droneStartupError = String(
+    currentDrone.hubMessage ?? currentDrone.statusError ?? '',
+  ).trim();
   const showDroneStartupFailureEmptyState = shouldShowDroneStartupFailureEmptyState({
     startupFailed: droneStartupFailed,
     transcriptCount: transcripts?.length ?? 0,
@@ -921,7 +995,8 @@ export function SelectedDroneWorkspace({
     ? false
     : chatUiMode === 'transcript'
       ? selectedChatDockerSnapshotBusy ||
-        visiblePendingPromptsWithStartup.some(pendingPromptShowsWorkingState)
+        visiblePendingPromptsWithStartup.some(pendingPromptShowsWorkingState) ||
+        externalQuestionRequests.length > 0
       : showRespondingAsStatusInHeader || canStopResponse;
   const openChatErrorDetails = React.useCallback(() => {
     const message = String(chatInfoError ?? '').trim();
@@ -1631,7 +1706,9 @@ export function SelectedDroneWorkspace({
                             role="menuitem"
                             title="Refresh the host working tree from this drone"
                           >
-                            <HeaderMenuItemIcon><IconRefresh className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
+                            <HeaderMenuItemIcon>
+                              <IconRefresh className="h-3.5 w-3.5" />
+                            </HeaderMenuItemIcon>
                             <span>Update</span>
                           </button>
                           <button
@@ -1807,7 +1884,9 @@ export function SelectedDroneWorkspace({
                     role="menuitem"
                     title={`SSH into "${currentDroneLabel}"`}
                   >
-                    <HeaderMenuItemIcon><IconTerminal className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
+                    <HeaderMenuItemIcon>
+                      <IconTerminal className="h-3.5 w-3.5" />
+                    </HeaderMenuItemIcon>
                     <span>SSH</span>
                   </button>
                   <button
@@ -1852,7 +1931,9 @@ export function SelectedDroneWorkspace({
                         : 'Copy the current chat transcript as Markdown'
                     }
                   >
-                    <HeaderMenuItemIcon><IconCopy className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
+                    <HeaderMenuItemIcon>
+                      <IconCopy className="h-3.5 w-3.5" />
+                    </HeaderMenuItemIcon>
                     <span>Copy transcript</span>
                   </button>
                   <button
@@ -1916,7 +1997,9 @@ export function SelectedDroneWorkspace({
                     )}
                     role="menuitem"
                   >
-                    <HeaderMenuItemIcon><IconVsCode className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
+                    <HeaderMenuItemIcon>
+                      <IconVsCode className="h-3.5 w-3.5" />
+                    </HeaderMenuItemIcon>
                     <span>Open VS Code</span>
                   </button>
                   <button
@@ -2151,8 +2234,7 @@ export function SelectedDroneWorkspace({
               const prCount = tab === 'prs' ? Number(openPullRequestCount ?? 0) : 0;
               const open = visibleToolTabs.includes(tab);
               const label = rightPanelTabLabels[tab];
-              const tooltip =
-                tab === 'prs' && prCount > 0 ? `${label} (${prCount} open)` : label;
+              const tooltip = tab === 'prs' && prCount > 0 ? `${label} (${prCount} open)` : label;
               return (
                 <UiTooltip
                   key={tab}
@@ -2442,6 +2524,29 @@ export function SelectedDroneWorkspace({
 
               {genericChatActive && chatUiMode === 'cli' ? (
                 <CliPendingPromptStrip items={visibleCliPendingPrompts} />
+              ) : null}
+
+              {genericChatActive && externalQuestionRequests.length > 0 ? (
+                <div className="mx-auto w-full max-w-[var(--chat-prose-max)] space-y-3 px-3 pb-3">
+                  {externalQuestionRequests.map((request) => (
+                    <AssistantQuestionCard
+                      key={request.id}
+                      request={request}
+                      busy={externalQuestionBusyId === request.id}
+                      error={externalQuestionError}
+                      onSubmit={({ responses, notes }) =>
+                        void resolveExternalQuestionRequest(request, {
+                          kind: 'submit',
+                          responses,
+                          notes,
+                        })
+                      }
+                      onSkip={(notes) =>
+                        void resolveExternalQuestionRequest(request, { kind: 'skip', notes })
+                      }
+                    />
+                  ))}
+                </div>
               ) : null}
 
               {genericChatActive ? (

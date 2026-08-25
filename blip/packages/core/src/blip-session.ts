@@ -16,6 +16,7 @@ import type {
   BlipPromptInput,
   BlipSessionContext,
   BlipSessionHandle,
+  BlipToolSuspensionResolution,
   CreateBlipSessionOptions,
 } from './blip-session-types.js';
 import type { BlipRuntimeEvent, BlipSessionState, BlipToolSuspension } from './types.js';
@@ -376,13 +377,13 @@ class BlipSession implements BlipSessionHandle {
 
   resolveToolSuspension(
     suspensionId: string,
-    decision: 'approve' | 'deny',
+    resolution: BlipToolSuspensionResolution,
   ): Promise<BlipSessionState> {
     if (this.closed) return Promise.reject(new Error('Blip session is closed'));
     if (this.activePromise) {
       return Promise.reject(new Error('Blip session is already processing'));
     }
-    const promise = this.runToolSuspensionResolution(suspensionId, decision);
+    const promise = this.runToolSuspensionResolution(suspensionId, resolution);
     this.activePromise = promise;
     return promise;
   }
@@ -815,9 +816,10 @@ class BlipSession implements BlipSessionHandle {
 
   private async runToolSuspensionResolution(
     suspensionId: string,
-    decision: 'approve' | 'deny',
+    resolution: BlipToolSuspensionResolution,
   ): Promise<BlipSessionState> {
     const suspension = await this.toolSuspensions.requireResolvable(suspensionId);
+    const decision = typeof resolution === 'string' ? resolution : 'approve';
 
     const lifecycleMessage: AgentMessage = {
       role: 'user',
@@ -836,7 +838,24 @@ class BlipSession implements BlipSessionHandle {
         turnId: active.turnId,
         kind: active.kind,
       });
-      if (decision === 'deny') {
+      if (typeof resolution !== 'string') {
+        const approved = await this.toolSuspensions.approve(suspension);
+        const executing = await this.toolSuspensions.beginExecution(approved);
+        const toolResult = {
+          role: 'toolResult' as const,
+          toolCallId: suspension.toolCallId,
+          toolName: suspension.toolName,
+          content: resolution.content,
+          details: resolution.details ?? {},
+          isError: resolution.isError === true,
+          timestamp: Date.now(),
+        };
+        await this.toolSuspensions.resolve(
+          executing,
+          toolResult,
+          resolution.isError === true ? 'failed' : 'completed',
+        );
+      } else if (decision === 'deny') {
         const result = {
           role: 'toolResult' as const,
           toolCallId: suspension.toolCallId,

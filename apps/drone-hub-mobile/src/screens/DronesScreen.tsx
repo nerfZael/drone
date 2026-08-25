@@ -4,6 +4,8 @@ import {
   buildModelCatalogChoices,
   normalizePromptQueueInterruption,
   type AssistantMessage,
+  type ChatQuestionRequest,
+  type ChatQuestionResponse,
 } from '@drone/assistant-chat';
 import {
   ActivityIndicator,
@@ -139,6 +141,7 @@ import {
   AssistantApprovalCard,
   type MobileAssistantApproval,
 } from '../local-assistant/AssistantApprovalCard';
+import { MobileQuestionRequestCard } from '../local-assistant/MobileQuestionRequestCard';
 import { CodexApprovalCard } from '../drones/CodexApprovalCard';
 import type { CodexApprovalDecision, CodexPendingApproval } from '@drone/assistant-chat';
 
@@ -437,6 +440,10 @@ export function DronesScreen({
   const [confirmAccessDiscard, setConfirmAccessDiscard] = React.useState(false);
   const [pendingApprovals, setPendingApprovals] = React.useState<MobileAssistantApproval[]>([]);
   const [approvalBusyId, setApprovalBusyId] = React.useState('');
+  const [pendingQuestionRequests, setPendingQuestionRequests] = React.useState<
+    ChatQuestionRequest[]
+  >([]);
+  const [questionBusyId, setQuestionBusyId] = React.useState('');
   const [resolvedCodexApprovalIds, setResolvedCodexApprovalIds] = React.useState<Set<string>>(
     () => new Set(),
   );
@@ -520,6 +527,7 @@ export function DronesScreen({
     setNativeChatId('');
     setNativeThread(null);
     setPendingApprovals([]);
+    setPendingQuestionRequests([]);
     setPendingPrompts([]);
     setAccessOpen(false);
     setAccessDirty(false);
@@ -982,6 +990,9 @@ export function DronesScreen({
     }
     setNativeThread(result?.thread ?? null);
     setPendingApprovals(Array.isArray(result?.pendingApprovals) ? result.pendingApprovals : []);
+    setPendingQuestionRequests(
+      Array.isArray(result?.pendingQuestionRequests) ? result.pendingQuestionRequests : [],
+    );
     const nextTurns = Array.isArray(result?.turns) ? result.turns : [];
     setTurns(nextTurns);
     const page = result?.historyKind === 'messages' ? nativeHistory.page : result?.page;
@@ -2221,6 +2232,7 @@ export function DronesScreen({
     nativeRuntimeActive:
       nativeThread?.status === 'running' ||
       nativeThread?.status === 'waiting_for_approval' ||
+      nativeThread?.status === 'waiting_for_input' ||
       nativeThread?.status === 'waiting_for_chats_idle',
     nativeTranscriptLoaded: nativeMessages !== null,
     serverChatBusy: Boolean(selected?.busyChats.some((chat) => chat === chatName)),
@@ -2683,6 +2695,47 @@ export function DronesScreen({
       .finally(() => setApprovalBusyId((current) => (current === approval.id ? '' : current)));
   };
 
+  const resolveQuestionRequest = (
+    request: ChatQuestionRequest,
+    resolution:
+      | { action: 'submit'; responses: ChatQuestionResponse[]; notes?: string }
+      | { action: 'skip'; notes?: string },
+  ) => {
+    if (!selected || questionBusyId) return;
+    const destinationId = targetId;
+    const droneId = selected.id;
+    const activeChat = chatName;
+    setQuestionBusyId(request.id);
+    setError(null);
+    void requestDroneControl(destinationId, 'chat.questions.resolve', {
+      droneId,
+      chatName: activeChat,
+      requestId: request.id,
+      ...resolution,
+    })
+      .then(async () => {
+        if (
+          targetIdRef.current !== destinationId ||
+          selectedRef.current?.id !== droneId ||
+          chatNameRef.current !== activeChat
+        )
+          return;
+        setPendingQuestionRequests((current) =>
+          current.filter((item) => item.id !== request.id),
+        );
+        await readChat(droneId, activeChat);
+      })
+      .catch((nextError: any) => {
+        if (
+          targetIdRef.current === destinationId &&
+          selectedRef.current?.id === droneId &&
+          chatNameRef.current === activeChat
+        )
+          setError(nextError?.message ?? String(nextError));
+      })
+      .finally(() => setQuestionBusyId((current) => (current === request.id ? '' : current)));
+  };
+
   const resolveCodexApproval = (
     approval: CodexPendingApproval,
     decision: CodexApprovalDecision,
@@ -3109,6 +3162,27 @@ export function DronesScreen({
                           busy={approvalBusyId === approval.id}
                           disabled={!targetReachable}
                           onResolve={(decision) => resolveCodexApproval(approval, decision)}
+                        />
+                      ))}
+                      {pendingQuestionRequests.map((request) => (
+                        <MobileQuestionRequestCard
+                          key={request.id}
+                          request={request}
+                          busy={questionBusyId === request.id}
+                          disabled={!targetReachable}
+                          onSubmit={({ responses, notes }) =>
+                            resolveQuestionRequest(request, {
+                              action: 'submit',
+                              responses,
+                              ...(notes ? { notes } : {}),
+                            })
+                          }
+                          onSkip={(notes) =>
+                            resolveQuestionRequest(request, {
+                              action: 'skip',
+                              ...(notes ? { notes } : {}),
+                            })
+                          }
                         />
                       ))}
                     </ScrollView>

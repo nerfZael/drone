@@ -88,6 +88,7 @@ import {
   type AssistantToolCallbacks,
 } from './assistant/assistant-workspace-contracts';
 import { isAssistantTransferTemporaryName } from './assistant/is-assistant-transfer-temporary-name';
+import { getChatQuestionRequestService } from './chat-question-requests';
 import type {
   AssistantChangeEvent,
   AssistantChatIdleStatus,
@@ -1136,6 +1137,14 @@ export class HubAssistantService {
     this.emitChange('canonical_history_changed', thread.id);
   }
 
+  async notifyQuestionRequestResolved(threadId: string): Promise<void> {
+    await this.ensureLoaded();
+    const thread = this.getThread(threadId);
+    thread.updatedAt = nowIso();
+    await this.persist();
+    this.emitChange('question_input_resolved', thread.id);
+  }
+
   async notifyRuntimeEvent(threadId: string, event: any): Promise<void> {
     await this.ensureLoaded();
     const thread = this.getThread(threadId);
@@ -1173,10 +1182,14 @@ export class HubAssistantService {
     }
     if (type === 'tool_call_suspended') {
       const details = event?.details && typeof event.details === 'object' ? event.details : {};
+      const questionRequest =
+        details?.questionRequest && typeof details.questionRequest === 'object'
+          ? details.questionRequest
+          : null;
       const approval =
         details?.approval && typeof details.approval === 'object' ? details.approval : {};
       const id = cleanOptionalString(event?.suspensionId);
-      if (id) {
+      if (id && !questionRequest) {
         this.approvals.set(id, {
           id,
           threadId: thread.id,
@@ -1190,11 +1203,17 @@ export class HubAssistantService {
         });
       }
       this.runningThreadIds.delete(thread.id);
-      thread.status = 'waiting_for_approval';
+      thread.status = questionRequest ? 'waiting_for_input' : 'waiting_for_approval';
       thread.error = cleanOptionalString(event?.reason) || null;
       thread.updatedAt = nowIso();
       await this.persist();
-      emit(event?.recoveryRequired ? 'approval_recovery_required' : 'approval_pending');
+      emit(
+        questionRequest
+          ? 'question_input_pending'
+          : event?.recoveryRequired
+            ? 'approval_recovery_required'
+            : 'approval_pending',
+      );
       return;
     }
     if (type === 'tool_call_resolved') {
@@ -1209,7 +1228,18 @@ export class HubAssistantService {
       this.runningThreadIds.delete(thread.id);
       const failed = String(event?.status ?? '').trim() === 'error';
       const suspended = String(event?.status ?? '').trim() === 'suspended';
-      thread.status = failed ? 'error' : suspended ? 'waiting_for_approval' : 'idle';
+      const waitingForInput =
+        getChatQuestionRequestService().listPending(
+          thread.ownerDroneId ?? '',
+          thread.ownerChatName ?? 'default',
+        ).length > 0;
+      thread.status = failed
+        ? 'error'
+        : suspended
+          ? waitingForInput
+            ? 'waiting_for_input'
+            : 'waiting_for_approval'
+          : 'idle';
       thread.error = failed
         ? cleanOptionalString(event?.error) || thread.error || 'Built-in agent prompt failed'
         : null;
@@ -1585,6 +1615,10 @@ export class HubAssistantService {
         this.runningThreadIds.has(id) ? { ...snapshotThread, status: 'running' } : snapshotThread,
       ],
       pendingApprovals: this.pendingApprovals(id),
+      pendingQuestionRequests: getChatQuestionRequestService().listPending(
+        targetThread.ownerDroneId ?? '',
+        targetThread.ownerChatName ?? 'default',
+      ),
       models: await this.modelOptions(),
       defaultModel: { ...this.defaultModelSelection },
       defaultEnabledTools: [...this.defaultEnabledTools],
@@ -1708,6 +1742,10 @@ export class HubAssistantService {
     return (
       this.queuedPromptsForThread(thread, false).length > 0 ||
       this.runningThreadIds.has(threadId) ||
+      getChatQuestionRequestService().listPending(
+        thread.ownerDroneId ?? '',
+        thread.ownerChatName ?? 'default',
+      ).length > 0 ||
       Array.from(this.approvals.values()).some(
         (approval) => approval.threadId === threadId && approval.status === 'pending',
       )
@@ -1724,6 +1762,10 @@ export class HubAssistantService {
         (prompt) => prompt.status === 'queued' || prompt.status === 'running',
       ) ||
       this.runningThreadIds.has(threadId) ||
+      getChatQuestionRequestService().listPending(
+        thread.ownerDroneId ?? '',
+        thread.ownerChatName ?? 'default',
+      ).length > 0 ||
       Array.from(this.approvals.values()).some(
         (approval) => approval.threadId === threadId && approval.status === 'pending',
       )
@@ -1739,6 +1781,11 @@ export class HubAssistantService {
       this.runningThreadIds.has(threadId) ||
       thread.status === 'running' ||
       thread.status === 'waiting_for_approval' ||
+      thread.status === 'waiting_for_input' ||
+      getChatQuestionRequestService().listPending(
+        thread.ownerDroneId ?? '',
+        thread.ownerChatName ?? 'default',
+      ).length > 0 ||
       Array.from(this.approvals.values()).some(
         (approval) => approval.threadId === threadId && approval.status === 'pending',
       )
@@ -2033,6 +2080,14 @@ export class HubAssistantService {
   async deleteThread(threadId: string): Promise<{ ok: true; deleted: boolean; threadId: string }> {
     await this.ensureLoaded();
     const existing = this.threads.find((thread) => thread.id === threadId);
+    if (existing) {
+      await getChatQuestionRequestService().skipPendingForChat(
+        existing.ownerDroneId ?? '',
+        existing.ownerChatName ?? 'default',
+        'chat_stopped',
+      );
+      this.runtimeStopDelegate?.(threadId);
+    }
     this.runningThreadIds.delete(threadId);
     await deleteAssistantArtifactsForThread(threadId);
     if (existing) {
@@ -2046,6 +2101,13 @@ export class HubAssistantService {
 
   async stopThread(threadId: string): Promise<AssistantSnapshot> {
     await this.ensureLoaded();
+    const thread = this.getThread(threadId);
+    await getChatQuestionRequestService().skipPendingForChat(
+      thread.ownerDroneId ?? '',
+      thread.ownerChatName ?? 'default',
+      'chat_stopped',
+    );
+    this.runtimeStopDelegate?.(threadId);
     await this.persist();
     return await this.threadSnapshot(threadId);
   }
@@ -3175,6 +3237,10 @@ export class HubAssistantService {
             },
       ],
       pendingApprovals: this.pendingApprovals(id),
+      pendingQuestionRequests: getChatQuestionRequestService().listPending(
+        targetThread.ownerDroneId ?? '',
+        targetThread.ownerChatName ?? 'default',
+      ),
       models: [],
       defaultModel: { ...this.defaultModelSelection },
       defaultEnabledTools: [...this.defaultEnabledTools],

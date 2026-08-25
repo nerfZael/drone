@@ -481,6 +481,12 @@ const ASSISTANT_TOOL_SUMMARY_DEFINITIONS: AssistantToolSummary[] = [
     category: 'actions',
     description: 'Send a user message to a drone chat after approval.',
   },
+  {
+    name: 'ask_questions',
+    label: 'Ask questions',
+    category: 'actions',
+    description: 'Pause this chat for structured answers from the user.',
+  },
 ];
 const DRONE_HUB_MCP_TOOL_NAMES = new Set([
   'list_drones',
@@ -525,6 +531,7 @@ const DRONE_HUB_MCP_TOOL_NAMES = new Set([
   'close_change_request',
   'merge_change_request',
   'send_message',
+  'ask_questions',
   'subscribe_to_resource_events',
   'subscribe_to_cron',
   'list_resource_subscriptions',

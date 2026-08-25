@@ -17,6 +17,24 @@ export type PromptSubmissionSource =
   | 'queue-action'
   | 'system';
 
+export type PromptQueuedEvent = {
+  droneId: string;
+  chatName: string;
+  prompt: PromptQueueRecord;
+  submissionSource?: PromptSubmissionSource;
+};
+
+const promptQueuedListeners = new Set<
+  (event: PromptQueuedEvent) => Promise<void> | void
+>();
+
+export function subscribePromptQueued(
+  listener: (event: PromptQueuedEvent) => Promise<void> | void,
+): () => void {
+  promptQueuedListeners.add(listener);
+  return () => promptQueuedListeners.delete(listener);
+}
+
 export type PromptQueueItem = {
   id: string;
   at: string;
@@ -406,7 +424,7 @@ export class PromptQueueRepository {
     const prompt = normalizeItem(opts.prompt, now);
     const idempotencyKey = String(opts.idempotencyKey ?? prompt.id).trim();
     if (!idempotencyKey) throw new Error('Prompt idempotency key cannot be empty');
-    return await this.database.writeTransaction('enqueue prompt', (connection) => {
+    const result = await this.database.writeTransaction('enqueue prompt', (connection) => {
       const deletedDrone = connection
         .prepare(
           `SELECT 1 FROM canonical_drone_chat_tombstones
@@ -499,6 +517,21 @@ export class PromptQueueRepository {
           : {}),
       };
     });
+    if (result.inserted && result.prompt.state === 'queued') {
+      await Promise.allSettled(
+        [...promptQueuedListeners].map((listener) =>
+          Promise.resolve(
+            listener({
+              droneId: opts.droneId,
+              chatName: opts.chatName,
+              prompt: result.prompt,
+              ...(opts.submissionSource ? { submissionSource: opts.submissionSource } : {}),
+            }),
+          ),
+        ),
+      );
+    }
+    return result;
   }
 
   async backfillLegacy(opts: {
@@ -1365,4 +1398,5 @@ export function getPromptQueueRepository(): PromptQueueRepository | null {
 
 export function resetPromptQueueRepositoryForTests(): void {
   cachedRepository = null;
+  promptQueuedListeners.clear();
 }

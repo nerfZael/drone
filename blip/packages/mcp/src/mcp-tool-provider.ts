@@ -71,7 +71,10 @@ export class McpToolProvider implements BlipToolProvider {
         const correlation = this.options.correlation?.(context) ?? {};
         const result = await this.options.client.callTool({
           name: tool.name,
-          arguments: { ...args, _blip: { sessionId: context.session.id, ...correlation } },
+          arguments: {
+            ...args,
+            _blip: { sessionId: context.session.id, toolCallId: _callId, ...correlation },
+          },
         });
         return agentResult(result);
       },

@@ -333,6 +333,18 @@ describe('device protocol', () => {
     );
   });
 
+  test('advertises structured question resolution as an explicit chat permission', () => {
+    expect(DRONE_CONTROL_CAPABILITY.operations).toContain('chat.questions.resolve');
+    expect(
+      isGranted(
+        [{ capability: 'drone-control', version: 1, operations: ['chat.read'] }],
+        'drone-control',
+        1,
+        'chat.questions.resolve',
+      ),
+    ).toBe(false);
+  });
+
   test('public pairing endpoints require a safe HTTPS origin', () => {
     expect(() =>
       parsePairingPayload({

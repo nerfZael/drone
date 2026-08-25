@@ -428,8 +428,39 @@ describe('Drone Hub assistant MCP transport', () => {
       const catalog = await client.listTools();
       const catalogNames = catalog.tools.map((tool) => tool.name).sort();
       const displayedMcpNames = ASSISTANT_TOOL_SUMMARIES.filter((tool) => tool.group?.kind === 'mcp' && tool.group.id === 'drone-hub').map((tool) => tool.name).sort();
-      expect(displayedMcpNames).toEqual(catalogNames);
+      expect(displayedMcpNames.filter((name) => name !== 'ask_questions')).toEqual(catalogNames);
       await client.close();
+
+      const chatClient = await createInProcessDroneHubMcpClient({
+        correlationId: 'thread-chat-catalog',
+        allowedDroneRefs: [],
+        allowedWriteDroneRefs: [],
+        allowedDroneIds: [],
+        nativeThreadId: 'thread-chat-catalog',
+        principal: {
+          kind: 'chat',
+          tokenId: 'chat:drone-a:default',
+          name: 'Drone A / default',
+          droneId: 'drone-a',
+          chatName: 'default',
+          chatId: 'thread-chat-catalog',
+          accessScope: {
+            readMode: 'all',
+            writeMode: 'all',
+            executeMode: 'all',
+            droneIds: [],
+            updatedAt: '2026-08-25T00:00:00.000Z',
+          },
+          selectedDroneRefs: [],
+        },
+      });
+      const askQuestions = (await chatClient.listTools()).tools.find(
+        (tool) => tool.name === 'ask_questions',
+      );
+      expect(askQuestions?.description).toContain('custom-answer field');
+      expect((askQuestions?.inputSchema as any)?.properties?.questions).toBeDefined();
+      expect((askQuestions?.inputSchema as any)?.properties?.customAnswer).toBeUndefined();
+      await chatClient.close();
     });
   });
 

@@ -44,6 +44,16 @@ export interface BlipToolProvider {
 
 export type BlipPromptProvider = (context: BlipSessionContext) => Promise<string> | string;
 
+export type BlipToolSuspensionResolution =
+  | 'approve'
+  | 'deny'
+  | {
+      kind: 'result';
+      content: Array<{ type: 'text'; text: string }>;
+      details?: unknown;
+      isError?: boolean;
+    };
+
 export type BlipToolPreflightDecision =
   | { status: 'allow' }
   | { status: 'deny'; reason: string }
@@ -114,7 +124,7 @@ export interface BlipSessionHandle {
   pendingToolSuspensions(): Promise<BlipToolSuspension[]>;
   resolveToolSuspension(
     suspensionId: string,
-    decision: 'approve' | 'deny',
+    resolution: BlipToolSuspensionResolution,
   ): Promise<BlipSessionState>;
   delete(): Promise<void>;
   clearQueue(): void;
