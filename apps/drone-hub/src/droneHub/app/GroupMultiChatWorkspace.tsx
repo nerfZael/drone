@@ -19,6 +19,7 @@ import {
 } from './group-multi-chat-sort';
 import { IconChat, IconChevron, IconDrone } from './icons';
 import type { DroneSummary } from '../types';
+import { isDroneOperation, type DroneOperationsById } from './drone-operation-state';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 
 type GroupMultiChatData = {
@@ -52,7 +53,7 @@ type GroupMultiChatWorkspaceProps = {
   uiDroneName: (nameRaw: string) => string;
   onSelectDroneCard: (droneId: string) => void;
   onDeleteDrone: (droneId: string) => void;
-  deletingDrones: Record<string, boolean>;
+  droneOperations: DroneOperationsById;
 };
 
 export function GroupMultiChatWorkspace({
@@ -69,7 +70,7 @@ export function GroupMultiChatWorkspace({
   uiDroneName,
   onSelectDroneCard,
   onDeleteDrone,
-  deletingDrones,
+  droneOperations,
 }: GroupMultiChatWorkspaceProps) {
   const {
     selectedChat,
@@ -301,7 +302,7 @@ export function GroupMultiChatWorkspace({
                   preferredChat={selectedChat || 'default'}
                   onOpenDrone={() => onSelectDroneCard(d.id)}
                   onDeleteDrone={() => onDeleteDrone(d.id)}
-                  deleteBusy={Boolean(deletingDrones[d.id])}
+                  deleteBusy={isDroneOperation(droneOperations, d.id, 'delete')}
                   onSendPromptInNewChat={(payload, context) =>
                     onSendPromptInNewChat(d, payload, context, selectedChat || 'default')
                   }

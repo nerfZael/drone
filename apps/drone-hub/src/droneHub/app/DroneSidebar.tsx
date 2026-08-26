@@ -123,6 +123,10 @@ import { useSidebarReadModel } from './use-sidebar-read-model';
 import { sidebarRepoGroupPathFromRepoPath } from './sidebar-repository-scope';
 import { buildSidebarRepositoryNavigationModel } from './sidebar-repository-navigation';
 import {
+  droneActionState,
+  type DroneOperationsById,
+} from './drone-operation-state';
+import {
   useSidebarInteractions,
   type ChatEditorState,
   type FolderEditorState,
@@ -911,12 +915,9 @@ export type DroneSidebarProps = {
   highlightedDroneIds: Set<string>;
   busyChatNodeIdSet: Set<string>;
   unreadAgentMessageByChatNodeId: Record<string, boolean>;
-  deletingDrones: Record<string, boolean>;
+  droneOperations: DroneOperationsById;
   deleteOperationModeById: Record<string, DroneDeleteMode>;
   deleteMode: DroneDeleteMode;
-  renamingDrones: Record<string, boolean>;
-  settingBaseImages: Record<string, boolean>;
-  startingDrones: Record<string, boolean>;
   movingDroneGroups: boolean;
   sidebarGroups: SidebarGroup[];
   canonicalGroups: GroupSummary[];
@@ -1031,12 +1032,9 @@ export function DroneSidebar({
   highlightedDroneIds,
   busyChatNodeIdSet,
   unreadAgentMessageByChatNodeId,
-  deletingDrones,
+  droneOperations,
   deleteOperationModeById,
   deleteMode,
-  renamingDrones,
-  settingBaseImages,
-  startingDrones,
   movingDroneGroups,
   sidebarGroups,
   canonicalGroups,
@@ -1855,7 +1853,7 @@ export function DroneSidebar({
           drone.hubPhase === 'creating' ||
           drone.hubPhase === 'starting' ||
           drone.hubPhase === 'seeding' ||
-          Boolean(deletingDrones[drone.id]));
+          droneActionState(droneOperations, drone.id).deleting);
       const inactiveDisplayState = sidebarDroneDisplayState(drone, false, '', false, false);
       const droneUnread =
         !droneWorking &&
@@ -1873,7 +1871,7 @@ export function DroneSidebar({
   }, [
     approvalRequiredByChatNodeId,
     busyChatNodeIdSet,
-    deletingDrones,
+    droneOperations,
     mutedChatIdSet,
     mutedDroneIdSet,
     sidebarChatGroupByChat,
@@ -2950,10 +2948,8 @@ export function DroneSidebar({
                     const hasActiveChildChat = selectedDrone === droneId && hasChatSection;
                     const defaultChatNodeId = createCanvasChatNodeId(droneId, 'default');
                     const isOptimistic = sidebarOptimisticDroneIdSet.has(droneId);
-                    const droneMutationBusy =
-                      Boolean(deletingDrones[droneId]) ||
-                      Boolean(renamingDrones[droneId]) ||
-                      Boolean(settingBaseImages[droneId]);
+                    const actionState = droneActionState(droneOperations, droneId);
+                    const droneMutationBusy = actionState.busy;
                     const droneProvisioning = isDroneStartingOrSeeding(drone.hubPhase);
                     const pinnedDragDisabled =
                       !pinnedDroneReorderEnabled || isOptimistic;
@@ -2996,7 +2992,9 @@ export function DroneSidebar({
                                   Boolean(approvalRequiredByChatNodeId[defaultChatNodeId]))
                               }
                               operationLabel={
-                                deletingDrones[droneId]
+                                actionState.startingContainer
+                                  ? 'Starting'
+                                  : actionState.deleting
                                   ? ((deleteOperationModeById[droneId] ?? deleteMode) === 'archive' ? 'Archiving' : 'Deleting')
                                   : undefined
                               }
@@ -3076,11 +3074,11 @@ export function DroneSidebar({
                               createChatDisabled={isOptimistic || droneMutationBusy || droneProvisioning}
                               addToGroupDisabled={isOptimistic || movingDroneGroups || droneMutationBusy || droneProvisioning}
                               renameDisabled={droneMutationBusy}
-                              renameBusy={Boolean(renamingDrones[droneId])}
+                              renameBusy={actionState.renaming}
                               setBaseImageDisabled={isOptimistic || droneMutationBusy || droneProvisioning}
-                              setBaseImageBusy={Boolean(settingBaseImages[droneId])}
+                              setBaseImageBusy={actionState.settingBaseImage}
                               deleteDisabled={isOptimistic || droneMutationBusy}
-                              deleteBusy={Boolean(deletingDrones[droneId])}
+                              deleteBusy={actionState.deleting}
                               onClick={(rowOpts) =>
                                 hasChatSection
                                   ? selectPinnedDroneContainer(drone, rowOpts)
@@ -3483,12 +3481,9 @@ export function DroneSidebar({
                       busyChatNodeIdSet={busyChatNodeIdSet}
                       approvalRequiredByChatNodeId={approvalRequiredByChatNodeId}
                       unreadAgentMessageByChatNodeId={unreadAgentMessageByChatNodeId}
-                      deletingDrones={deletingDrones}
+                      droneOperations={droneOperations}
                       deleteOperationModeById={deleteOperationModeById}
                       deleteMode={deleteMode}
-                      renamingDrones={renamingDrones}
-                      settingBaseImages={settingBaseImages}
-                      startingDrones={startingDrones}
                       movingDroneGroups={movingDroneGroups}
                       sidebarOptimisticDroneIdSet={sidebarOptimisticDroneIdSet}
                       uiDroneName={uiDroneName}
@@ -3699,9 +3694,7 @@ export function DroneSidebar({
                   ) ||
                   (drone.busyChats ?? []).includes(pinnedChatContextMenu.chatName) ||
                   busyChatNodeIdSet.has(chatNodeId) ||
-                  Boolean(deletingDrones[pinnedChatContextMenu.droneId]) ||
-                  Boolean(renamingDrones[pinnedChatContextMenu.droneId]) ||
-                  Boolean(settingBaseImages[pinnedChatContextMenu.droneId]) ||
+                  droneActionState(droneOperations, pinnedChatContextMenu.droneId).busy ||
                   isDroneStartingOrSeeding(drone.hubPhase)
                 );
               })(),
