@@ -104,6 +104,8 @@ export const sidebarFolderLabelClass =
 export const sidebarRepositoryLabelClass =
   'min-w-0 flex-1 truncate dh-type-sidebar-repository';
 
+export const sidebarRepositoryRowClass = 'dh-sidebar-repository-row';
+
 export const sidebarCountClass = 'flex-shrink-0 dh-type-count';
 
 export const sidebarChatStateClass =

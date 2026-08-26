@@ -91,6 +91,7 @@ import {
   sidebarDensityClasses,
   sidebarFolderLabelClass,
   sidebarRepositoryLabelClass,
+  sidebarRepositoryRowClass,
   sidebarSelectionEdgeClass,
 } from '../sidebar/presentation';
 import { selectSidebarChatNodes } from './sidebar-chat-selection';
@@ -2170,7 +2171,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
           <TreeDropGuide placement={dragOverTreeTarget.placement} />
         ) : null}
         <div
-          className={`dh-sidebar-row-interactive group/folder-row relative flex items-center gap-1 rounded-[var(--sidebar-row-radius)] pr-0.5 transition-colors ${densityClasses.folderRow} ${
+          className={`dh-sidebar-row-interactive group/folder-row relative flex items-center gap-1 rounded-[var(--sidebar-row-radius)] pr-0.5 transition-colors ${densityClasses.folderRow} ${isVirtualGroup ? sidebarRepositoryRowClass : ''} ${
             showEditorInline
               ? 'border border-transparent'
               : intoState

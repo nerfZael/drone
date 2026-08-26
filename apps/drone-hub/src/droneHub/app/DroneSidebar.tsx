@@ -116,6 +116,7 @@ import {
   sidebarDensityClasses,
   sidebarFolderLabelClass,
   sidebarRepositoryLabelClass,
+  sidebarRepositoryRowClass,
   sidebarSelectionEdgeClass,
 } from '../sidebar/presentation';
 import { useSidebarReadModel } from './use-sidebar-read-model';
@@ -432,7 +433,7 @@ function ReadOnlySidebarGroups({
           <section key={`${group.kind}:${group.group}`} className="flex flex-col gap-0.5">
             <UiNavigationRow
               density="compact"
-              className={densityClasses.folderRow}
+              className={`${densityClasses.folderRow} ${group.kind === 'repo' ? sidebarRepositoryRowClass : ''}`}
               label={
                 <span
                   className={`${group.kind === 'repo' ? sidebarRepositoryLabelClass : sidebarFolderLabelClass} ${densityClasses.folderLabel}`}
@@ -835,7 +836,7 @@ function StaticReadOnlySidebarTree({
       <div key={node.id} className="flex flex-col gap-0.5">
         <button
           type="button"
-          className={`relative flex items-center gap-1 rounded-[var(--radius-medium)] border border-transparent pr-2 text-left hover:border-[var(--border-subtle)] hover:bg-[var(--surface-soft)] ${densityClasses.folderRow}`}
+          className={`relative flex items-center gap-1 rounded-[var(--radius-medium)] border border-transparent pr-2 text-left hover:border-[var(--border-subtle)] hover:bg-[var(--surface-soft)] ${densityClasses.folderRow} ${node.groupKind === 'repo' && !node.groupPath ? sidebarRepositoryRowClass : ''}`}
           style={{
             paddingLeft: `${Math.max(0, node.depth) * densityClasses.folderDepthPaddingPx + 4}px`,
           }}

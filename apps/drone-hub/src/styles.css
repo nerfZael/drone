@@ -66,6 +66,8 @@
   --sidebar-row-selected-bg: rgba(177, 156, 255, .075);
   --sidebar-row-selected-border: transparent;
   --sidebar-row-selected-edge: rgba(177, 156, 255, .82);
+  --sidebar-repository-row-bg: rgba(255, 255, 255, .018);
+  --sidebar-repository-row-edge: rgba(59, 69, 87, .45);
   --sidebar-row-radius: var(--radius-medium);
   --sidebar-meta-fg: var(--muted-dim);
   --sidebar-blocked-indicator: #ff5964;
@@ -352,6 +354,8 @@
   --sidebar-row-selected-bg: rgba(203, 166, 247, .12);
   --sidebar-row-selected-border: transparent;
   --sidebar-row-selected-edge: rgba(203, 166, 247, .78);
+  --sidebar-repository-row-bg: rgba(205, 214, 244, .018);
+  --sidebar-repository-row-edge: rgba(49, 50, 68, .62);
   --sidebar-row-radius: .25rem;
   --sidebar-meta-fg: #a6adc8;
   --sidebar-blocked-indicator: #ff596b;
@@ -1026,6 +1030,26 @@ code, pre {
 /* Full-bleed navigation states without disturbing the row's content indent. */
 .dh-sidebar-row-interactive,
 .dh-sidebar-row-selected {
+  isolation: isolate;
+  background: transparent;
+}
+
+/* Repository roots are section boundaries, so give them a quiet full-bleed
+   wash and hairline without competing with hover or selection states. */
+.dh-sidebar-repository-row::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  top: -1px;
+  bottom: -1px;
+  left: -100vw;
+  right: -100vw;
+  background: var(--sidebar-repository-row-bg);
+  box-shadow: inset 0 -1px 0 var(--sidebar-repository-row-edge);
+  pointer-events: none;
+}
+
+.dh-sidebar-repository-row {
   isolation: isolate;
   background: transparent;
 }

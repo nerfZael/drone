@@ -7,6 +7,7 @@ import {
   sidebarDensityClasses,
   sidebarFolderLabelClass,
   sidebarRepositoryLabelClass,
+  sidebarRepositoryRowClass,
   sidebarSelectionEdgeClass,
 } from '../src/droneHub/sidebar/presentation';
 
@@ -353,6 +354,29 @@ describe('sidebar presentation', () => {
 
     expect(stylesSource).toContain('.dh-sidebar-row-context-target {');
     expect(stylesSource).toContain('box-shadow: inset 0 0 0 1px var(--border);');
+  });
+
+  test('gives repository group rows a restrained section treatment', () => {
+    const groupedTreeSource = readFileSync(
+      new URL('../src/droneHub/app/GroupedSidebarTree.tsx', import.meta.url),
+      'utf8',
+    );
+    const sidebarSource = readFileSync(
+      new URL('../src/droneHub/app/DroneSidebar.tsx', import.meta.url),
+      'utf8',
+    );
+    const stylesSource = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+
+    expect(sidebarRepositoryRowClass).toBe('dh-sidebar-repository-row');
+    expect(groupedTreeSource).toContain('isVirtualGroup ? sidebarRepositoryRowClass');
+    expect(sidebarSource).toContain("group.kind === 'repo' ? sidebarRepositoryRowClass");
+    expect(sidebarSource).toContain(
+      "node.groupKind === 'repo' && !node.groupPath ? sidebarRepositoryRowClass",
+    );
+    expect(stylesSource).toContain('.dh-sidebar-repository-row::before {');
+    expect(stylesSource).toContain('.dh-sidebar-repository-row {');
+    expect(stylesSource).toContain('background: var(--sidebar-repository-row-bg);');
+    expect(stylesSource).toContain('box-shadow: inset 0 -1px 0 var(--sidebar-repository-row-edge);');
   });
 
   test('uses the same full-bleed navigation states for repository rows', () => {
