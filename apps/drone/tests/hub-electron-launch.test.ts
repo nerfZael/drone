@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 
 const {
   detachedHubStartArgs,
@@ -56,5 +57,26 @@ describe('Drone Hub Electron background launch', () => {
     expect(() => parseDetachedHubStartOutput(JSON.stringify({ ok: true, state: {} }))).toThrow(
       'no usable UI address',
     );
+  });
+
+  test('navigates as soon as complete launcher output arrives', () => {
+    const mainSource = readFileSync(
+      new URL('../desktop/hub-electron-main.cjs', import.meta.url),
+      'utf8',
+    );
+
+    expect(mainSource).toContain('stdout += text;\n    loadHubUiFromOutput();');
+    expect(mainSource).toContain('if (!loadHubUiFromOutput())');
+  });
+
+  test('uses the shared chat loading visual and product-facing startup copy', () => {
+    const mainSource = readFileSync(
+      new URL('../desktop/hub-electron-main.cjs', import.meta.url),
+      'utf8',
+    );
+
+    expect(mainSource).toContain('M22 3a19 19 0 0 1 16.45 9.5');
+    expect(mainSource).toContain('Loading your workspace…');
+    expect(mainSource).not.toContain('Preparing the local server');
   });
 });

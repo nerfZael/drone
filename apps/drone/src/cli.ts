@@ -41,7 +41,7 @@ import { loadRegistry, updateRegistry } from './host/registry';
 import { readRegistryJsonFromSqlitePath } from './host/sqlite-registry-store';
 import { hostDroneRootPath, normalizeDroneRuntime, type DroneRuntime } from './host/runtime';
 import { ensureHubSetupState } from './host/setup-state';
-import { resolveDetachedCliLaunchSpec } from './hub/hub-launch';
+import { resolveDetachedCliLaunchSpec, waitForDetachedHubState } from './hub/hub-launch';
 import { readRawBody } from './hub/hub-http';
 import {
   createDroneRuntime,
@@ -51,7 +51,14 @@ import { cleanupLegacyRemoteHub } from './hub/legacy-remote-cleanup';
 import { permanentlyDeleteCanonicalDrone } from './hub/drone-deletion-service';
 import { renameDroneDisplayName, setDroneGroupMetadata } from './hub/drone-metadata-commands';
 import { DEFAULT_DEVICE_MESH_INGRESS_PORT } from './hub/device-mesh/device-mesh-ingress';
-import { parseHubRunnerProcessesFromPsOutput, parseHubUiServerProcessesFromPsOutput, selectHubRunnerPidsToStop } from './hub/orphan-hub-runners';
+import {
+  parseHubRunnerLaunchOptions,
+  parseHubRunnerProcessesFromPsOutput,
+  parseHubUiServerProcessesFromPsOutput,
+  selectHubRunnerPidsToStop,
+  selectHubRunnerToRecover,
+  type HubRunnerProcess,
+} from './hub/orphan-hub-runners';
 import { startDroneHubApiServer } from './hub/server';
 import {
   deleteChatAndSubscriptionsFromStore,
@@ -1048,18 +1055,73 @@ async function readCommandStdout(command: string, args: string[]): Promise<strin
   });
 }
 
-async function findRecoverableHubRunnerPids(preferredUiPort: number): Promise<number[]> {
+async function findRecoverableHubRunnerProcesses(): Promise<HubRunnerProcess[]> {
   if (process.platform === 'win32') return [];
   try {
     const psOutput = await readCommandStdout('ps', ['-eo', 'pid=,args=']);
-    const matches = parseHubRunnerProcessesFromPsOutput(psOutput, {
+    return parseHubRunnerProcessesFromPsOutput(psOutput, {
       cliPath: __filename,
       selfPid: process.pid,
     });
-    return selectHubRunnerPidsToStop(matches, preferredUiPort);
   } catch {
     return [];
   }
+}
+
+async function findRecoverableHubRunnerPids(preferredUiPort: number): Promise<number[]> {
+  return selectHubRunnerPidsToStop(await findRecoverableHubRunnerProcesses(), preferredUiPort);
+}
+
+async function recoverRunningHubState(preferredUiPort: number): Promise<HubState | null> {
+  const runners = await findRecoverableHubRunnerProcesses();
+  const viable: Array<{ process: HubRunnerProcess; launch: ReturnType<typeof parseHubRunnerLaunchOptions> }> = [];
+  for (const process of runners) {
+    const launch = parseHubRunnerLaunchOptions(process.args);
+    if (!launch.uiPort || !launch.apiPort) continue;
+    const apiHost = launch.apiHost || DEFAULT_HUB_API_HOST;
+    // A recoverable runner must own both advertised listeners. This avoids
+    // restoring state for a stale process that is still stuck during startup.
+    // eslint-disable-next-line no-await-in-loop
+    const uiPortAvailable = await isTcpPortAvailable('127.0.0.1', launch.uiPort);
+    // eslint-disable-next-line no-await-in-loop
+    const apiPortAvailable = await isTcpPortAvailable(apiHost, launch.apiPort);
+    if (!uiPortAvailable && !apiPortAvailable) viable.push({ process, launch });
+  }
+
+  const selectedProcess = selectHubRunnerToRecover(
+    viable.map(({ process }) => process),
+    preferredUiPort,
+  );
+  if (!selectedProcess) return null;
+  const selected = viable.find(({ process }) => process.pid === selectedProcess.pid);
+  if (!selected?.launch.uiPort || !selected.launch.apiPort) return null;
+
+  const apiHost = selected.launch.apiHost || DEFAULT_HUB_API_HOST;
+  const containerMcpHost = selected.launch.containerMcpHost;
+  const containerMcpPort = selected.launch.containerMcpPort;
+  const containerMcp = containerMcpHost && containerMcpPort
+    ? {
+        host: containerMcpHost,
+        port: containerMcpPort,
+        url: resolveContainerMcpProjectedUrl(
+          containerMcpPort,
+          selected.launch.containerMcpUrl || '',
+        ),
+      }
+    : null;
+  const state: HubState = {
+    version: 1,
+    pid: selected.process.pid,
+    apiHost,
+    apiPort: selected.launch.apiPort,
+    uiPort: selected.launch.uiPort,
+    containerMcp,
+    startedAt: new Date().toISOString(),
+    logPath: hubLogPath(),
+    launchEnv: null,
+  };
+  await writeHubState(state);
+  return state;
 }
 
 async function findRecoverableHubUiServerPids(preferredUiPort: number): Promise<number[]> {
@@ -1974,7 +2036,10 @@ async function hubStart(options: any) {
   const containerMcpProjectedUrl = resolveContainerMcpProjectedUrl(containerMcpPort, containerMcpUrl);
   await cleanupLegacyRemoteHubForCli();
 
-  const cur = await readHubState();
+  let cur = await readHubState();
+  if (!cur || !pidIsRunning(cur.pid)) {
+    cur = (await recoverRunningHubState(uiPort)) ?? cur;
+  }
   if (cur && pidIsRunning(cur.pid)) {
     const currentLaunchEnv = captureHubLaunchEnvSnapshot();
     const launchEnvChanged = hubLaunchEnvSnapshotsDiffer(cur.launchEnv, currentLaunchEnv);
@@ -2075,29 +2140,29 @@ async function hubStart(options: any) {
     );
     child.unref();
 
-    let state: HubState | null = null;
-    for (let i = 0; i < 60; i++) {
-      // eslint-disable-next-line no-await-in-loop
-      const s = await readHubState();
-      if (s && s.pid === child.pid) {
-        state = s;
-        break;
-      }
-      // eslint-disable-next-line no-await-in-loop
-      await sleep(80);
-    }
+    if (!child.pid) throw new Error(`Drone Hub process did not start. Log: ${logPath}`);
+    let launchError: Error | null = null;
+    child.once('error', (error) => {
+      launchError = error;
+    });
+    const state = await waitForDetachedHubState<HubState>({
+      expectedPid: child.pid,
+      readState: () => readHubState(),
+      readProcessStatus: () => ({
+        exitCode: child.exitCode,
+        signalCode: child.signalCode,
+        error: launchError,
+      }),
+      logPath,
+    });
 
     const output = {
       ok: true,
       pid: child.pid,
-      ...(state
-        ? {
-            apiUrl: `http://${state.apiHost}:${state.apiPort}`,
-            uiUrl: `http://127.0.0.1:${state.uiPort}`,
-            ...(state.containerMcp ? { containerMcpUrl: state.containerMcp.url } : {}),
-            logPath: state.logPath,
-          }
-        : { logPath }),
+      apiUrl: `http://${state.apiHost}:${state.apiPort}`,
+      uiUrl: `http://127.0.0.1:${state.uiPort}`,
+      ...(state.containerMcp ? { containerMcpUrl: state.containerMcp.url } : {}),
+      logPath: state.logPath,
     };
     // eslint-disable-next-line no-console
     console.log(jsonOutputRequested(options) ? JSON.stringify(output, null, 2) : formatHubStartOutput(output));

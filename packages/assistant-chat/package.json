@@ -9,12 +9,13 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
+      "require": "./dist/cjs/index.js",
       "default": "./dist/index.js"
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "test": "bun test tests"
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && node scripts/write-cjs-package.cjs",
+    "test": "bun run build && node --test tests/node/commonjs-entrypoint.node.cjs && bun test tests"
   },
   "dependencies": {
     "@blip/protocol": "workspace:*"

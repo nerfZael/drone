@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { parseHubRunnerProcessesFromPsOutput, parseHubUiServerProcessesFromPsOutput, selectHubRunnerPidsToStop } from '../src/hub/orphan-hub-runners';
+import {
+  parseHubRunnerLaunchOptions,
+  parseHubRunnerProcessesFromPsOutput,
+  parseHubUiServerProcessesFromPsOutput,
+  selectHubRunnerPidsToStop,
+  selectHubRunnerToRecover,
+} from '../src/hub/orphan-hub-runners';
 
 describe('orphan hub runner recovery helpers', () => {
   test('parses hub runner processes for the current cli path', () => {
@@ -57,6 +63,36 @@ describe('orphan hub runner recovery helpers', () => {
     );
 
     expect(selected).toEqual([2920616]);
+  });
+
+  test('recovers one unambiguous runner and parses its connection settings', () => {
+    const process = {
+      pid: 2920616,
+      uiPort: 5174,
+      args: 'node cli.js hub run --port 5174 --api-port=8787 --host 127.0.0.1 --container-mcp-host 172.17.0.1 --container-mcp-port 8788',
+    };
+
+    expect(selectHubRunnerToRecover([process], 0)).toEqual(process);
+    expect(parseHubRunnerLaunchOptions(process.args)).toEqual({
+      uiPort: 5174,
+      apiPort: 8787,
+      apiHost: '127.0.0.1',
+      containerMcpHost: '172.17.0.1',
+      containerMcpPort: 8788,
+      containerMcpUrl: null,
+    });
+  });
+
+  test('does not guess when multiple runners are available for an automatic port', () => {
+    expect(
+      selectHubRunnerToRecover(
+        [
+          { pid: 1, uiPort: 5174, args: 'first' },
+          { pid: 2, uiPort: 5175, args: 'second' },
+        ],
+        0,
+      ),
+    ).toBeNull();
   });
 
   test('parses hub-owned vite ui server processes for the current repo', () => {

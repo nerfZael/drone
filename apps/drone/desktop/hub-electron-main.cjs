@@ -50,28 +50,67 @@ function loadingHtml() {
         height: 100vh;
         display: grid;
         place-items: center;
-        background: #111827;
-        color: #f9fafb;
+        background: #11161e;
+        color: #c7cdda;
         font: 14px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
       main {
-        display: grid;
-        gap: 10px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 16px;
         text-align: center;
       }
-      strong {
-        font-size: 18px;
-        font-weight: 650;
+      .spinner {
+        position: relative;
+        width: 44px;
+        height: 44px;
       }
-      span {
-        color: #cbd5e1;
+      .spinner-track {
+        position: absolute;
+        inset: 0;
+        border: 1px solid #293241;
+        border-radius: 999px;
+        background: rgba(0, 0, 0, .09);
+      }
+      .spinner-arc {
+        position: absolute;
+        inset: 0;
+        width: 44px;
+        height: 44px;
+        animation: hub-spinner-rotate 1s linear infinite;
+      }
+      .spinner-dot {
+        position: absolute;
+        inset: 17px;
+        border-radius: 999px;
+        background: #b19cff;
+        box-shadow: 0 0 10px #9678fa;
+      }
+      .message {
+        color: #c7cdda;
+        font-size: 14px;
+        font-weight: 500;
+        line-height: 20px;
+      }
+      @keyframes hub-spinner-rotate {
+        to { transform: rotate(360deg); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .spinner-arc { animation: none; }
       }
     </style>
   </head>
   <body>
-    <main>
-      <strong>Starting Drone Hub</strong>
-      <span>Preparing the local server...</span>
+    <main role="status" aria-live="polite">
+      <div class="spinner" aria-hidden="true">
+        <div class="spinner-track"></div>
+        <svg class="spinner-arc" viewBox="0 0 44 44" fill="none">
+          <path d="M22 3a19 19 0 0 1 16.45 9.5" stroke="#b19cff" stroke-width="2.25" stroke-linecap="round" />
+        </svg>
+        <div class="spinner-dot"></div>
+      </div>
+      <div class="message">Loading your workspace…</div>
     </main>
   </body>
 </html>`;
@@ -92,7 +131,7 @@ function createWindow() {
     minWidth: 960,
     minHeight: 680,
     title: APP_NAME,
-    backgroundColor: '#111827',
+    backgroundColor: '#11161e',
     webPreferences: {
       preload: path.join(__dirname, 'hub-electron-preload.cjs'),
       nodeIntegration: false,
@@ -142,11 +181,28 @@ function startHub() {
 
   let stdout = '';
   let stderrBuffer = '';
+  let navigationStarted = false;
+
+  const loadHubUiFromOutput = () => {
+    if (navigationStarted) return true;
+    let uiUrl;
+    try {
+      ({ uiUrl } = parseDetachedHubStartOutput(stdout));
+    } catch {
+      return false;
+    }
+    navigationStarted = true;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.loadURL(uiUrl).catch(showError);
+    }
+    return true;
+  };
 
   hubLauncherProcess.stdout.on('data', (chunk) => {
     const text = String(chunk || '');
     process.stdout.write(text);
     stdout += text;
+    loadHubUiFromOutput();
   });
 
   hubLauncherProcess.stderr.on('data', (chunk) => {
@@ -161,15 +217,13 @@ function startHub() {
     hubLauncherProcess = null;
     if (isQuitting) return;
     if (code !== 0) {
+      if (navigationStarted) return;
       const reason = `Hub launcher exited with code ${code == null ? 'null' : code} signal ${signal || 'null'}.`;
       showError(`Drone Hub failed to start.\n\n${reason}\n\n${stderrBuffer.trim()}`);
       return;
     }
     try {
-      const { uiUrl } = parseDetachedHubStartOutput(stdout);
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.loadURL(uiUrl).catch(showError);
-      }
+      if (!loadHubUiFromOutput()) throw new Error('Hub launcher did not return its connection details.');
     } catch (error) {
       showError(error);
     }

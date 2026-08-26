@@ -12,12 +12,40 @@ export type HubUiServerProcess = {
   args: string;
 };
 
-function parseUiPortFromArgs(args: string): number | null {
-  const match = String(args ?? '').match(/(?:^|\s)--port(?:=|\s+)(\d+)(?=\s|$)/);
+export type HubRunnerLaunchOptions = {
+  uiPort: number | null;
+  apiPort: number | null;
+  apiHost: string | null;
+  containerMcpHost: string | null;
+  containerMcpPort: number | null;
+  containerMcpUrl: string | null;
+};
+
+function parsePositiveIntegerOption(args: string, option: string): number | null {
+  const escapedOption = option.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = String(args ?? '').match(new RegExp(`(?:^|\\s)${escapedOption}(?:=|\\s+)(\\d+)(?=\\s|$)`));
   if (!match) return null;
   const port = Number(match[1]);
   if (!Number.isFinite(port) || port <= 0) return null;
   return Math.floor(port);
+}
+
+function parseStringOption(args: string, option: string): string | null {
+  const escapedOption = option.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = String(args ?? '').match(new RegExp(`(?:^|\\s)${escapedOption}(?:=|\\s+)([^\\s]+)(?=\\s|$)`));
+  const value = String(match?.[1] ?? '').trim();
+  return value || null;
+}
+
+export function parseHubRunnerLaunchOptions(args: string): HubRunnerLaunchOptions {
+  return {
+    uiPort: parsePositiveIntegerOption(args, '--port'),
+    apiPort: parsePositiveIntegerOption(args, '--api-port'),
+    apiHost: parseStringOption(args, '--host'),
+    containerMcpHost: parseStringOption(args, '--container-mcp-host'),
+    containerMcpPort: parsePositiveIntegerOption(args, '--container-mcp-port'),
+    containerMcpUrl: parseStringOption(args, '--container-mcp-url'),
+  };
 }
 
 export function parseHubRunnerProcessesFromPsOutput(
@@ -51,7 +79,7 @@ export function parseHubRunnerProcessesFromPsOutput(
     if (!/\bhub\s+run\b/.test(args)) continue;
     out.push({
       pid: Math.floor(pid),
-      uiPort: parseUiPortFromArgs(args),
+      uiPort: parseHubRunnerLaunchOptions(args).uiPort,
       args,
     });
   }
@@ -89,7 +117,7 @@ export function parseHubUiServerProcessesFromPsOutput(
     if (!/(?:^|\s)--strictPort(?=\s|$)/.test(args)) continue;
     out.push({
       pid: Math.floor(pid),
-      uiPort: parseUiPortFromArgs(args),
+      uiPort: parsePositiveIntegerOption(args, '--port'),
       args,
     });
   }
@@ -107,4 +135,17 @@ export function selectHubRunnerPidsToStop(
   }
   if (processes.length === 1) return [processes[0].pid];
   return [];
+}
+
+export function selectHubRunnerToRecover(
+  processes: HubRunnerProcess[],
+  preferredUiPort: number | null | undefined,
+): HubRunnerProcess | null {
+  const preferredPort = Number(preferredUiPort);
+  if (Number.isFinite(preferredPort) && preferredPort > 0) {
+    const matches = processes.filter((proc) => proc.uiPort === Math.floor(preferredPort));
+    if (matches.length === 1) return matches[0];
+    if (matches.length > 1) return null;
+  }
+  return processes.length === 1 ? processes[0] : null;
 }

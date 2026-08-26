@@ -7,6 +7,26 @@ export type DetachedCliLaunchSpec = {
   args: string[];
 };
 
+type DetachedHubState = {
+  pid: number;
+};
+
+type DetachedProcessStatus = {
+  exitCode: number | null;
+  signalCode: NodeJS.Signals | null;
+  error?: Error | null;
+};
+
+type WaitForDetachedHubStateOptions<TState extends DetachedHubState> = {
+  expectedPid: number;
+  readState: () => Promise<TState | null>;
+  readProcessStatus: () => DetachedProcessStatus;
+  logPath: string;
+  maxAttempts?: number;
+  pollIntervalMs?: number;
+  sleep?: (ms: number) => Promise<void>;
+};
+
 type ResolveDetachedCliLaunchSpecOptions = {
   cliFilename: string;
   nodeExecPath?: string;
@@ -59,4 +79,33 @@ export function resolveDetachedCliLaunchSpec(opts: ResolveDetachedCliLaunchSpecO
   }
 
   return { command: nodeExecPath, args: [cliFilename] };
+}
+
+export async function waitForDetachedHubState<TState extends DetachedHubState>(
+  opts: WaitForDetachedHubStateOptions<TState>,
+): Promise<TState> {
+  const maxAttempts = Math.max(1, Math.floor(opts.maxAttempts ?? 376));
+  const pollIntervalMs = Math.max(0, Math.floor(opts.pollIntervalMs ?? 80));
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const state = await opts.readState();
+    if (state?.pid === opts.expectedPid) return state;
+
+    const processStatus = opts.readProcessStatus();
+    if (processStatus.error) {
+      throw new Error(
+        `Drone Hub process failed before becoming ready: ${processStatus.error.message}. Log: ${opts.logPath}`,
+      );
+    }
+    if (processStatus.exitCode !== null || processStatus.signalCode !== null) {
+      throw new Error(
+        `Drone Hub process exited before becoming ready (code ${processStatus.exitCode ?? 'null'}, signal ${processStatus.signalCode ?? 'null'}). Log: ${opts.logPath}`,
+      );
+    }
+
+    if (attempt + 1 < maxAttempts) await sleep(pollIntervalMs);
+  }
+
+  throw new Error(`Timed out waiting for Drone Hub to become ready. Log: ${opts.logPath}`);
 }
