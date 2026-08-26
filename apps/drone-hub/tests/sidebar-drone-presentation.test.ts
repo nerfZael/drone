@@ -426,7 +426,7 @@ describe('desktop sidebar drone presentation', () => {
     expect(mutationSource).toContain("method: 'POST'");
     expect(treeSource).toContain('isDroneContainerStopped(drone)');
     expect(treeSource).toContain("? 'Starting'");
-    expect(treeSource).toContain('startContainerBusy={Boolean(startingDrones[drone.id])}');
+    expect(treeSource).toContain('startContainerBusy={actionState.startingContainer}');
   });
 
   test('renames drones through a borderless inline editor that cancels on blur', () => {

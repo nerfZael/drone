@@ -60,6 +60,10 @@ import { useChatRuntimeOrchestration } from './droneHub/app/use-chat-runtime-orc
 import { useDroneErrorModalActions } from './droneHub/app/use-drone-error-modal-actions';
 import { useRepoBranchOptions } from './droneHub/app/use-repo-branch-options';
 import { useDroneMutationActions } from './droneHub/app/use-drone-mutation-actions';
+import {
+  isDroneOperation,
+  type DroneOperationsById,
+} from './droneHub/app/drone-operation-state';
 import { useFilesAndPortsPaneState } from './droneHub/app/use-files-and-ports-pane-state';
 import { useFileEditorState } from './droneHub/app/use-file-editor-state';
 import { useGroupBroadcast } from './droneHub/app/use-group-broadcast';
@@ -1186,11 +1190,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     showToast: showShortcutToast,
   });
   const {
-    deletingDrones,
-    renamingDrones,
+    droneOperations,
     renameDroneTarget,
-    settingBaseImages,
-    startingDrones,
     deleteDrone: deleteDroneBase,
     closeRenameDrone,
     clearRenameDroneError,
@@ -1268,10 +1269,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   React.useEffect(() => {
     const ids = Object.keys(droneDeleteOperationModeById);
     if (ids.length === 0) return;
-    if (ids.some((id) => deletingDrones[id])) return;
+    if (ids.some((id) => isDroneOperation(droneOperations, id, 'delete'))) return;
     droneDeleteOperationModeByIdRef.current = {};
     setDroneDeleteOperationModeById({});
-  }, [deletingDrones, droneDeleteOperationModeById]);
+  }, [droneDeleteOperationModeById, droneOperations]);
   const resolveDeleteDroneRows = React.useCallback(
     (droneIdsRaw: string[]): DroneDeleteConfirmModalDrone[] => {
       const seen = new Set<string>();
@@ -1283,7 +1284,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         const drone = droneById[id] ?? null;
         if (!drone) continue;
         if (
-          deletingDrones[id] ||
+          isDroneOperation(droneOperations, id, 'delete') ||
           droneDeleteOperationModeById[id] ||
           droneDeleteOperationModeByIdRef.current[id] ||
           optimisticallyDeletedDrones[id]
@@ -1298,7 +1299,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       return rows;
     },
     [
-      deletingDrones,
+      droneOperations,
       droneById,
       droneDeleteOperationModeById,
       optimisticallyDeletedDrones,
@@ -1402,7 +1403,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
                 id,
                 {
                   exists: Boolean(droneById[id]),
-                  deleting: Boolean(deletingDrones[id]),
+                  deleting: isDroneOperation(droneOperations, id, 'delete'),
                   deleteOperationMode:
                     droneDeleteOperationModeById[id] ??
                     droneDeleteOperationModeByIdRef.current[id] ??
@@ -1427,7 +1428,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       return true;
     },
     [
-      deletingDrones,
+      droneOperations,
       droneById,
       droneDeleteOperationModeById,
       resolveDeleteDroneRows,
@@ -5164,13 +5165,13 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setCustomAgentModalOpen(false);
   }, [newCustomAgentCommand, newCustomAgentLabel]);
 
-  const sidebarDeletingDrones = React.useMemo(() => {
+  const sidebarDroneOperations = React.useMemo<DroneOperationsById>(() => {
     const operationIds = Object.keys(droneDeleteOperationModeById);
-    if (operationIds.length === 0) return deletingDrones;
-    const next = { ...deletingDrones };
-    for (const id of operationIds) next[id] = true;
+    if (operationIds.length === 0) return droneOperations;
+    const next = { ...droneOperations };
+    for (const id of operationIds) next[id] ??= 'delete';
     return next;
-  }, [deletingDrones, droneDeleteOperationModeById]);
+  }, [droneDeleteOperationModeById, droneOperations]);
 
   const sidebarProps: DroneSidebarProps = useDroneHubSidebarProps({
     dronesError,
@@ -5185,12 +5186,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     highlightedDroneIds,
     busyChatNodeIdSet,
     unreadAgentMessageByChatNodeId,
-    deletingDrones: sidebarDeletingDrones,
+    droneOperations: sidebarDroneOperations,
     deleteOperationModeById: droneDeleteOperationModeById,
     deleteMode: deleteActionSettingsState.deleteSettings?.deleteAction.mode ?? 'permanent',
-    renamingDrones,
-    settingBaseImages,
-    startingDrones,
     movingDroneGroups,
     sidebarGroups,
     canonicalGroups: registryGroups,
@@ -5296,7 +5294,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     closeRenameDrone,
     clearRenameDroneError,
     confirmRenameDrone,
-    renamingDrones,
+    droneOperations,
     droneDropActionModal,
     closeDroneDropActionModal,
     droppedDroneTarget,
@@ -5385,7 +5383,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     selectDroneCard,
     selectDroneChat,
     deleteDrone: requestDeleteDrone,
-    deletingDrones,
+    droneOperations,
     optimisticallyDeletedDrones,
     drones,
     dronesLoading,
