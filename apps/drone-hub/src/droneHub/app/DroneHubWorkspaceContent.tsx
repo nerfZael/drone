@@ -1,6 +1,6 @@
 import React from 'react';
 import { NoDroneSelectedState } from './NoDroneSelectedState';
-import { SettingsView } from './SettingsView';
+import type { SettingsView as SettingsViewComponent } from './SettingsView';
 import { DraftChatWorkspace, type DraftChatWorkspace as DraftChatWorkspaceComponent } from './DraftChatWorkspace';
 import type { GroupMultiChatWorkspace as GroupMultiChatWorkspaceComponent } from './GroupMultiChatWorkspace';
 import { SelectedDroneWorkspace, type SelectedDroneWorkspace as SelectedDroneWorkspaceComponent } from './SelectedDroneWorkspace';
@@ -17,10 +17,15 @@ const GroupMultiChatWorkspace = React.lazy(async () => {
   return { default: module.GroupMultiChatWorkspace };
 });
 
+const SettingsView = React.lazy(async () => {
+  const module = await import('./SettingsView');
+  return { default: module.SettingsView };
+});
+
 export type DroneHubWorkspaceContentProps = {
   appView: AppView;
   setupWelcomeProps: React.ComponentProps<typeof SetupWelcomeViewComponent> | null;
-  settingsViewProps: React.ComponentProps<typeof SettingsView>;
+  settingsViewProps: React.ComponentProps<typeof SettingsViewComponent>;
   draftChatWorkspaceProps: React.ComponentProps<typeof DraftChatWorkspaceComponent> | null;
   groupMultiChatWorkspaceProps: React.ComponentProps<typeof GroupMultiChatWorkspaceComponent> | null;
   noDroneSelectedStateProps: React.ComponentProps<typeof NoDroneSelectedState>;

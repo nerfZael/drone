@@ -76,6 +76,7 @@ export function migrateDeviceMeshGrants(grants: readonly CapabilityGrant[]): Cap
 export class DeviceMeshStore {
   private state: DeviceMeshState | null = null;
   private writes: Promise<void> = Promise.resolve();
+  private readonly listeners = new Set<() => void>();
 
   constructor(
     private readonly statePath: string,
@@ -137,6 +138,11 @@ export class DeviceMeshStore {
     const result = await change(state);
     await this.persist();
     return result;
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
   }
 
   async upsertDiscoveredDevice(device: MeshDevice): Promise<boolean> {
@@ -202,5 +208,12 @@ export class DeviceMeshStore {
       await fs.rename(tempPath, this.statePath);
     });
     await this.writes;
+    for (const listener of this.listeners) {
+      try {
+        listener();
+      } catch {
+        // A status subscriber must never make a successful state write fail.
+      }
+    }
   }
 }

@@ -24,3 +24,7 @@ export function selectSidebarChatNodes(args: {
   }
   return [nodeId];
 }
+
+export function clearSidebarChatNodeSelection(currentNodeIds: string[]): string[] {
+  return currentNodeIds.length === 0 ? currentNodeIds : [];
+}

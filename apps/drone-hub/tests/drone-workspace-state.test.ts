@@ -297,6 +297,9 @@ describe('per-drone workspace state', () => {
     expect(workspace).toContain('if (!layout.panels[CHAT_PANEL_ID]) return;');
     expect(workspace).toContain('unmountingRef.current = false;');
     expect(workspace).toContain('unmountingRef.current = true;');
+    expect(workspace).toContain('schedulePersistCurrentLayout');
+    expect(workspace).toContain('}, 200);');
+    expect(workspace).toContain('lastVisibleToolTabsRef.current === nextVisibleTabsKey');
   });
 
   test('does not reconcile Dockview move removals as closed panels', () => {

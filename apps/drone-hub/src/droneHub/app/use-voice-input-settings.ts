@@ -14,13 +14,14 @@ type VoiceInputDraft = Omit<VoiceInputSettingsResponse['voiceInput'], 'silenceMi
 
 export type UseVoiceInputSettingsResult = ReturnType<typeof useVoiceInputSettings>;
 
-export function useVoiceInputSettings(requestJson: RequestJsonFn) {
+export function useVoiceInputSettings(requestJson: RequestJsonFn, enabled = true) {
   const queryClient = useQueryClient();
   const queryKey = settingsQueryKey('voice-input');
   const query = useSettingsQuery<VoiceInputSettingsResponse>(
     requestJson,
     queryKey,
     '/api/settings/voice-input',
+    enabled,
   );
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);

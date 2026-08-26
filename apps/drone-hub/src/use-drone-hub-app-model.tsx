@@ -234,9 +234,9 @@ export type DroneHubAppModel = {
 function droneHubBusyDebugEnabled(): boolean {
   if (typeof window === 'undefined') return false;
   try {
-    return window.localStorage.getItem('droneHub.debugBusy') !== '0';
+    return window.localStorage.getItem('droneHub.debugBusy') === '1';
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -934,7 +934,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const setRenderedSidebarNodeTree = React.useCallback((nodeTree: SidebarNodeTreeModel | null) => {
     renderedSidebarNodeTreeRef.current = nodeTree;
   }, []);
-  const deleteActionSettingsState = useDeleteActionSettings(requestJson);
+  const deleteActionSettingsState = useDeleteActionSettings(requestJson, {
+    archiveEnabled: appView === 'settings' && settingsActiveTab === 'archive',
+  });
   const setupStatusState = useSetupStatus(requestJson);
   const { llmSettings } = llmSettingsState;
 
@@ -957,7 +959,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   }, []);
 
   const hubLogsState = useHubLogs({
-    appView,
+    enabled: appView === 'settings' && settingsActiveTab === 'system',
     requestJson,
     copyText,
     tailLines: HUB_LOGS_TAIL_LINES,

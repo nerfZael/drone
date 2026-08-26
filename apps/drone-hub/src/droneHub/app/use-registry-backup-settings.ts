@@ -22,10 +22,10 @@ function parsePositiveIntDraft(value: string): number | null {
   return Number.isSafeInteger(n) && n > 0 ? n : null;
 }
 
-export function useRegistryBackupSettings(requestJson: RequestJsonFn) {
+export function useRegistryBackupSettings(requestJson: RequestJsonFn, enabled = true) {
   const queryClient = useQueryClient();
   const queryKey = settingsQueryKey('backups');
-  const query = useSettingsQuery<RegistryBackupSettingsResponse>(requestJson, queryKey, '/api/settings/backups');
+  const query = useSettingsQuery<RegistryBackupSettingsResponse>(requestJson, queryKey, '/api/settings/backups', enabled);
   const [backupSettingsError, setBackupSettingsError] = React.useState<string | null>(null);
   const [backupSettingsNotice, setBackupSettingsNotice] = React.useState<string | null>(null);
   const [backupsEnabledDraft, setBackupsEnabledDraft] = React.useState(true);

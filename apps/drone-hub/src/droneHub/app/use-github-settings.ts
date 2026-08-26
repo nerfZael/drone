@@ -5,11 +5,12 @@ type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 
 export type UseGithubSettingsResult = ReturnType<typeof useGithubSettings>;
 
-export function useGithubSettings(requestJson: RequestJsonFn) {
+export function useGithubSettings(requestJson: RequestJsonFn, enabled = true) {
   const query = useSettingsQuery<GithubSettingsResponse>(
     requestJson,
     settingsQueryKey('github'),
     '/api/settings/github',
+    enabled,
   );
 
   const loadGithubSettings = async () => {

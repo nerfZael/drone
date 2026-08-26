@@ -67,10 +67,10 @@ export function changeCompanionProvider(
 
 type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
 
-export function useCompanionSettings(requestJson: RequestJson) {
+export function useCompanionSettings(requestJson: RequestJson, enabled = true) {
   const [data, setData] = React.useState<CompanionSettingsResponse | null>(null);
   const [draft, setDraft] = React.useState<CompanionSettingsDraft | null>(null);
-  const [loading, setLoading] = React.useState(true);
+  const [loading, setLoading] = React.useState(enabled);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState('');
   const [saved, setSaved] = React.useState(false);
@@ -90,7 +90,9 @@ export function useCompanionSettings(requestJson: RequestJson) {
     }
   }, [requestJson]);
 
-  React.useEffect(() => void load(), [load]);
+  React.useEffect(() => {
+    if (enabled) void load();
+  }, [enabled, load]);
 
   const dirty = Boolean(data && draft && JSON.stringify(data.settings) !== JSON.stringify(draft));
   React.useEffect(() => {

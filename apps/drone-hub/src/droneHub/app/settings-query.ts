@@ -16,6 +16,8 @@ export function useSettingsQuery<T>(
     queryFn: ({ signal }) => requestJson<T>(url, { signal }),
     enabled,
     refetchOnReconnect: false,
+    refetchOnWindowFocus: false,
+    staleTime: 60_000,
   });
 }
 

@@ -8,7 +8,7 @@ function readSource(relativePath: string): string {
 }
 
 describe('whiteboard boundaries', () => {
-  test('mounts the whiteboard canvas without a whiteboard-specific lazy boundary', () => {
+  test('keeps the drawing dependency and its styles inside the lazy whiteboard pane', () => {
     const dock = readSource('WhiteboardDock.tsx');
     expect(dock).not.toContain("@excalidraw/excalidraw'");
     expect(dock).not.toContain('@excalidraw/excalidraw/types');
@@ -18,7 +18,7 @@ describe('whiteboard boundaries', () => {
 
     const canvas = readSource('WhiteboardCanvas.tsx');
     expect(canvas).toContain("@excalidraw/excalidraw'");
-    expect(canvas).not.toContain('@excalidraw/excalidraw/index.css');
+    expect(canvas).toContain('@excalidraw/excalidraw/index.css');
     expect(canvas).toContain('className="dh-whiteboard-theme h-full w-full"');
     expect(canvas).toContain('theme="dark"');
   });

@@ -18,14 +18,9 @@ const { RightPanelPaneLoadingFallback } = await import(
 );
 
 describe('right panel tab content', () => {
-  test('tracks only non-critical right panel panes as lazy-loaded', () => {
-    expect(isRightPanelTabLazyLoaded('editor')).toBe(false);
-    expect(isRightPanelTabLazyLoaded('whiteboard')).toBe(false);
-    expect(isRightPanelTabLazyLoaded('prs')).toBe(false);
+  test('tracks every right panel feature pane as lazy-loaded', () => {
     for (const tab of RIGHT_PANEL_TABS) {
-      if (tab !== 'editor' && tab !== 'whiteboard' && tab !== 'prs') {
-        expect(isRightPanelTabLazyLoaded(tab)).toBe(true);
-      }
+      expect(isRightPanelTabLazyLoaded(tab)).toBe(true);
     }
   });
 
@@ -47,22 +42,21 @@ describe('right panel tab content', () => {
     const sourcePath = path.join(import.meta.dir, '../src/droneHub/app/RightPanelTabContent.tsx');
     const source = fs.readFileSync(sourcePath, 'utf8');
     expect(source).not.toContain('React.lazy');
-    expect(source).toContain("from '../pullRequests/DronePullRequestsDock'");
+    expect(source).toContain("import('../pullRequests/DronePullRequestsDock')");
     expect(source).not.toContain("from '../files/OpenedDroneFilePanel'");
     expect(source).not.toContain("from '../files/QuickOpenModal'");
-    expect(source).toContain("from '../whiteboard/WhiteboardDock'");
-    expect(source).toContain("from './DroneEditorDock'");
-    expect(source).not.toContain('loadWhiteboardDock');
-    expect(source).not.toContain('loadDroneEditorDock');
+    expect(source).toContain("import('../whiteboard/WhiteboardDock')");
+    expect(source).toContain("import('./DroneEditorDock')");
+    expect(source).toContain('loadWhiteboardDock');
+    expect(source).toContain('loadDroneEditorDock');
     for (const tab of RIGHT_PANEL_TABS) {
-      if (tab === 'editor' || tab === 'whiteboard' || tab === 'prs') continue;
       if (tab === 'assistant') {
         expect(source).toContain("if (tab === 'assistant')");
       } else {
         expect(source).toContain(`case '${tab}'`);
       }
     }
-    expect(source.match(/<PaneModule tab=\{tab\}/g)?.length).toBe(RIGHT_PANEL_TABS.length - 3);
+    expect(source.match(/<PaneModule tab=\{tab\}/g)?.length).toBe(RIGHT_PANEL_TABS.length);
   });
 
   test('loads the changes dock only when inspecting a pull request', () => {

@@ -22,9 +22,9 @@ type UseDroneHubRegistryDataArgs = {
 function droneHubBusyDebugEnabled(): boolean {
   if (typeof window === 'undefined') return false;
   try {
-    return window.localStorage.getItem('droneHub.debugBusy') !== '0';
+    return window.localStorage.getItem('droneHub.debugBusy') === '1';
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -489,7 +489,7 @@ export function useDroneHubRegistryData({
     value: reposResp,
     error: reposError,
     loading: reposLoading,
-  } = usePoll<{ ok: true; repos: RepoSummary[] }>(() => fetchJson('/api/repos'), 5000, [], {
+  } = usePoll<{ ok: true; repos: RepoSummary[] }>(() => fetchJson('/api/repos'), 30_000, [], {
     isEqual: sameRepoResponse,
   });
   const repos = reposResp?.repos ?? [];
@@ -509,8 +509,11 @@ export function useDroneHubRegistryData({
   const { value: polledGroupsResp } = usePoll<{ ok: true; groups: GroupSummary[] }>(
     () => fetchJson('/api/groups'),
     5000,
-    [],
-    { isEqual: sameGroupsResponse },
+    [droneEvents.connected, Boolean(droneEvents.groups)],
+    {
+      enabled: !(droneEvents.connected && droneEvents.groups),
+      isEqual: sameGroupsResponse,
+    },
   );
   const registryGroups =
     droneEvents.connected && droneEvents.groups

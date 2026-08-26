@@ -130,6 +130,10 @@ export class DeviceMeshHttp {
     string,
     { status: 'pending' | 'approved' | 'failed'; error?: string }
   >();
+  private readonly eventClients = new Map<http.ServerResponse, ReturnType<typeof setInterval>>();
+  private eventRevision = 0;
+  private readonly unsubscribeStoreChanges: () => void;
+  private readonly unsubscribeConnectionChanges: () => void;
 
   constructor(
     private readonly identity: LocalDeviceIdentity,
@@ -140,7 +144,61 @@ export class DeviceMeshHttp {
     private readonly apiToken: string,
     private readonly extensions: DeviceMeshHttpExtension[] = [],
     private readonly invitationEndpoint: () => string | null = () => null,
-  ) {}
+  ) {
+    this.unsubscribeStoreChanges = this.store.subscribe(() => this.publishChange('state'));
+    this.unsubscribeConnectionChanges = this.router.subscribeConnections(() =>
+      this.publishChange('connections'),
+    );
+  }
+
+  close(): void {
+    this.unsubscribeStoreChanges();
+    this.unsubscribeConnectionChanges();
+    for (const [response, keepAlive] of this.eventClients) {
+      clearInterval(keepAlive);
+      if (!response.destroyed) response.end();
+    }
+    this.eventClients.clear();
+  }
+
+  private publishChange(reason: 'state' | 'connections'): void {
+    this.eventRevision += 1;
+    const payload = `event: change\ndata: ${JSON.stringify({ revision: this.eventRevision, reason })}\n\n`;
+    for (const response of this.eventClients.keys()) {
+      try {
+        response.write(payload);
+      } catch {
+        this.removeEventClient(response);
+      }
+    }
+  }
+
+  private removeEventClient(response: http.ServerResponse): void {
+    const keepAlive = this.eventClients.get(response);
+    if (keepAlive) clearInterval(keepAlive);
+    this.eventClients.delete(response);
+  }
+
+  private openEvents(response: http.ServerResponse): void {
+    response.statusCode = 200;
+    response.setHeader('content-type', 'text/event-stream; charset=utf-8');
+    response.setHeader('cache-control', 'no-cache, no-transform');
+    response.setHeader('connection', 'keep-alive');
+    response.flushHeaders?.();
+    response.write(`event: ready\ndata: ${JSON.stringify({ revision: this.eventRevision })}\n\n`);
+    const keepAlive = setInterval(() => {
+      try {
+        response.write(': keepalive\n\n');
+      } catch {
+        this.removeEventClient(response);
+      }
+    }, 25_000);
+    keepAlive.unref?.();
+    this.eventClients.set(response, keepAlive);
+    response.once('close', () => {
+      this.removeEventClient(response);
+    });
+  }
 
   async handlePublic(
     request: http.IncomingMessage,
@@ -191,6 +249,10 @@ export class DeviceMeshHttp {
       if (!this.adminAuthorized(request)) {
         response.setHeader('www-authenticate', 'Bearer realm="drone-device-mesh"');
         json(response, 401, { ok: false, error: 'unauthorized' });
+        return true;
+      }
+      if (method === 'GET' && url.pathname === '/api/device-mesh/events') {
+        this.openEvents(response);
         return true;
       }
       for (const extension of this.extensions) {

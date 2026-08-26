@@ -92,6 +92,7 @@ export class DeviceMeshRouter {
   private readonly requestTimes = new Map<string, number[]>();
   private readonly bulkRequestTimes = new Map<string, number[]>();
   private readonly connecting = new Set<string>();
+  private readonly connectionListeners = new Set<() => void>();
   private reconnectTimer: ReturnType<typeof setInterval> | null = null;
   private readonly membership: DeviceMembershipSynchronizer;
   private readonly requestClient: DeviceMeshRequestClient;
@@ -137,6 +138,21 @@ export class DeviceMeshRouter {
 
   connectedDeviceIds(): string[] {
     return [...this.connections.keys()];
+  }
+
+  subscribeConnections(listener: () => void): () => void {
+    this.connectionListeners.add(listener);
+    return () => this.connectionListeners.delete(listener);
+  }
+
+  private notifyConnectionsChanged(): void {
+    for (const listener of this.connectionListeners) {
+      try {
+        listener();
+      } catch {
+        // Connection observers are advisory and cannot interrupt mesh routing.
+      }
+    }
   }
 
   handleUpgrade(request: http.IncomingMessage, socket: Duplex, head: Buffer): boolean {
@@ -270,14 +286,17 @@ export class DeviceMeshRouter {
       existing.ws.close(4000, 'replaced');
     }
     this.connections.set(connection.peerDeviceId, connection);
+    this.notifyConnectionsChanged();
     connection.ws.on('message', (raw) => {
       void this.onMessage(connection, raw).catch(() =>
         connection.ws.close(1011, 'mesh processing failed'),
       );
     });
     connection.ws.on('close', () => {
-      if (this.connections.get(connection.peerDeviceId)?.ws === connection.ws)
+      if (this.connections.get(connection.peerDeviceId)?.ws === connection.ws) {
         this.connections.delete(connection.peerDeviceId);
+        this.notifyConnectionsChanged();
+      }
       for (const [requestId, route] of this.routes) {
         if (route.sourceWs !== connection.ws && route.targetWs !== connection.ws) continue;
         clearTimeout(route.timer);

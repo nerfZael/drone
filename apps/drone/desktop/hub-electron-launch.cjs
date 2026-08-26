@@ -28,6 +28,13 @@ function detachedHubStartArgs(cliPath, env = process.env, platform = process.pla
   return args;
 }
 
+function electronNodeChildEnv(env = process.env) {
+  return {
+    ...env,
+    ELECTRON_RUN_AS_NODE: '1',
+  };
+}
+
 function parseDetachedHubStartOutput(raw) {
   const output = String(raw || '').trim();
   const firstBrace = output.indexOf('{');
@@ -64,6 +71,7 @@ function formatDetachedHubStartOutput(payload) {
 
 module.exports = {
   detachedHubStartArgs,
+  electronNodeChildEnv,
   formatDetachedHubStartOutput,
   parseDetachedHubStartOutput,
 };

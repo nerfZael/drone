@@ -13,10 +13,10 @@ type ProfileMutation =
 
 export type UseProfileSettingsResult = ReturnType<typeof useProfileSettings>;
 
-export function useProfileSettings(requestJson: RequestJsonFn) {
+export function useProfileSettings(requestJson: RequestJsonFn, enabled = true) {
   const queryClient = useQueryClient();
   const queryKey = settingsQueryKey('profiles');
-  const query = useSettingsQuery<ProfileSettingsResponse>(requestJson, queryKey, '/api/settings/profiles');
+  const query = useSettingsQuery<ProfileSettingsResponse>(requestJson, queryKey, '/api/settings/profiles', enabled);
   const [profileSettingsError, setProfileSettingsError] = React.useState<string | null>(null);
   const [profileSettingsNotice, setProfileSettingsNotice] = React.useState<string | null>(null);
   const [createProfileDraft, setCreateProfileDraft] = React.useState('');

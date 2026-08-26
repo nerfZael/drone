@@ -19,13 +19,13 @@ export type UseHubLogsResult = {
 };
 
 export function useHubLogs(opts: {
-  appView: 'workspace' | 'settings';
+  enabled: boolean;
   requestJson: RequestJsonFn;
   copyText: CopyTextFn;
   tailLines: number;
   maxBytes: number;
 }): UseHubLogsResult {
-  const { appView, requestJson, copyText, tailLines, maxBytes } = opts;
+  const { enabled, requestJson, copyText, tailLines, maxBytes } = opts;
   const [hubLogs, setHubLogs] = React.useState<HubLogsResponse | null>(null);
   const [hubLogsLoading, setHubLogsLoading] = React.useState(false);
   const [hubLogsError, setHubLogsError] = React.useState<string | null>(null);
@@ -63,9 +63,9 @@ export function useHubLogs(opts: {
   }, []);
 
   React.useEffect(() => {
-    if (appView !== 'settings') return;
+    if (!enabled) return;
     void loadHubLogs();
-  }, [appView, loadHubLogs]);
+  }, [enabled, loadHubLogs]);
 
   React.useEffect(() => {
     if (!hubLogsExpanded) return;

@@ -84,7 +84,7 @@ export type {
 
 export type UseSkillLibraryResult = ReturnType<typeof useSkillLibrary>;
 
-export function useSkillLibrary(requestJson: RequestJsonFn) {
+export function useSkillLibrary(requestJson: RequestJsonFn, enabled = true) {
   const queryClient = useQueryClient();
   const skillsQueryKey = settingsQueryKey('skills');
   const sourcesQueryKey = settingsQueryKey('skill-sources');
@@ -116,23 +116,25 @@ export function useSkillLibrary(requestJson: RequestJsonFn) {
     requestJson,
     skillsQueryKey,
     '/api/skills',
+    enabled,
   );
   const sourcesQuery = useSettingsQuery<SkillSourceListResponse>(
     requestJson,
     sourcesQueryKey,
     '/api/skill-sources',
+    enabled,
   );
   const sourceSkillsQuery = useSettingsQuery<SkillSourceCandidatesResponse>(
     requestJson,
     settingsQueryKey('skill-source-candidates', selectedSourceId),
     `/api/skill-sources/${encodeURIComponent(selectedSourceId ?? '')}/skills`,
-    Boolean(selectedSourceId),
+    enabled && Boolean(selectedSourceId),
   );
   const sourcePreviewQuery = useSettingsQuery<SkillSourcePreviewResponse>(
     requestJson,
     settingsQueryKey('skill-source-preview', selectedSourceId, selectedSourcePreviewPath),
     `/api/skill-sources/${encodeURIComponent(selectedSourceId ?? '')}/preview?${new URLSearchParams({ path: selectedSourcePreviewPath ?? '' }).toString()}`,
-    Boolean(selectedSourceId && selectedSourcePreviewPath),
+    enabled && Boolean(selectedSourceId && selectedSourcePreviewPath),
   );
 
   const skills = React.useMemo(

@@ -514,6 +514,7 @@ import {
   readCanonicalDroneLifecycleModel,
   readCanonicalDroneSummaryModel,
 } from './canonical-drone-read-model';
+import { RevisionedSingleFlightCache } from './revisioned-single-flight-cache';
 import {
   commitDroneMetadataPatch,
   renameDroneDisplayName,
@@ -4472,7 +4473,6 @@ async function startDroneHubApiServerWithLifecycle(
 
   const DRONE_STATUS_SUMMARY_CONCURRENCY = 16;
   const DRONE_SUMMARY_REGISTRY_CACHE_TTL_MS = 1_000;
-  const CANONICAL_ACTIVE_MODEL_CACHE_TTL_MS = 250;
   const DRONE_SUMMARY_MAINTENANCE_MIN_INTERVAL_MS = 5_000;
   let droneSummaryRegistryCache: { loadedAtMs: number; registry: any } | null = null;
   let droneSummaryRegistryCacheLoad: Promise<any> | null = null;
@@ -4481,8 +4481,7 @@ async function startDroneHubApiServerWithLifecycle(
   let droneSummaryMaintenanceTask: Promise<void> | null = null;
   let droneSummaryMaintenanceLastStartedAt = 0;
   let droneSummaryMaintenanceStopped = false;
-  let canonicalActiveModelCache: { loadedAtMs: number; model: any } | null = null;
-  let canonicalSummaryModelCache: { loadedAtMs: number; model: any } | null = null;
+  const canonicalModelCache = new RevisionedSingleFlightCache<'active' | 'summary', any>();
 
   function hubPerformanceDebugEnabled(): boolean {
     return String(process.env.DRONE_HUB_PERF_DEBUG ?? '').trim() === '1';
@@ -4504,22 +4503,16 @@ async function startDroneHubApiServerWithLifecycle(
 
   async function loadCanonicalActiveModel(): Promise<any> {
     if ((globalThis as any).Bun) return await loadRegistry();
-    if (
-      canonicalActiveModelCache &&
-      Date.now() - canonicalActiveModelCache.loadedAtMs < CANONICAL_ACTIVE_MODEL_CACHE_TTL_MS
-    ) {
-      return canonicalActiveModelCache.model;
-    }
-    const phases: Array<{ name: string; durationMs: number; rowCount: number }> = [];
-    const readStartedAt = performance.now();
-    const activeModel = readCanonicalActiveDroneModel((phase) => phases.push(phase));
-    const readDurationMs = performance.now() - readStartedAt;
-    if (activeModel) {
-      logSynchronousHubWork('canonical active drone read', readDurationMs, { phases });
-    }
-    const model = activeModel ?? (await loadRegistry());
-    canonicalActiveModelCache = { loadedAtMs: Date.now(), model };
-    return model;
+    return await canonicalModelCache.getOrLoad('active', async () => {
+      const phases: Array<{ name: string; durationMs: number; rowCount: number }> = [];
+      const readStartedAt = performance.now();
+      const activeModel = readCanonicalActiveDroneModel((phase) => phases.push(phase));
+      const readDurationMs = performance.now() - readStartedAt;
+      if (activeModel) {
+        logSynchronousHubWork('canonical active drone read', readDurationMs, { phases });
+      }
+      return activeModel ?? (await loadRegistry());
+    });
   }
 
   async function loadCanonicalLifecycleModel(): Promise<any> {
@@ -4531,30 +4524,25 @@ async function startDroneHubApiServerWithLifecycle(
     record: (name: string, durationMs: number) => void;
   }): Promise<any> {
     if ((globalThis as any).Bun) return await loadRegistry();
-    if (
-      canonicalSummaryModelCache &&
-      Date.now() - canonicalSummaryModelCache.loadedAtMs < CANONICAL_ACTIVE_MODEL_CACHE_TTL_MS
-    ) {
-      return canonicalSummaryModelCache.model;
-    }
-    const phases: Array<{ name: string; durationMs: number; rowCount: number }> = [];
-    const readStartedAt = performance.now();
-    const summaryModel = readCanonicalDroneSummaryModel((phase) => {
-      phases.push(phase);
-      const timingName = `sqlite${phase.name[0].toUpperCase()}${phase.name.slice(1)}`;
-      timing?.record(timingName, phase.durationMs);
+    return await canonicalModelCache.getOrLoad('summary', async () => {
+      const phases: Array<{ name: string; durationMs: number; rowCount: number }> = [];
+      const readStartedAt = performance.now();
+      const summaryModel = readCanonicalDroneSummaryModel((phase) => {
+        phases.push(phase);
+        const timingName = `sqlite${phase.name[0].toUpperCase()}${phase.name.slice(1)}`;
+        timing?.record(timingName, phase.durationMs);
+      });
+      const readDurationMs = performance.now() - readStartedAt;
+      if (summaryModel) {
+        logSynchronousHubWork('canonical drone summary read', readDurationMs, { phases });
+      }
+      const projectionStartedAt = performance.now();
+      const model = summaryModel ?? (await loadRegistry());
+      if (!summaryModel) {
+        timing?.record('compatibilityProjection', performance.now() - projectionStartedAt);
+      }
+      return model;
     });
-    const readDurationMs = performance.now() - readStartedAt;
-    if (summaryModel) {
-      logSynchronousHubWork('canonical drone summary read', readDurationMs, { phases });
-    }
-    const projectionStartedAt = performance.now();
-    const model = summaryModel ?? (await loadRegistry());
-    if (!summaryModel) {
-      timing?.record('compatibilityProjection', performance.now() - projectionStartedAt);
-    }
-    canonicalSummaryModelCache = { loadedAtMs: Date.now(), model };
-    return model;
   }
 
   async function mapDroneRegistrySummaryConcurrent<T, R>(
@@ -5383,8 +5371,7 @@ async function startDroneHubApiServerWithLifecycle(
   const stopDroneRegistryBroadcasterIfIdle = () => droneRegistryBroadcaster.stopIfIdle();
 
   const notifyCanonicalDroneRegistryWrite = () => {
-    canonicalActiveModelCache = null;
-    canonicalSummaryModelCache = null;
+    canonicalModelCache.invalidate();
     invalidateDroneSummaryRegistryCache();
     scheduleDroneSummaryMaintenance('registry-write', 0);
     scheduleDroneStatusRefresh('registry-write', 0);
@@ -5397,8 +5384,7 @@ async function startDroneHubApiServerWithLifecycle(
     notifyCanonicalDroneRegistryWrite,
   );
   const notifyCanonicalDroneSummaryChange = () => {
-    canonicalActiveModelCache = null;
-    canonicalSummaryModelCache = null;
+    canonicalModelCache.invalidate();
     invalidateDroneSummaryRegistryCache();
     scheduleDroneRegistryBroadcasterRefresh();
   };

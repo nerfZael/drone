@@ -13,7 +13,6 @@ import { applyReadingDensity } from './reading-density';
 import { AppConfirmDialogProvider } from './ui/AppConfirmDialog';
 import { DesktopDeviceProvider, useDesktopDevice } from './droneHub/app/DesktopDeviceProvider';
 import { RemoteDeviceWorkspace } from './droneHub/app/RemoteDeviceWorkspace';
-import { useIdleMonacoEditorPreload } from './droneHub/files/monaco-editor-loader';
 import { ContinuousDictationProvider } from './droneHub/chat/ContinuousDictationContext';
 import { ActiveComposerProvider } from './droneHub/chat/ActiveComposerContext';
 import { EditorZoomController } from './droneHub/files/editor-zoom';
@@ -84,7 +83,6 @@ function DroneHubAppContent() {
 }
 
 export default function DroneHubApp() {
-  useIdleMonacoEditorPreload();
   return (
     <DesktopDeviceProvider>
       <EditorZoomController />

@@ -394,12 +394,14 @@ export function DockableDroneWorkspace({
   const apiRef = React.useRef<DockviewApi | null>(null);
   const disposablesRef = React.useRef<Array<{ dispose: () => void }>>([]);
   const removedPanelTimersRef = React.useRef<Map<string, number>>(new Map());
+  const layoutSaveTimerRef = React.useRef<number | null>(null);
   const suppressSaveRef = React.useRef(false);
   const unmountingRef = React.useRef(false);
   const lastAppliedOpenRequestRef = React.useRef(openRequestNonce);
   const [previewHostVersion, setPreviewHostVersion] = React.useState(0);
   const [workspacePanelCount, setWorkspacePanelCount] = React.useState(1);
   const lastReportedPreviewHostRef = React.useRef<PreviewHostState | null>(null);
+  const lastVisibleToolTabsRef = React.useRef<string>('');
   const isMobileViewport = useMobileViewport();
   const [mobileActivePanel, setMobileActivePanel] = React.useState<'chat' | 'tool'>('chat');
   const [mobileToolPaneOpen, setMobileToolPaneOpen] = React.useState(false);
@@ -417,8 +419,13 @@ export function DockableDroneWorkspace({
   );
   const updateWorkspacePanelState = React.useCallback(() => {
     const api = apiRef.current;
-    setWorkspacePanelCount(Math.max(1, api?.totalPanels ?? 1));
-    onVisibleToolTabsChange?.(api ? visibleToolTabs(api) : []);
+    const nextPanelCount = Math.max(1, api?.totalPanels ?? 1);
+    setWorkspacePanelCount((current) => current === nextPanelCount ? current : nextPanelCount);
+    const nextVisibleTabs = api ? visibleToolTabs(api) : [];
+    const nextVisibleTabsKey = nextVisibleTabs.join('\u0000');
+    if (lastVisibleToolTabsRef.current === nextVisibleTabsKey) return;
+    lastVisibleToolTabsRef.current = nextVisibleTabsKey;
+    onVisibleToolTabsChange?.(nextVisibleTabs);
   }, [onVisibleToolTabsChange]);
   const contextValue = React.useMemo(
     () => ({
@@ -463,6 +470,14 @@ export function DockableDroneWorkspace({
       // Ignore layout persistence failures; the active workspace can keep running.
     }
   }, [currentDrone.id]);
+
+  const schedulePersistCurrentLayout = React.useCallback(() => {
+    if (layoutSaveTimerRef.current !== null) window.clearTimeout(layoutSaveTimerRef.current);
+    layoutSaveTimerRef.current = window.setTimeout(() => {
+      layoutSaveTimerRef.current = null;
+      persistCurrentLayout();
+    }, 200);
+  }, [persistCurrentLayout]);
 
   const rebalanceWorkspaceGridGroups = React.useCallback((afterRebalance?: () => void) => {
     const api = apiRef.current;
@@ -551,7 +566,7 @@ export function DockableDroneWorkspace({
 
       const layoutDisposable = event.api.onDidLayoutChange(() => {
         updateWorkspacePanelState();
-        persistCurrentLayout();
+        schedulePersistCurrentLayout();
       });
       const activePanelDisposable = event.api.onDidActivePanelChange((panel) => {
         if (!panel) return;
@@ -595,7 +610,7 @@ export function DockableDroneWorkspace({
       disposablesRef.current.forEach((disposable) => disposable.dispose());
       disposablesRef.current = [layoutDisposable, activePanelDisposable, removeDisposable];
     },
-    [applyToolOpenRequest, loadLayout, onActiveToolTabChange, onAfterToolPanelRemove, persistCurrentLayout, rebalanceWorkspaceGridGroups, updateWorkspacePanelState],
+    [applyToolOpenRequest, loadLayout, onActiveToolTabChange, onAfterToolPanelRemove, persistCurrentLayout, rebalanceWorkspaceGridGroups, schedulePersistCurrentLayout, updateWorkspacePanelState],
   );
 
   React.useLayoutEffect(() => {
@@ -604,6 +619,10 @@ export function DockableDroneWorkspace({
     // layout persistence for this workspace instance.
     unmountingRef.current = false;
     return () => {
+      if (layoutSaveTimerRef.current !== null) {
+        window.clearTimeout(layoutSaveTimerRef.current);
+        layoutSaveTimerRef.current = null;
+      }
       persistCurrentLayout();
       unmountingRef.current = true;
       removedPanelTimersRef.current.forEach((timer) => window.clearTimeout(timer));

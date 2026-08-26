@@ -66,6 +66,7 @@ describe('settings-only hook startup boundary', () => {
 
     expect(workspaceContent).toContain("appView === 'settings' ? (");
     expect(workspaceContent).toContain('<SettingsView {...settingsViewProps} />');
+    expect(workspaceContent).toContain("import('./SettingsView')");
   });
 
   test('keeps settings-only hooks owned by SettingsView', () => {
@@ -82,5 +83,16 @@ describe('settings-only hook startup boundary', () => {
       const hook = source(`src/droneHub/app/${fileName}`);
       expect(hook).toContain('useSettingsQuery<');
     }
+  });
+
+  test('loads settings resources only for their active tab and keeps results warm', () => {
+    const settingsView = source('src/droneHub/app/SettingsView.tsx');
+    const settingsQuery = source('src/droneHub/app/settings-query.ts');
+
+    expect(settingsView).toContain("const generalEnabled = activeTab === 'general'");
+    expect(settingsView).toContain("useSkillLibrary(requestJson, activeTab === 'skills')");
+    expect(settingsView).toContain("useMcpServers(requestJson, activeTab === 'mcp')");
+    expect(settingsQuery).toContain('staleTime: 60_000');
+    expect(settingsQuery).toContain('refetchOnWindowFocus: false');
   });
 });

@@ -14,10 +14,10 @@ type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 
 export type UseFilesystemSettingsResult = ReturnType<typeof useFilesystemSettings>;
 
-export function useFilesystemSettings(requestJson: RequestJsonFn) {
+export function useFilesystemSettings(requestJson: RequestJsonFn, enabled = true) {
   const queryClient = useQueryClient();
   const queryKey = settingsQueryKey('filesystem');
-  const query = useSettingsQuery<FilesystemSettingsResponse>(requestJson, queryKey, '/api/settings/filesystem');
+  const query = useSettingsQuery<FilesystemSettingsResponse>(requestJson, queryKey, '/api/settings/filesystem', enabled);
   const [filesystemSettingsError, setFilesystemSettingsError] = React.useState<string | null>(null);
   const [filesystemSettingsNotice, setFilesystemSettingsNotice] = React.useState<string | null>(null);
   const [uploadMaxMiBDraft, setUploadMaxMiBDraft] = React.useState('2048');

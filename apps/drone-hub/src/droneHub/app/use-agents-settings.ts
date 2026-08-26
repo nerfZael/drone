@@ -16,10 +16,10 @@ function normalizeAgentsSettingsResponse(data: AgentsSettingsResponse): AgentsSe
 
 export type UseAgentsSettingsResult = ReturnType<typeof useAgentsSettings>;
 
-export function useAgentsSettings(requestJson: RequestJsonFn) {
+export function useAgentsSettings(requestJson: RequestJsonFn, enabled = true) {
   const queryClient = useQueryClient();
   const queryKey = settingsQueryKey('agents');
-  const query = useSettingsQuery<AgentsSettingsResponse>(requestJson, queryKey, '/api/settings/agents');
+  const query = useSettingsQuery<AgentsSettingsResponse>(requestJson, queryKey, '/api/settings/agents', enabled);
   const [agentsSettingsError, setAgentsSettingsError] = React.useState<string | null>(null);
   const [agentsSettingsNotice, setAgentsSettingsNotice] = React.useState<string | null>(null);
   const [agentsContentDraft, setAgentsContentDraft] = React.useState('');

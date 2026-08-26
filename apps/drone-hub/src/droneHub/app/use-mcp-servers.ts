@@ -71,12 +71,12 @@ function replaceServer(servers: McpServerRecord[], server: McpServerRecord): Mcp
 
 export type UseMcpServersResult = ReturnType<typeof useMcpServers>;
 
-export function useMcpServers(requestJson: RequestJsonFn) {
+export function useMcpServers(requestJson: RequestJsonFn, enabled = true) {
   const queryClient = useQueryClient();
   const serversQueryKey = settingsQueryKey('mcp-servers');
   const tokensQueryKey = settingsQueryKey('mcp-access-tokens');
-  const serversQuery = useSettingsQuery<McpServersListResponse>(requestJson, serversQueryKey, '/api/mcp-servers');
-  const tokensQuery = useSettingsQuery<McpTokensListResponse>(requestJson, tokensQueryKey, '/api/mcp-tokens');
+  const serversQuery = useSettingsQuery<McpServersListResponse>(requestJson, serversQueryKey, '/api/mcp-servers', enabled);
+  const tokensQuery = useSettingsQuery<McpTokensListResponse>(requestJson, tokensQueryKey, '/api/mcp-tokens', enabled);
   const [mcpServersError, setMcpServersError] = React.useState<string | null>(null);
   const [queryErrorDismissed, setQueryErrorDismissed] = React.useState(false);
   const [mcpServersNotice, setMcpServersNotice] = React.useState<string | null>(null);

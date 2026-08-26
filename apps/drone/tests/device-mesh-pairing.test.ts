@@ -129,6 +129,35 @@ afterEach(async () => {
 });
 
 describe('desktop device pairing', () => {
+  test('pushes authenticated mesh changes without polling', async () => {
+    const hub = await startHub();
+    const events = await fetch(`${hub.url}/api/device-mesh/events`, {
+      headers: { authorization: `Bearer ${hub.token}` },
+    });
+    expect(events.status).toBe(200);
+    expect(events.headers.get('content-type')).toContain('text/event-stream');
+    const reader = events.body?.getReader();
+    if (!reader) throw new Error('event response did not include a stream');
+    const decoder = new TextDecoder();
+    const ready = await reader.read();
+    expect(decoder.decode(ready.value)).toContain('event: ready');
+
+    const status = await adminJson(hub, '/api/device-mesh');
+    const change = reader.read();
+    await adminJson(hub, `/api/device-mesh/devices/${status.selfDeviceId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ name: 'Renamed desktop' }),
+    });
+    const pushed = await Promise.race([
+      change,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('mesh change event timed out')), 2_000),
+      ),
+    ]);
+    expect(decoder.decode(pushed.value)).toContain('event: change');
+    await reader.cancel();
+  });
+
   test('keeps the administration API off the public mesh listener', async () => {
     const hub = await startHub();
     const health = await fetch(`${hub.ingressUrl}/api/device-mesh/health`);

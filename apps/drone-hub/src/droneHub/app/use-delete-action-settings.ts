@@ -14,7 +14,10 @@ type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 
 export type UseDeleteActionSettingsResult = ReturnType<typeof useDeleteActionSettings>;
 
-export function useDeleteActionSettings(requestJson: RequestJsonFn) {
+export function useDeleteActionSettings(
+  requestJson: RequestJsonFn,
+  options: { archiveEnabled?: boolean } = {},
+) {
   const queryClient = useQueryClient();
   const deleteSettingsKey = settingsQueryKey('delete-action');
   const archivedDronesKey = settingsQueryKey('archive', 'drones');
@@ -24,8 +27,8 @@ export function useDeleteActionSettings(requestJson: RequestJsonFn) {
     deleteSettingsKey,
     '/api/settings/delete-action',
   );
-  const archivedDronesQuery = useSettingsQuery<ArchivedDronesResponse>(requestJson, archivedDronesKey, '/api/archive/drones');
-  const archivedChatsQuery = useSettingsQuery<ArchivedChatsResponse>(requestJson, archivedChatsKey, '/api/archive/chats');
+  const archivedDronesQuery = useSettingsQuery<ArchivedDronesResponse>(requestJson, archivedDronesKey, '/api/archive/drones', options.archiveEnabled ?? true);
+  const archivedChatsQuery = useSettingsQuery<ArchivedChatsResponse>(requestJson, archivedChatsKey, '/api/archive/chats', options.archiveEnabled ?? true);
   const [deleteSettingsError, setDeleteSettingsError] = React.useState<string | null>(null);
   const [deleteSettingsNotice, setDeleteSettingsNotice] = React.useState<string | null>(null);
   const [deleteModeDraft, setDeleteModeDraft] = React.useState<DroneDeleteMode>('permanent');

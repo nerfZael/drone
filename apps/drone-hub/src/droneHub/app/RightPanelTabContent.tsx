@@ -15,18 +15,13 @@ import type {
   PortReachabilityByHostPort,
 } from '../types';
 import type { DroneOpenedFileState, DroneOpenedFileTabState } from '../files/opened-file-types';
-import { DroneFilesDock } from '../files/DroneFilesDock';
-import { DronePullRequestsDock } from '../pullRequests/DronePullRequestsDock';
 import type { QuickOpenFile, QuickOpenRecentFile } from '../files/quick-open-state';
-import { WhiteboardDock } from '../whiteboard/WhiteboardDock';
 import {
   RIGHT_PANEL_TAB_LABELS,
   repoUnavailableReasonForRuntime,
   type RightPanelTab,
 } from './app-config';
 import { AsyncPaneBoundary, type PaneModuleLoader } from './AsyncPaneBoundary';
-import { DroneEditorDock } from './DroneEditorDock';
-import { DroneEditorWorkspace } from './DroneEditorWorkspace';
 import { isDroneStartingOrSeeding } from './helpers';
 
 const loadDroneCanvasDock = async () => (await import('../canvas/DroneCanvasDock')).DroneCanvasDock;
@@ -34,10 +29,16 @@ const loadDroneChangesDock = async () => (await import('../changes/DroneChangesD
 const loadDroneChangeRequestsDock = async () =>
   (await import('../changeRequests/DroneChangeRequestsDock')).DroneChangeRequestsDock;
 const loadDroneEnvDock = async () => (await import('../env/DroneEnvDock')).DroneEnvDock;
+const loadDroneFilesDock = async () => (await import('../files/DroneFilesDock')).DroneFilesDock;
 const loadDroneLinksDock = async () => (await import('../overview/DroneLinksDock')).DroneLinksDock;
 const loadDronePreviewDock = async () => (await import('../overview/DronePreviewDock')).DronePreviewDock;
+const loadDronePullRequestsDock = async () =>
+  (await import('../pullRequests/DronePullRequestsDock')).DronePullRequestsDock;
 const loadDroneTerminalDock = async () => (await import('../terminal/DroneTerminalDock')).DroneTerminalDock;
+const loadWhiteboardDock = async () => (await import('../whiteboard/WhiteboardDock')).WhiteboardDock;
 const loadDroneWorkflowsDock = async () => (await import('../workflows/DroneWorkflowsDock')).DroneWorkflowsDock;
+const loadDroneEditorDock = async () => (await import('./DroneEditorDock')).DroneEditorDock;
+const loadDroneEditorWorkspace = async () => (await import('./DroneEditorWorkspace')).DroneEditorWorkspace;
 
 export function RightPanelPaneLoadingFallback({ tab }: { tab: RightPanelTab }) {
   const label = RIGHT_PANEL_TAB_LABELS[tab] ?? 'Pane';
@@ -350,58 +351,62 @@ export function RightPanelTabContent({
   const chatName = selectedChat || 'default';
   const isCurrent = Boolean(currentDroneId && String(currentDroneId) === String(drone.id));
   const renderFileExplorer = (explorerZoom: number) => (
-    <DroneFilesDock
-      key={`${paneKey}-file-explorer`}
-      droneId={drone.id}
-      droneName={drone.name}
-      droneLabel={uiDroneName(drone.name)}
-      path={currentFsPath}
-      homePath={defaultFsPathForCurrentDrone}
-      entries={fsEntries}
-      loading={fsLoading}
-      error={isCurrent ? fsErrorUi : fsError}
-      startup={
-        isCurrent
-          ? {
-              waiting: filesPane.waiting,
-              timedOut: filesPane.timedOut,
-              hubPhase: drone.hubPhase,
-              hubMessage: drone.hubMessage,
-            }
-          : null
-      }
-      onOpenPath={setCurrentFsPath}
-      onRefresh={refreshFsList}
-      onRefreshOpenedFile={onRefreshOpenedEditorFile}
-      onOpenFile={onOpenFileInEditor}
-      onOpenFileInPanel={onOpenFileInPanel}
-      onCloseOpenedFile={onCloseOpenedEditorFile}
-      onConfirmCloseOpenedFilesForPaths={onConfirmCloseOpenedEditorFilesForPaths}
-      onCloseOpenedFilesForPaths={onCloseOpenedEditorFilesForPaths}
-      onRemapOpenedFilesForPathChange={onRemapOpenedEditorFilesForPathChange}
-      openedFile={openedFile}
-      zoom={explorerZoom}
-    />
+    <PaneModule tab="editor" load={loadDroneFilesDock}>
+      {(DroneFilesDock) => (
+        <DroneFilesDock
+          key={`${paneKey}-file-explorer`}
+          droneId={drone.id}
+          droneName={drone.name}
+          droneLabel={uiDroneName(drone.name)}
+          path={currentFsPath}
+          homePath={defaultFsPathForCurrentDrone}
+          entries={fsEntries}
+          loading={fsLoading}
+          error={isCurrent ? fsErrorUi : fsError}
+          startup={isCurrent ? {
+            waiting: filesPane.waiting,
+            timedOut: filesPane.timedOut,
+            hubPhase: drone.hubPhase,
+            hubMessage: drone.hubMessage,
+          } : null}
+          onOpenPath={setCurrentFsPath}
+          onRefresh={refreshFsList}
+          onRefreshOpenedFile={onRefreshOpenedEditorFile}
+          onOpenFile={onOpenFileInEditor}
+          onOpenFileInPanel={onOpenFileInPanel}
+          onCloseOpenedFile={onCloseOpenedEditorFile}
+          onConfirmCloseOpenedFilesForPaths={onConfirmCloseOpenedEditorFilesForPaths}
+          onCloseOpenedFilesForPaths={onCloseOpenedEditorFilesForPaths}
+          onRemapOpenedFilesForPathChange={onRemapOpenedEditorFilesForPathChange}
+          openedFile={openedFile}
+          zoom={explorerZoom}
+        />
+      )}
+    </PaneModule>
   );
   const fileEditor = (
-    <DroneEditorDock
-      droneId={drone.id}
-      droneName={drone.name}
-      openedFile={openedFile}
-      quickOpen={quickOpen}
-      openedFileTabs={openedFileTabs}
-      activeOpenedFileTabId={activeOpenedFileTabId}
-      onOpenedEditorFileContentChange={onOpenedEditorFileContentChange}
-      onSaveOpenedEditorFile={onSaveOpenedEditorFile}
-      onAppendFileDictationLine={onAppendFileDictationLine}
-      onOpenFileDictationTarget={onOpenFileDictationTarget}
-      onReloadOpenedEditorFileFromDisk={onReloadOpenedEditorFileFromDisk}
-      onOverwriteOpenedEditorFile={onOverwriteOpenedEditorFile}
-      onCloseOpenedEditorFile={onCloseOpenedEditorFile}
-      onActivateOpenedEditorFileTab={onActivateOpenedEditorFileTab}
-      onReorderOpenedEditorFileTabs={onReorderOpenedEditorFileTabs}
-      onOpenFileTargetInEditor={onOpenFileTargetInEditor}
-    />
+    <PaneModule tab="editor" load={loadDroneEditorDock}>
+      {(DroneEditorDock) => (
+        <DroneEditorDock
+          droneId={drone.id}
+          droneName={drone.name}
+          openedFile={openedFile}
+          quickOpen={quickOpen}
+          openedFileTabs={openedFileTabs}
+          activeOpenedFileTabId={activeOpenedFileTabId}
+          onOpenedEditorFileContentChange={onOpenedEditorFileContentChange}
+          onSaveOpenedEditorFile={onSaveOpenedEditorFile}
+          onAppendFileDictationLine={onAppendFileDictationLine}
+          onOpenFileDictationTarget={onOpenFileDictationTarget}
+          onReloadOpenedEditorFileFromDisk={onReloadOpenedEditorFileFromDisk}
+          onOverwriteOpenedEditorFile={onOverwriteOpenedEditorFile}
+          onCloseOpenedEditorFile={onCloseOpenedEditorFile}
+          onActivateOpenedEditorFileTab={onActivateOpenedEditorFileTab}
+          onReorderOpenedEditorFileTabs={onReorderOpenedEditorFileTabs}
+          onOpenFileTargetInEditor={onOpenFileTargetInEditor}
+        />
+      )}
+    </PaneModule>
   );
 
   switch (tab) {
@@ -457,7 +462,11 @@ export function RightPanelTabContent({
       );
 
     case 'whiteboard':
-      return <WhiteboardDock droneId={drone.id} />;
+      return (
+        <PaneModule tab={tab} load={loadWhiteboardDock}>
+          {(WhiteboardDock) => <WhiteboardDock droneId={drone.id} />}
+        </PaneModule>
+      );
 
     case 'terminal':
       return (
@@ -501,7 +510,11 @@ export function RightPanelTabContent({
 
     case 'editor':
       return (
-        <DroneEditorWorkspace explorer={renderFileExplorer} editor={fileEditor} />
+        <PaneModule tab={tab} load={loadDroneEditorWorkspace}>
+          {(DroneEditorWorkspace) => (
+            <DroneEditorWorkspace explorer={renderFileExplorer} editor={fileEditor} />
+          )}
+        </PaneModule>
       );
 
     case 'preview':
@@ -600,20 +613,24 @@ export function RightPanelTabContent({
 
     case 'prs':
       return (
-        <DronePullRequestsDock
-          key={`${paneKey}-${drone.id}-prs`}
-          droneId={drone.id}
-          droneName={drone.name}
-          repoAttached={repoFeaturesEnabled}
-          repoPath={drone.repoPath}
-          repoUnavailableReason={repoUnavailableReason}
-          disabled={disabled}
-          hubPhase={drone.hubPhase}
-          hubMessage={drone.hubMessage}
-          onOpenPullRequest={(pullRequest) => onOpenPullRequest(paneKey, pullRequest)}
-          onRevealFileInFiles={(repoRelativePath) => onRevealChangesFileInFiles(paneKey, repoRelativePath)}
-          onOpenFileInEditor={onOpenChangesFileInEditor}
-        />
+        <PaneModule tab={tab} load={loadDronePullRequestsDock}>
+          {(DronePullRequestsDock) => (
+            <DronePullRequestsDock
+              key={`${paneKey}-${drone.id}-prs`}
+              droneId={drone.id}
+              droneName={drone.name}
+              repoAttached={repoFeaturesEnabled}
+              repoPath={drone.repoPath}
+              repoUnavailableReason={repoUnavailableReason}
+              disabled={disabled}
+              hubPhase={drone.hubPhase}
+              hubMessage={drone.hubMessage}
+              onOpenPullRequest={(pullRequest) => onOpenPullRequest(paneKey, pullRequest)}
+              onRevealFileInFiles={(repoRelativePath) => onRevealChangesFileInFiles(paneKey, repoRelativePath)}
+              onOpenFileInEditor={onOpenChangesFileInEditor}
+            />
+          )}
+        </PaneModule>
       );
 
     default:

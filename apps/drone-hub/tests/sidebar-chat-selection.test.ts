@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { selectSidebarChatNodes } from '../src/droneHub/app/sidebar-chat-selection';
+import {
+  clearSidebarChatNodeSelection,
+  selectSidebarChatNodes,
+} from '../src/droneHub/app/sidebar-chat-selection';
 
 describe('sidebar chat multi-selection', () => {
   const ordered = ['chat:d:a', 'chat:d:b', 'chat:d:c', 'chat:d:d'];
@@ -15,5 +18,11 @@ describe('sidebar chat multi-selection', () => {
 
   test('shift selects the inclusive ordered range', () => {
     expect(selectSidebarChatNodes({ currentNodeIds: [ordered[1]!], orderedNodeIds: ordered, nodeId: ordered[3]!, anchorNodeId: ordered[1], range: true })).toEqual(ordered.slice(1));
+  });
+
+  test('does not schedule another update when an empty selection is already clear', () => {
+    const empty: string[] = [];
+    expect(clearSidebarChatNodeSelection(empty)).toBe(empty);
+    expect(clearSidebarChatNodeSelection([ordered[0]!])).toEqual([]);
   });
 });

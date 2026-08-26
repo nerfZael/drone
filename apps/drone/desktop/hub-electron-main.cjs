@@ -1,12 +1,18 @@
-const { app, BrowserWindow, Menu, shell } = require('electron');
+const { app, BrowserWindow, Menu, contentTracing, shell } = require('electron');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const {
   detachedHubStartArgs,
+  electronNodeChildEnv,
   formatDetachedHubStartOutput,
   parseDetachedHubStartOutput,
 } = require('./hub-electron-launch.cjs');
+const {
+  resolveDesktopStaticUiDir,
+  resolveHubApiTokenPath,
+  startDesktopStaticUiServer,
+} = require('./hub-electron-static-server.cjs');
 const { zoomActionForInput } = require('./hub-electron-zoom.cjs');
 
 const APP_NAME = 'Drone Hub';
@@ -14,7 +20,9 @@ const NAVIGATION_ZOOM_CHANNEL = 'drone-hub:navigation-zoom';
 
 let mainWindow = null;
 let hubLauncherProcess = null;
+let desktopStaticUiServer = null;
 let isQuitting = false;
+let performanceTraceStarted = false;
 
 app.setName(APP_NAME);
 if (process.platform === 'linux') {
@@ -197,11 +205,62 @@ function showError(error) {
   }
 }
 
+function requestedTraceDurationMs() {
+  const seconds = Number(process.env.DRONE_HUB_PERF_TRACE_SECONDS || 0);
+  if (!Number.isFinite(seconds) || seconds <= 0) return 0;
+  return Math.min(seconds, 300) * 1_000;
+}
+
+async function startPerformanceTraceAfterLoad() {
+  const durationMs = requestedTraceDurationMs();
+  if (performanceTraceStarted || durationMs <= 0) return;
+  performanceTraceStarted = true;
+  const requestedDelay = Number(process.env.DRONE_HUB_PERF_TRACE_DELAY_SECONDS || 0);
+  const delayMs = Number.isFinite(requestedDelay) && requestedDelay > 0
+    ? Math.min(requestedDelay, 300) * 1_000
+    : 0;
+  const explicitPath = String(process.env.DRONE_HUB_PERF_TRACE_PATH || '').trim();
+  const tracePath = explicitPath || path.join(
+    app.getPath('userData'),
+    'performance-traces',
+    `drone-hub-${Date.now()}.json`,
+  );
+  try {
+    fs.mkdirSync(path.dirname(tracePath), { recursive: true });
+    if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+    if (isQuitting) return;
+    await contentTracing.startRecording({
+      categoryFilter: [
+        'blink',
+        'cc',
+        'gpu',
+        'renderer.scheduler',
+        'toplevel',
+        'v8',
+        'disabled-by-default-v8.cpu_profiler',
+        'disabled-by-default-v8.cpu_profiler.hires',
+      ].join(','),
+      traceOptions: 'record-until-full',
+    });
+    const timer = setTimeout(() => {
+      void contentTracing.stopRecording(tracePath).then(() => {
+        if (process.env.DRONE_HUB_EXIT_AFTER_TRACE === '1') app.quit();
+      }).catch((error) => {
+        fs.writeFileSync(`${tracePath}.error.txt`, `${error?.stack || error}\n`);
+      });
+    }, durationMs);
+    timer.unref?.();
+  } catch (error) {
+    fs.writeFileSync(`${tracePath}.error.txt`, `${error?.stack || error}\n`);
+  }
+}
+
 function startHub() {
   const cliPath = resolveCliPath();
-  hubLauncherProcess = spawn(process.execPath, hubArgs(cliPath), {
+  const nodePath = String(process.env.DRONE_HUB_NODE_PATH || '').trim() || 'node';
+  hubLauncherProcess = spawn(nodePath, hubArgs(cliPath), {
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: process.env,
+    env: electronNodeChildEnv(process.env),
   });
 
   let stdout = '';
@@ -223,16 +282,39 @@ function startHub() {
       terminalStatusWritten = true;
       process.stdout.write(`${formatDetachedHubStartOutput(payload)}\n`);
     }
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.loadURL(uiUrl).catch(showError);
-    }
+    void (async () => {
+      try {
+        if (payload.alreadyRunning) {
+          const staticDir = resolveDesktopStaticUiDir(__dirname, process.env.DRONE_HUB_STATIC_UI_DIR);
+          const tokenPath = resolveHubApiTokenPath(payload);
+          const apiHost = String(payload.state?.apiHost || '').trim();
+          const apiPort = Number(payload.state?.apiPort);
+          if (!staticDir) throw new Error('The production Drone Hub UI bundle is missing. Run `bun run --filter drone-hub build`.');
+          if (!tokenPath || !fs.existsSync(tokenPath)) throw new Error('The running Hub API token could not be found.');
+          if (!apiHost || !Number.isInteger(apiPort) || apiPort <= 0) throw new Error('The running Hub API address is invalid.');
+          desktopStaticUiServer = await startDesktopStaticUiServer({
+            staticDir,
+            apiHost,
+            apiPort,
+            apiToken: fs.readFileSync(tokenPath, 'utf8').trim(),
+          });
+          uiUrl = desktopStaticUiServer.url;
+        }
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          await mainWindow.loadURL(uiUrl);
+          await startPerformanceTraceAfterLoad();
+        }
+      } catch (error) {
+        showError(error);
+      }
+    })();
     return true;
   };
 
   hubLauncherProcess.stdout.on('data', (chunk) => {
     const text = String(chunk || '');
     stdout += text;
-    loadHubUiFromOutput();
+    void loadHubUiFromOutput();
   });
 
   hubLauncherProcess.stderr.on('data', (chunk) => {
@@ -275,6 +357,8 @@ app.on('activate', () => {
 
 app.on('before-quit', () => {
   isQuitting = true;
+  void desktopStaticUiServer?.close();
+  desktopStaticUiServer = null;
 });
 
 app.on('window-all-closed', () => {

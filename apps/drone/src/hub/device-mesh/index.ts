@@ -130,6 +130,7 @@ export async function createDeviceMeshService(options: {
       await ingress.close();
       await chatAttachments.close();
       await capabilities.close();
+      httpHandler.close();
       router.close();
     },
     request: (

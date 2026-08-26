@@ -42,10 +42,10 @@ function formatApplyNotice(label: string, data: SyncSetApplyResponse): string {
   return `${parts.join(' ')}.`;
 }
 
-export function useSyncSets(requestJson: RequestJsonFn) {
+export function useSyncSets(requestJson: RequestJsonFn, enabled = true) {
   const queryClient = useQueryClient();
   const queryKey = settingsQueryKey('sync-sets');
-  const query = useSettingsQuery<SyncSetsResponse>(requestJson, queryKey, '/api/settings/sync-sets');
+  const query = useSettingsQuery<SyncSetsResponse>(requestJson, queryKey, '/api/settings/sync-sets', enabled);
   const [syncSetsError, setSyncSetsError] = React.useState<string | null>(null);
   const [syncSetsNotice, setSyncSetsNotice] = React.useState<string | null>(null);
 

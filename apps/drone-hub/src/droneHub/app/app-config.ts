@@ -32,14 +32,14 @@ export const STARTUP_SEED_MISSING_GRACE_MS = 30_000;
 export const WORKSPACE_TOOLS = {
   terminal: { label: 'Terminal', header: true, lazy: true },
   env: { label: 'Env', header: true, lazy: true },
-  editor: { label: 'Editor', header: true, lazy: false },
+  editor: { label: 'Editor', header: true, lazy: true },
   preview: { label: 'Browser', header: true, lazy: true },
   links: { label: 'Links', header: false, lazy: true },
   changes: { label: 'Changes', header: true, lazy: true },
   requests: { label: 'Change requests', header: true, lazy: true },
-  prs: { label: 'Pull requests', header: true, lazy: false },
+  prs: { label: 'Pull requests', header: true, lazy: true },
   canvas: { label: 'Canvas', header: true, lazy: true },
-  whiteboard: { label: 'Whiteboard', header: true, lazy: false },
+  whiteboard: { label: 'Whiteboard', header: true, lazy: true },
   workflows: { label: 'Workflows', header: true, lazy: true },
 } as const;
 export type RightPanelTab = keyof typeof WORKSPACE_TOOLS;

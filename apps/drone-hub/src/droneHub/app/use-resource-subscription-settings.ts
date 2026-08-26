@@ -17,6 +17,7 @@ export type UseResourceSubscriptionSettingsResult = ReturnType<typeof useResourc
 
 export function useResourceSubscriptionSettings(
   requestJson: RequestJsonFn,
+  enabled = true,
 ) {
   const queryClient = useQueryClient();
   const queryKey = settingsQueryKey('resource-subscriptions');
@@ -24,6 +25,7 @@ export function useResourceSubscriptionSettings(
     requestJson,
     queryKey,
     '/api/resource-subscriptions/settings',
+    enabled,
   );
   const [draft, setDraft] = React.useState<ResourceSubscriptionSettingsDraft | null>(null);
   const [error, setError] = React.useState<string | null>(null);

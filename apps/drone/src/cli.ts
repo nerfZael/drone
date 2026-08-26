@@ -2266,13 +2266,34 @@ async function hubApp(options: any) {
   const apiPort = Number(options.apiPort ?? 0);
   if (!Number.isFinite(apiPort) || apiPort < 0) throw new Error('invalid --api-port');
   const containerMcpUrl = resolveContainerMcpUrl(options);
+  const traceSeconds = options.trace == null ? null : Number(options.trace);
+  if (traceSeconds != null && (!Number.isFinite(traceSeconds) || traceSeconds <= 0 || traceSeconds > 300)) {
+    throw new Error('--trace must be between 1 and 300 seconds');
+  }
+  if (options.tracePath && traceSeconds == null) {
+    throw new Error('--trace-path requires --trace');
+  }
+  const traceDelaySeconds = options.traceDelay == null ? 0 : Number(options.traceDelay);
+  if (!Number.isFinite(traceDelaySeconds) || traceDelaySeconds < 0 || traceDelaySeconds > 300) {
+    throw new Error('--trace-delay must be between 0 and 300 seconds');
+  }
+  if (traceDelaySeconds > 0 && traceSeconds == null) {
+    throw new Error('--trace-delay requires --trace');
+  }
+  const tracePath = traceSeconds == null
+    ? null
+    : options.tracePath
+      ? path.resolve(String(options.tracePath))
+      : path.join(path.dirname(hubLogPath()), `electron-performance-${Date.now()}.json`);
 
   await new Promise<void>((resolve, reject) => {
     const child = spawn(process.execPath, [electronCli, electronMain], {
-      stdio: 'inherit',
+      detached: true,
+      stdio: 'ignore',
       env: {
         ...process.env,
         DRONE_HUB_CLI_PATH: __filename,
+        DRONE_HUB_NODE_PATH: process.execPath,
         DRONE_HUB_APP_PORT: String(uiPort),
         DRONE_HUB_APP_API_PORT: String(apiPort),
         DRONE_HUB_APP_HOST: String(options.host || DEFAULT_HUB_API_HOST),
@@ -2280,17 +2301,21 @@ async function hubApp(options: any) {
         DRONE_HUB_APP_CONTAINER_MCP_PORT: String(resolveContainerMcpPort(options)),
         ...(containerMcpUrl ? { DRONE_HUB_APP_CONTAINER_MCP_URL: containerMcpUrl } : {}),
         ...(options.staticUiDir ? { DRONE_HUB_STATIC_UI_DIR: path.resolve(String(options.staticUiDir)) } : {}),
+        ...(traceSeconds == null ? {} : { DRONE_HUB_PERF_TRACE_SECONDS: String(traceSeconds) }),
+        ...(traceDelaySeconds > 0 ? { DRONE_HUB_PERF_TRACE_DELAY_SECONDS: String(traceDelaySeconds) } : {}),
+        ...(tracePath ? { DRONE_HUB_PERF_TRACE_PATH: tracePath } : {}),
       },
     });
     child.once('error', reject);
-    child.once('exit', (code, signal) => {
-      if (code === 0 || signal === 'SIGTERM' || signal === 'SIGINT') {
-        resolve();
-        return;
-      }
-      reject(new Error(`Electron exited with code ${code ?? 'null'} signal ${signal ?? 'null'}`));
+    child.once('spawn', () => {
+      child.unref();
+      resolve();
     });
   });
+  // eslint-disable-next-line no-console
+  console.log(tracePath
+    ? `Drone Hub is opening. Performance trace: ${tracePath}`
+    : 'Drone Hub is opening.');
 }
 
 async function profileListCommand() {
@@ -2407,6 +2432,9 @@ hub.command('app')
   .option('--container-mcp-host <host>', 'Bind host for container-reachable MCP-only server', DEFAULT_CONTAINER_MCP_HOST)
   .option('--container-mcp-port <port>', `Container MCP-only server port (${DEFAULT_CONTAINER_MCP_PORT} by default)`, String(DEFAULT_CONTAINER_MCP_PORT))
   .option('--container-mcp-url <url>', 'MCP URL projected into container agent configs')
+  .option('--trace <seconds>', 'Record an Electron performance trace after the workspace loads')
+  .option('--trace-delay <seconds>', 'Wait after loading before recording the performance trace')
+  .option('--trace-path <path>', 'Write the Electron performance trace to this path')
   .action(async (options) => {
     await hubApp(options);
   });

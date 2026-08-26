@@ -36,6 +36,16 @@ function rectCenter(r: DOMRect): { x: number; y: number } {
   return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
 }
 
+function sameRect(left: DOMRect | null, right: DOMRect | null): boolean {
+  if (!left || !right) return left === right;
+  return (
+    left.x === right.x &&
+    left.y === right.y &&
+    left.width === right.width &&
+    left.height === right.height
+  );
+}
+
 function anchorOnRectEdge(opts: {
   rect: DOMRect;
   toward: { x: number; y: number };
@@ -277,7 +287,10 @@ export function GuidedOnboarding({ steps = GUIDED_ONBOARDING_STEPS }: { steps?: 
     if (!open) return;
     const el = tooltipRef.current;
     if (!el) return;
-    const measure = () => setTooltipRect(el.getBoundingClientRect());
+    const measure = () => {
+      const next = el.getBoundingClientRect();
+      setTooltipRect((current) => sameRect(current, next) ? current : next);
+    };
     measure();
     const ro = new ResizeObserver(() => measure());
     ro.observe(el);
@@ -289,6 +302,7 @@ export function GuidedOnboarding({ steps = GUIDED_ONBOARDING_STEPS }: { steps?: 
     if (!open || !step) return;
 
     let cancelled = false;
+    let frame = 0;
     const update = () => {
       if (cancelled) return;
       const el = getTargetEl(step.selector);
@@ -302,19 +316,33 @@ export function GuidedOnboarding({ steps = GUIDED_ONBOARDING_STEPS }: { steps?: 
         el.setAttribute('data-onboarding-active-step', step.id);
         activeTargetRef.current = el;
       }
-      setTargetRect(el ? el.getBoundingClientRect() : null);
+      const next = el ? el.getBoundingClientRect() : null;
+      setTargetRect((current) => sameRect(current, next) ? current : next);
     };
 
-    const onScrollOrResize = () => update();
+    const scheduleUpdate = () => {
+      if (cancelled || frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        update();
+      });
+    };
+    const onScrollOrResize = () => scheduleUpdate();
     window.addEventListener('resize', onScrollOrResize);
     window.addEventListener('scroll', onScrollOrResize, true);
 
-    const mo = new MutationObserver(() => update());
-    mo.observe(document.body, { subtree: true, childList: true, attributes: true });
+    const mo = new MutationObserver(() => scheduleUpdate());
+    mo.observe(document.body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ['class', 'style', 'hidden', 'aria-expanded'],
+    });
 
     update();
     return () => {
       cancelled = true;
+      if (frame) window.cancelAnimationFrame(frame);
       window.removeEventListener('resize', onScrollOrResize);
       window.removeEventListener('scroll', onScrollOrResize, true);
       mo.disconnect();

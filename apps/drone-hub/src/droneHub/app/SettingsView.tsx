@@ -79,18 +79,19 @@ export function SettingsView({
   onResetOnboarding,
 }: SettingsViewProps) {
   const settingsScrollRef = React.useRef<HTMLDivElement>(null);
-  const github = useGithubSettings(requestJson);
-  const agents = useAgentsSettings(requestJson);
-  const skillLibrary = useSkillLibrary(requestJson);
-  const mcpServers = useMcpServers(requestJson);
-  const filesystem = useFilesystemSettings(requestJson);
-  const speech = useSpeechSettings(requestJson);
-  const voiceInput = useVoiceInputSettings(requestJson);
-  const syncSets = useSyncSets(requestJson);
-  const profile = useProfileSettings(requestJson);
-  const backups = useRegistryBackupSettings(requestJson);
-  const subscriptions = useResourceSubscriptionSettings(requestJson);
-  const companion = useCompanionSettings(requestJson);
+  const generalEnabled = activeTab === 'general';
+  const github = useGithubSettings(requestJson, generalEnabled);
+  const agents = useAgentsSettings(requestJson, activeTab === 'agents');
+  const skillLibrary = useSkillLibrary(requestJson, activeTab === 'skills');
+  const mcpServers = useMcpServers(requestJson, activeTab === 'mcp');
+  const filesystem = useFilesystemSettings(requestJson, generalEnabled);
+  const speech = useSpeechSettings(requestJson, generalEnabled);
+  const voiceInput = useVoiceInputSettings(requestJson, generalEnabled);
+  const syncSets = useSyncSets(requestJson, activeTab === 'sync');
+  const profile = useProfileSettings(requestJson, activeTab === 'profiles');
+  const backups = useRegistryBackupSettings(requestJson, activeTab === 'backups');
+  const subscriptions = useResourceSubscriptionSettings(requestJson, generalEnabled);
+  const companion = useCompanionSettings(requestJson, activeTab === 'companion');
 
   const settingsBusy =
     hubLogsState.hubLogsLoading ||

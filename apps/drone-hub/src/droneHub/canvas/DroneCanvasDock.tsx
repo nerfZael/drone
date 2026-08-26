@@ -1,4 +1,5 @@
 import React from 'react';
+import '@xyflow/react/dist/style.css';
 import { useDndMonitor, useDroppable, type DragEndEvent, type DragMoveEvent, type DragOverEvent } from '@dnd-kit/core';
 import { useShallow } from 'zustand/react/shallow';
 import type { ChatAgentConfig } from '../../domain';

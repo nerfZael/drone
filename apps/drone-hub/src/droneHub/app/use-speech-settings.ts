@@ -8,10 +8,10 @@ type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 
 export type UseSpeechSettingsResult = ReturnType<typeof useSpeechSettings>;
 
-export function useSpeechSettings(requestJson: RequestJsonFn) {
+export function useSpeechSettings(requestJson: RequestJsonFn, enabled = true) {
   const queryClient = useQueryClient();
   const queryKey = settingsQueryKey('speech');
-  const query = useSettingsQuery<SpeechSettingsResponse>(requestJson, queryKey, '/api/settings/speech');
+  const query = useSettingsQuery<SpeechSettingsResponse>(requestJson, queryKey, '/api/settings/speech', enabled);
   const [speechSettingsError, setSpeechSettingsError] = React.useState<string | null>(null);
   const [speechSettingsNotice, setSpeechSettingsNotice] = React.useState<string | null>(null);
   const [enabledDraft, setEnabledDraft] = React.useState(true);

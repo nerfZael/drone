@@ -3,7 +3,8 @@ export function registerPwa(): void {
   if (!('serviceWorker' in navigator)) return;
   if (!window.isSecureContext) return;
 
-  if (import.meta.env.DEV) {
+  const desktop = Boolean(window.droneHubDesktop);
+  if (import.meta.env.DEV || desktop) {
     window.addEventListener('load', () => {
       navigator.serviceWorker
         .getRegistrations()

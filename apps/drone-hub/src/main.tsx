@@ -8,8 +8,7 @@ import { useDroneHubUiStore } from './droneHub/app/use-drone-hub-ui-store';
 import { applyDesktopTheme } from './theme';
 import { applyReadingDensity } from './reading-density';
 import { droneHubQueryClient } from './droneHub/query-client';
-import '@excalidraw/excalidraw/index.css';
-import '@xyflow/react/dist/style.css';
+import './local-fonts.css';
 import './styles.css';
 
 applyDesktopTheme(useDroneHubUiStore.getState().themeId);

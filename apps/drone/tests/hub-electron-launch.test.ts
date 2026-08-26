@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 
 const {
   detachedHubStartArgs,
+  electronNodeChildEnv,
   formatDetachedHubStartOutput,
   parseDetachedHubStartOutput,
 }: {
@@ -11,6 +12,7 @@ const {
     env?: Record<string, string>,
     platform?: string,
   ): string[];
+  electronNodeChildEnv(env?: Record<string, string>): Record<string, string>;
   formatDetachedHubStartOutput(payload: any): string;
   parseDetachedHubStartOutput(raw: string): { payload: any; uiUrl: string };
 } = require('../desktop/hub-electron-launch.cjs');
@@ -35,6 +37,31 @@ describe('Drone Hub Electron background launch', () => {
     expect(args).toContain('/app/hub-ui');
     expect(args).not.toContain('run');
     expect(args).not.toContain('--ready-json');
+  });
+
+  test('runs CLI children in Node mode when Electron is the fallback runtime', () => {
+    expect(electronNodeChildEnv({ DRONE_DATA_DIR: '/data' })).toEqual({
+      DRONE_DATA_DIR: '/data',
+      ELECTRON_RUN_AS_NODE: '1',
+    });
+
+    const mainSource = readFileSync(
+      new URL('../desktop/hub-electron-main.cjs', import.meta.url),
+      'utf8',
+    );
+    expect(mainSource).toContain("process.env.DRONE_HUB_NODE_PATH || ''");
+    expect(mainSource).toContain('spawn(nodePath, hubArgs(cliPath)');
+    expect(mainSource).toContain('env: electronNodeChildEnv(process.env)');
+  });
+
+  test('serves the packaged static UI when attaching to an existing Hub', () => {
+    const mainSource = readFileSync(
+      new URL('../desktop/hub-electron-main.cjs', import.meta.url),
+      'utf8',
+    );
+    expect(mainSource).toContain('if (payload.alreadyRunning)');
+    expect(mainSource).toContain('startDesktopStaticUiServer');
+    expect(mainSource).toContain('desktopStaticUiServer.url');
   });
 
   test('reads the UI URL returned for a newly started daemon', () => {
@@ -80,7 +107,7 @@ describe('Drone Hub Electron background launch', () => {
       'utf8',
     );
 
-    expect(mainSource).toContain('stdout += text;\n    loadHubUiFromOutput();');
+    expect(mainSource).toContain('stdout += text;\n    void loadHubUiFromOutput();');
     expect(mainSource).not.toContain('process.stdout.write(text);');
     expect(mainSource).toContain('formatDetachedHubStartOutput(payload)');
     expect(mainSource).toContain('if (!loadHubUiFromOutput())');
@@ -140,5 +167,32 @@ describe('Drone Hub Electron background launch', () => {
 
     expect(mainSource).toContain("path.join(__dirname, 'drone-hub-icon.png')");
     expect(mainSource).toContain('...(appIconPath ? { icon: appIconPath } : {})');
+  });
+
+  test('supports opt-in renderer tracing after the workspace finishes loading', () => {
+    const mainSource = readFileSync(
+      new URL('../desktop/hub-electron-main.cjs', import.meta.url),
+      'utf8',
+    );
+
+    expect(mainSource).toContain('contentTracing.startRecording');
+    expect(mainSource).toContain('disabled-by-default-v8.cpu_profiler.hires');
+    expect(mainSource).toContain('DRONE_HUB_PERF_TRACE_DELAY_SECONDS');
+    expect(mainSource).toContain('await startPerformanceTraceAfterLoad()');
+    expect(mainSource).toContain('contentTracing.stopRecording(tracePath)');
+  });
+
+  test('detaches the user-facing app command from the terminal lifecycle', () => {
+    const cliSource = readFileSync(new URL('../src/cli.ts', import.meta.url), 'utf8');
+    const appCommand = cliSource.slice(
+      cliSource.indexOf('async function hubApp'),
+      cliSource.indexOf('async function profileListCommand'),
+    );
+
+    expect(appCommand).toContain('detached: true');
+    expect(appCommand).toContain("stdio: 'ignore'");
+    expect(appCommand).toContain("child.once('spawn'");
+    expect(appCommand).toContain('child.unref()');
+    expect(appCommand).not.toContain("child.once('exit'");
   });
 });

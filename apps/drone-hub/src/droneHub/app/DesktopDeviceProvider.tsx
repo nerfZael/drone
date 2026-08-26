@@ -1,6 +1,7 @@
 import React from 'react';
 import { requestJson } from '../http';
 import type { MeshDevice, MeshStatus } from './use-device-mesh';
+import { subscribeDeviceMeshChanges } from './device-mesh-events';
 
 const SELECTED_DEVICE_STORAGE_KEY = 'drone-hub:selected-device-id';
 
@@ -19,6 +20,10 @@ type DesktopDeviceContextValue = {
 };
 
 const DesktopDeviceContext = React.createContext<DesktopDeviceContextValue | null>(null);
+
+function sameMeshStatus(left: MeshStatus | null, right: MeshStatus): boolean {
+  return Boolean(left) && JSON.stringify(left) === JSON.stringify(right);
+}
 
 export function desktopDeviceRouteAvailable(
   status: Pick<MeshStatus, 'selfDeviceId' | 'connectedDeviceIds'> | null,
@@ -56,7 +61,7 @@ export function DesktopDeviceProvider({ children }: { children: React.ReactNode 
   const load = React.useCallback(async () => {
     try {
       const next = await requestJson<{ ok: true } & MeshStatus>('/api/device-mesh');
-      setStatus(next);
+      setStatus((current) => sameMeshStatus(current, next) ? current : next);
       setError(null);
       setSelectedDeviceId((current) => {
         const selectedIsActive = next.devices.some(
@@ -73,10 +78,15 @@ export function DesktopDeviceProvider({ children }: { children: React.ReactNode 
 
   React.useEffect(() => void load(), [load]);
   React.useEffect(() => {
-    const timer = window.setInterval(() => {
+    const unsubscribe = subscribeDeviceMeshChanges(() => void load());
+    const refreshAfterResume = () => {
       if (document.visibilityState === 'visible') void load();
-    }, 3_000);
-    return () => window.clearInterval(timer);
+    };
+    document.addEventListener('visibilitychange', refreshAfterResume);
+    return () => {
+      unsubscribe();
+      document.removeEventListener('visibilitychange', refreshAfterResume);
+    };
   }, [load]);
   const refresh = React.useCallback(async () => {
     setRefreshing(true);

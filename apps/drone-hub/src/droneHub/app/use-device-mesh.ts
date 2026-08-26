@@ -1,4 +1,5 @@
 import React from 'react';
+import { subscribeDeviceMeshChanges } from './device-mesh-events';
 
 type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
 
@@ -40,6 +41,10 @@ export type MeshInvitationStatus = {
   claimed: boolean;
 };
 
+function sameMeshStatus(left: MeshStatus | null, right: MeshStatus): boolean {
+  return Boolean(left) && JSON.stringify(left) === JSON.stringify(right);
+}
+
 export function useDeviceMesh(requestJson: RequestJson) {
   const [status, setStatus] = React.useState<MeshStatus | null>(null);
   const [invitation, setInvitation] = React.useState<MeshInvitation | null>(null);
@@ -54,7 +59,8 @@ export function useDeviceMesh(requestJson: RequestJson) {
     setLoading(true);
     setError(null);
     try {
-      setStatus(await requestJson<{ ok: true } & MeshStatus>('/api/device-mesh'));
+      const next = await requestJson<{ ok: true } & MeshStatus>('/api/device-mesh');
+      setStatus((current) => sameMeshStatus(current, next) ? current : next);
     } catch (nextError: any) {
       setError(nextError?.message ?? String(nextError));
     } finally {
@@ -64,15 +70,26 @@ export function useDeviceMesh(requestJson: RequestJson) {
 
   React.useEffect(() => void load(), [load]);
 
-  React.useEffect(() => {
-    const timer = window.setInterval(() => {
-      if (document.visibilityState !== 'visible') return;
-      void requestJson<{ ok: true } & MeshStatus>('/api/device-mesh')
-        .then(setStatus)
-        .catch(() => undefined);
-    }, 3_000);
-    return () => window.clearInterval(timer);
+  const refreshStatus = React.useCallback(async () => {
+    try {
+      const next = await requestJson<{ ok: true } & MeshStatus>('/api/device-mesh');
+      setStatus((current) => sameMeshStatus(current, next) ? current : next);
+    } catch {
+      // The stream reconnects automatically; keep the last usable status meanwhile.
+    }
   }, [requestJson]);
+
+  React.useEffect(() => {
+    const unsubscribe = subscribeDeviceMeshChanges(() => void refreshStatus());
+    const refreshAfterResume = () => {
+      if (document.visibilityState === 'visible') void refreshStatus();
+    };
+    document.addEventListener('visibilitychange', refreshAfterResume);
+    return () => {
+      unsubscribe();
+      document.removeEventListener('visibilitychange', refreshAfterResume);
+    };
+  }, [refreshStatus]);
 
   const action = React.useCallback(
     async (id: string, run: () => Promise<void>) => {

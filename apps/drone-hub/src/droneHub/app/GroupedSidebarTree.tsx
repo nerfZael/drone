@@ -94,7 +94,7 @@ import {
   sidebarRepositoryRowClass,
   sidebarSelectionEdgeClass,
 } from '../sidebar/presentation';
-import { selectSidebarChatNodes } from './sidebar-chat-selection';
+import { clearSidebarChatNodeSelection, selectSidebarChatNodes } from './sidebar-chat-selection';
 import {
   buildSidebarChatDeleteConfirmation,
   buildSidebarChatGroupDeleteConfirmation,
@@ -2443,7 +2443,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
 
   React.useEffect(() => {
     if (!props.selectedSidebarNodeId || selectedChatNodeIdSet.has(props.selectedSidebarNodeId)) return;
-    setSelectedChatNodeIds([]);
+    setSelectedChatNodeIds(clearSidebarChatNodeSelection);
   }, [props.selectedSidebarNodeId, selectedChatNodeIdSet]);
 
   const selectChatNode = React.useCallback((droneId: string, chatName: string, event: Pick<React.MouseEvent, 'ctrlKey' | 'metaKey' | 'shiftKey'>) => {
