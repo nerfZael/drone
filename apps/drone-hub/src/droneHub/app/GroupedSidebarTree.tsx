@@ -1315,7 +1315,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
   const muted = effectiveMutedDroneIdSet.has(drone.id);
   const directlyMuted = mutedDroneIdSet.has(drone.id);
   const isOptimistic = sidebarOptimisticDroneIdSet.has(drone.id);
-  const dragDisabled = !sidebarDndEnabled || isOptimistic;
+  const dragDisabled = !sidebarDndEnabled || isOptimistic || actionState.busy;
   const dragData = React.useMemo(
     () =>
       groupedDroneDragData({

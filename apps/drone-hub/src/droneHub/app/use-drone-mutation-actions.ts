@@ -7,7 +7,9 @@ import type { DroneDeleteMode } from './settings-types';
 import { useDroneCanvasStore } from '../canvas/use-drone-canvas-store';
 import { droneRenameErrorMessage, type DroneRenameTarget } from './drone-rename';
 import {
+  claimDroneOperation,
   droneActionState,
+  releaseDroneOperation,
   type DroneOperationKind,
   type DroneOperationsById,
 } from './drone-operation-state';
@@ -54,8 +56,8 @@ export function useDroneMutationActions({
 
   const beginDroneOperation = React.useCallback(
     (droneId: string, operation: DroneOperationKind): boolean => {
-      if (droneOperationsRef.current[droneId]) return false;
-      const next = { ...droneOperationsRef.current, [droneId]: operation };
+      const next = claimDroneOperation(droneOperationsRef.current, droneId, operation);
+      if (!next) return false;
       droneOperationsRef.current = next;
       setDroneOperations(next);
       return true;
@@ -65,9 +67,8 @@ export function useDroneMutationActions({
 
   const finishDroneOperation = React.useCallback(
     (droneId: string, operation: DroneOperationKind): void => {
-      if (droneOperationsRef.current[droneId] !== operation) return;
-      const next = { ...droneOperationsRef.current };
-      delete next[droneId];
+      const next = releaseDroneOperation(droneOperationsRef.current, droneId, operation);
+      if (next === droneOperationsRef.current) return;
       droneOperationsRef.current = next;
       setDroneOperations(next);
     },
@@ -411,70 +412,78 @@ export function useDroneMutationActions({
       }
 
       const reparentedIds: string[] = [];
+      const claimedDroneIds: string[] = [];
       const errors: string[] = [];
-      for (const droneId of requestedDroneIds) {
-        if (droneOperationsRef.current[droneId]) {
-          errors.push(`Drone "${droneId}" is busy.`);
-          continue;
+      try {
+        for (const droneId of requestedDroneIds) {
+          if (!beginDroneOperation(droneId, 'reparent')) {
+            errors.push(`Drone "${droneId}" is busy.`);
+            continue;
+          }
+          claimedDroneIds.push(droneId);
+          try {
+            await requestJson<{ ok: true; id: string; parentId: string | null }>(
+              `/api/fleet/actors/${encodeURIComponent(droneId)}/parent`,
+              {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ parent: parentDroneId }),
+              },
+            );
+            reparentedIds.push(droneId);
+          } catch (error: any) {
+            const message = String(error?.message ?? error ?? '').trim() || `Failed to reparent ${droneId}.`;
+            errors.push(message);
+          }
         }
-        try {
-          await requestJson<{ ok: true; id: string; parentId: string | null }>(
-            `/api/fleet/actors/${encodeURIComponent(droneId)}/parent`,
-            {
+
+        const targetGroupRaw = String(parentDrone?.group ?? '').trim();
+        const targetGroup = targetGroupRaw || null;
+        // The same stale-snapshot rule applies to inherited group membership.
+        // Reassert the target parent's group after every successful reparent.
+        const droneIdsNeedingGroupMove = parentDrone ? reparentedIds : [];
+        if (droneIdsNeedingGroupMove.length > 0) {
+          try {
+            const response = await requestJson<{
+              ok: true;
+              moved: Array<{ id: string; name: string; previousGroup: string | null; group: string | null }>;
+              rejected: Array<{ id: string; name: string; error: string }>;
+            }>(`/api/drones/group-set`, {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ parent: parentDroneId }),
-            },
-          );
-          reparentedIds.push(droneId);
-        } catch (error: any) {
-          const message = String(error?.message ?? error ?? '').trim() || `Failed to reparent ${droneId}.`;
-          errors.push(message);
-        }
-      }
-
-      const targetGroupRaw = String(parentDrone?.group ?? '').trim();
-      const targetGroup = targetGroupRaw || null;
-      // The same stale-snapshot rule applies to inherited group membership.
-      // Reassert the target parent's group after every successful reparent.
-      const droneIdsNeedingGroupMove = parentDrone ? reparentedIds : [];
-      if (droneIdsNeedingGroupMove.length > 0) {
-        try {
-          const response = await requestJson<{
-            ok: true;
-            moved: Array<{ id: string; name: string; previousGroup: string | null; group: string | null }>;
-            rejected: Array<{ id: string; name: string; error: string }>;
-          }>(`/api/drones/group-set`, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ droneIds: droneIdsNeedingGroupMove, group: targetGroup }),
-          });
-          const rejected = Array.isArray(response?.rejected) ? response.rejected : [];
-          if (rejected.length > 0) {
-            errors.push(
-              rejected
-                .slice(0, 3)
-                .map((item) => {
-                  const label = String(item?.name ?? item?.id ?? 'unknown').trim() || 'unknown';
-                  const message = String(item?.error ?? 'move failed').trim() || 'move failed';
-                  return `${label}: ${message}`;
-                })
-                .join(', '),
-            );
+              body: JSON.stringify({ droneIds: droneIdsNeedingGroupMove, group: targetGroup }),
+            });
+            const rejected = Array.isArray(response?.rejected) ? response.rejected : [];
+            if (rejected.length > 0) {
+              errors.push(
+                rejected
+                  .slice(0, 3)
+                  .map((item) => {
+                    const label = String(item?.name ?? item?.id ?? 'unknown').trim() || 'unknown';
+                    const message = String(item?.error ?? 'move failed').trim() || 'move failed';
+                    return `${label}: ${message}`;
+                  })
+                  .join(', '),
+              );
+            }
+          } catch (error: any) {
+            const message = String(error?.message ?? error ?? '').trim() || 'Failed to move reparented drones into the target group.';
+            errors.push(message);
           }
-        } catch (error: any) {
-          const message = String(error?.message ?? error ?? '').trim() || 'Failed to move reparented drones into the target group.';
-          errors.push(message);
+        }
+
+        return {
+          ok: errors.length === 0,
+          error: errors.length > 0 ? errors.join(' ') : null,
+          reparentedIds,
+        };
+      } finally {
+        for (const droneId of claimedDroneIds) {
+          finishDroneOperation(droneId, 'reparent');
         }
       }
-
-      return {
-        ok: errors.length === 0,
-        error: errors.length > 0 ? errors.join(' ') : null,
-        reparentedIds,
-      };
     },
-    [requestJson],
+    [beginDroneOperation, finishDroneOperation, requestJson],
   );
 
   const suggestAndRenameDraftDrone = React.useCallback(

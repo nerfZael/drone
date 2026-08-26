@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  claimDroneOperation,
   droneActionState,
   isDroneOperation,
+  releaseDroneOperation,
   type DroneOperationKind,
   type DroneOperationsById,
 } from '../src/droneHub/app/drone-operation-state';
@@ -41,5 +43,26 @@ describe('drone operation state', () => {
     const otherOperation: DroneOperationKind = 'delete';
 
     expect(isDroneOperation(operations, 'worker', otherOperation)).toBe(false);
+  });
+
+  test('claims only idle drones without mutating the previous map', () => {
+    const previous: DroneOperationsById = { other: 'delete' };
+    const claimed = claimDroneOperation(previous, 'worker', 'reparent');
+
+    expect(claimed).toEqual({ other: 'delete', worker: 'reparent' });
+    expect(previous).toEqual({ other: 'delete' });
+    expect(droneActionState(claimed!, 'worker')).toMatchObject({
+      operation: 'reparent',
+      busy: true,
+    });
+    expect(claimDroneOperation(claimed!, 'worker', 'rename')).toBeNull();
+  });
+
+  test('releases only the matching operation', () => {
+    const operations: DroneOperationsById = { worker: 'reparent' };
+
+    expect(releaseDroneOperation(operations, 'worker', 'rename')).toBe(operations);
+    expect(releaseDroneOperation(operations, 'worker', 'reparent')).toEqual({});
+    expect(operations).toEqual({ worker: 'reparent' });
   });
 });
