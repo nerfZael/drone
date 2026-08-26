@@ -2,6 +2,7 @@ import type { DroneSidebarProps } from './DroneSidebar';
 import type { DroneHubOverlaysProps } from './DroneHubOverlays';
 import type { DroneHubWorkspaceContentProps } from './DroneHubWorkspaceContent';
 import { isSidebarGroupCollapsed } from './is-sidebar-group-collapsed';
+import { isDroneOperation } from './drone-operation-state';
 
 export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
   const {
@@ -16,12 +17,9 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     highlightedDroneIds,
     busyChatNodeIdSet,
     unreadAgentMessageByChatNodeId,
-    deletingDrones,
+    droneOperations,
     deleteOperationModeById,
     deleteMode,
-    renamingDrones,
-    settingBaseImages,
-    startingDrones,
     movingDroneGroups,
     sidebarGroups,
     canonicalGroups,
@@ -86,12 +84,9 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     highlightedDroneIds,
     busyChatNodeIdSet,
     unreadAgentMessageByChatNodeId,
-    deletingDrones,
+    droneOperations,
     deleteOperationModeById,
     deleteMode,
-    renamingDrones,
-    settingBaseImages,
-    startingDrones,
     movingDroneGroups,
     sidebarGroups,
     canonicalGroups,
@@ -209,7 +204,7 @@ export function useDroneHubOverlaysProps(args: any): DroneHubOverlaysProps {
     closeRenameDrone,
     clearRenameDroneError,
     confirmRenameDrone,
-    renamingDrones,
+    droneOperations,
     droneErrorModal,
     clearingDroneError,
     closeDroneErrorModal,
@@ -304,7 +299,7 @@ export function useDroneHubOverlaysProps(args: any): DroneHubOverlaysProps {
         : null,
     droneRenameModalProps: renameDroneTarget
       ? {
-          busy: Boolean(renamingDrones[renameDroneTarget.id]),
+          busy: isDroneOperation(droneOperations, renameDroneTarget.id, 'rename'),
           drone: {
             id: renameDroneTarget.id,
             currentName: renameDroneTarget.currentName,
@@ -425,7 +420,7 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     selectDroneCard,
     selectDroneChat,
     deleteDrone,
-    deletingDrones,
+    droneOperations,
     optimisticallyDeletedDrones,
     dronesLoading,
     sidebarDrones,
@@ -654,7 +649,7 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
           uiDroneName,
           onSelectDroneCard: selectDroneCard,
           onDeleteDrone: deleteDrone,
-          deletingDrones,
+          droneOperations,
         }
       : null,
     noDroneSelectedStateProps: {

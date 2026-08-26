@@ -100,6 +100,10 @@ import {
   type DeleteDroneChatOptions,
 } from './sidebar-chat-delete-confirmation';
 import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
+import {
+  droneActionState,
+  type DroneOperationsById,
+} from './drone-operation-state';
 
 type FolderEditorState = {
   mode: 'create' | 'rename';
@@ -199,12 +203,9 @@ type GroupedSidebarTreeProps = {
   busyChatNodeIdSet: Set<string>;
   approvalRequiredByChatNodeId: Record<string, boolean>;
   unreadAgentMessageByChatNodeId: Record<string, boolean>;
-  deletingDrones: Record<string, boolean>;
+  droneOperations: DroneOperationsById;
   deleteOperationModeById: Record<string, DroneDeleteMode>;
   deleteMode: DroneDeleteMode;
-  renamingDrones: Record<string, boolean>;
-  settingBaseImages: Record<string, boolean>;
-  startingDrones: Record<string, boolean>;
   movingDroneGroups: boolean;
   sidebarOptimisticDroneIdSet: Set<string>;
   uiDroneName: (nameRaw: string) => string;
@@ -565,9 +566,7 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
     onBlurChatEditor,
     onCancelChatEditor,
     deletingChats,
-    deletingDrones,
-    renamingDrones,
-    settingBaseImages,
+    droneOperations,
     handleDeleteChat,
     shouldSuppressClick,
     effectiveMutedDroneIdSet,
@@ -643,11 +642,10 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
       unreadAgentMessageByChatNodeId[chatNodeId] === true);
   const chatState = sidebarChatDisplayState(drone, chatBusy, approvalRequired);
   const chatStateLabel = muted ? 'Muted' : sidebarDroneStateLabel(chatState, chatUnread);
+  const actionState = droneActionState(droneOperations, drone.id);
   const chatActionsDisabled =
     isOptimistic ||
-    Boolean(deletingDrones[drone.id]) ||
-    Boolean(renamingDrones[drone.id]) ||
-    Boolean(settingBaseImages[drone.id]) ||
+    actionState.busy ||
     isDroneStartingOrSeeding(drone.hubPhase);
   const draft = drone.draftChats?.[chatName] === true;
   const canCreateChatGroups = normalizedDroneChats(drone).length > 1;
@@ -1261,12 +1259,9 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
     busyChatNodeIdSet,
     approvalRequiredByChatNodeId,
     unreadAgentMessageByChatNodeId,
-    deletingDrones,
+    droneOperations,
     deleteOperationModeById,
     deleteMode,
-    renamingDrones,
-    settingBaseImages,
-    startingDrones,
     collapsedDroneSections,
     setCollapsedDroneSections,
     onToggleDroneSection,
@@ -1316,10 +1311,11 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
   const densityClasses = sidebarDensityClasses(sidebarDensityMode);
   const drone = droneById[node.droneId];
   if (!drone) return null;
+  const actionState = droneActionState(droneOperations, drone.id);
   const muted = effectiveMutedDroneIdSet.has(drone.id);
   const directlyMuted = mutedDroneIdSet.has(drone.id);
   const isOptimistic = sidebarOptimisticDroneIdSet.has(drone.id);
-  const dragDisabled = !sidebarDndEnabled || isOptimistic;
+  const dragDisabled = !sidebarDndEnabled || isOptimistic || actionState.busy;
   const dragData = React.useMemo(
     () =>
       groupedDroneDragData({
@@ -1471,9 +1467,9 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
             busy={showBusy}
             approvalRequired={hasOnlyDefaultChat && defaultChatApprovalRequired}
             operationLabel={
-              startingDrones[drone.id]
+              actionState.startingContainer
                 ? 'Starting'
-                : deletingDrones[drone.id]
+                : actionState.deleting
                 ? ((deleteOperationModeById[drone.id] ?? deleteMode) === 'archive' ? 'Archiving' : 'Deleting')
                 : undefined
             }
@@ -1558,10 +1554,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
             onErrorClick={onOpenDroneErrorModal}
             cloneDisabled={
               isOptimistic ||
-              Boolean(deletingDrones[drone.id]) ||
-              Boolean(renamingDrones[drone.id]) ||
-              Boolean(settingBaseImages[drone.id]) ||
-              Boolean(startingDrones[drone.id]) ||
+              actionState.busy ||
               String(drone.runtime ?? 'container').trim().toLowerCase() === 'host'
             }
             cloneChatBusy={Boolean(cloningChatKeys[`${drone.id}:default`])}
@@ -1569,61 +1562,38 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
               showBusy ||
               Boolean(cloningChatKeys[`${drone.id}:default`]) ||
               isOptimistic ||
-              Boolean(deletingDrones[drone.id]) ||
-              Boolean(renamingDrones[drone.id]) ||
-              Boolean(settingBaseImages[drone.id]) ||
-              Boolean(startingDrones[drone.id]) ||
+              actionState.busy ||
               isDroneStartingOrSeeding(drone.hubPhase)
             }
             createChatDisabled={
               isOptimistic ||
-              Boolean(deletingDrones[drone.id]) ||
-              Boolean(renamingDrones[drone.id]) ||
-              Boolean(settingBaseImages[drone.id]) ||
-              Boolean(startingDrones[drone.id]) ||
+              actionState.busy ||
               isDroneStartingOrSeeding(drone.hubPhase)
             }
             addToGroupDisabled={
               isOptimistic ||
               movingDroneGroups ||
-              Boolean(deletingDrones[drone.id]) ||
-              Boolean(renamingDrones[drone.id]) ||
-              Boolean(settingBaseImages[drone.id]) ||
-              Boolean(startingDrones[drone.id]) ||
+              actionState.busy ||
               isDroneStartingOrSeeding(drone.hubPhase)
             }
-            renameDisabled={
-              Boolean(deletingDrones[drone.id]) ||
-              Boolean(renamingDrones[drone.id]) ||
-              Boolean(settingBaseImages[drone.id]) ||
-              Boolean(startingDrones[drone.id])
-            }
-            renameBusy={Boolean(renamingDrones[drone.id])}
+            renameDisabled={actionState.busy}
+            renameBusy={actionState.renaming}
             setBaseImageDisabled={
               isOptimistic ||
-              Boolean(deletingDrones[drone.id]) ||
-              Boolean(renamingDrones[drone.id]) ||
-              Boolean(settingBaseImages[drone.id]) ||
-              Boolean(startingDrones[drone.id]) ||
+              actionState.busy ||
               isDroneStartingOrSeeding(drone.hubPhase)
             }
-            setBaseImageBusy={Boolean(settingBaseImages[drone.id])}
+            setBaseImageBusy={actionState.settingBaseImage}
             startContainerDisabled={
               isOptimistic ||
-              Boolean(deletingDrones[drone.id]) ||
-              Boolean(renamingDrones[drone.id]) ||
-              Boolean(settingBaseImages[drone.id]) ||
-              Boolean(startingDrones[drone.id])
+              actionState.busy
             }
-            startContainerBusy={Boolean(startingDrones[drone.id])}
+            startContainerBusy={actionState.startingContainer}
             deleteDisabled={
               isOptimistic ||
-              Boolean(deletingDrones[drone.id]) ||
-              Boolean(renamingDrones[drone.id]) ||
-              Boolean(settingBaseImages[drone.id]) ||
-              Boolean(startingDrones[drone.id])
+              actionState.busy
             }
-            deleteBusy={Boolean(deletingDrones[drone.id])}
+            deleteBusy={actionState.deleting}
           />
         </div>
       </div>
@@ -1861,7 +1831,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
     busyChatNodeIdSet,
     approvalRequiredByChatNodeId,
     unreadAgentMessageByChatNodeId,
-    deletingDrones,
+    droneOperations,
     shouldSuppressClick,
     mutedSidebarGroupIdSet,
     effectiveMutedSidebarGroupIdSet,
@@ -1923,7 +1893,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
           drone.hubPhase === 'creating' ||
           drone.hubPhase === 'starting' ||
           drone.hubPhase === 'seeding' ||
-          Boolean(deletingDrones[drone.id]));
+          droneActionState(droneOperations, drone.id).deleting);
       const inactiveDisplayState = sidebarDroneDisplayState(drone, false, '', false, false);
       const unread =
         !working &&
@@ -1946,7 +1916,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
   }, [
     approvalRequiredByChatNodeId,
     busyChatNodeIdSet,
-    deletingDrones,
+    droneOperations,
     droneById,
     folderDroneIds,
     unreadAgentMessageByChatNodeId,
@@ -2900,7 +2870,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       props.cloningChatKeys,
       props.collapsedDroneSections,
       props.collapsedGroups,
-      props.deletingDrones,
+      props.droneOperations,
       props.deleteOperationModeById,
       props.deleteMode,
       props.deletingGroups,
@@ -2950,7 +2920,6 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       props.onSubmitFolderEditor,
       props.onToggleGroupCollapsed,
       props.onToggleDroneSection,
-      props.renamingDrones,
       props.renamingGroups,
       props.repositoryRootView,
       props.repoScopedGroupPathsByRepoGroup,
@@ -2963,8 +2932,6 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       props.setSelectedSidebarNodeId,
       props.setCollapsedDroneSections,
       props.onMoveSidebar,
-      props.settingBaseImages,
-      props.startingDrones,
       props.pinnedDroneIdSet,
       props.pinningDroneIds,
       props.sidebarChatOrderByDrone,
