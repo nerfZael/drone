@@ -809,7 +809,7 @@ export function mobileDroneTurnsToAssistantMessages(
     if (owner) owner.followUps.push(turn);
     else completedGroups.push({ primary: turn, followUps: [] });
   }
-  const completedMessages = completedGroups.flatMap((group): AssistantMessage[] => {
+  const completedMessageGroups = completedGroups.map((group, order) => {
     const turn = group.primary;
     const { prompt, output, error, attachments } = turn;
     const asapFollowUps: MobileAsapFollowUp[] = group.followUps.map((followUp) => ({
@@ -914,7 +914,11 @@ export function mobileDroneTurnsToAssistantMessages(
         details: { fileChanges: turn.fileChanges },
       });
     }
-    return messages;
+    return {
+      messages,
+      atMs: Date.parse(turn.promptAt || turn.at),
+      order,
+    };
   });
   const pendingGroups: Array<{ primary: any; followUps: any[] }> = [];
   const orderedPending = (Array.isArray(pendingRaw) ? pendingRaw : [])
@@ -953,7 +957,7 @@ export function mobileDroneTurnsToAssistantMessages(
     if (owner) owner.followUps.push(item);
     else pendingGroups.push({ primary: item, followUps: [] });
   }
-  const pendingMessages = pendingGroups.flatMap((group): AssistantMessage[] => {
+  const pendingMessageGroups = pendingGroups.flatMap((group, index) => {
     const item = group.primary;
     const id = String(item?.id ?? '').trim();
     const state = String(item?.state ?? '').trim();
@@ -1043,9 +1047,23 @@ export function mobileDroneTurnsToAssistantMessages(
         details: { fileChanges },
       });
     }
-    return messages;
+    return [
+      {
+        messages,
+        atMs: Date.parse(at),
+        order: completedGroups.length + index,
+      },
+    ];
   });
-  return [...completedMessages, ...pendingMessages];
+  return [...completedMessageGroups, ...pendingMessageGroups]
+    .sort((left, right) => {
+      const leftTimed = Number.isFinite(left.atMs);
+      const rightTimed = Number.isFinite(right.atMs);
+      if (leftTimed && rightTimed && left.atMs !== right.atMs) return left.atMs - right.atMs;
+      if (leftTimed !== rightTimed) return leftTimed ? -1 : 1;
+      return left.order - right.order;
+    })
+    .flatMap((group) => group.messages);
 }
 
 export function normalizeMobileNativeChatHistory(raw: unknown): {

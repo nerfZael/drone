@@ -15,11 +15,17 @@ describe('mobile question request card', () => {
     expect(source).toContain('styles.optionNumber');
     expect(source).toContain('advanceQuestion();');
     expect(source).toContain('minHeight: 46');
-    expect(source).toContain('borderLeftColor: colors.accent');
-    expect(source).toContain("backgroundColor: 'transparent'");
-    expect(source).toContain('styles.questionNavigationRow');
-    expect(source).not.toContain('questionHeader:');
-    expect(source).toContain('Skip all');
+    expect(source).toContain('borderColor: colors.border');
+    expect(source).toContain('backgroundColor: colors.whiteWashSoft');
+    expect(source).not.toContain('borderLeftColor: colors.accent');
+    expect(source).not.toContain('Input requested');
+    expect(source).toContain('styles.questionMetaRow');
+    expect(source).not.toContain('questionNavigationRow:');
+    expect(source).toContain('optionLetter(choiceIndex)');
+    expect(source).toContain('Add optional notes for the agent…');
+    expect(source).not.toContain('styles.notesLabel');
+    expect(source).toContain('Skip questionnaire');
+    expect(source).toContain('`Submit all ${questionCount}`');
   });
 
   test('renders completed answers as a compact read-only mobile summary', () => {
@@ -39,8 +45,21 @@ describe('mobile question request card', () => {
       'utf8',
     );
     expect(screenSource).toContain('Array.isArray(result?.questionRequests)');
-    expect(screenSource).toContain('<MobileQuestionResultCard key={request.id} request={request} />');
+    expect(screenSource).toContain('<MobileQuestionResultCard request={request} />');
     expect(screenSource).toContain("request.status === 'pending'");
+    expect(screenSource).toContain('questionRequests={questionRequests}');
+
+    const transcriptSource = readFileSync(
+      new URL('../src/local-assistant/LocalAssistantTranscript.tsx', import.meta.url),
+      'utf8',
+    );
+    expect(transcriptSource).toContain("kind: 'question' as const");
+    expect(transcriptSource).toContain(
+      "request.status === 'pending' ? request.createdAt : request.updatedAt",
+    );
+    expect(transcriptSource).toContain('renderQuestionRequest?.(entry.request)');
+    expect(transcriptSource).toContain('questionRequestsByRunKey');
+    expect(transcriptSource).toContain('interstitialContent=');
   });
 
   test('persists one display preference for every mobile questionnaire', () => {

@@ -983,6 +983,60 @@ describe('mobile drone sidebar model', () => {
     });
   });
 
+  test('places a failed pending run at its original position between completed turns', () => {
+    const messages = mobileDroneTurnsToAssistantMessages(
+      [
+        {
+          id: 'before',
+          promptAt: '2026-07-24T10:00:00.000Z',
+          completedAt: '2026-07-24T10:01:00.000Z',
+          prompt: 'Before failure',
+          output: 'Before response',
+        },
+        {
+          id: 'after',
+          promptAt: '2026-07-24T10:10:00.000Z',
+          completedAt: '2026-07-24T10:11:00.000Z',
+          prompt: 'After failure',
+          output: 'After response',
+        },
+      ],
+      [
+        {
+          id: 'failed-between',
+          at: '2026-07-24T10:05:00.000Z',
+          updatedAt: '2026-07-24T10:06:00.000Z',
+          prompt: 'Failed between them',
+          state: 'failed',
+          error: 'Agent crashed between turns',
+          activity: {
+            version: 1,
+            source: 'codex',
+            updatedAt: '2026-07-24T10:05:30.000Z',
+            messages: [
+              {
+                role: 'assistant',
+                content: [{ type: 'thinking', thinking: 'Trying the middle turn.' }],
+              },
+            ],
+          },
+        },
+      ],
+    );
+
+    expect(
+      messages
+        .filter((message) => message.role === 'user')
+        .map((message) => message.content),
+    ).toEqual(['Before failure', 'Failed between them', 'After failure']);
+    const failureIndex = messages.findIndex(
+      (message) => message.errorMessage === 'Agent crashed between turns',
+    );
+    const afterIndex = messages.findIndex((message) => message.content === 'After failure');
+    expect(failureIndex).toBeGreaterThan(-1);
+    expect(failureIndex).toBeLessThan(afterIndex);
+  });
+
   test('preserves stopped pending activity without turning the stop into an error message', () => {
     const messages = mobileDroneTurnsToAssistantMessages(
       [],

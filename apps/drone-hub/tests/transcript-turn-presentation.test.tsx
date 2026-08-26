@@ -5,6 +5,50 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { TranscriptTurn } from '../src/droneHub/chat/TranscriptTurn';
 
 describe('completed external transcript presentation', () => {
+  test('places an interactive result between tool activity and the continued answer', () => {
+    const html = renderToStaticMarkup(
+      <TranscriptTurn
+        item={{
+          turn: 1,
+          at: '2026-08-07T10:00:00.000Z',
+          prompt: 'Ask before continuing.',
+          session: 'codex-app-server',
+          logPath: '',
+          ok: true,
+          output: 'Continued after the answers.',
+          activity: {
+            version: 1,
+            source: 'codex',
+            updatedAt: '2026-08-07T10:01:00.000Z',
+            messages: [
+              {
+                role: 'assistant',
+                content: [
+                  { type: 'toolCall', id: 'questions-1', name: 'ask_questions', arguments: {} },
+                ],
+              },
+              {
+                role: 'toolResult',
+                toolCallId: 'questions-1',
+                toolName: 'ask_questions',
+                content: 'answered',
+              },
+              {
+                role: 'assistant',
+                content: [{ type: 'text', text: 'Continued after the answers.' }],
+              },
+            ],
+          },
+        }}
+        messageId="questions-turn"
+        interstitialContent={<div data-question-result="true">Saved answers</div>}
+      />,
+    );
+
+    expect(html.indexOf('Saved answers')).toBeGreaterThan(-1);
+    expect(html.indexOf('Saved answers')).toBeLessThan(html.indexOf('Continued after the answers.'));
+  });
+
   test('renders an accepted steering input without inventing an assistant response', () => {
     const html = renderToStaticMarkup(
       <TranscriptTurn

@@ -88,6 +88,7 @@ export const TranscriptTurn = React.memo(
     autoExpandAgentMessage = false,
     initiallyExpandFileChanges = false,
     followUps = [],
+    interstitialContent,
   }: {
     item: TranscriptItem;
     messageId: string;
@@ -103,6 +104,7 @@ export const TranscriptTurn = React.memo(
     autoExpandAgentMessage?: boolean;
     initiallyExpandFileChanges?: boolean;
     followUps?: UserChatMessageFollowUp[];
+    interstitialContent?: React.ReactNode;
   }) {
     const attachments = normalizeImageAttachmentRefs((item as any).attachments);
     const promptText = isAttachmentOnlyPrompt(item.prompt, attachments) ? '' : item.prompt;
@@ -262,8 +264,11 @@ export const TranscriptTurn = React.memo(
                   </button>
                 ) : undefined,
             }}
+            interstitialContent={interstitialContent}
           />
         ) : null}
+
+        {!activity ? interstitialContent : null}
 
         {showFallbackResponse ? (
           <ChatMessageFrame

@@ -180,6 +180,7 @@ describe('mesh assistant history', () => {
     const resolved = {
       ...pending,
       id: 'questions_resolved',
+      toolCallId: 'call_questions',
       status: 'submitted',
       result: {
         status: 'submitted',
@@ -194,6 +195,7 @@ describe('mesh assistant history', () => {
     expect(compact).toHaveLength(2);
     expect(compact[0].questions[0].choices).toEqual([]);
     expect(compact[0].result.responses[0].text).toBe('A carefully chosen custom scope.');
+    expect(compact[0].toolCallId).toBe('call_questions');
     expect(compact[1]).toBe(pending);
   });
 

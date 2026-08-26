@@ -12,6 +12,17 @@ type DraftResponse =
   | { outcome: 'custom'; text: string }
   | { outcome: 'skipped' };
 
+function optionLetter(index: number): string {
+  let value = index + 1;
+  let label = '';
+  while (value > 0) {
+    value -= 1;
+    label = String.fromCharCode('A'.charCodeAt(0) + (value % 26)) + label;
+    value = Math.floor(value / 26);
+  }
+  return label;
+}
+
 function initialResponses(request: ChatQuestionRequest): Record<string, DraftResponse | undefined> {
   return Object.fromEntries(
     request.questions.map((question) => {
@@ -85,32 +96,13 @@ export function AssistantQuestionCard({
 
   return (
     <section
-      className="relative min-w-0 border-l border-[var(--accent)] py-1 pl-4 pr-1 text-[var(--fg-secondary)]"
+      className="relative min-w-0 rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--surface-inset-faint)] px-3 py-3 text-[var(--fg-secondary)]"
       role="region"
       aria-label="Questions from the agent"
       aria-busy={busy || undefined}
       data-assistant-question-card="true"
     >
-      <div className="mb-3 flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--fg-strong)]">
-            Input requested
-          </div>
-          <div className="mt-0.5 text-[var(--text-10)] text-[var(--fg-secondary)]">
-            Review the recommendations, answer with something else, or skip any question.
-          </div>
-        </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={singleQuestion}
-          onClick={() => setAssistantQuestionViewMode(singleQuestion ? 'all' : 'single')}
-          className="shrink-0 rounded px-2 py-1 text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--fg-secondary)] transition-colors hover:bg-[var(--surface-strong)] hover:text-[var(--fg-strong)]"
-        >
-          {singleQuestion ? 'Show all' : 'One at a time'}
-        </button>
-      </div>
-      <div className="space-y-4">
+      <div className="space-y-3">
         {visibleQuestions.map((question) => {
           const questionIndex = request.questions.indexOf(question);
           const response = responses[question.id];
@@ -120,49 +112,66 @@ export function AssistantQuestionCard({
               key={question.id}
               disabled={locked}
               aria-labelledby={titleId}
-              className="min-w-0 space-y-1.5"
+              className="min-w-0 space-y-2"
             >
               <legend className="sr-only">{question.question}</legend>
-              <div className="flex min-w-0 items-start justify-between gap-3">
-                <div
-                  id={titleId}
-                  className="min-w-0 text-[var(--text-12)] font-[var(--weight-semibold)] leading-snug text-[var(--fg-strong)]"
-                >
-                  {singleQuestion ? question.question : `${questionIndex + 1}. ${question.question}`}
+              <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-4 gap-y-2">
+                <div className="flex min-w-[min(100%,28rem)] flex-1 flex-wrap items-center gap-2">
+                  <div
+                    id={titleId}
+                    className="min-w-0 text-[var(--text-14)] font-[var(--weight-strong)] leading-snug text-[var(--fg)]"
+                  >
+                    {singleQuestion
+                      ? question.question
+                      : `${questionIndex + 1}. ${question.question}`}
+                  </div>
+                  <span className="shrink-0 rounded bg-[var(--surface-strong)] px-1.5 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
+                    Importance {question.importance}/100
+                  </span>
                 </div>
-                {singleQuestion ? (
-                  <div className="flex shrink-0 items-center gap-1 text-[var(--text-10)] text-[var(--muted)]">
+                {singleQuestion || questionIndex === 0 ? (
+                  <div className="flex shrink-0 items-center gap-1 text-[var(--text-10)] text-[var(--fg-secondary)]">
+                    {singleQuestion ? (
+                      <>
+                        <button
+                          type="button"
+                          disabled={locked || activeQuestionIndex === 0}
+                          onClick={() => goToQuestion(activeQuestionIndex - 1)}
+                          aria-label="Previous question"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded text-[var(--fg-secondary)] hover:bg-[var(--surface-strong)] hover:text-[var(--fg-strong)] disabled:opacity-30"
+                        >
+                          <IconChevronLeft className="h-3.5 w-3.5" />
+                        </button>
+                        <span className="min-w-10 text-center tabular-nums">
+                          {activeQuestionIndex + 1} of {questionCount}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={locked || activeQuestionIndex >= questionCount - 1}
+                          onClick={() => goToQuestion(activeQuestionIndex + 1)}
+                          aria-label="Next question"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded text-[var(--fg-secondary)] hover:bg-[var(--surface-strong)] hover:text-[var(--fg-strong)] disabled:opacity-30"
+                        >
+                          <IconChevronRight className="h-3.5 w-3.5" />
+                        </button>
+                      </>
+                    ) : null}
                     <button
                       type="button"
-                      disabled={locked || activeQuestionIndex === 0}
-                      onClick={() => goToQuestion(activeQuestionIndex - 1)}
-                      aria-label="Previous question"
-                      className="inline-flex h-6 w-6 items-center justify-center rounded text-[var(--fg-secondary)] hover:bg-[var(--surface-strong)] hover:text-[var(--fg-strong)] disabled:opacity-30"
+                      role="switch"
+                      aria-checked={singleQuestion}
+                      onClick={() => setAssistantQuestionViewMode(singleQuestion ? 'all' : 'single')}
+                      className="ml-1 shrink-0 rounded px-2 py-1 text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--fg-secondary)] transition-colors hover:bg-[var(--surface-strong)] hover:text-[var(--fg-strong)]"
                     >
-                      <IconChevronLeft className="h-3.5 w-3.5" />
-                    </button>
-                    <span className="min-w-10 text-center tabular-nums">
-                      {activeQuestionIndex + 1} of {questionCount}
-                    </span>
-                    <button
-                      type="button"
-                      disabled={locked || activeQuestionIndex >= questionCount - 1}
-                      onClick={() => goToQuestion(activeQuestionIndex + 1)}
-                      aria-label="Next question"
-                      className="inline-flex h-6 w-6 items-center justify-center rounded text-[var(--fg-secondary)] hover:bg-[var(--surface-strong)] hover:text-[var(--fg-strong)] disabled:opacity-30"
-                    >
-                      <IconChevronRight className="h-3.5 w-3.5" />
+                      {singleQuestion ? 'Show all' : 'One at a time'}
                     </button>
                   </div>
                 ) : null}
               </div>
-              <div className="text-[var(--text-9)] text-[var(--muted)]">
-                Importance {question.importance}/100
-              </div>
               {question.detailedExplanation ? (
                 <MarkdownMessage
                   text={question.detailedExplanation}
-                  className="text-[var(--text-10)] leading-relaxed text-[var(--fg-secondary)]"
+                  className="!text-[var(--text-11)] !leading-relaxed text-[var(--fg-secondary)] opacity-90"
                 />
               ) : null}
               <div className={`${singleQuestion ? 'space-y-0' : 'space-y-1.5'} pt-0.5`}>
@@ -194,19 +203,17 @@ export function AssistantQuestionCard({
                           }));
                           advanceQuestion();
                         }}
-                        className={singleQuestion ? 'sr-only' : undefined}
+                        className="sr-only"
                       />
-                      {singleQuestion ? (
-                        <span
-                          className={`inline-flex h-7 min-w-7 shrink-0 items-center justify-center rounded-[var(--radius-medium)] text-[var(--text-10)] tabular-nums ${
-                            selected
-                              ? 'bg-[var(--surface-inset-strong)] text-[var(--fg-strong)]'
-                              : 'bg-[var(--surface-strong)] text-[var(--fg-secondary)]'
-                          }`}
-                        >
-                          {choiceIndex + 1}
-                        </span>
-                      ) : null}
+                      <span
+                        className={`inline-flex h-7 min-w-7 shrink-0 items-center justify-center rounded-[var(--radius-medium)] text-[var(--text-10)] font-[var(--weight-semibold)] ${
+                          selected
+                            ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
+                            : 'bg-[var(--surface-strong)] text-[var(--fg-secondary)]'
+                        }`}
+                      >
+                        {optionLetter(choiceIndex)}
+                      </span>
                       <span className="min-w-0 flex-1 text-[var(--text-11)]">
                         <span className="font-[var(--weight-semibold)] text-[var(--fg-strong)]">
                           {choice.label}
@@ -250,13 +257,17 @@ export function AssistantQuestionCard({
                           [question.id]: { outcome: 'custom', text: '' },
                         }))
                       }
-                      className={singleQuestion ? 'sr-only' : undefined}
+                      className="sr-only"
                     />
-                    {singleQuestion ? (
-                      <span className="inline-flex h-7 min-w-7 items-center justify-center rounded-[var(--radius-medium)] bg-[var(--surface-strong)] text-[var(--text-8)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
-                        Aa
-                      </span>
-                    ) : null}
+                    <span
+                      className={`inline-flex h-7 min-w-7 items-center justify-center rounded-[var(--radius-medium)] text-[var(--text-10)] font-[var(--weight-semibold)] ${
+                        response?.outcome === 'custom'
+                          ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
+                          : 'bg-[var(--surface-strong)] text-[var(--fg-secondary)]'
+                      }`}
+                    >
+                      {optionLetter(question.choices.length)}
+                    </span>
                     <span className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-strong)]">
                       Something else
                     </span>
@@ -287,7 +298,7 @@ export function AssistantQuestionCard({
                     }));
                     advanceQuestion();
                   }}
-                  className={`${singleQuestion ? 'ml-auto block' : ''} rounded px-2 py-1 text-[var(--text-10)] transition-colors ${
+                  className={`${singleQuestion ? 'ml-auto block' : ''} rounded px-2 py-0.5 text-[var(--text-10)] transition-colors ${
                     response?.outcome === 'skipped'
                       ? 'bg-[var(--surface-inset-strong)] font-[var(--weight-semibold)] text-[var(--fg-strong)]'
                       : 'text-[var(--fg-secondary)] hover:bg-[var(--surface-strong)] hover:text-[var(--fg-strong)]'
@@ -300,21 +311,39 @@ export function AssistantQuestionCard({
           );
         })}
       </div>
-      <label className="mt-4 block text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
-        Additional notes
-        <textarea
+      <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2 border-t border-[var(--border-subtle)] pt-2">
+        <label className="min-w-[14rem] flex-1">
+          <span className="sr-only">Additional notes</span>
+          <textarea
+            disabled={locked}
+            maxLength={8_000}
+            value={notes}
+            onChange={(event) => setNotes(event.target.value)}
+            rows={1}
+            placeholder="Add optional notes for the agent…"
+            className="block min-h-9 w-full resize-y rounded border border-[var(--border)] bg-[var(--surface-inset)] px-3 py-2 text-[var(--text-10)] font-normal leading-tight text-[var(--fg)] outline-none placeholder:text-[var(--muted)] focus:border-[var(--accent)]"
+          />
+        </label>
+        <button
+          type="button"
           disabled={locked}
-          maxLength={8_000}
-          value={notes}
-          onChange={(event) => setNotes(event.target.value)}
-          rows={2}
-          placeholder="Optional context for the agent"
-          className="mt-1.5 w-full resize-y rounded border border-[var(--border)] bg-[var(--surface-inset)] px-3 py-2 text-[var(--text-11)] font-normal text-[var(--fg)] outline-none focus:border-[var(--accent)]"
-        />
-      </label>
+          onClick={() => onSkip(notes.trim() || undefined)}
+          className="shrink-0 rounded border border-[var(--border)] bg-[var(--surface-inset)] px-3 py-2 text-[var(--text-10)] text-[var(--fg-secondary)] hover:border-[var(--accent-muted)] hover:text-[var(--fg-strong)] disabled:opacity-50"
+        >
+          Skip questionnaire
+        </button>
+        <button
+          type="button"
+          disabled={locked || !complete}
+          onClick={submit}
+          className="shrink-0 rounded bg-[var(--accent)] px-3 py-2 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--accent-contrast)] hover:brightness-110 disabled:opacity-50"
+        >
+          {questionCount === 1 ? 'Submit answer' : `Submit all ${questionCount} answers`}
+        </button>
+      </div>
       {!complete ? (
-        <div className="mt-2 text-[var(--text-9)] text-[var(--yellow)]">
-          Choose an answer or explicitly skip every question.
+        <div className="mt-1.5 text-[var(--text-9)] text-[var(--yellow)]">
+          Answer or skip each question to submit.
         </div>
       ) : null}
       {error ? (
@@ -322,24 +351,6 @@ export function AssistantQuestionCard({
           {error}
         </div>
       ) : null}
-      <div className="mt-3 flex flex-wrap justify-end gap-2">
-        <button
-          type="button"
-          disabled={locked}
-          onClick={() => onSkip(notes.trim() || undefined)}
-          className="rounded border border-[var(--border)] bg-[var(--surface-inset)] px-3 py-1.5 text-[var(--text-10)] text-[var(--fg-secondary)] hover:border-[var(--accent-muted)] hover:text-[var(--fg-strong)] disabled:opacity-50"
-        >
-          {notes.trim() ? 'Send note and skip' : 'Skip all questions'}
-        </button>
-        <button
-          type="button"
-          disabled={locked || !complete}
-          onClick={submit}
-          className="rounded bg-[var(--accent)] px-3 py-1.5 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--accent-contrast)] hover:brightness-110 disabled:opacity-50"
-        >
-          Submit answers
-        </button>
-      </div>
     </section>
   );
 }

@@ -74,6 +74,7 @@ import {
 } from './AssistantTranscript';
 import { ApprovalCard } from './AssistantWorkflowCards';
 import { AssistantQuestionCard } from './AssistantQuestionCard';
+import { AssistantQuestionResultCard } from './AssistantQuestionResultCard';
 import { buildNativeAgentComposerControls } from './native-agent-composer-controls';
 import {
   resolveAssistantStartupPromptPresentation,
@@ -482,7 +483,7 @@ export function AssistantDock({
   const hasHistory =
     blipSession.messages.length > 0 ||
     Boolean(activeThread?.queuedPrompts?.length) ||
-    Boolean(snapshot?.pendingQuestionRequests?.length) ||
+    Boolean(snapshot?.questionRequests?.length || snapshot?.pendingQuestionRequests?.length) ||
     startupPromptPresentation.showOptimistic;
   React.useEffect(() => {
     if (hasHistory) onHistoryChange?.(true);
@@ -500,12 +501,20 @@ export function AssistantDock({
       ),
     [activeThread?.id, snapshot?.pendingApprovals],
   );
-  const activeQuestionRequests = React.useMemo(
+  const threadQuestionRequests = React.useMemo(
     () =>
-      (snapshot?.pendingQuestionRequests ?? []).filter(
-        (request) => request.chatId === activeThread?.id && request.status === 'pending',
+      (snapshot?.questionRequests ?? snapshot?.pendingQuestionRequests ?? []).filter(
+        (request) => request.chatId === activeThread?.id,
       ),
-    [activeThread?.id, snapshot?.pendingQuestionRequests],
+    [activeThread?.id, snapshot?.pendingQuestionRequests, snapshot?.questionRequests],
+  );
+  const activeQuestionRequests = React.useMemo(
+    () => threadQuestionRequests.filter((request) => request.status === 'pending'),
+    [threadQuestionRequests],
+  );
+  const resolvedQuestionRequests = React.useMemo(
+    () => threadQuestionRequests.filter((request) => request.status !== 'pending' && request.result),
+    [threadQuestionRequests],
   );
   const activeApprovalStartedAt = React.useMemo(() => {
     const timestamps = activePendingApprovals
@@ -547,6 +556,7 @@ export function AssistantDock({
       activeThread?.queuedPrompts,
       snapshot?.pendingApprovals,
       snapshot?.pendingQuestionRequests,
+      snapshot?.questionRequests,
       running,
       error,
       blipSession.runError,
@@ -563,6 +573,7 @@ export function AssistantDock({
       running,
       snapshot?.pendingApprovals,
       snapshot?.pendingQuestionRequests,
+      snapshot?.questionRequests,
     ],
   );
   const {
@@ -2060,6 +2071,7 @@ export function AssistantDock({
 
   const toolActivityVisible = chatSurfaceAdapter.capabilities.toolActivity === 'visible';
   const nativeTranscriptItems: AgentChatTranscriptItem[] = [];
+  const renderedResolvedQuestionIds = new Set<string>();
   if (blipSession.olderLoading) {
     nativeTranscriptItems.push({
       key: 'native-history-older',
@@ -2290,6 +2302,35 @@ export function AssistantDock({
           approvalStartedAt={activeApprovalStartedAt}
         />
       ),
+    });
+    const runToolCallIds = new Set(runItems.map((runItem) => String(runItem.call?.id ?? '')));
+    for (const request of resolvedQuestionRequests) {
+      if (!request.toolCallId || !runToolCallIds.has(request.toolCallId)) continue;
+      renderedResolvedQuestionIds.add(request.id);
+      nativeTranscriptItems.push({
+        key: `questions:${request.id}`,
+        kind: 'approval',
+        content: <AssistantQuestionResultCard request={request} />,
+      });
+    }
+  }
+  for (const request of resolvedQuestionRequests) {
+    if (renderedResolvedQuestionIds.has(request.id)) continue;
+    const resolvedAt = Date.parse(request.updatedAt);
+    const nextMessage = Number.isFinite(resolvedAt)
+      ? visibleItems.find(
+          (item) =>
+            item.type === 'message' &&
+            (assistantMessageTimestampMs(item.message) ?? Number.NEGATIVE_INFINITY) > resolvedAt,
+        )
+      : undefined;
+    const nextIndex = nextMessage
+      ? nativeTranscriptItems.findIndex((item) => item.key === nextMessage.key)
+      : -1;
+    nativeTranscriptItems.splice(nextIndex < 0 ? nativeTranscriptItems.length : nextIndex, 0, {
+      key: `questions:${request.id}`,
+      kind: 'approval',
+      content: <AssistantQuestionResultCard request={request} />,
     });
   }
   if (blipSession.compactionInProgress) {

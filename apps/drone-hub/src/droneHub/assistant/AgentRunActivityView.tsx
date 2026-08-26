@@ -48,6 +48,7 @@ export function AgentRunActivityView({
   autoExpandFinalMessage = false,
   plan,
   messageExtras,
+  interstitialContent,
 }: {
   activity?: AgentRunActivity;
   active?: boolean;
@@ -58,6 +59,7 @@ export function AgentRunActivityView({
   autoExpandFinalMessage?: boolean;
   plan?: AgentPlan;
   messageExtras?: Omit<AgentMessageExtrasProps, 'text' | 'tasks'>;
+  interstitialContent?: React.ReactNode;
 }) {
   const displayActivity = React.useMemo(
     () => (active ? activity : settleAgentRunActivity(activity)),
@@ -211,6 +213,7 @@ export function AgentRunActivityView({
           ) : null}
         </div>
       ) : null}
+      {interstitialContent}
       {finalAssistantItem ? (
         <div className="mt-1 px-3">
           <AssistantMessageRow

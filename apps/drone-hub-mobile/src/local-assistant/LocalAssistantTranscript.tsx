@@ -37,6 +37,7 @@ import {
   type AssistantMessage,
   type AssistantRenderItem,
   type AssistantToolRenderItem,
+  type ChatQuestionRequest,
   type PromptQueueInterruption,
   type PromptQueueInterruptionResolution,
 } from '@drone/assistant-chat';
@@ -1390,12 +1391,14 @@ function MobileAgentPlanList({ plan, running = false }: { plan?: AgentPlan; runn
 function TranscriptRun({
   run,
   renderItem,
+  interstitialContent,
   showThinking,
   awaitingApproval = false,
   approvalStartedAt,
 }: {
   run: MobileTranscriptRun;
   renderItem: (item: AssistantRenderItem, blocked?: boolean) => any;
+  interstitialContent?: React.ReactNode;
   showThinking: boolean;
   awaitingApproval?: boolean;
   approvalStartedAt?: string | number;
@@ -1492,6 +1495,7 @@ function TranscriptRun({
           </View>
         ) : null}
       </View>
+      {interstitialContent}
       {trailingItems.map((item) => (
         <React.Fragment key={item.key}>{renderItem(item)}</React.Fragment>
       ))}
@@ -1526,6 +1530,8 @@ export function MobileAssistantTranscript({
   onOpenFileReference,
   onLoadRunFileDiff,
   onLoadRunFiles,
+  questionRequests = [],
+  renderQuestionRequest,
 }: {
   messages: AssistantMessage[];
   running?: boolean;
@@ -1567,6 +1573,8 @@ export function MobileAssistantTranscript({
     nextOffset: number | null;
     metadataTruncated?: boolean;
   }>;
+  questionRequests?: readonly ChatQuestionRequest[];
+  renderQuestionRequest?: (request: ChatQuestionRequest) => React.ReactNode;
 }) {
   const items = React.useMemo(() => renderItemsFromMessages(messages), [messages]);
   let latestRecoverableFailureKey = '';
@@ -1631,7 +1639,7 @@ export function MobileAssistantTranscript({
     (prompt) => prompt.status === 'failed' || prompt.status === 'stopped',
   );
   const queuedOnlyPrompts = queuedPrompts.filter((prompt) => prompt.status === 'queued');
-  if (items.length === 0 && !running && queuedPrompts.length === 0) {
+  if (items.length === 0 && !running && queuedPrompts.length === 0 && questionRequests.length === 0) {
     return (
       <View style={styles.emptyTranscript}>
         <View style={styles.emptyOrbit}>
@@ -1926,6 +1934,45 @@ export function MobileAssistantTranscript({
   const activePromptHasPlan = Boolean(activePrompt?.agentPlan?.items.length);
   const showStandaloneReasoning =
     running && Boolean(currentReasoning.trim()) && !groupedActiveRun && !activePrompt;
+  const questionRequestsByRunKey = new Map<string, ChatQuestionRequest[]>();
+  const unassignedQuestionRequests: ChatQuestionRequest[] = [];
+  for (const request of questionRequests) {
+    const toolCallId = String(request.toolCallId ?? '').trim();
+    const owner = toolCallId
+      ? groups.find(
+          (group) =>
+            group.type === 'run' &&
+            group.items.some((item) => {
+              if (item.type === 'tool') return item.call?.id === toolCallId;
+              if (item.type === 'toolGroup') {
+                return item.items.some((tool) => tool.call?.id === toolCallId);
+              }
+              return false;
+            }),
+        )
+      : undefined;
+    if (!owner) {
+      unassignedQuestionRequests.push(request);
+      continue;
+    }
+    const owned = questionRequestsByRunKey.get(owner.key) ?? [];
+    owned.push(request);
+    questionRequestsByRunKey.set(owner.key, owned);
+  }
+  const insertedTimeline = [
+    ...historicalPrompts.map((prompt, index) => ({
+      kind: 'prompt' as const,
+      prompt,
+      order: groups.length + index,
+      atMs: timestampMs(prompt.startedAt),
+    })),
+    ...unassignedQuestionRequests.map((request, index) => ({
+      kind: 'question' as const,
+      request,
+      order: groups.length + historicalPrompts.length + index,
+      atMs: timestampMs(request.status === 'pending' ? request.createdAt : request.updatedAt),
+    })),
+  ];
   const historicalTimeline = mergeMobileTranscriptTimeline(
     groups.map((group, order) => ({
       kind: 'group' as const,
@@ -1933,12 +1980,7 @@ export function MobileAssistantTranscript({
       order,
       atMs: timestampMs(mobileTranscriptGroupStartedAt(group)),
     })),
-    historicalPrompts.map((prompt, index) => ({
-      kind: 'prompt' as const,
-      prompt,
-      order: groups.length + index,
-      atMs: timestampMs(prompt.startedAt),
-    })),
+    insertedTimeline,
   );
   return (
     <View style={styles.messages}>
@@ -1950,11 +1992,22 @@ export function MobileAssistantTranscript({
             resolvingInterruptionId={resolvingInterruptionId}
             onResolveInterruption={onResolveInterruption}
           />
+        ) : entry.kind === 'question' ? (
+          <React.Fragment key={`question:${entry.request.id}`}>
+            {renderQuestionRequest?.(entry.request)}
+          </React.Fragment>
         ) : entry.group.type === 'run' ? (
           <TranscriptRun
             key={entry.group.key}
             run={entry.group}
             renderItem={renderItem}
+            interstitialContent={questionRequestsByRunKey
+              .get(entry.group.key)
+              ?.map((request) => (
+                <React.Fragment key={`question:${request.id}`}>
+                  {renderQuestionRequest?.(request)}
+                </React.Fragment>
+              ))}
             showThinking={!showStandaloneReasoning}
             awaitingApproval={awaitingApproval && entry.group.key === latestRunGroup?.key}
             approvalStartedAt={approvalStartedAt}

@@ -33,6 +33,9 @@ function compactResolvedQuestionRequest(request: any): any {
     droneId: String(request?.droneId ?? '').slice(0, 200),
     chatName: String(request?.chatName ?? '').slice(0, 200),
     chatId: String(request?.chatId ?? '').slice(0, 200),
+    ...(String(request?.toolCallId ?? '').trim()
+      ? { toolCallId: String(request.toolCallId).slice(0, 240) }
+      : {}),
     toolName: String(request?.toolName ?? 'ask_questions').slice(0, 160),
     createdAt: String(request?.createdAt ?? ''),
     updatedAt: String(request?.updatedAt ?? ''),

@@ -3,7 +3,9 @@ import {
   buildChatTimelineItems,
   groupedPendingPresentationItem,
   groupChatTimelineItems,
+  mergeChatTranscriptTimeline,
 } from '../src/droneHub/app/chat-timeline-items';
+import type { ChatQuestionRequest } from '@drone/assistant-chat';
 import type { PendingPrompt, TranscriptItem } from '../src/droneHub/types';
 
 function turn(turnNumber: number, at: string): TranscriptItem {
@@ -28,6 +30,61 @@ function pending(
 }
 
 describe('chat timeline items', () => {
+  test('places resolved questionnaires where they occurred instead of after the transcript', () => {
+    const groups = groupChatTimelineItems(
+      buildChatTimelineItems(
+        [turn(1, '2026-01-01T10:00:00.000Z'), turn(2, '2026-01-01T10:03:00.000Z')],
+        [],
+      ),
+    );
+    const request: ChatQuestionRequest = {
+      id: 'questions-1',
+      droneId: 'drone-1',
+      chatName: 'default',
+      chatId: 'chat-1',
+      toolName: 'ask_questions',
+      questions: [],
+      createdAt: '2026-01-01T10:01:00.000Z',
+      updatedAt: '2026-01-01T10:02:00.000Z',
+      status: 'submitted',
+      result: { status: 'submitted', requestId: 'questions-1', responses: [] },
+    };
+
+    expect(
+      mergeChatTranscriptTimeline(groups, [request]).map((entry) =>
+        entry.kind === 'group'
+          ? `turn:${entry.group.primary.item.turn}`
+          : `question:${entry.request.id}`,
+      ),
+    ).toEqual(['turn:1', 'question:questions-1', 'turn:2']);
+  });
+
+  test('uses creation time while a questionnaire is still pending', () => {
+    const groups = groupChatTimelineItems(
+      buildChatTimelineItems(
+        [turn(1, '2026-01-01T10:00:00.000Z'), turn(2, '2026-01-01T10:03:00.000Z')],
+        [],
+      ),
+    );
+    const request: ChatQuestionRequest = {
+      id: 'questions-1',
+      droneId: 'drone-1',
+      chatName: 'default',
+      chatId: 'chat-1',
+      toolName: 'ask_questions',
+      questions: [],
+      createdAt: '2026-01-01T10:01:00.000Z',
+      updatedAt: '2026-01-01T10:04:00.000Z',
+      status: 'pending',
+    };
+
+    expect(
+      mergeChatTranscriptTimeline(groups, [request]).map((entry) =>
+        entry.kind === 'group' ? `turn:${entry.group.primary.item.turn}` : 'question',
+      ),
+    ).toEqual(['turn:1', 'question', 'turn:2']);
+  });
+
   test('merges ordinary pending prompts with completed turns chronologically', () => {
     const items = buildChatTimelineItems(
       [turn(1, '2026-01-01T10:00:00.000Z'), turn(2, '2026-01-01T10:02:00.000Z')],

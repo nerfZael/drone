@@ -1,4 +1,4 @@
-import { isEventNotificationPrompt } from '@drone/assistant-chat';
+import { isEventNotificationPrompt, type ChatQuestionRequest } from '@drone/assistant-chat';
 import type { PendingPrompt, TranscriptItem } from '../types';
 import { parseIsoMs } from './selected-drone-workspace-utils';
 
@@ -11,6 +11,10 @@ export type ChatTimelineGroup = {
   followUps: ChatTimelineItem[];
 };
 
+export type ChatTranscriptTimelineEntry =
+  | { kind: 'group'; group: ChatTimelineGroup; groupIndex: number }
+  | { kind: 'question'; request: ChatQuestionRequest };
+
 type SortableChatTimelineItem = ChatTimelineItem & {
   order: number;
   sortMs: number;
@@ -19,6 +23,39 @@ type SortableChatTimelineItem = ChatTimelineItem & {
 function timelineSortMs(item: ChatTimelineItem): number {
   if (item.kind === 'turn') return parseIsoMs(item.item.promptAt ?? item.item.at);
   return parseIsoMs(item.item.at);
+}
+
+function questionTimelineSortMs(request: ChatQuestionRequest): number {
+  return parseIsoMs(request.status === 'pending' ? request.createdAt : request.updatedAt);
+}
+
+/** Merge questionnaire events into transcript history at the time visible to the user. */
+export function mergeChatTranscriptTimeline(
+  groups: readonly ChatTimelineGroup[],
+  questionRequests: readonly ChatQuestionRequest[],
+): ChatTranscriptTimelineEntry[] {
+  const entries: Array<ChatTranscriptTimelineEntry & { order: number; sortMs: number }> = [
+    ...groups.map((group, groupIndex) => ({
+      kind: 'group' as const,
+      group,
+      groupIndex,
+      order: groupIndex,
+      sortMs: timelineSortMs(group.primary),
+    })),
+    ...questionRequests.map((request, index) => ({
+      kind: 'question' as const,
+      request,
+      order: groups.length + index,
+      sortMs: questionTimelineSortMs(request),
+    })),
+  ];
+
+  entries.sort((left, right) => {
+    if (left.sortMs !== right.sortMs) return left.sortMs - right.sortMs;
+    return left.order - right.order;
+  });
+
+  return entries.map(({ order: _order, sortMs: _sortMs, ...entry }) => entry);
 }
 
 export function buildChatTimelineItems(

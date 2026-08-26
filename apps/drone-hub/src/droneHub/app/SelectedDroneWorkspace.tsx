@@ -8,6 +8,7 @@ import type {
   CodexPendingApproval,
   PromptQueueInterruptionResolution,
 } from '@drone/assistant-chat';
+import { toolCalls } from '@drone/assistant-chat';
 import {
   AgentChatTranscript,
   ChatSurface,
@@ -116,6 +117,7 @@ import {
   buildChatTimelineItems,
   groupedPendingPresentationItem,
   groupChatTimelineItems,
+  mergeChatTranscriptTimeline,
 } from './chat-timeline-items';
 import { timelineUserFollowUps } from './chat-timeline-follow-ups';
 import { pendingPromptShowsWorkingState } from './optimistic-pending-prompts';
@@ -766,6 +768,38 @@ export function SelectedDroneWorkspace({
     () => groupChatTimelineItems(externalTimelineItems),
     [externalTimelineItems],
   );
+  const externalQuestionTimelinePlacement = React.useMemo(() => {
+    const byGroupIndex = new Map<number, ChatQuestionRequest[]>();
+    const standalone: ChatQuestionRequest[] = [];
+    for (const request of externalQuestionRequests) {
+      const toolCallId = String(request.toolCallId ?? '').trim();
+      const groupIndex = request.status !== 'pending' && toolCallId
+        ? externalTimelineGroups.findIndex(
+            (group) =>
+              group.primary.kind === 'turn' &&
+              group.primary.item.activity?.messages?.some((message) =>
+                toolCalls(message).some((call) => call.id === toolCallId),
+              ),
+          )
+        : -1;
+      if (groupIndex < 0) {
+        standalone.push(request);
+        continue;
+      }
+      const requests = byGroupIndex.get(groupIndex) ?? [];
+      requests.push(request);
+      byGroupIndex.set(groupIndex, requests);
+    }
+    return { byGroupIndex, standalone };
+  }, [externalQuestionRequests, externalTimelineGroups]);
+  const externalTranscriptTimeline = React.useMemo(
+    () =>
+      mergeChatTranscriptTimeline(
+        externalTimelineGroups,
+        externalQuestionTimelinePlacement.standalone,
+      ),
+    [externalQuestionTimelinePlacement.standalone, externalTimelineGroups],
+  );
   const {
     bindContentRef: bindTranscriptContentRef,
     bindScrollRef: bindTranscriptScrollRef,
@@ -774,7 +808,7 @@ export function SelectedDroneWorkspace({
     updatePinned: updateTranscriptPinned,
   } = usePinnedTranscriptScroll({
     contextKey: `${currentDrone.id}:${activeChatName}`,
-    contentVersion: externalTimelineGroups,
+    contentVersion: externalTranscriptTimeline,
     enabled:
       currentDrone.hubPhase === 'error' ||
       (chatUiMode === 'transcript' && (currentAgentKey !== 'native' || currentChatIsDraft)),
@@ -1457,8 +1491,36 @@ export function SelectedDroneWorkspace({
   }
   const externalTranscriptItems: AgentChatTranscriptItem[] = [];
   const renderedApprovalIds = new Set<string>();
-  for (let groupIndex = 0; groupIndex < externalTimelineGroups.length; groupIndex += 1) {
-    const group = externalTimelineGroups[groupIndex]!;
+  for (const timelineEntry of externalTranscriptTimeline) {
+    if (timelineEntry.kind === 'question') {
+      const request = timelineEntry.request;
+      externalTranscriptItems.push({
+        key: `questions:${request.id}`,
+        kind: 'approval',
+        content:
+          request.status === 'pending' ? (
+            <AssistantQuestionCard
+              request={request}
+              busy={externalQuestionBusyId === request.id}
+              error={externalQuestionError}
+              onSubmit={({ responses, notes }) =>
+                void resolveExternalQuestionRequest(request, {
+                  kind: 'submit',
+                  responses,
+                  notes,
+                })
+              }
+              onSkip={(notes) =>
+                void resolveExternalQuestionRequest(request, { kind: 'skip', notes })
+              }
+            />
+          ) : (
+            <AssistantQuestionResultCard request={request} />
+          ),
+      });
+      continue;
+    }
+    const { group, groupIndex } = timelineEntry;
     const entry = group.primary;
     const followUps = timelineUserFollowUps(group.followUps, {
       droneId: currentDrone.id,
@@ -1522,6 +1584,11 @@ export function SelectedDroneWorkspace({
             droneHomePath={currentDroneHomePath}
             showRoleIcons={false}
             dockerSnapshotsEnabled={dockerSnapshotAfterAgentMessageEnabled}
+            interstitialContent={externalQuestionTimelinePlacement.byGroupIndex
+              .get(groupIndex)
+              ?.map((request) => (
+                <AssistantQuestionResultCard key={request.id} request={request} />
+              ))}
           />
         ),
       });
@@ -1547,32 +1614,6 @@ export function SelectedDroneWorkspace({
         });
       }
     }
-  }
-  for (const request of externalQuestionRequests) {
-    externalTranscriptItems.push({
-      key: `questions:${request.id}`,
-      kind: 'approval',
-      content:
-        request.status === 'pending' ? (
-          <AssistantQuestionCard
-            request={request}
-            busy={externalQuestionBusyId === request.id}
-            error={externalQuestionError}
-            onSubmit={({ responses, notes }) =>
-              void resolveExternalQuestionRequest(request, {
-                kind: 'submit',
-                responses,
-                notes,
-              })
-            }
-            onSkip={(notes) =>
-              void resolveExternalQuestionRequest(request, { kind: 'skip', notes })
-            }
-          />
-        ) : (
-          <AssistantQuestionResultCard request={request} />
-        ),
-    });
   }
   return (
     <>

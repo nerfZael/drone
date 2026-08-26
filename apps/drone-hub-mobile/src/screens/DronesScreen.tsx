@@ -3136,6 +3136,31 @@ export function DronesScreen({
                           onOpenFileReference={filePreview.open}
                           onLoadRunFileDiff={loadRunFileDiff}
                           onLoadRunFiles={loadRunFiles}
+                          questionRequests={questionRequests}
+                          renderQuestionRequest={(request) =>
+                            request.status === 'pending' ? (
+                              <MobileQuestionRequestCard
+                                request={request}
+                                busy={questionBusyId === request.id}
+                                disabled={!targetReachable}
+                                onSubmit={({ responses, notes }) =>
+                                  resolveQuestionRequest(request, {
+                                    action: 'submit',
+                                    responses,
+                                    ...(notes ? { notes } : {}),
+                                  })
+                                }
+                                onSkip={(notes) =>
+                                  resolveQuestionRequest(request, {
+                                    action: 'skip',
+                                    ...(notes ? { notes } : {}),
+                                  })
+                                }
+                              />
+                            ) : (
+                              <MobileQuestionResultCard request={request} />
+                            )
+                          }
                           onDeleteMessageRequest={
                             nativeMessages !== null
                               ? ({ message, deleteFollowing }) => {
@@ -3176,31 +3201,6 @@ export function DronesScreen({
                           onResolve={(decision) => resolveCodexApproval(approval, decision)}
                         />
                       ))}
-                      {questionRequests.map((request) =>
-                        request.status === 'pending' ? (
-                          <MobileQuestionRequestCard
-                            key={request.id}
-                            request={request}
-                            busy={questionBusyId === request.id}
-                            disabled={!targetReachable}
-                            onSubmit={({ responses, notes }) =>
-                              resolveQuestionRequest(request, {
-                                action: 'submit',
-                                responses,
-                                ...(notes ? { notes } : {}),
-                              })
-                            }
-                            onSkip={(notes) =>
-                              resolveQuestionRequest(request, {
-                                action: 'skip',
-                                ...(notes ? { notes } : {}),
-                              })
-                            }
-                          />
-                        ) : (
-                          <MobileQuestionResultCard key={request.id} request={request} />
-                        ),
-                      )}
                     </ScrollView>
                     <View style={styles.composerMetadataRow}>
                       <View style={styles.composerMetadataLeading}>

@@ -17,6 +17,17 @@ type Draft =
   | { outcome: 'custom'; text: string }
   | { outcome: 'skipped' };
 
+function optionLetter(index: number): string {
+  let value = index + 1;
+  let label = '';
+  while (value > 0) {
+    value -= 1;
+    label = String.fromCharCode('A'.charCodeAt(0) + (value % 26)) + label;
+    value = Math.floor(value / 26);
+  }
+  return label;
+}
+
 export function MobileQuestionRequestCard({
   request,
   busy,
@@ -64,71 +75,69 @@ export function MobileQuestionRequestCard({
 
   return (
     <Card style={styles.card}>
-      <View style={styles.cardHeader}>
-        <View style={styles.headerCopy}>
-          <Text style={styles.eyebrow}>Input requested</Text>
-          <Text style={styles.headerHint}>Choose an answer, write your own, or skip.</Text>
-        </View>
-        <Pressable
-          accessibilityRole="switch"
-          accessibilityState={{ checked: singleQuestion, disabled: locked }}
-          accessibilityLabel="Show one question at a time"
-          disabled={locked}
-          hitSlop={6}
-          onPress={() => setMobileQuestionViewMode(singleQuestion ? 'all' : 'single')}
-          style={({ pressed }) => [styles.modeToggle, pressed && styles.pressed]}
-        >
-          <Text style={styles.modeToggleText}>
-            {singleQuestion ? 'Show all' : 'One at a time'}
-          </Text>
-        </Pressable>
-      </View>
       {visibleQuestions.map((question) => {
         const index = request.questions.indexOf(question);
         const draft = drafts[question.id];
         return (
           <View key={question.id} style={styles.question}>
+            <View style={styles.questionMetaRow}>
+              <Text style={styles.importance}>Importance {question.importance}/100</Text>
+              {singleQuestion || index === 0 ? (
+                <View style={styles.questionControls}>
+                  {singleQuestion ? (
+                    <>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Previous question"
+                        disabled={locked || activeQuestionIndex === 0}
+                        hitSlop={6}
+                        onPress={() => goToQuestion(activeQuestionIndex - 1)}
+                        style={({ pressed }) => [
+                          styles.navigationButton,
+                          activeQuestionIndex === 0 && styles.disabled,
+                          pressed && styles.pressed,
+                        ]}
+                      >
+                        <ChevronLeft color={colors.textSecondary} size={17} strokeWidth={2.2} />
+                      </Pressable>
+                      <Text style={styles.questionCount}>
+                        {activeQuestionIndex + 1} of {questionCount}
+                      </Text>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Next question"
+                        disabled={locked || activeQuestionIndex >= questionCount - 1}
+                        hitSlop={6}
+                        onPress={() => goToQuestion(activeQuestionIndex + 1)}
+                        style={({ pressed }) => [
+                          styles.navigationButton,
+                          activeQuestionIndex >= questionCount - 1 && styles.disabled,
+                          pressed && styles.pressed,
+                        ]}
+                      >
+                        <ChevronRight color={colors.textSecondary} size={17} strokeWidth={2.2} />
+                      </Pressable>
+                    </>
+                  ) : null}
+                  <Pressable
+                    accessibilityRole="switch"
+                    accessibilityState={{ checked: singleQuestion, disabled: locked }}
+                    accessibilityLabel="Show one question at a time"
+                    disabled={locked}
+                    hitSlop={6}
+                    onPress={() => setMobileQuestionViewMode(singleQuestion ? 'all' : 'single')}
+                    style={({ pressed }) => [styles.modeToggle, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.modeToggleText}>
+                      {singleQuestion ? 'Show all' : 'One at a time'}
+                    </Text>
+                  </Pressable>
+                </View>
+              ) : null}
+            </View>
             <Text style={styles.questionTitle}>
               {singleQuestion ? question.question : `${index + 1}. ${question.question}`}
             </Text>
-            {singleQuestion ? (
-              <View style={styles.questionNavigationRow}>
-                <Text style={styles.questionCount}>
-                  {activeQuestionIndex + 1} of {questionCount}
-                </Text>
-                <View style={styles.questionNavigation}>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Previous question"
-                    disabled={locked || activeQuestionIndex === 0}
-                    hitSlop={6}
-                    onPress={() => goToQuestion(activeQuestionIndex - 1)}
-                    style={({ pressed }) => [
-                      styles.navigationButton,
-                      activeQuestionIndex === 0 && styles.disabled,
-                      pressed && styles.pressed,
-                    ]}
-                  >
-                    <ChevronLeft color={colors.textSecondary} size={17} strokeWidth={2.2} />
-                  </Pressable>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Next question"
-                    disabled={locked || activeQuestionIndex >= questionCount - 1}
-                    hitSlop={6}
-                    onPress={() => goToQuestion(activeQuestionIndex + 1)}
-                    style={({ pressed }) => [
-                      styles.navigationButton,
-                      activeQuestionIndex >= questionCount - 1 && styles.disabled,
-                      pressed && styles.pressed,
-                    ]}
-                  >
-                    <ChevronRight color={colors.textSecondary} size={17} strokeWidth={2.2} />
-                  </Pressable>
-                </View>
-              </View>
-            ) : null}
-            <Text style={styles.importance}>Importance {question.importance}/100</Text>
             {question.detailedExplanation ? (
               <NativeMarkdown text={question.detailedExplanation} />
             ) : null}
@@ -154,13 +163,13 @@ export function MobileQuestionRequestCard({
                     pressed && styles.pressed,
                   ]}
                 >
-                  {singleQuestion ? (
-                    <View style={[styles.optionNumber, selected && styles.optionNumberSelected]}>
-                      <Text style={styles.optionNumberText}>{choiceIndex + 1}</Text>
-                    </View>
-                  ) : (
-                    <View style={[styles.radio, selected && styles.radioSelected]} />
-                  )}
+                  <View style={[styles.optionNumber, selected && styles.optionNumberSelected]}>
+                    <Text
+                      style={[styles.optionNumberText, selected && styles.optionNumberTextSelected]}
+                    >
+                      {optionLetter(choiceIndex)}
+                    </Text>
+                  </View>
                   <View style={styles.optionBody}>
                     <View style={styles.optionTitleRow}>
                       <Text style={styles.optionTitle}>{choice.label}</Text>
@@ -195,13 +204,21 @@ export function MobileQuestionRequestCard({
                 pressed && styles.pressed,
               ]}
             >
-              {singleQuestion ? (
-                <View style={styles.optionNumber}>
-                  <Text style={styles.optionNumberText}>Aa</Text>
-                </View>
-              ) : (
-                <View style={[styles.radio, draft?.outcome === 'custom' && styles.radioSelected]} />
-              )}
+              <View
+                style={[
+                  styles.optionNumber,
+                  draft?.outcome === 'custom' && styles.optionNumberSelected,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.optionNumberText,
+                    draft?.outcome === 'custom' && styles.optionNumberTextSelected,
+                  ]}
+                >
+                  {optionLetter(question.choices.length)}
+                </Text>
+              </View>
               <Text style={styles.optionTitle}>Something else</Text>
             </Pressable>
             {draft?.outcome === 'custom' ? (
@@ -241,19 +258,19 @@ export function MobileQuestionRequestCard({
           </View>
         );
       })}
-      <Text style={styles.notesLabel}>Additional notes</Text>
       <ThemedTextInput
+        accessibilityLabel="Additional notes"
         editable={!locked}
         multiline
         maxLength={8_000}
         value={notes}
-        placeholder="Optional context for the agent"
+        placeholder="Add optional notes for the agent…"
         placeholderTextColor={colors.muted}
         onChangeText={setNotes}
-        style={styles.input}
+        style={styles.notesInput}
       />
       {!complete ? (
-        <Text style={styles.warning}>Choose an answer or explicitly skip every question.</Text>
+        <Text style={styles.warning}>Answer or skip each question to submit.</Text>
       ) : null}
       <View style={styles.actions}>
         <Button
@@ -262,7 +279,7 @@ export function MobileQuestionRequestCard({
           onPress={() => onSkip(notes.trim() || undefined)}
           style={styles.button}
         >
-          Skip all
+          Skip questionnaire
         </Button>
         <Button
           disabled={locked || !complete}
@@ -287,7 +304,7 @@ export function MobileQuestionRequestCard({
           }}
           style={styles.button}
         >
-          Submit answers
+          {questionCount === 1 ? 'Submit answer' : `Submit all ${questionCount}`}
         </Button>
       </View>
     </Card>
@@ -298,50 +315,50 @@ const styles = StyleSheet.create({
   card: {
     marginHorizontal: 12,
     marginBottom: 10,
-    gap: 10,
-    borderWidth: 0,
-    borderLeftWidth: 2,
-    borderLeftColor: colors.accent,
-    borderRadius: 0,
-    backgroundColor: 'transparent',
-    paddingHorizontal: 14,
-    paddingVertical: 6,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    backgroundColor: colors.whiteWashSoft,
+    paddingHorizontal: 11,
+    paddingVertical: 10,
     shadowOpacity: 0,
     elevation: 0,
   },
-  cardHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
-  headerCopy: { flex: 1, minWidth: 0, gap: 3 },
-  eyebrow: {
-    color: colors.textStrong,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  headerHint: { color: colors.textSecondary, fontSize: 11, lineHeight: 15 },
-  modeToggle: { minHeight: 32, justifyContent: 'center', paddingHorizontal: 8, borderRadius: 7 },
+  modeToggle: { minHeight: 30, justifyContent: 'center', paddingHorizontal: 7, borderRadius: 7 },
   modeToggleText: { color: colors.textSecondary, fontSize: 10, fontWeight: '700' },
-  question: { gap: 7, paddingBottom: 4 },
-  questionTitle: {
-    color: colors.textStrong,
-    fontSize: 14,
-    fontWeight: '700',
-    lineHeight: 20,
-  },
-  questionNavigationRow: {
-    minHeight: 38,
+  question: { gap: 7, paddingBottom: 2 },
+  questionMetaRow: {
+    minHeight: 30,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 8,
   },
-  questionNavigation: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  questionControls: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  questionTitle: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '700',
+    lineHeight: 22,
+  },
   navigationButton: {
-    width: 34,
-    height: 34,
+    width: 30,
+    height: 30,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 8,
   },
-  questionCount: { color: colors.muted, fontSize: 11 },
-  importance: { color: colors.muted, fontSize: 10 },
+  questionCount: { minWidth: 34, textAlign: 'center', color: colors.textSecondary, fontSize: 10 },
+  importance: {
+    color: colors.textSecondary,
+    fontSize: 10,
+    fontWeight: '700',
+    backgroundColor: colors.controlSurface,
+    borderRadius: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+  },
   option: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -369,26 +386,17 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: colors.controlSurface,
   },
-  optionNumberSelected: { backgroundColor: colors.surface1 },
+  optionNumberSelected: { backgroundColor: colors.accent },
   optionNumberText: { color: colors.textSecondary, fontSize: 11, fontWeight: '700' },
-  radio: {
-    width: 14,
-    height: 14,
-    marginTop: 2,
-    borderRadius: 7,
-    borderWidth: 1,
-    borderColor: colors.muted,
-  },
-  radioSelected: { borderWidth: 4, borderColor: colors.accent },
+  optionNumberTextSelected: { color: colors.onAccent },
   optionBody: { flex: 1, gap: 2 },
   optionTitleRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6 },
   optionTitle: { color: colors.textStrong, fontSize: 12, fontWeight: '700' },
   recommended: { color: colors.accent, fontSize: 8, fontWeight: '800', textTransform: 'uppercase' },
   optionDescription: { color: colors.muted, fontSize: 11, lineHeight: 16 },
-  skipButton: { alignSelf: 'flex-end', minHeight: 36, justifyContent: 'center', paddingHorizontal: 8 },
+  skipButton: { alignSelf: 'flex-end', minHeight: 30, justifyContent: 'center', paddingHorizontal: 7 },
   skipQuestion: { color: colors.muted, fontSize: 11 },
   skipped: { color: colors.textStrong, fontWeight: '700' },
-  notesLabel: { color: colors.muted, fontSize: 11, fontWeight: '700' },
   input: {
     minHeight: 58,
     borderWidth: 1,
@@ -396,6 +404,17 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     color: colors.text,
     padding: 9,
+    textAlignVertical: 'top',
+  },
+  notesInput: {
+    minHeight: 42,
+    maxHeight: 92,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    color: colors.text,
+    paddingHorizontal: 9,
+    paddingVertical: 8,
     textAlignVertical: 'top',
   },
   warning: { color: colors.warning, fontSize: 11 },
