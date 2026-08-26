@@ -28,7 +28,7 @@ export function ChatSurface({ adapter, children, className = '', ariaHidden }: C
         data-agent-type={adapter.agentType}
         data-tool-activity={adapter.capabilities.toolActivity}
         aria-hidden={ariaHidden}
-        className={`relative flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--chat-background)] ${className}`}
+        className={`relative flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--chat-background)] [container-type:size] ${className}`}
       >
         {children}
       </div>

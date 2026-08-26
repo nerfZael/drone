@@ -27,6 +27,9 @@ export type ChatComposerEditorHandle = {
   applyCompanionEdit: (content: string) => boolean;
 };
 
+const CHAT_COMPOSER_EDITOR_MIN_HEIGHT = '6rem';
+const CHAT_COMPOSER_EDITOR_MAX_HEIGHT = '80cqh';
+
 type ChatComposerEditorProps = {
   value: string;
   disabled: boolean;
@@ -70,13 +73,23 @@ export const ChatComposerEditor = React.forwardRef<
   const monacoTheme = desktopMonacoTheme(themeId);
   const editorZoomLevel = useEditorZoomLevel();
   const editorRef = React.useRef<MonacoEditorInstance | null>(null);
+  const contentSizeListenerRef = React.useRef<{ dispose: () => void } | null>(null);
   const fallbackRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const [editorHeight, setEditorHeight] = React.useState(0);
   const selectionRef = React.useRef(initialSelection);
   const focusWhenEditorMountsRef = React.useRef(Boolean(autoFocus));
   const onSendQueuedRef = React.useRef(onSendQueued);
   onSendQueuedRef.current = onSendQueued;
   const onFocusRef = React.useRef(onFocus);
   onFocusRef.current = onFocus;
+
+  React.useEffect(
+    () => () => {
+      contentSizeListenerRef.current?.dispose();
+      contentSizeListenerRef.current = null;
+    },
+    [],
+  );
 
   const focusEditor = React.useCallback(() => {
     const editor = editorRef.current;
@@ -170,6 +183,11 @@ export const ChatComposerEditor = React.forwardRef<
   const onMount = React.useCallback<MonacoEditorMountHandler>(
     (editor, monaco) => {
       editorRef.current = editor;
+      setEditorHeight(editor.getContentHeight());
+      contentSizeListenerRef.current?.dispose();
+      contentSizeListenerRef.current = editor.onDidContentSizeChange((event) => {
+        if (event.contentHeightChanged) setEditorHeight(event.contentHeight);
+      });
       const model = editor.getModel();
       model?.detectIndentation(true, 2);
       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
@@ -298,7 +316,12 @@ export const ChatComposerEditor = React.forwardRef<
       onFocus={(event) => {
         if (event.target === event.currentTarget) focusEditor();
       }}
-      className="relative h-[clamp(18rem,36vh,28rem)] w-full overflow-hidden bg-[var(--chat-composer-input)]"
+      className="relative w-full overflow-hidden bg-[var(--chat-composer-input)]"
+      style={{
+        height: editorHeight || CHAT_COMPOSER_EDITOR_MIN_HEIGHT,
+        minHeight: CHAT_COMPOSER_EDITOR_MIN_HEIGHT,
+        maxHeight: CHAT_COMPOSER_EDITOR_MAX_HEIGHT,
+      }}
     >
       <MonacoEditorErrorBoundary fallback={fallback}>
         <React.Suspense fallback={fallback}>

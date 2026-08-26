@@ -68,6 +68,24 @@ describe('chat send shortcuts', () => {
     expect(editor.match(/aria-keyshortcuts="Control\+Enter Meta\+Enter"/g)).toHaveLength(2);
   });
 
+  test('grows the full text editor with its content up to four fifths of the chat', () => {
+    const editor = readFileSync(
+      new URL('../src/droneHub/chat/ChatComposerEditor.tsx', import.meta.url),
+      'utf8',
+    );
+    const chatSurface = readFileSync(
+      new URL('../src/droneHub/chat/ChatSurface.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(editor).toContain('editor.onDidContentSizeChange');
+    expect(editor).toContain('height: editorHeight || CHAT_COMPOSER_EDITOR_MIN_HEIGHT');
+    expect(editor).toContain("const CHAT_COMPOSER_EDITOR_MIN_HEIGHT = '6rem'");
+    expect(editor).toContain("const CHAT_COMPOSER_EDITOR_MAX_HEIGHT = '80cqh'");
+    expect(chatSurface).toContain('[container-type:size]');
+    expect(editor).not.toContain('h-[clamp(18rem,36vh,28rem)]');
+  });
+
   test('keeps Shift+Enter and Shift+Tab available to the editor', () => {
     expect(shortcut('Enter', { shiftKey: true })).toBeNull();
     expect(shortcut('Tab', { shiftKey: true })).toBeNull();
