@@ -282,6 +282,15 @@ describe('drone hub ui store migration', () => {
     });
   });
 
+  test('normalizes the persisted reading density', () => {
+    expect(
+      migrateDroneHubUiPersistedState({ readingDensityMode: 'comfortable' }, 20),
+    ).toMatchObject({ readingDensityMode: 'comfortable' });
+    expect(
+      migrateDroneHubUiPersistedState({ readingDensityMode: 'oversized' }, 20),
+    ).toMatchObject({ readingDensityMode: 'default' });
+  });
+
   test('migrates legacy global spawn defaults into the non-repo bucket', () => {
     const migrated = migrateDroneHubUiPersistedState(
       {

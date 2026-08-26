@@ -116,8 +116,9 @@ function PreviewCell({
 
 const colorTokens = [
   { label: 'Accent', variable: '--accent' },
-  { label: 'Foreground', variable: '--fg-secondary' },
-  { label: 'Muted', variable: '--muted' },
+  { label: 'Primary text', variable: '--fg' },
+  { label: 'Secondary text', variable: '--fg-secondary' },
+  { label: 'Supporting text', variable: '--muted' },
   { label: 'Panel', variable: '--panel-raised' },
   { label: 'Success', variable: '--green' },
   { label: 'Warning', variable: '--yellow' },
@@ -297,6 +298,39 @@ export function ComponentLibraryPreview() {
             <div>
               <div className="dh-type-eyebrow">Code · JetBrains Mono</div>
               <code className="mt-2 block text-[length:var(--text-12)] text-[var(--accent)]">drone.run({`{ agent: "codex" }`})</code>
+            </div>
+          </div>
+        </UiCard>
+
+        <UiCard className="mt-3">
+          <UiCardHeader
+            title="Readable content hierarchy"
+            description="Brightness communicates meaning: primary content leads, secondary copy remains comfortable, supporting metadata recedes, and disabled text is the only deliberately dim role."
+          />
+          <div className="mt-4 grid gap-2 md:grid-cols-2">
+            <div className="rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-2.5">
+              <div className="dh-type-label dh-tone-primary">Primary</div>
+              <div className="mt-1 text-[var(--chat-question-size)] font-[var(--weight-semibold)] leading-relaxed dh-tone-primary">
+                Questions, selected titles, and decisive labels.
+              </div>
+            </div>
+            <div className="rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-2.5">
+              <div className="dh-type-label dh-tone-secondary">Secondary</div>
+              <div className="mt-1 text-[var(--chat-text-size)] leading-relaxed dh-tone-secondary">
+                Long-form prose, option descriptions, and ordinary navigation.
+              </div>
+            </div>
+            <div className="rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-2.5">
+              <div className="dh-type-label dh-tone-supporting">Supporting</div>
+              <div className="mt-1 dh-type-supporting dh-tone-supporting">
+                Timestamps, counts, importance, and contextual metadata.
+              </div>
+            </div>
+            <div className="rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-2.5">
+              <div className="dh-type-label dh-tone-disabled">Disabled</div>
+              <div className="mt-1 dh-type-control dh-tone-disabled">
+                Reserved for controls that cannot currently be used.
+              </div>
             </div>
           </div>
         </UiCard>

@@ -155,6 +155,9 @@
   --assistant-bubble-border: var(--accent-border);
   --assistant-bubble-fade: var(--accent-subtle);
   --assistant-message-fg: var(--fg-secondary);
+  --chat-card-bg: var(--panel-alt);
+  --chat-card-border: var(--border);
+  --chat-card-selected: var(--panel-raised);
   --chat-list-marker: var(--accent);
   --user-bubble: var(--user-dim);
   --user-bubble-border: var(--user-border);
@@ -213,12 +216,16 @@
   --text-13: var(--type-ui);
   --text-14: var(--type-prose);
   --chat-text-size: .875rem;
+  --chat-question-size: .9375rem;
   --chat-prose-max: 72ch;
+  --document-text-size: .9375rem;
+  --document-prose-max: 76ch;
+  --chat-interactive-max: 48rem;
   --weight-ui: 400;
   --weight-emphasis: 500;
-  /* Legacy aliases keep older feature styles light until they adopt type roles. */
-  --weight-semibold: var(--weight-ui);
-  --weight-bold: var(--weight-emphasis);
+  /* Legacy names now honor their semantic intent instead of flattening hierarchy. */
+  --weight-semibold: var(--weight-emphasis);
+  --weight-bold: var(--weight-strong);
   --weight-strong: 600;
   --control-height: 36px;
   --control-height-compact: 32px;
@@ -270,6 +277,18 @@
   --syntax-variable: #c7cdda;
 }
 
+:root[data-reading-density='comfortable'] {
+  --body-size: 14px;
+  --type-micro: 11px;
+  --type-caption: 12px;
+  --type-compact: 13px;
+  --type-ui: 14px;
+  --type-prose: 15px;
+  --chat-text-size: .9375rem;
+  --chat-question-size: 1rem;
+  --document-text-size: 1rem;
+}
+
 /* Expanded composers expose more controls at once, so their secondary chrome
    needs a firmer hierarchy than the deliberately quiet collapsed state. */
 [data-chat-composer-expanded='true'] {
@@ -283,18 +302,18 @@
 
 :root[data-theme='catppuccin-mocha'] {
   --bg: #1e1e2e;
-  --fg: #cdd6f4;
-  --fg-strong: #cdd6f4;
-  --fg-secondary: #bac2de;
-  --muted: #a6adc8;
-  --muted-dim: #9399b2;
+  --fg: #e6e9ff;
+  --fg-strong: #f2f4ff;
+  --fg-secondary: #cdd6f4;
+  --muted: #bac2de;
+  --muted-dim: #a6adc8;
   --panel: #181825;
   --panel-alt: #181825;
   --panel-raised: #313244;
   --workspace: #1e1e2e;
   --app-header-bg: #181825;
   --app-header-border: rgba(69, 71, 90, .52);
-  --workspace-header-title-fg: #cdd6f4;
+  --workspace-header-title-fg: #f2f4ff;
   --border: rgba(69, 71, 90, .56);
   --border-subtle: rgba(49, 50, 68, .78);
   --tree-guide: rgba(49, 50, 68, .78);
@@ -303,13 +322,13 @@
   --field-bg: rgba(49, 50, 68, .46);
   --field-border: rgba(69, 71, 90, .72);
   --field-focus-border: rgba(180, 190, 254, .88);
-  --field-fg: #cdd6f4;
-  --field-placeholder: #9399b2;
-  --sidebar-fg: #a6adc8;
-  --sidebar-fg-active: #bac2de;
-  --sidebar-subitem-fg: #7f849c;
-  --sidebar-heading-fg: #bac2de;
-  --sidebar-action-fg: #7f849c;
+  --field-fg: #e6e9ff;
+  --field-placeholder: #a6adc8;
+  --sidebar-fg: #cdd6f4;
+  --sidebar-fg-active: #f2f4ff;
+  --sidebar-subitem-fg: #bac2de;
+  --sidebar-heading-fg: #cdd6f4;
+  --sidebar-action-fg: #bac2de;
   --sidebar-bg: #181825;
   --sidebar-section-bg: #181825;
   --sidebar-section-border: rgba(49, 50, 68, .78);
@@ -320,21 +339,21 @@
   --toolbar-control-bg: transparent;
   --toolbar-control-border: transparent;
   --toolbar-control-hover-border: rgba(69, 71, 90, .68);
-  --sidebar-brand-fg: #cdd6f4;
+  --sidebar-brand-fg: #f2f4ff;
   --sidebar-brand-size: .875rem;
   --sidebar-brand-weight: 700;
   --sidebar-brand-letter-spacing: .025rem;
   --sidebar-brand-transform: uppercase;
   --sidebar-font: system-ui, -apple-system, sans-serif;
   --sidebar-heading-weight: 400;
-  --sidebar-drone-fg: #bac2de;
-  --sidebar-drone-active-fg: #cdd6f4;
+  --sidebar-drone-fg: #cdd6f4;
+  --sidebar-drone-active-fg: #f2f4ff;
   --sidebar-drone-weight: 400;
-  --sidebar-row-selected-bg: rgba(203, 166, 247, .075);
+  --sidebar-row-selected-bg: rgba(203, 166, 247, .12);
   --sidebar-row-selected-border: transparent;
   --sidebar-row-selected-edge: rgba(203, 166, 247, .78);
   --sidebar-row-radius: .25rem;
-  --sidebar-meta-fg: #7f849c;
+  --sidebar-meta-fg: #a6adc8;
   --sidebar-blocked-indicator: #ff596b;
   --sidebar-drone-compact-size: .75rem;
   --sidebar-drone-size: .8125rem;
@@ -414,29 +433,32 @@
   --assistant-bubble: transparent;
   --assistant-bubble-border: transparent;
   --assistant-bubble-fade: var(--bg);
-  --assistant-message-fg: #bac2de;
-  --chat-list-marker: #7f849c;
+  --assistant-message-fg: #cdd6f4;
+  --chat-card-bg: #242437;
+  --chat-card-border: rgba(88, 91, 115, .72);
+  --chat-card-selected: #313244;
+  --chat-list-marker: #a6adc8;
   --user-bubble: #313244;
   --user-bubble-border: rgba(69, 71, 90, .48);
   --user-bubble-fg: #cdd6f4;
   --chat-background: #1e1e2e;
-  --chat-message-time: #7f849c;
-  --chat-user-message-time: #a6adc8;
+  --chat-message-time: #a6adc8;
+  --chat-user-message-time: #bac2de;
   --chat-composer-border: rgba(69, 71, 90, .56);
   --chat-composer-focus-border: rgba(203, 166, 247, .38);
   --chat-composer-surface: #313244;
-  --chat-composer-fg: #cdd6f4;
-  --chat-composer-placeholder: #7f849c;
+  --chat-composer-fg: #e6e9ff;
+  --chat-composer-placeholder: #a6adc8;
   --chat-composer-control-bg: rgba(69, 71, 90, .34);
   --chat-composer-control-border: transparent;
-  --chat-composer-control-fg: #a6adc8;
-  --chat-composer-model-fg: #9399b2;
+  --chat-composer-control-fg: #bac2de;
+  --chat-composer-model-fg: #a6adc8;
   --chat-composer-context-track: rgba(49, 50, 68, .78);
-  --chat-composer-expanded-placeholder: #9399b2;
+  --chat-composer-expanded-placeholder: #bac2de;
   --chat-composer-expanded-control-bg: rgba(69, 71, 90, .62);
   --chat-composer-expanded-control-border: rgba(127, 132, 156, .28);
-  --chat-composer-expanded-control-fg: #cdd6f4;
-  --chat-composer-expanded-model-fg: #bac2de;
+  --chat-composer-expanded-control-fg: #e6e9ff;
+  --chat-composer-expanded-model-fg: #cdd6f4;
   --chat-composer-expanded-context-track: rgba(127, 132, 156, .42);
   --chat-composer-font: system-ui, -apple-system, sans-serif;
   --chat-composer-radius: .4375rem;
@@ -524,6 +546,18 @@
   --color-border-outline: var(--border);
   --color-border-outline-variant: var(--border-subtle);
   --color-surface-primary-container: var(--accent-subtle);
+}
+
+/* Theme-specific sidebar sizes are literal values, so the combined selector
+   keeps navigation in step with the semantic comfortable reading scale. */
+:root[data-reading-density='comfortable'][data-theme] {
+  --sidebar-brand-size: 15px;
+  --sidebar-drone-compact-size: 13px;
+  --sidebar-drone-size: 14px;
+  --sidebar-drone-comfortable-size: 15px;
+  --sidebar-item-compact-size: 13px;
+  --sidebar-item-size: 14px;
+  --sidebar-item-comfortable-size: 15px;
 }
 
 /* Dense, information-heavy panes use a tighter and more deliberate contrast
@@ -1112,7 +1146,11 @@ code, pre {
 }
 
 .dh-markdown-outline__document {
-  padding: 16px;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: calc(var(--document-prose-max) + 3.5rem);
+  margin-inline: auto;
+  padding: clamp(18px, 2.4vw, 28px);
 }
 
 .dh-markdown-outline__preamble,
@@ -1191,8 +1229,7 @@ code, pre {
 
 @media (max-width: 680px) {
   .dh-markdown-outline__document {
-    padding-right: 12px;
-    padding-left: 12px;
+    padding: 16px 12px 28px;
   }
 }
 
@@ -1319,8 +1356,16 @@ code, pre {
   color: var(--muted);
 }
 
+/* Color roles are deliberately independent from type roles. Components choose
+   what the copy means, while themes own the exact readable foreground. */
+.dh-tone-primary { color: var(--fg); }
+.dh-tone-secondary { color: var(--fg-secondary); }
+.dh-tone-supporting { color: var(--muted); }
+.dh-tone-disabled { color: var(--muted-dim); }
+
 .dh-type-sidebar-brand,
 .dh-type-sidebar-heading,
+.dh-type-sidebar-repository,
 .dh-type-sidebar-item,
 .dh-type-sidebar-item-active,
 .dh-type-sidebar-action,
@@ -1343,6 +1388,11 @@ code, pre {
   color: var(--sidebar-heading-fg);
 }
 
+.dh-type-sidebar-repository {
+  font-weight: var(--weight-strong);
+  color: var(--sidebar-heading-fg);
+}
+
 .dh-type-sidebar-item,
 .dh-type-sidebar-item-active,
 .dh-type-sidebar-subitem {
@@ -1350,7 +1400,10 @@ code, pre {
 }
 
 .dh-type-sidebar-item { color: var(--sidebar-drone-fg); }
-.dh-type-sidebar-item-active { color: var(--sidebar-drone-active-fg); }
+.dh-type-sidebar-item-active {
+  color: var(--sidebar-drone-active-fg);
+  font-weight: var(--weight-emphasis);
+}
 .dh-type-sidebar-subitem { color: var(--sidebar-subitem-fg); }
 
 .dh-type-sidebar-action {
@@ -1491,13 +1544,13 @@ code, pre {
 
 .dh-markdown {
   font: var(--chat-text-size)/1.65 var(--prose);
-  color: var(--fg);
+  color: var(--fg-secondary);
   word-break: break-word;
 }
 .dh-markdown--transcript {
   width: 100%;
   font-size: var(--chat-text-size);
-  line-height: 1.5;
+  line-height: 1.55;
 }
 .dh-markdown--transcript > * {
   max-width: min(100%, var(--chat-prose-max));
@@ -1559,14 +1612,40 @@ code, pre {
 .dh-markdown h2 { font-size: 1rem; }
 .dh-markdown h3 { font-size: .95rem; }
 .dh-markdown h4 { font-size: .91rem; }
-.dh-markdown h5 { font-size: .87rem; }
+.dh-markdown h5 { font-size: var(--chat-text-size); }
 .dh-markdown h6 {
-  font-size: .82rem;
+  font-size: var(--chat-text-size);
   color: var(--muted);
   letter-spacing: .04em;
 }
 
 /* Full document previews need a much stronger hierarchy than compact chat prose. */
+.dh-markdown--document {
+  font-size: var(--document-text-size);
+  line-height: 1.65;
+  font-kerning: normal;
+  text-rendering: optimizeLegibility;
+}
+
+.dh-markdown--document:not(.dh-markdown-outline__document) {
+  max-width: var(--document-prose-max);
+  margin-inline: auto;
+}
+
+/* Outline sections render individual Markdown roots inside the document shell. */
+.dh-markdown--document .dh-markdown {
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.dh-markdown--document p {
+  margin-block: .55rem;
+}
+
+.dh-markdown--document p + p {
+  margin-top: 1.05rem;
+}
+
 .dh-markdown--document h1,
 .dh-markdown--document h2,
 .dh-markdown--document h3,
@@ -1580,7 +1659,7 @@ code, pre {
   margin: 2rem 0 .9rem;
   border-bottom: 1px solid var(--border);
   padding-bottom: .5rem;
-  color: var(--fg-strong);
+  color: var(--fg);
   font-size: 1.45rem;
   font-weight: var(--weight-bold);
   letter-spacing: -.015em;
@@ -1600,8 +1679,8 @@ code, pre {
 
 .dh-markdown--document h3 {
   margin: 1.35rem 0 .5rem;
-  color: var(--fg-secondary);
-  font-size: 1rem;
+  color: var(--fg);
+  font-size: 1.05rem;
   font-weight: var(--weight-semibold);
   letter-spacing: .005em;
   line-height: 1.35;
@@ -1610,7 +1689,7 @@ code, pre {
 .dh-markdown--document h4 {
   margin: 1.15rem 0 .42rem;
   color: var(--fg-secondary);
-  font-size: .91rem;
+  font-size: .96rem;
 }
 
 .dh-markdown--document h5 {
@@ -1625,6 +1704,19 @@ code, pre {
   font-size: .79rem;
   letter-spacing: .055em;
   text-transform: uppercase;
+}
+
+.dh-markdown.dh-markdown--document a {
+  color: color-mix(in srgb, var(--link) 72%, var(--fg-secondary));
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in srgb, var(--link) 46%, transparent);
+  text-underline-offset: 2.5px;
+}
+
+.dh-markdown--document strong,
+.dh-markdown--document b {
+  color: var(--fg);
+  font-weight: var(--weight-strong);
 }
 
 .dh-markdown a {

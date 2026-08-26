@@ -9,6 +9,7 @@ import { useMobileViewport } from './droneHub/app/use-mobile-viewport';
 import { useDroneHubUiStore } from './droneHub/app/use-drone-hub-ui-store';
 import { useDroneHubAppModel } from './use-drone-hub-app-model';
 import { applyDesktopTheme } from './theme';
+import { applyReadingDensity } from './reading-density';
 import { AppConfirmDialogProvider } from './ui/AppConfirmDialog';
 import { DesktopDeviceProvider, useDesktopDevice } from './droneHub/app/DesktopDeviceProvider';
 import { RemoteDeviceWorkspace } from './droneHub/app/RemoteDeviceWorkspace';
@@ -67,9 +68,13 @@ function LocalDroneHubAppContent() {
 function DroneHubAppContent() {
   const { selectedDeviceId, selfDeviceId } = useDesktopDevice();
   const themeId = useDroneHubUiStore((state) => state.themeId);
+  const readingDensityMode = useDroneHubUiStore((state) => state.readingDensityMode);
   React.useEffect(() => {
     applyDesktopTheme(themeId);
   }, [themeId]);
+  React.useEffect(() => {
+    applyReadingDensity(readingDensityMode);
+  }, [readingDensityMode]);
 
   return selectedDeviceId && selfDeviceId && selectedDeviceId !== selfDeviceId ? (
     <RemoteDeviceWorkspace />

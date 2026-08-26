@@ -22,6 +22,7 @@ import X from 'lucide-react-native/icons/x';
 import Svg, { Circle, Line, Path } from 'react-native-svg';
 import { Drawer } from 'react-native-drawer-layout';
 import { colors } from '../theme';
+import { useMobileReadingDensity } from '../mobile-reading-density';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSharedMobileChatVoiceRecorder } from './MobileChatVoiceRecorderContext';
 import {
@@ -837,6 +838,7 @@ function DrawerDroneChatRow({
   onOpenActions?(target: DrawerChatActionTarget): void;
   onSelect(droneId: string, chatName: string): void;
 }) {
+  const comfortable = useMobileReadingDensity() === 'comfortable';
   const reorderSidebar = React.useContext(DrawerSidebarReorderContext);
   const muteContext = React.useContext(DrawerSidebarMuteContext);
   const chatTreeContext = React.useContext(DrawerChatTreeContext);
@@ -961,6 +963,7 @@ function DrawerDroneChatRow({
               numberOfLines={1}
               style={[
                 styles.droneChatLabel,
+                comfortable && styles.droneChatLabelComfortable,
                 styles.draggableRowLabel,
                 selected && styles.droneChatLabelActive,
               ]}
@@ -971,7 +974,11 @@ function DrawerDroneChatRow({
         ) : (
           <Text
             numberOfLines={1}
-            style={[styles.droneChatLabel, selected && styles.droneChatLabelActive]}
+            style={[
+              styles.droneChatLabel,
+              comfortable && styles.droneChatLabelComfortable,
+              selected && styles.droneChatLabelActive,
+            ]}
           >
             {chatName}
           </Text>
@@ -1202,6 +1209,7 @@ function DrawerDroneNode({
   onOpenChatActions?(target: DrawerChatActionTarget): void;
   onSelect(droneId: string, chatName: string): void;
 }) {
+  const comfortable = useMobileReadingDensity() === 'comfortable';
   const reorderSidebar = React.useContext(DrawerSidebarReorderContext);
   const muteContext = React.useContext(DrawerSidebarMuteContext);
   const companionHighlightedDroneIds = React.useContext(DrawerCompanionHighlightContext);
@@ -1486,6 +1494,7 @@ function DrawerDroneNode({
                   numberOfLines={1}
                   style={[
                     styles.switchItemTitle,
+                    comfortable && styles.switchItemTitleComfortable,
                     styles.draggableRowLabel,
                     parentSelected && styles.switchItemTitleActive,
                   ]}
@@ -1496,7 +1505,11 @@ function DrawerDroneNode({
             ) : (
               <Text
                 numberOfLines={1}
-                style={[styles.switchItemTitle, parentSelected && styles.switchItemTitleActive]}
+                style={[
+                  styles.switchItemTitle,
+                  comfortable && styles.switchItemTitleComfortable,
+                  parentSelected && styles.switchItemTitleActive,
+                ]}
               >
                 {drone.name}
               </Text>
@@ -3798,6 +3811,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '400',
   },
+  switchItemTitleComfortable: { fontSize: 14 },
   draggableRowLabel: { flex: 0 },
   switchItemTitleActive: { color: colors.sidebarDroneActiveFg },
   switchItemDraftBadge: {
@@ -3910,6 +3924,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '400',
   },
+  droneChatLabelComfortable: { fontSize: 14 },
   droneChatLabelActive: { color: colors.sidebarDroneFg },
   droneChatDraftBadge: {
     flexShrink: 0,

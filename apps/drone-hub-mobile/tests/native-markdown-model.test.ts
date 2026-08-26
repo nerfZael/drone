@@ -156,6 +156,20 @@ const ready = true;
     expect(source).not.toContain('<Pressable\n      accessible={false}');
   });
 
+  test('gives document previews more reading space without enlarging chat prose', () => {
+    const source = readFileSync(
+      new URL('../src/local-assistant/NativeMarkdown.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(source).toContain('documentMode && styles.documentMarkdownStack');
+    expect(source).toContain('documentMode && styles.documentBody');
+    expect(source).toContain('documentMarkdownStack: { gap: 12 }');
+    expect(source).toContain('documentBody: { lineHeight: 23 }');
+    expect(source).toContain("useMobileReadingDensity() === 'comfortable'");
+    expect(source).toContain('bodyComfortable: { fontSize: 16, lineHeight: 24 }');
+  });
+
   test('keeps rendered Mermaid diagrams inside a horizontally scrollable frame', () => {
     const source = readFileSync(
       new URL('../src/local-assistant/NativeMermaidDiagram.tsx', import.meta.url),

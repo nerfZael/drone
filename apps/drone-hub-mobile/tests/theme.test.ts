@@ -48,18 +48,19 @@ function contrastRatio(foreground: string | Rgb, background: string | Rgb) {
 }
 
 describe('mobile theme contrast', () => {
-  test('keeps the quiet hierarchy and the established user-message treatment explicit', () => {
-    expect(colors.textSecondary).toBe('#bac2de');
-    expect(colors.textStrong).toBe('#cdd6f4');
+  test('keeps the readable hierarchy and the established user-message treatment explicit', () => {
+    expect(colors.text).toBe('#e6e9ff');
+    expect(colors.textSecondary).toBe('#cdd6f4');
+    expect(colors.textStrong).toBe('#f2f4ff');
     expect(colors.muted).toBe('#bac2de');
     expect(colors.secondary).toBe('#a6adc8');
-    expect(colors.mutedDim).toBe('#848aa3');
+    expect(colors.mutedDim).toBe('#9399b2');
     expect(colors.border).toBe('rgba(69, 71, 90, 0.56)');
     expect(colors.borderSubtle).toBe('rgba(49, 50, 68, 0.78)');
     expect(colors.accentDark).toBe('rgba(203, 166, 247, 0.075)');
     expect(colors.accentBorder).toBe('rgba(203, 166, 247, 0.26)');
     expect(colors.accentWash).toBe('rgba(203, 166, 247, 0.06)');
-    expect(colors.sidebarSelectionWash).toBe('rgba(203, 166, 247, 0.075)');
+    expect(colors.sidebarSelectionWash).toBe('rgba(203, 166, 247, 0.12)');
     expect(colors.sidebarSelectionEdge).toBe('rgba(203, 166, 247, 0.78)');
     expect(colors.sidebarBlockedIndicator).toBe('#ff596b');
     expect(colors.link).toBe('#89b4fa');
@@ -68,6 +69,9 @@ describe('mobile theme contrast', () => {
     expect(colors.textSelection).toBe('rgba(147, 153, 178, 0.25)');
     expect(colors.composerBorder).toBe('rgba(69, 71, 90, 0.56)');
     expect(colors.controlSurface).toBe('rgba(69, 71, 90, 0.34)');
+    expect(colors.assistantText).toBe('#cdd6f4');
+    expect(colors.chatCard).toBe('#242437');
+    expect(colors.chatCardSelected).toBe('#313244');
 
     expect(colors.userBubble).toBe('#45475a');
     expect(colors.userBubbleBorder).toBe('#585b70');

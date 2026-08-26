@@ -160,7 +160,7 @@ export function AgentRunActivityView({
             </div>
           ) : null}
           {hasActivityDetails ? (
-            <div className="dh-agent-activity-scrollbar max-h-72 min-w-0 overflow-y-auto overscroll-contain border-l border-[var(--border-subtle)] px-3 opacity-[0.82] transition-opacity hover:opacity-100 focus-within:opacity-100">
+            <div className="dh-agent-activity-scrollbar max-h-72 min-w-0 overflow-y-auto overscroll-contain border-l border-[var(--border-subtle)] px-3">
               <div className="space-y-1">
                 {displayActivity?.truncated ? (
                   <div className="py-1 text-[var(--text-10)] text-[var(--muted-dim)]">

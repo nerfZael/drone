@@ -6,6 +6,7 @@ import {
   sidebarChatStateClass,
   sidebarDensityClasses,
   sidebarFolderLabelClass,
+  sidebarRepositoryLabelClass,
   sidebarSelectionEdgeClass,
 } from '../src/droneHub/sidebar/presentation';
 
@@ -139,6 +140,25 @@ describe('sidebar presentation', () => {
     expect(compact.folderDepthPaddingPx).toBeLessThan(normal.folderDepthPaddingPx);
     expect(normal.folderDepthPaddingPx).toBeLessThan(comfortable.folderDepthPaddingPx);
     expect(sidebarFolderLabelClass).toContain('dh-type-sidebar-heading');
+    expect(sidebarRepositoryLabelClass).toContain('dh-type-sidebar-repository');
+  });
+
+  test('keeps repository groups stronger than ordinary folders', () => {
+    const groupedTreeSource = readFileSync(
+      new URL('../src/droneHub/app/GroupedSidebarTree.tsx', import.meta.url),
+      'utf8',
+    );
+    const stylesSource = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+
+    expect(groupedTreeSource).toContain(
+      'isVirtualGroup ? sidebarRepositoryLabelClass : sidebarFolderLabelClass',
+    );
+    expect(stylesSource).toContain(
+      '.dh-type-sidebar-repository {\n  font-weight: var(--weight-strong);',
+    );
+    expect(stylesSource).toContain(
+      '.dh-type-sidebar-heading {\n  font-weight: var(--sidebar-heading-weight);',
+    );
   });
 
   test('uses a slim buttonless Chromium scrollbar in the sidebar', () => {

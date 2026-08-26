@@ -4,6 +4,7 @@ import type { ChatQuestionRequest, ChatQuestionResponse } from '@drone/assistant
 import Check from 'lucide-react-native/icons/check';
 import Minus from 'lucide-react-native/icons/minus';
 import { colors, radii } from '../theme';
+import { useMobileReadingDensity } from '../mobile-reading-density';
 
 function responseText(response: ChatQuestionResponse | undefined): string {
   if (!response || response.outcome === 'skipped') return 'Skipped';
@@ -18,6 +19,7 @@ function skippedTitle(request: ChatQuestionRequest): string {
 }
 
 export function MobileQuestionResultCard({ request }: { request: ChatQuestionRequest }) {
+  const comfortable = useMobileReadingDensity() === 'comfortable';
   const result = request.result;
   if (!result) return null;
   const submitted = result.status === 'submitted';
@@ -39,22 +41,32 @@ export function MobileQuestionResultCard({ request }: { request: ChatQuestionReq
             <Minus color={colors.mutedDim} size={14} strokeWidth={2.5} />
           )}
         </View>
-        <Text style={styles.title}>{submitted ? 'Answers submitted' : skippedTitle(request)}</Text>
+        <Text style={[styles.title, comfortable && styles.titleComfortable]}>
+          {submitted ? 'Answers submitted' : skippedTitle(request)}
+        </Text>
       </View>
       {responses ? (
         <View style={styles.answers}>
           {request.questions.map((question) => (
             <View key={question.id} style={styles.answer}>
-              <Text style={styles.question}>{question.question}</Text>
-              <Text style={styles.response}>{responseText(responses.get(question.id))}</Text>
+              <Text style={[styles.question, comfortable && styles.questionComfortable]}>
+                {question.question}
+              </Text>
+              <Text style={[styles.response, comfortable && styles.responseComfortable]}>
+                {responseText(responses.get(question.id))}
+              </Text>
             </View>
           ))}
         </View>
       ) : null}
       {result.notes ? (
         <View style={[styles.notes, responses && styles.notesSeparated]}>
-          <Text style={styles.question}>Additional notes</Text>
-          <Text style={styles.response}>{result.notes}</Text>
+          <Text style={[styles.question, comfortable && styles.questionComfortable]}>
+            Additional notes
+          </Text>
+          <Text style={[styles.response, comfortable && styles.responseComfortable]}>
+            {result.notes}
+          </Text>
         </View>
       ) : null}
     </View>
@@ -70,7 +82,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radii.large,
-    backgroundColor: colors.whiteWashSoft,
+    backgroundColor: colors.chatCard,
     gap: 10,
   },
   header: { flexDirection: 'row', alignItems: 'center', gap: 8 },
@@ -83,11 +95,14 @@ const styles = StyleSheet.create({
     backgroundColor: colors.controlSurface,
   },
   statusIconSubmitted: { backgroundColor: colors.onlineDark },
-  title: { flex: 1, color: colors.textSecondary, fontSize: 12, fontWeight: '700' },
+  title: { flex: 1, color: colors.text, fontSize: 14, fontWeight: '700' },
+  titleComfortable: { fontSize: 15 },
   answers: { gap: 10 },
   answer: { gap: 2 },
-  question: { color: colors.muted, fontSize: 11, lineHeight: 15 },
-  response: { color: colors.textStrong, fontSize: 13, lineHeight: 18 },
+  question: { color: colors.muted, fontSize: 12, lineHeight: 17 },
+  questionComfortable: { fontSize: 13, lineHeight: 19 },
+  response: { color: colors.textStrong, fontSize: 14, lineHeight: 20 },
+  responseComfortable: { fontSize: 15, lineHeight: 22 },
   notes: { gap: 2 },
   notesSeparated: { paddingTop: 9, borderTopWidth: 1, borderTopColor: colors.borderSubtle },
 });

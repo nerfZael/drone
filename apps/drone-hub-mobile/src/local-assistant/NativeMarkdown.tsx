@@ -19,6 +19,7 @@ import {
 } from 'react-native';
 import { MobileHighlightedCode } from '../components/MobileHighlightedCode';
 import { colors } from '../theme';
+import { useMobileReadingDensity } from '../mobile-reading-density';
 import { NativeMermaidDiagram } from './NativeMermaidDiagram';
 import {
   buildNativeMarkdownOutline,
@@ -202,6 +203,14 @@ function FileLinkedText({
   );
 }
 
+type NativeMarkdownTone = 'assistant' | 'secondary' | 'user';
+
+function toneTextStyle(tone: NativeMarkdownTone) {
+  if (tone === 'user') return styles.userText;
+  if (tone === 'secondary') return styles.secondaryText;
+  return undefined;
+}
+
 function InlineMarkdown({
   text,
   tone,
@@ -209,7 +218,7 @@ function InlineMarkdown({
   interactive = true,
 }: {
   text: string;
-  tone: 'assistant' | 'user';
+  tone: NativeMarkdownTone;
   onOpenFileReference?: (reference: MobileFileReference) => void;
   interactive?: boolean;
 }) {
@@ -284,9 +293,10 @@ function NativeMarkdownTable({
   onOpenFileReference,
 }: {
   block: NativeMarkdownTableBlock;
-  tone: 'assistant' | 'user';
+  tone: NativeMarkdownTone;
   onOpenFileReference?: (reference: MobileFileReference) => void;
 }) {
+  const comfortable = useMobileReadingDensity() === 'comfortable';
   const [sort, setSort] = React.useState<NativeMarkdownTableSort | null>(null);
   const headerLabels = React.useMemo(
     () => block.headers.map((header) => nativeMarkdownInlineText(header).trim()),
@@ -358,8 +368,9 @@ function NativeMarkdownTable({
                     key={columnIndex}
                     style={[
                       styles.tableCell,
+                      comfortable && styles.tableCellComfortable,
                       styles.tableHeadText,
-                      tone === 'user' && styles.userText,
+                      toneTextStyle(tone),
                     ]}
                   >
                     <InlineMarkdown
@@ -395,7 +406,8 @@ function NativeMarkdownTable({
                     <Text
                       style={[
                         styles.tableSortHeaderText,
-                        tone === 'user' && styles.userText,
+                        comfortable && styles.tableCellComfortable,
+                        toneTextStyle(tone),
                       ]}
                     >
                       <InlineMarkdown
@@ -425,7 +437,11 @@ function NativeMarkdownTable({
                 <Text
                   selectable
                   key={cellIndex}
-                  style={[styles.tableCell, tone === 'user' && styles.userText]}
+                  style={[
+                    styles.tableCell,
+                    comfortable && styles.tableCellComfortable,
+                    toneTextStyle(tone),
+                  ]}
                 >
                   <InlineMarkdown
                     text={row[cellIndex] ?? ''}
@@ -445,14 +461,19 @@ function NativeMarkdownTable({
 function NativeMarkdownBlocks({
   blocks,
   tone = 'assistant',
+  documentMode = false,
   onOpenFileReference,
 }: {
   blocks: NativeMarkdownBlock[];
-  tone?: 'assistant' | 'user';
+  tone?: NativeMarkdownTone;
+  documentMode?: boolean;
   onOpenFileReference?: (reference: MobileFileReference) => void;
 }) {
+  const comfortable = useMobileReadingDensity() === 'comfortable';
+  const comfortableTextStyle =
+    tone === 'secondary' ? styles.secondaryTextComfortable : styles.bodyComfortable;
   return (
-    <View style={styles.markdownStack}>
+    <View style={[styles.markdownStack, documentMode && styles.documentMarkdownStack]}>
       {blocks.map((block, index) => {
         if (block.type === 'heading') {
           return (
@@ -462,7 +483,11 @@ function NativeMarkdownBlocks({
               style={[
                 styles.heading,
                 block.level <= 2 ? styles.headingLarge : styles.headingSmall,
-                tone === 'user' && styles.userText,
+                toneTextStyle(tone),
+                comfortable &&
+                  (block.level <= 2
+                    ? styles.headingLargeComfortable
+                    : styles.headingSmallComfortable),
               ]}
             >
               <InlineMarkdown
@@ -497,7 +522,15 @@ function NativeMarkdownBlocks({
               {block.callout ? (
                 <Text style={[styles.calloutLabel, calloutStyle?.label]}>{block.callout}</Text>
               ) : null}
-              <Text selectable style={[styles.quoteText, tone === 'user' && styles.userText]}>
+              <Text
+                selectable
+                style={[
+                  styles.quoteText,
+                  documentMode && styles.documentBody,
+                  toneTextStyle(tone),
+                  comfortable && comfortableTextStyle,
+                ]}
+              >
                 <InlineMarkdown
                   text={block.text}
                   tone={tone}
@@ -521,7 +554,15 @@ function NativeMarkdownBlocks({
                         ? '☑'
                         : '☐'}
                   </Text>
-                  <Text selectable style={[styles.body, tone === 'user' && styles.userText]}>
+                  <Text
+                    selectable
+                    style={[
+                      styles.body,
+                      documentMode && styles.documentBody,
+                      toneTextStyle(tone),
+                      comfortable && comfortableTextStyle,
+                    ]}
+                  >
                     <InlineMarkdown
                       text={item.text}
                       tone={tone}
@@ -549,7 +590,12 @@ function NativeMarkdownBlocks({
           <Text
             selectable
             key={`paragraph:${index}`}
-            style={[styles.body, tone === 'user' && styles.userText]}
+            style={[
+              styles.body,
+              documentMode && styles.documentBody,
+              toneTextStyle(tone),
+              comfortable && comfortableTextStyle,
+            ]}
           >
             <InlineMarkdown
               text={block.text}
@@ -581,6 +627,7 @@ function DocumentSection({
   onToggle(id: string): void;
   onOpenFileReference?: (reference: MobileFileReference) => void;
 }) {
+  const comfortable = useMobileReadingDensity() === 'comfortable';
   const expanded = expandedIds.has(section.id);
   const canToggle = Boolean(
     section.content.length > 0 || (section.children.length > 0 && !keepChildrenVisible),
@@ -599,6 +646,18 @@ function DocumentSection({
             : level === 5
               ? styles.documentHeading5Text
               : styles.documentHeading6Text,
+    comfortable &&
+      (level === 1
+        ? styles.documentHeading1Comfortable
+        : level === 2
+          ? styles.documentHeading2Comfortable
+          : level === 3
+            ? styles.documentHeading3Comfortable
+            : level === 4
+              ? styles.documentHeading4Comfortable
+              : level === 5
+                ? styles.documentHeading5Comfortable
+                : styles.documentHeading6Comfortable),
   ];
   const headingContainerStyle = [
     styles.documentHeading,
@@ -646,6 +705,7 @@ function DocumentSection({
       {expanded && section.content.length > 0 ? (
         <NativeMarkdownBlocks
           blocks={section.content}
+          documentMode
           onOpenFileReference={onOpenFileReference}
         />
       ) : null}
@@ -676,7 +736,7 @@ export function NativeMarkdown({
   expansionCommand,
 }: {
   text: string;
-  tone?: 'assistant' | 'user';
+  tone?: NativeMarkdownTone;
   onOpenFileReference?: (reference: MobileFileReference) => void;
   documentMode?: boolean;
   collapsibleHeadings?: boolean;
@@ -722,6 +782,7 @@ export function NativeMarkdown({
       <NativeMarkdownBlocks
         blocks={blocks}
         tone={tone}
+        documentMode={documentMode}
         onOpenFileReference={onOpenFileReference}
       />
     );
@@ -738,6 +799,7 @@ export function NativeMarkdown({
         <NativeMarkdownBlocks
           blocks={outline.preamble}
           tone={tone}
+          documentMode
           onOpenFileReference={onOpenFileReference}
         />
       ) : null}
@@ -757,6 +819,7 @@ export function NativeMarkdown({
 
 const styles = StyleSheet.create({
   markdownStack: { width: '100%', minWidth: 0, alignSelf: 'stretch', gap: 10 },
+  documentMarkdownStack: { gap: 12 },
   documentHeading: {
     width: '100%',
     minWidth: 0,
@@ -826,10 +889,22 @@ const styles = StyleSheet.create({
   },
   documentExpandArrow: { marginLeft: 6 },
   headingPressed: { opacity: 0.7 },
-  body: { flex: 1, color: colors.assistantText, fontSize: 14, lineHeight: 21 },
+  body: { flex: 1, color: colors.assistantText, fontSize: 15, lineHeight: 22 },
+  documentBody: { lineHeight: 23 },
+  secondaryText: { color: colors.textSecondary, fontSize: 13, lineHeight: 19 },
+  bodyComfortable: { fontSize: 16, lineHeight: 24 },
+  secondaryTextComfortable: { fontSize: 14, lineHeight: 21 },
   heading: { color: colors.text, fontWeight: '900', letterSpacing: -0.2 },
   headingLarge: { fontSize: 19, lineHeight: 25, marginTop: 3 },
   headingSmall: { fontSize: 16, lineHeight: 22, marginTop: 2 },
+  headingLargeComfortable: { fontSize: 20, lineHeight: 27 },
+  headingSmallComfortable: { fontSize: 17, lineHeight: 24 },
+  documentHeading1Comfortable: { fontSize: 25, lineHeight: 32 },
+  documentHeading2Comfortable: { fontSize: 20, lineHeight: 26 },
+  documentHeading3Comfortable: { fontSize: 17, lineHeight: 23 },
+  documentHeading4Comfortable: { fontSize: 16, lineHeight: 22 },
+  documentHeading5Comfortable: { fontSize: 15, lineHeight: 21 },
+  documentHeading6Comfortable: { fontSize: 13, lineHeight: 19 },
   strong: { fontWeight: '800', color: colors.text },
   userStrong: { fontWeight: '800', color: colors.userBubbleText },
   userText: { color: colors.userBubbleText },
@@ -1029,6 +1104,7 @@ const styles = StyleSheet.create({
     borderRightColor: colors.surface1,
     textAlign: 'left',
   },
+  tableCellComfortable: { fontSize: 13, lineHeight: 18 },
   tableHeadText: { fontWeight: '900', color: colors.textStrong, textAlign: 'center' },
 });
 

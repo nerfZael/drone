@@ -25,7 +25,7 @@ export function AssistantQuestionResultCard({ request }: { request: ChatQuestion
 
   return (
     <section
-      className="min-w-0 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset-faint)] px-4 py-3 text-[var(--text-11)]"
+      className="min-w-0 max-w-[var(--chat-interactive-max)] rounded-[var(--radius-large)] border border-[var(--chat-card-border)] bg-[var(--chat-card-bg)] px-4 py-3 text-[var(--text-11)]"
       role="region"
       aria-label={result.status === 'submitted' ? 'Submitted answers' : 'Skipped questions'}
       data-assistant-question-result="true"

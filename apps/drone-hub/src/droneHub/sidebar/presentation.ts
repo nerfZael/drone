@@ -101,6 +101,9 @@ export const sidebarSelectionEdgeClass =
 export const sidebarFolderLabelClass =
   'min-w-0 flex-1 truncate font-normal dh-type-sidebar-heading';
 
+export const sidebarRepositoryLabelClass =
+  'min-w-0 flex-1 truncate dh-type-sidebar-repository';
+
 export const sidebarCountClass = 'flex-shrink-0 dh-type-count';
 
 export const sidebarChatStateClass =

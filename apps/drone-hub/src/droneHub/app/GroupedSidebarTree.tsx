@@ -90,6 +90,7 @@ import {
   sidebarChatStateClass,
   sidebarDensityClasses,
   sidebarFolderLabelClass,
+  sidebarRepositoryLabelClass,
   sidebarSelectionEdgeClass,
 } from '../sidebar/presentation';
 import { selectSidebarChatNodes } from './sidebar-chat-selection';
@@ -2281,7 +2282,10 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
                     <IconFolderGit className="h-3.5 w-3.5 flex-shrink-0 text-[var(--sidebar-action-fg)]" />
                   )
                 ) : null}
-                <span className={`${sidebarFolderLabelClass} ${densityClasses.folderLabel}`} title={folderTitle}>
+                <span
+                  className={`${isVirtualGroup ? sidebarRepositoryLabelClass : sidebarFolderLabelClass} ${densityClasses.folderLabel}`}
+                  title={folderTitle}
+                >
                   {node.label}
                 </span>
                 {muted ? <SidebarMutedStatusIndicator /> : collapsed ? <SidebarGroupStateCounts summary={stateSummary} /> : null}

@@ -6,6 +6,7 @@ export type ArchiveRetentionId = '1h' | '8h' | '1d' | '1w';
 export type ArchiveRuntimePolicy = 'keep-running' | 'stop';
 export type SidebarGroupingMode = 'groups' | 'repos';
 export type SidebarDensityMode = 'compact' | 'default' | 'comfortable';
+export type ReadingDensityMode = 'default' | 'comfortable';
 export type SyncSetSourceType = 'hub-managed' | 'host-path';
 export type SyncSetTargetStatusState = 'idle' | 'synced' | 'error';
 

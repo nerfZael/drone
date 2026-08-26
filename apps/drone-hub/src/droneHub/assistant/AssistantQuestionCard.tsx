@@ -96,7 +96,7 @@ export function AssistantQuestionCard({
 
   return (
     <section
-      className="relative min-w-0 rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--surface-inset-faint)] px-3 py-3 text-[var(--fg-secondary)]"
+      className="relative min-w-0 max-w-[var(--chat-interactive-max)] rounded-[var(--radius-large)] border border-[var(--chat-card-border)] bg-[var(--chat-card-bg)] px-3 py-3 text-[var(--fg-secondary)]"
       role="region"
       aria-label="Questions from the agent"
       aria-busy={busy || undefined}
@@ -119,7 +119,7 @@ export function AssistantQuestionCard({
                 <div className="flex min-w-[min(100%,28rem)] flex-1 flex-wrap items-center gap-2">
                   <div
                     id={titleId}
-                    className="min-w-0 text-[var(--text-14)] font-[var(--weight-strong)] leading-snug text-[var(--fg)]"
+                    className="min-w-0 text-[var(--chat-question-size)] font-[var(--weight-strong)] leading-snug text-[var(--fg-strong)]"
                   >
                     {singleQuestion
                       ? question.question
@@ -171,7 +171,7 @@ export function AssistantQuestionCard({
               {question.detailedExplanation ? (
                 <MarkdownMessage
                   text={question.detailedExplanation}
-                  className="!text-[var(--text-11)] !leading-relaxed text-[var(--fg-secondary)] opacity-90"
+                  className="!text-[var(--text-11)] !leading-relaxed text-[var(--fg-secondary)]"
                 />
               ) : null}
               <div className={`${singleQuestion ? 'space-y-0' : 'space-y-1.5'} pt-0.5`}>
@@ -184,10 +184,10 @@ export function AssistantQuestionCard({
                       className={`flex cursor-pointer items-start gap-2.5 px-2.5 py-2 transition-colors ${
                         singleQuestion
                           ? selected
-                            ? 'rounded-[var(--radius-medium)] border border-transparent bg-[var(--surface-strong)]'
+                            ? 'rounded-[var(--radius-medium)] border border-transparent bg-[var(--chat-card-selected)]'
                             : 'rounded-none border-0 border-b border-[var(--border-subtle)] bg-transparent hover:bg-[var(--surface-strong)]'
                           : selected
-                            ? 'rounded-[var(--radius-medium)] border border-[var(--accent)] bg-[var(--surface-inset-strong)]'
+                            ? 'rounded-[var(--radius-medium)] border border-[var(--accent)] bg-[var(--chat-card-selected)]'
                             : 'rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--surface-inset)] hover:border-[var(--accent-muted)]'
                       }`}
                     >
@@ -214,7 +214,7 @@ export function AssistantQuestionCard({
                       >
                         {optionLetter(choiceIndex)}
                       </span>
-                      <span className="min-w-0 flex-1 text-[var(--text-11)]">
+                      <span className="min-w-0 flex-1 text-[var(--text-12)]">
                         <span className="font-[var(--weight-semibold)] text-[var(--fg-strong)]">
                           {choice.label}
                         </span>
@@ -224,7 +224,7 @@ export function AssistantQuestionCard({
                           </span>
                         ) : null}
                         {choice.description ? (
-                          <span className="mt-0.5 block text-[var(--text-10)] leading-snug text-[var(--fg-secondary)]">
+                          <span className="mt-0.5 block text-[var(--text-11)] leading-snug text-[var(--fg-secondary)]">
                             {choice.description}
                           </span>
                         ) : null}
@@ -239,10 +239,10 @@ export function AssistantQuestionCard({
                   className={`block px-2.5 py-2 transition-colors ${
                     singleQuestion
                       ? response?.outcome === 'custom'
-                        ? 'rounded-[var(--radius-medium)] border border-transparent bg-[var(--surface-strong)]'
+                        ? 'rounded-[var(--radius-medium)] border border-transparent bg-[var(--chat-card-selected)]'
                         : 'rounded-none border-0 border-b border-[var(--border-subtle)] bg-transparent hover:bg-[var(--surface-strong)]'
                       : response?.outcome === 'custom'
-                        ? 'rounded-[var(--radius-medium)] border border-[var(--accent)] bg-[var(--surface-inset-strong)]'
+                        ? 'rounded-[var(--radius-medium)] border border-[var(--accent)] bg-[var(--chat-card-selected)]'
                         : 'rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--surface-inset)] hover:border-[var(--accent-muted)]'
                   }`}
                 >
@@ -268,7 +268,7 @@ export function AssistantQuestionCard({
                     >
                       {optionLetter(question.choices.length)}
                     </span>
-                    <span className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-strong)]">
+                    <span className="text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--fg-strong)]">
                       Something else
                     </span>
                   </span>

@@ -16,13 +16,14 @@ describe('mobile question request card', () => {
     expect(source).toContain('advanceQuestion();');
     expect(source).toContain('minHeight: 46');
     expect(source).toContain('borderColor: colors.border');
-    expect(source).toContain('backgroundColor: colors.whiteWashSoft');
+    expect(source).toContain('backgroundColor: colors.chatCard');
     expect(source).not.toContain('borderLeftColor: colors.accent');
     expect(source).not.toContain('Input requested');
     expect(source).toContain('styles.questionMetaRow');
     expect(source).not.toContain('questionNavigationRow:');
     expect(source).toContain('optionLetter(choiceIndex)');
     expect(source).toContain('Add optional notes for the agent…');
+    expect(source).toContain('tone="secondary"');
     expect(source).not.toContain('styles.notesLabel');
     expect(source).toContain('Skip questionnaire');
     expect(source).toContain('`Submit all ${questionCount}`');
@@ -38,6 +39,7 @@ describe('mobile question request card', () => {
     expect(source).toContain('Answers submitted');
     expect(source).toContain('Additional notes');
     expect(source).toContain('responseText(responses.get(question.id))');
+    expect(source).toContain('backgroundColor: colors.chatCard');
     expect(source).not.toContain('Submit answers');
 
     const screenSource = readFileSync(

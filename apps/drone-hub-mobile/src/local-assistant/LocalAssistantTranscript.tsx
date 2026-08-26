@@ -42,6 +42,7 @@ import {
   type PromptQueueInterruptionResolution,
 } from '@drone/assistant-chat';
 import { colors } from '../theme';
+import { useMobileReadingDensity } from '../mobile-reading-density';
 import { NativeFileTypeIcon } from '../components/FileTypeIcon';
 import {
   MobileAgentFailureDetails,
@@ -520,8 +521,16 @@ function LinkedMessageText({
   user: boolean;
   onOpenFileReference?: (reference: MobileFileReference) => void;
 }) {
+  const comfortable = useMobileReadingDensity() === 'comfortable';
   return (
-    <Text selectable style={[styles.messageText, user && styles.userMessageText]}>
+    <Text
+      selectable
+      style={[
+        styles.messageText,
+        comfortable && styles.messageTextComfortable,
+        user && styles.userMessageText,
+      ]}
+    >
       {splitMobileFileReferences(text).map((segment, index) =>
         segment.type === 'text' || !onOpenFileReference ? (
           segment.text
@@ -1203,6 +1212,7 @@ function AgentRunSummary({
   awaitingApproval?: boolean;
   approvalStartedAt?: string | number;
 }) {
+  const comfortable = useMobileReadingDensity() === 'comfortable';
   const fallbackStart = React.useRef(Date.now()).current;
   const parsedStart = timestampMs(startedAt);
   const start = Number.isFinite(parsedStart) ? parsedStart : fallbackStart;
@@ -1272,11 +1282,17 @@ function AgentRunSummary({
       : `${active ? 'Working' : 'Worked'} for ${duration}`;
   const content = (
     <>
-      <Text style={[styles.runSummaryLabel, awaitingApproval && styles.runSummaryLabelApproval]}>
+      <Text
+        style={[
+          styles.runSummaryLabel,
+          comfortable && styles.runSummaryLabelComfortable,
+          awaitingApproval && styles.runSummaryLabelApproval,
+        ]}
+      >
         {label}
       </Text>
       {toolCallCount > 0 ? (
-        <Text style={styles.runSummaryDetail}>
+        <Text style={[styles.runSummaryDetail, comfortable && styles.runSummaryDetailComfortable]}>
           {awaitingApproval ? `Worked ${duration} · ${callLabel}` : callLabel}
         </Text>
       ) : null}
@@ -1307,7 +1323,7 @@ function AgentRunSummary({
     <>
       {summary}
       {showTimingDetail && showPreRunDuration ? (
-        <Text style={styles.runTimingDetail}>
+        <Text style={[styles.runTimingDetail, comfortable && styles.runTimingDetailComfortable]}>
           Started in {workingDurationLabel(normalizedPreRunDurationMs)} · agent {duration}
         </Text>
       ) : null}
@@ -1316,6 +1332,7 @@ function AgentRunSummary({
 }
 
 function MobileAgentPlanList({ plan, running = false }: { plan?: AgentPlan; running?: boolean }) {
+  const comfortable = useMobileReadingDensity() === 'comfortable';
   const [stepsExpanded, setStepsExpanded] = React.useState(false);
   if (!plan?.items.length) return null;
   const complete = plan.items.filter((item) => item.status === 'completed').length;
@@ -1329,8 +1346,10 @@ function MobileAgentPlanList({ plan, running = false }: { plan?: AgentPlan; runn
         accessibilityLabel={`Plan, ${complete} of ${plan.items.length} steps complete`}
         style={styles.planToggle}
       >
-        <Text style={styles.planToggleText}>Plan</Text>
-        <Text style={styles.planProgress}>
+        <Text style={[styles.planToggleText, comfortable && styles.planToggleTextComfortable]}>
+          Plan
+        </Text>
+        <Text style={[styles.planProgress, comfortable && styles.planProgressComfortable]}>
           ({complete}/{plan.items.length})
         </Text>
       </View>
@@ -1361,6 +1380,7 @@ function MobileAgentPlanList({ plan, running = false }: { plan?: AgentPlan; runn
               <Text
                 style={[
                   styles.planItemText,
+                  comfortable && styles.planItemTextComfortable,
                   done && styles.planItemDone,
                   active && styles.planItemActive,
                   cancelled && styles.planItemCancelled,
@@ -2176,14 +2196,14 @@ const styles = StyleSheet.create({
   changedFilesTitle: {
     flexShrink: 1,
     color: colors.muted,
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '600',
   },
   changedFilesCount: { color: colors.mutedDim },
   changedFilesAttributionWarning: {
     color: colors.warning,
-    fontSize: 10,
-    lineHeight: 14,
+    fontSize: 11,
+    lineHeight: 16,
     paddingHorizontal: 12,
     paddingBottom: 8,
   },
@@ -2210,7 +2230,7 @@ const styles = StyleSheet.create({
   changedFilesList: { paddingBottom: 5 },
   changedFilesWorkspace: {
     color: colors.muted,
-    fontSize: 9,
+    fontSize: 10,
     fontWeight: '600',
     letterSpacing: 0.8,
     textTransform: 'uppercase',
@@ -2235,7 +2255,7 @@ const styles = StyleSheet.create({
     opacity: 0.78,
   },
   changedFilesStatusPressed: { opacity: 1 },
-  changedFilesPath: { flex: 1, color: colors.text, fontSize: 10, fontFamily: 'monospace' },
+  changedFilesPath: { flex: 1, color: colors.text, fontSize: 11, fontFamily: 'monospace' },
   changedFilesPathPressed: { color: colors.accent },
   changedFilesLineCounts: {
     flexDirection: 'row',
@@ -2309,7 +2329,6 @@ const styles = StyleSheet.create({
     marginRight: 10,
     borderLeftWidth: 1,
     borderLeftColor: colors.borderSubtle,
-    opacity: 0.82,
   },
   activityRailSideBySide: {
     flex: 1,
@@ -2333,30 +2352,35 @@ const styles = StyleSheet.create({
   },
   runSummaryPressed: { opacity: 0.72 },
   runSummaryLabel: { color: colors.muted, fontSize: 14, fontWeight: '600' },
+  runSummaryLabelComfortable: { fontSize: 15 },
   runSummaryLabelApproval: { color: colors.warning },
   runSummaryDetail: {
     flex: 1,
     color: colors.mutedDim,
-    fontSize: 11,
+    fontSize: 12,
   },
+  runSummaryDetailComfortable: { fontSize: 13 },
   runTimingDetail: {
     color: colors.mutedDim,
-    fontSize: 10,
+    fontSize: 11,
     paddingHorizontal: 10,
     paddingTop: 7,
   },
+  runTimingDetailComfortable: { fontSize: 12 },
   plan: {
     minWidth: 0,
     paddingVertical: 3,
   },
   planToggle: { flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 24 },
   planTogglePressed: { opacity: 0.68 },
-  planToggleText: { color: colors.muted, fontSize: 11, fontWeight: '600' },
+  planToggleText: { color: colors.muted, fontSize: 12, fontWeight: '600' },
+  planToggleTextComfortable: { fontSize: 13 },
   planProgress: {
     color: colors.mutedDim,
-    fontSize: 10,
+    fontSize: 11,
     fontFamily: 'monospace',
   },
+  planProgressComfortable: { fontSize: 12 },
   planItems: { gap: 6, marginTop: 7 },
   planItem: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   planStatusSlot: {
@@ -2385,6 +2409,7 @@ const styles = StyleSheet.create({
   planDotActive: { borderColor: colors.accent, backgroundColor: colors.accentWash },
   planDotCancelled: { borderColor: colors.mutedDim, opacity: 0.45 },
   planItemText: { flex: 1, color: colors.textSecondary, fontSize: 12, lineHeight: 18 },
+  planItemTextComfortable: { fontSize: 13, lineHeight: 20 },
   planItemDone: {
     color: colors.mutedDim,
     textDecorationLine: 'line-through',
@@ -2414,7 +2439,8 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderBottomRightRadius: 3,
   },
-  messageText: { color: colors.assistantText, fontSize: 14, lineHeight: 21 },
+  messageText: { color: colors.assistantText, fontSize: 15, lineHeight: 22 },
+  messageTextComfortable: { fontSize: 16, lineHeight: 24 },
   userMessageText: { color: colors.userBubbleText },
   fileLink: {
     color: colors.accentAlt,
@@ -2587,22 +2613,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 7,
     paddingVertical: 6,
   },
-  detailText: { color: colors.muted, fontSize: 10, lineHeight: 15, fontFamily: 'monospace' },
+  detailText: { color: colors.muted, fontSize: 11, lineHeight: 16, fontFamily: 'monospace' },
   detailPlaceholder: {
     color: colors.mutedDim,
-    fontSize: 10,
-    lineHeight: 15,
+    fontSize: 11,
+    lineHeight: 16,
     fontStyle: 'italic',
   },
   detailList: { gap: 7 },
   detailField: { gap: 2 },
-  detailFieldLabel: { color: colors.mutedDim, fontSize: 9, fontWeight: '600' },
+  detailFieldLabel: { color: colors.mutedDim, fontSize: 10, fontWeight: '600' },
   detailArrayRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 7 },
   detailIndex: {
     width: 18,
     color: colors.mutedDim,
-    fontSize: 9,
-    lineHeight: 15,
+    fontSize: 10,
+    lineHeight: 16,
     fontFamily: 'monospace',
     textAlign: 'right',
   },

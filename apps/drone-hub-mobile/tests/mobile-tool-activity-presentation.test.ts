@@ -49,7 +49,9 @@ describe('mobile tool activity presentation', () => {
     expect(transcriptSource).toContain(
       'Started in {workingDurationLabel(normalizedPreRunDurationMs)} · agent {duration}',
     );
-    expect(transcriptSource).toContain('style={styles.runTimingDetail}');
+    expect(transcriptSource).toContain(
+      'style={[styles.runTimingDetail, comfortable && styles.runTimingDetailComfortable]}',
+    );
     expect(transcriptSource).toContain("'Blocked pending approval.'");
     expect(transcriptSource).toContain("'Context compacted'");
     expect(transcriptSource).toContain('<MobileCompactionRow key={item.key}');

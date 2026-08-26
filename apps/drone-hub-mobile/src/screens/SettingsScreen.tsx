@@ -6,6 +6,7 @@ import Check from 'lucide-react-native/icons/check';
 import Link2 from 'lucide-react-native/icons/link-2';
 import Star from 'lucide-react-native/icons/star';
 import Smartphone from 'lucide-react-native/icons/smartphone';
+import Type from 'lucide-react-native/icons/type';
 import Trash2 from 'lucide-react-native/icons/trash-2';
 import { TopTabs, type TopTabOption } from '../components/TopTabs';
 import { ThemedTextInput } from '../components/ThemedTextInput';
@@ -15,10 +16,12 @@ import { useMesh } from '../mesh/MeshContext';
 import { colors } from '../theme';
 import { LocalAssistantSettingsCard } from '../local-assistant/LocalAssistantSettingsCard';
 import { MobileVoiceInputSettingsCard } from '../local-assistant/MobileVoiceInputSettingsCard';
+import { MobileReadingSettingsCard } from './MobileReadingSettingsCard';
 
-export type SettingsTab = 'assistant' | 'devices' | 'pairing';
+export type SettingsTab = 'display' | 'assistant' | 'devices' | 'pairing';
 
 const SETTINGS_TABS: Array<TopTabOption<SettingsTab>> = [
+  { value: 'display', label: 'Display', icon: Type },
   { value: 'assistant', label: 'Built-in', icon: Bot },
   { value: 'devices', label: 'Devices', icon: Smartphone },
   { value: 'pairing', label: 'Pairing', icon: Link2 },
@@ -92,7 +95,9 @@ export function SettingsScreen({
             <ErrorBanner message={visibleError} />
           </View>
         ) : null}
-        {tab === 'assistant' ? (
+        {tab === 'display' ? (
+          <MobileReadingSettingsCard />
+        ) : tab === 'assistant' ? (
           <>
             <LocalAssistantSettingsCard />
             <MobileVoiceInputSettingsCard />

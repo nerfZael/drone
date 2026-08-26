@@ -115,6 +115,7 @@ import {
   sidebarChatStateClass,
   sidebarDensityClasses,
   sidebarFolderLabelClass,
+  sidebarRepositoryLabelClass,
   sidebarSelectionEdgeClass,
 } from '../sidebar/presentation';
 import { useSidebarReadModel } from './use-sidebar-read-model';
@@ -433,7 +434,9 @@ function ReadOnlySidebarGroups({
               density="compact"
               className={densityClasses.folderRow}
               label={
-                <span className={`${sidebarFolderLabelClass} ${densityClasses.folderLabel}`}>
+                <span
+                  className={`${group.kind === 'repo' ? sidebarRepositoryLabelClass : sidebarFolderLabelClass} ${densityClasses.folderLabel}`}
+                >
                   {group.label}
                 </span>
               }
@@ -845,7 +848,9 @@ function StaticReadOnlySidebarTree({
             down={!collapsed}
             className={`${densityClasses.icon} flex-shrink-0 text-[var(--muted-dim)]`}
           />
-          <span className={`${sidebarFolderLabelClass} ${densityClasses.folderLabel}`}>
+          <span
+            className={`${node.groupKind === 'repo' && !node.groupPath ? sidebarRepositoryLabelClass : sidebarFolderLabelClass} ${densityClasses.folderLabel}`}
+          >
             {node.label}
           </span>
         </button>

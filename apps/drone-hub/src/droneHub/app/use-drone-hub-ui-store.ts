@@ -22,7 +22,7 @@ import type { CustomAgentProfile } from '../types';
 import type { AgentApprovalPolicy, AgentPermissionMode } from '../../domain';
 import type { SettingsTabId } from './settings-tabs';
 import type { RepoBranchSourceMode } from './drone-create-runtime';
-import type { SidebarDensityMode } from './settings-types';
+import type { ReadingDensityMode, SidebarDensityMode } from './settings-types';
 import { normalizeSidebarGroupOrder } from './sidebar-group-order';
 import { mergeSeenModelIds, normalizeSeenModelIds } from './spawn-model-history';
 import { profileStorageKey } from '../../profile-storage';
@@ -76,6 +76,7 @@ const DEFAULT_SPAWN_CONTEXT_PREFERENCES: SpawnContextPreferences = {
 
 type DroneHubUiState = {
   themeId: DesktopThemeId;
+  readingDensityMode: ReadingDensityMode;
   activeRepoPath: string;
   settingsActiveTab: SettingsTabId;
   chatHeaderRepoPath: string;
@@ -145,6 +146,7 @@ type DroneHubUiState = {
   terminalMenuOpen: boolean;
   agentMenuOpen: boolean;
   setThemeId: (next: Updater<DesktopThemeId>) => void;
+  setReadingDensityMode: (next: Updater<ReadingDensityMode>) => void;
   setActiveRepoPath: (next: Updater<string>) => void;
   setSettingsActiveTab: (next: Updater<SettingsTabId>) => void;
   setChatHeaderRepoPath: (next: Updater<string>) => void;
@@ -325,6 +327,7 @@ function buildUpdatedSpawnContextByRepoKey(
 type DroneHubUiPersistedState = Pick<
   DroneHubUiState,
   | 'themeId'
+  | 'readingDensityMode'
   | 'activeRepoPath'
   | 'settingsActiveTab'
   | 'chatHeaderRepoPath'
@@ -506,6 +509,9 @@ export function migrateDroneHubUiPersistedState(
   if (Object.prototype.hasOwnProperty.call(migrated, 'themeId')) {
     migrated.themeId = normalizeDesktopThemeId(migrated.themeId);
   }
+  if (Object.prototype.hasOwnProperty.call(migrated, 'readingDensityMode')) {
+    migrated.readingDensityMode = normalizeReadingDensityMode(migrated.readingDensityMode);
+  }
   delete (migrated as any).automations;
   delete (migrated as any).pullHostBranchBeforeCreate;
   delete (migrated as any).playbookRunsSelectionInitialized;
@@ -642,6 +648,10 @@ function normalizeSidebarGroupingMode(value: unknown): SidebarGroupingMode {
 
 function normalizeSidebarDensityMode(value: unknown): SidebarDensityMode {
   return value === 'compact' || value === 'comfortable' ? value : 'default';
+}
+
+function normalizeReadingDensityMode(value: unknown): ReadingDensityMode {
+  return value === 'comfortable' ? 'comfortable' : 'default';
 }
 
 function normalizeSidebarDockSide(value: unknown): SidebarDockSide {
@@ -926,6 +936,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
   persist(
     (set) => ({
       themeId: DEFAULT_DESKTOP_THEME_ID,
+      readingDensityMode: 'default',
       activeRepoPath: '',
       settingsActiveTab: 'general',
       chatHeaderRepoPath: '',
@@ -998,6 +1009,12 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       agentMenuOpen: false,
       setThemeId: (next) =>
         set((s) => ({ themeId: normalizeDesktopThemeId(resolveNext(s.themeId, next)) })),
+      setReadingDensityMode: (next) =>
+        set((s) => ({
+          readingDensityMode: normalizeReadingDensityMode(
+            resolveNext(s.readingDensityMode, next),
+          ),
+        })),
       setActiveRepoPath: (next) =>
         set((s) => {
           const nextRepoPath = resolveNext(s.activeRepoPath, next);
@@ -1431,12 +1448,13 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
     }),
     {
       name: profileStorageKey('droneHub.ui'),
-      version: 19,
+      version: 20,
       storage: createJSONStorage(() => localStorage),
       migrate: (persistedState, version) =>
         migrateDroneHubUiPersistedState(persistedState, version),
       partialize: (state): DroneHubUiPersistedState => ({
         themeId: state.themeId,
+        readingDensityMode: state.readingDensityMode,
         activeRepoPath: state.activeRepoPath,
         settingsActiveTab: state.settingsActiveTab,
         chatHeaderRepoPath: state.chatHeaderRepoPath,
@@ -1494,6 +1512,9 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           ...currentState,
           ...persistedRest,
           themeId: normalizeDesktopThemeId(persisted.themeId ?? currentState.themeId),
+          readingDensityMode: normalizeReadingDensityMode(
+            persisted.readingDensityMode ?? currentState.readingDensityMode,
+          ),
           settingsActiveTab:
             persisted.settingsActiveTab === 'general' ||
             persisted.settingsActiveTab === 'companion' ||

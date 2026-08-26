@@ -54,8 +54,9 @@ describe('AssistantQuestionCard', () => {
     expect(html).toContain('Skip questionnaire');
     expect(html).toContain('Submit answer');
     expect(html).toContain('data-assistant-question-card="true"');
-    expect(html).toContain('border border-[var(--border)]');
-    expect(html).toContain('bg-[var(--surface-inset-faint)]');
+    expect(html).toContain('border border-[var(--chat-card-border)]');
+    expect(html).toContain('bg-[var(--chat-card-bg)]');
+    expect(html).toContain('max-w-[var(--chat-interactive-max)]');
     expect(html).not.toContain('bg-[var(--panel-raised)]');
     expect(html).not.toContain('Input requested');
     expect(html).not.toContain('Review the recommendations');

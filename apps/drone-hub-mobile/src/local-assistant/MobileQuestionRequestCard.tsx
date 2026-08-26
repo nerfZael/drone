@@ -6,6 +6,7 @@ import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import { Button, Card } from '../components/Ui';
 import { ThemedTextInput } from '../components/ThemedTextInput';
 import { colors } from '../theme';
+import { useMobileReadingDensity } from '../mobile-reading-density';
 import { NativeMarkdown } from './NativeMarkdown';
 import {
   setMobileQuestionViewMode,
@@ -41,6 +42,7 @@ export function MobileQuestionRequestCard({
   onSubmit(input: { responses: ChatQuestionResponse[]; notes?: string }): void;
   onSkip(notes?: string): void;
 }) {
+  const comfortable = useMobileReadingDensity() === 'comfortable';
   const [drafts, setDrafts] = React.useState<Record<string, Draft | undefined>>(() =>
     Object.fromEntries(
       request.questions.map((question) => {
@@ -135,11 +137,11 @@ export function MobileQuestionRequestCard({
                 </View>
               ) : null}
             </View>
-            <Text style={styles.questionTitle}>
+            <Text style={[styles.questionTitle, comfortable && styles.questionTitleComfortable]}>
               {singleQuestion ? question.question : `${index + 1}. ${question.question}`}
             </Text>
             {question.detailedExplanation ? (
-              <NativeMarkdown text={question.detailedExplanation} />
+              <NativeMarkdown text={question.detailedExplanation} tone="secondary" />
             ) : null}
             {question.choices.map((choice, choiceIndex) => {
               const selected = draft?.outcome === 'choice' && draft.choiceId === choice.id;
@@ -172,13 +174,24 @@ export function MobileQuestionRequestCard({
                   </View>
                   <View style={styles.optionBody}>
                     <View style={styles.optionTitleRow}>
-                      <Text style={styles.optionTitle}>{choice.label}</Text>
+                      <Text
+                        style={[styles.optionTitle, comfortable && styles.optionTitleComfortable]}
+                      >
+                        {choice.label}
+                      </Text>
                       {choice.recommended ? (
                         <Text style={styles.recommended}>Recommended</Text>
                       ) : null}
                     </View>
                     {choice.description ? (
-                      <Text style={styles.optionDescription}>{choice.description}</Text>
+                      <Text
+                        style={[
+                          styles.optionDescription,
+                          comfortable && styles.optionDescriptionComfortable,
+                        ]}
+                      >
+                        {choice.description}
+                      </Text>
                     ) : null}
                   </View>
                   {singleQuestion && selected ? (
@@ -219,7 +232,9 @@ export function MobileQuestionRequestCard({
                   {optionLetter(question.choices.length)}
                 </Text>
               </View>
-              <Text style={styles.optionTitle}>Something else</Text>
+              <Text style={[styles.optionTitle, comfortable && styles.optionTitleComfortable]}>
+                Something else
+              </Text>
             </Pressable>
             {draft?.outcome === 'custom' ? (
               <ThemedTextInput
@@ -319,7 +334,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 10,
-    backgroundColor: colors.whiteWashSoft,
+    backgroundColor: colors.chatCard,
     paddingHorizontal: 11,
     paddingVertical: 10,
     shadowOpacity: 0,
@@ -342,6 +357,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     lineHeight: 22,
   },
+  questionTitleComfortable: { fontSize: 17, lineHeight: 24 },
   navigationButton: {
     width: 30,
     height: 30,
@@ -349,10 +365,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: 8,
   },
-  questionCount: { minWidth: 34, textAlign: 'center', color: colors.textSecondary, fontSize: 10 },
+  questionCount: { minWidth: 34, textAlign: 'center', color: colors.muted, fontSize: 11 },
   importance: {
-    color: colors.textSecondary,
-    fontSize: 10,
+    color: colors.muted,
+    fontSize: 11,
     fontWeight: '700',
     backgroundColor: colors.controlSurface,
     borderRadius: 6,
@@ -376,7 +392,7 @@ const styles = StyleSheet.create({
   optionSelected: {
     borderBottomColor: 'transparent',
     borderRadius: 8,
-    backgroundColor: colors.controlSurface,
+    backgroundColor: colors.chatCardSelected,
   },
   optionNumber: {
     width: 30,
@@ -391,9 +407,11 @@ const styles = StyleSheet.create({
   optionNumberTextSelected: { color: colors.onAccent },
   optionBody: { flex: 1, gap: 2 },
   optionTitleRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6 },
-  optionTitle: { color: colors.textStrong, fontSize: 12, fontWeight: '700' },
+  optionTitle: { color: colors.textStrong, fontSize: 13, fontWeight: '700' },
+  optionTitleComfortable: { fontSize: 14 },
   recommended: { color: colors.accent, fontSize: 8, fontWeight: '800', textTransform: 'uppercase' },
-  optionDescription: { color: colors.muted, fontSize: 11, lineHeight: 16 },
+  optionDescription: { color: colors.textSecondary, fontSize: 12, lineHeight: 18 },
+  optionDescriptionComfortable: { fontSize: 13, lineHeight: 20 },
   skipButton: { alignSelf: 'flex-end', minHeight: 30, justifyContent: 'center', paddingHorizontal: 7 },
   skipQuestion: { color: colors.muted, fontSize: 11 },
   skipped: { color: colors.textStrong, fontWeight: '700' },

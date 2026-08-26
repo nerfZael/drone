@@ -130,6 +130,8 @@ export function GeneralSettingsTab({
 }: GeneralSettingsTabProps) {
   const themeId = useDroneHubUiStore((state) => state.themeId);
   const setThemeId = useDroneHubUiStore((state) => state.setThemeId);
+  const readingDensityMode = useDroneHubUiStore((state) => state.readingDensityMode);
+  const setReadingDensityMode = useDroneHubUiStore((state) => state.setReadingDensityMode);
   const {
     llmSettings,
     llmSettingsLoading,
@@ -856,6 +858,24 @@ export function GeneralSettingsTab({
                   </button>
                 );
               })}
+            </div>
+            <div className="flex flex-col gap-2 border-t border-[var(--border-subtle)] pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="dh-type-label">Reading density</div>
+                <div className="mt-1 dh-type-supporting">
+                  Comfortable increases prose, navigation, and supporting text throughout the app.
+                </div>
+              </div>
+              <UiSegmentedControl
+                label="Reading density"
+                value={readingDensityMode}
+                options={[
+                  { value: 'default', label: 'Default' },
+                  { value: 'comfortable', label: 'Comfortable' },
+                ]}
+                onValueChange={setReadingDensityMode}
+                className="self-start sm:self-auto"
+              />
             </div>
           </section>
 
