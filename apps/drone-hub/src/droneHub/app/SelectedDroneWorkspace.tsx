@@ -345,7 +345,10 @@ function LocalAutoUpdatesControl({
   };
 
   return (
-    <div className="inline-flex h-8 items-center gap-0.5 rounded-[var(--radius-medium)] bg-[var(--surface-inset)] p-0.5 dh-type-header-action">
+    <div
+      data-drone-local-auto-updates="true"
+      className="inline-flex h-8 items-center gap-0.5 rounded-[var(--radius-medium)] bg-[var(--surface-inset)] p-0.5 dh-type-header-action"
+    >
       <span
         role="status"
         className="inline-flex items-center gap-1.5 rounded-[calc(var(--radius-medium)-1px)] px-2.5"
@@ -1729,7 +1732,7 @@ export function SelectedDroneWorkspace({
         {/* Tier 2: Toolbar */}
         <div
           data-drone-header-toolbar="true"
-          className="absolute right-3 top-1/2 flex max-w-[calc(100%-22rem)] -translate-y-1/2 flex-wrap items-center justify-end gap-1.5"
+          className="absolute right-3 top-1/2 flex max-w-[calc(100%-22rem)] -translate-y-1/2 flex-nowrap items-center justify-end gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
           {currentDroneRepoAttached && !hostRuntime && (
             <>
@@ -2310,7 +2313,8 @@ export function SelectedDroneWorkspace({
           {/* Workspace pane controls */}
           <div className="ml-1 h-5 w-px bg-[var(--border-subtle)]" />
           <div
-            className="flex min-w-0 items-center gap-px"
+            data-drone-workspace-tools="true"
+            className="flex flex-shrink-0 items-center gap-px"
             role="toolbar"
             aria-label="Workspace tools"
           >

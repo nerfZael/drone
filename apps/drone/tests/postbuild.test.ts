@@ -5,6 +5,7 @@ const {
   blipBundleArgs,
   CONTAINER_RUNTIME_FILES,
   daemonBundleArgs,
+  DRONE_HUB_ELECTRON_ICON_FILE,
   mcpBridgeBundleArgs,
 } = require('../scripts/postbuild.cjs');
 import { requiredDroneDaemonRuntimeFiles } from '../src/hub/drone-daemon-runtime';
@@ -22,6 +23,9 @@ describe('postbuild bundles', () => {
       '--format=cjs',
       `--outfile=${path.join(root, 'dist', 'blip.js')}`,
     ]);
+  });
+  test('packages the Drone Hub desktop icon', () => {
+    expect(DRONE_HUB_ELECTRON_ICON_FILE).toBe('drone-hub-icon.png');
   });
 
   test('bundles the credential-free MCP bridge for Node', () => {

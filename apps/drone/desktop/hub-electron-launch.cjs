@@ -53,4 +53,17 @@ function parseDetachedHubStartOutput(raw) {
   return { payload, uiUrl: `http://127.0.0.1:${uiPort}` };
 }
 
-module.exports = { detachedHubStartArgs, parseDetachedHubStartOutput };
+function formatDetachedHubStartOutput(payload) {
+  const state = payload && typeof payload.state === 'object' ? payload.state : null;
+  const pid = Number(payload?.pid ?? state?.pid);
+  const pidText = Number.isInteger(pid) && pid > 0 ? ` (PID ${pid})` : '';
+  return payload?.alreadyRunning
+    ? `Drone Hub is already running${pidText}.`
+    : `Drone Hub started${pidText}.`;
+}
+
+module.exports = {
+  detachedHubStartArgs,
+  formatDetachedHubStartOutput,
+  parseDetachedHubStartOutput,
+};

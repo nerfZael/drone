@@ -2,7 +2,11 @@ const { app, BrowserWindow, Menu, shell } = require('electron');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
-const { detachedHubStartArgs, parseDetachedHubStartOutput } = require('./hub-electron-launch.cjs');
+const {
+  detachedHubStartArgs,
+  formatDetachedHubStartOutput,
+  parseDetachedHubStartOutput,
+} = require('./hub-electron-launch.cjs');
 const { zoomActionForInput } = require('./hub-electron-zoom.cjs');
 
 const APP_NAME = 'Drone Hub';
@@ -36,6 +40,15 @@ function resolveCliPath() {
 
 function hubArgs(cliPath) {
   return detachedHubStartArgs(cliPath);
+}
+
+function resolveAppIconPath() {
+  const candidates = [
+    path.join(__dirname, 'drone-hub-icon.png'),
+    path.join(__dirname, 'hub-ui', 'icons', 'drone-app-icon-256.png'),
+    path.resolve(__dirname, '..', '..', 'drone-hub', 'pwa', 'icons', 'drone-app-icon-256.png'),
+  ];
+  return candidates.find((candidate) => fs.existsSync(candidate)) || null;
 }
 
 function loadingHtml() {
@@ -125,6 +138,7 @@ function errorHtml(message) {
 }
 
 function createWindow() {
+  const appIconPath = resolveAppIconPath();
   mainWindow = new BrowserWindow({
     width: 1360,
     height: 900,
@@ -132,6 +146,17 @@ function createWindow() {
     minHeight: 680,
     title: APP_NAME,
     backgroundColor: '#11161e',
+    ...(appIconPath ? { icon: appIconPath } : {}),
+    ...(process.platform === 'linux'
+      ? {}
+      : {
+          titleBarStyle: 'hidden',
+          titleBarOverlay: {
+            color: '#171d27',
+            symbolColor: '#c7cdda',
+            height: 29,
+          },
+        }),
     webPreferences: {
       preload: path.join(__dirname, 'hub-electron-preload.cjs'),
       nodeIntegration: false,
@@ -182,16 +207,22 @@ function startHub() {
   let stdout = '';
   let stderrBuffer = '';
   let navigationStarted = false;
+  let terminalStatusWritten = false;
 
   const loadHubUiFromOutput = () => {
     if (navigationStarted) return true;
+    let payload;
     let uiUrl;
     try {
-      ({ uiUrl } = parseDetachedHubStartOutput(stdout));
+      ({ payload, uiUrl } = parseDetachedHubStartOutput(stdout));
     } catch {
       return false;
     }
     navigationStarted = true;
+    if (!terminalStatusWritten) {
+      terminalStatusWritten = true;
+      process.stdout.write(`${formatDetachedHubStartOutput(payload)}\n`);
+    }
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.loadURL(uiUrl).catch(showError);
     }
@@ -200,7 +231,6 @@ function startHub() {
 
   hubLauncherProcess.stdout.on('data', (chunk) => {
     const text = String(chunk || '');
-    process.stdout.write(text);
     stdout += text;
     loadHubUiFromOutput();
   });
@@ -233,6 +263,8 @@ function startHub() {
 Menu.setApplicationMenu(null);
 
 app.whenReady().then(() => {
+  const appIconPath = resolveAppIconPath();
+  if (process.platform === 'darwin' && appIconPath) app.dock?.setIcon(appIconPath);
   createWindow();
   startHub();
 });

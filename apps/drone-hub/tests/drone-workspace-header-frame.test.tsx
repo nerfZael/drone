@@ -16,6 +16,7 @@ describe('DroneWorkspaceHeaderFrame', () => {
     );
 
     expect(html).toContain('h-11');
+    expect(html).toContain('[container-type:inline-size]');
     expect(html).not.toContain('overflow-y-auto');
   });
 
@@ -36,6 +37,10 @@ describe('DroneWorkspaceHeaderFrame', () => {
 
     expect(source).not.toContain('<span>Tools</span>');
     expect(source).toContain('aria-label="Workspace tools"');
+    expect(source).toContain('data-drone-local-auto-updates="true"');
+    expect(source).toContain('data-drone-workspace-tools="true"');
+    expect(source).toContain('flex-nowrap');
+    expect(source).toContain('overflow-x-auto');
     expect(source).toContain("align={index === tabs.length - 1 ? 'end' : 'center'}");
     expect(source).toContain('contextMenuPanelBaseClass');
     expect(source).toContain('contextMenuItemBaseClass as dropdownMenuItemBaseClass');
@@ -65,9 +70,9 @@ describe('DroneWorkspaceHeaderFrame', () => {
       'utf8',
     );
 
-    expect(source).toContain('<HeaderMenuItemIcon><IconRefresh');
-    expect(source).toContain('<HeaderMenuItemIcon><IconTerminal');
-    expect(source).toContain('<HeaderMenuItemIcon><IconCopy');
-    expect(source).toContain('<HeaderMenuItemIcon><IconVsCode');
+    expect(source).toMatch(/<HeaderMenuItemIcon>\s*<IconRefresh/);
+    expect(source).toMatch(/<HeaderMenuItemIcon>\s*<IconTerminal/);
+    expect(source).toMatch(/<HeaderMenuItemIcon>\s*<IconCopy/);
+    expect(source).toMatch(/<HeaderMenuItemIcon>\s*<IconVsCode/);
   });
 });

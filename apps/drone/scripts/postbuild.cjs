@@ -3,6 +3,8 @@ const { spawnSync } = require('node:child_process');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 
+const DRONE_HUB_ELECTRON_ICON_FILE = 'drone-hub-icon.png';
+
 function blipBundleArgs(root) {
   return [
     'build',
@@ -113,6 +115,12 @@ async function copyDroneHubElectronMain(root) {
   }
 }
 
+async function copyDroneHubElectronIcon(root) {
+  const source = path.resolve(root, '..', 'drone-hub', 'pwa', 'icons', 'drone-app-icon-256.png');
+  const target = path.join(root, 'dist', DRONE_HUB_ELECTRON_ICON_FILE);
+  await fs.copyFile(source, target);
+}
+
 async function copyBuiltDroneHubUi(root) {
   const source = path.resolve(root, '..', 'drone-hub', 'dist');
   const target = path.join(root, 'dist', 'hub-ui');
@@ -155,6 +163,7 @@ async function main() {
   await assertBlipBundleHasErrorDetails(root);
   await packageContainerRuntime(root);
   await copyDroneHubElectronMain(root);
+  await copyDroneHubElectronIcon(root);
   await copyBuiltDroneHubUi(root);
   await chmodExecutableBestEffort(path.join(root, 'dist', 'blip.js'));
   await chmodExecutableBestEffort(path.join(root, 'dist', 'mcp-http-stdio-bridge.js'));
@@ -167,6 +176,7 @@ module.exports = {
   blipBundleArgs,
   CONTAINER_RUNTIME_FILES,
   daemonBundleArgs,
+  DRONE_HUB_ELECTRON_ICON_FILE,
   mcpBridgeBundleArgs,
 };
 

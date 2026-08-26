@@ -825,6 +825,19 @@ code, pre {
    Mobile shell
    ────────────────────────────────────────────────────────── */
 
+/* The workspace owns less horizontal space when the sidebar is open, even on
+   a wide viewport. Compact against that actual space instead of the viewport. */
+@container (max-width: 1100px) {
+  [data-drone-local-auto-updates="true"] {
+    display: none;
+  }
+
+  [data-drone-workspace-tools="true"] button {
+    width: 2rem !important;
+    height: 2rem !important;
+  }
+}
+
 @media (max-width: 767px) {
   [data-drone-app-shell="true"] {
     min-width: 0;
