@@ -201,7 +201,7 @@ export function AgentRunActivityView({
           {hasPlan ? (
             <div
               data-agent-run-plan="true"
-              className="dh-agent-activity-scrollbar max-h-72 min-w-0 overflow-y-auto overscroll-contain pr-1"
+              className="dh-agent-activity-scrollbar max-h-72 min-w-0 overflow-y-auto overscroll-contain pr-1 opacity-[0.82] transition-opacity hover:opacity-100"
             >
               <AgentPlanList
                 embedded

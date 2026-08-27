@@ -32,14 +32,19 @@ import { buildNativeAgentComposerControls } from '../src/droneHub/assistant/nati
 import { assistantTranscriptHasErrorMessage } from '../src/droneHub/assistant/assistant-message-model';
 import { resolveInlineMediaToggleState } from '../src/droneHub/chat/AgentMessageExtras';
 import { AgentRunSummaryLine } from '../src/droneHub/chat/WorkingElapsedStatus';
+import { ActiveComposerProvider } from '../src/droneHub/chat/ActiveComposerContext';
 
 const TRANSCRIPT_ITEMS = [
   { key: 'message', kind: 'message' as const, content: <div>Visible message</div> },
   { key: 'tool', kind: 'tool' as const, content: <div>Visible tool call</div> },
 ];
 
+function renderWithActiveComposer(children: React.ReactNode) {
+  return renderToStaticMarkup(<ActiveComposerProvider>{children}</ActiveComposerProvider>);
+}
+
 function renderComposer(adapter: AgentChatSurfaceAdapter) {
-  return renderToStaticMarkup(
+  return renderWithActiveComposer(
     <ChatSurface adapter={adapter}>
       <ChatSurfaceComposer
         resetKey="test-chat"
@@ -103,7 +108,7 @@ describe('agent chat surface adapters', () => {
   });
 
   test('the loading view reserves the message bar while chat configuration resolves', () => {
-    const html = renderToStaticMarkup(
+    const html = renderWithActiveComposer(
       <ChatSurface adapter={adaptExternalAgentChatSurface()}>
         <ChatSurfaceLoadingView
           resetKey="loading-chat"
@@ -140,7 +145,8 @@ describe('agent chat surface adapters', () => {
     const microphoneButton = html.match(/<button[^>]*aria-label="Record voice message"[^>]*>/)?.[0];
     expect(microphoneButton).toBeDefined();
     expect(microphoneButton).not.toContain('disabled=""');
-    expect(html).toContain('>Stop</button>');
+    expect(html).toContain('data-chat-composer-stop-action="true"');
+    expect(html).toContain('aria-label="Stop response"');
     expect(html).toContain('aria-label="Send"');
   });
 
@@ -158,7 +164,8 @@ describe('agent chat surface adapters', () => {
     expect(html).not.toContain('accept="image/*"');
     expect(html).toContain('data-chat-composer-expanded="true"');
     expect(html).toContain('aria-label="Record voice message"');
-    expect(html).toContain('>Stop</button>');
+    expect(html).toContain('data-chat-composer-stop-action="true"');
+    expect(html).toContain('aria-label="Stop response"');
     expect(html).toContain('aria-label="Send"');
   });
 
@@ -274,7 +281,7 @@ describe('agent chat surface adapters', () => {
   });
 
   test('the shared composer renders structured model controls and menu actions', () => {
-    const html = renderToStaticMarkup(
+    const html = renderWithActiveComposer(
       <ChatSurface adapter={adaptExternalAgentChatSurface()}>
         <ChatSurfaceComposer
           resetKey="structured-controls"
@@ -314,7 +321,7 @@ describe('agent chat surface adapters', () => {
   });
 
   test('the shared mobile-style model picker combines model and reasoning in one trigger', () => {
-    const html = renderToStaticMarkup(
+    const html = renderWithActiveComposer(
       <ChatSurface adapter={adaptNativeAgentChatSurface()}>
         <ChatSurfaceComposer
           resetKey="combined-model-picker"
@@ -363,7 +370,7 @@ describe('agent chat surface adapters', () => {
   });
 
   test('the empty composer collapses to add, message, and microphone controls', () => {
-    const html = renderToStaticMarkup(
+    const html = renderWithActiveComposer(
       <ChatSurface adapter={adaptExternalAgentChatSurface()}>
         <ChatSurfaceComposer
           resetKey="collapsed-composer"
@@ -402,7 +409,7 @@ describe('agent chat surface adapters', () => {
   });
 
   test('the composer can stay expanded for chat-first creation surfaces', () => {
-    const html = renderToStaticMarkup(
+    const html = renderWithActiveComposer(
       <ChatSurface adapter={adaptExternalAgentChatSurface()}>
         <ChatSurfaceComposer
           resetKey="always-expanded-composer"

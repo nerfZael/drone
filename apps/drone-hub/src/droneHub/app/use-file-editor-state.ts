@@ -36,7 +36,14 @@ import {
   type QuickOpenRecentFile,
 } from '../files/quick-open-state';
 import { DRONE_WORKSPACE_STATE_DISPOSE_EVENT, disposedDroneIdFromEvent } from '../workspace-state-events';
-import { openedFileTabsStateForDrone, updateOpenedFileTabsStateForDrone } from './drone-file-editor-state';
+import {
+  openedFileTabsStateForDrone,
+  rememberedEditorFileFromTab,
+  restoredOpenedFileTabsStateByDrone,
+  updateOpenedFileTabsStateForDrone,
+  writeRememberedEditorFile,
+  type RememberedEditorFile,
+} from './drone-file-editor-state';
 import { appendFileDictationLine } from '../files/file-dictation-text';
 
 type RequestJson = typeof requestJsonFn;
@@ -46,6 +53,30 @@ type UseFileEditorStateArgs = {
   requestJson: RequestJson;
   onRefreshFsList: () => void;
 };
+
+function rememberedEditorFilesFromTabState(
+  stateByDroneId: Record<string, OpenedFileTabsState>,
+): Record<string, RememberedEditorFile> {
+  const remembered: Record<string, RememberedEditorFile> = {};
+  for (const [droneId, state] of Object.entries(stateByDroneId)) {
+    const activeTab = state.tabs.find((tab) => tab.tabId === state.activeTabId);
+    const file = rememberedEditorFileFromTab(activeTab);
+    if (file) remembered[droneId] = file;
+  }
+  return remembered;
+}
+
+function rememberedEditorFilesEqual(
+  left: RememberedEditorFile | null | undefined,
+  right: RememberedEditorFile | null | undefined,
+): boolean {
+  return (
+    left?.path === right?.path &&
+    left?.name === right?.name &&
+    left?.targetLine === right?.targetLine &&
+    left?.targetColumn === right?.targetColumn
+  );
+}
 
 function normalizeContainerPath(raw: string): string {
   const trimmed = String(raw ?? '').trim().replace(/\\/g, '/');
@@ -147,7 +178,13 @@ export function useFileEditorState({
   onRefreshFsList,
 }: UseFileEditorStateArgs) {
   const currentDroneId = String(currentDrone?.id ?? '').trim();
-  const [tabStateByDroneId, setTabStateByDroneId] = React.useState<Record<string, OpenedFileTabsState>>({});
+  const [tabStateByDroneId, setTabStateByDroneId] = React.useState<Record<string, OpenedFileTabsState>>(
+    restoredOpenedFileTabsStateByDrone,
+  );
+  const rememberedEditorFilesRef = React.useRef<Record<string, RememberedEditorFile> | null>(null);
+  if (rememberedEditorFilesRef.current === null) {
+    rememberedEditorFilesRef.current = rememberedEditorFilesFromTabState(tabStateByDroneId);
+  }
   const tabStateByDroneIdRef = React.useRef(tabStateByDroneId);
   tabStateByDroneIdRef.current = tabStateByDroneId;
   const tabState = openedFileTabsStateForDrone(tabStateByDroneId, currentDroneId);
@@ -185,6 +222,17 @@ export function useFileEditorState({
     },
     [],
   );
+
+  React.useEffect(() => {
+    const previous = rememberedEditorFilesRef.current ?? {};
+    const next = rememberedEditorFilesFromTabState(tabStateByDroneId);
+    const droneIds = new Set([...Object.keys(previous), ...Object.keys(next)]);
+    for (const droneId of droneIds) {
+      if (rememberedEditorFilesEqual(previous[droneId], next[droneId])) continue;
+      writeRememberedEditorFile(droneId, next[droneId] ?? null);
+    }
+    rememberedEditorFilesRef.current = next;
+  }, [tabStateByDroneId]);
 
   const setTabState = React.useCallback(
     (next: React.SetStateAction<OpenedFileTabsState>) => setTabStateForDrone(currentDroneId, next),
@@ -369,6 +417,7 @@ export function useFileEditorState({
         return next;
       });
       delete locationHistoryByDroneIdRef.current[droneId];
+      writeRememberedEditorFile(droneId, null);
       setRecentFilesByDroneId((prev) => {
         if (!(droneId in prev)) return prev;
         const next = { ...prev };

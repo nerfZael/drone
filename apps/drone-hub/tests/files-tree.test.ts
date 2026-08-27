@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { DroneFsEntry } from '../src/droneHub/types';
 import {
   buildFileExplorerTree,
+  fileAncestorDirectoryPaths,
   flattenVisibleFileExplorerRows,
   summarizeRootEntries,
 } from '../src/droneHub/files/tree';
@@ -20,6 +21,18 @@ function entry(seed: Partial<DroneFsEntry> & Pick<DroneFsEntry, 'name' | 'path' 
 }
 
 describe('file explorer tree', () => {
+  test('finds directories to expand for a file while keeping the workspace root', () => {
+    expect(
+      fileAncestorDirectoryPaths('/work/repo', '/work/repo/src/components/App.tsx'),
+    ).toEqual(['/work/repo/src', '/work/repo/src/components']);
+    expect(fileAncestorDirectoryPaths('/work/repo', '/work/repo/README.md')).toEqual([]);
+    expect(fileAncestorDirectoryPaths('/', '/etc/nginx/nginx.conf')).toEqual([
+      '/etc',
+      '/etc/nginx',
+    ]);
+    expect(fileAncestorDirectoryPaths('/work/repo', '/work/repository/file.ts')).toEqual([]);
+  });
+
   test('builds nested nodes from loaded child directories', () => {
     const tree = buildFileExplorerTree({
       rootEntries: [

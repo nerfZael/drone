@@ -16,6 +16,33 @@ export type FileExplorerVisibleRow = {
   count: number | null;
 };
 
+function normalizeExplorerPath(pathRaw: string): string {
+  const normalized = String(pathRaw ?? '')
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/\/+/g, '/');
+  if (!normalized) return '/';
+  const absolute = normalized.startsWith('/') ? normalized : `/${normalized}`;
+  return absolute === '/' ? absolute : absolute.replace(/\/+$/g, '');
+}
+
+export function fileAncestorDirectoryPaths(rootPathRaw: string, filePathRaw: string): string[] {
+  const rootPath = normalizeExplorerPath(rootPathRaw);
+  const filePath = normalizeExplorerPath(filePathRaw);
+  const insideRoot =
+    rootPath === '/' ? filePath.startsWith('/') : filePath.startsWith(`${rootPath}/`);
+  if (!insideRoot || filePath === rootPath) return [];
+
+  const relativePath =
+    rootPath === '/' ? filePath.slice(1) : filePath.slice(rootPath.length + 1);
+  const directorySegments = relativePath.split('/').filter(Boolean).slice(0, -1);
+  let currentPath = rootPath === '/' ? '' : rootPath;
+  return directorySegments.map((segment) => {
+    currentPath = `${currentPath}/${segment}`;
+    return currentPath;
+  });
+}
+
 export function buildFileExplorerTree(opts: {
   rootEntries: DroneFsEntry[];
   childEntriesByPath?: Record<string, DroneFsEntry[]>;

@@ -114,7 +114,11 @@ export function NewDroneAccessPicker({
   const triggerLabel = `${newDroneAccessLabel(permissionMode)} · ${newDroneApprovalLabel(approvalPolicy)}`;
 
   return (
-    <div ref={rootRef} className="relative min-w-0 flex-shrink-0">
+    <div
+      ref={rootRef}
+      data-chat-composer-access-picker="true"
+      className="relative min-w-0 flex-shrink-0"
+    >
       <button
         type="button"
         disabled={disabled}

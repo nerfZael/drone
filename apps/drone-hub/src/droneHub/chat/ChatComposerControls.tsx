@@ -139,6 +139,7 @@ export function ChatComposerControls({ config }: { config?: ChatComposerControls
   return (
     <div
       data-onboarding-id={config.onboardingId}
+      data-chat-composer-controls="true"
       className="flex min-w-0 flex-shrink-0 flex-wrap items-center gap-[.4375rem]"
     >
       {config.controls.map((control) => {

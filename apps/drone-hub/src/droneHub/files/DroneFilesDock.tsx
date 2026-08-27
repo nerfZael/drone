@@ -32,7 +32,11 @@ import {
   type DroneFilesActionMode,
   type DroneFilesContextMenuState,
 } from './DroneFilesContextMenu';
-import { buildFileExplorerTree, type FileExplorerNode } from './tree';
+import {
+  buildFileExplorerTree,
+  fileAncestorDirectoryPaths,
+  type FileExplorerNode,
+} from './tree';
 import { clampWorkspaceExplorerZoom } from '../app/workspace-explorer-preferences';
 
 const CHILD_DIRECTORY_CACHE_MAX_AGE_MS = 5 * 60_000;
@@ -364,9 +368,14 @@ export function DroneFilesDock({
       const dirPath = normalizeContainerPathInput(dirPathRaw);
       if (!dirPath || dirPath === normalizedPath) return;
       if (childLoadingByPath[dirPath]) return;
+      if (!opts?.force && childErrorByPath[dirPath]) return;
+      if (
+        !opts?.force &&
+        Object.prototype.hasOwnProperty.call(childEntriesByPath, dirPath)
+      )
+        return;
       const cacheKey = childDirectoryCacheKey(droneId, dirPath);
       const cached = opts?.force ? null : readChildDirectoryCache(cacheKey);
-      if (!opts?.force && Object.prototype.hasOwnProperty.call(childEntriesByPath, dirPath) && !cached) return;
       if (cached) {
         setChildEntriesByPath((prev) => {
           if (sameFsEntries(prev[dirPath], cached)) return prev;
@@ -376,6 +385,7 @@ export function DroneFilesDock({
           if (prev[dirPath] == null) return prev;
           return { ...prev, [dirPath]: null };
         });
+        return;
       }
 
       const seq = (childRequestSeqRef.current[dirPath] ?? 0) + 1;
@@ -415,17 +425,41 @@ export function DroneFilesDock({
         });
       }
     },
-    [childEntriesByPath, childLoadingByPath, droneId, normalizedPath],
+    [childEntriesByPath, childErrorByPath, childLoadingByPath, droneId, normalizedPath],
   );
+
+  const activeFileAncestorPaths = React.useMemo(
+    () => fileAncestorDirectoryPaths(normalizedPath, activeOpenedFilePath),
+    [activeOpenedFilePath, normalizedPath],
+  );
+
+  React.useEffect(() => {
+    if (activeFileAncestorPaths.length === 0) return;
+    setExpandedDirs((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const directoryPath of activeFileAncestorPaths) {
+        if (next[directoryPath] === true) continue;
+        next[directoryPath] = true;
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+    for (const directoryPath of activeFileAncestorPaths) {
+      void loadDirectory(directoryPath);
+    }
+  }, [activeFileAncestorPaths, loadDirectory, setExpandedDirs]);
 
   const toggleDirectory = React.useCallback(
     (dirPath: string) => {
       const open = expandedDirs[dirPath] === true;
       const nextOpen = !open;
       setExpandedDirs((prev) => ({ ...prev, [dirPath]: nextOpen }));
-      if (nextOpen) void loadDirectory(dirPath);
+      if (nextOpen) {
+        void loadDirectory(dirPath, { force: Boolean(childErrorByPath[dirPath]) });
+      }
     },
-    [expandedDirs, loadDirectory],
+    [childErrorByPath, expandedDirs, loadDirectory],
   );
 
   const refreshExplorer = React.useCallback(() => {

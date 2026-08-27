@@ -119,11 +119,11 @@ export function useFilesAndPortsPaneState({
     return normalizeContainerPathInput(saved || defaultFsPathForCurrentDrone);
   }, [currentDrone, defaultFsPathForCurrentDrone, fsPathByDrone]);
 
-  const setCurrentFsPath = React.useCallback(
-    (nextPath: string) => {
-      const droneId = String(currentDrone?.id ?? '').trim();
+  const setFsPathForDrone = React.useCallback(
+    (drone: Pick<DroneSummary, 'id' | 'runtime'> | null | undefined, nextPath: string) => {
+      const droneId = String(drone?.id ?? '').trim();
       if (!droneId) return;
-      const normalized = isHostRuntimeDrone(currentDrone)
+      const normalized = isHostRuntimeDrone(drone)
         ? String(nextPath ?? '').trim() || '/'
         : normalizeContainerPathInput(nextPath);
       setFsPathByDrone((prev) => {
@@ -131,7 +131,14 @@ export function useFilesAndPortsPaneState({
         return { ...prev, [droneId]: normalized };
       });
     },
-    [currentDrone],
+    [],
+  );
+
+  const setCurrentFsPath = React.useCallback(
+    (nextPath: string) => {
+      setFsPathForDrone(currentDrone, nextPath);
+    },
+    [currentDrone, setFsPathForDrone],
   );
 
   const refreshFsList = React.useCallback(() => {
@@ -546,6 +553,7 @@ export function useFilesAndPortsPaneState({
   return {
     defaultFsPathForCurrentDrone,
     currentFsPath,
+    setFsPathForDrone,
     setCurrentFsPath,
     refreshFsList,
     fsEntries,

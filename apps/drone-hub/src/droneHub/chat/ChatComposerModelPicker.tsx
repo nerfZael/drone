@@ -214,7 +214,11 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
   };
 
   return (
-    <div ref={rootRef} className="relative min-w-0 flex-shrink-0">
+    <div
+      ref={rootRef}
+      data-chat-composer-model-picker="true"
+      className="relative min-w-0 flex-shrink-0"
+    >
       <button
         type="button"
         disabled={disabled}

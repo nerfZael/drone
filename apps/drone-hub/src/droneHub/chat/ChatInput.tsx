@@ -1599,6 +1599,7 @@ export function ChatInput({
 
           {composerExpanded ? (
             <div
+              data-chat-composer-toolbar="true"
               className={`flex min-h-[2.9375rem] flex-wrap items-center gap-[.4375rem] px-[.5625rem] pb-[.5625rem] ${
                 editorMode ? 'pt-[.4375rem]' : ''
               }`}
@@ -1654,17 +1655,27 @@ export function ChatInput({
                 onToggle={toggleEditorMode}
               />
 
-              {!voiceRecordingActive && !continuousVoiceActive
-                ? composerLeadingControls
-                : null}
+              {!voiceRecordingActive && !continuousVoiceActive && composerLeadingControls ? (
+                <div
+                  data-chat-composer-leading-controls="true"
+                  className="min-w-0 flex-shrink-0"
+                >
+                  {composerLeadingControls}
+                </div>
+              ) : null}
 
-              <div className="min-w-2 flex-1" />
+              <div data-chat-composer-toolbar-spacer="true" className="min-w-2 flex-1" />
 
               {!voiceRecordingActive && !continuousVoiceActive ? composerStatus : null}
 
-              {!voiceRecordingActive && !continuousVoiceActive
-                ? composerTrailingControls
-                : null}
+              {!voiceRecordingActive && !continuousVoiceActive && composerTrailingControls ? (
+                <div
+                  data-chat-composer-trailing-controls="true"
+                  className="min-w-0 flex-shrink-0"
+                >
+                  {composerTrailingControls}
+                </div>
+              ) : null}
 
               {!voiceRecordingActive && !continuousVoiceActive ? <ChatComposerControls config={composerControls} /> : null}
 
@@ -1686,6 +1697,10 @@ export function ChatInput({
               </button>
               ) : null}
 
+              <div
+                data-chat-composer-primary-actions="true"
+                className="flex flex-shrink-0 items-center gap-[.4375rem]"
+              >
               {voiceRecordingActive ? (
                 <>
                   <button
@@ -1806,11 +1821,17 @@ export function ChatInput({
               {showSeparateStopAction ? (
               <button
                 type="button"
+                data-chat-composer-stop-action="true"
                 onClick={() => void onStop?.()}
                 disabled={stopping}
                 className="inline-flex h-8 items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 text-[.625rem] font-medium uppercase tracking-wide text-[var(--red)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-50"
+                title={stopping ? 'Stopping response' : 'Stop response'}
+                aria-label={stopping ? 'Stopping response' : 'Stop response'}
               >
-                {stopping ? 'Stopping...' : 'Stop'}
+                <span data-chat-composer-stop-label="true">{stopping ? 'Stopping...' : 'Stop'}</span>
+                <svg data-chat-composer-stop-icon="true" className="hidden" width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <rect x="7" y="7" width="10" height="10" rx="1" />
+                </svg>
               </button>
               ) : null}
               <button
@@ -1857,6 +1878,7 @@ export function ChatInput({
                   </svg>
                 )}
               </button>
+              </div>
             </div>
           ) : null}
           {hasModeHint && (

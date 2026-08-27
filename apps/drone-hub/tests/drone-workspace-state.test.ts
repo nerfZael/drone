@@ -4,8 +4,12 @@ import path from 'node:path';
 import { profileStorageKey } from '../src/profile-storage';
 import { openFileTab, updateFileTabContent } from '../src/droneHub/app/opened-file-tabs';
 import {
+  EDITOR_LAST_FILE_STORAGE_KEY,
   openedFileTabsStateForDrone,
+  readRememberedEditorFile,
+  restoredOpenedFileTabsStateByDrone,
   updateOpenedFileTabsStateForDrone,
+  writeRememberedEditorFile,
 } from '../src/droneHub/app/drone-file-editor-state';
 
 class MemoryStorage {
@@ -17,6 +21,10 @@ class MemoryStorage {
 
   setItem(key: string, value: string): void {
     this.values.set(key, String(value));
+  }
+
+  removeItem(key: string): void {
+    this.values.delete(key);
   }
 
   clear(): void {
@@ -366,5 +374,62 @@ describe('per-drone workspace state', () => {
 
     expect(openedFileTabsStateForDrone(state, 'drone-a').tabs[0]?.content).toBe('unsaved change');
     expect(openedFileTabsStateForDrone(state, 'drone-b').tabs[0]?.path).toBe('/work/repo/b.ts');
+  });
+
+  test('restores the last active editor file for each drone from storage', () => {
+    writeRememberedEditorFile('drone-a', {
+      path: '/work/repo/src/a.ts',
+      name: 'a.ts',
+      targetLine: 12,
+      targetColumn: 4,
+    });
+    writeRememberedEditorFile('drone-b', {
+      path: '/work/repo/README.md',
+      name: 'README.md',
+      targetLine: null,
+      targetColumn: null,
+    });
+
+    const restored = restoredOpenedFileTabsStateByDrone();
+    const droneA = openedFileTabsStateForDrone(restored, 'drone-a');
+    const droneB = openedFileTabsStateForDrone(restored, 'drone-b');
+
+    expect(droneA.tabs[0]).toMatchObject({
+      path: '/work/repo/src/a.ts',
+      name: 'a.ts',
+      targetLine: 12,
+      targetColumn: 4,
+      loaded: false,
+    });
+    expect(droneA.activeTabId).toBe(droneA.tabs[0]?.tabId);
+    expect(droneB.tabs[0]?.path).toBe('/work/repo/README.md');
+    expect(JSON.parse(storage.getItem(EDITOR_LAST_FILE_STORAGE_KEY) ?? '{}')).toEqual({
+      'drone-a': {
+        path: '/work/repo/src/a.ts',
+        name: 'a.ts',
+        targetLine: 12,
+        targetColumn: 4,
+      },
+      'drone-b': {
+        path: '/work/repo/README.md',
+        name: 'README.md',
+        targetLine: null,
+        targetColumn: null,
+      },
+    });
+  });
+
+  test('forgets the remembered editor file when its last tab closes', () => {
+    writeRememberedEditorFile('drone-a', {
+      path: '/work/repo/a.ts',
+      name: 'a.ts',
+      targetLine: null,
+      targetColumn: null,
+    });
+
+    writeRememberedEditorFile('drone-a', null);
+
+    expect(readRememberedEditorFile('drone-a')).toBeNull();
+    expect(storage.getItem(EDITOR_LAST_FILE_STORAGE_KEY)).toBeNull();
   });
 });

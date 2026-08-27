@@ -2609,6 +2609,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const {
     defaultFsPathForCurrentDrone,
     currentFsPath,
+    setFsPathForDrone,
     setCurrentFsPath,
     refreshFsList,
     fsEntries,
@@ -3549,21 +3550,29 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const focusEditorPane = React.useCallback(() => {
     requestRightPanelTab('editor');
   }, [requestRightPanelTab]);
+  const resetFileExplorerToRoot = React.useCallback(() => {
+    setCurrentFsPath(defaultFsPathForCurrentDrone);
+  }, [defaultFsPathForCurrentDrone, setCurrentFsPath]);
+  const activateOpenedEditorFileTab = React.useCallback(
+    (tabId: string) => {
+      resetFileExplorerToRoot();
+      setActiveOpenedFileTab(tabId);
+    },
+    [resetFileExplorerToRoot, setActiveOpenedFileTab],
+  );
   const openFileInFilesPane = React.useCallback(
     (next: { path: string; name: string; line?: number | null; column?: number | null }) => {
       const resolvedPath = resolveDroneFileOpenPath(currentDrone, next.path);
       if (!resolvedPath) return;
-      const slash = resolvedPath.lastIndexOf('/');
-      const parentPath = slash > 0 ? resolvedPath.slice(0, slash) : '/';
       const name =
         String(next.name ?? '').trim() ||
         resolvedPath.split('/').filter(Boolean).pop() ||
         resolvedPath;
-      setCurrentFsPath(parentPath || '/');
+      resetFileExplorerToRoot();
       openEditorFile({ ...next, path: resolvedPath, name });
       focusEditorPane();
     },
-    [currentDrone, focusEditorPane, openEditorFile, setCurrentFsPath],
+    [currentDrone, focusEditorPane, openEditorFile, resetFileExplorerToRoot],
   );
   const openFileDictationTarget = React.useCallback(
     (target: { droneId: string; path: string; name: string }) => {
@@ -3572,9 +3581,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       if (!droneId || !path) return;
       const name =
         String(target.name ?? '').trim() || path.split('/').filter(Boolean).pop() || path;
-      const slash = path.lastIndexOf('/');
       const targetDrone = droneByIdRef.current[droneId];
-      if (targetDrone) setActiveRepoPath(String(targetDrone.repoPath ?? '').trim());
+      if (targetDrone) {
+        setActiveRepoPath(String(targetDrone.repoPath ?? '').trim());
+        setFsPathForDrone(targetDrone, droneHomePath(targetDrone));
+      }
       setAppView('workspace');
       setHomeOpen(false);
       setSelectedGroupMultiChat(null);
@@ -3583,7 +3594,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setDraftCreateError(null);
       setSelectedDrone(droneId);
       setSelectedDroneIds([droneId]);
-      setCurrentFsPath(slash > 0 ? path.slice(0, slash) : '/');
       openEditorLocation({ droneId, path, name });
       requestRightPanelTab('editor');
     },
@@ -3592,7 +3602,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       requestRightPanelTab,
       setActiveRepoPath,
       setAppView,
-      setCurrentFsPath,
+      setFsPathForDrone,
       setDraftChat,
       setDraftCreateError,
       setDraftCreateOpen,
@@ -3612,18 +3622,16 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const droneId = String(currentDrone?.id ?? '').trim();
       const resolvedPath = resolveDroneFileOpenPath(currentDrone, next.path);
       if (!droneId || !resolvedPath) return false;
-      const slash = resolvedPath.lastIndexOf('/');
-      const parentPath = slash > 0 ? resolvedPath.slice(0, slash) : '/';
       const name =
         String(next.name ?? '').trim() ||
         resolvedPath.split('/').filter(Boolean).pop() ||
         resolvedPath;
-      setCurrentFsPath(parentPath || '/');
+      resetFileExplorerToRoot();
       openEditorFile({ ...next, path: resolvedPath, name });
       focusEditorPane();
       return true;
     },
-    [currentDrone, focusEditorPane, openEditorFile, setCurrentFsPath],
+    [currentDrone, focusEditorPane, openEditorFile, resetFileExplorerToRoot],
   );
 
   const openQuickOpenFromShortcut = React.useCallback(() => {
@@ -3633,31 +3641,29 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     return true;
   }, [currentDrone?.id, focusEditorPane, openQuickOpen]);
 
-  const revealEditorLocationParent = React.useCallback(
+  const revealEditorLocationFromRoot = React.useCallback(
     (pathRaw: string) => {
       const resolvedPath = resolveDroneFileOpenPath(currentDrone, pathRaw);
       if (!resolvedPath) return;
-      const slash = resolvedPath.lastIndexOf('/');
-      const parentPath = slash > 0 ? resolvedPath.slice(0, slash) : '/';
-      setCurrentFsPath(parentPath || '/');
+      resetFileExplorerToRoot();
       focusEditorPane();
     },
-    [currentDrone, focusEditorPane, setCurrentFsPath],
+    [currentDrone, focusEditorPane, resetFileExplorerToRoot],
   );
 
   const goBackEditorLocationFromShortcut = React.useCallback(() => {
     const location = goBackLocation();
     if (!location) return false;
-    revealEditorLocationParent(location.path);
+    revealEditorLocationFromRoot(location.path);
     return true;
-  }, [goBackLocation, revealEditorLocationParent]);
+  }, [goBackLocation, revealEditorLocationFromRoot]);
 
   const goForwardEditorLocationFromShortcut = React.useCallback(() => {
     const location = goForwardLocation();
     if (!location) return false;
-    revealEditorLocationParent(location.path);
+    revealEditorLocationFromRoot(location.path);
     return true;
-  }, [goForwardLocation, revealEditorLocationParent]);
+  }, [goForwardLocation, revealEditorLocationFromRoot]);
 
   React.useEffect(() => {
     const isBackShortcut = (event: KeyboardEvent): boolean =>
@@ -4992,11 +4998,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             },
             onGoBack: () => {
               const location = goBackLocation();
-              if (location) revealEditorLocationParent(location.path);
+              if (location) revealEditorLocationFromRoot(location.path);
             },
             onGoForward: () => {
               const location = goForwardLocation();
-              if (location) revealEditorLocationParent(location.path);
+              if (location) revealEditorLocationFromRoot(location.path);
             },
           }}
           openedFileTabs={openedEditorFileTabs}
@@ -5009,7 +5015,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           onConfirmCloseOpenedEditorFilesForPaths={confirmCloseOpenedFileTabsForPaths}
           onCloseOpenedEditorFilesForPaths={closeOpenedFileTabsForPaths}
           onRemapOpenedEditorFilesForPathChange={remapOpenedFileTabsForPathChange}
-          onActivateOpenedEditorFileTab={setActiveOpenedFileTab}
+          onActivateOpenedEditorFileTab={activateOpenedEditorFileTab}
           onReorderOpenedEditorFileTabs={reorderOpenedFileTabs}
           onRevealChangesFileInFiles={revealChangesFileInFiles}
           onOpenChangesFileInEditor={openChangesFileInEditor}
@@ -5096,6 +5102,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       openedEditorFileSize,
       openedEditorFileTabs,
       activeOpenedFileTabId,
+      activateOpenedEditorFileTab,
       quickOpenOpen,
       quickOpenQuery,
       quickOpenFiles,
@@ -5107,7 +5114,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setQuickOpenQuery,
       goBackLocation,
       goForwardLocation,
-      revealEditorLocationParent,
+      revealEditorLocationFromRoot,
       setOpenedFileContent,
       refreshOpenedFile,
       saveOpenedFile,
@@ -5116,7 +5123,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       confirmCloseOpenedFileTabsForPaths,
       closeOpenedFileTabsForPaths,
       remapOpenedFileTabsForPathChange,
-      setActiveOpenedFileTab,
       reorderOpenedFileTabs,
     ],
   );

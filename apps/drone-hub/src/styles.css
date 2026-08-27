@@ -842,6 +842,71 @@ code, pre {
   }
 }
 
+/* Keep the expanded composer useful in narrow desktop panes. Secondary
+   selectors compact before the primary voice/stop/send actions are allowed to
+   wrap. The query follows the chat pane width, not the browser viewport. */
+@container (min-width: 541px) and (max-width: 720px) {
+  [data-chat-composer-toolbar='true'] {
+    gap: .25rem;
+    padding-inline: .375rem;
+  }
+
+  [data-chat-composer-toolbar='true'] [data-chat-composer-primary-actions='true'],
+  [data-chat-composer-toolbar='true'] [data-chat-composer-controls='true'] {
+    gap: .25rem;
+  }
+
+  [data-chat-composer-toolbar='true'] [data-chat-composer-leading-controls='true'],
+  [data-chat-composer-toolbar='true'] [data-chat-composer-agent-picker='true'] {
+    max-width: 4.5rem;
+  }
+
+  [data-chat-composer-toolbar='true'] [data-chat-composer-agent-picker='true'] button {
+    min-width: 0 !important;
+    max-width: 4.5rem !important;
+    padding-inline: .375rem !important;
+  }
+
+  [data-chat-composer-toolbar='true'] [data-chat-composer-trailing-controls='true'],
+  [data-chat-composer-toolbar='true'] [data-chat-composer-access-picker='true'] {
+    max-width: 6.25rem;
+  }
+
+  [data-chat-composer-toolbar='true'] [data-chat-composer-access-picker='true'] > button {
+    max-width: 6.25rem;
+    padding-inline: .375rem;
+  }
+
+  [data-chat-composer-toolbar='true'] [data-chat-composer-model-picker='true'],
+  [data-chat-composer-toolbar='true'] [data-chat-composer-model-picker='true'] > button {
+    max-width: 6.75rem;
+  }
+
+  [data-chat-composer-toolbar='true'] [data-chat-composer-model-picker='true'] > button {
+    padding-inline: .375rem;
+  }
+
+  [data-chat-composer-stop-action='true'] {
+    width: 2rem;
+    flex-shrink: 0;
+    padding-inline: 0;
+  }
+
+  [data-chat-composer-stop-label='true'] {
+    display: none;
+  }
+
+  [data-chat-composer-stop-icon='true'] {
+    display: block;
+  }
+}
+
+@container (max-width: 540px) {
+  [data-chat-composer-toolbar='true'] [data-chat-composer-primary-actions='true'] {
+    margin-left: auto;
+  }
+}
+
 @media (max-width: 767px) {
   [data-drone-app-shell="true"] {
     min-width: 0;
