@@ -39,7 +39,10 @@ type DroneStatusProbeTiming = {
   statusReadCount: number;
 };
 
-const STATUS_REFRESH_CONCURRENCY = 4;
+// Status probes are network-bound. Four workers made a 160-drone sweep take
+// longer than a minute under load, which in turn caused poll requests to queue
+// another full sweep. Keep the bound conservative but large enough for fleets.
+const STATUS_REFRESH_CONCURRENCY = 16;
 const STATUS_REFRESH_INTERVAL_MS = 15_000;
 const STATUS_CACHE_MAX_ENTRIES = 500;
 
@@ -47,6 +50,7 @@ export function createDroneStatusRuntime(deps: DroneStatusRuntimeDependencies) {
   const cache = new Map<string, CachedDroneStatusSummary>();
   let loop: ManagedLoop | null = null;
   let refreshSource = 'interval';
+  let refreshRunning = false;
 
   function cachedForEntry(drone: any): CachedDroneStatusSummary {
     pruneCache();
@@ -54,6 +58,11 @@ export function createDroneStatusRuntime(deps: DroneStatusRuntimeDependencies) {
   }
 
   function schedule(source: string, delayMs = 0): void {
+    // A running sweep already observes the fleet state at least as recently as
+    // this request. The regular interval will pick up changes that land after a
+    // particular drone was probed; requesting an immediate whole-fleet rerun
+    // here can otherwise keep the monitor permanently saturated.
+    if (refreshRunning) return;
     refreshSource = source;
     loop?.wake(delayMs);
   }
@@ -79,6 +88,7 @@ export function createDroneStatusRuntime(deps: DroneStatusRuntimeDependencies) {
   }
 
   async function refresh(source: string): Promise<void> {
+    refreshRunning = true;
     const startedAt = performance.now();
     const phases: DroneStatusRefreshTiming['phases'] = [];
     let droneCount = 0;
@@ -120,6 +130,7 @@ export function createDroneStatusRuntime(deps: DroneStatusRuntimeDependencies) {
         error: error?.message ?? String(error),
       });
     } finally {
+      refreshRunning = false;
       try {
         deps.onTiming?.({
           source,

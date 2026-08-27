@@ -34,6 +34,7 @@ import {
   type CodexPromptSteeringDiagnostic,
 } from './codex-prompt-run-manager';
 import { codexDaemonRestartRecoveryAction } from './codex-daemon-restart';
+import { codexTranscriptRefreshDue } from './codex-transcript-refresh-policy';
 
 const execFileAsync = promisify(execFile);
 
@@ -131,6 +132,8 @@ const PROMPT_SESSION_MISSING_GRACE_MS = 1_500;
 const PROMPT_WRAPPER_HEARTBEAT_FRESH_MS = 6_000;
 const PROMPT_TERMINAL_EXIT_GRACE_MS = 5_000;
 const PROMPT_LATE_RECOVERY_POLL_MS = 5_000;
+const PROMPT_PUMP_INTERVAL_MS = 1_000;
+const PROMPT_EVENT_POLL_INTERVAL_MS = 1_000;
 const CODEX_APP_SERVER_IDLE_MS = 15 * 60_000;
 
 function nowIso(): string {
@@ -270,6 +273,7 @@ function promptJobEventSummary(job: PromptJob, pendingApprovalCount = 0) {
 async function buildPromptJobEventSnapshot(promptsDir: string): Promise<Map<string, string>> {
   const idx = await loadPromptIndex(promptsDir);
   const order = Array.isArray(idx.order) ? idx.order.map(String).filter(Boolean) : [];
+  pruneTerminalPromptJobCache(promptsDir, new Set(order));
   const next = new Map<string, string>();
   const pendingApprovalCountByRunId = new Map<string, number>();
   for (const id of order) {
@@ -307,16 +311,42 @@ function promptSessionName(id: string): string {
   return `drone-prompt-${cleaned || 'job'}`;
 }
 
-async function loadPromptJob(promptsDir: string, id: string): Promise<PromptJob | null> {
+const terminalPromptJobCache = new Map<string, PromptJob>();
+
+function terminalPromptJob(job: PromptJob): boolean {
+  return job.state === 'done' || job.state === 'failed' || job.state === 'canceled';
+}
+
+function pruneTerminalPromptJobCache(promptsDir: string, retainedIds: Set<string>): void {
+  const jobsPrefix = `${path.join(promptsDir, 'jobs')}${path.sep}`;
+  for (const cachePath of terminalPromptJobCache.keys()) {
+    if (!cachePath.startsWith(jobsPrefix)) continue;
+    const id = path.basename(cachePath, '.json');
+    if (!retainedIds.has(id)) terminalPromptJobCache.delete(cachePath);
+  }
+}
+
+async function loadPromptJob(
+  promptsDir: string,
+  id: string,
+  options?: { fresh?: boolean },
+): Promise<PromptJob | null> {
   const p = path.join(promptsDir, 'jobs', `${id}.json`);
+  if (options?.fresh) terminalPromptJobCache.delete(p);
+  const cached = options?.fresh ? undefined : terminalPromptJobCache.get(p);
+  if (cached) return cached;
   const exists = await fileExists(p);
   if (!exists) return null;
-  return await readJsonFile<PromptJob>(p, null as any);
+  const job = await readJsonFile<PromptJob>(p, null as any);
+  if (job && terminalPromptJob(job)) terminalPromptJobCache.set(p, job);
+  return job;
 }
 
 async function savePromptJob(promptsDir: string, job: PromptJob): Promise<void> {
   const p = path.join(promptsDir, 'jobs', `${job.id}.json`);
   await writeJsonFileAtomic(p, job);
+  if (terminalPromptJob(job)) terminalPromptJobCache.set(p, job);
+  else terminalPromptJobCache.delete(p);
 }
 
 async function loadCodexPromptRun(promptsDir: string, id: string): Promise<CodexPromptRun | null> {
@@ -1484,6 +1514,7 @@ async function main() {
   let promptPumpInFlight: Promise<void> | null = null;
   const promptLateRecoveryLastChecked = new Map<string, number>();
   const codexRestartResumesInFlight = new Set<string>();
+  const codexTranscriptLastRefreshAt = new Map<string, number>();
 
   async function withPromptMutationLock<T>(run: () => Promise<T>): Promise<T> {
     const result = promptMutationTail.then(run, run);
@@ -1524,7 +1555,22 @@ async function main() {
       if (events.length === 0) return run;
       const text = `${events.map((event) => JSON.stringify(event)).join('\n')}\n`;
       await fs.appendFile(run.stdoutPath, text, 'utf8');
-      const refreshed = await refreshCodexPromptRun({ ...run, updatedAt: nowIso() });
+      const eventAtMs = Date.now();
+      const updatedRun = { ...run, updatedAt: new Date(eventAtMs).toISOString() };
+      if (
+        !codexTranscriptRefreshDue({
+          events,
+          lastRefreshAtMs: codexTranscriptLastRefreshAt.get(run.id),
+          nowMs: eventAtMs,
+        })
+      ) {
+        // The durable JSONL event is enough until the next projection refresh.
+        // GET reads also refresh on demand, so skipping this quadratic reparse
+        // never hides persisted output from a reader.
+        return updatedRun;
+      }
+      const refreshed = await refreshCodexPromptRun(updatedRun);
+      codexTranscriptLastRefreshAt.set(run.id, eventAtMs);
       await saveCodexPromptRun(promptsDir, refreshed);
       const responseMessage = await loadPromptJob(promptsDir, refreshed.responseMessageId);
       if (responseMessage?.codexAppServer) {
@@ -1546,6 +1592,11 @@ async function main() {
   async function pumpPromptsUnlocked(): Promise<void> {
     const idx = await loadPromptIndex(promptsDir);
     const order = Array.isArray(idx.order) ? idx.order.map(String).filter(Boolean) : [];
+    pruneTerminalPromptJobCache(promptsDir, new Set(order));
+    const jobs = (
+      await Promise.all(order.map(async (id) => [id, await loadPromptJob(promptsDir, id)] as const))
+    ).filter((entry): entry is readonly [string, PromptJob] => Boolean(entry[1]));
+    const jobById = new Map(jobs);
     const orderSet = new Set(order);
     for (const id of promptLateRecoveryLastChecked.keys()) {
       if (!orderSet.has(id)) promptLateRecoveryLastChecked.delete(id);
@@ -1554,7 +1605,7 @@ async function main() {
     // corroborated tmux probe. Also revisit provisional missing-exit failures
     // so a late exit/terminal event can repair the persisted result.
     for (const id of order) {
-      const job = await loadPromptJob(promptsDir, id);
+      const job = jobById.get(id);
       if (!job) continue;
       if (job.codexAppServer && (job.state === 'queued' || job.state === 'running')) {
         const owned = codexPromptRuns.ownsMessage(job as CodexPromptJob);
@@ -1591,7 +1642,10 @@ async function main() {
       }
       if (job.state === 'running') {
         const next = await advanceRunningPromptJob(job);
-        if (next !== job) await savePromptJob(promptsDir, next);
+        if (next !== job) {
+          await savePromptJob(promptsDir, next);
+          jobById.set(id, next);
+        }
         continue;
       }
       if (job.state === 'failed' && job.exitStatusSource === 'missing-exit-file') {
@@ -1602,23 +1656,18 @@ async function main() {
         if (next !== job) {
           promptLateRecoveryLastChecked.delete(id);
           await savePromptJob(promptsDir, next);
+          jobById.set(id, next);
         }
       }
     }
 
     // Start next queued if none running.
-    const anyRunning = await (async () => {
-      for (const id of order) {
-        const job = await loadPromptJob(promptsDir, id);
-        if (job && job.state === 'running' && !job.codexAppServer) return true;
-      }
-      return false;
-    })();
+    const anyRunning = Array.from(jobById.values()).some(
+      (job) => job.state === 'running' && !job.codexAppServer,
+    );
     if (anyRunning) return;
 
-    const candidates = (await Promise.all(order.map((id) => loadPromptJob(promptsDir, id)))).filter(
-      (job): job is PromptJob => Boolean(job) && !job?.codexAppServer,
-    );
+    const candidates = Array.from(jobById.values()).filter((job) => !job.codexAppServer);
     const startId = selectNextPromptJobId(candidates);
     if (!startId) return;
     const job = await loadPromptJob(promptsDir, startId);
@@ -1646,7 +1695,7 @@ async function main() {
       // eslint-disable-next-line no-console
       console.error(`prompt pump failed: ${String(error?.message ?? error)}`);
     });
-  }, 400);
+  }, PROMPT_PUMP_INTERVAL_MS);
   void pumpPrompts().catch((error) => {
     // eslint-disable-next-line no-console
     console.error(`initial prompt pump failed: ${String(error?.message ?? error)}`);
@@ -1944,7 +1993,7 @@ async function main() {
         try {
           await emitChanges(true);
           while (!closed) {
-            await sleep(250);
+            await sleep(PROMPT_EVENT_POLL_INTERVAL_MS);
             if (closed) break;
             await emitChanges();
           }
@@ -1961,7 +2010,10 @@ async function main() {
       if (method === 'GET' && promptMatch) {
         const id = decodeURIComponent(promptMatch[1] ?? '');
         const job = await withPromptMutationLock(async () => {
-          const current = await loadPromptJob(promptsDir, id);
+          // User-facing reads double as reconciliation probes. Bypass the
+          // immutable-terminal fast path so externally persisted restart
+          // artifacts can still repair an incomplete job record.
+          const current = await loadPromptJob(promptsDir, id, { fresh: true });
           if (!current) return null;
           if (current.codexAppServer?.runId) {
             const run = await loadCodexPromptRun(promptsDir, current.codexAppServer.runId);

@@ -512,6 +512,7 @@ import {
 import { permanentlyDeleteCanonicalDrone } from './drone-deletion-service';
 import {
   readCanonicalActiveDroneModel,
+  readCanonicalChatActivityModel,
   readCanonicalDroneLifecycleModel,
   readCanonicalDroneSummaryModel,
 } from './canonical-drone-read-model';
@@ -535,6 +536,7 @@ import { createDockerSnapshotRuntime } from './docker-snapshot-runtime';
 import { createDroneStatusRuntime } from './drone-status-runtime';
 import { startHubHttpTransport } from './hub-http-transport';
 import { hubChangeEvents } from './hub-change-events';
+import { dispatchChatOutboxProjection } from './hub-outbox-projection-dispatch';
 import {
   createNativeChatRuntimePort,
   createResourceSubscriptionRuntimePort,
@@ -5481,7 +5483,9 @@ async function startDroneHubApiServerWithLifecycle(
     ? new ResourceSubscriptionService({
         repository: resourceSubscriptionRepository,
         readChatStatus: async (location) => {
-          const registry = await loadCanonicalActiveModel();
+          const registry =
+            readCanonicalChatActivityModel(location.droneId, location.chatName) ??
+            (await loadCanonicalActiveModel());
           return summarizeAssistantChatIdle(
             registry,
             { droneId: location.droneId, chatName: location.chatName },
@@ -6116,6 +6120,7 @@ async function startDroneHubApiServerWithLifecycle(
     isSafePromptId,
     loadCanonicalActiveModel,
     loadCanonicalLifecycleModel,
+    loadCanonicalSummaryModel,
     loadRegistry,
     logSlowHubRequest,
     makeDroneIdentity,
@@ -6320,6 +6325,15 @@ async function startDroneHubApiServerWithLifecycle(
     ? new HubOutboxDispatchLoop(
         new HubOutboxDispatcher(new HubOutboxRepository(outboxDatabase), async (event) => {
           if (await changeRequestFeature.handleOutboxEvent(event)) return;
+          if (
+            dispatchChatOutboxProjection(event, {
+              notifyChatWrite: (droneId, chatName) =>
+                hubChangeEvents.emitChatWrite(droneId, chatName),
+              notifyRegistryWrite: () => hubChangeEvents.emitRegistryWrite(),
+            })
+          ) {
+            return;
+          }
           // Canonical transactions only enqueue. Projection/SSE effects happen here,
           // after claim commit, and are coalesced by the existing refresh scheduler.
           hubChangeEvents.emitRegistryWrite();

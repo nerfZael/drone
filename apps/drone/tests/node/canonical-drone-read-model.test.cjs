@@ -10,6 +10,7 @@ const { getPromptQueueRepository } = require('../../dist/host/prompt-queue-repos
 const { resetDroneRootDirForTests } = require('../../dist/host/paths.js');
 const {
   readCanonicalActiveDroneModel,
+  readCanonicalChatActivityModel,
   readCanonicalDroneLifecycleModel,
   readCanonicalDroneSummaryModel,
 } = require('../../dist/hub/canonical-drone-read-model.js');
@@ -125,6 +126,19 @@ test('canonical active drone read model assembles summaries without writes or co
   assert.equal(model.pending['drone-b'].phase, 'starting');
   assert.equal(readCanonicalDroneLifecycleModel().drones['drone-a'].chats, undefined);
 
+  const chatActivity = readCanonicalChatActivityModel('drone-a', 'default');
+  assert.deepEqual(Object.keys(chatActivity.drones), ['drone-a']);
+  assert.deepEqual(Object.keys(chatActivity.drones['drone-a'].chats), ['default']);
+  assert.equal(chatActivity.drones['drone-a'].chats.default.turns[0].output, 'world');
+  assert.deepEqual(chatActivity.drones['drone-a'].chats.default.turns[0].activity, {
+    updatedAt: '2026-07-10T10:03:30.000Z',
+  });
+  assert.deepEqual(
+    chatActivity.drones['drone-a'].chats.default.pendingPrompts.map((prompt) => prompt.id),
+    ['prompt-1'],
+  );
+  assert.deepEqual(chatActivity.pending, {});
+
   const summaryPhases = [];
   const summary = readCanonicalDroneSummaryModel((phase) => summaryPhases.push(phase));
   const summaryChat = summary.drones['drone-a'].chats.default;
@@ -177,6 +191,69 @@ test('canonical summary read model keeps a large fleet plus startup and draft dr
   assert.equal(model.pending['starting-drone'].phase, 'starting');
   assert.equal(model.pending['draft-drone'].phase, 'draft');
   assert.equal(model.pending['draft-drone'].draft, true);
+});
+
+test('canonical summary keeps only the newest unresolved sent prompt unless an older prompt has approvals', async () => {
+  useTempDataDir();
+  const lifecycle = await getDroneLifecycleRepository();
+  await lifecycle.upsert('real', 'drone-a', {
+    id: 'drone-a',
+    name: 'alpha',
+    runtime: 'host',
+  });
+  await upsertChatInStore({ droneId: 'drone-a', chatName: 'default', chatEntry: {} });
+  const prompts = getPromptQueueRepository();
+  await prompts.enqueue({
+    droneId: 'drone-a',
+    chatName: 'default',
+    prompt: {
+      id: 'sent-old',
+      at: '2026-07-10T10:00:00.000Z',
+      prompt: 'old delivered prompt',
+      state: 'sent',
+    },
+  });
+  await prompts.enqueue({
+    droneId: 'drone-a',
+    chatName: 'default',
+    prompt: {
+      id: 'sent-with-approval',
+      at: '2026-07-10T10:01:00.000Z',
+      prompt: 'delivered prompt awaiting approval',
+      state: 'sent',
+      approvals: [{ id: 'approval-1', status: 'pending' }],
+    },
+  });
+  await prompts.enqueue({
+    droneId: 'drone-a',
+    chatName: 'default',
+    prompt: {
+      id: 'sent-new',
+      at: '2026-07-10T10:02:00.000Z',
+      prompt: 'newest delivered prompt',
+      state: 'sent',
+    },
+  });
+  await prompts.enqueue({
+    droneId: 'drone-a',
+    chatName: 'default',
+    prompt: {
+      id: 'queued',
+      at: '2026-07-10T10:03:00.000Z',
+      prompt: 'queued prompt',
+      state: 'queued',
+    },
+  });
+
+  const summaryIds = readCanonicalDroneSummaryModel().drones[
+    'drone-a'
+  ].chats.default.pendingPrompts.map((prompt) => prompt.id);
+  const activeIds = readCanonicalActiveDroneModel().drones[
+    'drone-a'
+  ].chats.default.pendingPrompts.map((prompt) => prompt.id);
+
+  assert.deepEqual(summaryIds, ['sent-with-approval', 'sent-new', 'queued']);
+  assert.deepEqual(activeIds, ['sent-old', 'sent-with-approval', 'sent-new', 'queued']);
 });
 
 test('canonical summary read model compares offset timestamps chronologically', async () => {

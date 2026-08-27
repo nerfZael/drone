@@ -349,6 +349,34 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       await droneHealth(client, { timeoutMs: 3_000 });
     },
     shouldRecoverProbeError: (error) => !(error instanceof DroneApiRequestError),
+    confirmUnavailable: async (target) => {
+      if (target.runtime === 'host') {
+        const pid = Math.floor(Number(target.hostPid));
+        if (!Number.isFinite(pid) || pid <= 0) return false;
+        try {
+          process.kill(pid, 0);
+        } catch (error: any) {
+          return error?.code === 'ESRCH';
+        }
+        const command = await commandForPid(pid);
+        return command ? !isDroneDaemonCommandForPort(command, target.hostPort) : false;
+      }
+
+      const inspected = await dvmExec(target.containerName, 'bash', [
+        '-lc',
+        [
+          'set -euo pipefail',
+          'if ! command -v tmux >/dev/null 2>&1; then echo unknown; exit 0; fi',
+          "if ! tmux has-session -t 'drone-daemon' 2>/dev/null; then echo dead; exit 0; fi",
+          "dead=\"$(tmux display-message -p -t 'drone-daemon:0.0' '#{pane_dead}' 2>/dev/null || echo unknown)\"",
+          'if [ "$dead" = "1" ]; then echo dead; exit 0; fi',
+          'if [ "$dead" != "0" ]; then echo unknown; exit 0; fi',
+          "pid=\"$(tmux display-message -p -t 'drone-daemon:0.0' '#{pane_pid}' 2>/dev/null || true)\"",
+          'if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then echo alive; else echo dead; fi',
+        ].join('\n'),
+      ]);
+      return inspected.code === 0 && inspected.stdout.trim() === 'dead';
+    },
     ensureContainer: async ({ containerName, containerPort }) => {
       await ensureContainerDroneDaemonSession({
         containerName,
@@ -425,6 +453,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           containerName,
           containerPort: Number(d?.containerPort ?? hostPort),
           hostPort,
+          hostPid: Number(d?.host?.pid),
           token,
           readyTimeoutMs: daemonReadyTimeoutMs,
         }),
@@ -534,6 +563,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           containerName,
           containerPort: Number(d?.containerPort ?? hostPort),
           hostPort,
+          hostPid: Number(d?.host?.pid),
           token,
           readyTimeoutMs: daemonReadyTimeoutMs,
         }),

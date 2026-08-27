@@ -271,9 +271,7 @@ export function readCanonicalActiveDroneModel(
           connection
             .prepare(
               `WITH ranked AS (
-          SELECT prompts.drone_id,prompts.chat_name,prompts.prompt_id,prompts.created_at,
-            prompts.updated_at,prompts.state,prompts.prompt,prompts.payload_json,
-            prompts.last_error,
+          SELECT prompts.drone_id,prompts.chat_name,prompts.prompt_id,prompts.sequence,
             ROW_NUMBER() OVER (
               PARTITION BY prompts.drone_id,prompts.chat_name ORDER BY prompts.sequence DESC
             ) AS rank
@@ -287,10 +285,13 @@ export function readCanonicalActiveDroneModel(
                 AND turns.turn_id = prompts.prompt_id
             )
         )
-        SELECT drone_id,chat_name,prompt_id,created_at,updated_at,state,prompt,
-          ${compactActivityJson('payload_json')} AS payload_json,last_error
-        FROM ranked WHERE rank <= 60
-        ORDER BY drone_id,chat_name,created_at,prompt_id`,
+        SELECT prompts.drone_id,prompts.chat_name,prompts.prompt_id,prompts.created_at,
+          prompts.updated_at,prompts.state,prompts.prompt,
+          ${compactActivityJson('prompts.payload_json')} AS payload_json,prompts.last_error
+        FROM ranked
+        JOIN prompts USING (drone_id,chat_name,prompt_id)
+        WHERE rank <= 60
+        ORDER BY prompts.drone_id,prompts.chat_name,prompts.created_at,prompts.prompt_id`,
             )
             .all() as PromptRow[],
         onPhase,
@@ -317,6 +318,111 @@ export function readCanonicalActiveDroneModel(
     }
 
     return { drones, pending };
+  });
+}
+
+/**
+ * Builds the bounded single-chat view used by subscription change detection.
+ *
+ * A subscription only needs one chat's timeline, so rebuilding every drone and
+ * parsing every recent turn once per polling tick is pure overhead. Keep the
+ * same per-chat turn and unresolved-prompt bounds as the fleet-wide active
+ * model so idle/latest-message behavior remains identical.
+ */
+export function readCanonicalChatActivityModel(
+  droneIdRaw: string,
+  chatNameRaw: string,
+): CanonicalActiveDroneReadModel | null {
+  const database = getHubDatabase();
+  if (!database) return null;
+  const droneId = String(droneIdRaw ?? '').trim();
+  const chatName = String(chatNameRaw ?? '').trim();
+  if (!droneId || !chatName) return null;
+
+  return database.read((connection) => {
+    if (!hasTable(connection, 'hub_canonical_drones') || !hasTable(connection, 'canonical_chats')) {
+      return null;
+    }
+
+    const lifecycleRow = connection
+      .prepare('SELECT * FROM hub_canonical_drones WHERE drone_id = ?')
+      .get(droneId) as LifecycleRow | undefined;
+    if (!lifecycleRow) return { drones: {}, pending: {} };
+
+    const drone = { ...lifecycleEntry(lifecycleRow), chats: {} as Record<string, any> };
+    const chatRow = connection
+      .prepare(
+        `SELECT drone_id,chat_name,metadata_json
+        FROM canonical_chats WHERE drone_id = ? AND chat_name = ?`,
+      )
+      .get(droneId, chatName) as ChatRow | undefined;
+    if (!chatRow) return { drones: { [droneId]: drone }, pending: {} };
+
+    const chat: any = { ...parseObject(chatRow.metadata_json), turns: [], pendingPrompts: [] };
+    drone.chats[chatName] = chat;
+
+    if (hasTable(connection, 'canonical_chat_turns')) {
+      const turnRows = connection
+        .prepare(
+          `WITH recent AS (
+            SELECT turn_id
+            FROM canonical_chat_turns
+            WHERE drone_id = ? AND chat_name = ?
+            ORDER BY COALESCE(prompt_at,at) DESC,completed_at DESC,ordinal DESC,turn_id DESC
+            LIMIT ?
+          )
+          SELECT turns.drone_id,turns.chat_name,
+            ${compactActivityJson('turns.turn_json')} AS turn_json
+          FROM recent
+          JOIN canonical_chat_turns AS turns
+            ON turns.drone_id = ? AND turns.chat_name = ? AND turns.turn_id = recent.turn_id
+          ORDER BY COALESCE(turns.prompt_at,turns.at),turns.completed_at,turns.ordinal,turns.turn_id`,
+        )
+        .all(droneId, chatName, RECENT_TURNS_PER_CHAT, droneId, chatName) as TurnRow[];
+      for (const row of turnRows) chat.turns.push(parseObject(row.turn_json));
+    }
+
+    if (hasTable(connection, 'prompts')) {
+      const promptRows = connection
+        .prepare(
+          `WITH recent AS (
+            SELECT prompts.prompt_id,prompts.sequence
+            FROM prompts
+            WHERE prompts.drone_id = ? AND prompts.chat_name = ?
+              AND prompts.state != 'cancelled'
+              AND NOT EXISTS (
+                SELECT 1
+                FROM canonical_chat_turns AS turns
+                WHERE turns.drone_id = prompts.drone_id
+                  AND turns.chat_name = prompts.chat_name
+                  AND turns.turn_id = prompts.prompt_id
+              )
+            ORDER BY prompts.sequence DESC
+            LIMIT ?
+          )
+          SELECT prompts.drone_id,prompts.chat_name,prompts.prompt_id,prompts.created_at,
+            prompts.updated_at,prompts.state,prompts.prompt,'{}' AS payload_json,
+            prompts.last_error
+          FROM recent
+          JOIN prompts
+            ON prompts.drone_id = ? AND prompts.chat_name = ?
+              AND prompts.prompt_id = recent.prompt_id
+          ORDER BY prompts.created_at,prompts.prompt_id`,
+        )
+        .all(droneId, chatName, RECENT_TURNS_PER_CHAT, droneId, chatName) as PromptRow[];
+      for (const row of promptRows) {
+        chat.pendingPrompts.push({
+          id: row.prompt_id,
+          at: row.created_at,
+          updatedAt: row.updated_at,
+          state: row.state,
+          prompt: row.prompt,
+          ...(row.last_error ? { error: row.last_error } : { error: undefined }),
+        });
+      }
+    }
+
+    return { drones: { [droneId]: drone }, pending: {} };
   });
 }
 
@@ -444,13 +550,9 @@ export function readCanonicalDroneSummaryModel(
         () =>
           connection
             .prepare(
-              `WITH ranked AS (
-                SELECT prompts.drone_id,prompts.chat_name,prompts.prompt_id,prompts.created_at,
-                  prompts.updated_at,prompts.state,prompts.prompt,prompts.payload_json,
-                  prompts.last_error,
-                  ROW_NUMBER() OVER (
-                    PARTITION BY prompts.drone_id,prompts.chat_name ORDER BY prompts.sequence DESC
-                  ) AS rank
+              `WITH unresolved AS (
+                SELECT prompts.drone_id,prompts.chat_name,prompts.prompt_id,
+                  prompts.state,prompts.sequence
                 FROM prompts
                 WHERE prompts.state != 'cancelled'
                   AND NOT EXISTS (
@@ -460,20 +562,48 @@ export function readCanonicalDroneSummaryModel(
                       AND turns.chat_name = prompts.chat_name
                       AND turns.turn_id = prompts.prompt_id
                   )
+              ), ranked AS (
+                SELECT unresolved.*,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY drone_id,chat_name ORDER BY sequence DESC
+                  ) AS rank
+                FROM unresolved
               )
-              SELECT drone_id,chat_name,prompt_id,created_at,updated_at,state,prompt,
+              SELECT prompts.drone_id,prompts.chat_name,prompts.prompt_id,
+                prompts.created_at,prompts.updated_at,prompts.state,prompts.prompt,
                 CASE
-                  WHEN json_valid(payload_json) THEN json_object(
-                    'action', json_extract(payload_json, '$.action'),
-                    'approvals', json_extract(payload_json, '$.approvals'),
+                  WHEN json_valid(prompts.payload_json) THEN json_object(
+                    'action', json_extract(prompts.payload_json, '$.action'),
+                    'approvals', json_extract(prompts.payload_json, '$.approvals'),
                     'activity', json_object(
-                      'updatedAt', json_extract(payload_json, '$.activity.updatedAt')
+                      'updatedAt', json_extract(prompts.payload_json, '$.activity.updatedAt')
                     )
                   )
                   ELSE '{}'
-                END AS payload_json,last_error
-              FROM ranked WHERE rank <= 60
-              ORDER BY drone_id,chat_name,created_at,prompt_id`,
+                END AS payload_json,prompts.last_error
+              FROM ranked
+              JOIN prompts USING (drone_id,chat_name,prompt_id)
+              WHERE rank <= 60
+                AND (
+                  ranked.state != 'sent'
+                  OR NOT EXISTS (
+                    SELECT 1
+                    FROM prompts AS newer
+                    WHERE newer.drone_id = ranked.drone_id
+                      AND newer.chat_name = ranked.chat_name
+                      AND newer.state = 'sent'
+                      AND newer.sequence > ranked.sequence
+                      AND NOT EXISTS (
+                        SELECT 1
+                        FROM canonical_chat_turns AS newer_turns
+                        WHERE newer_turns.drone_id = newer.drone_id
+                          AND newer_turns.chat_name = newer.chat_name
+                          AND newer_turns.turn_id = newer.prompt_id
+                      )
+                  )
+                  OR json_array_length(json_extract(prompts.payload_json, '$.approvals')) > 0
+                )
+              ORDER BY prompts.drone_id,prompts.chat_name,prompts.created_at,prompts.prompt_id`,
             )
             .all() as PromptRow[],
         onPhase,

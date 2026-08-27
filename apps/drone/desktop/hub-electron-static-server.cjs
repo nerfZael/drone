@@ -71,7 +71,7 @@ async function readBody(req) {
   return Buffer.concat(chunks);
 }
 
-async function proxyApiRequest({ req, res, apiHost, apiPort, apiToken }) {
+async function proxyApiRequest({ req, res, apiHost, apiPort, apiToken, signal }) {
   const method = String(req.method || 'GET').toUpperCase();
   const requestUrl = new URL(req.url || '/', `http://${req.headers.host || '127.0.0.1'}`);
   const response = await fetch(`http://${apiHost}:${apiPort}${requestUrl.pathname}${requestUrl.search}`, {
@@ -87,6 +87,7 @@ async function proxyApiRequest({ req, res, apiHost, apiPort, apiToken }) {
       ...(req.headers['x-drone-companion-message-id'] ? { 'x-drone-companion-message-id': String(req.headers['x-drone-companion-message-id']) } : {}),
     },
     body: method === 'GET' || method === 'HEAD' ? undefined : await readBody(req),
+    signal,
   });
   res.statusCode = response.status;
   copyResponseHeaders(response, res);
@@ -98,7 +99,7 @@ function proxyApiUpgrade({ req, socket, head, apiHost, apiPort, apiToken }) {
   const requestUrl = new URL(req.url || '/', `http://${req.headers.host || '127.0.0.1'}`);
   if (!requestUrl.pathname.startsWith('/api/')) {
     socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
-    return;
+    return null;
   }
   const upstream = net.connect(apiPort, apiHost);
   upstream.once('connect', () => {
@@ -118,42 +119,57 @@ function proxyApiUpgrade({ req, socket, head, apiHost, apiPort, apiToken }) {
     socket.pipe(upstream).pipe(socket);
   });
   upstream.once('error', () => socket.destroy());
+  return upstream;
 }
 
 async function startDesktopStaticUiServer({ staticDir, apiHost, apiPort, apiToken }) {
   const sockets = new Set();
-  const server = http.createServer(async (req, res) => {
-    try {
-      const requestUrl = new URL(req.url || '/', `http://${req.headers.host || '127.0.0.1'}`);
-      if (requestUrl.pathname.startsWith('/api/')) {
-        await proxyApiRequest({ req, res, apiHost, apiPort, apiToken });
-        return;
+  const upstreamSockets = new Set();
+  const requests = new Set();
+  const shutdown = new AbortController();
+  const server = http.createServer((req, res) => {
+    const request = (async () => {
+      try {
+        const requestUrl = new URL(req.url || '/', `http://${req.headers.host || '127.0.0.1'}`);
+        if (requestUrl.pathname.startsWith('/api/')) {
+          await proxyApiRequest({ req, res, apiHost, apiPort, apiToken, signal: shutdown.signal });
+          return;
+        }
+        const filePath = staticAssetPath(staticDir, requestUrl.pathname);
+        if (!filePath || !fs.existsSync(filePath)) {
+          res.statusCode = 404;
+          res.end('Not found');
+          return;
+        }
+        res.statusCode = 200;
+        res.setHeader('content-type', contentType(filePath));
+        if (path.extname(filePath) === '.html' || path.basename(filePath) === 'pwa-sw.js' || path.basename(filePath) === 'version.json') {
+          res.setHeader('cache-control', 'no-store');
+        } else if (requestUrl.pathname.startsWith('/assets/')) {
+          res.setHeader('cache-control', 'public, max-age=31536000, immutable');
+        }
+        fs.createReadStream(filePath).pipe(res);
+      } catch (error) {
+        if (!res.headersSent) res.statusCode = 502;
+        if (!res.destroyed) res.end(String(error?.message || error));
       }
-      const filePath = staticAssetPath(staticDir, requestUrl.pathname);
-      if (!filePath || !fs.existsSync(filePath)) {
-        res.statusCode = 404;
-        res.end('Not found');
-        return;
-      }
-      res.statusCode = 200;
-      res.setHeader('content-type', contentType(filePath));
-      if (path.extname(filePath) === '.html' || path.basename(filePath) === 'pwa-sw.js' || path.basename(filePath) === 'version.json') {
-        res.setHeader('cache-control', 'no-store');
-      } else if (requestUrl.pathname.startsWith('/assets/')) {
-        res.setHeader('cache-control', 'public, max-age=31536000, immutable');
-      }
-      fs.createReadStream(filePath).pipe(res);
-    } catch (error) {
-      if (!res.headersSent) res.statusCode = 502;
-      if (!res.destroyed) res.end(String(error?.message || error));
-    }
+    })();
+    requests.add(request);
+    void request.then(
+      () => requests.delete(request),
+      () => requests.delete(request),
+    );
   });
   server.on('connection', (socket) => {
     sockets.add(socket);
     socket.once('close', () => sockets.delete(socket));
   });
   server.on('upgrade', (req, socket, head) => {
-    proxyApiUpgrade({ req, socket, head, apiHost, apiPort, apiToken });
+    const upstream = proxyApiUpgrade({ req, socket, head, apiHost, apiPort, apiToken });
+    if (!upstream) return;
+    upstreamSockets.add(upstream);
+    upstream.once('close', () => upstreamSockets.delete(upstream));
+    socket.once('close', () => upstream.destroy());
   });
   await new Promise((resolve, reject) => {
     server.once('error', reject);
@@ -161,11 +177,19 @@ async function startDesktopStaticUiServer({ staticDir, apiHost, apiPort, apiToke
   });
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : 0;
+  let closePromise = null;
   return {
     url: `http://127.0.0.1:${port}`,
-    close: async () => {
-      for (const socket of sockets) socket.destroy();
-      await new Promise((resolve) => server.close(resolve));
+    close: () => {
+      if (closePromise) return closePromise;
+      closePromise = (async () => {
+        shutdown.abort();
+        for (const upstream of upstreamSockets) upstream.destroy();
+        for (const socket of sockets) socket.destroy();
+        await new Promise((resolve) => server.close(resolve));
+        await Promise.allSettled([...requests]);
+      })();
+      return closePromise;
     },
   };
 }

@@ -25,6 +25,25 @@ let desktopStaticUiServer = null;
 let isQuitting = false;
 let performanceTraceStarted = false;
 let restartInProgress = false;
+let desktopCleanupPromise = null;
+let desktopCleanupComplete = false;
+let desktopShutdownRejectionHandlerInstalled = false;
+
+function isExpectedDesktopShutdownError(error) {
+  if (error?.name === 'AbortError') return true;
+  return /\b(?:terminated|operation was aborted)\b/i.test(String(error?.message || error || ''));
+}
+
+function installDesktopShutdownRejectionHandler() {
+  if (desktopShutdownRejectionHandlerInstalled) return;
+  desktopShutdownRejectionHandlerInstalled = true;
+  process.on('unhandledRejection', (reason) => {
+    if (isQuitting && isExpectedDesktopShutdownError(reason)) return;
+    process.nextTick(() => {
+      throw reason instanceof Error ? reason : new Error(String(reason));
+    });
+  });
+}
 
 app.setName(APP_NAME);
 if (process.platform === 'linux') {
@@ -614,10 +633,22 @@ if (!hasSingleInstanceLock) {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 
-  app.on('before-quit', () => {
+  app.on('before-quit', (event) => {
     isQuitting = true;
-    void desktopStaticUiServer?.close();
+    if (desktopCleanupComplete || !desktopStaticUiServer) return;
+    event.preventDefault();
+    if (desktopCleanupPromise) return;
+    installDesktopShutdownRejectionHandler();
+    const staticUiServer = desktopStaticUiServer;
     desktopStaticUiServer = null;
+    desktopCleanupPromise = staticUiServer.close()
+      .catch((error) => {
+        process.stderr.write(`Failed to close the Drone Hub desktop proxy: ${error?.stack || error}\n`);
+      })
+      .finally(() => {
+        desktopCleanupComplete = true;
+        app.quit();
+      });
   });
 
   app.on('window-all-closed', () => {

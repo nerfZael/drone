@@ -5,6 +5,7 @@ export type DroneDaemonRecoveryTarget<TClient = unknown> = {
   containerName: string;
   containerPort: number;
   hostPort: number;
+  hostPid?: number;
   token: string;
   readyTimeoutMs: number;
 };
@@ -12,6 +13,7 @@ export type DroneDaemonRecoveryTarget<TClient = unknown> = {
 export type DroneDaemonRecoveryDependencies<TClient = unknown> = {
   probe(client: TClient): Promise<void>;
   shouldRecoverProbeError(error: unknown): boolean;
+  confirmUnavailable(target: DroneDaemonRecoveryTarget<TClient>): Promise<boolean>;
   ensureContainer(input: { containerName: string; containerPort: number }): Promise<void>;
   launchHost(input: {
     droneId: string;
@@ -57,12 +59,21 @@ export class DroneDaemonRecovery<TClient = unknown> {
     // daemon is still unreachable inside the per-drone single flight before
     // replacing it; restarting an otherwise healthy daemon interrupts every
     // in-flight App Server turn it owns.
+    let confirmedProbeError: unknown;
     try {
       await this.deps.probe(target.client);
       return { recovered: false };
     } catch (error) {
       if (!this.deps.shouldRecoverProbeError(error)) throw error;
+      confirmedProbeError = error;
     }
+
+    // An HTTP timeout only proves that the daemon did not answer quickly. It
+    // does not prove that the owning process is gone, especially while several
+    // App Server turns are producing events. Never destroy those in-memory
+    // sessions unless the runtime independently confirms that the daemon is
+    // absent or dead.
+    if (!(await this.deps.confirmUnavailable(target))) throw confirmedProbeError;
 
     if (target.runtime === 'host') {
       const pid = await this.deps.launchHost({

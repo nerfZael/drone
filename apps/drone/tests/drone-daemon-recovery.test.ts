@@ -28,6 +28,7 @@ function dependencies(
   return {
     probe: async () => {},
     shouldRecoverProbeError: () => true,
+    confirmUnavailable: async () => true,
     ensureContainer: async () => {},
     launchHost: async () => 12_345,
     persistHostPid: async () => {},
@@ -93,6 +94,33 @@ describe('lazy drone daemon recovery', () => {
 
     await expect(recovery.ensure(target())).resolves.toEqual({ recovered: false });
     expect(probes).toBe(2);
+    expect(recoveries).toBe(0);
+  });
+
+  test('does not restart a live daemon after repeated health timeouts', async () => {
+    let probes = 0;
+    let inspections = 0;
+    let recoveries = 0;
+    const timeout = new Error('request timeout after 3000ms');
+    const recovery = new DroneDaemonRecovery(
+      dependencies({
+        probe: async () => {
+          probes += 1;
+          throw timeout;
+        },
+        confirmUnavailable: async () => {
+          inspections += 1;
+          return false;
+        },
+        ensureContainer: async () => {
+          recoveries += 1;
+        },
+      }),
+    );
+
+    await expect(recovery.ensure(target())).rejects.toBe(timeout);
+    expect(probes).toBe(2);
+    expect(inspections).toBe(1);
     expect(recoveries).toBe(0);
   });
 

@@ -191,6 +191,7 @@ function createDroneProvisioningServiceHandler(
     isSafePromptId,
     loadCanonicalActiveModel,
     loadCanonicalLifecycleModel,
+    loadCanonicalSummaryModel,
     loadRegistry,
     logSlowHubRequest,
     makeDroneIdentity,
@@ -1414,7 +1415,7 @@ function createDroneProvisioningServiceHandler(
       ) {
         const timer = createRequestTimer();
         try {
-          const regAny: any = await loadCanonicalActiveModel();
+          const regAny: any = await loadCanonicalSummaryModel();
           timer.mark('load');
           const drones = buildAssistantDroneSummariesFromRegistry(regAny);
           timer.mark('format');

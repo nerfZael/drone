@@ -45,7 +45,7 @@ describe('drone status runtime', () => {
 
     await runtime.refreshNow('first');
 
-    expect(maxActiveProbes).toBeLessThanOrEqual(4);
+    expect(maxActiveProbes).toBe(16);
     expect(changedSources).toEqual(['first']);
     expect(runtime.cachedForEntry(drones['drone-0'])).toMatchObject({
       hostPort: 10_000,
@@ -125,5 +125,57 @@ describe('drone status runtime', () => {
     });
 
     await runtime.refreshNow('timing-failure');
+  });
+
+  test('coalesces refresh requests received during a running fleet sweep', async () => {
+    let releaseFirstProbe!: () => void;
+    const firstProbeReleased = new Promise<void>((resolve) => {
+      releaseFirstProbe = resolve;
+    });
+    let firstProbeStarted!: () => void;
+    const firstProbeObserved = new Promise<void>((resolve) => {
+      firstProbeStarted = resolve;
+    });
+    let refreshCompleted!: () => void;
+    const refreshObserved = new Promise<void>((resolve) => {
+      refreshCompleted = resolve;
+    });
+    let probes = 0;
+    const runtime = createDroneStatusRuntime({
+      loadModel: async () => ({
+        drones: {
+          drone: {
+            id: 'drone',
+            name: 'Drone',
+            runtime: 'host',
+            hostPort: 10_000,
+            token: 'token',
+          },
+        },
+      }),
+      log: () => {},
+      makeClient: () => ({}),
+      normalizeDroneId: (value) => String(value ?? ''),
+      normalizeRuntime: (value) => String(value ?? ''),
+      onChanged: () => {},
+      onTiming: () => refreshCompleted(),
+      readStatus: async () => {
+        probes += 1;
+        firstProbeStarted();
+        await firstProbeReleased;
+        return { state: 'ready' };
+      },
+      resolveHostPort: async () => null,
+    });
+
+    runtime.start();
+    await firstProbeObserved;
+    runtime.schedule('api:drones', 0);
+    releaseFirstProbe();
+    await refreshObserved;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await runtime.stop();
+
+    expect(probes).toBe(1);
   });
 });
