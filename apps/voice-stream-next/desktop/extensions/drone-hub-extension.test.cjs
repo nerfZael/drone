@@ -69,6 +69,68 @@ describe('drone hub desktop extension', () => {
     expect(createTool.inputSchema.properties.pullHostBranchBeforeCreate).toBeUndefined();
   });
 
+  test('sends only to existing chat names unless creation is explicit', async () => {
+    const api = createApi();
+    const chatNames = ['default'];
+    const promptBodies = [];
+    globalThis.fetch = async (url, init = {}) => {
+      const parsed = new URL(String(url));
+      const method = String(init.method || 'GET').toUpperCase();
+      const body = typeof init.body === 'string' ? JSON.parse(init.body) : undefined;
+      if (parsed.pathname === '/api/drones/drone-1/chats' && method === 'GET') {
+        return jsonResponse({
+          ok: true,
+          chats: [...chatNames],
+          chatDetails: [{ chat: 'default', chatId: 'default-resource-id' }],
+        });
+      }
+      if (parsed.pathname === '/api/drones/drone-1/chats' && method === 'POST') {
+        chatNames.push(body.name);
+        return jsonResponse({ ok: true, chat: body.name }, 201);
+      }
+      if (parsed.pathname.endsWith('/prompt') && method === 'POST') {
+        promptBodies.push(body);
+        return jsonResponse({
+          ok: true,
+          id: 'drone-1',
+          chat: decodeURIComponent(parsed.pathname.split('/').at(-2)),
+          promptId: `prompt-${promptBodies.length}`,
+          pendingState: 'queued',
+        }, 202);
+      }
+      return jsonResponse({ ok: false, error: 'not found' }, 404);
+    };
+
+    await extension.activate(api);
+    const sendMessage = api.tools.get('send_message');
+
+    await expect(sendMessage.execute({
+      drone: 'drone-1',
+      chat: 'default',
+      message: 'Continue',
+    })).resolves.toMatchObject({ ok: true, chat: 'default' });
+    await expect(sendMessage.execute({
+      drone: 'drone-1',
+      chat: 'default-resource-id',
+      message: 'Wrong identifier',
+    })).rejects.toThrow('unknown chat: default-resource-id');
+    await expect(sendMessage.execute({
+      drone: 'drone-1',
+      chat: 'review',
+      message: 'Do not create implicitly',
+    })).rejects.toThrow('unknown chat: review');
+    await expect(sendMessage.execute({
+      drone: 'drone-1',
+      chat: 'review',
+      message: 'Create explicitly',
+      createChat: true,
+    })).resolves.toMatchObject({ ok: true, chat: 'review' });
+
+    expect(chatNames).toEqual(['default', 'review']);
+    expect(promptBodies[0]).toMatchObject({ requireExistingChat: true });
+    expect(promptBodies[1].requireExistingChat).toBeUndefined();
+  });
+
   test('uses repo-scoped remembered branch defaults when creating a drone', async () => {
     const api = createApi();
     const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-hub-extension-repo-'));

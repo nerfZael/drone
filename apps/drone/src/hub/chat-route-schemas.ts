@@ -13,6 +13,7 @@ export const chatPromptBodySchema = z
     cwd: z.string().optional(),
     deliveryMode: z.enum(['queue', 'asap']).optional(),
     autoRenameHandledByClient: z.boolean().optional(),
+    requireExistingChat: z.boolean().optional(),
   })
   .passthrough();
 

@@ -42,6 +42,7 @@ type ChatPromptRouteDependencyName =
   | 'normalizeChatModel'
   | 'normalizeChatName'
   | 'normalizeDroneIdentity'
+  | 'normalizePendingStartupPrompts'
   | 'normalizeSubmittedAtIso'
   | 'nowIso'
   | 'pushPendingPrompt'
@@ -99,6 +100,7 @@ export function createChatPromptRouteHandler(
     normalizeChatModel,
     normalizeChatName,
     normalizeDroneIdentity,
+    normalizePendingStartupPrompts,
     normalizeSubmittedAtIso,
     nowIso,
     pushPendingPrompt,
@@ -214,6 +216,29 @@ export function createChatPromptRouteHandler(
           const chat = normalizeChatName(chatName);
           const existingChatEntry =
             resolved.kind === 'real' ? ((drone as any)?.chats?.[chat] ?? null) : null;
+          if (body?.requireExistingChat === true && resolved.kind === 'pending') {
+            const startupChatNames = [
+              ...new Set(
+                normalizePendingStartupPrompts((drone as any)?.startupQueuedPrompts).map(
+                  (item: any) => item.chatName,
+                ),
+              ),
+            ].filter(Boolean);
+            const existingPendingChat =
+              startupChatNames.includes(chat) ||
+              (chat === 'default' && startupChatNames.length === 0);
+            if (!existingPendingChat) {
+              timer.setHeader(res);
+              logSlowHubRequest('chat prompt', timer, {
+                droneId,
+                chatName: chat,
+                status: 404,
+                error: `unknown chat: ${chat}`,
+              });
+              json(res, 404, { ok: false, error: `unknown chat: ${chat}` });
+              return;
+            }
+          }
           const autoRenameCandidateFromFirstPrompt = existingChatEntry
             ? await shouldAutoRenameChatOnPrompt({
                 droneId,
@@ -284,6 +309,7 @@ export function createChatPromptRouteHandler(
                   submittedAt,
                   deliveryMode,
                   submissionSource,
+                  requireExistingChat: body?.requireExistingChat === true,
                   mark: (name: string) => timer.mark(name),
                 });
               }
@@ -330,6 +356,7 @@ export function createChatPromptRouteHandler(
                 submittedAt,
                 deliveryMode,
                 submissionSource,
+                requireExistingChat: body?.requireExistingChat === true,
                 mark: (name: string) => timer.mark(name),
               });
             }
@@ -384,7 +411,7 @@ export function createChatPromptRouteHandler(
           const msg = e?.message ?? String(e);
           const code = /still starting/i.test(msg)
             ? 409
-            : /unknown drone/i.test(msg)
+            : /unknown drone|unknown chat/i.test(msg)
               ? 404
               : /invalid promptId/i.test(msg)
                 ? 400

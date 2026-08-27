@@ -72,7 +72,11 @@ type DroneProvisioningControllerDeps = {
   cloneChatEntryForDroneClone: (entryRaw: any) => any;
   defaultDaemonReadyTimeoutMs: () => number;
   defaultRepoSeedTimeoutMs: () => number;
-  ensureChatEntry: (opts: { droneId: string; chatName: string }) => Promise<void>;
+  ensureChatEntry: (opts: {
+    droneId: string;
+    chatName: string;
+    createIfMissing?: boolean;
+  }) => Promise<void>;
   enqueuePrompt: (opts: EnqueuePromptOptions) => Promise<any>;
   enqueuePendingPromptPump: (droneIdRaw: string, chatName: string) => void;
   hubLog: (

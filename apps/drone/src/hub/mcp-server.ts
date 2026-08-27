@@ -3252,10 +3252,16 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
       description: 'Send a message to a Drone Hub drone chat and return the queued run.',
       inputSchema: {
         drone: z.string(),
-        chat: z.string().optional(),
+        chat: z
+          .string()
+          .describe('Existing chat name. Chat resource IDs are not accepted.')
+          .optional(),
         message: z.string(),
         idempotencyKey: z.string().optional(),
-        createChat: z.boolean().optional(),
+        createChat: z
+          .boolean()
+          .describe('Create the named chat before sending. Defaults to false.')
+          .optional(),
       },
     },
     async (args) => {
@@ -3268,10 +3274,21 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
         }).catch((error: any) => {
           if (error?.status !== 409) throw error;
         });
+      } else {
+        const listed = await requestJson(
+          `/api/drones/${encodeURIComponent(args.drone)}/chats`,
+          { method: 'GET' },
+        );
+        const existingChats = normalizeMcpChatList(listed);
+        const existing =
+          existingChats.some((entry) => entry.name === chat) ||
+          (chat === 'default' && existingChats.length === 0);
+        if (!existing) throw new Error(`unknown chat: ${chat}`);
       }
       const body = {
         prompt: args.message,
         submissionSource: 'assistant-tool',
+        ...(!args.createChat ? { requireExistingChat: true } : {}),
         ...(cleanString(args.idempotencyKey) ? { promptId: cleanString(args.idempotencyKey) } : {}),
       };
       const response = await requestJson(
@@ -3640,17 +3657,22 @@ export function authorizeDroneHubMcpTool(
       throw new Error(`MCP principal ${principal.name} is not allowed to merge change requests`);
     }
     const refs = assertedDroneRefs(args);
-    const kind = chatAccessKindForTool(tool);
-    if (
-      refs.every((ref) =>
-        mcpChatAccessAllowsDrone(principal.accessScope, kind, ref, principal.selectedDroneRefs),
-      )
-    ) {
-      return;
+    const requiredKinds: McpChatAccessKind[] =
+      tool === 'send_message' && args?.createChat === true
+        ? ['write', 'execute']
+        : [chatAccessKindForTool(tool)];
+    for (const kind of requiredKinds) {
+      if (
+        !refs.every((ref) =>
+          mcpChatAccessAllowsDrone(principal.accessScope, kind, ref, principal.selectedDroneRefs),
+        )
+      ) {
+        throw new Error(
+          `MCP principal ${principal.name} ${kind} scope does not include the requested drone`,
+        );
+      }
     }
-    throw new Error(
-      `MCP principal ${principal.name} ${kind} scope does not include the requested drone`,
-    );
+    return;
   }
   const scopedDroneId = cleanString(principal.droneId);
   if (!scopedDroneId || !DRONE_PRINCIPAL_TOOLS.has(tool)) {

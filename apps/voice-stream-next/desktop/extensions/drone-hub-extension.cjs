@@ -1559,7 +1559,8 @@ exports.activate = async function activate(api) {
   registerTool(api, {
     name: 'send_message',
     label: 'Send drone message',
-    description: 'Send a message to a Drone Hub drone chat and return the queued run.',
+    description:
+      'Send a message to an existing Drone Hub chat name and return the queued run. Chat resource IDs are not accepted.',
     approval: async (args) => !(await wasCreatedByExtension(api, args?.drone)),
     inputSchema: {
       type: 'object',
@@ -1589,9 +1590,23 @@ exports.activate = async function activate(api) {
         ).catch((error) => {
           if (error?.status !== 409) throw error;
         });
+      } else {
+        const listed = await requestJson(
+          hub,
+          `/api/drones/${encodeURIComponent(drone)}/chats`,
+          { method: 'GET' },
+        );
+        const existingChats = Array.isArray(listed?.chats)
+          ? listed.chats
+              .map((entry) => cleanString(typeof entry === 'string' ? entry : entry?.chat ?? entry?.name))
+              .filter(Boolean)
+          : [];
+        const existing = existingChats.includes(chat) || (chat === 'default' && existingChats.length === 0);
+        if (!existing) throw new Error(`unknown chat: ${chat}`);
       }
       const body = {
         prompt: message,
+        ...(!args.createChat ? { requireExistingChat: true } : {}),
         ...(cleanString(args.idempotencyKey) ? { promptId: cleanString(args.idempotencyKey) } : {}),
       };
       const response = await requestJson(

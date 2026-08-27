@@ -396,7 +396,11 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     return { sessionName };
   }
 
-  async function ensureChatEntry(opts: { droneId: string; chatName: string }): Promise<void> {
+  async function ensureChatEntry(opts: {
+    droneId: string;
+    chatName: string;
+    createIfMissing?: boolean;
+  }): Promise<void> {
     const reg: any = await loadRegistry();
     const droneId = normalizeDroneIdentity(opts.droneId);
     const d = droneId ? reg?.drones?.[droneId] : null;
@@ -413,6 +417,11 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
           });
         }
         return;
+      }
+      const hasImplicitDefault =
+        opts.chatName === 'default' && listChatsFromStore({ droneId }).chats.length === 0;
+      if (opts.createIfMissing === false && !hasImplicitDefault) {
+        throw new Error(`unknown chat: ${opts.chatName}`);
       }
       await upsertChatInStore({
         droneId,
@@ -437,6 +446,11 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
           drone.chats[opts.chatName].id = crypto.randomUUID();
         }
       } else {
+        const hasImplicitDefault =
+          opts.chatName === 'default' && Object.keys(drone.chats).length === 0;
+        if (opts.createIfMissing === false && !hasImplicitDefault) {
+          throw new Error(`unknown chat: ${opts.chatName}`);
+        }
         // Child drones default to Codex; other drones keep Cursor.
         // NOTE: chatId is intentionally omitted (it is created lazily on first prompt).
         drone.chats[opts.chatName] = buildNewChatEntry({

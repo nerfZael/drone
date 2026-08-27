@@ -127,6 +127,65 @@ describeSocketSuite('chat management api', () => {
     expect((listed.data?.chats ?? []).includes('review')).toBe(true);
   });
 
+  test('does not materialize an unknown chat when a prompt requires an existing chat', async () => {
+    const droneId = 'drone-chat-require-existing';
+    await seedDrone(droneId);
+
+    const prompted = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/missing/prompt`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          prompt: 'Do not create this chat',
+          requireExistingChat: true,
+        }),
+      },
+    );
+    expect(prompted.r.status).toBe(404);
+    expect(prompted.data?.error).toBe('unknown chat: missing');
+
+    const listed = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats`);
+    expect(listed.r.status).toBe(200);
+    expect(listed.data?.chats).toEqual(['default']);
+  });
+
+  test('materializes the logical default when an empty legacy drone requires it', async () => {
+    const droneId = 'drone-chat-require-implicit-default';
+    const now = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      reg.drones = reg.drones ?? {};
+      reg.drones[droneId] = {
+        id: droneId,
+        name: droneId,
+        runtime: 'container',
+        hostPort: 1,
+        token: 'mock-token',
+        containerPort: 7777,
+        repoPath: '',
+        createdAt: now,
+        chats: {},
+      };
+    });
+
+    const prompted = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/prompt`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          prompt: 'Materialize the logical default',
+          requireExistingChat: true,
+        }),
+      },
+    );
+    expect(prompted.r.status).toBe(202);
+
+    const listed = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats`);
+    expect(listed.r.status).toBe(200);
+    expect(listed.data?.chats).toEqual(['default']);
+  });
+
   test('can omit legacy turns from chat metadata', async () => {
     const droneId = 'drone-chat-compact-metadata';
     await seedDrone(droneId);

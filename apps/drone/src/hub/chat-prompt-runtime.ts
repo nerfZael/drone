@@ -193,6 +193,7 @@ export type EnqueuePromptOptions = {
   priority?: 'queue' | 'asap';
   schedulePump?: boolean;
   submissionSource?: PromptSubmissionSource;
+  requireExistingChat?: boolean;
   mark?: (name: string) => void;
 };
 
@@ -2840,8 +2841,15 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     const droneId = normalizeDroneIdentity(opts.droneId);
     if (!droneId) throw new Error('missing droneId');
 
-    // Make sure chat exists before we write pending state.
-    await ensureChatEntry({ droneId, chatName });
+    // Make sure chat exists before we write pending state. Callers that do not
+    // have creation intent can require an existing chat without racing a
+    // separate list/read request. An empty legacy drone still has a logical
+    // default chat, which ensureChatEntry may materialize.
+    await ensureChatEntry({
+      droneId,
+      chatName,
+      createIfMissing: opts.requireExistingChat !== true,
+    });
     opts.mark?.('ensureChat');
     const { d, chat } = await getChatEntry({ droneId, chatName });
     const canonicalPendingPrompts = await readPendingPrompts({ droneId, chatName });
@@ -3098,6 +3106,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     submittedAt?: string | null;
     deliveryMode?: 'queue' | 'asap';
     submissionSource?: PromptSubmissionSource;
+    requireExistingChat?: boolean;
     mark?: (name: string) => void;
   }): Promise<
     | {
@@ -3128,6 +3137,16 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       if (!liveDroneEntry)
         return { kind: 'error', status: 404, error: `unknown drone: ${droneId}` };
       if (droneIsProvisioning(liveDroneEntry)) {
+        const provisioningChats =
+          liveDroneEntry?.chats && typeof liveDroneEntry.chats === 'object'
+            ? Object.keys(liveDroneEntry.chats)
+            : [];
+        const existingProvisioningChat =
+          Boolean(liveDroneEntry?.chats?.[chatName]) ||
+          (chatName === 'default' && provisioningChats.length === 0);
+        if (opts.requireExistingChat === true && !existingProvisioningChat) {
+          return { kind: 'error', status: 404, error: `unknown chat: ${chatName}` };
+        }
         if (attachments.length > 0) {
           return {
             kind: 'error',
@@ -3223,6 +3242,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         deliveryMode: acceptance.enqueueMode,
         priority: acceptance.priority,
         submissionSource: opts.submissionSource,
+        requireExistingChat: opts.requireExistingChat,
         mark: opts.mark,
       });
       return {
@@ -3270,6 +3290,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           deliveryMode: acceptance.enqueueMode,
           priority: acceptance.priority,
           submissionSource: opts.submissionSource,
+          requireExistingChat: opts.requireExistingChat,
           mark: opts.mark,
         });
         return {
