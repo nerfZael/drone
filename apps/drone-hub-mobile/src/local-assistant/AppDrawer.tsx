@@ -68,6 +68,7 @@ import {
   EMPTY_MOBILE_DRONE_STATE_SUMMARY,
   mobileDroneChatDisplayState,
   mobileDroneDisplayState,
+  summarizeMobileDroneChatSubset,
   summarizeMobileDroneChats,
   type MobileDroneDisplayState,
   type MobileDroneStateSummary,
@@ -1042,6 +1043,21 @@ function DrawerDroneChatTreeEntry({
   const groupId = node.id;
   const expanded = Boolean(chatTreeContext?.expandedGroupIds.has(groupId));
   const muted = Boolean(muteContext?.effectiveChatGroupIds.has(groupId));
+  const stateSummary = summarizeMobileDroneChatSubset(
+    drone,
+    sidebarChatTreeChatNamesInGroup(tree, node.id).filter(
+      (chatName) =>
+        !muteContext?.effectiveChatIds.has(mobileSidebarChatId(drone.id, chatName)),
+    ),
+    drone.id === activeDroneId ? activeChatName : '',
+  );
+  const stateDescription = [
+    stateSummary.approval > 0
+      ? `${stateSummary.approval} chats awaiting approval`
+      : '',
+    stateSummary.unread > 0 ? `${stateSummary.unread} unread chats` : '',
+    stateSummary.working > 0 ? `${stateSummary.working} working chats` : '',
+  ].filter(Boolean).join(', ');
   const parentPath = sidebarChatGroupParentPath(node.path);
   const childIds = tree.childIdsByParent[node.id] ?? [];
   const dragScope = `chat-parent:${node.parentId}`;
@@ -1100,7 +1116,13 @@ function DrawerDroneChatTreeEntry({
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ expanded }}
-          accessibilityLabel={`${expanded ? 'Collapse' : 'Expand'} ${node.label} group${muted ? ', muted' : ''}`}
+          accessibilityLabel={`${expanded ? 'Collapse' : 'Expand'} ${node.label} group${
+            muted
+              ? ', muted'
+              : !expanded && stateDescription
+                ? `, ${stateDescription}`
+                : ''
+          }`}
           delayLongPress={600}
           onLongPress={() => chatTreeContext?.openGroupActions({ drone, path: node.path })}
           onPress={() => chatTreeContext?.toggleGroup(groupId)}
@@ -1133,7 +1155,11 @@ function DrawerDroneChatTreeEntry({
           ) : (
             <Text numberOfLines={1} style={styles.groupName}>{node.label}</Text>
           )}
-          {muted ? <MutedStatusIndicator /> : null}
+          {muted ? (
+            <MutedStatusIndicator />
+          ) : !expanded ? (
+            <DroneStateCounts summary={stateSummary} compact entity="chat" />
+          ) : null}
         </Pressable>
         {expanded ? (
           <View style={styles.groupChildren}>

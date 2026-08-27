@@ -773,6 +773,23 @@ describe('mobile sidebar presentation', () => {
     );
   });
 
+  test('shows descendant chat state counts on collapsed mobile chat groups', () => {
+    const source = readFileSync(
+      new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
+      'utf8',
+    );
+    const groupStart = source.indexOf('function DrawerDroneChatTreeEntry');
+    const groupEnd = source.indexOf('function DrawerDroneNode', groupStart);
+    const groupSource = source.slice(groupStart, groupEnd);
+
+    expect(groupSource).toContain('summarizeMobileDroneChatSubset(');
+    expect(groupSource).toContain('sidebarChatTreeChatNamesInGroup(tree, node.id).filter(');
+    expect(groupSource).toContain('muteContext?.effectiveChatIds.has(');
+    expect(groupSource).toContain(
+      ': !expanded ? (\n            <DroneStateCounts summary={stateSummary} compact entity="chat" />',
+    );
+  });
+
   test('omits the selected-drone subtitle while preserving contextual create copy', () => {
     const dronesSource = readFileSync(
       new URL('../src/screens/DronesScreen.tsx', import.meta.url),
@@ -927,6 +944,16 @@ describe('mobile sidebar presentation', () => {
     );
 
     expect(drawerSource).toContain('<MobileSidebarDragArea');
+    const chatRowStart = drawerSource.indexOf('function DrawerDroneChatRow');
+    const chatTreeStart = drawerSource.indexOf('function DrawerDroneChatTreeEntry');
+    const droneNodeStart = drawerSource.indexOf('function DrawerDroneNode');
+    expect(drawerSource.slice(chatRowStart, chatTreeStart)).toContain(
+      '<MobileSidebarDragTarget',
+    );
+    expect(drawerSource.slice(chatTreeStart, droneNodeStart)).toContain(
+      '<MobileSidebarDragTarget',
+    );
+    expect(drawerSource.slice(droneNodeStart)).toContain('<MobileSidebarDragTarget');
     expect(drawerSource).toContain('label={`${folder.label} group`}');
     expect(drawerSource).toContain("kind: 'move-into-folder'");
     expect(drawerSource).toContain('canDropInside={(activeItemId) => {');

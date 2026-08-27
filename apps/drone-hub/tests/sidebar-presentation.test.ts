@@ -290,7 +290,7 @@ describe('sidebar presentation', () => {
 
     expect(groupedTreeSource).toContain('data-sidebar-chat-rail="true"');
     expect(groupedTreeSource).toContain(
-      'className={`${densityClasses.chatIndent} dh-sidebar-drone-chat-body flex flex-col gap-0 border-l [--sidebar-selection-edge-offset:-1px]`}',
+      'className={`${densityClasses.chatIndent} dh-sidebar-drone-chat-body flex flex-col gap-0 border-l [--sidebar-selection-edge-offset:-1px]',
     );
     expect(groupedTreeSource).toContain(
       "data-sidebar-guide-selected={hasActiveChildChat ? 'true' : undefined}",
@@ -475,6 +475,58 @@ describe('sidebar presentation', () => {
     );
     expect(groupedTreeSource).toContain(
       'group/folder-row relative flex items-center gap-1 rounded-[var(--sidebar-row-radius)] pr-0.5',
+    );
+  });
+
+  test('shows descendant chat state counts on collapsed chat groups', () => {
+    const groupedTreeSource = readFileSync(
+      new URL('../src/droneHub/app/GroupedSidebarTree.tsx', import.meta.url),
+      'utf8',
+    );
+    const folderStart = groupedTreeSource.indexOf(
+      'const GroupedSidebarChatFolderRow',
+    );
+    const folderEnd = groupedTreeSource.indexOf(
+      'function GroupedSidebarChatGroupEditor',
+      folderStart,
+    );
+    const folderSource = groupedTreeSource.slice(folderStart, folderEnd);
+
+    expect(folderSource).toContain(
+      'sidebarChatTreeChatNamesInGroup(tree, node.id).filter(',
+    );
+    expect(folderSource).toContain('summarizeSidebarChats({');
+    expect(folderSource).toContain(
+      ': collapsed ? (\n              <SidebarGroupStateCounts summary={stateSummary} />',
+    );
+  });
+
+  test('uses the outer sidebar tree drag UX for chats and chat groups', () => {
+    const groupedTreeSource = readFileSync(
+      new URL('../src/droneHub/app/GroupedSidebarTree.tsx', import.meta.url),
+      'utf8',
+    );
+    const dndSource = readFileSync(
+      new URL('../src/droneHub/app/drone-hub-dnd.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(groupedTreeSource).toContain('type ChatTreeDropTarget = {');
+    expect(groupedTreeSource).toContain('resolveChatTreeBodyInsertionTarget(');
+    expect(groupedTreeSource).toContain("type: 'sidebar-chat-tree-folder-body'");
+    expect(groupedTreeSource).toContain('data-sidebar-chat-tree-node-id=');
+    expect(groupedTreeSource).toContain('<TreeDropGuide placement={dropGuidePlacement} />');
+    expect(groupedTreeSource).toContain("dropPlacement === 'before' ? 'pt-3'");
+    expect(groupedTreeSource).toContain(
+      "'border-[var(--accent-muted)] bg-[var(--accent-subtle)] ring-1 ring-[var(--accent-muted)]'",
+    );
+    expect(groupedTreeSource).toContain(
+      ": showChatTailPreview\n        ? 'pb-3'",
+    );
+    expect(groupedTreeSource).not.toContain('const [dragOverChat,');
+    expect(groupedTreeSource).not.toContain("overData?.type === 'sidebar-chat-reorder'");
+    expect(dndSource).toContain(
+      "data.type === 'sidebar-folder' || data.type === 'sidebar-chat-folder'",
     );
   });
 

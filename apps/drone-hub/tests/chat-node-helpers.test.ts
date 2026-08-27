@@ -7,6 +7,7 @@ import {
   reconcileManualUnreadMarker,
   resolveAgentChatF2RenameTarget,
   resolveCanvasChatDisplay,
+  summarizeSidebarChats,
   unreadChatNodeIdsForDrone,
 } from '../src/droneHub/app/chat-node-helpers';
 import type { DroneSummary } from '../src/droneHub/types';
@@ -27,6 +28,7 @@ function drone(seed: Partial<DroneSummary> & Pick<DroneSummary, 'id' | 'name'>):
     chatReadStates: seed.chatReadStates,
     approvalChats: seed.approvalChats,
     approvalRequired: seed.approvalRequired,
+    busyChats: seed.busyChats,
     fleetParentId: seed.fleetParentId ?? null,
     repoAttached: seed.repoAttached ?? false,
     hubPhase: seed.hubPhase ?? null,
@@ -64,6 +66,43 @@ describe('chat node helpers', () => {
         'default',
       ),
     ).toBe(false);
+  });
+
+  test('summarizes approval, working, and unread state for a chat subset', () => {
+    const summary = drone({
+      id: 'alpha',
+      name: 'Alpha',
+      chats: ['default', 'working', 'review', 'outside'],
+      busyChats: ['working', 'review'],
+      unreadChats: ['default', 'working', 'outside'],
+      approvalChats: ['review'],
+    });
+
+    expect(summarizeSidebarChats({
+      drone: summary,
+      chatNames: ['default', 'working', 'review'],
+      activeChatName: 'default',
+      approvalRequiredByChatNodeId: {},
+      busyChatNodeIdSet: new Set(),
+      unreadAgentMessageByChatNodeId: {},
+    })).toEqual({ approval: 1, unread: 0, working: 1 });
+  });
+
+  test('includes live local chat state in sidebar summaries', () => {
+    const summary = drone({
+      id: 'alpha',
+      name: 'Alpha',
+      chats: ['default', 'working', 'review'],
+    });
+
+    expect(summarizeSidebarChats({
+      drone: summary,
+      chatNames: ['default', 'working', 'review'],
+      activeChatName: null,
+      approvalRequiredByChatNodeId: { 'chat:alpha::review': true },
+      busyChatNodeIdSet: new Set(['chat:alpha::working']),
+      unreadAgentMessageByChatNodeId: { 'chat:alpha::default': true },
+    })).toEqual({ approval: 1, unread: 0, working: 1 });
   });
 
   test('treats an implicit empty chat list as only the default chat', () => {

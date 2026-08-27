@@ -126,3 +126,27 @@ export function summarizeMobileDroneChats(
   if (summary.approval === 0 && drone.approvalRequired) summary.approval = 1;
   return summary;
 }
+
+export function summarizeMobileDroneChatSubset(
+  drone: MobileDroneSummary,
+  chatNames: readonly string[],
+  activeChatNameRaw = '',
+): MobileDroneStateSummary {
+  const includedChatNames = new Set(chatNames);
+  const includedChats = drone.chats.filter((chatName) => includedChatNames.has(chatName));
+  const includedApprovalChats = (drone.approvalChats ?? []).filter((chatName) =>
+    includedChatNames.has(chatName),
+  );
+  return summarizeMobileDroneChats({
+    ...drone,
+    chats: includedChats,
+    busyChats: drone.busyChats.filter((chatName) => includedChatNames.has(chatName)),
+    unreadChats: drone.unreadChats?.filter((chatName) => includedChatNames.has(chatName)),
+    approvalChats: includedApprovalChats,
+    approvalRequired:
+      drone.approvalRequired &&
+      (drone.approvalChats
+        ? includedApprovalChats.length > 0
+        : includedChats.length > 0),
+  }, activeChatNameRaw);
+}

@@ -262,7 +262,7 @@ function dragPreviewLabel(data: DroneHubDragData): { title: string; detail: stri
 }
 
 function ActiveDragPreview({ data }: { data: DroneHubDragData }) {
-  if (data.type === 'sidebar-folder') {
+  if (data.type === 'sidebar-folder' || data.type === 'sidebar-chat-folder') {
     return (
       <div className="pointer-events-none w-[240px] rounded-[var(--radius-medium)] border border-[var(--accent-muted)] bg-[var(--panel-overlay)] px-2 py-1.5 shadow-[0_18px_44px_var(--shadow-color)]">
         <div className="flex min-w-0 items-center gap-1.5">
@@ -274,12 +274,14 @@ function ActiveDragPreview({ data }: { data: DroneHubDragData }) {
       </div>
     );
   }
-  if (data.type === 'sidebar-chat' || data.type === 'sidebar-chat-folder') {
+  if (data.type === 'sidebar-chat') {
     return (
-      <div className="pointer-events-none w-[220px] rounded border border-[var(--accent-muted)] bg-[var(--panel-overlay)] px-2 py-1.5 shadow-[0_18px_44px_var(--shadow-color)]">
+      <div className="pointer-events-none w-[240px] rounded-[var(--radius-medium)] border border-[var(--accent-muted)] bg-[var(--panel-overlay)] px-2 py-1.5 shadow-[0_18px_44px_var(--shadow-color)]">
         <div className="flex items-center gap-1.5 text-[var(--text-11)] text-[var(--fg-secondary)]">
-          <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--accent)]" />
-          <span className="min-w-0 flex-1 truncate font-mono">{data.label}</span>
+          <span className="inline-flex h-3 w-3 flex-shrink-0 items-center justify-center">
+            <span className="h-1.5 w-1.5 rounded-full border border-[var(--muted-dim)] opacity-70" />
+          </span>
+          <span className="min-w-0 flex-1 truncate [font-family:var(--sidebar-font)]">{data.label}</span>
         </div>
       </div>
     );

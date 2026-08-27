@@ -53,6 +53,48 @@ export function normalizedDroneChats(
   return out;
 }
 
+export type SidebarChatStateSummary = {
+  approval: number;
+  unread: number;
+  working: number;
+};
+
+export function summarizeSidebarChats({
+  drone,
+  chatNames,
+  activeChatName,
+  approvalRequiredByChatNodeId,
+  busyChatNodeIdSet,
+  unreadAgentMessageByChatNodeId,
+}: {
+  drone: DroneSummary;
+  chatNames: readonly string[];
+  activeChatName?: string | null;
+  approvalRequiredByChatNodeId: Readonly<Record<string, boolean>>;
+  busyChatNodeIdSet: ReadonlySet<string>;
+  unreadAgentMessageByChatNodeId: Readonly<Record<string, boolean>>;
+}): SidebarChatStateSummary {
+  const summary: SidebarChatStateSummary = { approval: 0, unread: 0, working: 0 };
+  for (const chatName of chatNames) {
+    const chatNodeId = createCanvasChatNodeId(drone.id, chatName);
+    const approval =
+      droneChatRequiresApproval(drone, chatName) ||
+      approvalRequiredByChatNodeId[chatNodeId] === true;
+    const working =
+      !approval &&
+      ((drone.busyChats ?? []).includes(chatName) || busyChatNodeIdSet.has(chatNodeId));
+    const unread =
+      chatName !== activeChatName &&
+      ((drone.unreadChats ?? []).includes(chatName) ||
+        unreadAgentMessageByChatNodeId[chatNodeId] === true);
+    if (approval) summary.approval += 1;
+    if (unread) summary.unread += 1;
+    if (working) summary.working += 1;
+  }
+  if (summary.working > 0) summary.unread = 0;
+  return summary;
+}
+
 export function hasOnlyDefaultChat(drone: DroneSummary | null | undefined): boolean {
   const chats = normalizedDroneChats(drone, { includeDefaultWhenEmpty: true });
   return chats.length === 1 && chats[0] === 'default';

@@ -3,6 +3,7 @@ import { normalizeMobileDrones } from '../src/drones/drone-sidebar-model';
 import {
   mobileDroneChatDisplayState,
   mobileDroneDisplayState,
+  summarizeMobileDroneChatSubset,
   summarizeMobileDroneChats,
   summarizeMobileDrones,
   withMobileApprovalRequired,
@@ -124,6 +125,28 @@ describe('mobile drone state summary', () => {
       working: 0,
       unread: 0,
     });
+  });
+
+  test('summarizes only the chats inside a mobile chat group', () => {
+    const [drone] = normalizeMobileDrones([
+      {
+        id: 'grouped',
+        chats: ['default', 'working', 'approval', 'outside'],
+        busyChats: ['working', 'approval'],
+        approvalChats: ['approval'],
+        unreadChats: ['default', 'working', 'outside'],
+      },
+    ]);
+    expect(drone).toBeDefined();
+    if (!drone) return;
+
+    expect(
+      summarizeMobileDroneChatSubset(
+        drone,
+        ['default', 'working', 'approval'],
+        'default',
+      ),
+    ).toEqual({ approval: 1, working: 1, unread: 0 });
   });
 
   test('does not count working or blocked drones as unread', () => {
