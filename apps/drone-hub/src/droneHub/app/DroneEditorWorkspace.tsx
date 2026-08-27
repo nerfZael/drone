@@ -29,12 +29,16 @@ type DroneEditorWorkspaceProps = {
 };
 
 const EXPLORER_LAYOUT_STORAGE_KEY = profileStorageKey('droneHub.editorExplorerLayout');
+const EXPLORER_DRAG_TYPE = 'application/x-drone-hub-editor-explorer';
 
 export function DroneEditorWorkspace({ explorer, editor }: DroneEditorWorkspaceProps) {
   const rootRef = React.useRef<HTMLDivElement | null>(null);
   const resizePointerIdRef = React.useRef<number | null>(null);
+  const explorerDragActiveRef = React.useRef(false);
   const [layout, setLayout] = React.useState<StoredExplorerLayout>(readExplorerLayout);
   const [explorerZoom, setExplorerZoom] = React.useState(readWorkspaceExplorerZoom);
+  const [dragging, setDragging] = React.useState(false);
+  const [dropSide, setDropSide] = React.useState<ExplorerSide | null>(null);
 
   React.useEffect(
     () => subscribeWorkspaceExplorerZoom(() => setExplorerZoom(readWorkspaceExplorerZoom())),
@@ -89,6 +93,49 @@ export function DroneEditorWorkspace({ explorer, editor }: DroneEditorWorkspaceP
     });
   }, []);
 
+  const handleExplorerDragStart = React.useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    event.stopPropagation();
+    explorerDragActiveRef.current = true;
+    setDragging(true);
+    setDropSide(null);
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData(EXPLORER_DRAG_TYPE, 'explorer');
+  }, []);
+
+  const handleDragOver = React.useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (!explorerDragActiveRef.current && !hasExplorerDragPayload(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = 'move';
+    setDropSide(explorerSideForPointer(event.currentTarget, event.clientX));
+  }, []);
+
+  const resetExplorerDrag = React.useCallback(() => {
+    explorerDragActiveRef.current = false;
+    setDragging(false);
+    setDropSide(null);
+  }, []);
+
+  const handleExplorerDragEnd = React.useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      event.stopPropagation();
+      resetExplorerDrag();
+    },
+    [resetExplorerDrag],
+  );
+
+  const handleDrop = React.useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      if (!explorerDragActiveRef.current && !hasExplorerDragPayload(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const side = explorerSideForPointer(event.currentTarget, event.clientX);
+      updateLayout({ ...layout, side });
+      resetExplorerDrag();
+    },
+    [layout, resetExplorerDrag, updateLayout],
+  );
+
   const handleResizeKeyDown = React.useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
       if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
@@ -117,6 +164,11 @@ export function DroneEditorWorkspace({ explorer, editor }: DroneEditorWorkspaceP
           setExplorerZoom((current) => clampWorkspaceExplorerZoom(current + WORKSPACE_EXPLORER_ZOOM_STEP))
         }
         onResetZoom={() => setExplorerZoom(WORKSPACE_EXPLORER_ZOOM_DEFAULT)}
+        dragHandle={{
+          onDragStart: handleExplorerDragStart,
+          onDragEnd: handleExplorerDragEnd,
+          title: 'Drag to move the File Explorer to the other side',
+        }}
       />
       <div className="min-h-0 flex-1">{explorer(explorerZoom)}</div>
     </aside>
@@ -147,6 +199,8 @@ export function DroneEditorWorkspace({ explorer, editor }: DroneEditorWorkspaceP
     <div
       ref={rootRef}
       className="relative flex h-full min-h-0 w-full overflow-hidden bg-[var(--panel-alt)]"
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
     >
       {layout.side === 'left' ? explorerPane : null}
       {layout.side === 'left' ? resizeHandle : null}
@@ -155,8 +209,33 @@ export function DroneEditorWorkspace({ explorer, editor }: DroneEditorWorkspaceP
       </main>
       {layout.side === 'right' ? resizeHandle : null}
       {layout.side === 'right' ? explorerPane : null}
+      {dragging && dropSide ? (
+        <div
+          className={`pointer-events-none absolute inset-y-0 z-20 w-1/2 border-2 border-[var(--accent)] bg-[var(--accent-subtle)] ${
+            dropSide === 'left' ? 'left-0' : 'right-0'
+          }`}
+          aria-hidden="true"
+        />
+      ) : null}
     </div>
   );
+}
+
+function hasExplorerDragPayload(event: React.DragEvent<HTMLElement>): boolean {
+  return Array.from(event.dataTransfer.types ?? []).includes(EXPLORER_DRAG_TYPE);
+}
+
+function explorerSideForPointer(element: HTMLElement, clientX: number): ExplorerSide {
+  const rect = element.getBoundingClientRect();
+  return resolveExplorerDropSide(rect.left, rect.width, clientX);
+}
+
+export function resolveExplorerDropSide(
+  containerLeft: number,
+  containerWidth: number,
+  clientX: number,
+): ExplorerSide {
+  return clientX < containerLeft + containerWidth / 2 ? 'left' : 'right';
 }
 
 function clampExplorerWidth(width: number, containerWidth = Number.POSITIVE_INFINITY): number {

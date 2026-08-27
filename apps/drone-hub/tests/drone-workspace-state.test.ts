@@ -50,6 +50,7 @@ const {
   writeWorkspaceExplorerWidth,
   writeWorkspaceExplorerZoom,
 } = await import('../src/droneHub/app/workspace-explorer-preferences');
+const { resolveExplorerDropSide } = await import('../src/droneHub/app/DroneEditorWorkspace');
 
 function readAppSource(relativePath: string): string {
   return fs.readFileSync(path.join(import.meta.dir, '../src/droneHub', relativePath), 'utf8');
@@ -133,10 +134,21 @@ describe('per-drone workspace state', () => {
 
     expect(editorWorkspace).toContain("profileStorageKey('droneHub.editorExplorerLayout')");
     expect(editorWorkspace).toContain('<WorkspaceExplorerHeader');
+    expect(editorWorkspace).toContain('dragHandle={{');
+    expect(editorWorkspace).toContain('onDragOver={handleDragOver}');
+    expect(editorWorkspace).toContain('onDrop={handleDrop}');
+    expect(editorWorkspace).toContain("dropSide === 'left' ? 'left-0' : 'right-0'");
     expect(changesDock).toContain('<WorkspaceExplorerHeader');
     expect(rightPanel).toContain('zoom={explorerZoom}');
     expect(editorWorkspace).toContain('aria-label="File Explorer"');
     expect(appConfig).toContain("if (raw === 'files') return 'editor'");
+  });
+
+  test('targets the explorer side from the workspace midpoint', () => {
+    expect(resolveExplorerDropSide(100, 600, 100)).toBe('left');
+    expect(resolveExplorerDropSide(100, 600, 399)).toBe('left');
+    expect(resolveExplorerDropSide(100, 600, 400)).toBe('right');
+    expect(resolveExplorerDropSide(100, 600, 700)).toBe('right');
   });
 
   test('shares explorer width and zoom through one preference pair', () => {
