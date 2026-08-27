@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   MOBILE_SIDEBAR_EXPANDED_FOLDER_IDS_STORAGE_KEY,
   parseMobileSidebarExpandedFolderIds,
+  rewriteMobileSidebarExpandedFolderPrefix,
   serializeMobileSidebarExpandedFolderIds,
 } from './mobile-sidebar-expansion-state';
 
@@ -97,10 +98,8 @@ export function useMobileSidebarExpandedFolderIds(): {
     const current = String(currentPrefix ?? '').trim();
     const next = String(nextPrefix ?? '').trim();
     if (!current || !next || current === next) return;
-    updateFolderIds((folderIds) => new Set([...folderIds].map((folderId) =>
-      folderId === current || folderId.startsWith(`${current}/`)
-        ? `${next}${folderId.slice(current.length)}`
-        : folderId)));
+    updateFolderIds((folderIds) =>
+      rewriteMobileSidebarExpandedFolderPrefix(folderIds, current, next));
   }, [updateFolderIds]);
 
   const removeFolderPrefix = React.useCallback((prefixRaw: string) => {

@@ -3462,6 +3462,7 @@ export function DroneSidebar({
                       setCollapsedDroneSections={setCollapsedDroneSections}
                       onToggleDroneSection={toggleDroneSection}
                       collapsedGroups={collapsedGroups}
+                      setCollapsedGroups={setCollapsedGroups}
                       deletingGroups={deletingGroups}
                       renamingGroups={renamingGroups}
                       hiddenSidebarGroupTokenSet={hiddenSidebarGroupTokenSet}

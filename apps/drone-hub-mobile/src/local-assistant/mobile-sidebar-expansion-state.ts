@@ -34,6 +34,22 @@ export function serializeMobileSidebarExpandedFolderIds(
   return serializeIdSet(folderIds);
 }
 
+export function rewriteMobileSidebarExpandedFolderPrefix(
+  folderIds: ReadonlySet<string>,
+  currentPrefixRaw: string,
+  nextPrefixRaw: string,
+): Set<string> {
+  const currentPrefix = String(currentPrefixRaw ?? '').trim();
+  const nextPrefix = String(nextPrefixRaw ?? '').trim();
+  if (!currentPrefix || !nextPrefix || currentPrefix === nextPrefix) {
+    return new Set(folderIds);
+  }
+  return new Set([...folderIds].map((folderId) =>
+    folderId === currentPrefix || folderId.startsWith(`${currentPrefix}/`)
+      ? `${nextPrefix}${folderId.slice(currentPrefix.length)}`
+      : folderId));
+}
+
 export function parseMobileSidebarCollapsedDroneIds(raw: string | null): Set<string> {
   return parseStoredIdSet(raw);
 }

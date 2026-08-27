@@ -26,6 +26,32 @@ export function joinSidebarGroupPath(parts: Array<string | null | undefined>): s
     .join('/');
 }
 
+export function reparentSidebarGroupPath(
+  pathRaw: string | null | undefined,
+  parentPathRaw: string | null | undefined,
+): string {
+  return joinSidebarGroupPath([
+    parentPathRaw,
+    sidebarGroupBaseName(pathRaw),
+  ]);
+}
+
+export function replaceSidebarGroupPathSuffix(
+  scopedPathRaw: string | null | undefined,
+  currentGroupPathRaw: string | null | undefined,
+  nextGroupPathRaw: string | null | undefined,
+): string {
+  const scopedPath = String(scopedPathRaw ?? '').trim();
+  const currentGroupPath = normalizeSidebarGroupPath(currentGroupPathRaw);
+  const nextGroupPath = normalizeSidebarGroupPath(nextGroupPathRaw);
+  if (!scopedPath || !currentGroupPath || !nextGroupPath) return scopedPath;
+  if (scopedPath === currentGroupPath) return nextGroupPath;
+  if (!scopedPath.endsWith(currentGroupPath)) return scopedPath;
+  const boundary = scopedPath[scopedPath.length - currentGroupPath.length - 1];
+  if (boundary !== ':' && boundary !== '/') return scopedPath;
+  return `${scopedPath.slice(0, -currentGroupPath.length)}${nextGroupPath}`;
+}
+
 export function isSameOrDescendantSidebarGroupPath(
   pathRaw: string | null | undefined,
   prefixRaw: string | null | undefined,

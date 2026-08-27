@@ -47,6 +47,8 @@ import {
   normalizeSidebarChatGroupPath,
   resolvePinnedSidebarDrones,
   resolveEffectiveSidebarChatMuteSets,
+  reparentSidebarGroupPath,
+  replaceSidebarGroupPathSuffix,
   sidebarChatGroupBaseName,
   sidebarChatGroupNodeId,
   sidebarChatGroupParentPath,
@@ -191,11 +193,12 @@ const DrawerWorkingPhaseContext = React.createContext<Animated.Value | null>(nul
 const DrawerSidebarReorderContext = React.createContext<
   ((request: MobileSidebarMutationRequest) => void) | null
 >(null);
-const DrawerChatTreeContext = React.createContext<{
+const DrawerSidebarTreeContext = React.createContext<{
   sidebar: MobileDroneSidebarOrder;
   expandedGroupIds: ReadonlySet<string>;
   selectedChatNodeIds: ReadonlySet<string>;
   toggleGroup(groupId: string): void;
+  rewriteGroupPrefix(currentPrefix: string, nextPrefix: string): void;
   toggleChatSelection(droneId: string, chatName: string): void;
   clearChatSelection(): void;
   openGroupActions(target: DrawerChatGroupActionTarget): void;
@@ -842,7 +845,7 @@ function DrawerDroneChatRow({
   const comfortable = useMobileReadingDensity() === 'comfortable';
   const reorderSidebar = React.useContext(DrawerSidebarReorderContext);
   const muteContext = React.useContext(DrawerSidebarMuteContext);
-  const chatTreeContext = React.useContext(DrawerChatTreeContext);
+  const chatTreeContext = React.useContext(DrawerSidebarTreeContext);
   const sidebarNodeId = sidebarChatNodeId(drone.id, chatName);
   const multiSelected = Boolean(chatTreeContext?.selectedChatNodeIds.has(sidebarNodeId));
   const selected = drone.id === activeDroneId && chatName === activeChatName;
@@ -1017,7 +1020,7 @@ function DrawerDroneChatTreeEntry({
 }) {
   const reorderSidebar = React.useContext(DrawerSidebarReorderContext);
   const muteContext = React.useContext(DrawerSidebarMuteContext);
-  const chatTreeContext = React.useContext(DrawerChatTreeContext);
+  const chatTreeContext = React.useContext(DrawerSidebarTreeContext);
   if (node.kind === 'chat') {
     const parent = node.parentId === tree.rootId ? null : tree.nodesById[node.parentId];
     const parentPath = parent?.kind === 'folder' ? parent.path : null;
@@ -1071,10 +1074,11 @@ function DrawerDroneChatTreeEntry({
     placement: 'before' | 'inside' | 'after',
     target?: MobileSidebarDragTargetData,
   ) => {
+    if (!reorderSidebar) return;
     const targetPath = placement === 'inside'
       ? target?.folderPath ?? null
       : target?.parentGroupPath ?? null;
-    reorderSidebar?.({
+    reorderSidebar({
       kind: 'chat-tree-move',
       droneId: drone.id,
       itemKind: 'folder',
@@ -1086,6 +1090,13 @@ function DrawerDroneChatTreeEntry({
       ...(placement === 'inside' ? {} : { overNodeId }),
       placement,
     });
+    const nextPath = reparentSidebarGroupPath(node.path, targetPath);
+    if (nextPath !== node.path) {
+      chatTreeContext?.rewriteGroupPrefix(
+        sidebarChatGroupNodeId(drone.id, node.path),
+        sidebarChatGroupNodeId(drone.id, nextPath),
+      );
+    }
   };
   const moveGroup = (direction: 'up' | 'down') => {
     const siblings = tree.childIdsByParent[node.parentId] ?? [];
@@ -1239,7 +1250,7 @@ function DrawerDroneNode({
   const reorderSidebar = React.useContext(DrawerSidebarReorderContext);
   const muteContext = React.useContext(DrawerSidebarMuteContext);
   const companionHighlightedDroneIds = React.useContext(DrawerCompanionHighlightContext);
-  const chatTreeContext = React.useContext(DrawerChatTreeContext);
+  const chatTreeContext = React.useContext(DrawerSidebarTreeContext);
   const suppressPressAfterLongPressRef = React.useRef(false);
   const { drone } = node;
   const companionHighlighted = companionHighlightedDroneIds.has(drone.id);
@@ -1663,6 +1674,7 @@ function DrawerDroneFolder({
   onSelect(droneId: string, chatName: string): void;
 }) {
   const reorderSidebar = React.useContext(DrawerSidebarReorderContext);
+  const sidebarTreeContext = React.useContext(DrawerSidebarTreeContext);
   const muteContext = React.useContext(DrawerSidebarMuteContext);
   const suppressPressAfterLongPressRef = React.useRef(false);
   const collapsed = !expandedFolderIds.has(folder.id);
@@ -1707,6 +1719,11 @@ function DrawerDroneFolder({
           targetOverNodeId: insertAtStart ? firstChildNodeId : undefined,
           placement: insertAtStart ? 'before' : placement,
         });
+        const nextPath = reparentSidebarGroupPath(folder.path, target.folderPath);
+        sidebarTreeContext?.rewriteGroupPrefix(
+          folder.id,
+          replaceSidebarGroupPathSuffix(folder.id, folder.path, nextPath),
+        );
         return;
       }
       if (placement === 'inside') return;
@@ -1725,6 +1742,11 @@ function DrawerDroneFolder({
           targetOverNodeId: overNodeId,
           placement,
         });
+        const nextPath = reparentSidebarGroupPath(folder.path, target.parentGroupPath);
+        sidebarTreeContext?.rewriteGroupPrefix(
+          folder.id,
+          replaceSidebarGroupPathSuffix(folder.id, folder.path, nextPath),
+        );
         return;
       }
       reorderSidebar({
@@ -1736,7 +1758,7 @@ function DrawerDroneFolder({
         placement,
       });
     },
-    [folder.path, nodeId, parentId, repoPath, reorderSidebar, siblingNodeIds],
+    [folder.id, folder.path, nodeId, parentId, repoPath, reorderSidebar, sidebarTreeContext, siblingNodeIds],
   );
   const moveFolderAccessibility = React.useCallback(
     (direction: 'up' | 'down') => {
@@ -2570,10 +2592,11 @@ function AppDrawerView({
     expandedGroupIds: expandedFolderIds,
     selectedChatNodeIds,
     toggleGroup: toggleFolder,
+    rewriteGroupPrefix: rewriteFolderPrefix,
     toggleChatSelection,
     clearChatSelection: () => setSelectedChatNodeIds(new Set()),
     openGroupActions: setChatGroupActionTarget,
-  }), [droneSidebarOrder, expandedFolderIds, selectedChatNodeIds, toggleChatSelection, toggleFolder]);
+  }), [droneSidebarOrder, expandedFolderIds, rewriteFolderPrefix, selectedChatNodeIds, toggleChatSelection, toggleFolder]);
   const submitChatEditor = React.useCallback(async () => {
     if (!chatEditor || chatMutationBusy) return;
     const nextName = chatEditor.value.trim();
@@ -3109,7 +3132,7 @@ function AppDrawerView({
     <DrawerWorkingPhaseContext.Provider value={workingPhase}>
       <DrawerSidebarReorderContext.Provider value={onReorderSidebar ?? null}>
         <DrawerSidebarMuteContext.Provider value={muteContextValue}>
-          <DrawerChatTreeContext.Provider value={chatTreeContextValue}>
+          <DrawerSidebarTreeContext.Provider value={chatTreeContextValue}>
           <DrawerCompanionHighlightContext.Provider value={companionHighlightSet}>
             <MobileSidebarDragDropProvider>
           <View
@@ -3465,7 +3488,7 @@ function AppDrawerView({
           />
             </MobileSidebarDragDropProvider>
           </DrawerCompanionHighlightContext.Provider>
-          </DrawerChatTreeContext.Provider>
+          </DrawerSidebarTreeContext.Provider>
         </DrawerSidebarMuteContext.Provider>
       </DrawerSidebarReorderContext.Provider>
     </DrawerWorkingPhaseContext.Provider>

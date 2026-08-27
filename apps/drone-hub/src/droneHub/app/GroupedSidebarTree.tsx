@@ -57,7 +57,12 @@ import {
   sidebarDropPlacementFromRects,
   SidebarReorderDropIndicator,
 } from './sidebar-reorder-ui';
-import { sidebarGroupBaseName } from './sidebar-group-paths';
+import {
+  reparentSidebarGroupPath,
+  replaceSidebarGroupPathSuffix,
+  sidebarGroupBaseName,
+} from './sidebar-group-paths';
+import { renameCollapsedGroupKeysByPrefix } from './sidebar-collapsed-groups';
 import type { DroneDeleteMode, SidebarDensityMode } from './settings-types';
 import type { SidebarMoveIntent } from '@drone/hub-model/sidebar';
 import {
@@ -169,6 +174,7 @@ type GroupedSidebarTreeProps = {
   setCollapsedDroneSections: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   onToggleDroneSection: (droneId: string, kind: SidebarInlineSectionKind) => void;
   collapsedGroups: Record<string, boolean>;
+  setCollapsedGroups: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   deletingGroups: Record<string, boolean>;
   renamingGroups: Record<string, boolean>;
   hiddenSidebarGroupTokenSet: Set<string>;
@@ -2840,6 +2846,46 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
     [droneById, nodeTree, sidebarChatOrderByDrone, sidebarDropTargetFromEvent],
   );
 
+  const migrateMovedGroupExpansionState = React.useCallback((intent: SidebarMoveIntent) => {
+    if (intent.kind === 'move-into-folder' && intent.itemKind === 'folder') {
+      const sourceNode = nodeTree.nodesById[intent.sourceNodeId];
+      if (!sourceNode || sourceNode.kind !== 'folder') return;
+      const currentGroupPath = intent.sourceGroup;
+      const nextGroupPath = reparentSidebarGroupPath(currentGroupPath, intent.targetGroup);
+      if (!nextGroupPath || nextGroupPath === currentGroupPath) return;
+      const currentKey = sidebarFolderCollapseKey(sourceNode, props.repositoryRootView === true);
+      const nextKey = props.repositoryRootView
+        ? replaceSidebarGroupPathSuffix(sourceNode.path, currentGroupPath, nextGroupPath)
+        : nextGroupPath;
+      props.setCollapsedGroups((current) =>
+        renameCollapsedGroupKeysByPrefix(current, currentKey, nextKey));
+      return;
+    }
+    if (intent.kind !== 'chat-tree-move' || intent.itemKind !== 'folder') return;
+    const tree = chatTreeByDrone[intent.droneId];
+    const sourceNode = tree?.nodesById[intent.activeNodeId];
+    if (!sourceNode || sourceNode.kind !== 'folder') return;
+    const nextPath = reparentSidebarGroupPath(sourceNode.path, intent.targetPath);
+    if (!nextPath || nextPath === sourceNode.path) return;
+    props.setCollapsedDroneSections((current) => renameCollapsedGroupKeysByPrefix(
+      current,
+      chatGroupCollapseKey(intent.droneId, sourceNode.path),
+      chatGroupCollapseKey(intent.droneId, nextPath),
+    ));
+  }, [
+    chatTreeByDrone,
+    nodeTree,
+    props.repositoryRootView,
+    props.setCollapsedDroneSections,
+    props.setCollapsedGroups,
+  ]);
+
+  const applySidebarMove = React.useCallback(async (intent: SidebarMoveIntent) => {
+    const applied = await props.onMoveSidebar(intent);
+    if (applied) migrateMovedGroupExpansionState(intent);
+    return applied;
+  }, [migrateMovedGroupExpansionState, props.onMoveSidebar]);
+
   const resolveChatTreeDrop = React.useCallback((event: DragMoveEvent | DragOverEvent | DragEndEvent): {
     target: ChatTreeDropTarget;
     intent: SidebarMoveIntent;
@@ -2979,23 +3025,23 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
               suppressClicksUntilRef.current = Date.now() + 180;
               const chatTreeDrop = resolveChatTreeDrop(event);
               if (chatTreeDrop) {
-                void onMoveSidebar(chatTreeDrop.intent);
+                void applySidebarMove(chatTreeDrop.intent);
                 clearDragState();
                 return;
               }
               const plan = createSidebarDropPlan(event, {
                 treeTarget: dragOverTreeTarget,
               });
-              if (plan?.intent) void onMoveSidebar(plan.intent);
+              if (plan?.intent) void applySidebarMove(plan.intent);
               clearDragState();
             },
           }
         : {},
     [
       clearDragState,
+      applySidebarMove,
       createSidebarDropPlan,
       dragOverTreeTarget,
-      onMoveSidebar,
       onPrepareDroneDragStart,
       props.sidebarDndEnabled,
       resolveChatTreeDrop,

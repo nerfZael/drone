@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import {
   parseMobileSidebarCollapsedDroneIds,
   parseMobileSidebarExpandedFolderIds,
+  rewriteMobileSidebarExpandedFolderPrefix,
   serializeMobileSidebarCollapsedDroneIds,
   serializeMobileSidebarExpandedFolderIds,
 } from '../src/local-assistant/mobile-sidebar-expansion-state';
@@ -41,6 +42,33 @@ describe('mobile sidebar expansion state', () => {
     );
   });
 
+  test('preserves outer and in-drone group expansion when a group is moved', () => {
+    expect(rewriteMobileSidebarExpandedFolderPrefix(
+      new Set([
+        'repo-scope:repo:/work/a:Review',
+        'repo-scope:repo:/work/a:Review/Ready',
+        'chat-folder:drone-a:Review',
+        'chat-folder:drone-b:Review',
+      ]),
+      'repo-scope:repo:/work/a:Review',
+      'repo-scope:repo:/work/a:Archive/Review',
+    )).toEqual(new Set([
+      'repo-scope:repo:/work/a:Archive/Review',
+      'repo-scope:repo:/work/a:Archive/Review/Ready',
+      'chat-folder:drone-a:Review',
+      'chat-folder:drone-b:Review',
+    ]));
+
+    expect(rewriteMobileSidebarExpandedFolderPrefix(
+      new Set(['chat-folder:drone-a:Review', 'chat-folder:drone-a:Review/Ready']),
+      'chat-folder:drone-a:Review',
+      'chat-folder:drone-a:Archive/Review',
+    )).toEqual(new Set([
+      'chat-folder:drone-a:Archive/Review',
+      'chat-folder:drone-a:Archive/Review/Ready',
+    ]));
+  });
+
   test('persists expansion on the viewing phone without resetting it for the selected device', () => {
     const drawerSource = readFileSync(
       new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
@@ -68,6 +96,7 @@ describe('mobile sidebar expansion state', () => {
     expect(drawerSource).toContain('const collapsed = !expandedFolderIds.has(folder.id);');
     expect(drawerSource).toContain('} = useMobileSidebarExpandedFolderIds();');
     expect(drawerSource).toContain('rewriteFolderPrefix(');
+    expect(drawerSource).toContain('rewriteGroupPrefix(');
     expect(drawerSource).toContain('removeFolderPrefix(');
     expect(drawerSource).not.toContain('setExpandedFolderIds(new Set());');
     expect(droneHookSource).toContain(

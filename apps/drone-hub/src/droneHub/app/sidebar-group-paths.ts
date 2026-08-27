@@ -2,6 +2,8 @@ export {
   isSameOrDescendantSidebarGroupPath,
   joinSidebarGroupPath,
   normalizeSidebarGroupPath,
+  reparentSidebarGroupPath,
+  replaceSidebarGroupPathSuffix,
   rewriteSidebarGroupPathPrefix,
   sidebarGroupBaseName,
   sidebarGroupParentPath,
