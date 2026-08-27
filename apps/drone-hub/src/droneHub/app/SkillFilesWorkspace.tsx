@@ -183,6 +183,9 @@ function SkillTextEditor({
   const themeId = useDroneHubUiStore((state) => state.themeId);
   const monacoTheme = desktopMonacoTheme(themeId);
   const editorZoomLevel = useEditorZoomLevel();
+  // Monaco runs onMount only once, so its command must dereference the current callback.
+  const onSaveRef = React.useRef(onSave);
+  onSaveRef.current = onSave;
   const fallback = (
     <PlainSkillEditor value={value} saving={saving} onChange={onChange} onSave={onSave} />
   );
@@ -203,10 +206,10 @@ function SkillTextEditor({
   );
   const handleMount = React.useCallback<MonacoEditorMountHandler>(
     (editor, monaco) => {
-      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, onSave);
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => onSaveRef.current());
       editor.focus();
     },
-    [onSave],
+    [],
   );
   return (
     <AppShortcutBoundary data-editor-zoom-surface="file-editor" className="h-full w-full">

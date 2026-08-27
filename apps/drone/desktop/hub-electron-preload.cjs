@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 const NAVIGATION_ZOOM_CHANNEL = 'drone-hub:navigation-zoom';
+const STARTUP_RETRY_CHANNEL = 'drone-hub:startup-retry';
 const DESKTOP_TITLE_BAR_HEIGHT = 29;
 
 window.addEventListener('DOMContentLoaded', () => {
@@ -61,6 +62,9 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 contextBridge.exposeInMainWorld('droneHubDesktop', {
+  retryStartup() {
+    ipcRenderer.send(STARTUP_RETRY_CHANNEL);
+  },
   onNavigationZoom(callback) {
     if (typeof callback !== 'function') return () => {};
     const listener = (_event, payload) => callback(payload);

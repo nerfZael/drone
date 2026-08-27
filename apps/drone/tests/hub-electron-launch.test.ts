@@ -130,6 +130,26 @@ describe('Drone Hub Electron background launch', () => {
     expect(mainSource).toContain('drone hub stop');
   });
 
+  test('renders startup failures as a high-contrast recovery screen with an in-app restart', () => {
+    const mainSource = readFileSync(
+      new URL('../desktop/hub-electron-main.cjs', import.meta.url),
+      'utf8',
+    );
+    const preloadSource = readFileSync(
+      new URL('../desktop/hub-electron-preload.cjs', import.meta.url),
+      'utf8',
+    );
+
+    expect(mainSource).toContain('Restart Drone Hub');
+    expect(mainSource).toContain('We couldn’t open Drone Hub');
+    expect(mainSource).toContain('Technical details');
+    expect(mainSource).toContain("loadingHtml('Restarting Drone Hub…')");
+    expect(mainSource).toContain("[cliPath, 'hub', 'stop', '--json']");
+    expect(mainSource).toContain("ipcMain.on(STARTUP_RETRY_CHANNEL");
+    expect(preloadSource).toContain('retryStartup()');
+    expect(preloadSource).toContain('ipcRenderer.send(STARTUP_RETRY_CHANNEL)');
+  });
+
   test('rejects launcher output without a usable UI address', () => {
     expect(() => parseDetachedHubStartOutput(JSON.stringify({ ok: true, state: {} }))).toThrow(
       'no usable UI address',

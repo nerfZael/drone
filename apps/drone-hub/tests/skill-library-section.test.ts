@@ -40,4 +40,15 @@ describe('skill library settings navigation', () => {
   test('does not overwrite an unsaved draft after a background skills refetch', () => {
     expect(hookSource).toContain('if (draftDirtyRef.current) return;');
   });
+
+  test('the Monaco save shortcut invokes the latest save callback', () => {
+    const workspaceSource = readFileSync(
+      new URL('../src/droneHub/app/SkillFilesWorkspace.tsx', import.meta.url),
+      'utf8',
+    );
+    expect(workspaceSource).toContain('const onSaveRef = React.useRef(onSave);');
+    expect(workspaceSource).toContain('onSaveRef.current = onSave;');
+    expect(workspaceSource).toContain('() => onSaveRef.current()');
+    expect(workspaceSource).not.toContain('monaco.KeyCode.KeyS, onSave');
+  });
 });

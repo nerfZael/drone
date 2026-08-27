@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, contentTracing, shell } = require('electron');
+const { app, BrowserWindow, Menu, contentTracing, ipcMain, shell } = require('electron');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -17,12 +17,14 @@ const { zoomActionForInput } = require('./hub-electron-zoom.cjs');
 
 const APP_NAME = 'Drone Hub';
 const NAVIGATION_ZOOM_CHANNEL = 'drone-hub:navigation-zoom';
+const STARTUP_RETRY_CHANNEL = 'drone-hub:startup-retry';
 
 let mainWindow = null;
 let hubLauncherProcess = null;
 let desktopStaticUiServer = null;
 let isQuitting = false;
 let performanceTraceStarted = false;
+let restartInProgress = false;
 
 app.setName(APP_NAME);
 if (process.platform === 'linux') {
@@ -60,7 +62,11 @@ function resolveAppIconPath() {
   return candidates.find((candidate) => fs.existsSync(candidate)) || null;
 }
 
-function loadingHtml() {
+function loadingHtml(message = 'Loading your workspace…') {
+  const escapedMessage = String(message)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
   return `<!doctype html>
 <html>
   <head>
@@ -132,18 +138,193 @@ function loadingHtml() {
         </svg>
         <div class="spinner-dot"></div>
       </div>
-      <div class="message">Loading your workspace…</div>
+      <div class="message">${escapedMessage}</div>
     </main>
   </body>
 </html>`;
 }
 
 function errorHtml(message) {
-  const escaped = String(message || 'Drone Hub failed to start.')
+  const rawMessage = String(message || 'Drone Hub failed to start.').trim();
+  const restartRequired = /^Restart required(?:\s|$)/i.test(rawMessage);
+  const technicalMessage = restartRequired
+    ? rawMessage.replace(/^Restart required\s*/i, '').trim()
+    : rawMessage;
+  const escaped = technicalMessage
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Drone Hub</title></head><body style="font:14px system-ui;margin:32px;line-height:1.5"><h1>Drone Hub failed to start</h1><pre style="white-space:pre-wrap">${escaped}</pre></body></html>`;
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+  const eyebrow = restartRequired ? 'Update ready' : 'Startup issue';
+  const title = restartRequired ? 'Restart Drone Hub' : 'We couldn’t open Drone Hub';
+  const description = restartRequired
+    ? 'An older version of Drone Hub is still running. Restart it to load the current app.'
+    : 'Something prevented your workspace from loading. Try restarting Drone Hub first.';
+  const buttonLabel = restartRequired ? 'Restart Drone Hub' : 'Try again';
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="color-scheme" content="dark" />
+    <title>Drone Hub</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        overflow: auto;
+        padding: clamp(24px, 6vw, 72px);
+        background:
+          radial-gradient(circle at 50% 10%, rgba(132, 104, 219, .14), transparent 38%),
+          #111521;
+        color: #f2efff;
+      }
+      main {
+        width: min(620px, 100%);
+        padding: clamp(28px, 5vw, 48px);
+        border: 1px solid #3d4354;
+        border-radius: 16px;
+        background: linear-gradient(145deg, rgba(31, 34, 49, .98), rgba(24, 27, 40, .98));
+        box-shadow: 0 24px 70px rgba(0, 0, 0, .38), inset 0 1px rgba(255, 255, 255, .025);
+      }
+      .icon {
+        width: 52px;
+        height: 52px;
+        display: grid;
+        place-items: center;
+        margin-bottom: 24px;
+        border: 1px solid #6d4a65;
+        border-radius: 14px;
+        background: #382735;
+        color: #ff9ab8;
+        box-shadow: 0 0 0 6px rgba(207, 105, 142, .06);
+      }
+      .eyebrow {
+        margin: 0 0 8px;
+        color: #c5b8ff;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: .09em;
+        text-transform: uppercase;
+      }
+      h1 {
+        margin: 0;
+        color: #f5f2ff;
+        font-size: clamp(25px, 4vw, 34px);
+        font-weight: 650;
+        letter-spacing: -.025em;
+        line-height: 1.15;
+      }
+      .description {
+        max-width: 510px;
+        margin: 14px 0 0;
+        color: #b9c1d2;
+        font-size: 15px;
+        line-height: 1.65;
+      }
+      .actions {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        margin-top: 28px;
+        flex-wrap: wrap;
+      }
+      button {
+        min-height: 42px;
+        padding: 0 18px;
+        border: 1px solid #b8a8ff;
+        border-radius: 8px;
+        background: #a995ff;
+        color: #171526;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+        box-shadow: 0 7px 22px rgba(114, 88, 203, .25);
+      }
+      button:hover { background: #b8a9ff; }
+      button:focus-visible { outline: 3px solid rgba(169, 149, 255, .36); outline-offset: 3px; }
+      button:disabled { cursor: wait; opacity: .72; }
+      .alternative {
+        color: #929bad;
+        font-size: 12px;
+        line-height: 1.5;
+      }
+      code {
+        padding: 3px 6px;
+        border: 1px solid #454b5f;
+        border-radius: 5px;
+        background: #141824;
+        color: #d9d1ff;
+        font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      details {
+        margin-top: 28px;
+        padding-top: 20px;
+        border-top: 1px solid #353b4c;
+      }
+      summary {
+        width: fit-content;
+        color: #aab3c5;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      pre {
+        max-height: 190px;
+        overflow: auto;
+        margin: 14px 0 0;
+        padding: 14px;
+        border: 1px solid #363c4e;
+        border-radius: 8px;
+        background: #111520;
+        color: #c7cedd;
+        font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      @media (max-height: 560px) {
+        body { place-items: start center; }
+        main { padding: 26px; }
+        .icon { margin-bottom: 18px; }
+        .actions { margin-top: 20px; }
+        details { margin-top: 20px; padding-top: 16px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main role="alert" aria-labelledby="startup-error-title">
+      <div class="icon" aria-hidden="true">
+        <svg width="25" height="25" viewBox="0 0 24 24" fill="none">
+          <path d="M12 8v5m0 3.5v.01M10.3 3.8 2.5 17.2A2 2 0 0 0 4.2 20h15.6a2 2 0 0 0 1.7-2.8L13.7 3.8a2 2 0 0 0-3.4 0Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </div>
+      <p class="eyebrow">${eyebrow}</p>
+      <h1 id="startup-error-title">${title}</h1>
+      <p class="description">${description}</p>
+      <div class="actions">
+        <button id="startup-retry" type="button">${buttonLabel}</button>
+        <span class="alternative">Or run <code>drone hub restart</code> in a terminal.</span>
+      </div>
+      <details${restartRequired ? '' : ' open'}>
+        <summary>Technical details</summary>
+        <pre>${escaped}</pre>
+      </details>
+    </main>
+    <script>
+      document.getElementById('startup-retry').addEventListener('click', function () {
+        this.disabled = true;
+        this.textContent = 'Restarting…';
+        window.droneHubDesktop?.retryStartup?.();
+      });
+    </script>
+  </body>
+</html>`;
 }
 
 function createWindow() {
@@ -200,11 +381,73 @@ function createWindow() {
 }
 
 function showError(error) {
+  restartInProgress = false;
   const message = error && error.message ? error.message : String(error || 'Unknown error');
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(errorHtml(message))}`).catch(() => {});
   }
 }
+
+function restartHubFromError() {
+  if (restartInProgress || isQuitting) return;
+  restartInProgress = true;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    void mainWindow.loadURL(
+      `data:text/html;charset=utf-8,${encodeURIComponent(loadingHtml('Restarting Drone Hub…'))}`,
+    );
+  }
+
+  const stopAndStart = () => {
+    let stopProcess;
+    try {
+      const cliPath = resolveCliPath();
+      const nodePath = String(process.env.DRONE_HUB_NODE_PATH || '').trim() || 'node';
+      stopProcess = spawn(nodePath, [cliPath, 'hub', 'stop', '--json'], {
+        stdio: ['ignore', 'ignore', 'pipe'],
+        env: electronNodeChildEnv(process.env),
+      });
+    } catch (error) {
+      showError(error);
+      return;
+    }
+    let stderr = '';
+    let settled = false;
+    stopProcess.stderr.on('data', (chunk) => {
+      stderr += String(chunk || '');
+      if (stderr.length > 8000) stderr = stderr.slice(-8000);
+    });
+    stopProcess.once('error', (error) => {
+      if (settled) return;
+      settled = true;
+      showError(error);
+    });
+    stopProcess.once('exit', (code, signal) => {
+      if (settled) return;
+      settled = true;
+      if (code !== 0) {
+        showError(
+          `Drone Hub could not restart.\n\nThe existing Hub process could not be stopped (code ${code == null ? 'null' : code}, signal ${signal || 'null'}).\n\n${stderr.trim()}`,
+        );
+        return;
+      }
+      restartInProgress = false;
+      try {
+        startHub();
+      } catch (error) {
+        showError(error);
+      }
+    });
+  };
+
+  if (hubLauncherProcess) hubLauncherProcess.once('exit', stopAndStart);
+  else stopAndStart();
+}
+
+ipcMain.on(STARTUP_RETRY_CHANNEL, (event) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return;
+  if (!event.sender.getURL().startsWith('data:text/html')) return;
+  restartHubFromError();
+});
 
 function requestedTraceDurationMs() {
   const seconds = Number(process.env.DRONE_HUB_PERF_TRACE_SECONDS || 0);
