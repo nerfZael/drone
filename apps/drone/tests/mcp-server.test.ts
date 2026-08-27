@@ -456,6 +456,11 @@ describe('Drone Hub assistant MCP transport', () => {
       expect(catalog.tools.find((tool) => tool.name === 'ask_questions')?.description).toContain(
         'custom-answer field',
       );
+      const sendMessageDescription = catalog.tools.find(
+        (tool) => tool.name === 'send_message',
+      )?.description;
+      expect(sendMessageDescription).toContain('never live-steers or interrupts');
+      expect(sendMessageDescription).toContain('starts after the current one finishes');
       const hostAskResult = await client.callTool({
         name: 'ask_questions',
         arguments: {

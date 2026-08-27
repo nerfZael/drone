@@ -3249,7 +3249,8 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     'send_message',
     {
       title: 'Send drone message',
-      description: 'Send a message to a Drone Hub drone chat and return the queued run.',
+      description:
+        'Send a message to a Drone Hub drone chat as a new execution and return the queued run. This tool never live-steers or interrupts an execution already in progress; when the chat is busy, the new execution starts after the current one finishes.',
       inputSchema: {
         drone: z.string(),
         chat: z
