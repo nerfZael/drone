@@ -1956,16 +1956,25 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     if (typeof window === 'undefined') return;
     const handleAssistantOpenDroneChat = (event: Event) => {
       const detail = (event as CustomEvent<AssistantOpenDroneChatEventDetail>).detail;
-      const droneId = String(detail?.droneId ?? '').trim();
-      if (!droneId || !droneByIdRef.current[droneId]) return;
-      const chatName = String(detail?.chatName ?? '').trim() || 'default';
+      const requestedDroneId = String(detail?.droneId ?? '').trim();
+      let droneId = droneByIdRef.current[requestedDroneId] ? requestedDroneId : '';
+      if (!droneId) {
+        const requestedDroneName = String(detail?.droneName ?? '').trim();
+        const matchingDrones = Object.values(droneByIdRef.current).filter(
+          (drone) => String(drone?.name ?? '').trim() === requestedDroneName,
+        );
+        if (matchingDrones.length !== 1) return;
+        droneId = matchingDrones[0]!.id;
+      }
       expandGroupsForDroneIds([droneId]);
-      selectDroneChat(droneId, chatName);
+      const chatName = String(detail?.chatName ?? '').trim();
+      if (chatName) selectDroneChat(droneId, chatName);
+      else selectDroneCard(droneId);
     };
     window.addEventListener(ASSISTANT_OPEN_DRONE_CHAT_EVENT, handleAssistantOpenDroneChat);
     return () =>
       window.removeEventListener(ASSISTANT_OPEN_DRONE_CHAT_EVENT, handleAssistantOpenDroneChat);
-  }, [expandGroupsForDroneIds, selectDroneChat]);
+  }, [expandGroupsForDroneIds, selectDroneCard, selectDroneChat]);
   React.useEffect(() => {
     if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') return;
     let closed = false;

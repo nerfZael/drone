@@ -29,6 +29,17 @@ export type EventNotificationDataField = {
   value: string;
 };
 
+export type EventNotificationCollapsedSummary = {
+  title: string;
+  subtitle: string;
+};
+
+export type EventNotificationChatTarget = {
+  droneId: string;
+  droneName: string;
+  chatName: string;
+};
+
 function xmlEscape(value: unknown): string {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -235,6 +246,53 @@ export function eventNotificationEventLabel(eventTypeRaw: unknown): string {
       .join(' · ') ||
     'Resource changed'
   );
+}
+
+export function eventNotificationCollapsedSummary(
+  notification: EventNotificationDisplay,
+): EventNotificationCollapsedSummary {
+  if (notification.events.length !== 1) {
+    return {
+      title: `${notification.events.length} subscription events`,
+      subtitle: 'Subscribed resources changed',
+    };
+  }
+
+  const event = notification.events[0]!;
+  const eventLabel = eventNotificationEventLabel(event.eventType);
+  const chatTarget = eventNotificationChatTarget(event);
+  if (chatTarget) {
+    return {
+      title: `${eventLabel}: ${chatTarget.chatName}`,
+      subtitle: `Drone: ${chatTarget.droneName}`,
+    };
+  }
+
+  return {
+    title: eventLabel,
+    subtitle: eventNotificationResourceLabel(event),
+  };
+}
+
+export function eventNotificationChatTarget(
+  event: EventNotificationDisplayEvent,
+): EventNotificationChatTarget | null {
+  if (String(event.resourceType ?? '').trim() !== 'chat') return null;
+  try {
+    const content = JSON.parse(String(event.providerContentText ?? '')) as Record<
+      string,
+      unknown
+    >;
+    const droneId = String(content?.droneId ?? '').trim();
+    const droneName = String(content?.droneName ?? '').trim();
+    const chatName = String(content?.chatName ?? '').trim();
+    if (chatName && (droneId || droneName)) {
+      return { droneId, droneName: droneName || droneId, chatName };
+    }
+  } catch {
+    // Older or truncated notifications retain their non-interactive label fallback.
+  }
+  return null;
 }
 
 export function eventNotificationResourceLabel(input: {

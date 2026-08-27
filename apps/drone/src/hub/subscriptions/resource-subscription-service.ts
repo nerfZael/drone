@@ -982,6 +982,7 @@ function chatEvent(
     providerContent: {
       chatLabel,
       chatId: location.chatId,
+      droneId: location.droneId,
       droneName: String(location.droneName ?? '').trim() || location.droneId,
       chatName: location.chatName,
       latestMessage: String(status.latest?.text ?? '').slice(0, 8_000),

@@ -1,5 +1,7 @@
 import React from 'react';
 import {
+  eventNotificationChatTarget,
+  eventNotificationCollapsedSummary,
   eventNotificationCopyText,
   eventNotificationDataFields,
   eventNotificationEventLabel,
@@ -9,6 +11,7 @@ import {
   type EventNotificationDisplay,
 } from '@drone/assistant-chat';
 
+import { dispatchAssistantOpenDroneTarget } from '../assistant/open-drone-chat-event';
 import { UserChatMessage } from './UserChatMessage';
 
 export function SubscriptionEventBadge() {
@@ -46,37 +49,85 @@ function NotificationIcon() {
 
 function EventNotificationBody({ notification }: { notification: EventNotificationDisplay }) {
   const [expanded, setExpanded] = React.useState(false);
-  const first = notification.events[0]!;
-  const title =
-    notification.events.length === 1
-      ? eventNotificationEventLabel(first.eventType)
-      : `${notification.events.length} subscription events`;
-  const subtitle =
-    notification.events.length === 1
-      ? eventNotificationResourceLabel(first)
-      : 'Subscribed resources changed';
+  const { title, subtitle } = eventNotificationCollapsedSummary(notification);
+  const first = notification.events.length === 1 ? notification.events[0]! : null;
+  const chatTarget = first ? eventNotificationChatTarget(first) : null;
+  const eventLabel = first ? eventNotificationEventLabel(first.eventType) : '';
+  const openTarget = (chatName: string | null) => {
+    if (!chatTarget) return;
+    dispatchAssistantOpenDroneTarget({
+      droneId: chatTarget.droneId,
+      droneName: chatTarget.droneName,
+      chatName,
+    });
+  };
 
   return (
     <div className="w-[min(30rem,70vw)] min-w-0 max-w-full">
-      <button
-        type="button"
-        aria-expanded={expanded}
-        onClick={() => setExpanded((current) => !current)}
-        className="flex w-full items-center gap-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]"
-      >
-        <span className="flex h-7 w-5 shrink-0 items-center justify-start text-[var(--accent)]">
+      <div className="relative isolate flex w-full items-center gap-2.5 text-left">
+        <button
+          type="button"
+          aria-expanded={expanded}
+          aria-label={expanded ? 'Hide event details' : 'Show event details'}
+          onClick={() => setExpanded((current) => !current)}
+          className="absolute inset-0 z-0 rounded-[var(--radius-medium)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]"
+        />
+        <span className="pointer-events-none relative z-10 flex h-7 w-5 shrink-0 items-center justify-start text-[var(--accent)]">
           <NotificationIcon />
         </span>
-        <span className="min-w-0 flex-1">
-          <span className="block text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--user-bubble-fg)]">
-            {title}
-          </span>
-          <span className="mt-0.5 block truncate text-[var(--text-10)] text-[var(--user-muted)]">
-            {subtitle}
-          </span>
+        <span className="pointer-events-none relative z-10 min-w-0 flex-1">
+          {chatTarget ? (
+            <>
+              <span
+                className="flex min-w-0 items-baseline text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--user-bubble-fg)]"
+                title={title}
+              >
+                <span className="shrink-0">{eventLabel}:&nbsp;</span>
+                <button
+                  type="button"
+                  data-event-notification-chat-link="true"
+                  aria-label={`Open chat ${chatTarget.chatName} in drone ${chatTarget.droneName}`}
+                  onClick={() => openTarget(chatTarget.chatName)}
+                  className="pointer-events-auto min-w-0 cursor-pointer truncate hover:text-[var(--accent)] focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+                >
+                  {chatTarget.chatName}
+                </button>
+              </span>
+              <span
+                className="mt-0.5 flex min-w-0 items-baseline text-[var(--text-10)] text-[var(--user-muted)]"
+                title={subtitle}
+              >
+                <span className="shrink-0">Drone:&nbsp;</span>
+                <button
+                  type="button"
+                  data-event-notification-drone-link="true"
+                  aria-label={`Open drone ${chatTarget.droneName}`}
+                  onClick={() => openTarget(null)}
+                  className="pointer-events-auto min-w-0 cursor-pointer truncate hover:text-[var(--accent)] focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+                >
+                  {chatTarget.droneName}
+                </button>
+              </span>
+            </>
+          ) : (
+            <>
+              <span
+                className="block truncate text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--user-bubble-fg)]"
+                title={title}
+              >
+                {title}
+              </span>
+              <span
+                className="mt-0.5 block truncate text-[var(--text-10)] text-[var(--user-muted)]"
+                title={subtitle}
+              >
+                {subtitle}
+              </span>
+            </>
+          )}
         </span>
         <svg
-          className={`h-3.5 w-3.5 shrink-0 text-[var(--user-muted)] transition-transform ${expanded ? 'rotate-180' : ''}`}
+          className={`pointer-events-none relative z-10 h-3.5 w-3.5 shrink-0 text-[var(--user-muted)] transition-transform ${expanded ? 'rotate-180' : ''}`}
           viewBox="0 0 16 16"
           fill="none"
           aria-hidden="true"
@@ -89,7 +140,7 @@ function EventNotificationBody({ notification }: { notification: EventNotificati
             strokeLinejoin="round"
           />
         </svg>
-      </button>
+      </div>
       {expanded ? (
         <div className="mt-3 border-t border-[var(--user-bubble-border)]">
           {notification.events.map((event, index) => {

@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  eventNotificationChatTarget,
+  eventNotificationCollapsedSummary,
   eventNotificationDataFields,
   eventNotificationEventLabel,
   eventNotificationResourceLabel,
@@ -9,6 +11,44 @@ import {
 } from '../src/event-notification';
 
 describe('event notification prompts', () => {
+  test('shows chat status and context in two concise collapsed rows', () => {
+    const event = {
+      provider: 'drone-hub',
+      resourceType: 'chat',
+      resourceId: '415ee2a4-f0b4-49da-b3e0-23d7096f5090',
+      eventType: 'chat.idle',
+      occurredAt: null,
+      summary: 'Build RTS frontend foundation-copy / in-game-menu-gallery-review became idle.',
+      providerContentText: JSON.stringify({
+        chatLabel: 'Build RTS frontend foundation-copy / in-game-menu-gallery-review',
+        droneName: 'Build RTS frontend foundation-copy',
+        chatName: 'in-game-menu-gallery-review',
+      }),
+    };
+
+    expect(
+      eventNotificationCollapsedSummary({ version: 1, legacy: false, events: [event] }),
+    ).toEqual({
+      title: 'Chat idle: in-game-menu-gallery-review',
+      subtitle: 'Drone: Build RTS frontend foundation-copy',
+    });
+    expect(eventNotificationChatTarget(event)).toEqual({
+      droneId: '',
+      droneName: 'Build RTS frontend foundation-copy',
+      chatName: 'in-game-menu-gallery-review',
+    });
+    expect(
+      eventNotificationCollapsedSummary({
+        version: 1,
+        legacy: false,
+        events: [{ ...event, eventType: 'chat.failed' }],
+      }),
+    ).toEqual({
+      title: 'Chat failed: in-game-menu-gallery-review',
+      subtitle: 'Drone: Build RTS frontend foundation-copy',
+    });
+  });
+
   test('round-trips display data while keeping intent out of the parsed UI model', () => {
     const prompt = renderEventNotificationPrompt({
       events: [

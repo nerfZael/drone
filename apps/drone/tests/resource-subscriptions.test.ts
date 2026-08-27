@@ -579,6 +579,7 @@ describe('chat subscription transitions', () => {
       providerContent: {
         chatLabel: 'Workstream 2 / 02 Character Models',
         chatId: 'target-chat',
+        droneId: 'drone-b',
         droneName: 'Workstream 2',
         chatName: '02 Character Models',
       },

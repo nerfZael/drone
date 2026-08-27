@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Bell from 'lucide-react-native/icons/bell';
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
 import {
+  eventNotificationCollapsedSummary,
   eventNotificationDataFields,
   eventNotificationEventLabel,
   eventNotificationResourceLabel,
@@ -19,15 +20,7 @@ export function MobileEventNotification({
   onLongPress?: () => void;
 }) {
   const [expanded, setExpanded] = React.useState(false);
-  const first = notification.events[0]!;
-  const title =
-    notification.events.length === 1
-      ? eventNotificationEventLabel(first.eventType)
-      : `${notification.events.length} subscription events`;
-  const subtitle =
-    notification.events.length === 1
-      ? eventNotificationResourceLabel(first)
-      : 'Subscribed resources changed';
+  const { title, subtitle } = eventNotificationCollapsedSummary(notification);
 
   return (
     <View style={styles.group}>

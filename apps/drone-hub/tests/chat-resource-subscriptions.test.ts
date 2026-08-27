@@ -261,6 +261,8 @@ describe('chat resource subscription presentation', () => {
           providerContent: {
             chatLabel: 'Workstream 2 / 02 Character Models',
             chatId: '415ee2a4-f0b4-49da-b3e0-23d7096f5090',
+            droneName: 'Workstream 2',
+            chatName: '02 Character Models',
           },
         },
       ],
@@ -268,7 +270,12 @@ describe('chat resource subscription presentation', () => {
     const chatHtml = renderToStaticMarkup(
       React.createElement(SubscriptionEventMessage, { prompt: chatPrompt }),
     );
-    expect(chatHtml).toContain('Chat idle');
-    expect(chatHtml).toContain('Chat · Workstream 2 / 02 Character Models');
+    expect(chatHtml).toContain('Chat idle: 02 Character Models');
+    expect(chatHtml).toContain('Drone: Workstream 2');
+    expect(chatHtml).not.toContain('Chat · Workstream 2 / 02 Character Models');
+    expect(chatHtml).toContain('data-event-notification-chat-link="true"');
+    expect(chatHtml).toContain('data-event-notification-drone-link="true"');
+    expect(chatHtml).toContain('aria-label="Open chat 02 Character Models in drone Workstream 2"');
+    expect(chatHtml).toContain('aria-label="Open drone Workstream 2"');
   });
 });
