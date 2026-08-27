@@ -9,9 +9,7 @@ describe('terminal prompt wake-up', () => {
     const handleTerminalPrompt = createTerminalPromptWakeHandler({
       normalizeDroneId: (value) => value.trim(),
       normalizeChatName: (value) => value.trim() || 'default',
-      listChatNames: async () => ['default', 'default', 'other'],
-      readPendingPrompts: async (_droneId, chatName) =>
-        chatName === 'default' ? [{ id: 'active-prompt' }] : [{ id: 'different-prompt' }],
+      findChatNamesForPrompt: async () => ['default', 'default'],
       enqueueReconcile: (droneId, chatName) => reconciled.push(`${droneId}/${chatName}`),
       enqueuePromptPump: (droneId, chatName) => pumped.push(`${droneId}/${chatName}`),
     });
@@ -27,8 +25,7 @@ describe('terminal prompt wake-up', () => {
     const handleTerminalPrompt = createTerminalPromptWakeHandler({
       normalizeDroneId: (value) => value.trim(),
       normalizeChatName: (value) => value.trim() || 'default',
-      listChatNames: async () => ['default'],
-      readPendingPrompts: async () => [{ id: 'another-prompt' }],
+      findChatNamesForPrompt: async () => [],
       enqueueReconcile: (_droneId, chatName) => wakeups.push(`reconcile:${chatName}`),
       enqueuePromptPump: (_droneId, chatName) => wakeups.push(`pump:${chatName}`),
     });

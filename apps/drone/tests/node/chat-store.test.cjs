@@ -26,6 +26,7 @@ const {
   readChatFromStore,
   readDroneChatCleanupProjectionFromStore,
   readChatReadStateFromStore,
+  readTranscriptTurnsByIdsFromStore,
   readTranscriptTurnsFromStore,
   renameChatInStore,
   restoreArchivedChatInStore,
@@ -642,6 +643,14 @@ describe('canonical chat and transcript repository', () => {
     assert.deepEqual(
       readTranscriptTurnsFromStore({ droneId: 'drone-1', chatName: 'default', indexes: [0, 1] })
         .turns.map((item) => item.turn.id),
+      ['earlier', 'later'],
+    );
+    assert.deepEqual(
+      readTranscriptTurnsByIdsFromStore({
+        droneId: 'drone-1',
+        chatName: 'default',
+        turnIds: [' later ', 'missing', 'earlier', 'later', ''],
+      }).map((turn) => turn.id).sort(),
       ['earlier', 'later'],
     );
 

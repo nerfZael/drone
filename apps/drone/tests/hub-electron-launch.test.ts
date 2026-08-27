@@ -64,6 +64,19 @@ describe('Drone Hub Electron background launch', () => {
     expect(mainSource).toContain('desktopStaticUiServer.url');
   });
 
+  test('keeps one Electron app instance and focuses it on repeated launches', () => {
+    const mainSource = readFileSync(
+      new URL('../desktop/hub-electron-main.cjs', import.meta.url),
+      'utf8',
+    );
+
+    expect(mainSource).toContain('app.requestSingleInstanceLock()');
+    expect(mainSource).toContain("app.on('second-instance'");
+    expect(mainSource).toContain('if (mainWindow.isMinimized()) mainWindow.restore()');
+    expect(mainSource).toContain('mainWindow.show()');
+    expect(mainSource).toContain('mainWindow.focus()');
+  });
+
   test('reads the UI URL returned for a newly started daemon', () => {
     const result = parseDetachedHubStartOutput(`log line\n${JSON.stringify({
       ok: true,
@@ -93,6 +106,28 @@ describe('Drone Hub Electron background launch', () => {
         state: { pid: 353573 },
       }),
     ).toBe('Drone Hub is already running (PID 353573).');
+    expect(
+      formatDetachedHubStartOutput({
+        ok: true,
+        alreadyRunning: true,
+        buildMismatch: true,
+        reason: 'Drone Hub is running an older app build.',
+        state: { pid: 353573 },
+      }),
+    ).toBe(
+      'Drone Hub is already running (PID 353573). Restart required: Drone Hub is running an older app build.',
+    );
+  });
+
+  test('shows a restart-required screen instead of attaching to an older Hub build', () => {
+    const mainSource = readFileSync(
+      new URL('../desktop/hub-electron-main.cjs', import.meta.url),
+      'utf8',
+    );
+
+    expect(mainSource).toContain('if (payload.buildMismatch)');
+    expect(mainSource).toContain('Restart required');
+    expect(mainSource).toContain('drone hub stop');
   });
 
   test('rejects launcher output without a usable UI address', () => {

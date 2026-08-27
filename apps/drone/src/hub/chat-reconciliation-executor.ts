@@ -3,6 +3,7 @@ import { codexPromptOwnsResponse } from './codex-prompt-run';
 import type { PendingPrompt } from './drone-pending-prompts';
 import { finalizeDroneRunFileChanges } from './run-file-changes';
 import { completePendingChatFork } from './chat-fork';
+import { readChatReconciliationEntry } from './chat-reconciliation-read';
 import type { BuiltinTranscriptAgentId } from './pendingPromptEnqueue';
 import {
   BUILTIN_TRANSCRIPT_SESSION_FIELD_BY_AGENT,
@@ -42,7 +43,8 @@ export type ChatReconciliationExecutorDependencies = {
   parseStructuredAgentJobTranscript: any;
   projectCanonicalChatToRegistry: any;
   pruneCompletedPendingPrompts: any;
-  readChatFromStore: any;
+  readChatMetadataFromStore: any;
+  readChatRowsFromStore: any;
   recoverStalePromptJobSession: any;
   resolveCanonicalDroneOrPendingForReadRef: any;
   resolveCodexTurnRuntime: any;
@@ -92,7 +94,8 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
     parseStructuredAgentJobTranscript,
     projectCanonicalChatToRegistry,
     pruneCompletedPendingPrompts,
-    readChatFromStore,
+    readChatMetadataFromStore,
+    readChatRowsFromStore,
     recoverStalePromptJobSession,
     resolveCanonicalDroneOrPendingForReadRef,
     resolveCodexTurnRuntime,
@@ -196,20 +199,22 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
     const chatName = normalizeChatName(opts.chatName);
     let d: any = null;
     let entry: any = null;
+    const readReconciliationEntryFromStore = () =>
+      readChatReconciliationEntry(
+        { droneId, chatName },
+        { readChatMetadataFromStore, readChatRowsFromStore },
+      );
     if (!(globalThis as any).Bun) {
       const resolved = droneId ? await resolveCanonicalDroneOrPendingForReadRef(droneId) : null;
       if (resolved?.kind === 'real') d = resolved.drone;
-      const stored = droneId ? readChatFromStore({ droneId, chatName }) : null;
-      entry = stored?.available ? stored.chat : null;
+      entry = droneId ? readReconciliationEntryFromStore() : null;
     } else {
       const regAny: any = await loadRegistry();
       d = droneId ? regAny?.drones?.[droneId] : null;
       const registryEntry = d?.chats?.[chatName];
       if (registryEntry) {
         await importChatFromRegistry({ droneId, chatName, chatEntry: registryEntry });
-        const projectedEntry = readChatFromStore({ droneId, chatName });
-        entry =
-          projectedEntry.available && projectedEntry.chat ? projectedEntry.chat : registryEntry;
+        entry = readReconciliationEntryFromStore() ?? registryEntry;
       }
     }
     if (!d) return;

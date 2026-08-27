@@ -1991,6 +1991,30 @@ export class ChatTranscriptRepository {
     });
   }
 
+  readTurnsByIds(opts: {
+    droneId: string;
+    chatName: string;
+    turnIds: string[];
+  }): StoredTranscriptTurn[] {
+    const turnIds = [
+      ...new Set(opts.turnIds.map((id) => String(id ?? '').trim()).filter(Boolean)),
+    ];
+    if (turnIds.length === 0) return [];
+    return this.database.read((connection) => {
+      const turns: StoredTranscriptTurn[] = [];
+      for (let offset = 0; offset < turnIds.length; offset += 400) {
+        const batch = turnIds.slice(offset, offset + 400);
+        const placeholders = batch.map(() => '?').join(', ');
+        const rows = connection
+          .prepare(`SELECT turn_json FROM canonical_chat_turns
+            WHERE drone_id = ? AND chat_name = ? AND turn_id IN (${placeholders})`)
+          .all(opts.droneId, opts.chatName, ...batch) as TurnRow[];
+        turns.push(...rows.map((row) => normalizeTurn(parseJson(row.turn_json))));
+      }
+      return turns;
+    });
+  }
+
   async clearAllForTests(): Promise<void> {
     await this.database.writeTransaction('clear canonical chats for tests', (connection) => {
       connection.exec(`
@@ -3190,6 +3214,22 @@ export function readTranscriptTurnsFromStore(opts: { droneId: string; chatName: 
   if (store) return store.read(opts);
   const turns = sortedTurns(memoryTurnMap(opts.droneId, opts.chatName).values());
   return { available: true, count: turns.length, transcriptVersion: turns.length, sourceHash: transcriptTurnsSourceHash(turns), turns: opts.indexes.map((index) => turns[index] ? { index, turn: turns[index] } : null).filter((item): item is { index: number; turn: StoredTranscriptTurn } => Boolean(item)) };
+}
+
+export function readTranscriptTurnsByIdsFromStore(opts: {
+  droneId: string;
+  chatName: string;
+  turnIds: string[];
+}): StoredTranscriptTurn[] {
+  const store = repository();
+  if (store) return store.readTurnsByIds(opts);
+  const turns = memoryTurnMap(opts.droneId, opts.chatName);
+  return [
+    ...new Set(opts.turnIds.map((id) => String(id ?? '').trim()).filter(Boolean)),
+  ].flatMap((id) => {
+    const turn = turns.get(id);
+    return turn ? [turn] : [];
+  });
 }
 
 export function countTranscriptTurnsFromStore(opts: { droneId: string; chatName: string }): { available: boolean; count: number; transcriptVersion: number; sourceHash: string } {

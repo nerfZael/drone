@@ -207,6 +207,16 @@ export const PROMPT_QUEUE_MIGRATIONS: readonly HubDatabaseMigration[] = [
       `);
     },
   },
+  {
+    version: 5,
+    name: 'prompt event lookup by drone and prompt id',
+    migrate(connection) {
+      connection.exec(`
+        CREATE INDEX idx_prompts_drone_prompt
+          ON prompts (drone_id, prompt_id, chat_name);
+      `);
+    },
+  },
 ];
 
 type PromptRow = {
@@ -731,6 +741,21 @@ export class PromptQueueRepository {
   get(opts: { droneId: string; chatName: string; promptId: string }): PromptQueueRecord | null {
     return this.database.read((connection) =>
       rowForPrompt(connection, opts.droneId, opts.chatName, opts.promptId),
+    );
+  }
+
+  findChatNamesForPrompt(opts: { droneId: string; promptId: string }): string[] {
+    return this.database.read((connection) =>
+      (
+        connection
+          .prepare(
+            `SELECT chat_name
+             FROM prompts
+             WHERE drone_id = ? AND prompt_id = ? AND state != 'cancelled'
+             ORDER BY sequence`,
+          )
+          .all(opts.droneId, opts.promptId) as Array<{ chat_name: string }>
+      ).map((row) => row.chat_name),
     );
   }
 

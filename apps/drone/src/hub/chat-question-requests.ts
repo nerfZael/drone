@@ -660,13 +660,20 @@ export class ChatQuestionRequestService {
 }
 
 let cached: ChatQuestionRequestService | null = null;
+let cachedDatabase: HubDatabase | null = null;
 
 export function getChatQuestionRequestService(): ChatQuestionRequestService {
-  if (!cached) cached = new ChatQuestionRequestService();
+  const database = getHubDatabase();
+  if (!cached || cachedDatabase !== database) {
+    cached?.close();
+    cached = new ChatQuestionRequestService(database);
+    cachedDatabase = database;
+  }
   return cached;
 }
 
 export function resetChatQuestionRequestServiceForTests(): void {
   cached?.close();
   cached = null;
+  cachedDatabase = null;
 }

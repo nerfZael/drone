@@ -52,6 +52,7 @@ export type HubState = {
   } | null;
   startedAt: string;
   logPath: string;
+  buildId: string | null;
   launchEnv: HubLaunchEnvSnapshot | null;
 };
 
@@ -169,6 +170,7 @@ async function readHubState(rootDir?: string): Promise<HubState | null> {
       containerMcp: parseHubContainerMcpState(parsed.containerMcp),
       startedAt: typeof parsed.startedAt === 'string' ? parsed.startedAt : new Date().toISOString(),
       logPath: typeof parsed.logPath === 'string' ? parsed.logPath : path.join(droneDir(rootDir), 'hub.log'),
+      buildId: typeof parsed.buildId === 'string' && parsed.buildId.trim() ? parsed.buildId.trim() : null,
       launchEnv: parsed.launchEnv ?? null,
     };
   } catch {

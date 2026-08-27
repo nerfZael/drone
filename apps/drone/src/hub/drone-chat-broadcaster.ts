@@ -8,7 +8,10 @@ export class DroneChatBroadcaster {
 
   private refreshTimeout: ReturnType<typeof setTimeout> | null = null;
   private keepAliveTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly pendingChanges = new Map<string, ChatRef>();
+  private fullRefreshPending = false;
   private busy = false;
+  private snapshotInitialized = false;
 
   constructor(
     private readonly deps: {
@@ -79,6 +82,7 @@ export class DroneChatBroadcaster {
   private replaceSnapshot(next: Map<string, string>): void {
     this.lastByKey.clear();
     for (const [key, fingerprint] of next) this.lastByKey.set(key, fingerprint);
+    this.snapshotInitialized = true;
   }
 
   private broadcast(event: string, data: any): void {
@@ -91,12 +95,41 @@ export class DroneChatBroadcaster {
     }
   }
 
+  private ensureRefreshScheduled(delayMs: number): void {
+    // A timer that fires while a snapshot is being built cannot do useful
+    // work. Leave the request pending and let refresh() schedule it after the
+    // in-flight build releases the broadcaster.
+    if (this.clients.size === 0 || this.refreshTimeout || this.busy) return;
+    this.refreshTimeout = setTimeout(
+      () => {
+        this.refreshTimeout = null;
+        void this.refresh();
+      },
+      Math.max(0, delayMs),
+    );
+    this.refreshTimeout.unref?.();
+  }
+
   async refresh(opts?: { broadcastSnapshot?: boolean }): Promise<void> {
     if (this.clients.size === 0 || this.busy) return;
     this.busy = true;
+    const claimedChanges = new Map(this.pendingChanges);
+    const claimedFullRefresh = this.fullRefreshPending;
+    this.pendingChanges.clear();
+    this.fullRefreshPending = false;
     try {
+      if (
+        !opts?.broadcastSnapshot &&
+        !claimedFullRefresh &&
+        (this.snapshotInitialized || this.lastByKey.size > 0) &&
+        claimedChanges.size > 0
+      ) {
+        const chats = Array.from(claimedChanges.values());
+        this.broadcast('chat_delta', { ok: true, chats, removed: [], at: this.deps.nowIso() });
+        return;
+      }
       const next = await this.buildSnapshot();
-      if (opts?.broadcastSnapshot || this.lastByKey.size === 0) {
+      if (opts?.broadcastSnapshot || (!this.snapshotInitialized && this.lastByKey.size === 0)) {
         this.replaceSnapshot(next);
         this.broadcast('snapshot', {
           ok: true,
@@ -130,22 +163,28 @@ export class DroneChatBroadcaster {
         });
       }
     } catch (error: any) {
+      if (claimedFullRefresh) this.fullRefreshPending = true;
+      for (const [key, change] of claimedChanges) {
+        if (!this.pendingChanges.has(key)) this.pendingChanges.set(key, change);
+      }
       this.broadcast('stream-error', { ok: false, error: error?.message ?? String(error) });
     } finally {
       this.busy = false;
+      if (this.fullRefreshPending || this.pendingChanges.size > 0) {
+        this.ensureRefreshScheduled(0);
+      }
     }
   }
 
-  schedule(delayMs = 100): void {
-    if (this.clients.size === 0 || this.refreshTimeout) return;
-    this.refreshTimeout = setTimeout(
-      () => {
-        this.refreshTimeout = null;
-        void this.refresh();
-      },
-      Math.max(0, delayMs),
-    );
-    this.refreshTimeout.unref?.();
+  schedule(delayMs = 100, change?: ChatRef): void {
+    if (change) {
+      const droneId = this.deps.normalizeDroneId(change.droneId);
+      const chatName = this.deps.normalizeChatName(change.chatName);
+      if (droneId && chatName) this.pendingChanges.set(this.key(droneId, chatName), { droneId, chatName });
+    } else {
+      this.fullRefreshPending = true;
+    }
+    this.ensureRefreshScheduled(delayMs);
   }
 
   start(): void {
@@ -170,7 +209,10 @@ export class DroneChatBroadcaster {
     if (this.keepAliveTimer) clearInterval(this.keepAliveTimer);
     this.refreshTimeout = null;
     this.keepAliveTimer = null;
+    this.pendingChanges.clear();
+    this.fullRefreshPending = false;
     this.busy = false;
+    this.snapshotInitialized = false;
     this.clients.clear();
   }
 }

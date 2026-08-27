@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 
 import { updateRegistry } from '../src/host/registry';
-import { createDronePendingPromptStore } from '../src/hub/drone-pending-prompts';
+import {
+  createDronePendingPromptStore,
+  filterCompletedSentPromptBlockers,
+} from '../src/hub/drone-pending-prompts';
 import {
   createPendingDroneStateHelpers,
   hasQueuedPromptWithId,
@@ -21,10 +24,22 @@ const pendingPromptStore = createDronePendingPromptStore({
   normalizePendingPromptText: pendingStateHelpers.normalizePendingPromptText,
   normalizePendingStartupPrompts: pendingStateHelpers.normalizePendingStartupPrompts,
   nowIso: () => '2026-03-26T10:00:00.000Z',
+  readTranscriptTurnsByIdsFromStore: () => [],
   startupPromptToPendingPrompt: pendingStateHelpers.startupPromptToPendingPrompt,
 });
 
 describe('drone pending prompt store', () => {
+  test('omits completed sent blockers but retains unresolved sent prompts', () => {
+    const at = '2026-03-26T10:00:00.000Z';
+    const prompts = [
+      { id: 'completed', at, prompt: 'completed', state: 'sent' as const },
+      { id: 'unresolved', at, prompt: 'unresolved', state: 'sent' as const },
+      { id: 'follow-up', at, prompt: 'follow-up', state: 'queued' as const },
+    ];
+    expect(filterCompletedSentPromptBlockers(prompts, [{ id: 'completed' }]).map(({ id }) => id))
+      .toEqual(['unresolved', 'follow-up']);
+  });
+
   test('keeps the Hub queued fallback while using canonical pending states', () => {
     expect(pendingStateHelpers.normalizePendingPromptState(' sent ')).toBe('sent');
     expect(pendingStateHelpers.normalizePendingPromptState('running')).toBe('queued');

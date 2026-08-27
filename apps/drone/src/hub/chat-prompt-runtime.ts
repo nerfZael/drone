@@ -12,7 +12,10 @@ import { DroneApiRequestError } from '../host/api';
 import { commandForPid } from '../host/process-inspection';
 import type { ChatImageAttachment, ChatImageAttachmentRef } from './chat-attachments';
 import type { AgentPermissionMode, BuiltinAgentId, ChatAgentConfig } from './chat-types';
-import type { PromptSubmissionSource } from '../host/prompt-queue-repository';
+import {
+  getPromptQueueRepository,
+  type PromptSubmissionSource,
+} from '../host/prompt-queue-repository';
 import { ChatReconciliationQueue } from './chat-reconciliation-queue';
 import { createChatReconciliationExecutor } from './chat-reconciliation-executor';
 import { pendingCodexApprovalsForNeverAsk } from './codex-never-ask';
@@ -134,6 +137,9 @@ type ChatPromptRuntimeDependencyName =
   | 'promptWithImageAttachments'
   | 'readBuiltinTranscriptSessionId'
   | 'readChatFromStore'
+  | 'readChatMetadataFromStore'
+  | 'readChatRowsFromStore'
+  | 'readTranscriptTurnsByIdsFromStore'
   | 'readChatAttachmentsFromRefs'
   | 'resetTranscriptStoreForTests'
   | 'resolveBlipPromptCommand'
@@ -287,6 +293,9 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     promptWithImageAttachments,
     readBuiltinTranscriptSessionId,
     readChatFromStore,
+    readChatMetadataFromStore,
+    readChatRowsFromStore,
+    readTranscriptTurnsByIdsFromStore,
     readChatAttachmentsFromRefs,
     resetTranscriptStoreForTests,
     resolveBlipPromptCommand,
@@ -1180,9 +1189,13 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
   const handleTerminalPromptWake = createTerminalPromptWakeHandler({
     normalizeDroneId: normalizeDroneIdentity,
     normalizeChatName,
-    listChatNames: async (droneId) => {
+    findChatNamesForPrompt: async (droneId, promptId) => {
+      const promptQueue = getPromptQueueRepository();
+      if (promptQueue) return promptQueue.findChatNamesForPrompt({ droneId, promptId });
+
+      // Bun ABI tests can run without native SQLite. Preserve the in-memory
+      // fallback without loading complete transcript history for every chat.
       const stored = listChatsFromStore({ droneId });
-      if (stored.available && !(globalThis as any).Bun) return stored.chats;
       let registryChatNames: string[] = [];
       try {
         const registry = await loadRegistry();
@@ -1193,13 +1206,23 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       } catch {
         // Canonical chat and prompt state is enough to handle the wake-up.
       }
-      return [...stored.chats, ...registryChatNames];
-    },
-    readPendingPrompts: async (droneId, chatName) => {
-      const stored = readChatFromStore({ droneId, chatName });
-      return stored.available && Array.isArray(stored.chat?.pendingPrompts)
-        ? stored.chat.pendingPrompts
-        : [];
+      const matches: string[] = [];
+      for (const chatName of new Set([...stored.chats, ...registryChatNames])) {
+        const rows = readChatRowsFromStore({
+          droneId,
+          chatName,
+          indexes: [],
+          includePending: true,
+        });
+        if (
+          rows?.available &&
+          Array.isArray(rows.pending) &&
+          rows.pending.some((item: any) => String(item?.id ?? '').trim() === promptId)
+        ) {
+          matches.push(chatName);
+        }
+      }
+      return matches;
     },
     enqueueReconcile,
     enqueuePromptPump: enqueuePendingPromptPump,
@@ -1339,6 +1362,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     nowIso,
     onPendingPromptChanged: ({ droneId, chatName }: any) =>
       notifyDroneChatWrite?.(droneId, chatName),
+    readTranscriptTurnsByIdsFromStore,
     startupPromptToPendingPrompt,
   });
 
@@ -2769,7 +2793,8 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     parseStructuredAgentJobTranscript,
     projectCanonicalChatToRegistry,
     pruneCompletedPendingPrompts,
-    readChatFromStore,
+    readChatMetadataFromStore,
+    readChatRowsFromStore,
     recoverStalePromptJobSession,
     resolveCanonicalDroneOrPendingForReadRef,
     resolveCodexTurnRuntime,

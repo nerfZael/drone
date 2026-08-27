@@ -32,6 +32,7 @@ if (process.platform === 'linux') {
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.drone.hub');
 }
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
 function resolveCliPath() {
   const explicit = String(process.env.DRONE_HUB_CLI_PATH || '').trim();
@@ -284,6 +285,11 @@ function startHub() {
     }
     void (async () => {
       try {
+        if (payload.buildMismatch) {
+          throw new Error(
+            'Restart required\n\nDrone Hub is running an older app build. Close this window, run `drone hub stop`, then reopen Drone Hub.',
+          );
+        }
         if (payload.alreadyRunning) {
           const staticDir = resolveDesktopStaticUiDir(__dirname, process.env.DRONE_HUB_STATIC_UI_DIR);
           const tokenPath = resolveHubApiTokenPath(payload);
@@ -344,23 +350,34 @@ function startHub() {
 
 Menu.setApplicationMenu(null);
 
-app.whenReady().then(() => {
-  const appIconPath = resolveAppIconPath();
-  if (process.platform === 'darwin' && appIconPath) app.dock?.setIcon(appIconPath);
-  createWindow();
-  startHub();
-});
-
-app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow();
-});
-
-app.on('before-quit', () => {
-  isQuitting = true;
-  void desktopStaticUiServer?.close();
-  desktopStaticUiServer = null;
-});
-
-app.on('window-all-closed', () => {
+if (!hasSingleInstanceLock) {
   app.quit();
-});
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  });
+
+  app.whenReady().then(() => {
+    const appIconPath = resolveAppIconPath();
+    if (process.platform === 'darwin' && appIconPath) app.dock?.setIcon(appIconPath);
+    createWindow();
+    startHub();
+  });
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+
+  app.on('before-quit', () => {
+    isQuitting = true;
+    void desktopStaticUiServer?.close();
+    desktopStaticUiServer = null;
+  });
+
+  app.on('window-all-closed', () => {
+    app.quit();
+  });
+}

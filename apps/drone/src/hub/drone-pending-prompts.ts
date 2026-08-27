@@ -76,6 +76,18 @@ export type RetryPendingPromptResult = {
   nextAttemptAt?: string;
 };
 
+export function filterCompletedSentPromptBlockers(
+  prompts: PendingPrompt[],
+  turns: Array<{ id?: unknown }>,
+): PendingPrompt[] {
+  const completedIds = completedTurnIds(turns);
+  if (completedIds.size === 0) return prompts;
+  return prompts.filter(
+    (prompt) =>
+      !(prompt.state === 'sent' && completedIds.has(String(prompt.id ?? '').trim())),
+  );
+}
+
 const RECENT_COMPLETED_PENDING_PROMPT_GRACE_MS = 2 * 60_000;
 
 export function createDronePendingPromptStore(deps: {
@@ -86,6 +98,11 @@ export function createDronePendingPromptStore(deps: {
   normalizePendingStartupPrompts: (raw: unknown, chatNameFilter?: string) => PendingStartupPrompt[];
   nowIso: () => string;
   onPendingPromptChanged?: (change: { droneId: string; chatName: string }) => void;
+  readTranscriptTurnsByIdsFromStore: (opts: {
+    droneId: string;
+    chatName: string;
+    turnIds: string[];
+  }) => Array<{ id?: unknown }>;
   startupPromptToPendingPrompt: (prompt: PendingStartupPrompt) => PendingPrompt;
 }) {
   function notifyPendingPromptChanged(droneId: string, chatName: string): void {
@@ -411,14 +428,20 @@ export function createDronePendingPromptStore(deps: {
     if (!queue || !droneId) return null;
     const candidate = queue.nextQueued({ droneId, chatName });
     if (!candidate) return { candidateId: '', prompts: [] };
+    const prompts = queue.listThrough({
+      droneId,
+      chatName,
+      promptId: candidate.id,
+      limit: 100,
+    }) as PendingPrompt[];
+    const turns = deps.readTranscriptTurnsByIdsFromStore({
+      droneId,
+      chatName,
+      turnIds: prompts.map((prompt) => String(prompt.id ?? '').trim()).filter(Boolean),
+    });
     return {
       candidateId: candidate.id,
-      prompts: queue.listThrough({
-        droneId,
-        chatName,
-        promptId: candidate.id,
-        limit: 100,
-      }) as PendingPrompt[],
+      prompts: filterCompletedSentPromptBlockers(prompts, turns),
     };
   }
 

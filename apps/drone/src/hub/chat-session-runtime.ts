@@ -48,6 +48,30 @@ export async function resolveStoredChatEntry(input: {
   return imported.available ? imported.chat : input.registryChatEntry;
 }
 
+export function projectPromptRuntimeChatEntry(input: {
+  metadata: { available: boolean; chat: any | null };
+  rows: {
+    available: boolean;
+    pending?: any[];
+    pendingTurns?: any[];
+  };
+}): any | null {
+  if (!input.metadata.available || !input.metadata.chat) return null;
+  return {
+    ...input.metadata.chat,
+    // Prompt dispatch only needs canonical pending rows and the transcript
+    // turns whose ids match those rows. Loading the entire transcript here is
+    // expensive for long-running manager chats, but omitting these turns makes
+    // completed `sent` rows look active and blocks every queued follow-up.
+    pendingPrompts:
+      input.rows.available && Array.isArray(input.rows.pending) ? input.rows.pending : [],
+    turns:
+      input.rows.available && Array.isArray(input.rows.pendingTurns)
+        ? input.rows.pendingTurns
+        : [],
+  };
+}
+
 function normalizeAgentRunFileChanges(raw: unknown): AgentRunFileChanges | undefined {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
   const candidate = raw as Partial<AgentRunFileChanges>;
@@ -104,6 +128,7 @@ export type ChatSessionRuntimeDependencies = {
   patchChatMetadataInStore: any;
   pruneCompletedPendingPrompts: any;
   readChatFromStore: any;
+  readChatMetadataFromStore: any;
   readChatRowsFromStore: any;
   readChatVersionFromStore: any;
   readPendingPrompts: any;
@@ -173,6 +198,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     patchChatMetadataInStore,
     pruneCompletedPendingPrompts,
     readChatFromStore,
+    readChatMetadataFromStore,
     readChatRowsFromStore,
     readChatVersionFromStore,
     readPendingPrompts,
@@ -564,9 +590,17 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       const droneId = normalizeDroneIdentity(opts.droneId);
       const resolved = droneId ? await resolveCanonicalDroneOrPendingForReadRef(droneId) : null;
       if (resolved?.kind !== 'real') throw new Error(`unknown drone: ${opts.droneId}`);
-      const stored = readChatFromStore({ droneId, chatName: opts.chatName });
-      if (!stored.available || !stored.chat) throw new Error(`unknown chat: ${opts.chatName}`);
-      return { reg: null, d: resolved.drone, chat: stored.chat, droneId };
+      const chat = projectPromptRuntimeChatEntry({
+        metadata: readChatMetadataFromStore({ droneId, chatName: opts.chatName }),
+        rows: readChatRowsFromStore({
+          droneId,
+          chatName: opts.chatName,
+          indexes: [],
+          includePending: true,
+        }),
+      });
+      if (!chat) throw new Error(`unknown chat: ${opts.chatName}`);
+      return { reg: null, d: resolved.drone, chat, droneId };
     }
     const reg = await loadRegistry();
     const droneId = normalizeDroneIdentity(opts.droneId);

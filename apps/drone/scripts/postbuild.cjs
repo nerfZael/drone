@@ -1,9 +1,40 @@
 #!/usr/bin/env node
 const { spawnSync } = require('node:child_process');
+const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 
 const DRONE_HUB_ELECTRON_ICON_FILE = 'drone-hub-icon.png';
+const DRONE_HUB_BUILD_ID_FILE = 'build-id';
+
+async function runtimeBuildId(root) {
+  const dist = path.join(root, 'dist');
+  const files = [];
+  const visit = async (dir) => {
+    for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
+      const absolute = path.join(dir, entry.name);
+      if (entry.isDirectory()) await visit(absolute);
+      else if (/\.(?:c?js)$/.test(entry.name)) files.push(absolute);
+    }
+  };
+  await visit(dist);
+  files.sort();
+  if (files.length === 0) throw new Error(`No runtime JavaScript found in ${dist}`);
+  const hash = crypto.createHash('sha256');
+  for (const file of files) {
+    hash.update(path.relative(dist, file));
+    hash.update('\0');
+    hash.update(await fs.readFile(file));
+    hash.update('\0');
+  }
+  return hash.digest('hex').slice(0, 16);
+}
+
+async function writeRuntimeBuildId(root) {
+  const buildId = await runtimeBuildId(root);
+  await fs.writeFile(path.join(root, 'dist', DRONE_HUB_BUILD_ID_FILE), `${buildId}\n`, 'utf8');
+  return buildId;
+}
 
 function blipBundleArgs(root) {
   return [
@@ -166,6 +197,7 @@ async function main() {
   await copyDroneHubElectronMain(root);
   await copyDroneHubElectronIcon(root);
   await copyBuiltDroneHubUi(root);
+  await writeRuntimeBuildId(root);
   await chmodExecutableBestEffort(path.join(root, 'dist', 'blip.js'));
   await chmodExecutableBestEffort(path.join(root, 'dist', 'mcp-http-stdio-bridge.js'));
   await chmodExecutableBestEffort(path.join(root, 'dist', 'cli.js'));
@@ -177,8 +209,11 @@ module.exports = {
   blipBundleArgs,
   CONTAINER_RUNTIME_FILES,
   daemonBundleArgs,
+  DRONE_HUB_BUILD_ID_FILE,
   DRONE_HUB_ELECTRON_ICON_FILE,
   mcpBridgeBundleArgs,
+  runtimeBuildId,
+  writeRuntimeBuildId,
 };
 
 if (require.main === module) {

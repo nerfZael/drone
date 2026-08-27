@@ -795,8 +795,27 @@ type HubState = {
   } | null;
   startedAt: string;
   logPath: string;
+  buildId?: string | null;
   launchEnv?: HubLaunchEnvSnapshot | null;
 };
+
+let cliBuildIdPromise: Promise<string> | null = null;
+
+function currentCliBuildId(): Promise<string> {
+  if (!cliBuildIdPromise) {
+    cliBuildIdPromise = fs.readFile(path.join(__dirname, 'build-id'), 'utf8')
+      .then((value) => {
+        const buildId = value.trim();
+        if (!/^[a-f0-9]{16}$/.test(buildId)) throw new Error('Invalid Drone Hub build identity');
+        return buildId;
+      })
+      .catch(async () => {
+        const contents = await fs.readFile(__filename);
+        return crypto.createHash('sha256').update(contents).digest('hex').slice(0, 16);
+      });
+  }
+  return cliBuildIdPromise;
+}
 
 type HubSecretSnapshot = {
   present: boolean;
@@ -929,9 +948,12 @@ async function readHubState(rootDir?: string): Promise<HubState | null> {
     const apiHost = typeof parsed.apiHost === 'string' ? parsed.apiHost : '127.0.0.1';
     const startedAt = typeof parsed.startedAt === 'string' ? parsed.startedAt : new Date().toISOString();
     const logPath = typeof parsed.logPath === 'string' ? parsed.logPath : hubLogPath(rootDir);
+    const buildId = typeof parsed.buildId === 'string' && parsed.buildId.trim()
+      ? parsed.buildId.trim()
+      : null;
     const launchEnv = parseHubLaunchEnvSnapshot(parsed.launchEnv);
     const containerMcp = parseHubContainerMcpState(parsed.containerMcp);
-    return { version: 1, pid, apiHost, apiPort, uiPort, containerMcp, startedAt, logPath, launchEnv };
+    return { version: 1, pid, apiHost, apiPort, uiPort, containerMcp, startedAt, logPath, buildId, launchEnv };
   } catch {
     return null;
   }
@@ -1118,6 +1140,7 @@ async function recoverRunningHubState(preferredUiPort: number): Promise<HubState
     containerMcp,
     startedAt: new Date().toISOString(),
     logPath: hubLogPath(),
+    buildId: null,
     launchEnv: null,
   };
   await writeHubState(state);
@@ -1912,6 +1935,7 @@ async function hubRun(options: any) {
     containerMcp: api.containerMcp,
     startedAt: new Date().toISOString(),
     logPath: hubLogPath(),
+    buildId: await currentCliBuildId(),
     launchEnv: captureHubLaunchEnvSnapshot(),
   });
   await writeHubApiToken(apiToken);
@@ -2041,6 +2065,8 @@ async function hubStart(options: any) {
     cur = (await recoverRunningHubState(uiPort)) ?? cur;
   }
   if (cur && pidIsRunning(cur.pid)) {
+    const currentBuildId = await currentCliBuildId();
+    const buildMismatch = cur.buildId !== currentBuildId;
     const currentLaunchEnv = captureHubLaunchEnvSnapshot();
     const launchEnvChanged = hubLaunchEnvSnapshotsDiffer(cur.launchEnv, currentLaunchEnv);
     const runningApiHost = String(cur.apiHost ?? '').trim();
@@ -2049,6 +2075,9 @@ async function hubStart(options: any) {
     const runningContainerMcpPort = Number(cur.containerMcp?.port);
     const runningContainerMcpUrl = String(cur.containerMcp?.url ?? '').trim();
     const restartReasons: string[] = [];
+    if (buildMismatch) {
+      restartReasons.push('Drone Hub is running an older app build. Restart it to use this version.');
+    }
     if (runningApiHost && runningApiHost !== apiHost) {
       restartReasons.push(`Hub API is bound to ${runningApiHost}; requested ${apiHost}.`);
     }
@@ -2083,6 +2112,9 @@ async function hubStart(options: any) {
         ? {
             restartRecommended: true,
             reason: restartReasons.join(' '),
+            ...(buildMismatch
+              ? { buildMismatch: true, runningBuildId: cur.buildId ?? null, currentBuildId }
+              : {}),
             ...(launchEnvChanged ? { runningLaunchEnv: cur.launchEnv, currentLaunchEnv } : {}),
           }
         : {}),

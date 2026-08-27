@@ -1,10 +1,7 @@
-type PendingPromptRef = { id?: unknown };
-
 export function createTerminalPromptWakeHandler(deps: {
   normalizeDroneId: (value: string) => string;
   normalizeChatName: (value: string) => string;
-  listChatNames: (droneId: string) => Promise<string[]>;
-  readPendingPrompts: (droneId: string, chatName: string) => Promise<PendingPromptRef[]>;
+  findChatNamesForPrompt: (droneId: string, promptId: string) => Promise<string[]>;
   enqueueReconcile: (droneId: string, chatName: string) => void;
   enqueuePromptPump: (droneId: string, chatName: string) => void;
 }) {
@@ -14,13 +11,11 @@ export function createTerminalPromptWakeHandler(deps: {
     if (!droneId || !promptId) return;
 
     const chatNames = new Set(
-      (await deps.listChatNames(droneId))
+      (await deps.findChatNamesForPrompt(droneId, promptId))
         .map((chatName) => deps.normalizeChatName(chatName))
         .filter(Boolean),
     );
     for (const chatName of chatNames) {
-      const pending = await deps.readPendingPrompts(droneId, chatName);
-      if (!pending.some((item) => String(item?.id ?? '').trim() === promptId)) continue;
       deps.enqueueReconcile(droneId, chatName);
       deps.enqueuePromptPump(droneId, chatName);
     }

@@ -64,9 +64,11 @@ function formatDetachedHubStartOutput(payload) {
   const state = payload && typeof payload.state === 'object' ? payload.state : null;
   const pid = Number(payload?.pid ?? state?.pid);
   const pidText = Number.isInteger(pid) && pid > 0 ? ` (PID ${pid})` : '';
-  return payload?.alreadyRunning
+  const status = payload?.alreadyRunning
     ? `Drone Hub is already running${pidText}.`
     : `Drone Hub started${pidText}.`;
+  const reason = String(payload?.reason || 'Drone Hub is running an older app build.');
+  return payload?.buildMismatch ? `${status} Restart required: ${reason}` : status;
 }
 
 module.exports = {

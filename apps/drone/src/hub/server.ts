@@ -147,6 +147,7 @@ import {
   readChatRowsFromStore,
   readChatVersionFromStore,
   readTranscriptTurnsFromStore,
+  readTranscriptTurnsByIdsFromStore,
   renameChatInStore,
   resetTranscriptStoreForTests,
   restoreArchivedChatInStore,
@@ -853,6 +854,7 @@ async function readManagedHubStateAtRoot(rootDir: string): Promise<ManagedHubSta
     containerMcp: parseManagedHubContainerMcpState(parsed.containerMcp),
     startedAt: typeof parsed.startedAt === 'string' ? parsed.startedAt : new Date().toISOString(),
     logPath: typeof parsed.logPath === 'string' ? parsed.logPath : path.join(rootDir, 'hub.log'),
+    buildId: typeof parsed.buildId === 'string' && parsed.buildId.trim() ? parsed.buildId.trim() : null,
     launchEnv: parsed.launchEnv ?? null,
   };
 }
@@ -3035,6 +3037,7 @@ function createHubRuntimeGraph(
     pruneCompletedPendingPrompts: (...args: any[]) =>
       promptRuntime.pruneCompletedPendingPrompts(...args),
     readChatFromStore,
+    readChatMetadataFromStore,
     readChatRowsFromStore,
     readChatVersionFromStore,
     readPendingPrompts: (...args: any[]) => promptRuntime.readPendingPrompts(...args),
@@ -3250,6 +3253,9 @@ function createHubRuntimeGraph(
     readBuiltinTranscriptSessionId,
     readChatAttachmentsFromRefs,
     readChatFromStore,
+    readChatMetadataFromStore,
+    readChatRowsFromStore,
+    readTranscriptTurnsByIdsFromStore,
     resetTranscriptStoreForTests,
     resolveBlipPromptCommand,
     resolveCanonicalDroneOrPendingForReadRef,
@@ -4200,6 +4206,7 @@ async function startDroneHubApiServerWithLifecycle(
           : null,
       startedAt: new Date().toISOString(),
       logPath: path.join(rootDir, 'hub.log'),
+      buildId: null,
       launchEnv: null,
     };
   };
@@ -5362,7 +5369,10 @@ async function startDroneHubApiServerWithLifecycle(
     droneChatBroadcaster.refresh(opts);
   const refreshDroneRegistryBroadcasterSnapshot = (opts?: { broadcastSnapshot?: boolean }) =>
     droneRegistryBroadcaster.refresh(opts);
-  const scheduleDroneChatEventRefresh = (delayMs = 100) => droneChatBroadcaster.schedule(delayMs);
+  const scheduleDroneChatEventRefresh = (
+    delayMs = 100,
+    change?: { droneId: string; chatName: string },
+  ) => droneChatBroadcaster.schedule(delayMs, change);
   const scheduleDroneRegistryBroadcasterRefresh = (delayMs = 150, restart = false) =>
     droneRegistryBroadcaster.schedule(delayMs, restart);
   const startDroneChatBroadcaster = () => droneChatBroadcaster.start();
@@ -5409,7 +5419,7 @@ async function startDroneHubApiServerWithLifecycle(
     // explicitly so live state and native-message timestamps are not delayed
     // until the fallback poll.
     notifyCanonicalDroneSummaryChange();
-    scheduleDroneChatEventRefresh();
+    scheduleDroneChatEventRefresh(100, { droneId, chatName });
     void deviceMesh.broadcastDroneChatChange({
       reason: 'chat_write',
       droneId,

@@ -73,6 +73,20 @@ test('enqueue is idempotent by request key and keeps the original payload', asyn
   assert.equal(queue.list({ droneId: 'alpha', chatName: 'default' }).length, 1);
 });
 
+test('finds owning chats for a daemon prompt event without loading prompt payloads', async () => {
+  const queue = repository('prompt-owner-index');
+  const at = '2026-07-10T09:00:00.000Z';
+  await queue.enqueue({ droneId: 'alpha', chatName: 'default', prompt: prompt('shared', at) });
+  await queue.enqueue({ droneId: 'alpha', chatName: 'other', prompt: prompt('shared', at) });
+  await queue.enqueue({ droneId: 'beta', chatName: 'default', prompt: prompt('shared', at) });
+
+  assert.deepEqual(queue.findChatNamesForPrompt({ droneId: 'alpha', promptId: 'shared' }), [
+    'default',
+    'other',
+  ]);
+  assert.deepEqual(queue.findChatNamesForPrompt({ droneId: 'alpha', promptId: 'missing' }), []);
+});
+
 test('reserves a seed queue position before an immediate follow-up', async () => {
   const queue = repository('seed-reservation');
   await reserveInitialPromptQueuePosition({
@@ -1039,6 +1053,7 @@ test('active-drone lifecycle uses the canonical queue without rewriting the regi
     normalizePendingStartupPrompts: helpers.normalizePendingStartupPrompts,
     nowIso: () => now,
     onPendingPromptChanged: (change) => pendingChanges.push(change),
+    readTranscriptTurnsByIdsFromStore: () => [],
     startupPromptToPendingPrompt: helpers.startupPromptToPendingPrompt,
   });
   await saveRegistry({

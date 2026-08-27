@@ -9,6 +9,7 @@ const { resetDroneRootDirForTests } = require('../../dist/host/paths.js');
 const { loadRegistry, saveRegistry } = require('../../dist/host/registry.js');
 const {
   getPromptQueueRepository,
+  PROMPT_QUEUE_MIGRATIONS,
   resetPromptQueueRepositoryForTests,
 } = require('../../dist/host/prompt-queue-repository.js');
 const { permanentlyDeleteCanonicalDrone } = require('../../dist/hub/drone-deletion-service.js');
@@ -19,6 +20,7 @@ const {
 } = require('../../dist/hub/drone-lifecycle-service.js');
 const {
   archiveChatInStore,
+  CHAT_STORE_MIGRATIONS,
   deleteArchivedChatFromStore,
   deleteChatFromStore,
   importArchivedChatsFromRegistry,
@@ -206,17 +208,8 @@ test('permanent deletion atomically clears every chat aggregate and blocks stale
       WHERE scope IN ('chats', 'prompts') ORDER BY scope, version
     `).all()),
     [
-      { scope: 'chats', version: 1 },
-      { scope: 'chats', version: 2 },
-      { scope: 'chats', version: 3 },
-      { scope: 'chats', version: 4 },
-      { scope: 'chats', version: 5 },
-      { scope: 'chats', version: 6 },
-      { scope: 'chats', version: 7 },
-      { scope: 'prompts', version: 1 },
-      { scope: 'prompts', version: 2 },
-      { scope: 'prompts', version: 3 },
-      { scope: 'prompts', version: 4 },
+      ...CHAT_STORE_MIGRATIONS.map(({ version }) => ({ scope: 'chats', version })),
+      ...PROMPT_QUEUE_MIGRATIONS.map(({ version }) => ({ scope: 'prompts', version })),
     ],
   );
 
