@@ -2,7 +2,6 @@ const fs = require('node:fs');
 const http = require('node:http');
 const net = require('node:net');
 const path = require('node:path');
-const { Readable } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 
 const HOP_BY_HOP_HEADERS = new Set([
@@ -60,9 +59,9 @@ function staticAssetPath(staticDir, pathname) {
 }
 
 function copyResponseHeaders(response, res) {
-  response.headers.forEach((value, key) => {
-    if (!HOP_BY_HOP_HEADERS.has(key.toLowerCase())) res.setHeader(key, value);
-  });
+  for (const [key, value] of Object.entries(response.headers)) {
+    if (value != null && !HOP_BY_HOP_HEADERS.has(key.toLowerCase())) res.setHeader(key, value);
+  }
 }
 
 async function readBody(req) {
@@ -74,38 +73,81 @@ async function readBody(req) {
 async function proxyApiRequest({ req, res, apiHost, apiPort, apiToken, signal }) {
   const method = String(req.method || 'GET').toUpperCase();
   const requestUrl = new URL(req.url || '/', `http://${req.headers.host || '127.0.0.1'}`);
-  const response = await fetch(`http://${apiHost}:${apiPort}${requestUrl.pathname}${requestUrl.search}`, {
-    method,
-    headers: {
-      authorization: `Bearer ${apiToken}`,
-      ...(req.headers['content-type'] ? { 'content-type': String(req.headers['content-type']) } : {}),
-      ...(req.headers['if-none-match'] ? { 'if-none-match': String(req.headers['if-none-match']) } : {}),
-      ...(req.headers['mcp-session-id'] ? { 'mcp-session-id': String(req.headers['mcp-session-id']) } : {}),
-      ...(req.headers['x-drone-transcription-quality'] ? { 'x-drone-transcription-quality': String(req.headers['x-drone-transcription-quality']) } : {}),
-      ...(req.headers['x-drone-transcription-language'] ? { 'x-drone-transcription-language': String(req.headers['x-drone-transcription-language']) } : {}),
-      ...(req.headers['x-drone-transcription-prompt-base64'] ? { 'x-drone-transcription-prompt-base64': String(req.headers['x-drone-transcription-prompt-base64']) } : {}),
-      ...(req.headers['x-drone-companion-message-id'] ? { 'x-drone-companion-message-id': String(req.headers['x-drone-companion-message-id']) } : {}),
-    },
-    body: method === 'GET' || method === 'HEAD' ? undefined : await readBody(req),
-    signal,
+  const body = method === 'GET' || method === 'HEAD' ? null : await readBody(req);
+  await new Promise((resolve, reject) => {
+    let upstreamResponse = null;
+    const upstream = http.request({
+      host: apiHost,
+      port: apiPort,
+      method,
+      path: `${requestUrl.pathname}${requestUrl.search}`,
+      headers: {
+        authorization: `Bearer ${apiToken}`,
+        ...(req.headers['content-type'] ? { 'content-type': String(req.headers['content-type']) } : {}),
+        ...(req.headers['if-none-match'] ? { 'if-none-match': String(req.headers['if-none-match']) } : {}),
+        ...(req.headers['mcp-session-id'] ? { 'mcp-session-id': String(req.headers['mcp-session-id']) } : {}),
+        ...(req.headers['x-drone-transcription-quality'] ? { 'x-drone-transcription-quality': String(req.headers['x-drone-transcription-quality']) } : {}),
+        ...(req.headers['x-drone-transcription-language'] ? { 'x-drone-transcription-language': String(req.headers['x-drone-transcription-language']) } : {}),
+        ...(req.headers['x-drone-transcription-prompt-base64'] ? { 'x-drone-transcription-prompt-base64': String(req.headers['x-drone-transcription-prompt-base64']) } : {}),
+        ...(req.headers['x-drone-companion-message-id'] ? { 'x-drone-companion-message-id': String(req.headers['x-drone-companion-message-id']) } : {}),
+      },
+    });
+    const cleanup = () => signal.removeEventListener('abort', abort);
+    const succeed = () => {
+      cleanup();
+      resolve();
+    };
+    const fail = (error) => {
+      cleanup();
+      reject(error);
+    };
+    const abort = () => {
+      const error = new Error('Drone Hub desktop proxy is closing');
+      upstream.destroy(error);
+      upstreamResponse?.destroy(error);
+    };
+    signal.addEventListener('abort', abort, { once: true });
+    upstream.once('error', fail);
+    upstream.once('response', (response) => {
+      upstreamResponse = response;
+      res.statusCode = response.statusCode || 502;
+      copyResponseHeaders(response, res);
+      void pipeline(response, res).then(succeed, fail);
+    });
+    if (signal.aborted) abort();
+    else upstream.end(body ?? undefined);
   });
-  res.statusCode = response.status;
-  copyResponseHeaders(response, res);
-  if (!response.body) return void res.end();
-  await pipeline(Readable.fromWeb(response.body), res);
 }
 
-function proxyApiUpgrade({ req, socket, head, apiHost, apiPort, apiToken }) {
+function proxyApiUpgrade({ req, socket, head, apiHost, apiPort, apiToken, proxyOrigin }) {
   const requestUrl = new URL(req.url || '/', `http://${req.headers.host || '127.0.0.1'}`);
   if (!requestUrl.pathname.startsWith('/api/')) {
     socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
+    return null;
+  }
+  let requestOrigin;
+  try {
+    requestOrigin = new URL(String(req.headers.origin || '')).origin;
+  } catch {
+    requestOrigin = '';
+  }
+  if (!requestOrigin || requestOrigin !== proxyOrigin) {
+    socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
     return null;
   }
   const upstream = net.connect(apiPort, apiHost);
   upstream.once('connect', () => {
     const headers = new Map();
     for (const [key, value] of Object.entries(req.headers)) {
-      if (value == null || key.toLowerCase() === 'host' || key.toLowerCase() === 'authorization') continue;
+      const lowerKey = key.toLowerCase();
+      if (
+        value == null ||
+        lowerKey === 'host' ||
+        lowerKey === 'authorization' ||
+        lowerKey === 'origin' ||
+        HOP_BY_HOP_HEADERS.has(lowerKey)
+      )
+        continue;
       headers.set(key, Array.isArray(value) ? value.join(', ') : String(value));
     }
     headers.set('Host', `${apiHost}:${apiPort}`);
@@ -127,6 +169,7 @@ async function startDesktopStaticUiServer({ staticDir, apiHost, apiPort, apiToke
   const upstreamSockets = new Set();
   const requests = new Set();
   const shutdown = new AbortController();
+  let proxyOrigin = '';
   const server = http.createServer((req, res) => {
     const request = (async () => {
       try {
@@ -165,7 +208,15 @@ async function startDesktopStaticUiServer({ staticDir, apiHost, apiPort, apiToke
     socket.once('close', () => sockets.delete(socket));
   });
   server.on('upgrade', (req, socket, head) => {
-    const upstream = proxyApiUpgrade({ req, socket, head, apiHost, apiPort, apiToken });
+    const upstream = proxyApiUpgrade({
+      req,
+      socket,
+      head,
+      apiHost,
+      apiPort,
+      apiToken,
+      proxyOrigin,
+    });
     if (!upstream) return;
     upstreamSockets.add(upstream);
     upstream.once('close', () => upstreamSockets.delete(upstream));
@@ -177,6 +228,7 @@ async function startDesktopStaticUiServer({ staticDir, apiHost, apiPort, apiToke
   });
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : 0;
+  proxyOrigin = `http://127.0.0.1:${port}`;
   let closePromise = null;
   return {
     url: `http://127.0.0.1:${port}`,
