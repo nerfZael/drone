@@ -266,6 +266,20 @@ export async function listCanonicalRepositories(): Promise<CatalogRepositoryReco
   return store.listRepositories();
 }
 
+export async function resolveCanonicalRepository(repoPathRaw: unknown): Promise<CatalogRepositoryRecord | null> {
+  const repoPath = String(repoPathRaw ?? '').trim();
+  if (!repoPath) return null;
+  const store = await catalogStoreOrCompatibility();
+  if (!store) {
+    return legacyRepositories(await loadRegistry()).find((repo) => repo.path === repoPath) ?? null;
+  }
+  if (!repositoriesBackfilled.has(store)) {
+    await store.backfillRepositories(legacyRepositories(await loadRegistryRawSnapshot()));
+    repositoriesBackfilled.add(store);
+  }
+  return store.getRepository(repoPath);
+}
+
 export async function canonicalRepositoriesMap(): Promise<Record<string, CatalogRepositoryRecord>> {
   return Object.fromEntries((await listCanonicalRepositories()).map((repo) => [repo.path, repo]));
 }

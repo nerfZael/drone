@@ -1032,7 +1032,6 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
     timing.record('materializeStartupPrompts', performance.now() - materializePromptsStartedAt);
 
     let postCreateDroneEntry: any = null;
-    let postCreateRegistrySnapshot: any = null;
     let managedSyncResult: ManagedDroneStateSyncResult | null = null;
     let sharedPathsSyncResult: { repositoryFilesMayHaveChanged: boolean } | null = null;
     let postCreateSyncSucceeded = false;
@@ -1044,7 +1043,6 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
       const createdDrone = findDroneEntryByIdentity(regAfterCreate, pendingDroneId)?.entry ?? null;
       if (createdDrone) {
         postCreateDroneEntry = createdDrone;
-        postCreateRegistrySnapshot = regAfterCreate;
         if (sharedPathsSyncPromise) {
           sharedPathsSyncResult = (await sharedPathsSyncPromise) ?? null;
         } else {
@@ -1092,7 +1090,6 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
     );
     if (
       postCreateDroneEntry &&
-      postCreateRegistrySnapshot &&
       postCreateSyncSucceeded &&
       deps.registerProvisionedPromptHandoff
     ) {
@@ -1127,7 +1124,6 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
           chatName,
           promptId: queued.id,
           droneEntry: postCreateDroneEntry,
-          registrySnapshot: postCreateRegistrySnapshot,
           createdAtMs: Date.now(),
           ...(fileChangesBaseline ? { fileChangesBaseline } : {}),
         });

@@ -1904,6 +1904,10 @@ async function hubRun(options: any) {
   const activeProfile = readActiveProfileNameSync();
   const apiToken = await ensureHubApiToken();
   const mcpToken = await ensureHubMcpToken();
+  // Refresh permissions before readiness is published. The state file must be
+  // the final artifact: launchers treat its presence as the ready signal.
+  await writeHubApiToken(apiToken);
+  await writeHubMcpToken(mcpToken);
   const allowedOrigins = new Set<string>([`http://127.0.0.1:${uiPort}`, `http://localhost:${uiPort}`]);
   if (apiHost && apiHost !== '0.0.0.0' && apiHost !== '::') {
     allowedOrigins.add(`http://${apiHost}:${uiPort}`);
@@ -1913,33 +1917,7 @@ async function hubRun(options: any) {
   let waitForStopResolve: (() => void) | null = null;
   let shutdownStarted = false;
   let staticUiServer: StaticDroneHubUiServer | null = null;
-
-  const api = await startDroneHubApiServer({
-    port: apiPort,
-    host: apiHost,
-    containerMcpHost,
-    containerMcpPort,
-    containerMcpUrl,
-    apiToken,
-    deviceMeshIngressPort: DEFAULT_DEVICE_MESH_INGRESS_PORT,
-    mcpToken,
-    allowedOrigins: Array.from(allowedOrigins),
-  });
-
-  await writeHubState({
-    version: 1,
-    pid: process.pid,
-    apiHost: api.host,
-    apiPort: api.port,
-    uiPort,
-    containerMcp: api.containerMcp,
-    startedAt: new Date().toISOString(),
-    logPath: hubLogPath(),
-    buildId: await currentCliBuildId(),
-    launchEnv: captureHubLaunchEnvSnapshot(),
-  });
-  await writeHubApiToken(apiToken);
-  await writeHubMcpToken(mcpToken);
+  let child: ReturnType<typeof spawn> | null = null;
 
   const hubDir = path.join(repoRoot, 'apps', 'drone-hub');
   const staticUiDir = resolveDroneHubStaticUiDir(repoRoot, options.staticUiDir);
@@ -1953,37 +1931,84 @@ async function hubRun(options: any) {
       uiPortAvailable = await isTcpPortAvailable('127.0.0.1', uiPort);
     }
   }
-  const child = uiMode === 'dev' && uiPortAvailable
-    ? spawn('bun', ['run', 'dev', '--', '--port', String(uiPort), '--strictPort'], {
-        cwd: hubDir,
-        stdio: 'inherit',
-        env: {
-          ...process.env,
-          DRONE_HUB_API_PORT: String(api.port),
-          DRONE_HUB_API_TOKEN: apiToken,
-          // Keep short API fetches off the Vite origin used by long-lived SSE
-          // streams. Otherwise HTTP/1.1 browser connection limits can queue
-          // unrelated Hub requests behind EventSource connections.
-          VITE_DRONE_HUB_DIRECT_API_BASE: `http://127.0.0.1:${api.port}`,
-          VITE_DRONE_HUB_DIRECT_API_TOKEN: apiToken,
-          ...(activeProfile ? { VITE_DRONE_PROFILE_ID: activeProfile } : {}),
-        },
-      })
-    : null;
-  if (uiMode === 'static') {
-    if (!uiPortAvailable) {
-      throw new Error(`Drone Hub UI port ${uiPort} is already in use`);
-    }
-    staticUiServer = await startStaticDroneHubUiServer({
-      port: uiPort,
-      staticDir: staticUiDir,
-      apiHost: api.host,
-      apiPort: api.port,
+
+  const startedAt = new Date().toISOString();
+  const buildId = await currentCliBuildId();
+  const launchEnv = captureHubLaunchEnvSnapshot();
+  let api: Awaited<ReturnType<typeof startDroneHubApiServer>>;
+  try {
+    api = await startDroneHubApiServer({
+      port: apiPort,
+      host: apiHost,
+      containerMcpHost,
+      containerMcpPort,
+      containerMcpUrl,
       apiToken,
+      deviceMeshIngressPort: DEFAULT_DEVICE_MESH_INGRESS_PORT,
+      mcpToken,
+      allowedOrigins: Array.from(allowedOrigins),
+      onListening: async (listening) => {
+        child = uiMode === 'dev' && uiPortAvailable
+          ? spawn('bun', ['run', 'dev', '--', '--port', String(uiPort), '--strictPort'], {
+              cwd: hubDir,
+              stdio: 'inherit',
+              env: {
+                ...process.env,
+                DRONE_HUB_API_PORT: String(listening.port),
+                DRONE_HUB_API_TOKEN: apiToken,
+                // Keep short API fetches off the Vite origin used by long-lived SSE
+                // streams. Otherwise HTTP/1.1 browser connection limits can queue
+                // unrelated Hub requests behind EventSource connections.
+                VITE_DRONE_HUB_DIRECT_API_BASE: `http://127.0.0.1:${listening.port}`,
+                VITE_DRONE_HUB_DIRECT_API_TOKEN: apiToken,
+                ...(activeProfile ? { VITE_DRONE_PROFILE_ID: activeProfile } : {}),
+              },
+            })
+          : null;
+        if (uiMode === 'static') {
+          if (!uiPortAvailable) {
+            throw new Error(`Drone Hub UI port ${uiPort} is already in use`);
+          }
+          staticUiServer = await startStaticDroneHubUiServer({
+            port: uiPort,
+            staticDir: staticUiDir,
+            apiHost: listening.host,
+            apiPort: listening.port,
+            apiToken,
+          });
+        } else if (!uiPortAvailable) {
+          // eslint-disable-next-line no-console
+          console.warn(`Drone Hub UI port ${uiPort} is already in use; leaving the existing UI server running.`);
+        }
+        await writeHubState({
+          version: 1,
+          pid: process.pid,
+          apiHost: listening.host,
+          apiPort: listening.port,
+          uiPort,
+          containerMcp: listening.containerMcp,
+          startedAt,
+          logPath: hubLogPath(),
+          buildId,
+          launchEnv,
+        });
+      },
     });
-  } else if (!uiPortAvailable) {
-    // eslint-disable-next-line no-console
-    console.warn(`Drone Hub UI port ${uiPort} is already in use; leaving the existing UI server running.`);
+  } catch (error) {
+    // onListening may already have published state before a later background
+    // service failed. Never leave a dead process advertised as ready.
+    try {
+      (child as ReturnType<typeof spawn> | null)?.kill('SIGINT');
+    } catch {
+      // ignore
+    }
+    try {
+      await (staticUiServer as StaticDroneHubUiServer | null)?.close();
+    } catch {
+      // ignore
+    }
+    await removeHubStateIfOwnedByPid(process.pid);
+    throw error;
   }
 
   const shutdown = async () => {

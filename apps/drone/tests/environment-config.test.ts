@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { deriveCreatedDroneEnvironmentConfig, resolveDroneEnvironmentConfig, resolveRepoEnvironmentConfig } from '../src/hub/environment-config';
+import { updateRegistry } from '../src/host/registry';
+import {
+  deriveCreatedDroneEnvironmentConfig,
+  resolveCanonicalDroneEnvironmentConfig,
+  resolveDroneEnvironmentConfig,
+  resolveRepoEnvironmentConfig,
+} from '../src/hub/environment-config';
+import { withTempDroneDataDir } from './test-helpers';
 
 describe('environment config helpers', () => {
   test('resolves repo and no-repo config', () => {
@@ -70,6 +77,35 @@ describe('environment config helpers', () => {
       API_KEY: 'secret',
       KEEP: 'custom',
       LOCAL_ONLY: '1',
+    });
+  });
+
+  test('resolves one drone environment through canonical owners', async () => {
+    await withTempDroneDataDir('canonical-drone-environment-', async () => {
+      await updateRegistry((registry: any) => {
+        registry.repos = {
+          '/tmp/repo-a': {
+            path: '/tmp/repo-a',
+            addedAt: '2026-03-20T00:00:00.000Z',
+            environment: {
+              vars: { API_KEY: 'repo', DEBUG: 'true' },
+              autoApplyToNewContainerDrones: true,
+            },
+          },
+        };
+      });
+
+      const resolved = await resolveCanonicalDroneEnvironmentConfig({
+        repoPath: '/tmp/repo-a',
+        environment: {
+          useRepoVars: true,
+          disabledRepoKeys: ['DEBUG'],
+          vars: { API_KEY: 'drone', LOCAL_ONLY: '1' },
+        },
+      });
+
+      expect(resolved.repo.registered).toBe(true);
+      expect(resolved.resolvedVars).toEqual({ API_KEY: 'drone', LOCAL_ONLY: '1' });
     });
   });
 

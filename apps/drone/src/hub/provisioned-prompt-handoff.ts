@@ -5,7 +5,6 @@ export type ProvisionedPromptHandoff = {
   chatName: string;
   promptId: string;
   droneEntry: any;
-  registrySnapshot: any;
   createdAtMs: number;
   fileChangesBaseline?: AgentRunFileChangesBaseline;
 };

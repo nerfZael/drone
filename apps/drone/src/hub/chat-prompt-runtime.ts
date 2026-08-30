@@ -143,11 +143,11 @@ type ChatPromptRuntimeDependencyName =
   | 'readChatAttachmentsFromRefs'
   | 'resetTranscriptStoreForTests'
   | 'resolveBlipPromptCommand'
+  | 'resolveCanonicalDroneEnvironmentConfig'
   | 'resolveCanonicalDroneOrPendingForReadRef'
   | 'resolveChatTmuxCommand'
   | 'resolveCodexTurnRuntime'
   | 'resolveDroneDaemonClientForEntry'
-  | 'resolveDroneEnvironmentConfig'
   | 'resolveEffectiveLlmProvider'
   | 'resolveEffectiveProviderApiKeySettings'
   | 'resolveHostPort'
@@ -300,11 +300,11 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     readChatAttachmentsFromRefs,
     resetTranscriptStoreForTests,
     resolveBlipPromptCommand,
+    resolveCanonicalDroneEnvironmentConfig,
     resolveCanonicalDroneOrPendingForReadRef,
     resolveChatTmuxCommand,
     resolveCodexTurnRuntime,
     resolveDroneDaemonClientForEntry,
-    resolveDroneEnvironmentConfig,
     resolveEffectiveLlmProvider,
     resolveEffectiveProviderApiKeySettings,
     resolveHostPort,
@@ -709,15 +709,15 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     if (dSeed) {
       opts.timing?.record('reuseProvisioningState', 0);
     } else {
-      const regAny: any = await measurePromptDeliveryPhase(
+      const resolved = await measurePromptDeliveryPhase(
         opts.timing,
-        'loadRegistryBeforeSync',
-        async () => await loadRegistry(),
+        'resolveDroneBeforeSync',
+        async () => await resolveCanonicalDroneOrPendingForReadRef(droneId),
       );
-      if (regAny?.pending?.[droneId] && !regAny?.drones?.[droneId]) {
+      if (resolved?.kind === 'pending') {
         throw new Error(`drone "${droneId}" is still starting`);
       }
-      dSeed = (regAny as any).drones?.[droneId];
+      dSeed = resolved?.kind === 'real' ? resolved.drone : null;
       if (!dSeed) throw new Error(`unknown drone: ${droneId}`);
     }
 
@@ -750,18 +750,17 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     return await withDroneOpLock(lockKey, async () => {
       opts.timing?.record('droneLockWait', performance.now() - lockWaitStartedAt);
       throwIfBackgroundPromptAborted(opts.signal);
-      let regLatest: any = provisioningHandoff?.registrySnapshot ?? null;
       let d: any = provisioningHandoff?.droneEntry ?? null;
       if (!d) {
-        regLatest = await measurePromptDeliveryPhase(
+        const resolved = await measurePromptDeliveryPhase(
           opts.timing,
-          'loadRegistryAfterLock',
-          async () => await loadRegistry(),
+          'resolveDroneAfterLock',
+          async () => await resolveCanonicalDroneOrPendingForReadRef(droneId),
         );
-        if (regLatest?.pending?.[droneId] && !regLatest?.drones?.[droneId]) {
+        if (resolved?.kind === 'pending') {
           throw new Error(`drone "${droneId}" is still starting`);
         }
-        d = (regLatest as any).drones?.[droneId] ?? null;
+        d = resolved?.kind === 'real' ? resolved.drone : null;
         if (!d) throw new Error(`unknown drone: ${droneId}`);
       }
       const droneLabel = String(d?.name ?? '').trim() || droneId;
@@ -789,7 +788,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       const agentPermissionMode = normalizeAgentPermissionMode((chat as any)?.agentPermissionMode);
       const approvalPolicy = normalizeAgentApprovalPolicy((chat as any)?.approvalPolicy);
       if (agentPermissionMode !== 'execute') assertReadOnlySupportedForAgent(agent);
-      const managedEnv = resolveDroneEnvironmentConfig(regLatest, d).resolvedVars;
+      const managedEnv = (await resolveCanonicalDroneEnvironmentConfig(d)).resolvedVars;
       const managedEnvLines = buildEnvExportLines(managedEnv);
       const managedChatMcpEnv = await measurePromptDeliveryPhase(
         opts.timing,
@@ -3160,19 +3159,22 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     if (!droneId) return { kind: 'error', status: 400, error: 'missing drone id' };
     if (!prompt) return { kind: 'error', status: 400, error: 'missing prompt' };
 
-    let regSnap: any = await loadRegistry();
-    opts.mark?.('loadRegistry');
-    if (regSnap?.drones?.[droneId]) {
-      let liveDroneEntry = regSnap?.drones?.[droneId] ?? null;
-      if (!liveDroneEntry)
-        return { kind: 'error', status: 404, error: `unknown drone: ${droneId}` };
+    const resolved = await resolveCanonicalDroneOrPendingForReadRef(droneId);
+    opts.mark?.('resolveDrone');
+    if (resolved?.kind === 'real') {
+      let liveDroneEntry = resolved.drone;
+      let chatEntry: any = null;
+      try {
+        const current = await getChatEntry({ droneId, chatName });
+        liveDroneEntry = current.d;
+        chatEntry = current.chat;
+      } catch (error: any) {
+        if (String(error?.message ?? '') !== `unknown chat: ${chatName}`) throw error;
+      }
       if (droneIsProvisioning(liveDroneEntry)) {
-        const provisioningChats =
-          liveDroneEntry?.chats && typeof liveDroneEntry.chats === 'object'
-            ? Object.keys(liveDroneEntry.chats)
-            : [];
+        const provisioningChats = listChatsFromStore({ droneId }).chats;
         const existingProvisioningChat =
-          Boolean(liveDroneEntry?.chats?.[chatName]) ||
+          Boolean(chatEntry) ||
           (chatName === 'default' && provisioningChats.length === 0);
         if (opts.requireExistingChat === true && !existingProvisioningChat) {
           return { kind: 'error', status: 404, error: `unknown chat: ${chatName}` };
@@ -3208,16 +3210,13 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           pendingState: 'queued',
         };
       }
-      let chatEntry = liveDroneEntry?.chats?.[chatName] ?? null;
       if (chatHasActiveDockerSnapshot(chatEntry)) {
         await failStaleDockerSnapshotsForChat({ droneId, chatName });
         opts.mark?.('snapshotMaintenance');
-        regSnap = await loadRegistry();
-        opts.mark?.('reloadRegistry');
-        liveDroneEntry = regSnap?.drones?.[droneId] ?? null;
-        if (!liveDroneEntry)
-          return { kind: 'error', status: 404, error: `unknown drone: ${droneId}` };
-        chatEntry = liveDroneEntry?.chats?.[chatName] ?? null;
+        const refreshed = await getChatEntry({ droneId, chatName });
+        liveDroneEntry = refreshed.d;
+        chatEntry = refreshed.chat;
+        opts.mark?.('reloadChat');
       }
       if (chatHasActiveDockerSnapshot(chatEntry)) {
         return {
@@ -3284,7 +3283,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
 
     // If the drone is still provisioning, stage prompt rows on the pending entry and
     // migrate them into normal chat `pendingPrompts` once startup finishes.
-    if (regSnap?.pending?.[droneId] && !regSnap?.drones?.[droneId]) {
+    if (resolved?.kind === 'pending') {
       if (attachments.length > 0) {
         return {
           kind: 'error',

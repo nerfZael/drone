@@ -1,6 +1,6 @@
-import { canonicalRepositoriesMap } from './groups-repositories';
+import { canonicalRepositoriesMap, resolveCanonicalRepository } from './groups-repositories';
 import { getHubSettingsRepository } from '../host/hub-settings-repository';
-import { loadRegistry } from '../host/registry';
+import { loadRegistryCompatibilityBase } from '../host/registry';
 
 const NON_REPO_ENVIRONMENT_SETTING_KEY = 'environment.non-repository';
 
@@ -127,7 +127,9 @@ export async function resolveCanonicalNonRepoEnvironmentConfig(
     autoApplyToNewContainerDrones?: boolean;
   }>(NON_REPO_ENVIRONMENT_SETTING_KEY);
   if (!record) {
-    const legacyRegistry = registry ?? (await loadRegistry());
+    // This is a one-time migration fallback. Do not build the global
+    // compatibility projection just to read one legacy setting.
+    const legacyRegistry = registry ?? (await loadRegistryCompatibilityBase());
     const legacy = resolveRepoEnvironmentConfig(legacyRegistry, '');
     record = await repository.backfillIfAbsent(
       NON_REPO_ENVIRONMENT_SETTING_KEY,
@@ -165,6 +167,8 @@ export async function resolveCanonicalRepoEnvironmentConfig(
   repoPathRaw: unknown,
 ): Promise<ResolvedRepoEnvironmentConfig> {
   const nonRepo = await resolveCanonicalNonRepoEnvironmentConfig(regAny);
+  const repoPath = typeof repoPathRaw === 'string' ? repoPathRaw.trim() : '';
+  const repository = repoPath ? await resolveCanonicalRepository(repoPath) : null;
   return resolveRepoEnvironmentConfig(
     {
       ...regAny,
@@ -176,14 +180,21 @@ export async function resolveCanonicalRepoEnvironmentConfig(
           updatedAt: nonRepo.updatedAt,
         },
       },
-      repos: await canonicalRepositoriesMap(),
+      repos: repository ? { [repository.path]: repository } : {},
     },
-    repoPathRaw,
+    repoPath,
   );
 }
 
 export function resolveDroneEnvironmentConfig(regAny: any, droneEntry: any): ResolvedDroneEnvironmentConfig {
   const repo = resolveRepoEnvironmentConfig(regAny, droneEntry?.repoPath);
+  return resolveDroneEnvironmentConfigWithRepo(repo, droneEntry);
+}
+
+function resolveDroneEnvironmentConfigWithRepo(
+  repo: ResolvedRepoEnvironmentConfig,
+  droneEntry: any,
+): ResolvedDroneEnvironmentConfig {
   const config = droneEntry?.environment ?? {};
   const vars = normalizeEnvVarMap(config?.vars);
   const useRepoVars = config?.useRepoVars === true;
@@ -208,6 +219,15 @@ export function resolveDroneEnvironmentConfig(regAny: any, droneEntry: any): Res
       ...vars,
     },
   };
+}
+
+/** Resolves one drone's environment from canonical owners without hydrating chat state. */
+export async function resolveCanonicalDroneEnvironmentConfig(
+  droneEntry: any,
+  legacyRegistry?: any,
+): Promise<ResolvedDroneEnvironmentConfig> {
+  const repo = await resolveCanonicalRepoEnvironmentConfig(legacyRegistry, droneEntry?.repoPath);
+  return resolveDroneEnvironmentConfigWithRepo(repo, droneEntry);
 }
 
 export function deriveCreatedDroneEnvironmentConfig(regAny: any, opts: {

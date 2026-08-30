@@ -197,6 +197,7 @@ import {
   deriveCreatedDroneEnvironmentConfig,
   normalizeDisabledRepoKeys,
   normalizeEnvVarMap,
+  resolveCanonicalDroneEnvironmentConfig,
   resolveCanonicalRepoEnvironmentConfig,
   resolveDroneEnvironmentConfig,
   upsertCanonicalNonRepoEnvironmentConfig,
@@ -3260,11 +3261,11 @@ function createHubRuntimeGraph(
     readTranscriptTurnsByIdsFromStore,
     resetTranscriptStoreForTests,
     resolveBlipPromptCommand,
+    resolveCanonicalDroneEnvironmentConfig,
     resolveCanonicalDroneOrPendingForReadRef,
     resolveChatTmuxCommand,
     resolveCodexTurnRuntime,
     resolveDroneDaemonClientForEntry,
-    resolveDroneEnvironmentConfig,
     resolveEffectiveLlmProvider,
     resolveEffectiveProviderApiKeySettings,
     resolveHostPort,
@@ -3922,6 +3923,11 @@ type DroneHubApiServerOptions = {
   deviceMeshIngressPort?: number;
   mcpToken?: string;
   allowedOrigins?: string[];
+  onListening?: (state: {
+    host: string;
+    port: number;
+    containerMcp: { host: string; port: number; url: string } | null;
+  }) => void | Promise<void>;
 };
 
 export async function startDroneHubApiServer(opts: DroneHubApiServerOptions) {
@@ -6319,6 +6325,14 @@ async function startDroneHubApiServerWithLifecycle(
     hostUrl: `http://127.0.0.1:${actualPort}/mcp`,
     containerUrl:
       httpTransport.containerMcp?.url || `http://host.docker.internal:${actualPort}/mcp`,
+  });
+  // The API is ready to serve at this point. Publish readiness before starting
+  // background recovery and fleet probes, which can take tens of seconds on a
+  // large installation and must not make a healthy listener look failed.
+  await opts.onListening?.({
+    host,
+    port: actualPort,
+    containerMcp: httpTransport.containerMcp,
   });
   const outboxDatabase = getHubDatabase();
   const hubOutboxDispatchLoop = outboxDatabase

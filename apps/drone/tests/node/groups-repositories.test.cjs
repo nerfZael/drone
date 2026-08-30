@@ -18,6 +18,7 @@ const {
   registerCanonicalRepository,
   removeCanonicalRepository,
   renameCanonicalGroupTree,
+  resolveCanonicalRepository,
   updateCanonicalRepositoryAgents,
   updateCanonicalRepositoryEnvironment,
 } = require('../../dist/hub/groups-repositories.js');
@@ -54,11 +55,13 @@ test('canonical tombstones beat repeated legacy imports for groups and repositor
   });
   assert.equal((await listCanonicalGroups()).length, 1);
   assert.equal((await listCanonicalRepositories()).length, 1);
+  assert.equal((await resolveCanonicalRepository('/repo')).remoteUrl, 'legacy');
   const store = await getCatalogStore();
   assert.equal(await store.deleteGroup('', 'legacy', at), true);
   assert.equal(await removeCanonicalRepository('/repo'), true);
   assert.deepEqual(await listCanonicalGroups(), []);
   assert.deepEqual(await listCanonicalRepositories(), []);
+  assert.equal(await resolveCanonicalRepository('/repo'), null);
 });
 
 test('independent environment and agents updates serialize without lost fields and append outbox events', async () => {

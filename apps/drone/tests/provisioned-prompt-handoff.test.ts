@@ -12,7 +12,6 @@ describe('provisioned prompt handoff', () => {
       chatName: 'default',
       promptId: 'prompt-1',
       droneEntry: { id: 'drone-1' },
-      registrySnapshot: { drones: { 'drone-1': { id: 'drone-1' } } },
       createdAtMs: now,
     };
 

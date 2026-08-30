@@ -74,4 +74,41 @@ describeSocketSuite('background lifecycle', () => {
       await second.close();
     }
   });
+
+  test('publishes listening only after the API can accept requests', async () => {
+    let callbackCount = 0;
+    const server = await startDroneHubApiServer({
+      port: 0,
+      apiToken: token,
+      onListening: async ({ host, port }) => {
+        callbackCount += 1;
+        const response = await fetch(`http://${host}:${port}/api/settings/agents`, {
+          headers: { authorization: `Bearer ${token}` },
+        });
+        expect(response.status).toBe(200);
+      },
+    });
+    try {
+      expect(callbackCount).toBe(1);
+    } finally {
+      await server.close();
+    }
+  });
+
+  test('closes the listener when readiness publication fails', async () => {
+    let port = 0;
+    await expect(
+      startDroneHubApiServer({
+        port: 0,
+        apiToken: token,
+        onListening: ({ port: listeningPort }) => {
+          port = listeningPort;
+          throw new Error('readiness publication failed');
+        },
+      }),
+    ).rejects.toThrow('readiness publication failed');
+
+    const recovered = await startDroneHubApiServer({ port, apiToken: token });
+    await recovered.close();
+  });
 });
