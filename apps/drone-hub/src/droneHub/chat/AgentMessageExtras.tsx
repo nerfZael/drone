@@ -1,5 +1,6 @@
 import React from 'react';
 import type { AgentRunFileChanges } from '@blip/protocol';
+import { normalizeAgentSkillUses, type AgentSkillUse } from '@drone/assistant-chat';
 
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import type { AgentPlan } from '../types';
@@ -31,6 +32,7 @@ export type AgentMessageExtrasProps = {
   onOpenFileReference?: (ref: MarkdownFileReference) => void;
   onOpenLink?: (href: string) => boolean;
   plan?: AgentPlan;
+  skillsUsed?: AgentSkillUse[];
   fileChanges?: AgentRunFileChanges;
   initiallyExpandFileChanges?: boolean;
   initiallyExpandLinkedPullRequests?: boolean;
@@ -47,6 +49,7 @@ export function AgentMessageExtras({
   onOpenFileReference,
   onOpenLink,
   plan,
+  skillsUsed,
   fileChanges,
   initiallyExpandFileChanges = false,
   initiallyExpandLinkedPullRequests = false,
@@ -67,6 +70,7 @@ export function AgentMessageExtras({
   const showInlineMedia = inlineMedia.length > 0 && inlineMediaVisible;
   const inlineMediaToggle = resolveInlineMediaToggleState(inlineMediaVisible);
   const hasPlan = Boolean(plan?.items.length);
+  const normalizedSkillsUsed = normalizeAgentSkillUses(skillsUsed);
   const hasMessageActions = inlineMedia.length > 0 || Boolean(actionEnd);
 
   const openInlineMediaTarget = React.useCallback(
@@ -205,6 +209,24 @@ export function AgentMessageExtras({
         plan={plan}
         headerActions={hasPlan && hasMessageActions ? messageActions : undefined}
       />
+
+      {normalizedSkillsUsed.length > 0 ? (
+        <div
+          data-agent-skills-used="true"
+          aria-label="Skills used by this agent run"
+          className="mt-2 flex flex-wrap items-center gap-1.5"
+        >
+          {normalizedSkillsUsed.map((skill) => (
+            <span
+              key={skill.name.toLowerCase()}
+              title={`${skill.name} skill loaded`}
+              className="inline-flex max-w-full items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-0.5 font-mono text-[var(--text-10)] text-[var(--muted)]"
+            >
+              <span className="truncate">{skill.name}</span>
+            </span>
+          ))}
+        </div>
+      ) : null}
 
       {!hasPlan && hasMessageActions ? (
         <div

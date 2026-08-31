@@ -19,6 +19,264 @@ import {
 } from '../src/hub/builtin-agent-activity';
 
 describe('parseCodexJsonl', () => {
+  test('records explicitly invoked and successfully loaded Codex skills', () => {
+    const parsed = parseCodexJsonl([
+      JSON.stringify({
+        type: 'item.completed',
+        item: {
+          id: 'user-1',
+          type: 'user_message',
+          content: [
+            { type: 'text', text: '$openai-docs answer this' },
+            {
+              type: 'skill',
+              name: 'openai-docs',
+              path: '/home/user/.codex/skills/.system/openai-docs/SKILL.md',
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: 'item.completed',
+        item: {
+          id: 'command-1',
+          type: 'command_execution',
+          source: 'agent',
+          status: 'completed',
+          exit_code: 0,
+          commandActions: [
+            {
+              type: 'read',
+              command: 'sed',
+              name: 'SKILL.md',
+              path: '/home/user/.agents/skills/repo-review/SKILL.md',
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: 'item.completed',
+        item: {
+          id: 'command-2',
+          type: 'command_execution',
+          source: 'agent',
+          status: 'failed',
+          exit_code: 1,
+          commandActions: [
+            {
+              type: 'read',
+              command: 'cat',
+              name: 'SKILL.md',
+              path: '/home/user/.agents/skills/missing-skill/SKILL.md',
+            },
+          ],
+        },
+      }),
+    ].join('\n'));
+
+    expect(parsed.skillsUsed).toEqual([
+      { name: 'openai-docs', source: 'explicit' },
+      { name: 'repo-review', source: 'skill-file-read' },
+    ]);
+  });
+
+  test('does not count a skill until its read command completes', () => {
+    const parsed = parseCodexJsonl(
+      JSON.stringify({
+        type: 'item.started',
+        item: {
+          id: 'command-1',
+          type: 'command_execution',
+          source: 'agent',
+          status: 'in_progress',
+          commandActions: [
+            {
+              type: 'read',
+              command: 'cat',
+              name: 'SKILL.md',
+              path: 'C:\\Users\\me\\.agents\\skills\\frontend-design\\SKILL.md',
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(parsed.skillsUsed).toBeUndefined();
+  });
+
+  test('keeps read evidence from command start when the completed item omits actions', () => {
+    const parsed = parseCodexJsonl(
+      [
+        JSON.stringify({
+          type: 'item.started',
+          item: {
+            id: 'command-1',
+            type: 'command_execution',
+            source: 'unifiedExecStartup',
+            status: 'in_progress',
+            commandActions: [
+              {
+                type: 'read',
+                name: 'SKILL.md',
+                path: '/root/.agents/skills/communication',
+              },
+            ],
+          },
+        }),
+        JSON.stringify({
+          type: 'item.completed',
+          item: {
+            id: 'command-1',
+            type: 'command_execution',
+            source: 'unifiedExecStartup',
+            status: 'completed',
+            exit_code: null,
+            commandActions: [],
+          },
+        }),
+      ].join('\n'),
+    );
+
+    expect(parsed.skillsUsed).toEqual([
+      { name: 'communication', source: 'skill-file-read' },
+    ]);
+  });
+
+  test('accepts live snake-case command action fields without legacy skill records', () => {
+    const parsed = parseCodexJsonl(
+      JSON.stringify({
+        type: 'item.completed',
+        item: {
+          id: 'command-1',
+          type: 'command_execution',
+          source: 'agent',
+          status: 'completed',
+          exit_code: 0,
+          command_actions: [
+            {
+              type: 'read',
+              path: '/root/.agents/skills/communication/SKILL.md',
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(parsed.skillsUsed).toEqual([
+      { name: 'communication', source: 'skill-file-read' },
+    ]);
+  });
+
+  test('detects a successful skill read hidden behind a shell wrapper', () => {
+    const command =
+      `/bin/bash -lc "sed -n '1,80p' /root/.agents/skills/communication/SKILL.md"`;
+    const parsed = parseCodexJsonl(
+      JSON.stringify({
+        type: 'item.completed',
+        item: {
+          id: 'command-1',
+          type: 'command_execution',
+          source: 'agent',
+          status: 'completed',
+          exit_code: 0,
+          command,
+          commandActions: [{ type: 'unknown', command }],
+          aggregated_output:
+            '---\nname: communication\ndescription: Explain things clearly.\n---\n',
+        },
+      }),
+    );
+
+    expect(parsed.skillsUsed).toEqual([
+      { name: 'communication', source: 'skill-file-read' },
+    ]);
+  });
+
+  test('detects a skill read in the combined shell command shape emitted by Codex', () => {
+    const command =
+      `/bin/bash -lc "sed -n '1,240p' /root/.agents/skills/communication/SKILL.md && git status --short && git log --oneline -12"`;
+    const actionCommand =
+      `sed -n '1,240p' /root/.agents/skills/communication/SKILL.md && git status --short && git log --oneline -12`;
+    const parsed = parseCodexJsonl(
+      [
+        JSON.stringify({
+          type: 'item.started',
+          item: {
+            id: 'exec-1',
+            type: 'command_execution',
+            source: 'unifiedExecStartup',
+            status: 'inProgress',
+            command,
+            commandActions: [{ type: 'unknown', command: actionCommand }],
+            aggregatedOutput: null,
+            exitCode: null,
+          },
+        }),
+        JSON.stringify({
+          type: 'item.completed',
+          item: {
+            id: 'exec-1',
+            type: 'command_execution',
+            source: 'unifiedExecStartup',
+            status: 'completed',
+            command,
+            commandActions: [{ type: 'unknown', command: actionCommand }],
+            aggregatedOutput:
+              '---\nname: communication\ndescription: Explain things clearly.\n---\n',
+            exitCode: 0,
+          },
+        }),
+      ].join('\n'),
+    );
+
+    expect(parsed.skillsUsed).toEqual([
+      { name: 'communication', source: 'skill-file-read' },
+    ]);
+  });
+
+  test('does not treat a command that merely mentions a skill path as a read', () => {
+    const parsed = parseCodexJsonl(
+      JSON.stringify({
+        type: 'item.completed',
+        item: {
+          id: 'command-1',
+          type: 'command_execution',
+          source: 'agent',
+          status: 'completed',
+          exit_code: 0,
+          command: 'test -f /root/.agents/skills/communication/SKILL.md',
+          commandActions: [{ type: 'unknown', command: 'test -f' }],
+          aggregated_output: 'exists',
+        },
+      }),
+    );
+
+    expect(parsed.skillsUsed).toBeUndefined();
+  });
+
+  test('does not count SKILL.md reads from user shell commands', () => {
+    const parsed = parseCodexJsonl(
+      JSON.stringify({
+        type: 'item.completed',
+        item: {
+          id: 'command-1',
+          type: 'command_execution',
+          source: 'userShell',
+          status: 'completed',
+          exit_code: 0,
+          commandActions: [
+            {
+              type: 'read',
+              path: '/home/user/.agents/skills/repo-review/SKILL.md',
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(parsed.skillsUsed).toBeUndefined();
+  });
+
   test('keeps the latest Codex todo-list snapshot', () => {
     const parsed = parseCodexJsonl([
       '{"type":"item.started","item":{"id":"plan","type":"todo_list","items":[{"text":"Inspect code","completed":false},{"text":"Add tests","completed":false}]}}',
@@ -584,6 +842,7 @@ describe('prompt job transcript metadata', () => {
   test('preserves the final Codex message even when persisted stdout is truncated earlier', () => {
     const fullStdout = [
       '{"type":"thread.started","thread_id":"019e1922-047b-74b1-bab8-0eaceadf4062"}',
+      '{"type":"item.completed","item":{"id":"command-1","type":"command_execution","source":"agent","status":"completed","exit_code":0,"commandActions":[{"type":"read","path":"/home/user/.agents/skills/repo-review/SKILL.md"}]}}',
       '{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"Interim status."}}',
       '{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"Final report."}}',
       '{"type":"turn.completed"}',
@@ -599,6 +858,7 @@ describe('prompt job transcript metadata', () => {
       message: 'Final report.',
       threadId: '019e1922-047b-74b1-bab8-0eaceadf4062',
       terminalEvent: 'turn.completed',
+      skillsUsed: [{ name: 'repo-review', source: 'skill-file-read' }],
       stdoutBytes: 3_000_000,
       stdoutTruncated: true,
       parsedAt: '2026-05-25T21:50:23.410Z',
@@ -614,6 +874,7 @@ describe('prompt job transcript metadata', () => {
       threadId: '019e1922-047b-74b1-bab8-0eaceadf4062',
       message: 'Final report.',
       terminalEvent: 'turn.completed',
+      skillsUsed: [{ name: 'repo-review', source: 'skill-file-read' }],
     });
   });
 

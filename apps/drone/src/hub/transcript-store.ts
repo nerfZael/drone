@@ -12,7 +12,12 @@ import { appendHubOutboxEvent, initializeHubOutbox } from '../host/hub-outbox';
 import { getPromptQueueRepository } from '../host/prompt-queue-repository';
 import { normalizeSilentCompletion } from '../host/silent-completion';
 import type { AgentRunFileChanges } from '@blip/protocol';
-import type { AgentPlan, AgentRunActivity } from '@drone/assistant-chat';
+import {
+  normalizeAgentSkillUses,
+  type AgentPlan,
+  type AgentRunActivity,
+  type AgentSkillUse,
+} from '@drone/assistant-chat';
 import { normalizeAgentRunActivity } from './builtin-agent-activity';
 import type { AgentRunFileChangesBaseline } from './run-file-changes';
 import {
@@ -42,6 +47,7 @@ export type StoredTranscriptTurn = {
   inheritedFromClone?: boolean;
   dockerSnapshot?: unknown;
   agentPlan?: AgentPlan;
+  skillsUsed?: AgentSkillUse[];
   fileChanges?: AgentRunFileChanges;
 };
 
@@ -679,6 +685,7 @@ function normalizeTurn(raw: any): StoredTranscriptTurn {
   const at = String(raw?.at ?? new Date().toISOString());
   const id = typeof raw?.id === 'string' && raw.id.trim() ? raw.id.trim() : undefined;
   const activity = normalizeAgentRunActivity(raw?.activity);
+  const skillsUsed = normalizeAgentSkillUses(raw?.skillsUsed);
   const { output, silentCompletion } = normalizeSilentCompletion(
     Boolean(raw?.ok),
     raw?.output,
@@ -708,6 +715,7 @@ function normalizeTurn(raw: any): StoredTranscriptTurn {
     ...(raw?.inheritedFromClone === true ? { inheritedFromClone: true } : {}),
     ...(raw?.dockerSnapshot && typeof raw.dockerSnapshot === 'object' ? { dockerSnapshot: raw.dockerSnapshot } : {}),
     ...(raw?.agentPlan && typeof raw.agentPlan === 'object' ? { agentPlan: raw.agentPlan } : {}),
+    ...(skillsUsed.length > 0 ? { skillsUsed } : {}),
     ...(raw?.fileChanges && typeof raw.fileChanges === 'object' ? { fileChanges: raw.fileChanges } : {}),
   };
 }

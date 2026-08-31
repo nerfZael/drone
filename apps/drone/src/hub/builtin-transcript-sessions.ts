@@ -1,4 +1,10 @@
-import { normalizeAgentPlan, type AgentPlan, type AgentRunActivity } from '@drone/assistant-chat';
+import {
+  normalizeAgentPlan,
+  normalizeAgentSkillUses,
+  type AgentPlan,
+  type AgentRunActivity,
+  type AgentSkillUse,
+} from '@drone/assistant-chat';
 import type { BuiltinTranscriptAgentId } from './pendingPromptEnqueue';
 import { BuiltinAgentActivityCollector, normalizeAgentRunActivity } from './builtin-agent-activity';
 
@@ -81,6 +87,7 @@ type CodexJsonlParseResult = {
   reasoning?: string;
   terminalEvent?: CodexTerminalEvent;
   agentPlan?: AgentPlan;
+  skillsUsed?: AgentSkillUse[];
 };
 type StructuredAgentJsonlParseResult = {
   sessionId: string | null;
@@ -151,6 +158,125 @@ function createCodexJsonlParser(): {
   let assistantSequence = 0;
   let lastActivityText = '';
   const activity = new BuiltinAgentActivityCollector('codex');
+  const skillsUsed = new Map<string, AgentSkillUse>();
+  type CommandSkillReadEvidence = { structured: string[]; commandFallback: string[] };
+  const pendingCommandSkillReads = new Map<string, CommandSkillReadEvidence>();
+
+  function recordSkillUse(nameRaw: unknown, source: AgentSkillUse['source']) {
+    const normalized = normalizeAgentSkillUses([{ name: nameRaw, source }])[0];
+    if (!normalized) return;
+    const key = normalized.name.toLowerCase();
+    const existing = skillsUsed.get(key);
+    if (!existing || normalized.source === 'explicit') skillsUsed.set(key, normalized);
+  }
+
+  function skillNameFromFileRead(pathRaw: unknown, nameRaw?: unknown): string | null {
+    if (typeof pathRaw !== 'string') return null;
+    const path = pathRaw.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+    const parts = path.split('/').filter(Boolean);
+    if (String(parts.at(-1) ?? '').toLowerCase() === 'skill.md') {
+      return String(parts.at(-2) ?? '').trim() || null;
+    }
+    if (typeof nameRaw !== 'string') return null;
+    const nameParts = nameRaw.trim().replace(/\\/g, '/').split('/').filter(Boolean);
+    if (String(nameParts.at(-1) ?? '').toLowerCase() !== 'skill.md') return null;
+    if (nameParts.length > 1) return String(nameParts.at(-2) ?? '').trim() || null;
+    return String(parts.at(-1) ?? '').trim() || null;
+  }
+
+  function recordExplicitSkillInputs(content: unknown) {
+    if (!Array.isArray(content)) return;
+    for (const input of content) {
+      if (!input || typeof input !== 'object' || Array.isArray(input)) continue;
+      if (String((input as any).type ?? '').trim() !== 'skill') continue;
+      const name = String((input as any).name ?? '').trim();
+      if (name) recordSkillUse(name, 'explicit');
+    }
+  }
+
+  function dedupeSkillNames(names: string[]): string[] {
+    const seen = new Set<string>();
+    return names.filter((name) => {
+      const key = name.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function commandFallbackSkillReads(item: any, actions: any[]): string[] {
+    const commands = [item?.command, ...actions.map((action) => action?.command)].filter(
+      (command): command is string => typeof command === 'string' && command.trim().length > 0,
+    );
+    const readCommandPattern =
+      /(?:^|[\s"';&|()])(?:\/(?:usr\/)?bin\/)?(?:awk|bat|batcat|cat|head|less|more|sed|tail)(?=$|[\s"';&|()])/i;
+    const skillPathPattern = /(?:[A-Za-z]:)?[\\/][^"'`\r\n]*?[\\/]SKILL\.md/gi;
+    const names: string[] = [];
+    for (const command of commands) {
+      if (!readCommandPattern.test(command)) continue;
+      skillPathPattern.lastIndex = 0;
+      for (const match of command.matchAll(skillPathPattern)) {
+        const name = skillNameFromFileRead(match[0]);
+        if (name) names.push(name);
+      }
+    }
+    return dedupeSkillNames(names);
+  }
+
+  function commandSkillReads(item: any): CommandSkillReadEvidence {
+    const actions = Array.isArray(item?.commandActions) ? item.commandActions : [];
+    const legacyActions = Array.isArray(item?.command_actions) ? item.command_actions : [];
+    const availableActions = actions.length > 0 ? actions : legacyActions;
+    const structured: string[] = [];
+    for (const action of availableActions) {
+      if (String(action?.type ?? '').trim() !== 'read') continue;
+      const name = skillNameFromFileRead(action?.path, action?.name);
+      if (name) structured.push(name);
+    }
+    return {
+      structured: dedupeSkillNames(structured),
+      commandFallback: commandFallbackSkillReads(item, availableActions),
+    };
+  }
+
+  function recordCommandSkillReads(item: any, eventType: string) {
+    const itemId = String(item?.id ?? '').trim();
+    const evidence = commandSkillReads(item);
+    if (eventType !== 'item.completed') {
+      if (itemId && (evidence.structured.length > 0 || evidence.commandFallback.length > 0)) {
+        if (!pendingCommandSkillReads.has(itemId) && pendingCommandSkillReads.size >= 256) {
+          const oldestItemId = pendingCommandSkillReads.keys().next().value;
+          if (oldestItemId) pendingCommandSkillReads.delete(oldestItemId);
+        }
+        const current = pendingCommandSkillReads.get(itemId);
+        pendingCommandSkillReads.set(itemId, {
+          structured: dedupeSkillNames([...(current?.structured ?? []), ...evidence.structured]),
+          commandFallback: dedupeSkillNames([
+            ...(current?.commandFallback ?? []),
+            ...evidence.commandFallback,
+          ]),
+        });
+      }
+      return;
+    }
+    const pendingEvidence = itemId ? pendingCommandSkillReads.get(itemId) : undefined;
+    if (itemId) pendingCommandSkillReads.delete(itemId);
+    if (String(item?.source ?? '').trim() === 'userShell') return;
+    const status = String(item?.status ?? '').trim().toLowerCase();
+    const exitCode = item?.exit_code ?? item?.exitCode;
+    if (status !== 'completed') return;
+    if (typeof exitCode === 'number' && exitCode !== 0) return;
+    const output = takeStringText(item?.aggregated_output) ?? takeStringText(item?.aggregatedOutput);
+    const names = dedupeSkillNames([
+      ...(pendingEvidence?.structured ?? []),
+      ...evidence.structured,
+      ...(output ? pendingEvidence?.commandFallback ?? [] : []),
+      ...(output ? evidence.commandFallback : []),
+    ]);
+    for (const name of names) {
+      recordSkillUse(name, 'skill-file-read');
+    }
+  }
 
   function extractItemText(item: any): string | null {
     if (!item || typeof item !== 'object') return null;
@@ -196,6 +322,15 @@ function createCodexJsonlParser(): {
     if (!item || typeof item !== 'object') return;
     const itemType = String(item.type ?? '').trim();
     const id = String(item.id ?? `${itemType || 'item'}-${assistantSequence++}`);
+    if (
+      itemType === 'user_message' ||
+      (itemType === 'message' && String(item.role ?? '').trim() === 'user')
+    ) {
+      recordExplicitSkillInputs(item.content);
+    }
+    if (itemType === 'command_execution') {
+      recordCommandSkillReads(item, eventType);
+    }
     if (itemType === 'reasoning') {
       const thinking =
         takeStringText(item.text) ??
@@ -357,6 +492,7 @@ function createCodexJsonlParser(): {
     },
     result() {
       const agentActivity = activity.result();
+      const agentSkillsUsed = normalizeAgentSkillUses([...skillsUsed.values()]);
       return {
         threadId,
         message: lastMsg ?? (streamedMsg ? streamedMsg : null),
@@ -365,6 +501,7 @@ function createCodexJsonlParser(): {
         ...(lastReasoning ? { reasoning: lastReasoning } : {}),
         ...(terminalEvent ? { terminalEvent } : {}),
         ...(agentPlan ? { agentPlan } : {}),
+        ...(agentSkillsUsed.length > 0 ? { skillsUsed: agentSkillsUsed } : {}),
       };
     },
   };
@@ -1125,6 +1262,7 @@ export type BuiltinPromptJobTranscript =
       reasoning?: string;
       terminalEvent?: CodexTerminalEvent;
       agentPlan?: AgentPlan;
+      skillsUsed?: AgentSkillUse[];
       stdoutBytes?: number;
       stdoutTruncated?: boolean;
       parsedAt?: string;
@@ -1227,6 +1365,7 @@ export function parseBuiltinPromptJobTranscript(
       ...(parsed.reasoning ? { reasoning: parsed.reasoning } : {}),
       ...(parsed.terminalEvent ? { terminalEvent: parsed.terminalEvent } : {}),
       ...(parsed.agentPlan ? { agentPlan: parsed.agentPlan } : {}),
+      ...(parsed.skillsUsed ? { skillsUsed: parsed.skillsUsed } : {}),
       ...promptJobTranscriptMeta(opts),
     };
   }
@@ -1291,6 +1430,7 @@ export async function parseBuiltinPromptJobTranscriptLines(
       ...(parsed.reasoning ? { reasoning: parsed.reasoning } : {}),
       ...(parsed.terminalEvent ? { terminalEvent: parsed.terminalEvent } : {}),
       ...(parsed.agentPlan ? { agentPlan: parsed.agentPlan } : {}),
+      ...(parsed.skillsUsed ? { skillsUsed: parsed.skillsUsed } : {}),
       ...promptJobTranscriptMeta(opts),
     };
   }
@@ -1346,6 +1486,7 @@ export function parseCodexJobTranscript(job: any): {
   reasoning?: string;
   terminalEvent?: CodexTerminalEvent;
   agentPlan?: AgentPlan;
+  skillsUsed?: AgentSkillUse[];
 } {
   const transcript = job?.transcript;
   if (
@@ -1370,6 +1511,7 @@ export function parseCodexJobTranscript(job: any): {
         'codex',
         transcript.agentPlan?.updatedAt,
       );
+      const skillsUsed = normalizeAgentSkillUses(transcript.skillsUsed);
       return {
         threadId: optionalString(transcript.threadId),
         message: optionalString(transcript.message),
@@ -1378,6 +1520,7 @@ export function parseCodexJobTranscript(job: any): {
         ...(reasoning ? { reasoning } : {}),
         ...(terminalEvent ? { terminalEvent } : {}),
         ...(agentPlan ? { agentPlan } : {}),
+        ...(skillsUsed.length > 0 ? { skillsUsed } : {}),
       };
     }
   }

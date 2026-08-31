@@ -27,6 +27,26 @@ const summary = {
 };
 
 describe('changed files card', () => {
+  test('renders deduplicated skill pills at the end of an agent message', () => {
+    const html = renderToStaticMarkup(
+      <AgentMessageExtras
+        text="Completed the requested changes."
+        messageId="message-with-skills"
+        skillsUsed={[
+          { name: 'openai-docs', source: 'skill-file-read' },
+          { name: 'OpenAI-Docs', source: 'explicit' },
+          { name: 'frontend-design', source: 'skill-file-read' },
+        ]}
+      />,
+    );
+
+    expect(html).toContain('data-agent-skills-used="true"');
+    expect(html).toContain('aria-label="Skills used by this agent run"');
+    expect(html).toContain('OpenAI-Docs');
+    expect(html).toContain('frontend-design');
+    expect(html).not.toContain('>openai-docs</span>');
+  });
+
   test('renders a compact collapsed summary without mounting file rows', () => {
     const html = renderToStaticMarkup(<ChangedFilesCard fileChanges={summary} />);
 

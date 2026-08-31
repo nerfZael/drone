@@ -3,7 +3,7 @@ import {
   type ManagedDroneDesiredState,
 } from '../managed-drone-state';
 import { DroneApiRequestError, type DroneClient, type DroneDaemonConnection } from '../host/api';
-import { CODEX_ROOT_THREAD_RECOVERY_CAPABILITY } from '../daemon-capabilities';
+import { CODEX_SKILL_USE_TRACKING_CAPABILITY } from '../daemon-capabilities';
 
 type SyncOptions = { droneId: string; droneEntry: any };
 
@@ -61,7 +61,9 @@ type ManagedDroneStateSyncDependencies = {
   onTiming?: (timing: ManagedDroneStateSyncTiming) => void;
 };
 
-const REQUIRED_CAPABILITY = CODEX_ROOT_THREAD_RECOVERY_CAPABILITY;
+// Managed-state sync is also the deployment boundary for the daemon-side transcript parser.
+// Bump this requirement when transcript behavior must reach already-running drones.
+const REQUIRED_CAPABILITY = CODEX_SKILL_USE_TRACKING_CAPABILITY;
 
 export function createManagedDroneStateSyncService(deps: ManagedDroneStateSyncDependencies) {
   async function ensureCapability(

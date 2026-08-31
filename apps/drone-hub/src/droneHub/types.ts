@@ -3,6 +3,7 @@ import type { AgentRunFileChanges } from '@blip/protocol';
 import type {
   AgentPlan,
   AgentRunActivity,
+  AgentSkillUse,
   ChatQueueAction,
   GithubPullRequestFileChange,
   GithubPullRequestSummaryPayload,
@@ -561,6 +562,7 @@ export type TranscriptItem = {
   userOnly?: boolean;
   deliveryMode?: 'queue' | 'asap';
   agentPlan?: AgentPlan;
+  skillsUsed?: AgentSkillUse[];
   fileChanges?: AgentRunFileChanges;
   dockerSnapshot?: {
     id: string;

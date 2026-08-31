@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import type { AgentRunFileChanges } from '@blip/protocol';
+import { normalizeAgentSkillUses } from '@drone/assistant-chat';
 import { normalizeMcpChatAccessScope } from './mcp-chat-access';
 import { settleAgentRunActivity } from './builtin-agent-activity';
 
@@ -1014,6 +1015,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     const model = normalizeChatModel((turn as any)?.model);
     const reasoning = normalizeChatReasoning((turn as any)?.reasoning);
     const activity = settleAgentRunActivity((turn as any)?.activity);
+    const skillsUsed = normalizeAgentSkillUses((turn as any)?.skillsUsed);
     const attachments = normalizeChatImageAttachmentRefs((turn as any)?.attachments);
     const dockerSnapshot = normalizeDockerSnapshot((turn as any)?.dockerSnapshot);
     const fileChanges = normalizeAgentRunFileChanges((turn as any)?.fileChanges);
@@ -1044,6 +1046,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       ...(model ? { model } : {}),
       ...(reasoning ? { reasoning } : {}),
       ...(activity ? { activity } : {}),
+      ...(skillsUsed.length > 0 ? { skillsUsed } : {}),
       ...(attachments.length > 0 ? { attachments } : {}),
       ...(agentPlan ? { agentPlan } : {}),
       ...(fileChanges ? { fileChanges } : {}),

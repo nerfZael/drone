@@ -4,6 +4,7 @@ export * from './assistant-message-types.js';
 export * from './agent-run-activity.js';
 export * from './agent-run-file-changes.js';
 export * from './agent-run-failure.js';
+export * from './agent-skill-use.js';
 export * from './chat-attachment-context.js';
 export * from './chat-attachment-policy.js';
 export * from './chat-queue-actions.js';

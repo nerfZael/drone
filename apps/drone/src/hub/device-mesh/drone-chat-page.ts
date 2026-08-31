@@ -1,5 +1,5 @@
 import { MESH_CHAT_PAYLOAD_BYTES } from '@drone/device-protocol';
-import type { AssistantMessage } from '@drone/assistant-chat';
+import { normalizeAgentSkillUses, type AssistantMessage } from '@drone/assistant-chat';
 import { normalizeAgentRunActivity, trimJsonArrayToBytes } from '../builtin-agent-activity';
 
 const MAX_TURNS_PER_PAGE = 100;
@@ -268,6 +268,7 @@ function compactTurn(turn: any, sourceIndex: number): Record<string, unknown> {
   const compactedActivity = compactAgentRunActivityForMesh(turn?.activity);
   const agentPlan = compactAgentPlanForMesh(turn?.agentPlan);
   const fileChanges = compactAgentRunFileChangesForMesh(turn?.fileChanges);
+  const skillsUsed = normalizeAgentSkillUses(turn?.skillsUsed);
   const meshTruncated = prompt.truncated || responseTruncated || compactedActivity.truncated;
   const turnNumber = Number.isFinite(Number(turn?.turn)) ? Number(turn.turn) : null;
   return {
@@ -291,6 +292,7 @@ function compactTurn(turn: any, sourceIndex: number): Record<string, unknown> {
     reasoning: String(turn?.reasoning ?? ''),
     ...(agentPlan ? { agentPlan } : {}),
     ...(fileChanges ? { fileChanges } : {}),
+    ...(skillsUsed.length > 0 ? { skillsUsed } : {}),
     ...(compactedActivity.activity ? { activity: compactedActivity.activity } : {}),
     attachments: compactAttachments(turn?.attachments),
     ...(prompt.truncated ? { promptTruncated: true } : {}),

@@ -80,7 +80,7 @@ describe('device mesh drone chat pages', () => {
     });
   });
 
-  test('preserves plans, changed files, and bounded external-agent activity', () => {
+  test('preserves skills, plans, changed files, and bounded external-agent activity', () => {
     const [turn] = boundedDroneChatPage([
       {
         id: 'turn-activity',
@@ -93,6 +93,11 @@ describe('device mesh drone chat pages', () => {
           source: 'codex',
           items: [{ text: 'Inspect', status: 'completed' }],
         },
+        skillsUsed: [
+          { name: 'openai-docs', source: 'skill-file-read' },
+          { name: 'invalid-source', source: 'unknown' },
+          'legacy-string-record',
+        ],
         fileChanges: {
           version: 1,
           capturedAt: '2026-07-24T00:00:00.000Z',
@@ -131,6 +136,7 @@ describe('device mesh drone chat pages', () => {
     ]).turns;
 
     expect(turn?.agentPlan).toMatchObject({ items: [{ text: 'Inspect' }] });
+    expect(turn?.skillsUsed).toEqual([{ name: 'openai-docs', source: 'skill-file-read' }]);
     expect(turn?.startedAt).toBe('2026-07-24T00:05:00.000Z');
     expect(turn?.fileChanges).toMatchObject({ counts: { changed: 1 } });
     expect(turn?.activity).toMatchObject({
