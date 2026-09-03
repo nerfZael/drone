@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { MESH_CHAT_PAYLOAD_BYTES } from '@drone/device-protocol';
+import { MESH_BINARY_CHUNK_BYTES, MESH_CHAT_PAYLOAD_BYTES } from '@drone/device-protocol';
 import {
   createDroneControlCapability,
   deviceMeshDroneSummary,
@@ -2344,38 +2344,65 @@ describe('device mesh drone summaries', () => {
 
   test('chunks large mobile directory listings below the mesh response limit', async () => {
     const originalFetch = globalThis.fetch;
+    let listRequests = 0;
     const entries = Array.from({ length: 3_000 }, (_, index) => ({
       name: `file-${index.toString().padStart(4, '0')}-${'x'.repeat(48)}.ts`,
       path: `/work/repo/file-${index.toString().padStart(4, '0')}-${'x'.repeat(48)}.ts`,
       kind: 'file',
     }));
-    globalThis.fetch = (async () =>
-      Response.json({ ok: true, path: '/work/repo', entries })) as typeof fetch;
+    globalThis.fetch = (async () => {
+      listRequests += 1;
+      return Response.json({ ok: true, path: '/work/repo', entries });
+    }) as typeof fetch;
     try {
       const capability = createDroneControlCapability({
         baseUrl: () => 'http://127.0.0.1:7777',
         apiToken: 'test',
       });
-      const first: any = await capability.invoke('files.list', {
-        droneId: 'one',
-        path: '/work/repo',
-        contentOffset: 0,
-      });
+      const context = { sourceDevice: { id: 'phone-a' }, requestId: 'request-a' } as any;
+      const first: any = await capability.invoke(
+        'files.list',
+        {
+          droneId: 'one',
+          path: '/work/repo',
+          contentOffset: 0,
+        },
+        context,
+      );
       expect(first.contentChunk).toMatchObject({
         encoding: 'base64-json-utf8',
         offset: 0,
         done: false,
       });
-      const second: any = await capability.invoke('files.list', {
-        droneId: 'one',
-        path: '/work/repo',
-        contentOffset: first.contentChunk.bytes,
-      });
+      const second: any = await capability.invoke(
+        'files.list',
+        {
+          droneId: 'one',
+          path: '/work/repo',
+          contentOffset: first.contentChunk.bytes,
+          snapshotToken: first.contentChunk.snapshotToken,
+        },
+        context,
+      );
       expect(second.contentChunk).toMatchObject({
         encoding: 'base64-json-utf8',
         offset: first.contentChunk.bytes,
       });
       expect(first.contentChunk.totalBytes).toBeGreaterThan(first.contentChunk.bytes);
+      expect(second.contentChunk.snapshotToken).toBe(first.contentChunk.snapshotToken);
+      expect(listRequests).toBe(1);
+      await expect(
+        capability.invoke(
+          'files.list',
+          {
+            droneId: 'one',
+            path: '/work/other',
+            contentOffset: first.contentChunk.bytes,
+            snapshotToken: first.contentChunk.snapshotToken,
+          },
+          context,
+        ),
+      ).rejects.toThrow('does not match');
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -2383,7 +2410,8 @@ describe('device mesh drone summaries', () => {
 
   test('returns chunked text and media file previews', async () => {
     const originalFetch = globalThis.fetch;
-    const chunkRequests: string[] = [];
+    const mediaBytes = Buffer.alloc(MESH_BINARY_CHUNK_BYTES + 3, 7);
+    const mediaRequests: string[] = [];
     const fileRequests: string[] = [];
     globalThis.fetch = (async (input, init) => {
       const url = new URL(String(input));
@@ -2408,26 +2436,15 @@ describe('device mesh drone summaries', () => {
               path: '/work/repo/demo.mp4',
               kind: 'video',
               mime: 'video/mp4',
-              size: 6,
+              size: mediaBytes.length,
               mtimeMs: 200,
               revision: url.searchParams.get('revision') === '0' ? null : 'sha256:video',
             };
         return Response.json(body);
       }
-      if (url.pathname.endsWith('/fs/chunk')) {
-        const offset = Number(url.searchParams.get('offset'));
-        const bytes = offset === 0 ? Buffer.from([1, 2, 3]) : Buffer.from([4, 5, 6]);
-        chunkRequests.push(`${offset}:${url.searchParams.get('limit')}`);
-        return Response.json({
-          ok: true,
-          kind: 'binary-chunk',
-          mime: 'video/mp4',
-          size: 6,
-          offset,
-          nextOffset: offset + bytes.length,
-          eof: offset + bytes.length >= 6,
-          dataBase64: bytes.toString('base64'),
-        });
+      if (url.pathname.endsWith('/fs/media')) {
+        mediaRequests.push(url.searchParams.get('revision') ?? '');
+        return new Response(mediaBytes, { headers: { 'content-type': 'video/mp4' } });
       }
       return Response.json({ error: 'not found' }, { status: 404 });
     }) as typeof fetch;
@@ -2460,23 +2477,22 @@ describe('device mesh drone summaries', () => {
         preview: { kind: 'text', revision: 'sha256:text' },
       });
 
-      await expect(
-        capability.invoke('file.preview', {
-          droneId: 'one',
-          path: '/work/repo/demo.mp4',
-        }),
-      ).resolves.toMatchObject({
+      const firstMedia: any = await capability.invoke('file.preview', {
+        droneId: 'one',
+        path: '/work/repo/demo.mp4',
+      });
+      expect(firstMedia).toMatchObject({
         preview: {
           kind: 'video',
           mime: 'video/mp4',
-          size: 6,
+          size: mediaBytes.length,
           revision: 'sha256:video',
         },
         mediaChunk: {
           encoding: 'base64-binary',
           offset: 0,
-          bytes: 3,
-          totalBytes: 6,
+          bytes: MESH_BINARY_CHUNK_BYTES,
+          totalBytes: mediaBytes.length,
           done: false,
         },
       });
@@ -2484,20 +2500,22 @@ describe('device mesh drone summaries', () => {
         capability.invoke('file.preview', {
           droneId: 'one',
           path: '/work/repo/demo.mp4',
-          contentOffset: 3,
+          contentOffset: MESH_BINARY_CHUNK_BYTES,
           expectedRevision: 'sha256:video',
+          mediaSnapshot: true,
+          snapshotToken: firstMedia.mediaChunk.snapshotToken,
         }),
       ).resolves.toMatchObject({
         preview: { revision: 'sha256:video' },
         mediaChunk: {
-          offset: 3,
+          offset: MESH_BINARY_CHUNK_BYTES,
           bytes: 3,
-          totalBytes: 6,
+          totalBytes: mediaBytes.length,
           done: true,
         },
       });
-      expect(chunkRequests).toEqual(['0:131072', '3:131072']);
-      expect(fileRequests).toEqual([':', '1:1', '1:0', '1:1', '1:0']);
+      expect(mediaRequests).toEqual(['sha256:video']);
+      expect(fileRequests).toEqual([':', '1:1', '1:0', '1:1']);
     } finally {
       globalThis.fetch = originalFetch;
     }

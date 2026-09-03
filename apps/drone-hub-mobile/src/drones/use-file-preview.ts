@@ -21,6 +21,7 @@ import type { MobileDroneSummary } from './drone-sidebar-model';
 import { BoundedSwrCache } from './bounded-swr-cache';
 import { mobileFileCacheKey } from './mobile-file-cache-key';
 import { mobilePreviewErrorMode } from './mobile-preview-error-state';
+import { readPipelinedMediaChunks } from './read-pipelined-media-chunks';
 
 type PreviewRequest = {
   targetId: string;
@@ -148,19 +149,25 @@ export function useFilePreview({
         });
         if (firstResult?.contentChunk) {
           let firstAvailable = true;
-          const content = await readMeshJsonContent(async (contentOffset) => {
-            if (contentOffset === 0 && firstAvailable) {
-              firstAvailable = false;
-              return firstResult.contentChunk;
-            }
-            const next = await requestDroneControl(nextRequest.targetId, 'file.preview', {
-              droneId: nextRequest.droneId,
-              chatName: nextRequest.chatName,
-              path: nextRequest.path,
-              contentOffset,
-            });
-            return next?.contentChunk ?? {};
-          });
+          const content = await readMeshJsonContent(
+            async (contentOffset, snapshotToken) => {
+              if (contentOffset === 0 && firstAvailable) {
+                firstAvailable = false;
+                return firstResult.contentChunk;
+              }
+              const next = await requestDroneControl(nextRequest.targetId, 'file.preview', {
+                droneId: nextRequest.droneId,
+                chatName: nextRequest.chatName,
+                path: nextRequest.path,
+                contentOffset,
+                ...(snapshotToken ? { snapshotToken } : {}),
+              });
+              return next?.contentChunk ?? {};
+            },
+            {
+              isCancelled: () => version !== loadVersion.current,
+            },
+          );
           if (version !== loadVersion.current) return;
           const path = String(content?.path ?? nextRequest.path).trim() || nextRequest.path;
           commitPreview(nextRequest, {
@@ -237,46 +244,57 @@ export function useFilePreview({
             offset = inlineBytes.length;
             firstResult = null;
           }
-          while (offset < totalBytes) {
-            const result =
-              offset === 0
-                ? firstResult
-                : await requestDroneControl(nextRequest.targetId, 'file.preview', {
-                    droneId: nextRequest.droneId,
-                    chatName: nextRequest.chatName,
-                    path: nextRequest.path,
-                    contentOffset: offset,
-                    expectedRevision: metadata.revision,
-                  });
+          if (offset < totalBytes) {
+            await readPipelinedMediaChunks({
+              firstResult,
+              totalBytes,
+              requestResult: async (contentOffset, snapshotToken) =>
+                await requestDroneControl(nextRequest.targetId, 'file.preview', {
+                  droneId: nextRequest.droneId,
+                  chatName: nextRequest.chatName,
+                  path: nextRequest.path,
+                  contentOffset,
+                  expectedRevision: metadata.revision,
+                  ...(snapshotToken ? { snapshotToken, mediaSnapshot: true } : {}),
+                }),
+              validateResult: (result, contentOffset) => {
+                const resultPreview = result?.preview;
+                const chunk = result?.mediaChunk;
+                const bytes = toByteArray(String(chunk?.dataBase64 ?? ''));
+                const nextOffset = contentOffset + bytes.length;
+                const expectedMtime = Number(metadata.mtimeMs);
+                const resultMtime = Number(resultPreview?.mtimeMs);
+                const expectedRevision =
+                  typeof metadata.revision === 'string' ? metadata.revision : null;
+                const resultRevision =
+                  typeof resultPreview?.revision === 'string' ? resultPreview.revision : null;
+                if (
+                  resultPreview?.kind !== metadata.kind ||
+                  Number(resultPreview?.size) !== totalBytes ||
+                  (Number.isFinite(expectedMtime) &&
+                    Number.isFinite(resultMtime) &&
+                    resultMtime !== expectedMtime) ||
+                  (expectedRevision && resultRevision !== expectedRevision) ||
+                  chunk?.encoding !== 'base64-binary' ||
+                  Number(chunk?.offset) !== contentOffset ||
+                  Number(chunk?.bytes) !== bytes.length ||
+                  Number(chunk?.totalBytes) !== totalBytes ||
+                  bytes.length === 0 ||
+                  chunk?.done !== (nextOffset === totalBytes)
+                ) {
+                  throw new Error('The selected device returned an invalid media chunk');
+                }
+                const snapshotToken =
+                  typeof chunk?.snapshotToken === 'string' && chunk.snapshotToken.trim()
+                    ? chunk.snapshotToken.trim()
+                    : undefined;
+                return { bytes, snapshotToken };
+              },
+              appendBytes,
+              isCancelled: () => version !== loadVersion.current,
+            });
+            offset = totalBytes;
             firstResult = null;
-            const resultPreview = result?.preview;
-            const chunk = result?.mediaChunk;
-            const bytes = toByteArray(String(chunk?.dataBase64 ?? ''));
-            const nextOffset = offset + bytes.length;
-            const expectedMtime = Number(metadata.mtimeMs);
-            const resultMtime = Number(resultPreview?.mtimeMs);
-            const expectedRevision =
-              typeof metadata.revision === 'string' ? metadata.revision : null;
-            const resultRevision =
-              typeof resultPreview?.revision === 'string' ? resultPreview.revision : null;
-            if (
-              resultPreview?.kind !== metadata.kind ||
-              Number(resultPreview?.size) !== totalBytes ||
-              (Number.isFinite(expectedMtime) &&
-                Number.isFinite(resultMtime) &&
-                resultMtime !== expectedMtime) ||
-              (expectedRevision && resultRevision !== expectedRevision) ||
-              chunk?.encoding !== 'base64-binary' ||
-              Number(chunk?.offset) !== offset ||
-              Number(chunk?.bytes) !== bytes.length ||
-              Number(chunk?.totalBytes) !== totalBytes ||
-              bytes.length === 0 ||
-              chunk?.done !== (nextOffset === totalBytes)
-            ) {
-              throw new Error('The selected device returned an invalid media chunk');
-            }
-            appendBytes(bytes);
-            offset = nextOffset;
           }
         } catch (mediaError) {
           cacheHandle?.close();

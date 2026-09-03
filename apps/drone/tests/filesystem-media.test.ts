@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -9,6 +10,12 @@ import {
   FS_GIT_IGNORED_PATHS_MARKER,
   parseContainerFsListOutput,
 } from '../src/hub/filesystem-media';
+import {
+  buildContainerMediaRangeScript,
+  parseRequestedByteRange,
+  readHostMediaRange,
+  resolveByteRange,
+} from '../src/hub/filesystem-media-range';
 
 describe('filesystem media caching', () => {
   test('caches only URLs whose revision matches the served bytes', () => {
@@ -18,6 +25,130 @@ describe('filesystem media caching', () => {
     expect(browserCacheControlForFileRevision('sha256:stale', 'sha256:current')).toBe('no-store');
     expect(browserCacheControlForFileRevision('', 'sha256:current')).toBe('no-store');
     expect(browserCacheControlForFileRevision(null, 'sha256:current')).toBe('no-store');
+  });
+});
+
+describe('filesystem media ranges', () => {
+  test('resolves closed, open, suffix, and invalid byte ranges', () => {
+    expect(resolveByteRange(parseRequestedByteRange('bytes=2-5'), 10)).toEqual({
+      kind: 'range',
+      start: 2,
+      end: 5,
+      length: 4,
+    });
+    expect(resolveByteRange(parseRequestedByteRange('bytes=7-'), 10)).toEqual({
+      kind: 'range',
+      start: 7,
+      end: 9,
+      length: 3,
+    });
+    expect(resolveByteRange(parseRequestedByteRange('bytes=-20'), 10)).toEqual({
+      kind: 'range',
+      start: 0,
+      end: 9,
+      length: 10,
+    });
+    expect(resolveByteRange(parseRequestedByteRange('bytes=10-11'), 10)).toBeNull();
+    expect(resolveByteRange(parseRequestedByteRange('bytes=-0'), 10)).toBeNull();
+    expect(resolveByteRange(parseRequestedByteRange('bytes=unsafe'), 10)).toBeNull();
+  });
+
+  test('reads only an unversioned host range and hashes the exact revisioned stream', async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'drone-media-range-'));
+    const filePath = path.join(root, 'video.mp4');
+    const bytes = Buffer.alloc(300_000);
+    for (let index = 0; index < bytes.length; index += 1) bytes[index] = index % 251;
+    writeFileSync(filePath, bytes);
+    try {
+      const unversioned = await readHostMediaRange({
+        targetPath: filePath,
+        maxBytes: 400_000,
+        requestedRange: parseRequestedByteRange('bytes=100000-100127'),
+        includeRevision: false,
+      });
+      expect(unversioned.bytes).toEqual(bytes.subarray(100_000, 100_128));
+      expect(unversioned.servedRevision).toBeNull();
+
+      const revisioned = await readHostMediaRange({
+        targetPath: filePath,
+        maxBytes: 400_000,
+        requestedRange: parseRequestedByteRange('bytes=-257'),
+        includeRevision: true,
+      });
+      expect(revisioned.bytes).toEqual(bytes.subarray(bytes.length - 257));
+      expect(revisioned.servedRevision).toBe(
+        `sha256:${crypto.createHash('sha256').update(bytes).digest('hex')}`,
+      );
+      await expect(
+        readHostMediaRange({
+          targetPath: filePath,
+          maxBytes: 400_000,
+          requestedRange: parseRequestedByteRange('bytes=400000-'),
+          includeRevision: false,
+        }),
+      ).rejects.toMatchObject({ statusCode: 416, size: bytes.length });
+      await expect(
+        readHostMediaRange({
+          targetPath: filePath,
+          maxBytes: 100,
+          requestedRange: parseRequestedByteRange(''),
+          includeRevision: false,
+        }),
+      ).rejects.toMatchObject({ statusCode: 413, size: bytes.length });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('container range script transfers the requested bytes and hashes one immutable stream', () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'drone-container-media-range-'));
+    const filePath = path.join(root, 'video.mp4');
+    const bytes = Buffer.alloc(400_000);
+    for (let index = 0; index < bytes.length; index += 1) bytes[index] = index % 239;
+    writeFileSync(filePath, bytes);
+    try {
+      const output = execFileSync(
+        'bash',
+        [
+          '-lc',
+          buildContainerMediaRangeScript({
+            targetPath: filePath,
+            maxBytes: 500_000,
+            requestedRange: parseRequestedByteRange('bytes=130000-131000'),
+            includeRevision: true,
+          }),
+        ],
+        { encoding: 'utf8' },
+      );
+      const firstNewline = output.indexOf('\n');
+      const metadata = output.slice(0, firstNewline).split('\t');
+      const transferred = Buffer.from(output.slice(firstNewline + 1), 'base64');
+      expect(metadata.slice(2, 6)).toEqual(['400000', '130000', '1001', '1']);
+      expect(metadata[6]).toBe(crypto.createHash('sha256').update(bytes).digest('hex'));
+      expect(metadata[7]).toBe(String(bytes.length));
+      expect(transferred).toEqual(bytes.subarray(130_000, 131_001));
+
+      try {
+        execFileSync(
+          'bash',
+          [
+            '-lc',
+            buildContainerMediaRangeScript({
+              targetPath: filePath,
+              maxBytes: 500_000,
+              requestedRange: parseRequestedByteRange('bytes=500000-'),
+              includeRevision: false,
+            }),
+          ],
+          { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+        );
+        throw new Error('expected the invalid range command to fail');
+      } catch (error: any) {
+        expect(String(error?.stdout ?? '')).toMatch(/__ERR__\s+range\s+400000/);
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

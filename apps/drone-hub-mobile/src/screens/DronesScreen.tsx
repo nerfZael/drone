@@ -1143,22 +1143,31 @@ export function DronesScreen({
     setFullMessageBusyId(messageId);
     setError(null);
     try {
-      const content = await readMeshJsonContent(async (contentOffset) => {
-        const result = await requestDroneControl(destinationId, 'chat.read', {
-          droneId,
-          chatName: activeChat,
-          ...(native
-            ? { messageId }
-            : {
-                turnId,
-                ...(Number.isSafeInteger(turnNumber) && Number(turnNumber) > 0
-                  ? { turnNumber }
-                  : {}),
-              }),
-          contentOffset,
-        });
-        return result?.contentChunk ?? {};
-      });
+      const content = await readMeshJsonContent(
+        async (contentOffset, snapshotToken) => {
+          const result = await requestDroneControl(destinationId, 'chat.read', {
+            droneId,
+            chatName: activeChat,
+            ...(native
+              ? { messageId }
+              : {
+                  turnId,
+                  ...(Number.isSafeInteger(turnNumber) && Number(turnNumber) > 0
+                    ? { turnNumber }
+                    : {}),
+                }),
+            contentOffset,
+            ...(snapshotToken ? { snapshotToken } : {}),
+          });
+          return result?.contentChunk ?? {};
+        },
+        {
+          isCancelled: () =>
+            targetIdRef.current !== destinationId ||
+            selectedRef.current?.id !== droneId ||
+            chatNameRef.current !== activeChat,
+        },
+      );
       if (
         targetIdRef.current !== destinationId ||
         selectedRef.current?.id !== droneId ||

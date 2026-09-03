@@ -483,6 +483,24 @@ describeSocketSuite('host runtime routing api', () => {
     );
     expect(rangedMedia.headers.get('content-range')).toBe(`bytes 1-4/${imageBytes.length}`);
     expect(Buffer.from(await rangedMedia.arrayBuffer())).toEqual(imageBytes.subarray(1, 5));
+
+    const unversionedRange = await authorizedFetch(routeUrl('media'), {
+      headers: { range: 'bytes=-3' },
+    });
+    expect(unversionedRange.status).toBe(206);
+    expect(unversionedRange.headers.get('cache-control')).toBe('no-store');
+    expect(unversionedRange.headers.get('content-range')).toBe(
+      `bytes ${imageBytes.length - 3}-${imageBytes.length - 1}/${imageBytes.length}`,
+    );
+    expect(Buffer.from(await unversionedRange.arrayBuffer())).toEqual(imageBytes.subarray(-3));
+
+    for (const range of ['bytes=999-', 'bytes=-0', 'bytes=invalid']) {
+      const invalidRange = await authorizedFetch(routeUrl('media', revision), {
+        headers: { range },
+      });
+      expect(invalidRange.status).toBe(416);
+      expect(invalidRange.headers.get('content-range')).toBe(`bytes */${imageBytes.length}`);
+    }
   });
 
   test('preflights every host batch mutation before changing the first item', async () => {

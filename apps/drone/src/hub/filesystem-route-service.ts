@@ -9,6 +9,12 @@ import {
   browserCacheControlForFileRevision,
   buildContainerFsListScript,
 } from './filesystem-media';
+import {
+  buildContainerMediaRangeScript,
+  parseRequestedByteRange,
+  readHostMediaRange,
+  type ResolvedByteRange,
+} from './filesystem-media-range';
 import { bashQuote, normalizeContainerPath } from './hub-format';
 import { readJsonBody, sendJson as json } from './hub-http';
 import { listGitIgnoredPaths } from './listGitIgnoredPaths';
@@ -95,14 +101,15 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
   const cacheControlForServedFile = (input: {
     res: ServerResponse;
     requestedRevision: unknown;
-    bytes: Buffer;
+    bytes?: Buffer;
+    servedRevision?: string | null;
     droneId: string;
     droneName: string;
     targetPath: string;
   }): string | null => {
     const requestedRevision = String(input.requestedRevision ?? '').trim();
     if (!requestedRevision) return 'no-store';
-    const servedRevision = sha256(input.bytes);
+    const servedRevision = input.servedRevision ?? (input.bytes ? sha256(input.bytes) : '');
     const cacheControl = browserCacheControlForFileRevision(requestedRevision, servedRevision);
     if (cacheControl !== 'no-store') return cacheControl;
     json(input.res, 409, {
@@ -115,6 +122,27 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
       currentRevision: servedRevision,
     });
     return null;
+  };
+  const sendMediaBytes = (input: {
+    res: ServerResponse;
+    bytes: Buffer;
+    totalBytes: number;
+    range: ResolvedByteRange;
+    mime: string;
+    cacheControl: string;
+  }) => {
+    input.res.statusCode = input.range.kind === 'range' ? 206 : 200;
+    input.res.setHeader('content-type', input.mime);
+    input.res.setHeader('cache-control', input.cacheControl);
+    input.res.setHeader('accept-ranges', 'bytes');
+    if (input.range.kind === 'range') {
+      input.res.setHeader(
+        'content-range',
+        `bytes ${input.range.start}-${input.range.end}/${input.totalBytes}`,
+      );
+    }
+    input.res.setHeader('content-length', String(input.bytes.length));
+    input.res.end(input.bytes);
   };
   const addHostGitIgnoreMetadata = async <T extends { path: string }>(
     directoryPath: string,
@@ -1699,11 +1727,18 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
           return;
         }
         const requestedRevision = u.searchParams.get('revision');
+        const requestedRange = parseRequestedByteRange(req.headers.range);
 
         if (runtime === 'host') {
           try {
-            const read = await readHostFileBytes({ targetPath, maxBytes: FS_MEDIA_MAX_BYTES });
-            const mimeRaw = String(read.mime ?? '')
+            const resolvedPath = path.resolve(targetPath);
+            const read = await readHostMediaRange({
+              targetPath: resolvedPath,
+              maxBytes: FS_MEDIA_MAX_BYTES,
+              requestedRange,
+              includeRevision: Boolean(String(requestedRevision ?? '').trim()),
+            });
+            const mimeRaw = String(await hostMimeType(resolvedPath))
               .trim()
               .toLowerCase();
             const mime = mimeRaw.startsWith('image/')
@@ -1726,73 +1761,33 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
               return;
             }
 
-            const buf = read.buf;
             const cacheControl = cacheControlForServedFile({
               res,
               requestedRevision,
-              bytes: buf,
+              servedRevision: read.servedRevision,
               droneId,
               droneName,
-              targetPath: path.resolve(targetPath),
+              targetPath: resolvedPath,
             });
             if (cacheControl == null) return;
-            const total = buf.length;
-            const rangeHeader = String(req.headers.range ?? '').trim();
-            if (rangeHeader.startsWith('bytes=')) {
-              const raw = rangeHeader.slice('bytes='.length).split(',')[0]?.trim() ?? '';
-              const m = /^(\d*)-(\d*)$/.exec(raw);
-              if (!m) {
-                res.statusCode = 416;
-                res.setHeader('content-range', `bytes */${total}`);
-                res.end();
-                return;
-              }
-              const startRaw = String(m[1] ?? '').trim();
-              const endRaw = String(m[2] ?? '').trim();
-              let start = startRaw ? Number(startRaw) : NaN;
-              let end = endRaw ? Number(endRaw) : NaN;
-              if (!Number.isFinite(start) && Number.isFinite(end)) {
-                const suffixLen = Math.floor(end);
-                if (suffixLen <= 0) {
-                  res.statusCode = 416;
-                  res.setHeader('content-range', `bytes */${total}`);
-                  res.end();
-                  return;
-                }
-                start = Math.max(0, total - suffixLen);
-                end = total - 1;
-              } else {
-                start = Number.isFinite(start) ? Math.floor(start) : 0;
-                end = Number.isFinite(end) ? Math.floor(end) : total - 1;
-              }
-              if (start < 0 || end < start || start >= total) {
-                res.statusCode = 416;
-                res.setHeader('content-range', `bytes */${total}`);
-                res.end();
-                return;
-              }
-              const safeEnd = Math.min(end, total - 1);
-              const chunk = buf.subarray(start, safeEnd + 1);
-              res.statusCode = 206;
-              res.setHeader('content-type', mime);
-              res.setHeader('cache-control', cacheControl);
-              res.setHeader('accept-ranges', 'bytes');
-              res.setHeader('content-range', `bytes ${start}-${safeEnd}/${total}`);
-              res.setHeader('content-length', String(chunk.length));
-              res.end(chunk);
-              return;
-            }
-
-            res.statusCode = 200;
-            res.setHeader('content-type', mime);
-            res.setHeader('cache-control', cacheControl);
-            res.setHeader('accept-ranges', 'bytes');
-            res.setHeader('content-length', String(total));
-            res.end(buf);
+            sendMediaBytes({
+              res,
+              bytes: read.bytes,
+              totalBytes: read.totalBytes,
+              range: read.range,
+              mime,
+              cacheControl,
+            });
             return;
           } catch (e: any) {
             const msg = e?.message ?? String(e);
             const explicitStatus = Number((e as any)?.statusCode ?? 0);
+            if (explicitStatus === 416) {
+              res.statusCode = 416;
+              res.setHeader('content-range', `bytes */${Math.max(0, Number(e?.size) || 0)}`);
+              res.end();
+              return;
+            }
             if (explicitStatus === 413) {
               const size = Number((e as any)?.size ?? NaN);
               const sizeText = Number.isFinite(size)
@@ -1819,27 +1814,12 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
           }
         }
 
-        const script = [
-          'set -euo pipefail',
-          `target=${bashQuote(targetPath)}`,
-          `max=${String(FS_MEDIA_MAX_BYTES)}`,
-          'if [ ! -f "$target" ]; then',
-          '  echo "__ERR__\tnot-file"',
-          '  exit 3',
-          'fi',
-          'size=$(wc -c < "$target" | tr -d "[:space:]")',
-          'if [ -z "$size" ]; then size=0; fi',
-          'if [ "$size" -gt "$max" ]; then',
-          '  printf "__ERR__\ttoo-large\t%s\n" "$size"',
-          '  exit 4',
-          'fi',
-          'mime=""',
-          'if command -v file >/dev/null 2>&1; then',
-          '  mime=$(file -Lb --mime-type -- "$target" 2>/dev/null || true)',
-          'fi',
-          'printf "__META__\t%s\t%s\n" "$mime" "$size"',
-          'base64 < "$target" | tr -d "\\n"',
-        ].join('\n');
+        const script = buildContainerMediaRangeScript({
+          targetPath,
+          maxBytes: FS_MEDIA_MAX_BYTES,
+          requestedRange,
+          includeRevision: Boolean(String(requestedRevision ?? '').trim()),
+        });
 
         try {
           const r = await withReadonlyDroneContainer(
@@ -1872,6 +1852,13 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
               });
               return;
             }
+            const invalidRange = out.match(/__ERR__\s+range\s+(\d+)/i);
+            if (invalidRange) {
+              res.statusCode = 416;
+              res.setHeader('content-range', `bytes */${invalidRange[1]}`);
+              res.end();
+              return;
+            }
             json(res, 500, {
               ok: false,
               error: 'failed reading media',
@@ -1896,7 +1883,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
           const metaLine = stdout.slice(0, firstNl);
           const b64 = stdout.slice(firstNl + 1).trim();
           const meta = metaLine.split('\t');
-          if (meta.length < 3 || meta[0] !== '__META__') {
+          if (meta.length < 8 || meta[0] !== '__META__') {
             json(res, 500, {
               ok: false,
               error: 'media metadata missing',
@@ -1930,6 +1917,44 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
             return;
           }
 
+          const total = Number(meta[2]);
+          const start = Number(meta[3]);
+          const count = Number(meta[4]);
+          const partial = meta[5] === '1';
+          const servedRevision = String(meta[6] ?? '').trim();
+          const actualSize = Number(meta[7]);
+          if (
+            !Number.isSafeInteger(total) ||
+            total < 0 ||
+            !Number.isSafeInteger(start) ||
+            start < 0 ||
+            !Number.isSafeInteger(count) ||
+            count < 0 ||
+            !Number.isSafeInteger(actualSize) ||
+            actualSize < 0
+          ) {
+            json(res, 500, {
+              ok: false,
+              error: 'media metadata invalid',
+              id: droneId,
+              name: droneName,
+              path: targetPath,
+            });
+            return;
+          }
+          if (actualSize !== total) {
+            json(res, 409, {
+              ok: false,
+              code: 'FILE_CHANGED_DURING_READ',
+              error: 'file changed while it was being read',
+              id: droneId,
+              name: droneName,
+              path: targetPath,
+              ...(servedRevision ? { currentRevision: `sha256:${servedRevision}` } : {}),
+            });
+            return;
+          }
+
           let buf: Buffer;
           try {
             buf = Buffer.from(b64, 'base64');
@@ -1943,70 +1968,35 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
             });
             return;
           }
+          if (buf.length !== count || start + count > total) {
+            json(res, 409, {
+              ok: false,
+              code: 'FILE_CHANGED_DURING_READ',
+              error: 'file changed while it was being read',
+              id: droneId,
+              name: droneName,
+              path: targetPath,
+            });
+            return;
+          }
 
           const cacheControl = cacheControlForServedFile({
             res,
             requestedRevision,
-            bytes: buf,
+            ...(servedRevision
+              ? { servedRevision: `sha256:${servedRevision}` }
+              : partial
+                ? {}
+                : { bytes: buf }),
             droneId,
             droneName,
             targetPath,
           });
           if (cacheControl == null) return;
-
-          const total = buf.length;
-          const rangeHeader = String(req.headers.range ?? '').trim();
-          if (rangeHeader.startsWith('bytes=')) {
-            const raw = rangeHeader.slice('bytes='.length).split(',')[0]?.trim() ?? '';
-            const m = /^(\d*)-(\d*)$/.exec(raw);
-            if (!m) {
-              res.statusCode = 416;
-              res.setHeader('content-range', `bytes */${total}`);
-              res.end();
-              return;
-            }
-            const startRaw = String(m[1] ?? '').trim();
-            const endRaw = String(m[2] ?? '').trim();
-            let start = startRaw ? Number(startRaw) : NaN;
-            let end = endRaw ? Number(endRaw) : NaN;
-            if (!Number.isFinite(start) && Number.isFinite(end)) {
-              const suffixLen = Math.floor(end);
-              if (suffixLen <= 0) {
-                res.statusCode = 416;
-                res.setHeader('content-range', `bytes */${total}`);
-                res.end();
-                return;
-              }
-              start = Math.max(0, total - suffixLen);
-              end = total - 1;
-            } else {
-              start = Number.isFinite(start) ? Math.floor(start) : 0;
-              end = Number.isFinite(end) ? Math.floor(end) : total - 1;
-            }
-            if (start < 0 || end < start || start >= total) {
-              res.statusCode = 416;
-              res.setHeader('content-range', `bytes */${total}`);
-              res.end();
-              return;
-            }
-            const safeEnd = Math.min(end, total - 1);
-            const chunk = buf.subarray(start, safeEnd + 1);
-            res.statusCode = 206;
-            res.setHeader('content-type', mime);
-            res.setHeader('cache-control', cacheControl);
-            res.setHeader('accept-ranges', 'bytes');
-            res.setHeader('content-range', `bytes ${start}-${safeEnd}/${total}`);
-            res.setHeader('content-length', String(chunk.length));
-            res.end(chunk);
-            return;
-          }
-
-          res.statusCode = 200;
-          res.setHeader('content-type', mime);
-          res.setHeader('cache-control', cacheControl);
-          res.setHeader('accept-ranges', 'bytes');
-          res.setHeader('content-length', String(total));
-          res.end(buf);
+          const range: ResolvedByteRange = partial
+            ? { kind: 'range', start, end: start + count - 1, length: count }
+            : { kind: 'full', start: 0, end: Math.max(-1, total - 1), length: total };
+          sendMediaBytes({ res, bytes: buf, totalBytes: total, range, mime, cacheControl });
           return;
         } catch (e: any) {
           const msg = e?.message ?? String(e);
@@ -2029,6 +2019,13 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
               name: droneName,
               path: targetPath,
             });
+            return;
+          }
+          const invalidRange = msg.match(/__ERR__\s+range\s+(\d+)/i);
+          if (invalidRange) {
+            res.statusCode = 416;
+            res.setHeader('content-range', `bytes */${invalidRange[1]}`);
+            res.end();
             return;
           }
           const code = looksLikeMissingContainerError(msg) ? 404 : 500;

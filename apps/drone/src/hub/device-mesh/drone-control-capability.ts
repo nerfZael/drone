@@ -1,4 +1,4 @@
-import { DRONE_CONTROL_CAPABILITY, MESH_BINARY_CHUNK_BYTES } from '@drone/device-protocol';
+import { DRONE_CONTROL_CAPABILITY } from '@drone/device-protocol';
 import {
   filterCompletedPendingPrompts,
   isSendInNewChatQueueAction,
@@ -19,8 +19,8 @@ import {
 } from './drone-chat-page';
 import { trimJsonArrayToBytes } from '../builtin-agent-activity';
 import { isLikelyImagePath, isLikelyVideoPath } from '../filesystem-media';
-import { localHubRequest, type LocalHubAccess } from './local-hub-request';
-import { meshJsonContentChunk } from './mesh-content-chunk';
+import { localHubBinaryRequest, localHubRequest, type LocalHubAccess } from './local-hub-request';
+import { MeshContentSnapshotStore } from './mesh-content-chunk';
 import type { MeshChatAttachmentStore } from './mesh-chat-attachment-store';
 import { fitMeshChatPayload } from './fit-mesh-chat-payload';
 import { compactChatQuestionRequests, compactNativeChatReadResponse } from './native-chat-response';
@@ -368,13 +368,13 @@ export function deviceMeshDroneSummary(drone: any) {
     cwd: firstText(drone?.cwd, drone?.workingDirectory),
     repoAttached: Boolean(
       drone?.repoAttached ??
-      firstText(
-        drone?.repoPath,
-        drone?.repositoryPath,
-        drone?.repo?.path,
-        drone?.repo?.hostPath,
-        drone?.repo?.dest,
-      ),
+        firstText(
+          drone?.repoPath,
+          drone?.repositoryPath,
+          drone?.repo?.path,
+          drone?.repo?.hostPath,
+          drone?.repo?.dest,
+        ),
     ),
     ...(String(drone?.runtime ?? 'container')
       .trim()
@@ -450,6 +450,7 @@ export function createDroneControlCapability(
   };
   const fileWatches = new Map<string, FileWatch>();
   const fileWatchStarts = new Map<string, Promise<FileWatch>>();
+  const contentSnapshots = new MeshContentSnapshotStore();
   let closed = false;
   const stopWatch = (key: string) => {
     const watch = fileWatches.get(key);
@@ -570,6 +571,7 @@ export function createDroneControlCapability(
     descriptor: DRONE_CONTROL_CAPABILITY,
     async invoke(operation, rawPayload, context) {
       const payload = object(rawPayload);
+      const sourceDeviceId = optionalText(context?.sourceDevice?.id) ?? '__direct__';
       if (operation === 'drones.list') {
         const createModelAgent = optionalText(payload.createModelAgent);
         if (createModelAgent) {
@@ -1042,11 +1044,30 @@ export function createDroneControlCapability(
       }
       if (operation === 'files.list') {
         const directoryPath = optionalText(payload.path) ?? '';
+        const scope = ['files.list', droneId, directoryPath].join('\u0000');
+        if (payload.snapshotToken) {
+          return {
+            contentChunk: contentSnapshots.resume({
+              snapshotToken: payload.snapshotToken,
+              sourceDeviceId,
+              scope,
+              encoding: 'base64-json-utf8',
+              offset: payload.contentOffset,
+            }).chunk,
+          };
+        }
         const listing = await localHubRequest(
           access,
           `/api/drones/${encodedDrone}/fs/list?path=${encodeURIComponent(directoryPath)}`,
         );
-        return { contentChunk: meshJsonContentChunk(listing, payload.contentOffset) };
+        return {
+          contentChunk: contentSnapshots.createJson({
+            value: listing,
+            sourceDeviceId,
+            scope,
+            offset: payload.contentOffset,
+          }),
+        };
       }
       if (operation === 'file.action') {
         const action = requiredText(payload.action, 'action');
@@ -1100,6 +1121,7 @@ export function createDroneControlCapability(
       }
       if (operation === 'file.preview') {
         const filePath = requiredText(payload.path, 'path');
+        const contentScope = ['file.preview', droneId, filePath].join('\u0000');
         const watchAction = optionalText(payload.watch);
         const watchId = optionalText(payload.watchId) ?? 'default';
         const watchKey = `${droneId}\u0000${filePath}`;
@@ -1133,6 +1155,22 @@ export function createDroneControlCapability(
             revision: watch.revision,
           };
         }
+        if (payload.snapshotToken) {
+          const resumed = contentSnapshots.resume({
+            snapshotToken: payload.snapshotToken,
+            sourceDeviceId,
+            scope: contentScope,
+            encoding:
+              payload.expectedRevision || payload.mediaSnapshot === true
+                ? 'base64-binary'
+                : 'base64-json-utf8',
+            offset: payload.contentOffset,
+          });
+          if (resumed.chunk.encoding === 'base64-binary') {
+            return { preview: resumed.metadata, mediaChunk: resumed.chunk };
+          }
+          return { contentChunk: resumed.chunk };
+        }
         const fsFilePath = `/api/drones/${encodedDrone}/fs/file?path=${encodeURIComponent(filePath)}`;
         if (payload.metadataOnly === true) {
           return {
@@ -1157,7 +1195,12 @@ export function createDroneControlCapability(
         }
         if (metadata?.kind !== 'image' && metadata?.kind !== 'video') {
           return {
-            contentChunk: meshJsonContentChunk(metadata, payload.contentOffset),
+            contentChunk: contentSnapshots.createJson({
+              value: metadata,
+              sourceDeviceId,
+              scope: contentScope,
+              offset: payload.contentOffset,
+            }),
           };
         }
 
@@ -1182,48 +1225,46 @@ export function createDroneControlCapability(
         }
         const revision = optionalText(metadata?.revision) ?? expectedRevision ?? null;
         const previewPath = requiredText(metadata?.path ?? filePath, 'preview path');
-
-        const requestedOffset = Number(payload.contentOffset);
-        const offset =
-          Number.isSafeInteger(requestedOffset) && requestedOffset > 0 ? requestedOffset : 0;
-        if (offset >= size)
-          throw Object.assign(new Error('media preview offset is outside the file'), {
-            code: 'INVALID_REQUEST',
+        if (!revision) {
+          throw Object.assign(new Error('the Hub did not return a media revision'), {
+            code: 'INVALID_RESPONSE',
           });
-        const chunk = await localHubRequest(
-          access,
-          `/api/drones/${encodedDrone}/fs/chunk?path=${encodeURIComponent(previewPath)}&offset=${offset}&limit=${MESH_BINARY_CHUNK_BYTES}`,
-        );
-        const dataBase64 = String(chunk?.dataBase64 ?? '');
-        const bytes = Buffer.from(dataBase64, 'base64');
-        if (
-          chunk?.kind !== 'binary-chunk' ||
-          Number(chunk?.offset) !== offset ||
-          Number(chunk?.nextOffset) !== offset + bytes.length ||
-          Number(chunk?.size) !== size ||
-          bytes.toString('base64') !== dataBase64
-        ) {
+        }
+        let releaseSnapshotReservation = contentSnapshots.reserve(size);
+        let media: Awaited<ReturnType<typeof localHubBinaryRequest>>;
+        try {
+          media = await localHubBinaryRequest(
+            access,
+            `/api/drones/${encodedDrone}/fs/media?path=${encodeURIComponent(previewPath)}&revision=${encodeURIComponent(revision)}`,
+          );
+          releaseSnapshotReservation();
+          releaseSnapshotReservation = () => undefined;
+        } finally {
+          releaseSnapshotReservation();
+        }
+        if (media.bytes.length !== size) {
           throw Object.assign(new Error('the Hub returned an invalid media chunk'), {
             code: 'INVALID_RESPONSE',
           });
         }
+        const preview = {
+          path: previewPath,
+          kind: metadata.kind,
+          mime: String(metadata.mime ?? media.contentType ?? ''),
+          size,
+          mtimeMs: Number.isFinite(Number(metadata.mtimeMs)) ? Number(metadata.mtimeMs) : null,
+          revision,
+        };
+        const snapshot = contentSnapshots.createBinary({
+          content: media.bytes,
+          sourceDeviceId,
+          scope: contentScope,
+          metadata: preview,
+          offset: payload.contentOffset,
+        });
         return {
-          preview: {
-            path: previewPath,
-            kind: metadata.kind,
-            mime: String(metadata.mime ?? chunk?.mime ?? ''),
-            size,
-            mtimeMs: Number.isFinite(Number(metadata.mtimeMs)) ? Number(metadata.mtimeMs) : null,
-            revision,
-          },
-          mediaChunk: {
-            encoding: 'base64-binary',
-            offset,
-            bytes: bytes.length,
-            totalBytes: size,
-            done: offset + bytes.length >= size,
-            dataBase64,
-          },
+          preview,
+          mediaChunk: snapshot.chunk,
         };
       }
 
@@ -1296,6 +1337,25 @@ export function createDroneControlCapability(
         }
         const messageId = optionalText(payload.messageId);
         const turnId = optionalText(payload.turnId);
+        const contentScope = [
+          'chat.read',
+          droneId,
+          chatName,
+          messageId ? `message:${messageId}` : `turn:${turnId ?? ''}`,
+        ].join('\u0000');
+        if (payload.snapshotToken && (messageId || turnId)) {
+          return {
+            droneId,
+            chatName,
+            contentChunk: contentSnapshots.resume({
+              snapshotToken: payload.snapshotToken,
+              sourceDeviceId,
+              scope: contentScope,
+              encoding: 'base64-json-utf8',
+              offset: payload.contentOffset,
+            }).chunk,
+          };
+        }
         const contentOnlyRead = Boolean(messageId || turnId);
         const turnNumber = Number(payload.turnNumber);
         const hasTurnNumber = Number.isSafeInteger(turnNumber) && turnNumber > 0;
@@ -1373,7 +1433,12 @@ export function createDroneControlCapability(
               historyKind: 'message-content',
               nativeChatId,
               messageId,
-              contentChunk: meshJsonContentChunk(entry, payload.contentOffset),
+              contentChunk: contentSnapshots.createJson({
+                value: entry,
+                sourceDeviceId,
+                scope: contentScope,
+                offset: payload.contentOffset,
+              }),
             };
           }
           const history = await localHubRequest(
@@ -1446,7 +1511,12 @@ export function createDroneControlCapability(
             chatName,
             historyKind: 'turn-content',
             turnId,
-            contentChunk: meshJsonContentChunk(turn, payload.contentOffset),
+            contentChunk: contentSnapshots.createJson({
+              value: turn,
+              sourceDeviceId,
+              scope: contentScope,
+              offset: payload.contentOffset,
+            }),
           };
         }
         const pending = filterCompletedPendingPrompts(
@@ -1844,9 +1914,11 @@ export function createDroneControlCapability(
     },
     close() {
       closed = true;
+      contentSnapshots.close();
       for (const key of [...fileWatches.keys()]) stopWatch(key);
     },
     revokeDevice(deviceId) {
+      contentSnapshots.revokeDevice(deviceId);
       for (const [key, watch] of fileWatches) {
         watch.subscribers.delete(deviceId);
         if (watch.subscribers.size === 0) stopWatch(key);

@@ -235,26 +235,35 @@ export function MobileFileExplorer({
         if (result?.contentChunk) {
           let firstChunkAvailable = true;
           const firstChunk = result.contentChunk;
-          result = await readMeshJsonContent(async (contentOffset) => {
-            if (
-              currentContextKeyRef.current !== requestContextKey ||
-              contextVersionRef.current !== requestContextVersion ||
-              directoryRequestSeqRef.current[path] !== requestSeq
-            ) {
-              throw new Error('The selected workspace changed while files were loading');
-            }
-            if (contentOffset === 0 && firstChunkAvailable) {
-              firstChunkAvailable = false;
-              return firstChunk;
-            }
-            const next = await requestDroneControl(targetId, 'files.list', {
-              droneId,
-              chatName,
-              path,
-              contentOffset,
-            });
-            return next?.contentChunk ?? {};
-          });
+          result = await readMeshJsonContent(
+            async (contentOffset, snapshotToken) => {
+              if (
+                currentContextKeyRef.current !== requestContextKey ||
+                contextVersionRef.current !== requestContextVersion ||
+                directoryRequestSeqRef.current[path] !== requestSeq
+              ) {
+                throw new Error('The selected workspace changed while files were loading');
+              }
+              if (contentOffset === 0 && firstChunkAvailable) {
+                firstChunkAvailable = false;
+                return firstChunk;
+              }
+              const next = await requestDroneControl(targetId, 'files.list', {
+                droneId,
+                chatName,
+                path,
+                contentOffset,
+                ...(snapshotToken ? { snapshotToken } : {}),
+              });
+              return next?.contentChunk ?? {};
+            },
+            {
+              isCancelled: () =>
+                currentContextKeyRef.current !== requestContextKey ||
+                contextVersionRef.current !== requestContextVersion ||
+                directoryRequestSeqRef.current[path] !== requestSeq,
+            },
+          );
         }
         if (
           currentContextKeyRef.current !== requestContextKey ||
