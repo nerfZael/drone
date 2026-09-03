@@ -43,12 +43,23 @@ describe('skill library settings navigation', () => {
 
   test('the Monaco save shortcut invokes the latest save callback', () => {
     const workspaceSource = readFileSync(
-      new URL('../src/droneHub/app/SkillFilesWorkspace.tsx', import.meta.url),
+      new URL('../src/droneHub/app/SkillTextEditor.tsx', import.meta.url),
       'utf8',
     );
     expect(workspaceSource).toContain('const onSaveRef = React.useRef(onSave);');
     expect(workspaceSource).toContain('onSaveRef.current = onSave;');
     expect(workspaceSource).toContain('() => onSaveRef.current()');
     expect(workspaceSource).not.toContain('monaco.KeyCode.KeyS, onSave');
+    expect(workspaceSource).toContain('monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter');
+    expect(workspaceSource).toContain('monaco.KeyMod.WinCtrl | monaco.KeyCode.Enter');
+    expect(workspaceSource).toContain("key === 's' || key === 'enter'");
+    expect(workspaceSource).toContain('!event.shiftKey');
+    expect(workspaceSource).toContain('!event.altKey');
+    expect(workspaceSource).toContain(
+      'aria-keyshortcuts="Control+S Meta+S Control+Enter Meta+Enter"',
+    );
+    expect(workspaceSource).toContain('nonBasicASCII: false');
+    expect(workspaceSource).toContain('ambiguousCharacters: false');
+    expect(workspaceSource).toContain('invisibleCharacters: true');
   });
 });

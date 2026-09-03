@@ -1,5 +1,6 @@
 import React from 'react';
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
   UiAlert,
@@ -196,6 +197,16 @@ describe('drone hub component library', () => {
     expect(html).toContain('right-2.5');
     expect(html).toContain('<kbd');
     expect(html).toContain('<table');
+  });
+
+  test('keeps centered dialogs centered throughout their entrance animation', () => {
+    const styles = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+    const dialogAnimation = styles.match(/@keyframes dialog-in \{([\s\S]*?)\n\}/)?.[1] ?? '';
+
+    expect(dialogAnimation).toContain(
+      'transform: translate(-50%, calc(-50% + 14px)) scale(.965)',
+    );
+    expect(dialogAnimation).toContain('transform: translate(-50%, -50%) scale(1)');
   });
 
   test('renders dense application patterns with accessible interaction contracts', () => {

@@ -710,6 +710,38 @@ export async function updateSkillFromEditablePackage(
   return await updateSkillRecord(existing.id, skillInputFromEditablePackage(parsed, existing));
 }
 
+export async function replaceSkillFromEditablePackage(
+  idRaw: string,
+  input: EditableSkillPackageInput,
+): Promise<SkillRecord> {
+  const existing = await getSkillById(idRaw);
+  if (!existing) throw new Error(`unknown skill: ${String(idRaw ?? '').trim()}`);
+  const parsed = parseEditableSkillPackage(input);
+  const current = await listSkills();
+  const record = normalizeIncomingSkillInput({
+    ...skillInputFromEditablePackage(parsed, existing),
+    // A replacement gets the same default slug as a newly created skill. The old
+    // record is excluded from uniqueness checks so case-only name changes work.
+    slug: parsed.slug ?? parsed.name,
+  });
+  assertSkillSlugAvailable(current, record.slug, existing.id);
+
+  const store = await canonicalSkillStore();
+  if (store) return await store.replaceSkill(existing.id, record);
+  await updateRegistry((reg: any) => {
+    reg.skills = reg.skills ?? {};
+    const latest = listSkillsFromRegistry(reg);
+    const existingKey = Object.keys(reg.skills).find(
+      (key) => normalizeStoredSkillRecord(reg.skills[key], key)?.id === existing.id,
+    );
+    if (!existingKey) throw new Error(`unknown skill: ${existing.id}`);
+    assertSkillSlugAvailable(latest, record.slug, existing.id);
+    delete reg.skills[existingKey];
+    reg.skills[record.id] = record;
+  });
+  return record;
+}
+
 export async function deleteSkillRecord(idRaw: string): Promise<boolean> {
   const id = String(idRaw ?? '').trim();
   if (!id) return false;

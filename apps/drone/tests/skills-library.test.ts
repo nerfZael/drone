@@ -11,6 +11,7 @@ import {
   deleteSkillRecord,
   listSkills,
   listSkillsFromRegistry,
+  replaceSkillFromEditablePackage,
   renderSkillMarkdown,
   renderSkillProjectionPackages,
   syncSkillLibraryToHostTargets,
@@ -235,6 +236,33 @@ describe('editable skill packages', () => {
           (entry) => entry.slug === 'empty-codex',
         )?.files,
       ).toContainEqual({ path: 'agents/openai.yaml', content: '', executable: false });
+    });
+  });
+
+  test('atomically replaces a renamed skill even when its normalized slug is unchanged', async () => {
+    await withTempHomes(async () => {
+      const created = await createSkill(sampleSkill());
+      const replaced = await replaceSkillFromEditablePackage(created.id, {
+        files: [
+          {
+            path: 'SKILL.md',
+            content:
+              '---\nname: Repo review\ndescription: Renamed with the same normalized slug.\n---\n\nNew instructions.\n',
+          },
+          {
+            path: 'agents/openai.yaml',
+            content: created.overlays?.codex?.openaiYaml ?? '',
+          },
+          { path: 'references/checklist.md', content: '# Preserved\n' },
+        ],
+      });
+
+      expect(replaced.id).not.toBe(created.id);
+      expect(replaced.slug).toBe('repo-review');
+      expect(replaced.name).toBe('Repo review');
+      expect(replaced.overlays).toEqual(created.overlays);
+      expect(replaced.files[0]?.content).toContain('Preserved');
+      expect(await listSkills()).toEqual([replaced]);
     });
   });
 

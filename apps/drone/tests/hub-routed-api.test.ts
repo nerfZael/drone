@@ -192,6 +192,26 @@ describeSocketSuite('routed Hub APIs', () => {
     expect(invalid.response.status).toBe(400);
     expect(invalid.data.error).toContain('invalid SKILL.md');
 
-    await apiFetch(`/api/skills/${encodeURIComponent(skillId)}`, { method: 'DELETE' });
+    const replaced = await apiFetch(
+      `/api/skills/${encodeURIComponent(skillId)}/replacement-package`,
+      jsonRequest('POST', {
+        files: [
+          {
+            path: 'SKILL.md',
+            content:
+              '---\nname: Updated package\ndescription: Replaced with the same normalized slug.\n---\n\nReplacement body.\n',
+          },
+        ],
+      }),
+    );
+    expect(replaced.response.status).toBe(200);
+    expect(replaced.data.skill.id).not.toBe(skillId);
+    expect(replaced.data.skill.slug).toBe('updated-package');
+
+    const oldSkill = await apiFetch(`/api/skills/${encodeURIComponent(skillId)}`);
+    expect(oldSkill.response.status).toBe(404);
+    await apiFetch(`/api/skills/${encodeURIComponent(replaced.data.skill.id)}`, {
+      method: 'DELETE',
+    });
   });
 });

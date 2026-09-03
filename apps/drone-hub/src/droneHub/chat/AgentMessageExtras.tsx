@@ -12,6 +12,7 @@ import type { MarkdownFileReference } from './MarkdownMessage';
 import { IconImage, IconOpen } from './icons';
 import { collectInlineAgentMedia, type InlineAgentMedia } from './inline-agent-media';
 import { ChangedFilesCard } from './ChangedFilesCard';
+import { prefetchSkillPillEditorData, SkillPillEditorDialog } from './SkillPillEditorDialog';
 
 export function resolveInlineMediaToggleState(inlineMediaVisible: boolean): {
   active: boolean;
@@ -66,6 +67,7 @@ export function AgentMessageExtras({
     [droneHomePath, droneId, text],
   );
   const [failedMediaById, setFailedMediaById] = React.useState<Record<string, true>>({});
+  const [editingSkillName, setEditingSkillName] = React.useState<string | null>(null);
   const inlineMediaVisible = inlineMediaOverride !== false;
   const showInlineMedia = inlineMedia.length > 0 && inlineMediaVisible;
   const inlineMediaToggle = resolveInlineMediaToggleState(inlineMediaVisible);
@@ -217,15 +219,27 @@ export function AgentMessageExtras({
           className="mt-2 flex flex-wrap items-center gap-1.5"
         >
           {normalizedSkillsUsed.map((skill) => (
-            <span
+            <button
+              type="button"
               key={skill.name.toLowerCase()}
-              title={`${skill.name} skill loaded`}
-              className="inline-flex max-w-full items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-0.5 font-mono text-[var(--text-10)] text-[var(--muted)]"
+              title={`Edit ${skill.name} skill`}
+              aria-haspopup="dialog"
+              onPointerEnter={() => void prefetchSkillPillEditorData()}
+              onFocus={() => void prefetchSkillPillEditorData()}
+              onClick={() => setEditingSkillName(skill.name)}
+              className="inline-flex max-w-full items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-0.5 font-mono text-[var(--text-10)] text-[var(--muted)] transition-colors hover:border-[var(--accent-muted)] hover:bg-[var(--surface-inset-strong)] hover:text-[var(--accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
             >
               <span className="truncate">{skill.name}</span>
-            </span>
+            </button>
           ))}
         </div>
+      ) : null}
+
+      {editingSkillName ? (
+        <SkillPillEditorDialog
+          skillName={editingSkillName}
+          onClose={() => setEditingSkillName(null)}
+        />
       ) : null}
 
       {!hasPlan && hasMessageActions ? (
