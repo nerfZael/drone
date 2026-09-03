@@ -66,6 +66,7 @@ import {
 } from './chat-timeline-items';
 import { timelineUserFollowUps } from './chat-timeline-follow-ups';
 import {
+  createGroupChatOlderLoadCoordinator,
   groupChatScrollTopAfterPrepend,
   groupChatTailHasOlder,
   type GroupChatScrollAnchor,
@@ -242,8 +243,6 @@ export function GroupMultiChatColumn({
     let loadedInitialTail = false;
     let eventsConnected = false;
     let reloadAfterCurrentLoad = false;
-    let reloadAfterFullHistory = false;
-    let loadOlderAfterCurrentLoad = false;
     const clearTimer = () => {
       if (timer == null) return;
       clearTimeout(timer);
@@ -262,7 +261,6 @@ export function GroupMultiChatColumn({
     setError(null);
     setLoading(true);
     let olderHistoryAvailable = false;
-    let fullTranscriptBusy = false;
 
     const loadFullTranscript = async (): Promise<void> => {
       const data = await fetchDroneChatTranscriptCached({
@@ -292,37 +290,30 @@ export function GroupMultiChatColumn({
       setError(null);
     };
 
+    const olderHistoryLoads = createGroupChatOlderLoadCoordinator({
+      load: loadFullTranscript,
+      onError(error) {
+        if (isNotFoundError(error)) {
+          transcriptEtagRef.current = null;
+          setTranscripts((prev) => (Array.isArray(prev) && prev.length === 0 ? prev : []));
+          olderHistoryAvailable = false;
+          setHasOlder(false);
+          setError(null);
+          return;
+        }
+        setOlderError(error instanceof Error ? error.message : String(error));
+      },
+      onLoadingChange: setOlderLoading,
+      resumePolling() {
+        clearTimer();
+        void loop();
+      },
+    });
+
     const startOlderHistoryLoad = () => {
-      if (!olderHistoryAvailable || fullTranscriptBusy) return;
-      if (busy) {
-        loadOlderAfterCurrentLoad = true;
-        return;
-      }
-      fullTranscriptBusy = true;
-      setOlderLoading(true);
+      if (!olderHistoryAvailable || olderHistoryLoads.isLoading()) return;
       setOlderError(null);
-      void loadFullTranscript()
-        .catch((err: any) => {
-          if (!mounted) return;
-          if (isNotFoundError(err)) {
-            transcriptEtagRef.current = null;
-            setTranscripts((prev) => (Array.isArray(prev) && prev.length === 0 ? prev : []));
-            olderHistoryAvailable = false;
-            setHasOlder(false);
-            setError(null);
-            return;
-          }
-          setOlderError(err?.message ?? String(err));
-        })
-        .finally(() => {
-          fullTranscriptBusy = false;
-          if (mounted) setOlderLoading(false);
-          if (reloadAfterFullHistory && mounted) {
-            reloadAfterFullHistory = false;
-            clearTimer();
-            void loop();
-          }
-        });
+      if (olderHistoryLoads.request(busy) === 'started') clearTimer();
     };
     loadOlderHistoryRef.current = startOlderHistoryLoad;
 
@@ -368,8 +359,7 @@ export function GroupMultiChatColumn({
           setHasOlder(olderHistoryAvailable);
           setError(null);
           setLoading(false);
-        } else if (fullTranscriptBusy) {
-          reloadAfterFullHistory = true;
+        } else if (olderHistoryLoads.isLoading()) {
           scheduleNext = false;
         } else {
           const data = await fetchDroneChatTranscriptCached({
@@ -411,11 +401,13 @@ export function GroupMultiChatColumn({
       } finally {
         busy = false;
         if (mounted) setLoading(false);
-        if (loadOlderAfterCurrentLoad && mounted) {
-          loadOlderAfterCurrentLoad = false;
+        if (
+          mounted &&
+          olderHistoryLoads.startQueuedAfterRegularLoad(olderHistoryAvailable)
+        ) {
+          reloadAfterCurrentLoad = false;
           scheduleNext = false;
           clearTimer();
-          startOlderHistoryLoad();
         } else if (reloadAfterCurrentLoad && mounted) {
           reloadAfterCurrentLoad = false;
           scheduleNext = false;
@@ -465,6 +457,7 @@ export function GroupMultiChatColumn({
     return () => {
       mounted = false;
       loadOlderHistoryRef.current = () => {};
+      olderHistoryLoads.dispose();
       setChatEventsConnected(false);
       unsubscribeChatEvents();
       clearTimer();
