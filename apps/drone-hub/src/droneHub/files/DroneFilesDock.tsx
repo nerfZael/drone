@@ -309,6 +309,22 @@ export function DroneFilesDock({
   }, [expandedDirs, explorerTree]);
 
   const selectedEntries = React.useMemo(() => selectedEntriesFromPaths(visibleEntries, selectedPaths), [selectedPaths, visibleEntries]);
+  const selectedDirectoryAncestors = React.useMemo(() => {
+    const ancestors = new Set<string>();
+    const selected = Array.from(selectedPaths);
+    for (const entry of visibleEntries) {
+      if (
+        entry.kind === 'directory' &&
+        selected.some(
+          (selectedPath) =>
+            selectedPath !== entry.path && isPathInsideOrEqual(entry.path, selectedPath),
+        )
+      ) {
+        ancestors.add(entry.path);
+      }
+    }
+    return ancestors;
+  }, [selectedPaths, visibleEntries]);
   const actionEntries = React.useMemo(() => topLevelSelectedEntries(selectedEntries), [selectedEntries]);
   const selectedCount = selectedEntries.length;
   const selectedOne = selectedCount === 1 ? selectedEntries[0] ?? null : null;
@@ -941,9 +957,7 @@ export function DroneFilesDock({
         const creatingInside =
           (inlineNameMode === 'create-file' || inlineNameMode === 'create-directory') &&
           actionTargetDirectory === node.path;
-        const hasSelectedDescendant = Array.from(selectedPaths).some(
-          (selectedPath) => selectedPath !== node.path && isPathInsideOrEqual(node.path, selectedPath),
-        );
+        const hasSelectedDescendant = selectedDirectoryAncestors.has(node.path);
 
         return (
           <div

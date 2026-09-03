@@ -194,6 +194,8 @@ export function ChatMessageBody({
               key={image.key}
               src={image.src}
               alt={image.alt}
+              loading="lazy"
+              decoding="async"
               className="max-h-44 max-w-[min(260px,100%)] rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] object-contain"
             />
           ))}

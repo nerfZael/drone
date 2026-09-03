@@ -706,7 +706,7 @@ export function createChatPromptRouteHandler(
               : {}),
           };
           if (includeVolatileState) {
-            json(res, 200, responseBody);
+            jsonWithEtag(req, res, 200, responseBody);
           } else if (snapshot.responseEtag) {
             jsonWithKnownEtag(req, res, 200, responseBody, snapshot.responseEtag);
           } else {

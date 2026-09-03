@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   fetchDroneChatState,
+  fetchDroneChatStateCached,
   fetchDroneChatTranscript,
   sameTranscriptItem,
   sendDroneChatPrompt,
@@ -187,5 +188,51 @@ describe('chat api request scopes', () => {
     expect(urls).toEqual([
       '/api/drones/drone-1/chats/chat%20one/state?turn=all&transcript=selected&pending=none&transcriptMeta=0',
     ]);
+  });
+
+  test('conditionally refreshes transcript state without volatile subscription data', async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{ url: string; etag: string | null }> = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      requests.push({ url: String(input), etag: headers.get('if-none-match') });
+      if (requests.length === 1) {
+        return new Response(
+          JSON.stringify({ ok: true, transcripts: [transcriptItem()], pending: [] }),
+          { status: 200, headers: { 'content-type': 'application/json', etag: '"state-1"' } },
+        );
+      }
+      return new Response(null, { status: 304 });
+    }) as typeof fetch;
+
+    try {
+      const first = await fetchDroneChatStateCached({
+        droneId: 'drone one',
+        chatName: 'default',
+        tail: 50,
+      });
+      expect(first.notModified).toBe(false);
+      expect(first.etag).toBe('"state-1"');
+
+      const second = await fetchDroneChatStateCached({
+        droneId: 'drone one',
+        chatName: 'default',
+        tail: 50,
+        etag: first.etag,
+      });
+      expect(second).toEqual({ etag: '"state-1"', notModified: true });
+      expect(requests).toEqual([
+        {
+          url: '/api/drones/drone%20one/chats/default/state?turn=all&tail=50&transcript=tail&subscriptions=false&readState=false&transcriptMeta=0',
+          etag: null,
+        },
+        {
+          url: '/api/drones/drone%20one/chats/default/state?turn=all&tail=50&transcript=tail&subscriptions=false&readState=false&transcriptMeta=0',
+          etag: '"state-1"',
+        },
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });

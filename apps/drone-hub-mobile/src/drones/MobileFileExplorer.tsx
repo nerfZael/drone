@@ -121,6 +121,7 @@ function fileNameStemSelectionEnd(name: string): number {
 }
 
 export function MobileFileExplorer({
+  active,
   targetId,
   droneId,
   chatName,
@@ -129,6 +130,7 @@ export function MobileFileExplorer({
   requestDroneControl,
   onOpenFile,
 }: {
+  active: boolean;
   targetId: string;
   droneId: string;
   chatName: string;
@@ -243,17 +245,22 @@ export function MobileFileExplorer({
   React.useEffect(() => {
     contextVersionRef.current += 1;
     directoryRequestSeqRef.current = {};
+    directoriesRef.current = {};
     setDirectories({});
     setExpanded(new Set());
     setActionMenuEntry(undefined);
     setEditor(null);
     setActionInput('');
     setActionError(null);
-    void loadDirectory(rootPath, true);
     return () => {
       contextVersionRef.current += 1;
     };
-  }, [contextKey, loadDirectory, rootPath]);
+  }, [contextKey]);
+
+  React.useEffect(() => {
+    if (!active) return;
+    void loadDirectory(rootPath);
+  }, [active, loadDirectory, rootPath]);
 
   const toggleDirectory = (path: string) => {
     const willExpand = !expanded.has(path);

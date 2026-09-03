@@ -48,6 +48,34 @@ type FsListCacheEntry = {
   payload: Extract<DroneFsListPayload, { ok: true }>;
 };
 
+export function sameDroneFsListPayload(
+  left: DroneFsListPayload | null,
+  right: Extract<DroneFsListPayload, { ok: true }>,
+): boolean {
+  if (!left?.ok) return false;
+  if (left.id !== right.id || left.name !== right.name || left.path !== right.path) return false;
+  if (left.entries.length !== right.entries.length) return false;
+  for (let index = 0; index < left.entries.length; index += 1) {
+    const leftEntry = left.entries[index];
+    const rightEntry = right.entries[index];
+    if (
+      !rightEntry ||
+      leftEntry.name !== rightEntry.name ||
+      leftEntry.path !== rightEntry.path ||
+      leftEntry.kind !== rightEntry.kind ||
+      leftEntry.size !== rightEntry.size ||
+      leftEntry.mtimeMs !== rightEntry.mtimeMs ||
+      leftEntry.ext !== rightEntry.ext ||
+      leftEntry.isGitIgnored !== rightEntry.isGitIgnored ||
+      leftEntry.isImage !== rightEntry.isImage ||
+      leftEntry.isVideo !== rightEntry.isVideo
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 const fsListCache = new Map<string, FsListCacheEntry>();
 
 function fsListCacheKey(droneIdRaw: string, pathRaw: string): string {
@@ -229,7 +257,7 @@ export function useFilesAndPortsPaneState({
         hasLoadedData = true;
         const payload = data as Extract<DroneFsListPayload, { ok: true }>;
         writeFsListCache(cacheKey, payload);
-        setFsResp(payload);
+        setFsResp((current) => (sameDroneFsListPayload(current, payload) ? current : payload));
         setFsError(null);
       } catch (e: any) {
         if (!mounted) return;

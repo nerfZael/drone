@@ -1,8 +1,19 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  browserCacheControlForFileRevision,
   FS_GIT_IGNORED_PATHS_MARKER,
   parseContainerFsListOutput,
 } from '../src/hub/filesystem-media';
+
+describe('filesystem media caching', () => {
+  test('caches only URLs tied to a file revision', () => {
+    expect(browserCacheControlForFileRevision('sha256:abc123')).toBe(
+      'private, max-age=31536000, immutable',
+    );
+    expect(browserCacheControlForFileRevision('')).toBe('no-store');
+    expect(browserCacheControlForFileRevision(null)).toBe('no-store');
+  });
+});
 
 describe('filesystem list metadata', () => {
   test('applies null-delimited Git ignore metadata to container entries', () => {

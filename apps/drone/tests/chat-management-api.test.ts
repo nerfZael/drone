@@ -1336,6 +1336,18 @@ describeSocketSuite('chat management api', () => {
     expect(unchanged.r.status).toBe(304);
     expect(unchanged.data).toBeNull();
 
+    const stateWithSubscriptions = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=1&subscriptions=true`,
+    );
+    const subscriptionsEtag = stateWithSubscriptions.r.headers.get('etag');
+    expect(subscriptionsEtag).toMatch(/^"sha256-/);
+    const subscriptionsUnchanged = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=1&subscriptions=true`,
+      { headers: { 'if-none-match': subscriptionsEtag ?? '' } },
+    );
+    expect(subscriptionsUnchanged.r.status).toBe(304);
+    expect(subscriptionsUnchanged.data).toBeNull();
+
     await updateRegistry((reg: any) => {
       const entry = reg?.drones?.[droneId]?.chats?.default;
       if (!entry) throw new Error('missing seeded chat entry');

@@ -738,6 +738,7 @@ export function FilePreviewModal({
                 </View>
               </Pressable>
               <MobileFileExplorer
+                active={explorerExpanded}
                 targetId={targetId}
                 droneId={droneId}
                 chatName={chatName}

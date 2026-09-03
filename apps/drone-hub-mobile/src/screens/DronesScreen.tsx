@@ -653,44 +653,6 @@ export function DronesScreen({
             'This device returned the legacy drone list without repository metadata. Update and restart DroneHub on the selected device.',
           );
         }
-        if (!quiet) {
-          const optionsRequestVersion = ++createOptionsRequestVersion.current;
-          setCreateOptionsLoading(true);
-          try {
-            const optionsResult = await requestDroneControl(targetId, 'drones.list', {
-              includeCreateOptions: true,
-            });
-            if (
-              targetIdRef.current !== targetId ||
-              droneListVersion.current !== requestVersion ||
-              createOptionsRequestVersion.current !== optionsRequestVersion
-            )
-              return;
-            const options = normalizeMobileDroneListPayload(optionsResult);
-            setDeleteMode(options.deleteMode);
-            setCreateRepos(
-              options.createRepos.map(
-                (repo) => createRepoBranchesCache.current.get(`${targetId}:${repo.path}`) ?? repo,
-              ),
-            );
-          } catch (nextError: any) {
-            if (
-              targetIdRef.current === targetId &&
-              droneListVersion.current === requestVersion &&
-              createOptionsRequestVersion.current === optionsRequestVersion
-            ) {
-              setError(
-                `Drones loaded, but creation options are unavailable: ${nextError?.message ?? String(nextError)}`,
-              );
-            }
-          } finally {
-            if (
-              targetIdRef.current === targetId &&
-              createOptionsRequestVersion.current === optionsRequestVersion
-            )
-              setCreateOptionsLoading(false);
-          }
-        }
       } catch (nextError: any) {
         if (targetIdRef.current === targetId && droneListVersion.current === requestVersion) {
           const message = nextError?.message ?? String(nextError);

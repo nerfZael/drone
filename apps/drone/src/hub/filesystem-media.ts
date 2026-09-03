@@ -40,6 +40,12 @@ export const ASSISTANT_BASH_MAX_COMMAND_BYTES = 20 * 1024;
 export const ASSISTANT_SEARCH_MAX_CONTEXT_LINES = 10;
 export const ASSISTANT_CHANGED_FILES_LIMIT = 200;
 
+export function browserCacheControlForFileRevision(revision: unknown): string {
+  return String(revision ?? '').trim()
+    ? 'private, max-age=31536000, immutable'
+    : 'no-store';
+}
+
 export type ContainerFsEntry = {
   name: string;
   path: string;

@@ -21,7 +21,12 @@ import {
   reconcileOptimisticPendingPrompt,
 } from './optimistic-pending-prompts';
 import { createCanvasChatNodeId } from './app-config';
-import { droneChatEventMatches, fetchDroneChatState, sameTranscriptItems, sendDroneChatPrompt } from './chat-api';
+import {
+  droneChatEventMatches,
+  fetchDroneChatStateCached,
+  sameTranscriptItems,
+  sendDroneChatPrompt,
+} from './chat-api';
 import { subscribeDroneChatEvents } from './chat-events';
 import { droneChatQueueKey, isDroneStartingOrSeeding, parseDroneChatQueueKey, shouldReadChatRuntimeForHubPhase } from './helpers';
 import { fetchJson, isNotFoundError, resolvePollIntervalMs, usePoll } from './hooks';
@@ -908,6 +913,7 @@ export function useChatRuntimeOrchestration({
     let eventsConnected = false;
     let reloadAfterCurrentLoad = false;
     let consecutiveTransientFailures = 0;
+    let stateEtag: string | null = null;
     const clearTimer = () => {
       if (timer == null) return;
       clearTimeout(timer);
@@ -929,13 +935,20 @@ export function useChatRuntimeOrchestration({
       const initial = transcriptsRef.current === null && !transcriptErrorRef.current;
       if (initial && mounted) setLoadingTranscript(true);
       try {
-        const data = await fetchDroneChatState(requestJson, {
+        const data = await fetchDroneChatStateCached({
           droneId: selectedDrone,
           chatName: selectedChat,
           turn: 'all',
           tail: INITIAL_TRANSCRIPT_TAIL_TURNS,
+          etag: stateEtag,
         });
         if (!mounted) return;
+        stateEtag = data.etag;
+        if (data.notModified) {
+          setTranscriptError(null);
+          consecutiveTransientFailures = 0;
+          return;
+        }
         const currentChatInfo =
           selectedChatInfoRef.current.key === selectedChatCacheKey
             ? selectedChatInfoRef.current.value
@@ -963,6 +976,7 @@ export function useChatRuntimeOrchestration({
       } catch (e: any) {
         if (!mounted) return;
         if (isNotFoundError(e)) {
+          stateEtag = null;
           // Treat 404 as "no transcript yet" to avoid a scary error state for brand new chats.
           const currentChatInfo =
             selectedChatInfoRef.current.key === selectedChatCacheKey

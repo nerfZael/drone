@@ -638,6 +638,8 @@ describe('agent chat surface adapters', () => {
 
     expect(html).toContain('<strong>Shared response</strong>');
     expect(html).toContain('Attached image');
+    expect(html).toContain('loading="lazy"');
+    expect(html).toContain('decoding="async"');
   });
 
   test('assistant message bodies leave inline media rendering to the media rail', () => {

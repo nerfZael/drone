@@ -45,6 +45,15 @@ export type FetchDroneChatStateResult = {
   subscriptions: ChatResourceSubscriptionInfo[];
 };
 
+export type FetchDroneChatStateCachedResult =
+  | { etag: string | null; notModified: true }
+  | {
+      transcripts: TranscriptItem[];
+      pending: PendingPrompt[];
+      etag: string | null;
+      notModified: false;
+    };
+
 export type DroneChatEventRef = {
   droneId?: string;
   chatName?: string;
@@ -363,6 +372,39 @@ export async function fetchDroneChatState(
   };
 }
 
+export async function fetchDroneChatStateCached(opts: {
+  droneId: string;
+  chatName: string;
+  turn?: 'all' | 'last' | number;
+  tail?: number;
+  etag?: string | null;
+}): Promise<FetchDroneChatStateCachedResult> {
+  const droneId = String(opts.droneId ?? '').trim();
+  const chatName = String(opts.chatName ?? '').trim() || 'default';
+  const turn = opts.turn ?? 'all';
+  const qs = new URLSearchParams({ turn: String(turn) });
+  if (typeof opts.tail === 'number' && Number.isFinite(opts.tail) && opts.tail > 0) {
+    qs.set('tail', String(Math.floor(opts.tail)));
+    qs.set('transcript', 'tail');
+  }
+  qs.set('subscriptions', 'false');
+  qs.set('readState', 'false');
+  qs.set('transcriptMeta', '0');
+  const url = `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/state?${qs.toString()}`;
+  const response = await fetchJsonCached<{
+    ok: true;
+    transcripts: TranscriptItem[];
+    pending: PendingPrompt[];
+  }>(url, opts.etag);
+  if (response.notModified) return { etag: response.etag, notModified: true };
+  return {
+    transcripts: Array.isArray(response.data?.transcripts) ? response.data.transcripts : [],
+    pending: Array.isArray(response.data?.pending) ? response.data.pending : [],
+    etag: response.etag,
+    notModified: false,
+  };
+}
+
 export async function fetchDroneChatTranscriptCached(opts: {
   droneId: string;
   chatName: string;
@@ -381,13 +423,32 @@ export async function fetchDroneChatTranscriptCached(opts: {
   qs.set('pending', 'none');
   qs.set('transcriptMeta', '0');
   const url = `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/state?${qs.toString()}`;
+  const response = await fetchJsonCached<{ ok: true; transcripts: TranscriptItem[] }>(
+    url,
+    opts.etag,
+  );
+  if (response.notModified) {
+    return { transcripts: [], etag: response.etag, notModified: true };
+  }
+  return {
+    transcripts: Array.isArray(response.data?.transcripts) ? response.data.transcripts : [],
+    etag: response.etag,
+    notModified: false,
+  };
+}
+
+async function fetchJsonCached<T>(
+  url: string,
+  etagRaw: string | null | undefined,
+): Promise<
+  | { data: null; etag: string | null; notModified: true }
+  | { data: T; etag: string | null; notModified: false }
+> {
   const headers = new Headers();
-  const etag = String(opts.etag ?? '').trim();
+  const etag = String(etagRaw ?? '').trim();
   if (etag) headers.set('if-none-match', etag);
   const response = await fetch(url, { headers });
-  if (response.status === 304) {
-    return { transcripts: [], etag: etag || null, notModified: true };
-  }
+  if (response.status === 304) return { data: null, etag: etag || null, notModified: true };
   const text = await response.text();
   const contentType = String(response.headers.get('content-type') ?? '').toLowerCase();
   const looksHtml = contentType.includes('text/html') || /^\s*</.test(text);
@@ -428,9 +489,5 @@ export async function fetchDroneChatTranscriptCached(opts: {
     error.data = data;
     throw error;
   }
-  return {
-    transcripts: Array.isArray(data?.transcripts) ? data.transcripts : [],
-    etag: response.headers.get('etag'),
-    notModified: false,
-  };
+  return { data: data as T, etag: response.headers.get('etag'), notModified: false };
 }

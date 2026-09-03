@@ -5,7 +5,10 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 
-import { FS_GIT_IGNORED_PATHS_MARKER } from './filesystem-media';
+import {
+  browserCacheControlForFileRevision,
+  FS_GIT_IGNORED_PATHS_MARKER,
+} from './filesystem-media';
 import { bashQuote, normalizeContainerPath } from './hub-format';
 import { readJsonBody, sendJson as json } from './hub-http';
 import { listGitIgnoredPaths } from './listGitIgnoredPaths';
@@ -1699,6 +1702,9 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
           json(res, 400, { ok: false, error: 'missing file path' });
           return;
         }
+        const cacheControl = browserCacheControlForFileRevision(
+          u.searchParams.get('revision'),
+        );
 
         if (runtime === 'host') {
           try {
@@ -1766,7 +1772,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
               const chunk = buf.subarray(start, safeEnd + 1);
               res.statusCode = 206;
               res.setHeader('content-type', mime);
-              res.setHeader('cache-control', 'no-store');
+              res.setHeader('cache-control', cacheControl);
               res.setHeader('accept-ranges', 'bytes');
               res.setHeader('content-range', `bytes ${start}-${safeEnd}/${total}`);
               res.setHeader('content-length', String(chunk.length));
@@ -1776,7 +1782,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
 
             res.statusCode = 200;
             res.setHeader('content-type', mime);
-            res.setHeader('cache-control', 'no-store');
+            res.setHeader('cache-control', cacheControl);
             res.setHeader('accept-ranges', 'bytes');
             res.setHeader('content-length', String(total));
             res.end(buf);
@@ -1974,7 +1980,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
             const chunk = buf.subarray(start, safeEnd + 1);
             res.statusCode = 206;
             res.setHeader('content-type', mime);
-            res.setHeader('cache-control', 'no-store');
+            res.setHeader('cache-control', cacheControl);
             res.setHeader('accept-ranges', 'bytes');
             res.setHeader('content-range', `bytes ${start}-${safeEnd}/${total}`);
             res.setHeader('content-length', String(chunk.length));
@@ -1984,7 +1990,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
 
           res.statusCode = 200;
           res.setHeader('content-type', mime);
-          res.setHeader('cache-control', 'no-store');
+          res.setHeader('cache-control', cacheControl);
           res.setHeader('accept-ranges', 'bytes');
           res.setHeader('content-length', String(total));
           res.end(buf);
@@ -2047,6 +2053,9 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
           json(res, 400, { ok: false, error: 'missing file path' });
           return;
         }
+        const cacheControl = browserCacheControlForFileRevision(
+          u.searchParams.get('revision'),
+        );
         if (!isLikelyImagePath(targetPath)) {
           json(res, 415, { ok: false, error: 'not an image file' });
           return;
@@ -2072,7 +2081,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
 
             res.statusCode = 200;
             res.setHeader('content-type', mime);
-            res.setHeader('cache-control', 'no-store');
+            res.setHeader('cache-control', cacheControl);
             res.end(read.buf);
             return;
           } catch (e: any) {
@@ -2223,7 +2232,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
 
           res.statusCode = 200;
           res.setHeader('content-type', mime);
-          res.setHeader('cache-control', 'no-store');
+          res.setHeader('cache-control', cacheControl);
           res.end(buf);
           return;
         } catch (e: any) {
