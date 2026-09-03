@@ -1,18 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 
-import { dispatchDeviceMeshEventBlock } from '../src/droneHub/app/device-mesh-events';
 import {
-  createTrailingRefresh,
-  remoteDroneRefreshPlan,
-} from '../src/droneHub/app/remote-drone-refresh';
-
-function deferred() {
-  let resolve!: () => void;
-  const promise = new Promise<void>((next) => {
-    resolve = next;
-  });
-  return { promise, resolve };
-}
+  DeviceMeshEventParser,
+  dispatchDeviceMeshEventBlock,
+  subscribeDeviceMeshChanges,
+  type DeviceMeshEventRuntime,
+} from '../src/droneHub/app/device-mesh-events';
+import { remoteDroneRefreshPlan } from '../src/droneHub/app/remote-drone-refresh';
 
 describe('desktop device mesh events', () => {
   test('parses capability events for the remote workspace', () => {
@@ -47,20 +41,72 @@ describe('desktop device mesh events', () => {
     ).toEqual({ refreshChat: false, refreshDrones: true });
   });
 
-  test('coalesces noisy events into one active and one trailing refresh', async () => {
-    const first = deferred();
-    const calls: number[] = [];
-    const refresh = createTrailingRefresh(async () => {
-      calls.push(calls.length + 1);
-      if (calls.length === 1) await first.promise;
-    });
+  test('parses CRLF framing split at every chunk boundary', () => {
+    const source = 'event: change\r\ndata: {"revision":1}\r\n\r\n';
+    for (let split = 1; split < source.length; split += 1) {
+      let changes = 0;
+      const parser = new DeviceMeshEventParser({ onChange: () => (changes += 1) });
+      parser.push(source.slice(0, split));
+      parser.push(source.slice(split));
+      expect(changes).toBe(1);
+    }
+  });
 
-    const initial = refresh();
-    const trailing = refresh();
-    void refresh();
-    expect(calls).toEqual([1]);
-    first.resolve();
-    await Promise.all([initial, trailing]);
-    expect(calls).toEqual([1, 2]);
+  test('parses multiple mixed-newline events from one chunk', () => {
+    let changes = 0;
+    const capabilities: any[] = [];
+    const parser = new DeviceMeshEventParser({
+      onChange: () => (changes += 1),
+      onCapabilityEvent: (event) => capabilities.push(event),
+    });
+    parser.push(
+      'event: change\ndata: {}\n\nevent: capability\r\ndata: {"sourceDeviceId":"remote","capability":"drone-control","event":"drones.changed","payload":{}}\r\n\r\n',
+    );
+    expect(changes).toBe(1);
+    expect(capabilities).toHaveLength(1);
+  });
+
+  test('retries an unauthorized response and cleans up the connected stream on abort', async () => {
+    const encoded = new TextEncoder().encode('event: change\r\ndata: {}\r\n\r\n');
+    let fetches = 0;
+    let cancelled = false;
+    const connections: boolean[] = [];
+    const runtime: DeviceMeshEventRuntime = {
+      fetch: (async () => {
+        fetches += 1;
+        if (fetches === 1) return new Response(null, { status: 401 });
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(encoded);
+            },
+            cancel() {
+              cancelled = true;
+            },
+          }),
+          { status: 200 },
+        );
+      }) as typeof window.fetch,
+      setTimeout: ((callback: TimerHandler) => {
+        queueMicrotask(() => (callback as () => void)());
+        return 1;
+      }) as typeof window.setTimeout,
+      clearTimeout: (() => undefined) as typeof window.clearTimeout,
+    };
+    let unsubscribe = () => {};
+    await new Promise<void>((resolve) => {
+      unsubscribe = subscribeDeviceMeshChanges(
+        () => {
+          unsubscribe();
+          resolve();
+        },
+        { onConnectionChange: (connected) => connections.push(connected) },
+        runtime,
+      );
+    });
+    await Promise.resolve();
+    expect(fetches).toBe(2);
+    expect(cancelled).toBe(true);
+    expect(connections).toEqual([true, false]);
   });
 });

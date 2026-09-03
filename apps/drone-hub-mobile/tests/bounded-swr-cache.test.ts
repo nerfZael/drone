@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
 import { BoundedSwrCache } from '../src/drones/bounded-swr-cache';
-import { mobileDirectoryCacheKey, mobileFileCacheKey } from '../src/drones/mobile-file-cache-key';
+import {
+  mobileDirectoryCacheKey,
+  mobileFileActionInvalidationPaths,
+  mobileFileCacheKey,
+} from '../src/drones/mobile-file-cache-key';
 
 describe('BoundedSwrCache', () => {
   test('retains equal identity and evicts the least recently viewed entry', () => {
@@ -58,5 +62,29 @@ describe('BoundedSwrCache', () => {
     expect(mobileDirectoryCacheKey({ ...local, chatName: 'one' })).not.toBe(
       mobileDirectoryCacheKey({ ...local, chatName: 'two' }),
     );
+  });
+
+  test('invalidates both sides of a rename before an old path can be recreated', () => {
+    const cache = new BoundedSwrCache<string>({ maxEntries: 6, maxAgeMs: 120_000 });
+    const context = {
+      targetId: 'target',
+      droneId: 'drone',
+      chatName: 'default',
+      phoneTarget: false,
+    };
+    const oldKey = mobileFileCacheKey({ ...context, path: '/workspace/old.txt' });
+    const newKey = mobileFileCacheKey({ ...context, path: '/workspace/new.txt' });
+    cache.set(oldKey, 'old bytes');
+    cache.set(newKey, 'previous new-path bytes');
+    const paths = mobileFileActionInvalidationPaths({
+      action: 'rename',
+      sourcePath: '/workspace/old.txt',
+      createdPath: '/workspace/new.txt',
+      targetPath: '/workspace/new.txt',
+    });
+    for (const path of paths) cache.delete(mobileFileCacheKey({ ...context, path }));
+
+    expect(cache.get(oldKey)).toBeUndefined();
+    expect(cache.get(newKey)).toBeUndefined();
   });
 });

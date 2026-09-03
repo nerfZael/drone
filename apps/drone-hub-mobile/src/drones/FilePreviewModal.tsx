@@ -216,6 +216,7 @@ export function FilePreviewModal({
   line,
   loading,
   error,
+  refreshError,
   saving,
   saveError,
   targetId,
@@ -228,6 +229,7 @@ export function FilePreviewModal({
   onSave,
   onClose,
   onRetry,
+  onPreviewPathsChanged,
 }: {
   visible: boolean;
   preview: MobileFilePreview | null;
@@ -235,6 +237,7 @@ export function FilePreviewModal({
   line: number | null;
   loading: boolean;
   error: string | null;
+  refreshError: string | null;
   saving: boolean;
   saveError: string | null;
   targetId: string;
@@ -251,6 +254,7 @@ export function FilePreviewModal({
   onSave(content: string, expectedRevision?: string | null): Promise<boolean>;
   onClose(): void;
   onRetry(): void;
+  onPreviewPathsChanged(paths: readonly string[]): void;
 }) {
   const companion = useMobileCompanion();
   const [explorerExpanded, setExplorerExpanded] = React.useState(false);
@@ -618,6 +622,19 @@ export function FilePreviewModal({
               </View>
             ) : null}
             <View style={styles.previewBody}>
+              {refreshError && preview ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Retry file preview refresh"
+                  onPress={onRetry}
+                  style={styles.refreshErrorBanner}
+                >
+                  <Text numberOfLines={2} style={styles.refreshErrorText}>
+                    Refresh failed: {refreshError}
+                  </Text>
+                  <Text style={styles.refreshErrorRetry}>Retry</Text>
+                </Pressable>
+              ) : null}
               <RenderErrorBoundary
                 key={`${preview?.path ?? displayPath}:${preview?.revision ?? preview?.mtimeMs ?? preview?.content?.length ?? 0}`}
                 fallback={
@@ -746,6 +763,7 @@ export function FilePreviewModal({
                 selectedPath={selectedPath}
                 requestDroneControl={requestDroneControl}
                 onOpenFile={openExplorerPath}
+                onPathsChanged={onPreviewPathsChanged}
               />
             </View>
           </KeyboardAvoidingView>
@@ -818,6 +836,19 @@ const styles = StyleSheet.create({
     paddingTop: 10,
   },
   previewBody: { flex: 1, minHeight: 0 },
+  refreshErrorBanner: {
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.warningBorder,
+    backgroundColor: colors.warningDark,
+  },
+  refreshErrorText: { minWidth: 0, flex: 1, color: colors.warning, fontSize: 10 },
+  refreshErrorRetry: { color: colors.accent, fontSize: 10, fontWeight: '800' },
   editorInput: {
     flex: 1,
     minHeight: 0,

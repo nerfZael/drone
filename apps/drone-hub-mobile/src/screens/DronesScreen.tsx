@@ -120,6 +120,11 @@ import {
 import { MobileChatReadCoordinator } from '../drones/mobile-chat-read-coordinator';
 import { BoundedSwrCache } from '../drones/bounded-swr-cache';
 import {
+  invalidateMobileChatCache,
+  mobileChatCacheScopeIncludes,
+  mobileChatCacheKey,
+} from '../drones/mobile-chat-cache';
+import {
   loadMobileChatWithListRecovery,
   mobileChatRefreshPlan,
 } from '../drones/mobile-chat-refresh';
@@ -524,6 +529,25 @@ export function DronesScreen({
   selectedRef.current = selected;
   chatNameRef.current = chatName;
 
+  const invalidateChatReadCache = React.useCallback(
+    (scope: { targetId: string; droneId?: string; chatName?: string }) => {
+      const activeDroneId = selectedRef.current?.id ?? '';
+      if (
+        activeDroneId &&
+        mobileChatCacheScopeIncludes(scope, {
+          targetId: targetIdRef.current,
+          droneId: activeDroneId,
+          chatName: chatNameRef.current,
+        })
+      ) {
+        // Do not let a read that started before invalidation repopulate or apply stale data.
+        chatReadVersion.current += 1;
+      }
+      invalidateMobileChatCache(chatReadCacheRef.current!, scope);
+    },
+    [],
+  );
+
   const resetActiveChatState = React.useCallback(() => {
     appliedChatReadRef.current = null;
     setChatModel('');
@@ -874,7 +898,7 @@ export function DronesScreen({
     options: { useCache?: boolean } = {},
   ): Promise<void> => {
     const destinationId = targetId;
-    const key = `${destinationId}\u0000${droneId}\u0000${nextChat}`;
+    const key = mobileChatCacheKey(destinationId, droneId, nextChat);
     if (options.useCache) {
       const cached = chatReadCacheRef.current!.get(key);
       if (
@@ -935,7 +959,7 @@ export function DronesScreen({
   };
 
   const applyChatReadResult = (result: any, droneId: string, nextChat: string) => {
-    const resultKey = `${targetIdRef.current}\u0000${droneId}\u0000${nextChat}`;
+    const resultKey = mobileChatCacheKey(targetIdRef.current, droneId, nextChat);
     if (
       appliedChatReadRef.current?.key === resultKey &&
       appliedChatReadRef.current.result === result
@@ -1195,6 +1219,10 @@ export function DronesScreen({
     };
     const unsubscribeDrones = mesh.subscribe('drone-control', 'drones.changed', (event) => {
       if (event.sourceDeviceId !== targetId) return;
+      if (String(event.payload?.reason ?? '').trim() === 'registry_write') {
+        invalidateChatReadCache({ targetId });
+        chatChanged = true;
+      }
       dronesChanged = true;
       schedule();
     });
@@ -1204,11 +1232,18 @@ export function DronesScreen({
       const activeChat = chatNameRef.current;
       const eventDroneId = String(event.payload?.droneId ?? '').trim();
       const eventChatName = String(event.payload?.chatName ?? '').trim();
-      if (eventDroneId && eventChatName) {
-        chatReadCacheRef.current!.delete(`${targetId}\u0000${eventDroneId}\u0000${eventChatName}`);
+      const reason = String(event.payload?.reason ?? '').trim();
+      if (reason === 'registry_write') {
+        invalidateChatReadCache({ targetId });
+      } else if (eventDroneId && eventChatName) {
+        invalidateChatReadCache({
+          targetId,
+          droneId: eventDroneId,
+          chatName: eventChatName,
+        });
       }
       const plan = mobileChatRefreshPlan({
-        reason: String(event.payload?.reason ?? '').trim(),
+        reason,
         eventDroneId,
         eventChatName,
         activeDroneId: activeDrone?.id ?? '',
@@ -1224,7 +1259,7 @@ export function DronesScreen({
       if (realtimeTimer.current) clearTimeout(realtimeTimer.current);
       realtimeTimer.current = null;
     };
-  }, [mesh.subscribe, targetId, targetSupportsDrones]);
+  }, [invalidateChatReadCache, mesh.subscribe, targetId, targetSupportsDrones]);
 
   const selectChat = (nextChat: string) =>
     selected &&
@@ -1834,6 +1869,11 @@ export function DronesScreen({
           return;
         }
         const currentDrone = selectedRef.current!;
+        invalidateChatReadCache({
+          targetId: destinationId,
+          droneId,
+          chatName: targetChatName,
+        });
         const nextChats = [...new Set([...currentDrone.chats, targetChatName])];
         const updatedDrone = { ...currentDrone, chats: nextChats };
         setDrones((current) => current.map((item) => (item.id === droneId ? updatedDrone : item)));
@@ -1948,6 +1988,11 @@ export function DronesScreen({
       ...(copyFrom ? { copyFrom } : {}),
     });
     if (targetIdRef.current !== destinationId) return false;
+    invalidateChatReadCache({
+      targetId: destinationId,
+      droneId,
+      chatName: nextChatName,
+    });
     const currentDrone = droneListSnapshotRef.current.drones.find((drone) => drone.id === droneId);
     const fallbackChats = currentDrone
       ? [...new Set([...currentDrone.chats, nextChatName])]
@@ -1967,6 +2012,12 @@ export function DronesScreen({
       newName,
     });
     if (targetIdRef.current !== destinationId) return false;
+    invalidateChatReadCache({
+      targetId: destinationId,
+      droneId,
+      chatName: currentChatName,
+    });
+    invalidateChatReadCache({ targetId: destinationId, droneId, chatName: newName });
     if (selectedRef.current?.id === droneId && chatNameRef.current === currentChatName) {
       chatNameRef.current = newName;
       setChatName(newName);
@@ -2009,6 +2060,11 @@ export function DronesScreen({
       chatName: chatToDelete,
     });
     if (targetIdRef.current !== destinationId) return false;
+    invalidateChatReadCache({
+      targetId: destinationId,
+      droneId,
+      chatName: chatToDelete,
+    });
     const currentDrone = droneListSnapshotRef.current.drones.find((drone) => drone.id === droneId);
     const fallbackChats = (currentDrone?.chats ?? []).filter(
       (chatName) => chatName !== chatToDelete,
@@ -2051,6 +2107,11 @@ export function DronesScreen({
       )
         return;
       const createdChat = String(result?.chatName ?? nextChat).trim() || nextChat;
+      invalidateChatReadCache({
+        targetId: destinationId,
+        droneId: drone.id,
+        chatName: createdChat,
+      });
       const nextChats: string[] = Array.isArray(result?.chats)
         ? [
             ...new Set<string>(
@@ -3309,6 +3370,7 @@ export function DronesScreen({
         line={filePreview.line}
         loading={filePreview.loading}
         error={filePreview.error}
+        refreshError={filePreview.refreshError}
         saving={filePreview.saving}
         saveError={filePreview.saveError}
         targetId={targetId}
@@ -3321,6 +3383,7 @@ export function DronesScreen({
         onSave={filePreview.save}
         onClose={filePreview.close}
         onRetry={filePreview.retry}
+        onPreviewPathsChanged={filePreview.invalidatePaths}
       />
       <TextInputDialog
         visible={Boolean(renameCandidate)}

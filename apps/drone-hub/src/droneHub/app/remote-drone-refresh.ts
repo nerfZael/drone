@@ -5,8 +5,6 @@ export type RemoteDroneRefreshPlan = {
   refreshDrones: boolean;
 };
 
-export type TrailingRefresh = () => Promise<void>;
-
 const CHAT_ONLY_REASONS = new Set([
   'runtime_tool_call_started',
   'runtime_tool_call_progress',
@@ -43,26 +41,4 @@ export function remoteDroneRefreshPlan(
     return { refreshChat: matchingChat, refreshDrones: !matchingChat };
   }
   return { refreshChat: matchingChat, refreshDrones: true };
-}
-
-export function createTrailingRefresh(run: () => Promise<void>): TrailingRefresh {
-  let pending = false;
-  let active: Promise<void> | null = null;
-
-  const drain = async () => {
-    while (pending) {
-      pending = false;
-      await run();
-    }
-  };
-
-  return () => {
-    pending = true;
-    if (!active) {
-      active = drain().finally(() => {
-        active = null;
-      });
-    }
-    return active;
-  };
 }

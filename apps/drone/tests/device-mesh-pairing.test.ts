@@ -138,6 +138,8 @@ afterEach(async () => {
 describe('desktop device pairing', () => {
   test('pushes authenticated mesh changes without polling', async () => {
     const hub = await startHub();
+    const unauthorized = await fetch(`${hub.url}/api/device-mesh/events`);
+    expect(unauthorized.status).toBe(401);
     const events = await fetch(`${hub.url}/api/device-mesh/events`, {
       headers: { authorization: `Bearer ${hub.token}` },
     });

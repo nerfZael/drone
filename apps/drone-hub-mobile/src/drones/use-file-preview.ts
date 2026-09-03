@@ -20,6 +20,7 @@ import {
 import type { MobileDroneSummary } from './drone-sidebar-model';
 import { BoundedSwrCache } from './bounded-swr-cache';
 import { mobileFileCacheKey } from './mobile-file-cache-key';
+import { mobilePreviewErrorMode } from './mobile-preview-error-state';
 
 type PreviewRequest = {
   targetId: string;
@@ -87,6 +88,7 @@ export function useFilePreview({
   const [saving, setSaving] = React.useState(false);
   const [saveError, setSaveError] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const [refreshError, setRefreshError] = React.useState<string | null>(null);
   const previewFileRef = React.useRef<File | null>(null);
   const previewRef = React.useRef<MobileFilePreview | null>(null);
   const previewCacheRef = React.useRef<BoundedSwrCache<CachedFilePreview> | null>(null);
@@ -131,7 +133,8 @@ export function useFilePreview({
       const version = ++loadVersion.current;
       const background = options?.background === true && previewRef.current != null;
       if (!background) setLoading(true);
-      setError(null);
+      if (!background) setError(null);
+      setRefreshError(null);
       if (!background) {
         setPreview(null);
         clearActivePreview();
@@ -333,11 +336,19 @@ export function useFilePreview({
       } catch (nextError: any) {
         if (version === loadVersion.current) {
           const message = nextError?.message ?? String(nextError);
-          setError(
-            /not granted|not permitted|access|denied/i.test(message)
-              ? `${message}. Enable “drone-control: file.preview” for this phone in Devices if needed.`
-              : message,
-          );
+          const displayMessage = /not granted|not permitted|access|denied/i.test(message)
+            ? `${message}. Enable “drone-control: file.preview” for this phone in Devices if needed.`
+            : message;
+          if (
+            mobilePreviewErrorMode({
+              background,
+              previewKind: previewRef.current?.kind ?? null,
+            }) === 'refresh'
+          ) {
+            setRefreshError(displayMessage);
+          } else {
+            setError(displayMessage);
+          }
         }
       } finally {
         if (version === loadVersion.current && !background) setLoading(false);
@@ -376,6 +387,7 @@ export function useFilePreview({
         setPreview(cached.preview);
         setLoading(false);
         setError(null);
+        setRefreshError(null);
         void load(nextRequest, { background: true });
       } else {
         void load(nextRequest);
@@ -392,6 +404,7 @@ export function useFilePreview({
     setRequest(null);
     setPreview(null);
     setError(null);
+    setRefreshError(null);
     setSaveError(null);
     setLoading(false);
     setSaving(false);
@@ -405,6 +418,7 @@ export function useFilePreview({
     setRequest(null);
     setPreview(null);
     setError(null);
+    setRefreshError(null);
     setLoading(false);
     setSaving(false);
     setSaveError(null);
@@ -545,6 +559,7 @@ export function useFilePreview({
     line: requestIsCurrent ? (request?.line ?? null) : null,
     loading: requestIsCurrent && loading,
     error: requestIsCurrent ? error : null,
+    refreshError: requestIsCurrent ? refreshError : null,
     saving: requestIsCurrent && saving,
     saveError: requestIsCurrent ? saveError : null,
     rootPath: selectedDrone && !phoneTarget ? mobileDroneWorkspaceRoot(selectedDrone) : '',
@@ -553,7 +568,26 @@ export function useFilePreview({
     openExplorer,
     close,
     retry: () => {
-      if (request && requestIsCurrent) void load(request);
+      if (request && requestIsCurrent) {
+        void load(request, { background: previewRef.current != null });
+      }
+    },
+    invalidatePaths: (paths: readonly string[]) => {
+      if (!workspaceContext) return;
+      const normalizedPaths = new Set(
+        paths.map((path) => String(path ?? '').trim()).filter(Boolean),
+      );
+      if (
+        requestIsCurrent &&
+        request &&
+        (normalizedPaths.has(request.path) ||
+          (previewRef.current?.path ? normalizedPaths.has(previewRef.current.path) : false))
+      ) {
+        loadVersion.current += 1;
+      }
+      for (const path of normalizedPaths) {
+        previewCacheRef.current!.delete(mobileFileCacheKey({ ...workspaceContext, path }));
+      }
     },
     save: async (content: string, expectedRevision?: string | null) => {
       if (!request || !requestIsCurrent || preview?.kind !== 'text' || saving) return false;

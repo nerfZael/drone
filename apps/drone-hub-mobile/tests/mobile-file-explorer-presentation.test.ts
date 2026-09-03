@@ -68,4 +68,34 @@ describe('mobile file explorer presentation', () => {
     );
     expect(source).not.toContain('void loadDirectory(rootPath, true);');
   });
+
+  test('keeps stale root and child rows visible with retryable refresh errors', () => {
+    const explorer = readFileSync(
+      new URL('../src/drones/MobileFileExplorer.tsx', import.meta.url),
+      'utf8',
+    );
+    expect(explorer).toContain("mobileDirectoryErrorMode(root) === 'stale'");
+    expect(explorer).toContain('accessibilityLabel="Retry workspace refresh"');
+    expect(explorer).toContain('if (child?.error) {');
+    expect(explorer).toContain('visit(entry.path, depth + 1);');
+    expect(explorer).toContain('contextVersionRef.current !== requestContextVersion');
+    expect(explorer).toContain('directoryRequestSeqRef.current[path] !== requestSeq');
+  });
+
+  test('renders background preview failures without replacing cached content', () => {
+    const modal = readFileSync(
+      new URL('../src/drones/FilePreviewModal.tsx', import.meta.url),
+      'utf8',
+    );
+    const refreshBanner = modal.indexOf('refreshError && preview');
+    const blockingError = modal.indexOf(': error ? (', refreshBanner);
+    expect(refreshBanner).toBeGreaterThan(-1);
+    expect(blockingError).toBeGreaterThan(refreshBanner);
+    expect(modal).toContain('accessibilityLabel="Retry file preview refresh"');
+    const hook = readFileSync(
+      new URL('../src/drones/use-file-preview.ts', import.meta.url),
+      'utf8',
+    );
+    expect(hook).toContain('refreshError: requestIsCurrent ? refreshError : null');
+  });
 });

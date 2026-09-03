@@ -52,6 +52,12 @@ export class BoundedSwrCache<T> {
     if (entry) this.remove(key, entry);
   }
 
+  deleteMatching(matches: (key: string) => boolean): void {
+    for (const [key, entry] of this.entries) {
+      if (matches(key)) this.remove(key, entry);
+    }
+  }
+
   clear(): void {
     for (const [key, entry] of this.entries) this.remove(key, entry);
   }
