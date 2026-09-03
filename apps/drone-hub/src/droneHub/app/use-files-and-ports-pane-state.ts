@@ -103,6 +103,16 @@ export function invalidateFsListCacheForPath(droneIdRaw: string, pathRaw: string
   fsListCache.delete(fsListCacheKey(droneId, parentPath || '/'));
 }
 
+export function invalidateFsListCacheForDirectory(
+  droneIdRaw: string,
+  directoryPathRaw: string,
+): void {
+  const droneId = String(droneIdRaw ?? '').trim();
+  const directoryPath = String(directoryPathRaw ?? '').trim() || '/';
+  if (!droneId) return;
+  fsListCache.delete(fsListCacheKey(droneId, directoryPath));
+}
+
 export function invalidateFsListCachesForDrone(droneIdRaw: string): void {
   const droneId = String(droneIdRaw ?? '').trim();
   if (!droneId) return;

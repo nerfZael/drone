@@ -6,7 +6,10 @@ import {
   UiPanelStatusStrip,
 } from '../../ui/components';
 import { DRONE_WORKSPACE_STATE_DISPOSE_EVENT, disposedDroneIdFromEvent } from '../workspace-state-events';
-import { invalidateFsListCachesForDrone } from '../app/use-files-and-ports-pane-state';
+import {
+  invalidateFsListCacheForDirectory,
+  invalidateFsListCachesForDrone,
+} from '../app/use-files-and-ports-pane-state';
 import { requestJson, requestJsonWithTimeout } from '../http';
 import { IconChevron } from '../icons';
 import type { DroneFsEntry, DroneFsListPayload, DroneFsUploadPayload } from '../types';
@@ -38,6 +41,13 @@ import {
   type FileExplorerNode,
 } from './tree';
 import { clampWorkspaceExplorerZoom } from '../app/workspace-explorer-preferences';
+import {
+  filesystemMutationRefreshPlan,
+  joinFsPath,
+  pathMatchesRefreshScope,
+  type FilesystemMutationRefreshPlan,
+} from './filesystem-mutation-refresh';
+import { TrailingDirectoryRequestTracker } from './trailing-directory-request-tracker';
 
 const CHILD_DIRECTORY_CACHE_MAX_AGE_MS = 5 * 60_000;
 const FS_LIST_REQUEST_TIMEOUT_MS = 12_000;
@@ -70,6 +80,19 @@ function clearChildDirectoryCacheForDrone(droneIdRaw: string): void {
   if (!droneId) return;
   for (const key of Array.from(childDirectoryCache.keys())) {
     if (key.startsWith(`${droneId}\u0000`)) childDirectoryCache.delete(key);
+  }
+}
+
+function clearChildDirectoryCacheForPlan(
+  droneIdRaw: string,
+  plan: FilesystemMutationRefreshPlan,
+): void {
+  const droneId = String(droneIdRaw ?? '').trim();
+  if (!droneId) return;
+  const prefix = `${droneId}\u0000`;
+  for (const key of Array.from(childDirectoryCache.keys())) {
+    if (!key.startsWith(prefix)) continue;
+    if (pathMatchesRefreshScope(key.slice(prefix.length), plan)) childDirectoryCache.delete(key);
   }
 }
 
@@ -237,6 +260,7 @@ export function DroneFilesDock({
   const dragDepthRef = React.useRef(0);
   const uploadRunRef = React.useRef(0);
   const childRequestSeqRef = React.useRef<Record<string, number>>({});
+  const childRequestTrackerRef = React.useRef(new TrailingDirectoryRequestTracker());
   const [dragActive, setDragActive] = React.useState(false);
   const [uploading, setUploading] = React.useState(false);
   const [uploadStatus, setUploadStatus] = React.useState<string | null>(null);
@@ -253,6 +277,10 @@ export function DroneFilesDock({
   const [contextMenu, setContextMenu] = React.useState<DroneFilesContextMenuState | null>(null);
 
   React.useEffect(() => {
+    for (const dirPath of Object.keys(childRequestSeqRef.current)) {
+      childRequestSeqRef.current[dirPath] = (childRequestSeqRef.current[dirPath] ?? 0) + 1;
+    }
+    childRequestTrackerRef.current.reset();
     setExpandedDirsState(expandedDirectoriesByWorkspace.get(workspaceStateKey) ?? {});
     setChildEntriesByPath({});
     setChildLoadingByPath({});
@@ -383,7 +411,11 @@ export function DroneFilesDock({
     async (dirPathRaw: string, opts?: { force?: boolean }) => {
       const dirPath = normalizeContainerPathInput(dirPathRaw);
       if (!dirPath || dirPath === normalizedPath) return;
-      if (childLoadingByPath[dirPath]) return;
+      const inFlightSeq = childRequestTrackerRef.current.activeSequence(dirPath);
+      if (inFlightSeq != null) {
+        if (opts?.force) childRequestTrackerRef.current.requestTrailing(dirPath, inFlightSeq);
+        return;
+      }
       if (!opts?.force && childErrorByPath[dirPath]) return;
       if (
         !opts?.force &&
@@ -406,6 +438,7 @@ export function DroneFilesDock({
 
       const seq = (childRequestSeqRef.current[dirPath] ?? 0) + 1;
       childRequestSeqRef.current[dirPath] = seq;
+      childRequestTrackerRef.current.begin(dirPath, seq);
       if (!cached) setChildLoadingByPath((prev) => ({ ...prev, [dirPath]: true }));
       setChildErrorByPath((prev) => ({ ...prev, [dirPath]: null }));
 
@@ -434,14 +467,17 @@ export function DroneFilesDock({
         const msg = String(e?.message ?? e ?? 'failed to load directory').trim() || 'failed to load directory';
         setChildErrorByPath((prev) => ({ ...prev, [dirPath]: msg }));
       } finally {
-        if (childRequestSeqRef.current[dirPath] !== seq) return;
-        setChildLoadingByPath((prev) => {
-          if (prev[dirPath] === false) return prev;
-          return { ...prev, [dirPath]: false };
-        });
+        const forceAfterBusy = childRequestTrackerRef.current.finish(dirPath, seq);
+        if (childRequestSeqRef.current[dirPath] === seq) {
+          setChildLoadingByPath((prev) => {
+            if (prev[dirPath] === false) return prev;
+            return { ...prev, [dirPath]: false };
+          });
+        }
+        if (forceAfterBusy) void loadDirectory(dirPath, { force: true });
       }
     },
-    [childEntriesByPath, childErrorByPath, childLoadingByPath, droneId, normalizedPath],
+    [childEntriesByPath, childErrorByPath, droneId, normalizedPath],
   );
 
   const activeFileAncestorPaths = React.useMemo(
@@ -508,19 +544,58 @@ export function DroneFilesDock({
   }, []);
 
   const refreshAfterMutation = React.useCallback(
-    (message: string) => {
-      setActionStatus(message);
-      clearChildDirectoryCacheForDrone(droneId);
-      invalidateFsListCachesForDrone(droneId);
-      onRefresh();
-      const visibleExpandedDirs = Object.entries(expandedDirs)
-        .filter(([, open]) => open)
-        .map(([dirPath]) => dirPath);
-      for (const dirPath of visibleExpandedDirs) {
+    (message: string | null, plan: FilesystemMutationRefreshPlan) => {
+      if (message) setActionStatus(message);
+      clearChildDirectoryCacheForPlan(droneId, plan);
+      for (const listingPath of plan.listingPaths) {
+        invalidateFsListCacheForDirectory(droneId, listingPath);
+        const activeSequence = childRequestTrackerRef.current.activeSequence(listingPath);
+        if (activeSequence == null) continue;
+        if (expandedDirs[listingPath] === true) {
+          childRequestTrackerRef.current.requestTrailing(listingPath, activeSequence);
+        }
+        childRequestSeqRef.current[listingPath] =
+          (childRequestSeqRef.current[listingPath] ?? 0) + 1;
+      }
+      if (plan.listingPaths.includes(normalizedPath)) onRefresh();
+
+      for (const subtree of plan.staleSubtrees) {
+        for (const dirPath of Object.keys(childRequestSeqRef.current)) {
+          if (dirPath !== subtree && !dirPath.startsWith(`${subtree.replace(/\/+$/, '')}/`)) continue;
+          childRequestSeqRef.current[dirPath] = (childRequestSeqRef.current[dirPath] ?? 0) + 1;
+          childRequestTrackerRef.current.discardTrailing(dirPath);
+        }
+      }
+      const retainUnmatched = <T,>(
+        current: Record<string, T>,
+        clearCollapsedListings: boolean,
+      ): Record<string, T> => {
+        let changed = false;
+        const next: Record<string, T> = {};
+        for (const [dirPath, value] of Object.entries(current)) {
+          const stale = plan.staleSubtrees.some(
+            (subtree) => dirPath === subtree || dirPath.startsWith(`${subtree.replace(/\/+$/, '')}/`),
+          );
+          const collapsedListing =
+            clearCollapsedListings &&
+            plan.listingPaths.includes(dirPath) &&
+            expandedDirs[dirPath] !== true;
+          if (stale || collapsedListing) changed = true;
+          else next[dirPath] = value;
+        }
+        return changed ? next : current;
+      };
+      setChildEntriesByPath((current) => retainUnmatched(current, true));
+      setChildLoadingByPath((current) => retainUnmatched(current, true));
+      setChildErrorByPath((current) => retainUnmatched(current, true));
+      setExpandedDirs((current) => retainUnmatched(current, false));
+
+      for (const dirPath of plan.listingPaths) {
+        if (dirPath === normalizedPath || expandedDirs[dirPath] !== true) continue;
         void loadDirectory(dirPath, { force: true });
       }
     },
-    [droneId, expandedDirs, loadDirectory, onRefresh],
+    [droneId, expandedDirs, loadDirectory, normalizedPath, onRefresh, setExpandedDirs],
   );
 
   const runAction = React.useCallback(
@@ -575,7 +650,11 @@ export function DroneFilesDock({
             isVideo: false,
           });
         }
-        refreshAfterMutation(`${actionMode === 'create-file' ? 'Created file' : 'Created folder'} ${value}.`);
+        const createdPath = result.path ?? joinFsPath(actionTargetDirectory, value);
+        refreshAfterMutation(
+          `${actionMode === 'create-file' ? 'Created file' : 'Created folder'} ${value}.`,
+          filesystemMutationRefreshPlan({ destinationPaths: [createdPath] }),
+        );
       });
       return;
     }
@@ -600,7 +679,13 @@ export function DroneFilesDock({
         setActionMode(null);
         setActionInput('');
         setContextMenu(null);
-        refreshAfterMutation(`Renamed ${previous.name} to ${value}.`);
+        refreshAfterMutation(
+          `Renamed ${previous.name} to ${value}.`,
+          filesystemMutationRefreshPlan({
+            sourcePaths: [previous.path],
+            destinationPaths: nextPath ? [nextPath] : [],
+          }),
+        );
       });
       return;
     }
@@ -622,7 +707,13 @@ export function DroneFilesDock({
         setActionMode(null);
         setActionInput('');
         setContextMenu(null);
-        refreshAfterMutation(`Moved ${moving.length} item${moving.length === 1 ? '' : 's'}.`);
+        refreshAfterMutation(
+          `Moved ${moving.length} item${moving.length === 1 ? '' : 's'}.`,
+          filesystemMutationRefreshPlan({
+            sourcePaths: moving.map((entry) => entry.path),
+            destinationPaths: moving.map((entry) => joinFsPath(targetDir, entry.name)),
+          }),
+        );
       });
     }
   }, [
@@ -723,7 +814,10 @@ export function DroneFilesDock({
         }
         clearClipboardForChangedEntries(entriesToDelete);
         setSelectedPaths(new Set());
-        refreshAfterMutation(`Deleted ${entriesToDelete.length} item${entriesToDelete.length === 1 ? '' : 's'}.`);
+        refreshAfterMutation(
+          `Deleted ${entriesToDelete.length} item${entriesToDelete.length === 1 ? '' : 's'}.`,
+          filesystemMutationRefreshPlan({ sourcePaths: paths }),
+        );
       });
     },
     [
@@ -754,7 +848,12 @@ export function DroneFilesDock({
         paths: clipboard.entries.map((entry) => entry.path),
         targetDir: normalizedPath,
       });
-      refreshAfterMutation(`Pasted ${clipboard.entries.length} item${clipboard.entries.length === 1 ? '' : 's'}.`);
+      refreshAfterMutation(
+        `Pasted ${clipboard.entries.length} item${clipboard.entries.length === 1 ? '' : 's'}.`,
+        filesystemMutationRefreshPlan({
+          destinationPaths: clipboard.entries.map((entry) => joinFsPath(normalizedPath, entry.name)),
+        }),
+      );
     });
   }, [clipboard, droneId, normalizedPath, refreshAfterMutation, runAction]);
 
@@ -773,10 +872,11 @@ export function DroneFilesDock({
       setUploadStatus(`Uploading ${files.length} file${files.length === 1 ? '' : 's'}...`);
 
       let uploaded = 0;
+      const uploadedPaths: string[] = [];
       const failures: string[] = [];
       for (const file of files) {
         try {
-          await requestJson<Extract<DroneFsUploadPayload, { ok: true }>>(
+          const response = await requestJson<Extract<DroneFsUploadPayload, { ok: true }>>(
             `/api/drones/${encodeURIComponent(droneId)}/fs/upload?path=${encodeURIComponent(normalizedPath)}&name=${encodeURIComponent(file.name)}`,
             {
               method: 'POST',
@@ -785,6 +885,7 @@ export function DroneFilesDock({
             },
           );
           uploaded += 1;
+          uploadedPaths.push(response.path || joinFsPath(normalizedPath, file.name));
           if (uploadRunRef.current === runId) {
             setUploadStatus(`Uploading ${uploaded}/${files.length}...`);
           }
@@ -800,7 +901,10 @@ export function DroneFilesDock({
 
       if (uploadRunRef.current !== runId) return;
       setUploading(false);
-      if (uploaded > 0) refreshExplorer();
+      if (uploaded > 0) {
+        refreshAfterMutation(null, filesystemMutationRefreshPlan({ destinationPaths: uploadedPaths }));
+        onRefreshOpenedFile?.();
+      }
       if (failures.length === 0) {
         setUploadError(null);
         setUploadStatus(`Uploaded ${uploaded} file${uploaded === 1 ? '' : 's'} to ${normalizedPath}.`);
@@ -814,7 +918,7 @@ export function DroneFilesDock({
       setUploadError(failureText);
       setUploadStatus(uploaded > 0 ? `Uploaded ${uploaded}/${files.length}.` : null);
     },
-    [droneId, normalizedPath, refreshExplorer],
+    [droneId, normalizedPath, onRefreshOpenedFile, refreshAfterMutation],
   );
 
   const onPanelDragEnter = React.useCallback(

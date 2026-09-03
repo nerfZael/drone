@@ -45,6 +45,7 @@ import {
   type RememberedEditorFile,
 } from './drone-file-editor-state';
 import { appendFileDictationLine } from '../files/file-dictation-text';
+import { desktopFileReadUrl } from '../files/file-read-url';
 
 type RequestJson = typeof requestJsonFn;
 
@@ -535,7 +536,7 @@ export function useFileEditorState({
 
     let cancelled = false;
     void requestJson<Extract<DroneFsReadPayload, { ok: true }>>(
-      `/api/drones/${encodeURIComponent(droneId)}/fs/file?path=${encodeURIComponent(filePath)}`,
+      desktopFileReadUrl(droneId, filePath),
     )
       .then((data) => {
         if (cancelled || requestSeqRef.current !== seq) return;
@@ -608,7 +609,7 @@ export function useFileEditorState({
         }
 
         void requestJson<Extract<DroneFsReadPayload, { ok: true }>>(
-          `/api/drones/${encodeURIComponent(droneId)}/fs/file?path=${encodeURIComponent(fallbackPath)}`,
+          desktopFileReadUrl(droneId, fallbackPath),
         )
           .then((data) => {
             if (cancelled || requestSeqRef.current !== seq) return;
@@ -758,7 +759,7 @@ export function useFileEditorState({
       const nextSeq = (liveReloadSeqByTabRef.current.get(tabId) ?? 0) + 1;
       liveReloadSeqByTabRef.current.set(tabId, nextSeq);
       void requestJson<Extract<DroneFsReadPayload, { ok: true }>>(
-        `/api/drones/${encodeURIComponent(currentTab.droneId)}/fs/file?path=${encodeURIComponent(currentTab.path)}`,
+        desktopFileReadUrl(currentTab.droneId, currentTab.path),
       )
         .then((data) => {
           if (liveReloadSeqByTabRef.current.get(tabId) !== nextSeq) return;

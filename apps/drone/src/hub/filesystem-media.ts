@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import { normalizeContainerPath } from './hub-format';
+import { bashQuote, normalizeContainerPath } from './hub-format';
 
 export const IMAGE_FILE_EXTENSIONS = new Set([
   'png',
@@ -49,6 +49,41 @@ export function browserCacheControlForFileRevision(
   return requested && requested === served
     ? 'private, max-age=31536000, immutable'
     : 'no-store';
+}
+
+export function buildContainerFsListScript(
+  targetPath: string,
+  nonRepoHomeCwd: string,
+): string {
+  return [
+    'set -euo pipefail',
+    `target=${bashQuote(targetPath)}`,
+    // Defensive bootstrap: the Hub defaults non-repo drones to this directory,
+    // but early explorer requests can arrive before it exists.
+    't="${target%/}"; [ -z "$t" ] && t="/"',
+    `if [ "$t" = ${bashQuote(nonRepoHomeCwd)} ]; then mkdir -p ${bashQuote(nonRepoHomeCwd)} 2>/dev/null || true; fi`,
+    'if [ ! -d "$target" ]; then',
+    '  echo "__ERR__\tnot-dir"',
+    '  exit 3',
+    'fi',
+    'cd "$target"',
+    'resolved=$(pwd -P)',
+    'printf "__PATH__\t%s\n" "$resolved"',
+    'shopt -s dotglob nullglob',
+    'paths=(./*)',
+    'if [ "${#paths[@]}" -gt 0 ]; then',
+    "  while IFS= read -r -d '' p && IFS= read -r -d '' size && IFS= read -r -d '' mtime; do",
+    '    name=${p#./}',
+    '    kind=o',
+    '    if [ -d "$p" ]; then kind=d; elif [ -f "$p" ]; then kind=f; fi',
+    '    printf "%s\t%s\t%s\t%s\n" "$name" "$kind" "$size" "$mtime"',
+    "  done < <(stat --printf='%n\\0%s\\0%Y\\0' -- \"${paths[@]}\" 2>/dev/null || true)",
+    'fi',
+    'if command -v git >/dev/null 2>&1 && git -C "$resolved" rev-parse --is-inside-work-tree >/dev/null 2>&1; then',
+    `  printf "${FS_GIT_IGNORED_PATHS_MARKER}\\n"`,
+    '  find "$resolved" -mindepth 1 -maxdepth 1 -print0 2>/dev/null | git -C "$resolved" check-ignore -z --stdin 2>/dev/null || true',
+    'fi',
+  ].join('\n');
 }
 
 export type ContainerFsEntry = {

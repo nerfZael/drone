@@ -7,7 +7,7 @@ import path from 'node:path';
 
 import {
   browserCacheControlForFileRevision,
-  FS_GIT_IGNORED_PATHS_MARKER,
+  buildContainerFsListScript,
 } from './filesystem-media';
 import { bashQuote, normalizeContainerPath } from './hub-format';
 import { readJsonBody, sendJson as json } from './hub-http';
@@ -306,35 +306,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
             return;
           }
         }
-        const script = [
-          'set -euo pipefail',
-          `target=${bashQuote(targetPath)}`,
-          // Defensive bootstrap: the Hub defaults non-repo drones to `/dvm-data/home`,
-          // but early explorer requests can arrive before that directory exists.
-          't="${target%/}"; [ -z "$t" ] && t="/"',
-          `if [ "$t" = ${bashQuote(NON_REPO_HOME_CWD)} ]; then mkdir -p ${bashQuote(NON_REPO_HOME_CWD)} 2>/dev/null || true; fi`,
-          'if [ ! -d "$target" ]; then',
-          '  echo "__ERR__\tnot-dir"',
-          '  exit 3',
-          'fi',
-          'cd "$target"',
-          'resolved=$(pwd -P)',
-          'printf "__PATH__\t%s\n" "$resolved"',
-          'shopt -s dotglob nullglob',
-          'for p in ./*; do',
-          '  [ -e "$p" ] || continue',
-          '  name=$(basename -- "$p")',
-          '  kind=o',
-          '  if [ -d "$p" ]; then kind=d; elif [ -f "$p" ]; then kind=f; fi',
-          '  size=$(stat -c %s -- "$p" 2>/dev/null || echo 0)',
-          '  mtime=$(stat -c %Y -- "$p" 2>/dev/null || echo 0)',
-          '  printf "%s\t%s\t%s\t%s\n" "$name" "$kind" "$size" "$mtime"',
-          'done',
-          'if command -v git >/dev/null 2>&1 && git -C "$resolved" rev-parse --is-inside-work-tree >/dev/null 2>&1; then',
-          `  printf "${FS_GIT_IGNORED_PATHS_MARKER}\\n"`,
-          '  find "$resolved" -mindepth 1 -maxdepth 1 -print0 2>/dev/null | git -C "$resolved" check-ignore -z --stdin 2>/dev/null || true',
-          'fi',
-        ].join('\n');
+        const script = buildContainerFsListScript(targetPath, NON_REPO_HOME_CWD);
 
         try {
           const r = await withReadonlyDroneContainer(

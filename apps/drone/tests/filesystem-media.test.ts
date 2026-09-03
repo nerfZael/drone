@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
   browserCacheControlForFileRevision,
+  buildContainerFsListScript,
   FS_GIT_IGNORED_PATHS_MARKER,
   parseContainerFsListOutput,
 } from '../src/hub/filesystem-media';
@@ -17,6 +22,38 @@ describe('filesystem media caching', () => {
 });
 
 describe('filesystem list metadata', () => {
+  test('uses one batched stat command for container entries', () => {
+    const script = buildContainerFsListScript('/work/repo', '/dvm-data/home');
+
+    expect(script.match(/\bstat\b/g)).toHaveLength(1);
+    expect(script).not.toContain('basename --');
+    expect(script).toContain("stat --printf='%n\\0%s\\0%Y\\0'");
+  });
+
+  test('the batched container listing retains hidden files, kinds, sizes, and timestamps', () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'drone-fs-list-'));
+    try {
+      writeFileSync(path.join(root, '.hidden file'), 'abc');
+      mkdirSync(path.join(root, 'folder'));
+      const output = execFileSync(
+        'bash',
+        ['-lc', buildContainerFsListScript(root, '/dvm-data/home')],
+        { encoding: 'utf8' },
+      );
+      const parsed = parseContainerFsListOutput(output);
+
+      expect(parsed.resolvedPath).toBe(root);
+      expect(parsed.entries.find((entry) => entry.name === '.hidden file')).toMatchObject({
+        kind: 'file',
+        size: 3,
+      });
+      expect(parsed.entries.find((entry) => entry.name === 'folder')?.kind).toBe('directory');
+      expect(parsed.entries.every((entry) => Number.isFinite(entry.mtimeMs))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('applies null-delimited Git ignore metadata to container entries', () => {
     const ignoredPath = '/work/repo/generated_output.log';
     const output = `${[

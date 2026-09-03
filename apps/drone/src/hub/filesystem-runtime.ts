@@ -8,6 +8,9 @@ import type { URL } from 'node:url';
 import type { ResolvedDrone } from './drone-lifecycle-service';
 import type { ContainerFsEntry } from './filesystem-media';
 import { createAssistantFilesystemService } from './assistant-filesystem-service';
+import { mapInBatches } from './map-in-batches';
+
+const HOST_DIRECTORY_METADATA_BATCH_SIZE = 64;
 
 type FilesystemRuntimeDependencyName =
   | 'NON_REPO_HOME_CWD'
@@ -366,10 +369,9 @@ export function createFilesystemRuntime(dependencies: FilesystemRuntimeDependenc
     }
 
     const dirents = await fs.readdir(resolvedPath, { withFileTypes: true });
-    const entries: ContainerFsEntry[] = [];
-    for (const d of dirents) {
+    const entries = await mapInBatches(dirents, HOST_DIRECTORY_METADATA_BATCH_SIZE, async (d) => {
       const name = String(d?.name ?? '').trim();
-      if (!name || name === '.' || name === '..') continue;
+      if (!name || name === '.' || name === '..') return null;
       const fullPath = path.join(resolvedPath, name);
       let stat: any = null;
       try {
@@ -384,7 +386,7 @@ export function createFilesystemRuntime(dependencies: FilesystemRuntimeDependenc
             ? 'file'
             : 'other';
       const ext = kind === 'file' ? extensionLower(name) || null : null;
-      entries.push({
+      return {
         name,
         path: fullPath,
         kind,
@@ -394,10 +396,11 @@ export function createFilesystemRuntime(dependencies: FilesystemRuntimeDependenc
         ext,
         isImage: kind === 'file' ? isLikelyImagePath(name) : false,
         isVideo: kind === 'file' ? isLikelyVideoPath(name) : false,
-      });
-    }
-    sortFsEntries(entries);
-    return { resolvedPath, entries };
+      } satisfies ContainerFsEntry;
+    });
+    const presentEntries = entries.filter((entry): entry is ContainerFsEntry => entry != null);
+    sortFsEntries(presentEntries);
+    return { resolvedPath, entries: presentEntries };
   }
 
   function parseFsSearchOutput(
