@@ -4,6 +4,7 @@ import {
   filesystemMutationRefreshPlan,
   joinFsPath,
   pathMatchesRefreshScope,
+  runFilesystemMutationWithReconciliation,
 } from '../src/droneHub/files/filesystem-mutation-refresh';
 
 describe('filesystem mutation refresh planning', () => {
@@ -36,5 +37,19 @@ describe('filesystem mutation refresh planning', () => {
   test('normalizes joined destination paths', () => {
     expect(joinFsPath('/work/repo/', '/asset.png')).toBe('/work/repo/asset.png');
     expect(joinFsPath('/', 'asset.png')).toBe('/asset.png');
+  });
+
+  test('reconciles every possible directory when a batch mutation fails', async () => {
+    const events: string[] = [];
+    await expect(
+      runFilesystemMutationWithReconciliation(
+        async () => {
+          events.push('mutation');
+          throw new Error('later item failed');
+        },
+        () => events.push('reconcile'),
+      ),
+    ).rejects.toThrow('later item failed');
+    expect(events).toEqual(['mutation', 'reconcile']);
   });
 });

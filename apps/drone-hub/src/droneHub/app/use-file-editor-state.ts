@@ -45,7 +45,7 @@ import {
   type RememberedEditorFile,
 } from './drone-file-editor-state';
 import { appendFileDictationLine } from '../files/file-dictation-text';
-import { desktopFileReadUrl } from '../files/file-read-url';
+import { readDesktopFile } from '../files/read-desktop-file';
 
 type RequestJson = typeof requestJsonFn;
 
@@ -157,7 +157,7 @@ function readPayloadToTabState(data: Extract<DroneFsReadPayload, { ok: true }>):
   const nextMime = typeof (data as any).mime === 'string' ? String((data as any).mime).trim().toLowerCase() : '';
   const nextSize = Number((data as any).size);
   const nextContent = nextKind === 'text' && typeof (data as any).content === 'string' ? (data as any).content : '';
-  const nextPath = typeof (data as any).path === 'string' ? String((data as any).path).trim() : '';
+  const nextPath = typeof (data as any).path === 'string' ? String((data as any).path) : '';
   return {
     kind: nextKind,
     mime: nextMime || null,
@@ -505,7 +505,7 @@ export function useFileEditorState({
     if (activeTab.loaded || activeTab.loading) return;
     const activeId = activeTab.tabId;
     const droneId = String(activeTab.droneId ?? '').trim();
-    const filePath = String(activeTab.path ?? '').trim();
+    const filePath = String(activeTab.path ?? '');
     if (!droneId || !filePath) return;
     const seq = requestSeqRef.current + 1;
     requestSeqRef.current = seq;
@@ -535,9 +535,7 @@ export function useFileEditorState({
     contentRef.current = '';
 
     let cancelled = false;
-    void requestJson<Extract<DroneFsReadPayload, { ok: true }>>(
-      desktopFileReadUrl(droneId, filePath),
-    )
+    void readDesktopFile(requestJson, droneId, filePath)
       .then((data) => {
         if (cancelled || requestSeqRef.current !== seq) return;
         const nextLoadedState = readPayloadToTabState(data);
@@ -608,9 +606,7 @@ export function useFileEditorState({
           return;
         }
 
-        void requestJson<Extract<DroneFsReadPayload, { ok: true }>>(
-          desktopFileReadUrl(droneId, fallbackPath),
-        )
+        void readDesktopFile(requestJson, droneId, fallbackPath)
           .then((data) => {
             if (cancelled || requestSeqRef.current !== seq) return;
             const nextLoadedState = readPayloadToTabState(data);
@@ -758,9 +754,7 @@ export function useFileEditorState({
       }
       const nextSeq = (liveReloadSeqByTabRef.current.get(tabId) ?? 0) + 1;
       liveReloadSeqByTabRef.current.set(tabId, nextSeq);
-      void requestJson<Extract<DroneFsReadPayload, { ok: true }>>(
-        desktopFileReadUrl(currentTab.droneId, currentTab.path),
-      )
+      void readDesktopFile(requestJson, currentTab.droneId, currentTab.path)
         .then((data) => {
           if (liveReloadSeqByTabRef.current.get(tabId) !== nextSeq) return;
           const nextLoadedState = readPayloadToTabState(data);

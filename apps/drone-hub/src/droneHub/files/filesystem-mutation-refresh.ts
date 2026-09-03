@@ -44,6 +44,18 @@ export function pathMatchesRefreshScope(
   );
 }
 
+export async function runFilesystemMutationWithReconciliation<T>(
+  mutation: () => Promise<T>,
+  reconcileFailure: () => void,
+): Promise<T> {
+  try {
+    return await mutation();
+  } catch (error) {
+    reconcileFailure();
+    throw error;
+  }
+}
+
 function uniquePaths(values: readonly string[]): string[] {
   return Array.from(new Set(values.map(normalizePath).filter(Boolean)));
 }

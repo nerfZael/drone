@@ -20,6 +20,7 @@ import {
   ASSISTANT_SEARCH_MAX_CONTEXT_LINES,
   FS_EDITOR_MAX_BYTES,
   FS_LIST_TIMEOUT_MS,
+  buildContainerFsListScript,
   parseContainerFsListOutput,
   type ContainerFsEntry,
 } from './filesystem-media';
@@ -292,25 +293,7 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
       };
     }
 
-    const script = [
-      'set -euo pipefail',
-      `target=${bashQuote(target.targetPath)}`,
-      `if [ "$target" = ${bashQuote(NON_REPO_HOME_CWD)} ]; then mkdir -p ${bashQuote(NON_REPO_HOME_CWD)} 2>/dev/null || true; fi`,
-      'if [ ! -d "$target" ]; then echo "__ERR__\tnot-dir"; exit 3; fi',
-      'cd "$target"',
-      'resolved=$(pwd -P)',
-      'printf "__PATH__\t%s\n" "$resolved"',
-      'shopt -s dotglob nullglob',
-      'for p in ./*; do',
-      '  [ -e "$p" ] || continue',
-      '  name=$(basename -- "$p")',
-      '  kind=o',
-      '  if [ -d "$p" ]; then kind=d; elif [ -f "$p" ]; then kind=f; fi',
-      '  size=$(stat -c %s -- "$p" 2>/dev/null || echo 0)',
-      '  mtime=$(stat -c %Y -- "$p" 2>/dev/null || echo 0)',
-      '  printf "%s\t%s\t%s\t%s\n" "$name" "$kind" "$size" "$mtime"',
-      'done',
-    ].join('\n');
+    const script = buildContainerFsListScript(target.targetPath, NON_REPO_HOME_CWD, false);
     const r = await withReadonlyDroneContainer(
       { requestedDroneName: target.name, droneEntry: target.drone },
       async ({ droneEntry }) => {

@@ -16,4 +16,18 @@ describe('desktopFileReadUrl', () => {
     );
     expect(desktopFileReadUrl('drone', '/work/archive.bin')).not.toContain('metadata=1');
   });
+
+  test('treats question marks and fragments as literal Unix filename characters', () => {
+    for (const filePath of [
+      '/work/notes.png?draft.md',
+      '/work/notes.png#draft.md',
+      '/work/space name.png\tdraft.md',
+      '/work/space name.png\ndraft.md',
+      '/work/notes.png trailing.md ',
+    ]) {
+      const url = desktopFileReadUrl('drone', filePath);
+      expect(url).not.toContain('metadata=1');
+      expect(new URL(url, 'http://local').searchParams.get('path')).toBe(filePath);
+    }
+  });
 });

@@ -33,6 +33,10 @@ export const FS_TEXT_CHUNK_MAX_BYTES = 512 * 1024;
 export const FS_QUICK_OPEN_MAX_RESULTS = 200;
 export const FS_LIST_TIMEOUT_MS = 10_000;
 export const FS_GIT_IGNORED_PATHS_MARKER = '__GIT_IGNORED_PATHS_Z__';
+const FS_LIST_PATH_MARKER = '__FS_PATH_Z__';
+const FS_LIST_ENTRY_MARKER = '__FS_ENTRY_Z__';
+const FS_LIST_ARG_MAX_BYTES = 128 * 1024;
+const FS_LIST_ARG_MAX_ENTRIES = 256;
 export const ASSISTANT_BASH_DEFAULT_TIMEOUT_MS = 30 * 60_000;
 export const ASSISTANT_BASH_MAX_TIMEOUT_MS = 60 * 60_000;
 export const ASSISTANT_BASH_MAX_OUTPUT_BYTES = 64 * 1024;
@@ -54,6 +58,7 @@ export function browserCacheControlForFileRevision(
 export function buildContainerFsListScript(
   targetPath: string,
   nonRepoHomeCwd: string,
+  includeGitIgnoreMetadata = true,
 ): string {
   return [
     'set -euo pipefail',
@@ -68,21 +73,25 @@ export function buildContainerFsListScript(
     'fi',
     'cd "$target"',
     'resolved=$(pwd -P)',
-    'printf "__PATH__\t%s\n" "$resolved"',
-    'shopt -s dotglob nullglob',
-    'paths=(./*)',
-    'if [ "${#paths[@]}" -gt 0 ]; then',
-    "  while IFS= read -r -d '' p && IFS= read -r -d '' size && IFS= read -r -d '' mtime; do",
-    '    name=${p#./}',
-    '    kind=o',
-    '    if [ -d "$p" ]; then kind=d; elif [ -f "$p" ]; then kind=f; fi',
-    '    printf "%s\t%s\t%s\t%s\n" "$name" "$kind" "$size" "$mtime"',
-    "  done < <(stat --printf='%n\\0%s\\0%Y\\0' -- \"${paths[@]}\" 2>/dev/null || true)",
+    `printf "${FS_LIST_PATH_MARKER}\\0%s\\0" "$resolved"`,
+    'metadata_file=$(mktemp)',
+    'metadata_error=$(mktemp)',
+    'trap \'rm -f "$metadata_file" "$metadata_error"\' EXIT',
+    'export LC_ALL=C',
+    `if ! find . -mindepth 1 -maxdepth 1 -print0 | xargs -0 -r -s ${FS_LIST_ARG_MAX_BYTES} -n ${FS_LIST_ARG_MAX_ENTRIES} stat --printf='${FS_LIST_ENTRY_MARKER}\\0%n\\0%F\\0%s\\0%Y\\0' -- >"$metadata_file" 2>"$metadata_error"; then`,
+    '  printf "__ERR__\\tmetadata-failed\\n" >&2',
+    '  cat "$metadata_error" >&2',
+    '  exit 5',
     'fi',
-    'if command -v git >/dev/null 2>&1 && git -C "$resolved" rev-parse --is-inside-work-tree >/dev/null 2>&1; then',
-    `  printf "${FS_GIT_IGNORED_PATHS_MARKER}\\n"`,
-    '  find "$resolved" -mindepth 1 -maxdepth 1 -print0 2>/dev/null | git -C "$resolved" check-ignore -z --stdin 2>/dev/null || true',
-    'fi',
+    'cat "$metadata_file"',
+    ...(includeGitIgnoreMetadata
+      ? [
+          'if command -v git >/dev/null 2>&1 && git -C "$resolved" rev-parse --is-inside-work-tree >/dev/null 2>&1; then',
+          `  printf "${FS_GIT_IGNORED_PATHS_MARKER}\\0"`,
+          '  find "$resolved" -mindepth 1 -maxdepth 1 -print0 2>/dev/null | git -C "$resolved" check-ignore -z --stdin 2>/dev/null || true',
+          'fi',
+        ]
+      : []),
   ].join('\n');
 }
 
@@ -213,6 +222,59 @@ export function parseContainerFsListOutput(text: string): {
   entries: ContainerFsEntry[];
 } {
   const raw = String(text ?? '');
+  if (raw.includes(`${FS_LIST_PATH_MARKER}\0`)) return parseNullDelimitedContainerFsList(raw);
+  return parseLegacyContainerFsList(raw);
+}
+
+function parseNullDelimitedContainerFsList(raw: string): {
+  resolvedPath: string;
+  entries: ContainerFsEntry[];
+} {
+  const fields = raw.split('\0');
+  let resolvedPath = '/';
+  const entries: ContainerFsEntry[] = [];
+  const ignoredPaths = new Set<string>();
+  let index = 0;
+  let readingIgnoredPaths = false;
+
+  while (index < fields.length) {
+    const field = fields[index] ?? '';
+    index += 1;
+    if (field === FS_LIST_PATH_MARKER) {
+      const nextPath = normalizeContainerPath(fields[index] ?? '');
+      index += 1;
+      resolvedPath = nextPath || '/';
+      continue;
+    }
+    if (field === FS_GIT_IGNORED_PATHS_MARKER) {
+      readingIgnoredPaths = true;
+      continue;
+    }
+    if (readingIgnoredPaths) {
+      if (field.startsWith('/')) ignoredPaths.add(path.posix.normalize(field));
+      continue;
+    }
+    if (field !== FS_LIST_ENTRY_MARKER) continue;
+    const nameField = String(fields[index] ?? '');
+    const type = String(fields[index + 1] ?? '');
+    const sizeRaw = fields[index + 2] ?? '';
+    const mtimeRaw = fields[index + 3] ?? '';
+    index += 4;
+    const name = nameField.startsWith('./') ? nameField.slice(2) : nameField;
+    const kind: ContainerFsEntry['kind'] =
+      type === 'directory' ? 'directory' : type.startsWith('regular') ? 'file' : 'other';
+    appendContainerFsEntry(entries, resolvedPath, name, kind, sizeRaw, mtimeRaw);
+  }
+
+  for (const entry of entries) entry.isGitIgnored = ignoredPaths.has(entry.path);
+  sortFsEntries(entries);
+  return { resolvedPath, entries };
+}
+
+function parseLegacyContainerFsList(raw: string): {
+  resolvedPath: string;
+  entries: ContainerFsEntry[];
+} {
   const ignoredSectionMarker = `\n${FS_GIT_IGNORED_PATHS_MARKER}\n`;
   const ignoredSectionIndex = raw.indexOf(ignoredSectionMarker);
   const listingText = ignoredSectionIndex >= 0 ? raw.slice(0, ignoredSectionIndex) : raw;
@@ -252,24 +314,7 @@ export function parseContainerFsListOutput(text: string): {
     const sizeNum = Number(sizeRaw);
     const mtimeSec = Number(mtimeRaw);
 
-    const fullPath =
-      resolvedPath === '/'
-        ? path.posix.join('/', name)
-        : path.posix.join(resolvedPath.replace(/\/+$/g, ''), name);
-    const ext = kind === 'file' ? extensionLower(name) || null : null;
-    const isImage = kind === 'file' ? isLikelyImagePath(name) : false;
-    const isVideo = kind === 'file' ? isLikelyVideoPath(name) : false;
-
-    entries.push({
-      name,
-      path: fullPath,
-      kind,
-      size: Number.isFinite(sizeNum) ? Math.max(0, Math.floor(sizeNum)) : null,
-      mtimeMs: Number.isFinite(mtimeSec) ? Math.max(0, Math.floor(mtimeSec * 1000)) : null,
-      ext,
-      isImage,
-      isVideo,
-    });
+    appendContainerFsEntry(entries, resolvedPath, name, kind, sizeNum, mtimeSec);
   }
 
   for (const entry of entries) {
@@ -279,6 +324,33 @@ export function parseContainerFsListOutput(text: string): {
   sortFsEntries(entries);
 
   return { resolvedPath, entries };
+}
+
+function appendContainerFsEntry(
+  entries: ContainerFsEntry[],
+  resolvedPath: string,
+  name: string,
+  kind: ContainerFsEntry['kind'],
+  sizeRaw: string | number,
+  mtimeRaw: string | number,
+): void {
+  if (!name || name === '.' || name === '..') return;
+  const sizeNum = Number(sizeRaw);
+  const mtimeSec = Number(mtimeRaw);
+  const fullPath =
+    resolvedPath === '/'
+      ? path.posix.join('/', name)
+      : path.posix.join(resolvedPath.replace(/\/+$/g, ''), name);
+  entries.push({
+    name,
+    path: fullPath,
+    kind,
+    size: Number.isFinite(sizeNum) ? Math.max(0, Math.floor(sizeNum)) : null,
+    mtimeMs: Number.isFinite(mtimeSec) ? Math.max(0, Math.floor(mtimeSec * 1000)) : null,
+    ext: kind === 'file' ? extensionLower(name) || null : null,
+    isImage: kind === 'file' ? isLikelyImagePath(name) : false,
+    isVideo: kind === 'file' ? isLikelyVideoPath(name) : false,
+  });
 }
 
 export function sortFsEntries(entries: ContainerFsEntry[]): void {

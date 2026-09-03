@@ -29,8 +29,18 @@ describe('TrailingDirectoryRequestTracker', () => {
     const tracker = new TrailingDirectoryRequestTracker();
     tracker.begin('/work/old', 4);
     tracker.requestTrailing('/work/old', 4);
-    tracker.discardTrailing('/work/old');
+    tracker.cancelReplacement('/work/old');
 
     expect(tracker.finish('/work/old', 4)).toBe(false);
+  });
+
+  test('queues data requested after a collapsed in-flight read was invalidated', () => {
+    const tracker = new TrailingDirectoryRequestTracker();
+    tracker.begin('/work/src', 7);
+    tracker.invalidate('/work/src', 7, false);
+
+    expect(tracker.isInvalidated('/work/src', 7)).toBe(true);
+    tracker.requestTrailing('/work/src', 7);
+    expect(tracker.finish('/work/src', 7)).toBe(true);
   });
 });

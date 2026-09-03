@@ -45,9 +45,11 @@ import {
   filesystemMutationRefreshPlan,
   joinFsPath,
   pathMatchesRefreshScope,
+  runFilesystemMutationWithReconciliation,
   type FilesystemMutationRefreshPlan,
 } from './filesystem-mutation-refresh';
 import { TrailingDirectoryRequestTracker } from './trailing-directory-request-tracker';
+import { deferDirectoryLoadWhileActive } from './defer-directory-load';
 
 const CHILD_DIRECTORY_CACHE_MAX_AGE_MS = 5 * 60_000;
 const FS_LIST_REQUEST_TIMEOUT_MS = 12_000;
@@ -411,11 +413,13 @@ export function DroneFilesDock({
     async (dirPathRaw: string, opts?: { force?: boolean }) => {
       const dirPath = normalizeContainerPathInput(dirPathRaw);
       if (!dirPath || dirPath === normalizedPath) return;
-      const inFlightSeq = childRequestTrackerRef.current.activeSequence(dirPath);
-      if (inFlightSeq != null) {
-        if (opts?.force) childRequestTrackerRef.current.requestTrailing(dirPath, inFlightSeq);
-        return;
-      }
+      if (
+        deferDirectoryLoadWhileActive(
+          childRequestTrackerRef.current,
+          dirPath,
+          opts?.force === true,
+        )
+      ) return;
       if (!opts?.force && childErrorByPath[dirPath]) return;
       if (
         !opts?.force &&
@@ -551,9 +555,11 @@ export function DroneFilesDock({
         invalidateFsListCacheForDirectory(droneId, listingPath);
         const activeSequence = childRequestTrackerRef.current.activeSequence(listingPath);
         if (activeSequence == null) continue;
-        if (expandedDirs[listingPath] === true) {
-          childRequestTrackerRef.current.requestTrailing(listingPath, activeSequence);
-        }
+        childRequestTrackerRef.current.invalidate(
+          listingPath,
+          activeSequence,
+          expandedDirs[listingPath] === true,
+        );
         childRequestSeqRef.current[listingPath] =
           (childRequestSeqRef.current[listingPath] ?? 0) + 1;
       }
@@ -563,7 +569,7 @@ export function DroneFilesDock({
         for (const dirPath of Object.keys(childRequestSeqRef.current)) {
           if (dirPath !== subtree && !dirPath.startsWith(`${subtree.replace(/\/+$/, '')}/`)) continue;
           childRequestSeqRef.current[dirPath] = (childRequestSeqRef.current[dirPath] ?? 0) + 1;
-          childRequestTrackerRef.current.discardTrailing(dirPath);
+          childRequestTrackerRef.current.cancelReplacement(dirPath);
         }
       }
       const retainUnmatched = <T,>(
@@ -692,11 +698,23 @@ export function DroneFilesDock({
     if (actionMode === 'move' && selectedCount > 0) {
       const moving = [...actionEntries];
       void runAction('Moving', async () => {
-        const result = await runDroneFsAction(droneId, {
-          action: 'move',
-          paths: moving.map((entry) => entry.path),
-          targetDir: value,
+        const destinationPaths = moving.map((entry) => joinFsPath(value, entry.name));
+        const refreshPlan = filesystemMutationRefreshPlan({
+          sourcePaths: moving.map((entry) => entry.path),
+          destinationPaths,
         });
+        const result = await runFilesystemMutationWithReconciliation(
+          () => runDroneFsAction(droneId, {
+            action: 'move',
+            paths: moving.map((entry) => entry.path),
+            targetDir: value,
+          }),
+          () => {
+            clearClipboardForChangedEntries(moving);
+            refreshAfterMutation(null, refreshPlan);
+            onRefreshOpenedFile?.();
+          },
+        );
         const targetDir = result.targetDir ?? value;
         for (const entry of moving) {
           const nextPath = movedPathForEntry(entry, targetDir, entry.path);
@@ -727,6 +745,7 @@ export function DroneFilesDock({
     onOpenFile,
     onOpenPath,
     onRemapOpenedFilesForPathChange,
+    onRefreshOpenedFile,
     refreshAfterMutation,
     runAction,
     actionEntries,
@@ -803,10 +822,18 @@ export function DroneFilesDock({
       const paths = entriesToDelete.map((entry) => entry.path);
       if (onConfirmCloseOpenedFilesForPaths && !onConfirmCloseOpenedFilesForPaths(paths, 'Delete selected item')) return;
       void runAction('Deleting', async () => {
-        await runDroneFsAction(droneId, {
-          action: 'delete',
-          paths,
-        });
+        const refreshPlan = filesystemMutationRefreshPlan({ sourcePaths: paths });
+        await runFilesystemMutationWithReconciliation(
+          () => runDroneFsAction(droneId, {
+            action: 'delete',
+            paths,
+          }),
+          () => {
+            clearClipboardForChangedEntries(entriesToDelete);
+            refreshAfterMutation(null, refreshPlan);
+            onRefreshOpenedFile?.();
+          },
+        );
         if (onCloseOpenedFilesForPaths) {
           onCloseOpenedFilesForPaths(paths);
         } else if (activeOpenedFilePath && entriesToDelete.some(pathContainsActiveFile)) {
@@ -827,6 +854,7 @@ export function DroneFilesDock({
       onCloseOpenedFile,
       onCloseOpenedFilesForPaths,
       onConfirmCloseOpenedFilesForPaths,
+      onRefreshOpenedFile,
       pathContainsActiveFile,
       refreshAfterMutation,
       runAction,
@@ -843,11 +871,17 @@ export function DroneFilesDock({
   const pasteClipboard = React.useCallback(() => {
     if (!clipboard || clipboard.entries.length === 0) return;
     void runAction('Pasting', async () => {
-      await runDroneFsAction(droneId, {
-        action: 'copy',
-        paths: clipboard.entries.map((entry) => entry.path),
-        targetDir: normalizedPath,
+      const refreshPlan = filesystemMutationRefreshPlan({
+        destinationPaths: clipboard.entries.map((entry) => joinFsPath(normalizedPath, entry.name)),
       });
+      await runFilesystemMutationWithReconciliation(
+        () => runDroneFsAction(droneId, {
+          action: 'copy',
+          paths: clipboard.entries.map((entry) => entry.path),
+          targetDir: normalizedPath,
+        }),
+        () => refreshAfterMutation(null, refreshPlan),
+      );
       refreshAfterMutation(
         `Pasted ${clipboard.entries.length} item${clipboard.entries.length === 1 ? '' : 's'}.`,
         filesystemMutationRefreshPlan({

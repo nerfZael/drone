@@ -167,6 +167,12 @@ describeSocketSuite('host runtime routing api', () => {
       Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7bKJYAAAAASUVORK5CYII=', 'base64'),
     );
     fs.writeFileSync(videoPath, Buffer.alloc(2 * 1024 * 1024 + 1));
+    const unusualHostName = ' leading\tfile.txt ';
+    fs.writeFileSync(path.join(droneRoot, unusualHostName), 'odd');
+    fs.mkdirSync(path.join(droneRoot, 'linked-directory'));
+    fs.symlinkSync('note.txt', path.join(droneRoot, 'file-link'));
+    fs.symlinkSync('linked-directory', path.join(droneRoot, 'directory-link'));
+    fs.symlinkSync('missing.txt', path.join(droneRoot, 'dangling-link'));
 
     await seedHostDrone(droneId, { cwd: droneRoot, repoPath: '' });
 
@@ -184,6 +190,11 @@ describeSocketSuite('host runtime routing api', () => {
     const entryNames = ((listResp.data?.entries ?? []) as Array<{ name?: string }>).map((e) => String(e?.name ?? ''));
     expect(entryNames).toContain('note.txt');
     expect(entryNames).toContain('thumb.png');
+    expect(entryNames).toContain(unusualHostName);
+    const listedEntries = (listResp.data?.entries ?? []) as Array<{ name?: string; kind?: string }>;
+    expect(listedEntries.find((entry) => entry.name === 'file-link')?.kind).toBe('other');
+    expect(listedEntries.find((entry) => entry.name === 'directory-link')?.kind).toBe('other');
+    expect(listedEntries.find((entry) => entry.name === 'dangling-link')?.kind).toBe('other');
 
     const readResp = await apiFetch(
       `/api/drones/${encodeURIComponent(droneId)}/fs/file?path=${encodeURIComponent(notePath)}`,
@@ -472,6 +483,35 @@ describeSocketSuite('host runtime routing api', () => {
     );
     expect(rangedMedia.headers.get('content-range')).toBe(`bytes 1-4/${imageBytes.length}`);
     expect(Buffer.from(await rangedMedia.arrayBuffer())).toEqual(imageBytes.subarray(1, 5));
+  });
+
+  test('preflights every host batch mutation before changing the first item', async () => {
+    const droneId = 'host-fs-preflight';
+    const droneRoot = path.join(tempRoot, 'host-fs-preflight');
+    const destination = path.join(droneRoot, 'destination');
+    const existing = path.join(droneRoot, 'existing.txt');
+    const missing = path.join(droneRoot, 'missing.txt');
+    fs.mkdirSync(destination, { recursive: true });
+    fs.writeFileSync(existing, 'keep me');
+    await seedHostDrone(droneId, { cwd: droneRoot, repoPath: '' });
+
+    const action = async (body: unknown) =>
+      await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/fs/action`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+    for (const mutation of [
+      { action: 'delete', paths: [existing, missing] },
+      { action: 'move', paths: [existing, missing], targetDir: destination },
+      { action: 'copy', paths: [existing, missing], targetDir: destination },
+    ]) {
+      const response = await action(mutation);
+      expect(response.r.status).toBe(404);
+      expect(fs.readFileSync(existing, 'utf8')).toBe('keep me');
+      expect(fs.existsSync(path.join(destination, 'existing.txt'))).toBe(false);
+    }
   });
 
   test('streams hash revision changes for an open host file', async () => {
