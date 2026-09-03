@@ -168,6 +168,7 @@ export class DeviceMeshRouter {
       timer: ReturnType<typeof setTimeout>;
     }
   >();
+  private readonly capabilitySourceSockets = new Map<string, Set<WebSocket>>();
   private readonly replay = new Map<string, number>();
   private readonly responses = new DeviceMeshResponseCache();
   private readonly requestTimes = new Map<string, number[]>();
@@ -1042,6 +1043,12 @@ export class DeviceMeshRouter {
     if (connection && transferSnapshotRequest) {
       connection.capabilitySourceDeviceIds ??= new Set();
       connection.capabilitySourceDeviceIds.add(source.id);
+      let sourceSockets = this.capabilitySourceSockets.get(source.id);
+      if (!sourceSockets) {
+        sourceSockets = new Set();
+        this.capabilitySourceSockets.set(source.id, sourceSockets);
+      }
+      sourceSockets.add(connection.ws);
     }
     const invocationController = new AbortController();
     const abortInvocation = () => invocationController.abort();
@@ -1108,6 +1115,10 @@ export class DeviceMeshRouter {
     ]);
     connection.capabilitySourceDeviceIds?.clear();
     for (const sourceDeviceId of sourceDeviceIds) {
+      const sourceSockets = this.capabilitySourceSockets.get(sourceDeviceId);
+      sourceSockets?.delete(connection.ws);
+      if (sourceSockets?.size) continue;
+      this.capabilitySourceSockets.delete(sourceDeviceId);
       void this.capabilities.disconnectDevice(sourceDeviceId);
     }
   }

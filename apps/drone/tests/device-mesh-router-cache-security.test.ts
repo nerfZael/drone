@@ -238,4 +238,59 @@ describe('device mesh router response replay', () => {
       await fs.rm(root, { recursive: true, force: true });
     }
   });
+
+  test('keeps a transfer owner live until its last relay connection closes', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mesh-router-multi-route-'));
+    const desktop = identity('desktop-a', 'desktop');
+    const capabilities = new CapabilityRegistry();
+    const disconnected: string[] = [];
+    capabilities.register({
+      descriptor: DRONE_CONTROL_CAPABILITY,
+      async invoke() {
+        return {};
+      },
+      disconnectDevice(deviceId) {
+        disconnected.push(deviceId);
+      },
+    });
+    const store = new DeviceMeshStore(path.join(root, 'state.json'), desktop);
+    const router = new DeviceMeshRouter(
+      desktop,
+      store,
+      capabilities,
+      new DeviceRouteManager(desktop, store),
+      new DeviceMeshAuditStore(path.join(root, 'audit.json')),
+    );
+    const sourceId = 'source-a';
+    const relayA = {
+      peerDeviceId: 'relay-a',
+      outbound: true,
+      ws: {} as WebSocket,
+      lifecycle: new AbortController(),
+      capabilitySourceDeviceIds: new Set([sourceId]),
+    };
+    const relayB = {
+      peerDeviceId: 'relay-b',
+      outbound: true,
+      ws: {} as WebSocket,
+      lifecycle: new AbortController(),
+      capabilitySourceDeviceIds: new Set([sourceId]),
+    };
+    (router as any).capabilitySourceSockets.set(sourceId, new Set([relayA.ws, relayB.ws]));
+    try {
+      (router as any).cleanupConnectionCapabilities(relayA);
+      expect(disconnected).toContain(relayA.peerDeviceId);
+      expect(disconnected).not.toContain(sourceId);
+      expect((router as any).capabilitySourceSockets.get(sourceId)).toEqual(new Set([relayB.ws]));
+
+      (router as any).cleanupConnectionCapabilities(relayB);
+      expect(disconnected).toContain(relayB.peerDeviceId);
+      expect(disconnected.filter((id) => id === sourceId)).toHaveLength(1);
+      expect((router as any).capabilitySourceSockets.has(sourceId)).toBe(false);
+    } finally {
+      router.close();
+      await capabilities.close();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
 });
