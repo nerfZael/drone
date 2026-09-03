@@ -2406,6 +2406,66 @@ describe('device mesh drone summaries', () => {
     }
   });
 
+  test('prevents directory snapshots from publishing after owner lifecycle cleanup', async () => {
+    const originalFetch = globalThis.fetch;
+    try {
+      for (const lifecycle of ['revokeDevice', 'disconnectDevice', 'accessChanged'] as const) {
+        let blocked = true;
+        let release!: () => void;
+        let started!: () => void;
+        const gate = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        const didStart = new Promise<void>((resolve) => {
+          started = resolve;
+        });
+        globalThis.fetch = (async () => {
+          if (blocked) {
+            started();
+            await gate;
+          }
+          return Response.json({
+            ok: true,
+            path: '/work/repo',
+            entries: Array.from({ length: 3_000 }, (_, index) => ({
+              name: `file-${index}-${'x'.repeat(40)}`,
+              path: `/work/repo/file-${index}-${'x'.repeat(40)}`,
+              kind: 'file',
+            })),
+          });
+        }) as typeof fetch;
+        const capability = createDroneControlCapability({
+          baseUrl: () => 'http://127.0.0.1:7777',
+          apiToken: 'test',
+        });
+        const context = {
+          sourceDevice: { id: 'phone-a' },
+          requestId: `${lifecycle}-old`,
+        } as any;
+        const pending = capability.invoke(
+          'files.list',
+          { droneId: 'one', path: '/work/repo' },
+          context,
+        );
+        await didStart;
+        await capability[lifecycle]?.('phone-a');
+        blocked = false;
+        release();
+        await expect(pending).rejects.toMatchObject({ code: 'TRANSFER_EXPIRED' });
+
+        await expect(
+          capability.invoke('files.list', { droneId: 'one', path: '/work/repo' }, {
+            sourceDevice: { id: 'phone-a' },
+            requestId: `${lifecycle}-new`,
+          } as any),
+        ).resolves.toMatchObject({ contentChunk: { encoding: 'base64-json-utf8' } });
+        capability.close?.();
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('returns chunked text and media file previews', async () => {
     const originalFetch = globalThis.fetch;
     const mediaBytes = Buffer.alloc(MESH_BINARY_CHUNK_BYTES + 3, 7);

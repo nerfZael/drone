@@ -36,6 +36,7 @@ type RequestDroneControl = (
   destinationId: string,
   operation: DroneControlOperation,
   payload?: any,
+  signal?: AbortSignal,
 ) => Promise<any>;
 
 type CachedFilePreview = {
@@ -103,6 +104,7 @@ export function useFilePreview({
     });
   }
   const loadVersion = React.useRef(0);
+  const loadAbortRef = React.useRef<AbortController | null>(null);
   const saveVersion = React.useRef(0);
   previewRef.current = preview;
 
@@ -112,6 +114,8 @@ export function useFilePreview({
   const resetPreviewSelection = React.useCallback(
     (nextWorkspaceContext: Omit<PreviewRequest, 'path' | 'line'> | null) => {
       loadVersion.current += 1;
+      loadAbortRef.current?.abort();
+      loadAbortRef.current = null;
       saveVersion.current += 1;
       setWorkspaceContext(nextWorkspaceContext);
       setRequest(null);
@@ -125,7 +129,13 @@ export function useFilePreview({
     },
     [clearActivePreview],
   );
-  React.useEffect(() => () => previewCacheRef.current?.clear(), []);
+  React.useEffect(
+    () => () => {
+      loadAbortRef.current?.abort();
+      previewCacheRef.current?.clear();
+    },
+    [],
+  );
 
   const commitPreview = React.useCallback(
     (nextRequest: PreviewRequest, next: CachedFilePreview) => {
@@ -150,6 +160,9 @@ export function useFilePreview({
       nextRequest: PreviewRequest,
       options?: { background?: boolean; transferRestarted?: boolean },
     ) => {
+      loadAbortRef.current?.abort();
+      const loadController = new AbortController();
+      loadAbortRef.current = loadController;
       const version = ++loadVersion.current;
       const background = options?.background === true && previewRef.current != null;
       if (!background) setLoading(true);
@@ -160,31 +173,42 @@ export function useFilePreview({
         clearActivePreview();
       }
       try {
-        let firstResult: any = await requestDroneControl(nextRequest.targetId, 'file.preview', {
-          droneId: nextRequest.droneId,
-          chatName: nextRequest.chatName,
-          path: nextRequest.path,
-          contentOffset: 0,
-        });
+        let firstResult: any = await requestDroneControl(
+          nextRequest.targetId,
+          'file.preview',
+          {
+            droneId: nextRequest.droneId,
+            chatName: nextRequest.chatName,
+            path: nextRequest.path,
+            contentOffset: 0,
+          },
+          loadController.signal,
+        );
         if (firstResult?.contentChunk) {
           let firstAvailable = true;
           const content = await readMeshJsonContent(
-            async (contentOffset, snapshotToken) => {
+            async (contentOffset, snapshotToken, signal) => {
               if (contentOffset === 0 && firstAvailable) {
                 firstAvailable = false;
                 return firstResult.contentChunk;
               }
-              const next = await requestDroneControl(nextRequest.targetId, 'file.preview', {
-                droneId: nextRequest.droneId,
-                chatName: nextRequest.chatName,
-                path: nextRequest.path,
-                contentOffset,
-                ...(snapshotToken ? { snapshotToken } : {}),
-              });
+              const next = await requestDroneControl(
+                nextRequest.targetId,
+                'file.preview',
+                {
+                  droneId: nextRequest.droneId,
+                  chatName: nextRequest.chatName,
+                  path: nextRequest.path,
+                  contentOffset,
+                  ...(snapshotToken ? { snapshotToken } : {}),
+                },
+                signal,
+              );
               return next?.contentChunk ?? {};
             },
             {
               isCancelled: () => version !== loadVersion.current,
+              signal: loadController.signal,
               cancelSnapshot: async (snapshotToken) => {
                 await requestDroneControl(nextRequest.targetId, 'file.preview', {
                   droneId: nextRequest.droneId,
@@ -276,15 +300,20 @@ export function useFilePreview({
             await readPipelinedMediaChunks({
               firstResult,
               totalBytes,
-              requestResult: async (contentOffset, snapshotToken) =>
-                await requestDroneControl(nextRequest.targetId, 'file.preview', {
-                  droneId: nextRequest.droneId,
-                  chatName: nextRequest.chatName,
-                  path: nextRequest.path,
-                  contentOffset,
-                  expectedRevision: metadata.revision,
-                  ...(snapshotToken ? { snapshotToken, mediaSnapshot: true } : {}),
-                }),
+              requestResult: async (contentOffset, snapshotToken, signal) =>
+                await requestDroneControl(
+                  nextRequest.targetId,
+                  'file.preview',
+                  {
+                    droneId: nextRequest.droneId,
+                    chatName: nextRequest.chatName,
+                    path: nextRequest.path,
+                    contentOffset,
+                    expectedRevision: metadata.revision,
+                    ...(snapshotToken ? { snapshotToken, mediaSnapshot: true } : {}),
+                  },
+                  signal,
+                ),
               validateResult: (result, contentOffset) => {
                 const resultPreview = result?.preview;
                 const chunk = result?.mediaChunk;
@@ -320,6 +349,7 @@ export function useFilePreview({
               },
               appendBytes,
               isCancelled: () => version !== loadVersion.current,
+              signal: loadController.signal,
               cancelSnapshot: async (snapshotToken) => {
                 await requestDroneControl(nextRequest.targetId, 'file.preview', {
                   droneId: nextRequest.droneId,
@@ -416,6 +446,7 @@ export function useFilePreview({
           }
         }
       } finally {
+        if (loadAbortRef.current === loadController) loadAbortRef.current = null;
         if (version === loadVersion.current && !background) setLoading(false);
       }
     },
@@ -629,6 +660,8 @@ export function useFilePreview({
           (previewRef.current?.path ? normalizedPaths.has(previewRef.current.path) : false))
       ) {
         loadVersion.current += 1;
+        loadAbortRef.current?.abort();
+        loadAbortRef.current = null;
       }
       for (const path of normalizedPaths) {
         previewCacheRef.current!.delete(mobileFileCacheKey({ ...workspaceContext, path }));

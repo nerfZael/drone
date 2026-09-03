@@ -16,11 +16,18 @@ type MeshContentChunk = {
 
 type ReadMeshJsonOptions = {
   isCancelled?: () => boolean;
+  signal?: AbortSignal;
   cancelSnapshot?: (snapshotToken: string) => Promise<void>;
 };
 
+type RequestChunk = (
+  offset: number,
+  snapshotToken?: string,
+  signal?: AbortSignal,
+) => Promise<MeshContentChunk>;
+
 export async function readMeshJsonContent(
-  requestChunk: (offset: number, snapshotToken?: string) => Promise<MeshContentChunk>,
+  requestChunk: RequestChunk,
   options: ReadMeshJsonOptions = {},
 ): Promise<any> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -35,12 +42,14 @@ export async function readMeshJsonContent(
 }
 
 async function readMeshJsonContentOnce(
-  requestChunk: (offset: number, snapshotToken?: string) => Promise<MeshContentChunk>,
+  requestChunk: RequestChunk,
   options: ReadMeshJsonOptions,
 ): Promise<any> {
+  const controller = new AbortController();
+  const removeAbortListener = forwardAbort(options.signal, controller);
   let first: ValidatedChunk | null = null;
   try {
-    first = validateChunk(await requestChunk(0), 0, null, undefined);
+    first = validateChunk(await requestChunk(0, undefined, controller.signal), 0, null, undefined);
     ensureActive(options);
     if (first.done) return decodeJson([first.bytes], first.totalBytes);
 
@@ -49,21 +58,25 @@ async function readMeshJsonContentOnce(
       first.bytes.length === MESH_BINARY_CHUNK_BYTES &&
       first.totalBytes > first.bytes.length
     ) {
-      return await readPipelined(requestChunk, first, options);
+      return await readPipelined(requestChunk, first, options, controller);
     }
-    return await readSequential(requestChunk, first, options);
+    return await readSequential(requestChunk, first, options, controller.signal);
   } catch (error) {
+    controller.abort();
     if (first?.snapshotToken) {
       void options.cancelSnapshot?.(first.snapshotToken).catch(() => undefined);
     }
     throw error;
+  } finally {
+    removeAbortListener();
   }
 }
 
 async function readSequential(
-  requestChunk: (offset: number, snapshotToken?: string) => Promise<MeshContentChunk>,
+  requestChunk: RequestChunk,
   first: ValidatedChunk,
   options: ReadMeshJsonOptions,
+  signal: AbortSignal,
 ) {
   const chunks = [first.bytes];
   let offset = first.bytes.length;
@@ -71,7 +84,7 @@ async function readSequential(
   for (let index = 1; index < 1_024; index += 1) {
     ensureActive(options);
     const next = validateChunk(
-      await requestChunk(offset, snapshotToken),
+      await requestChunk(offset, snapshotToken, signal),
       offset,
       first.totalBytes,
       snapshotToken,
@@ -86,9 +99,10 @@ async function readSequential(
 }
 
 async function readPipelined(
-  requestChunk: (offset: number, snapshotToken?: string) => Promise<MeshContentChunk>,
+  requestChunk: RequestChunk,
   first: ValidatedChunk,
   options: ReadMeshJsonOptions,
+  controller: AbortController,
 ) {
   const chunkCount = Math.ceil(first.totalBytes / MESH_BINARY_CHUNK_BYTES);
   if (chunkCount > 1_024) throw new Error('The remote content used too many chunks');
@@ -104,7 +118,7 @@ async function readPipelined(
         nextIndex += 1;
         const offset = index * MESH_BINARY_CHUNK_BYTES;
         const chunk = validateChunk(
-          await requestChunk(offset, first.snapshotToken),
+          await requestChunk(offset, first.snapshotToken, controller.signal),
           offset,
           first.totalBytes,
           first.snapshotToken,
@@ -118,17 +132,29 @@ async function readPipelined(
       }
     } catch (error) {
       stopped = true;
+      controller.abort();
       throw error;
     }
   };
-  const settled = await Promise.allSettled(
-    Array.from({ length: Math.min(MAX_PIPELINED_REQUESTS, chunkCount - 1) }, () => worker()),
+  const workers = Array.from({ length: Math.min(MAX_PIPELINED_REQUESTS, chunkCount - 1) }, () =>
+    worker(),
   );
-  const failed = settled.find(
-    (result): result is PromiseRejectedResult => result.status === 'rejected',
-  );
-  if (failed) throw failed.reason;
+  try {
+    await Promise.all(workers);
+  } catch (error) {
+    controller.abort();
+    void Promise.allSettled(workers);
+    throw error;
+  }
   return decodeJson(chunks, first.totalBytes);
+}
+
+function forwardAbort(signal: AbortSignal | undefined, controller: AbortController): () => void {
+  if (!signal) return () => undefined;
+  const abort = () => controller.abort();
+  if (signal.aborted) controller.abort();
+  else signal.addEventListener('abort', abort, { once: true });
+  return () => signal.removeEventListener('abort', abort);
 }
 
 type ValidatedChunk = {
@@ -190,7 +216,9 @@ function decodeJson(chunks: Uint8Array[], totalBytes: number) {
 }
 
 function ensureActive(options: ReadMeshJsonOptions) {
-  if (options.isCancelled?.()) throw new Error('The content load was cancelled');
+  if (options.signal?.aborted || options.isCancelled?.()) {
+    throw new Error('The content load was cancelled');
+  }
 }
 
 function isExpiredTransfer(error: unknown): boolean {

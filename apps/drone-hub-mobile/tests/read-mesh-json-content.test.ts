@@ -117,7 +117,7 @@ describe('mesh JSON content reader', () => {
     expect(cancelledTokens).toEqual(['snapshot-a']);
   });
 
-  test('restarts one expired transfer from byte zero without mixing snapshots', async () => {
+  test('restarts one expired transfer promptly from byte zero without mixing snapshots', async () => {
     const expected = { text: 'r'.repeat(MESH_BINARY_CHUNK_BYTES * 2) };
     const content = new TextEncoder().encode(JSON.stringify(expected));
     let generation = 0;
@@ -154,7 +154,59 @@ describe('mesh JSON content reader', () => {
 
     expect(result).toEqual(expected);
     expect(zeroOffsets).toEqual(['snapshot-1', 'snapshot-2']);
-    expect(restartedWhileOldActive).toBe(false);
+    expect(restartedWhileOldActive).toBe(true);
+  });
+
+  test('aborts three slow continuation requests and cancels the snapshot immediately', async () => {
+    const content = new Uint8Array(MESH_BINARY_CHUNK_BYTES * 4);
+    const controller = new AbortController();
+    const cancelled: string[] = [];
+    let started = 0;
+    let aborted = 0;
+    const reading = readMeshJsonContent(
+      async (offset, _token, signal) => {
+        if (offset === 0) {
+          return {
+            encoding: 'base64-json-utf8',
+            offset: 0,
+            bytes: MESH_BINARY_CHUNK_BYTES,
+            totalBytes: content.length,
+            done: false,
+            dataBase64: fromByteArray(content.subarray(0, MESH_BINARY_CHUNK_BYTES)),
+            snapshotToken: 'snapshot-slow',
+          };
+        }
+        started += 1;
+        return await new Promise((_, reject) => {
+          const onAbort = () => {
+            aborted += 1;
+            reject(new Error('request aborted'));
+          };
+          if (signal?.aborted) onAbort();
+          else signal?.addEventListener('abort', onAbort, { once: true });
+        });
+      },
+      {
+        signal: controller.signal,
+        cancelSnapshot: async (token) => {
+          cancelled.push(token);
+        },
+      },
+    );
+    for (let attempt = 0; attempt < 20 && started < 3; attempt += 1) await Bun.sleep(1);
+    expect(started).toBe(3);
+
+    controller.abort();
+    await expect(
+      Promise.race([
+        reading,
+        Bun.sleep(100).then(() => {
+          throw new Error('cancellation timed out');
+        }),
+      ]),
+    ).rejects.toThrow(/cancelled|aborted/);
+    expect(aborted).toBe(3);
+    expect(cancelled).toEqual(['snapshot-slow']);
   });
 
   test('does not loop after a restarted transfer expires or after cancellation', async () => {

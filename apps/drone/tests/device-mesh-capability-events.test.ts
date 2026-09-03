@@ -298,6 +298,32 @@ describe('device mesh capability events', () => {
     }
   });
 
+  test('keeps relay validation work scoped to the socket across reconnects', async () => {
+    const receiver = identity('receiver');
+    const relay = identity('relay');
+    const target = await harness(receiver, [receiver, relay]);
+    const oldSocket = fakeSocket();
+    const currentSocket = fakeSocket();
+    try {
+      for (let index = 0; index < 8; index += 1) {
+        expect((target.router as any).beginCapabilityEventRelayValidation(oldSocket)).toBe(true);
+        expect((target.router as any).beginCapabilityEventRelayValidation(currentSocket)).toBe(
+          true,
+        );
+      }
+      expect((target.router as any).beginCapabilityEventRelayValidation(currentSocket)).toBe(false);
+
+      // Completion from the replaced socket must not decrement the new socket's counter.
+      (target.router as any).finishCapabilityEventRelayValidation(oldSocket);
+      expect((target.router as any).beginCapabilityEventRelayValidation(currentSocket)).toBe(false);
+
+      (target.router as any).finishCapabilityEventRelayValidation(currentSocket);
+      expect((target.router as any).beginCapabilityEventRelayValidation(currentSocket)).toBe(true);
+    } finally {
+      await closeHarnesses(target);
+    }
+  });
+
   test('forwards one signed targeted hop without notifying the relay or unauthorized peers', async () => {
     const deviceA = identity('device-a');
     const deviceB = identity('device-b');

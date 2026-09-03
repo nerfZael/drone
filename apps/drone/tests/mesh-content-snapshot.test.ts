@@ -188,14 +188,19 @@ describe('mesh content snapshots', () => {
     });
     await Promise.resolve();
     expect(mediaAdmitted).toBe(false);
-    await expect(
-      store.createJson({
-        value: { text: 'y'.repeat(MESH_BINARY_CHUNK_BYTES) },
-        sourceDeviceId: 'phone-d',
-        scope: 'directory-d',
-      }),
-    ).rejects.toMatchObject({ code: 'RESOURCE_LIMIT' });
-    expect((store as any).pendingContentBytes).toBe(0);
+    let serialized = false;
+    const jsonPending = store.createJson({
+      value: {
+        toJSON() {
+          serialized = true;
+          return { text: 'small' };
+        },
+      },
+      sourceDeviceId: 'phone-d',
+      scope: 'directory-d',
+    });
+    await Promise.resolve();
+    expect(serialized).toBe(false);
 
     store.resume({
       snapshotToken: active.snapshotToken,
@@ -208,6 +213,101 @@ describe('mesh content snapshots', () => {
     expect(media.signal.aborted).toBe(false);
     media.release();
     working.release();
+    await expect(jsonPending).resolves.toMatchObject({ done: true });
+    expect(serialized).toBe(true);
+    store.close();
+  });
+
+  test('admits JSON work before serialization so rejected concurrency stays bounded', async () => {
+    const bytes = 1024 * 1024;
+    const store = new MeshContentSnapshotStore({
+      maxSnapshotBytes: bytes,
+      maxTotalBytes: bytes,
+      maxSourceBytes: bytes,
+      maxPendingReservations: 20,
+      maxPendingReservationsPerSource: 2,
+    });
+    let serialized = 0;
+    const requests = Array.from({ length: 20 }, (_, index) =>
+      store.createJson({
+        value: {
+          toJSON() {
+            serialized += 1;
+            return { text: 'x'.repeat(900 * 1024) };
+          },
+        },
+        sourceDeviceId: `phone-${index}`,
+        scope: `directory-${index}`,
+      }),
+    );
+
+    await requests[0];
+    await Promise.resolve();
+    expect(serialized).toBe(1);
+    expect((store as any).reservedBytes).toBe(0);
+    expect((store as any).totalBytes).toBeLessThanOrEqual(bytes);
+
+    store.close();
+    const settled = await Promise.allSettled(requests);
+    expect(settled.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+  });
+
+  test('keeps pending admission per-owner and schedules another owner first', async () => {
+    const store = new MeshContentSnapshotStore({
+      maxSnapshotBytes: 100,
+      maxTotalBytes: 100,
+      maxSourceBytes: 100,
+      maxPendingReservations: 3,
+      maxPendingReservationsPerSource: 2,
+    });
+    const active = await store.reserve('phone-a', 100);
+    const pendingA1 = store.reserve('phone-a', 100);
+    const pendingA2 = store.reserve('phone-a', 100);
+    await expect(store.reserve('phone-a', 1)).rejects.toMatchObject({ code: 'RESOURCE_LIMIT' });
+    let admittedB = false;
+    const pendingB = store.reserve('phone-b', 1).then((reservation) => {
+      admittedB = true;
+      return reservation;
+    });
+
+    active.release();
+    const otherOwner = await pendingB;
+    expect(admittedB).toBe(true);
+    expect((store as any).sourceReservedBytes.get('phone-a')).toBeUndefined();
+    otherOwner.release();
+    const nextA = await pendingA1;
+    nextA.release();
+    const finalA = await pendingA2;
+    finalA.release();
+    store.close();
+  });
+
+  test('rejects reservations and commits from an owner generation revoked mid-operation', async () => {
+    const store = new MeshContentSnapshotStore({ maxSnapshotBytes: 100, maxTotalBytes: 100 });
+    const oldOwner = store.captureOwner('phone-a');
+    store.revokeDevice('phone-a');
+
+    await expect(store.reserve('phone-a', 1, undefined, oldOwner)).rejects.toMatchObject({
+      code: 'TRANSFER_CANCELLED',
+    });
+    await expect(
+      store.createJson({
+        value: { stale: true },
+        sourceDeviceId: 'phone-a',
+        scope: 'stale',
+        owner: oldOwner,
+      }),
+    ).rejects.toMatchObject({ code: 'TRANSFER_CANCELLED' });
+
+    const currentOwner = store.captureOwner('phone-a');
+    await expect(
+      store.createJson({
+        value: { current: true },
+        sourceDeviceId: 'phone-a',
+        scope: 'current',
+        owner: currentOwner,
+      }),
+    ).resolves.toMatchObject({ done: true });
     store.close();
   });
 

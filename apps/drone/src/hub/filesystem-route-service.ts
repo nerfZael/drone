@@ -18,6 +18,17 @@ import { listGitIgnoredPaths } from './listGitIgnoredPaths';
 import type { FilesystemRouteDependencies } from './routes/filesystem-routes';
 import type { LegacyRouteDependencyContract, LegacyRouteHandler } from './routes/legacy-route';
 
+export function writeFileSseFrame(res: ServerResponse, frame: string): boolean {
+  if (res.writableEnded || res.destroyed) return false;
+  try {
+    if (res.write(frame)) return true;
+  } catch {
+    // A failed write is handled like a backpressured client below.
+  }
+  res.destroy();
+  return false;
+}
+
 export class FilesystemService {
   readonly handle: LegacyRouteHandler;
 
@@ -295,9 +306,8 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
       },
     );
   };
-  const writeFileSseEvent = (res: ServerResponse, event: string, data: unknown) => {
-    if (res.writableEnded || res.destroyed) return;
-    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  const writeFileSseEvent = (res: ServerResponse, event: string, data: unknown): boolean => {
+    return writeFileSseFrame(res, `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   };
   return async ({ req, res, url: u, method, parts }) => {
     const handled = await (async (): Promise<false | void> => {
@@ -772,6 +782,12 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
         (res as any).flushHeaders?.();
 
         let closed = false;
+        let cleanup: () => void = () => undefined;
+        const publish = (event: string, data: unknown) => {
+          const written = writeFileSseEvent(res, event, data);
+          if (!written) cleanup();
+          return written;
+        };
         let busy = false;
         let forceAfterBusy = false;
         let lastRevision: string | null = null;
@@ -811,7 +827,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
               lastHashAt = Date.now();
               lastMissing = false;
               if (event) {
-                writeFileSseEvent(res, event, {
+                publish(event, {
                   ok: true,
                   id: droneId,
                   ...fingerprint,
@@ -843,7 +859,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
                   : null;
             lastRevision = current.revision;
             lastMissing = false;
-            if (event) writeFileSseEvent(res, event, { ok: true, id: droneId, ...current });
+            if (event) publish(event, { ok: true, id: droneId, ...current });
           } catch (error: any) {
             const message = String(error?.message ?? error);
             const missing = /not found|not-file|ENOENT/i.test(message);
@@ -852,9 +868,9 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
               lastRevision = null;
               lastFingerprint = null;
               lastHashAt = 0;
-              writeFileSseEvent(res, 'deleted', { ok: false, id: droneId, path: targetPath });
+              publish('deleted', { ok: false, id: droneId, path: targetPath });
             } else if (!missing) {
-              writeFileSseEvent(res, 'stream-error', {
+              publish('stream-error', {
                 ok: false,
                 id: droneId,
                 path: targetPath,
@@ -893,10 +909,10 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
         const timer = setInterval(() => void poll(hostRuntime), hostRuntime ? 30_000 : 2_000);
         timer.unref?.();
         const heartbeat = setInterval(() => {
-          if (!closed && !res.writableEnded) res.write(': keepalive\n\n');
+          if (!closed && !writeFileSseFrame(res, ': keepalive\n\n')) cleanup();
         }, 15_000);
         heartbeat.unref?.();
-        const cleanup = () => {
+        cleanup = () => {
           if (closed) return;
           closed = true;
           clearInterval(timer);

@@ -159,7 +159,7 @@ export class DeviceMeshRouter {
   private readonly capabilityEventDirectPeerTimes = new Map<string, number[]>();
   private readonly capabilityEventRelaySourceTimes = new Map<string, number[]>();
   private readonly capabilityEventInvalidRelayTimes = new Map<string, number[]>();
-  private readonly capabilityEventRelayValidations = new Map<string, number>();
+  private readonly capabilityEventRelayValidations = new WeakMap<WebSocket, number>();
   private readonly capabilityEventSourceTimes = new Map<string, number[]>();
   private readonly capabilityEventTypeTimes = new Map<string, number[]>();
   private readonly seenCapabilityEvents = new Map<string, number>();
@@ -214,7 +214,6 @@ export class DeviceMeshRouter {
     this.capabilityEventDirectPeerTimes.clear();
     this.capabilityEventRelaySourceTimes.clear();
     this.capabilityEventInvalidRelayTimes.clear();
-    this.capabilityEventRelayValidations.clear();
     this.capabilityEventSourceTimes.clear();
     this.capabilityEventTypeTimes.clear();
     this.seenCapabilityEvents.clear();
@@ -479,7 +478,6 @@ export class DeviceMeshRouter {
       if (this.connections.get(connection.peerDeviceId)?.ws === connection.ws) {
         this.connections.delete(connection.peerDeviceId);
         this.responses.deleteDevice(connection.peerDeviceId);
-        this.capabilityEventRelayValidations.delete(connection.peerDeviceId);
         for (const [targetDeviceId, route] of this.capabilityEventRoutes) {
           if (route.relayDeviceId === connection.peerDeviceId) {
             this.capabilityEventRoutes.delete(targetDeviceId);
@@ -626,7 +624,7 @@ export class DeviceMeshRouter {
       if (forwarding && claimedSourceDeviceId !== connection.peerDeviceId) return;
 
       const relayed = claimedSourceDeviceId !== connection.peerDeviceId;
-      if (relayed && !this.beginCapabilityEventRelayValidation(connection.peerDeviceId)) return;
+      if (relayed && !this.beginCapabilityEventRelayValidation(connection.ws)) return;
       if (
         !relayed &&
         !recordEventWithinLimit(
@@ -644,7 +642,7 @@ export class DeviceMeshRouter {
       try {
         authenticated = await this.authenticateCapabilityEvent(message);
       } finally {
-        if (relayed) this.finishCapabilityEventRelayValidation(connection.peerDeviceId);
+        if (relayed) this.finishCapabilityEventRelayValidation(connection.ws);
       }
       if (!authenticated) {
         if (relayed && !this.recordInvalidCapabilityEventRelay(connection.peerDeviceId)) {
@@ -923,17 +921,17 @@ export class DeviceMeshRouter {
     return event;
   }
 
-  private beginCapabilityEventRelayValidation(peerDeviceId: string): boolean {
-    const active = this.capabilityEventRelayValidations.get(peerDeviceId) ?? 0;
+  private beginCapabilityEventRelayValidation(ws: WebSocket): boolean {
+    const active = this.capabilityEventRelayValidations.get(ws) ?? 0;
     if (active >= CAPABILITY_EVENT_MAX_RELAY_VALIDATIONS) return false;
-    this.capabilityEventRelayValidations.set(peerDeviceId, active + 1);
+    this.capabilityEventRelayValidations.set(ws, active + 1);
     return true;
   }
 
-  private finishCapabilityEventRelayValidation(peerDeviceId: string): void {
-    const active = (this.capabilityEventRelayValidations.get(peerDeviceId) ?? 1) - 1;
-    if (active > 0) this.capabilityEventRelayValidations.set(peerDeviceId, active);
-    else this.capabilityEventRelayValidations.delete(peerDeviceId);
+  private finishCapabilityEventRelayValidation(ws: WebSocket): void {
+    const active = (this.capabilityEventRelayValidations.get(ws) ?? 1) - 1;
+    if (active > 0) this.capabilityEventRelayValidations.set(ws, active);
+    else this.capabilityEventRelayValidations.delete(ws);
   }
 
   private recordInvalidCapabilityEventRelay(peerDeviceId: string): boolean {
@@ -968,7 +966,6 @@ export class DeviceMeshRouter {
   private clearCapabilityEventPeer(deviceId: string): void {
     this.capabilityEventDirectPeerTimes.delete(deviceId);
     this.capabilityEventInvalidRelayTimes.delete(deviceId);
-    this.capabilityEventRelayValidations.delete(deviceId);
     this.capabilityEventSourceTimes.delete(deviceId);
     for (const key of this.capabilityEventRelaySourceTimes.keys()) {
       if (key.startsWith(`${deviceId}\0`) || key.endsWith(`\0${deviceId}`)) {

@@ -28,6 +28,37 @@ export async function localHubRequest(
   return body;
 }
 
+export async function localHubBoundedJsonRequest(
+  access: LocalHubAccess,
+  pathname: string,
+  options: { maxBytes: number; signal?: AbortSignal },
+): Promise<any> {
+  if (!Number.isSafeInteger(options.maxBytes) || options.maxBytes < 0) {
+    throw Object.assign(new Error('invalid Hub JSON byte limit'), { code: 'RESOURCE_LIMIT' });
+  }
+  const response = await fetch(new URL(pathname, access.baseUrl()), {
+    headers: {
+      authorization: `Bearer ${access.apiToken}`,
+      'content-type': 'application/json',
+    },
+    signal: options.signal,
+  });
+  const body = await readBoundedResponseBody(response, options.maxBytes);
+  let value: any = {};
+  try {
+    value = body.length > 0 ? JSON.parse(body.toString('utf8')) : {};
+  } catch {
+    value = {};
+  }
+  if (!response.ok) {
+    throw Object.assign(
+      new Error(String(value?.error ?? `Hub request failed (${response.status})`)),
+      { code: `HUB_${response.status}` },
+    );
+  }
+  return value;
+}
+
 export async function localHubBinaryRequest(
   access: LocalHubAccess,
   pathname: string,
@@ -116,4 +147,45 @@ function parseContentLength(value: string | null): number | null {
   if (value == null || !/^\d+$/.test(value)) return null;
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+async function readBoundedResponseBody(response: Response, maxBytes: number): Promise<Buffer> {
+  const declaredLength = parseContentLength(response.headers.get('content-length'));
+  if (declaredLength != null && declaredLength > maxBytes) {
+    await response.body?.cancel().catch(() => undefined);
+    throw Object.assign(new Error('the Hub JSON response exceeded the transfer limit'), {
+      code: 'RESOURCE_LIMIT',
+    });
+  }
+  const destination = Buffer.allocUnsafe(declaredLength ?? maxBytes);
+  const reader = response.body?.getReader();
+  let totalBytes = 0;
+  try {
+    if (!reader) return Buffer.alloc(0);
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      if (
+        totalBytes + next.value.byteLength > maxBytes ||
+        (declaredLength != null && totalBytes + next.value.byteLength > declaredLength)
+      ) {
+        throw Object.assign(new Error('the Hub JSON response exceeded the transfer limit'), {
+          code: 'RESOURCE_LIMIT',
+        });
+      }
+      Buffer.from(next.value).copy(destination, totalBytes);
+      totalBytes += next.value.byteLength;
+    }
+  } catch (error) {
+    await reader?.cancel().catch(() => undefined);
+    throw error;
+  } finally {
+    reader?.releaseLock();
+  }
+  if (declaredLength != null && totalBytes !== declaredLength) {
+    throw Object.assign(new Error('the Hub JSON response length changed'), {
+      code: 'INVALID_RESPONSE',
+    });
+  }
+  return destination.subarray(0, totalBytes);
 }

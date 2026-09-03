@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 
-import { localHubBinaryRequest } from '../src/hub/device-mesh/local-hub-request';
+import {
+  localHubBinaryRequest,
+  localHubBoundedJsonRequest,
+} from '../src/hub/device-mesh/local-hub-request';
 
 const originalFetch = globalThis.fetch;
 
@@ -49,5 +52,36 @@ describe('local Hub bounded binary reads', () => {
     await expect(
       localHubBinaryRequest(access, '/media', { maxBytes: 8, expectedBytes: 5 }),
     ).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
+  });
+});
+
+describe('local Hub bounded JSON reads', () => {
+  test('parses a response within the admitted byte limit', async () => {
+    globalThis.fetch = (async () => Response.json({ ok: true, entries: [1, 2] })) as typeof fetch;
+    await expect(
+      localHubBoundedJsonRequest(access, '/list', { maxBytes: 128 }),
+    ).resolves.toEqual({ ok: true, entries: [1, 2] });
+  });
+
+  test('rejects declared and streamed responses beyond the admitted limit', async () => {
+    globalThis.fetch = (async () =>
+      new Response('{"large":true}', { headers: { 'content-length': '64' } })) as typeof fetch;
+    await expect(
+      localHubBoundedJsonRequest(access, '/list', { maxBytes: 32 }),
+    ).rejects.toMatchObject({ code: 'RESOURCE_LIMIT' });
+
+    globalThis.fetch = (async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"text":"'));
+            controller.enqueue(new TextEncoder().encode('x'.repeat(40)));
+            controller.close();
+          },
+        }),
+      )) as typeof fetch;
+    await expect(
+      localHubBoundedJsonRequest(access, '/list', { maxBytes: 32 }),
+    ).rejects.toMatchObject({ code: 'RESOURCE_LIMIT' });
   });
 });

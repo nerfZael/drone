@@ -160,4 +160,52 @@ describe('pipelined mobile media chunks', () => {
       'invalid media chunk',
     );
   });
+
+  test('aborts three slow requests and releases the snapshot without waiting for timeouts', async () => {
+    const totalBytes = MESH_BINARY_CHUNK_BYTES * 4;
+    const controller = new AbortController();
+    let started = 0;
+    let aborted = 0;
+    const cancelled: string[] = [];
+    const reading = readPipelinedMediaChunks({
+      firstResult: {
+        offset: 0,
+        bytes: new Uint8Array(MESH_BINARY_CHUNK_BYTES),
+        snapshotToken: 'snapshot-slow',
+        done: false,
+      } satisfies Result,
+      totalBytes,
+      requestResult: async (_offset, _token, signal) => {
+        started += 1;
+        return await new Promise<Result>((_, reject) => {
+          const onAbort = () => {
+            aborted += 1;
+            reject(new Error('request aborted'));
+          };
+          if (signal?.aborted) onAbort();
+          else signal?.addEventListener('abort', onAbort, { once: true });
+        });
+      },
+      validateResult: (result) => result,
+      appendBytes: () => undefined,
+      signal: controller.signal,
+      cancelSnapshot: async (token) => {
+        cancelled.push(token);
+      },
+    });
+    for (let attempt = 0; attempt < 20 && started < 3; attempt += 1) await Bun.sleep(1);
+    expect(started).toBe(3);
+
+    controller.abort();
+    await expect(
+      Promise.race([
+        reading,
+        Bun.sleep(100).then(() => {
+          throw new Error('cancellation timed out');
+        }),
+      ]),
+    ).rejects.toThrow(/cancelled|aborted/);
+    expect(aborted).toBe(3);
+    expect(cancelled).toEqual(['snapshot-slow']);
+  });
 });

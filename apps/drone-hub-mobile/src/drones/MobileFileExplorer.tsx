@@ -72,6 +72,7 @@ type RequestDroneControl = (
   destinationId: string,
   operation: DroneControlOperation,
   payload?: any,
+  signal?: AbortSignal,
 ) => Promise<any>;
 
 function normalizeEntries(raw: unknown): FileExplorerEntry[] {
@@ -145,6 +146,7 @@ export function MobileFileExplorer({
   const directoryContextRef = React.useRef(new MobileDirectoryContextCache());
   const contextVersionRef = React.useRef(0);
   const directoryRequestSeqRef = React.useRef<Record<string, number>>({});
+  const directoryAbortControllersRef = React.useRef(new Map<string, AbortController>());
   const directoryRequestsRef = React.useRef(new MobileDirectoryRequestTracker());
   const loadDirectoryRef = React.useRef<((path: string, force?: boolean) => Promise<void>) | null>(
     null,
@@ -214,6 +216,8 @@ export function MobileFileExplorer({
       const background = existing?.loaded === true;
       const requestSeq = (directoryRequestSeqRef.current[path] ?? 0) + 1;
       directoryRequestSeqRef.current[path] = requestSeq;
+      const requestController = new AbortController();
+      directoryAbortControllersRef.current.set(path, requestController);
       if (background) {
         const nextRefreshing = new Set(refreshingRef.current).add(path);
         refreshingRef.current = nextRefreshing;
@@ -232,17 +236,22 @@ export function MobileFileExplorer({
         ]);
       }
       try {
-        let result = await requestDroneControl(targetId, 'files.list', {
-          droneId,
-          chatName,
-          path,
-          contentOffset: 0,
-        });
+        let result = await requestDroneControl(
+          targetId,
+          'files.list',
+          {
+            droneId,
+            chatName,
+            path,
+            contentOffset: 0,
+          },
+          requestController.signal,
+        );
         if (result?.contentChunk) {
           let firstChunkAvailable = true;
           const firstChunk = result.contentChunk;
           result = await readMeshJsonContent(
-            async (contentOffset, snapshotToken) => {
+            async (contentOffset, snapshotToken, signal) => {
               if (
                 currentContextKeyRef.current !== requestContextKey ||
                 contextVersionRef.current !== requestContextVersion ||
@@ -254,13 +263,18 @@ export function MobileFileExplorer({
                 firstChunkAvailable = false;
                 return firstChunk;
               }
-              const next = await requestDroneControl(targetId, 'files.list', {
-                droneId,
-                chatName,
-                path,
-                contentOffset,
-                ...(snapshotToken ? { snapshotToken } : {}),
-              });
+              const next = await requestDroneControl(
+                targetId,
+                'files.list',
+                {
+                  droneId,
+                  chatName,
+                  path,
+                  contentOffset,
+                  ...(snapshotToken ? { snapshotToken } : {}),
+                },
+                signal,
+              );
               return next?.contentChunk ?? {};
             },
             {
@@ -268,6 +282,7 @@ export function MobileFileExplorer({
                 currentContextKeyRef.current !== requestContextKey ||
                 contextVersionRef.current !== requestContextVersion ||
                 directoryRequestSeqRef.current[path] !== requestSeq,
+              signal: requestController.signal,
               cancelSnapshot: async (snapshotToken) => {
                 await requestDroneControl(targetId, 'files.list', {
                   droneId,
@@ -322,6 +337,9 @@ export function MobileFileExplorer({
           },
         ]);
       } finally {
+        if (directoryAbortControllersRef.current.get(path) === requestController) {
+          directoryAbortControllersRef.current.delete(path);
+        }
         const requestIsCurrent =
           currentContextKeyRef.current === requestContextKey &&
           contextVersionRef.current === requestContextVersion &&
@@ -343,11 +361,12 @@ export function MobileFileExplorer({
   loadDirectoryRef.current = loadDirectory;
 
   React.useEffect(() => {
+    for (const controller of directoryAbortControllersRef.current.values()) controller.abort();
+    directoryAbortControllersRef.current.clear();
     contextVersionRef.current += 1;
     directoryRequestSeqRef.current = {};
     directoryRequestsRef.current.reset();
-    const cached =
-      directoryCacheRef.current!.get(contextKey) ?? new MobileDirectoryContextCache();
+    const cached = directoryCacheRef.current!.get(contextKey) ?? new MobileDirectoryContextCache();
     directoryContextRef.current = cached;
     directoriesRef.current = cached.directories;
     setDirectories(cached.directories);
@@ -361,6 +380,8 @@ export function MobileFileExplorer({
     setActionError(null);
     setActionLoading(false);
     return () => {
+      for (const controller of directoryAbortControllersRef.current.values()) controller.abort();
+      directoryAbortControllersRef.current.clear();
       contextVersionRef.current += 1;
       directoryRequestsRef.current.reset();
     };

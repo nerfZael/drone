@@ -14,11 +14,19 @@ export type MeshSnapshotChunk = {
 
 export type MeshSnapshotReservation = {
   signal: AbortSignal;
+  maxBytes: number;
+  commitJson(input: { value: unknown; scope: string; offset?: unknown }): MeshSnapshotChunk;
   commitBinary(input: { content: Buffer; scope: string; metadata?: unknown; offset?: unknown }): {
     chunk: MeshSnapshotChunk;
     metadata: unknown;
   };
   release(): void;
+};
+
+export type MeshSnapshotOwnerLease = {
+  sourceDeviceId: string;
+  generation: number;
+  signal: AbortSignal;
 };
 
 type Snapshot = {
@@ -38,6 +46,7 @@ type SnapshotStoreOptions = {
   ttlMs?: number;
   reservationTtlMs?: number;
   maxPendingReservations?: number;
+  maxPendingReservationsPerSource?: number;
   now?: () => number;
   createToken?: () => string;
 };
@@ -45,8 +54,8 @@ type SnapshotStoreOptions = {
 type ReservationRequest = {
   id: number;
   sourceDeviceId: string;
+  owner: MeshSnapshotOwnerLease;
   contentBytes: number;
-  contentRetained: boolean;
   controller: AbortController;
   timer: ReturnType<typeof setTimeout>;
   removeAbortListener: () => void;
@@ -59,6 +68,12 @@ const DEFAULT_MAX_TOTAL_BYTES = 64 * 1024 * 1024;
 const DEFAULT_TTL_MS = 60_000;
 const DEFAULT_RESERVATION_TTL_MS = 20_000;
 const DEFAULT_MAX_PENDING_RESERVATIONS = 100;
+const DEFAULT_MAX_PENDING_RESERVATIONS_PER_SOURCE = 4;
+
+type OwnerState = {
+  generation: number;
+  controller: AbortController;
+};
 
 export class MeshContentSnapshotStore {
   private readonly snapshots = new Map<string, Snapshot>();
@@ -70,15 +85,16 @@ export class MeshContentSnapshotStore {
   private readonly ttlMs: number;
   private readonly reservationTtlMs: number;
   private readonly maxPendingReservations: number;
+  private readonly maxPendingReservationsPerSource: number;
   private readonly now: () => number;
   private readonly createToken: () => string;
   private totalBytes = 0;
   private reservedBytes = 0;
-  private pendingContentBytes = 0;
   private readonly sourceBytes = new Map<string, number>();
   private readonly sourceReservedBytes = new Map<string, number>();
-  private readonly sourcePendingContentBytes = new Map<string, number>();
+  private readonly owners = new Map<string, OwnerState>();
   private nextReservationId = 1;
+  private lastAdmittedSourceDeviceId: string | null = null;
   private closed = false;
   private clearing = false;
   private expiryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -96,6 +112,12 @@ export class MeshContentSnapshotStore {
     this.reservationTtlMs = options.reservationTtlMs ?? DEFAULT_RESERVATION_TTL_MS;
     this.maxPendingReservations =
       options.maxPendingReservations ?? DEFAULT_MAX_PENDING_RESERVATIONS;
+    this.maxPendingReservationsPerSource =
+      options.maxPendingReservationsPerSource ??
+      Math.min(
+        DEFAULT_MAX_PENDING_RESERVATIONS_PER_SOURCE,
+        Math.max(1, Math.ceil(this.maxPendingReservations / 4)),
+      );
     this.now = options.now ?? Date.now;
     this.createToken = options.createToken ?? (() => crypto.randomUUID());
   }
@@ -106,25 +128,16 @@ export class MeshContentSnapshotStore {
     scope: string;
     offset?: unknown;
     signal?: AbortSignal;
+    owner?: MeshSnapshotOwnerLease;
   }): Promise<MeshSnapshotChunk> {
-    this.ensureOpen();
-    const content = Buffer.from(JSON.stringify(input.value));
-    if (content.length <= MESH_BINARY_CHUNK_BYTES) {
-      return snapshotChunk(content, input.offset, 'base64-json-utf8', undefined, false);
-    }
-    const reservation = await this.reserve(
-      input.sourceDeviceId,
-      content.length,
-      input.signal,
-      true,
-    );
+    const owner = input.owner ?? this.captureOwner(input.sourceDeviceId);
+    const reservation = await this.reserveJson(owner, input.signal);
     try {
-      return this.commitReservation(reservation, {
-        content,
-        encoding: 'base64-json-utf8',
+      return reservation.commitJson({
+        value: input.value,
         scope: input.scope,
         offset: input.offset,
-      }).chunk;
+      });
     } finally {
       reservation.release();
     }
@@ -137,15 +150,17 @@ export class MeshContentSnapshotStore {
     metadata?: unknown;
     offset?: unknown;
     signal?: AbortSignal;
+    owner?: MeshSnapshotOwnerLease;
   }): Promise<{ chunk: MeshSnapshotChunk; metadata: unknown }> {
     this.ensureOpen();
     const reservation = await this.reserve(
       input.sourceDeviceId,
       input.content.length,
       input.signal,
+      input.owner,
     );
     try {
-      return this.commitReservation(reservation, { ...input, encoding: 'base64-binary' });
+      return this.commitReservation(reservation, { ...input, encoding: 'base64-binary' }, true);
     } finally {
       reservation.release();
     }
@@ -155,24 +170,23 @@ export class MeshContentSnapshotStore {
     sourceDeviceId: string,
     contentBytes: number,
     signal?: AbortSignal,
-    contentRetained = false,
+    owner = this.captureOwner(sourceDeviceId),
   ): Promise<MeshSnapshotReservation> {
     this.ensureOpen();
+    this.ensureCurrentOwner(owner, sourceDeviceId);
     this.pruneExpired();
     this.validateReservationSize(contentBytes);
-    if (signal?.aborted) {
+    if (signal?.aborted || owner.signal.aborted) {
       return Promise.reject(transferError('The transfer was cancelled', 'TRANSFER_CANCELLED'));
     }
     if (this.pendingReservations.length >= this.maxPendingReservations) {
       return Promise.reject(transferError('The transfer queue is full', 'RESOURCE_LIMIT'));
     }
-    if (
-      contentRetained &&
-      (this.totalBytes + this.reservedBytes + this.pendingContentBytes + contentBytes >
-        this.maxTotalBytes ||
-        this.sourceUsage(sourceDeviceId) + contentBytes > this.maxSourceBytes)
-    ) {
-      return Promise.reject(transferError('The transfer snapshot limit is full', 'RESOURCE_LIMIT'));
+    const sourcePending = this.pendingReservations.filter(
+      (request) => request.sourceDeviceId === sourceDeviceId,
+    ).length;
+    if (sourcePending >= this.maxPendingReservationsPerSource) {
+      return Promise.reject(transferError('The transfer queue is full', 'RESOURCE_LIMIT'));
     }
 
     return new Promise((resolve, reject) => {
@@ -180,6 +194,7 @@ export class MeshContentSnapshotStore {
       const id = this.nextReservationId++;
       const onAbort = () => this.cancelReservation(id, 'The transfer was cancelled');
       signal?.addEventListener('abort', onAbort, { once: true });
+      owner.signal.addEventListener('abort', onAbort, { once: true });
       const timer = setTimeout(
         () => this.cancelReservation(id, 'The transfer reservation expired'),
         this.reservationTtlMs + 5_000,
@@ -188,21 +203,41 @@ export class MeshContentSnapshotStore {
       const request: ReservationRequest = {
         id,
         sourceDeviceId,
+        owner,
         contentBytes,
-        contentRetained,
         controller,
         timer,
-        removeAbortListener: () => signal?.removeEventListener('abort', onAbort),
+        removeAbortListener: () => {
+          signal?.removeEventListener('abort', onAbort);
+          owner.signal.removeEventListener('abort', onAbort);
+        },
         resolve,
         reject,
       };
-      if (contentRetained) {
-        this.pendingContentBytes += contentBytes;
-        this.adjustSourceBytes(this.sourcePendingContentBytes, sourceDeviceId, contentBytes);
-      }
       this.pendingReservations.push(request);
       this.drainReservations();
     });
+  }
+
+  captureOwner(sourceDeviceId: string): MeshSnapshotOwnerLease {
+    this.ensureOpen();
+    let owner = this.owners.get(sourceDeviceId);
+    if (!owner) {
+      owner = { generation: 0, controller: new AbortController() };
+      this.owners.set(sourceDeviceId, owner);
+    }
+    return {
+      sourceDeviceId,
+      generation: owner.generation,
+      signal: owner.controller.signal,
+    };
+  }
+
+  reserveJson(
+    owner: MeshSnapshotOwnerLease,
+    signal?: AbortSignal,
+  ): Promise<MeshSnapshotReservation> {
+    return this.reserve(owner.sourceDeviceId, this.maxSnapshotBytes, signal, owner);
   }
 
   resume(input: {
@@ -237,6 +272,7 @@ export class MeshContentSnapshotStore {
   }
 
   revokeDevice(sourceDeviceId: string): void {
+    this.invalidateOwner(sourceDeviceId);
     for (const [token, snapshot] of this.snapshots) {
       if (snapshot.sourceDeviceId === sourceDeviceId) this.remove(token, snapshot);
     }
@@ -265,6 +301,7 @@ export class MeshContentSnapshotStore {
 
   clear(): void {
     this.clearing = true;
+    for (const [sourceDeviceId] of this.owners) this.invalidateOwner(sourceDeviceId);
     this.snapshots.clear();
     this.totalBytes = 0;
     this.sourceBytes.clear();
@@ -274,9 +311,9 @@ export class MeshContentSnapshotStore {
     this.reservations.clear();
     this.pendingReservations.length = 0;
     this.reservedBytes = 0;
-    this.pendingContentBytes = 0;
     this.sourceReservedBytes.clear();
-    this.sourcePendingContentBytes.clear();
+    this.owners.clear();
+    this.lastAdmittedSourceDeviceId = null;
     this.clearing = false;
     if (this.expiryTimer) clearTimeout(this.expiryTimer);
     this.expiryTimer = null;
@@ -301,6 +338,7 @@ export class MeshContentSnapshotStore {
       metadata?: unknown;
       offset?: unknown;
     },
+    exactBytes: boolean,
   ): { chunk: MeshSnapshotChunk; metadata: unknown } {
     this.ensureOpen();
     const id = (reservation as MeshSnapshotReservation & { id: number }).id;
@@ -308,7 +346,12 @@ export class MeshContentSnapshotStore {
     if (!request || request.controller.signal.aborted) {
       throw transferError('The transfer reservation expired', 'TRANSFER_EXPIRED');
     }
-    if (input.content.length !== request.contentBytes) {
+    this.ensureCurrentOwner(request.owner, request.sourceDeviceId);
+    if (
+      input.content.length > request.contentBytes ||
+      input.content.length > this.maxSnapshotBytes ||
+      (exactBytes && input.content.length !== request.contentBytes)
+    ) {
       throw transferError('The transfer changed while it was loading', 'INVALID_RESPONSE');
     }
     const needsSnapshot = input.content.length > MESH_BINARY_CHUNK_BYTES;
@@ -349,17 +392,17 @@ export class MeshContentSnapshotStore {
   private drainReservations(): void {
     if (this.closed || this.clearing) return;
     for (;;) {
-      const index = this.pendingReservations.findIndex((request) => {
-        const additionalBytes = request.contentRetained ? 0 : request.contentBytes;
-        return (
-          this.totalBytes + this.reservedBytes + this.pendingContentBytes + additionalBytes <=
-            this.maxTotalBytes &&
-          this.sourceUsage(request.sourceDeviceId) + additionalBytes <= this.maxSourceBytes
-        );
-      });
+      const index = this.nextPendingReservationIndex();
       if (index < 0) return;
       const [request] = this.pendingReservations.splice(index, 1);
-      this.releasePendingContent(request);
+      try {
+        this.ensureCurrentOwner(request.owner, request.sourceDeviceId);
+      } catch (error: any) {
+        request.controller.abort();
+        this.cleanupReservation(request);
+        request.reject(error);
+        continue;
+      }
       clearTimeout(request.timer);
       request.timer = setTimeout(
         () => this.cancelReservation(request.id, 'The transfer reservation expired'),
@@ -373,11 +416,26 @@ export class MeshContentSnapshotStore {
         request.sourceDeviceId,
         request.contentBytes,
       );
+      this.lastAdmittedSourceDeviceId = request.sourceDeviceId;
       const reservation: MeshSnapshotReservation & { id: number } = {
         id: request.id,
         signal: request.controller.signal,
+        maxBytes: request.contentBytes,
+        commitJson: (input) => {
+          let content: Buffer;
+          try {
+            content = Buffer.from(JSON.stringify(input.value));
+          } catch {
+            throw transferError('The transfer content is not serializable', 'INVALID_RESPONSE');
+          }
+          return this.commitReservation(
+            reservation,
+            { ...input, content, encoding: 'base64-json-utf8' },
+            false,
+          ).chunk;
+        },
         commitBinary: (input) =>
-          this.commitReservation(reservation, { ...input, encoding: 'base64-binary' }),
+          this.commitReservation(reservation, { ...input, encoding: 'base64-binary' }, true),
         release: () => this.releaseReservation(request.id),
       };
       request.resolve(reservation);
@@ -396,7 +454,6 @@ export class MeshContentSnapshotStore {
     const index = this.pendingReservations.findIndex((request) => request.id === id);
     if (index < 0) return;
     const [pending] = this.pendingReservations.splice(index, 1);
-    this.releasePendingContent(pending);
     pending.controller.abort();
     this.cleanupReservation(pending);
     pending.reject(transferError(message, 'TRANSFER_CANCELLED'));
@@ -422,17 +479,6 @@ export class MeshContentSnapshotStore {
     request.removeAbortListener();
   }
 
-  private releasePendingContent(request: ReservationRequest): void {
-    if (!request.contentRetained) return;
-    request.contentRetained = false;
-    this.pendingContentBytes -= request.contentBytes;
-    this.adjustSourceBytes(
-      this.sourcePendingContentBytes,
-      request.sourceDeviceId,
-      -request.contentBytes,
-    );
-  }
-
   private pruneExpired(): void {
     const now = this.now();
     let removed = false;
@@ -455,9 +501,52 @@ export class MeshContentSnapshotStore {
   private sourceUsage(sourceDeviceId: string): number {
     return (
       (this.sourceBytes.get(sourceDeviceId) ?? 0) +
-      (this.sourceReservedBytes.get(sourceDeviceId) ?? 0) +
-      (this.sourcePendingContentBytes.get(sourceDeviceId) ?? 0)
+      (this.sourceReservedBytes.get(sourceDeviceId) ?? 0)
     );
+  }
+
+  private nextPendingReservationIndex(): number {
+    const sources = [...new Set(this.pendingReservations.map((request) => request.sourceDeviceId))];
+    if (sources.length === 0) return -1;
+    const previousIndex = this.lastAdmittedSourceDeviceId
+      ? sources.indexOf(this.lastAdmittedSourceDeviceId)
+      : -1;
+    const ordered =
+      previousIndex < 0
+        ? sources
+        : [...sources.slice(previousIndex + 1), ...sources.slice(0, previousIndex + 1)];
+    for (const sourceDeviceId of ordered) {
+      const index = this.pendingReservations.findIndex(
+        (request) =>
+          request.sourceDeviceId === sourceDeviceId &&
+          this.totalBytes + this.reservedBytes + request.contentBytes <= this.maxTotalBytes &&
+          this.sourceUsage(sourceDeviceId) + request.contentBytes <= this.maxSourceBytes,
+      );
+      if (index >= 0) return index;
+    }
+    return -1;
+  }
+
+  private ensureCurrentOwner(owner: MeshSnapshotOwnerLease, sourceDeviceId: string): void {
+    const current = this.owners.get(sourceDeviceId);
+    if (
+      owner.sourceDeviceId !== sourceDeviceId ||
+      owner.signal.aborted ||
+      !current ||
+      current.generation !== owner.generation ||
+      current.controller.signal !== owner.signal
+    ) {
+      throw transferError('Transfer access was removed', 'TRANSFER_CANCELLED');
+    }
+  }
+
+  private invalidateOwner(sourceDeviceId: string): void {
+    const current = this.owners.get(sourceDeviceId);
+    current?.controller.abort();
+    this.owners.set(sourceDeviceId, {
+      generation: (current?.generation ?? 0) + 1,
+      controller: new AbortController(),
+    });
   }
 
   private adjustSourceBytes(

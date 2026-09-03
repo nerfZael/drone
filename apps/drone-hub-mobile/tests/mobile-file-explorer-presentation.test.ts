@@ -83,6 +83,11 @@ describe('mobile file explorer presentation', () => {
     expect(explorer).toContain('directoryRequestsRef.current.begin(path, force)');
     expect(explorer).toContain('directoryRequestsRef.current.finish(path, requestToken)');
     expect(explorer).toContain('void loadDirectoryRef.current?.(path, true)');
+    expect(explorer).toContain('directoryAbortControllersRef.current.set(path, requestController)');
+    expect(explorer).toContain('signal: requestController.signal');
+    expect(explorer).toContain(
+      'for (const controller of directoryAbortControllersRef.current.values()) controller.abort()',
+    );
   });
 
   test('renders background preview failures without replacing cached content', () => {
@@ -100,5 +105,7 @@ describe('mobile file explorer presentation', () => {
       'utf8',
     );
     expect(hook).toContain('refreshError: requestIsCurrent ? refreshError : null');
+    expect(hook).toContain('loadAbortRef.current?.abort()');
+    expect(hook).toContain('signal: loadController.signal');
   });
 });

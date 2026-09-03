@@ -367,10 +367,23 @@ export function DronesScreen({
   const targetReconnecting =
     targetConnectionState === 'reconnecting' || targetConnectionState === 'suspended';
   const requestDroneControl = React.useCallback(
-    (destinationId: string, operation: DroneControlOperation, payload?: any) =>
-      destinationId === mesh.identity?.id
+    (
+      destinationId: string,
+      operation: DroneControlOperation,
+      payload?: any,
+      signal?: AbortSignal,
+    ) => {
+      if (signal?.aborted) {
+        return Promise.reject(
+          Object.assign(new Error('The request was cancelled'), {
+            name: 'AbortError',
+          }),
+        );
+      }
+      return destinationId === mesh.identity?.id
         ? localDroneControl.request(operation, payload)
-        : mesh.request(destinationId, 'drone-control', operation, payload),
+        : mesh.request(destinationId, 'drone-control', operation, payload, signal);
+    },
     [localDroneControl.request, mesh.identity?.id, mesh.request],
   );
   const [droneListSnapshot, setDroneListSnapshot] = React.useState<MobileDroneListSnapshot>(
@@ -500,6 +513,7 @@ export function DronesScreen({
   const realtimeTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const droneListVersion = React.useRef(0);
   const chatReadVersion = React.useRef(0);
+  const fullMessageAbortRef = React.useRef<AbortController | null>(null);
   const openDroneVersion = React.useRef(0);
   const runVersion = React.useRef(0);
   const busyVersion = React.useRef(0);
@@ -528,6 +542,14 @@ export function DronesScreen({
   droneSidebarOrderRef.current = droneSidebarOrder;
   selectedRef.current = selected;
   chatNameRef.current = chatName;
+
+  React.useEffect(() => {
+    fullMessageAbortRef.current?.abort();
+    fullMessageAbortRef.current = null;
+    setFullMessageBusyId('');
+  }, [chatName, selected?.id, targetId]);
+
+  React.useEffect(() => () => fullMessageAbortRef.current?.abort(), []);
 
   const invalidateChatReadCache = React.useCallback(
     (scope: { targetId: string; droneId?: string; chatName?: string }) => {
@@ -1142,26 +1164,34 @@ export function DronesScreen({
       : Number(turns.find((turn) => String(turn?.id ?? turn?.turn ?? '') === turnId)?.turn);
     setFullMessageBusyId(messageId);
     setError(null);
+    const controller = new AbortController();
+    fullMessageAbortRef.current = controller;
     try {
       const content = await readMeshJsonContent(
-        async (contentOffset, snapshotToken) => {
-          const result = await requestDroneControl(destinationId, 'chat.read', {
-            droneId,
-            chatName: activeChat,
-            ...(native
-              ? { messageId }
-              : {
-                  turnId,
-                  ...(Number.isSafeInteger(turnNumber) && Number(turnNumber) > 0
-                    ? { turnNumber }
-                    : {}),
-                }),
-            contentOffset,
-            ...(snapshotToken ? { snapshotToken } : {}),
-          });
+        async (contentOffset, snapshotToken, signal) => {
+          const result = await requestDroneControl(
+            destinationId,
+            'chat.read',
+            {
+              droneId,
+              chatName: activeChat,
+              ...(native
+                ? { messageId }
+                : {
+                    turnId,
+                    ...(Number.isSafeInteger(turnNumber) && Number(turnNumber) > 0
+                      ? { turnNumber }
+                      : {}),
+                  }),
+              contentOffset,
+              ...(snapshotToken ? { snapshotToken } : {}),
+            },
+            signal,
+          );
           return result?.contentChunk ?? {};
         },
         {
+          signal: controller.signal,
           isCancelled: () =>
             targetIdRef.current !== destinationId ||
             selectedRef.current?.id !== droneId ||
@@ -1202,9 +1232,19 @@ export function DronesScreen({
         );
       }
     } catch (nextError: any) {
-      if (targetIdRef.current === destinationId) setError(nextError?.message ?? String(nextError));
+      if (
+        !controller.signal.aborted &&
+        targetIdRef.current === destinationId &&
+        selectedRef.current?.id === droneId &&
+        chatNameRef.current === activeChat
+      ) {
+        setError(nextError?.message ?? String(nextError));
+      }
     } finally {
-      setFullMessageBusyId('');
+      if (fullMessageAbortRef.current === controller) {
+        fullMessageAbortRef.current = null;
+        setFullMessageBusyId('');
+      }
     }
   };
 
