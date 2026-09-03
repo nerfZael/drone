@@ -4,10 +4,10 @@ import { MESH_BINARY_CHUNK_BYTES } from '@drone/device-protocol';
 import { MeshContentSnapshotStore } from '../src/hub/device-mesh/mesh-content-chunk';
 
 describe('mesh content snapshots', () => {
-  test('keeps immutable bytes for out-of-order continuation reads', () => {
+  test('keeps immutable bytes for out-of-order continuation reads', async () => {
     const store = new MeshContentSnapshotStore({ createToken: () => 'snapshot-1' });
     const value = { text: 'x'.repeat(MESH_BINARY_CHUNK_BYTES * 2) };
-    const first = store.createJson({
+    const first = await store.createJson({
       value,
       sourceDeviceId: 'phone-a',
       scope: 'files.list\0drone-a\0/work',
@@ -46,7 +46,7 @@ describe('mesh content snapshots', () => {
     expect(store.size).toBe(0);
   });
 
-  test('expires, scopes, bounds, and revokes snapshots', () => {
+  test('expires, scopes, bounds, and revokes snapshots', async () => {
     let now = 1_000;
     let token = 0;
     const store = new MeshContentSnapshotStore({
@@ -57,14 +57,16 @@ describe('mesh content snapshots', () => {
       now: () => now,
       createToken: () => `snapshot-${++token}`,
     });
-    const create = (device: string) =>
-      store.createBinary({
-        content: Buffer.alloc(MESH_BINARY_CHUNK_BYTES + 1),
-        sourceDeviceId: device,
-        scope: 'file.preview\0drone-a\0/movie.mp4',
-      }).chunk.snapshotToken!;
+    const create = async (device: string) =>
+      (
+        await store.createBinary({
+          content: Buffer.alloc(MESH_BINARY_CHUNK_BYTES + 1),
+          sourceDeviceId: device,
+          scope: 'file.preview\0drone-a\0/movie.mp4',
+        })
+      ).chunk.snapshotToken!;
 
-    const first = create('phone-a');
+    const first = await create('phone-a');
     expect(() =>
       store.resume({
         snapshotToken: first,
@@ -84,15 +86,15 @@ describe('mesh content snapshots', () => {
       }),
     ).toThrow('does not match');
 
-    const second = create('phone-b');
+    const second = await create('phone-b');
     expect(store.size).toBe(2);
     store.revokeDevice('phone-b');
     expect(store.size).toBe(1);
-    expect(create('phone-b')).toStartWith('snapshot-');
+    expect(await create('phone-b')).toStartWith('snapshot-');
     store.revokeDevice('phone-b');
     expect(store.size).toBe(1);
 
-    const third = create('phone-a');
+    const third = await create('phone-a');
     now += 51;
     expect(() =>
       store.resume({
@@ -105,34 +107,48 @@ describe('mesh content snapshots', () => {
     ).toThrow('expired');
   });
 
-  test('reserves bounded space for concurrent snapshot generation', () => {
+  test('reserves bounded space for concurrent snapshot generation', async () => {
     const store = new MeshContentSnapshotStore({
       maxSnapshotBytes: 200,
       maxTotalBytes: 300,
     });
-    const release = store.reserve('phone-a', 200);
-    expect(() => store.reserve('phone-b', 200)).toThrow('limit is full');
-    release();
-    const releaseSecond = store.reserve('phone-b', 200);
-    releaseSecond();
+    const first = await store.reserve('phone-a', 200);
+    let secondAdmitted = false;
+    const secondPending = store.reserve('phone-b', 200).then((reservation) => {
+      secondAdmitted = true;
+      return reservation;
+    });
+    await Promise.resolve();
+    expect(secondAdmitted).toBe(false);
+    first.release();
+    const second = await secondPending;
+    second.release();
     store.close();
-    expect(() => store.reserve('phone-a', 1)).toThrow('store is closed');
+    expect(store.reserve('phone-a', 1)).rejects.toThrow('store is closed');
   });
 
-  test('rejects capacity pressure without evicting an active transfer', () => {
+  test('queues capacity pressure without evicting an active transfer', async () => {
     const snapshotBytes = MESH_BINARY_CHUNK_BYTES + 1;
     const store = new MeshContentSnapshotStore({
       maxSnapshotBytes: snapshotBytes,
       maxTotalBytes: snapshotBytes * 2,
       createToken: () => 'active-snapshot',
     });
-    const active = store.createBinary({
-      content: Buffer.alloc(snapshotBytes),
-      sourceDeviceId: 'phone-a',
-      scope: 'file.preview\0drone-a\0movie.mp4',
-    }).chunk;
-    const release = store.reserve('phone-b', snapshotBytes);
-    expect(() => store.reserve('phone-c', 1)).toThrow('limit is full');
+    const active = (
+      await store.createBinary({
+        content: Buffer.alloc(snapshotBytes),
+        sourceDeviceId: 'phone-a',
+        scope: 'file.preview\0drone-a\0movie.mp4',
+      })
+    ).chunk;
+    const reservation = await store.reserve('phone-b', snapshotBytes);
+    let thirdAdmitted = false;
+    const thirdPending = store.reserve('phone-c', 1).then((value) => {
+      thirdAdmitted = true;
+      return value;
+    });
+    await Promise.resolve();
+    expect(thirdAdmitted).toBe(false);
     expect(
       store.resume({
         snapshotToken: active.snapshotToken,
@@ -142,41 +158,127 @@ describe('mesh content snapshots', () => {
         offset: MESH_BINARY_CHUNK_BYTES,
       }).chunk.done,
     ).toBe(true);
-    release();
+    const third = await thirdPending;
+    third.release();
+    reservation.release();
     store.close();
   });
 
-  test('reserves only the checked media working set without raising the snapshot limit', () => {
+  test('shares fair admission between media reservations and JSON snapshots', async () => {
+    const snapshotBytes = MESH_BINARY_CHUNK_BYTES + 32;
+    const store = new MeshContentSnapshotStore({
+      maxSnapshotBytes: snapshotBytes,
+      maxTotalBytes: snapshotBytes * 2,
+      maxSourceBytes: snapshotBytes,
+      createToken: (() => {
+        let token = 0;
+        return () => `mixed-${++token}`;
+      })(),
+    });
+    const active = await store.createJson({
+      value: { text: 'x'.repeat(MESH_BINARY_CHUNK_BYTES) },
+      sourceDeviceId: 'phone-a',
+      scope: 'directory-a',
+    });
+    const working = await store.reserve('phone-b', snapshotBytes);
+    let mediaAdmitted = false;
+    const mediaPending = store.reserve('phone-c', snapshotBytes).then((reservation) => {
+      mediaAdmitted = true;
+      return reservation;
+    });
+    await Promise.resolve();
+    expect(mediaAdmitted).toBe(false);
+    await expect(
+      store.createJson({
+        value: { text: 'y'.repeat(MESH_BINARY_CHUNK_BYTES) },
+        sourceDeviceId: 'phone-d',
+        scope: 'directory-d',
+      }),
+    ).rejects.toMatchObject({ code: 'RESOURCE_LIMIT' });
+    expect((store as any).pendingContentBytes).toBe(0);
+
+    store.resume({
+      snapshotToken: active.snapshotToken,
+      sourceDeviceId: 'phone-a',
+      scope: 'directory-a',
+      encoding: 'base64-json-utf8',
+      offset: MESH_BINARY_CHUNK_BYTES,
+    });
+    const media = await mediaPending;
+    expect(media.signal.aborted).toBe(false);
+    media.release();
+    working.release();
+    store.close();
+  });
+
+  test('reserves only the checked media working set without raising the snapshot limit', async () => {
     const store = new MeshContentSnapshotStore({ maxSnapshotBytes: 32, maxTotalBytes: 64 });
-    const release = store.reserve('phone-a', 32);
-    expect(() => store.reserve('phone-a', 1)).toThrow('for this device is full');
-    const releaseOther = store.reserve('phone-b', 32);
-    expect(() => store.reserve('phone-c', 1)).toThrow('limit is full');
-    expect(() => store.reserve('phone-c', 65)).toThrow('too large');
-    releaseOther();
-    release();
-    const releaseAgain = store.reserve('phone-c', 32);
-    expect(releaseAgain).toBeFunction();
-    releaseAgain();
+    const first = await store.reserve('phone-a', 32);
+    const second = await store.reserve('phone-b', 32);
+    const thirdPending = store.reserve('phone-c', 32);
+    expect(store.reserve('phone-c', 65)).rejects.toThrow('too large');
+    second.release();
+    const third = await thirdPending;
+    third.release();
+    first.release();
     store.close();
   });
 
-  test('prevents one source from monopolizing capacity while another source progresses', () => {
+  test('prevents one source from monopolizing capacity while another source progresses', async () => {
     const store = new MeshContentSnapshotStore({
       maxSnapshotBytes: 200,
       maxTotalBytes: 300,
       maxSourceBytes: 200,
     });
-    const releaseA = store.reserve('phone-a', 200);
-    expect(() => store.reserve('phone-a', 1)).toThrow('for this device is full');
-    const releaseB = store.reserve('phone-b', 100);
-    expect(() => store.reserve('phone-c', 1)).toThrow('limit is full');
-    releaseB();
-    const releaseC = store.reserve('phone-c', 100);
-    releaseA();
-    const releaseBRetry = store.reserve('phone-b', 200);
-    releaseC();
-    releaseBRetry();
+    const first = await store.reserve('phone-a', 200);
+    const second = await store.reserve('phone-b', 100);
+    const thirdPending = store.reserve('phone-c', 100);
+    const reacquirePending = store.reserve('phone-a', 200);
+    second.release();
+    const third = await thirdPending;
+    expect((store as any).reservations.size).toBe(2);
+    first.release();
+    const reacquired = await reacquirePending;
+    third.release();
+    reacquired.release();
+    store.close();
+  });
+
+  test('revocation aborts active work, prevents late publish, and releases capacity', async () => {
+    const store = new MeshContentSnapshotStore({
+      maxSnapshotBytes: 200,
+      maxTotalBytes: 200,
+      maxSourceBytes: 200,
+    });
+    const first = await store.reserve('phone-a', 200);
+    const nextPending = store.reserve('phone-b', 200);
+
+    store.revokeDevice('phone-a');
+
+    expect(first.signal.aborted).toBe(true);
+    expect(() =>
+      first.commitBinary({ content: Buffer.alloc(200), scope: 'file.preview\0late' }),
+    ).toThrow('expired');
+    const next = await nextPending;
+    next.release();
+    store.close();
+  });
+
+  test('times out stalled reservations without keeping capacity pinned', async () => {
+    const store = new MeshContentSnapshotStore({
+      maxSnapshotBytes: 32,
+      maxTotalBytes: 32,
+      maxSourceBytes: 32,
+      reservationTtlMs: 10,
+    });
+    const stalled = await store.reserve('phone-a', 32);
+    const nextPending = store.reserve('phone-b', 32);
+
+    await Bun.sleep(20);
+
+    expect(stalled.signal.aborted).toBe(true);
+    const next = await nextPending;
+    next.release();
     store.close();
   });
 
@@ -185,20 +287,24 @@ describe('mesh content snapshots', () => {
       ttlMs: 10,
       createToken: () => 'snapshot-expiring',
     });
-    const snapshot = store.createBinary({
-      content: Buffer.alloc(MESH_BINARY_CHUNK_BYTES + 1),
-      sourceDeviceId: 'phone-a',
-      scope: 'file.preview\0drone-a\0movie.mp4\0sha256:one',
-    }).chunk;
+    const snapshot = (
+      await store.createBinary({
+        content: Buffer.alloc(MESH_BINARY_CHUNK_BYTES + 1),
+        sourceDeviceId: 'phone-a',
+        scope: 'file.preview\0drone-a\0movie.mp4\0sha256:one',
+      })
+    ).chunk;
     expect((store as any).snapshots.size).toBe(1);
     await Bun.sleep(25);
     expect((store as any).snapshots.size).toBe(0);
 
-    const token = store.createBinary({
-      content: Buffer.alloc(MESH_BINARY_CHUNK_BYTES + 1),
-      sourceDeviceId: 'phone-a',
-      scope: 'file.preview\0drone-a\0movie.mp4\0sha256:two',
-    }).chunk.snapshotToken;
+    const token = (
+      await store.createBinary({
+        content: Buffer.alloc(MESH_BINARY_CHUNK_BYTES + 1),
+        sourceDeviceId: 'phone-a',
+        scope: 'file.preview\0drone-a\0movie.mp4\0sha256:two',
+      })
+    ).chunk.snapshotToken;
     expect(() =>
       store.cancel({
         snapshotToken: token,

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { describe, expect, test } from 'bun:test';
 import {
   capabilityEventSigningText,
+  MESH_SAFE_MESSAGE_BYTES,
   type CapabilityEvent,
   type CapabilityGrant,
 } from '@drone/device-protocol';
@@ -221,6 +222,82 @@ describe('device mesh capability events', () => {
     }
   });
 
+  test('does not charge a captured forwarding envelope before checking hop ownership', async () => {
+    const relay = identity('relay');
+    const source = identity('source');
+    const attacker = identity('attacker');
+    const recipient = identity('recipient');
+    const target = await harness(relay, [relay, source, attacker, recipient]);
+    let forwarded = 0;
+    (target.router as any).connections.set(recipient.id, {
+      peerDeviceId: recipient.id,
+      outbound: true,
+      ws: fakeSocket(() => {
+        forwarded += 1;
+      }),
+    });
+    const captured = signedEvent(source, recipient.id);
+    try {
+      await (target.router as any).onMessage(
+        { peerDeviceId: attacker.id, outbound: false, ws: fakeSocket() },
+        Buffer.from(JSON.stringify(captured)),
+      );
+      expect((target.router as any).seenCapabilityEvents.size).toBe(0);
+      expect((target.router as any).capabilityEventSourceTimes.has(source.id)).toBe(false);
+
+      await (target.router as any).onMessage(
+        { peerDeviceId: source.id, outbound: false, ws: fakeSocket() },
+        Buffer.from(JSON.stringify(captured)),
+      );
+      expect(forwarded).toBe(1);
+      expect((target.router as any).seenCapabilityEvents.size).toBe(1);
+    } finally {
+      await closeHarnesses(target);
+    }
+  });
+
+  test('keeps valid relayed sources independent behind one peer', async () => {
+    const receiver = identity('receiver');
+    const relay = identity('relay');
+    const sources = Array.from({ length: 5 }, (_, index) => identity(`source-${index}`));
+    const target = await harness(receiver, [receiver, relay, ...sources]);
+    const connection = { peerDeviceId: relay.id, outbound: false, ws: fakeSocket() };
+    const received = new Map<string, number>();
+    target.router.subscribeCapabilityEvents((value) => {
+      const sourceDeviceId = String(value.sourceDeviceId);
+      received.set(sourceDeviceId, (received.get(sourceDeviceId) ?? 0) + 1);
+    });
+    try {
+      const forged = signedEvent(sources[0], receiver.id);
+      forged.sourceDeviceId = sources[1].id;
+      await (target.router as any).onMessage(connection, Buffer.from(JSON.stringify(forged)));
+      expect((target.router as any).capabilityEventSourceTimes.has(sources[1].id)).toBe(false);
+      expect(
+        (target.router as any).capabilityEventRelaySourceTimes.has(`${relay.id}\0${sources[1].id}`),
+      ).toBe(false);
+
+      for (const source of sources) {
+        for (let index = 0; index < 600; index += 1) {
+          await (target.router as any).onMessage(
+            connection,
+            Buffer.from(
+              JSON.stringify(
+                signedEvent(source, receiver.id, {
+                  event: 'chat.changed',
+                  eventId: crypto.randomUUID(),
+                  payload: { droneId: 'drone', chatName: 'default' },
+                }),
+              ),
+            ),
+          );
+        }
+      }
+      expect([...received.values()]).toEqual([600, 600, 600, 600, 600]);
+    } finally {
+      await closeHarnesses(target);
+    }
+  });
+
   test('forwards one signed targeted hop without notifying the relay or unauthorized peers', async () => {
     const deviceA = identity('device-a');
     const deviceB = identity('device-b');
@@ -352,7 +429,9 @@ describe('device mesh capability events', () => {
     (d.router as any).connections.set(deviceC.id, {
       peerDeviceId: deviceC.id,
       outbound: true,
-      ws: fakeSocket((value) => pending.push((c.router as any).onMessage(cFromD, Buffer.from(value)))),
+      ws: fakeSocket((value) =>
+        pending.push((c.router as any).onMessage(cFromD, Buffer.from(value))),
+      ),
     });
     const received: CapabilityEvent[] = [];
     c.router.subscribeCapabilityEvents((event) => received.push(event as CapabilityEvent));
@@ -372,8 +451,15 @@ describe('device mesh capability events', () => {
       (b.router as any).connections.set(deviceC.id, {
         peerDeviceId: deviceC.id,
         outbound: true,
-        ws: fakeSocket((value) => pending.push((c.router as any).onMessage(cFromB, Buffer.from(value)))),
+        ws: fakeSocket((value) =>
+          pending.push((c.router as any).onMessage(cFromB, Buffer.from(value))),
+        ),
       });
+      (a.router as any).capabilityEventRoutes.set(deviceC.id, {
+        relayDeviceId: deviceD.id,
+        expiresAt: Date.now() + 60_000,
+      });
+      const sendsToBBeforeKnownRoute = sendsToB;
       await a.router.broadcastCapabilityEvent(
         'drone-control',
         'chat.changed',
@@ -383,6 +469,7 @@ describe('device mesh capability events', () => {
       );
       while (pending.length > 0) await Promise.all(pending.splice(0));
       expect(received).toHaveLength(2);
+      expect(sendsToB).toBe(sendsToBBeforeKnownRoute);
 
       let directSends = 0;
       (a.router as any).connections.set(deviceC.id, {
@@ -390,7 +477,9 @@ describe('device mesh capability events', () => {
         outbound: true,
         ws: fakeSocket((value) => {
           directSends += 1;
-          pending.push((c.router as any).onMessage(incoming(c.router, deviceA.id), Buffer.from(value)));
+          pending.push(
+            (c.router as any).onMessage(incoming(c.router, deviceA.id), Buffer.from(value)),
+          );
         }),
       });
       const relaySendsBeforeDirect = sendsToB + sendsToD;
@@ -419,6 +508,117 @@ describe('device mesh capability events', () => {
       expect(directSends).toBe(1);
     } finally {
       await closeHarnesses(a, b, c, d);
+    }
+  });
+
+  test('bounds disconnected-target relay fanout and closes backpressured sockets', async () => {
+    const source = identity('source');
+    const target = await harness(source, [source]);
+    const grant = {
+      capability: 'companion',
+      version: 1,
+      operations: ['run.start'],
+    } satisfies CapabilityGrant;
+    const template = identity('template');
+    await target.store.update((state) => {
+      for (let index = 0; index < 100; index += 1) {
+        state.devices[`target-${index}`] = {
+          id: `target-${index}`,
+          name: `target-${index}`,
+          platform: 'desktop',
+          publicKey: template.publicKey,
+          administrator: false,
+          grants: [grant],
+          endpoints: [],
+          revokedAt: null,
+          addedAt: '',
+          updatedAt: '',
+        };
+        state.devices[`relay-${index}`] = {
+          id: `relay-${index}`,
+          name: `relay-${index}`,
+          platform: 'desktop',
+          publicKey: template.publicKey,
+          administrator: false,
+          grants: [],
+          endpoints: [],
+          revokedAt: null,
+          addedAt: '',
+          updatedAt: '',
+        };
+      }
+    });
+    let sends = 0;
+    for (let index = 0; index < 100; index += 1) {
+      (target.router as any).connections.set(`relay-${index}`, {
+        peerDeviceId: `relay-${index}`,
+        outbound: true,
+        ws: fakeSocket(() => {
+          sends += 1;
+        }),
+      });
+    }
+    try {
+      await target.router.broadcastCapabilityEvent(
+        'companion',
+        'run.event',
+        { runId: 'run', text: 'x'.repeat(64 * 1024 - 128) },
+        'run.start',
+      );
+      expect(sends).toBe(100);
+      await target.router.broadcastCapabilityEvent(
+        'companion',
+        'run.event',
+        { runId: 'run', text: 'x'.repeat(64 * 1024 - 128) },
+        'run.start',
+      );
+      expect(sends).toBe(200);
+
+      const closes: Array<[number, string]> = [];
+      let directSends = 0;
+      (target.router as any).connections.set('target-0', {
+        peerDeviceId: 'target-0',
+        outbound: true,
+        ws: {
+          ...fakeSocket(() => {
+            directSends += 1;
+          }),
+          bufferedAmount: MESH_SAFE_MESSAGE_BYTES * 2,
+          close: (code: number, reason: string) => closes.push([code, reason]),
+        },
+      });
+      await target.router.broadcastCapabilityEvent(
+        'companion',
+        'run.event',
+        { runId: 'run', text: 'x'.repeat(64 * 1024 - 128) },
+        'run.start',
+        ['target-0'],
+      );
+      expect(directSends).toBe(0);
+      expect(closes).toEqual([[1013, 'mesh connection is backpressured']]);
+
+      (target.router as any).connections.clear();
+      const sendFailureCloses: Array<[number, string]> = [];
+      (target.router as any).connections.set('target-1', {
+        peerDeviceId: 'target-1',
+        outbound: true,
+        ws: {
+          ...fakeSocket(() => {
+            throw new Error('socket failed');
+          }),
+          close: (code: number, reason: string) => sendFailureCloses.push([code, reason]),
+        },
+      });
+      await target.router.broadcastCapabilityEvent(
+        'companion',
+        'run.event',
+        { runId: 'run' },
+        'run.start',
+        ['target-1'],
+      );
+      expect(sendFailureCloses).toEqual([[1011, 'mesh send failed']]);
+    } finally {
+      await closeHarnesses(target);
     }
   });
 

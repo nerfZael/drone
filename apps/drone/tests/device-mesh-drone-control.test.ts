@@ -2708,6 +2708,85 @@ describe('device mesh drone summaries', () => {
     }
   });
 
+  test('aborts owner reservations and rejects late media after lifecycle cleanup', async () => {
+    const originalFetch = globalThis.fetch;
+    const mediaBytes = Buffer.alloc(MESH_BINARY_CHUNK_BYTES + 1, 4);
+    try {
+      for (const lifecycle of [
+        'revokeDevice',
+        'disconnectDevice',
+        'accessChanged',
+        'close',
+      ] as const) {
+        let mediaStarted = false;
+        let mediaSignal: AbortSignal | undefined;
+        let finishMedia!: () => void;
+        let holdMedia = true;
+        const mediaGate = new Promise<void>((resolve) => {
+          finishMedia = resolve;
+        });
+        globalThis.fetch = (async (input, init) => {
+          const url = new URL(String(input));
+          if (url.pathname.endsWith('/fs/file')) {
+            return Response.json({
+              ok: true,
+              path: '/work/repo/video.mp4',
+              kind: 'video',
+              mime: 'video/mp4',
+              size: mediaBytes.length,
+              mtimeMs: 1,
+              revision: url.searchParams.get('revision') === '0' ? null : 'sha256:video',
+            });
+          }
+          if (url.pathname.endsWith('/fs/media')) {
+            mediaStarted = true;
+            mediaSignal = init?.signal ?? undefined;
+            if (holdMedia) await mediaGate;
+            return new Response(mediaBytes, {
+              headers: {
+                'content-type': 'video/mp4',
+                'content-length': String(mediaBytes.length),
+              },
+            });
+          }
+          return Response.json({ error: 'not found' }, { status: 404 });
+        }) as typeof fetch;
+        const capability = createDroneControlCapability({
+          baseUrl: () => 'http://127.0.0.1:7777',
+          apiToken: 'test',
+        });
+        const pending = capability.invoke(
+          'file.preview',
+          { droneId: 'one', path: '/work/repo/video.mp4' },
+          { sourceDevice: { id: 'phone-a' }, requestId: lifecycle } as any,
+        );
+        for (let attempt = 0; attempt < 20 && !mediaStarted; attempt += 1) await Bun.sleep(1);
+        expect(mediaStarted).toBe(true);
+
+        if (lifecycle === 'close') capability.close?.();
+        else await capability[lifecycle]?.('phone-a');
+        expect(mediaSignal?.aborted).toBe(true);
+        finishMedia();
+        await expect(pending).rejects.toMatchObject({
+          code: lifecycle === 'close' ? 'CAPABILITY_CLOSED' : 'TRANSFER_EXPIRED',
+        });
+
+        if (lifecycle !== 'close') {
+          holdMedia = false;
+          await expect(
+            capability.invoke('file.preview', { droneId: 'one', path: '/work/repo/video.mp4' }, {
+              sourceDevice: { id: 'phone-b' },
+              requestId: `${lifecycle}-next`,
+            } as any),
+          ).resolves.toMatchObject({ mediaChunk: { snapshotToken: expect.any(String) } });
+          capability.close?.();
+        }
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('broadcasts hash changes for files watched by a mobile device', async () => {
     const originalFetch = globalThis.fetch;
     let revision = 'sha256:first';

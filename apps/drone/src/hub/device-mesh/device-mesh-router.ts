@@ -42,15 +42,51 @@ type ValidatedRequest = {
 
 const CAPABILITY_EVENT_LIFETIME_MS = 60_000;
 const CAPABILITY_EVENT_MAX_PER_SOURCE_PER_MINUTE = 600;
-const CAPABILITY_EVENT_MAX_PER_RELAY_PER_MINUTE = 2_400;
+const CAPABILITY_EVENT_MAX_PER_RELAY_SOURCE_PER_MINUTE = 600;
+const CAPABILITY_EVENT_MAX_INVALID_PER_RELAY_PER_MINUTE = 120;
+const CAPABILITY_EVENT_MAX_RELAY_VALIDATIONS = 8;
+const CAPABILITY_EVENT_MAX_RELAY_SENDS_PER_BROADCAST = 100;
+const CAPABILITY_EVENT_MAX_RELAYS_PER_TARGET = 3;
+const CAPABILITY_EVENT_ROUTE_TTL_MS = 5 * 60_000;
 const MAX_MESH_CONNECTIONS = 100;
+const MESH_MAX_BUFFERED_BYTES = MESH_SAFE_MESSAGE_BYTES * 2;
 
 function send(ws: WebSocket, payload: unknown): boolean {
+  try {
+    return sendSerialized(ws, JSON.stringify(payload));
+  } catch {
+    return false;
+  }
+}
+
+function sendSerialized(ws: WebSocket, serialized: string): boolean {
   if (ws.readyState !== WebSocket.OPEN) return false;
-  const serialized = JSON.stringify(payload);
-  if (Buffer.byteLength(serialized) > MESH_SAFE_MESSAGE_BYTES) return false;
-  ws.send(serialized);
-  return true;
+  const bytes = Buffer.byteLength(serialized);
+  if (bytes > MESH_SAFE_MESSAGE_BYTES) return false;
+  const bufferedBytes = Number(ws.bufferedAmount) || 0;
+  if (bufferedBytes + bytes > MESH_MAX_BUFFERED_BYTES) {
+    closeSocket(ws, 1013, 'mesh connection is backpressured');
+    return false;
+  }
+  try {
+    ws.send(serialized, (error) => {
+      if (error && ws.readyState === WebSocket.OPEN) {
+        closeSocket(ws, 1011, 'mesh send failed');
+      }
+    });
+    return true;
+  } catch {
+    closeSocket(ws, 1011, 'mesh send failed');
+    return false;
+  }
+}
+
+function closeSocket(ws: WebSocket, code: number, reason: string): void {
+  try {
+    ws.close(code, reason);
+  } catch {
+    // The socket is already unusable; callers will fall back to polling or another route.
+  }
 }
 
 function serializedBytes(value: unknown): number {
@@ -120,10 +156,17 @@ export class DeviceMeshRouter {
   private readonly responses = new DeviceMeshResponseCache();
   private readonly requestTimes = new Map<string, number[]>();
   private readonly bulkRequestTimes = new Map<string, number[]>();
-  private readonly capabilityEventPeerTimes = new Map<string, number[]>();
+  private readonly capabilityEventDirectPeerTimes = new Map<string, number[]>();
+  private readonly capabilityEventRelaySourceTimes = new Map<string, number[]>();
+  private readonly capabilityEventInvalidRelayTimes = new Map<string, number[]>();
+  private readonly capabilityEventRelayValidations = new Map<string, number>();
   private readonly capabilityEventSourceTimes = new Map<string, number[]>();
   private readonly capabilityEventTypeTimes = new Map<string, number[]>();
   private readonly seenCapabilityEvents = new Map<string, number>();
+  private readonly capabilityEventRoutes = new Map<
+    string,
+    { relayDeviceId: string; expiresAt: number }
+  >();
   private capabilityEventPruneTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly connecting = new Set<string>();
   private readonly connectionListeners = new Set<() => void>();
@@ -168,10 +211,14 @@ export class DeviceMeshRouter {
     for (const route of this.routes.values()) clearTimeout(route.timer);
     this.routes.clear();
     this.responses.clear();
-    this.capabilityEventPeerTimes.clear();
+    this.capabilityEventDirectPeerTimes.clear();
+    this.capabilityEventRelaySourceTimes.clear();
+    this.capabilityEventInvalidRelayTimes.clear();
+    this.capabilityEventRelayValidations.clear();
     this.capabilityEventSourceTimes.clear();
     this.capabilityEventTypeTimes.clear();
     this.seenCapabilityEvents.clear();
+    this.capabilityEventRoutes.clear();
     if (this.capabilityEventPruneTimer) clearTimeout(this.capabilityEventPruneTimer);
     this.capabilityEventPruneTimer = null;
     this.requestClient.close();
@@ -265,12 +312,30 @@ export class DeviceMeshRouter {
       return;
     }
     const issuedAt = new Date();
+    const relayWork: Array<{
+      targetDeviceId: string;
+      serialized: string;
+      attemptedRelays: Set<string>;
+      relayAttempts: number;
+    }> = [];
+    let relaySends = 0;
+    let unknownRelayTargetsPrepared = 0;
     for (const peer of Object.values(state.devices)) {
       if (
         peer.id === state.selfDeviceId ||
         peer.revokedAt ||
         (targets && !targets.has(peer.id)) ||
         !isGranted(peer.grants, capability, 1, requiredOperation)
+      ) {
+        continue;
+      }
+      const direct = this.connections.get(peer.id);
+      const knownRoute = direct ? null : this.capabilityEventRouteFor(peer.id);
+      if (
+        !direct &&
+        ((!knownRoute &&
+          unknownRelayTargetsPrepared >= CAPABILITY_EVENT_MAX_RELAY_SENDS_PER_BROADCAST) ||
+          (knownRoute && relaySends >= CAPABILITY_EVENT_MAX_RELAY_SENDS_PER_BROADCAST))
       ) {
         continue;
       }
@@ -292,16 +357,45 @@ export class DeviceMeshRouter {
         ...unsigned,
         signature: signDeviceText(this.identity, capabilityEventSigningText(unsigned)),
       } satisfies CapabilityEvent;
-      const direct = this.connections.get(peer.id);
+      const serialized = JSON.stringify(signed);
       if (direct) {
-        send(direct.ws, signed);
-        continue;
+        if (sendSerialized(direct.ws, serialized)) continue;
       }
-      // The mesh does not advertise adjacency, so a sender cannot know which directly
-      // connected peer can reach this one-hop target. Fan out to at most the mesh connection
-      // limit; only a peer directly connected to the target forwards it,
-      // and the target's signed-event replay cache suppresses duplicate delivery.
-      for (const relay of this.connections.values()) send(relay.ws, signed);
+      const attemptedRelays = new Set<string>();
+      if (direct) attemptedRelays.add(direct.peerDeviceId);
+      let relayAttempts = 0;
+      if (knownRoute && relaySends < CAPABILITY_EVENT_MAX_RELAY_SENDS_PER_BROADCAST) {
+        attemptedRelays.add(knownRoute.peerDeviceId);
+        relayAttempts += 1;
+        relaySends += 1;
+        if (sendSerialized(knownRoute.ws, serialized)) continue;
+        this.capabilityEventRoutes.delete(peer.id);
+      }
+      if (unknownRelayTargetsPrepared >= CAPABILITY_EVENT_MAX_RELAY_SENDS_PER_BROADCAST) continue;
+      unknownRelayTargetsPrepared += 1;
+      relayWork.push({ targetDeviceId: peer.id, serialized, attemptedRelays, relayAttempts });
+    }
+
+    // Unknown routes get bounded round-robin probes. Every target gets one chance before
+    // another target gets a second, and the total work cannot exceed 100 frames regardless
+    // of targets × connections. Missed advisory pushes are reconciled by client fallback polls.
+    const relays = [...this.connections.values()];
+    for (
+      let pass = 0;
+      pass < CAPABILITY_EVENT_MAX_RELAYS_PER_TARGET &&
+      relaySends < CAPABILITY_EVENT_MAX_RELAY_SENDS_PER_BROADCAST;
+      pass += 1
+    ) {
+      for (const work of relayWork) {
+        if (relaySends >= CAPABILITY_EVENT_MAX_RELAY_SENDS_PER_BROADCAST) break;
+        if (work.relayAttempts >= CAPABILITY_EVENT_MAX_RELAYS_PER_TARGET) continue;
+        const relay = relayForTarget(relays, work.targetDeviceId, pass, work.attemptedRelays);
+        if (!relay) continue;
+        work.attemptedRelays.add(relay.peerDeviceId);
+        work.relayAttempts += 1;
+        relaySends += 1;
+        sendSerialized(relay.ws, work.serialized);
+      }
     }
   }
 
@@ -314,10 +408,7 @@ export class DeviceMeshRouter {
       ws.close(4001, 'unknown device');
       return;
     }
-    if (
-      !this.connections.has(requestedDeviceId) &&
-      this.connections.size >= MAX_MESH_CONNECTIONS
-    ) {
+    if (!this.connections.has(requestedDeviceId) && this.connections.size >= MAX_MESH_CONNECTIONS) {
       ws.close(4008, 'connection limit reached');
       return;
     }
@@ -388,6 +479,12 @@ export class DeviceMeshRouter {
       if (this.connections.get(connection.peerDeviceId)?.ws === connection.ws) {
         this.connections.delete(connection.peerDeviceId);
         this.responses.deleteDevice(connection.peerDeviceId);
+        this.capabilityEventRelayValidations.delete(connection.peerDeviceId);
+        for (const [targetDeviceId, route] of this.capabilityEventRoutes) {
+          if (route.relayDeviceId === connection.peerDeviceId) {
+            this.capabilityEventRoutes.delete(targetDeviceId);
+          }
+        }
         void this.capabilities.disconnectDevice(connection.peerDeviceId);
         this.notifyConnectionsChanged();
       }
@@ -421,9 +518,7 @@ export class DeviceMeshRouter {
   private async connectToKnownPeers(): Promise<void> {
     const state = await this.store.read();
     for (const device of Object.values(state.devices)) {
-      if (
-        new Set([...this.connections.keys(), ...this.connecting]).size >= MAX_MESH_CONNECTIONS
-      ) {
+      if (new Set([...this.connections.keys(), ...this.connecting]).size >= MAX_MESH_CONNECTIONS) {
         break;
       }
       if (
@@ -524,24 +619,58 @@ export class DeviceMeshRouter {
       return;
     }
     if (message?.type === 'capability.event') {
-      const envelopeDecision = this.acceptCapabilityEventEnvelope(
-        connection.peerDeviceId,
-        String(message?.sourceDeviceId ?? ''),
-      );
-      if (envelopeDecision === 'disconnect') {
+      const claimedSourceDeviceId = String(message?.sourceDeviceId ?? '');
+      const forwarding = String(message?.targetDeviceId ?? '') !== this.identity.id;
+      // A relay hop is owned by the authenticated source connection. Reject a copied
+      // third-party envelope before it can consume the real source's replay/rate state.
+      if (forwarding && claimedSourceDeviceId !== connection.peerDeviceId) return;
+
+      const relayed = claimedSourceDeviceId !== connection.peerDeviceId;
+      if (relayed && !this.beginCapabilityEventRelayValidation(connection.peerDeviceId)) return;
+      if (
+        !relayed &&
+        !recordEventWithinLimit(
+          this.capabilityEventDirectPeerTimes,
+          connection.peerDeviceId,
+          CAPABILITY_EVENT_MAX_PER_SOURCE_PER_MINUTE,
+          Date.now(),
+        )
+      ) {
         connection.ws.close(4008, 'capability event rate limit reached');
         return;
       }
-      if (envelopeDecision === 'drop') return;
-      const event = await this.validateCapabilityEvent(message);
+
+      let authenticated: CapabilityEvent | null = null;
+      try {
+        authenticated = await this.authenticateCapabilityEvent(message);
+      } finally {
+        if (relayed) this.finishCapabilityEventRelayValidation(connection.peerDeviceId);
+      }
+      if (!authenticated) {
+        if (relayed && !this.recordInvalidCapabilityEventRelay(connection.peerDeviceId)) {
+          connection.ws.close(4008, 'invalid capability event rate limit reached');
+        }
+        return;
+      }
+      if (
+        relayed &&
+        !recordEventWithinLimit(
+          this.capabilityEventRelaySourceTimes,
+          `${connection.peerDeviceId}\0${authenticated.sourceDeviceId}`,
+          CAPABILITY_EVENT_MAX_PER_RELAY_SOURCE_PER_MINUTE,
+          Date.now(),
+        )
+      ) {
+        return;
+      }
+      const event = this.admitCapabilityEvent(authenticated);
       if (!event) return;
-      const state = await this.store.read();
-      if (event.targetDeviceId !== state.selfDeviceId) {
-        if (event.sourceDeviceId !== connection.peerDeviceId) return;
+      if (event.targetDeviceId !== this.identity.id) {
         const target = this.connections.get(event.targetDeviceId);
         if (target && target.ws !== connection.ws) send(target.ws, event);
         return;
       }
+      if (relayed) this.rememberCapabilityEventRoute(event.sourceDeviceId, connection.peerDeviceId);
       for (const listener of this.capabilityEventListeners) {
         try {
           listener(event);
@@ -689,6 +818,9 @@ export class DeviceMeshRouter {
       return;
     }
     const response = await this.execute(request);
+    if (response.ok && request.sourceDeviceId !== connection.peerDeviceId) {
+      this.rememberCapabilityEventRoute(request.sourceDeviceId, connection.peerDeviceId);
+    }
     if (
       request.capability !== WORKSPACE_CAPABILITY.id &&
       !bulkTransfer &&
@@ -705,7 +837,7 @@ export class DeviceMeshRouter {
     send(connection.ws, response);
   }
 
-  private async validateCapabilityEvent(value: any): Promise<CapabilityEvent | null> {
+  private async authenticateCapabilityEvent(value: any): Promise<CapabilityEvent | null> {
     const policy = capabilityEventPolicy(
       String(value?.capability ?? ''),
       String(value?.event ?? ''),
@@ -754,20 +886,28 @@ export class DeviceMeshRouter {
     ) {
       return null;
     }
-    const replayKey = `${source.id}:${value.eventId}`;
+    return value as CapabilityEvent;
+  }
+
+  private admitCapabilityEvent(event: CapabilityEvent): CapabilityEvent | null {
+    const policy = capabilityEventPolicy(event.capability, event.event);
+    if (!policy) return null;
+    const now = Date.now();
+    const expiresAt = Date.parse(event.expiresAt);
+    const replayKey = `${event.sourceDeviceId}:${event.eventId}`;
     const replayExpiry = this.seenCapabilityEvents.get(replayKey) ?? 0;
     if (replayExpiry > now) return null;
     if (
       !recordEventWithinLimit(
         this.capabilityEventSourceTimes,
-        source.id,
+        event.sourceDeviceId,
         CAPABILITY_EVENT_MAX_PER_SOURCE_PER_MINUTE,
         now,
       )
     ) {
       return null;
     }
-    const eventRateKey = `${source.id}\0${value.capability}\0${value.event}`;
+    const eventRateKey = `${event.sourceDeviceId}\0${event.capability}\0${event.event}`;
     if (
       !recordEventWithinLimit(
         this.capabilityEventTypeTimes,
@@ -780,35 +920,71 @@ export class DeviceMeshRouter {
     }
     this.seenCapabilityEvents.set(replayKey, expiresAt);
     this.scheduleCapabilityEventPrune();
-    return value as CapabilityEvent;
+    return event;
   }
 
-  private acceptCapabilityEventEnvelope(
-    peerDeviceId: string,
-    claimedSourceDeviceId: string,
-  ): 'accept' | 'drop' | 'disconnect' {
+  private beginCapabilityEventRelayValidation(peerDeviceId: string): boolean {
+    const active = this.capabilityEventRelayValidations.get(peerDeviceId) ?? 0;
+    if (active >= CAPABILITY_EVENT_MAX_RELAY_VALIDATIONS) return false;
+    this.capabilityEventRelayValidations.set(peerDeviceId, active + 1);
+    return true;
+  }
+
+  private finishCapabilityEventRelayValidation(peerDeviceId: string): void {
+    const active = (this.capabilityEventRelayValidations.get(peerDeviceId) ?? 1) - 1;
+    if (active > 0) this.capabilityEventRelayValidations.set(peerDeviceId, active);
+    else this.capabilityEventRelayValidations.delete(peerDeviceId);
+  }
+
+  private recordInvalidCapabilityEventRelay(peerDeviceId: string): boolean {
     const now = Date.now();
-    const direct = claimedSourceDeviceId === peerDeviceId;
-    const accepted = recordEventWithinLimit(
-      this.capabilityEventPeerTimes,
+    return recordEventWithinLimit(
+      this.capabilityEventInvalidRelayTimes,
       peerDeviceId,
-      direct
-        ? CAPABILITY_EVENT_MAX_PER_SOURCE_PER_MINUTE
-        : CAPABILITY_EVENT_MAX_PER_RELAY_PER_MINUTE,
+      CAPABILITY_EVENT_MAX_INVALID_PER_RELAY_PER_MINUTE,
       now,
     );
-    if (accepted) return 'accept';
-    return direct ? 'disconnect' : 'drop';
+  }
+
+  private rememberCapabilityEventRoute(targetDeviceId: string, relayDeviceId: string): void {
+    if (targetDeviceId === relayDeviceId || !this.connections.has(relayDeviceId)) return;
+    this.capabilityEventRoutes.set(targetDeviceId, {
+      relayDeviceId,
+      expiresAt: Date.now() + CAPABILITY_EVENT_ROUTE_TTL_MS,
+    });
+  }
+
+  private capabilityEventRouteFor(targetDeviceId: string): AuthenticatedSocket | null {
+    const route = this.capabilityEventRoutes.get(targetDeviceId);
+    if (!route) return null;
+    const connection = this.connections.get(route.relayDeviceId);
+    if (!connection || route.expiresAt <= Date.now()) {
+      this.capabilityEventRoutes.delete(targetDeviceId);
+      return null;
+    }
+    return connection;
   }
 
   private clearCapabilityEventPeer(deviceId: string): void {
-    this.capabilityEventPeerTimes.delete(deviceId);
+    this.capabilityEventDirectPeerTimes.delete(deviceId);
+    this.capabilityEventInvalidRelayTimes.delete(deviceId);
+    this.capabilityEventRelayValidations.delete(deviceId);
     this.capabilityEventSourceTimes.delete(deviceId);
+    for (const key of this.capabilityEventRelaySourceTimes.keys()) {
+      if (key.startsWith(`${deviceId}\0`) || key.endsWith(`\0${deviceId}`)) {
+        this.capabilityEventRelaySourceTimes.delete(key);
+      }
+    }
     for (const key of this.capabilityEventTypeTimes.keys()) {
       if (key.startsWith(`${deviceId}\0`)) this.capabilityEventTypeTimes.delete(key);
     }
     for (const key of this.seenCapabilityEvents.keys()) {
       if (key.startsWith(`${deviceId}:`)) this.seenCapabilityEvents.delete(key);
+    }
+    for (const [targetDeviceId, route] of this.capabilityEventRoutes) {
+      if (targetDeviceId === deviceId || route.relayDeviceId === deviceId) {
+        this.capabilityEventRoutes.delete(targetDeviceId);
+      }
     }
   }
 
@@ -952,6 +1128,24 @@ export class DeviceMeshRouter {
       error: { code, message },
     };
   }
+}
+
+function relayForTarget(
+  relays: AuthenticatedSocket[],
+  targetDeviceId: string,
+  pass: number,
+  attempted: Set<string>,
+): AuthenticatedSocket | null {
+  if (relays.length === 0) return null;
+  let hash = 0;
+  for (let index = 0; index < targetDeviceId.length; index += 1) {
+    hash = (hash * 31 + targetDeviceId.charCodeAt(index)) >>> 0;
+  }
+  for (let offset = 0; offset < relays.length; offset += 1) {
+    const relay = relays[(hash + pass + offset) % relays.length];
+    if (!attempted.has(relay.peerDeviceId)) return relay;
+  }
+  return null;
 }
 
 function recordEventWithinLimit(

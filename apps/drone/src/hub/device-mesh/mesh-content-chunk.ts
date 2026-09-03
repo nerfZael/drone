@@ -12,6 +12,15 @@ export type MeshSnapshotChunk = {
   snapshotToken?: string;
 };
 
+export type MeshSnapshotReservation = {
+  signal: AbortSignal;
+  commitBinary(input: { content: Buffer; scope: string; metadata?: unknown; offset?: unknown }): {
+    chunk: MeshSnapshotChunk;
+    metadata: unknown;
+  };
+  release(): void;
+};
+
 type Snapshot = {
   content: Buffer;
   encoding: MeshSnapshotChunk['encoding'];
@@ -27,28 +36,51 @@ type SnapshotStoreOptions = {
   maxTotalBytes?: number;
   maxSourceBytes?: number;
   ttlMs?: number;
+  reservationTtlMs?: number;
+  maxPendingReservations?: number;
   now?: () => number;
   createToken?: () => string;
+};
+
+type ReservationRequest = {
+  id: number;
+  sourceDeviceId: string;
+  contentBytes: number;
+  contentRetained: boolean;
+  controller: AbortController;
+  timer: ReturnType<typeof setTimeout>;
+  removeAbortListener: () => void;
+  resolve: (reservation: MeshSnapshotReservation) => void;
+  reject: (error: Error) => void;
 };
 
 const DEFAULT_MAX_SNAPSHOT_BYTES = 32 * 1024 * 1024;
 const DEFAULT_MAX_TOTAL_BYTES = 64 * 1024 * 1024;
 const DEFAULT_TTL_MS = 60_000;
+const DEFAULT_RESERVATION_TTL_MS = 20_000;
+const DEFAULT_MAX_PENDING_RESERVATIONS = 100;
 
 export class MeshContentSnapshotStore {
   private readonly snapshots = new Map<string, Snapshot>();
+  private readonly reservations = new Map<number, ReservationRequest>();
+  private readonly pendingReservations: ReservationRequest[] = [];
   private readonly maxSnapshotBytes: number;
   private readonly maxTotalBytes: number;
   private readonly maxSourceBytes: number;
   private readonly ttlMs: number;
+  private readonly reservationTtlMs: number;
+  private readonly maxPendingReservations: number;
   private readonly now: () => number;
   private readonly createToken: () => string;
   private totalBytes = 0;
   private reservedBytes = 0;
+  private pendingContentBytes = 0;
   private readonly sourceBytes = new Map<string, number>();
   private readonly sourceReservedBytes = new Map<string, number>();
-  private reservationGeneration = 0;
+  private readonly sourcePendingContentBytes = new Map<string, number>();
+  private nextReservationId = 1;
   private closed = false;
+  private clearing = false;
   private expiryTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: SnapshotStoreOptions = {}) {
@@ -61,37 +93,115 @@ export class MeshContentSnapshotStore {
         Math.max(this.maxSnapshotBytes, Math.floor(this.maxTotalBytes / 2)),
       );
     this.ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
+    this.reservationTtlMs = options.reservationTtlMs ?? DEFAULT_RESERVATION_TTL_MS;
+    this.maxPendingReservations =
+      options.maxPendingReservations ?? DEFAULT_MAX_PENDING_RESERVATIONS;
     this.now = options.now ?? Date.now;
     this.createToken = options.createToken ?? (() => crypto.randomUUID());
   }
 
-  createJson(input: {
+  async createJson(input: {
     value: unknown;
     sourceDeviceId: string;
     scope: string;
     offset?: unknown;
-  }): MeshSnapshotChunk {
+    signal?: AbortSignal;
+  }): Promise<MeshSnapshotChunk> {
     this.ensureOpen();
-    return this.create({
-      content: Buffer.from(JSON.stringify(input.value)),
-      encoding: 'base64-json-utf8',
-      sourceDeviceId: input.sourceDeviceId,
-      scope: input.scope,
-      offset: input.offset,
-    }).chunk;
+    const content = Buffer.from(JSON.stringify(input.value));
+    if (content.length <= MESH_BINARY_CHUNK_BYTES) {
+      return snapshotChunk(content, input.offset, 'base64-json-utf8', undefined, false);
+    }
+    const reservation = await this.reserve(
+      input.sourceDeviceId,
+      content.length,
+      input.signal,
+      true,
+    );
+    try {
+      return this.commitReservation(reservation, {
+        content,
+        encoding: 'base64-json-utf8',
+        scope: input.scope,
+        offset: input.offset,
+      }).chunk;
+    } finally {
+      reservation.release();
+    }
   }
 
-  createBinary(input: {
+  async createBinary(input: {
     content: Buffer;
     sourceDeviceId: string;
     scope: string;
     metadata?: unknown;
     offset?: unknown;
-  }): { chunk: MeshSnapshotChunk; metadata: unknown } {
+    signal?: AbortSignal;
+  }): Promise<{ chunk: MeshSnapshotChunk; metadata: unknown }> {
     this.ensureOpen();
-    return this.create({
-      ...input,
-      encoding: 'base64-binary',
+    const reservation = await this.reserve(
+      input.sourceDeviceId,
+      input.content.length,
+      input.signal,
+    );
+    try {
+      return this.commitReservation(reservation, { ...input, encoding: 'base64-binary' });
+    } finally {
+      reservation.release();
+    }
+  }
+
+  async reserve(
+    sourceDeviceId: string,
+    contentBytes: number,
+    signal?: AbortSignal,
+    contentRetained = false,
+  ): Promise<MeshSnapshotReservation> {
+    this.ensureOpen();
+    this.pruneExpired();
+    this.validateReservationSize(contentBytes);
+    if (signal?.aborted) {
+      return Promise.reject(transferError('The transfer was cancelled', 'TRANSFER_CANCELLED'));
+    }
+    if (this.pendingReservations.length >= this.maxPendingReservations) {
+      return Promise.reject(transferError('The transfer queue is full', 'RESOURCE_LIMIT'));
+    }
+    if (
+      contentRetained &&
+      (this.totalBytes + this.reservedBytes + this.pendingContentBytes + contentBytes >
+        this.maxTotalBytes ||
+        this.sourceUsage(sourceDeviceId) + contentBytes > this.maxSourceBytes)
+    ) {
+      return Promise.reject(transferError('The transfer snapshot limit is full', 'RESOURCE_LIMIT'));
+    }
+
+    return new Promise((resolve, reject) => {
+      const controller = new AbortController();
+      const id = this.nextReservationId++;
+      const onAbort = () => this.cancelReservation(id, 'The transfer was cancelled');
+      signal?.addEventListener('abort', onAbort, { once: true });
+      const timer = setTimeout(
+        () => this.cancelReservation(id, 'The transfer reservation expired'),
+        this.reservationTtlMs + 5_000,
+      );
+      timer.unref?.();
+      const request: ReservationRequest = {
+        id,
+        sourceDeviceId,
+        contentBytes,
+        contentRetained,
+        controller,
+        timer,
+        removeAbortListener: () => signal?.removeEventListener('abort', onAbort),
+        resolve,
+        reject,
+      };
+      if (contentRetained) {
+        this.pendingContentBytes += contentBytes;
+        this.adjustSourceBytes(this.sourcePendingContentBytes, sourceDeviceId, contentBytes);
+      }
+      this.pendingReservations.push(request);
+      this.drainReservations();
     });
   }
 
@@ -121,18 +231,22 @@ export class MeshContentSnapshotStore {
     ) {
       this.remove(token, snapshot);
       this.scheduleExpiry();
+      this.drainReservations();
     }
-    return {
-      chunk,
-      metadata: snapshot.metadata,
-    };
+    return { chunk, metadata: snapshot.metadata };
   }
 
-  revokeDevice(sourceDeviceId: string) {
+  revokeDevice(sourceDeviceId: string): void {
     for (const [token, snapshot] of this.snapshots) {
       if (snapshot.sourceDeviceId === sourceDeviceId) this.remove(token, snapshot);
     }
+    for (const request of [...this.reservations.values(), ...this.pendingReservations]) {
+      if (request.sourceDeviceId === sourceDeviceId) {
+        this.cancelReservation(request.id, 'Transfer access was removed');
+      }
+    }
     this.scheduleExpiry();
+    this.drainReservations();
   }
 
   cancel(input: { snapshotToken: unknown; sourceDeviceId: string; scope: string }): void {
@@ -146,117 +260,193 @@ export class MeshContentSnapshotStore {
     }
     this.remove(token, snapshot);
     this.scheduleExpiry();
+    this.drainReservations();
   }
 
-  reserve(sourceDeviceId: string, contentBytes: number): () => void {
-    this.ensureOpen();
-    this.pruneExpired();
-    if (
-      !Number.isSafeInteger(contentBytes) ||
-      contentBytes < 0 ||
-      contentBytes > this.maxTotalBytes
-    ) {
-      throw transferError('The transfer is too large to snapshot', 'RESOURCE_LIMIT');
-    }
-    if (this.totalBytes + this.reservedBytes + contentBytes > this.maxTotalBytes) {
-      throw transferError('The transfer snapshot limit is full', 'RESOURCE_LIMIT');
-    }
-    if (this.sourceUsage(sourceDeviceId) + contentBytes > this.maxSourceBytes) {
-      throw transferError('The transfer snapshot limit for this device is full', 'RESOURCE_LIMIT');
-    }
-    this.reservedBytes += contentBytes;
-    this.sourceReservedBytes.set(
-      sourceDeviceId,
-      (this.sourceReservedBytes.get(sourceDeviceId) ?? 0) + contentBytes,
-    );
-    const generation = this.reservationGeneration;
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      if (generation !== this.reservationGeneration) return;
-      this.reservedBytes -= contentBytes;
-      this.adjustSourceBytes(this.sourceReservedBytes, sourceDeviceId, -contentBytes);
-    };
-  }
-
-  clear() {
+  clear(): void {
+    this.clearing = true;
     this.snapshots.clear();
     this.totalBytes = 0;
     this.sourceBytes.clear();
+    for (const request of [...this.reservations.values(), ...this.pendingReservations]) {
+      this.cancelReservation(request.id, 'The transfer store was cleared');
+    }
+    this.reservations.clear();
+    this.pendingReservations.length = 0;
     this.reservedBytes = 0;
+    this.pendingContentBytes = 0;
     this.sourceReservedBytes.clear();
-    this.reservationGeneration += 1;
+    this.sourcePendingContentBytes.clear();
+    this.clearing = false;
     if (this.expiryTimer) clearTimeout(this.expiryTimer);
     this.expiryTimer = null;
   }
 
-  close() {
+  close(): void {
     this.closed = true;
     this.clear();
   }
 
-  get size() {
+  get size(): number {
     this.pruneExpired();
     return this.snapshots.size;
   }
 
-  private create(input: {
-    content: Buffer;
-    encoding: MeshSnapshotChunk['encoding'];
-    sourceDeviceId: string;
-    scope: string;
-    metadata?: unknown;
-    offset?: unknown;
-  }): { chunk: MeshSnapshotChunk; metadata: unknown } {
-    this.pruneExpired();
-    if (input.content.length > this.maxSnapshotBytes) {
-      throw transferError('The transfer is too large to snapshot', 'RESOURCE_LIMIT');
+  private commitReservation(
+    reservation: MeshSnapshotReservation,
+    input: {
+      content: Buffer;
+      encoding: MeshSnapshotChunk['encoding'];
+      scope: string;
+      metadata?: unknown;
+      offset?: unknown;
+    },
+  ): { chunk: MeshSnapshotChunk; metadata: unknown } {
+    this.ensureOpen();
+    const id = (reservation as MeshSnapshotReservation & { id: number }).id;
+    const request = this.reservations.get(id);
+    if (!request || request.controller.signal.aborted) {
+      throw transferError('The transfer reservation expired', 'TRANSFER_EXPIRED');
+    }
+    if (input.content.length !== request.contentBytes) {
+      throw transferError('The transfer changed while it was loading', 'INVALID_RESPONSE');
     }
     const needsSnapshot = input.content.length > MESH_BINARY_CHUNK_BYTES;
-    let token: string | undefined;
-    if (needsSnapshot) {
-      if (this.totalBytes + this.reservedBytes + input.content.length > this.maxTotalBytes) {
-        throw transferError('The transfer snapshot limit is full', 'RESOURCE_LIMIT');
-      }
-      if (this.sourceUsage(input.sourceDeviceId) + input.content.length > this.maxSourceBytes) {
-        throw transferError(
-          'The transfer snapshot limit for this device is full',
-          'RESOURCE_LIMIT',
-        );
-      }
-      token = this.createToken();
-      const now = this.now();
-      const initialChunk = snapshotChunk(input.content, input.offset, input.encoding, token, false);
+    const token = needsSnapshot ? this.createToken() : undefined;
+    const initialChunk = snapshotChunk(input.content, input.offset, input.encoding, token, false);
+
+    this.finishReservation(request);
+    if (needsSnapshot && token) {
       this.snapshots.set(token, {
         content: input.content,
         encoding: input.encoding,
-        sourceDeviceId: input.sourceDeviceId,
+        sourceDeviceId: request.sourceDeviceId,
         scope: input.scope,
         metadata: input.metadata,
-        expiresAt: now + this.ttlMs,
+        expiresAt: this.now() + this.ttlMs,
         deliveredOffsets: new Set([initialChunk.offset]),
       });
       this.totalBytes += input.content.length;
-      this.adjustSourceBytes(this.sourceBytes, input.sourceDeviceId, input.content.length);
+      this.adjustSourceBytes(this.sourceBytes, request.sourceDeviceId, input.content.length);
       this.scheduleExpiry();
-      return { chunk: initialChunk, metadata: input.metadata };
     }
-    return {
-      chunk: snapshotChunk(input.content, input.offset, input.encoding, token, false),
-      metadata: input.metadata,
-    };
+    this.drainReservations();
+    return { chunk: initialChunk, metadata: input.metadata };
   }
 
-  private pruneExpired() {
+  private validateReservationSize(contentBytes: number): void {
+    if (
+      !Number.isSafeInteger(contentBytes) ||
+      contentBytes < 0 ||
+      contentBytes > this.maxSnapshotBytes ||
+      contentBytes > this.maxTotalBytes ||
+      contentBytes > this.maxSourceBytes
+    ) {
+      throw transferError('The transfer is too large to snapshot', 'RESOURCE_LIMIT');
+    }
+  }
+
+  private drainReservations(): void {
+    if (this.closed || this.clearing) return;
+    for (;;) {
+      const index = this.pendingReservations.findIndex((request) => {
+        const additionalBytes = request.contentRetained ? 0 : request.contentBytes;
+        return (
+          this.totalBytes + this.reservedBytes + this.pendingContentBytes + additionalBytes <=
+            this.maxTotalBytes &&
+          this.sourceUsage(request.sourceDeviceId) + additionalBytes <= this.maxSourceBytes
+        );
+      });
+      if (index < 0) return;
+      const [request] = this.pendingReservations.splice(index, 1);
+      this.releasePendingContent(request);
+      clearTimeout(request.timer);
+      request.timer = setTimeout(
+        () => this.cancelReservation(request.id, 'The transfer reservation expired'),
+        this.reservationTtlMs,
+      );
+      request.timer.unref?.();
+      this.reservations.set(request.id, request);
+      this.reservedBytes += request.contentBytes;
+      this.adjustSourceBytes(
+        this.sourceReservedBytes,
+        request.sourceDeviceId,
+        request.contentBytes,
+      );
+      const reservation: MeshSnapshotReservation & { id: number } = {
+        id: request.id,
+        signal: request.controller.signal,
+        commitBinary: (input) =>
+          this.commitReservation(reservation, { ...input, encoding: 'base64-binary' }),
+        release: () => this.releaseReservation(request.id),
+      };
+      request.resolve(reservation);
+    }
+  }
+
+  private cancelReservation(id: number, message: string): void {
+    const active = this.reservations.get(id);
+    if (active) {
+      active.controller.abort();
+      this.finishReservation(active);
+      active.reject(transferError(message, 'TRANSFER_CANCELLED'));
+      this.drainReservations();
+      return;
+    }
+    const index = this.pendingReservations.findIndex((request) => request.id === id);
+    if (index < 0) return;
+    const [pending] = this.pendingReservations.splice(index, 1);
+    this.releasePendingContent(pending);
+    pending.controller.abort();
+    this.cleanupReservation(pending);
+    pending.reject(transferError(message, 'TRANSFER_CANCELLED'));
+    this.drainReservations();
+  }
+
+  private releaseReservation(id: number): void {
+    const request = this.reservations.get(id);
+    if (!request) return;
+    this.finishReservation(request);
+    this.drainReservations();
+  }
+
+  private finishReservation(request: ReservationRequest): void {
+    if (!this.reservations.delete(request.id)) return;
+    this.reservedBytes -= request.contentBytes;
+    this.adjustSourceBytes(this.sourceReservedBytes, request.sourceDeviceId, -request.contentBytes);
+    this.cleanupReservation(request);
+  }
+
+  private cleanupReservation(request: ReservationRequest): void {
+    clearTimeout(request.timer);
+    request.removeAbortListener();
+  }
+
+  private releasePendingContent(request: ReservationRequest): void {
+    if (!request.contentRetained) return;
+    request.contentRetained = false;
+    this.pendingContentBytes -= request.contentBytes;
+    this.adjustSourceBytes(
+      this.sourcePendingContentBytes,
+      request.sourceDeviceId,
+      -request.contentBytes,
+    );
+  }
+
+  private pruneExpired(): void {
     const now = this.now();
+    let removed = false;
     for (const [token, snapshot] of this.snapshots) {
-      if (snapshot.expiresAt <= now) this.remove(token, snapshot);
+      if (snapshot.expiresAt <= now) {
+        this.remove(token, snapshot);
+        removed = true;
+      }
     }
     this.scheduleExpiry();
+    if (removed) this.drainReservations();
   }
 
-  private remove(token: string, snapshot: Snapshot) {
+  private remove(token: string, snapshot: Snapshot): void {
     if (!this.snapshots.delete(token)) return;
     this.totalBytes -= snapshot.content.length;
     this.adjustSourceBytes(this.sourceBytes, snapshot.sourceDeviceId, -snapshot.content.length);
@@ -265,17 +455,22 @@ export class MeshContentSnapshotStore {
   private sourceUsage(sourceDeviceId: string): number {
     return (
       (this.sourceBytes.get(sourceDeviceId) ?? 0) +
-      (this.sourceReservedBytes.get(sourceDeviceId) ?? 0)
+      (this.sourceReservedBytes.get(sourceDeviceId) ?? 0) +
+      (this.sourcePendingContentBytes.get(sourceDeviceId) ?? 0)
     );
   }
 
-  private adjustSourceBytes(entries: Map<string, number>, sourceDeviceId: string, delta: number) {
+  private adjustSourceBytes(
+    entries: Map<string, number>,
+    sourceDeviceId: string,
+    delta: number,
+  ): void {
     const next = (entries.get(sourceDeviceId) ?? 0) + delta;
     if (next > 0) entries.set(sourceDeviceId, next);
     else entries.delete(sourceDeviceId);
   }
 
-  private scheduleExpiry() {
+  private scheduleExpiry(): void {
     if (this.expiryTimer) clearTimeout(this.expiryTimer);
     this.expiryTimer = null;
     let nextExpiry = Infinity;
@@ -287,7 +482,7 @@ export class MeshContentSnapshotStore {
     this.expiryTimer.unref?.();
   }
 
-  private ensureOpen() {
+  private ensureOpen(): void {
     if (this.closed) throw transferError('The transfer store is closed', 'CAPABILITY_CLOSED');
   }
 }
@@ -325,6 +520,6 @@ function snapshotChunk(
   };
 }
 
-function transferError(message: string, code: string) {
+function transferError(message: string, code: string): Error {
   return Object.assign(new Error(message), { code });
 }
