@@ -3,7 +3,8 @@ export type BrowserMicrophoneOwner =
   | 'continuous-steering'
   | 'continuous-dictation'
   | 'file-dictation'
-  | 'companion';
+  | 'companion'
+  | 'global-dictation';
 
 export type BrowserMicrophoneLease = {
   owner: BrowserMicrophoneOwner;
@@ -48,5 +49,6 @@ export function browserMicrophoneOwnerLabel(owner: BrowserMicrophoneOwner): stri
   if (owner === 'continuous-steering') return 'Continuous voice steering';
   if (owner === 'file-dictation') return 'File dictation';
   if (owner === 'companion') return 'Companion';
+  if (owner === 'global-dictation') return 'Dictation scratchpad';
   return 'A voice message';
 }

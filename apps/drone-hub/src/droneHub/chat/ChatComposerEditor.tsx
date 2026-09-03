@@ -42,6 +42,7 @@ type ChatComposerEditorProps = {
   onFocus?: () => void;
   onSendQueued: () => void;
   ariaLabel: string;
+  maxHeight?: string;
 };
 
 function clampSelection(selection: ChatComposerSelection, value: string): ChatComposerSelection {
@@ -66,6 +67,7 @@ export const ChatComposerEditor = React.forwardRef<
     onFocus,
     onSendQueued,
     ariaLabel,
+    maxHeight,
   },
   forwardedRef,
 ) {
@@ -320,7 +322,7 @@ export const ChatComposerEditor = React.forwardRef<
       style={{
         height: editorHeight || CHAT_COMPOSER_EDITOR_MIN_HEIGHT,
         minHeight: CHAT_COMPOSER_EDITOR_MIN_HEIGHT,
-        maxHeight: CHAT_COMPOSER_EDITOR_MAX_HEIGHT,
+        maxHeight: maxHeight ?? CHAT_COMPOSER_EDITOR_MAX_HEIGHT,
       }}
     >
       <MonacoEditorErrorBoundary fallback={fallback}>

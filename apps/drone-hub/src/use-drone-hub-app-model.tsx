@@ -175,7 +175,11 @@ import {
   isSuggestedChatRenameConflict,
   isSuggestedChatRenameRetriable,
 } from './droneHub/app/chat-name-suggestions';
-import { promoteNewDroneChatAction, sendInNewDroneChatAction } from './droneHub/app/chat-api';
+import {
+  promoteNewDroneChatAction,
+  sendDroneChatPrompt,
+  sendInNewDroneChatAction,
+} from './droneHub/app/chat-api';
 import {
   chatInputDraftKeyForDroneChat,
   droneChatQueueKey,
@@ -197,6 +201,13 @@ import { allocateUntitledDisplayName } from './droneHub/app/name-helpers';
 import { createTerminalPaneSessionsState } from './droneHub/terminal/terminal-tabs-state';
 import { useTerminalPaneSessions } from './droneHub/terminal/use-terminal-pane-sessions';
 import type { DronePortMapping, DroneSummary, PortReachabilityByHostPort } from './droneHub/types';
+import type {
+  GlobalDictationDestination,
+  GlobalDictationSendResult,
+  GlobalDictationTarget,
+  GlobalDictationTargetResult,
+} from './droneHub/dictation/global-dictation-types';
+import type { GlobalDictationOverlayProps } from './droneHub/dictation/GlobalDictationOverlay';
 
 const EMPTY_VISIBLE_TOOL_TABS: RightPanelTab[] = [];
 const NO_HIDDEN_SIDEBAR_GROUPS: string[] = [];
@@ -233,6 +244,7 @@ export type DroneHubAppModel = {
   sidebarProps: DroneSidebarProps;
   overlaysProps: DroneHubOverlaysProps;
   workspaceContentProps: DroneHubWorkspaceContentProps;
+  globalDictationProps: GlobalDictationOverlayProps;
 };
 
 function droneHubBusyDebugEnabled(): boolean {
@@ -4544,6 +4556,242 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     if (result.ok && chatName) selectDroneChat(currentDrone.id, chatName);
     return result.ok === true;
   }, [cloneDroneChat, currentDrone, selectDroneChat, selectedChat, selectedGroupMultiChat]);
+  const resolveGlobalDictationTarget = React.useCallback(
+    (destination: GlobalDictationDestination): GlobalDictationTargetResult => {
+      if (destination === 'root-drone') {
+        const selectionContext = resolveCurrentSelectionDraftContext();
+        const repoPath = normalizeCreateRepoPath(selectionContext?.repoPath ?? activeRepoPath);
+        const repoLabel = repoPath.split(/[\\/]/).filter(Boolean).pop() || 'no repository';
+        return {
+          ok: true,
+          target: {
+            destination,
+            repoPath,
+            group: '',
+            label: `root drone in ${repoLabel}`,
+          },
+        };
+      }
+
+      if (!currentDrone || selectedGroupMultiChat) {
+        return { ok: false, error: 'Open a drone chat before using this destination.' };
+      }
+      const chatName = resolveChatNameForDrone(currentDrone, selectedChat);
+      const droneLabel = uiDroneName(currentDrone.name);
+
+      if (destination === 'group-drone') {
+        const selectionContext = resolveCurrentSelectionDraftContext();
+        if (!selectionContext) {
+          return { ok: false, error: 'The current drone group could not be resolved.' };
+        }
+        return {
+          ok: true,
+          target: {
+            destination,
+            repoPath: normalizeCreateRepoPath(selectionContext.repoPath),
+            group: selectionContext.group,
+            label: selectionContext.group
+              ? `new drone in ${selectionContext.group}`
+              : 'new ungrouped drone',
+          },
+        };
+      }
+
+      const actionLabel =
+        destination === 'current-chat'
+          ? `${droneLabel} / ${chatName}`
+          : destination === 'new-chat'
+            ? `new chat in ${droneLabel}`
+            : `clone of ${droneLabel} / ${chatName}`;
+      return {
+        ok: true,
+        target: {
+          destination,
+          droneId: currentDrone.id,
+          chatName,
+          label: actionLabel,
+        },
+      };
+    },
+    [
+      activeRepoPath,
+      currentDrone,
+      normalizeCreateRepoPath,
+      resolveCurrentSelectionDraftContext,
+      selectedChat,
+      selectedGroupMultiChat,
+      uiDroneName,
+    ],
+  );
+
+  const sendGlobalDictationToChat = React.useCallback(
+    async (
+      droneId: string,
+      chatName: string,
+      prompt: string,
+    ): Promise<GlobalDictationSendResult> => {
+      const drone = droneByIdRef.current[droneId];
+      if (!drone) return { ok: false, error: 'The destination drone is no longer available.' };
+      const key = droneChatQueueKey(droneId, chatName);
+      const tracked = newDraftChatsRef.current.get(key);
+      if (tracked) {
+        tracked.submissionInFlight = true;
+        if (tracked.creationPromise && !(await tracked.creationPromise)) {
+          tracked.submissionInFlight = false;
+          return { ok: false, error: 'The destination draft chat could not be created.' };
+        }
+        try {
+          await requestJson<{ ok: true }>(
+            `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/publish`,
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({}),
+            },
+          );
+          newDraftChatsRef.current.delete(key);
+        } catch (publishError: unknown) {
+          tracked.submissionInFlight = false;
+          tracked.preserveOnLeave = true;
+          return {
+            ok: false,
+            error:
+              publishError instanceof Error
+                ? publishError.message
+                : 'The destination draft chat could not be published.',
+          };
+        }
+      }
+
+      selectDroneChat(droneId, chatName);
+      if (isDroneStartingOrSeeding(drone.hubPhase)) {
+        enqueueQueuedPrompt(droneId, chatName, prompt, []);
+        return { ok: true };
+      }
+
+      try {
+        const data = await sendDroneChatPrompt(requestJson, {
+          droneId,
+          chatName,
+          prompt,
+          promptId: makeId(),
+          deliveryMode: 'queue',
+          autoRenameHandledByClient: Boolean(prompt),
+        });
+        if (data.autoRenameChat && prompt) {
+          handleAutoRenameChatFromFirstPrompt(droneId, chatName, prompt);
+        }
+        return { ok: true };
+      } catch (sendError: unknown) {
+        return {
+          ok: false,
+          error: sendError instanceof Error ? sendError.message : String(sendError),
+        };
+      }
+    },
+    [enqueueQueuedPrompt, handleAutoRenameChatFromFirstPrompt, requestJson, selectDroneChat],
+  );
+
+  const sendGlobalDictation = React.useCallback(
+    async (target: GlobalDictationTarget, text: string): Promise<GlobalDictationSendResult> => {
+      const prompt = String(text ?? '').trim();
+      if (!prompt) return { ok: false, error: 'There is no dictated text to send.' };
+
+      if (target.destination === 'root-drone' || target.destination === 'group-drone') {
+        try {
+          const remembered = loadDesktopNewDronePreferences(target.repoPath);
+          const defaults = remembered ?? normalizeDesktopNewDronePreferences({});
+          if (!defaults) {
+            return { ok: false, error: 'The new-drone settings could not be loaded.' };
+          }
+          const spawnContexts = useDroneHubUiStore.getState().spawnContextByRepoKey;
+          const creationPreferences = resolveCompanionDroneCreationPreferences({
+            remembered,
+            defaults,
+            spawnContext: resolveSpawnContextPreferencesForRepo(spawnContexts, target.repoPath),
+            hasSpawnContext: hasSpawnContextPreferencesForRepo(spawnContexts, target.repoPath),
+          });
+          let createdDroneId = '';
+          let createFailure = '';
+          const created = await createDroneFromDraft({
+            prompt,
+            name: '',
+            group: target.group,
+            repoPath: target.repoPath,
+            creationPreferences,
+            rememberPreferences: false,
+            isolatedContext: true,
+            createMode: 'with-chat',
+            autoRename: true,
+            selectOnSuccess: false,
+            deliveryMode: 'queue',
+            onCreated: (createdDrone) => {
+              createdDroneId = createdDrone.droneId;
+            },
+            onError: (message) => {
+              createFailure = message;
+            },
+          });
+          if (!created || !createdDroneId) {
+            return {
+              ok: false,
+              error: createFailure || 'The new drone could not be created.',
+            };
+          }
+          selectDroneChat(createdDroneId, 'default');
+          preferredSelectedDroneRef.current = createdDroneId;
+          preferredSelectedDroneHoldUntilRef.current =
+            Date.now() + STARTUP_SEED_MISSING_GRACE_MS;
+          return { ok: true };
+        } catch (createError: unknown) {
+          return {
+            ok: false,
+            error: createError instanceof Error ? createError.message : String(createError),
+          };
+        }
+      }
+
+      if (!('droneId' in target)) {
+        return { ok: false, error: 'The dictation destination is invalid.' };
+      }
+      const drone = droneByIdRef.current[target.droneId];
+      if (!drone) return { ok: false, error: 'The destination drone is no longer available.' };
+      if (target.destination === 'current-chat') {
+        return await sendGlobalDictationToChat(target.droneId, target.chatName, prompt);
+      }
+
+      if (target.destination === 'new-chat') {
+        const created = await createUntitledDroneChat(drone, { select: false });
+        const chatName = String(created.chatName ?? '').trim();
+        if (!created.ok || !chatName) {
+          return { ok: false, error: created.error || 'The new chat could not be created.' };
+        }
+        return await sendGlobalDictationToChat(drone.id, chatName, prompt);
+      }
+
+      const cloned = await cloneDroneChat(target.droneId, target.chatName);
+      const clonedChatName = String(cloned.chatName ?? '').trim();
+      if (!cloned.ok || !clonedChatName) {
+        return { ok: false, error: cloned.error || 'The chat could not be cloned.' };
+      }
+      return await sendGlobalDictationToChat(target.droneId, clonedChatName, prompt);
+    },
+    [
+      cloneDroneChat,
+      createDroneFromDraft,
+      createUntitledDroneChat,
+      preferredSelectedDroneHoldUntilRef,
+      preferredSelectedDroneRef,
+      selectDroneChat,
+      sendGlobalDictationToChat,
+    ],
+  );
+
+  const globalDictationActiveChatLabel =
+    currentDrone && !selectedGroupMultiChat
+      ? `${uiDroneName(currentDrone.name)} / ${resolveChatNameForDrone(currentDrone, selectedChat)}`
+      : '';
+
   React.useEffect(() => {
     if (newDraftChatsRef.current.size === 0) return;
     for (const [key, tracked] of newDraftChatsRef.current) {
@@ -5537,5 +5785,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     sidebarProps,
     overlaysProps,
     workspaceContentProps,
+    globalDictationProps: {
+      activeChatLabel: globalDictationActiveChatLabel,
+      resolveTarget: resolveGlobalDictationTarget,
+      send: sendGlobalDictation,
+    },
   };
 }

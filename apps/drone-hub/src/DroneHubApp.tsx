@@ -20,9 +20,11 @@ import { FileDictationProvider } from './droneHub/files/FileDictationContext';
 import { CompanionWorkspaceProvider } from './droneHub/companion/CompanionWorkspaceContext';
 import { CompanionProvider } from './droneHub/companion/CompanionContext';
 import { NavigationSizeController } from './droneHub/app/NavigationSizeController';
+import { GlobalDictationOverlay } from './droneHub/dictation/GlobalDictationOverlay';
 
 function LocalDroneHubAppContent() {
-  const { sidebarProps, overlaysProps, workspaceContentProps } = useDroneHubAppModel();
+  const { sidebarProps, overlaysProps, workspaceContentProps, globalDictationProps } =
+    useDroneHubAppModel();
   const sidebarDockSide = useDroneHubUiStore((s) => s.sidebarDockSide);
   const sidebarCollapsed = useDroneHubUiStore((s) => s.sidebarCollapsed);
   const setSidebarCollapsed = useDroneHubUiStore((s) => s.setSidebarCollapsed);
@@ -57,6 +59,7 @@ function LocalDroneHubAppContent() {
           </>
         )}
         <DroneHubOverlays {...overlaysProps} />
+        <GlobalDictationOverlay {...globalDictationProps} />
         <GuidedOnboarding />
         <FrontendUpdatePrompt />
       </div>
