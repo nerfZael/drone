@@ -11,7 +11,46 @@ function buildUnexpectedHtmlError(url: string): string {
   return `Expected JSON from ${path || 'request'}, but received HTML.`;
 }
 
+type JsonResponse<T> =
+  | { data: T; response: Response; notModified: false }
+  | { data: null; response: Response; notModified: true };
+
+export type ConditionalJsonResponse<T> =
+  | { data: T; etag: string | null; notModified: false }
+  | { data: null; etag: string | null; notModified: true };
+
 export async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const result = await requestJsonResponse<T>(url, init, false);
+  if (result.notModified) {
+    throw new Error(`Unexpected 304 response from ${url}.`);
+  }
+  return result.data;
+}
+
+export async function requestJsonConditional<T>(
+  url: string,
+  init?: RequestInit,
+): Promise<ConditionalJsonResponse<T>> {
+  const requestHeaders = new Headers(init?.headers);
+  const result = await requestJsonResponse<T>(url, { ...init, headers: requestHeaders }, true);
+  return result.notModified
+    ? {
+        data: null,
+        etag: result.response.headers.get('etag') ?? requestHeaders.get('if-none-match'),
+        notModified: true,
+      }
+    : {
+        data: result.data,
+        etag: result.response.headers.get('etag'),
+        notModified: false,
+      };
+}
+
+async function requestJsonResponse<T>(
+  url: string,
+  init: RequestInit | undefined,
+  allowNotModified: boolean,
+): Promise<JsonResponse<T>> {
   const headers = new Headers(init?.headers);
   const observation = observeChatLoadRequest(url);
   let r: Response;
@@ -24,6 +63,10 @@ export async function requestJson<T>(url: string, init?: RequestInit): Promise<T
   } catch (error) {
     observation?.fail(error);
     throw error;
+  }
+  if (allowNotModified && r.status === 304) {
+    observation?.finish({ responseBytes: responseTextBytes(text), parseMs: 0 });
+    return { data: null, response: r, notModified: true };
   }
   const contentType = String(r.headers.get('content-type') ?? '').toLowerCase();
   const looksHtml = contentType.includes('text/html') || /^\s*</.test(text);
@@ -74,7 +117,7 @@ export async function requestJson<T>(url: string, init?: RequestInit): Promise<T
     throw err;
   }
   observation?.finish({ responseBytes: responseTextBytes(text), parseMs });
-  return data as T;
+  return { data: data as T, response: r, notModified: false };
 }
 
 export async function requestJsonWithTimeout<T>(url: string, init: RequestInit | undefined, timeoutMs: number): Promise<T> {

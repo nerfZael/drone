@@ -6,12 +6,13 @@ import {
 } from '../src/hub/filesystem-media';
 
 describe('filesystem media caching', () => {
-  test('caches only URLs tied to a file revision', () => {
-    expect(browserCacheControlForFileRevision('sha256:abc123')).toBe(
+  test('caches only URLs whose revision matches the served bytes', () => {
+    expect(browserCacheControlForFileRevision('sha256:abc123', 'sha256:abc123')).toBe(
       'private, max-age=31536000, immutable',
     );
-    expect(browserCacheControlForFileRevision('')).toBe('no-store');
-    expect(browserCacheControlForFileRevision(null)).toBe('no-store');
+    expect(browserCacheControlForFileRevision('sha256:stale', 'sha256:current')).toBe('no-store');
+    expect(browserCacheControlForFileRevision('', 'sha256:current')).toBe('no-store');
+    expect(browserCacheControlForFileRevision(null, 'sha256:current')).toBe('no-store');
   });
 });
 

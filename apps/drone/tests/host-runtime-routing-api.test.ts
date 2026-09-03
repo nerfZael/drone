@@ -1,5 +1,6 @@
-import http from 'node:http';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
@@ -402,6 +403,75 @@ describeSocketSuite('host runtime routing api', () => {
     );
     expect(thumbResp.status).toBe(200);
     expect(String(thumbResp.headers.get('content-type') ?? '')).toContain('image/');
+  });
+
+  test('validates media and thumbnail revisions before enabling browser caching', async () => {
+    const droneId = 'host-media-cache';
+    const droneRoot = path.join(tempRoot, 'host-media-cache');
+    const imagePath = path.join(droneRoot, 'pixel.png');
+    const imageBytes = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7bKJYAAAAASUVORK5CYII=',
+      'base64',
+    );
+    const revision = `sha256:${crypto.createHash('sha256').update(imageBytes).digest('hex')}`;
+    const staleRevision = `sha256:${'0'.repeat(64)}`;
+    fs.mkdirSync(droneRoot, { recursive: true });
+    fs.writeFileSync(imagePath, imageBytes);
+    await seedHostDrone(droneId, { cwd: droneRoot, repoPath: '' });
+
+    const routeUrl = (route: 'media' | 'thumb', requestedRevision?: string) => {
+      const url = new URL(
+        `${baseUrl}/api/drones/${encodeURIComponent(droneId)}/fs/${route}`,
+      );
+      url.searchParams.set('path', imagePath);
+      if (requestedRevision) url.searchParams.set('revision', requestedRevision);
+      return url;
+    };
+    const authorizedFetch = (url: URL, init?: RequestInit) =>
+      fetch(url, {
+        ...init,
+        headers: { ...init?.headers, authorization: `Bearer ${token}` },
+      });
+
+    const unversionedMedia = await authorizedFetch(routeUrl('media'));
+    expect(unversionedMedia.status).toBe(200);
+    expect(unversionedMedia.headers.get('cache-control')).toBe('no-store');
+    const unversionedThumb = await authorizedFetch(routeUrl('thumb'));
+    expect(unversionedThumb.status).toBe(200);
+    expect(unversionedThumb.headers.get('cache-control')).toBe('no-store');
+
+    const versionedMedia = await authorizedFetch(routeUrl('media', revision));
+    expect(versionedMedia.status).toBe(200);
+    expect(versionedMedia.headers.get('cache-control')).toBe(
+      'private, max-age=31536000, immutable',
+    );
+    expect(Buffer.from(await versionedMedia.arrayBuffer())).toEqual(imageBytes);
+    const versionedThumb = await authorizedFetch(routeUrl('thumb', revision));
+    expect(versionedThumb.status).toBe(200);
+    expect(versionedThumb.headers.get('cache-control')).toBe(
+      'private, max-age=31536000, immutable',
+    );
+
+    for (const route of ['media', 'thumb'] as const) {
+      const mismatch = await authorizedFetch(routeUrl(route, staleRevision));
+      expect(mismatch.status).toBe(409);
+      expect(mismatch.headers.get('cache-control')).toBe('no-store');
+      expect(await mismatch.json()).toMatchObject({
+        ok: false,
+        code: 'FILE_REVISION_MISMATCH',
+        currentRevision: revision,
+      });
+    }
+
+    const rangedMedia = await authorizedFetch(routeUrl('media', revision), {
+      headers: { range: 'bytes=1-4' },
+    });
+    expect(rangedMedia.status).toBe(206);
+    expect(rangedMedia.headers.get('cache-control')).toBe(
+      'private, max-age=31536000, immutable',
+    );
+    expect(rangedMedia.headers.get('content-range')).toBe(`bytes 1-4/${imageBytes.length}`);
+    expect(Buffer.from(await rangedMedia.arrayBuffer())).toEqual(imageBytes.subarray(1, 5));
   });
 
   test('streams hash revision changes for an open host file', async () => {

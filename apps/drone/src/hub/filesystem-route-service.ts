@@ -92,6 +92,30 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
   };
   const sha256 = (value: Buffer | string) =>
     `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`;
+  const cacheControlForServedFile = (input: {
+    res: ServerResponse;
+    requestedRevision: unknown;
+    bytes: Buffer;
+    droneId: string;
+    droneName: string;
+    targetPath: string;
+  }): string | null => {
+    const requestedRevision = String(input.requestedRevision ?? '').trim();
+    if (!requestedRevision) return 'no-store';
+    const servedRevision = sha256(input.bytes);
+    const cacheControl = browserCacheControlForFileRevision(requestedRevision, servedRevision);
+    if (cacheControl !== 'no-store') return cacheControl;
+    json(input.res, 409, {
+      ok: false,
+      code: 'FILE_REVISION_MISMATCH',
+      error: 'file revision changed',
+      id: input.droneId,
+      name: input.droneName,
+      path: input.targetPath,
+      currentRevision: servedRevision,
+    });
+    return null;
+  };
   const addHostGitIgnoreMetadata = async <T extends { path: string }>(
     directoryPath: string,
     entries: T[],
@@ -1702,9 +1726,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
           json(res, 400, { ok: false, error: 'missing file path' });
           return;
         }
-        const cacheControl = browserCacheControlForFileRevision(
-          u.searchParams.get('revision'),
-        );
+        const requestedRevision = u.searchParams.get('revision');
 
         if (runtime === 'host') {
           try {
@@ -1733,6 +1755,15 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
             }
 
             const buf = read.buf;
+            const cacheControl = cacheControlForServedFile({
+              res,
+              requestedRevision,
+              bytes: buf,
+              droneId,
+              droneName,
+              targetPath: path.resolve(targetPath),
+            });
+            if (cacheControl == null) return;
             const total = buf.length;
             const rangeHeader = String(req.headers.range ?? '').trim();
             if (rangeHeader.startsWith('bytes=')) {
@@ -1941,6 +1972,16 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
             return;
           }
 
+          const cacheControl = cacheControlForServedFile({
+            res,
+            requestedRevision,
+            bytes: buf,
+            droneId,
+            droneName,
+            targetPath,
+          });
+          if (cacheControl == null) return;
+
           const total = buf.length;
           const rangeHeader = String(req.headers.range ?? '').trim();
           if (rangeHeader.startsWith('bytes=')) {
@@ -2053,9 +2094,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
           json(res, 400, { ok: false, error: 'missing file path' });
           return;
         }
-        const cacheControl = browserCacheControlForFileRevision(
-          u.searchParams.get('revision'),
-        );
+        const requestedRevision = u.searchParams.get('revision');
         if (!isLikelyImagePath(targetPath)) {
           json(res, 415, { ok: false, error: 'not an image file' });
           return;
@@ -2078,6 +2117,16 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
               });
               return;
             }
+
+            const cacheControl = cacheControlForServedFile({
+              res,
+              requestedRevision,
+              bytes: read.buf,
+              droneId,
+              droneName,
+              targetPath: path.resolve(targetPath),
+            });
+            if (cacheControl == null) return;
 
             res.statusCode = 200;
             res.setHeader('content-type', mime);
@@ -2229,6 +2278,16 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
             });
             return;
           }
+
+          const cacheControl = cacheControlForServedFile({
+            res,
+            requestedRevision,
+            bytes: buf,
+            droneId,
+            droneName,
+            targetPath,
+          });
+          if (cacheControl == null) return;
 
           res.statusCode = 200;
           res.setHeader('content-type', mime);

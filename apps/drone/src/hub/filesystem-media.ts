@@ -40,8 +40,13 @@ export const ASSISTANT_BASH_MAX_COMMAND_BYTES = 20 * 1024;
 export const ASSISTANT_SEARCH_MAX_CONTEXT_LINES = 10;
 export const ASSISTANT_CHANGED_FILES_LIMIT = 200;
 
-export function browserCacheControlForFileRevision(revision: unknown): string {
-  return String(revision ?? '').trim()
+export function browserCacheControlForFileRevision(
+  requestedRevision: unknown,
+  servedRevision: unknown,
+): string {
+  const requested = String(requestedRevision ?? '').trim();
+  const served = String(servedRevision ?? '').trim();
+  return requested && requested === served
     ? 'private, max-age=31536000, immutable'
     : 'no-store';
 }

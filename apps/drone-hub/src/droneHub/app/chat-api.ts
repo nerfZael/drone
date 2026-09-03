@@ -1,5 +1,6 @@
 import { sameAgentPlan } from '@drone/assistant-chat';
 import type { ChatSendPayload } from '../chat';
+import { requestJsonConditional } from '../http';
 import type { PendingPrompt, TranscriptItem } from '../types';
 import {
   normalizeChatResourceSubscriptionsPayload,
@@ -86,14 +87,6 @@ export function droneChatEventMatches(
       normalizeEventText(ref?.droneId) === droneId &&
       (normalizeEventText(ref?.chatName) || 'default') === chatName,
   );
-}
-
-function buildUnexpectedHtmlError(url: string): string {
-  const path = String(url ?? '').trim();
-  if (path.startsWith('/api/')) {
-    return `Expected JSON from ${path}, but received HTML. The Hub API is likely unreachable. Start via 'drone hub' or set DRONE_HUB_API_PORT for the Vite dev server.`;
-  }
-  return `Expected JSON from ${path || 'request'}, but received HTML.`;
 }
 
 function sameOptionalText(left: unknown, right: unknown): boolean {
@@ -447,47 +440,5 @@ async function fetchJsonCached<T>(
   const headers = new Headers();
   const etag = String(etagRaw ?? '').trim();
   if (etag) headers.set('if-none-match', etag);
-  const response = await fetch(url, { headers });
-  if (response.status === 304) return { data: null, etag: etag || null, notModified: true };
-  const text = await response.text();
-  const contentType = String(response.headers.get('content-type') ?? '').toLowerCase();
-  const looksHtml = contentType.includes('text/html') || /^\s*</.test(text);
-  let data: any = null;
-  if (text) {
-    try {
-      data = JSON.parse(text);
-    } catch {
-      const error = new Error(
-        looksHtml
-          ? buildUnexpectedHtmlError(url)
-          : `Expected JSON from ${url}, but response was not valid JSON.`,
-      ) as Error & {
-        status?: number;
-        data?: any;
-      };
-      error.status = response.status;
-      throw error;
-    }
-  }
-  if (!response.ok) {
-    const error = new Error(
-      data?.error ? String(data.error) : `${response.status} ${response.statusText}`,
-    ) as Error & {
-      status?: number;
-      data?: any;
-    };
-    error.status = response.status;
-    error.data = data;
-    throw error;
-  }
-  if (data == null) {
-    const error = new Error(`Expected JSON from ${url}, but response body was empty.`) as Error & {
-      status?: number;
-      data?: any;
-    };
-    error.status = response.status;
-    error.data = data;
-    throw error;
-  }
-  return { data: data as T, etag: response.headers.get('etag'), notModified: false };
+  return requestJsonConditional<T>(url, { headers });
 }

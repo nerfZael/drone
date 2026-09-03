@@ -86,6 +86,7 @@ import {
   type MobileDroneSidebarOrder,
   type MobileDroneSummary,
 } from '../drones/drone-sidebar-model';
+import { loadMobileDroneList } from '../drones/load-mobile-drone-list';
 import {
   applyOptimisticMobileSidebarMove,
   mobileSidebarMoveDestination,
@@ -581,14 +582,8 @@ export function DronesScreen({
       if (!quiet) setDroneListError(null);
       if (!quiet) setError(null);
       try {
-        const result = await requestDroneControl(targetId, 'drones.list', {
-          includeCreateOptions: false,
-        });
+        const normalized = await loadMobileDroneList(requestDroneControl, targetId, quiet);
         if (targetIdRef.current !== targetId || droneListVersion.current !== requestVersion) return;
-        if (!result || typeof result !== 'object' || !Array.isArray(result.drones)) {
-          throw new Error('The selected Drone Hub returned an invalid drone list');
-        }
-        const normalized = normalizeMobileDroneListPayload(result);
         const confirmedSnapshot = resolveMobileDroneListSnapshot({
           current: droneListSnapshotRef.current,
           targetId,
@@ -605,7 +600,7 @@ export function DronesScreen({
         );
         const nextDrones = visibleSidebar.drones;
         setDeleteMode(normalized.deleteMode);
-        if (normalized.createRepos.length > 0) {
+        if (!quiet || normalized.createRepos.length > 0) {
           setCreateRepos((current) => {
             const currentByPath = new Map(current.map((repo) => [repo.path, repo]));
             return normalized.createRepos.map(

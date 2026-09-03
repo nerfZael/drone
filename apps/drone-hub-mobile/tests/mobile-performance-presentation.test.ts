@@ -1,21 +1,37 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'bun:test';
 
+import { loadMobileDroneList } from '../src/drones/load-mobile-drone-list';
+
 describe('mobile performance presentation', () => {
-  test('does not refetch creation options after the initial drone list', () => {
-    const source = readFileSync(
-      new URL('../src/screens/DronesScreen.tsx', import.meta.url),
-      'utf8',
-    );
-    const loadDrones = source.slice(
-      source.indexOf('const loadDrones = React.useCallback'),
-      source.indexOf('loadDronesRef.current = loadDrones'),
+  test('loads startup drones and creation repositories in one request', async () => {
+    const requests: Array<{ destinationId: string; operation: string; payload: unknown }> = [];
+    const result = await loadMobileDroneList(
+      async (destinationId, operation, payload) => {
+        requests.push({ destinationId, operation, payload });
+        return {
+          drones: [],
+          createOptions: { repos: [{ path: '/work/widgets', hostBranch: 'main' }] },
+        };
+      },
+      'hub-1',
+      false,
     );
 
-    expect(loadDrones.match(/requestDroneControl\(targetId, 'drones\.list'/g)).toHaveLength(1);
-    expect(loadDrones).toContain('includeCreateOptions: false');
-    expect(source).toContain(
-      "requestDroneControl(destinationId, 'drones.list', { includeCreateOptions: true })",
-    );
+    expect(requests).toEqual([
+      {
+        destinationId: 'hub-1',
+        operation: 'drones.list',
+        payload: { includeCreateOptions: true },
+      },
+    ]);
+    expect(result.createRepos).toEqual([
+      {
+        path: '/work/widgets',
+        hostBranch: 'main',
+        remoteBranches: [],
+        branchesError: null,
+        branchesLoaded: false,
+      },
+    ]);
   });
 });
