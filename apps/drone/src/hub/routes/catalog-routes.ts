@@ -6,6 +6,7 @@ import {
   deleteSkillRecord,
   getSkillById,
   listSkills,
+  replaceSkillFromEditablePackage,
   updateSkillRecord,
   updateSkillFromEditablePackage,
 } from '../skills';
@@ -40,7 +41,7 @@ export function registerCatalogRoutes(apiRouter: HubRouter, deps: CatalogRouteDe
   const { mcpToken, upsertDroneHubMcpServerPreset } = deps;
   const errorMessage = (error: any): string => error?.message ?? String(error);
   const createCatalogStatus = (message: string): number =>
-    /already exists|duplicate/i.test(message)
+    /already exists|duplicate|unique constraint/i.test(message)
       ? 409
       : /missing |invalid /i.test(message)
         ? 400
@@ -100,6 +101,23 @@ export function registerCatalogRoutes(apiRouter: HubRouter, deps: CatalogRouteDe
       respond(status, { ok: false, error: message });
     }
   });
+
+  apiRouter.post(
+    '/api/skills/:skillId/replacement-package',
+    async ({ params, readJson, json: respond }) => {
+      const body = await readJson();
+      try {
+        respond(200, {
+          ok: true,
+          skill: await replaceSkillFromEditablePackage(params.skillId, body),
+        });
+      } catch (error: any) {
+        const message = errorMessage(error);
+        const status = /unknown skill/i.test(message) ? 404 : createCatalogStatus(message);
+        respond(status, { ok: false, error: message });
+      }
+    },
+  );
 
   apiRouter.delete('/api/skills/:skillId', async ({ params, fail, json: respond }) => {
     if (!(await deleteSkillRecord(params.skillId))) {

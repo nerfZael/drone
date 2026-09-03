@@ -209,6 +209,27 @@ test('unique conflicts roll back cleanly and concurrent writers cannot create du
   assert.equal(store.listSkills().filter((record) => record.slug === 'shared').length, 1);
 });
 
+test('skill replacement swaps identities atomically and rolls back conflicts', async () => {
+  useDataDir('replace-skill');
+  const store = await getCatalogStore();
+  const original = { ...skill('old-skill', 'old-skill'), name: 'Old Skill' };
+  const replacement = { ...skill('new-skill', 'new-skill'), name: 'New Skill' };
+  await store.putSkill(original);
+
+  assert.deepEqual(await store.replaceSkill(original.id, replacement), replacement);
+  assert.equal(store.getSkill(original.id), null);
+  assert.deepEqual(store.getSkill(replacement.id), replacement);
+
+  const conflicting = skill('conflicting-skill', 'taken');
+  await store.putSkill(conflicting);
+  await assert.rejects(
+    store.replaceSkill(replacement.id, skill('failed-replacement', conflicting.slug)),
+    /UNIQUE/,
+  );
+  assert.deepEqual(store.getSkill(replacement.id), replacement);
+  assert.equal(store.getSkill('failed-replacement'), null);
+});
+
 test('cached store follows DRONE_DATA_DIR switching instead of leaking rows', async () => {
   useDataDir('switch-a');
   const first = await getCatalogStore();

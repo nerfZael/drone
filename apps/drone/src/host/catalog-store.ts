@@ -430,6 +430,22 @@ export class CatalogStore {
     });
   }
 
+  replaceSkill<T extends CatalogSkillRecord>(oldId: string, record: T): Promise<T> {
+    return this.database.writeTransaction('replace skill catalog', (connection) => {
+      const deleted = Number(connection.prepare('DELETE FROM catalog_skills WHERE id = ?')
+        .run(oldId).changes ?? 0);
+      if (deleted !== 1) throw new Error(`Unknown skill: ${oldId}`);
+      connection.prepare(`INSERT INTO catalog_skills
+        (id, slug, name, description, created_at, updated_at, record_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`)
+        .run(record.id, record.slug, record.name, record.description, record.createdAt,
+          record.updatedAt, json(record));
+      const stored = this.selectSkill<T>(connection, record.id);
+      if (!stored) throw new Error(`Failed to persist skill ${record.id}`);
+      return stored;
+    });
+  }
+
   deleteSkill(id: string): Promise<boolean> {
     return this.deleteById('catalog_skills', id, 'delete skill');
   }

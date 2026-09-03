@@ -84,6 +84,7 @@
         "@xterm/xterm": "^6.0.0",
         "@xyflow/react": "^12.11.2",
         "dockview": "^6.6.1",
+        "js-yaml": "^4.1.1",
         "mermaid": "^11.16.0",
         "monaco-editor": "^0.55.1",
         "radix-ui": "^1.6.7",
@@ -97,6 +98,7 @@
         "zustand": "^5.0.11",
       },
       "devDependencies": {
+        "@types/js-yaml": "^4.0.9",
         "@types/react": "^18.3.5",
         "@types/react-dom": "^18.3.0",
         "@vitejs/plugin-react": "^4.3.4",

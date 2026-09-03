@@ -44,7 +44,9 @@ describe('changed files card', () => {
     expect(html).toContain('aria-label="Skills used by this agent run"');
     expect(html).toContain('OpenAI-Docs');
     expect(html).toContain('frontend-design');
-    expect(html).not.toContain('>openai-docs</span>');
+    expect(html).toContain('title="Edit OpenAI-Docs skill"');
+    expect(html).toContain('aria-haspopup="dialog"');
+    expect(html).not.toContain('title="Edit openai-docs skill"');
   });
 
   test('renders a compact collapsed summary without mounting file rows', () => {
