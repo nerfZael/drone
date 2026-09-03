@@ -71,6 +71,63 @@ describe('MeshSocket requests', () => {
     expect(internals.pending.size).toBe(0);
   });
 
+  test('does not register a request when its socket is replaced while signing', async () => {
+    const signingStarted = Promise.withResolvers<void>();
+    const signingGate = Promise.withResolvers<void>();
+    const oldSent: string[] = [];
+    const nextSent: string[] = [];
+    const socket = new MeshSocket(
+      { deviceId: 'peer-a', endpoint: 'https://peer-a.test', role: 'primary' },
+      'network-a',
+      {
+        id: 'mobile-a',
+        name: 'Mobile',
+        platform: 'android',
+        publicKey: {},
+        async sign() {
+          signingStarted.resolve();
+          await signingGate.promise;
+          return 'signature';
+        },
+      },
+      {},
+      () => undefined,
+      () => undefined,
+      () => undefined,
+      () => undefined,
+      { handle: async () => null },
+      { inspectEnvelope: () => 'accept', acceptValidated: () => 'accept' },
+    );
+    const internals = socket as unknown as {
+      ready: boolean;
+      socket: Pick<WebSocket, 'readyState' | 'send'>;
+      pending: Map<string, unknown>;
+    };
+    const oldSocket = {
+      readyState: WebSocket.OPEN,
+      send(value: string) {
+        oldSent.push(value);
+      },
+    };
+    internals.ready = true;
+    internals.socket = oldSocket;
+
+    const request = socket.request('target-a', 'drone-control', 'files.list', {});
+    await signingStarted.promise;
+    internals.socket = {
+      readyState: WebSocket.OPEN,
+      send(value: string) {
+        nextSent.push(value);
+      },
+    };
+    signingGate.resolve();
+
+    await expect(request).rejects.toThrow('Mesh connection changed');
+    expect(oldSent).toEqual([]);
+    expect(nextSent).toEqual([]);
+    expect(internals.pending.size).toBe(0);
+  });
+
   test('cancels a snapshot returned after its initial request was aborted', async () => {
     const sent: string[] = [];
     const socket = new MeshSocket(

@@ -152,6 +152,9 @@ export class MeshSocket {
     // Signing can yield to the native key store. Do not miss an abort that arrives before the
     // pending-request listener can be installed.
     if (signal?.aborted) throw meshRequestCancelledError();
+    if (!this.ready || this.socket !== socket || socket.readyState !== WebSocket.OPEN) {
+      throw new Error('Mesh connection changed while the request was being signed');
+    }
     const serialized = JSON.stringify(request);
     const requestBytes =
       typeof TextEncoder === 'undefined'
