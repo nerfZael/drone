@@ -75,11 +75,13 @@ export class MeshSocket {
         reject(new Error('Connection timed out'));
       }, 12_000);
       socket.onmessage = (event) => {
-        void this.handleMessage(String(event.data), resolve, reject, timeout).catch((error) => {
-          clearTimeout(timeout);
-          socket.close();
-          reject(error instanceof Error ? error : new Error(String(error)));
-        });
+        void this.handleMessage(String(event.data), resolve, reject, timeout, socket).catch(
+          (error) => {
+            clearTimeout(timeout);
+            socket.close();
+            reject(error instanceof Error ? error : new Error(String(error)));
+          },
+        );
       };
       socket.onerror = () => {
         clearTimeout(timeout);
@@ -217,9 +219,11 @@ export class MeshSocket {
     resolveConnect: () => void,
     rejectConnect: (error: Error) => void,
     connectTimer: ReturnType<typeof setTimeout>,
+    sourceSocket: WebSocket | null = this.socket,
   ): Promise<void> {
+    if (!sourceSocket || this.socket !== sourceSocket) return;
     if (meshSocketFrameIsTooLarge(raw)) {
-      this.socket?.close(1009, 'mesh message is too large');
+      sourceSocket.close(1009, 'mesh message is too large');
       return;
     }
     const message = JSON.parse(raw);
@@ -237,13 +241,15 @@ export class MeshSocket {
         )
       )
         throw new Error('Connected device identity changed');
-      this.socket?.send(
+      const signature = await this.identity.sign(
+        socketAuthSigningText(this.identity.id, String(message.nonce)),
+      );
+      if (this.socket !== sourceSocket || sourceSocket.readyState !== WebSocket.OPEN) return;
+      sourceSocket.send(
         JSON.stringify({
           type: 'auth.response',
           deviceId: this.identity.id,
-          signature: await this.identity.sign(
-            socketAuthSigningText(this.identity.id, String(message.nonce)),
-          ),
+          signature,
         }),
       );
       return;
@@ -251,7 +257,7 @@ export class MeshSocket {
     if (message.type === 'auth.ready') {
       clearTimeout(connectTimer);
       if (message.networkId !== this.networkId || message.deviceId !== this.connection.deviceId) {
-        this.socket?.close();
+        sourceSocket.close();
         rejectConnect(new Error('The remote device belongs to a different mesh'));
         return;
       }
@@ -277,7 +283,7 @@ export class MeshSocket {
         message,
       );
       if (envelopeDecision === 'disconnect') {
-        this.socket?.close(4008, 'capability event rate limit reached');
+        sourceSocket.close(4008, 'capability event rate limit reached');
         return;
       }
       if (envelopeDecision === 'drop') return;
@@ -291,7 +297,7 @@ export class MeshSocket {
         event,
       );
       if (eventDecision === 'disconnect') {
-        this.socket?.close(4008, 'capability event rate limit reached');
+        sourceSocket.close(4008, 'capability event rate limit reached');
         return;
       }
       if (eventDecision === 'accept') this.onCapabilityEvent(event);
@@ -299,13 +305,13 @@ export class MeshSocket {
     }
     if (message.type === 'capability.request') {
       const response = await this.capabilityRouter.handle(message);
-      if (response && this.socket?.readyState === WebSocket.OPEN) {
+      if (response && this.socket === sourceSocket && sourceSocket.readyState === WebSocket.OPEN) {
         const serialized = JSON.stringify(response);
         const responseBytes =
           typeof TextEncoder === 'undefined'
             ? serialized.length * 3
             : new TextEncoder().encode(serialized).byteLength;
-        if (responseBytes <= MESH_SAFE_MESSAGE_BYTES) this.socket.send(serialized);
+        if (responseBytes <= MESH_SAFE_MESSAGE_BYTES) sourceSocket.send(serialized);
       }
       return;
     }

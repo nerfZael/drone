@@ -178,6 +178,79 @@ describe('MeshSocket requests', () => {
     expect(internals.pending.size).toBe(0);
   });
 
+  test('does not send a stale authentication signature on a replacement socket', async () => {
+    const signingStarted = Promise.withResolvers<void>();
+    const signingGate = Promise.withResolvers<void>();
+    const oldSent: string[] = [];
+    const nextSent: string[] = [];
+    const socket = new MeshSocket(
+      { deviceId: 'peer-a', endpoint: 'https://peer-a.test', role: 'primary' },
+      'network-a',
+      {
+        id: 'mobile-a',
+        name: 'Mobile',
+        platform: 'android',
+        publicKey: {},
+        async sign() {
+          signingStarted.resolve();
+          await signingGate.promise;
+          return 'signature';
+        },
+      },
+      {},
+      () => undefined,
+      () => undefined,
+      () => undefined,
+      () => undefined,
+      { handle: async () => null },
+      { inspectEnvelope: () => 'accept', acceptValidated: () => 'accept' },
+    );
+    const internals = socket as unknown as {
+      socket: Pick<WebSocket, 'readyState' | 'send'>;
+      handleMessage(
+        raw: string,
+        resolve: () => void,
+        reject: (error: Error) => void,
+        timer: ReturnType<typeof setTimeout>,
+        sourceSocket: Pick<WebSocket, 'readyState' | 'send'>,
+      ): Promise<void>;
+    };
+    const oldSocket = {
+      readyState: WebSocket.OPEN,
+      send(value: string) {
+        oldSent.push(value);
+      },
+    };
+    const nextSocket = {
+      readyState: WebSocket.OPEN,
+      send(value: string) {
+        nextSent.push(value);
+      },
+    };
+    internals.socket = oldSocket;
+    const timer = setTimeout(() => undefined, 1_000);
+    const handling = internals.handleMessage(
+      JSON.stringify({
+        type: 'auth.challenge',
+        deviceId: 'peer-a',
+        nonce: 'nonce-a',
+        signature: 'peer-signature',
+      }),
+      () => undefined,
+      () => undefined,
+      timer,
+      oldSocket,
+    );
+    await signingStarted.promise;
+    internals.socket = nextSocket;
+    signingGate.resolve();
+    await handling;
+    clearTimeout(timer);
+
+    expect(oldSent).toEqual([]);
+    expect(nextSent).toEqual([]);
+  });
+
   test('cancels a snapshot returned after its initial request was aborted', async () => {
     const sent: string[] = [];
     const socket = new MeshSocket(
