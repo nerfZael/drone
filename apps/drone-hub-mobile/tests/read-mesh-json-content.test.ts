@@ -90,6 +90,7 @@ describe('mesh JSON content reader', () => {
     ).rejects.toThrow('snapshot changed');
 
     let cancelled = false;
+    const cancelledTokens: string[] = [];
     await expect(
       readMeshJsonContent(
         async (offset) => {
@@ -105,8 +106,87 @@ describe('mesh JSON content reader', () => {
             snapshotToken: 'snapshot-a',
           };
         },
-        { isCancelled: () => cancelled },
+        {
+          isCancelled: () => cancelled,
+          cancelSnapshot: async (token) => {
+            cancelledTokens.push(token);
+          },
+        },
       ),
     ).rejects.toThrow('cancelled');
+    expect(cancelledTokens).toEqual(['snapshot-a']);
+  });
+
+  test('restarts one expired transfer from byte zero without mixing snapshots', async () => {
+    const expected = { text: 'r'.repeat(MESH_BINARY_CHUNK_BYTES * 2) };
+    const content = new TextEncoder().encode(JSON.stringify(expected));
+    let generation = 0;
+    let expired = false;
+    let oldRequestsActive = 0;
+    let restartedWhileOldActive = false;
+    const zeroOffsets: string[] = [];
+    const result = await readMeshJsonContent(async (offset, token) => {
+      if (offset === 0) {
+        generation += 1;
+        zeroOffsets.push(`snapshot-${generation}`);
+        if (generation === 2 && oldRequestsActive > 0) restartedWhileOldActive = true;
+      } else if (generation === 1) {
+        oldRequestsActive += 1;
+        await Bun.sleep(offset === MESH_BINARY_CHUNK_BYTES ? 1 : 8);
+        oldRequestsActive -= 1;
+        if (!expired) {
+          expired = true;
+          throw Object.assign(new Error('evicted'), { code: 'TRANSFER_EXPIRED' });
+        }
+      }
+      const bytes = content.slice(offset, offset + MESH_BINARY_CHUNK_BYTES);
+      const snapshotToken = token ?? `snapshot-${generation}`;
+      return {
+        encoding: 'base64-json-utf8',
+        offset,
+        bytes: bytes.length,
+        totalBytes: content.length,
+        done: offset + bytes.length === content.length,
+        dataBase64: fromByteArray(bytes),
+        snapshotToken,
+      };
+    });
+
+    expect(result).toEqual(expected);
+    expect(zeroOffsets).toEqual(['snapshot-1', 'snapshot-2']);
+    expect(restartedWhileOldActive).toBe(false);
+  });
+
+  test('does not loop after a restarted transfer expires or after cancellation', async () => {
+    let starts = 0;
+    await expect(
+      readMeshJsonContent(async (offset) => {
+        if (offset === 0) starts += 1;
+        if (offset > 0) throw Object.assign(new Error('expired'), { code: 'TRANSFER_EXPIRED' });
+        const bytes = new Uint8Array(MESH_BINARY_CHUNK_BYTES);
+        return {
+          encoding: 'base64-json-utf8',
+          offset,
+          bytes: bytes.length,
+          totalBytes: MESH_BINARY_CHUNK_BYTES + 1,
+          done: false,
+          dataBase64: fromByteArray(bytes),
+          snapshotToken: `snapshot-${starts}`,
+        };
+      }),
+    ).rejects.toThrow('expired');
+    expect(starts).toBe(2);
+
+    let cancelledStarts = 0;
+    await expect(
+      readMeshJsonContent(
+        async () => {
+          cancelledStarts += 1;
+          throw Object.assign(new Error('expired'), { code: 'TRANSFER_EXPIRED' });
+        },
+        { isCancelled: () => true },
+      ),
+    ).rejects.toThrow('cancelled');
+    expect(cancelledStarts).toBe(1);
   });
 });

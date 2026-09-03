@@ -494,13 +494,68 @@ describeSocketSuite('host runtime routing api', () => {
     );
     expect(Buffer.from(await unversionedRange.arrayBuffer())).toEqual(imageBytes.subarray(-3));
 
-    for (const range of ['bytes=999-', 'bytes=-0', 'bytes=invalid']) {
+    const fullHead = await authorizedFetch(routeUrl('media', revision), { method: 'HEAD' });
+    expect(fullHead.status).toBe(200);
+    expect(fullHead.headers.get('content-length')).toBe(String(imageBytes.length));
+    expect(fullHead.headers.get('cache-control')).toBe(
+      'private, max-age=31536000, immutable',
+    );
+    expect(await fullHead.text()).toBe('');
+
+    const rangeHead = await authorizedFetch(routeUrl('media', revision), {
+      method: 'HEAD',
+      headers: { range: 'bytes=1-4' },
+    });
+    expect(rangeHead.status).toBe(206);
+    expect(rangeHead.headers.get('content-range')).toBe(`bytes 1-4/${imageBytes.length}`);
+    expect(rangeHead.headers.get('content-length')).toBe('4');
+    expect(await rangeHead.text()).toBe('');
+
+    const mismatchHead = await authorizedFetch(routeUrl('media', staleRevision), {
+      method: 'HEAD',
+    });
+    expect(mismatchHead.status).toBe(409);
+    expect(mismatchHead.headers.get('cache-control')).toBe('no-store');
+    expect(await mismatchHead.text()).toBe('');
+
+    const exactEof = await authorizedFetch(routeUrl('media'), {
+      headers: { range: `bytes=${imageBytes.length - 1}-` },
+    });
+    expect(exactEof.status).toBe(206);
+    expect(Buffer.from(await exactEof.arrayBuffer())).toEqual(imageBytes.subarray(-1));
+    const largeSuffix = await authorizedFetch(routeUrl('media'), {
+      headers: { range: `bytes=-${imageBytes.length + 20}` },
+    });
+    expect(largeSuffix.status).toBe(206);
+    expect(Buffer.from(await largeSuffix.arrayBuffer())).toEqual(imageBytes);
+
+    for (const range of ['bytes=999-', 'bytes=-0', 'bytes=invalid', 'bytes=0-1,4-5']) {
       const invalidRange = await authorizedFetch(routeUrl('media', revision), {
         headers: { range },
       });
       expect(invalidRange.status).toBe(416);
       expect(invalidRange.headers.get('content-range')).toBe(`bytes */${imageBytes.length}`);
+      expect(invalidRange.headers.get('accept-ranges')).toBe('bytes');
     }
+
+    const emptyPath = path.join(droneRoot, 'empty.png');
+    fs.writeFileSync(emptyPath, '');
+    const emptyUrl = routeUrl('media');
+    emptyUrl.searchParams.set('path', emptyPath);
+    const emptyHead = await authorizedFetch(emptyUrl, { method: 'HEAD' });
+    expect(emptyHead.status).toBe(200);
+    expect(emptyHead.headers.get('content-length')).toBe('0');
+    const emptyRange = await authorizedFetch(emptyUrl, {
+      headers: { range: 'bytes=0-' },
+    });
+    expect(emptyRange.status).toBe(416);
+    expect(emptyRange.headers.get('content-range')).toBe('bytes */0');
+
+    const boundedUrl = routeUrl('media');
+    boundedUrl.searchParams.set('maxBytes', String(imageBytes.length - 1));
+    const bounded = await authorizedFetch(boundedUrl);
+    expect(bounded.status).toBe(413);
+    expect(await bounded.json()).toMatchObject({ ok: false });
   });
 
   test('preflights every host batch mutation before changing the first item', async () => {

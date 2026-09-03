@@ -394,12 +394,19 @@ export class DvmApi {
     containerName: string,
     cmd: string,
     args: string[] = [],
-    options?: { timeoutMs?: number; containerAlreadyReady?: boolean },
+    options?: {
+      timeoutMs?: number;
+      containerAlreadyReady?: boolean;
+      maxOutputBytes?: number;
+      signal?: AbortSignal;
+    },
   ): Promise<DvmRunResult> {
     try {
       return await this.manager.docker.execCommandDetailed(containerName, [cmd, ...args], {
         timeoutMs: options?.timeoutMs,
         containerAlreadyReady: options?.containerAlreadyReady,
+        maxOutputBytes: options?.maxOutputBytes,
+        signal: options?.signal,
       });
     } catch (error: any) {
       return { code: 1, stdout: '', stderr: error?.message ?? String(error) };

@@ -48,6 +48,7 @@ export async function createDeviceMeshService(options: {
       store,
       () => capabilities.list(),
       () => router.broadcastMembership(),
+      (deviceId) => router.accessChanged(deviceId),
     ),
   );
   capabilities.register(

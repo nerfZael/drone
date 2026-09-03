@@ -16,24 +16,48 @@ type MeshContentChunk = {
 
 type ReadMeshJsonOptions = {
   isCancelled?: () => boolean;
+  cancelSnapshot?: (snapshotToken: string) => Promise<void>;
 };
 
 export async function readMeshJsonContent(
   requestChunk: (offset: number, snapshotToken?: string) => Promise<MeshContentChunk>,
   options: ReadMeshJsonOptions = {},
 ): Promise<any> {
-  const first = validateChunk(await requestChunk(0), 0, null, undefined);
-  ensureActive(options);
-  if (first.done) return decodeJson([first.bytes], first.totalBytes);
-
-  if (
-    first.snapshotToken &&
-    first.bytes.length === MESH_BINARY_CHUNK_BYTES &&
-    first.totalBytes > first.bytes.length
-  ) {
-    return await readPipelined(requestChunk, first, options);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await readMeshJsonContentOnce(requestChunk, options);
+    } catch (error) {
+      ensureActive(options);
+      if (attempt > 0 || !isExpiredTransfer(error)) throw error;
+    }
   }
-  return await readSequential(requestChunk, first, options);
+  throw new Error('The remote content transfer could not be restarted');
+}
+
+async function readMeshJsonContentOnce(
+  requestChunk: (offset: number, snapshotToken?: string) => Promise<MeshContentChunk>,
+  options: ReadMeshJsonOptions,
+): Promise<any> {
+  let first: ValidatedChunk | null = null;
+  try {
+    first = validateChunk(await requestChunk(0), 0, null, undefined);
+    ensureActive(options);
+    if (first.done) return decodeJson([first.bytes], first.totalBytes);
+
+    if (
+      first.snapshotToken &&
+      first.bytes.length === MESH_BINARY_CHUNK_BYTES &&
+      first.totalBytes > first.bytes.length
+    ) {
+      return await readPipelined(requestChunk, first, options);
+    }
+    return await readSequential(requestChunk, first, options);
+  } catch (error) {
+    if (first?.snapshotToken) {
+      void options.cancelSnapshot?.(first.snapshotToken).catch(() => undefined);
+    }
+    throw error;
+  }
 }
 
 async function readSequential(
@@ -97,9 +121,13 @@ async function readPipelined(
       throw error;
     }
   };
-  await Promise.all(
+  const settled = await Promise.allSettled(
     Array.from({ length: Math.min(MAX_PIPELINED_REQUESTS, chunkCount - 1) }, () => worker()),
   );
+  const failed = settled.find(
+    (result): result is PromiseRejectedResult => result.status === 'rejected',
+  );
+  if (failed) throw failed.reason;
   return decodeJson(chunks, first.totalBytes);
 }
 
@@ -163,4 +191,8 @@ function decodeJson(chunks: Uint8Array[], totalBytes: number) {
 
 function ensureActive(options: ReadMeshJsonOptions) {
   if (options.isCancelled?.()) throw new Error('The content load was cancelled');
+}
+
+function isExpiredTransfer(error: unknown): boolean {
+  return String((error as any)?.code ?? '') === 'TRANSFER_EXPIRED';
 }

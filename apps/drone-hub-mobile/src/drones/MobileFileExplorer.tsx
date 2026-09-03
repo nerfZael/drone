@@ -262,6 +262,15 @@ export function MobileFileExplorer({
                 currentContextKeyRef.current !== requestContextKey ||
                 contextVersionRef.current !== requestContextVersion ||
                 directoryRequestSeqRef.current[path] !== requestSeq,
+              cancelSnapshot: async (snapshotToken) => {
+                await requestDroneControl(targetId, 'files.list', {
+                  droneId,
+                  chatName,
+                  path,
+                  snapshotToken,
+                  cancelSnapshot: true,
+                });
+              },
             },
           );
         }

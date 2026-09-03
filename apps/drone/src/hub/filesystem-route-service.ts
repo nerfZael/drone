@@ -5,10 +5,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 
-import {
-  browserCacheControlForFileRevision,
-  buildContainerFsListScript,
-} from './filesystem-media';
+import { browserCacheControlForFileRevision, buildContainerFsListScript } from './filesystem-media';
 import {
   buildContainerMediaRangeScript,
   parseRequestedByteRange,
@@ -130,6 +127,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
     range: ResolvedByteRange;
     mime: string;
     cacheControl: string;
+    headOnly?: boolean;
   }) => {
     input.res.statusCode = input.range.kind === 'range' ? 206 : 200;
     input.res.setHeader('content-type', input.mime);
@@ -141,8 +139,8 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
         `bytes ${input.range.start}-${input.range.end}/${input.totalBytes}`,
       );
     }
-    input.res.setHeader('content-length', String(input.bytes.length));
-    input.res.end(input.bytes);
+    input.res.setHeader('content-length', String(input.range.length));
+    input.res.end(input.headOnly ? undefined : input.bytes);
   };
   const addHostGitIgnoreMetadata = async <T extends { path: string }>(
     directoryPath: string,
@@ -159,14 +157,22 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
       isGitIgnored: ignoredPaths.has(path.resolve(entry.path)),
     }));
   };
-  const hashHostFile = async (filePath: string): Promise<string> =>
+  const hashHostFileWithSize = async (
+    filePath: string,
+  ): Promise<{ revision: string; size: number }> =>
     await new Promise((resolve, reject) => {
       const hash = crypto.createHash('sha256');
+      let size = 0;
       const stream = createReadStream(filePath);
-      stream.on('data', (chunk) => hash.update(chunk));
+      stream.on('data', (chunk) => {
+        hash.update(chunk);
+        size += Buffer.byteLength(chunk);
+      });
       stream.on('error', reject);
-      stream.on('end', () => resolve(`sha256:${hash.digest('hex')}`));
+      stream.on('end', () => resolve({ revision: `sha256:${hash.digest('hex')}`, size }));
     });
+  const hashHostFile = async (filePath: string): Promise<string> =>
+    (await hashHostFileWithSize(filePath)).revision;
   const readFileRevision = async ({
     drone,
     droneName,
@@ -184,11 +190,18 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
         error.code = 'ENOENT';
         throw error;
       }
+      const scanned = await hashHostFileWithSize(resolvedPath);
+      if (scanned.size !== stat.size) {
+        throw Object.assign(new Error('file changed while it was being read'), {
+          statusCode: 409,
+          code: 'FILE_CHANGED_DURING_READ',
+        });
+      }
       return {
         path: resolvedPath,
         size: Number.isFinite(stat.size) ? Math.max(0, Math.floor(stat.size)) : 0,
         mtimeMs: Number.isFinite(stat.mtimeMs) ? Math.max(0, Math.floor(stat.mtimeMs)) : null,
-        revision: await hashHostFile(resolvedPath),
+        revision: scanned.revision,
       };
     }
     return await withReadonlyDroneContainer(
@@ -201,6 +214,8 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
           'size=$(stat -c %s -- "$target" 2>/dev/null || echo 0)',
           'mtime=$(stat -c %Y -- "$target" 2>/dev/null || echo 0)',
           'revision=$(sha256sum -- "$target" | cut -d " " -f 1)',
+          'size_after=$(stat -c %s -- "$target" 2>/dev/null || echo -1)',
+          'if [ "$size_after" != "$size" ]; then echo "__ERR__\tchanged"; exit 6; fi',
           'printf "__META__\\t%s\\t%s\\t%s\\n" "$size" "$mtime" "$revision"',
         ].join('\n');
         const result = await dvmExec(containerName, 'bash', ['-lc', script]);
@@ -820,7 +835,12 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
               targetPath,
             });
             lastHashAt = Date.now();
-            const event = lastRevision == null ? 'snapshot' : current.revision !== lastRevision ? 'changed' : null;
+            const event =
+              lastRevision == null
+                ? 'snapshot'
+                : current.revision !== lastRevision
+                  ? 'changed'
+                  : null;
             lastRevision = current.revision;
             lastMissing = false;
             if (event) writeFileSseEvent(res, event, { ok: true, id: droneId, ...current });
@@ -870,10 +890,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
         hostWatcher?.on('error', () => {
           // The periodic revision check remains the correctness fallback.
         });
-        const timer = setInterval(
-          () => void poll(hostRuntime),
-          hostRuntime ? 30_000 : 2_000,
-        );
+        const timer = setInterval(() => void poll(hostRuntime), hostRuntime ? 30_000 : 2_000);
         timer.unref?.();
         const heartbeat = setInterval(() => {
           if (!closed && !res.writableEnded) res.write(': keepalive\n\n');
@@ -935,6 +952,13 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
                 (await hostMimeType(resolvedPath)) ?? '',
                 stat.size,
               );
+              const scanned = includeRevision ? await hashHostFileWithSize(resolvedPath) : null;
+              if (scanned && scanned.size !== stat.size) {
+                throw Object.assign(new Error('file changed while it was being read'), {
+                  statusCode: 409,
+                  code: 'FILE_CHANGED_DURING_READ',
+                });
+              }
               json(res, 200, {
                 ok: true,
                 id: droneId,
@@ -946,7 +970,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
                 mtimeMs: Number.isFinite(stat.mtimeMs)
                   ? Math.max(0, Math.floor(stat.mtimeMs))
                   : null,
-                revision: includeRevision ? await hashHostFile(resolvedPath) : null,
+                revision: scanned?.revision ?? null,
               });
               return;
             }
@@ -956,8 +980,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
               .toLowerCase();
             const emptyTextFile = isEmptyTextFile(targetPath, read.buf.length);
             const textLike =
-              emptyTextFile ||
-              (isLikelyTextMimeType(mimeRaw) && !bufferLooksBinary(read.buf));
+              emptyTextFile || (isLikelyTextMimeType(mimeRaw) && !bufferLooksBinary(read.buf));
             if (!textLike) {
               const inferredMime = mimeRaw.startsWith('image/')
                 ? mimeRaw
@@ -1047,7 +1070,11 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
                   'fi',
                 ]),
             ...(includeRevision
-              ? ['revision=$(sha256sum -- "$target" | cut -d " " -f 1)']
+              ? [
+                  'revision=$(sha256sum -- "$target" | cut -d " " -f 1)',
+                  'size_after=$(wc -c < "$target" | tr -d "[:space:]")',
+                  'if [ "$size_after" != "$size" ]; then echo "__ERR__\tchanged"; exit 6; fi',
+                ]
               : ['revision=""']),
             'printf "__META__\t%s\t%s\t%s\t%s\n" "$mime" "$size" "$mtime" "$revision"',
             ...(metadataOnly ? [] : ['base64 < "$target" | tr -d "\\n"']),
@@ -1219,8 +1246,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
 
           const emptyTextFile = isEmptyTextFile(effectivePath, buf.length);
           const textLike =
-            emptyTextFile ||
-            (isLikelyTextMimeType(mimeRaw) && !bufferLooksBinary(buf));
+            emptyTextFile || (isLikelyTextMimeType(mimeRaw) && !bufferLooksBinary(buf));
           if (!textLike) {
             const inferredMime = mimeRaw.startsWith('image/')
               ? mimeRaw
@@ -1451,11 +1477,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
                   throw err;
                 }
                 throw new Error(
-                  (
-                    writeOut.stderr ||
-                    writeOut.stdout ||
-                    'failed writing file'
-                  ).trim(),
+                  (writeOut.stderr || writeOut.stdout || 'failed writing file').trim(),
                 );
               }
 
@@ -1701,10 +1723,10 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
         }
       }
 
-      // GET /api/drones/:id/fs/media?path=/...
+      // GET/HEAD /api/drones/:id/fs/media?path=/...
       // Returns image/video bytes for preview rendering.
       if (
-        method === 'GET' &&
+        (method === 'GET' || method === 'HEAD') &&
         parts.length === 5 &&
         parts[0] === 'api' &&
         parts[1] === 'drones' &&
@@ -1728,15 +1750,28 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
         }
         const requestedRevision = u.searchParams.get('revision');
         const requestedRange = parseRequestedByteRange(req.headers.range);
+        const requestedMaxBytes = Number(u.searchParams.get('maxBytes'));
+        const mediaMaxBytes =
+          Number.isSafeInteger(requestedMaxBytes) && requestedMaxBytes > 0
+            ? Math.min(FS_MEDIA_MAX_BYTES, requestedMaxBytes)
+            : FS_MEDIA_MAX_BYTES;
+        const headOnly = method === 'HEAD';
+        const abortController = new AbortController();
+        req.once('aborted', () => abortController.abort());
+        res.once('close', () => {
+          if (!res.writableEnded) abortController.abort();
+        });
 
         if (runtime === 'host') {
           try {
             const resolvedPath = path.resolve(targetPath);
             const read = await readHostMediaRange({
               targetPath: resolvedPath,
-              maxBytes: FS_MEDIA_MAX_BYTES,
+              maxBytes: mediaMaxBytes,
               requestedRange,
               includeRevision: Boolean(String(requestedRevision ?? '').trim()),
+              retainBytes: !headOnly,
+              signal: abortController.signal,
             });
             const mimeRaw = String(await hostMimeType(resolvedPath))
               .trim()
@@ -1777,6 +1812,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
               range: read.range,
               mime,
               cacheControl,
+              headOnly,
             });
             return;
           } catch (e: any) {
@@ -1784,6 +1820,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
             const explicitStatus = Number((e as any)?.statusCode ?? 0);
             if (explicitStatus === 416) {
               res.statusCode = 416;
+              res.setHeader('accept-ranges', 'bytes');
               res.setHeader('content-range', `bytes */${Math.max(0, Number(e?.size) || 0)}`);
               res.end();
               return;
@@ -1795,7 +1832,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
                 : 'unknown';
               json(res, 413, {
                 ok: false,
-                error: `media too large (${sizeText} bytes, max ${FS_MEDIA_MAX_BYTES})`,
+                error: `media too large (${sizeText} bytes, max ${mediaMaxBytes})`,
                 id: droneId,
                 name: droneName,
                 path: path.resolve(targetPath),
@@ -1816,16 +1853,21 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
 
         const script = buildContainerMediaRangeScript({
           targetPath,
-          maxBytes: FS_MEDIA_MAX_BYTES,
+          maxBytes: mediaMaxBytes,
           requestedRange,
           includeRevision: Boolean(String(requestedRevision ?? '').trim()),
+          includeBody: !headOnly,
         });
 
         try {
           const r = await withReadonlyDroneContainer(
             { requestedDroneName: droneName, droneEntry: resolved.drone },
             async ({ containerName }: any) => {
-              return await dvmExec(containerName, 'bash', ['-lc', script]);
+              return await dvmExec(containerName, 'bash', ['-lc', script], {
+                timeoutMs: 60_000,
+                maxOutputBytes: Math.ceil((mediaMaxBytes * 4) / 3) + 64 * 1024,
+                signal: abortController.signal,
+              });
             },
           );
           const stdout = String(r.stdout ?? '');
@@ -1845,7 +1887,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
             if (large) {
               json(res, 413, {
                 ok: false,
-                error: `media too large (${large[1]} bytes, max ${FS_MEDIA_MAX_BYTES})`,
+                error: `media too large (${large[1]} bytes, max ${mediaMaxBytes})`,
                 id: droneId,
                 name: droneName,
                 path: targetPath,
@@ -1855,6 +1897,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
             const invalidRange = out.match(/__ERR__\s+range\s+(\d+)/i);
             if (invalidRange) {
               res.statusCode = 416;
+              res.setHeader('accept-ranges', 'bytes');
               res.setHeader('content-range', `bytes */${invalidRange[1]}`);
               res.end();
               return;
@@ -1968,7 +2011,11 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
             });
             return;
           }
-          if (buf.length !== count || start + count > total) {
+          if (
+            (!headOnly && buf.length !== count) ||
+            (headOnly && buf.length !== 0) ||
+            start + count > total
+          ) {
             json(res, 409, {
               ok: false,
               code: 'FILE_CHANGED_DURING_READ',
@@ -1996,7 +2043,15 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
           const range: ResolvedByteRange = partial
             ? { kind: 'range', start, end: start + count - 1, length: count }
             : { kind: 'full', start: 0, end: Math.max(-1, total - 1), length: total };
-          sendMediaBytes({ res, bytes: buf, totalBytes: total, range, mime, cacheControl });
+          sendMediaBytes({
+            res,
+            bytes: buf,
+            totalBytes: total,
+            range,
+            mime,
+            cacheControl,
+            headOnly,
+          });
           return;
         } catch (e: any) {
           const msg = e?.message ?? String(e);
@@ -2014,7 +2069,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
           if (large) {
             json(res, 413, {
               ok: false,
-              error: `media too large (${large[1]} bytes, max ${FS_MEDIA_MAX_BYTES})`,
+              error: `media too large (${large[1]} bytes, max ${mediaMaxBytes})`,
               id: droneId,
               name: droneName,
               path: targetPath,
@@ -2024,6 +2079,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
           const invalidRange = msg.match(/__ERR__\s+range\s+(\d+)/i);
           if (invalidRange) {
             res.statusCode = 416;
+            res.setHeader('accept-ranges', 'bytes');
             res.setHeader('content-range', `bytes */${invalidRange[1]}`);
             res.end();
             return;

@@ -1046,6 +1046,14 @@ export function createDroneControlCapability(
         const directoryPath = optionalText(payload.path) ?? '';
         const scope = ['files.list', droneId, directoryPath].join('\u0000');
         if (payload.snapshotToken) {
+          if (payload.cancelSnapshot === true) {
+            contentSnapshots.cancel({
+              snapshotToken: payload.snapshotToken,
+              sourceDeviceId,
+              scope,
+            });
+            return { cancelled: true };
+          }
           return {
             contentChunk: contentSnapshots.resume({
               snapshotToken: payload.snapshotToken,
@@ -1156,14 +1164,29 @@ export function createDroneControlCapability(
           };
         }
         if (payload.snapshotToken) {
+          const resumedRevision = optionalText(payload.expectedRevision);
+          const isMediaSnapshot = Boolean(resumedRevision || payload.mediaSnapshot === true);
+          const resumeScope = isMediaSnapshot
+            ? [contentScope, resumedRevision ?? ''].join('\u0000')
+            : contentScope;
+          if (isMediaSnapshot && !resumedRevision) {
+            throw Object.assign(new Error('expectedRevision is required to resume media'), {
+              code: 'INVALID_REQUEST',
+            });
+          }
+          if (payload.cancelSnapshot === true) {
+            contentSnapshots.cancel({
+              snapshotToken: payload.snapshotToken,
+              sourceDeviceId,
+              scope: resumeScope,
+            });
+            return { cancelled: true };
+          }
           const resumed = contentSnapshots.resume({
             snapshotToken: payload.snapshotToken,
             sourceDeviceId,
-            scope: contentScope,
-            encoding:
-              payload.expectedRevision || payload.mediaSnapshot === true
-                ? 'base64-binary'
-                : 'base64-json-utf8',
+            scope: resumeScope,
+            encoding: isMediaSnapshot ? 'base64-binary' : 'base64-json-utf8',
             offset: payload.contentOffset,
           });
           if (resumed.chunk.encoding === 'base64-binary') {
@@ -1204,6 +1227,22 @@ export function createDroneControlCapability(
           };
         }
 
+        const initialMediaKind = metadata.kind;
+        const initialMediaPath = requiredText(metadata?.path ?? filePath, 'preview path');
+        metadata = await localHubRequest(access, `${fsFilePath}&metadata=1&revision=1`);
+        if (metadata?.kind !== 'image' && metadata?.kind !== 'video') {
+          throw Object.assign(new Error('the file is no longer previewable media'), {
+            code: 'FILE_CHANGED_DURING_READ',
+          });
+        }
+        if (
+          metadata.kind !== initialMediaKind ||
+          requiredText(metadata?.path ?? filePath, 'preview path') !== initialMediaPath
+        ) {
+          throw Object.assign(new Error('the file changed while it was loading'), {
+            code: 'FILE_CHANGED_DURING_READ',
+          });
+        }
         const size = Number(metadata?.size);
         if (!Number.isSafeInteger(size) || size < 0)
           throw Object.assign(new Error('the Hub returned invalid file metadata'), {
@@ -1220,22 +1259,29 @@ export function createDroneControlCapability(
             ),
             { code: 'FILE_TOO_LARGE' },
           );
-        if (!optionalText(metadata?.revision) && !expectedRevision) {
-          metadata = await localHubRequest(access, `${fsFilePath}&metadata=1&revision=1`);
-        }
-        const revision = optionalText(metadata?.revision) ?? expectedRevision ?? null;
+        const revision = optionalText(metadata?.revision);
         const previewPath = requiredText(metadata?.path ?? filePath, 'preview path');
         if (!revision) {
           throw Object.assign(new Error('the Hub did not return a media revision'), {
             code: 'INVALID_RESPONSE',
           });
         }
-        let releaseSnapshotReservation = contentSnapshots.reserve(size);
+        if (expectedRevision && revision !== expectedRevision) {
+          throw Object.assign(new Error('the file changed while it was loading'), {
+            code: 'FILE_REVISION_MISMATCH',
+          });
+        }
+        // Account for both the route's bounded read and the receiving buffer. This also
+        // serializes worst-case media generation so stale metadata cannot multiply memory use.
+        let releaseSnapshotReservation = contentSnapshots.reserve(
+          MOBILE_FILE_MEDIA_MAX_BYTES * 2,
+        );
         let media: Awaited<ReturnType<typeof localHubBinaryRequest>>;
         try {
           media = await localHubBinaryRequest(
             access,
-            `/api/drones/${encodedDrone}/fs/media?path=${encodeURIComponent(previewPath)}&revision=${encodeURIComponent(revision)}`,
+            `/api/drones/${encodedDrone}/fs/media?path=${encodeURIComponent(previewPath)}&revision=${encodeURIComponent(revision)}&maxBytes=${MOBILE_FILE_MEDIA_MAX_BYTES}`,
+            { maxBytes: MOBILE_FILE_MEDIA_MAX_BYTES, expectedBytes: size },
           );
           releaseSnapshotReservation();
           releaseSnapshotReservation = () => undefined;
@@ -1245,6 +1291,14 @@ export function createDroneControlCapability(
         if (media.bytes.length !== size) {
           throw Object.assign(new Error('the Hub returned an invalid media chunk'), {
             code: 'INVALID_RESPONSE',
+          });
+        }
+        if (
+          (metadata.kind === 'image' && !media.contentType.toLowerCase().startsWith('image/')) ||
+          (metadata.kind === 'video' && !media.contentType.toLowerCase().startsWith('video/'))
+        ) {
+          throw Object.assign(new Error('the Hub returned a different media type'), {
+            code: 'FILE_CHANGED_DURING_READ',
           });
         }
         const preview = {
@@ -1258,7 +1312,7 @@ export function createDroneControlCapability(
         const snapshot = contentSnapshots.createBinary({
           content: media.bytes,
           sourceDeviceId,
-          scope: contentScope,
+          scope: [contentScope, revision].join('\u0000'),
           metadata: preview,
           offset: payload.contentOffset,
         });
@@ -1344,6 +1398,14 @@ export function createDroneControlCapability(
           messageId ? `message:${messageId}` : `turn:${turnId ?? ''}`,
         ].join('\u0000');
         if (payload.snapshotToken && (messageId || turnId)) {
+          if (payload.cancelSnapshot === true) {
+            contentSnapshots.cancel({
+              snapshotToken: payload.snapshotToken,
+              sourceDeviceId,
+              scope: contentScope,
+            });
+            return { cancelled: true };
+          }
           return {
             droneId,
             chatName,
@@ -1923,6 +1985,13 @@ export function createDroneControlCapability(
         watch.subscribers.delete(deviceId);
         if (watch.subscribers.size === 0) stopWatch(key);
       }
+    },
+    disconnectDevice(deviceId) {
+      // Transfers are connection-scoped: a reconnect starts from a fresh, authorized snapshot.
+      contentSnapshots.revokeDevice(deviceId);
+    },
+    accessChanged(deviceId) {
+      contentSnapshots.revokeDevice(deviceId);
     },
   };
 }

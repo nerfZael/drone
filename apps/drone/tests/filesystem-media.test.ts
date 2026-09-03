@@ -1,7 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdtempSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
@@ -49,8 +57,20 @@ describe('filesystem media ranges', () => {
       length: 10,
     });
     expect(resolveByteRange(parseRequestedByteRange('bytes=10-11'), 10)).toBeNull();
+    expect(resolveByteRange(parseRequestedByteRange('bytes=9-'), 10)).toMatchObject({
+      start: 9,
+      end: 9,
+      length: 1,
+    });
+    expect(resolveByteRange(parseRequestedByteRange('bytes=-20'), 10)).toMatchObject({
+      start: 0,
+      end: 9,
+      length: 10,
+    });
     expect(resolveByteRange(parseRequestedByteRange('bytes=-0'), 10)).toBeNull();
     expect(resolveByteRange(parseRequestedByteRange('bytes=unsafe'), 10)).toBeNull();
+    expect(resolveByteRange(parseRequestedByteRange('bytes=0-1,4-5'), 10)).toBeNull();
+    expect(resolveByteRange(parseRequestedByteRange('bytes=0-'), 0)).toBeNull();
   });
 
   test('reads only an unversioned host range and hashes the exact revisioned stream', async () => {
@@ -79,6 +99,33 @@ describe('filesystem media ranges', () => {
       expect(revisioned.servedRevision).toBe(
         `sha256:${crypto.createHash('sha256').update(bytes).digest('hex')}`,
       );
+
+      const allocations: number[] = [];
+      const openEnded = await readHostMediaRange({
+        targetPath: filePath,
+        maxBytes: 400_000,
+        requestedRange: parseRequestedByteRange('bytes=1-'),
+        includeRevision: true,
+        allocateBytes: (length) => {
+          allocations.push(length);
+          return Buffer.alloc(length);
+        },
+      });
+      expect(openEnded.bytes).toEqual(bytes.subarray(1));
+      expect(allocations).toEqual([bytes.length - 1]);
+
+      const head = await readHostMediaRange({
+        targetPath: filePath,
+        maxBytes: 400_000,
+        requestedRange: parseRequestedByteRange('bytes=5-9'),
+        includeRevision: true,
+        retainBytes: false,
+      });
+      expect(head.bytes.length).toBe(0);
+      expect(head.range).toMatchObject({ kind: 'range', start: 5, end: 9, length: 5 });
+      expect(head.servedRevision).toBe(
+        `sha256:${crypto.createHash('sha256').update(bytes).digest('hex')}`,
+      );
       await expect(
         readHostMediaRange({
           targetPath: filePath,
@@ -95,6 +142,18 @@ describe('filesystem media ranges', () => {
           includeRevision: false,
         }),
       ).rejects.toMatchObject({ statusCode: 413, size: bytes.length });
+
+      const controller = new AbortController();
+      controller.abort();
+      await expect(
+        readHostMediaRange({
+          targetPath: filePath,
+          maxBytes: 400_000,
+          requestedRange: parseRequestedByteRange('bytes=1-2'),
+          includeRevision: true,
+          signal: controller.signal,
+        }),
+      ).rejects.toMatchObject({ name: 'AbortError' });
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -128,6 +187,26 @@ describe('filesystem media ranges', () => {
       expect(metadata[7]).toBe(String(bytes.length));
       expect(transferred).toEqual(bytes.subarray(130_000, 131_001));
 
+      const headOutput = execFileSync(
+        'bash',
+        [
+          '-lc',
+          buildContainerMediaRangeScript({
+            targetPath: filePath,
+            maxBytes: 500_000,
+            requestedRange: parseRequestedByteRange('bytes=-20'),
+            includeRevision: true,
+            includeBody: false,
+          }),
+        ],
+        { encoding: 'utf8' },
+      );
+      const headParts = headOutput.trimEnd().split('\n');
+      expect(headParts).toHaveLength(1);
+      const headMetadata = headParts[0].split('\t');
+      expect(headMetadata.slice(2, 6)).toEqual(['400000', '399980', '20', '1']);
+      expect(headMetadata[6]).toBe(crypto.createHash('sha256').update(bytes).digest('hex'));
+
       try {
         execFileSync(
           'bash',
@@ -146,6 +225,43 @@ describe('filesystem media ranges', () => {
       } catch (error: any) {
         expect(String(error?.stdout ?? '')).toMatch(/__ERR__\s+range\s+400000/);
       }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('container range failures clean bounded snapshot files', () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'drone-container-media-failure-'));
+    const bin = path.join(root, 'bin');
+    const tmp = path.join(root, 'tmp');
+    const filePath = path.join(root, 'video.mp4');
+    mkdirSync(bin);
+    mkdirSync(tmp);
+    writeFileSync(filePath, Buffer.alloc(200_000, 4));
+    const sha = path.join(bin, 'sha256sum');
+    writeFileSync(sha, '#!/bin/sh\nexit 7\n');
+    chmodSync(sha, 0o755);
+    try {
+      expect(() =>
+        execFileSync(
+          'bash',
+          [
+            '-c',
+            buildContainerMediaRangeScript({
+              targetPath: filePath,
+              maxBytes: 300_000,
+              requestedRange: parseRequestedByteRange('bytes=10-20'),
+              includeRevision: true,
+            }),
+          ],
+          {
+            encoding: 'utf8',
+            env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp },
+            stdio: ['ignore', 'pipe', 'pipe'],
+          },
+        ),
+      ).toThrow();
+      expect(readdirSync(tmp)).toEqual([]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -207,8 +323,9 @@ describe('filesystem list metadata', () => {
   test('chunks directories whose operands exceed the conservative argv budget', () => {
     const root = mkdtempSync(path.join(os.tmpdir(), 'drone-fs-list-argv-'));
     try {
-      const names = Array.from({ length: 900 }, (_, index) =>
-        `${String(index).padStart(4, '0')}-${'x'.repeat(170)}.txt`,
+      const names = Array.from(
+        { length: 900 },
+        (_, index) => `${String(index).padStart(4, '0')}-${'x'.repeat(170)}.txt`,
       );
       expect(names.reduce((total, name) => total + name.length + 3, 0)).toBeGreaterThan(128 * 1024);
       for (const name of names) writeFileSync(path.join(root, name), 'x');

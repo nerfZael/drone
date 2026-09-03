@@ -130,7 +130,10 @@ export function useFilePreview({
   );
 
   const load = React.useCallback(
-    async (nextRequest: PreviewRequest, options?: { background?: boolean }) => {
+    async (
+      nextRequest: PreviewRequest,
+      options?: { background?: boolean; transferRestarted?: boolean },
+    ) => {
       const version = ++loadVersion.current;
       const background = options?.background === true && previewRef.current != null;
       if (!background) setLoading(true);
@@ -166,6 +169,15 @@ export function useFilePreview({
             },
             {
               isCancelled: () => version !== loadVersion.current,
+              cancelSnapshot: async (snapshotToken) => {
+                await requestDroneControl(nextRequest.targetId, 'file.preview', {
+                  droneId: nextRequest.droneId,
+                  chatName: nextRequest.chatName,
+                  path: nextRequest.path,
+                  snapshotToken,
+                  cancelSnapshot: true,
+                });
+              },
             },
           );
           if (version !== loadVersion.current) return;
@@ -288,10 +300,21 @@ export function useFilePreview({
                   typeof chunk?.snapshotToken === 'string' && chunk.snapshotToken.trim()
                     ? chunk.snapshotToken.trim()
                     : undefined;
-                return { bytes, snapshotToken };
+                return { bytes, snapshotToken, done: chunk?.done === true };
               },
               appendBytes,
               isCancelled: () => version !== loadVersion.current,
+              cancelSnapshot: async (snapshotToken) => {
+                await requestDroneControl(nextRequest.targetId, 'file.preview', {
+                  droneId: nextRequest.droneId,
+                  chatName: nextRequest.chatName,
+                  path: nextRequest.path,
+                  expectedRevision: metadata.revision,
+                  mediaSnapshot: true,
+                  snapshotToken,
+                  cancelSnapshot: true,
+                });
+              },
             });
             offset = totalBytes;
             firstResult = null;
@@ -352,6 +375,14 @@ export function useFilePreview({
           },
         });
       } catch (nextError: any) {
+        if (
+          version === loadVersion.current &&
+          !options?.transferRestarted &&
+          String(nextError?.code ?? '') === 'TRANSFER_EXPIRED'
+        ) {
+          await load(nextRequest, { background, transferRestarted: true });
+          return;
+        }
         if (version === loadVersion.current) {
           const message = nextError?.message ?? String(nextError);
           const displayMessage = /not granted|not permitted|access|denied/i.test(message)

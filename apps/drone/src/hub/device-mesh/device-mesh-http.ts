@@ -685,6 +685,9 @@ export class DeviceMeshHttp {
       current.updatedAt = new Date().toISOString();
       return current;
     });
+    if (Array.isArray(body.grants)) {
+      await this.router.accessChanged(deviceId).catch(() => undefined);
+    }
     await this.router.broadcastMembership();
     json(response, 200, { ok: true, device });
   }

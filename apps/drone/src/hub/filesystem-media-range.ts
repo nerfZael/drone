@@ -17,7 +17,8 @@ export type ResolvedByteRange =
 export function parseRequestedByteRange(value: unknown): RequestedByteRange {
   const header = String(value ?? '').trim();
   if (!header.startsWith('bytes=')) return { kind: 'full' };
-  const raw = header.slice('bytes='.length).split(',')[0]?.trim() ?? '';
+  const raw = header.slice('bytes='.length).trim();
+  if (raw.includes(',')) return { kind: 'invalid' };
   const match = /^(\d*)-(\d*)$/.exec(raw);
   if (!match) return { kind: 'invalid' };
   const startRaw = match[1] ?? '';
@@ -57,6 +58,9 @@ export async function readHostMediaRange(input: {
   maxBytes: number;
   requestedRange: RequestedByteRange;
   includeRevision: boolean;
+  retainBytes?: boolean;
+  signal?: AbortSignal;
+  allocateBytes?: (length: number) => Buffer;
 }): Promise<{
   bytes: Buffer;
   totalBytes: number;
@@ -85,19 +89,19 @@ export async function readHostMediaRange(input: {
     });
   }
 
-  if (range.kind === 'full') {
-    const bytes = await fs.readFile(input.targetPath);
-    ensureStableLength(bytes.length, totalBytes);
-    return {
-      bytes,
-      totalBytes,
-      range,
-      servedRevision: input.includeRevision ? sha256(bytes) : null,
-    };
-  }
+  const retainBytes = input.retainBytes !== false;
   if (!input.includeRevision) {
     return {
-      bytes: await readExactRange(input.targetPath, range.start, range.length),
+      bytes: retainBytes
+        ? await readExactRange(
+            input.targetPath,
+            range.start,
+            range.length,
+            totalBytes,
+            input.signal,
+            input.allocateBytes,
+          )
+        : Buffer.alloc(0),
       totalBytes,
       range,
       servedRevision: null,
@@ -105,9 +109,12 @@ export async function readHostMediaRange(input: {
   }
 
   const hash = crypto.createHash('sha256');
-  const selected: Buffer[] = [];
+  const selected = retainBytes
+    ? (input.allocateBytes ?? ((length) => Buffer.alloc(length)))(range.length)
+    : Buffer.alloc(0);
+  let selectedBytes = 0;
   let streamedBytes = 0;
-  for await (const rawChunk of createReadStream(input.targetPath)) {
+  for await (const rawChunk of createReadStream(input.targetPath, { signal: input.signal })) {
     const chunk = Buffer.isBuffer(rawChunk) ? rawChunk : Buffer.from(rawChunk);
     hash.update(chunk);
     const chunkStart = streamedBytes;
@@ -115,15 +122,21 @@ export async function readHostMediaRange(input: {
     const selectedStart = Math.max(range.start, chunkStart);
     const selectedEnd = Math.min(range.end + 1, chunkEnd);
     if (selectedStart < selectedEnd) {
-      selected.push(chunk.subarray(selectedStart - chunkStart, selectedEnd - chunkStart));
+      if (retainBytes) {
+        const sourceStart = selectedStart - chunkStart;
+        const copied = chunk.copy(selected, selectedBytes, sourceStart, selectedEnd - chunkStart);
+        selectedBytes += copied;
+      }
     }
     streamedBytes = chunkEnd;
+    if (streamedBytes > input.maxBytes) {
+      throw Object.assign(new Error('media too large'), { statusCode: 413, size: streamedBytes });
+    }
   }
   ensureStableLength(streamedBytes, totalBytes);
-  const bytes = Buffer.concat(selected, range.length);
-  ensureStableLength(bytes.length, range.length);
+  if (retainBytes) ensureStableLength(selectedBytes, range.length);
   return {
-    bytes,
+    bytes: selected,
     totalBytes,
     range,
     servedRevision: `sha256:${hash.digest('hex')}`,
@@ -135,6 +148,7 @@ export function buildContainerMediaRangeScript(input: {
   maxBytes: number;
   requestedRange: RequestedByteRange;
   includeRevision: boolean;
+  includeBody?: boolean;
 }): string {
   const rangeKind = input.requestedRange.kind;
   const rangeStart = input.requestedRange.kind === 'from' ? input.requestedRange.start : 0;
@@ -152,6 +166,7 @@ export function buildContainerMediaRangeScript(input: {
     `range_end=${String(rangeEnd)}`,
     `suffix_length=${String(suffixLength)}`,
     `include_revision=${input.includeRevision ? '1' : '0'}`,
+    `include_body=${input.includeBody === false ? '0' : '1'}`,
     'if [ ! -f "$target" ]; then echo "__ERR__\tnot-file"; exit 3; fi',
     'size=$(wc -c < "$target" | tr -d "[:space:]")',
     'if [ -z "$size" ]; then size=0; fi',
@@ -181,29 +196,33 @@ export function buildContainerMediaRangeScript(input: {
     'if command -v file >/dev/null 2>&1; then mime=$(file -Lb --mime-type -- "$target" 2>/dev/null || true); fi',
     'revision=""',
     'actual_size="$size"',
-    'data="$target"',
+    'data=""',
     'tmp=""',
-    'cleanup() { if [ -n "$tmp" ]; then rm -rf -- "$tmp"; fi; }',
+    'watchdog_pid=""',
+    'cleanup() { if [ -n "$watchdog_pid" ]; then kill "$watchdog_pid" 2>/dev/null || true; fi; if [ -n "$tmp" ]; then rm -rf -- "$tmp"; fi; }',
     'trap cleanup EXIT',
-    'if [ "$include_revision" -eq 1 ] && [ "$partial" -eq 1 ]; then',
+    "trap 'exit 124' HUP INT TERM",
+    '( sleep 55; kill -TERM "$$" ) &',
+    'watchdog_pid="$!"',
+    'if [ "$include_revision" -eq 1 ] || { [ "$partial" -eq 0 ] && [ "$include_body" -eq 1 ]; }; then',
     '  tmp=$(mktemp -d)',
-    '  data="$tmp/data"',
-    '  set +e',
-    '  tee -p >(sha256sum | awk \'{print $1}\' > "$tmp/hash") >(wc -c | tr -d "[:space:]" > "$tmp/size") < "$target" | dd iflag=skip_bytes,count_bytes skip="$start" count="$count" status=none > "$data"',
-    '  pipeline_status=("${PIPESTATUS[@]}")',
-    '  wait',
-    '  wait_status=$?',
-    '  set -e',
-    '  if [ "${pipeline_status[0]}" -ne 0 ] || [ "${pipeline_status[1]}" -ne 0 ] || [ "$wait_status" -ne 0 ]; then echo "__ERR__\tread-failed"; exit 6; fi',
-    '  revision=$(cat "$tmp/hash")',
-    '  actual_size=$(cat "$tmp/size")',
-    'elif [ "$partial" -eq 1 ]; then',
+    '  snapshot="$tmp/snapshot"',
+    '  if ! head -c "$((max + 1))" -- "$target" > "$snapshot"; then echo "__ERR__\tread-failed"; exit 6; fi',
+    '  actual_size=$(wc -c < "$snapshot" | tr -d "[:space:]")',
+    '  if [ "$actual_size" -gt "$max" ]; then printf "__ERR__\ttoo-large\t%s\n" "$actual_size"; exit 4; fi',
+    '  if [ "$include_revision" -eq 1 ]; then revision=$(sha256sum -- "$snapshot" | awk \'{print $1}\'); fi',
+    '  if [ "$include_body" -eq 1 ]; then',
+    '    data="$tmp/data"',
+    '    dd if="$snapshot" iflag=skip_bytes,count_bytes skip="$start" count="$count" status=none > "$data"',
+    '  fi',
+    'elif [ "$partial" -eq 1 ] && [ "$include_body" -eq 1 ]; then',
     '  tmp=$(mktemp -d)',
     '  data="$tmp/data"',
     '  dd if="$target" iflag=skip_bytes,count_bytes skip="$start" count="$count" status=none > "$data"',
     'fi',
+    'if [ "$include_revision" -eq 0 ]; then actual_size=$(wc -c < "$target" | tr -d "[:space:]"); fi',
     'printf "__META__\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "$mime" "$size" "$start" "$count" "$partial" "$revision" "$actual_size"',
-    'base64 < "$data" | tr -d "\\n"',
+    'if [ "$include_body" -eq 1 ]; then base64 < "$data" | tr -d "\\n"; fi',
   ].join('\n');
 }
 
@@ -213,25 +232,31 @@ function safeInteger(value: string): number | null {
   return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
-async function readExactRange(filePath: string, start: number, length: number): Promise<Buffer> {
-  const bytes = Buffer.alloc(length);
+async function readExactRange(
+  filePath: string,
+  start: number,
+  length: number,
+  expectedTotalBytes: number,
+  signal?: AbortSignal,
+  allocateBytes: (length: number) => Buffer = Buffer.alloc,
+): Promise<Buffer> {
+  const bytes = allocateBytes(length);
   const handle = await fs.open(filePath, 'r');
   let offset = 0;
   try {
     while (offset < length) {
+      if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError');
       const read = await handle.read(bytes, offset, length - offset, start + offset);
       if (read.bytesRead === 0) break;
       offset += read.bytesRead;
     }
+    const finalStat = await handle.stat();
+    ensureStableLength(finalStat.size, expectedTotalBytes);
   } finally {
     await handle.close();
   }
   ensureStableLength(offset, length);
   return bytes;
-}
-
-function sha256(bytes: Buffer): string {
-  return `sha256:${crypto.createHash('sha256').update(bytes).digest('hex')}`;
 }
 
 function ensureStableLength(actual: number, expected: number) {

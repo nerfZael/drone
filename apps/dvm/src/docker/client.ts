@@ -388,7 +388,12 @@ export class DockerClient {
   async execCommandDetailed(
     name: string,
     command: string[],
-    options?: { timeoutMs?: number; containerAlreadyReady?: boolean }
+    options?: {
+      timeoutMs?: number;
+      containerAlreadyReady?: boolean;
+      maxOutputBytes?: number;
+      signal?: AbortSignal;
+    }
   ): Promise<ExecCommandResult> {
     const container = options?.containerAlreadyReady
       ? this.docker.getContainer(name)
@@ -414,13 +419,35 @@ export class DockerClient {
       let done = false;
       let timeout: ReturnType<typeof setTimeout> | null = null;
       let streamRef: NodeJS.ReadWriteStream | null = null;
+      let outputBytes = 0;
+
+      const stopStream = () => {
+        try {
+          const stream: any = streamRef;
+          if (stream && typeof stream.destroy === 'function') stream.destroy();
+        } catch {
+          // ignore
+        }
+      };
+
+      const abort = () => {
+        stopStream();
+        finish({ code: 130, stdout: stdoutText, stderr: `${stderrText}Command aborted` });
+      };
 
       const finish = (res: ExecCommandResult) => {
         if (done) return;
         done = true;
         if (timeout) clearTimeout(timeout);
+        options?.signal?.removeEventListener('abort', abort);
         resolve(res);
       };
+
+      if (options?.signal?.aborted) {
+        finish({ code: 130, stdout: '', stderr: 'Command aborted' });
+        return;
+      }
+      options?.signal?.addEventListener('abort', abort, { once: true });
 
       const timeoutMs =
         typeof options?.timeoutMs === 'number' && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
@@ -428,12 +455,7 @@ export class DockerClient {
           : 0;
       if (timeoutMs > 0) {
         timeout = setTimeout(() => {
-          try {
-            const s: any = streamRef;
-            if (s && typeof s.destroy === 'function') s.destroy();
-          } catch {
-            // ignore
-          }
+          stopStream();
           finish({
             code: 124,
             stdout: stdoutText,
@@ -443,6 +465,14 @@ export class DockerClient {
       }
 
       exec.start({ hijack: true, stdin: false }, (err: Error | null, stream?: NodeJS.ReadWriteStream) => {
+        if (done) {
+          try {
+            (stream as any)?.destroy?.();
+          } catch {
+            // ignore
+          }
+          return;
+        }
         if (err) {
           finish({ code: 127, stdout: stdoutText, stderr: `${stderrText}${err.message}` });
           return;
@@ -458,9 +488,23 @@ export class DockerClient {
         const stderr = new PassThrough();
 
         stdout.on('data', (chunk: Buffer) => {
+          if (done) return;
+          outputBytes += chunk.length;
+          if (options?.maxOutputBytes && outputBytes > options.maxOutputBytes) {
+            stopStream();
+            finish({ code: 125, stdout: stdoutText, stderr: `${stderrText}Command output limit exceeded` });
+            return;
+          }
           stdoutText += chunk.toString();
         });
         stderr.on('data', (chunk: Buffer) => {
+          if (done) return;
+          outputBytes += chunk.length;
+          if (options?.maxOutputBytes && outputBytes > options.maxOutputBytes) {
+            stopStream();
+            finish({ code: 125, stdout: stdoutText, stderr: `${stderrText}Command output limit exceeded` });
+            return;
+          }
           stderrText += chunk.toString();
         });
 

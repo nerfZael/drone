@@ -20,6 +20,7 @@ type Snapshot = {
   metadata: unknown;
   expiresAt: number;
   createdAt: number;
+  deliveredOffsets: Set<number>;
 };
 
 type SnapshotStoreOptions = {
@@ -44,6 +45,7 @@ export class MeshContentSnapshotStore {
   private totalBytes = 0;
   private reservedBytes = 0;
   private closed = false;
+  private expiryTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: SnapshotStoreOptions = {}) {
     this.maxSnapshotBytes = options.maxSnapshotBytes ?? DEFAULT_MAX_SNAPSHOT_BYTES;
@@ -102,8 +104,16 @@ export class MeshContentSnapshotStore {
     ) {
       throw transferError('The transfer snapshot does not match this request', 'INVALID_REQUEST');
     }
+    const chunk = snapshotChunk(snapshot.content, input.offset, snapshot.encoding, token, true);
+    snapshot.deliveredOffsets.add(chunk.offset);
+    if (
+      snapshot.deliveredOffsets.size >= Math.ceil(snapshot.content.length / MESH_BINARY_CHUNK_BYTES)
+    ) {
+      this.remove(token, snapshot);
+      this.scheduleExpiry();
+    }
     return {
-      chunk: snapshotChunk(snapshot.content, input.offset, snapshot.encoding, token, true),
+      chunk,
       metadata: snapshot.metadata,
     };
   }
@@ -112,6 +122,20 @@ export class MeshContentSnapshotStore {
     for (const [token, snapshot] of this.snapshots) {
       if (snapshot.sourceDeviceId === sourceDeviceId) this.remove(token, snapshot);
     }
+    this.scheduleExpiry();
+  }
+
+  cancel(input: { snapshotToken: unknown; sourceDeviceId: string; scope: string }): void {
+    this.ensureOpen();
+    const token = String(input.snapshotToken ?? '').trim();
+    this.pruneExpired();
+    const snapshot = this.snapshots.get(token);
+    if (!snapshot) return;
+    if (snapshot.sourceDeviceId !== input.sourceDeviceId || snapshot.scope !== input.scope) {
+      throw transferError('The transfer snapshot does not match this request', 'INVALID_REQUEST');
+    }
+    this.remove(token, snapshot);
+    this.scheduleExpiry();
   }
 
   reserve(contentBytes: number): () => void {
@@ -120,7 +144,7 @@ export class MeshContentSnapshotStore {
     if (
       !Number.isSafeInteger(contentBytes) ||
       contentBytes < 0 ||
-      contentBytes > this.maxSnapshotBytes
+      contentBytes > this.maxTotalBytes
     ) {
       throw transferError('The transfer is too large to snapshot', 'RESOURCE_LIMIT');
     }
@@ -140,6 +164,8 @@ export class MeshContentSnapshotStore {
   clear() {
     this.snapshots.clear();
     this.totalBytes = 0;
+    if (this.expiryTimer) clearTimeout(this.expiryTimer);
+    this.expiryTimer = null;
   }
 
   close() {
@@ -173,6 +199,7 @@ export class MeshContentSnapshotStore {
       }
       token = this.createToken();
       const now = this.now();
+      const initialChunk = snapshotChunk(input.content, input.offset, input.encoding, token, false);
       this.snapshots.set(token, {
         content: input.content,
         encoding: input.encoding,
@@ -181,8 +208,11 @@ export class MeshContentSnapshotStore {
         metadata: input.metadata,
         expiresAt: now + this.ttlMs,
         createdAt: now,
+        deliveredOffsets: new Set([initialChunk.offset]),
       });
       this.totalBytes += input.content.length;
+      this.scheduleExpiry();
+      return { chunk: initialChunk, metadata: input.metadata };
     }
     return {
       chunk: snapshotChunk(input.content, input.offset, input.encoding, token, false),
@@ -195,6 +225,7 @@ export class MeshContentSnapshotStore {
     for (const [token, snapshot] of this.snapshots) {
       if (snapshot.expiresAt <= now) this.remove(token, snapshot);
     }
+    this.scheduleExpiry();
   }
 
   private evictUntilAvailable(contentBytes: number) {
@@ -214,6 +245,18 @@ export class MeshContentSnapshotStore {
     this.totalBytes -= snapshot.content.length;
   }
 
+  private scheduleExpiry() {
+    if (this.expiryTimer) clearTimeout(this.expiryTimer);
+    this.expiryTimer = null;
+    let nextExpiry = Infinity;
+    for (const snapshot of this.snapshots.values()) {
+      nextExpiry = Math.min(nextExpiry, snapshot.expiresAt);
+    }
+    if (!Number.isFinite(nextExpiry)) return;
+    this.expiryTimer = setTimeout(() => this.pruneExpired(), Math.max(0, nextExpiry - this.now()));
+    this.expiryTimer.unref?.();
+  }
+
   private ensureOpen() {
     if (this.closed) throw transferError('The transfer store is closed', 'CAPABILITY_CLOSED');
   }
@@ -229,7 +272,10 @@ function snapshotChunk(
   const parsedOffset = Number(offsetRaw ?? 0);
   if (
     strictOffset &&
-    (!Number.isSafeInteger(parsedOffset) || parsedOffset < 0 || parsedOffset >= content.length)
+    (!Number.isSafeInteger(parsedOffset) ||
+      parsedOffset < 0 ||
+      parsedOffset >= content.length ||
+      parsedOffset % MESH_BINARY_CHUNK_BYTES !== 0)
   ) {
     throw transferError('The transfer offset is outside the snapshot', 'INVALID_REQUEST');
   }

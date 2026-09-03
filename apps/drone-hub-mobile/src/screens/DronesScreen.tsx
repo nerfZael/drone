@@ -1166,6 +1166,15 @@ export function DronesScreen({
             targetIdRef.current !== destinationId ||
             selectedRef.current?.id !== droneId ||
             chatNameRef.current !== activeChat,
+          cancelSnapshot: async (snapshotToken) => {
+            await requestDroneControl(destinationId, 'chat.read', {
+              droneId,
+              chatName: activeChat,
+              ...(native ? { messageId } : { turnId }),
+              snapshotToken,
+              cancelSnapshot: true,
+            });
+          },
         },
       );
       if (

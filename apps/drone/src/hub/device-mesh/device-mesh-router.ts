@@ -11,6 +11,7 @@ import {
   socketServerAuthSigningText,
   WORKSPACE_CAPABILITY,
   type CapabilityResponse,
+  type MeshDevice,
   type SignedCapabilityRequest,
 } from '@drone/device-protocol';
 import { RawData, WebSocket, WebSocketServer } from 'ws';
@@ -18,6 +19,7 @@ import { CapabilityRegistry } from './capability-registry';
 import { DeviceMembershipSynchronizer } from './device-membership-synchronizer';
 import { DeviceMeshAuditStore } from './device-mesh-audit-store';
 import { DeviceMeshRequestClient } from './device-mesh-request-client';
+import { DeviceMeshResponseCache } from './device-mesh-response-cache';
 import {
   signDeviceText,
   signSocketChallenge,
@@ -28,6 +30,12 @@ import { DeviceMeshStore } from './device-mesh-store';
 import { DeviceRouteManager } from './device-route-manager';
 
 type AuthenticatedSocket = { ws: WebSocket; peerDeviceId: string; outbound: boolean };
+type ValidatedRequest = {
+  state: Awaited<ReturnType<DeviceMeshStore['read']>>;
+  source: MeshDevice;
+  expires: number;
+  replayKey: string;
+};
 
 function send(ws: WebSocket, payload: unknown): boolean {
   if (ws.readyState !== WebSocket.OPEN) return false;
@@ -67,6 +75,14 @@ function isBulkTransferRequest(request: SignedCapabilityRequest): boolean {
   );
 }
 
+function isSnapshotChunkResponse(response: CapabilityResponse): boolean {
+  const result =
+    response.ok && response.result && typeof response.result === 'object'
+      ? (response.result as Record<string, any>)
+      : null;
+  return Boolean(result?.contentChunk?.dataBase64 || result?.mediaChunk?.dataBase64);
+}
+
 export class DeviceMeshRouter {
   private readonly server = new WebSocketServer({
     noServer: true,
@@ -85,10 +101,7 @@ export class DeviceMeshRouter {
     }
   >();
   private readonly replay = new Map<string, number>();
-  private readonly responses = new Map<
-    string,
-    { expires: number; fingerprint: string; response: CapabilityResponse }
-  >();
+  private readonly responses = new DeviceMeshResponseCache();
   private readonly requestTimes = new Map<string, number[]>();
   private readonly bulkRequestTimes = new Map<string, number[]>();
   private readonly connecting = new Set<string>();
@@ -133,6 +146,7 @@ export class DeviceMeshRouter {
     this.connecting.clear();
     for (const route of this.routes.values()) clearTimeout(route.timer);
     this.routes.clear();
+    this.responses.clear();
     this.requestClient.close();
     this.server.close();
   }
@@ -171,7 +185,14 @@ export class DeviceMeshRouter {
   }
 
   disconnect(deviceId: string): void {
+    this.responses.deleteDevice(deviceId);
+    void this.capabilities.disconnectDevice(deviceId);
     this.connections.get(deviceId)?.ws.close(4003, 'device revoked');
+  }
+
+  async accessChanged(deviceId: string): Promise<void> {
+    this.responses.deleteDevice(deviceId);
+    await this.capabilities.accessChanged(deviceId);
   }
 
   async announceEndpoint(endpoint: string | null): Promise<void> {
@@ -301,6 +322,8 @@ export class DeviceMeshRouter {
     connection.ws.on('close', () => {
       if (this.connections.get(connection.peerDeviceId)?.ws === connection.ws) {
         this.connections.delete(connection.peerDeviceId);
+        this.responses.deleteDevice(connection.peerDeviceId);
+        void this.capabilities.disconnectDevice(connection.peerDeviceId);
         this.notifyConnectionsChanged();
       }
       for (const [requestId, route] of this.routes) {
@@ -569,7 +592,12 @@ export class DeviceMeshRouter {
     const responseKey = `${request.sourceDeviceId}:${request.requestId}`;
     const fingerprint = crypto.createHash('sha256').update(JSON.stringify(request)).digest('hex');
     const cached = this.responses.get(responseKey);
-    if (cached && cached.expires > Date.now()) {
+    if (cached) {
+      const validation = await this.validateRequest(request, false);
+      if (!('state' in validation)) {
+        send(connection.ws, validation);
+        return;
+      }
       send(
         connection.ws,
         cached.fingerprint === fingerprint
@@ -583,57 +611,27 @@ export class DeviceMeshRouter {
       return;
     }
     const response = await this.execute(request);
-    if (this.responses.size >= 10_000)
-      this.responses.delete(this.responses.keys().next().value as string);
-    this.responses.set(responseKey, {
-      expires: Date.now() + 5 * 60_000,
-      fingerprint,
-      response,
-    });
+    if (
+      request.capability !== WORKSPACE_CAPABILITY.id &&
+      !bulkTransfer &&
+      !isSnapshotChunkResponse(response)
+    ) {
+      this.responses.set({
+        key: responseKey,
+        deviceId: request.sourceDeviceId,
+        requestExpiresAt: Date.parse(request.expiresAt),
+        fingerprint,
+        response,
+      });
+    }
     send(connection.ws, response);
   }
 
   private async execute(request: SignedCapabilityRequest): Promise<CapabilityResponse> {
     for (const [key, expiry] of this.replay) if (expiry <= Date.now()) this.replay.delete(key);
-    for (const [key, cached] of this.responses)
-      if (cached.expires <= Date.now()) this.responses.delete(key);
-    const state = await this.store.read();
-    const source = state.devices[request.sourceDeviceId];
-    if (!source || source.revokedAt)
-      return await this.denied(request, 'DEVICE_REVOKED', 'source device is not active');
-    const issued = Date.parse(request.issuedAt);
-    const expires = Date.parse(request.expiresAt);
-    if (
-      !Number.isFinite(issued) ||
-      !Number.isFinite(expires) ||
-      issued > Date.now() + 30_000 ||
-      expires < Date.now() ||
-      expires - issued > 120_000
-    ) {
-      return await this.denied(
-        request,
-        'REQUEST_EXPIRED',
-        'request timestamp is outside the allowed window',
-      );
-    }
-    const replayKey = `${source.id}:${request.nonce}`;
-    if ((this.replay.get(replayKey) ?? 0) > Date.now())
-      return await this.denied(request, 'REPLAYED_REQUEST', 'request nonce was already used');
-    const { signature, ...unsigned } = request;
-    if (!verifyDeviceText(source.publicKey, capabilityRequestSigningText(unsigned), signature)) {
-      return await this.denied(request, 'INVALID_SIGNATURE', 'request signature is invalid');
-    }
-    if (
-      // Workspace access is scoped by source device and workspace root inside its handler.
-      request.capability !== WORKSPACE_CAPABILITY.id &&
-      !isGranted(source.grants, request.capability, request.capabilityVersion, request.operation)
-    ) {
-      return await this.denied(
-        request,
-        'PERMISSION_DENIED',
-        'this device has not granted that operation',
-      );
-    }
+    const validation = await this.validateRequest(request, true);
+    if (!('state' in validation)) return validation;
+    const { state, source, expires, replayKey } = validation;
     this.replay.set(replayKey, expires);
     try {
       const result = await this.capabilities.invoke(
@@ -672,6 +670,50 @@ export class DeviceMeshRouter {
         error?.message ?? String(error),
       );
     }
+  }
+
+  private async validateRequest(
+    request: SignedCapabilityRequest,
+    enforceReplay: boolean,
+  ): Promise<ValidatedRequest | CapabilityResponse> {
+    const state = await this.store.read();
+    const source = state.devices[request.sourceDeviceId];
+    if (!source || source.revokedAt)
+      return await this.denied(request, 'DEVICE_REVOKED', 'source device is not active');
+    const issued = Date.parse(request.issuedAt);
+    const expires = Date.parse(request.expiresAt);
+    if (
+      !Number.isFinite(issued) ||
+      !Number.isFinite(expires) ||
+      issued > Date.now() + 30_000 ||
+      expires < Date.now() ||
+      expires - issued > 120_000
+    ) {
+      return await this.denied(
+        request,
+        'REQUEST_EXPIRED',
+        'request timestamp is outside the allowed window',
+      );
+    }
+    const replayKey = `${source.id}:${request.nonce}`;
+    if (enforceReplay && (this.replay.get(replayKey) ?? 0) > Date.now())
+      return await this.denied(request, 'REPLAYED_REQUEST', 'request nonce was already used');
+    const { signature, ...unsigned } = request;
+    if (!verifyDeviceText(source.publicKey, capabilityRequestSigningText(unsigned), signature)) {
+      return await this.denied(request, 'INVALID_SIGNATURE', 'request signature is invalid');
+    }
+    if (
+      // Workspace access is scoped by source device and workspace root inside its handler.
+      request.capability !== WORKSPACE_CAPABILITY.id &&
+      !isGranted(source.grants, request.capability, request.capabilityVersion, request.operation)
+    ) {
+      return await this.denied(
+        request,
+        'PERMISSION_DENIED',
+        'this device has not granted that operation',
+      );
+    }
+    return { state, source, expires, replayKey };
   }
 
   private async denied(

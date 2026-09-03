@@ -7,6 +7,7 @@ type Result = {
   offset: number;
   bytes: Uint8Array;
   snapshotToken?: string;
+  done: boolean;
 };
 
 describe('pipelined mobile media chunks', () => {
@@ -21,6 +22,7 @@ describe('pipelined mobile media chunks', () => {
         offset / MESH_BINARY_CHUNK_BYTES,
       ),
       snapshotToken: 'snapshot-a',
+      done: offset + Math.min(MESH_BINARY_CHUNK_BYTES, totalBytes - offset) === totalBytes,
     });
 
     await readPipelinedMediaChunks({
@@ -49,11 +51,15 @@ describe('pipelined mobile media chunks', () => {
     const requests: number[] = [];
     const writes: number[] = [];
     await readPipelinedMediaChunks({
-      firstResult: { offset: 0, bytes: new Uint8Array([1, 2]) } satisfies Result,
+      firstResult: { offset: 0, bytes: new Uint8Array([1, 2]), done: false } satisfies Result,
       totalBytes: 5,
       requestResult: async (offset) => {
         requests.push(offset);
-        return { offset, bytes: new Uint8Array(offset === 2 ? [3, 4] : [5]) };
+        return {
+          offset,
+          bytes: new Uint8Array(offset === 2 ? [3, 4] : [5]),
+          done: offset === 4,
+        };
       },
       validateResult: (result, offset) => {
         expect(result.offset).toBe(offset);
@@ -71,7 +77,9 @@ describe('pipelined mobile media chunks', () => {
       offset: 0,
       bytes: new Uint8Array(MESH_BINARY_CHUNK_BYTES),
       snapshotToken: 'snapshot-a',
+      done: false,
     };
+    const cancelledSnapshots: string[] = [];
     const run = (requestResult: (offset: number) => Promise<Result>, cancelled = () => false) =>
       readPipelinedMediaChunks({
         firstResult: first,
@@ -83,6 +91,9 @@ describe('pipelined mobile media chunks', () => {
         },
         appendBytes: () => undefined,
         isCancelled: cancelled,
+        cancelSnapshot: async (token) => {
+          cancelledSnapshots.push(token);
+        },
       });
 
     await expect(
@@ -90,6 +101,7 @@ describe('pipelined mobile media chunks', () => {
         offset: offset + 1,
         bytes: new Uint8Array(MESH_BINARY_CHUNK_BYTES),
         snapshotToken: 'snapshot-a',
+        done: true,
       })),
     ).rejects.toThrow('invalid offset');
     await expect(
@@ -97,6 +109,7 @@ describe('pipelined mobile media chunks', () => {
         offset,
         bytes: new Uint8Array(MESH_BINARY_CHUNK_BYTES),
         snapshotToken: 'snapshot-b',
+        done: true,
       })),
     ).rejects.toThrow('snapshot changed');
     await expect(run(async () => Promise.reject(new Error('network failed')))).rejects.toThrow(
@@ -108,9 +121,43 @@ describe('pipelined mobile media chunks', () => {
           offset,
           bytes: new Uint8Array(MESH_BINARY_CHUNK_BYTES),
           snapshotToken: 'snapshot-a',
+          done: true,
         }),
         () => true,
       ),
     ).rejects.toThrow('cancelled');
+    expect(cancelledSnapshots).toEqual(['snapshot-a', 'snapshot-a', 'snapshot-a', 'snapshot-a']);
+  });
+
+  test('rejects chunks that do not exactly fit the declared transfer', async () => {
+    const run = (firstResult: Result, requestResult = async () => firstResult) =>
+      readPipelinedMediaChunks({
+        firstResult,
+        totalBytes: 5,
+        requestResult,
+        validateResult: (result) => result,
+        appendBytes: () => undefined,
+      });
+
+    await expect(run({ offset: 0, bytes: new Uint8Array(6), done: true })).rejects.toThrow(
+      'invalid media chunk',
+    );
+    await expect(
+      run({ offset: 0, bytes: new Uint8Array(3), done: false }, async (offset) => ({
+        offset,
+        bytes: new Uint8Array(3),
+        done: true,
+      })),
+    ).rejects.toThrow('invalid media chunk');
+    await expect(
+      run({ offset: 0, bytes: new Uint8Array(3), done: false }, async (offset) => ({
+        offset,
+        bytes: new Uint8Array(0),
+        done: false,
+      })),
+    ).rejects.toThrow('invalid media chunk');
+    await expect(run({ offset: 0, bytes: new Uint8Array(3), done: true })).rejects.toThrow(
+      'invalid media chunk',
+    );
   });
 });
