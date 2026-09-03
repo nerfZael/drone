@@ -1271,11 +1271,9 @@ export function createDroneControlCapability(
             code: 'FILE_REVISION_MISMATCH',
           });
         }
-        // Account for both the route's bounded read and the receiving buffer. This also
-        // serializes worst-case media generation so stale metadata cannot multiply memory use.
-        let releaseSnapshotReservation = contentSnapshots.reserve(
-          MOBILE_FILE_MEDIA_MAX_BYTES * 2,
-        );
+        // The binary reader preallocates exactly the authoritative byte count. Reserve that
+        // working buffer so concurrent reads and retained snapshots share one memory ceiling.
+        let releaseSnapshotReservation = contentSnapshots.reserve(size);
         let media: Awaited<ReturnType<typeof localHubBinaryRequest>>;
         try {
           media = await localHubBinaryRequest(

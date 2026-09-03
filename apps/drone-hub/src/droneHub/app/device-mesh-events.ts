@@ -12,22 +12,25 @@ export type DeviceMeshEventRuntime = {
   clearTimeout: typeof window.clearTimeout;
 };
 
-function wait(
+export function waitForDeviceMeshReconnect(
   delayMs: number,
   signal: AbortSignal,
   runtime: DeviceMeshEventRuntime,
 ): Promise<void> {
   return new Promise((resolve) => {
     if (signal.aborted) return resolve();
-    const timer = runtime.setTimeout(resolve, delayMs);
-    signal.addEventListener(
-      'abort',
-      () => {
-        runtime.clearTimeout(timer);
-        resolve();
-      },
-      { once: true },
-    );
+    let settled = false;
+    let timer: number | null = null;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (timer != null) runtime.clearTimeout(timer);
+      signal.removeEventListener('abort', finish);
+      resolve();
+    };
+    signal.addEventListener('abort', finish, { once: true });
+    timer = runtime.setTimeout(finish, delayMs);
+    if (settled) runtime.clearTimeout(timer);
   });
 }
 
@@ -180,7 +183,7 @@ export function subscribeDeviceMeshChanges(
         void reader?.cancel().catch(() => undefined);
         request = null;
       }
-      await wait(reconnectDelay, lifecycle.signal, runtime);
+      await waitForDeviceMeshReconnect(reconnectDelay, lifecycle.signal, runtime);
       reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY_MS);
     }
   })();

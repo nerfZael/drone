@@ -181,12 +181,23 @@ export class DeviceMeshHttp {
     this.eventRevision += 1;
     const payload = `event: ${eventName}\ndata: ${JSON.stringify(dataForRevision(this.eventRevision))}\n\n`;
     for (const response of this.eventClients.keys()) {
-      try {
-        response.write(payload);
-      } catch {
-        this.removeEventClient(response);
-      }
+      this.writeEventClient(response, payload);
     }
+  }
+
+  private writeEventClient(response: http.ServerResponse, payload: string): boolean {
+    try {
+      if (response.write(payload)) return true;
+    } catch {
+      // The stream is removed below.
+    }
+    this.removeEventClient(response);
+    try {
+      if (!response.destroyed) response.destroy();
+    } catch {
+      // The stream has already been removed from the tracked client set.
+    }
+    return false;
   }
 
   private removeEventClient(response: http.ServerResponse): void {
@@ -201,13 +212,16 @@ export class DeviceMeshHttp {
     response.setHeader('cache-control', 'no-cache, no-transform');
     response.setHeader('connection', 'keep-alive');
     response.flushHeaders?.();
-    response.write(`event: ready\ndata: ${JSON.stringify({ revision: this.eventRevision })}\n\n`);
+    if (
+      !this.writeEventClient(
+        response,
+        `event: ready\ndata: ${JSON.stringify({ revision: this.eventRevision })}\n\n`,
+      )
+    ) {
+      return;
+    }
     const keepAlive = setInterval(() => {
-      try {
-        response.write(': keepalive\n\n');
-      } catch {
-        this.removeEventClient(response);
-      }
+      this.writeEventClient(response, ': keepalive\n\n');
     }, 25_000);
     keepAlive.unref?.();
     this.eventClients.set(response, keepAlive);

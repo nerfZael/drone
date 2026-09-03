@@ -51,7 +51,7 @@ describe('mesh content snapshots', () => {
     let token = 0;
     const store = new MeshContentSnapshotStore({
       maxSnapshotBytes: MESH_BINARY_CHUNK_BYTES * 2,
-      maxTotalBytes: MESH_BINARY_CHUNK_BYTES * 2,
+      maxTotalBytes: (MESH_BINARY_CHUNK_BYTES + 1) * 3,
       ttlMs: 50,
       now: () => now,
       createToken: () => `snapshot-${++token}`,
@@ -84,18 +84,9 @@ describe('mesh content snapshots', () => {
     ).toThrow('does not match');
 
     const second = create('phone-b');
-    expect(store.size).toBe(1);
-    expect(() =>
-      store.resume({
-        snapshotToken: first,
-        sourceDeviceId: 'phone-a',
-        scope: 'file.preview\0drone-a\0/movie.mp4',
-        encoding: 'base64-binary',
-        offset: MESH_BINARY_CHUNK_BYTES,
-      }),
-    ).toThrow('expired');
+    expect(store.size).toBe(2);
     store.revokeDevice('phone-b');
-    expect(store.size).toBe(0);
+    expect(store.size).toBe(1);
 
     const third = create('phone-a');
     now += 51;
@@ -122,6 +113,33 @@ describe('mesh content snapshots', () => {
     releaseSecond();
     store.close();
     expect(() => store.reserve(1)).toThrow('store is closed');
+  });
+
+  test('rejects capacity pressure without evicting an active transfer', () => {
+    const snapshotBytes = MESH_BINARY_CHUNK_BYTES + 1;
+    const store = new MeshContentSnapshotStore({
+      maxSnapshotBytes: snapshotBytes,
+      maxTotalBytes: snapshotBytes * 2,
+      createToken: () => 'active-snapshot',
+    });
+    const active = store.createBinary({
+      content: Buffer.alloc(snapshotBytes),
+      sourceDeviceId: 'phone-a',
+      scope: 'file.preview\0drone-a\0movie.mp4',
+    }).chunk;
+    const release = store.reserve(snapshotBytes);
+    expect(() => store.reserve(1)).toThrow('limit is full');
+    expect(
+      store.resume({
+        snapshotToken: active.snapshotToken,
+        sourceDeviceId: 'phone-a',
+        scope: 'file.preview\0drone-a\0movie.mp4',
+        encoding: 'base64-binary',
+        offset: MESH_BINARY_CHUNK_BYTES,
+      }).chunk.done,
+    ).toBe(true);
+    release();
+    store.close();
   });
 
   test('can reserve the bounded generation working set without raising the snapshot limit', () => {

@@ -19,7 +19,6 @@ type Snapshot = {
   scope: string;
   metadata: unknown;
   expiresAt: number;
-  createdAt: number;
   deliveredOffsets: Set<number>;
 };
 
@@ -148,7 +147,6 @@ export class MeshContentSnapshotStore {
     ) {
       throw transferError('The transfer is too large to snapshot', 'RESOURCE_LIMIT');
     }
-    this.evictUntilAvailable(contentBytes);
     if (this.totalBytes + this.reservedBytes + contentBytes > this.maxTotalBytes) {
       throw transferError('The transfer snapshot limit is full', 'RESOURCE_LIMIT');
     }
@@ -193,7 +191,6 @@ export class MeshContentSnapshotStore {
     const needsSnapshot = input.content.length > MESH_BINARY_CHUNK_BYTES;
     let token: string | undefined;
     if (needsSnapshot) {
-      this.evictUntilAvailable(input.content.length);
       if (this.totalBytes + this.reservedBytes + input.content.length > this.maxTotalBytes) {
         throw transferError('The transfer snapshot limit is full', 'RESOURCE_LIMIT');
       }
@@ -207,7 +204,6 @@ export class MeshContentSnapshotStore {
         scope: input.scope,
         metadata: input.metadata,
         expiresAt: now + this.ttlMs,
-        createdAt: now,
         deliveredOffsets: new Set([initialChunk.offset]),
       });
       this.totalBytes += input.content.length;
@@ -226,18 +222,6 @@ export class MeshContentSnapshotStore {
       if (snapshot.expiresAt <= now) this.remove(token, snapshot);
     }
     this.scheduleExpiry();
-  }
-
-  private evictUntilAvailable(contentBytes: number) {
-    while (
-      this.snapshots.size > 0 &&
-      this.totalBytes + this.reservedBytes + contentBytes > this.maxTotalBytes
-    ) {
-      const oldest = [...this.snapshots.entries()].reduce((current, candidate) =>
-        candidate[1].createdAt < current[1].createdAt ? candidate : current,
-      );
-      this.remove(oldest[0], oldest[1]);
-    }
   }
 
   private remove(token: string, snapshot: Snapshot) {

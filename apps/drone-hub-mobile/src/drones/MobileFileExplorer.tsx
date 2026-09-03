@@ -28,6 +28,7 @@ import {
   type MobileDirectoryState as DirectoryState,
   type MobileExplorerEntry as FileExplorerEntry,
 } from './mobile-directory-cache';
+import { MobileDirectoryRequestTracker } from './mobile-directory-request-tracker';
 import {
   mobileDirectoryCacheKey,
   mobileFileActionInvalidationPaths,
@@ -144,6 +145,10 @@ export function MobileFileExplorer({
   const directoryContextRef = React.useRef(new MobileDirectoryContextCache());
   const contextVersionRef = React.useRef(0);
   const directoryRequestSeqRef = React.useRef<Record<string, number>>({});
+  const directoryRequestsRef = React.useRef(new MobileDirectoryRequestTracker());
+  const loadDirectoryRef = React.useRef<((path: string, force?: boolean) => Promise<void>) | null>(
+    null,
+  );
   const directoryCacheRef = React.useRef<BoundedSwrCache<MobileDirectoryContextCache> | null>(null);
   if (!directoryCacheRef.current) {
     directoryCacheRef.current = new BoundedSwrCache({
@@ -203,8 +208,9 @@ export function MobileFileExplorer({
       const requestContextVersion = contextVersionRef.current;
       const requestContextKey = contextKey;
       const existing = directoriesRef.current[path];
-      if (existing?.loading || refreshingRef.current.has(path) || (!force && existing?.loaded))
-        return;
+      if (!force && existing?.loaded) return;
+      const requestToken = directoryRequestsRef.current.begin(path, force);
+      if (!requestToken) return;
       const background = existing?.loaded === true;
       const requestSeq = (directoryRequestSeqRef.current[path] ?? 0) + 1;
       directoryRequestSeqRef.current[path] = requestSeq;
@@ -316,27 +322,30 @@ export function MobileFileExplorer({
           },
         ]);
       } finally {
-        if (
+        const requestIsCurrent =
           currentContextKeyRef.current === requestContextKey &&
           contextVersionRef.current === requestContextVersion &&
-          directoryRequestSeqRef.current[path] === requestSeq
-        ) {
-          setRefreshing((current) => {
-            if (!current.has(path)) return current;
-            const next = new Set(current);
-            next.delete(path);
-            refreshingRef.current = next;
-            return next;
-          });
+          directoryRequestSeqRef.current[path] === requestSeq;
+        if (requestIsCurrent && refreshingRef.current.has(path)) {
+          const next = new Set(refreshingRef.current);
+          next.delete(path);
+          refreshingRef.current = next;
+          setRefreshing(next);
+        }
+        const runTrailing = directoryRequestsRef.current.finish(path, requestToken);
+        if (requestIsCurrent && runTrailing) {
+          void loadDirectoryRef.current?.(path, true);
         }
       }
     },
     [chatName, commitDirectories, contextKey, droneId, requestDroneControl, targetId],
   );
+  loadDirectoryRef.current = loadDirectory;
 
   React.useEffect(() => {
     contextVersionRef.current += 1;
     directoryRequestSeqRef.current = {};
+    directoryRequestsRef.current.reset();
     const cached =
       directoryCacheRef.current!.get(contextKey) ?? new MobileDirectoryContextCache();
     directoryContextRef.current = cached;
@@ -353,6 +362,7 @@ export function MobileFileExplorer({
     setActionLoading(false);
     return () => {
       contextVersionRef.current += 1;
+      directoryRequestsRef.current.reset();
     };
   }, [contextKey]);
 

@@ -12,6 +12,7 @@ import type { MobileDeviceIdentity } from '../security/device-identity';
 import { verifyP256Signature } from '../security/device-identity';
 import type { MeshConnection } from './mesh-storage';
 import type { MobileCapabilityRouter } from './mobile-capability-router';
+import { validateCapabilityEvent } from './validate-capability-event';
 
 function websocketUrl(endpoint: string, deviceId: string): string {
   const url = new URL(endpoint);
@@ -43,6 +44,7 @@ export class MeshSocket {
     private readonly networkId: string,
     private readonly identity: MobileDeviceIdentity,
     private readonly peerPublicKey: JsonWebKey,
+    private readonly devicePublicKeyFor: (deviceId: string) => JsonWebKey | undefined,
     private readonly onState: () => void,
     private readonly onTopologyChange: () => void,
     private readonly onCapabilityEvent: (event: CapabilityEvent) => void,
@@ -232,13 +234,11 @@ export class MeshSocket {
       return;
     }
     if (message.type === 'capability.event') {
-      if (
-        message.version === 1 &&
-        message.sourceDeviceId === this.connection.deviceId &&
-        typeof message.capability === 'string' &&
-        typeof message.event === 'string'
-      )
-        this.onCapabilityEvent(message as CapabilityEvent);
+      const event = validateCapabilityEvent(message, {
+        targetDeviceId: this.identity.id,
+        devicePublicKeyFor: this.devicePublicKeyFor,
+      });
+      if (event) this.onCapabilityEvent(event);
       return;
     }
     if (message.type === 'capability.request') {

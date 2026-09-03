@@ -80,6 +80,9 @@ describe('mobile file explorer presentation', () => {
     expect(explorer).toContain('visit(entry.path, depth + 1);');
     expect(explorer).toContain('contextVersionRef.current !== requestContextVersion');
     expect(explorer).toContain('directoryRequestSeqRef.current[path] !== requestSeq');
+    expect(explorer).toContain('directoryRequestsRef.current.begin(path, force)');
+    expect(explorer).toContain('directoryRequestsRef.current.finish(path, requestToken)');
+    expect(explorer).toContain('void loadDirectoryRef.current?.(path, true)');
   });
 
   test('renders background preview failures without replacing cached content', () => {

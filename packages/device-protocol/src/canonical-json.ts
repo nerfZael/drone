@@ -22,6 +22,12 @@ export function capabilityRequestSigningText(
   return `drone-device-request-v1\n${canonicalJson(request)}`;
 }
 
+export function capabilityEventSigningText(
+  event: Omit<import('./types').CapabilityEvent, 'signature'>,
+): string {
+  return `drone-device-event-v1\n${canonicalJson(event)}`;
+}
+
 export function pairingClaimSigningText(
   claim: Omit<import('./types').PairingClaim, 'signature'>,
 ): string {

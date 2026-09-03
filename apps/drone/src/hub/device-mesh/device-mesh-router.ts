@@ -2,6 +2,8 @@ import crypto from 'node:crypto';
 import type http from 'node:http';
 import type { Duplex } from 'node:stream';
 import {
+  capabilityEventPolicy,
+  capabilityEventSigningText,
   capabilityRequestSigningText,
   isGranted,
   MESH_MAX_MESSAGE_BYTES,
@@ -10,6 +12,7 @@ import {
   socketAuthSigningText,
   socketServerAuthSigningText,
   WORKSPACE_CAPABILITY,
+  type CapabilityEvent,
   type CapabilityResponse,
   type MeshDevice,
   type SignedCapabilityRequest,
@@ -37,12 +40,23 @@ type ValidatedRequest = {
   replayKey: string;
 };
 
+const CAPABILITY_EVENT_LIFETIME_MS = 60_000;
+const CAPABILITY_EVENT_MAX_PER_PEER_PER_MINUTE = 600;
+
 function send(ws: WebSocket, payload: unknown): boolean {
   if (ws.readyState !== WebSocket.OPEN) return false;
   const serialized = JSON.stringify(payload);
   if (Buffer.byteLength(serialized) > MESH_SAFE_MESSAGE_BYTES) return false;
   ws.send(serialized);
   return true;
+}
+
+function serializedBytes(value: unknown): number {
+  try {
+    return Buffer.byteLength(JSON.stringify(value));
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
 }
 
 function socketUrl(endpoint: string, deviceId: string): string {
@@ -104,6 +118,10 @@ export class DeviceMeshRouter {
   private readonly responses = new DeviceMeshResponseCache();
   private readonly requestTimes = new Map<string, number[]>();
   private readonly bulkRequestTimes = new Map<string, number[]>();
+  private readonly capabilityEventTimes = new Map<string, number[]>();
+  private readonly capabilityEventTypeTimes = new Map<string, number[]>();
+  private readonly seenCapabilityEvents = new Map<string, number>();
+  private capabilityEventPruneTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly connecting = new Set<string>();
   private readonly connectionListeners = new Set<() => void>();
   private readonly capabilityEventListeners = new Set<(event: Record<string, any>) => void>();
@@ -147,6 +165,11 @@ export class DeviceMeshRouter {
     for (const route of this.routes.values()) clearTimeout(route.timer);
     this.routes.clear();
     this.responses.clear();
+    this.capabilityEventTimes.clear();
+    this.capabilityEventTypeTimes.clear();
+    this.seenCapabilityEvents.clear();
+    if (this.capabilityEventPruneTimer) clearTimeout(this.capabilityEventPruneTimer);
+    this.capabilityEventPruneTimer = null;
     this.requestClient.close();
     this.server.close();
   }
@@ -186,6 +209,7 @@ export class DeviceMeshRouter {
 
   disconnect(deviceId: string): void {
     this.responses.deleteDevice(deviceId);
+    this.clearCapabilityEventPeer(deviceId);
     void this.capabilities.disconnectDevice(deviceId);
     this.connections.get(deviceId)?.ws.close(4003, 'device revoked');
   }
@@ -229,21 +253,43 @@ export class DeviceMeshRouter {
   ): Promise<void> {
     const state = await this.store.read();
     const targets = targetDeviceIds ? new Set(targetDeviceIds) : null;
-    const message = {
-      type: 'capability.event',
-      version: 1,
-      sourceDeviceId: this.identity.id,
-      capability,
-      capabilityVersion: 1,
-      event,
-      payload,
-      issuedAt: new Date().toISOString(),
-    } as const;
-    for (const connection of this.connections.values()) {
-      if (targets && !targets.has(connection.peerDeviceId)) continue;
-      const peer = state.devices[connection.peerDeviceId];
-      if (peer && !peer.revokedAt && isGranted(peer.grants, capability, 1, requiredOperation))
-        send(connection.ws, message);
+    const policy = capabilityEventPolicy(capability, event);
+    if (!policy || policy.requiredOperation !== requiredOperation) {
+      throw new Error(`unsupported capability event: ${capability}@1/${event}`);
+    }
+    if (serializedBytes(payload) > policy.maxPayloadBytes) {
+      return;
+    }
+    const issuedAt = new Date();
+    for (const peer of Object.values(state.devices)) {
+      if (
+        peer.id === state.selfDeviceId ||
+        peer.revokedAt ||
+        (targets && !targets.has(peer.id)) ||
+        !isGranted(peer.grants, capability, 1, requiredOperation)
+      ) {
+        continue;
+      }
+      const nextHop = this.connections.get(peer.id) ?? this.connections.values().next().value;
+      if (!nextHop) continue;
+      const unsigned: Omit<CapabilityEvent, 'signature'> = {
+        type: 'capability.event',
+        version: 1,
+        eventId: crypto.randomUUID(),
+        sourceDeviceId: this.identity.id,
+        targetDeviceId: peer.id,
+        capability,
+        capabilityVersion: 1,
+        event,
+        payload,
+        issuedAt: issuedAt.toISOString(),
+        expiresAt: new Date(issuedAt.getTime() + CAPABILITY_EVENT_LIFETIME_MS).toISOString(),
+        maxHops: 1,
+      };
+      send(nextHop.ws, {
+        ...unsigned,
+        signature: signDeviceText(this.identity, capabilityEventSigningText(unsigned)),
+      } satisfies CapabilityEvent);
     }
   }
 
@@ -454,21 +500,24 @@ export class DeviceMeshRouter {
       return;
     }
     if (message?.type === 'capability.event') {
-      if (
-        message.version === 1 &&
-        message.sourceDeviceId === connection.peerDeviceId &&
-        typeof message.capability === 'string' &&
-        typeof message.event === 'string' &&
-        message.payload &&
-        typeof message.payload === 'object' &&
-        !Array.isArray(message.payload)
-      ) {
-        for (const listener of this.capabilityEventListeners) {
-          try {
-            listener(message);
-          } catch {
-            // Event observers are advisory and cannot interrupt mesh routing.
-          }
+      if (!this.acceptCapabilityEventEnvelope(connection.peerDeviceId)) {
+        connection.ws.close(4008, 'capability event rate limit reached');
+        return;
+      }
+      const event = await this.validateCapabilityEvent(connection, message);
+      if (!event) return;
+      const state = await this.store.read();
+      if (event.targetDeviceId !== state.selfDeviceId) {
+        if (event.sourceDeviceId !== connection.peerDeviceId) return;
+        const target = this.connections.get(event.targetDeviceId);
+        if (target && target.ws !== connection.ws) send(target.ws, event);
+        return;
+      }
+      for (const listener of this.capabilityEventListeners) {
+        try {
+          listener(event);
+        } catch {
+          // Event observers are advisory and cannot interrupt mesh routing.
         }
       }
       return;
@@ -625,6 +674,114 @@ export class DeviceMeshRouter {
       });
     }
     send(connection.ws, response);
+  }
+
+  private async validateCapabilityEvent(
+    connection: AuthenticatedSocket,
+    value: any,
+  ): Promise<CapabilityEvent | null> {
+    const policy = capabilityEventPolicy(
+      String(value?.capability ?? ''),
+      String(value?.event ?? ''),
+    );
+    if (
+      !policy ||
+      value?.version !== 1 ||
+      value?.capabilityVersion !== 1 ||
+      value?.maxHops !== 1 ||
+      typeof value?.eventId !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.eventId) ||
+      typeof value?.sourceDeviceId !== 'string' ||
+      typeof value?.targetDeviceId !== 'string' ||
+      !value?.payload ||
+      typeof value.payload !== 'object' ||
+      Array.isArray(value.payload) ||
+      serializedBytes(value.payload) > policy.maxPayloadBytes ||
+      serializedBytes(value) > policy.maxPayloadBytes + 4 * 1024
+    ) {
+      return null;
+    }
+    const now = Date.now();
+    const issuedAt = Date.parse(String(value.issuedAt ?? ''));
+    const expiresAt = Date.parse(String(value.expiresAt ?? ''));
+    if (
+      !Number.isFinite(issuedAt) ||
+      !Number.isFinite(expiresAt) ||
+      issuedAt > now + 30_000 ||
+      expiresAt <= now ||
+      expiresAt <= issuedAt ||
+      expiresAt - issuedAt > CAPABILITY_EVENT_LIFETIME_MS
+    ) {
+      return null;
+    }
+    const eventRateKey = `${connection.peerDeviceId}\0${value.capability}\0${value.event}`;
+    const recentTypeEvents = (this.capabilityEventTypeTimes.get(eventRateKey) ?? []).filter(
+      (time) => time > now - 60_000,
+    );
+    if (recentTypeEvents.length >= policy.maxEventsPerMinute) return null;
+    recentTypeEvents.push(now);
+    this.capabilityEventTypeTimes.set(eventRateKey, recentTypeEvents);
+
+    const state = await this.store.read();
+    const source = state.devices[value.sourceDeviceId];
+    const target = state.devices[value.targetDeviceId];
+    if (!source || source.revokedAt || !target || target.revokedAt) return null;
+    const { signature, ...unsigned } = value as CapabilityEvent;
+    if (
+      !verifyDeviceText(
+        source.publicKey,
+        capabilityEventSigningText(unsigned),
+        String(signature ?? ''),
+      )
+    ) {
+      return null;
+    }
+    const replayKey = `${source.id}:${value.eventId}`;
+    const replayExpiry = this.seenCapabilityEvents.get(replayKey) ?? 0;
+    if (replayExpiry > now) return null;
+    this.seenCapabilityEvents.set(replayKey, expiresAt);
+    this.scheduleCapabilityEventPrune();
+    return value as CapabilityEvent;
+  }
+
+  private acceptCapabilityEventEnvelope(peerDeviceId: string): boolean {
+    const now = Date.now();
+    const recent = (this.capabilityEventTimes.get(peerDeviceId) ?? []).filter(
+      (time) => time > now - 60_000,
+    );
+    if (recent.length >= CAPABILITY_EVENT_MAX_PER_PEER_PER_MINUTE) return false;
+    recent.push(now);
+    this.capabilityEventTimes.set(peerDeviceId, recent);
+    return true;
+  }
+
+  private clearCapabilityEventPeer(deviceId: string): void {
+    this.capabilityEventTimes.delete(deviceId);
+    for (const key of this.capabilityEventTypeTimes.keys()) {
+      if (key.startsWith(`${deviceId}\0`)) this.capabilityEventTypeTimes.delete(key);
+    }
+    for (const key of this.seenCapabilityEvents.keys()) {
+      if (key.startsWith(`${deviceId}:`)) this.seenCapabilityEvents.delete(key);
+    }
+  }
+
+  private scheduleCapabilityEventPrune(): void {
+    if (this.capabilityEventPruneTimer || this.seenCapabilityEvents.size === 0) return;
+    let nextExpiry = Number.POSITIVE_INFINITY;
+    for (const expiry of this.seenCapabilityEvents.values())
+      nextExpiry = Math.min(nextExpiry, expiry);
+    this.capabilityEventPruneTimer = setTimeout(
+      () => {
+        this.capabilityEventPruneTimer = null;
+        const now = Date.now();
+        for (const [key, expiry] of this.seenCapabilityEvents) {
+          if (expiry <= now) this.seenCapabilityEvents.delete(key);
+        }
+        this.scheduleCapabilityEventPrune();
+      },
+      Math.max(0, nextExpiry - Date.now()),
+    );
+    this.capabilityEventPruneTimer.unref?.();
   }
 
   private async execute(request: SignedCapabilityRequest): Promise<CapabilityResponse> {

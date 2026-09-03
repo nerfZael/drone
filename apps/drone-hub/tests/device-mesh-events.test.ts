@@ -4,6 +4,7 @@ import {
   DeviceMeshEventParser,
   dispatchDeviceMeshEventBlock,
   subscribeDeviceMeshChanges,
+  waitForDeviceMeshReconnect,
   type DeviceMeshEventRuntime,
 } from '../src/droneHub/app/device-mesh-events';
 import { remoteDroneRefreshPlan } from '../src/droneHub/app/remote-drone-refresh';
@@ -108,5 +109,61 @@ describe('desktop device mesh events', () => {
     expect(fetches).toBe(2);
     expect(cancelled).toBe(true);
     expect(connections).toEqual([true, false]);
+  });
+
+  test('removes each reconnect abort listener when its timer completes', async () => {
+    let timerCallback: (() => void) | null = null;
+    let listeners = 0;
+    const signal = {
+      aborted: false,
+      addEventListener(_type: string, _listener: EventListenerOrEventListenerObject) {
+        listeners += 1;
+      },
+      removeEventListener(_type: string, _listener: EventListenerOrEventListenerObject) {
+        listeners -= 1;
+      },
+    } as AbortSignal;
+    const runtime = {
+      fetch: (() => Promise.reject(new Error('unused'))) as typeof window.fetch,
+      setTimeout: ((callback: TimerHandler) => {
+        timerCallback = callback as () => void;
+        return 1;
+      }) as typeof window.setTimeout,
+      clearTimeout: (() => undefined) as typeof window.clearTimeout,
+    };
+
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const waiting = waitForDeviceMeshReconnect(500, signal, runtime);
+      expect(listeners).toBe(1);
+      timerCallback?.();
+      await waiting;
+      expect(listeners).toBe(0);
+    }
+  });
+
+  test('clears the reconnect timer and listener when the lifecycle aborts', async () => {
+    let listener: (() => void) | null = null;
+    let cleared = 0;
+    const signal = {
+      aborted: false,
+      addEventListener(_type: string, next: EventListenerOrEventListenerObject) {
+        listener = next as () => void;
+      },
+      removeEventListener() {
+        listener = null;
+      },
+    } as AbortSignal;
+    const waiting = waitForDeviceMeshReconnect(500, signal, {
+      fetch: (() => Promise.reject(new Error('unused'))) as typeof window.fetch,
+      setTimeout: (() => 1) as typeof window.setTimeout,
+      clearTimeout: (() => {
+        cleared += 1;
+      }) as typeof window.clearTimeout,
+    });
+
+    listener?.();
+    await waiting;
+    expect(cleared).toBe(1);
+    expect(listener).toBeNull();
   });
 });

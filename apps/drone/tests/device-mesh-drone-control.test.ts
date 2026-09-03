@@ -2627,6 +2627,87 @@ describe('device mesh drone summaries', () => {
     }
   });
 
+  test('keeps two concurrent media snapshots live with size-based reservations', async () => {
+    const originalFetch = globalThis.fetch;
+    const mediaBytes = Buffer.alloc(MESH_BINARY_CHUNK_BYTES * 2 + 3, 9);
+    let mediaStarted = 0;
+    let releaseMedia!: () => void;
+    const mediaGate = new Promise<void>((resolve) => {
+      releaseMedia = resolve;
+    });
+    globalThis.fetch = (async (input) => {
+      const url = new URL(String(input));
+      const filePath = url.searchParams.get('path') ?? '/work/repo/demo.mp4';
+      if (url.pathname.endsWith('/fs/file')) {
+        return Response.json({
+          ok: true,
+          path: filePath,
+          kind: 'video',
+          mime: 'video/mp4',
+          size: mediaBytes.length,
+          mtimeMs: 1,
+          revision: url.searchParams.get('revision') === '0' ? null : `sha256:${filePath}`,
+        });
+      }
+      if (url.pathname.endsWith('/fs/media')) {
+        mediaStarted += 1;
+        await mediaGate;
+        return new Response(mediaBytes, {
+          headers: { 'content-type': 'video/mp4', 'content-length': String(mediaBytes.length) },
+        });
+      }
+      return Response.json({ error: 'not found' }, { status: 404 });
+    }) as typeof fetch;
+    const capability = createDroneControlCapability({
+      baseUrl: () => 'http://127.0.0.1:7777',
+      apiToken: 'test',
+    });
+    try {
+      const firstPromise: Promise<any> = capability.invoke(
+        'file.preview',
+        { droneId: 'one', path: '/work/repo/first.mp4' },
+        { sourceDevice: { id: 'phone-a' }, requestId: 'first' } as any,
+      );
+      const secondPromise: Promise<any> = capability.invoke(
+        'file.preview',
+        { droneId: 'one', path: '/work/repo/second.mp4' },
+        { sourceDevice: { id: 'phone-b' }, requestId: 'second' } as any,
+      );
+      for (let attempt = 0; attempt < 20 && mediaStarted < 2; attempt += 1) await Bun.sleep(1);
+      expect(mediaStarted).toBe(2);
+      releaseMedia();
+      const [first, second] = await Promise.all([firstPromise, secondPromise]);
+      expect(first.mediaChunk.snapshotToken).toBeString();
+      expect(second.mediaChunk.snapshotToken).toBeString();
+
+      for (const [result, sourceDeviceId, filePath] of [
+        [first, 'phone-a', '/work/repo/first.mp4'],
+        [second, 'phone-b', '/work/repo/second.mp4'],
+      ] as const) {
+        await expect(
+          capability.invoke(
+            'file.preview',
+            {
+              droneId: 'one',
+              path: filePath,
+              contentOffset: MESH_BINARY_CHUNK_BYTES,
+              expectedRevision: `sha256:${filePath}`,
+              mediaSnapshot: true,
+              snapshotToken: result.mediaChunk.snapshotToken,
+            },
+            { sourceDevice: { id: sourceDeviceId }, requestId: `${sourceDeviceId}-next` } as any,
+          ),
+        ).resolves.toMatchObject({
+          mediaChunk: { offset: MESH_BINARY_CHUNK_BYTES },
+        });
+      }
+    } finally {
+      releaseMedia();
+      capability.close?.();
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('broadcasts hash changes for files watched by a mobile device', async () => {
     const originalFetch = globalThis.fetch;
     let revision = 'sha256:first';

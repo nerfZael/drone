@@ -152,6 +152,8 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
             nextIdentity,
             nextProfile.devices.find((device) => device.id === connection.deviceId)?.publicKey ??
               {},
+            (deviceId) =>
+              profileRef.current?.devices.find((device) => device.id === deviceId)?.publicKey,
             () => connectionManager.handleSocketState(socket),
             () => {
               if (topologyRefreshTimer.current) clearTimeout(topologyRefreshTimer.current);

@@ -4,7 +4,12 @@ import fs from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { pairingClaimSigningText, type PairingClaim } from '@drone/device-protocol';
+import {
+  capabilityEventSigningText,
+  pairingClaimSigningText,
+  type CapabilityEvent,
+  type PairingClaim,
+} from '@drone/device-protocol';
 import { WebSocket } from 'ws';
 import { createDeviceMeshService } from '../src/hub/device-mesh';
 import {
@@ -174,6 +179,7 @@ describe('desktop device pairing', () => {
       { capability: 'drone-control', version: 1, operations: ['drones.list', 'chat.read'] },
     ]);
     const remoteIdentity = await loadOrCreateDeviceIdentity(remote.rootDir);
+    const desktopIdentity = await loadOrCreateDeviceIdentity(desktop.rootDir);
     const socket = new WebSocket(
       `${desktop.ingressUrl.replace('http:', 'ws:')}/api/device-mesh/ws?deviceId=${encodeURIComponent(remoteIdentity.id)}`,
     );
@@ -206,20 +212,29 @@ describe('desktop device pairing', () => {
     await reader.read();
 
     const pushed = reader.read();
+    const issuedAt = new Date();
+    const unsigned: Omit<CapabilityEvent, 'signature'> = {
+      type: 'capability.event',
+      version: 1,
+      eventId: crypto.randomUUID(),
+      sourceDeviceId: remoteIdentity.id,
+      targetDeviceId: desktopIdentity.id,
+      capability: 'drone-control',
+      capabilityVersion: 1,
+      event: 'chat.changed',
+      payload: {
+        droneId: 'drone-1',
+        chatName: 'default',
+        reason: 'runtime_tool_call_progress',
+      },
+      issuedAt: issuedAt.toISOString(),
+      expiresAt: new Date(issuedAt.getTime() + 60_000).toISOString(),
+      maxHops: 1,
+    };
     socket.send(
       JSON.stringify({
-        type: 'capability.event',
-        version: 1,
-        sourceDeviceId: remoteIdentity.id,
-        capability: 'drone-control',
-        capabilityVersion: 1,
-        event: 'chat.changed',
-        payload: {
-          droneId: 'drone-1',
-          chatName: 'default',
-          reason: 'runtime_tool_call_progress',
-        },
-        issuedAt: new Date().toISOString(),
+        ...unsigned,
+        signature: signDeviceText(remoteIdentity, capabilityEventSigningText(unsigned)),
       }),
     );
     const event = await Promise.race([
