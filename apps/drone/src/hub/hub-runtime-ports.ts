@@ -3,6 +3,7 @@ type NativeChatRuntime = {
   copyConfiguration: (input: any) => Promise<void>;
   deleteSessions: (droneEntry: any) => Promise<void>;
   error: (chatId: string) => Promise<string>;
+  hasHistory: (chatId: string) => Promise<boolean>;
   isBusy: (chatId: string) => Promise<boolean>;
   latestAssistantText: (chatId: string) => Promise<string>;
   prompt: (input: any) => Promise<void>;
@@ -30,6 +31,7 @@ export function createNativeChatRuntimePort() {
     copyConfiguration: async (input: any) => await requireRuntime().copyConfiguration(input),
     deleteSessions: async (droneEntry: any) => await requireRuntime().deleteSessions(droneEntry),
     error: (chatId: string) => runtime?.error(chatId) ?? Promise.resolve(''),
+    hasHistory: (chatId: string) => runtime?.hasHistory(chatId) ?? Promise.resolve(false),
     isBusy: (chatId: string) => runtime?.isBusy(chatId) ?? Promise.resolve(false),
     latestAssistantText: (chatId: string) =>
       runtime?.latestAssistantText(chatId) ?? Promise.resolve(''),

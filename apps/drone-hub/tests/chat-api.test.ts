@@ -173,6 +173,31 @@ describe('chat api request scopes', () => {
     expect(result.pending).toHaveLength(1);
     expect(result.chatId).toBe('chat-1');
     expect(result.subscriptions).toHaveLength(1);
+    expect(result.transcriptTotal).toBeNull();
+  });
+
+  test('requests transcript totals when a group column needs an initial tail boundary', async () => {
+    const urls: string[] = [];
+    const result = await fetchDroneChatState(
+      async <T>(url: string): Promise<T> => {
+        urls.push(url);
+        return {
+          ok: true,
+          transcripts: [transcriptItem()],
+          pending: [],
+          transcript: { total: 81 },
+        } as T;
+      },
+      {
+        droneId: 'drone-1',
+        chatName: 'default',
+        tail: 50,
+        includeTranscriptMeta: true,
+      },
+    );
+
+    expect(urls[0]).toContain('transcriptMeta=1');
+    expect(result.transcriptTotal).toBe(81);
   });
 
   test('requests full transcript without pending prompts for explicit export', async () => {
@@ -231,6 +256,63 @@ describe('chat api request scopes', () => {
           etag: '"state-1"',
         },
       ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('reuses configuration included in the initial cached state response', async () => {
+    const originalFetch = globalThis.fetch;
+    let requestedUrl = '';
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      requestedUrl = String(input);
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          id: 'drone-1',
+          name: 'Drone one',
+          chat: 'default',
+          chatId: 'chat-1',
+          transcripts: [],
+          pending: [],
+          subscriptions: [],
+          agent: { kind: 'builtin', id: 'codex' },
+          agentLocked: true,
+          model: 'gpt-5',
+          reasoning: 'high',
+          agentPermissionMode: 'write',
+          approvalPolicy: 'ask',
+          dockerSnapshotAfterAgentMessageEnabled: true,
+          sessionName: 'drone-hub-chat-default',
+          createdAt: '2026-09-03T10:00:00.000Z',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json', etag: '"state-1"' } },
+      );
+    }) as typeof fetch;
+
+    try {
+      const result = await fetchDroneChatStateCached({
+        droneId: 'drone-1',
+        chatName: 'default',
+        includeConfig: true,
+      });
+
+      expect(requestedUrl).toContain('subscriptions=true');
+      expect(requestedUrl).toContain('config=true');
+      expect(requestedUrl).not.toContain('turns=0');
+      expect(result.notModified).toBe(false);
+      if (!result.notModified) {
+        expect(result.chatInfo).toMatchObject({
+          name: 'Drone one',
+          chat: 'default',
+          chatId: 'chat-1',
+          agent: { kind: 'builtin', id: 'codex' },
+          agentLocked: true,
+          model: 'gpt-5',
+          reasoning: 'high',
+          dockerSnapshotAfterAgentMessageEnabled: true,
+        });
+      }
     } finally {
       globalThis.fetch = originalFetch;
     }

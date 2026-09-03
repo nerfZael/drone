@@ -3003,6 +3003,8 @@ function createHubRuntimeGraph(
     countTranscriptTurnsFromStore,
     defaultChatAgentConfigForDrone,
     defaultSeedBootstrapTimeoutMs,
+    dockerSnapshotAfterAgentMessageEnabledForChat: (...args: any[]) =>
+      dockerSnapshotRuntime.dockerSnapshotAfterAgentMessageEnabledForChat(...args),
     droneRuntime,
     dvmExec,
     dvmSessionStart,
@@ -3034,6 +3036,7 @@ function createHubRuntimeGraph(
       dockerSnapshotRuntime.normalizeDockerSnapshot(...args),
     normalizeDroneIdentity,
     normalizePendingStartupPrompts,
+    nativeChatHasHistory: (chatId: string) => nativeChatRuntimePort.hasHistory(chatId),
     nowIso,
     parseChatNameForMutation,
     patchChatMetadataInStore,
@@ -4380,6 +4383,15 @@ async function startDroneHubApiServerWithLifecycle(
     assistantService.nativeThreadError(nativeChatId);
   const nativeChatLatestAssistantText = (nativeChatId: string) =>
     blipAssistantHost.latestAssistantText(nativeChatId);
+  const nativeChatHasHistory = async (nativeChatId: string) => {
+    if (await assistantService.nativeThreadHasHistory(nativeChatId)) return true;
+    try {
+      const history = await blipAssistantHost.historyPage(nativeChatId, { limit: 1 });
+      return history.entries.length > 0;
+    } catch {
+      return false;
+    }
+  };
   const deleteNativeChatSessions = async (droneEntry: any) => {
     const chatEntries = [
       ...Object.values<any>(droneEntry?.chats ?? {}),
@@ -4474,6 +4486,7 @@ async function startDroneHubApiServerWithLifecycle(
     copyConfiguration: copyNativeChatConfiguration,
     deleteSessions: deleteNativeChatSessions,
     error: nativeChatError,
+    hasHistory: nativeChatHasHistory,
     isBusy: nativeChatIsBusy,
     latestAssistantText: nativeChatLatestAssistantText,
     prompt: promptNativeChat,
@@ -6057,15 +6070,7 @@ async function startDroneHubApiServerWithLifecycle(
     markChatReadInStore,
     markChatUnreadInStore,
     migrateInMemoryChatStateForRename,
-    nativeChatHasHistory: async (nativeChatId: string) => {
-      if (await assistantService.nativeThreadHasHistory(nativeChatId)) return true;
-      try {
-        const history = await blipAssistantHost.historyPage(nativeChatId, { limit: 1 });
-        return history.entries.length > 0;
-      } catch {
-        return false;
-      }
-    },
+    nativeChatHasHistory,
     normalizeAgentPermissionMode,
     normalizeAgentApprovalPolicy,
     normalizeBuiltinAgentId,

@@ -4,7 +4,9 @@ import { requestJsonConditional } from '../http';
 import type { PendingPrompt, TranscriptItem } from '../types';
 import {
   normalizeChatResourceSubscriptionsPayload,
+  normalizeChatInfoPayload,
   type ChatResourceSubscriptionInfo,
+  type ChatInfo,
 } from '../../domain';
 import { clientTimeZone } from './client-time-zone';
 
@@ -44,6 +46,7 @@ export type FetchDroneChatStateResult = {
   pending: PendingPrompt[];
   chatId: string | null;
   subscriptions: ChatResourceSubscriptionInfo[];
+  transcriptTotal: number | null;
 };
 
 export type FetchDroneChatStateCachedResult =
@@ -51,6 +54,7 @@ export type FetchDroneChatStateCachedResult =
   | {
       transcripts: TranscriptItem[];
       pending: PendingPrompt[];
+      chatInfo: ChatInfo | null;
       etag: string | null;
       notModified: false;
     };
@@ -336,6 +340,7 @@ export async function fetchDroneChatState(
     chatName: string;
     turn?: 'all' | 'last' | number;
     tail?: number;
+    includeTranscriptMeta?: boolean;
   },
 ): Promise<FetchDroneChatStateResult> {
   const droneId = String(opts.droneId ?? '').trim();
@@ -347,21 +352,24 @@ export async function fetchDroneChatState(
     qs.set('transcript', 'tail');
   }
   qs.set('subscriptions', 'true');
-  qs.set('transcriptMeta', '0');
+  qs.set('transcriptMeta', opts.includeTranscriptMeta ? '1' : '0');
   const data = await requestJson<{
     ok: true;
     chatId?: string | null;
     transcripts: TranscriptItem[];
     pending: PendingPrompt[];
     subscriptions?: unknown;
+    transcript?: { total?: unknown };
   }>(
     `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/state?${qs.toString()}`,
   );
+  const transcriptTotal = data?.transcript?.total;
   return {
     transcripts: Array.isArray(data?.transcripts) ? data.transcripts : [],
     pending: Array.isArray(data?.pending) ? data.pending : [],
     chatId: String(data?.chatId ?? '').trim() || null,
     subscriptions: normalizeChatResourceSubscriptionsPayload(data?.subscriptions),
+    transcriptTotal: Number.isSafeInteger(transcriptTotal) ? Number(transcriptTotal) : null,
   };
 }
 
@@ -371,28 +379,36 @@ export async function fetchDroneChatStateCached(opts: {
   turn?: 'all' | 'last' | number;
   tail?: number;
   etag?: string | null;
+  includeConfig?: boolean;
+  includeTranscript?: boolean;
 }): Promise<FetchDroneChatStateCachedResult> {
   const droneId = String(opts.droneId ?? '').trim();
   const chatName = String(opts.chatName ?? '').trim() || 'default';
   const turn = opts.turn ?? 'all';
   const qs = new URLSearchParams({ turn: String(turn) });
-  if (typeof opts.tail === 'number' && Number.isFinite(opts.tail) && opts.tail > 0) {
+  if (opts.includeTranscript === false) {
+    qs.set('transcript', 'none');
+    qs.set('pending', 'none');
+  } else if (typeof opts.tail === 'number' && Number.isFinite(opts.tail) && opts.tail > 0) {
     qs.set('tail', String(Math.floor(opts.tail)));
     qs.set('transcript', 'tail');
   }
-  qs.set('subscriptions', 'false');
+  qs.set('subscriptions', opts.includeConfig ? 'true' : 'false');
   qs.set('readState', 'false');
   qs.set('transcriptMeta', '0');
+  if (opts.includeConfig) qs.set('config', 'true');
   const url = `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/state?${qs.toString()}`;
   const response = await fetchJsonCached<{
     ok: true;
     transcripts: TranscriptItem[];
     pending: PendingPrompt[];
+    agent?: unknown;
   }>(url, opts.etag);
   if (response.notModified) return { etag: response.etag, notModified: true };
   return {
     transcripts: Array.isArray(response.data?.transcripts) ? response.data.transcripts : [],
     pending: Array.isArray(response.data?.pending) ? response.data.pending : [],
+    chatInfo: opts.includeConfig ? normalizeChatInfoPayload(response.data) : null,
     etag: response.etag,
     notModified: false,
   };

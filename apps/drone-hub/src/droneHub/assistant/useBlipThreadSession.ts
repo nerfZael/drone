@@ -10,6 +10,10 @@ import type {
   BlipThreadStreamEvent,
 } from '@blip/protocol';
 import { assistantTranscriptHasErrorMessage } from './assistant-message-model';
+import {
+  createHistoryRefreshCoordinator,
+  type HistoryRefreshOptions,
+} from './history-refresh-coordinator';
 
 const ASSISTANT_HISTORY_PAGE_SIZE = 200;
 
@@ -91,8 +95,8 @@ export function useBlipThreadSession({
   onNativeChangeRef.current = onNativeChange;
   const bootstrapHistory = initialHistory?.threadId === threadId ? initialHistory : null;
 
-  const refreshHistory = React.useCallback(
-    async (options?: { quiet?: boolean; preserveContextUsage?: boolean }) => {
+  const runHistoryRefresh = React.useCallback(
+    async (options: HistoryRefreshOptions) => {
       if (!enabled || !threadId) return;
       const requestId = ++latestHistoryRequestRef.current;
       if (!options?.quiet) setHistoryLoading(true);
@@ -143,6 +147,11 @@ export function useBlipThreadSession({
     },
     [enabled, threadId],
   );
+  const historyRefreshCoordinator = React.useMemo(
+    () => createHistoryRefreshCoordinator(runHistoryRefresh),
+    [runHistoryRefresh],
+  );
+  const refreshHistory = historyRefreshCoordinator.refresh;
 
   React.useEffect(() => {
     setEntries(bootstrapHistory?.entries ?? []);

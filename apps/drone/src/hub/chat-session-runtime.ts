@@ -98,6 +98,7 @@ export type ChatSessionRuntimeDependencies = {
   countTranscriptTurnsFromStore: any;
   defaultChatAgentConfigForDrone: any;
   defaultSeedBootstrapTimeoutMs: any;
+  dockerSnapshotAfterAgentMessageEnabledForChat: any;
   droneRuntime: any;
   dvmExec: any;
   dvmSessionStart: any;
@@ -124,6 +125,7 @@ export type ChatSessionRuntimeDependencies = {
   normalizeDockerSnapshot: any;
   normalizeDroneIdentity: any;
   normalizePendingStartupPrompts: any;
+  nativeChatHasHistory: any;
   nowIso: any;
   parseChatNameForMutation: any;
   patchChatMetadataInStore: any;
@@ -168,6 +170,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     countTranscriptTurnsFromStore,
     defaultChatAgentConfigForDrone,
     defaultSeedBootstrapTimeoutMs,
+    dockerSnapshotAfterAgentMessageEnabledForChat,
     droneRuntime,
     dvmExec,
     dvmSessionStart,
@@ -194,6 +197,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     normalizeDockerSnapshot,
     normalizeDroneIdentity,
     normalizePendingStartupPrompts,
+    nativeChatHasHistory,
     nowIso,
     parseChatNameForMutation,
     patchChatMetadataInStore,
@@ -915,6 +919,10 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
         reasoning: string | null;
         agentPermissionMode: AgentPermissionMode;
         approvalPolicy: AgentApprovalPolicy;
+        agentLocked?: boolean;
+        dockerSnapshotAfterAgentMessageEnabled?: boolean;
+        sessionName?: string;
+        createdAt?: string;
         turnCount: number;
         transcriptEtag: string | null;
         responseEtag?: string;
@@ -1177,6 +1185,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     tailRaw?: string | null;
     includeTranscript: boolean;
     includePending: boolean;
+    includeConfigDetails?: boolean;
     maintenance?: ChatSnapshotMaintenance;
     includeDockerSnapshotMaintenance?: boolean;
     ifNoneMatch?: string;
@@ -1229,7 +1238,9 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
 
     const droneId = context.droneId;
     const entry = context.projectedChatEntry;
-    const transcriptResult = opts.includeTranscript
+    const agent = inferChatAgent(entry as any, context.droneEntry);
+    const transcriptResult =
+      opts.includeTranscript && !(opts.includeConfigDetails && agent.kind === 'custom')
       ? await buildTranscriptRowsForChat({
           droneId,
           droneName: context.droneName,
@@ -1258,23 +1269,41 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       });
     }
 
-    const agent = transcriptResult?.agent ?? inferChatAgent(entry as any, context.droneEntry);
     const pending = opts.includePending
       ? await buildPendingRowsForChat({ droneId, chatName: opts.chatName })
       : [];
+    const chatId = String((entry as any)?.id ?? '').trim() || null;
+    const turnCount =
+      transcriptResult?.turnCount ??
+      (opts.includeConfigDetails
+        ? countTranscriptTurnsFromStore({ droneId, chatName: opts.chatName }).count
+        : 0);
+    const configDetails = opts.includeConfigDetails
+      ? {
+          agentLocked:
+            turnCount > 0 ||
+            pending.length > 0 ||
+            (agent.kind === 'native' && chatId ? await nativeChatHasHistory(chatId) : false),
+          dockerSnapshotAfterAgentMessageEnabled:
+            dockerSnapshotAfterAgentMessageEnabledForChat(context.droneEntry, entry),
+          sessionName: hubChatSessionName(opts.chatName || 'default'),
+          createdAt: String((entry as any)?.createdAt ?? '').trim(),
+        }
+      : {};
     return {
       ok: true,
       id: droneId,
       name: context.droneName,
       chat: opts.chatName,
-      chatId: String((entry as any)?.id ?? '').trim() || null,
+      chatId,
       selection: transcriptResult?.selection ?? opts.selection,
       transcripts: transcriptResult?.transcripts ?? [],
       pending,
       agent,
       model: normalizeChatModel((entry as any)?.model),
       ...chatSnapshotConfig(entry),
-      turnCount: transcriptResult?.turnCount ?? 0,
+      ...configDetails,
+      turnCount,
       transcriptEtag: transcriptResult?.etag ?? null,
     };
   }
@@ -1286,6 +1315,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     tailRaw?: string | null;
     includeTranscript: boolean;
     includePending: boolean;
+    includeConfigDetails?: boolean;
     maintenance?: ChatSnapshotMaintenance;
     includeDockerSnapshotMaintenance?: boolean;
     ifNoneMatch?: string;
@@ -1333,7 +1363,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     if (!version.chat)
       return { ok: false, statusCode: 404, error: `unknown chat: ${opts.chatName}` };
     const agent = inferChatAgent(version.chat, resolved.drone);
-    if (opts.includeTranscript && agent.kind === 'custom') {
+    if (opts.includeTranscript && agent.kind === 'custom' && !opts.includeConfigDetails) {
       return {
         ok: false,
         statusCode: 410,
@@ -1396,6 +1426,19 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
         })
       : [];
     opts.mark?.('format');
+    const chatId = String((version.chat as any)?.id ?? '').trim() || null;
+    const configDetails = opts.includeConfigDetails
+      ? {
+          agentLocked:
+            version.turnCount > 0 ||
+            rows.pending.length > 0 ||
+            (agent.kind === 'native' && chatId ? await nativeChatHasHistory(chatId) : false),
+          dockerSnapshotAfterAgentMessageEnabled:
+            dockerSnapshotAfterAgentMessageEnabledForChat(resolved.drone, version.chat),
+          sessionName: hubChatSessionName(opts.chatName || 'default'),
+          createdAt: String((version.chat as any)?.createdAt ?? '').trim(),
+        }
+      : {};
     const maintenanceEntry = { ...version.chat, pendingPrompts: pending };
     if (opts.maintenance === 'run') {
       runChatReadMaintenance({
@@ -1417,13 +1460,14 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       id: resolved.id,
       name: droneName,
       chat: opts.chatName,
-      chatId: String((version.chat as any)?.id ?? '').trim() || null,
+      chatId,
       selection: opts.selection,
       transcripts,
       pending,
       agent,
       model: normalizeChatModel((version.chat as any)?.model),
       ...chatSnapshotConfig(version.chat),
+      ...configDetails,
       turnCount: version.turnCount,
       transcriptEtag: responseEtag,
       responseEtag,
@@ -1448,6 +1492,15 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       reasoning: snapshot.reasoning,
       agentPermissionMode: snapshot.agentPermissionMode,
       approvalPolicy: snapshot.approvalPolicy,
+      ...(snapshot.agentLocked !== undefined ? { agentLocked: snapshot.agentLocked } : {}),
+      ...(snapshot.dockerSnapshotAfterAgentMessageEnabled !== undefined
+        ? {
+            dockerSnapshotAfterAgentMessageEnabled:
+              snapshot.dockerSnapshotAfterAgentMessageEnabled,
+          }
+        : {}),
+      ...(snapshot.sessionName !== undefined ? { sessionName: snapshot.sessionName } : {}),
+      ...(snapshot.createdAt !== undefined ? { createdAt: snapshot.createdAt } : {}),
       ...(opts?.includeTranscriptMeta
         ? {
             transcript: {
