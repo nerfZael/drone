@@ -128,6 +128,56 @@ describe('MeshSocket requests', () => {
     expect(internals.pending.size).toBe(0);
   });
 
+  test('does not register a request when disconnected while signing', async () => {
+    const signingStarted = Promise.withResolvers<void>();
+    const signingGate = Promise.withResolvers<void>();
+    const sent: string[] = [];
+    const socket = new MeshSocket(
+      { deviceId: 'peer-a', endpoint: 'https://peer-a.test', role: 'primary' },
+      'network-a',
+      {
+        id: 'mobile-a',
+        name: 'Mobile',
+        platform: 'android',
+        publicKey: {},
+        async sign() {
+          signingStarted.resolve();
+          await signingGate.promise;
+          return 'signature';
+        },
+      },
+      {},
+      () => undefined,
+      () => undefined,
+      () => undefined,
+      () => undefined,
+      { handle: async () => null },
+      { inspectEnvelope: () => 'accept', acceptValidated: () => 'accept' },
+    );
+    const internals = socket as unknown as {
+      ready: boolean;
+      socket: Pick<WebSocket, 'readyState' | 'send' | 'close'>;
+      pending: Map<string, unknown>;
+    };
+    internals.ready = true;
+    internals.socket = {
+      readyState: WebSocket.OPEN,
+      send(value) {
+        sent.push(String(value));
+      },
+      close() {},
+    };
+
+    const request = socket.request('target-a', 'drone-control', 'files.list', {});
+    await signingStarted.promise;
+    socket.disconnect();
+    signingGate.resolve();
+
+    await expect(request).rejects.toThrow('Mesh connection changed');
+    expect(sent).toEqual([]);
+    expect(internals.pending.size).toBe(0);
+  });
+
   test('cancels a snapshot returned after its initial request was aborted', async () => {
     const sent: string[] = [];
     const socket = new MeshSocket(
