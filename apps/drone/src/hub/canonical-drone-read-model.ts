@@ -1,4 +1,5 @@
 import { getHubDatabase, type HubDatabaseConnection } from '../host/hub-database';
+import { compactActivityJsonSql } from '../host/activity-read-projection';
 
 type LifecycleRow = {
   drone_id: string;
@@ -75,26 +76,6 @@ function measureRows<T>(
   const rows = read();
   onPhase?.({ name, durationMs: performance.now() - startedAt, rowCount: rows.length });
   return rows;
-}
-
-/**
- * Sidebar and event-stream readers only use activity.updatedAt to detect live
- * changes. Agent activity can contain up to 512 KiB of message/tool history and
- * is duplicated in both prompt and turn payloads, so carrying the full value in
- * this frequently rebuilt read model creates hundreds of MiB of short-lived JS
- * objects. Preserve every other payload field while projecting activity down to
- * the one value these callers consume.
- */
-function compactActivityJson(column: string): string {
-  return `CASE
-    WHEN json_valid(${column}) = 0 THEN ${column}
-    WHEN json_type(${column}, '$.activity') IS NULL THEN ${column}
-    ELSE json_set(
-      json_remove(${column}, '$.activity'),
-      '$.activity',
-      json_object('updatedAt', json_extract(${column}, '$.activity.updatedAt'))
-    )
-  END`;
 }
 
 function parseObject(raw: string): Record<string, any> {
@@ -223,6 +204,16 @@ export function readCanonicalActiveDroneModel(
     });
 
     if (hasTable(connection, 'canonical_chat_turns')) {
+      const hasTurnProjections = hasTable(connection, 'canonical_chat_turn_active_projections');
+      const activeTurnJson = hasTurnProjections
+        ? 'turn_projections.turn_json'
+        : compactActivityJsonSql('turns.turn_json');
+      const turnProjectionJoin = hasTurnProjections
+        ? `JOIN canonical_chat_turn_active_projections AS turn_projections
+          ON turn_projections.drone_id = turns.drone_id
+          AND turn_projections.chat_name = turns.chat_name
+          AND turn_projections.turn_id = turns.turn_id`
+        : '';
       const turnRows = measureRows(
         'turns',
         () =>
@@ -240,12 +231,13 @@ export function readCanonicalActiveDroneModel(
           FROM ranked WHERE recent_rank <= ?
         )
         SELECT turns.drone_id,turns.chat_name,
-          ${compactActivityJson('turns.turn_json')} AS turn_json
+          ${activeTurnJson} AS turn_json
         FROM selected_ids
         JOIN canonical_chat_turns AS turns
           ON turns.drone_id = selected_ids.drone_id
           AND turns.chat_name = selected_ids.chat_name
           AND turns.turn_id = selected_ids.turn_id
+        ${turnProjectionJoin}
         ORDER BY turns.drone_id,turns.chat_name,COALESCE(turns.prompt_at,turns.at),
           turns.completed_at,turns.ordinal,turns.turn_id`,
             )
@@ -265,6 +257,13 @@ export function readCanonicalActiveDroneModel(
     }
 
     if (hasTable(connection, 'prompts')) {
+      const hasPromptProjections = hasTable(connection, 'prompt_active_projections');
+      const activePromptJson = hasPromptProjections
+        ? 'prompt_projections.payload_json'
+        : compactActivityJsonSql('prompts.payload_json');
+      const promptProjectionJoin = hasPromptProjections
+        ? 'JOIN prompt_active_projections AS prompt_projections USING (drone_id,chat_name,prompt_id)'
+        : '';
       const promptRows = measureRows(
         'prompts',
         () =>
@@ -287,9 +286,10 @@ export function readCanonicalActiveDroneModel(
         )
         SELECT prompts.drone_id,prompts.chat_name,prompts.prompt_id,prompts.created_at,
           prompts.updated_at,prompts.state,prompts.prompt,
-          ${compactActivityJson('prompts.payload_json')} AS payload_json,prompts.last_error
+          ${activePromptJson} AS payload_json,prompts.last_error
         FROM ranked
         JOIN prompts USING (drone_id,chat_name,prompt_id)
+        ${promptProjectionJoin}
         WHERE rank <= 60
         ORDER BY prompts.drone_id,prompts.chat_name,prompts.created_at,prompts.prompt_id`,
             )
@@ -362,6 +362,16 @@ export function readCanonicalChatActivityModel(
     drone.chats[chatName] = chat;
 
     if (hasTable(connection, 'canonical_chat_turns')) {
+      const hasTurnProjections = hasTable(connection, 'canonical_chat_turn_active_projections');
+      const activeTurnJson = hasTurnProjections
+        ? 'turn_projections.turn_json'
+        : compactActivityJsonSql('turns.turn_json');
+      const turnProjectionJoin = hasTurnProjections
+        ? `JOIN canonical_chat_turn_active_projections AS turn_projections
+            ON turn_projections.drone_id = turns.drone_id
+            AND turn_projections.chat_name = turns.chat_name
+            AND turn_projections.turn_id = turns.turn_id`
+        : '';
       const turnRows = connection
         .prepare(
           `WITH recent AS (
@@ -372,10 +382,11 @@ export function readCanonicalChatActivityModel(
             LIMIT ?
           )
           SELECT turns.drone_id,turns.chat_name,
-            ${compactActivityJson('turns.turn_json')} AS turn_json
+            ${activeTurnJson} AS turn_json
           FROM recent
           JOIN canonical_chat_turns AS turns
             ON turns.drone_id = ? AND turns.chat_name = ? AND turns.turn_id = recent.turn_id
+          ${turnProjectionJoin}
           ORDER BY COALESCE(turns.prompt_at,turns.at),turns.completed_at,turns.ordinal,turns.turn_id`,
         )
         .all(droneId, chatName, RECENT_TURNS_PER_CHAT, droneId, chatName) as TurnRow[];
@@ -545,6 +556,13 @@ export function readCanonicalDroneSummaryModel(
     }
 
     if (hasTable(connection, 'prompts')) {
+      const hasPromptProjections = hasTable(connection, 'prompt_active_projections');
+      const activePromptJson = hasPromptProjections
+        ? 'prompt_projections.payload_json'
+        : compactActivityJsonSql('prompts.payload_json');
+      const promptProjectionJoin = hasPromptProjections
+        ? 'JOIN prompt_active_projections AS prompt_projections USING (drone_id,chat_name,prompt_id)'
+        : '';
       const promptRows = measureRows(
         'prompts',
         () =>
@@ -572,17 +590,18 @@ export function readCanonicalDroneSummaryModel(
               SELECT prompts.drone_id,prompts.chat_name,prompts.prompt_id,
                 prompts.created_at,prompts.updated_at,prompts.state,prompts.prompt,
                 CASE
-                  WHEN json_valid(prompts.payload_json) THEN json_object(
-                    'action', json_extract(prompts.payload_json, '$.action'),
-                    'approvals', json_extract(prompts.payload_json, '$.approvals'),
+                  WHEN json_valid(${activePromptJson}) THEN json_object(
+                    'action', json_extract(${activePromptJson}, '$.action'),
+                    'approvals', json_extract(${activePromptJson}, '$.approvals'),
                     'activity', json_object(
-                      'updatedAt', json_extract(prompts.payload_json, '$.activity.updatedAt')
+                      'updatedAt', json_extract(${activePromptJson}, '$.activity.updatedAt')
                     )
                   )
                   ELSE '{}'
                 END AS payload_json,prompts.last_error
               FROM ranked
               JOIN prompts USING (drone_id,chat_name,prompt_id)
+              ${promptProjectionJoin}
               WHERE rank <= 60
                 AND (
                   ranked.state != 'sent'
@@ -601,7 +620,7 @@ export function readCanonicalDroneSummaryModel(
                           AND newer_turns.turn_id = newer.prompt_id
                       )
                   )
-                  OR json_array_length(json_extract(prompts.payload_json, '$.approvals')) > 0
+                  OR json_array_length(json_extract(${activePromptJson}, '$.approvals')) > 0
                 )
               ORDER BY prompts.drone_id,prompts.chat_name,prompts.created_at,prompts.prompt_id`,
             )

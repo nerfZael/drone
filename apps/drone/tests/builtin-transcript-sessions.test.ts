@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  createCodexPromptJobTranscriptAccumulator,
   formatTranscriptJobFailure,
   parseBuiltinPromptJobTranscript,
   parseBlipJobTranscript,
@@ -839,6 +840,42 @@ describe('parsePiJsonl', () => {
 });
 
 describe('prompt job transcript metadata', () => {
+  test('incrementally projects appended Codex events without losing streamed text', () => {
+    const accumulator = createCodexPromptJobTranscriptAccumulator();
+    accumulator.pushLine('{"type":"thread.started","thread_id":"thread-1"}');
+    accumulator.pushLine('{"type":"response.output_text.delta","item_id":"answer-1","delta":"Hello"}');
+
+    expect(accumulator.transcript({ stdoutBytes: 120 })).toMatchObject({
+      kind: 'codex',
+      threadId: 'thread-1',
+      message: 'Hello',
+      stdoutBytes: 120,
+    });
+
+    accumulator.pushLine('{"type":"response.output_text.delta","item_id":"answer-1","delta":" world"}');
+    accumulator.pushLine('{"type":"turn.completed","status":"completed"}');
+
+    expect(accumulator.transcript({ stdoutBytes: 240 })).toMatchObject({
+      kind: 'codex',
+      threadId: 'thread-1',
+      message: 'Hello world',
+      terminalEvent: 'turn.completed',
+      terminalStatus: 'completed',
+      stdoutBytes: 240,
+    });
+  });
+
+  test('retains an interrupted Codex terminal outcome in the compact transcript', () => {
+    const accumulator = createCodexPromptJobTranscriptAccumulator();
+    accumulator.pushLine('{"type":"turn.completed","status":"interrupted"}');
+
+    expect(accumulator.transcript()).toMatchObject({
+      kind: 'codex',
+      terminalEvent: 'turn.completed',
+      terminalStatus: 'canceled',
+    });
+  });
+
   test('preserves the final Codex message even when persisted stdout is truncated earlier', () => {
     const fullStdout = [
       '{"type":"thread.started","thread_id":"019e1922-047b-74b1-bab8-0eaceadf4062"}',

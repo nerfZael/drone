@@ -79,6 +79,7 @@ function extractReasoningEffort(raw: any): string | null {
 }
 
 type CodexTerminalEvent = 'turn.completed' | 'response.completed' | 'response.failed' | 'error';
+type CodexTerminalStatus = 'completed' | 'failed' | 'canceled';
 type CodexJsonlParseResult = {
   threadId: string | null;
   message: string | null;
@@ -86,6 +87,7 @@ type CodexJsonlParseResult = {
   model?: string;
   reasoning?: string;
   terminalEvent?: CodexTerminalEvent;
+  terminalStatus?: CodexTerminalStatus;
   agentPlan?: AgentPlan;
   skillsUsed?: AgentSkillUse[];
 };
@@ -154,6 +156,7 @@ function createCodexJsonlParser(): {
   let streamedMsg = '';
   let streamedItemId = 'response-stream';
   let terminalEvent: CodexTerminalEvent | null = null;
+  let terminalStatus: CodexTerminalStatus | null = null;
   let agentPlan: AgentPlan | undefined;
   let assistantSequence = 0;
   let lastActivityText = '';
@@ -430,6 +433,19 @@ function createCodexJsonlParser(): {
         type === 'error'
       ) {
         terminalEvent = type;
+        if (type === 'turn.completed') {
+          const status = String(obj.status ?? 'completed')
+            .trim()
+            .toLowerCase();
+          terminalStatus =
+            status === 'completed'
+              ? 'completed'
+              : status === 'interrupted' || status === 'canceled' || status === 'cancelled'
+                ? 'canceled'
+                : 'failed';
+        } else {
+          terminalStatus = type === 'response.completed' ? 'completed' : 'failed';
+        }
         activity.settleOpenTools();
       }
       if (obj.type === 'thread.started' && typeof obj.thread_id === 'string') {
@@ -500,10 +516,52 @@ function createCodexJsonlParser(): {
         ...(lastModel ? { model: lastModel } : {}),
         ...(lastReasoning ? { reasoning: lastReasoning } : {}),
         ...(terminalEvent ? { terminalEvent } : {}),
+        ...(terminalStatus ? { terminalStatus } : {}),
         ...(agentPlan ? { agentPlan } : {}),
         ...(agentSkillsUsed.length > 0 ? { skillsUsed: agentSkillsUsed } : {}),
       };
     },
+  };
+}
+
+type PromptJobTranscriptMeta = {
+  stdoutBytes?: number;
+  stdoutTruncated?: boolean;
+  parsedAt?: string;
+};
+
+function codexPromptJobTranscript(
+  parsed: CodexJsonlParseResult,
+  opts?: PromptJobTranscriptMeta,
+): Extract<BuiltinPromptJobTranscript, { kind: 'codex' }> {
+  return {
+    kind: 'codex',
+    message: parsed.message,
+    threadId: parsed.threadId,
+    ...(parsed.activity ? { activity: parsed.activity } : {}),
+    ...(parsed.model ? { model: parsed.model } : {}),
+    ...(parsed.reasoning ? { reasoning: parsed.reasoning } : {}),
+    ...(parsed.terminalEvent ? { terminalEvent: parsed.terminalEvent } : {}),
+    ...(parsed.terminalStatus ? { terminalStatus: parsed.terminalStatus } : {}),
+    ...(parsed.agentPlan ? { agentPlan: parsed.agentPlan } : {}),
+    ...(parsed.skillsUsed ? { skillsUsed: parsed.skillsUsed } : {}),
+    ...promptJobTranscriptMeta(opts),
+  };
+}
+
+/**
+ * Stateful parser used by the daemon while a Codex App Server run is active.
+ * Callers can feed only newly appended JSONL rows and materialize the same
+ * bounded transcript shape without reparsing the run from byte zero.
+ */
+export function createCodexPromptJobTranscriptAccumulator(): {
+  pushLine(line: string): void;
+  transcript(opts?: PromptJobTranscriptMeta): Extract<BuiltinPromptJobTranscript, { kind: 'codex' }>;
+} {
+  const parser = createCodexJsonlParser();
+  return {
+    pushLine: parser.pushLine,
+    transcript: (opts) => codexPromptJobTranscript(parser.result(), opts),
   };
 }
 
@@ -1261,6 +1319,7 @@ export type BuiltinPromptJobTranscript =
       model?: string;
       reasoning?: string;
       terminalEvent?: CodexTerminalEvent;
+      terminalStatus?: CodexTerminalStatus;
       agentPlan?: AgentPlan;
       skillsUsed?: AgentSkillUse[];
       stdoutBytes?: number;
@@ -1355,19 +1414,7 @@ export function parseBuiltinPromptJobTranscript(
 ): BuiltinPromptJobTranscript | null {
   const kind = String(kindRaw ?? '').trim();
   if (kind === 'codex') {
-    const parsed = parseCodexJsonl(stdout);
-    return {
-      kind: 'codex',
-      message: parsed.message,
-      threadId: parsed.threadId,
-      ...(parsed.activity ? { activity: parsed.activity } : {}),
-      ...(parsed.model ? { model: parsed.model } : {}),
-      ...(parsed.reasoning ? { reasoning: parsed.reasoning } : {}),
-      ...(parsed.terminalEvent ? { terminalEvent: parsed.terminalEvent } : {}),
-      ...(parsed.agentPlan ? { agentPlan: parsed.agentPlan } : {}),
-      ...(parsed.skillsUsed ? { skillsUsed: parsed.skillsUsed } : {}),
-      ...promptJobTranscriptMeta(opts),
-    };
+    return codexPromptJobTranscript(parseCodexJsonl(stdout), opts);
   }
   if (kind === 'cursor' || kind === 'claude' || kind === 'opencode') {
     const parsed = parseStructuredAgentJsonl(kind, stdout);
@@ -1420,19 +1467,7 @@ export async function parseBuiltinPromptJobTranscriptLines(
 ): Promise<BuiltinPromptJobTranscript | null> {
   const kind = String(kindRaw ?? '').trim();
   if (kind === 'codex') {
-    const parsed = await parseCodexJsonlLines(lines);
-    return {
-      kind: 'codex',
-      message: parsed.message,
-      threadId: parsed.threadId,
-      ...(parsed.activity ? { activity: parsed.activity } : {}),
-      ...(parsed.model ? { model: parsed.model } : {}),
-      ...(parsed.reasoning ? { reasoning: parsed.reasoning } : {}),
-      ...(parsed.terminalEvent ? { terminalEvent: parsed.terminalEvent } : {}),
-      ...(parsed.agentPlan ? { agentPlan: parsed.agentPlan } : {}),
-      ...(parsed.skillsUsed ? { skillsUsed: parsed.skillsUsed } : {}),
-      ...promptJobTranscriptMeta(opts),
-    };
+    return codexPromptJobTranscript(await parseCodexJsonlLines(lines), opts);
   }
   if (kind === 'cursor' || kind === 'claude' || kind === 'opencode') {
     const parsed = await parseStructuredAgentJsonlLines(kind, lines);
@@ -1485,6 +1520,7 @@ export function parseCodexJobTranscript(job: any): {
   model?: string;
   reasoning?: string;
   terminalEvent?: CodexTerminalEvent;
+  terminalStatus?: CodexTerminalStatus;
   agentPlan?: AgentPlan;
   skillsUsed?: AgentSkillUse[];
 } {
@@ -1506,6 +1542,13 @@ export function parseCodexJobTranscript(job: any): {
         terminalEventRaw === 'error'
           ? terminalEventRaw
           : undefined;
+      const terminalStatusRaw = String(transcript.terminalStatus ?? '').trim();
+      const terminalStatus =
+        terminalStatusRaw === 'completed' ||
+        terminalStatusRaw === 'failed' ||
+        terminalStatusRaw === 'canceled'
+          ? terminalStatusRaw
+          : undefined;
       const agentPlan = normalizeAgentPlan(
         transcript.agentPlan,
         'codex',
@@ -1519,6 +1562,7 @@ export function parseCodexJobTranscript(job: any): {
         ...(model ? { model } : {}),
         ...(reasoning ? { reasoning } : {}),
         ...(terminalEvent ? { terminalEvent } : {}),
+        ...(terminalStatus ? { terminalStatus } : {}),
         ...(agentPlan ? { agentPlan } : {}),
         ...(skillsUsed.length > 0 ? { skillsUsed } : {}),
       };

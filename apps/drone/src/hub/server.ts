@@ -5237,11 +5237,26 @@ async function startDroneHubApiServerWithLifecycle(
       phases.push({ name, durationMs });
       timing?.record(name, durationMs);
     };
+    const measureSource = async <T>(name: string, operation: () => Promise<T>): Promise<T> => {
+      const startedAt = performance.now();
+      try {
+        return await operation();
+      } finally {
+        record(name, startedAt);
+      }
+    };
+    const eventLoopStartedAt = performance.now();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    record('snapshotEventLoopDelay', eventLoopStartedAt);
     const sourcesStartedAt = performance.now();
     const [regAny, canonicalGroups, preferences] = await Promise.all([
-      loadPreparedDroneRegistryForSummary(source, timing),
-      listCanonicalGroups(),
-      hubApplication.settings.uiPreferences.read(),
+      measureSource('snapshotRegistry', async () =>
+        await loadPreparedDroneRegistryForSummary(source, timing),
+      ),
+      measureSource('snapshotGroups', async () => await listCanonicalGroups()),
+      measureSource('snapshotPreferences', async () =>
+        await hubApplication.settings.uiPreferences.read(),
+      ),
     ]);
     record('snapshotSources', sourcesStartedAt);
     const groupIdByScopeAndName = new Map(

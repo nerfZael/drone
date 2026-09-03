@@ -134,6 +134,10 @@ describeSocketSuite('create runtime api', () => {
         statusChecking: false,
       });
       const serverTiming = response.r.headers.get('server-timing') ?? '';
+      expect(serverTiming).toContain('snapshotEventLoopDelay;dur=');
+      expect(serverTiming).toContain('snapshotRegistry;dur=');
+      expect(serverTiming).toContain('snapshotGroups;dur=');
+      expect(serverTiming).toContain('snapshotPreferences;dur=');
       expect(serverTiming).toContain('snapshotSources;dur=');
       expect(serverTiming).toContain('serialize;dur=');
     } finally {

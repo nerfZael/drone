@@ -1,5 +1,6 @@
 import { applyHubDatabaseMigrations, getHubDatabase } from './hub-database';
 import type { HubDatabase, HubDatabaseConnection, HubDatabaseMigration } from './hub-database';
+import { compactActivityJsonSql } from './activity-read-projection';
 import {
   normalizePromptQueueInterruption,
   type AgentRunActivity,
@@ -214,6 +215,54 @@ export const PROMPT_QUEUE_MIGRATIONS: readonly HubDatabaseMigration[] = [
       connection.exec(`
         CREATE INDEX idx_prompts_drone_prompt
           ON prompts (drone_id, prompt_id, chat_name);
+      `);
+    },
+  },
+  {
+    version: 6,
+    name: 'compact active prompt read projections',
+    migrate(connection) {
+      const compactPrompt = compactActivityJsonSql('payload_json');
+      const compactNewPrompt = compactActivityJsonSql('NEW.payload_json');
+      connection.exec(`
+        CREATE TABLE prompt_active_projections (
+          drone_id TEXT NOT NULL,
+          chat_name TEXT NOT NULL,
+          prompt_id TEXT NOT NULL,
+          payload_json TEXT NOT NULL,
+          PRIMARY KEY (drone_id, chat_name, prompt_id),
+          FOREIGN KEY (drone_id, chat_name, prompt_id)
+            REFERENCES prompts(drone_id, chat_name, prompt_id)
+            ON UPDATE CASCADE ON DELETE CASCADE
+        );
+
+        INSERT INTO prompt_active_projections (
+          drone_id, chat_name, prompt_id, payload_json
+        )
+        SELECT drone_id, chat_name, prompt_id, ${compactPrompt}
+        FROM prompts;
+
+        CREATE TRIGGER prompt_active_projection_insert
+        AFTER INSERT ON prompts BEGIN
+          DELETE FROM prompt_active_projections
+          WHERE drone_id = NEW.drone_id
+            AND chat_name = NEW.chat_name
+            AND prompt_id = NEW.prompt_id;
+          INSERT INTO prompt_active_projections (
+            drone_id, chat_name, prompt_id, payload_json
+          ) VALUES (NEW.drone_id, NEW.chat_name, NEW.prompt_id, ${compactNewPrompt});
+        END;
+
+        CREATE TRIGGER prompt_active_projection_update
+        AFTER UPDATE OF payload_json ON prompts BEGIN
+          DELETE FROM prompt_active_projections
+          WHERE drone_id = NEW.drone_id
+            AND chat_name = NEW.chat_name
+            AND prompt_id = NEW.prompt_id;
+          INSERT INTO prompt_active_projections (
+            drone_id, chat_name, prompt_id, payload_json
+          ) VALUES (NEW.drone_id, NEW.chat_name, NEW.prompt_id, ${compactNewPrompt});
+        END;
       `);
     },
   },

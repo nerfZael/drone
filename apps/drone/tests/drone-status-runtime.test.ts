@@ -127,6 +127,80 @@ describe('drone status runtime', () => {
     await runtime.refreshNow('timing-failure');
   });
 
+  test('backs off unchanged interval probes while forced refreshes remain immediate', async () => {
+    let nowMs = 0;
+    let probes = 0;
+    const timings: any[] = [];
+    const drone = {
+      id: 'stable-drone',
+      name: 'Stable Drone',
+      runtime: 'container',
+      hostPort: 10_000,
+      token: 'token',
+    };
+    const runtime = createDroneStatusRuntime({
+      loadModel: async () => ({ drones: { [drone.id]: drone } }),
+      log: () => {},
+      makeClient: () => ({}),
+      normalizeDroneId: (value) => String(value ?? ''),
+      normalizeRuntime: (value) => String(value ?? ''),
+      now: () => nowMs,
+      onChanged: () => {},
+      onTiming: (timing) => timings.push(timing),
+      readStatus: async () => {
+        probes += 1;
+        return { state: 'ready' };
+      },
+      resolveHostPort: async () => null,
+    });
+
+    await runtime.refreshNow('interval');
+    nowMs = 15_000;
+    await runtime.refreshNow('interval');
+    nowMs = 30_000;
+    await runtime.refreshNow('interval');
+
+    expect(probes).toBe(2);
+    expect(timings.at(-1).phases).toContainEqual(
+      expect.objectContaining({ name: 'skipStableStatuses', operationCount: 1 }),
+    );
+
+    await runtime.refreshNow('registry-write');
+    expect(probes).toBe(3);
+  });
+
+  test('starts the quiet period after a slow probe completes', async () => {
+    let nowMs = 0;
+    let probes = 0;
+    const drone = {
+      id: 'slow-drone',
+      name: 'Slow Drone',
+      runtime: 'container',
+      hostPort: 10_000,
+      token: 'token',
+    };
+    const runtime = createDroneStatusRuntime({
+      loadModel: async () => ({ drones: { [drone.id]: drone } }),
+      log: () => {},
+      makeClient: () => ({}),
+      normalizeDroneId: (value) => String(value ?? ''),
+      normalizeRuntime: (value) => String(value ?? ''),
+      now: () => nowMs,
+      onChanged: () => {},
+      readStatus: async () => {
+        probes += 1;
+        nowMs += 20_000;
+        return { state: 'ready' };
+      },
+      resolveHostPort: async () => null,
+    });
+
+    await runtime.refreshNow('interval');
+    await runtime.refreshNow('interval');
+
+    expect(probes).toBe(1);
+  });
+
   test('coalesces refresh requests received during a running fleet sweep', async () => {
     let releaseFirstProbe!: () => void;
     const firstProbeReleased = new Promise<void>((resolve) => {

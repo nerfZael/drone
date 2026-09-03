@@ -18,6 +18,7 @@ import {
   type AgentRunActivity,
   type AgentSkillUse,
 } from '@drone/assistant-chat';
+import { compactActivityJsonSql } from '../host/activity-read-projection';
 import { normalizeAgentRunActivity } from './builtin-agent-activity';
 import type { AgentRunFileChangesBaseline } from './run-file-changes';
 import {
@@ -537,6 +538,54 @@ export const CHAT_STORE_MIGRATIONS: readonly HubDatabaseMigration[] = [
         CREATE INDEX idx_canonical_chat_turns_docker_snapshot
           ON canonical_chat_turns (drone_id, chat_name)
           WHERE instr(turn_json, '"dockerSnapshot"') > 0;
+      `);
+    },
+  },
+  {
+    version: 11,
+    name: 'compact active transcript read projections',
+    migrate(connection) {
+      const compactTurn = compactActivityJsonSql('turn_json');
+      const compactNewTurn = compactActivityJsonSql('NEW.turn_json');
+      connection.exec(`
+        CREATE TABLE canonical_chat_turn_active_projections (
+          drone_id TEXT NOT NULL,
+          chat_name TEXT NOT NULL,
+          turn_id TEXT NOT NULL,
+          turn_json TEXT NOT NULL,
+          PRIMARY KEY (drone_id, chat_name, turn_id),
+          FOREIGN KEY (drone_id, chat_name, turn_id)
+            REFERENCES canonical_chat_turns(drone_id, chat_name, turn_id)
+            ON UPDATE CASCADE ON DELETE CASCADE
+        );
+
+        INSERT INTO canonical_chat_turn_active_projections (
+          drone_id, chat_name, turn_id, turn_json
+        )
+        SELECT drone_id, chat_name, turn_id, ${compactTurn}
+        FROM canonical_chat_turns;
+
+        CREATE TRIGGER canonical_chat_turn_active_projection_insert
+        AFTER INSERT ON canonical_chat_turns BEGIN
+          DELETE FROM canonical_chat_turn_active_projections
+          WHERE drone_id = NEW.drone_id
+            AND chat_name = NEW.chat_name
+            AND turn_id = NEW.turn_id;
+          INSERT INTO canonical_chat_turn_active_projections (
+            drone_id, chat_name, turn_id, turn_json
+          ) VALUES (NEW.drone_id, NEW.chat_name, NEW.turn_id, ${compactNewTurn});
+        END;
+
+        CREATE TRIGGER canonical_chat_turn_active_projection_update
+        AFTER UPDATE OF turn_json ON canonical_chat_turns BEGIN
+          DELETE FROM canonical_chat_turn_active_projections
+          WHERE drone_id = NEW.drone_id
+            AND chat_name = NEW.chat_name
+            AND turn_id = NEW.turn_id;
+          INSERT INTO canonical_chat_turn_active_projections (
+            drone_id, chat_name, turn_id, turn_json
+          ) VALUES (NEW.drone_id, NEW.chat_name, NEW.turn_id, ${compactNewTurn});
+        END;
       `);
     },
   },

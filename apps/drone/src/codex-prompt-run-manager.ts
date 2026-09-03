@@ -293,7 +293,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
   async failInterrupted(message: TMessage, reason: string, alreadyMutating = false): Promise<void> {
     const run = await this.runForMessage(message);
     if (run) {
-      const recoveredTerminal = terminalRunResultFromStdout(run.stdout);
+      const recoveredTerminal = terminalRunResultFromDurableProjection(run);
       if (isTerminal(run.state) || recoveredTerminal) {
         const recoveredAt = this.now();
         const terminalRun: CodexPromptRun =
@@ -1162,6 +1162,31 @@ function terminalRunResultFromStdout(
     }
   }
   return terminal;
+}
+
+function terminalRunResultFromDurableProjection(
+  run: CodexPromptRun,
+): { state: Extract<CodexPromptState, 'done' | 'failed' | 'canceled'>; error?: string } | null {
+  const fromStdout = terminalRunResultFromStdout(run.stdout);
+  if (fromStdout) return fromStdout;
+  const transcript =
+    run.transcript && typeof run.transcript === 'object' && !Array.isArray(run.transcript)
+      ? (run.transcript as Record<string, unknown>)
+      : null;
+  const event = String(transcript?.terminalEvent ?? '').trim();
+  const status = String(transcript?.terminalStatus ?? '').trim();
+  if (status === 'completed') return { state: 'done' };
+  if (status === 'canceled') return { state: 'canceled' };
+  if (status === 'failed') {
+    return { state: 'failed', ...(run.error ? { error: run.error } : {}) };
+  }
+  // Older durable transcripts predate terminalStatus. Preserve their recovery
+  // behavior while all newly written transcripts retain the exact outcome.
+  if (event === 'turn.completed' || event === 'response.completed') return { state: 'done' };
+  if (event === 'response.failed' || event === 'error') {
+    return { state: 'failed', ...(run.error ? { error: run.error } : {}) };
+  }
+  return null;
 }
 
 function isTerminal(state: CodexPromptState): boolean {

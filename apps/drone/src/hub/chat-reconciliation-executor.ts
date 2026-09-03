@@ -794,8 +794,11 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
           // Self-heal false failed states only when Codex emitted a terminal
           // completion event. An in-flight status update is not a final answer.
           const terminalEvent = String(parsed.terminalEvent ?? '').trim();
+          const terminalStatus = String(parsed.terminalStatus ?? '').trim();
           const hasCompletedTurn =
-            terminalEvent === 'turn.completed' || terminalEvent === 'response.completed';
+            terminalStatus === 'completed' ||
+            (!terminalStatus &&
+              (terminalEvent === 'turn.completed' || terminalEvent === 'response.completed'));
           if (output && hasCompletedTurn) {
             if (applyBuiltinSessionId(entry, 'codex', parsed.threadId)) {
               changed = true;

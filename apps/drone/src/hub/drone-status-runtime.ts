@@ -16,6 +16,7 @@ type DroneStatusRuntimeDependencies = {
   normalizeRuntime: (value: unknown) => string;
   onChanged: (source: string) => void;
   onTiming?: (timing: DroneStatusRefreshTiming) => void;
+  now?: () => number;
   readStatus: (client: any) => Promise<any>;
   resolveHostPort: (containerName: string, containerPort: number) => Promise<number | null>;
 };
@@ -26,7 +27,13 @@ export type DroneStatusRefreshTiming = {
   changedCount: number;
   totalMs: number;
   phases: Array<{
-    name: 'loadModel' | 'probeStatuses' | 'resolvePorts' | 'readStatuses' | 'notify';
+    name:
+      | 'loadModel'
+      | 'probeStatuses'
+      | 'resolvePorts'
+      | 'readStatuses'
+      | 'skipStableStatuses'
+      | 'notify';
     durationMs: number;
     operationCount?: number;
   }>;
@@ -37,6 +44,7 @@ type DroneStatusProbeTiming = {
   portLookupCount: number;
   statusReadMs: number;
   statusReadCount: number;
+  skippedCount: number;
 };
 
 // Status probes are network-bound. Four workers made a 160-drone sweep take
@@ -44,10 +52,13 @@ type DroneStatusProbeTiming = {
 // another full sweep. Keep the bound conservative but large enough for fleets.
 const STATUS_REFRESH_CONCURRENCY = 16;
 const STATUS_REFRESH_INTERVAL_MS = 15_000;
+const STATUS_STABLE_MAX_INTERVAL_MS = 120_000;
 const STATUS_CACHE_MAX_ENTRIES = 500;
 
 export function createDroneStatusRuntime(deps: DroneStatusRuntimeDependencies) {
   const cache = new Map<string, CachedDroneStatusSummary>();
+  const probeSchedule = new Map<string, { unchangedCount: number; nextProbeAtMs: number }>();
+  const now = deps.now ?? Date.now;
   let loop: ManagedLoop | null = null;
   let refreshSource = 'interval';
   let refreshRunning = false;
@@ -105,9 +116,11 @@ export function createDroneStatusRuntime(deps: DroneStatusRuntimeDependencies) {
         portLookupCount: 0,
         statusReadMs: 0,
         statusReadCount: 0,
+        skippedCount: 0,
       };
+      const force = source !== 'interval';
       const changed = await mapConcurrent(drones, STATUS_REFRESH_CONCURRENCY, async (drone) =>
-        refreshEntry(drone, probeTiming),
+        refreshEntry(drone, probeTiming, force),
       );
       phases.push({ name: 'probeStatuses', durationMs: performance.now() - phaseStartedAt });
       phases.push({
@@ -119,6 +132,11 @@ export function createDroneStatusRuntime(deps: DroneStatusRuntimeDependencies) {
         name: 'readStatuses',
         durationMs: probeTiming.statusReadMs,
         operationCount: probeTiming.statusReadCount,
+      });
+      phases.push({
+        name: 'skipStableStatuses',
+        durationMs: 0,
+        operationCount: probeTiming.skippedCount,
       });
       changedCount = changed.filter(Boolean).length;
       phaseStartedAt = performance.now();
@@ -145,9 +163,19 @@ export function createDroneStatusRuntime(deps: DroneStatusRuntimeDependencies) {
     }
   }
 
-  async function refreshEntry(drone: any, timing: DroneStatusProbeTiming): Promise<boolean> {
+  async function refreshEntry(
+    drone: any,
+    timing: DroneStatusProbeTiming,
+    force: boolean,
+  ): Promise<boolean> {
     const key = cacheKey(drone);
     const previous = cache.get(key);
+    const scheduled = probeSchedule.get(key);
+    const checkedAtMs = now();
+    if (!force && previous && scheduled && checkedAtMs < scheduled.nextProbeAtMs) {
+      timing.skippedCount += 1;
+      return false;
+    }
     let next: CachedDroneStatusSummary;
     try {
       next = await probe(drone, timing);
@@ -163,8 +191,20 @@ export function createDroneStatusRuntime(deps: DroneStatusRuntimeDependencies) {
       };
     }
     cache.set(key, next);
+    const changed = !sameSummary(previous, next);
+    const unchangedCount = changed ? 0 : Math.min(3, (scheduled?.unchangedCount ?? 0) + 1);
+    const nextIntervalMs = Math.min(
+      STATUS_STABLE_MAX_INTERVAL_MS,
+      STATUS_REFRESH_INTERVAL_MS * 2 ** unchangedCount,
+    );
+    probeSchedule.set(key, {
+      unchangedCount,
+      // A slow network probe should not consume its own quiet period. Anchor
+      // the next check after completion so overloaded fleets actually back off.
+      nextProbeAtMs: now() + nextIntervalMs,
+    });
     pruneCache();
-    return !sameSummary(previous, next);
+    return changed;
   }
 
   async function probe(
@@ -251,6 +291,7 @@ export function createDroneStatusRuntime(deps: DroneStatusRuntimeDependencies) {
       const oldestKey = cache.keys().next().value;
       if (!oldestKey) break;
       cache.delete(oldestKey);
+      probeSchedule.delete(oldestKey);
     }
   }
 

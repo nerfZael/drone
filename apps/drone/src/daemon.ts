@@ -10,6 +10,7 @@ import { URL } from 'node:url';
 import { promisify } from 'node:util';
 
 import {
+  createCodexPromptJobTranscriptAccumulator,
   parseBuiltinPromptJobTranscriptLines,
   type BuiltinPromptJobTranscript,
 } from './hub/builtin-transcript-sessions';
@@ -34,7 +35,6 @@ import {
   type CodexPromptSteeringDiagnostic,
 } from './codex-prompt-run-manager';
 import { codexDaemonRestartRecoveryAction } from './codex-daemon-restart';
-import { codexTranscriptRefreshDue } from './codex-transcript-refresh-policy';
 
 const execFileAsync = promisify(execFile);
 
@@ -387,6 +387,17 @@ function codexRunAsPromptJob(run: CodexPromptRun): PromptJob {
 }
 
 async function refreshCodexPromptRun(run: CodexPromptRun): Promise<CodexPromptRun> {
+  const [currentBytes, currentStderrBytes] = await Promise.all([
+    fileSizeSafe(run.stdoutPath),
+    fileSizeSafe(run.stderrPath),
+  ]);
+  if (
+    run.transcript &&
+    run.stdoutBytes === currentBytes &&
+    (run.stderrBytes ?? 0) === currentStderrBytes
+  ) {
+    return run;
+  }
   const refreshed = await refreshPromptJobTranscript(codexRunAsPromptJob(run));
   return {
     ...run,
@@ -398,6 +409,42 @@ async function refreshCodexPromptRun(run: CodexPromptRun): Promise<CodexPromptRu
     stderrTruncated: refreshed.stderrTruncated,
     transcript: refreshed.transcript,
   };
+}
+
+type CodexTranscriptAccumulator = ReturnType<typeof createCodexPromptJobTranscriptAccumulator>;
+const codexTranscriptAccumulatorByRunId = new Map<
+  string,
+  { accumulator: CodexTranscriptAccumulator; stdoutBytes: number }
+>();
+
+async function codexTranscriptAccumulatorForRun(
+  run: CodexPromptRun,
+): Promise<{ accumulator: CodexTranscriptAccumulator; stdoutBytes: number }> {
+  const cached = codexTranscriptAccumulatorByRunId.get(run.id);
+  if (cached) return cached;
+  const accumulator = createCodexPromptJobTranscriptAccumulator();
+  const stdoutBytes = await fileSizeSafe(run.stdoutPath);
+  if (stdoutBytes > 0) {
+    const stream = createReadStream(run.stdoutPath, {
+      encoding: 'utf8',
+      start: 0,
+      end: stdoutBytes - 1,
+    });
+    const lines = readline.createInterface({ input: stream, crlfDelay: Infinity });
+    try {
+      for await (const line of lines) accumulator.pushLine(line);
+    } finally {
+      lines.close();
+      stream.destroy();
+    }
+  }
+  const projection = { accumulator, stdoutBytes };
+  if (codexTranscriptAccumulatorByRunId.size >= 64) {
+    const oldestRunId = codexTranscriptAccumulatorByRunId.keys().next().value;
+    if (oldestRunId) codexTranscriptAccumulatorByRunId.delete(oldestRunId);
+  }
+  codexTranscriptAccumulatorByRunId.set(run.id, projection);
+  return projection;
 }
 
 async function projectCodexPromptJob(promptsDir: string, job: CodexPromptJob): Promise<PromptJob> {
@@ -1514,7 +1561,6 @@ async function main() {
   let promptPumpInFlight: Promise<void> | null = null;
   const promptLateRecoveryLastChecked = new Map<string, number>();
   const codexRestartResumesInFlight = new Set<string>();
-  const codexTranscriptLastRefreshAt = new Map<string, number>();
 
   async function withPromptMutationLock<T>(run: () => Promise<T>): Promise<T> {
     const result = promptMutationTail.then(run, run);
@@ -1553,24 +1599,28 @@ async function main() {
     saveRun: (run) => saveCodexPromptRun(promptsDir, run),
     appendRunEvents: async (run, events) => {
       if (events.length === 0) return run;
-      const text = `${events.map((event) => JSON.stringify(event)).join('\n')}\n`;
+      const serializedEvents = events.map((event) => JSON.stringify(event));
+      const text = `${serializedEvents.join('\n')}\n`;
+      const projection = await codexTranscriptAccumulatorForRun(run);
       await fs.appendFile(run.stdoutPath, text, 'utf8');
       const eventAtMs = Date.now();
-      const updatedRun = { ...run, updatedAt: new Date(eventAtMs).toISOString() };
-      if (
-        !codexTranscriptRefreshDue({
-          events,
-          lastRefreshAtMs: codexTranscriptLastRefreshAt.get(run.id),
-          nowMs: eventAtMs,
-        })
-      ) {
-        // The durable JSONL event is enough until the next projection refresh.
-        // GET reads also refresh on demand, so skipping this quadratic reparse
-        // never hides persisted output from a reader.
-        return updatedRun;
-      }
-      const refreshed = await refreshCodexPromptRun(updatedRun);
-      codexTranscriptLastRefreshAt.set(run.id, eventAtMs);
+      for (const serialized of serializedEvents) projection.accumulator.pushLine(serialized);
+      projection.stdoutBytes += Buffer.byteLength(text);
+      const updatedAt = new Date(eventAtMs).toISOString();
+      const refreshed: CodexPromptRun = {
+        ...run,
+        updatedAt,
+        stdout: undefined,
+        stderr: undefined,
+        stdoutBytes: projection.stdoutBytes,
+        stdoutTruncated: undefined,
+        stderrTruncated: undefined,
+        transcript: projection.accumulator.transcript({
+          stdoutBytes: projection.stdoutBytes,
+          stdoutTruncated: false,
+          parsedAt: updatedAt,
+        }),
+      };
       await saveCodexPromptRun(promptsDir, refreshed);
       const responseMessage = await loadPromptJob(promptsDir, refreshed.responseMessageId);
       if (responseMessage?.codexAppServer) {
@@ -1578,6 +1628,15 @@ async function main() {
           ...responseMessage,
           updatedAt: refreshed.updatedAt,
         });
+      }
+      if (
+        events.some((event: any) =>
+          ['turn.completed', 'response.completed', 'response.failed', 'error'].includes(
+            String(event?.type ?? ''),
+          ),
+        )
+      ) {
+        codexTranscriptAccumulatorByRunId.delete(run.id);
       }
       return refreshed;
     },

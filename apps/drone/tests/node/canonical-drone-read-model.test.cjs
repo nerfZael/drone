@@ -105,6 +105,30 @@ test('canonical active drone read model assembles summaries without writes or co
   });
 
   const database = requireHubDatabase();
+  const storedProjections = database.read((connection) => ({
+    turn: connection.prepare(`
+      SELECT turns.turn_json AS full_json, projection.turn_json AS active_json
+      FROM canonical_chat_turns AS turns
+      JOIN canonical_chat_turn_active_projections AS projection
+        USING (drone_id, chat_name, turn_id)
+      WHERE turns.turn_id = 'turn-1'
+    `).get(),
+    prompt: connection.prepare(`
+      SELECT prompts.payload_json AS full_json, projection.payload_json AS active_json
+      FROM prompts
+      JOIN prompt_active_projections AS projection
+        USING (drone_id, chat_name, prompt_id)
+      WHERE prompts.prompt_id = 'prompt-1'
+    `).get(),
+  }));
+  assert.equal(JSON.parse(storedProjections.turn.full_json).activity.messages.length, 1);
+  assert.deepEqual(JSON.parse(storedProjections.turn.active_json).activity, {
+    updatedAt: '2026-07-10T10:03:30.000Z',
+  });
+  assert.equal(JSON.parse(storedProjections.prompt.full_json).activity.messages.length, 1);
+  assert.deepEqual(JSON.parse(storedProjections.prompt.active_json).activity, {
+    updatedAt: '2026-07-10T10:04:30.000Z',
+  });
   const changesBefore = database.read((connection) => connection.prepare('SELECT total_changes() AS count').get().count);
   const model = readCanonicalActiveDroneModel();
   const changesAfter = database.read((connection) => connection.prepare('SELECT total_changes() AS count').get().count);
@@ -158,6 +182,21 @@ test('canonical active drone read model assembles summaries without writes or co
   ]);
   assert.ok(summaryPhases.some((phase) => phase.name === 'turns' && phase.rowCount === 1));
   assert.ok(summaryPhases.some((phase) => phase.name === 'prompts' && phase.rowCount === 1));
+
+  await database.writeTransaction('preserve non-object activity fixture', (connection) => {
+    connection.prepare(`UPDATE canonical_chat_turns
+      SET turn_json = json_set(turn_json, '$.activity', json('null'))
+      WHERE drone_id = 'drone-a' AND chat_name = 'default' AND turn_id = 'turn-1'`).run();
+  });
+  const nullActivityProjection = database.read((connection) => connection.prepare(`
+    SELECT turn_json FROM canonical_chat_turn_active_projections
+    WHERE drone_id = 'drone-a' AND chat_name = 'default' AND turn_id = 'turn-1'
+  `).get());
+  assert.equal(JSON.parse(nullActivityProjection.turn_json).activity, null);
+  assert.equal(
+    readCanonicalActiveDroneModel().drones['drone-a'].chats.default.turns[0].activity,
+    null,
+  );
 });
 
 test('canonical summary read model keeps a large fleet plus startup and draft drones', async () => {
