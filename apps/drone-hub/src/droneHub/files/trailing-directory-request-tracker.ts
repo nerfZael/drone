@@ -7,6 +7,15 @@ export class TrailingDirectoryRequestTracker {
     return this.inFlightByPath.get(path) ?? null;
   }
 
+  deferActiveRequest(path: string, force: boolean): boolean {
+    const activeSequence = this.activeSequence(path);
+    if (activeSequence == null) return false;
+    if (force || this.isInvalidated(path, activeSequence)) {
+      this.requestTrailing(path, activeSequence);
+    }
+    return true;
+  }
+
   begin(path: string, sequence: number): void {
     this.inFlightByPath.set(path, sequence);
   }

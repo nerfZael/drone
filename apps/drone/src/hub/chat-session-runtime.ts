@@ -949,6 +949,29 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     };
   }
 
+  async function chatSnapshotConfigDetails(opts: {
+    droneEntry: any;
+    chatEntry: any;
+    agent: ChatAgentConfig;
+    chatId: string | null;
+    chatName: string;
+    turnCount: number;
+    hasPending: boolean;
+  }) {
+    return {
+      agentLocked:
+        opts.turnCount > 0 ||
+        opts.hasPending ||
+        (opts.agent.kind === 'native' && opts.chatId
+          ? await nativeChatHasHistory(opts.chatId)
+          : false),
+      dockerSnapshotAfterAgentMessageEnabled:
+        dockerSnapshotAfterAgentMessageEnabledForChat(opts.droneEntry, opts.chatEntry),
+      sessionName: hubChatSessionName(opts.chatName || 'default'),
+      createdAt: String(opts.chatEntry?.createdAt ?? '').trim(),
+    };
+  }
+
   function runChatReadMaintenance(opts: {
     droneId: string;
     chatName: string;
@@ -1279,16 +1302,15 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
         ? countTranscriptTurnsFromStore({ droneId, chatName: opts.chatName }).count
         : 0);
     const configDetails = opts.includeConfigDetails
-      ? {
-          agentLocked:
-            turnCount > 0 ||
-            pending.length > 0 ||
-            (agent.kind === 'native' && chatId ? await nativeChatHasHistory(chatId) : false),
-          dockerSnapshotAfterAgentMessageEnabled:
-            dockerSnapshotAfterAgentMessageEnabledForChat(context.droneEntry, entry),
-          sessionName: hubChatSessionName(opts.chatName || 'default'),
-          createdAt: String((entry as any)?.createdAt ?? '').trim(),
-        }
+      ? await chatSnapshotConfigDetails({
+          droneEntry: context.droneEntry,
+          chatEntry: entry,
+          agent,
+          chatId,
+          chatName: opts.chatName,
+          turnCount,
+          hasPending: pending.length > 0,
+        })
       : {};
     return {
       ok: true,
@@ -1428,16 +1450,15 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     opts.mark?.('format');
     const chatId = String((version.chat as any)?.id ?? '').trim() || null;
     const configDetails = opts.includeConfigDetails
-      ? {
-          agentLocked:
-            version.turnCount > 0 ||
-            rows.pending.length > 0 ||
-            (agent.kind === 'native' && chatId ? await nativeChatHasHistory(chatId) : false),
-          dockerSnapshotAfterAgentMessageEnabled:
-            dockerSnapshotAfterAgentMessageEnabledForChat(resolved.drone, version.chat),
-          sessionName: hubChatSessionName(opts.chatName || 'default'),
-          createdAt: String((version.chat as any)?.createdAt ?? '').trim(),
-        }
+      ? await chatSnapshotConfigDetails({
+          droneEntry: resolved.drone,
+          chatEntry: version.chat,
+          agent,
+          chatId,
+          chatName: opts.chatName,
+          turnCount: version.turnCount,
+          hasPending: rows.pending.length > 0,
+        })
       : {};
     const maintenanceEntry = { ...version.chat, pendingPrompts: pending };
     if (opts.maintenance === 'run') {

@@ -109,6 +109,22 @@ export function useFilePreview({
   const clearActivePreview = React.useCallback(() => {
     previewFileRef.current = null;
   }, []);
+  const resetPreviewSelection = React.useCallback(
+    (nextWorkspaceContext: Omit<PreviewRequest, 'path' | 'line'> | null) => {
+      loadVersion.current += 1;
+      saveVersion.current += 1;
+      setWorkspaceContext(nextWorkspaceContext);
+      setRequest(null);
+      setPreview(null);
+      setError(null);
+      setRefreshError(null);
+      setSaveError(null);
+      setLoading(false);
+      setSaving(false);
+      clearActivePreview();
+    },
+    [clearActivePreview],
+  );
   React.useEffect(() => () => previewCacheRef.current?.clear(), []);
 
   const commitPreview = React.useCallback(
@@ -447,32 +463,12 @@ export function useFilePreview({
 
   const openExplorer = React.useCallback(() => {
     if (!selectedDrone) return;
-    loadVersion.current += 1;
-    saveVersion.current += 1;
-    setWorkspaceContext({ targetId, droneId: selectedDrone.id, chatName, phoneTarget });
-    setRequest(null);
-    setPreview(null);
-    setError(null);
-    setRefreshError(null);
-    setSaveError(null);
-    setLoading(false);
-    setSaving(false);
-    clearActivePreview();
-  }, [chatName, clearActivePreview, phoneTarget, selectedDrone, targetId]);
+    resetPreviewSelection({ targetId, droneId: selectedDrone.id, chatName, phoneTarget });
+  }, [chatName, phoneTarget, resetPreviewSelection, selectedDrone, targetId]);
 
   const close = React.useCallback(() => {
-    loadVersion.current += 1;
-    saveVersion.current += 1;
-    setWorkspaceContext(null);
-    setRequest(null);
-    setPreview(null);
-    setError(null);
-    setRefreshError(null);
-    setLoading(false);
-    setSaving(false);
-    setSaveError(null);
-    clearActivePreview();
-  }, [clearActivePreview]);
+    resetPreviewSelection(null);
+  }, [resetPreviewSelection]);
 
   const requestIsCurrent = Boolean(
     request &&

@@ -46,6 +46,7 @@ import {
 } from './drone-file-editor-state';
 import { appendFileDictationLine } from '../files/file-dictation-text';
 import { readDesktopFile } from '../files/read-desktop-file';
+import { desktopMediaFileKindForExtension } from '../files/desktop-media-file-kind';
 
 type RequestJson = typeof requestJsonFn;
 
@@ -115,9 +116,7 @@ function parseFileTooLargeMessage(msgRaw: string): { size: number; maxBytes: num
 
 function oversizedFileKindForPath(pathRaw: string): OpenedFileKind {
   const ext = String(pathRaw ?? '').trim().toLowerCase().split(/[?#]/)[0]?.split('.').pop() ?? '';
-  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico', 'avif', 'tif', 'tiff'].includes(ext)) return 'image';
-  if (['mp4', 'webm', 'mov', 'm4v', 'ogv', 'ogg', 'avi', 'mkv', 'wmv'].includes(ext)) return 'video';
-  return 'large-text';
+  return desktopMediaFileKindForExtension(ext) ?? 'large-text';
 }
 
 function confirmDiscardDirtyTabs(tabs: OpenedFileTab[], actionLabel: string): boolean {

@@ -40,6 +40,7 @@ import {
   fileAncestorDirectoryPaths,
   type FileExplorerNode,
 } from './tree';
+import { sameDroneFsEntries } from './same-drone-fs-entries';
 import { clampWorkspaceExplorerZoom } from '../app/workspace-explorer-preferences';
 import {
   filesystemMutationRefreshPlan,
@@ -49,7 +50,6 @@ import {
   type FilesystemMutationRefreshPlan,
 } from './filesystem-mutation-refresh';
 import { TrailingDirectoryRequestTracker } from './trailing-directory-request-tracker';
-import { deferDirectoryLoadWhileActive } from './defer-directory-load';
 
 const CHILD_DIRECTORY_CACHE_MAX_AGE_MS = 5 * 60_000;
 const FS_LIST_REQUEST_TIMEOUT_MS = 12_000;
@@ -141,31 +141,6 @@ function formatLocalDateTime(ms: number | null | undefined): string {
 
 function hasFileDragPayload(event: React.DragEvent<HTMLElement>): boolean {
   return Array.from(event.dataTransfer?.types ?? []).includes('Files');
-}
-
-function sameFsEntries(a: DroneFsEntry[] | undefined, b: DroneFsEntry[] | undefined): boolean {
-  if (a === b) return true;
-  if (!a || !b) return false;
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i += 1) {
-    const left = a[i];
-    const right = b[i];
-    if (!right) return false;
-    if (
-      left.name !== right.name ||
-      left.path !== right.path ||
-      left.kind !== right.kind ||
-      left.size !== right.size ||
-      left.mtimeMs !== right.mtimeMs ||
-      left.ext !== right.ext ||
-      left.isGitIgnored !== right.isGitIgnored ||
-      left.isImage !== right.isImage ||
-      left.isVideo !== right.isVideo
-    ) {
-      return false;
-    }
-  }
-  return true;
 }
 
 function InlineSpinner() {
@@ -414,11 +389,7 @@ export function DroneFilesDock({
       const dirPath = normalizeContainerPathInput(dirPathRaw);
       if (!dirPath || dirPath === normalizedPath) return;
       if (
-        deferDirectoryLoadWhileActive(
-          childRequestTrackerRef.current,
-          dirPath,
-          opts?.force === true,
-        )
+        childRequestTrackerRef.current.deferActiveRequest(dirPath, opts?.force === true)
       ) return;
       if (!opts?.force && childErrorByPath[dirPath]) return;
       if (
@@ -430,7 +401,7 @@ export function DroneFilesDock({
       const cached = opts?.force ? null : readChildDirectoryCache(cacheKey);
       if (cached) {
         setChildEntriesByPath((prev) => {
-          if (sameFsEntries(prev[dirPath], cached)) return prev;
+          if (sameDroneFsEntries(prev[dirPath], cached)) return prev;
           return { ...prev, [dirPath]: cached };
         });
         setChildErrorByPath((prev) => {
@@ -459,7 +430,7 @@ export function DroneFilesDock({
         const nextEntries = Array.isArray((data as any).entries) ? (((data as any).entries as DroneFsEntry[]) ?? []) : [];
         writeChildDirectoryCache(cacheKey, nextEntries);
         setChildEntriesByPath((prev) => {
-          if (sameFsEntries(prev[dirPath], nextEntries)) return prev;
+          if (sameDroneFsEntries(prev[dirPath], nextEntries)) return prev;
           return { ...prev, [dirPath]: nextEntries };
         });
         setChildErrorByPath((prev) => {

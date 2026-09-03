@@ -167,20 +167,19 @@ export class DeviceMeshHttp {
   }
 
   private publishChange(reason: 'state' | 'connections'): void {
-    this.eventRevision += 1;
-    const payload = `event: change\ndata: ${JSON.stringify({ revision: this.eventRevision, reason })}\n\n`;
-    for (const response of this.eventClients.keys()) {
-      try {
-        response.write(payload);
-      } catch {
-        this.removeEventClient(response);
-      }
-    }
+    this.publishEvent('change', (revision) => ({ revision, reason }));
   }
 
   private publishCapabilityEvent(event: Record<string, any>): void {
+    this.publishEvent('capability', (revision) => ({ ...event, revision }));
+  }
+
+  private publishEvent(
+    eventName: 'change' | 'capability',
+    dataForRevision: (revision: number) => Record<string, any>,
+  ): void {
     this.eventRevision += 1;
-    const payload = `event: capability\ndata: ${JSON.stringify({ ...event, revision: this.eventRevision })}\n\n`;
+    const payload = `event: ${eventName}\ndata: ${JSON.stringify(dataForRevision(this.eventRevision))}\n\n`;
     for (const response of this.eventClients.keys()) {
       try {
         response.write(payload);

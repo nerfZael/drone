@@ -1,31 +1,12 @@
-const MEDIA_FILE_EXTENSIONS = new Set([
-  'png',
-  'jpg',
-  'jpeg',
-  'gif',
-  'webp',
-  'bmp',
-  'svg',
-  'ico',
-  'avif',
-  'tif',
-  'tiff',
-  'mp4',
-  'webm',
-  'mov',
-  'm4v',
-  'ogv',
-  'ogg',
-  'avi',
-  'mkv',
-  'wmv',
-]);
+import { desktopMediaFileKindForExtension } from './desktop-media-file-kind';
 
 export function desktopFileReadUrl(droneIdRaw: string, pathRaw: string): string {
   const droneId = String(droneIdRaw ?? '').trim();
   const filePath = String(pathRaw ?? '');
   const base = `/api/drones/${encodeURIComponent(droneId)}/fs/file?path=${encodeURIComponent(filePath)}`;
-  return MEDIA_FILE_EXTENSIONS.has(fileExtension(filePath)) ? `${base}&metadata=1` : base;
+  return desktopMediaFileKindForExtension(fileExtension(filePath))
+    ? `${base}&metadata=1`
+    : base;
 }
 
 export function desktopFileContentReadUrl(droneIdRaw: string, pathRaw: string): string {

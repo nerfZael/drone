@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
-import { deferDirectoryLoadWhileActive } from '../src/droneHub/files/defer-directory-load';
 import { TrailingDirectoryRequestTracker } from '../src/droneHub/files/trailing-directory-request-tracker';
 
 describe('directory load lifecycle', () => {
@@ -17,7 +16,7 @@ describe('directory load lifecycle', () => {
     sequence += 1;
 
     // Expanding before the stale response settles must queue a replacement.
-    expect(deferDirectoryLoadWhileActive(tracker, '/work/src', false)).toBe(true);
+    expect(tracker.deferActiveRequest('/work/src', false)).toBe(true);
     const runTrailing = tracker.finish('/work/src', 1);
     if (runTrailing) {
       requestCount += 1;
@@ -26,7 +25,7 @@ describe('directory load lifecycle', () => {
 
     expect(runTrailing).toBe(true);
     expect(requestCount).toBe(2);
-    expect(deferDirectoryLoadWhileActive(tracker, '/work/src', false)).toBe(true);
+    expect(tracker.deferActiveRequest('/work/src', false)).toBe(true);
     expect(tracker.finish('/work/src', sequence)).toBe(false);
   });
 
@@ -35,7 +34,7 @@ describe('directory load lifecycle', () => {
       new URL('../src/droneHub/files/DroneFilesDock.tsx', import.meta.url),
       'utf8',
     );
-    expect(source).toContain('deferDirectoryLoadWhileActive(');
+    expect(source).toContain('childRequestTrackerRef.current.deferActiveRequest(');
     expect(source).toContain('childRequestTrackerRef.current.invalidate(');
   });
 });

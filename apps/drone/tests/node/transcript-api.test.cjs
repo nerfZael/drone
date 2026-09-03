@@ -207,6 +207,16 @@ test('Node Hub transcript API uses SQLite read model and cheap conditional ETags
   assert.equal(stateRead.data.transcripts.length, 1);
   assert.equal(stateRead.data.transcripts[0].fileChanges.workspaces[0].diffArtifactId, 'diff-artifact-newer');
   assert.equal(stateRead.data.pending[0].id, 'pending-1');
+  const configuredState = await apiFetch(
+    baseUrl,
+    token,
+    `/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=1&config=true`,
+  );
+  assert.equal(configuredState.response.status, 200, configuredState.text);
+  assert.equal(configuredState.data.agentLocked, true);
+  assert.equal(configuredState.data.dockerSnapshotAfterAgentMessageEnabled, false);
+  assert.equal(configuredState.data.sessionName, 'drone-hub-chat-default');
+  assert.equal(configuredState.data.createdAt, older);
   const stateEtag = stateRead.response.headers.get('etag');
   const unchangedState = await apiFetch(
     baseUrl,

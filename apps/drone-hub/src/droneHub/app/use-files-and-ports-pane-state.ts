@@ -37,6 +37,7 @@ import {
   usePersistedLocalStorageItem,
   usePoll,
 } from './hooks';
+import { sameDroneFsEntries } from '../files/same-drone-fs-entries';
 
 const FS_LIST_CACHE_MAX_AGE_MS = 5 * 60_000;
 const FS_LIST_POLL_LOADING_MS = 8_000;
@@ -54,26 +55,7 @@ export function sameDroneFsListPayload(
 ): boolean {
   if (!left?.ok) return false;
   if (left.id !== right.id || left.name !== right.name || left.path !== right.path) return false;
-  if (left.entries.length !== right.entries.length) return false;
-  for (let index = 0; index < left.entries.length; index += 1) {
-    const leftEntry = left.entries[index];
-    const rightEntry = right.entries[index];
-    if (
-      !rightEntry ||
-      leftEntry.name !== rightEntry.name ||
-      leftEntry.path !== rightEntry.path ||
-      leftEntry.kind !== rightEntry.kind ||
-      leftEntry.size !== rightEntry.size ||
-      leftEntry.mtimeMs !== rightEntry.mtimeMs ||
-      leftEntry.ext !== rightEntry.ext ||
-      leftEntry.isGitIgnored !== rightEntry.isGitIgnored ||
-      leftEntry.isImage !== rightEntry.isImage ||
-      leftEntry.isVideo !== rightEntry.isVideo
-    ) {
-      return false;
-    }
-  }
-  return true;
+  return sameDroneFsEntries(left.entries, right.entries);
 }
 
 const fsListCache = new Map<string, FsListCacheEntry>();

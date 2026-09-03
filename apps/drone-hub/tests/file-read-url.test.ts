@@ -1,8 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 
 import { desktopFileReadUrl } from '../src/droneHub/files/file-read-url';
+import { desktopMediaFileKindForExtension } from '../src/droneHub/files/desktop-media-file-kind';
 
 describe('desktopFileReadUrl', () => {
+  test('shares one image and video extension policy', () => {
+    expect(desktopMediaFileKindForExtension('png')).toBe('image');
+    expect(desktopMediaFileKindForExtension('tiff')).toBe('image');
+    expect(desktopMediaFileKindForExtension('mp4')).toBe('video');
+    expect(desktopMediaFileKindForExtension('wmv')).toBe('video');
+    expect(desktopMediaFileKindForExtension('md')).toBeNull();
+  });
+
   test('requests metadata only for image and video previews', () => {
     expect(desktopFileReadUrl('drone one', '/work/photo.PNG')).toBe(
       '/api/drones/drone%20one/fs/file?path=%2Fwork%2Fphoto.PNG&metadata=1',

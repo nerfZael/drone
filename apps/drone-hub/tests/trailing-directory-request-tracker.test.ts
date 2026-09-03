@@ -6,8 +6,8 @@ describe('TrailingDirectoryRequestTracker', () => {
   test('coalesces repeated force requests into one trailing directory load', () => {
     const tracker = new TrailingDirectoryRequestTracker();
     tracker.begin('/work/src', 1);
-    tracker.requestTrailing('/work/src', 1);
-    tracker.requestTrailing('/work/src', 1);
+    expect(tracker.deferActiveRequest('/work/src', true)).toBe(true);
+    expect(tracker.deferActiveRequest('/work/src', true)).toBe(true);
 
     expect(tracker.finish('/work/src', 1)).toBe(true);
     expect(tracker.finish('/work/src', 1)).toBe(false);
@@ -40,7 +40,13 @@ describe('TrailingDirectoryRequestTracker', () => {
     tracker.invalidate('/work/src', 7, false);
 
     expect(tracker.isInvalidated('/work/src', 7)).toBe(true);
-    tracker.requestTrailing('/work/src', 7);
+    expect(tracker.deferActiveRequest('/work/src', false)).toBe(true);
     expect(tracker.finish('/work/src', 7)).toBe(true);
+  });
+
+  test('does not defer when the directory has no active request', () => {
+    const tracker = new TrailingDirectoryRequestTracker();
+
+    expect(tracker.deferActiveRequest('/work/src', true)).toBe(false);
   });
 });
