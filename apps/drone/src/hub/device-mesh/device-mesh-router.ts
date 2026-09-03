@@ -32,7 +32,14 @@ import {
 import { DeviceMeshStore } from './device-mesh-store';
 import { DeviceRouteManager } from './device-route-manager';
 
-type AuthenticatedSocket = { ws: WebSocket; peerDeviceId: string; outbound: boolean };
+type AuthenticatedSocket = {
+  ws: WebSocket;
+  peerDeviceId: string;
+  outbound: boolean;
+  lifecycle?: AbortController;
+  capabilityCleanupStarted?: boolean;
+  capabilitySourceDeviceIds?: Set<string>;
+};
 type ValidatedRequest = {
   state: Awaited<ReturnType<DeviceMeshStore['read']>>;
   source: MeshDevice;
@@ -135,6 +142,15 @@ function isSnapshotChunkResponse(response: CapabilityResponse): boolean {
   return Boolean(result?.contentChunk?.dataBase64 || result?.mediaChunk?.dataBase64);
 }
 
+function usesTransferSnapshot(request: SignedCapabilityRequest): boolean {
+  return (
+    request.capability === 'drone-control' &&
+    (request.operation === 'files.list' ||
+      request.operation === 'file.preview' ||
+      request.operation === 'chat.read')
+  );
+}
+
 export class DeviceMeshRouter {
   private readonly server = new WebSocketServer({
     noServer: true,
@@ -205,7 +221,10 @@ export class DeviceMeshRouter {
   close(): void {
     if (this.reconnectTimer) clearInterval(this.reconnectTimer);
     this.reconnectTimer = null;
-    for (const connection of this.connections.values()) connection.ws.close();
+    for (const connection of this.connections.values()) {
+      this.cleanupConnectionCapabilities(connection);
+      connection.ws.close();
+    }
     this.connections.clear();
     this.connecting.clear();
     for (const route of this.routes.values()) clearTimeout(route.timer);
@@ -452,6 +471,7 @@ export class DeviceMeshRouter {
   }
 
   private attach(connection: AuthenticatedSocket): void {
+    connection.lifecycle = new AbortController();
     const existing = this.connections.get(connection.peerDeviceId);
     if (!existing && this.connections.size >= MAX_MESH_CONNECTIONS) {
       connection.ws.close(4008, 'connection limit reached');
@@ -465,6 +485,7 @@ export class DeviceMeshRouter {
         connection.ws.close(4000, 'duplicate');
         return;
       }
+      this.cleanupConnectionCapabilities(existing);
       existing.ws.close(4000, 'replaced');
     }
     this.connections.set(connection.peerDeviceId, connection);
@@ -475,6 +496,7 @@ export class DeviceMeshRouter {
       );
     });
     connection.ws.on('close', () => {
+      this.cleanupConnectionCapabilities(connection);
       if (this.connections.get(connection.peerDeviceId)?.ws === connection.ws) {
         this.connections.delete(connection.peerDeviceId);
         this.responses.deleteDevice(connection.peerDeviceId);
@@ -483,7 +505,6 @@ export class DeviceMeshRouter {
             this.capabilityEventRoutes.delete(targetDeviceId);
           }
         }
-        void this.capabilities.disconnectDevice(connection.peerDeviceId);
         this.notifyConnectionsChanged();
       }
       for (const [requestId, route] of this.routes) {
@@ -815,7 +836,7 @@ export class DeviceMeshRouter {
       );
       return;
     }
-    const response = await this.execute(request);
+    const response = await this.execute(request, connection);
     if (response.ok && request.sourceDeviceId !== connection.peerDeviceId) {
       this.rememberCapabilityEventRoute(request.sourceDeviceId, connection.peerDeviceId);
     }
@@ -1004,12 +1025,31 @@ export class DeviceMeshRouter {
     this.capabilityEventPruneTimer.unref?.();
   }
 
-  private async execute(request: SignedCapabilityRequest): Promise<CapabilityResponse> {
+  private async execute(
+    request: SignedCapabilityRequest,
+    connection?: AuthenticatedSocket,
+  ): Promise<CapabilityResponse> {
     for (const [key, expiry] of this.replay) if (expiry <= Date.now()) this.replay.delete(key);
     const validation = await this.validateRequest(request, true);
     if (!('state' in validation)) return validation;
     const { state, source, expires, replayKey } = validation;
     this.replay.set(replayKey, expires);
+    const connectionSignal = connection?.lifecycle?.signal;
+    if (connectionSignal?.aborted) {
+      return this.errorResponse(request, 'TRANSFER_CANCELLED', 'mesh connection was replaced');
+    }
+    const transferSnapshotRequest = usesTransferSnapshot(request);
+    if (connection && transferSnapshotRequest) {
+      connection.capabilitySourceDeviceIds ??= new Set();
+      connection.capabilitySourceDeviceIds.add(source.id);
+    }
+    const invocationController = new AbortController();
+    const abortInvocation = () => invocationController.abort();
+    connectionSignal?.addEventListener('abort', abortInvocation, { once: true });
+    const expiryTimer = transferSnapshotRequest
+      ? setTimeout(abortInvocation, Math.max(0, expires - Date.now()))
+      : null;
+    expiryTimer?.unref?.();
     try {
       const result = await this.capabilities.invoke(
         request.capability,
@@ -1019,8 +1059,14 @@ export class DeviceMeshRouter {
         {
           sourceDevice: source,
           requestId: request.requestId,
+          signal: invocationController.signal,
         },
       );
+      if (invocationController.signal.aborted) {
+        throw Object.assign(new Error('mesh request expired or its connection was replaced'), {
+          code: 'TRANSFER_CANCELLED',
+        });
+      }
       await this.recordAudit(request, 'allowed');
       const response: CapabilityResponse = {
         type: 'capability.response',
@@ -1046,6 +1092,23 @@ export class DeviceMeshRouter {
         String(error?.code ?? 'OPERATION_FAILED'),
         error?.message ?? String(error),
       );
+    } finally {
+      if (expiryTimer) clearTimeout(expiryTimer);
+      connectionSignal?.removeEventListener('abort', abortInvocation);
+    }
+  }
+
+  private cleanupConnectionCapabilities(connection: AuthenticatedSocket): void {
+    if (connection.capabilityCleanupStarted) return;
+    connection.capabilityCleanupStarted = true;
+    connection.lifecycle?.abort();
+    const sourceDeviceIds = new Set<string>([
+      connection.peerDeviceId,
+      ...(connection.capabilitySourceDeviceIds ?? []),
+    ]);
+    connection.capabilitySourceDeviceIds?.clear();
+    for (const sourceDeviceId of sourceDeviceIds) {
+      void this.capabilities.disconnectDevice(sourceDeviceId);
     }
   }
 

@@ -40,6 +40,7 @@ export type DeviceMeshState = {
 export type CapabilityContext = {
   sourceDevice: MeshDevice;
   requestId: string;
+  signal?: AbortSignal;
 };
 
 export type CapabilityHandler = {

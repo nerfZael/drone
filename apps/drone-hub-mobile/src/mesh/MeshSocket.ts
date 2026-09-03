@@ -33,6 +33,10 @@ type PendingRequest = {
   targetDeviceId: string;
   signal?: AbortSignal;
   onAbort?: () => void;
+  aborted: boolean;
+  capability: string;
+  operation: string;
+  payload: unknown;
 };
 
 const MESH_REQUEST_TIMEOUT_MS = 40_000;
@@ -118,8 +122,7 @@ export class MeshSocket {
     payload: unknown,
     signal?: AbortSignal,
   ): Promise<unknown> {
-    if (signal?.aborted)
-      throw Object.assign(new Error('Mesh request cancelled'), { name: 'AbortError' });
+    if (signal?.aborted) throw meshRequestCancelledError();
     const socket = this.socket;
     if (!this.ready || !socket || socket.readyState !== WebSocket.OPEN)
       throw new Error('No mesh connection is available');
@@ -146,6 +149,9 @@ export class MeshSocket {
       ...unsigned,
       signature: await this.identity.sign(capabilityRequestSigningText(unsigned)),
     };
+    // Signing can yield to the native key store. Do not miss an abort that arrives before the
+    // pending-request listener can be installed.
+    if (signal?.aborted) throw meshRequestCancelledError();
     const serialized = JSON.stringify(request);
     const requestBytes =
       typeof TextEncoder === 'undefined'
@@ -153,10 +159,26 @@ export class MeshSocket {
         : new TextEncoder().encode(serialized).byteLength;
     if (requestBytes > MESH_SAFE_MESSAGE_BYTES) throw new Error('Mesh request is too large');
     return await new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(meshRequestCancelledError());
+        return;
+      }
       const onAbort = () => {
-        clearTimeout(timer);
-        this.pending.delete(request.requestId);
-        reject(Object.assign(new Error('Mesh request cancelled'), { name: 'AbortError' }));
+        const pending = this.pending.get(request.requestId);
+        if (pending && canReturnAbandonedSnapshot(pending)) {
+          pending.aborted = true;
+          clearTimeout(pending.timer);
+          pending.timer = setTimeout(
+            () => {
+              this.pending.delete(request.requestId);
+            },
+            Math.max(0, Date.parse(request.expiresAt) - Date.now() + 5_000),
+          );
+        } else {
+          clearTimeout(timer);
+          this.pending.delete(request.requestId);
+        }
+        reject(meshRequestCancelledError());
       };
       const timer = setTimeout(() => {
         signal?.removeEventListener('abort', onAbort);
@@ -170,6 +192,10 @@ export class MeshSocket {
         targetDeviceId,
         signal,
         onAbort,
+        aborted: false,
+        capability,
+        operation,
+        payload,
       });
       signal?.addEventListener('abort', onAbort, { once: true });
       try {
@@ -292,6 +318,10 @@ export class MeshSocket {
     clearTimeout(pending.timer);
     pending.signal?.removeEventListener('abort', pending.onAbort!);
     this.pending.delete(response.requestId);
+    if (pending.aborted) {
+      if (response.ok) void this.cancelAbandonedSnapshot(pending, response.result);
+      return;
+    }
     if (response.ok) pending.resolve(response.result);
     else
       pending.reject(
@@ -299,6 +329,38 @@ export class MeshSocket {
           code: response.error?.code ?? 'OPERATION_FAILED',
         }),
       );
+  }
+
+  private async cancelAbandonedSnapshot(pending: PendingRequest, result: unknown): Promise<void> {
+    if (
+      pending.capability !== 'drone-control' ||
+      !['files.list', 'file.preview', 'chat.read'].includes(pending.operation)
+    )
+      return;
+    const value = objectRecord(result);
+    const contentChunk = objectRecord(value.contentChunk);
+    const mediaChunk = objectRecord(value.mediaChunk);
+    const snapshotToken = textValue(contentChunk.snapshotToken ?? mediaChunk.snapshotToken);
+    if (!snapshotToken) return;
+    const originalPayload = objectRecord(pending.payload);
+    const preview = objectRecord(value.preview);
+    const expectedRevision = textValue(preview.revision ?? originalPayload.expectedRevision);
+    try {
+      await this.request(pending.targetDeviceId, pending.capability, pending.operation, {
+        ...originalPayload,
+        snapshotToken,
+        cancelSnapshot: true,
+        ...(mediaChunk.snapshotToken
+          ? {
+              mediaSnapshot: true,
+              ...(expectedRevision ? { expectedRevision } : {}),
+            }
+          : {}),
+      });
+    } catch {
+      // The socket may have disconnected with the original request. Server expiry remains the
+      // final bounded cleanup path when the best-effort cancellation cannot be delivered.
+    }
   }
 
   private rejectPending(message: string): void {
@@ -309,4 +371,26 @@ export class MeshSocket {
     }
     this.pending.clear();
   }
+}
+
+function meshRequestCancelledError(): Error {
+  return Object.assign(new Error('Mesh request cancelled'), { name: 'AbortError' });
+}
+
+function objectRecord(value: unknown): Record<string, any> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, any>)
+    : {};
+}
+
+function textValue(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function canReturnAbandonedSnapshot(request: PendingRequest): boolean {
+  return (
+    request.capability === 'drone-control' &&
+    ['files.list', 'file.preview', 'chat.read'].includes(request.operation) &&
+    !textValue(objectRecord(request.payload).snapshotToken)
+  );
 }

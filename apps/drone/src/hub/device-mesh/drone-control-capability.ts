@@ -578,12 +578,15 @@ export function createDroneControlCapability(
       const payload = object(rawPayload);
       const sourceDeviceId = optionalText(context?.sourceDevice?.id) ?? '__direct__';
       const snapshotOwner = contentSnapshots.captureOwner(sourceDeviceId);
+      const operationSignal = context?.signal
+        ? AbortSignal.any([snapshotOwner.signal, context.signal])
+        : snapshotOwner.signal;
       const loadJsonSnapshot = async (
         scope: string,
         offset: unknown,
         load: (signal: AbortSignal, maxBytes: number) => Promise<unknown>,
       ) => {
-        const reservation = await contentSnapshots.reserveJson(snapshotOwner);
+        const reservation = await contentSnapshots.reserveJson(snapshotOwner, operationSignal);
         try {
           const value = await load(reservation.signal, reservation.maxBytes);
           return reservation.commitJson({ value, scope, offset });
@@ -1216,7 +1219,7 @@ export function createDroneControlCapability(
             preview: await localHubRequest(
               access,
               `${fsFilePath}&metadata=1&revision=${payload.includeRevision === false ? '0' : '1'}`,
-              { signal: snapshotOwner.signal },
+              { signal: operationSignal },
             ),
           };
         }
@@ -1225,10 +1228,13 @@ export function createDroneControlCapability(
         let metadata: any;
         if (likelyMedia) {
           metadata = await localHubRequest(access, `${fsFilePath}&metadata=1&revision=0`, {
-            signal: snapshotOwner.signal,
+            signal: operationSignal,
           });
         } else {
-          const jsonReservation = await contentSnapshots.reserveJson(snapshotOwner);
+          const jsonReservation = await contentSnapshots.reserveJson(
+            snapshotOwner,
+            operationSignal,
+          );
           try {
             try {
               metadata = await localHubBoundedJsonRequest(access, fsFilePath, {
@@ -1260,7 +1266,7 @@ export function createDroneControlCapability(
         const initialMediaKind = metadata.kind;
         const initialMediaPath = requiredText(metadata?.path ?? filePath, 'preview path');
         metadata = await localHubRequest(access, `${fsFilePath}&metadata=1&revision=1`, {
-          signal: snapshotOwner.signal,
+          signal: operationSignal,
         });
         if (metadata?.kind !== 'image' && metadata?.kind !== 'video') {
           throw Object.assign(new Error('the file is no longer previewable media'), {
@@ -1308,7 +1314,7 @@ export function createDroneControlCapability(
         const snapshotReservation = await contentSnapshots.reserve(
           sourceDeviceId,
           size,
-          undefined,
+          operationSignal,
           snapshotOwner,
         );
         try {
@@ -1456,7 +1462,7 @@ export function createDroneControlCapability(
         }
         const contentOnlyRead = Boolean(messageId || turnId);
         const contentReservation = contentOnlyRead
-          ? await contentSnapshots.reserveJson(snapshotOwner)
+          ? await contentSnapshots.reserveJson(snapshotOwner, operationSignal)
           : null;
         try {
           const turnNumber = Number(payload.turnNumber);

@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { EventEmitter } from 'node:events';
 import { describe, expect, test } from 'bun:test';
 import {
   DRONE_CONTROL_CAPABILITY,
@@ -121,6 +122,116 @@ describe('device mesh router response replay', () => {
       router.disconnect(phone.id);
       expect((router as any).responses.size).toBe(0);
       expect(disconnects).toBe(1);
+    } finally {
+      router.close();
+      await capabilities.close();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('replacing a relay connection cancels its direct and relayed transfer owners', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mesh-router-lifecycle-'));
+    const desktop = identity('desktop-a', 'desktop');
+    const relay = identity('relay-a', 'phone');
+    const source = identity('source-a', 'phone');
+    const store = new DeviceMeshStore(path.join(root, 'state.json'), desktop);
+    await store.read();
+    await store.update((state) => {
+      for (const device of [relay, source]) {
+        state.devices[device.id] = {
+          id: device.id,
+          name: device.name,
+          platform: device.platform,
+          publicKey: device.publicKey,
+          administrator: false,
+          grants: [
+            { capability: DRONE_CONTROL_CAPABILITY.id, version: 1, operations: ['files.list'] },
+          ],
+          endpoints: [],
+          revokedAt: null,
+          addedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+      }
+    });
+    const capabilities = new CapabilityRegistry();
+    const disconnected: string[] = [];
+    let invokedOperation = '';
+    const started = Promise.withResolvers<void>();
+    capabilities.register({
+      descriptor: DRONE_CONTROL_CAPABILITY,
+      async invoke(operation, _payload, context) {
+        invokedOperation = operation;
+        started.resolve();
+        await new Promise<void>((_resolve, reject) => {
+          const abort = () => reject(Object.assign(new Error('cancelled'), { code: 'CANCELLED' }));
+          if (context.signal?.aborted) abort();
+          else context.signal?.addEventListener('abort', abort, { once: true });
+        });
+      },
+      disconnectDevice(deviceId) {
+        disconnected.push(deviceId);
+      },
+    });
+    const router = new DeviceMeshRouter(
+      desktop,
+      store,
+      capabilities,
+      new DeviceRouteManager(desktop, store),
+      new DeviceMeshAuditStore(path.join(root, 'audit.json')),
+    );
+    class FakeSocket extends EventEmitter {
+      readyState = WebSocket.OPEN;
+      bufferedAmount = 0;
+      send(_value: string, callback?: (error?: Error) => void) {
+        callback?.();
+      }
+      close() {
+        this.readyState = WebSocket.CLOSED;
+        this.emit('close');
+      }
+    }
+    const oldSocket = new FakeSocket();
+    const nextSocket = new FakeSocket();
+    const oldConnection = { peerDeviceId: relay.id, outbound: true, ws: oldSocket } as any;
+    const nextConnection = { peerDeviceId: relay.id, outbound: true, ws: nextSocket } as any;
+    (router as any).attach(oldConnection);
+    const issuedAt = new Date();
+    const unsigned: Omit<SignedCapabilityRequest, 'signature'> = {
+      type: 'capability.request',
+      version: 1,
+      requestId: 'relayed-request',
+      sourceDeviceId: source.id,
+      targetDeviceId: desktop.id,
+      capability: DRONE_CONTROL_CAPABILITY.id,
+      capabilityVersion: 1,
+      operation: 'files.list',
+      payload: {},
+      issuedAt: issuedAt.toISOString(),
+      expiresAt: new Date(issuedAt.getTime() + 60_000).toISOString(),
+      nonce: 'relayed-nonce',
+      maxHops: 1,
+    };
+    const request = {
+      ...unsigned,
+      signature: signDeviceText(source, capabilityRequestSigningText(unsigned)),
+    };
+    try {
+      const invocation = (router as any).onMessage(
+        oldConnection,
+        Buffer.from(JSON.stringify(request)),
+      );
+      await started.promise;
+      expect(invokedOperation).toBe('files.list');
+      expect([...oldConnection.capabilitySourceDeviceIds]).toEqual([source.id]);
+
+      (router as any).attach(nextConnection);
+      await invocation;
+
+      expect(oldConnection.lifecycle.signal.aborted).toBe(true);
+      expect(disconnected.filter((id) => id === relay.id)).toHaveLength(1);
+      expect(disconnected.filter((id) => id === source.id)).toHaveLength(1);
+      expect(oldConnection.capabilitySourceDeviceIds.size).toBe(0);
     } finally {
       router.close();
       await capabilities.close();
