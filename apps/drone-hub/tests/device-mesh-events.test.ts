@@ -7,6 +7,7 @@ import {
   waitForDeviceMeshReconnect,
   type DeviceMeshEventRuntime,
 } from '../src/droneHub/app/device-mesh-events';
+import { CoalescedRefresh } from '../src/droneHub/app/coalesced-refresh';
 import { remoteDroneRefreshPlan } from '../src/droneHub/app/remote-drone-refresh';
 
 describe('desktop device mesh events', () => {
@@ -21,6 +22,111 @@ describe('desktop device mesh events', () => {
       refreshChat: true,
       refreshDrones: false,
     });
+  });
+
+  test('parses ready revisions for reconnect reconciliation', () => {
+    const revisions: number[] = [];
+    dispatchDeviceMeshEventBlock('event: ready\ndata: {"revision":7}', {
+      onChange: () => undefined,
+      onReady: (revision) => revisions.push(revision),
+    });
+    dispatchDeviceMeshEventBlock('event: ready\ndata: {"revision":"invalid"}', {
+      onChange: () => undefined,
+      onReady: (revision) => revisions.push(revision),
+    });
+    expect(revisions).toEqual([7]);
+  });
+
+  test('coalesces rapid ready/change refreshes into one trailing reconciliation', async () => {
+    const coordinator = new CoalescedRefresh();
+    const releases: Array<() => void> = [];
+    let active = 0;
+    let maximumActive = 0;
+    let runs = 0;
+    const run = () =>
+      coordinator.request(async () => {
+        runs += 1;
+        active += 1;
+        maximumActive = Math.max(maximumActive, active);
+        await new Promise<void>((resolve) => releases.push(resolve));
+        active -= 1;
+      });
+
+    const initial = run();
+    void run();
+    void run();
+    expect(runs).toBe(1);
+    releases.shift()?.();
+    await Bun.sleep(0);
+    expect(runs).toBe(2);
+    releases.shift()?.();
+    await initial;
+    expect(maximumActive).toBe(1);
+    expect(runs).toBe(2);
+  });
+
+  test('runs a queued reconciliation after an active refresh fails', async () => {
+    const coordinator = new CoalescedRefresh();
+    let release!: () => void;
+    let trailingRuns = 0;
+    const first = coordinator.request(async () => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      throw new Error('offline');
+    });
+    const trailing = coordinator.request(async () => {
+      trailingRuns += 1;
+    });
+    release();
+    const results = await Promise.allSettled([first, trailing]);
+    expect(results.map((result) => result.status)).toEqual(['rejected', 'rejected']);
+    expect(trailingRuns).toBe(1);
+  });
+
+  test('delivers one ready reconciliation on each fresh event stream', async () => {
+    const revisions: number[] = [];
+    let fetches = 0;
+    let unsubscribe = () => {};
+    const runtime: DeviceMeshEventRuntime = {
+      fetch: (async () => {
+        fetches += 1;
+        const revision = fetches;
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(
+                new TextEncoder().encode(`event: ready\ndata: {"revision":${revision}}\n\n`),
+              );
+              if (fetches === 1) controller.close();
+            },
+          }),
+          { status: 200 },
+        );
+      }) as typeof window.fetch,
+      setTimeout: ((callback: TimerHandler) => {
+        queueMicrotask(() => (callback as () => void)());
+        return 1;
+      }) as typeof window.setTimeout,
+      clearTimeout: (() => undefined) as typeof window.clearTimeout,
+    };
+    await new Promise<void>((resolve) => {
+      unsubscribe = subscribeDeviceMeshChanges(
+        () => undefined,
+        {
+          onReady(revision) {
+            revisions.push(revision);
+            if (revisions.length === 2) {
+              unsubscribe();
+              resolve();
+            }
+          },
+        },
+        runtime,
+      );
+    });
+    expect(revisions).toEqual([1, 2]);
+    expect(fetches).toBe(2);
   });
 
   test('uses drone refreshes for inactive chat state and registry events', () => {

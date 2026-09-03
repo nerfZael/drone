@@ -3,6 +3,7 @@ const MAX_RECONNECT_DELAY_MS = 10_000;
 
 export type DeviceMeshEventCallbacks = {
   onChange: () => void;
+  onReady?: (revision: number) => void;
   onCapabilityEvent?: (event: DeviceMeshCapabilityEvent) => void;
 };
 
@@ -50,6 +51,17 @@ export function dispatchDeviceMeshEventBlock(
     .find((line) => line.startsWith('event:'))
     ?.slice('event:'.length)
     .trim();
+  if (event === 'ready') {
+    const dataLine = block.split('\n').find((line) => line.startsWith('data:'));
+    if (!dataLine || !callbacks.onReady) return;
+    try {
+      const revision = Number(JSON.parse(dataLine.slice('data:'.length).trim())?.revision);
+      if (Number.isSafeInteger(revision) && revision >= 0) callbacks.onReady(revision);
+    } catch {
+      // A malformed ready marker cannot advance client state.
+    }
+    return;
+  }
   if (event === 'change') {
     callbacks.onChange();
     return;
@@ -122,6 +134,7 @@ export function subscribeDeviceMeshChanges(
   options: {
     onCapabilityEvent?: (event: DeviceMeshCapabilityEvent) => void;
     onConnectionChange?: (connected: boolean) => void;
+    onReady?: (revision: number) => void;
   } = {},
   runtime: DeviceMeshEventRuntime = {
     fetch: window.fetch.bind(window),
@@ -161,6 +174,7 @@ export function subscribeDeviceMeshChanges(
         const decoder = new TextDecoder();
         const parser = new DeviceMeshEventParser({
           onChange,
+          onReady: options.onReady,
           onCapabilityEvent: options.onCapabilityEvent,
         });
         while (!lifecycle.signal.aborted) {

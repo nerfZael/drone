@@ -25,6 +25,7 @@ type Snapshot = {
 type SnapshotStoreOptions = {
   maxSnapshotBytes?: number;
   maxTotalBytes?: number;
+  maxSourceBytes?: number;
   ttlMs?: number;
   now?: () => number;
   createToken?: () => string;
@@ -38,17 +39,27 @@ export class MeshContentSnapshotStore {
   private readonly snapshots = new Map<string, Snapshot>();
   private readonly maxSnapshotBytes: number;
   private readonly maxTotalBytes: number;
+  private readonly maxSourceBytes: number;
   private readonly ttlMs: number;
   private readonly now: () => number;
   private readonly createToken: () => string;
   private totalBytes = 0;
   private reservedBytes = 0;
+  private readonly sourceBytes = new Map<string, number>();
+  private readonly sourceReservedBytes = new Map<string, number>();
+  private reservationGeneration = 0;
   private closed = false;
   private expiryTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: SnapshotStoreOptions = {}) {
     this.maxSnapshotBytes = options.maxSnapshotBytes ?? DEFAULT_MAX_SNAPSHOT_BYTES;
     this.maxTotalBytes = options.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES;
+    this.maxSourceBytes =
+      options.maxSourceBytes ??
+      Math.min(
+        this.maxTotalBytes,
+        Math.max(this.maxSnapshotBytes, Math.floor(this.maxTotalBytes / 2)),
+      );
     this.ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
     this.now = options.now ?? Date.now;
     this.createToken = options.createToken ?? (() => crypto.randomUUID());
@@ -137,7 +148,7 @@ export class MeshContentSnapshotStore {
     this.scheduleExpiry();
   }
 
-  reserve(contentBytes: number): () => void {
+  reserve(sourceDeviceId: string, contentBytes: number): () => void {
     this.ensureOpen();
     this.pruneExpired();
     if (
@@ -150,18 +161,32 @@ export class MeshContentSnapshotStore {
     if (this.totalBytes + this.reservedBytes + contentBytes > this.maxTotalBytes) {
       throw transferError('The transfer snapshot limit is full', 'RESOURCE_LIMIT');
     }
+    if (this.sourceUsage(sourceDeviceId) + contentBytes > this.maxSourceBytes) {
+      throw transferError('The transfer snapshot limit for this device is full', 'RESOURCE_LIMIT');
+    }
     this.reservedBytes += contentBytes;
+    this.sourceReservedBytes.set(
+      sourceDeviceId,
+      (this.sourceReservedBytes.get(sourceDeviceId) ?? 0) + contentBytes,
+    );
+    const generation = this.reservationGeneration;
     let released = false;
     return () => {
       if (released) return;
       released = true;
+      if (generation !== this.reservationGeneration) return;
       this.reservedBytes -= contentBytes;
+      this.adjustSourceBytes(this.sourceReservedBytes, sourceDeviceId, -contentBytes);
     };
   }
 
   clear() {
     this.snapshots.clear();
     this.totalBytes = 0;
+    this.sourceBytes.clear();
+    this.reservedBytes = 0;
+    this.sourceReservedBytes.clear();
+    this.reservationGeneration += 1;
     if (this.expiryTimer) clearTimeout(this.expiryTimer);
     this.expiryTimer = null;
   }
@@ -194,6 +219,12 @@ export class MeshContentSnapshotStore {
       if (this.totalBytes + this.reservedBytes + input.content.length > this.maxTotalBytes) {
         throw transferError('The transfer snapshot limit is full', 'RESOURCE_LIMIT');
       }
+      if (this.sourceUsage(input.sourceDeviceId) + input.content.length > this.maxSourceBytes) {
+        throw transferError(
+          'The transfer snapshot limit for this device is full',
+          'RESOURCE_LIMIT',
+        );
+      }
       token = this.createToken();
       const now = this.now();
       const initialChunk = snapshotChunk(input.content, input.offset, input.encoding, token, false);
@@ -207,6 +238,7 @@ export class MeshContentSnapshotStore {
         deliveredOffsets: new Set([initialChunk.offset]),
       });
       this.totalBytes += input.content.length;
+      this.adjustSourceBytes(this.sourceBytes, input.sourceDeviceId, input.content.length);
       this.scheduleExpiry();
       return { chunk: initialChunk, metadata: input.metadata };
     }
@@ -227,6 +259,20 @@ export class MeshContentSnapshotStore {
   private remove(token: string, snapshot: Snapshot) {
     if (!this.snapshots.delete(token)) return;
     this.totalBytes -= snapshot.content.length;
+    this.adjustSourceBytes(this.sourceBytes, snapshot.sourceDeviceId, -snapshot.content.length);
+  }
+
+  private sourceUsage(sourceDeviceId: string): number {
+    return (
+      (this.sourceBytes.get(sourceDeviceId) ?? 0) +
+      (this.sourceReservedBytes.get(sourceDeviceId) ?? 0)
+    );
+  }
+
+  private adjustSourceBytes(entries: Map<string, number>, sourceDeviceId: string, delta: number) {
+    const next = (entries.get(sourceDeviceId) ?? 0) + delta;
+    if (next > 0) entries.set(sourceDeviceId, next);
+    else entries.delete(sourceDeviceId);
   }
 
   private scheduleExpiry() {

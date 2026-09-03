@@ -12,6 +12,10 @@ import type { MobileDeviceIdentity } from '../security/device-identity';
 import { verifyP256Signature } from '../security/device-identity';
 import type { MeshConnection } from './mesh-storage';
 import type { MobileCapabilityRouter } from './mobile-capability-router';
+import {
+  meshSocketFrameIsTooLarge,
+  type MobileCapabilityEventGuard,
+} from './mobile-capability-event-guard';
 import { validateCapabilityEvent } from './validate-capability-event';
 
 function websocketUrl(endpoint: string, deviceId: string): string {
@@ -49,6 +53,7 @@ export class MeshSocket {
     private readonly onTopologyChange: () => void,
     private readonly onCapabilityEvent: (event: CapabilityEvent) => void,
     private readonly capabilityRouter: Pick<MobileCapabilityRouter, 'handle'>,
+    private readonly capabilityEventGuard: MobileCapabilityEventGuard,
   ) {}
 
   get connected(): boolean {
@@ -184,6 +189,10 @@ export class MeshSocket {
     rejectConnect: (error: Error) => void,
     connectTimer: ReturnType<typeof setTimeout>,
   ): Promise<void> {
+    if (meshSocketFrameIsTooLarge(raw)) {
+      this.socket?.close(1009, 'mesh message is too large');
+      return;
+    }
     const message = JSON.parse(raw);
     if (message.type === 'auth.challenge') {
       if (
@@ -234,11 +243,29 @@ export class MeshSocket {
       return;
     }
     if (message.type === 'capability.event') {
+      const envelopeDecision = this.capabilityEventGuard.inspectEnvelope(
+        this.connection.deviceId,
+        message,
+      );
+      if (envelopeDecision === 'disconnect') {
+        this.socket?.close(4008, 'capability event rate limit reached');
+        return;
+      }
+      if (envelopeDecision === 'drop') return;
       const event = validateCapabilityEvent(message, {
         targetDeviceId: this.identity.id,
         devicePublicKeyFor: this.devicePublicKeyFor,
       });
-      if (event) this.onCapabilityEvent(event);
+      if (!event) return;
+      const eventDecision = this.capabilityEventGuard.acceptValidated(
+        this.connection.deviceId,
+        event,
+      );
+      if (eventDecision === 'disconnect') {
+        this.socket?.close(4008, 'capability event rate limit reached');
+        return;
+      }
+      if (eventDecision === 'accept') this.onCapabilityEvent(event);
       return;
     }
     if (message.type === 'capability.request') {

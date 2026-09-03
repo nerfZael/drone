@@ -1,5 +1,6 @@
 import React from 'react';
 import { requestJson } from '../http';
+import { CoalescedRefresh } from './coalesced-refresh';
 import type { MeshDevice, MeshStatus } from './use-device-mesh';
 import { subscribeDeviceMeshChanges } from './device-mesh-events';
 
@@ -57,8 +58,9 @@ export function DesktopDeviceProvider({ children }: { children: React.ReactNode 
   const [loading, setLoading] = React.useState(true);
   const [refreshing, setRefreshing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const statusRefresh = React.useRef(new CoalescedRefresh());
 
-  const load = React.useCallback(async () => {
+  const readStatus = React.useCallback(async () => {
     try {
       const next = await requestJson<{ ok: true } & MeshStatus>('/api/device-mesh');
       setStatus((current) => sameMeshStatus(current, next) ? current : next);
@@ -76,9 +78,15 @@ export function DesktopDeviceProvider({ children }: { children: React.ReactNode 
     }
   }, []);
 
+  const load = React.useCallback(
+    async () => await statusRefresh.current.request(readStatus),
+    [readStatus],
+  );
+
   React.useEffect(() => void load(), [load]);
   React.useEffect(() => {
-    const unsubscribe = subscribeDeviceMeshChanges(() => void load());
+    const reconcile = () => void load();
+    const unsubscribe = subscribeDeviceMeshChanges(reconcile, { onReady: reconcile });
     const refreshAfterResume = () => {
       if (document.visibilityState === 'visible') void load();
     };

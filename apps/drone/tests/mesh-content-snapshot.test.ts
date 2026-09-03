@@ -52,6 +52,7 @@ describe('mesh content snapshots', () => {
     const store = new MeshContentSnapshotStore({
       maxSnapshotBytes: MESH_BINARY_CHUNK_BYTES * 2,
       maxTotalBytes: (MESH_BINARY_CHUNK_BYTES + 1) * 3,
+      maxSourceBytes: (MESH_BINARY_CHUNK_BYTES + 1) * 3,
       ttlMs: 50,
       now: () => now,
       createToken: () => `snapshot-${++token}`,
@@ -87,6 +88,9 @@ describe('mesh content snapshots', () => {
     expect(store.size).toBe(2);
     store.revokeDevice('phone-b');
     expect(store.size).toBe(1);
+    expect(create('phone-b')).toStartWith('snapshot-');
+    store.revokeDevice('phone-b');
+    expect(store.size).toBe(1);
 
     const third = create('phone-a');
     now += 51;
@@ -106,13 +110,13 @@ describe('mesh content snapshots', () => {
       maxSnapshotBytes: 200,
       maxTotalBytes: 300,
     });
-    const release = store.reserve(200);
-    expect(() => store.reserve(200)).toThrow('limit is full');
+    const release = store.reserve('phone-a', 200);
+    expect(() => store.reserve('phone-b', 200)).toThrow('limit is full');
     release();
-    const releaseSecond = store.reserve(200);
+    const releaseSecond = store.reserve('phone-b', 200);
     releaseSecond();
     store.close();
-    expect(() => store.reserve(1)).toThrow('store is closed');
+    expect(() => store.reserve('phone-a', 1)).toThrow('store is closed');
   });
 
   test('rejects capacity pressure without evicting an active transfer', () => {
@@ -127,8 +131,8 @@ describe('mesh content snapshots', () => {
       sourceDeviceId: 'phone-a',
       scope: 'file.preview\0drone-a\0movie.mp4',
     }).chunk;
-    const release = store.reserve(snapshotBytes);
-    expect(() => store.reserve(1)).toThrow('limit is full');
+    const release = store.reserve('phone-b', snapshotBytes);
+    expect(() => store.reserve('phone-c', 1)).toThrow('limit is full');
     expect(
       store.resume({
         snapshotToken: active.snapshotToken,
@@ -142,15 +146,37 @@ describe('mesh content snapshots', () => {
     store.close();
   });
 
-  test('can reserve the bounded generation working set without raising the snapshot limit', () => {
+  test('reserves only the checked media working set without raising the snapshot limit', () => {
     const store = new MeshContentSnapshotStore({ maxSnapshotBytes: 32, maxTotalBytes: 64 });
-    const release = store.reserve(64);
-    expect(() => store.reserve(1)).toThrow('limit is full');
-    expect(() => store.reserve(65)).toThrow('too large');
+    const release = store.reserve('phone-a', 32);
+    expect(() => store.reserve('phone-a', 1)).toThrow('for this device is full');
+    const releaseOther = store.reserve('phone-b', 32);
+    expect(() => store.reserve('phone-c', 1)).toThrow('limit is full');
+    expect(() => store.reserve('phone-c', 65)).toThrow('too large');
+    releaseOther();
     release();
-    const releaseAgain = store.reserve(64);
+    const releaseAgain = store.reserve('phone-c', 32);
     expect(releaseAgain).toBeFunction();
     releaseAgain();
+    store.close();
+  });
+
+  test('prevents one source from monopolizing capacity while another source progresses', () => {
+    const store = new MeshContentSnapshotStore({
+      maxSnapshotBytes: 200,
+      maxTotalBytes: 300,
+      maxSourceBytes: 200,
+    });
+    const releaseA = store.reserve('phone-a', 200);
+    expect(() => store.reserve('phone-a', 1)).toThrow('for this device is full');
+    const releaseB = store.reserve('phone-b', 100);
+    expect(() => store.reserve('phone-c', 1)).toThrow('limit is full');
+    releaseB();
+    const releaseC = store.reserve('phone-c', 100);
+    releaseA();
+    const releaseBRetry = store.reserve('phone-b', 200);
+    releaseC();
+    releaseBRetry();
     store.close();
   });
 

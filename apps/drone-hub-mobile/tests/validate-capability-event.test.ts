@@ -4,6 +4,7 @@ import { fromByteArray } from 'base64-js';
 import { capabilityEventSigningText, type CapabilityEvent } from '@drone/device-protocol';
 
 import { validateCapabilityEvent } from '../src/mesh/validate-capability-event';
+import { activeDevicePublicKey } from '../src/mesh/mobile-capability-event-guard';
 
 function base64Url(bytes: Uint8Array): string {
   return fromByteArray(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -49,8 +50,71 @@ describe('mobile capability event validation', () => {
 
     expect(validateCapabilityEvent(event, options)).toEqual(event);
     expect(validateCapabilityEvent({ ...event, payload: { changed: true } }, options)).toBeNull();
+    const sign = (nextUnsigned: Omit<CapabilityEvent, 'signature'>): CapabilityEvent => ({
+      ...nextUnsigned,
+      signature: base64Url(
+        p256.sign(
+          new TextEncoder().encode(capabilityEventSigningText(nextUnsigned)),
+          privateKey,
+        ),
+      ),
+    });
+    for (const [capability, eventName, payload] of [
+      ['drone-control', 'drones.changed', { reason: 'registry_write' }],
+      ['drone-control', 'file.changed', { droneId: 'drone', path: '/work/file.txt' }],
+      ['companion', 'run.event', { runId: 'run', type: 'assistant_message' }],
+    ] as const) {
+      expect(
+        validateCapabilityEvent(
+          sign({ ...unsigned, capability, event: eventName, payload }),
+          options,
+        ),
+      ).not.toBeNull();
+    }
+    expect(
+      validateCapabilityEvent(
+        sign({ ...unsigned, payload: { text: 'x'.repeat(9 * 1024) } }),
+        options,
+      ),
+    ).toBeNull();
+    expect(
+      validateCapabilityEvent(
+        sign({
+          ...unsigned,
+          issuedAt: new Date(now + 30_001).toISOString(),
+          expiresAt: new Date(now + 60_000).toISOString(),
+        }),
+        options,
+      ),
+    ).toBeNull();
+    expect(
+      validateCapabilityEvent(event, { ...options, devicePublicKeyFor: () => undefined }),
+    ).toBeNull();
     expect(
       validateCapabilityEvent(event, { ...options, now: Date.parse(event.expiresAt) }),
+    ).toBeNull();
+    expect(
+      validateCapabilityEvent(event, {
+        ...options,
+        devicePublicKeyFor: (deviceId) =>
+          activeDevicePublicKey(
+            [
+              {
+                id: event.sourceDeviceId,
+                name: 'revoked source',
+                platform: 'desktop',
+                publicKey,
+                administrator: false,
+                grants: [],
+                endpoints: [],
+                revokedAt: new Date(now).toISOString(),
+                addedAt: new Date(now).toISOString(),
+                updatedAt: new Date(now).toISOString(),
+              },
+            ],
+            deviceId,
+          ),
+      }),
     ).toBeNull();
   });
 });

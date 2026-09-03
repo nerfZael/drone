@@ -1273,7 +1273,7 @@ export function createDroneControlCapability(
         }
         // The binary reader preallocates exactly the authoritative byte count. Reserve that
         // working buffer so concurrent reads and retained snapshots share one memory ceiling.
-        let releaseSnapshotReservation = contentSnapshots.reserve(size);
+        let releaseSnapshotReservation = contentSnapshots.reserve(sourceDeviceId, size);
         let media: Awaited<ReturnType<typeof localHubBinaryRequest>>;
         try {
           media = await localHubBinaryRequest(

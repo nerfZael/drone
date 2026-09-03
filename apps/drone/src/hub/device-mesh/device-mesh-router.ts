@@ -41,7 +41,9 @@ type ValidatedRequest = {
 };
 
 const CAPABILITY_EVENT_LIFETIME_MS = 60_000;
-const CAPABILITY_EVENT_MAX_PER_PEER_PER_MINUTE = 600;
+const CAPABILITY_EVENT_MAX_PER_SOURCE_PER_MINUTE = 600;
+const CAPABILITY_EVENT_MAX_PER_RELAY_PER_MINUTE = 2_400;
+const MAX_MESH_CONNECTIONS = 100;
 
 function send(ws: WebSocket, payload: unknown): boolean {
   if (ws.readyState !== WebSocket.OPEN) return false;
@@ -118,7 +120,8 @@ export class DeviceMeshRouter {
   private readonly responses = new DeviceMeshResponseCache();
   private readonly requestTimes = new Map<string, number[]>();
   private readonly bulkRequestTimes = new Map<string, number[]>();
-  private readonly capabilityEventTimes = new Map<string, number[]>();
+  private readonly capabilityEventPeerTimes = new Map<string, number[]>();
+  private readonly capabilityEventSourceTimes = new Map<string, number[]>();
   private readonly capabilityEventTypeTimes = new Map<string, number[]>();
   private readonly seenCapabilityEvents = new Map<string, number>();
   private capabilityEventPruneTimer: ReturnType<typeof setTimeout> | null = null;
@@ -165,7 +168,8 @@ export class DeviceMeshRouter {
     for (const route of this.routes.values()) clearTimeout(route.timer);
     this.routes.clear();
     this.responses.clear();
-    this.capabilityEventTimes.clear();
+    this.capabilityEventPeerTimes.clear();
+    this.capabilityEventSourceTimes.clear();
     this.capabilityEventTypeTimes.clear();
     this.seenCapabilityEvents.clear();
     if (this.capabilityEventPruneTimer) clearTimeout(this.capabilityEventPruneTimer);
@@ -270,8 +274,6 @@ export class DeviceMeshRouter {
       ) {
         continue;
       }
-      const nextHop = this.connections.get(peer.id) ?? this.connections.values().next().value;
-      if (!nextHop) continue;
       const unsigned: Omit<CapabilityEvent, 'signature'> = {
         type: 'capability.event',
         version: 1,
@@ -286,10 +288,20 @@ export class DeviceMeshRouter {
         expiresAt: new Date(issuedAt.getTime() + CAPABILITY_EVENT_LIFETIME_MS).toISOString(),
         maxHops: 1,
       };
-      send(nextHop.ws, {
+      const signed = {
         ...unsigned,
         signature: signDeviceText(this.identity, capabilityEventSigningText(unsigned)),
-      } satisfies CapabilityEvent);
+      } satisfies CapabilityEvent;
+      const direct = this.connections.get(peer.id);
+      if (direct) {
+        send(direct.ws, signed);
+        continue;
+      }
+      // The mesh does not advertise adjacency, so a sender cannot know which directly
+      // connected peer can reach this one-hop target. Fan out to at most the mesh connection
+      // limit; only a peer directly connected to the target forwards it,
+      // and the target's signed-event replay cache suppresses duplicate delivery.
+      for (const relay of this.connections.values()) send(relay.ws, signed);
     }
   }
 
@@ -302,7 +314,10 @@ export class DeviceMeshRouter {
       ws.close(4001, 'unknown device');
       return;
     }
-    if (!this.connections.has(requestedDeviceId) && this.connections.size >= 100) {
+    if (
+      !this.connections.has(requestedDeviceId) &&
+      this.connections.size >= MAX_MESH_CONNECTIONS
+    ) {
       ws.close(4008, 'connection limit reached');
       return;
     }
@@ -348,6 +363,10 @@ export class DeviceMeshRouter {
 
   private attach(connection: AuthenticatedSocket): void {
     const existing = this.connections.get(connection.peerDeviceId);
+    if (!existing && this.connections.size >= MAX_MESH_CONNECTIONS) {
+      connection.ws.close(4008, 'connection limit reached');
+      return;
+    }
     const prefersOutbound = this.identity.id < connection.peerDeviceId;
     const preferred = connection.outbound === prefersOutbound;
     if (existing && existing.ws !== connection.ws) {
@@ -402,6 +421,11 @@ export class DeviceMeshRouter {
   private async connectToKnownPeers(): Promise<void> {
     const state = await this.store.read();
     for (const device of Object.values(state.devices)) {
+      if (
+        new Set([...this.connections.keys(), ...this.connecting]).size >= MAX_MESH_CONNECTIONS
+      ) {
+        break;
+      }
       if (
         device.id === state.selfDeviceId ||
         device.revokedAt ||
@@ -500,11 +524,16 @@ export class DeviceMeshRouter {
       return;
     }
     if (message?.type === 'capability.event') {
-      if (!this.acceptCapabilityEventEnvelope(connection.peerDeviceId)) {
+      const envelopeDecision = this.acceptCapabilityEventEnvelope(
+        connection.peerDeviceId,
+        String(message?.sourceDeviceId ?? ''),
+      );
+      if (envelopeDecision === 'disconnect') {
         connection.ws.close(4008, 'capability event rate limit reached');
         return;
       }
-      const event = await this.validateCapabilityEvent(connection, message);
+      if (envelopeDecision === 'drop') return;
+      const event = await this.validateCapabilityEvent(message);
       if (!event) return;
       const state = await this.store.read();
       if (event.targetDeviceId !== state.selfDeviceId) {
@@ -676,10 +705,7 @@ export class DeviceMeshRouter {
     send(connection.ws, response);
   }
 
-  private async validateCapabilityEvent(
-    connection: AuthenticatedSocket,
-    value: any,
-  ): Promise<CapabilityEvent | null> {
+  private async validateCapabilityEvent(value: any): Promise<CapabilityEvent | null> {
     const policy = capabilityEventPolicy(
       String(value?.capability ?? ''),
       String(value?.event ?? ''),
@@ -714,14 +740,6 @@ export class DeviceMeshRouter {
     ) {
       return null;
     }
-    const eventRateKey = `${connection.peerDeviceId}\0${value.capability}\0${value.event}`;
-    const recentTypeEvents = (this.capabilityEventTypeTimes.get(eventRateKey) ?? []).filter(
-      (time) => time > now - 60_000,
-    );
-    if (recentTypeEvents.length >= policy.maxEventsPerMinute) return null;
-    recentTypeEvents.push(now);
-    this.capabilityEventTypeTimes.set(eventRateKey, recentTypeEvents);
-
     const state = await this.store.read();
     const source = state.devices[value.sourceDeviceId];
     const target = state.devices[value.targetDeviceId];
@@ -739,24 +757,53 @@ export class DeviceMeshRouter {
     const replayKey = `${source.id}:${value.eventId}`;
     const replayExpiry = this.seenCapabilityEvents.get(replayKey) ?? 0;
     if (replayExpiry > now) return null;
+    if (
+      !recordEventWithinLimit(
+        this.capabilityEventSourceTimes,
+        source.id,
+        CAPABILITY_EVENT_MAX_PER_SOURCE_PER_MINUTE,
+        now,
+      )
+    ) {
+      return null;
+    }
+    const eventRateKey = `${source.id}\0${value.capability}\0${value.event}`;
+    if (
+      !recordEventWithinLimit(
+        this.capabilityEventTypeTimes,
+        eventRateKey,
+        policy.maxEventsPerMinute,
+        now,
+      )
+    ) {
+      return null;
+    }
     this.seenCapabilityEvents.set(replayKey, expiresAt);
     this.scheduleCapabilityEventPrune();
     return value as CapabilityEvent;
   }
 
-  private acceptCapabilityEventEnvelope(peerDeviceId: string): boolean {
+  private acceptCapabilityEventEnvelope(
+    peerDeviceId: string,
+    claimedSourceDeviceId: string,
+  ): 'accept' | 'drop' | 'disconnect' {
     const now = Date.now();
-    const recent = (this.capabilityEventTimes.get(peerDeviceId) ?? []).filter(
-      (time) => time > now - 60_000,
+    const direct = claimedSourceDeviceId === peerDeviceId;
+    const accepted = recordEventWithinLimit(
+      this.capabilityEventPeerTimes,
+      peerDeviceId,
+      direct
+        ? CAPABILITY_EVENT_MAX_PER_SOURCE_PER_MINUTE
+        : CAPABILITY_EVENT_MAX_PER_RELAY_PER_MINUTE,
+      now,
     );
-    if (recent.length >= CAPABILITY_EVENT_MAX_PER_PEER_PER_MINUTE) return false;
-    recent.push(now);
-    this.capabilityEventTimes.set(peerDeviceId, recent);
-    return true;
+    if (accepted) return 'accept';
+    return direct ? 'disconnect' : 'drop';
   }
 
   private clearCapabilityEventPeer(deviceId: string): void {
-    this.capabilityEventTimes.delete(deviceId);
+    this.capabilityEventPeerTimes.delete(deviceId);
+    this.capabilityEventSourceTimes.delete(deviceId);
     for (const key of this.capabilityEventTypeTimes.keys()) {
       if (key.startsWith(`${deviceId}\0`)) this.capabilityEventTypeTimes.delete(key);
     }
@@ -905,4 +952,20 @@ export class DeviceMeshRouter {
       error: { code, message },
     };
   }
+}
+
+function recordEventWithinLimit(
+  entries: Map<string, number[]>,
+  key: string,
+  limit: number,
+  now: number,
+): boolean {
+  const recent = (entries.get(key) ?? []).filter((time) => time > now - 60_000);
+  if (recent.length >= limit) {
+    entries.set(key, recent);
+    return false;
+  }
+  recent.push(now);
+  entries.set(key, recent);
+  return true;
 }
