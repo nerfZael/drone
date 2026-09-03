@@ -134,6 +134,7 @@ export class DeviceMeshHttp {
   private eventRevision = 0;
   private readonly unsubscribeStoreChanges: () => void;
   private readonly unsubscribeConnectionChanges: () => void;
+  private readonly unsubscribeCapabilityEvents: () => void;
 
   constructor(
     private readonly identity: LocalDeviceIdentity,
@@ -149,11 +150,15 @@ export class DeviceMeshHttp {
     this.unsubscribeConnectionChanges = this.router.subscribeConnections(() =>
       this.publishChange('connections'),
     );
+    this.unsubscribeCapabilityEvents = this.router.subscribeCapabilityEvents((event) =>
+      this.publishCapabilityEvent(event),
+    );
   }
 
   close(): void {
     this.unsubscribeStoreChanges();
     this.unsubscribeConnectionChanges();
+    this.unsubscribeCapabilityEvents();
     for (const [response, keepAlive] of this.eventClients) {
       clearInterval(keepAlive);
       if (!response.destroyed) response.end();
@@ -164,6 +169,18 @@ export class DeviceMeshHttp {
   private publishChange(reason: 'state' | 'connections'): void {
     this.eventRevision += 1;
     const payload = `event: change\ndata: ${JSON.stringify({ revision: this.eventRevision, reason })}\n\n`;
+    for (const response of this.eventClients.keys()) {
+      try {
+        response.write(payload);
+      } catch {
+        this.removeEventClient(response);
+      }
+    }
+  }
+
+  private publishCapabilityEvent(event: Record<string, any>): void {
+    this.eventRevision += 1;
+    const payload = `event: capability\ndata: ${JSON.stringify({ ...event, revision: this.eventRevision })}\n\n`;
     for (const response of this.eventClients.keys()) {
       try {
         response.write(payload);

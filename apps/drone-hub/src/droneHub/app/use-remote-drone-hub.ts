@@ -8,6 +8,11 @@ import type {
 import { requestJson, requestJsonWithTimeout } from '../http';
 import type { ChatAttachmentPayload } from '../chat/ChatInput';
 import { sendRemoteChatPrompt } from './remote-chat-attachments';
+import { subscribeDeviceMeshChanges } from './device-mesh-events';
+import { createTrailingRefresh, remoteDroneRefreshPlan } from './remote-drone-refresh';
+
+const REMOTE_IDLE_FALLBACK_POLL_MS = 30_000;
+const REMOTE_ACTIVE_FALLBACK_POLL_MS = 4_000;
 
 export type RemoteDroneSummary = {
   id: string;
@@ -209,7 +214,11 @@ export function useRemoteDroneHub(targetDeviceId: string, routeAvailable: boolea
   const listVersion = React.useRef(0);
   const listRequests = React.useRef(new Map<string, symbol>());
   const chatVersion = React.useRef(0);
+  const selectedDroneIdRef = React.useRef(selectedDroneId);
+  const selectedChatRef = React.useRef(selectedChat);
   targetRef.current = targetDeviceId;
+  selectedDroneIdRef.current = selectedDroneId;
+  selectedChatRef.current = selectedChat;
 
   const selectedDrone = drones.find((drone) => drone.id === selectedDroneId) ?? null;
   const waiting = Boolean(
@@ -324,24 +333,87 @@ export function useRemoteDroneHub(targetDeviceId: string, routeAvailable: boolea
   React.useEffect(() => {
     const reconnected = routeAvailable && !routeAvailableRef.current;
     routeAvailableRef.current = routeAvailable;
-    if (reconnected) void loadDrones();
-  }, [loadDrones, routeAvailable]); // Refresh immediately after a route reconnects.
+    if (!reconnected) return;
+    void loadDrones();
+    if (selectedDroneIdRef.current && selectedChatRef.current) {
+      void loadChat(selectedDroneIdRef.current, selectedChatRef.current, true);
+    }
+  }, [loadChat, loadDrones, routeAvailable]); // Refresh immediately after a route reconnects.
 
   React.useEffect(() => {
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible') void loadDrones(true);
-    }, 3_000);
+    }, REMOTE_IDLE_FALLBACK_POLL_MS);
     return () => window.clearInterval(timer);
   }, [loadDrones]);
 
   React.useEffect(() => {
     if (!selectedDroneId || !selectedChat) return;
     void loadChat(selectedDroneId, selectedChat);
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') void loadChat(selectedDroneId, selectedChat, true);
-    }, 2_500);
+    const timer = window.setInterval(
+      () => {
+        if (document.visibilityState === 'visible')
+          void loadChat(selectedDroneId, selectedChat, true);
+      },
+      waiting ? REMOTE_ACTIVE_FALLBACK_POLL_MS : REMOTE_IDLE_FALLBACK_POLL_MS,
+    );
     return () => window.clearInterval(timer);
-  }, [loadChat, selectedChat, selectedDroneId]);
+  }, [loadChat, selectedChat, selectedDroneId, waiting]);
+
+  React.useEffect(() => {
+    let active = true;
+    let timer: number | null = null;
+    let refreshDrones = false;
+    let refreshChat = false;
+    const refreshDronesFromEvent = createTrailingRefresh(async () => {
+      if (active) await loadDrones(true);
+    });
+    const refreshChatFromEvent = createTrailingRefresh(async () => {
+      const droneId = selectedDroneIdRef.current;
+      const chatName = selectedChatRef.current;
+      if (active && droneId && chatName) await loadChat(droneId, chatName, true);
+    });
+    const flush = () => {
+      timer = null;
+      if (document.visibilityState !== 'visible') return;
+      if (refreshDrones) void refreshDronesFromEvent();
+      if (refreshChat) void refreshChatFromEvent();
+      refreshDrones = false;
+      refreshChat = false;
+    };
+    const schedule = (delayMs = 150) => {
+      if (timer != null) return;
+      timer = window.setTimeout(flush, delayMs);
+    };
+    const refreshAfterResume = () => {
+      if (document.visibilityState !== 'visible') return;
+      refreshDrones = true;
+      refreshChat = true;
+      schedule(0);
+    };
+    const unsubscribe = subscribeDeviceMeshChanges(() => undefined, {
+      onCapabilityEvent(event) {
+        if (event.sourceDeviceId !== targetDeviceId) return;
+        const plan = remoteDroneRefreshPlan(event, {
+          droneId: selectedDroneIdRef.current,
+          chatName: selectedChatRef.current,
+        });
+        refreshDrones ||= plan.refreshDrones;
+        refreshChat ||= plan.refreshChat;
+        if (refreshDrones || refreshChat) schedule();
+      },
+      onConnectionChange(connected) {
+        if (connected) refreshAfterResume();
+      },
+    });
+    document.addEventListener('visibilitychange', refreshAfterResume);
+    return () => {
+      active = false;
+      unsubscribe();
+      if (timer != null) window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', refreshAfterResume);
+    };
+  }, [loadChat, loadDrones, targetDeviceId]);
 
   const selectChat = React.useCallback((droneId: string, chatName: string) => {
     chatVersion.current += 1;

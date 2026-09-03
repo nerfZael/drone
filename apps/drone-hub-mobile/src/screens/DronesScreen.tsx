@@ -118,6 +118,11 @@ import {
   optimisticMobilePendingPrompt,
 } from '../drones/mobile-pending-prompts';
 import { MobileChatReadCoordinator } from '../drones/mobile-chat-read-coordinator';
+import { BoundedSwrCache } from '../drones/bounded-swr-cache';
+import {
+  loadMobileChatWithListRecovery,
+  mobileChatRefreshPlan,
+} from '../drones/mobile-chat-refresh';
 import { isMobileDroneStarting } from '../drones/isMobileDroneStarting';
 import { useDroneLinkedPullRequests } from '../drones/use-drone-linked-pull-requests';
 import { useLocalDroneControl } from '../drones/local-drone-control';
@@ -504,10 +509,15 @@ export function DronesScreen({
     async () => {},
   );
   const chatReadCoordinatorRef = React.useRef<MobileChatReadCoordinator | null>(null);
+  const chatReadCacheRef = React.useRef<BoundedSwrCache<any> | null>(null);
+  const appliedChatReadRef = React.useRef<{ key: string; result: any } | null>(null);
   if (!chatReadCoordinatorRef.current) {
     chatReadCoordinatorRef.current = new MobileChatReadCoordinator(() =>
       setChatReadRevision((value) => value + 1),
     );
+  }
+  if (!chatReadCacheRef.current) {
+    chatReadCacheRef.current = new BoundedSwrCache({ maxEntries: 8, maxAgeMs: 2 * 60_000 });
   }
   targetIdRef.current = targetId;
   droneSidebarOrderRef.current = droneSidebarOrder;
@@ -515,6 +525,7 @@ export function DronesScreen({
   chatNameRef.current = chatName;
 
   const resetActiveChatState = React.useCallback(() => {
+    appliedChatReadRef.current = null;
     setChatModel('');
     setChatReasoning('');
     setChatModelProvider('drone');
@@ -832,31 +843,49 @@ export function DronesScreen({
     // Starting clones publish a chat change when their copied chats are ready. Reading now
     // returns a transient conflict and replaces the useful starting state with an error.
     if (options.deferChatLoad) return;
-    const result = await requestDroneControl(destinationId, 'chats.list', {
-      droneId: drone.id,
+    await loadMobileChatWithListRecovery({
+      initialChat: knownChat,
+      knownChats,
+      requestedChat,
+      listChats: async () => {
+        const result = await requestDroneControl(destinationId, 'chats.list', {
+          droneId: drone.id,
+        });
+        return result?.chats;
+      },
+      readChat: (nextChat) => readChat(drone.id, nextChat, { useCache: true }),
+      isCurrent: () =>
+        targetIdRef.current === destinationId && openDroneVersion.current === requestVersion,
+      applyListedSelection(nextChats, nextChat) {
+        setChats(nextChats);
+        if (nextChat === chatNameRef.current) return;
+        chatReadVersion.current += 1;
+        transitionToChat(nextChat);
+      },
     });
-    if (targetIdRef.current !== destinationId || openDroneVersion.current !== requestVersion)
-      return;
-    const listedChats: string[] = Array.isArray(result?.chats)
-      ? result.chats
-          .map((chat: unknown) => String(chat ?? '').trim())
-          .filter((chat: string) => Boolean(chat))
-      : [];
-    const nextChats = listedChats.length > 0 ? [...new Set(listedChats)] : drone.chats;
-    const nextChat =
-      requestedChat && nextChats.includes(requestedChat) ? requestedChat : (nextChats[0] ?? '');
-    setChats(nextChats);
-    chatNameRef.current = nextChat;
-    setChatName(nextChat);
-    if (nextChat) await readChat(drone.id, nextChat);
   };
 
   const openDrone = (drone: MobileDroneSummary, requestedChat?: string) =>
     run('chats', () => activateDrone(drone, requestedChat));
 
-  const readChat = (droneId: string, nextChat: string): Promise<void> => {
+  const readChat = (
+    droneId: string,
+    nextChat: string,
+    options: { useCache?: boolean } = {},
+  ): Promise<void> => {
     const destinationId = targetId;
     const key = `${destinationId}\u0000${droneId}\u0000${nextChat}`;
+    if (options.useCache) {
+      const cached = chatReadCacheRef.current!.get(key);
+      if (
+        cached &&
+        targetIdRef.current === destinationId &&
+        selectedRef.current?.id === droneId &&
+        chatNameRef.current === nextChat
+      ) {
+        applyChatReadResult(cached, droneId, nextChat);
+      }
+    }
     return chatReadCoordinatorRef.current!.request(key, async () => {
       if (
         targetIdRef.current !== destinationId ||
@@ -878,7 +907,12 @@ export function DronesScreen({
           chatReadVersion.current !== requestVersion
         )
           return;
-        applyChatReadResult(result, droneId, nextChat);
+        const retained = chatReadCacheRef.current!.set(
+          key,
+          result,
+          (current, next) => JSON.stringify(current) === JSON.stringify(next),
+        );
+        applyChatReadResult(retained, droneId, nextChat);
         const previousChatReadError = chatReadErrorRef.current;
         chatReadErrorRef.current = null;
         if (previousChatReadError) {
@@ -901,6 +935,14 @@ export function DronesScreen({
   };
 
   const applyChatReadResult = (result: any, droneId: string, nextChat: string) => {
+    const resultKey = `${targetIdRef.current}\u0000${droneId}\u0000${nextChat}`;
+    if (
+      appliedChatReadRef.current?.key === resultKey &&
+      appliedChatReadRef.current.result === result
+    ) {
+      return;
+    }
+    appliedChatReadRef.current = { key: resultKey, result };
     setChatModel(String(result?.model ?? '').trim());
     setChatReasoning(String(result?.reasoning ?? '').trim());
     setChatAgentId(
@@ -1158,18 +1200,22 @@ export function DronesScreen({
     });
     const unsubscribeChat = mesh.subscribe('drone-control', 'chat.changed', (event) => {
       if (event.sourceDeviceId !== targetId) return;
-      dronesChanged = true;
       const activeDrone = selectedRef.current;
       const activeChat = chatNameRef.current;
       const eventDroneId = String(event.payload?.droneId ?? '').trim();
       const eventChatName = String(event.payload?.chatName ?? '').trim();
-      if (
-        activeDrone &&
-        (!eventDroneId || eventDroneId === activeDrone.id) &&
-        (!eventChatName || eventChatName === activeChat)
-      ) {
-        chatChanged = true;
+      if (eventDroneId && eventChatName) {
+        chatReadCacheRef.current!.delete(`${targetId}\u0000${eventDroneId}\u0000${eventChatName}`);
       }
+      const plan = mobileChatRefreshPlan({
+        reason: String(event.payload?.reason ?? '').trim(),
+        eventDroneId,
+        eventChatName,
+        activeDroneId: activeDrone?.id ?? '',
+        activeChatName: activeChat,
+      });
+      dronesChanged ||= plan.refreshDrones;
+      chatChanged ||= plan.refreshChat;
       schedule();
     });
     return () => {
@@ -1184,7 +1230,7 @@ export function DronesScreen({
     selected &&
     run('chat', async () => {
       transitionToChat(nextChat);
-      await readChat(selected.id, nextChat);
+      await readChat(selected.id, nextChat, { useCache: true });
     });
 
   const addPromptImages = async () => {

@@ -20,6 +20,8 @@ import { NativeFileTypeIcon } from '../components/FileTypeIcon';
 import { ThemedTextInput } from '../components/ThemedTextInput';
 import { readMeshJsonContent } from '../mesh/read-mesh-json-content';
 import { colors } from '../theme';
+import { BoundedSwrCache } from './bounded-swr-cache';
+import { mobileDirectoryCacheKey } from './mobile-file-cache-key';
 
 type FileExplorerEntry = {
   name: string;
@@ -96,6 +98,22 @@ function normalizeEntries(raw: unknown): FileExplorerEntry[] {
     );
 }
 
+function sameExplorerEntries(
+  left: readonly FileExplorerEntry[],
+  right: readonly FileExplorerEntry[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every(
+      (entry, index) =>
+        entry.name === right[index]?.name &&
+        entry.path === right[index]?.path &&
+        entry.kind === right[index]?.kind &&
+        entry.isGitIgnored === right[index]?.isGitIgnored,
+    )
+  );
+}
+
 export function mobileExplorerParentPath(pathRaw: string, rootPathRaw: string): string {
   const rawRootPath = String(rootPathRaw ?? '');
   const rootPath = /^\/+$/.test(rawRootPath) ? '/' : rawRootPath.replace(/[\\/]+$/g, '');
@@ -143,6 +161,15 @@ export function MobileFileExplorer({
   const directoriesRef = React.useRef(directories);
   const contextVersionRef = React.useRef(0);
   const directoryRequestSeqRef = React.useRef<Record<string, number>>({});
+  const directoryCacheRef = React.useRef<BoundedSwrCache<Record<string, DirectoryState>> | null>(
+    null,
+  );
+  if (!directoryCacheRef.current) {
+    directoryCacheRef.current = new BoundedSwrCache({
+      maxEntries: 4,
+      maxAgeMs: 2 * 60_000,
+    });
+  }
   directoriesRef.current = directories;
   const [expanded, setExpanded] = React.useState<ReadonlySet<string>>(() => new Set());
   const [actionMenuEntry, setActionMenuEntry] = React.useState<
@@ -154,7 +181,19 @@ export function MobileFileExplorer({
   const [actionError, setActionError] = React.useState<string | null>(null);
   const actionInputRef = React.useRef<NativeTextInput | null>(null);
   const suppressPressUntilRef = React.useRef(0);
-  const contextKey = `${targetId}\0${droneId}\0${chatName}\0${rootPath}`;
+  const contextKey = mobileDirectoryCacheKey({ targetId, droneId, chatName, rootPath });
+
+  const commitDirectories = React.useCallback(
+    (update: (current: Record<string, DirectoryState>) => Record<string, DirectoryState>) => {
+      setDirectories((current) => {
+        const next = update(current);
+        directoriesRef.current = next;
+        directoryCacheRef.current!.set(contextKey, next);
+        return next;
+      });
+    },
+    [contextKey],
+  );
 
   const loadDirectory = React.useCallback(
     async (path: string, force = false) => {
@@ -163,7 +202,7 @@ export function MobileFileExplorer({
       if (!force && (existing?.loading || existing?.loaded)) return;
       const requestSeq = (directoryRequestSeqRef.current[path] ?? 0) + 1;
       directoryRequestSeqRef.current[path] = requestSeq;
-      setDirectories((current) => ({
+      commitDirectories((current) => ({
         ...current,
         [path]: {
           entries: current[path]?.entries ?? [],
@@ -208,13 +247,17 @@ export function MobileFileExplorer({
         )
           return;
         const resolvedPath = String(result?.path ?? path);
+        const normalizedEntries = normalizeEntries(result?.entries);
+        const previousEntries = directoriesRef.current[path]?.entries ?? [];
         const nextState: DirectoryState = {
-          entries: normalizeEntries(result?.entries),
+          entries: sameExplorerEntries(previousEntries, normalizedEntries)
+            ? previousEntries
+            : normalizedEntries,
           loading: false,
           error: null,
           loaded: true,
         };
-        setDirectories((current) => ({
+        commitDirectories((current) => ({
           ...current,
           [path]: nextState,
           ...(resolvedPath !== path ? { [resolvedPath]: nextState } : {}),
@@ -226,7 +269,7 @@ export function MobileFileExplorer({
         )
           return;
         const message = String(nextError?.message ?? nextError ?? 'Unable to list files.');
-        setDirectories((current) => ({
+        commitDirectories((current) => ({
           ...current,
           [path]: {
             entries: current[path]?.entries ?? [],
@@ -239,14 +282,15 @@ export function MobileFileExplorer({
         }));
       }
     },
-    [chatName, droneId, requestDroneControl, targetId],
+    [chatName, commitDirectories, droneId, requestDroneControl, targetId],
   );
 
   React.useEffect(() => {
     contextVersionRef.current += 1;
     directoryRequestSeqRef.current = {};
-    directoriesRef.current = {};
-    setDirectories({});
+    const cached = directoryCacheRef.current!.get(contextKey) ?? {};
+    directoriesRef.current = cached;
+    setDirectories(cached);
     setExpanded(new Set());
     setActionMenuEntry(undefined);
     setEditor(null);
@@ -259,7 +303,8 @@ export function MobileFileExplorer({
 
   React.useEffect(() => {
     if (!active) return;
-    void loadDirectory(rootPath);
+    const cachedRoot = directoriesRef.current[rootPath];
+    void loadDirectory(rootPath, Boolean(cachedRoot?.loaded || cachedRoot?.loading));
   }, [active, loadDirectory, rootPath]);
 
   const toggleDirectory = (path: string) => {
@@ -270,7 +315,10 @@ export function MobileFileExplorer({
       else next.delete(path);
       return next;
     });
-    if (willExpand) void loadDirectory(path);
+    if (willExpand) {
+      const cachedDirectory = directoriesRef.current[path];
+      void loadDirectory(path, Boolean(cachedDirectory?.loaded || cachedDirectory?.loading));
+    }
   };
 
   const refreshExplorer = React.useCallback(() => {

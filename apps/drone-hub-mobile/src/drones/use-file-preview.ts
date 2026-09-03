@@ -18,6 +18,8 @@ import {
   type MobileFilePreview,
 } from './file-preview-model';
 import type { MobileDroneSummary } from './drone-sidebar-model';
+import { BoundedSwrCache } from './bounded-swr-cache';
+import { mobileFileCacheKey } from './mobile-file-cache-key';
 
 type PreviewRequest = {
   targetId: string;
@@ -34,6 +36,11 @@ type RequestDroneControl = (
   payload?: any,
 ) => Promise<any>;
 
+type CachedFilePreview = {
+  file: File | null;
+  preview: MobileFilePreview;
+};
+
 function deleteCachedFile(file: File | null) {
   if (!file) return;
   try {
@@ -41,6 +48,18 @@ function deleteCachedFile(file: File | null) {
   } catch {
     // Cache cleanup is best effort.
   }
+}
+
+function sameFilePreview(left: MobileFilePreview, right: MobileFilePreview): boolean {
+  return (
+    left.path === right.path &&
+    left.kind === right.kind &&
+    left.mime === right.mime &&
+    left.size === right.size &&
+    left.mtimeMs === right.mtimeMs &&
+    left.revision === right.revision &&
+    left.content === right.content
+  );
 }
 
 export function useFilePreview({
@@ -70,17 +89,42 @@ export function useFilePreview({
   const [error, setError] = React.useState<string | null>(null);
   const previewFileRef = React.useRef<File | null>(null);
   const previewRef = React.useRef<MobileFilePreview | null>(null);
+  const previewCacheRef = React.useRef<BoundedSwrCache<CachedFilePreview> | null>(null);
+  if (!previewCacheRef.current) {
+    previewCacheRef.current = new BoundedSwrCache({
+      maxEntries: 6,
+      maxAgeMs: 2 * 60_000,
+      onEvict: ({ file }) => {
+        if (file) setTimeout(() => deleteCachedFile(file), 500);
+      },
+    });
+  }
   const loadVersion = React.useRef(0);
   const saveVersion = React.useRef(0);
   previewRef.current = preview;
 
-  const discardCachedPreview = React.useCallback(() => {
-    const file = previewFileRef.current;
+  const clearActivePreview = React.useCallback(() => {
     previewFileRef.current = null;
-    if (!file) return;
-    setTimeout(() => deleteCachedFile(file), 500);
   }, []);
-  React.useEffect(() => () => discardCachedPreview(), [discardCachedPreview]);
+  React.useEffect(() => () => previewCacheRef.current?.clear(), []);
+
+  const commitPreview = React.useCallback(
+    (nextRequest: PreviewRequest, next: CachedFilePreview) => {
+      const key = mobileFileCacheKey(nextRequest);
+      const current = previewCacheRef.current!.get(key);
+      const retained =
+        current && sameFilePreview(current.preview, next.preview)
+          ? current
+          : previewCacheRef.current!.set(key, next);
+      if (retained === current && next.file && next.file !== current.file) {
+        setTimeout(() => deleteCachedFile(next.file), 500);
+      }
+      previewFileRef.current = retained.file;
+      previewRef.current = retained.preview;
+      setPreview((value) => (value === retained.preview ? value : retained.preview));
+    },
+    [],
+  );
 
   const load = React.useCallback(
     async (nextRequest: PreviewRequest, options?: { background?: boolean }) => {
@@ -90,7 +134,7 @@ export function useFilePreview({
       setError(null);
       if (!background) {
         setPreview(null);
-        discardCachedPreview();
+        clearActivePreview();
       }
       try {
         let firstResult: any = await requestDroneControl(nextRequest.targetId, 'file.preview', {
@@ -116,23 +160,25 @@ export function useFilePreview({
           });
           if (version !== loadVersion.current) return;
           const path = String(content?.path ?? nextRequest.path).trim() || nextRequest.path;
-          setPreview({
-            path,
-            name: mobileFileName(path),
-            kind:
-              content?.kind === 'binary' || content?.kind === 'image' || content?.kind === 'video'
-                ? content.kind
-                : 'text',
-            mime: String(content?.mime ?? 'text/plain'),
-            size: Math.max(0, Number(content?.size) || 0),
-            mtimeMs: Number.isFinite(Number(content?.mtimeMs)) ? Number(content.mtimeMs) : null,
-            revision:
-              typeof content?.revision === 'string' && content.revision.trim()
-                ? content.revision.trim()
-                : null,
-            ...(typeof content?.content === 'string' ? { content: content.content } : {}),
+          commitPreview(nextRequest, {
+            file: null,
+            preview: {
+              path,
+              name: mobileFileName(path),
+              kind:
+                content?.kind === 'binary' || content?.kind === 'image' || content?.kind === 'video'
+                  ? content.kind
+                  : 'text',
+              mime: String(content?.mime ?? 'text/plain'),
+              size: Math.max(0, Number(content?.size) || 0),
+              mtimeMs: Number.isFinite(Number(content?.mtimeMs)) ? Number(content.mtimeMs) : null,
+              revision:
+                typeof content?.revision === 'string' && content.revision.trim()
+                  ? content.revision.trim()
+                  : null,
+              ...(typeof content?.content === 'string' ? { content: content.content } : {}),
+            },
           });
-          if (background) discardCachedPreview();
           return;
         }
 
@@ -249,10 +295,31 @@ export function useFilePreview({
             bytes.set(chunk, position);
             position += chunk.length;
           }
-          setPreview({
+          commitPreview(nextRequest, {
+            file: null,
+            preview: {
+              path,
+              name: mobileFileName(path),
+              kind: 'image',
+              mime,
+              size: totalBytes,
+              mtimeMs: Number.isFinite(Number(metadata.mtimeMs)) ? Number(metadata.mtimeMs) : null,
+              revision:
+                typeof metadata.revision === 'string' && metadata.revision.trim()
+                  ? metadata.revision.trim()
+                  : null,
+              content: new TextDecoder().decode(bytes),
+            },
+          });
+          return;
+        }
+        if (!cacheFile) throw new Error('The media preview cache could not be created');
+        commitPreview(nextRequest, {
+          file: cacheFile,
+          preview: {
             path,
             name: mobileFileName(path),
-            kind: 'image',
+            kind: metadata.kind,
             mime,
             size: totalBytes,
             mtimeMs: Number.isFinite(Number(metadata.mtimeMs)) ? Number(metadata.mtimeMs) : null,
@@ -260,30 +327,9 @@ export function useFilePreview({
               typeof metadata.revision === 'string' && metadata.revision.trim()
                 ? metadata.revision.trim()
                 : null,
-            content: new TextDecoder().decode(bytes),
-          });
-          if (background) discardCachedPreview();
-          return;
-        }
-        if (!cacheFile) throw new Error('The media preview cache could not be created');
-        const previousCacheFile = previewFileRef.current;
-        previewFileRef.current = cacheFile;
-        setPreview({
-          path,
-          name: mobileFileName(path),
-          kind: metadata.kind,
-          mime,
-          size: totalBytes,
-          mtimeMs: Number.isFinite(Number(metadata.mtimeMs)) ? Number(metadata.mtimeMs) : null,
-          revision:
-            typeof metadata.revision === 'string' && metadata.revision.trim()
-              ? metadata.revision.trim()
-              : null,
-          uri: cacheFile.uri,
+            uri: cacheFile.uri,
+          },
         });
-        if (previousCacheFile && previousCacheFile !== cacheFile) {
-          setTimeout(() => deleteCachedFile(previousCacheFile), 500);
-        }
       } catch (nextError: any) {
         if (version === loadVersion.current) {
           const message = nextError?.message ?? String(nextError);
@@ -297,7 +343,7 @@ export function useFilePreview({
         if (version === loadVersion.current && !background) setLoading(false);
       }
     },
-    [discardCachedPreview, requestDroneControl],
+    [clearActivePreview, commitPreview, requestDroneControl],
   );
 
   const open = React.useCallback(
@@ -323,7 +369,17 @@ export function useFilePreview({
       setRequest(nextRequest);
       setSaving(false);
       setSaveError(null);
-      void load(nextRequest);
+      const cached = previewCacheRef.current!.get(mobileFileCacheKey(nextRequest));
+      if (cached) {
+        previewFileRef.current = cached.file;
+        previewRef.current = cached.preview;
+        setPreview(cached.preview);
+        setLoading(false);
+        setError(null);
+        void load(nextRequest, { background: true });
+      } else {
+        void load(nextRequest);
+      }
     },
     [chatName, load, phoneTarget, selectedDrone, targetId],
   );
@@ -339,8 +395,8 @@ export function useFilePreview({
     setSaveError(null);
     setLoading(false);
     setSaving(false);
-    discardCachedPreview();
-  }, [chatName, discardCachedPreview, phoneTarget, selectedDrone, targetId]);
+    clearActivePreview();
+  }, [chatName, clearActivePreview, phoneTarget, selectedDrone, targetId]);
 
   const close = React.useCallback(() => {
     loadVersion.current += 1;
@@ -352,8 +408,8 @@ export function useFilePreview({
     setLoading(false);
     setSaving(false);
     setSaveError(null);
-    discardCachedPreview();
-  }, [discardCachedPreview]);
+    clearActivePreview();
+  }, [clearActivePreview]);
 
   const requestIsCurrent = Boolean(
     request &&
@@ -428,14 +484,16 @@ export function useFilePreview({
     if (!phoneTarget && subscribeFileChanges) {
       unsubscribeEvent = subscribeFileChanges((payload) => {
         const eventPath = String(payload?.path ?? '');
+        const eventDroneId = String(payload?.droneId ?? '');
         const eventRevision =
           typeof payload?.revision === 'string' && payload.revision.trim()
             ? payload.revision.trim()
             : null;
-        if (
-          String(payload?.droneId ?? '') !== request.droneId ||
-          (eventPath !== request.path && eventPath !== previewRef.current?.path)
-        ) {
+        if (eventDroneId !== request.droneId) return;
+        if (eventPath !== request.path && eventPath !== previewRef.current?.path) {
+          if (eventPath) {
+            previewCacheRef.current!.delete(mobileFileCacheKey({ ...request, path: eventPath }));
+          }
           return;
         }
         if (eventRevision && eventRevision === previewRef.current?.revision) return;
@@ -527,22 +585,27 @@ export function useFilePreview({
       try {
         const result = await requestDroneControl(request.targetId, 'file.write', writePayload);
         if (saveVersion.current !== version) return false;
-        setPreview((current) =>
-          current?.path === savedPath
-            ? {
-                ...current,
-                content,
-                size: Math.max(0, Number(result?.size) || contentBytes),
-                mtimeMs: Number.isFinite(Number(result?.mtimeMs))
-                  ? Number(result.mtimeMs)
-                  : current.mtimeMs,
-                revision:
-                  typeof result?.revision === 'string' && result.revision.trim()
-                    ? result.revision.trim()
-                    : current.revision,
-              }
-            : current,
-        );
+        setPreview((current) => {
+          if (current?.path !== savedPath) return current;
+          const next = {
+            ...current,
+            content,
+            size: Math.max(0, Number(result?.size) || contentBytes),
+            mtimeMs: Number.isFinite(Number(result?.mtimeMs))
+              ? Number(result.mtimeMs)
+              : current.mtimeMs,
+            revision:
+              typeof result?.revision === 'string' && result.revision.trim()
+                ? result.revision.trim()
+                : current.revision,
+          };
+          const retained = previewCacheRef.current!.set(mobileFileCacheKey(request), {
+            file: previewFileRef.current,
+            preview: next,
+          });
+          previewRef.current = retained.preview;
+          return retained.preview;
+        });
         return true;
       } catch (nextError: any) {
         if (saveVersion.current !== version) return false;

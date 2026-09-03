@@ -63,7 +63,9 @@ describe('mobile file explorer presentation', () => {
       'utf8',
     );
 
-    expect(source).toContain('if (!active) return;\n    void loadDirectory(rootPath);');
+    expect(source).toContain(
+      'if (!active) return;\n    const cachedRoot = directoriesRef.current[rootPath];\n    void loadDirectory(rootPath, Boolean(cachedRoot?.loaded || cachedRoot?.loading));',
+    );
     expect(source).not.toContain('void loadDirectory(rootPath, true);');
   });
 });

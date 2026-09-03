@@ -93,6 +93,7 @@ export class DeviceMeshRouter {
   private readonly bulkRequestTimes = new Map<string, number[]>();
   private readonly connecting = new Set<string>();
   private readonly connectionListeners = new Set<() => void>();
+  private readonly capabilityEventListeners = new Set<(event: Record<string, any>) => void>();
   private reconnectTimer: ReturnType<typeof setInterval> | null = null;
   private readonly membership: DeviceMembershipSynchronizer;
   private readonly requestClient: DeviceMeshRequestClient;
@@ -143,6 +144,11 @@ export class DeviceMeshRouter {
   subscribeConnections(listener: () => void): () => void {
     this.connectionListeners.add(listener);
     return () => this.connectionListeners.delete(listener);
+  }
+
+  subscribeCapabilityEvents(listener: (event: Record<string, any>) => void): () => void {
+    this.capabilityEventListeners.add(listener);
+    return () => this.capabilityEventListeners.delete(listener);
   }
 
   private notifyConnectionsChanged(): void {
@@ -421,6 +427,26 @@ export class DeviceMeshRouter {
         }
       } catch {
         // Invalid route hints are ignored; the authenticated connection remains usable.
+      }
+      return;
+    }
+    if (message?.type === 'capability.event') {
+      if (
+        message.version === 1 &&
+        message.sourceDeviceId === connection.peerDeviceId &&
+        typeof message.capability === 'string' &&
+        typeof message.event === 'string' &&
+        message.payload &&
+        typeof message.payload === 'object' &&
+        !Array.isArray(message.payload)
+      ) {
+        for (const listener of this.capabilityEventListeners) {
+          try {
+            listener(message);
+          } catch {
+            // Event observers are advisory and cannot interrupt mesh routing.
+          }
+        }
       }
       return;
     }

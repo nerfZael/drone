@@ -5,10 +5,16 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { pairingClaimSigningText, type PairingClaim } from '@drone/device-protocol';
+import { WebSocket } from 'ws';
 import { createDeviceMeshService } from '../src/hub/device-mesh';
-import { loadOrCreateDeviceIdentity, signDeviceText } from '../src/hub/device-mesh/device-identity';
+import {
+  loadOrCreateDeviceIdentity,
+  signDeviceText,
+  signSocketChallenge,
+} from '../src/hub/device-mesh/device-identity';
 
 type TestHub = {
+  rootDir: string;
   url: string;
   ingressUrl: string;
   token: string;
@@ -49,6 +55,7 @@ async function startHub(): Promise<TestHub> {
     body: JSON.stringify({ port: ingress.status.port, publicEndpoint: ingressUrl }),
   });
   const hub: TestHub = {
+    rootDir,
     url,
     ingressUrl,
     token,
@@ -157,6 +164,76 @@ describe('desktop device pairing', () => {
     expect(decoder.decode(pushed.value)).toContain('event: change');
     await reader.cancel();
   });
+
+  test('bridges authenticated capability events to desktop event clients', async () => {
+    const remote = await startHub();
+    const desktop = await startHub();
+    await pairHubs(remote, desktop, [
+      { capability: 'drone-control', version: 1, operations: ['drones.list', 'chat.read'] },
+    ]);
+    const remoteIdentity = await loadOrCreateDeviceIdentity(remote.rootDir);
+    const socket = new WebSocket(
+      `${desktop.ingressUrl.replace('http:', 'ws:')}/api/device-mesh/ws?deviceId=${encodeURIComponent(remoteIdentity.id)}`,
+    );
+    const challenge = JSON.parse(
+      String(
+        await new Promise((resolve, reject) => {
+          socket.once('message', resolve);
+          socket.once('error', reject);
+        }),
+      ),
+    );
+    const ready = new Promise((resolve, reject) => {
+      socket.once('message', resolve);
+      socket.once('error', reject);
+    });
+    socket.send(
+      JSON.stringify({
+        type: 'auth.response',
+        deviceId: remoteIdentity.id,
+        signature: signSocketChallenge(remoteIdentity, challenge.nonce),
+      }),
+    );
+    await ready;
+    const events = await fetch(`${desktop.url}/api/device-mesh/events`, {
+      headers: { authorization: `Bearer ${desktop.token}` },
+    });
+    const reader = events.body?.getReader();
+    if (!reader) throw new Error('event response did not include a stream');
+    const decoder = new TextDecoder();
+    await reader.read();
+
+    const pushed = reader.read();
+    socket.send(
+      JSON.stringify({
+        type: 'capability.event',
+        version: 1,
+        sourceDeviceId: remoteIdentity.id,
+        capability: 'drone-control',
+        capabilityVersion: 1,
+        event: 'chat.changed',
+        payload: {
+          droneId: 'drone-1',
+          chatName: 'default',
+          reason: 'runtime_tool_call_progress',
+        },
+        issuedAt: new Date().toISOString(),
+      }),
+    );
+    const event = await Promise.race([
+      pushed,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('capability event timed out')), 2_000),
+      ),
+    ]);
+    const body = decoder.decode(event.value);
+    expect(body).toContain('event: capability');
+    expect(body).toContain('runtime_tool_call_progress');
+    await reader.cancel();
+    const closed = new Promise((resolve) => socket.once('close', resolve));
+    socket.close();
+    await closed;
+  }, 10_000);
 
   test('keeps the administration API off the public mesh listener', async () => {
     const hub = await startHub();
