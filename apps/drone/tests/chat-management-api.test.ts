@@ -723,6 +723,16 @@ describeSocketSuite('chat management api', () => {
     expect(chatInfo.data?.model).toBe('gpt-test');
     expect(chatInfo.data?.reasoning).toBe('high');
 
+    const chatList = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats`);
+    expect(chatList.r.status).toBe(200);
+    expect(chatList.data?.chatDetails).toContainEqual(expect.objectContaining({
+      chat: 'default',
+      agent: { kind: 'builtin', id: 'codex' },
+      provider: null,
+      model: 'gpt-test',
+      reasoning: 'high',
+    }));
+
     const cleared = await apiFetch(
       `/api/drones/${encodeURIComponent(droneId)}/chats/default/config`,
       {
@@ -1680,6 +1690,18 @@ describeSocketSuite('chat management api', () => {
         command: 'custom-agent',
       };
     });
+
+    const chatList = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats`);
+    expect(chatList.r.status).toBe(200);
+    const listedAgent = chatList.data?.chatDetails?.find(
+      (entry: any) => entry.chat === 'default',
+    )?.agent;
+    expect(listedAgent).toEqual({
+      kind: 'custom',
+      id: 'custom-test',
+      label: 'Custom Test',
+    });
+    expect(listedAgent?.command).toBeUndefined();
 
     const transcript = await apiFetch(
       `/api/drones/${encodeURIComponent(droneId)}/chats/default/transcript?turn=all`,

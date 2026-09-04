@@ -9,6 +9,7 @@ import { ChatMessageBody } from '../chat/ChatMessageBody';
 import { formatChatVoiceDuration } from '../chat/use-chat-voice-recorder';
 import { useCompanion } from './CompanionContext';
 import { CompanionProposalCard } from './CompanionProposalCard';
+import { CompanionProposalHistory } from './CompanionProposalHistory';
 import { useCompanionWorkspace } from './CompanionWorkspaceContext';
 
 function Chevron({ open }: { open: boolean }) {
@@ -59,12 +60,18 @@ function CompanionHeaderButton({
   label,
   tone = 'neutral',
   disabled = false,
+  pressed,
+  expanded,
+  controls,
   onClick,
   children,
 }: {
   label: string;
   tone?: 'neutral' | 'accent' | 'success' | 'danger';
   disabled?: boolean;
+  pressed?: boolean;
+  expanded?: boolean;
+  controls?: string;
   onClick(): void;
   children: React.ReactNode;
 }) {
@@ -80,6 +87,9 @@ function CompanionHeaderButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
+      aria-pressed={pressed}
+      aria-expanded={expanded}
+      aria-controls={controls}
       className={`inline-flex h-7 w-7 items-center justify-center rounded-md border transition-opacity hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-40 ${classes}`}
       title={label}
       aria-label={label}
@@ -94,6 +104,7 @@ export function CompanionOverlay() {
   const workspace = useCompanionWorkspace();
   const [expanded, setExpanded] = React.useState(false);
   const [transcriptExpanded, setTranscriptExpanded] = React.useState(false);
+  const [historyOpen, setHistoryOpen] = React.useState(false);
   const [, tick] = React.useState(0);
   React.useEffect(() => {
     if (companion?.status !== 'working') return;
@@ -104,17 +115,34 @@ export function CompanionOverlay() {
     if (companion?.status === 'idle') {
       setExpanded(false);
       setTranscriptExpanded(false);
+      setHistoryOpen(false);
     }
   }, [companion?.status]);
+  React.useEffect(() => {
+    if (companion?.proposalHistory.length === 0) setHistoryOpen(false);
+  }, [companion?.proposalHistory.length]);
   if (!companion || companion.status === 'idle') return null;
   const active = companion.status === 'working';
   const duration = companion.startedAt
     ? Math.max(0, (companion.endedAt ?? Date.now()) - companion.startedAt)
     : 0;
   const activityGroups = groupCompanionToolActivity(companion.activity);
+  const showProposal = Boolean(
+    companion.proposal &&
+    (!companion.autoApprove || companion.status === 'error' || companion.status === 'cancelled'),
+  );
+  const latestProposalExecution = companion.proposalHistory[
+    companion.proposalHistory.length - 1
+  ]?.execution;
+  const latestProposalExecutionFailed = latestProposalExecution?.ok === false;
   return (
     <div className="fixed bottom-4 right-4 z-[80] flex max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] flex-col items-end gap-3 min-[860px]:w-auto min-[860px]:flex-row">
-      {companion.proposal ? (
+      {historyOpen ? (
+        <CompanionProposalHistory
+          entries={companion.proposalHistory}
+          onClose={() => setHistoryOpen(false)}
+        />
+      ) : showProposal && companion.proposal ? (
         <CompanionProposalCard
           proposal={companion.proposal}
           defaultRepoPath={companion.proposalDefaultRepoPath ?? ''}
@@ -236,6 +264,41 @@ export function CompanionOverlay() {
               </svg>
             </CompanionHeaderButton>
           ) : null}
+          <CompanionHeaderButton
+            label={`Auto-approve proposals ${companion.autoApprove ? 'on' : 'off'}; double-tap Caps Lock to toggle`}
+            tone={companion.autoApprove ? 'success' : 'neutral'}
+            pressed={companion.autoApprove}
+            onClick={companion.toggleAutoApprove}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="m13 2-9 12h7l-1 8 9-12h-7z" />
+            </svg>
+          </CompanionHeaderButton>
+          <CompanionHeaderButton
+            label={companion.proposalHistory.length > 0
+              ? `Show execution history (${companion.proposalHistory.length})${
+                  latestProposalExecutionFailed ? '; latest execution failed' : ''
+                }`
+              : 'No proposals executed this session'}
+            disabled={companion.proposalHistory.length === 0}
+            tone={historyOpen ? 'accent' : latestProposalExecutionFailed ? 'danger' : 'neutral'}
+            expanded={historyOpen}
+            controls="companion-proposal-history"
+            onClick={() => setHistoryOpen((open) => !open)}
+          >
+            <span className="relative inline-flex">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+                <path d="M3 3v5h5" />
+                <path d="M12 7v5l3 2" />
+              </svg>
+              {companion.proposalHistory.length > 0 ? (
+                <span className="absolute -right-2 -top-2 min-w-3.5 rounded-full bg-[var(--accent)] px-0.5 text-center text-[8px] font-[var(--weight-bold)] leading-3.5 text-[var(--accent-fg)]">
+                  {Math.min(companion.proposalHistory.length, 99)}
+                </span>
+              ) : null}
+            </span>
+          </CompanionHeaderButton>
           <button
             type="button"
             onClick={() => void companion.close()}

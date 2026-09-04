@@ -900,7 +900,28 @@ type McpChatListEntry = {
   name: string;
   resourceId?: string;
   draft?: true;
+  agent?:
+    | { kind: 'native' }
+    | { kind: 'builtin'; id: string }
+    | { kind: 'custom'; id: string; label: string };
+  provider?: string;
+  model?: string;
+  reasoning?: string;
 };
+
+function normalizeMcpChatAgent(value: any): McpChatListEntry['agent'] {
+  if (value?.kind === 'native') return { kind: 'native' };
+  if (value?.kind === 'builtin') {
+    const id = cleanString(value.id);
+    return id ? { kind: 'builtin', id } : undefined;
+  }
+  if (value?.kind === 'custom') {
+    const id = cleanString(value.id);
+    const label = cleanString(value.label, id || 'Custom');
+    return id ? { kind: 'custom', id, label } : undefined;
+  }
+  return undefined;
+}
 
 type McpChatTreeSnapshot = {
   drone: {
@@ -930,6 +951,11 @@ function normalizeMcpChatList(response: any): McpChatListEntry[] {
       )
       .filter(([name, id]: readonly [string, string]) => Boolean(name && id)),
   );
+  const chatDetailByName = new Map<string, any>(
+    (Array.isArray(response?.chatDetails) ? response.chatDetails : [])
+      .map((item: any) => [cleanString(item?.chat ?? item?.name), item] as const)
+      .filter(([name]: readonly [string, any]) => Boolean(name)),
+  );
   for (const item of Array.isArray(response?.chatDetails) ? response.chatDetails : []) {
     const name = cleanString(item?.chat ?? item?.name);
     if (name && item?.draft === true) draftByChat[name] = true;
@@ -942,9 +968,18 @@ function normalizeMcpChatList(response: any): McpChatListEntry[] {
       const resourceId =
         (typeof item === 'object' ? cleanString(item?.chatId ?? item?.id) : '') ||
         chatIdByName[name];
+      const detail = chatDetailByName.get(name);
+      const provider = cleanString(detail?.provider);
+      const model = cleanString(detail?.model);
+      const reasoning = cleanString(detail?.reasoning);
+      const agent = normalizeMcpChatAgent(detail?.agent);
       return {
         name,
         ...(resourceId ? { resourceId } : {}),
+        ...(agent ? { agent } : {}),
+        ...(provider ? { provider } : {}),
+        ...(model ? { model } : {}),
+        ...(reasoning ? { reasoning } : {}),
         ...((typeof item === 'object' && item?.draft === true) || draftByChat[name]
           ? { draft: true as const }
           : {}),
@@ -2578,7 +2613,8 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     'list_chats',
     {
       title: 'List drone chats',
-      description: 'List chats for a Drone Hub drone.',
+      description:
+        'List chats for a Drone Hub drone, including each chat\'s configured agent, provider, model, and reasoning when explicitly set. Omitted configuration fields use Drone Hub defaults.',
       inputSchema: { drone: z.string() },
     },
     async (args) => {

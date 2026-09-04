@@ -16,7 +16,7 @@ import {
 export type CompanionThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
 export type CompanionSettings = {
-  schemaVersion: 3;
+  schemaVersion: 4;
   provider: LlmProviderId;
   model: string;
   thinkingLevel: CompanionThinkingLevel;
@@ -66,11 +66,22 @@ const PREVIOUS_DRAFT_DEFAULT_COMPANION_SYSTEM_PROMPT = [
   'Each prepare_drone_draft call creates one independent durable draft. Call it once for every draft the user requests; calls never replace earlier drafts.',
 ].join('\n');
 
-export const DEFAULT_COMPANION_SYSTEM_PROMPT = [
-  PREVIOUS_DEFAULT_COMPANION_SYSTEM_PROMPT,
+const COMPANION_PROPOSAL_PROMPT_LINES = [
   'Use read_companion_proposal and apply_companion_proposal_patch for requested Drone Hub changes such as creating, cloning, renaming, or deleting groups, drones, and chats, configuring creation overrides, and sending or queueing chat messages.',
   'There is one editable proposal for the Companion session. Proposal patches update its review card but do not execute it. You may discuss it with the user and revise it over multiple turns before they apply or discard it.',
   'Read the proposal before every patch. Preserve operations the user still wants, use $create-operation-id references for later operations on a newly created drone, and keep operation order executable.',
+];
+
+const PREVIOUS_PROPOSAL_DEFAULT_COMPANION_SYSTEM_PROMPT = [
+  PREVIOUS_DEFAULT_COMPANION_SYSTEM_PROMPT,
+  ...COMPANION_PROPOSAL_PROMPT_LINES,
+].join('\n');
+
+export const DEFAULT_COMPANION_SYSTEM_PROMPT = [
+  PREVIOUS_DEFAULT_COMPANION_SYSTEM_PROMPT,
+  'Use list_agent_models to discover valid model and reasoning combinations before proposing explicit agent, provider, model, or reasoning overrides. Match the requested host or container runtime.',
+  'Use list_chats to inspect an existing chat\'s configured agent, provider, model, and reasoning. Omitted configuration fields use Drone Hub defaults.',
+  ...COMPANION_PROPOSAL_PROMPT_LINES,
 ].join('\n');
 
 export const COMPANION_TOOL_SUMMARIES = [
@@ -100,6 +111,15 @@ export const COMPANION_TOOL_SUMMARIES = [
     description: 'List drones, repositories, states, and chat counts.',
   },
   {
+    name: 'list_agent_models',
+    label: 'List agent models',
+    category: 'hub',
+    execution: 'mcp',
+    requires: null,
+    description:
+      'List available models and reported reasoning levels for a Built-in or CLI agent on the host or in Drone Hub containers.',
+  },
+  {
     name: 'list_groups',
     label: 'List groups',
     category: 'hub',
@@ -113,7 +133,8 @@ export const COMPANION_TOOL_SUMMARIES = [
     category: 'chats',
     execution: 'mcp',
     requires: null,
-    description: 'List active chats for a drone.',
+    description:
+      'List active chats for a drone, including configured agent, provider, model, and reasoning when explicitly set.',
   },
   {
     name: 'read_chat',
@@ -224,7 +245,7 @@ export type CompanionToolName = CompanionToolCatalogEntry['name'];
 export type { CompanionBrowserToolName } from '@drone/assistant-chat';
 
 const SETTING_KEY = 'companion';
-const COMPANION_SETTINGS_SCHEMA_VERSION = 3;
+const COMPANION_SETTINGS_SCHEMA_VERSION = 4;
 const TOOL_NAMES = new Set(COMPANION_TOOL_SUMMARIES.map((tool) => tool.name));
 const LEGACY_PROPOSAL_TOOL_NAME = 'prepare_drone_draft';
 const LEGACY_DEFAULT_TOOL_NAMES = COMPANION_TOOL_SUMMARIES
@@ -232,9 +253,13 @@ const LEGACY_DEFAULT_TOOL_NAMES = COMPANION_TOOL_SUMMARIES
   .filter((name) =>
     name !== 'open_drone_chat' &&
     name !== 'list_groups' &&
+    name !== 'list_agent_models' &&
     name !== 'read_companion_proposal' &&
     name !== 'apply_companion_proposal_patch',
   );
+const SCHEMA_V3_DEFAULT_TOOL_NAMES = COMPANION_TOOL_SUMMARIES
+  .map((tool) => tool.name)
+  .filter((name) => name !== 'list_agent_models');
 const TOOL_DEPENDENCIES = new Map<CompanionToolName, CompanionToolName>(
   COMPANION_TOOL_SUMMARIES.flatMap((tool) =>
     tool.requires ? [[tool.name, tool.requires] as const] : [],
@@ -250,7 +275,7 @@ export const DEFAULT_COMPANION_SETTINGS: CompanionSettings = {
   enabledTools: COMPANION_TOOL_SUMMARIES.map((tool) => tool.name),
 };
 
-function normalizeEnabledTools(value: unknown, migrateLegacyDefaults: boolean): CompanionToolName[] {
+function normalizeEnabledTools(value: unknown, storedSchemaVersion: number): CompanionToolName[] {
   const rawRequested = Array.isArray(value)
     ? value.map((item) => String(item).trim())
     : DEFAULT_COMPANION_SETTINGS.enabledTools;
@@ -258,13 +283,22 @@ function normalizeEnabledTools(value: unknown, migrateLegacyDefaults: boolean): 
     ? rawRequested.filter((item): item is CompanionToolName => TOOL_NAMES.has(item as CompanionToolName))
     : DEFAULT_COMPANION_SETTINGS.enabledTools;
   const enabled = new Set(requested);
-  if (migrateLegacyDefaults && LEGACY_DEFAULT_TOOL_NAMES.every((name) => enabled.has(name))) {
+  if (
+    storedSchemaVersion < 3 &&
+    LEGACY_DEFAULT_TOOL_NAMES.every((name) => enabled.has(name))
+  ) {
     enabled.add('open_drone_chat');
     enabled.add('list_groups');
   }
-  if (migrateLegacyDefaults && rawRequested.includes(LEGACY_PROPOSAL_TOOL_NAME)) {
+  if (storedSchemaVersion < 3 && rawRequested.includes(LEGACY_PROPOSAL_TOOL_NAME)) {
     enabled.add('read_companion_proposal');
     enabled.add('apply_companion_proposal_patch');
+  }
+  if (
+    storedSchemaVersion < 4 &&
+    SCHEMA_V3_DEFAULT_TOOL_NAMES.every((name) => enabled.has(name))
+  ) {
+    enabled.add('list_agent_models');
   }
   for (const [patchTool, readTool] of TOOL_DEPENDENCIES) {
     if (enabled.has(patchTool)) enabled.add(readTool);
@@ -284,7 +318,9 @@ export function normalizeCompanionSettings(value: unknown): CompanionSettings {
     throw new Error('Companion settings must be an object');
   }
   const raw = input as Record<string, unknown>;
-  const migrateLegacyDefaults = raw.schemaVersion !== COMPANION_SETTINGS_SCHEMA_VERSION;
+  const storedSchemaVersion = Number.isInteger(raw.schemaVersion)
+    ? Number(raw.schemaVersion)
+    : 0;
   const provider = raw.provider;
   if (provider !== 'openai' && provider !== 'gemini' && provider !== 'codex') {
     throw new Error('Companion provider must be openai, codex, or gemini');
@@ -304,7 +340,8 @@ export function normalizeCompanionSettings(value: unknown): CompanionSettings {
   const storedPrompt = String(raw.systemPrompt ?? DEFAULT_COMPANION_SYSTEM_PROMPT);
   const prompt = storedPrompt === LEGACY_DEFAULT_COMPANION_SYSTEM_PROMPT ||
     storedPrompt === PREVIOUS_DEFAULT_COMPANION_SYSTEM_PROMPT ||
-    storedPrompt === PREVIOUS_DRAFT_DEFAULT_COMPANION_SYSTEM_PROMPT
+    storedPrompt === PREVIOUS_DRAFT_DEFAULT_COMPANION_SYSTEM_PROMPT ||
+    storedPrompt === PREVIOUS_PROPOSAL_DEFAULT_COMPANION_SYSTEM_PROMPT
     ? DEFAULT_COMPANION_SYSTEM_PROMPT
     : storedPrompt;
   return {
@@ -313,7 +350,7 @@ export function normalizeCompanionSettings(value: unknown): CompanionSettings {
     model: match.id,
     thinkingLevel: match.thinkingLevel,
     systemPrompt: prompt.slice(0, COMPANION_SYSTEM_PROMPT_MAX_CHARS),
-    enabledTools: normalizeEnabledTools(raw.enabledTools, migrateLegacyDefaults),
+    enabledTools: normalizeEnabledTools(raw.enabledTools, storedSchemaVersion),
   };
 }
 

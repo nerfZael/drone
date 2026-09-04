@@ -625,6 +625,107 @@ describe('Drone Hub assistant MCP transport', () => {
     });
   });
 
+  test('lists configured agent, provider, model, and reasoning for chats', async () => {
+    await withTempDroneDataDir('drone-assistant-mcp-chat-config-', async () => {
+      const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
+      const previousToken = process.env.DRONE_TOKEN;
+      const previousFetch = globalThis.fetch;
+      globalThis.fetch = (async (input) => {
+        const url = new URL(
+          typeof input === 'string' ? input : input instanceof URL ? input : input.url,
+        );
+        if (url.pathname !== '/api/drones/drone-config/chats') {
+          return Response.json({ ok: false, error: 'unexpected request' }, { status: 500 });
+        }
+        return Response.json({
+          ok: true,
+          chats: ['default', 'native-chat', 'custom-chat'],
+          chatDetails: [
+            {
+              chat: 'default',
+              chatId: 'chat-default',
+              agent: { kind: 'builtin', id: 'codex' },
+              provider: null,
+              model: 'gpt-5.6-sol',
+              reasoning: 'high',
+            },
+            {
+              chat: 'native-chat',
+              chatId: 'chat-native',
+              agent: { kind: 'native' },
+              provider: 'gemini',
+              model: 'gemini-3.5-flash-lite',
+              reasoning: 'medium',
+            },
+            {
+              chat: 'custom-chat',
+              chatId: 'chat-custom',
+              agent: {
+                kind: 'custom',
+                id: 'custom-reviewer',
+                label: 'Custom Reviewer',
+                command: 'secret-agent-command --token hidden',
+              },
+            },
+          ],
+        });
+      }) as typeof fetch;
+      process.env.DRONE_HUB_BASE_URL = 'http://drone-hub.test';
+      process.env.DRONE_TOKEN = 'chat-config-test-token';
+      let client: Awaited<ReturnType<typeof createInProcessDroneHubMcpClient>> | null = null;
+      try {
+        client = await createInProcessDroneHubMcpClient({
+          correlationId: 'thread-chat-config',
+          allowedDroneRefs: ['drone-config'],
+          allowedWriteDroneRefs: [],
+          allowedDroneIds: ['drone-config'],
+        });
+        const response = await client.callTool({
+          name: 'list_chats',
+          arguments: { drone: 'drone-config' },
+        });
+        expect(response.isError).not.toBe(true);
+        expect(response.structuredContent).toMatchObject({
+          ok: true,
+          chats: [
+            {
+              name: 'default',
+              resourceId: 'chat-default',
+              agent: { kind: 'builtin', id: 'codex' },
+              model: 'gpt-5.6-sol',
+              reasoning: 'high',
+            },
+            {
+              name: 'native-chat',
+              resourceId: 'chat-native',
+              agent: { kind: 'native' },
+              provider: 'gemini',
+              model: 'gemini-3.5-flash-lite',
+              reasoning: 'medium',
+            },
+            {
+              name: 'custom-chat',
+              resourceId: 'chat-custom',
+              agent: {
+                kind: 'custom',
+                id: 'custom-reviewer',
+                label: 'Custom Reviewer',
+              },
+            },
+          ],
+        });
+        expect(JSON.stringify(response.structuredContent)).not.toContain('secret-agent-command');
+      } finally {
+        await client?.close();
+        globalThis.fetch = previousFetch;
+        if (previousBaseUrl == null) delete process.env.DRONE_HUB_BASE_URL;
+        else process.env.DRONE_HUB_BASE_URL = previousBaseUrl;
+        if (previousToken == null) delete process.env.DRONE_TOKEN;
+        else process.env.DRONE_TOKEN = previousToken;
+      }
+    });
+  });
+
   test('uses the shared rename command without a loopback HTTP request', async () => {
     await withTempDroneDataDir('drone-assistant-mcp-rename-', async () => {
       const previousFetch = globalThis.fetch;

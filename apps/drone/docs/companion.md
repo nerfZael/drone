@@ -119,8 +119,9 @@ Reuse the in-process Drone Hub MCP client for these server-owned tools:
 - `get_hub_overview`: return repository, drone, chat, group, busy, error, and repo-less-drone counts;
 - `list_repos`: return the existing stable repository references and counts, with drone counts added;
 - `list_drones`: add `hasRepository` and repository filters, and return an unambiguous `repository: null | {...}` plus `chatCount`;
+- `list_agent_models`: return available models and reported reasoning levels for a Built-in or CLI agent on the requested runtime;
 - `list_groups`: return existing group names and repository scope so proposal operations can target them exactly;
-- `list_chats` and `read_chat`: enumerate a drone's chats and inspect a selected transcript;
+- `list_chats` and `read_chat`: enumerate a drone's chats with their explicit agent/model configuration and inspect a selected transcript;
 - `search_chat_messages`: perform bounded keyword search across active chats, optionally scoped to a repository, drone, or chat;
 - optional read-only workspace tools for the active drone.
 
@@ -156,13 +157,15 @@ The server applies the patch hunks to the snapshot, then asks the browser to com
 
 The proposal supports creating, renaming, and deleting groups, drones, and chats; creating normal or draft drones/chats; cloning container drones; cloning chat history; copying chat configuration without history; and sending ASAP or queued messages. Drone creation can optionally override runtime, volume persistence, branch source/remote branch, and the initial chat's agent, provider, model, reasoning, permission mode, and approval policy. Chat creation supports the same chat-scoped overrides. Every omitted setting continues to use the saved creation or chat default. Operations execute top-to-bottom after explicit user approval and stop after the first failure. A later operation can target a newly created or cloned drone with `$<operation id>`. Repository omissions resolve against the active repository captured when the proposal is first created, so later navigation cannot silently retarget it. Any execution attempt, including a partial failure, is terminal for that proposal; the user must discard it before Companion can create a fresh retry, preventing already-completed operations from being replayed. The review card stays to the left of the desktop Companion window across follow-up turns, so Companion can discuss and patch the same proposal repeatedly before the user applies or discards it.
 
-Desktop and mobile Companion use the same proposal document and validation contract. Desktop shows the review card beside the Companion window; mobile shows it inside the Companion overlay. Neither surface executes proposal edits until the user explicitly applies the reviewed proposal.
+Desktop and mobile Companion use the same proposal document and validation contract. Desktop shows the review card beside the Companion window; mobile shows it inside the Companion overlay. By default, neither surface executes proposal edits until the user explicitly applies the reviewed proposal.
+
+On desktop, one press of the proposal shortcut applies the ready review card. A double press of its default Caps Lock binding toggles session-only auto-approve, which is off when the Companion session starts. While enabled, complete proposals execute after the Companion turn finishes without opening the review card. Every manual and automatic execution remains available from the Companion header's execution-history button until the session closes, including partial failures and per-operation results.
 
 The proposal card is the single preview surface for pending operations. It shows each structural change and its execution status without inserting speculative groups, drones, or chats into the live sidebar model. The sidebar continues to render confirmed and ordinary optimistic application state, and applied proposal changes appear there through the normal registry refresh.
 
 Applying a patch must preserve user undo. For Monaco-backed composer and file editors, expose an edit method on the registered target that uses `pushUndoStop`, `executeEdits`, and `pushUndoStop` instead of replacing the React `value`; one Ctrl/Cmd+Z should revert the whole Companion patch. For controlled textareas, keep an app-owned Companion undo snapshot and intercept Ctrl/Cmd+Z when the current revision still matches the patched result. Clear that snapshot when the composer is sent, reset, or replaced. Browser tests must cover user typing before and after the patch. Do not claim undo support from `setDraft` or `setOpenedFileContent` alone.
 
-Do not enable shell, direct workspace file writes or saves, generic navigation, settings changes, or the full built-in-agent catalog. Hub mutations and chat messages go through the proposal review boundary; opening an existing chat and temporary highlighting remain immediate navigation actions.
+Do not enable shell, direct workspace file writes or saves, generic navigation, settings changes, or the full built-in-agent management catalog. Read-only model discovery is allowed so Companion can validate proposal overrides. Hub mutations and chat messages go through the proposal review boundary; opening an existing chat and temporary highlighting remain immediate navigation actions.
 
 ### 4. Add a dedicated Companion Settings tab
 

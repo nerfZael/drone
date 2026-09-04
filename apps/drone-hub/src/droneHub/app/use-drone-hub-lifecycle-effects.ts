@@ -21,6 +21,8 @@ import { toggleCurrentChatComposerEditorMode } from '../chat/chat-composer-edito
 import { useFileDictation } from '../files/FileDictationContext';
 import { useCompanion } from '../companion/CompanionContext';
 import {
+  COMPANION_SHORTCUT_DOUBLE_TAP_MS,
+  companionProposalShortcutGesture,
   isCompanionShortcutDoubleTap,
   shouldConsumeCompanionProposalShortcut,
 } from '../companion/companion-shortcut';
@@ -166,15 +168,27 @@ export function useDroneHubLifecycleEffects({
   const toggleCompanionRecording = companion?.toggle;
   const closeCompanion = companion?.close;
   const applyCompanionProposal = companion?.executeProposal;
+  const toggleCompanionAutoApprove = companion?.status === 'idle'
+    ? undefined
+    : companion?.toggleAutoApprove;
   const canApplyCompanionProposal = Boolean(
     companion?.proposal &&
+    !companion.autoApprove &&
     companion.proposal.operations.length > 0 &&
     companion.proposalDefaultRepoPath !== null &&
     !companion.proposalExecuting &&
     companion.proposalExecution === null &&
     !['starting', 'recording', 'transcribing', 'working'].includes(companion.status),
   );
+  const applyCompanionProposalRef = React.useRef(applyCompanionProposal);
+  const canApplyCompanionProposalRef = React.useRef(canApplyCompanionProposal);
+  const companionProposalRef = React.useRef(companion?.proposal ?? null);
+  applyCompanionProposalRef.current = applyCompanionProposal;
+  canApplyCompanionProposalRef.current = canApplyCompanionProposal;
+  companionProposalRef.current = companion?.proposal ?? null;
   const lastCompanionShortcutAtRef = React.useRef(0);
+  const lastCompanionProposalShortcutAtRef = React.useRef(0);
+  const pendingCompanionProposalApplyTimerRef = React.useRef<number | null>(null);
   const lastChatVoiceShortcutAtRef = React.useRef(0);
   const pendingRootVoiceDraftFocusKeyRef = React.useRef<string | null | undefined>(undefined);
   const pendingRootVoiceFrameRef = React.useRef<number | null>(null);
@@ -198,6 +212,11 @@ export function useDroneHubLifecycleEffects({
     }
     return true;
   }, [closeCompanion, toggleCompanionRecording]);
+  React.useEffect(() => () => {
+    if (pendingCompanionProposalApplyTimerRef.current !== null) {
+      window.clearTimeout(pendingCompanionProposalApplyTimerRef.current);
+    }
+  }, []);
   const toggleContinuousDictation = useContinuousDictation()?.toggle;
   const activeComposer = useActiveComposer();
   const toggleActiveComposerVoiceRecording = activeComposer.toggleVoiceRecording;
@@ -292,6 +311,46 @@ export function useDroneHubLifecycleEffects({
       return handled;
     };
 
+    const applyCompanionProposalNow = (
+      expectedProposal = companionProposalRef.current,
+    ): boolean => {
+      const execute = applyCompanionProposalRef.current;
+      if (
+        !execute ||
+        !expectedProposal ||
+        companionProposalRef.current !== expectedProposal ||
+        !canApplyCompanionProposalRef.current
+      ) return false;
+      void execute();
+      return true;
+    };
+
+    const runCompanionProposalShortcut = (): boolean => {
+      const binding = shortcutBindings.applyCompanionProposal;
+      if (binding?.key !== 'capslock') return applyCompanionProposalNow();
+      const now = Date.now();
+      if (
+        companionProposalShortcutGesture(lastCompanionProposalShortcutAtRef.current, now) ===
+        'toggle-auto-approve'
+      ) {
+        lastCompanionProposalShortcutAtRef.current = 0;
+        if (pendingCompanionProposalApplyTimerRef.current !== null) {
+          window.clearTimeout(pendingCompanionProposalApplyTimerRef.current);
+          pendingCompanionProposalApplyTimerRef.current = null;
+        }
+        toggleCompanionAutoApprove?.();
+        return true;
+      }
+      lastCompanionProposalShortcutAtRef.current = now;
+      const proposalAtTap = companionProposalRef.current;
+      pendingCompanionProposalApplyTimerRef.current = window.setTimeout(() => {
+        pendingCompanionProposalApplyTimerRef.current = null;
+        lastCompanionProposalShortcutAtRef.current = 0;
+        applyCompanionProposalNow(proposalAtTap);
+      }, COMPANION_SHORTCUT_DOUBLE_TAP_MS);
+      return true;
+    };
+
     const openRightPanelTabFromShortcut = (tab: RightPanelTab) => {
       if (!currentDrone) return;
       requestRightPanelTab(tab);
@@ -359,9 +418,7 @@ export function useDroneHubLifecycleEffects({
         return runCompanionShortcut();
       },
       applyCompanionProposal: () => {
-        if (!applyCompanionProposal || !canApplyCompanionProposal) return false;
-        void applyCompanionProposal();
-        return true;
+        return runCompanionProposalShortcut();
       },
       toggleVoiceClipboardRecording: () => toggleVoiceClipboardRecording(),
       markSelectedDronesUnread: () => onMarkSelectedDronesUnreadShortcut(),
@@ -576,6 +633,7 @@ export function useDroneHubLifecycleEffects({
     toggleVoiceClipboardRecording,
     toggleContinuousDictation,
     toggleFileDictation,
+    toggleCompanionAutoApprove,
   ]);
 
   React.useEffect(() => {

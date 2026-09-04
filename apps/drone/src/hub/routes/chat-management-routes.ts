@@ -698,10 +698,21 @@ export function createChatManagementRouteHandler(
           const readStates = listChatReadStatesFromStore({ droneId });
           const chatDetails = chats.map((chatName: string) => {
             const stored = storedChats.get(chatName);
+            const chatEntry = stored?.chat;
+            const agent = chatEntry ? inferChatAgent(chatEntry, resolved.drone) : null;
+            const agentSummary = agent?.kind === 'custom'
+              ? { kind: agent.kind, id: agent.id, label: agent.label }
+              : agent;
             return {
               chat: chatName,
-              chatId: String((stored?.chat as any)?.id ?? '').trim() || null,
-              draft: isDraftChatEntry(stored?.chat),
+              chatId: String((chatEntry as any)?.id ?? '').trim() || null,
+              draft: isDraftChatEntry(chatEntry),
+              agent: agentSummary,
+              provider: agent?.kind === 'native'
+                ? String((chatEntry as any)?.nativeProvider ?? '').trim() || null
+                : null,
+              model: String((chatEntry as any)?.model ?? '').trim() || null,
+              reasoning: normalizeChatReasoning((chatEntry as any)?.reasoning),
               unread: readStates[chatName]?.unread === true,
               latestAgentTurnId: readStates[chatName]?.latestAgentTurnId ?? null,
               latestAgentRevision: readStates[chatName]?.latestAgentRevision ?? 0,

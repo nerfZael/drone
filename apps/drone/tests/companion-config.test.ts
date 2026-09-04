@@ -36,6 +36,7 @@ describe('Companion settings', () => {
     ).toEqual([
       'list_repos',
       'list_drones',
+      'list_agent_models',
       'list_chats',
       'read_chat',
       'search_chat_messages',
@@ -61,6 +62,7 @@ describe('Companion settings', () => {
     expect(DEFAULT_COMPANION_SETTINGS.systemPrompt).toContain(
       'one editable proposal',
     );
+    expect(DEFAULT_COMPANION_SETTINGS.systemPrompt).toContain('Use list_agent_models');
   });
 
   test('adds the matching read dependency for enabled patch tools', () => {
@@ -137,12 +139,31 @@ describe('Companion settings', () => {
     expect(settings.systemPrompt).toContain('Use open_drone_chat');
   });
 
+  test('migrates the schema-v3 default prompt to model discovery instructions', () => {
+    const previousSchemaV3Prompt = DEFAULT_COMPANION_SETTINGS.systemPrompt
+      .split('\n')
+      .filter((line) =>
+        !line.startsWith('Use list_agent_models') &&
+        !line.startsWith('Use list_chats to inspect'),
+      )
+      .join('\n');
+    const settings = normalizeCompanionSettings({
+      ...DEFAULT_COMPANION_SETTINGS,
+      schemaVersion: 3,
+      systemPrompt: previousSchemaV3Prompt,
+    });
+
+    expect(settings.systemPrompt).toBe(DEFAULT_COMPANION_SETTINGS.systemPrompt);
+    expect(settings.systemPrompt).toContain('Use list_agent_models');
+  });
+
   test('enables proposal editing and chat navigation for legacy all-tools profiles without overriding new choices', () => {
     const legacyToolNames = COMPANION_TOOL_SUMMARIES
       .map((tool) => tool.name)
       .filter((name) =>
         name !== 'open_drone_chat' &&
         name !== 'list_groups' &&
+        name !== 'list_agent_models' &&
         name !== 'read_companion_proposal' &&
         name !== 'apply_companion_proposal_patch',
       );
@@ -163,11 +184,32 @@ describe('Companion settings', () => {
 
     expect(migrated.enabledTools).toContain('open_drone_chat');
     expect(migrated.enabledTools).toContain('list_groups');
+    expect(migrated.enabledTools).toContain('list_agent_models');
     expect(migrated.enabledTools).toContain('read_companion_proposal');
     expect(migrated.enabledTools).toContain('apply_companion_proposal_patch');
     expect(migratedWithoutDraftPermission.enabledTools).toContain('open_drone_chat');
     expect(migratedWithoutDraftPermission.enabledTools).not.toContain('read_companion_proposal');
     expect(explicitlyDisabled.enabledTools).not.toContain('open_drone_chat');
     expect(explicitlyDisabled.enabledTools).not.toContain('read_companion_proposal');
+  });
+
+  test('adds model discovery only to schema-v3 default profiles', () => {
+    const schemaV3Defaults = COMPANION_TOOL_SUMMARIES
+      .map((tool) => tool.name)
+      .filter((name) => name !== 'list_agent_models');
+    const migratedDefault = normalizeCompanionSettings({
+      ...DEFAULT_COMPANION_SETTINGS,
+      schemaVersion: 3,
+      enabledTools: schemaV3Defaults,
+    });
+    const migratedCustomized = normalizeCompanionSettings({
+      ...DEFAULT_COMPANION_SETTINGS,
+      schemaVersion: 3,
+      enabledTools: schemaV3Defaults.filter((name) => name !== 'list_groups'),
+    });
+
+    expect(migratedDefault.enabledTools).toContain('list_agent_models');
+    expect(migratedCustomized.enabledTools).not.toContain('list_agent_models');
+    expect(migratedCustomized.enabledTools).not.toContain('list_groups');
   });
 });

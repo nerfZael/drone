@@ -41,3 +41,37 @@ export function isCompanionShortcutDoubleTap(
   const elapsed = currentTimestamp - previousTimestamp;
   return previousTimestamp > 0 && elapsed >= 0 && elapsed <= COMPANION_SHORTCUT_DOUBLE_TAP_MS;
 }
+
+export function companionProposalShortcutGesture(
+  previousTimestamp: number,
+  currentTimestamp: number,
+): 'schedule-apply' | 'toggle-auto-approve' {
+  return isCompanionShortcutDoubleTap(previousTimestamp, currentTimestamp)
+    ? 'toggle-auto-approve'
+    : 'schedule-apply';
+}
+
+export function shouldAutoExecuteCompanionProposal({
+  enabled,
+  status,
+  operationCount,
+  hasExecutionContext,
+  executing,
+  executed,
+}: {
+  enabled: boolean;
+  status: string;
+  operationCount: number;
+  hasExecutionContext: boolean;
+  executing: boolean;
+  executed: boolean;
+}): boolean {
+  return (
+    enabled &&
+    status === 'completed' &&
+    operationCount > 0 &&
+    hasExecutionContext &&
+    !executing &&
+    !executed
+  );
+}

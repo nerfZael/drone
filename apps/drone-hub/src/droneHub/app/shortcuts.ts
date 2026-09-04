@@ -148,7 +148,8 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   {
     id: 'applyCompanionProposal',
     label: 'Apply Companion proposal',
-    description: 'Applies the current reviewed Companion proposal when it is ready.',
+    description:
+      'Applies the current reviewed Companion proposal when ready; double-tap Caps Lock to toggle session auto-approve.',
   },
   {
     id: 'toggleVoiceClipboardRecording',

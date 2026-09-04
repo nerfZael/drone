@@ -20,9 +20,23 @@ import {
 
 import { buildDirectApiWebSocketUrl } from '../app/direct-api-fetch';
 import { useChatVoiceRecorder } from '../chat/use-chat-voice-recorder';
-import { shouldCancelCompanionRecordingWithEscape } from './companion-shortcut';
+import {
+  shouldAutoExecuteCompanionProposal,
+  shouldCancelCompanionRecordingWithEscape,
+} from './companion-shortcut';
 import { createCompanionWebSocketTransport } from './companion-websocket-transport';
 import { useCompanionWorkspace } from './CompanionWorkspaceContext';
+
+export type CompanionProposalHistoryEntry = {
+  id: string;
+  proposal: CompanionProposal;
+  execution: CompanionProposalExecution;
+  defaultRepoPath: string;
+  droneNames: Readonly<Record<string, string>>;
+  startedAt: number;
+  completedAt: number;
+  autoApproved: boolean;
+};
 
 type CompanionContextValue = {
   status: CompanionStatus;
@@ -40,6 +54,8 @@ type CompanionContextValue = {
   proposalDroneNames: Readonly<Record<string, string>>;
   proposalDefaultRepoPath: string | null;
   proposalExecuting: boolean;
+  autoApprove: boolean;
+  proposalHistory: CompanionProposalHistoryEntry[];
   toggle(): Promise<void>;
   stop(): void;
   toggleRecordingPause(): void;
@@ -47,6 +63,7 @@ type CompanionContextValue = {
   close(): Promise<void>;
   executeProposal(): Promise<void>;
   discardProposal(): void;
+  toggleAutoApprove(): void;
 };
 
 const CompanionContext = React.createContext<CompanionContextValue | null>(null);
@@ -79,6 +96,8 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     React.useState<Readonly<Record<string, string>>>({});
   const [proposalDefaultRepoPath, setProposalDefaultRepoPath] = React.useState<string | null>(null);
   const [proposalExecuting, setProposalExecuting] = React.useState(false);
+  const [autoApprove, setAutoApprove] = React.useState(false);
+  const [proposalHistory, setProposalHistory] = React.useState<CompanionProposalHistoryEntry[]>([]);
   const proposalExecutingRef = React.useRef(false);
   const proposalExecutionRef = React.useRef<CompanionProposalExecution | null>(null);
   const proposalExecutionContextRef = React.useRef<CompanionProposalExecutionContext | null>(null);
@@ -112,6 +131,8 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     setProposalExecutionProgress(null);
     setProposalDroneNames({});
     setProposalDefaultRepoPath(null);
+    setAutoApprove(false);
+    setProposalHistory([]);
     proposalExecutingRef.current = false;
     setProposalExecuting(false);
   }, [controller, voice.discardRecording]);
@@ -187,7 +208,11 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     setProposalDefaultRepoPath(null);
   }, []);
 
-  const executeProposal = React.useCallback(async () => {
+  const toggleAutoApprove = React.useCallback(() => {
+    setAutoApprove((enabled) => !enabled);
+  }, []);
+
+  const executeProposal = React.useCallback(async (options?: { autoApproved?: boolean }) => {
     const current = proposalRef.current;
     const executionContext = proposalExecutionContextRef.current;
     if (!workspace || !current || !executionContext || current.operations.length === 0 ||
@@ -195,47 +220,64 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     const executionGeneration = proposalExecutionGenerationRef.current + 1;
     proposalExecutionGenerationRef.current = executionGeneration;
     proposalExecutingRef.current = true;
+    const startedAt = Date.now();
+    const autoApproved = options?.autoApproved === true;
     setProposalExecuting(true);
     setProposalExecution(null);
     setProposalExecutionProgress({ activeOperationId: null, operations: [] });
-    setProposalDroneNames(Object.fromEntries(
+    const droneNames = Object.fromEntries(
       current.operations.flatMap((operation) => {
         if (!('droneId' in operation) || operation.droneId.startsWith('$')) return [];
         return [[operation.droneId, workspace.resolveDroneName(operation.droneId) || operation.droneId]];
       }),
-    ));
+    );
+    setProposalDroneNames(droneNames);
+    let completedExecution: CompanionProposalExecution;
     try {
-      const execution = await workspace.executeProposal(current, executionContext, (progress) => {
+      completedExecution = await workspace.executeProposal(current, executionContext, (progress) => {
         if (proposalExecutionGenerationRef.current === executionGeneration) {
           setProposalExecutionProgress(progress);
         }
       });
-      if (proposalExecutionGenerationRef.current === executionGeneration) {
-        proposalExecutionRef.current = execution;
-        setProposalExecution(execution);
-        setProposalExecutionProgress(null);
-      }
     } catch (executionError) {
-      if (proposalExecutionGenerationRef.current === executionGeneration) {
-        const execution: CompanionProposalExecution = {
-          ok: false,
-          operations: current.operations.map((operation, index) => index === 0
-            ? {
-                id: operation.id,
-                type: operation.type,
-                status: 'failed',
-                error: executionError instanceof Error
-                  ? executionError.message
-                  : String(executionError),
-              }
-            : { id: operation.id, type: operation.type, status: 'skipped' }),
-        };
-        proposalExecutionRef.current = execution;
-        setProposalExecution(execution);
-        setProposalExecutionProgress(null);
-      }
+      completedExecution = {
+        ok: false,
+        operations: current.operations.map((operation, index) => index === 0
+          ? {
+              id: operation.id,
+              type: operation.type,
+              status: 'failed',
+              error: executionError instanceof Error
+                ? executionError.message
+                : String(executionError),
+            }
+          : { id: operation.id, type: operation.type, status: 'skipped' }),
+      };
     } finally {
       if (proposalExecutionGenerationRef.current === executionGeneration) {
+        proposalExecutionRef.current = completedExecution!;
+        setProposalExecution(completedExecution!);
+        setProposalExecutionProgress(null);
+        setProposalHistory((history) => [...history, {
+          id: newId(),
+          proposal: current,
+          execution: completedExecution!,
+          defaultRepoPath: executionContext.defaultRepoPath,
+          droneNames,
+          startedAt,
+          completedAt: Date.now(),
+          autoApproved,
+        }]);
+        if (autoApproved) {
+          proposalRevisionRef.current += 1;
+          proposalRef.current = null;
+          proposalExecutionRef.current = null;
+          proposalExecutionContextRef.current = null;
+          setProposal(null);
+          setProposalExecution(null);
+          setProposalDroneNames({});
+          setProposalDefaultRepoPath(null);
+        }
         proposalExecutingRef.current = false;
         setProposalExecuting(false);
       }
@@ -344,6 +386,26 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const effectiveStatus: CompanionStatus =
     voice.status === 'paused' ? 'recording' : voice.status !== 'idle' ? voice.status : state.status;
 
+  React.useEffect(() => {
+    if (!proposal || !shouldAutoExecuteCompanionProposal({
+      enabled: autoApprove,
+      status: effectiveStatus,
+      operationCount: proposal.operations.length,
+      hasExecutionContext: proposalDefaultRepoPath !== null,
+      executing: proposalExecuting,
+      executed: proposalExecution !== null,
+    })) return;
+    void executeProposal({ autoApproved: true });
+  }, [
+    autoApprove,
+    effectiveStatus,
+    executeProposal,
+    proposal,
+    proposalDefaultRepoPath,
+    proposalExecution,
+    proposalExecuting,
+  ]);
+
   const value = React.useMemo<CompanionContextValue>(
     () => ({
       ...state,
@@ -356,6 +418,8 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       proposalDroneNames,
       proposalDefaultRepoPath,
       proposalExecuting,
+      autoApprove,
+      proposalHistory,
       toggle,
       stop,
       toggleRecordingPause,
@@ -363,9 +427,11 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       close,
       executeProposal,
       discardProposal,
+      toggleAutoApprove,
     }),
     [
       close,
+      autoApprove,
       discardProposal,
       discardRecording,
       effectiveStatus,
@@ -376,10 +442,12 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       proposalExecutionProgress,
       proposalDroneNames,
       proposalExecuting,
+      proposalHistory,
       state,
       stop,
       toggle,
       toggleRecordingPause,
+      toggleAutoApprove,
       voice.durationMillis,
       voice.status,
     ],
