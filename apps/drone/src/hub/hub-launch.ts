@@ -7,6 +7,22 @@ export type DetachedCliLaunchSpec = {
   args: string[];
 };
 
+export function resolveHubHeapDiagnosticNodeArgs(opts: {
+  enabledRaw: unknown;
+  diagnosticDir: string;
+}): string[] {
+  const enabled = ['1', 'true', 'yes', 'on'].includes(
+    String(opts.enabledRaw ?? '').trim().toLowerCase(),
+  );
+  if (!enabled) return [];
+  const diagnosticDir = path.resolve(String(opts.diagnosticDir ?? '').trim());
+  return [
+    '--heapsnapshot-near-heap-limit=2',
+    '--report-on-fatalerror',
+    `--diagnostic-dir=${diagnosticDir}`,
+  ];
+}
+
 type DetachedHubState = {
   pid: number;
 };

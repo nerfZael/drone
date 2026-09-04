@@ -41,7 +41,7 @@ function dependencies(overrides = {}) {
     hubLog: () => {},
     importArchivedChatsFromRegistry: async () => {},
     importDroneChatsFromRegistry: async () => {},
-    listArchivedChatsFromStore: () => ({ available: true, archivedChats: [] }),
+    listExpiredArchivedChatsFromStore: () => ({ available: true, archivedChats: [] }),
     listCanonicalDroneLifecycleForRead: async () => [],
     listChatsFromStore: () => ({ available: true, chats: [] }),
     loadRegistry: async () => {
@@ -127,4 +127,35 @@ test('restore archived drone allocates names from lightweight canonical lifecycl
     name: 'Alpha (2)',
   });
   assert.equal('archivedAt' in upsert.entry, false);
+});
+
+test('expired chat cleanup consumes targeted expiry keys and deletes one archive at a time', async () => {
+  const lifecycle = record('real', 'drone-a', 'Alpha');
+  const deleted = [];
+  let cutoff = null;
+  const runtime = createArchiveRuntime(dependencies({
+    listCanonicalDroneLifecycleForRead: async (state) => state === 'real' ? [lifecycle] : [],
+    listExpiredArchivedChatsFromStore: (input) => {
+      cutoff = input.deleteAtOrBefore;
+      return {
+        available: true,
+        archivedChats: [
+          { droneId: 'drone-a', chatName: 'one' },
+          { droneId: 'drone-a', chatName: 'two' },
+        ],
+      };
+    },
+    deleteArchivedChatFromStore: async ({ droneId, archivedChatName }) => {
+      deleted.push({ droneId, chatName: archivedChatName });
+      return { deleted: true, archivedChat: { chat: { id: archivedChatName } } };
+    },
+  }));
+
+  await runtime.cleanupExpiredArchivedChats({ reason: 'test' });
+
+  assert.ok(Number.isFinite(Date.parse(cutoff)));
+  assert.deepEqual(deleted, [
+    { droneId: 'drone-a', chatName: 'one' },
+    { droneId: 'drone-a', chatName: 'two' },
+  ]);
 });

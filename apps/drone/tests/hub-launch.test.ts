@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 
-import { resolveDetachedCliLaunchSpec, waitForDetachedHubState } from '../src/hub/hub-launch';
+import {
+  resolveDetachedCliLaunchSpec,
+  resolveHubHeapDiagnosticNodeArgs,
+  waitForDetachedHubState,
+} from '../src/hub/hub-launch';
 
 describe('resolveDetachedCliLaunchSpec', () => {
   test('uses plain node for built cli entrypoints', () => {
@@ -45,6 +49,24 @@ describe('resolveDetachedCliLaunchSpec', () => {
       command: '/usr/bin/node',
       args: ['/repo/apps/drone/dist/cli.js'],
     });
+  });
+});
+
+describe('resolveHubHeapDiagnosticNodeArgs', () => {
+  test('keeps heap diagnostics opt-in', () => {
+    expect(
+      resolveHubHeapDiagnosticNodeArgs({ enabledRaw: undefined, diagnosticDir: '/var/drone' }),
+    ).toEqual([]);
+  });
+
+  test('writes near-limit heap snapshots and fatal reports to the Drone data directory', () => {
+    expect(
+      resolveHubHeapDiagnosticNodeArgs({ enabledRaw: '1', diagnosticDir: '/var/drone' }),
+    ).toEqual([
+      '--heapsnapshot-near-heap-limit=2',
+      '--report-on-fatalerror',
+      '--diagnostic-dir=/var/drone',
+    ]);
   });
 });
 

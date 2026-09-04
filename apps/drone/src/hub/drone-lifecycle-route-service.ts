@@ -1,5 +1,8 @@
+import crypto from 'node:crypto';
+
 import { parseBoolParam } from './hub-format';
 import { readJsonBody, sendJson as json } from './hub-http';
+import { captureHubProcessMemory, hubMemoryDiagnosticsEnabled } from './hub-memory-diagnostics';
 import { describeHubError } from './domain-errors';
 import type { DroneRuntime } from '../host/runtime';
 import type { LegacyRouteDependencyContract, LegacyRouteHandler } from './routes/legacy-route';
@@ -34,7 +37,7 @@ function createDroneLifecycleServiceHandler(
     findDroneIdByRef,
     hubLog,
     isDraftDroneEntry,
-    listArchivedChatsFromStore,
+    listArchivedChatMetadataFromStore,
     listCanonicalDroneLifecycleForRead,
     loadRegistry,
     looksLikeContainerNotRunningError,
@@ -627,79 +630,115 @@ function createDroneLifecycleServiceHandler(
         parts[1] === 'archive' &&
         parts[2] === 'chats'
       ) {
-        await cleanupExpiredArchivedChats({ reason: 'api:archive-chats' });
-        const nowMs = parseIsoToMs(nowIso()) ?? Date.now();
-        const canonicalReal = await listCanonicalDroneLifecycleForRead('real');
-        let droneEntries: Array<[string, any]> | null = null;
-        if (canonicalReal) {
-          const targetedEntries: Array<[string, any]> = [];
-          let storesAvailable = true;
-          for (const record of canonicalReal) {
-            const listed = listArchivedChatsFromStore({ droneId: record.id });
-            if (!listed.available) {
-              storesAvailable = false;
-              break;
+        const inboundRequestId = String(req.headers['x-request-id'] ?? '').trim();
+        const requestId = inboundRequestId.slice(0, 160) || crypto.randomUUID();
+        res.setHeader('x-request-id', requestId);
+        const startedAt = performance.now();
+        const memoryBefore = captureHubProcessMemory();
+        hubLog('info', 'archive chat list request started', { requestId, memory: memoryBefore });
+        try {
+          await cleanupExpiredArchivedChats({ reason: 'api:archive-chats' });
+          const nowMs = parseIsoToMs(nowIso()) ?? Date.now();
+          const canonicalReal = await listCanonicalDroneLifecycleForRead('real');
+          const listed = listArchivedChatMetadataFromStore({
+            includeStoredContentBytes: hubMemoryDiagnosticsEnabled(),
+          });
+          let droneEntries: Array<[string, any]> | null = null;
+          if (canonicalReal && listed.available) {
+            const archivedByDroneId = new Map<string, Array<any>>();
+            for (const chat of listed.archivedChats) {
+              const entries = archivedByDroneId.get(chat.droneId) ?? [];
+              entries.push(chat);
+              archivedByDroneId.set(chat.droneId, entries);
             }
-            targetedEntries.push([
+            droneEntries = canonicalReal.map((record: any) => [
               record.id,
               {
                 ...lifecycleEntryFromRecord(record),
-                archivedChats: Object.fromEntries(listed.archivedChats.map((chat: any) => [
-                  chat.chatName,
-                  {
-                    archivedAt: chat.archivedAt,
-                    deleteAt: chat.deleteAt,
-                    archiveRetention: chat.archiveRetention,
-                  },
-                ])),
+                archivedChats: Object.fromEntries(
+                  (archivedByDroneId.get(record.id) ?? []).map((chat: any) => [
+                    chat.chatName,
+                    {
+                      archivedAt: chat.archivedAt,
+                      deleteAt: chat.deleteAt,
+                      archiveRetention: chat.archiveRetention,
+                    },
+                  ]),
+                ),
               },
             ]);
           }
-          if (storesAvailable) droneEntries = targetedEntries;
-        }
-        if (!droneEntries) {
-          droneEntries = Object.entries((await loadRegistry())?.drones ?? {}) as Array<[string, any]>;
-        }
-        const archived = droneEntries
-          .flatMap(([droneIdRaw, droneEntry]) => {
-            const droneId = normalizeDroneIdentity(droneIdRaw);
-            if (!droneId) return [];
-            const droneName = String(droneEntry?.name ?? '').trim() || droneId;
-            return (Object.entries(droneEntry?.archivedChats ?? {}) as Array<[string, any]>)
-              .map(([chatNameRaw, entry]) => {
-                const chatName = normalizeChatName(chatNameRaw);
-                if (!chatName) return null;
-                const archivedAt =
-                  String(entry?.archivedAt ?? '').trim() || String(entry?.createdAt ?? nowIso());
-                const deleteAt = resolveArchiveDeleteAtIso(entry);
-                const deleteAtMs = parseIsoToMs(deleteAt);
-                if (deleteAtMs != null && deleteAtMs <= nowMs) return null;
-                const retention = normalizeArchiveRetention(entry?.archiveRetention);
-                return {
-                  droneId,
-                  droneName,
-                  chatName,
-                  archivedAt,
-                  deleteAt,
-                  deleteInMs: deleteAtMs == null ? null : Math.max(0, deleteAtMs - nowMs),
-                  archiveRetention: retention,
-                  archiveRetentionMs: archiveRetentionMs(retention),
-                };
-              })
-              .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
-          })
-          .sort((a, b) => {
-            const ams = parseIsoToMs(a.archivedAt) ?? 0;
-            const bms = parseIsoToMs(b.archivedAt) ?? 0;
-            return bms - ams;
+          if (!droneEntries) {
+            droneEntries = Object.entries((await loadRegistry())?.drones ?? {}) as Array<[string, any]>;
+          }
+          const archived = droneEntries
+            .flatMap(([droneIdRaw, droneEntry]) => {
+              const droneId = normalizeDroneIdentity(droneIdRaw);
+              if (!droneId) return [];
+              const droneName = String(droneEntry?.name ?? '').trim() || droneId;
+              return (Object.entries(droneEntry?.archivedChats ?? {}) as Array<[string, any]>)
+                .map(([chatNameRaw, entry]) => {
+                  const chatName = normalizeChatName(chatNameRaw);
+                  if (!chatName) return null;
+                  const archivedAt =
+                    String(entry?.archivedAt ?? '').trim() || String(entry?.createdAt ?? nowIso());
+                  const deleteAt = resolveArchiveDeleteAtIso(entry);
+                  const deleteAtMs = parseIsoToMs(deleteAt);
+                  if (deleteAtMs != null && deleteAtMs <= nowMs) return null;
+                  const retention = normalizeArchiveRetention(entry?.archiveRetention);
+                  return {
+                    droneId,
+                    droneName,
+                    chatName,
+                    archivedAt,
+                    deleteAt,
+                    deleteInMs: deleteAtMs == null ? null : Math.max(0, deleteAtMs - nowMs),
+                    archiveRetention: retention,
+                    archiveRetentionMs: archiveRetentionMs(retention),
+                  };
+                })
+                .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+            })
+            .sort((a, b) => {
+              const ams = parseIsoToMs(a.archivedAt) ?? 0;
+              const bms = parseIsoToMs(b.archivedAt) ?? 0;
+              return bms - ams;
+            });
+          const measuredStoredContentBytes = listed.archivedChats.every(
+            (chat: any) => typeof chat.storedContentBytes === 'number',
+          );
+          const storedContentBytes = listed.available && measuredStoredContentBytes
+            ? listed.archivedChats.reduce(
+                (total: number, chat: any) => total + (Number(chat.storedContentBytes) || 0),
+                0,
+              )
+            : null;
+          const memoryAfter = captureHubProcessMemory();
+          hubLog('info', 'archive chat list request completed', {
+            requestId,
+            durationMs: Math.round((performance.now() - startedAt) * 10) / 10,
+            archiveCount: archived.length,
+            storedContentBytes,
+            memoryBefore,
+            memoryAfter,
           });
-        json(res, 200, {
-          ok: true,
-          archived,
-          total: archived.length,
-          now: new Date(nowMs).toISOString(),
-        });
-        return;
+          json(res, 200, {
+            ok: true,
+            archived,
+            total: archived.length,
+            now: new Date(nowMs).toISOString(),
+          });
+          return;
+        } catch (error) {
+          hubLog('error', 'archive chat list request failed', {
+            requestId,
+            durationMs: Math.round((performance.now() - startedAt) * 10) / 10,
+            memoryBefore,
+            memoryAfter: captureHubProcessMemory(),
+            error: error instanceof Error ? error.message : String(error),
+          });
+          throw error;
+        }
       }
 
       // POST /api/archive/drones/:id/restore

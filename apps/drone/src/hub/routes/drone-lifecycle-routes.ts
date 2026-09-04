@@ -18,7 +18,7 @@ type DroneLifecycleDependencyName =
   | 'findDroneIdByRef'
   | 'hubLog'
   | 'isDraftDroneEntry'
-  | 'listArchivedChatsFromStore'
+  | 'listArchivedChatMetadataFromStore'
   | 'listCanonicalDroneLifecycleForRead'
   | 'loadRegistry'
   | 'looksLikeContainerNotRunningError'

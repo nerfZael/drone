@@ -198,6 +198,12 @@ hosts, that MCP listener binds to the Docker bridge address `172.17.0.1` by defa
 Podman, or Docker Desktop networking. Use `drone hub restart` when changing MCP bind/projection
 settings on an already-running Hub.
 
+For memory investigations, set `DRONE_HUB_MEMORY_DIAGNOSTICS=1` when restarting the Hub to log
+process memory once per minute. Set `DRONE_HUB_HEAP_DIAGNOSTICS=1` to additionally ask Node for up
+to two near-limit heap snapshots and a fatal-error report in the active Drone data directory; this
+also enables the periodic memory log. Heap snapshots can be several gigabytes and briefly stall the
+Hub, so leave heap diagnostics disabled during normal operation.
+
 ### Drone Hub grouping
 
 The Drone Hub sidebar shows drones **grouped into folder-like sections by default** (using each drone’s `group` in the drone registry file). You can toggle to a **flat list** using the switch in the sidebar header.

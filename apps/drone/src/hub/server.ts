@@ -108,6 +108,7 @@ import type {
 } from './chat-types';
 import { createDeviceMeshService } from './device-mesh';
 import { createBackgroundLifecycle, type BackgroundLifecycle } from './background-lifecycle';
+import { startHubMemoryDiagnostics } from './hub-memory-diagnostics';
 import {
   canonicalRepositoriesMap,
   ensureCanonicalGroup,
@@ -133,10 +134,12 @@ import {
   importChatFromRegistry,
   importDroneChatsFromRegistry,
   importTranscriptTurnsFromRegistry,
+  listArchivedChatMetadataFromStore,
   listChatReadStatesForDronesFromStore,
   listChatReadStatesFromStore,
   listArchivedChatsFromStore,
   listChatsFromStore,
+  listExpiredArchivedChatsFromStore,
   markChatReadInStore,
   markChatUnreadInStore,
   patchChatMetadataInStore,
@@ -3704,7 +3707,7 @@ function createHubLifecycleFeatures(
     hubLog,
     importArchivedChatsFromRegistry,
     importDroneChatsFromRegistry,
-    listArchivedChatsFromStore,
+    listExpiredArchivedChatsFromStore,
     listCanonicalDroneLifecycleForRead,
     listChatsFromStore,
     loadRegistry,
@@ -3951,6 +3954,10 @@ async function startDroneHubApiServerWithLifecycle(
   lifecycle: BackgroundLifecycle,
 ) {
   const { register: registerBackgroundResource, stop: stopBackgroundResources } = lifecycle;
+  const stopMemoryDiagnostics = startHubMemoryDiagnostics({ log: hubLog });
+  if (stopMemoryDiagnostics) {
+    registerBackgroundResource('memory diagnostics', async () => stopMemoryDiagnostics());
+  }
   const nativeChatRuntimePort = createNativeChatRuntimePort();
   const resourceSubscriptionRuntimePort = createResourceSubscriptionRuntimePort();
   const mcpProjectionFeature = createMcpProjectionFeature();
@@ -5843,7 +5850,7 @@ async function startDroneHubApiServerWithLifecycle(
     findDroneIdByRef,
     hubLog,
     isDraftDroneEntry,
-    listArchivedChatsFromStore,
+    listArchivedChatMetadataFromStore,
     listCanonicalDroneLifecycleForRead,
     loadRegistry,
     looksLikeContainerNotRunningError,

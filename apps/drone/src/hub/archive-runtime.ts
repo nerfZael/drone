@@ -19,7 +19,7 @@ type ArchiveRuntimeDependencyName =
   | 'hubLog'
   | 'importArchivedChatsFromRegistry'
   | 'importDroneChatsFromRegistry'
-  | 'listArchivedChatsFromStore'
+  | 'listExpiredArchivedChatsFromStore'
   | 'listCanonicalDroneLifecycleForRead'
   | 'listChatsFromStore'
   | 'loadRegistry'
@@ -65,7 +65,7 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
     hubLog,
     importArchivedChatsFromRegistry,
     importDroneChatsFromRegistry,
-    listArchivedChatsFromStore,
+    listExpiredArchivedChatsFromStore,
     listCanonicalDroneLifecycleForRead,
     listChatsFromStore,
     loadRegistry,
@@ -456,26 +456,18 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
 
   async function cleanupExpiredArchivedChats(opts?: { reason?: string }): Promise<void> {
     const nowMs = Date.now();
-    const canonicalReal = await listCanonicalDroneLifecycleForRead('real');
     let expired: Array<{ droneId: string; chatName: string }> | null = null;
-    if (canonicalReal) {
-      const canonicalExpired: Array<{ droneId: string; chatName: string }> = [];
-      let canonicalAvailable = true;
-      for (const record of canonicalReal) {
-        const listed = listArchivedChatsFromStore({ droneId: record.id });
-        if (!listed.available) {
-          canonicalAvailable = false;
-          break;
-        }
-        for (const archivedChat of listed.archivedChats) {
-          const deleteAtMs = parseIsoToMs(resolveArchiveDeleteAtIso(archivedChat));
-          if (deleteAtMs != null && deleteAtMs <= nowMs) {
-            canonicalExpired.push({ droneId: record.id, chatName: archivedChat.chatName });
-          }
-        }
-      }
-      if (canonicalAvailable) expired = canonicalExpired;
-    }
+    const scanStartedAt = performance.now();
+    const listed = listExpiredArchivedChatsFromStore({
+      deleteAtOrBefore: new Date(nowMs).toISOString(),
+    });
+    if (listed.available) expired = listed.archivedChats;
+    hubLog('info', 'archive TTL chat scan completed', {
+      reason: opts?.reason ?? null,
+      durationMs: Math.round((performance.now() - scanStartedAt) * 10) / 10,
+      expiredCount: expired?.length ?? null,
+      readModel: listed.available ? 'targeted-expiry-keys' : 'compatibility-projection',
+    });
     if (!expired) {
       const regSnapshot: any = await loadRegistry();
       expired = (Object.entries(regSnapshot?.drones ?? {}) as Array<[string, any]>).flatMap(

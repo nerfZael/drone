@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 const { afterEach, describe, test } = require('node:test');
 
 const { requireHubDatabase, resetHubDatabaseForTests } = require('../../dist/host/hub-database.js');
@@ -16,10 +17,12 @@ const {
   deleteChatFromStore,
   importArchivedChatsFromRegistry,
   importDroneChatsFromRegistry,
+  listArchivedChatMetadataFromStore,
   listArchivedChatsFromStore,
   listChatReadStatesForDronesFromStore,
   listChatReadStatesFromStore,
   listChatsFromStore,
+  listExpiredArchivedChatsFromStore,
   markChatReadInStore,
   markChatUnreadInStore,
   patchChatMetadataInStore,
@@ -487,6 +490,108 @@ describe('canonical chat and transcript repository', () => {
     assert.equal(deleted.deleted, true);
     await importArchivedChatsFromRegistry({ droneId: 'drone-1', archivedChats: archived });
     assert.deepEqual(listArchivedChatsFromStore({ droneId: 'drone-1' }).archivedChats, []);
+  });
+
+  test('lists archive metadata and expiry keys without returning stored chat content', async () => {
+    tempDataDir('archived-metadata');
+    const largeContent = 'archive-content-sentinel'.repeat(250_000);
+    await importArchivedChatsFromRegistry({
+      droneId: 'drone-1',
+      archivedChats: {
+        expired: {
+          ...legacyChat('expired archive'),
+          largeContent,
+          archivedAt: '2026-02-01T00:00:00.000Z',
+          deleteAt: '2026-02-02T00:00:00.000Z',
+          archiveRetention: '1d',
+        },
+        retained: {
+          ...legacyChat('retained archive'),
+          largeContent,
+          archivedAt: '2026-02-03T00:00:00.000Z',
+          deleteAt: '2026-02-10T00:00:00.000Z',
+          archiveRetention: '1w',
+        },
+      },
+    });
+    await importArchivedChatsFromRegistry({
+      droneId: 'drone-2',
+      archivedChats: {
+        other: {
+          ...legacyChat('other archive'),
+          archivedAt: '2026-02-01T00:00:00.000Z',
+          deleteAt: '2026-02-02T00:00:00.000Z',
+          archiveRetention: '1d',
+        },
+      },
+    });
+
+    const metadata = listArchivedChatMetadataFromStore({
+      droneId: 'drone-1',
+      includeStoredContentBytes: true,
+    });
+    assert.equal(metadata.available, true);
+    assert.deepEqual(metadata.archivedChats.map((chat) => chat.chatName), ['retained', 'expired']);
+    assert.equal('chat' in metadata.archivedChats[0], false);
+    assert.ok(metadata.archivedChats[0].storedContentBytes > Buffer.byteLength(largeContent));
+
+    const expired = listExpiredArchivedChatsFromStore({
+      deleteAtOrBefore: '2026-02-05T00:00:00.000Z',
+    });
+    assert.deepEqual(expired.archivedChats, [
+      { droneId: 'drone-1', chatName: 'expired' },
+      { droneId: 'drone-2', chatName: 'other' },
+    ]);
+    const expiryPlan = requireHubDatabase().read((connection) =>
+      connection.prepare(`EXPLAIN QUERY PLAN SELECT drone_id, chat_name
+        FROM canonical_archived_chats WHERE delete_at <= ?
+        ORDER BY delete_at, drone_id, chat_name`).all('2026-02-05T00:00:00.000Z'),
+    );
+    assert.match(
+      expiryPlan.map((step) => String(step.detail ?? '')).join('\n'),
+      /idx_canonical_archived_chats_expiry/,
+    );
+  });
+
+  test('lists metadata for a 128 MiB archived chat under a 64 MiB JavaScript heap limit', async () => {
+    const dataDir = tempDataDir('archived-metadata-bounded-heap');
+    await importArchivedChatsFromRegistry({
+      droneId: 'drone-1',
+      archivedChats: {
+        large: {
+          ...legacyChat('large archive'),
+          archivedAt: '2026-02-01T00:00:00.000Z',
+          deleteAt: '2026-02-02T00:00:00.000Z',
+          archiveRetention: '1d',
+        },
+      },
+    });
+    await requireHubDatabase().writeTransaction('expand archived chat fixture', (connection) => {
+      connection.prepare(`UPDATE canonical_archived_chats
+        SET chat_json = CAST(zeroblob(?) AS TEXT)
+        WHERE drone_id = ? AND chat_name = ?`).run(128 * 1024 * 1024, 'drone-1', 'large');
+    });
+    await resetHubDatabaseForTests();
+
+    const transcriptStorePath = path.resolve(__dirname, '../../dist/hub/transcript-store.js');
+    const resultPath = path.join(dataDir, 'bounded-metadata-result.json');
+    const script = `const fs = require('node:fs');const store = require(${JSON.stringify(transcriptStorePath)});` +
+      `fs.writeFileSync(${JSON.stringify(resultPath)},JSON.stringify(store.listArchivedChatMetadataFromStore({droneId:'drone-1'})));`;
+    const childEnv = { ...process.env, DRONE_DATA_DIR: dataDir };
+    delete childEnv.NODE_TEST_CONTEXT;
+    const child = spawnSync(process.execPath, ['--max-old-space-size=64', '-e', script], {
+      cwd: path.resolve(__dirname, '../..'),
+      env: childEnv,
+      encoding: 'utf8',
+      timeout: 20_000,
+    });
+
+    assert.equal(child.status, 0, child.stderr);
+    const result = JSON.parse(fs.readFileSync(resultPath, 'utf8'));
+    assert.equal(result.archivedChats.length, 1);
+    assert.equal(result.archivedChats[0].chatName, 'large');
+    assert.equal(result.archivedChats[0].storedContentBytes, null);
+    assert.equal('chat' in result.archivedChats[0], false);
   });
 
   test('atomically archives, restores with collision allocation, and deletes canonical chats', async () => {

@@ -146,6 +146,17 @@ export type ArchivedChatRecord = {
   archiveRetention: string;
 };
 export type ArchivedChatStoreListResult = { available: boolean; archivedChats: ArchivedChatRecord[] };
+export type ArchivedChatMetadataRecord = Omit<ArchivedChatRecord, 'chat'> & {
+  storedContentBytes: number | null;
+};
+export type ArchivedChatMetadataStoreListResult = {
+  available: boolean;
+  archivedChats: ArchivedChatMetadataRecord[];
+};
+export type ExpiredArchivedChatStoreListResult = {
+  available: boolean;
+  archivedChats: Array<{ droneId: string; chatName: string }>;
+};
 export type DroneChatCleanupProjection = {
   available: boolean;
   chats: Record<string, any>;
@@ -737,6 +748,9 @@ type ArchivedChatRow = {
   archive_retention: string;
   chat_json: string;
   source_hash: string;
+};
+type ArchivedChatMetadataRow = Omit<ArchivedChatRow, 'chat_json' | 'source_hash'> & {
+  stored_content_bytes: number | null;
 };
 
 const memoryChats = new Map<string, { metadata: any; sourceHash: string; version: number }>();
@@ -1645,6 +1659,54 @@ export class ChatTranscriptRepository {
 
   listArchivedChats(opts: { droneId?: string } = {}): ArchivedChatStoreListResult {
     return this.database.read((connection) => this.listArchivedChatsWithConnection(connection, opts.droneId));
+  }
+
+  listArchivedChatMetadata(
+    opts: { droneId?: string; includeStoredContentBytes?: boolean } = {},
+  ): ArchivedChatMetadataStoreListResult {
+    return this.database.read((connection) => {
+      const contentBytesSql = opts.includeStoredContentBytes
+        ? 'length(CAST(chat_json AS BLOB))'
+        : 'NULL';
+      const rows = (opts.droneId
+        ? connection.prepare(`SELECT drone_id, chat_name, archived_at, delete_at,
+            archive_retention, ${contentBytesSql} AS stored_content_bytes
+            FROM canonical_archived_chats
+            WHERE drone_id = ? ORDER BY archived_at DESC, chat_name`).all(opts.droneId)
+        : connection.prepare(`SELECT drone_id, chat_name, archived_at, delete_at,
+            archive_retention, ${contentBytesSql} AS stored_content_bytes
+            FROM canonical_archived_chats
+            ORDER BY archived_at DESC, drone_id, chat_name`).all()) as ArchivedChatMetadataRow[];
+      return {
+        available: true,
+        archivedChats: rows.map((row) => ({
+          droneId: row.drone_id,
+          chatName: row.chat_name,
+          archivedAt: row.archived_at,
+          deleteAt: row.delete_at,
+          archiveRetention: row.archive_retention,
+          storedContentBytes: row.stored_content_bytes != null && Number.isFinite(Number(row.stored_content_bytes))
+            ? Number(row.stored_content_bytes)
+            : null,
+        })),
+      };
+    });
+  }
+
+  listExpiredArchivedChats(deleteAtOrBefore: string): ExpiredArchivedChatStoreListResult {
+    return this.database.read((connection) => {
+      const rows = connection.prepare(`SELECT drone_id, chat_name
+        FROM canonical_archived_chats
+        WHERE delete_at <= ?
+        ORDER BY delete_at, drone_id, chat_name`).all(deleteAtOrBefore) as Array<{
+        drone_id: string;
+        chat_name: string;
+      }>;
+      return {
+        available: true,
+        archivedChats: rows.map((row) => ({ droneId: row.drone_id, chatName: row.chat_name })),
+      };
+    });
   }
 
   readArchivedChat(opts: { droneId: string; chatName: string }): ArchivedChatRecord | null {
@@ -2993,6 +3055,44 @@ export function listArchivedChatsFromStore(opts: { droneId?: string } = {}): Arc
     archivedChats: [...memoryArchivedChats.values()]
       .filter((record) => !opts.droneId || record.droneId === opts.droneId)
       .sort((left, right) => right.archivedAt.localeCompare(left.archivedAt) || left.chatName.localeCompare(right.chatName)),
+  };
+}
+
+export function listArchivedChatMetadataFromStore(
+  opts: { droneId?: string; includeStoredContentBytes?: boolean } = {},
+): ArchivedChatMetadataStoreListResult {
+  const store = repository();
+  if (store) return store.listArchivedChatMetadata(opts);
+  return {
+    available: true,
+    archivedChats: [...memoryArchivedChats.values()]
+      .filter((record) => !opts.droneId || record.droneId === opts.droneId)
+      .map(({ chat: _chat, ...record }) => ({ ...record, storedContentBytes: null }))
+      .sort(
+        (left, right) =>
+          right.archivedAt.localeCompare(left.archivedAt) || left.chatName.localeCompare(right.chatName),
+      ),
+  };
+}
+
+export function listExpiredArchivedChatsFromStore(opts: {
+  deleteAtOrBefore: string;
+}): ExpiredArchivedChatStoreListResult {
+  const store = repository();
+  if (store) return store.listExpiredArchivedChats(opts.deleteAtOrBefore);
+  const cutoffMs = Date.parse(opts.deleteAtOrBefore);
+  return {
+    available: true,
+    archivedChats: [...memoryArchivedChats.values()]
+      .filter((record) => {
+        const deleteAtMs = Date.parse(record.deleteAt);
+        return Number.isFinite(cutoffMs) && Number.isFinite(deleteAtMs) && deleteAtMs <= cutoffMs;
+      })
+      .map((record) => ({ droneId: record.droneId, chatName: record.chatName }))
+      .sort(
+        (left, right) =>
+          left.droneId.localeCompare(right.droneId) || left.chatName.localeCompare(right.chatName),
+      ),
   };
 }
 

@@ -41,7 +41,11 @@ import { loadRegistry, updateRegistry } from './host/registry';
 import { readRegistryJsonFromSqlitePath } from './host/sqlite-registry-store';
 import { hostDroneRootPath, normalizeDroneRuntime, type DroneRuntime } from './host/runtime';
 import { ensureHubSetupState } from './host/setup-state';
-import { resolveDetachedCliLaunchSpec, waitForDetachedHubState } from './hub/hub-launch';
+import {
+  resolveDetachedCliLaunchSpec,
+  resolveHubHeapDiagnosticNodeArgs,
+  waitForDetachedHubState,
+} from './hub/hub-launch';
 import { readRawBody } from './hub/hub-http';
 import {
   createDroneRuntime,
@@ -2252,9 +2256,18 @@ async function hubStart(options: any) {
   const logHandle = await fs.open(logPath, 'a');
   try {
     const launch = resolveDetachedCliLaunchSpec({ cliFilename: __filename });
+    const heapDiagnosticArgs = resolveHubHeapDiagnosticNodeArgs({
+      enabledRaw: process.env.DRONE_HUB_HEAP_DIAGNOSTICS,
+      diagnosticDir: droneDir(),
+    });
+    const childEnv: NodeJS.ProcessEnv = { ...process.env, DRONE_HUB_DAEMON: '1' };
+    if (heapDiagnosticArgs.length > 0 && !childEnv.DRONE_HUB_MEMORY_DIAGNOSTICS) {
+      childEnv.DRONE_HUB_MEMORY_DIAGNOSTICS = '1';
+    }
     const child = spawn(
       launch.command,
       [
+        ...heapDiagnosticArgs,
         ...launch.args,
         'hub',
         'run',
@@ -2273,7 +2286,7 @@ async function hubStart(options: any) {
         String(containerMcpPort),
         ...(containerMcpUrl ? ['--container-mcp-url', containerMcpUrl] : []),
       ],
-      { detached: true, stdio: ['ignore', logHandle.fd, logHandle.fd], env: { ...process.env, DRONE_HUB_DAEMON: '1' } }
+      { detached: true, stdio: ['ignore', logHandle.fd, logHandle.fd], env: childEnv }
     );
     child.unref();
 
