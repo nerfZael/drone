@@ -1,11 +1,15 @@
 import React from 'react';
 import { useMesh } from '../mesh/MeshContext';
-import { useMobileChatVoiceRecorder } from './use-mobile-chat-voice-recorder';
+import {
+  useMobileChatVoiceRecorder,
+  type MobileVoiceRecordingClip,
+} from './use-mobile-chat-voice-recorder';
 import { useMobileContinuousDictation } from './use-mobile-continuous-dictation';
 import { useMobileContinuousVoice } from './use-mobile-continuous-voice';
 import { MobileMicrophoneCoordinator } from './mobile-microphone-coordinator';
 import {
   resolveMobileVoiceSession,
+  type MobileRecordedVoiceSession,
   type MobileRecordedVoiceSessionOwner,
   type MobileVoiceSession,
 } from './mobile-voice-session';
@@ -17,9 +21,11 @@ type MobileChatVoiceRecorderContextValue = {
   error: string;
   getError(): string;
   setError: React.Dispatch<React.SetStateAction<string>>;
+  getRecordingSession(): MobileRecordedVoiceSession;
   startRecording(owner: MobileRecordedVoiceSessionOwner): Promise<boolean>;
   toggleRecordingPause(owner: MobileRecordedVoiceSessionOwner): void;
   discardRecording(owner: MobileRecordedVoiceSessionOwner): Promise<void>;
+  finishRecording(owner: MobileRecordedVoiceSessionOwner): Promise<MobileVoiceRecordingClip | null>;
   stopRecordingForTranscript(owner: MobileRecordedVoiceSessionOwner): Promise<string>;
 };
 
@@ -82,10 +88,12 @@ export function MobileChatVoiceRecorderProvider({ children }: { children: React.
     continuousDictation,
     error,
     getError,
+    getRecordingSession: recorder.getSession,
     setError: setSharedError,
     startRecording: recorder.startRecording,
     toggleRecordingPause: recorder.toggleRecordingPause,
     discardRecording: recorder.discardRecording,
+    finishRecording: recorder.finishRecording,
     stopRecordingForTranscript: recorder.stopRecordingForTranscript,
   };
 

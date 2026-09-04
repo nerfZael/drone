@@ -47,6 +47,11 @@ const MOBILE_VOICE_RECORDING_OPTIONS = {
 
 const APP_FOREGROUND_RESUME_TIMEOUT_MS = 3_000;
 
+export type MobileVoiceRecordingClip = {
+  uri: string;
+  durationMillis: number;
+};
+
 async function waitForAppForeground(): Promise<boolean> {
   if (AppState.currentState === 'active') return true;
   return await new Promise<boolean>((resolve) => {
@@ -105,13 +110,16 @@ export function useMobileChatVoiceRecorder({
     if (mountedRef.current) setSession(next);
   }, []);
 
-  const setStatusValue = React.useCallback((status: MobileVoiceRecordingStatus) => {
-    if (status === 'idle') {
-      setSessionValue({ kind: 'idle', status });
-    } else if (sessionRef.current.kind !== 'idle') {
-      setSessionValue({ ...sessionRef.current, status });
-    }
-  }, [setSessionValue]);
+  const setStatusValue = React.useCallback(
+    (status: MobileVoiceRecordingStatus) => {
+      if (status === 'idle') {
+        setSessionValue({ kind: 'idle', status });
+      } else if (sessionRef.current.kind !== 'idle') {
+        setSessionValue({ ...sessionRef.current, status });
+      }
+    },
+    [setSessionValue],
+  );
 
   const deactivateRecordingMode = React.useCallback(async () => {
     await setAudioModeAsync({
@@ -167,10 +175,10 @@ export function useMobileChatVoiceRecorder({
         void failedRecorder
           .stop()
           .catch(() => undefined)
-          .finally(() => deleteRecordingFile(uri))
+          .finally(() => deleteMobileVoiceRecordingFile(uri))
           .then(releaseMicrophone);
       } else {
-        deleteRecordingFile(uri);
+        deleteMobileVoiceRecordingFile(uri);
         void releaseMicrophone();
       }
       if (mountedRef.current) {
@@ -205,7 +213,7 @@ export function useMobileChatVoiceRecorder({
     () => () => {
       const uri = recordingUriRef.current;
       recordingUriRef.current = null;
-      deleteRecordingFile(uri);
+      deleteMobileVoiceRecordingFile(uri);
       // useAudioRecorder owns and releases the native recorder on unmount. Its
       // shared object must not be read or stopped from this later cleanup.
       void releaseMicrophone();
@@ -214,130 +222,141 @@ export function useMobileChatVoiceRecorder({
   );
 
   // Owner checks keep stale UI callbacks from mutating a newer session.
-  const discardRecording = React.useCallback(async (owner: MobileRecordedVoiceSessionOwner) => {
-    if (sessionRef.current.kind !== owner) return;
-    const previousStatus = sessionRef.current.status;
-    const pendingStart = startPromiseRef.current;
-    const controller = transcribeAbortRef.current;
-    generationRef.current += 1;
-    controller?.abort();
-    transcribeAbortRef.current = null;
-    stopPromiseRef.current = null;
-    const shouldStop =
-      previousStatus === 'starting' ||
-      previousStatus === 'recording' ||
-      previousStatus === 'paused';
-    // prepareToRecordAsync may still be binding Android's foreground recording
-    // service. Let that native call settle before stop/retry so another prepare
-    // cannot collide with the in-flight bind.
-    await pendingStart?.catch(() => undefined);
-    let uri = recordingUriRef.current || recorder.uri;
-    recordingUriRef.current = uri;
-    if (shouldStop) await recorder.stop().catch(() => undefined);
-    uri = recordingUriRef.current || recorder.uri || uri;
-    deleteRecordingFile(uri);
-    recordingUriRef.current = null;
-    await releaseMicrophone();
-    setStatusValue('idle');
-    onError('');
-  }, [onError, recorder, releaseMicrophone, setStatusValue]);
-
-  const startRecordingOperation = React.useCallback(async (owner: MobileRecordedVoiceSessionOwner) => {
-    if (sessionRef.current.kind !== 'idle') return;
-    const microphoneLease = microphoneCoordinator.acquire(owner);
-    if (!microphoneLease) {
-      const currentOwner = microphoneCoordinator.getSnapshot();
-      onError(
-        currentOwner === 'continuous'
-          ? 'Continuous voice is already using the microphone.'
-          : currentOwner === 'companion'
-            ? 'Companion is already using the microphone.'
-          : 'The microphone is still finishing the previous recording.',
-      );
-      return;
-    }
-    microphoneLeaseRef.current = microphoneLease;
-    setSessionValue({ kind: owner, status: 'starting' });
-    const generation = generationRef.current + 1;
-    generationRef.current = generation;
-    const staleUri = recordingUriRef.current;
-    recordingUriRef.current = null;
-    deleteRecordingFile(staleUri);
-    onError('');
-    try {
-      if (!(await readGroqApiKey())) {
-        throw new Error(
-          'GROQ API key is not configured on this phone. Copy it in Built-in agent settings first.',
-        );
-      }
-      if (generationRef.current !== generation || !mountedRef.current) return;
-      const permission = await ensureMobileRecordingPermission({
-        getPermission: getRecordingPermissionsAsync,
-        requestPermission: requestRecordingPermissionsAsync,
-      });
-      if (generationRef.current !== generation || !mountedRef.current) return;
-      if (!permission.granted) {
-        throw new Error(
-          permission.canAskAgain === false
-            ? 'Microphone permission is disabled. Enable it in the phone’s system settings.'
-            : 'Microphone permission was denied.',
-        );
-      }
-      await ensureBackgroundRecordingPermission();
-      if (generationRef.current !== generation || !mountedRef.current) return;
-      if (!(await waitForAppForeground())) {
-        throw new Error('Voice recording was cancelled when the app left the foreground.');
-      }
-      if (generationRef.current !== generation || !mountedRef.current) return;
-      await setAudioModeAsync({
-        allowsRecording: true,
-        allowsBackgroundRecording: true,
-        playsInSilentMode: true,
-      });
-      if (generationRef.current !== generation || !mountedRef.current) {
-        return;
-      }
-      await recorder.prepareToRecordAsync();
-      if (generationRef.current !== generation || !mountedRef.current) {
-        return;
-      }
-      const uri = recorder.uri;
+  const discardRecording = React.useCallback(
+    async (owner: MobileRecordedVoiceSessionOwner) => {
+      if (sessionRef.current.kind !== owner) return;
+      const previousStatus = sessionRef.current.status;
+      const pendingStart = startPromiseRef.current;
+      const controller = transcribeAbortRef.current;
+      generationRef.current += 1;
+      controller?.abort();
+      transcribeAbortRef.current = null;
+      stopPromiseRef.current = null;
+      const shouldStop =
+        previousStatus === 'starting' ||
+        previousStatus === 'recording' ||
+        previousStatus === 'paused';
+      // prepareToRecordAsync may still be binding Android's foreground recording
+      // service. Let that native call settle before stop/retry so another prepare
+      // cannot collide with the in-flight bind.
+      await pendingStart?.catch(() => undefined);
+      let uri = recordingUriRef.current || recorder.uri;
       recordingUriRef.current = uri;
-      if (!(await waitForAppForeground())) {
-        throw new Error('Voice recording was cancelled when the app left the foreground.');
-      }
-      if (generationRef.current !== generation || !mountedRef.current) {
-        await recorder.stop().catch(() => undefined);
-        deleteRecordingFile(uri);
-        recordingUriRef.current = null;
-        await releaseMicrophone();
-        return;
-      }
-      recorder.record();
-      setStatusValue('recording');
-    } catch (error: any) {
-      if (generationRef.current !== generation) return;
-      const uri = recordingUriRef.current || recorder.uri;
-      await recorder.stop().catch(() => undefined);
-      deleteRecordingFile(uri);
+      if (shouldStop) await recorder.stop().catch(() => undefined);
+      uri = recordingUriRef.current || recorder.uri || uri;
+      deleteMobileVoiceRecordingFile(uri);
       recordingUriRef.current = null;
       await releaseMicrophone();
       setStatusValue('idle');
-      onError(error?.message ?? String(error));
-    }
-  }, [microphoneCoordinator, onError, recorder, releaseMicrophone, setSessionValue, setStatusValue]);
+      onError('');
+    },
+    [onError, recorder, releaseMicrophone, setStatusValue],
+  );
 
-  const startRecording = React.useCallback(async (owner: MobileRecordedVoiceSessionOwner) => {
-    if (startPromiseRef.current || sessionRef.current.kind !== 'idle') return false;
-    const promise = startRecordingOperation(owner);
-    startPromiseRef.current = promise;
-    try {
-      await promise;
-      return (sessionRef.current.status as MobileVoiceRecordingStatus) === 'recording';
-    } finally {
-      if (startPromiseRef.current === promise) startPromiseRef.current = null;
-    }
-  }, [startRecordingOperation]);
+  const startRecordingOperation = React.useCallback(
+    async (owner: MobileRecordedVoiceSessionOwner) => {
+      if (sessionRef.current.kind !== 'idle') return;
+      const microphoneLease = microphoneCoordinator.acquire(owner);
+      if (!microphoneLease) {
+        const currentOwner = microphoneCoordinator.getSnapshot();
+        onError(
+          currentOwner === 'continuous'
+            ? 'Continuous voice is already using the microphone.'
+            : currentOwner === 'companion'
+              ? 'Companion is already using the microphone.'
+              : currentOwner === 'dictation'
+                ? 'Dictation is already using the microphone.'
+                : 'The microphone is still finishing the previous recording.',
+        );
+        return;
+      }
+      microphoneLeaseRef.current = microphoneLease;
+      setSessionValue({ kind: owner, status: 'starting' });
+      const generation = generationRef.current + 1;
+      generationRef.current = generation;
+      const staleUri = recordingUriRef.current;
+      recordingUriRef.current = null;
+      deleteMobileVoiceRecordingFile(staleUri);
+      onError('');
+      try {
+        if (!(await readGroqApiKey())) {
+          throw new Error(
+            'GROQ API key is not configured on this phone. Copy it in Built-in agent settings first.',
+          );
+        }
+        if (generationRef.current !== generation || !mountedRef.current) return;
+        const permission = await ensureMobileRecordingPermission({
+          getPermission: getRecordingPermissionsAsync,
+          requestPermission: requestRecordingPermissionsAsync,
+        });
+        if (generationRef.current !== generation || !mountedRef.current) return;
+        if (!permission.granted) {
+          throw new Error(
+            permission.canAskAgain === false
+              ? 'Microphone permission is disabled. Enable it in the phone’s system settings.'
+              : 'Microphone permission was denied.',
+          );
+        }
+        await ensureBackgroundRecordingPermission();
+        if (generationRef.current !== generation || !mountedRef.current) return;
+        if (!(await waitForAppForeground())) {
+          throw new Error('Voice recording was cancelled when the app left the foreground.');
+        }
+        if (generationRef.current !== generation || !mountedRef.current) return;
+        await setAudioModeAsync({
+          allowsRecording: true,
+          allowsBackgroundRecording: true,
+          playsInSilentMode: true,
+        });
+        if (generationRef.current !== generation || !mountedRef.current) {
+          return;
+        }
+        await recorder.prepareToRecordAsync();
+        if (generationRef.current !== generation || !mountedRef.current) {
+          return;
+        }
+        const uri = recorder.uri;
+        recordingUriRef.current = uri;
+        if (!(await waitForAppForeground())) {
+          throw new Error('Voice recording was cancelled when the app left the foreground.');
+        }
+        if (generationRef.current !== generation || !mountedRef.current) {
+          await recorder.stop().catch(() => undefined);
+          deleteMobileVoiceRecordingFile(uri);
+          recordingUriRef.current = null;
+          await releaseMicrophone();
+          return;
+        }
+        recorder.record();
+        setStatusValue('recording');
+      } catch (error: any) {
+        if (generationRef.current !== generation) return;
+        const uri = recordingUriRef.current || recorder.uri;
+        await recorder.stop().catch(() => undefined);
+        deleteMobileVoiceRecordingFile(uri);
+        recordingUriRef.current = null;
+        await releaseMicrophone();
+        setStatusValue('idle');
+        onError(error?.message ?? String(error));
+      }
+    },
+    [microphoneCoordinator, onError, recorder, releaseMicrophone, setSessionValue, setStatusValue],
+  );
+
+  const startRecording = React.useCallback(
+    async (owner: MobileRecordedVoiceSessionOwner) => {
+      if (startPromiseRef.current || sessionRef.current.kind !== 'idle') return false;
+      const promise = startRecordingOperation(owner);
+      startPromiseRef.current = promise;
+      try {
+        await promise;
+        return (sessionRef.current.status as MobileVoiceRecordingStatus) === 'recording';
+      } finally {
+        if (startPromiseRef.current === promise) startPromiseRef.current = null;
+      }
+    },
+    [startRecordingOperation],
+  );
 
   React.useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
@@ -347,10 +366,7 @@ export function useMobileChatVoiceRecorder({
       // The native background audio session keeps active and paused recordings
       // alive through screen lock. Startup synchronizes itself with foreground
       // state, while network transcription remains foreground-only/cancellable.
-      if (
-        interruptedOwner !== 'idle' &&
-        shouldCancelMobileVoiceWhenInactive(interruptedStatus)
-      ) {
+      if (interruptedOwner !== 'idle' && shouldCancelMobileVoiceWhenInactive(interruptedStatus)) {
         void discardRecording(interruptedOwner).then(() => {
           if (mountedRef.current) {
             onError('Voice transcription was cancelled when the app left the foreground.');
@@ -361,20 +377,23 @@ export function useMobileChatVoiceRecorder({
     return () => subscription.remove();
   }, [discardRecording, onError]);
 
-  const toggleRecordingPause = React.useCallback((owner: MobileRecordedVoiceSessionOwner) => {
-    if (sessionRef.current.kind !== owner) return;
-    try {
-      if (sessionRef.current.status === 'recording') {
-        recorder.pause();
-        setStatusValue('paused');
-      } else if (sessionRef.current.status === 'paused') {
-        recorder.record();
-        setStatusValue('recording');
+  const toggleRecordingPause = React.useCallback(
+    (owner: MobileRecordedVoiceSessionOwner) => {
+      if (sessionRef.current.kind !== owner) return;
+      try {
+        if (sessionRef.current.status === 'recording') {
+          recorder.pause();
+          setStatusValue('paused');
+        } else if (sessionRef.current.status === 'paused') {
+          recorder.record();
+          setStatusValue('recording');
+        }
+      } catch (error: any) {
+        onError(error?.message ?? String(error));
       }
-    } catch (error: any) {
-      onError(error?.message ?? String(error));
-    }
-  }, [onError, recorder, setStatusValue]);
+    },
+    [onError, recorder, setStatusValue],
+  );
 
   const transcribeRecording = React.useCallback(async (): Promise<string> => {
     const alreadyStopped = sessionRef.current.status === 'stopped';
@@ -399,7 +418,7 @@ export function useMobileChatVoiceRecorder({
       recordingUriRef.current = uri;
       await releaseMicrophone();
       if (generationRef.current !== generation) {
-        deleteRecordingFile(uri);
+        deleteMobileVoiceRecordingFile(uri);
         return '';
       }
       setStatusValue('transcribing');
@@ -422,26 +441,65 @@ export function useMobileChatVoiceRecorder({
       if (transcribeAbortRef.current === controller) transcribeAbortRef.current = null;
       // The transcription helper deletes uploaded files itself. This second,
       // idempotent cleanup also covers failures before the upload begins.
-      deleteRecordingFile(uri);
+      deleteMobileVoiceRecordingFile(uri);
       if (recordingUriRef.current === uri) recordingUriRef.current = null;
       await releaseMicrophone();
       if (generationRef.current === generation) setStatusValue('idle');
     }
   }, [onError, recorder, releaseMicrophone, setStatusValue]);
 
-  const stopRecordingForTranscript = React.useCallback(async (
-    owner: MobileRecordedVoiceSessionOwner,
-  ): Promise<string> => {
-    if (sessionRef.current.kind !== owner) return '';
-    if (stopPromiseRef.current) return stopPromiseRef.current;
-    const promise = transcribeRecording();
-    stopPromiseRef.current = promise;
-    try {
-      return await promise;
-    } finally {
-      stopPromiseRef.current = null;
-    }
-  }, [transcribeRecording]);
+  const stopRecordingForTranscript = React.useCallback(
+    async (owner: MobileRecordedVoiceSessionOwner): Promise<string> => {
+      if (sessionRef.current.kind !== owner) return '';
+      if (stopPromiseRef.current) return stopPromiseRef.current;
+      const promise = transcribeRecording();
+      stopPromiseRef.current = promise;
+      try {
+        return await promise;
+      } finally {
+        stopPromiseRef.current = null;
+      }
+    },
+    [transcribeRecording],
+  );
+
+  const finishRecording = React.useCallback(
+    async (owner: MobileRecordedVoiceSessionOwner): Promise<MobileVoiceRecordingClip | null> => {
+      if (sessionRef.current.kind !== owner) return null;
+      await startPromiseRef.current?.catch(() => undefined);
+      if (sessionRef.current.kind !== owner) return null;
+      const status = sessionRef.current.status;
+      if (status !== 'recording' && status !== 'paused' && status !== 'stopped') return null;
+
+      const generation = generationRef.current + 1;
+      generationRef.current = generation;
+      let uri = recordingUriRef.current || recorder.uri || '';
+      const durationMillis = Math.max(0, Number(recorderState.durationMillis) || 0);
+      try {
+        if (status !== 'stopped') {
+          setStatusValue('stopped');
+          await recorder.stop();
+          uri ||= recorder.uri || '';
+        }
+        if (!uri) throw new Error('The voice recording could not be saved.');
+        recordingUriRef.current = null;
+        await releaseMicrophone();
+        if (generationRef.current === generation) setStatusValue('idle');
+        onError('');
+        return { uri, durationMillis };
+      } catch (error: any) {
+        deleteMobileVoiceRecordingFile(uri);
+        if (recordingUriRef.current === uri) recordingUriRef.current = null;
+        await releaseMicrophone();
+        if (generationRef.current === generation) setStatusValue('idle');
+        onError(error?.message ?? String(error));
+        return null;
+      }
+    },
+    [onError, recorder, recorderState.durationMillis, releaseMicrophone, setStatusValue],
+  );
+
+  const getSession = React.useCallback(() => sessionRef.current, []);
 
   return {
     session,
@@ -450,11 +508,13 @@ export function useMobileChatVoiceRecorder({
     startRecording,
     toggleRecordingPause,
     discardRecording,
+    finishRecording,
+    getSession,
     stopRecordingForTranscript,
   };
 }
 
-function deleteRecordingFile(uri: string | null | undefined): void {
+export function deleteMobileVoiceRecordingFile(uri: string | null | undefined): void {
   if (!uri) return;
   try {
     const file = new File(uri);

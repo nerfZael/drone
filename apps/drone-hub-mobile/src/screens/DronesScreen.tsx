@@ -29,6 +29,14 @@ import {
   type DrawerDevicePickerItem,
 } from '../local-assistant/AppDrawer';
 import { AssistantComposer } from '../local-assistant/AssistantComposer';
+import { MobileDictationComposer } from '../local-assistant/MobileDictationComposer';
+import { resolveMobileDictationTarget } from '../local-assistant/mobile-dictation-target';
+import type {
+  MobileDictationDestination,
+  MobileDictationSendResult,
+  MobileDictationTarget,
+} from '../local-assistant/mobile-dictation-types';
+import { useMobileDictation } from '../local-assistant/use-mobile-dictation';
 import { MobileLoadingState } from '../local-assistant/MobileLoadingState';
 import { useMobileCompanionWorkspaceTarget } from '../local-assistant/use-mobile-companion-workspace-target';
 import {
@@ -2191,6 +2199,151 @@ export function DronesScreen({
       await loadDrones(true);
     });
 
+  const resolveDictationTarget = (destination: MobileDictationDestination) =>
+    resolveMobileDictationTarget({
+      destination,
+      deviceId: targetId,
+      targetReachable,
+      selectedDrone: selected,
+      chatName,
+      agent: chatAgentId,
+      agentPermissionMode: chatAgentPermissionMode,
+      approvalPolicy: chatApprovalPolicy,
+      provider: chatModelProvider,
+      model: chatModel,
+      reasoning: chatReasoning,
+    });
+
+  const sendDictationToChat = async (
+    target: Extract<MobileDictationTarget, { droneId: string }>,
+    text: string,
+  ): Promise<MobileDictationSendResult> => {
+    let destinationChat = target.chatName;
+    let updatedDrone: MobileDroneSummary | null = null;
+    if (target.destination === 'new-chat' || target.destination === 'clone-chat') {
+      const suggestedChat = suggestNextMobileDroneChatName(target.chatNames);
+      const result = await requestDroneControl(target.deviceId, 'chat.create', {
+        droneId: target.droneId,
+        name: suggestedChat,
+        copyFrom: target.chatName,
+        mode: target.destination === 'clone-chat' ? 'fork' : 'copy-config',
+      });
+      destinationChat = String(result?.chatName ?? suggestedChat).trim() || suggestedChat;
+      const sourceDrone = droneListSnapshotRef.current.drones.find(
+        (drone) => drone.id === target.droneId,
+      );
+      if (sourceDrone) {
+        const nextChats = normalizedChatMutationList(result?.chats, [
+          ...new Set([...sourceDrone.chats, destinationChat]),
+        ]);
+        updatedDrone = { ...sourceDrone, chats: nextChats };
+        if (targetIdRef.current === target.deviceId) {
+          const optimisticDrone = updatedDrone;
+          setDrones((current) =>
+            current.map((drone) => (drone.id === optimisticDrone.id ? optimisticDrone : drone)),
+          );
+        }
+      }
+    }
+
+    const userTimeZone = clientTimeZone();
+    await requestDroneControl(target.deviceId, 'chat.prompt', {
+      droneId: target.droneId,
+      chatName: destinationChat,
+      prompt: text,
+      deliveryMode: 'queue',
+      submittedAt: new Date().toISOString(),
+      ...(userTimeZone ? { userTimeZone } : {}),
+    });
+
+    if (targetIdRef.current === target.deviceId) {
+      const destinationDrone =
+        updatedDrone ??
+        droneListSnapshotRef.current.drones.find((drone) => drone.id === target.droneId) ??
+        null;
+      if (destinationDrone) {
+        transitionToDroneChat(destinationDrone, destinationChat);
+        await readChat(destinationDrone.id, destinationChat);
+      }
+      await loadDrones(true);
+    }
+    return { ok: true };
+  };
+
+  const sendDictationToDrone = async (
+    target: Extract<MobileDictationTarget, { repoPath: string }>,
+    text: string,
+  ): Promise<MobileDictationSendResult> => {
+    if (targetIdRef.current !== target.deviceId) {
+      return {
+        ok: false,
+        error: 'Return to the original Drone Hub device before creating the new drone.',
+      };
+    }
+    const remembered = await loadMobileDroneCreatePreferences(target.deviceId, target.repoPath);
+    const runtime = target.runtime;
+    const useRemoteBranch =
+      runtime === 'container' &&
+      remembered?.repoBranchSource === 'remote' &&
+      Boolean(remembered.repoCreateRemoteBranch);
+    const payload: MobileDroneCreatePayload = {
+      runtime,
+      ...(target.group ? { group: target.group } : {}),
+      ...(runtime === 'container' ? { persistVolume: remembered?.persistVolume ?? false } : {}),
+      ...(target.repoPath ? { repoPath: target.repoPath } : {}),
+      repoBranchSource: useRemoteBranch ? 'remote' : 'host',
+      ...(useRemoteBranch ? { remoteBranch: remembered!.repoCreateRemoteBranch } : {}),
+      seedAgent:
+        target.agent === 'native' ? { kind: 'native' } : { kind: 'builtin', id: target.agent },
+      ...(target.agent === 'native' && target.provider ? { seedProvider: target.provider } : {}),
+      ...(target.model ? { seedModel: target.model } : {}),
+      ...(target.reasoning ? { seedReasoning: target.reasoning } : {}),
+      ...(target.agentPermissionMode !== 'execute'
+        ? { seedAgentPermissionMode: target.agentPermissionMode }
+        : {}),
+      ...(target.approvalPolicy !== 'ask' ? { seedApprovalPolicy: target.approvalPolicy } : {}),
+      seedPrompt: text,
+      seedSubmittedAt: new Date().toISOString(),
+      autoRename: true,
+    };
+    const preferences: MobileDroneCreatePreferences = {
+      mode: 'with-chat',
+      runtime,
+      persistVolume: runtime === 'container' && (remembered?.persistVolume ?? false),
+      agent: target.agent,
+      agentPermissionMode: target.agentPermissionMode,
+      approvalPolicy: target.approvalPolicy,
+      model: target.model,
+      provider: target.provider,
+      reasoning: target.reasoning,
+      repoBranchSource: useRemoteBranch ? 'remote' : 'host',
+      repoCreateRemoteBranch: useRemoteBranch ? remembered!.repoCreateRemoteBranch : '',
+    };
+    const created = await createDrone(payload, preferences);
+    return created ? { ok: true } : { ok: false, error: 'The new drone could not be created.' };
+  };
+
+  const sendMobileDictation = async (
+    target: MobileDictationTarget,
+    text: string,
+  ): Promise<MobileDictationSendResult> => {
+    try {
+      return 'droneId' in target
+        ? await sendDictationToChat(target, text)
+        : await sendDictationToDrone(target, text);
+    } catch (sendError: unknown) {
+      return {
+        ok: false,
+        error: sendError instanceof Error ? sendError.message : String(sendError),
+      };
+    }
+  };
+
+  const dictation = useMobileDictation({
+    resolveTarget: resolveDictationTarget,
+    send: sendMobileDictation,
+  });
+
   const transcriptMessages = React.useMemo(
     () => nativeMessages ?? mobileDroneTurnsToAssistantMessages(turns, pendingPrompts),
     [nativeMessages, pendingPrompts, turns],
@@ -3324,58 +3477,106 @@ export function DronesScreen({
                         />
                       ))}
                     </ScrollView>
-                    <View style={styles.composerMetadataRow}>
-                      <View style={styles.composerMetadataLeading}>
-                        <DroneRuntimeIndicator
-                          runtime={selected.runtime === 'host' ? 'host' : 'container'}
+                    {dictation.open ? (
+                      <MobileDictationComposer
+                        value={dictation.text}
+                        deviceName={activeTarget?.name ?? 'This device'}
+                        droneName={selected.name}
+                        chatName={chatName}
+                        groupName={selected.group}
+                        recordingStatus={dictation.recordingStatus}
+                        recordingDurationMillis={dictation.recordingDurationMillis}
+                        pendingCount={dictation.pendingCount}
+                        error={dictation.error}
+                        notice={dictation.notice}
+                        failedTranscriptionError={dictation.failedClip?.error}
+                        finalizing={dictation.finalizing}
+                        networkSending={dictation.networkSending}
+                        microphoneUnavailable={dictation.microphoneUnavailable}
+                        onChangeText={dictation.setText}
+                        onClose={dictation.discardAndClose}
+                        onToggleRecording={dictation.toggleRecording}
+                        onTogglePause={dictation.togglePause}
+                        onCancelRecording={dictation.cancelRecording}
+                        onRetryFailedTranscription={dictation.retryFailedClip}
+                        onDiscardFailedTranscription={dictation.discardFailedClip}
+                        onDestinationPress={dictation.requestSend}
+                      />
+                    ) : (
+                      <>
+                        <View style={styles.composerMetadataRow}>
+                          <View style={styles.composerMetadataLeading}>
+                            <DroneRuntimeIndicator
+                              runtime={selected.runtime === 'host' ? 'host' : 'container'}
+                            />
+                            <ChatSubscriptionIndicator subscriptions={chatSubscriptions} />
+                          </View>
+                          <DroneBranchIndicator branch={selected.repoBranch} />
+                        </View>
+                        <AssistantComposer
+                          focusKey={composerFocusKey}
+                          voiceResetKey={`${targetId}:${selected.id}:${chatName}`}
+                          value={prompt}
+                          onChangeText={setPrompt}
+                          onSend={async (
+                            promptOverride,
+                            deliveryMode,
+                            promptId,
+                            preserveComposer,
+                          ) =>
+                            await sendPrompt(
+                              promptOverride,
+                              deliveryMode,
+                              promptId,
+                              preserveComposer,
+                            )
+                          }
+                          onStop={() => void stopChat()}
+                          onOpenDictation={() => {
+                            const initialPrompt = promptRef.current;
+                            void dictation.openAndStart(initialPrompt).then((adopted) => {
+                              if (!adopted || promptRef.current !== initialPrompt) return;
+                              promptRef.current = '';
+                              setPrompt('');
+                            });
+                          }}
+                          onOpenModel={() => void openModelPicker()}
+                          modelLabel={displayedModel}
+                          reasoningLabel={chatReasoning}
+                          sending={busy === 'prompt'}
+                          running={running}
+                          editable={targetReachable}
+                          queueWhileRunning={targetReachable}
+                          placeholder={
+                            targetReachable
+                              ? 'Ask the agent'
+                              : targetReconnecting
+                                ? 'Reconnecting…'
+                                : 'Device offline'
+                          }
+                          hasAttachments={promptAttachments.length > 0}
+                          onAddAttachment={addPromptAttachment}
+                          attachmentActionsDisabled={!targetReachable || (phoneTarget && running)}
+                          sendBlocked={
+                            !targetReachable ||
+                            (phoneTarget && running && promptAttachments.length > 0)
+                          }
+                          footer={
+                            promptAttachments.length > 0 ? (
+                              <ChatAttachmentStrip
+                                attachments={promptAttachments}
+                                disabled={!targetReachable || busy === 'prompt'}
+                                onRemove={(id) =>
+                                  setPromptAttachments((current) =>
+                                    current.filter((attachment) => attachment.id !== id),
+                                  )
+                                }
+                              />
+                            ) : undefined
+                          }
                         />
-                        <ChatSubscriptionIndicator subscriptions={chatSubscriptions} />
-                      </View>
-                      <DroneBranchIndicator branch={selected.repoBranch} />
-                    </View>
-                    <AssistantComposer
-                      focusKey={composerFocusKey}
-                      voiceResetKey={`${targetId}:${selected.id}:${chatName}`}
-                      value={prompt}
-                      onChangeText={setPrompt}
-                      onSend={async (promptOverride, deliveryMode, promptId, preserveComposer) =>
-                        await sendPrompt(promptOverride, deliveryMode, promptId, preserveComposer)
-                      }
-                      onStop={() => void stopChat()}
-                      onOpenModel={() => void openModelPicker()}
-                      modelLabel={displayedModel}
-                      reasoningLabel={chatReasoning}
-                      sending={busy === 'prompt'}
-                      running={running}
-                      editable={targetReachable}
-                      queueWhileRunning={targetReachable}
-                      placeholder={
-                        targetReachable
-                          ? 'Ask the agent'
-                          : targetReconnecting
-                            ? 'Reconnecting…'
-                            : 'Device offline'
-                      }
-                      hasAttachments={promptAttachments.length > 0}
-                      onAddAttachment={addPromptAttachment}
-                      attachmentActionsDisabled={!targetReachable || (phoneTarget && running)}
-                      sendBlocked={
-                        !targetReachable || (phoneTarget && running && promptAttachments.length > 0)
-                      }
-                      footer={
-                        promptAttachments.length > 0 ? (
-                          <ChatAttachmentStrip
-                            attachments={promptAttachments}
-                            disabled={!targetReachable || busy === 'prompt'}
-                            onRemove={(id) =>
-                              setPromptAttachments((current) =>
-                                current.filter((attachment) => attachment.id !== id),
-                              )
-                            }
-                          />
-                        ) : undefined
-                      }
-                    />
+                      </>
+                    )}
                     <AssistantModelPicker
                       open={modelOpen}
                       currentProvider={chatModelProvider}

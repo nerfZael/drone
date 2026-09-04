@@ -139,6 +139,7 @@ export function AssistantComposer({
   onChangeText,
   onSend,
   onStop,
+  onOpenDictation,
   onOpenModel,
   modelLabel,
   reasoningLabel,
@@ -166,6 +167,7 @@ export function AssistantComposer({
   onChangeText(value: string): void;
   onSend: MobileComposerSend;
   onStop?(): void;
+  onOpenDictation?(): void;
   onOpenModel(): void;
   modelLabel: string;
   reasoningLabel?: string;
@@ -208,10 +210,8 @@ export function AssistantComposer({
   } = useSharedMobileChatVoiceRecorder();
   const companionUsingVoice = voiceSession.kind === 'companion';
   const voiceError = companion.status === 'idle' ? sharedVoiceError : '';
-  const voiceStatus =
-    voiceSession.kind === 'single-shot' ? voiceSession.status : ('idle' as const);
-  const voiceDurationMillis =
-    voiceSession.kind === 'single-shot' ? voiceSession.durationMillis : 0;
+  const voiceStatus = voiceSession.kind === 'single-shot' ? voiceSession.status : ('idle' as const);
+  const voiceDurationMillis = voiceSession.kind === 'single-shot' ? voiceSession.durationMillis : 0;
   const targetKey = String(voiceResetKey ?? '').trim();
   const voiceActive = voiceStatus !== 'idle';
   const voiceRecordAccessibilityLabel =
@@ -219,7 +219,9 @@ export function AssistantComposer({
       ? 'Continuous voice is using the microphone'
       : companionUsingVoice
         ? 'Companion is using the microphone'
-        : 'Record voice message';
+        : onOpenDictation
+          ? 'Open dictation draft'
+          : 'Record voice message';
   const voiceActiveRef = React.useRef(voiceActive);
   voiceActiveRef.current = voiceActive;
   const voiceCanPause = voiceStatus === 'recording' || voiceStatus === 'paused';
@@ -524,7 +526,10 @@ export function AssistantComposer({
               accessibilityState={{ disabled: voiceRecordActionDisabled }}
               disabled={voiceRecordActionDisabled}
               hitSlop={6}
-              onPress={() => void beginVoiceRecording()}
+              onPress={() => {
+                if (onOpenDictation) onOpenDictation();
+                else void beginVoiceRecording();
+              }}
               style={({ pressed }) => [
                 styles.collapsedVoiceButton,
                 showAssistantStop && styles.collapsedVoiceButtonWithStop,
@@ -630,7 +635,10 @@ export function AssistantComposer({
                   label={voiceRecordAccessibilityLabel}
                   icon={Mic}
                   disabled={voiceRecordActionDisabled}
-                  onPress={() => void beginVoiceRecording()}
+                  onPress={() => {
+                    if (onOpenDictation) onOpenDictation();
+                    else void beginVoiceRecording();
+                  }}
                 />
               </>
             ) : continuousVoiceOwned ? (

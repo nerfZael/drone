@@ -8,13 +8,13 @@ import {
 import type { MobileVoiceInputSettings } from './mobile-voice-input-settings';
 import { uploadMobileVoiceWave } from './mobile-groq-wave-upload';
 
-const MOBILE_GROQ_TRANSCRIPTION_URL =
-  'https://api.groq.com/openai/v1/audio/transcriptions';
+const MOBILE_GROQ_TRANSCRIPTION_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
 
 export async function transcribeMobileVoiceRecording(input: {
   uri: string;
   apiKey: string;
   signal?: AbortSignal;
+  deleteFile?: boolean;
 }): Promise<string> {
   const file = new File(input.uri);
   try {
@@ -41,7 +41,7 @@ export async function transcribeMobileVoiceRecording(input: {
       body: await response.text(),
     });
   } finally {
-    if (file.exists) {
+    if (input.deleteFile !== false && file.exists) {
       try {
         file.delete();
       } catch {
