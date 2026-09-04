@@ -4,6 +4,7 @@ import {
   type LlmProviderId,
 } from './hub-settings';
 import { DEFAULT_GEMINI_FLASH_MODEL_ID } from './llm-models';
+import { DEFAULT_OPENROUTER_MODEL } from './llm-model-catalog';
 
 export { providerDisplayName } from './hub-settings';
 
@@ -34,6 +35,7 @@ export function normalizeHubLlmProvider(raw: unknown): LlmProviderId {
 export function defaultHubLlmModelId(provider: LlmProviderId, purpose: 'small' | 'standard' = 'small'): string {
   if (provider === 'gemini') return DEFAULT_GEMINI_FLASH_MODEL_ID;
   if (provider === 'codex') return purpose === 'standard' ? 'gpt-5.3-codex' : 'gpt-5.3-codex-spark';
+  if (provider === 'openrouter') return DEFAULT_OPENROUTER_MODEL;
   return purpose === 'standard' ? 'gpt-4o' : 'gpt-4o-mini';
 }
 
@@ -165,7 +167,10 @@ export async function resolveHubLlmRuntime(opts?: { provider?: LlmProviderId; ap
   }
 
   const { createOpenAI } = await dynamicImport('@ai-sdk/openai');
-  const openai = createOpenAI({ apiKey });
+  const openai = createOpenAI({
+    apiKey,
+    ...(provider === 'openrouter' ? { baseURL: 'https://openrouter.ai/api/v1' } : {}),
+  });
   return {
     provider,
     z,

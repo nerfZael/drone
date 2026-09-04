@@ -42,6 +42,24 @@ describe('device protocol', () => {
     ).toBe(true);
   });
 
+  test('advertises OpenRouter credential export as an explicit permission', () => {
+    expect(PROVIDER_CREDENTIALS_CAPABILITY.operations).toContain('openrouter.export');
+    expect(
+      isGranted(
+        [
+          {
+            capability: 'provider-credentials',
+            version: 1,
+            operations: ['openrouter.export'],
+          },
+        ],
+        'provider-credentials',
+        1,
+        'openrouter.export',
+      ),
+    ).toBe(true);
+  });
+
   test('advertises Companion run controls as explicit permissions', () => {
     expect(COMPANION_CAPABILITY.operations).toEqual(['run.start', 'run.cancel', 'tool.result']);
     expect(isGranted([], COMPANION_CAPABILITY.id, COMPANION_CAPABILITY.version, 'run.start')).toBe(

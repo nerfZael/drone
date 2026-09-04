@@ -901,15 +901,17 @@ type HubSecretSnapshot = {
 };
 
 type HubLaunchEnvSnapshot = {
-  llmProvider: 'openai' | 'gemini' | null;
+  llmProvider: 'openai' | 'gemini' | 'codex' | 'openrouter' | null;
   llmProviderRaw: string | null;
   openai: HubSecretSnapshot;
   gemini: HubSecretSnapshot;
+  openrouter: HubSecretSnapshot;
 };
 
-function normalizeHubLlmProviderEnv(raw: unknown): 'openai' | 'gemini' | null {
+function normalizeHubLlmProviderEnv(raw: unknown): HubLaunchEnvSnapshot['llmProvider'] {
   const value = String(raw ?? '').trim().toLowerCase();
-  if (value === 'openai' || value === 'gemini') return value;
+  if (value === 'openai' || value === 'gemini' || value === 'codex' || value === 'openrouter')
+    return value;
   return null;
 }
 
@@ -939,6 +941,7 @@ function captureHubLaunchEnvSnapshot(): HubLaunchEnvSnapshot {
     llmProviderRaw: llmProviderRaw || null,
     openai: captureSecretEnvSnapshot(process.env.OPENAI_API_KEY),
     gemini: captureSecretEnvSnapshot(process.env.GEMINI_API_KEY),
+    openrouter: captureSecretEnvSnapshot(process.env.OPENROUTER_API_KEY),
   };
 }
 
@@ -959,6 +962,7 @@ function parseHubLaunchEnvSnapshot(raw: unknown): HubLaunchEnvSnapshot | null {
   const value = raw as Record<string, unknown>;
   const openai = parseHubSecretSnapshot(value.openai);
   const gemini = parseHubSecretSnapshot(value.gemini);
+  const openrouter = parseHubSecretSnapshot(value.openrouter) ?? captureSecretEnvSnapshot(undefined);
   if (!openai || !gemini) return null;
   const llmProviderRaw = typeof value.llmProviderRaw === 'string' ? value.llmProviderRaw.trim() : '';
   return {
@@ -966,6 +970,7 @@ function parseHubLaunchEnvSnapshot(raw: unknown): HubLaunchEnvSnapshot | null {
     llmProviderRaw: llmProviderRaw || null,
     openai,
     gemini,
+    openrouter,
   };
 }
 
@@ -2201,7 +2206,7 @@ async function hubStart(options: any) {
     }
     if (launchEnvChanged) {
       restartReasons.push(
-        'The hub is already running with a different LLM environment snapshot. Restart it to pick up the current OPENAI_API_KEY/GEMINI_API_KEY/DRONE_HUB_LLM_PROVIDER values.'
+        'The hub is already running with a different LLM environment snapshot. Restart it to pick up the current OPENAI_API_KEY/GEMINI_API_KEY/OPENROUTER_API_KEY/DRONE_HUB_LLM_PROVIDER values.'
       );
     }
     const output = {

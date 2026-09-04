@@ -16,7 +16,7 @@ import type {
 import { settingsErrorMessage, settingsQueryError, settingsQueryKey, useSettingsQuery } from './settings-query';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
-type ApiKeyProviderId = 'openai' | 'gemini' | 'groq';
+type ApiKeyProviderId = 'openai' | 'gemini' | 'openrouter' | 'groq';
 type ApiKeyMutationInput = {
   provider: ApiKeyProviderId;
   action: 'save' | 'clear';
@@ -25,6 +25,7 @@ type ApiKeyMutationInput = {
 
 function providerLabel(provider: LlmProviderId | ApiKeyProviderId): string {
   if (provider === 'codex') return 'Codex';
+  if (provider === 'openrouter') return 'OpenRouter';
   if (provider === 'groq') return 'GROQ';
   return provider === 'gemini' ? 'Gemini' : 'OpenAI';
 }
@@ -55,6 +56,9 @@ export function useLlmSettings(requestJson: RequestJsonFn) {
   const [openAiSettingsDraft, setOpenAiSettingsDraft] = React.useState('');
   const [openAiDraftLoadedFromSettings, setOpenAiDraftLoadedFromSettings] = React.useState(false);
   const [showOpenAiKey, setShowOpenAiKey] = React.useState(false);
+  const [openRouterSettingsDraft, setOpenRouterSettingsDraft] = React.useState('');
+  const [openRouterDraftLoadedFromSettings, setOpenRouterDraftLoadedFromSettings] = React.useState(false);
+  const [showOpenRouterKey, setShowOpenRouterKey] = React.useState(false);
   const [groqSettingsDraft, setGroqSettingsDraft] = React.useState('');
   const [groqDraftLoadedFromSettings, setGroqDraftLoadedFromSettings] = React.useState(false);
   const [showGroqKey, setShowGroqKey] = React.useState(false);
@@ -136,6 +140,7 @@ export function useLlmSettings(requestJson: RequestJsonFn) {
       };
       if (provider === 'openai') return { ...prev, openai: next };
       if (provider === 'codex') return { ...prev, codex: next };
+      if (provider === 'openrouter') return { ...prev, openrouter: next };
       if (provider === 'groq') return { ...prev, groq: next };
       return { ...prev, gemini: next };
     });
@@ -178,20 +183,38 @@ export function useLlmSettings(requestJson: RequestJsonFn) {
 
   const toggleApiKeyVisibility = React.useCallback(
     async (provider: ApiKeyProviderId) => {
-      const showing = provider === 'openai' ? showOpenAiKey : provider === 'gemini' ? showGeminiKey : showGroqKey;
-      const draft = provider === 'openai' ? openAiSettingsDraft : provider === 'gemini' ? geminiSettingsDraft : groqSettingsDraft;
+      const showing =
+        provider === 'openai'
+          ? showOpenAiKey
+          : provider === 'gemini'
+            ? showGeminiKey
+            : provider === 'openrouter'
+              ? showOpenRouterKey
+              : showGroqKey;
+      const draft =
+        provider === 'openai'
+          ? openAiSettingsDraft
+          : provider === 'gemini'
+            ? geminiSettingsDraft
+            : provider === 'openrouter'
+              ? openRouterSettingsDraft
+              : groqSettingsDraft;
       const hasKey =
         provider === 'openai'
           ? Boolean(llmQuery.data?.openai.hasKey)
           : provider === 'gemini'
             ? Boolean(llmQuery.data?.gemini.hasKey)
-            : Boolean(llmQuery.data?.groq.hasKey);
+            : provider === 'openrouter'
+              ? Boolean(llmQuery.data?.openrouter.hasKey)
+              : Boolean(llmQuery.data?.groq.hasKey);
       const draftLoadedFromSettings =
         provider === 'openai'
           ? openAiDraftLoadedFromSettings
           : provider === 'gemini'
             ? geminiDraftLoadedFromSettings
-            : groqDraftLoadedFromSettings;
+            : provider === 'openrouter'
+              ? openRouterDraftLoadedFromSettings
+              : groqDraftLoadedFromSettings;
 
       if (showing) {
         if (provider === 'openai') {
@@ -205,6 +228,12 @@ export function useLlmSettings(requestJson: RequestJsonFn) {
           if (draftLoadedFromSettings) {
             setGeminiSettingsDraft('');
             setGeminiDraftLoadedFromSettings(false);
+          }
+        } else if (provider === 'openrouter') {
+          setShowOpenRouterKey(false);
+          if (draftLoadedFromSettings) {
+            setOpenRouterSettingsDraft('');
+            setOpenRouterDraftLoadedFromSettings(false);
           }
         } else {
           setShowGroqKey(false);
@@ -229,6 +258,9 @@ export function useLlmSettings(requestJson: RequestJsonFn) {
           } else if (provider === 'gemini') {
             setGeminiSettingsDraft(apiKey);
             setGeminiDraftLoadedFromSettings(true);
+          } else if (provider === 'openrouter') {
+            setOpenRouterSettingsDraft(apiKey);
+            setOpenRouterDraftLoadedFromSettings(true);
           } else {
             setGroqSettingsDraft(apiKey);
             setGroqDraftLoadedFromSettings(true);
@@ -241,6 +273,7 @@ export function useLlmSettings(requestJson: RequestJsonFn) {
 
       if (provider === 'openai') setShowOpenAiKey(true);
       else if (provider === 'gemini') setShowGeminiKey(true);
+      else if (provider === 'openrouter') setShowOpenRouterKey(true);
       else setShowGroqKey(true);
     },
     [
@@ -251,11 +284,14 @@ export function useLlmSettings(requestJson: RequestJsonFn) {
       llmQuery.data,
       openAiDraftLoadedFromSettings,
       openAiSettingsDraft,
+      openRouterDraftLoadedFromSettings,
+      openRouterSettingsDraft,
       requestJson,
       revealMutation,
       showGeminiKey,
       showGroqKey,
       showOpenAiKey,
+      showOpenRouterKey,
       updateProviderKeySettings,
     ],
   );
@@ -263,8 +299,22 @@ export function useLlmSettings(requestJson: RequestJsonFn) {
   const mutateApiKeySettings = React.useCallback(
     async (provider: ApiKeyProviderId, action: 'save' | 'clear') => {
       const label = providerLabel(provider);
-      const envKeyName = provider === 'gemini' ? 'GEMINI_API_KEY' : provider === 'openai' ? 'OPENAI_API_KEY' : '';
-      const draft = provider === 'openai' ? openAiSettingsDraft : provider === 'gemini' ? geminiSettingsDraft : groqSettingsDraft;
+      const envKeyName =
+        provider === 'gemini'
+          ? 'GEMINI_API_KEY'
+          : provider === 'openai'
+            ? 'OPENAI_API_KEY'
+            : provider === 'openrouter'
+              ? 'OPENROUTER_API_KEY'
+              : '';
+      const draft =
+        provider === 'openai'
+          ? openAiSettingsDraft
+          : provider === 'gemini'
+            ? geminiSettingsDraft
+            : provider === 'openrouter'
+              ? openRouterSettingsDraft
+              : groqSettingsDraft;
       const apiKey = String(maybeExtractApiKey(draft, provider) ?? '').trim();
       if (action === 'save') {
         if (!apiKey) {
@@ -274,6 +324,7 @@ export function useLlmSettings(requestJson: RequestJsonFn) {
         if (apiKey !== draft) {
           if (provider === 'openai') setOpenAiSettingsDraft(apiKey);
           else if (provider === 'gemini') setGeminiSettingsDraft(apiKey);
+          else if (provider === 'openrouter') setOpenRouterSettingsDraft(apiKey);
           else setGroqSettingsDraft(apiKey);
         }
       }
@@ -290,6 +341,10 @@ export function useLlmSettings(requestJson: RequestJsonFn) {
           setGeminiSettingsDraft('');
           setGeminiDraftLoadedFromSettings(false);
           setShowGeminiKey(false);
+        } else if (provider === 'openrouter') {
+          setOpenRouterSettingsDraft('');
+          setOpenRouterDraftLoadedFromSettings(false);
+          setShowOpenRouterKey(false);
         } else {
           setGroqSettingsDraft('');
           setGroqDraftLoadedFromSettings(false);
@@ -304,7 +359,7 @@ export function useLlmSettings(requestJson: RequestJsonFn) {
         setLlmSettingsError(settingsErrorMessage(error));
       }
     },
-    [apiKeyMutation, geminiSettingsDraft, groqSettingsDraft, openAiSettingsDraft, updateProviderKeySettings],
+    [apiKeyMutation, geminiSettingsDraft, groqSettingsDraft, openAiSettingsDraft, openRouterSettingsDraft, updateProviderKeySettings],
   );
 
   const saveLlmProviderSettings = React.useCallback(async () => {
@@ -352,6 +407,11 @@ export function useLlmSettings(requestJson: RequestJsonFn) {
     setGroqSettingsDraft(maybeExtractApiKey(raw, 'groq'));
   }, []);
 
+  const updateOpenRouterSettingsDraft = React.useCallback((raw: string) => {
+    setOpenRouterDraftLoadedFromSettings(false);
+    setOpenRouterSettingsDraft(maybeExtractApiKey(raw, 'openrouter'));
+  }, []);
+
   return {
     llmSettings: llmQuery.data ?? null,
     llmSettingsLoading: llmQuery.isFetching || defaultModelQuery.isFetching,
@@ -371,6 +431,11 @@ export function useLlmSettings(requestJson: RequestJsonFn) {
     clearingOpenAiSettings: apiKeyMutation.isPending && apiKeyMutation.variables.provider === 'openai' && apiKeyMutation.variables.action === 'clear',
     showOpenAiKey,
     revealingOpenAiKey: revealMutation.isPending && revealMutation.variables === 'openai',
+    openRouterSettingsDraft,
+    savingOpenRouterSettings: apiKeyMutation.isPending && apiKeyMutation.variables.provider === 'openrouter' && apiKeyMutation.variables.action === 'save',
+    clearingOpenRouterSettings: apiKeyMutation.isPending && apiKeyMutation.variables.provider === 'openrouter' && apiKeyMutation.variables.action === 'clear',
+    showOpenRouterKey,
+    revealingOpenRouterKey: revealMutation.isPending && revealMutation.variables === 'openrouter',
     groqSettingsDraft,
     savingGroqSettings: apiKeyMutation.isPending && apiKeyMutation.variables.provider === 'groq' && apiKeyMutation.variables.action === 'save',
     clearingGroqSettings: apiKeyMutation.isPending && apiKeyMutation.variables.provider === 'groq' && apiKeyMutation.variables.action === 'clear',
@@ -382,6 +447,7 @@ export function useLlmSettings(requestJson: RequestJsonFn) {
     setLlmDefaultReasoningDraft,
     updateOpenAiSettingsDraft,
     updateGeminiSettingsDraft,
+    updateOpenRouterSettingsDraft,
     updateGroqSettingsDraft,
     loadLlmSettings,
     saveLlmProviderSettings,

@@ -97,7 +97,7 @@ type DroneRegistryV1 = {
       updatedAt?: string;
     };
     llm?: {
-      provider?: 'openai' | 'gemini' | 'codex';
+      provider?: 'openai' | 'gemini' | 'codex' | 'openrouter';
       updatedAt?: string;
     };
     openai?: {
@@ -105,6 +105,10 @@ type DroneRegistryV1 = {
       updatedAt?: string;
     };
     gemini?: {
+      apiKey?: string;
+      updatedAt?: string;
+    };
+    openrouter?: {
       apiKey?: string;
       updatedAt?: string;
     };

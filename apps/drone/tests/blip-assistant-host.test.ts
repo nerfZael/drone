@@ -24,6 +24,7 @@ describe('Blip assistant host', () => {
     expect(toBlipModelProvider('openai-codex')).toBe('openai-codex');
     expect(toBlipModelProvider('gemini')).toBe('google');
     expect(toBlipModelProvider('google')).toBe('google');
+    expect(toBlipModelProvider('openrouter')).toBe('openrouter');
   });
 
   test('discards legacy standalone metadata and stores native chat metadata', async () => {

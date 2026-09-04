@@ -12,6 +12,7 @@ export type HubAgentModelOption = {
 export const DEFAULT_OPENAI_MODEL = 'gpt-5.6-sol';
 export const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash-lite';
 export const DEFAULT_CODEX_MODEL = 'gpt-5.6-sol';
+export const DEFAULT_OPENROUTER_MODEL = 'openrouter/auto';
 
 const STANDARD_REASONING_LEVELS: NativeAgentThinkingLevel[] = ['off', 'low', 'medium', 'high'];
 const GEMINI_FLASH_LITE_REASONING_LEVELS: NativeAgentThinkingLevel[] = [
@@ -38,6 +39,10 @@ export const HUB_AGENT_MODEL_OPTIONS: HubAgentModelOption[] = [
   ...modelOptions('codex', 'gpt-5.6-terra', 'GPT-5.6 Terra'),
   ...modelOptions('codex', 'gpt-5.6-luna', 'GPT-5.6 Luna'),
   ...modelOptions('codex', 'gpt-5.5', 'GPT-5.5'),
+  ...modelOptions('openrouter', 'openrouter/auto', 'OpenRouter Auto'),
+  ...modelOptions('openrouter', 'anthropic/claude-sonnet-4.6', 'Claude Sonnet 4.6'),
+  ...modelOptions('openrouter', 'openai/gpt-5', 'GPT-5'),
+  ...modelOptions('openrouter', 'google/gemini-3-flash-preview', 'Gemini 3 Flash'),
   ...modelOptions(
     'gemini',
     'gemini-3.5-flash-lite',

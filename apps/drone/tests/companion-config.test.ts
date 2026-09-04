@@ -9,10 +9,11 @@ import {
 } from '../src/hub/companion/companion-config';
 
 describe('Companion settings', () => {
-  test('offers OpenAI, Codex, and Gemini including Gemini 3.5 Flash-Lite', () => {
+  test('offers OpenAI, Codex, Gemini, and OpenRouter including Gemini 3.5 Flash-Lite', () => {
     expect([...new Set(HUB_AGENT_MODEL_OPTIONS.map((option) => option.provider))]).toEqual([
       'openai',
       'codex',
+      'openrouter',
       'gemini',
     ]);
     expect(
@@ -90,6 +91,21 @@ describe('Companion settings', () => {
     expect(settings.enabledTools).toEqual(['get_hub_overview']);
   });
 
+  test('accepts an explicit OpenRouter model combination', () => {
+    const settings = normalizeCompanionSettings({
+      provider: 'openrouter',
+      model: 'openrouter/auto',
+      thinkingLevel: 'medium',
+      systemPrompt: 'Custom',
+      enabledTools: ['get_hub_overview'],
+    });
+    expect(settings.provider).toBe('openrouter');
+    expect(settings.model).toBe('openrouter/auto');
+    expect(settings.thinkingLevel).toBe('medium');
+    expect(settings.enabledTools).toEqual(['get_hub_overview']);
+  });
+
+
   test('does not fall back from missing or unsupported provider and model selections', () => {
     expect(normalizeCompanionSettings()).toEqual(DEFAULT_COMPANION_SETTINGS);
     expect(() => normalizeCompanionSettings(null)).toThrow('Companion settings must be an object');
@@ -100,7 +116,7 @@ describe('Companion settings', () => {
     expect(() => normalizeCompanionSettings({
       model: DEFAULT_COMPANION_SETTINGS.model,
       thinkingLevel: DEFAULT_COMPANION_SETTINGS.thinkingLevel,
-    })).toThrow('Companion provider must be openai, codex, or gemini');
+    })).toThrow('Companion provider must be openai, codex, gemini, or openrouter');
     expect(() => normalizeCompanionSettings({
       ...DEFAULT_COMPANION_SETTINGS,
       provider: 'gemini',

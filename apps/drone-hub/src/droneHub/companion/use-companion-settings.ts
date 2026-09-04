@@ -1,6 +1,6 @@
 import React from 'react';
 
-export type CompanionProvider = 'openai' | 'codex' | 'gemini';
+export type CompanionProvider = 'openai' | 'codex' | 'gemini' | 'openrouter';
 
 export type CompanionSettingsDraft = {
   schemaVersion: 3;
@@ -32,7 +32,7 @@ export type CompanionSettingsResponse = {
     description: string;
   }>;
   models: CompanionModelOption[];
-  credentials: Record<'openai' | 'codex' | 'gemini', boolean>;
+  credentials: Record<CompanionProvider, boolean>;
 };
 
 export function isCompanionModelSelectionValid(

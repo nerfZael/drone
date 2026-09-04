@@ -35,19 +35,20 @@ describe('native model catalog', () => {
       [
         { provider: 'openai', id: 'shared', name: 'Shared', thinkingLevel: 'low' },
         { provider: 'codex', id: 'shared', name: 'Shared', thinkingLevel: 'medium' },
+        { provider: 'openrouter', id: 'openrouter/auto', name: 'OpenRouter Auto', thinkingLevel: 'high' },
         { provider: 'gemini', id: 'gemini-only', name: 'Gemini only', thinkingLevel: 'high' },
       ],
-      { provider: 'codex', model: 'shared', thinkingLevel: 'medium' },
-      'codex',
+      { provider: 'openrouter', model: 'openrouter/auto', thinkingLevel: 'high' },
+      'openrouter',
     );
 
     expect(catalog).toEqual([
       {
-        provider: 'codex',
-        id: 'shared',
-        label: 'Shared',
-        reasoningLevels: ['medium'],
-        defaultReasoningLevel: 'medium',
+        provider: 'openrouter',
+        id: 'openrouter/auto',
+        label: 'OpenRouter Auto',
+        reasoningLevels: ['high'],
+        defaultReasoningLevel: 'high',
       },
     ]);
   });

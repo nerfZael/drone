@@ -1,6 +1,6 @@
 import type { NativeAgentDefaultSettings } from '@drone/assistant-chat';
 
-export type LlmProviderId = 'openai' | 'gemini' | 'codex';
+export type LlmProviderId = 'openai' | 'gemini' | 'codex' | 'openrouter';
 export type DroneDeleteMode = 'permanent' | 'archive';
 export type ArchiveRetentionId = '1h' | '8h' | '1d' | '1w';
 export type ArchiveRuntimePolicy = 'keep-running' | 'stop';
@@ -28,6 +28,7 @@ export type LlmSettingsResponse = {
   openai: Omit<ApiKeySettingsResponse, 'ok'>;
   gemini: Omit<ApiKeySettingsResponse, 'ok'>;
   codex: Omit<ApiKeySettingsResponse, 'ok'>;
+  openrouter: Omit<ApiKeySettingsResponse, 'ok'>;
   groq: Omit<ApiKeySettingsResponse, 'ok'>;
 };
 
