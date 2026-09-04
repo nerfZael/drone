@@ -194,4 +194,23 @@ describe('mesh connection manager', () => {
     expect(manager.routeFor('second')).toBe(second);
     expect(manager.routeFor('indirect')).toBe(first);
   });
+
+  test('preserves retained sockets and disconnects only removed routes during reconciliation', async () => {
+    const { manager } = createHarness();
+    const retained = new FakeSocket({ deviceId: 'retained' });
+    const removed = new FakeSocket({ deviceId: 'removed' });
+    const added = new FakeSocket({ deviceId: 'added' });
+    manager.replaceSockets([retained, removed]);
+    await manager.connectAll();
+
+    manager.replaceSockets([retained, added]);
+
+    expect(retained.disconnectCalls).toBe(0);
+    expect(retained.connected).toBe(true);
+    expect(removed.disconnectCalls).toBe(1);
+    expect(manager.connectionStatesByDevice).toEqual({
+      retained: 'connected',
+      added: 'reconnecting',
+    });
+  });
 });

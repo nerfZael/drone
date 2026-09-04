@@ -147,9 +147,20 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
 
   const connect = React.useCallback(
     async (nextProfile: MeshProfile, nextIdentity: MobileDeviceIdentity) => {
+      const reusableSockets = new Map(
+        connectionManager.sockets.map((socket) => [socket.connection.deviceId, socket]),
+      );
       const nextSockets = [...nextProfile.connections]
         .sort((left, right) => Number(left.role === 'backup') - Number(right.role === 'backup'))
         .map((connection) => {
+          const reusable = reusableSockets.get(connection.deviceId);
+          if (reusable) {
+            reusableSockets.delete(connection.deviceId);
+            // Keep an authenticated route alive while adopting the newest endpoint for its next
+            // reconnect. A topology refresh must not interrupt requests already using the route.
+            reusable.updateConnection(connection);
+            return reusable;
+          }
           let socket!: MeshSocket;
           socket = new MeshSocket(
             connection,

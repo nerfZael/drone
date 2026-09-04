@@ -12,6 +12,48 @@ mock.module('../src/security/device-identity', () => ({
 const { MeshSocket } = await import('../src/mesh/MeshSocket');
 
 describe('MeshSocket requests', () => {
+  test('adopts a refreshed endpoint without disconnecting the live socket', () => {
+    const socket = new MeshSocket(
+      { deviceId: 'peer-a', endpoint: 'https://old.test', role: 'primary' },
+      'network-a',
+      {
+        id: 'mobile-a',
+        name: 'Mobile',
+        platform: 'android',
+        publicKey: {},
+        sign: async () => 'signature',
+      },
+      {},
+      () => undefined,
+      () => undefined,
+      () => undefined,
+      () => undefined,
+      { handle: async () => null },
+      { inspectEnvelope: () => 'accept', acceptValidated: () => 'accept' },
+    );
+    const liveSocket = { close: mock(() => undefined) };
+    const internals = socket as unknown as {
+      ready: boolean;
+      socket: typeof liveSocket;
+    };
+    internals.ready = true;
+    internals.socket = liveSocket;
+
+    socket.updateConnection({
+      deviceId: 'peer-a',
+      endpoint: 'https://new.test',
+      role: 'backup',
+    });
+
+    expect(socket.connection).toEqual({
+      deviceId: 'peer-a',
+      endpoint: 'https://new.test',
+      role: 'backup',
+    });
+    expect(socket.connected).toBe(true);
+    expect(liveSocket.close).not.toHaveBeenCalled();
+  });
+
   test('does not send or retain a request aborted while signing', async () => {
     let releaseSigning!: () => void;
     const signingStarted = Promise.withResolvers<void>();

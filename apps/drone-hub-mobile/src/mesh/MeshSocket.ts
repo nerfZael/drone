@@ -48,7 +48,7 @@ export class MeshSocket {
   private connectPromise: Promise<void> | null = null;
 
   constructor(
-    readonly connection: MeshConnection,
+    connection: MeshConnection,
     private readonly networkId: string,
     private readonly identity: MobileDeviceIdentity,
     private readonly peerPublicKey: JsonWebKey,
@@ -58,7 +58,18 @@ export class MeshSocket {
     private readonly onCapabilityEvent: (event: CapabilityEvent) => void,
     private readonly capabilityRouter: Pick<MobileCapabilityRouter, 'handle'>,
     private readonly capabilityEventGuard: MobileCapabilityEventGuard,
-  ) {}
+  ) {
+    this.connection = connection;
+  }
+
+  connection: MeshConnection;
+
+  updateConnection(connection: MeshConnection): void {
+    if (connection.deviceId !== this.connection.deviceId) {
+      throw new Error('Cannot move a mesh socket to another device');
+    }
+    this.connection = connection;
+  }
 
   get connected(): boolean {
     return this.ready;

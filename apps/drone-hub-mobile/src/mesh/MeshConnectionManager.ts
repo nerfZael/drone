@@ -68,15 +68,27 @@ export class MeshConnectionManager<Socket extends ManagedMeshSocket> {
   replaceSockets(nextSockets: Socket[]): void {
     this.cancelReconnect();
     const previous = this.socketsValue;
+    const retained = new Set<Socket>(nextSockets);
+    const previousStates = new Map(this.states);
     this.socketsValue = [];
-    for (const socket of previous) socket.disconnect();
+    for (const socket of previous) {
+      if (!retained.has(socket)) socket.disconnect();
+    }
     this.states.clear();
     this.socketsValue = nextSockets;
     const initialState: MeshDeviceConnectionState =
       this.lifecycle === 'suspended' ? 'suspended' : 'reconnecting';
     for (const socket of nextSockets) {
-      this.states.set(socket.connection.deviceId, initialState);
-      this.onConnectionError(socket.connection.deviceId, null);
+      const wasRetained = previous.includes(socket);
+      this.states.set(
+        socket.connection.deviceId,
+        socket.connected
+          ? 'connected'
+          : wasRetained
+            ? (previousStates.get(socket.connection.deviceId) ?? initialState)
+            : initialState,
+      );
+      if (!wasRetained) this.onConnectionError(socket.connection.deviceId, null);
     }
     this.onChange();
   }
