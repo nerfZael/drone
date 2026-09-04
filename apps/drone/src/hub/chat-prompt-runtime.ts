@@ -51,6 +51,27 @@ export function claudeSandboxEnvironmentLines(runtime: unknown): string[] {
   return runtime === 'container' ? ['export IS_SANDBOX=1'] : [];
 }
 
+export type ClaudeSessionLaunch = {
+  mode: 'create' | 'resume' | 'fork';
+  sessionId: string;
+};
+
+export function resolveClaudeSessionLaunch(opts: {
+  existingSessionId?: string | null;
+  newSessionId?: string | null;
+  forkSessionId?: string | null;
+}): ClaudeSessionLaunch {
+  const forkSessionId = String(opts.forkSessionId ?? '').trim();
+  if (forkSessionId) return { mode: 'fork', sessionId: forkSessionId };
+
+  const existingSessionId = String(opts.existingSessionId ?? '').trim();
+  if (existingSessionId) return { mode: 'resume', sessionId: existingSessionId };
+
+  const newSessionId = String(opts.newSessionId ?? '').trim();
+  if (!newSessionId) throw new Error('missing Claude session id');
+  return { mode: 'create', sessionId: newSessionId };
+}
+
 type ChatPromptRuntimeDependencyName =
   | 'NON_REPO_HOME_CWD'
   | 'PROMPT_SKILL_SYNC_WARNINGS'
@@ -865,9 +886,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         };
       }
       const pendingNativeForkSourceSessionId =
-        agent.kind === 'builtin'
-          ? pendingChatForkSourceSessionId(chat, agent.id)
-          : '';
+        agent.kind === 'builtin' ? pendingChatForkSourceSessionId(chat, agent.id) : '';
       const promptWithHistory =
         agent.kind === 'builtin' && !pendingNativeForkSourceSessionId
           ? maybeBootstrapPromptFromTranscript({
@@ -946,9 +965,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
               ? 'never'
               : 'untrusted';
         const forkThreadId = pendingChatForkSourceSessionId(chat, 'codex');
-        const existingThreadId = forkThreadId
-          ? ''
-          : readBuiltinTranscriptSessionId(chat, 'codex');
+        const existingThreadId = forkThreadId ? '' : readBuiltinTranscriptSessionId(chat, 'codex');
         const stableChatId = String((chat as any)?.id ?? '').trim() || normalizedChat;
         const launchScript = [
           'set -euo pipefail',
@@ -993,13 +1010,29 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
 
       if (agent.kind === 'builtin' && agent.id === 'claude') {
         const forkSessionId = pendingChatForkSourceSessionId(chat, 'claude');
-        const claudeSessionId = forkSessionId
+        const existingClaudeSessionId = forkSessionId
           ? ''
-          : await ensureClaudeSessionId({ droneId, chatName: normalizedChat });
+          : readBuiltinTranscriptSessionId(chat, 'claude');
+        const newClaudeSessionId =
+          forkSessionId || existingClaudeSessionId
+            ? ''
+            : await ensureClaudeSessionId({ droneId, chatName: normalizedChat });
+        const sessionLaunch = resolveClaudeSessionLaunch({
+          forkSessionId,
+          existingSessionId: existingClaudeSessionId,
+          newSessionId: newClaudeSessionId,
+        });
+        const claudeSessionId = forkSessionId ? '' : sessionLaunch.sessionId;
         const supportsModel = chatModel
           ? await cliSupportsModelFlag({ runtime, containerName, cwd, bin: 'claude' })
           : false;
         const modelArg = chatModel && supportsModel ? ` --model ${bashQuote(chatModel)}` : '';
+        const sessionArg =
+          sessionLaunch.mode === 'fork'
+            ? ` --resume ${bashQuote(sessionLaunch.sessionId)} --fork-session`
+            : sessionLaunch.mode === 'resume'
+              ? ` --resume ${bashQuote(sessionLaunch.sessionId)}`
+              : ` --session-id ${bashQuote(sessionLaunch.sessionId)}`;
         const script = [
           'set -euo pipefail',
           ...buildContainerManagedEnvLines(d),
@@ -1008,11 +1041,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           ...claudeSandboxEnvironmentLines(runtime),
           `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
           cdCommand,
-          `claude --print --dangerously-skip-permissions --output-format stream-json --verbose${modelArg}${
-            forkSessionId
-              ? ` --resume ${bashQuote(forkSessionId)} --fork-session`
-              : ` --session-id ${bashQuote(claudeSessionId)}`
-          } ${bashQuote(promptWithHistory)}`,
+          `claude --print --dangerously-skip-permissions --output-format stream-json --verbose${modelArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
         ].join('\n');
         await enqueueTranscriptPrompt({
           id: opts.id,
@@ -2356,11 +2385,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         p?.deliveryMode === 'asap' && agent.kind === 'builtin' && agent.id === 'codex';
       const defer =
         !codexAsapCanSteer &&
-        hasBlockingPendingPrompt(
-          prior,
-          turns,
-          p?.deliveryMode === 'asap' ? 'asap' : 'queue',
-        );
+        hasBlockingPendingPrompt(prior, turns, p?.deliveryMode === 'asap' ? 'asap' : 'queue');
       if (defer) {
         // Completion events are an optimization, not the only wake-up edge.
         // Recheck so an automated prompt cannot remain queued after a missed event.
@@ -3182,8 +3207,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       if (droneIsProvisioning(liveDroneEntry)) {
         const provisioningChats = listChatsFromStore({ droneId }).chats;
         const existingProvisioningChat =
-          Boolean(chatEntry) ||
-          (chatName === 'default' && provisioningChats.length === 0);
+          Boolean(chatEntry) || (chatName === 'default' && provisioningChats.length === 0);
         if (opts.requireExistingChat === true && !existingProvisioningChat) {
           return { kind: 'error', status: 404, error: `unknown chat: ${chatName}` };
         }
