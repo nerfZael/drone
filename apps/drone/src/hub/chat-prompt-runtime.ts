@@ -2700,7 +2700,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
   const droneBusyDebugLastById = new Map<string, string>();
 
   function droneBusyDebugEnabled(): boolean {
-    return String(process.env.DRONE_HUB_BUSY_DEBUG ?? '').trim() !== '0';
+    return String(process.env.DRONE_HUB_BUSY_DEBUG ?? '').trim() === '1';
   }
 
   function busyChatDebugForEntry(

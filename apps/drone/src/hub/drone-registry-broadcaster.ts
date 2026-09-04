@@ -16,8 +16,11 @@ export type DroneRegistryBroadcastTiming = {
   phases: Array<{ name: 'buildSnapshot' | 'format' | 'broadcast'; durationMs: number }>;
 };
 
+export type DroneRegistryEventSubscriber = (event: string, data: any) => void;
+
 export class DroneRegistryBroadcaster {
   readonly clients = new Set<ServerResponse>();
+  private readonly subscribers = new Set<DroneRegistryEventSubscriber>();
 
   private lastById = new Map<string, string>();
   private lastSnapshot: DroneRegistrySnapshot | null = null;
@@ -30,6 +33,9 @@ export class DroneRegistryBroadcaster {
   private busy = false;
   private refreshPending = false;
   private pendingBroadcastSnapshot = false;
+  private scheduledBroadcastSnapshot = false;
+  private changeVersion = 0;
+  private snapshotVersion = -1;
 
   constructor(
     private readonly deps: {
@@ -43,6 +49,19 @@ export class DroneRegistryBroadcaster {
     return this.lastSnapshot;
   }
 
+  get freshSnapshot(): DroneRegistrySnapshot | null {
+    return this.snapshotVersion === this.changeVersion ? this.lastSnapshot : null;
+  }
+
+  get hasConsumers(): boolean {
+    return this.clients.size > 0 || this.subscribers.size > 0;
+  }
+
+  subscribe(subscriber: DroneRegistryEventSubscriber): () => void {
+    this.subscribers.add(subscriber);
+    return () => this.subscribers.delete(subscriber);
+  }
+
   private broadcast(event: string, data: any): void {
     for (const client of Array.from(this.clients)) {
       if (client.destroyed || client.writableEnded) {
@@ -51,15 +70,24 @@ export class DroneRegistryBroadcaster {
         this.deps.writeSseEvent(client, event, data);
       }
     }
+    for (const subscriber of Array.from(this.subscribers)) {
+      try {
+        subscriber(event, data);
+      } catch {
+        // One transport subscriber must not interrupt snapshot publication.
+      }
+    }
   }
 
   async refresh(opts?: { broadcastSnapshot?: boolean }): Promise<DroneRegistrySnapshot | null> {
     if (this.busy) {
+      this.changeVersion += 1;
       this.refreshPending = true;
       this.pendingBroadcastSnapshot ||= opts?.broadcastSnapshot === true;
       return this.lastSnapshot;
     }
     this.busy = true;
+    const refreshVersion = this.changeVersion;
     const startedAt = performance.now();
     const phases: DroneRegistryBroadcastTiming['phases'] = [];
     let droneCount = 0;
@@ -82,6 +110,7 @@ export class DroneRegistryBroadcaster {
 
       if (opts?.broadcastSnapshot || !this.lastSnapshot) {
         this.lastSnapshot = snapshot;
+        this.snapshotVersion = refreshVersion;
         this.lastPreferenceVersion = snapshot.preferenceVersion;
         this.lastPreferencesSerialized = JSON.stringify(snapshot.uiPreferences ?? {});
         this.lastGroupsSerialized = JSON.stringify(snapshot.groups ?? []);
@@ -112,6 +141,7 @@ export class DroneRegistryBroadcaster {
       const groupsSerialized = JSON.stringify(snapshot.groups ?? []);
       const groupsChanged = groupsSerialized !== this.lastGroupsSerialized;
       this.lastSnapshot = snapshot;
+      this.snapshotVersion = refreshVersion;
       this.lastPreferenceVersion = snapshot.preferenceVersion;
       this.lastPreferencesSerialized = preferencesSerialized;
       this.lastGroupsSerialized = groupsSerialized;
@@ -155,18 +185,29 @@ export class DroneRegistryBroadcaster {
         const broadcastSnapshot = this.pendingBroadcastSnapshot;
         this.refreshPending = false;
         this.pendingBroadcastSnapshot = false;
-        void this.refresh(broadcastSnapshot ? { broadcastSnapshot: true } : undefined);
+        // Writes can arrive continuously while a large fleet snapshot is being
+        // assembled. Preserve the latest requested state, but yield briefly so
+        // rebuilds cannot monopolize the Hub event loop.
+        this.scheduleRefresh(150, false, broadcastSnapshot);
       }
     }
   }
 
   schedule(delayMs = 150, restart = false): void {
-    if (this.clients.size === 0 || (this.refreshTimeout && !restart)) return;
+    this.changeVersion += 1;
+    this.scheduleRefresh(delayMs, restart, false);
+  }
+
+  private scheduleRefresh(delayMs: number, restart: boolean, broadcastSnapshot: boolean): void {
+    this.scheduledBroadcastSnapshot ||= broadcastSnapshot;
+    if (!this.hasConsumers || (this.refreshTimeout && !restart)) return;
     if (this.refreshTimeout) clearTimeout(this.refreshTimeout);
     this.refreshTimeout = setTimeout(
       () => {
         this.refreshTimeout = null;
-        void this.refresh();
+        const shouldBroadcastSnapshot = this.scheduledBroadcastSnapshot;
+        this.scheduledBroadcastSnapshot = false;
+        void this.refresh(shouldBroadcastSnapshot ? { broadcastSnapshot: true } : undefined);
       },
       Math.max(0, delayMs),
     );
@@ -191,7 +232,7 @@ export class DroneRegistryBroadcaster {
   }
 
   stopIfIdle(): void {
-    if (this.clients.size > 0) return;
+    if (this.hasConsumers) return;
     this.stop();
   }
 
@@ -202,9 +243,10 @@ export class DroneRegistryBroadcaster {
     this.refreshTimer = null;
     this.refreshTimeout = null;
     this.keepAliveTimer = null;
-    this.busy = false;
     this.refreshPending = false;
     this.pendingBroadcastSnapshot = false;
+    this.scheduledBroadcastSnapshot = false;
     this.clients.clear();
+    this.subscribers.clear();
   }
 }

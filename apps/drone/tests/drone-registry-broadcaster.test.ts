@@ -5,6 +5,22 @@ import {
 } from '../src/hub/drone-registry-broadcaster';
 
 describe('drone registry broadcaster', () => {
+  test('does not expose a scheduled stale snapshot to request handlers', async () => {
+    const snapshot = { ok: true as const, drones: [{ id: 'host' }] };
+    const broadcaster = new DroneRegistryBroadcaster({
+      buildSnapshot: async () => snapshot,
+      writeSseEvent: () => {},
+    });
+    broadcaster.clients.add({ destroyed: false, writableEnded: false } as any);
+
+    await broadcaster.refresh({ broadcastSnapshot: true });
+    expect(broadcaster.freshSnapshot).toBe(snapshot);
+    broadcaster.schedule(10_000);
+    expect(broadcaster.snapshot).toBe(snapshot);
+    expect(broadcaster.freshSnapshot).toBeNull();
+    broadcaster.stop();
+  });
+
   test('publishes matching UI preferences with a drone membership delta', async () => {
     let snapshot: DroneRegistrySnapshot = {
       ok: true,
@@ -129,6 +145,9 @@ describe('drone registry broadcaster', () => {
     await broadcaster.refresh();
     releaseFirstBuild();
     await firstRefresh;
+    // A dirty write is retained, but the broadcaster yields before starting
+    // another expensive snapshot build.
+    expect(buildCount).toBe(1);
     await secondBuildFinished;
     await latestPublished;
 

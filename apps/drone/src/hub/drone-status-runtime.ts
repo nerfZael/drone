@@ -118,7 +118,12 @@ export function createDroneStatusRuntime(deps: DroneStatusRuntimeDependencies) {
         statusReadCount: 0,
         skippedCount: 0,
       };
-      const force = source !== 'interval';
+      // Registry writes should discover new or reconfigured entries immediately,
+      // but must not bypass the quiet period for every unchanged fleet member.
+      // The cache key includes all connection fields, so affected entries are
+      // naturally cache misses. Background refresh sources honor per-entry
+      // backoff; explicit refreshNow callers can still request a full sweep.
+      const force = source !== 'interval' && source !== 'registry-write';
       const changed = await mapConcurrent(drones, STATUS_REFRESH_CONCURRENCY, async (drone) =>
         refreshEntry(drone, probeTiming, force),
       );

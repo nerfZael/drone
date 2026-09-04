@@ -1046,6 +1046,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     const model = normalizeChatModel((turn as any)?.model);
     const reasoning = normalizeChatReasoning((turn as any)?.reasoning);
     const activity = settleAgentRunActivity((turn as any)?.activity);
+    const activitySummary = (turn as any)?.activitySummary;
     const skillsUsed = normalizeAgentSkillUses((turn as any)?.skillsUsed);
     const attachments = normalizeChatImageAttachmentRefs((turn as any)?.attachments);
     const dockerSnapshot = normalizeDockerSnapshot((turn as any)?.dockerSnapshot);
@@ -1077,6 +1078,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       ...(model ? { model } : {}),
       ...(reasoning ? { reasoning } : {}),
       ...(activity ? { activity } : {}),
+      ...(!activity && activitySummary ? { activitySummary } : {}),
       ...(skillsUsed.length > 0 ? { skillsUsed } : {}),
       ...(attachments.length > 0 ? { attachments } : {}),
       ...(agentPlan ? { agentPlan } : {}),
@@ -1111,6 +1113,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     droneEntry: any;
     selection: string;
     tailRaw?: string | null;
+    activityMode?: 'full' | 'summary' | 'none';
   }): Promise<BuiltChatTranscriptRows> {
     const agent = inferChatAgent(opts.chatEntry as any, opts.droneEntry);
     if (agent.kind === 'custom') {
@@ -1169,6 +1172,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       chatName: opts.chatName,
       selection: opts.selection,
       tail: opts.tailRaw ?? '',
+      activityMode: opts.activityMode ?? 'full',
       sourceHash: effectiveSourceHash,
       transcriptVersion: effectiveTranscriptVersion,
       agent,
@@ -1180,6 +1184,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
           droneId: opts.droneId,
           chatName: opts.chatName,
           indexes: idxs,
+          activityMode: opts.activityMode,
         })
       : { available: false as const, turns: [] };
     const selectedTurns = storeRead.available
@@ -1211,6 +1216,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     includeConfigDetails?: boolean;
     maintenance?: ChatSnapshotMaintenance;
     includeDockerSnapshotMaintenance?: boolean;
+    activityMode?: 'full' | 'summary' | 'none';
     ifNoneMatch?: string;
     mark?: (name: string) => void;
   }): Promise<ChatSnapshotRead> {
@@ -1272,6 +1278,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
           droneEntry: context.droneEntry,
           selection: opts.selection,
           tailRaw: opts.tailRaw,
+          activityMode: opts.activityMode,
         })
       : null;
     if (transcriptResult && !transcriptResult.ok) return transcriptResult;
@@ -1340,6 +1347,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     includeConfigDetails?: boolean;
     maintenance?: ChatSnapshotMaintenance;
     includeDockerSnapshotMaintenance?: boolean;
+    activityMode?: 'full' | 'summary' | 'none';
     ifNoneMatch?: string;
     mark?: (name: string) => void;
   }): Promise<ChatSnapshotRead> {
@@ -1405,6 +1413,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       tail: opts.tailRaw ?? '',
       includeTranscript: opts.includeTranscript,
       includePending: opts.includePending,
+      activityMode: opts.activityMode ?? 'full',
       chatSourceHash: version.chatSourceHash,
       transcriptVersion: version.transcriptVersion,
       transcriptSourceHash: version.transcriptSourceHash,
@@ -1439,6 +1448,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       chatName: opts.chatName,
       indexes,
       includePending: opts.includePending,
+      activityMode: opts.activityMode,
     });
     opts.mark?.('rows');
     const transcripts = rows.turns.map((item: any) => formatTranscriptRow(item.index, item.turn));

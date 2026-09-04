@@ -1,5 +1,6 @@
 import React from 'react';
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { AppConfirmDialog } from '../src/ui/AppConfirmDialog';
 
@@ -40,5 +41,20 @@ describe('application confirmation dialog', () => {
     expect(html).toContain('border-[var(--red-border)]');
     expect(html).toContain('text-[var(--red)]');
     expect(html).toContain('Close pull request');
+  });
+
+  test('uses the themed confirmation for setting a drone as the base image', () => {
+    const source = readFileSync(
+      new URL('../src/droneHub/app/use-drone-mutation-actions.ts', import.meta.url),
+      'utf8',
+    );
+    const flow = source.slice(
+      source.indexOf('const setDroneBaseImage'),
+      source.indexOf('const startDroneContainer'),
+    );
+
+    expect(flow).toContain('await confirm({');
+    expect(flow).toContain("confirmLabel: 'Set as base image'");
+    expect(flow).not.toContain('window.confirm');
   });
 });

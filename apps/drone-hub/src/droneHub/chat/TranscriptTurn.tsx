@@ -6,6 +6,7 @@ import {
   normalizeAgentRunActivity,
   sameAgentPlan,
   toolCalls,
+  type AgentRunActivity,
 } from '@drone/assistant-chat';
 import { stripAnsi } from '../../domain';
 import type { TranscriptItem } from '../types';
@@ -89,6 +90,7 @@ export const TranscriptTurn = React.memo(
     initiallyExpandFileChanges = false,
     followUps = [],
     interstitialContent,
+    loadActivity,
   }: {
     item: TranscriptItem;
     messageId: string;
@@ -105,6 +107,7 @@ export const TranscriptTurn = React.memo(
     initiallyExpandFileChanges?: boolean;
     followUps?: UserChatMessageFollowUp[];
     interstitialContent?: React.ReactNode;
+    loadActivity?: (turnId: string, signal: AbortSignal) => Promise<AgentRunActivity | null>;
   }) {
     const attachments = normalizeImageAttachmentRefs((item as any).attachments);
     const promptText = isAttachmentOnlyPrompt(item.prompt, attachments) ? '' : item.prompt;
@@ -120,8 +123,79 @@ export const TranscriptTurn = React.memo(
         ? stripAnsi(item.output)
         : stripAnsi(item.error || 'failed');
     const cleanedAgentMessage = cleaned;
-    const activity =
+    const providedActivity =
       isSilentCompletion || isUserOnly ? undefined : normalizeAgentRunActivity(item.activity);
+    const activitySummary = isSilentCompletion || isUserOnly ? undefined : item.activitySummary;
+    const [hydratedActivity, setHydratedActivity] = React.useState<AgentRunActivity | null>(null);
+    const [activityHydratedAt, setActivityHydratedAt] = React.useState<string | null>(null);
+    const [activityLoading, setActivityLoading] = React.useState(false);
+    const [activityLoadError, setActivityLoadError] = React.useState<string | null>(null);
+    const activityLoadControllerRef = React.useRef<AbortController | null>(null);
+    React.useEffect(() => {
+      activityLoadControllerRef.current?.abort();
+      setHydratedActivity(null);
+      setActivityHydratedAt(null);
+      setActivityLoading(false);
+      setActivityLoadError(null);
+    }, [activitySummary?.updatedAt, item.id]);
+    const activity =
+      providedActivity ??
+      (hydratedActivity?.updatedAt === activitySummary?.updatedAt
+        ? (hydratedActivity ?? undefined)
+        : undefined);
+    const requestActivity = React.useCallback(async () => {
+      const turnId = String(item.id ?? '').trim();
+      if (
+        !turnId ||
+        !activitySummary?.available ||
+        !loadActivity ||
+        activity ||
+        activityLoading ||
+        activityHydratedAt === activitySummary.updatedAt
+      )
+        return;
+      activityLoadControllerRef.current?.abort();
+      const controller = new AbortController();
+      activityLoadControllerRef.current = controller;
+      setActivityLoading(true);
+      setActivityLoadError(null);
+      try {
+        const next = await loadActivity(turnId, controller.signal);
+        if (!controller.signal.aborted) {
+          setHydratedActivity(next);
+          setActivityHydratedAt(activitySummary.updatedAt);
+        }
+      } catch (error: any) {
+        if (!controller.signal.aborted && error?.name !== 'AbortError') {
+          setActivityLoadError(error?.message ?? String(error));
+        }
+      } finally {
+        if (!controller.signal.aborted) setActivityLoading(false);
+      }
+    }, [
+      activity,
+      activityHydratedAt,
+      activityLoading,
+      activitySummary?.available,
+      activitySummary?.updatedAt,
+      item.id,
+      loadActivity,
+    ]);
+    React.useEffect(() => {
+      if (
+        autoExpandAgentMessage &&
+        activitySummary?.available &&
+        !activity &&
+        !activityLoadError
+      ) void requestActivity();
+    }, [
+      activity,
+      activityLoadError,
+      activitySummary?.available,
+      autoExpandAgentMessage,
+      requestActivity,
+    ]);
+    React.useEffect(() => () => activityLoadControllerRef.current?.abort(), []);
     const activityHasResponse = agentRunActivityHasResponse(activity);
     const activityToolCallCount =
       activity?.messages.reduce((count, message) => count + toolCalls(message).length, 0) ?? 0;
@@ -185,7 +259,7 @@ export const TranscriptTurn = React.memo(
           />
         )}
 
-        {completedRunDurationMs !== null && !activity && !isSilentCompletion && !isUserOnly ? (
+        {completedRunDurationMs !== null && !activity && !activitySummary && !isSilentCompletion && !isUserOnly ? (
           <AgentRunSummaryLine
             active={false}
             durationMs={completedRunDurationMs}
@@ -199,6 +273,32 @@ export const TranscriptTurn = React.memo(
           />
         ) : null}
 
+        {!activity && activitySummary ? (
+          <div className="px-3">
+            <AgentRunSummaryLine
+              active={false}
+              durationMs={completedRunDurationMs ?? 0}
+              preRunDurationMs={preRunDurationMs}
+              label={completedRunDurationMs === null ? 'Run details' : undefined}
+              at={agentIso}
+              detail={
+                activitySummary.toolCallCount > 0
+                  ? `${activitySummary.toolCallCount} tool ${activitySummary.toolCallCount === 1 ? 'call' : 'calls'}`
+                  : `${activitySummary.messageCount} activity ${activitySummary.messageCount === 1 ? 'item' : 'items'}`
+              }
+              trailing={activityLoading ? <IconSpinner className="h-3.5 w-3.5" /> : <span>›</span>}
+              expanded={false}
+              onToggle={() => void requestActivity()}
+              toggleLabel="run details"
+            />
+            {activityLoadError ? (
+              <div className="px-3 pb-1 text-[var(--text-10)] text-[var(--red)]">
+                {activityLoadError}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
         {activity ? (
           <AgentRunActivityView
             activity={activity}
@@ -207,6 +307,7 @@ export const TranscriptTurn = React.memo(
             preRunDurationMs={preRunDurationMs}
             at={agentIso}
             autoExpandFinalMessage={autoExpandAgentMessage}
+            initiallyExpanded={Boolean(hydratedActivity)}
             plan={item.agentPlan}
             messageExtras={{
               messageId,
@@ -391,6 +492,16 @@ export const TranscriptTurn = React.memo(
     a.item.session === b.item.session &&
     a.item.logPath === b.item.logPath &&
     a.item.output === b.item.output &&
+    a.item.activity === b.item.activity &&
+    (a.item.activitySummary?.available ?? false) ===
+      (b.item.activitySummary?.available ?? false) &&
+    (a.item.activitySummary?.version ?? 0) === (b.item.activitySummary?.version ?? 0) &&
+    (a.item.activitySummary?.source ?? '') === (b.item.activitySummary?.source ?? '') &&
+    (a.item.activitySummary?.updatedAt ?? '') === (b.item.activitySummary?.updatedAt ?? '') &&
+    (a.item.activitySummary?.messageCount ?? 0) === (b.item.activitySummary?.messageCount ?? 0) &&
+    (a.item.activitySummary?.toolCallCount ?? 0) === (b.item.activitySummary?.toolCallCount ?? 0) &&
+    (a.item.activitySummary?.truncated ?? false) ===
+      (b.item.activitySummary?.truncated ?? false) &&
     a.item.userOnly === b.item.userOnly &&
     a.item.silentCompletion === b.item.silentCompletion &&
     sameAgentPlan(a.item.agentPlan, b.item.agentPlan) &&
@@ -424,5 +535,6 @@ export const TranscriptTurn = React.memo(
     (a.item.dockerSnapshot?.error ?? '') === (b.item.dockerSnapshot?.error ?? '') &&
     (a.showRoleIcons ?? false) === (b.showRoleIcons ?? false) &&
     (a.actionsEnabled ?? true) === (b.actionsEnabled ?? true) &&
+    a.loadActivity === b.loadActivity &&
     sameFollowUps(a.followUps ?? [], b.followUps ?? []),
 );

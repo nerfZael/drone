@@ -10,7 +10,7 @@ function buildUnexpectedHtmlError(url: string): string {
 }
 
 export function usePoll<T>(
-  fn: () => Promise<T>,
+  fn: (signal: AbortSignal) => Promise<T>,
   intervalMs: number,
   deps: React.DependencyList = [],
   opts?: { enabled?: boolean; isEqual?: (prev: T, next: T) => boolean },
@@ -26,6 +26,7 @@ export function usePoll<T>(
       return;
     }
     let mounted = true;
+    const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | null = null;
     let busy = false;
 
@@ -53,12 +54,12 @@ export function usePoll<T>(
       }
       busy = true;
       try {
-        const v = await fn();
+        const v = await fn(controller.signal);
         if (!mounted) return;
         setValue((prev) => (prev && opts?.isEqual?.(prev, v) ? prev : v));
         setError(null);
       } catch (e: any) {
-        if (!mounted) return;
+        if (!mounted || e?.name === 'AbortError') return;
         setError(e?.message ?? String(e));
       } finally {
         if (mounted) setLoading(false);
@@ -77,6 +78,7 @@ export function usePoll<T>(
 
     return () => {
       mounted = false;
+      controller.abort();
       clearTimer();
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
@@ -161,13 +163,13 @@ export function resolvePollIntervalMs(intervalMs: number, hiddenMinMs: number = 
   return Math.max(baseMs, hiddenMinMs);
 }
 
-export async function fetchJson<T>(url: string): Promise<T> {
+export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const observation = observeChatLoadRequest(url);
   let r: Response;
   let text = '';
   let parseMs = 0;
   try {
-    r = await fetch(url);
+    r = await fetch(url, init);
     observation?.response(r);
     text = await r.text();
   } catch (error) {

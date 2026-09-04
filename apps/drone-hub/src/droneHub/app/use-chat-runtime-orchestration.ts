@@ -43,6 +43,7 @@ import {
   readFreshChatRuntimeCache,
   writeChatRuntimeCache,
 } from './chat-runtime-cache';
+import { chatConfigAvailableForSelection } from './chat-selection-model';
 
 type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
 
@@ -254,7 +255,6 @@ export function useChatRuntimeOrchestration({
   const onChatInfoRejectedFromStateRef = React.useRef(onChatInfoRejectedFromState);
   onChatInfoResolvedFromStateRef.current = onChatInfoResolvedFromState;
   onChatInfoRejectedFromStateRef.current = onChatInfoRejectedFromState;
-  const chatConfigResolvedKeyRef = React.useRef('');
   const transcriptStateKeyRef = React.useRef(selectedChatCacheKey);
   const sessionStateKeyRef = React.useRef(selectedChatCacheKey);
   const optimisticPendingPromptsChatKeyRef = React.useRef(selectedChatCacheKey);
@@ -923,7 +923,12 @@ export function useChatRuntimeOrchestration({
     let reloadAfterCurrentLoad = false;
     let consecutiveTransientFailures = 0;
     let stateEtag: string | null = null;
-    let chatConfigResolved = chatConfigResolvedKeyRef.current === selectedChatCacheKey;
+    const controller = new AbortController();
+    let chatConfigResolved = chatConfigAvailableForSelection(
+      selectedChatInfoRef.current.value,
+      selectedChatInfoRef.current.key,
+      selectedChatCacheKey,
+    );
     const clearTimer = () => {
       if (timer == null) return;
       clearTimeout(timer);
@@ -952,6 +957,7 @@ export function useChatRuntimeOrchestration({
           tail: INITIAL_TRANSCRIPT_TAIL_TURNS,
           etag: stateEtag,
           includeConfig: !chatConfigResolved,
+          signal: controller.signal,
         });
         if (!mounted) return;
         stateEtag = data.etag;
@@ -965,7 +971,6 @@ export function useChatRuntimeOrchestration({
             throw new Error('Chat state response did not include chat configuration.');
           }
           chatConfigResolved = true;
-          chatConfigResolvedKeyRef.current = selectedChatCacheKey;
           onChatInfoResolvedFromStateRef.current(data.chatInfo);
         }
         const currentChatInfo = data.chatInfo ??
@@ -1092,6 +1097,7 @@ export function useChatRuntimeOrchestration({
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
       mounted = false;
+      controller.abort();
       unsubscribeChatEvents();
       clearTimer();
       document.removeEventListener('visibilitychange', onVisibilityChange);
@@ -1111,20 +1117,28 @@ export function useChatRuntimeOrchestration({
 
   React.useEffect(() => {
     if (chatUiMode !== 'cli' || !selectedDrone || !selectedChat) return;
-    if (chatConfigResolvedKeyRef.current === selectedChatCacheKey) return;
+    if (
+      chatConfigAvailableForSelection(
+        selectedChatInfoRef.current.value,
+        selectedChatInfoRef.current.key,
+        selectedChatCacheKey,
+      )
+    )
+      return;
     let mounted = true;
+    const controller = new AbortController();
     void fetchDroneChatStateCached({
       droneId: selectedDrone,
       chatName: selectedChat,
       includeConfig: true,
       includeTranscript: false,
+      signal: controller.signal,
     })
       .then((data) => {
         if (!mounted) return;
         if (data.notModified || !data.chatInfo) {
           throw new Error('Chat state response did not include chat configuration.');
         }
-        chatConfigResolvedKeyRef.current = selectedChatCacheKey;
         onChatInfoResolvedFromStateRef.current(data.chatInfo);
       })
       .catch((error) => {
@@ -1132,6 +1146,7 @@ export function useChatRuntimeOrchestration({
       });
     return () => {
       mounted = false;
+      controller.abort();
     };
   }, [chatUiMode, selectedChat, selectedChatCacheKey, selectedDrone]);
 

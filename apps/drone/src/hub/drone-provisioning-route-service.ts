@@ -187,7 +187,8 @@ function createDroneProvisioningServiceHandler(
     findDroneEntryByIdentity,
     findDroneIdByRef,
     gitResolveRemoteBranchForCreate,
-    getDroneRegistrySseLastSnapshot,
+    getDroneRegistrySseFreshSnapshot,
+    hasDroneRegistrySseConsumers,
     isSafePromptId,
     loadCanonicalActiveModel,
     loadCanonicalLifecycleModel,
@@ -218,7 +219,6 @@ function createDroneProvisioningServiceHandler(
     resolveEffectiveLlmProvider,
     resolveStableDroneOrPendingIdFromRef,
     scheduleDroneRegistryBroadcasterRefresh,
-    scheduleDroneStatusRefresh,
     setFleetActorConfig,
     startDroneChatBroadcaster,
     startDroneRegistryBroadcaster,
@@ -1362,7 +1362,7 @@ function createDroneProvisioningServiceHandler(
         res.on('close', cleanup);
         startDroneRegistryBroadcaster();
         writeHubSseEvent(res, 'connected', { ok: true, at: nowIso() });
-        const lastSnapshot = getDroneRegistrySseLastSnapshot();
+        const lastSnapshot = getDroneRegistrySseFreshSnapshot();
         if (lastSnapshot) {
           writeHubSseEvent(res, 'snapshot', lastSnapshot);
           scheduleDroneRegistryBroadcasterRefresh(0);
@@ -1436,15 +1436,25 @@ function createDroneProvisioningServiceHandler(
 
       // GET /api/drones
       if (method === 'GET' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'drones') {
-        scheduleDroneStatusRefresh('api:drones', 0);
         const timer = createRequestTimer();
         try {
-          const { drones } = await buildDroneRegistrySnapshot('api:drones', timer);
+          // The broadcaster snapshot is authoritative only while its background
+          // refresh loop has a live consumer. A disconnected client's fallback
+          // poll must build a fresh read instead of reusing the final SSE value.
+          const cachedSnapshot = hasDroneRegistrySseConsumers()
+            ? getDroneRegistrySseFreshSnapshot()
+            : null;
+          const { drones } =
+            cachedSnapshot ?? (await buildDroneRegistrySnapshot('api:drones', timer));
           timer.mark('snapshot');
           const data = JSON.stringify({ ok: true, drones }, null, 2);
           timer.mark('serialize');
           timer.setHeader(res);
-          logSlowHubRequest('drone list', timer, { status: 200, count: drones.length });
+          logSlowHubRequest('drone list', timer, {
+            status: 200,
+            count: drones.length,
+            snapshotCache: cachedSnapshot ? 'hit' : 'miss',
+          });
           sendSerializedJson(res, 200, data);
         } catch (e: any) {
           timer.mark('error');

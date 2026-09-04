@@ -96,6 +96,7 @@ import {
   type DeleteDroneChatOptions,
 } from './droneHub/app/sidebar-chat-delete-confirmation';
 import { markChatLoadSelectionCommitted } from './droneHub/app/chat-load-telemetry';
+import { subscribeDesktopEvents } from './droneHub/app/desktop-events';
 import {
   chatRuntimeCacheKey,
   deleteChatRuntimeCache,
@@ -1992,7 +1993,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   React.useEffect(() => {
     if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') return;
     let closed = false;
-    const source = new window.EventSource('/api/assistant/events');
     const handleAssistantChange = (event: MessageEvent) => {
       if (closed) return;
       let data: any = null;
@@ -2086,10 +2086,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         }, durationMs);
       }
     };
-    source.addEventListener('assistant_change', handleAssistantChange);
+    const unsubscribe = subscribeDesktopEvents({
+      handlers: { assistant_change: handleAssistantChange },
+    });
     return () => {
       closed = true;
-      source.close();
+      unsubscribe();
     };
   }, [
     expandGroupsForDroneIds,

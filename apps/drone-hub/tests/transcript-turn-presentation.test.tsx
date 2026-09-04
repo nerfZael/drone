@@ -239,6 +239,40 @@ describe('completed external transcript presentation', () => {
     expect(html.match(/The file is ready\./g)).toHaveLength(1);
   });
 
+  test('renders compact activity metadata before run details are hydrated', () => {
+    const html = renderToStaticMarkup(
+      <TranscriptTurn
+        item={{
+          turn: 3,
+          id: 'turn-3',
+          at: '2026-09-04T10:00:00.000Z',
+          completedAt: '2026-09-04T10:00:04.000Z',
+          prompt: 'Inspect the repository.',
+          session: 'external-session',
+          logPath: '',
+          ok: true,
+          output: 'Inspection complete.',
+          activitySummary: {
+            available: true,
+            version: 1,
+            source: 'codex',
+            updatedAt: '2026-09-04T10:00:04.000Z',
+            messageCount: 4,
+            toolCallCount: 2,
+            truncated: false,
+          },
+        }}
+        messageId="external-turn-summary"
+        loadActivity={async () => null}
+      />,
+    );
+
+    expect(html).toContain('2 tool calls');
+    expect(html).toContain('aria-label="Expand run details"');
+    expect(html).toContain('Inspection complete.');
+    expect(html).not.toContain('data-agent-run-activity="codex"');
+  });
+
   test('settles missing terminal tool results without leaving a spinner visible', () => {
     const html = renderToStaticMarkup(
       <TranscriptTurn

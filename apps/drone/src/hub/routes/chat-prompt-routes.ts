@@ -1,6 +1,9 @@
 import crypto from 'node:crypto';
 
-import { normalizePromptQueueInterruptionResolution } from '@drone/assistant-chat';
+import {
+  normalizeAgentRunActivity,
+  normalizePromptQueueInterruptionResolution,
+} from '@drone/assistant-chat';
 import type { ChatImageAttachment } from '../chat-attachments';
 import { chatPromptBodySchema } from '../chat-route-schemas';
 import { parseBoolParam } from '../hub-format';
@@ -50,7 +53,9 @@ type ChatPromptRouteDependencyName =
   | 'promoteQueuedNewChatAction'
   | 'readChatReadStateFromStore'
   | 'readChatSnapshot'
+  | 'readTranscriptTurnsByIdsFromStore'
   | 'resolveInterruptedPendingPrompt'
+  | 'resolveCanonicalDroneOrPendingForReadRef'
   | 'resolveChatTmuxCommand'
   | 'resolveDroneDaemonClientForEntry'
   | 'resolveDroneOrPendingForReadRef'
@@ -63,6 +68,38 @@ type ChatPromptRouteDependencyName =
 
 export type ChatPromptRouteDependencies =
   LegacyRouteDependencyContract<ChatPromptRouteDependencyName>;
+
+export function projectTranscriptActivity(
+  transcripts: readonly any[],
+  mode: 'summary' | 'none',
+): any[] {
+  return transcripts.map((turn) => {
+    const activity = normalizeAgentRunActivity(turn?.activity);
+    if (!activity) {
+      if (mode !== 'none' || !turn?.activitySummary) return turn;
+      const { activitySummary: _activitySummary, ...rest } = turn;
+      return rest;
+    }
+    const { activity: _activity, activitySummary: _activitySummary, ...rest } = turn;
+    if (mode === 'none') return rest;
+    const toolCallCount = activity.messages.reduce((count, message) => {
+      if (!Array.isArray(message?.content)) return count;
+      return count + message.content.filter((part: any) => part?.type === 'toolCall').length;
+    }, 0);
+    return {
+      ...rest,
+      activitySummary: {
+        available: true,
+        version: activity.version,
+        source: activity.source,
+        updatedAt: activity.updatedAt,
+        messageCount: activity.messages.length,
+        toolCallCount,
+        truncated: activity.truncated === true,
+      },
+    };
+  });
+}
 
 export function createChatPromptRouteHandler(
   deps: ChatPromptRouteDependencies,
@@ -108,7 +145,9 @@ export function createChatPromptRouteHandler(
     promoteQueuedNewChatAction,
     readChatReadStateFromStore,
     readChatSnapshot,
+    readTranscriptTurnsByIdsFromStore,
     resolveInterruptedPendingPrompt,
+    resolveCanonicalDroneOrPendingForReadRef,
     resolveChatTmuxCommand,
     resolveDroneDaemonClientForEntry,
     resolveDroneOrPendingForReadRef,
@@ -572,6 +611,52 @@ export function createChatPromptRouteHandler(
         }
       }
 
+      // GET /api/drones/:id/chats/:chat/turns/:turnId/activity
+      if (
+        method === 'GET' &&
+        parts.length === 8 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'chats' &&
+        parts[5] === 'turns' &&
+        parts[7] === 'activity'
+      ) {
+        const droneRef = decodeURIComponent(parts[2]);
+        const chatName = normalizeChatName(decodeURIComponent(parts[4]));
+        const requestedTurnId = String(decodeURIComponent(parts[6] ?? '')).trim();
+        const timer = createRequestTimer();
+        const resolved = await resolveCanonicalDroneOrPendingForReadRef(droneRef);
+        timer.mark('resolve');
+        if (!resolved) {
+          json(res, 404, { ok: false, error: `unknown drone: ${droneRef}` });
+          return;
+        }
+        const droneId = normalizeDroneIdentity(resolved.id);
+        const turn = requestedTurnId
+          ? readTranscriptTurnsByIdsFromStore({
+              droneId,
+              chatName,
+              turnIds: [requestedTurnId],
+            })[0]
+          : null;
+        timer.mark('read');
+        if (!turn) {
+          json(res, 404, { ok: false, error: `unknown chat turn: ${requestedTurnId || 'missing'}` });
+          return;
+        }
+        const activity = normalizeAgentRunActivity((turn as any).activity) ?? null;
+        timer.mark('normalize');
+        timer.setHeader(res);
+        jsonWithEtag(req, res, 200, {
+          ok: true,
+          droneId,
+          chatName,
+          turnId: requestedTurnId,
+          activity,
+        });
+        return;
+      }
+
       // GET /api/drones/:id/chats/:chat/state?transcript=selected|tail|page|full|none&pending=none
       if (
         method === 'GET' &&
@@ -622,6 +707,16 @@ export function createChatPromptRouteHandler(
             return;
           }
           const includeTranscript = transcriptMode !== 'none';
+          const activityMode = String(u.searchParams.get('activity') ?? 'full')
+            .trim()
+            .toLowerCase();
+          if (!['full', 'summary', 'none'].includes(activityMode)) {
+            json(res, 400, {
+              ok: false,
+              error: 'invalid activity mode (expected full, summary, or none)',
+            });
+            return;
+          }
           const includePending = !['none', 'false', '0'].includes(pendingMode);
           const includeSubscriptions = parseBoolParam(u.searchParams.get('subscriptions'), false);
           const includeConfigDetails = parseBoolParam(u.searchParams.get('config'), false);
@@ -654,6 +749,7 @@ export function createChatPromptRouteHandler(
             includeConfigDetails,
             maintenance: 'schedule',
             includeDockerSnapshotMaintenance: true,
+            activityMode: activityMode as 'full' | 'summary' | 'none',
             ifNoneMatch: includeVolatileState ? '' : String(req.headers['if-none-match'] ?? ''),
             mark: (name: string) => timer.mark(name),
           });
@@ -690,8 +786,17 @@ export function createChatPromptRouteHandler(
             pendingCount: snapshot.pending.length,
             status: 200,
           });
+          const responseSnapshot = activityMode === 'full'
+            ? snapshot
+            : {
+                ...snapshot,
+                transcripts: projectTranscriptActivity(
+                  snapshot.transcripts,
+                  activityMode as 'summary' | 'none',
+                ),
+              };
           const responseBody = {
-            ...chatSnapshotResponseBody(snapshot, { includeTranscriptMeta }),
+            ...chatSnapshotResponseBody(responseSnapshot, { includeTranscriptMeta }),
             ...(includeReadState
               ? {
                   readState: readChatReadStateFromStore({

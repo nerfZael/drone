@@ -551,6 +551,15 @@ export type TranscriptItem = {
   model?: string;
   reasoning?: string;
   activity?: AgentRunActivity;
+  activitySummary?: {
+    available: true;
+    version: 1;
+    source: AgentRunActivity['source'];
+    updatedAt: string;
+    messageCount: number;
+    toolCallCount: number;
+    truncated?: boolean;
+  };
   attachments?: ChatImageAttachmentRef[];
   inheritedFromClone?: boolean;
   session: string;

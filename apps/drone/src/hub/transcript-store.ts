@@ -18,7 +18,7 @@ import {
   type AgentRunActivity,
   type AgentSkillUse,
 } from '@drone/assistant-chat';
-import { compactActivityJsonSql } from '../host/activity-read-projection';
+import { summarizeActivityJsonSql } from '../host/activity-read-projection';
 import { normalizeAgentRunActivity } from './builtin-agent-activity';
 import type { AgentRunFileChangesBaseline } from './run-file-changes';
 import {
@@ -44,12 +44,23 @@ export type StoredTranscriptTurn = {
   model?: string;
   reasoning?: string;
   activity?: AgentRunActivity;
+  activitySummary?: StoredAgentRunActivitySummary;
   attachments?: unknown;
   inheritedFromClone?: boolean;
   dockerSnapshot?: unknown;
   agentPlan?: AgentPlan;
   skillsUsed?: AgentSkillUse[];
   fileChanges?: AgentRunFileChanges;
+};
+
+export type StoredAgentRunActivitySummary = {
+  available: true;
+  version: 1;
+  source: AgentRunActivity['source'];
+  updatedAt: string;
+  messageCount: number;
+  toolCallCount: number;
+  truncated: boolean;
 };
 
 export type StoredPendingPrompt = {
@@ -81,6 +92,7 @@ export type TranscriptStoreReadResult = {
   sourceHash: string;
   turns: Array<{ index: number; turn: StoredTranscriptTurn }>;
 };
+export type TranscriptActivityReadMode = 'full' | 'summary' | 'none';
 export type ChatReadVersion = {
   available: boolean;
   chat: Record<string, unknown> | null;
@@ -190,6 +202,72 @@ export type PermanentDroneChatCleanupResult = {
   archivedChatTombstonesDeleted: number;
   promptsDeleted: number;
 };
+
+function activeTurnProjectionsHaveActivitySummaries(
+  connection: HubDatabaseConnection,
+): boolean {
+  const row = connection
+    .prepare(`SELECT sql FROM sqlite_master
+      WHERE type = 'trigger' AND name = 'canonical_chat_turn_active_projection_insert'`)
+    .get() as { sql?: string } | undefined;
+  return String(row?.sql ?? '').includes('activitySummary');
+}
+
+function installActiveTurnProjections(
+  connection: HubDatabaseConnection,
+  opts: { rebuildExisting?: boolean } = {},
+): void {
+  const projectedTurn = summarizeActivityJsonSql('turn_json');
+  const projectedNewTurn = summarizeActivityJsonSql('NEW.turn_json');
+  const rebuildExisting = opts.rebuildExisting !== false;
+  connection.exec(`
+    CREATE TABLE IF NOT EXISTS canonical_chat_turn_active_projections (
+      drone_id TEXT NOT NULL,
+      chat_name TEXT NOT NULL,
+      turn_id TEXT NOT NULL,
+      turn_json TEXT NOT NULL,
+      PRIMARY KEY (drone_id, chat_name, turn_id),
+      FOREIGN KEY (drone_id, chat_name, turn_id)
+        REFERENCES canonical_chat_turns(drone_id, chat_name, turn_id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+    );
+
+    DROP TRIGGER IF EXISTS canonical_chat_turn_active_projection_insert;
+    DROP TRIGGER IF EXISTS canonical_chat_turn_active_projection_update;
+    ${
+      rebuildExisting
+        ? `DELETE FROM canonical_chat_turn_active_projections;
+    INSERT INTO canonical_chat_turn_active_projections (
+      drone_id, chat_name, turn_id, turn_json
+    )
+    SELECT drone_id, chat_name, turn_id, ${projectedTurn}
+    FROM canonical_chat_turns;`
+        : ''
+    }
+
+    CREATE TRIGGER canonical_chat_turn_active_projection_insert
+    AFTER INSERT ON canonical_chat_turns BEGIN
+      DELETE FROM canonical_chat_turn_active_projections
+      WHERE drone_id = NEW.drone_id
+        AND chat_name = NEW.chat_name
+        AND turn_id = NEW.turn_id;
+      INSERT INTO canonical_chat_turn_active_projections (
+        drone_id, chat_name, turn_id, turn_json
+      ) VALUES (NEW.drone_id, NEW.chat_name, NEW.turn_id, ${projectedNewTurn});
+    END;
+
+    CREATE TRIGGER canonical_chat_turn_active_projection_update
+    AFTER UPDATE OF turn_json ON canonical_chat_turns BEGIN
+      DELETE FROM canonical_chat_turn_active_projections
+      WHERE drone_id = NEW.drone_id
+        AND chat_name = NEW.chat_name
+        AND turn_id = NEW.turn_id;
+      INSERT INTO canonical_chat_turn_active_projections (
+        drone_id, chat_name, turn_id, turn_json
+      ) VALUES (NEW.drone_id, NEW.chat_name, NEW.turn_id, ${projectedNewTurn});
+    END;
+  `);
+}
 
 export const CHAT_STORE_MIGRATIONS: readonly HubDatabaseMigration[] = [
   {
@@ -545,48 +623,15 @@ export const CHAT_STORE_MIGRATIONS: readonly HubDatabaseMigration[] = [
     version: 11,
     name: 'compact active transcript read projections',
     migrate(connection) {
-      const compactTurn = compactActivityJsonSql('turn_json');
-      const compactNewTurn = compactActivityJsonSql('NEW.turn_json');
-      connection.exec(`
-        CREATE TABLE canonical_chat_turn_active_projections (
-          drone_id TEXT NOT NULL,
-          chat_name TEXT NOT NULL,
-          turn_id TEXT NOT NULL,
-          turn_json TEXT NOT NULL,
-          PRIMARY KEY (drone_id, chat_name, turn_id),
-          FOREIGN KEY (drone_id, chat_name, turn_id)
-            REFERENCES canonical_chat_turns(drone_id, chat_name, turn_id)
-            ON UPDATE CASCADE ON DELETE CASCADE
-        );
-
-        INSERT INTO canonical_chat_turn_active_projections (
-          drone_id, chat_name, turn_id, turn_json
-        )
-        SELECT drone_id, chat_name, turn_id, ${compactTurn}
-        FROM canonical_chat_turns;
-
-        CREATE TRIGGER canonical_chat_turn_active_projection_insert
-        AFTER INSERT ON canonical_chat_turns BEGIN
-          DELETE FROM canonical_chat_turn_active_projections
-          WHERE drone_id = NEW.drone_id
-            AND chat_name = NEW.chat_name
-            AND turn_id = NEW.turn_id;
-          INSERT INTO canonical_chat_turn_active_projections (
-            drone_id, chat_name, turn_id, turn_json
-          ) VALUES (NEW.drone_id, NEW.chat_name, NEW.turn_id, ${compactNewTurn});
-        END;
-
-        CREATE TRIGGER canonical_chat_turn_active_projection_update
-        AFTER UPDATE OF turn_json ON canonical_chat_turns BEGIN
-          DELETE FROM canonical_chat_turn_active_projections
-          WHERE drone_id = NEW.drone_id
-            AND chat_name = NEW.chat_name
-            AND turn_id = NEW.turn_id;
-          INSERT INTO canonical_chat_turn_active_projections (
-            drone_id, chat_name, turn_id, turn_json
-          ) VALUES (NEW.drone_id, NEW.chat_name, NEW.turn_id, ${compactNewTurn});
-        END;
-      `);
+      installActiveTurnProjections(connection);
+    },
+  },
+  {
+    version: 12,
+    name: 'summarize activity in active transcript read projections',
+    migrate(connection) {
+      const rebuildExisting = !activeTurnProjectionsHaveActivitySummaries(connection);
+      installActiveTurnProjections(connection, { rebuildExisting });
     },
   },
 ];
@@ -734,6 +779,22 @@ function normalizeTurn(raw: any): StoredTranscriptTurn {
   const at = String(raw?.at ?? new Date().toISOString());
   const id = typeof raw?.id === 'string' && raw.id.trim() ? raw.id.trim() : undefined;
   const activity = normalizeAgentRunActivity(raw?.activity);
+  const activitySummaryRaw = raw?.activitySummary;
+  const activitySummary =
+    activitySummaryRaw?.available === true &&
+    activitySummaryRaw?.version === 1 &&
+    typeof activitySummaryRaw?.source === 'string' &&
+    typeof activitySummaryRaw?.updatedAt === 'string'
+      ? ({
+          available: true,
+          version: 1,
+          source: activitySummaryRaw.source,
+          updatedAt: activitySummaryRaw.updatedAt,
+          messageCount: Math.max(0, Number(activitySummaryRaw.messageCount) || 0),
+          toolCallCount: Math.max(0, Number(activitySummaryRaw.toolCallCount) || 0),
+          truncated: activitySummaryRaw.truncated === true,
+        } as StoredAgentRunActivitySummary)
+      : undefined;
   const skillsUsed = normalizeAgentSkillUses(raw?.skillsUsed);
   const { output, silentCompletion } = normalizeSilentCompletion(
     Boolean(raw?.ok),
@@ -760,6 +821,7 @@ function normalizeTurn(raw: any): StoredTranscriptTurn {
     ...(typeof raw?.model === 'string' && raw.model.trim() ? { model: raw.model.trim() } : {}),
     ...(typeof raw?.reasoning === 'string' && raw.reasoning.trim() ? { reasoning: raw.reasoning.trim() } : {}),
     ...(activity ? { activity } : {}),
+    ...(activitySummary ? { activitySummary } : {}),
     ...(Array.isArray(raw?.attachments) ? { attachments: raw.attachments } : {}),
     ...(raw?.inheritedFromClone === true ? { inheritedFromClone: true } : {}),
     ...(raw?.dockerSnapshot && typeof raw.dockerSnapshot === 'object' ? { dockerSnapshot: raw.dockerSnapshot } : {}),
@@ -767,6 +829,45 @@ function normalizeTurn(raw: any): StoredTranscriptTurn {
     ...(skillsUsed.length > 0 ? { skillsUsed } : {}),
     ...(raw?.fileChanges && typeof raw.fileChanges === 'object' ? { fileChanges: raw.fileChanges } : {}),
   };
+}
+
+function projectTurnActivityForRead(
+  turn: StoredTranscriptTurn,
+  mode: TranscriptActivityReadMode,
+): StoredTranscriptTurn {
+  if (mode === 'full') return turn;
+  const { activity, activitySummary, ...rest } = turn;
+  if (mode === 'none') return rest;
+  if (activitySummary) return { ...rest, activitySummary };
+  if (!activity) return rest;
+  return {
+    ...rest,
+    activitySummary: {
+      available: true,
+      version: activity.version,
+      source: activity.source,
+      updatedAt: activity.updatedAt,
+      messageCount: activity.messages.length,
+      toolCallCount: activity.messages.reduce(
+        (count, message) =>
+          count +
+          (Array.isArray(message?.content)
+            ? message.content.filter((part: any) => part?.type === 'toolCall').length
+            : 0),
+        0,
+      ),
+      truncated: activity.truncated === true,
+    },
+  };
+}
+
+function contiguousIndexRange(indexes: readonly number[]): { start: number; count: number } | null {
+  if (indexes.length === 0) return null;
+  const start = indexes[0];
+  for (let offset = 1; offset < indexes.length; offset += 1) {
+    if (indexes[offset] !== start + offset) return null;
+  }
+  return { start, count: indexes.length };
 }
 
 function stripRetiredChatMetadata(raw: unknown): Record<string, any> {
@@ -1972,18 +2073,89 @@ export class ChatTranscriptRepository {
     });
   }
 
-  read(opts: { droneId: string; chatName: string; indexes: number[] }): TranscriptStoreReadResult {
+  read(opts: {
+    droneId: string;
+    chatName: string;
+    indexes: number[];
+    activityMode?: TranscriptActivityReadMode;
+  }): TranscriptStoreReadResult {
     return this.database.read((connection) => {
       const row = this.chatRow(connection, opts.droneId, opts.chatName);
-      const turns = this.projectTurns(connection, opts.droneId, opts.chatName);
+      const countRow = connection
+        .prepare(`SELECT COUNT(*) AS count FROM canonical_chat_turns
+          WHERE drone_id = ? AND chat_name = ?`)
+        .get(opts.droneId, opts.chatName) as { count: number };
+      const indexes = [
+        ...new Set(opts.indexes.filter((value) => Number.isSafeInteger(value) && value >= 0)),
+      ].sort((left, right) => left - right);
+      const turns: Array<{ index: number; turn: StoredTranscriptTurn }> = [];
+      const activityMode = opts.activityMode ?? 'full';
+      const projectionJoin =
+        activityMode === 'full'
+          ? ''
+          : `JOIN canonical_chat_turn_active_projections AS projection
+              ON projection.drone_id = turns.drone_id
+              AND projection.chat_name = turns.chat_name
+              AND projection.turn_id = turns.turn_id`;
+      const selectedJson = activityMode === 'full' ? 'turns.turn_json' : 'projection.turn_json';
+      const appendRows = (selectedRows: Array<{ turn_index: number; turn_json: string }>) => {
+        for (const selectedRow of selectedRows) {
+          const turn = projectTurnActivityForRead(
+            normalizeTurn(parseJson(selectedRow.turn_json)),
+            activityMode,
+          );
+          turns.push({ index: Number(selectedRow.turn_index), turn });
+        }
+      };
+      const contiguousRange = indexes.length > 400 ? contiguousIndexRange(indexes) : null;
+      if (contiguousRange) {
+        const selectedRows = connection
+          .prepare(`SELECT ${selectedJson} AS turn_json
+            FROM canonical_chat_turns AS turns
+            ${projectionJoin}
+            WHERE turns.drone_id = ? AND turns.chat_name = ?
+            ORDER BY COALESCE(turns.prompt_at, turns.at), turns.completed_at,
+              turns.ordinal, turns.turn_id
+            LIMIT ? OFFSET ?`)
+          .all(
+            opts.droneId,
+            opts.chatName,
+            contiguousRange.count,
+            contiguousRange.start,
+          ) as Array<{ turn_json: string }>;
+        appendRows(selectedRows.map((selectedRow, offset) => ({
+          ...selectedRow,
+          turn_index: contiguousRange.start + offset,
+        })));
+      } else {
+        for (let offset = 0; offset < indexes.length; offset += 400) {
+          const batch = indexes.slice(offset, offset + 400);
+          const placeholders = batch.map(() => '?').join(', ');
+          const selectedRows = connection
+          .prepare(`WITH ordered AS (
+            SELECT ROW_NUMBER() OVER (
+              ORDER BY COALESCE(turns.prompt_at, turns.at), turns.completed_at,
+                turns.ordinal, turns.turn_id
+            ) - 1 AS turn_index, ${selectedJson} AS turn_json
+            FROM canonical_chat_turns AS turns
+            ${projectionJoin}
+            WHERE turns.drone_id = ? AND turns.chat_name = ?
+          )
+          SELECT turn_index, turn_json FROM ordered
+          WHERE turn_index IN (${placeholders}) ORDER BY turn_index`)
+          .all(opts.droneId, opts.chatName, ...batch) as Array<{
+            turn_index: number;
+            turn_json: string;
+          }>;
+          appendRows(selectedRows);
+        }
+      }
       return {
         available: true,
-        count: turns.length,
+        count: Number(countRow?.count ?? 0),
         transcriptVersion: Number(row?.transcript_version ?? 0),
-        sourceHash: row?.turns_source_hash || transcriptTurnsSourceHash(turns),
-        turns: opts.indexes
-          .map((index) => turns[index] ? { index, turn: turns[index] } : null)
-          .filter((item): item is { index: number; turn: StoredTranscriptTurn } => Boolean(item)),
+        sourceHash: row?.turns_source_hash || transcriptTurnsSourceHash([]),
+        turns,
       };
     });
   }
@@ -2013,22 +2185,67 @@ export class ChatTranscriptRepository {
     });
   }
 
-  readRows(opts: { droneId: string; chatName: string; indexes: number[]; includePending: boolean }): ChatReadRows {
+  readRows(opts: {
+    droneId: string;
+    chatName: string;
+    indexes: number[];
+    includePending: boolean;
+    activityMode?: TranscriptActivityReadMode;
+  }): ChatReadRows {
     return this.database.read((connection) => {
       const indexes = [...new Set(opts.indexes.filter((value) => Number.isSafeInteger(value) && value >= 0))].sort((a, b) => a - b);
+      const activityMode = opts.activityMode ?? 'full';
+      const projectionJoin =
+        activityMode === 'full'
+          ? ''
+          : `JOIN canonical_chat_turn_active_projections AS projection
+              ON projection.drone_id = turns.drone_id
+              AND projection.chat_name = turns.chat_name
+              AND projection.turn_id = turns.turn_id`;
+      const selectedJson = activityMode === 'full' ? 'turns.turn_json' : 'projection.turn_json';
       let turns: Array<{ index: number; turn: StoredTranscriptTurn }> = [];
       if (indexes.length > 0) {
-        for (let offset = 0; offset < indexes.length; offset += 400) {
-          const batch = indexes.slice(offset, offset + 400);
-          const placeholders = batch.map(() => '?').join(', ');
-          const rows = connection.prepare(`WITH ordered AS (
-            SELECT ROW_NUMBER() OVER (
-              ORDER BY COALESCE(prompt_at, at), completed_at, ordinal, turn_id
-            ) - 1 AS turn_index, turn_json
-            FROM canonical_chat_turns WHERE drone_id = ? AND chat_name = ?
-          ) SELECT turn_index, turn_json FROM ordered WHERE turn_index IN (${placeholders}) ORDER BY turn_index`)
-            .all(opts.droneId, opts.chatName, ...batch) as Array<{ turn_index: number; turn_json: string }>;
-          turns.push(...rows.map((row) => ({ index: Number(row.turn_index), turn: normalizeTurn(parseJson(row.turn_json)) })));
+        const appendRows = (rows: Array<{ turn_index: number; turn_json: string }>) => {
+          turns.push(...rows.map((row) => ({
+            index: Number(row.turn_index),
+            turn: projectTurnActivityForRead(normalizeTurn(parseJson(row.turn_json)), activityMode),
+          })));
+        };
+        const contiguousRange = indexes.length > 400 ? contiguousIndexRange(indexes) : null;
+        if (contiguousRange) {
+          const rows = connection.prepare(`SELECT ${selectedJson} AS turn_json
+            FROM canonical_chat_turns AS turns
+            ${projectionJoin}
+            WHERE turns.drone_id = ? AND turns.chat_name = ?
+            ORDER BY COALESCE(turns.prompt_at, turns.at), turns.completed_at,
+              turns.ordinal, turns.turn_id
+            LIMIT ? OFFSET ?`)
+            .all(
+              opts.droneId,
+              opts.chatName,
+              contiguousRange.count,
+              contiguousRange.start,
+            ) as Array<{ turn_json: string }>;
+          appendRows(rows.map((row, offset) => ({
+            ...row,
+            turn_index: contiguousRange.start + offset,
+          })));
+        } else {
+          for (let offset = 0; offset < indexes.length; offset += 400) {
+            const batch = indexes.slice(offset, offset + 400);
+            const placeholders = batch.map(() => '?').join(', ');
+            const rows = connection.prepare(`WITH ordered AS (
+              SELECT ROW_NUMBER() OVER (
+                ORDER BY COALESCE(turns.prompt_at, turns.at), turns.completed_at,
+                  turns.ordinal, turns.turn_id
+              ) - 1 AS turn_index, ${selectedJson} AS turn_json
+              FROM canonical_chat_turns AS turns
+              ${projectionJoin}
+              WHERE turns.drone_id = ? AND turns.chat_name = ?
+            ) SELECT turn_index, turn_json FROM ordered WHERE turn_index IN (${placeholders}) ORDER BY turn_index`)
+              .all(opts.droneId, opts.chatName, ...batch) as Array<{ turn_index: number; turn_json: string }>;
+            appendRows(rows);
+          }
         }
       }
       const pending = opts.includePending ? this.projectPending(connection, opts.droneId, opts.chatName) : [];
@@ -3241,6 +3458,7 @@ export function readChatRowsFromStore(opts: {
   chatName: string;
   indexes: number[];
   includePending: boolean;
+  activityMode?: TranscriptActivityReadMode;
 }): ChatReadRows {
   const store = repository();
   if (store) return store.readRows(opts);
@@ -3248,7 +3466,11 @@ export function readChatRowsFromStore(opts: {
   const turns = Array.isArray(read.chat?.turns) ? read.chat.turns : [];
   return {
     available: true,
-    turns: opts.indexes.flatMap((index) => turns[index] ? [{ index, turn: turns[index] }] : []),
+    turns: opts.indexes.flatMap((index) =>
+      turns[index]
+        ? [{ index, turn: projectTurnActivityForRead(turns[index], opts.activityMode ?? 'full') }]
+        : [],
+    ),
     pending: opts.includePending && Array.isArray(read.chat?.pendingPrompts) ? read.chat.pendingPrompts : [],
     pendingTurns: turns,
   };
@@ -3266,11 +3488,17 @@ export async function importTranscriptTurnsFromRegistry(opts: { droneId: string;
   return { available: true, transcriptVersion: turns.length, sourceHash: transcriptTurnsSourceHash(turns) };
 }
 
-export function readTranscriptTurnsFromStore(opts: { droneId: string; chatName: string; indexes: number[] }): TranscriptStoreReadResult {
+export function readTranscriptTurnsFromStore(opts: {
+  droneId: string;
+  chatName: string;
+  indexes: number[];
+  activityMode?: TranscriptActivityReadMode;
+}): TranscriptStoreReadResult {
   const store = repository();
   if (store) return store.read(opts);
   const turns = sortedTurns(memoryTurnMap(opts.droneId, opts.chatName).values());
-  return { available: true, count: turns.length, transcriptVersion: turns.length, sourceHash: transcriptTurnsSourceHash(turns), turns: opts.indexes.map((index) => turns[index] ? { index, turn: turns[index] } : null).filter((item): item is { index: number; turn: StoredTranscriptTurn } => Boolean(item)) };
+  const activityMode = opts.activityMode ?? 'full';
+  return { available: true, count: turns.length, transcriptVersion: turns.length, sourceHash: transcriptTurnsSourceHash(turns), turns: opts.indexes.map((index) => turns[index] ? { index, turn: projectTurnActivityForRead(turns[index], activityMode) } : null).filter((item): item is { index: number; turn: StoredTranscriptTurn } => Boolean(item)) };
 }
 
 export function readTranscriptTurnsByIdsFromStore(opts: {

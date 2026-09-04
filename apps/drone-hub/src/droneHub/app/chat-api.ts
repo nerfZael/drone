@@ -1,4 +1,4 @@
-import { sameAgentPlan } from '@drone/assistant-chat';
+import { sameAgentPlan, type AgentRunActivity } from '@drone/assistant-chat';
 import type { ChatSendPayload } from '../chat';
 import { requestJsonConditional } from '../http';
 import type { PendingPrompt, TranscriptItem } from '../types';
@@ -163,6 +163,23 @@ function sameActivity(
   return JSON.stringify(left.messages) === JSON.stringify(right.messages);
 }
 
+function sameActivitySummary(
+  left: TranscriptItem['activitySummary'],
+  right: TranscriptItem['activitySummary'],
+): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return (
+    left.available === right.available &&
+    left.version === right.version &&
+    left.source === right.source &&
+    left.updatedAt === right.updatedAt &&
+    left.messageCount === right.messageCount &&
+    left.toolCallCount === right.toolCallCount &&
+    left.truncated === right.truncated
+  );
+}
+
 export function sameTranscriptItem(left: TranscriptItem, right: TranscriptItem): boolean {
   return (
     left.turn === right.turn &&
@@ -187,6 +204,7 @@ export function sameTranscriptItem(left: TranscriptItem, right: TranscriptItem):
     sameAgentPlan(left.agentPlan, right.agentPlan) &&
     sameFileChanges(left.fileChanges, right.fileChanges) &&
     sameActivity(left.activity, right.activity) &&
+    sameActivitySummary(left.activitySummary, right.activitySummary) &&
     sameDockerSnapshot(left.dockerSnapshot, right.dockerSnapshot)
   );
 }
@@ -327,10 +345,31 @@ export async function fetchDroneChatTranscript(
   qs.set('transcript', 'selected');
   qs.set('pending', 'none');
   qs.set('transcriptMeta', '0');
+  // Transcript exports only use prompt/result fields, so avoid reading run
+  // activity for every historical turn.
+  qs.set('activity', 'none');
   const data = await requestJson<{ ok: true; transcripts: TranscriptItem[] }>(
     `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/state?${qs.toString()}`,
   );
   return Array.isArray(data?.transcripts) ? data.transcripts : [];
+}
+
+export async function fetchDroneChatTurnActivity(opts: {
+  droneId: string;
+  chatName: string;
+  turnId: string;
+  signal?: AbortSignal;
+}): Promise<AgentRunActivity | null> {
+  const response = await requestJsonConditional<{
+    ok: true;
+    activity?: TranscriptItem['activity'] | null;
+  }>(
+    `/api/drones/${encodeURIComponent(opts.droneId)}/chats/${encodeURIComponent(
+      opts.chatName,
+    )}/turns/${encodeURIComponent(opts.turnId)}/activity`,
+    { signal: opts.signal },
+  );
+  return response.notModified ? null : (response.data.activity ?? null);
 }
 
 export async function fetchDroneChatState(
@@ -353,6 +392,7 @@ export async function fetchDroneChatState(
   }
   qs.set('subscriptions', 'true');
   qs.set('transcriptMeta', opts.includeTranscriptMeta ? '1' : '0');
+  qs.set('activity', 'summary');
   const data = await requestJson<{
     ok: true;
     chatId?: string | null;
@@ -381,6 +421,7 @@ export async function fetchDroneChatStateCached(opts: {
   etag?: string | null;
   includeConfig?: boolean;
   includeTranscript?: boolean;
+  signal?: AbortSignal;
 }): Promise<FetchDroneChatStateCachedResult> {
   const droneId = String(opts.droneId ?? '').trim();
   const chatName = String(opts.chatName ?? '').trim() || 'default';
@@ -396,6 +437,7 @@ export async function fetchDroneChatStateCached(opts: {
   qs.set('subscriptions', opts.includeConfig ? 'true' : 'false');
   qs.set('readState', 'false');
   qs.set('transcriptMeta', '0');
+  qs.set('activity', 'summary');
   if (opts.includeConfig) qs.set('config', 'true');
   const url = `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/state?${qs.toString()}`;
   const response = await fetchJsonCached<{
@@ -403,7 +445,7 @@ export async function fetchDroneChatStateCached(opts: {
     transcripts: TranscriptItem[];
     pending: PendingPrompt[];
     agent?: unknown;
-  }>(url, opts.etag);
+  }>(url, opts.etag, opts.signal);
   if (response.notModified) return { etag: response.etag, notModified: true };
   return {
     transcripts: Array.isArray(response.data?.transcripts) ? response.data.transcripts : [],
@@ -431,6 +473,7 @@ export async function fetchDroneChatTranscriptCached(opts: {
   qs.set('transcript', 'selected');
   qs.set('pending', 'none');
   qs.set('transcriptMeta', '0');
+  qs.set('activity', 'summary');
   const url = `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/state?${qs.toString()}`;
   const response = await fetchJsonCached<{ ok: true; transcripts: TranscriptItem[] }>(
     url,
@@ -449,6 +492,7 @@ export async function fetchDroneChatTranscriptCached(opts: {
 async function fetchJsonCached<T>(
   url: string,
   etagRaw: string | null | undefined,
+  signal?: AbortSignal,
 ): Promise<
   | { data: null; etag: string | null; notModified: true }
   | { data: T; etag: string | null; notModified: false }
@@ -456,5 +500,5 @@ async function fetchJsonCached<T>(
   const headers = new Headers();
   const etag = String(etagRaw ?? '').trim();
   if (etag) headers.set('if-none-match', etag);
-  return requestJsonConditional<T>(url, { headers });
+  return requestJsonConditional<T>(url, { headers, signal });
 }

@@ -4,6 +4,7 @@ import {
   fetchDroneChatStateCached,
   fetchDroneChatTranscript,
   sameTranscriptItem,
+  sameTranscriptItems,
   sendDroneChatPrompt,
 } from '../src/droneHub/app/chat-api';
 import type { TranscriptItem } from '../src/droneHub/types';
@@ -105,6 +106,25 @@ describe('chat api transcript equality', () => {
     expect(sameTranscriptItem(before, after)).toBe(false);
   });
 
+  test('detects a compact activity summary update', () => {
+    const left = transcriptItem({
+      activitySummary: {
+        available: true,
+        version: 1,
+        source: 'codex',
+        updatedAt: '2026-09-04T10:00:00.000Z',
+        messageCount: 2,
+        toolCallCount: 1,
+        truncated: false,
+      },
+    });
+    const right = transcriptItem({
+      activitySummary: { ...left.activitySummary!, messageCount: 3 },
+    });
+
+    expect(sameTranscriptItems([left], [right])).toBe(false);
+  });
+
   test('detects steering presentation metadata', () => {
     const before = transcriptItem({ userOnly: true });
     const after = transcriptItem({ userOnly: true, deliveryMode: 'asap' });
@@ -167,7 +187,7 @@ describe('chat api request scopes', () => {
     );
 
     expect(urls).toEqual([
-      '/api/drones/drone%20one/chats/default/state?turn=all&tail=50&transcript=tail&subscriptions=true&transcriptMeta=0',
+      '/api/drones/drone%20one/chats/default/state?turn=all&tail=50&transcript=tail&subscriptions=true&transcriptMeta=0&activity=summary',
     ]);
     expect(result.transcripts).toHaveLength(1);
     expect(result.pending).toHaveLength(1);
@@ -211,7 +231,7 @@ describe('chat api request scopes', () => {
     );
 
     expect(urls).toEqual([
-      '/api/drones/drone-1/chats/chat%20one/state?turn=all&transcript=selected&pending=none&transcriptMeta=0',
+      '/api/drones/drone-1/chats/chat%20one/state?turn=all&transcript=selected&pending=none&transcriptMeta=0&activity=none',
     ]);
   });
 
@@ -248,11 +268,11 @@ describe('chat api request scopes', () => {
       expect(second).toEqual({ etag: '"state-1"', notModified: true });
       expect(requests).toEqual([
         {
-          url: '/api/drones/drone%20one/chats/default/state?turn=all&tail=50&transcript=tail&subscriptions=false&readState=false&transcriptMeta=0',
+          url: '/api/drones/drone%20one/chats/default/state?turn=all&tail=50&transcript=tail&subscriptions=false&readState=false&transcriptMeta=0&activity=summary',
           etag: null,
         },
         {
-          url: '/api/drones/drone%20one/chats/default/state?turn=all&tail=50&transcript=tail&subscriptions=false&readState=false&transcriptMeta=0',
+          url: '/api/drones/drone%20one/chats/default/state?turn=all&tail=50&transcript=tail&subscriptions=false&readState=false&transcriptMeta=0&activity=summary',
           etag: '"state-1"',
         },
       ]);

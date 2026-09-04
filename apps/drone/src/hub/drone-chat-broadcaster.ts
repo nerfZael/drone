@@ -1,15 +1,18 @@
 import type { ServerResponse } from 'node:http';
 
 type ChatRef = { droneId: string; chatName: string };
+export type DroneChatEventSubscriber = (event: string, data: any) => void;
 
 export class DroneChatBroadcaster {
   readonly clients = new Set<ServerResponse>();
   readonly lastByKey = new Map<string, string>();
+  private readonly subscribers = new Set<DroneChatEventSubscriber>();
 
   private refreshTimeout: ReturnType<typeof setTimeout> | null = null;
   private keepAliveTimer: ReturnType<typeof setInterval> | null = null;
   private readonly pendingChanges = new Map<string, ChatRef>();
   private fullRefreshPending = false;
+  private pendingBroadcastSnapshot = false;
   private busy = false;
   private snapshotInitialized = false;
 
@@ -22,6 +25,26 @@ export class DroneChatBroadcaster {
       writeSseEvent: (response: ServerResponse, event: string, data: any) => void;
     },
   ) {}
+
+  get hasConsumers(): boolean {
+    return this.clients.size > 0 || this.subscribers.size > 0;
+  }
+
+  get snapshot(): { ok: true; chats: ChatRef[]; at: string } | null {
+    if (!this.snapshotInitialized) return null;
+    return {
+      ok: true,
+      chats: Array.from(this.lastByKey.keys())
+        .map((key) => this.parseKey(key))
+        .filter((chat): chat is ChatRef => Boolean(chat)),
+      at: this.deps.nowIso(),
+    };
+  }
+
+  subscribe(subscriber: DroneChatEventSubscriber): () => void {
+    this.subscribers.add(subscriber);
+    return () => this.subscribers.delete(subscriber);
+  }
 
   private key(droneIdRaw: string, chatNameRaw: string): string {
     return `${this.deps.normalizeDroneId(droneIdRaw)}\u0000${this.deps.normalizeChatName(chatNameRaw)}`;
@@ -49,7 +72,9 @@ export class DroneChatBroadcaster {
             outputLength: String(lastTurn?.output ?? '').length,
             outputTail: String(lastTurn?.output ?? '').slice(-256),
             agentPlan: lastTurn?.agentPlan ?? null,
-            activityUpdatedAt: String(lastTurn?.activity?.updatedAt ?? ''),
+            activityUpdatedAt: String(
+              lastTurn?.activity?.updatedAt ?? lastTurn?.activitySummary?.updatedAt ?? '',
+            ),
           }
         : null,
       pendingPrompts: pendingPrompts.map((item: any) => ({
@@ -93,13 +118,20 @@ export class DroneChatBroadcaster {
         this.deps.writeSseEvent(client, event, data);
       }
     }
+    for (const subscriber of Array.from(this.subscribers)) {
+      try {
+        subscriber(event, data);
+      } catch {
+        // One transport subscriber must not interrupt chat invalidations.
+      }
+    }
   }
 
   private ensureRefreshScheduled(delayMs: number): void {
     // A timer that fires while a snapshot is being built cannot do useful
     // work. Leave the request pending and let refresh() schedule it after the
     // in-flight build releases the broadcaster.
-    if (this.clients.size === 0 || this.refreshTimeout || this.busy) return;
+    if (!this.hasConsumers || this.refreshTimeout || this.busy) return;
     this.refreshTimeout = setTimeout(
       () => {
         this.refreshTimeout = null;
@@ -111,15 +143,23 @@ export class DroneChatBroadcaster {
   }
 
   async refresh(opts?: { broadcastSnapshot?: boolean }): Promise<void> {
-    if (this.clients.size === 0 || this.busy) return;
+    if (!this.hasConsumers) return;
+    if (this.busy) {
+      this.fullRefreshPending = true;
+      this.pendingBroadcastSnapshot ||= opts?.broadcastSnapshot === true;
+      return;
+    }
     this.busy = true;
     const claimedChanges = new Map(this.pendingChanges);
     const claimedFullRefresh = this.fullRefreshPending;
+    const broadcastSnapshot =
+      opts?.broadcastSnapshot === true || this.pendingBroadcastSnapshot;
     this.pendingChanges.clear();
     this.fullRefreshPending = false;
+    this.pendingBroadcastSnapshot = false;
     try {
       if (
-        !opts?.broadcastSnapshot &&
+        !broadcastSnapshot &&
         !claimedFullRefresh &&
         (this.snapshotInitialized || this.lastByKey.size > 0) &&
         claimedChanges.size > 0
@@ -129,15 +169,9 @@ export class DroneChatBroadcaster {
         return;
       }
       const next = await this.buildSnapshot();
-      if (opts?.broadcastSnapshot || (!this.snapshotInitialized && this.lastByKey.size === 0)) {
+      if (broadcastSnapshot || (!this.snapshotInitialized && this.lastByKey.size === 0)) {
         this.replaceSnapshot(next);
-        this.broadcast('snapshot', {
-          ok: true,
-          chats: Array.from(next.keys())
-            .map((key) => this.parseKey(key))
-            .filter(Boolean),
-          at: this.deps.nowIso(),
-        });
+        this.broadcast('snapshot', this.snapshot);
         return;
       }
 
@@ -163,7 +197,8 @@ export class DroneChatBroadcaster {
         });
       }
     } catch (error: any) {
-      if (claimedFullRefresh) this.fullRefreshPending = true;
+      if (claimedFullRefresh || broadcastSnapshot) this.fullRefreshPending = true;
+      if (broadcastSnapshot) this.pendingBroadcastSnapshot = true;
       for (const [key, change] of claimedChanges) {
         if (!this.pendingChanges.has(key)) this.pendingChanges.set(key, change);
       }
@@ -200,7 +235,7 @@ export class DroneChatBroadcaster {
   }
 
   stopIfIdle(): void {
-    if (this.clients.size > 0) return;
+    if (this.hasConsumers) return;
     this.stop();
   }
 
@@ -211,8 +246,9 @@ export class DroneChatBroadcaster {
     this.keepAliveTimer = null;
     this.pendingChanges.clear();
     this.fullRefreshPending = false;
-    this.busy = false;
+    this.pendingBroadcastSnapshot = false;
     this.snapshotInitialized = false;
     this.clients.clear();
+    this.subscribers.clear();
   }
 }

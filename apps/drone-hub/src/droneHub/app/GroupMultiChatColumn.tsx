@@ -49,6 +49,7 @@ import {
   droneChatEventMatches,
   fetchDroneChatState,
   fetchDroneChatTranscriptCached,
+  fetchDroneChatTurnActivity,
   sameTranscriptItems,
   sendDroneChatPrompt,
 } from './chat-api';
@@ -121,6 +122,11 @@ export function GroupMultiChatColumn({
   );
   const chatCacheKey = React.useMemo(() => `${drone.id}\u0000${chatName}`, [chatName, drone.id]);
   const droneHome = React.useMemo(() => droneHomePath(drone), [drone]);
+  const loadTranscriptActivity = React.useCallback(
+    (turnId: string, signal: AbortSignal) =>
+      fetchDroneChatTurnActivity({ droneId: drone.id, chatName, turnId, signal }),
+    [chatName, drone.id],
+  );
   const [transcripts, setTranscripts] = React.useState<TranscriptItem[] | null>(null);
   const [chatId, setChatId] = React.useState<string | null>(null);
   const [chatSubscriptions, setChatSubscriptions] = React.useState<ChatResourceSubscriptionInfo[]>(
@@ -1214,6 +1220,7 @@ export function GroupMultiChatColumn({
                     droneId={drone.id}
                     droneHomePath={droneHome}
                     showRoleIcons={false}
+                    loadActivity={loadTranscriptActivity}
                   />
                 );
               }

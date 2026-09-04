@@ -24,6 +24,7 @@ const {
   markChatUnreadInStore,
   patchChatMetadataInStore,
   readChatFromStore,
+  readChatRowsFromStore,
   readDroneChatCleanupProjectionFromStore,
   readChatReadStateFromStore,
   readTranscriptTurnsByIdsFromStore,
@@ -106,7 +107,7 @@ describe('canonical chat and transcript repository', () => {
       requireHubDatabase().read((connection) =>
         connection.prepare("SELECT COUNT(*) AS count FROM hub_schema_migrations WHERE scope = 'chats'").get().count,
       ),
-      11,
+      12,
     );
     assert.ok(
       requireHubDatabase().read((connection) =>
@@ -143,6 +144,107 @@ describe('canonical chat and transcript repository', () => {
     const [turn] = readChatFromStore({ droneId: 'drone-1', chatName: 'default' }).chat.turns;
     assert.equal(turn.userOnly, true);
     assert.equal(turn.deliveryMode, 'asap');
+  });
+
+  test('reads compact activity summaries from the write-time turn projection', async () => {
+    tempDataDir('activity-summary');
+    const activity = {
+      version: 1,
+      source: 'codex',
+      updatedAt: '2026-01-01T00:01:30.000Z',
+      messages: [
+        {
+          id: 'assistant-1',
+          role: 'assistant',
+          content: [{ type: 'toolCall', id: 'tool-1', name: 'shell', arguments: {} }],
+        },
+        {
+          id: 'tool-result-1',
+          role: 'toolResult',
+          toolCallId: 'tool-1',
+          content: `large-marker-${'x'.repeat(10_000)}`,
+        },
+      ],
+    };
+    await upsertChatInStore({
+      droneId: 'drone-1',
+      chatName: 'default',
+      chatEntry: legacyChat('summary', [
+        {
+          id: 'turn-1',
+          at: '2026-01-01T00:01:00.000Z',
+          prompt: 'run it',
+          ok: true,
+          output: 'done',
+          activity,
+        },
+      ]),
+    });
+
+    const full = readTranscriptTurnsFromStore({
+      droneId: 'drone-1', chatName: 'default', indexes: [0], activityMode: 'full',
+    }).turns[0].turn;
+    const summary = readTranscriptTurnsFromStore({
+      droneId: 'drone-1', chatName: 'default', indexes: [0], activityMode: 'summary',
+    }).turns[0].turn;
+    const none = readTranscriptTurnsFromStore({
+      droneId: 'drone-1', chatName: 'default', indexes: [0], activityMode: 'none',
+    }).turns[0].turn;
+    const canonicalSummary = readChatRowsFromStore({
+      droneId: 'drone-1', chatName: 'default', indexes: [0], includePending: false,
+      activityMode: 'summary',
+    }).turns[0].turn;
+    const projectionJson = requireHubDatabase().read((connection) =>
+      connection.prepare(`SELECT turn_json FROM canonical_chat_turn_active_projections
+        WHERE drone_id = 'drone-1' AND chat_name = 'default' AND turn_id = 'turn-1'`).get().turn_json,
+    );
+
+    assert.equal(full.activity.messages.length, 2);
+    assert.equal(summary.activity, undefined);
+    assert.deepEqual(summary.activitySummary, {
+      available: true,
+      version: 1,
+      source: 'codex',
+      updatedAt: '2026-01-01T00:01:30.000Z',
+      messageCount: 2,
+      toolCallCount: 1,
+      truncated: false,
+    });
+    assert.equal(none.activity, undefined);
+    assert.equal(none.activitySummary, undefined);
+    assert.equal(canonicalSummary.activity, undefined);
+    assert.deepEqual(canonicalSummary.activitySummary, summary.activitySummary);
+    assert.equal(projectionJson.includes('large-marker'), false);
+  });
+
+  test('reads large contiguous transcript selections in one ordered range', async () => {
+    tempDataDir('contiguous-selection');
+    const turns = Array.from({ length: 405 }, (_, index) => ({
+      id: `turn-${index}`,
+      at: new Date(Date.parse('2026-01-01T00:00:00.000Z') + index * 1_000).toISOString(),
+      prompt: `prompt ${index}`,
+      ok: true,
+      output: `output ${index}`,
+    }));
+    await upsertChatInStore({
+      droneId: 'drone-1',
+      chatName: 'default',
+      chatEntry: legacyChat('large range', turns),
+    });
+    const indexes = turns.map((_, index) => index);
+
+    const transcriptRead = readTranscriptTurnsFromStore({
+      droneId: 'drone-1', chatName: 'default', indexes, activityMode: 'summary',
+    });
+    const canonicalRead = readChatRowsFromStore({
+      droneId: 'drone-1', chatName: 'default', indexes, includePending: false,
+      activityMode: 'summary',
+    });
+
+    assert.equal(transcriptRead.turns.length, 405);
+    assert.equal(canonicalRead.turns.length, 405);
+    assert.equal(transcriptRead.turns[0].turn.id, 'turn-0');
+    assert.equal(canonicalRead.turns.at(-1).turn.id, 'turn-404');
   });
 
   test('drops retired follow-up metadata while importing and reading chats', async () => {

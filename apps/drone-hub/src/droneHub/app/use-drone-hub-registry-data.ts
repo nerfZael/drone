@@ -5,6 +5,7 @@ import type { DroneSummary, GroupSummary, RepoSummary } from '../types';
 import { isWorkflowChildDrone } from '../workflows/workflow-drone-visibility';
 import { compareDronesByNewestFirst } from './helpers';
 import { fetchJson, usePoll } from './hooks';
+import { subscribeDesktopEvents } from './desktop-events';
 
 type Updater<T> = T | ((prev: T) => T);
 type Setter<T> = (next: Updater<T>) => void;
@@ -289,15 +290,17 @@ export function useDroneRegistryEvents(enabled = true): {
     }
 
     let closed = false;
-    const source = new window.EventSource('/api/drones/events');
-    const markOpen = () => {
+    const markConnection = (next: boolean) => {
       if (closed) return;
-      setConnected(true);
-      setError(null);
+      setConnected(next);
+      if (next) setError(null);
+      else {
+        setLoading(false);
+        setError((prev) => prev ?? 'Drone registry event stream disconnected.');
+      }
     };
 
-    source.addEventListener('connected', markOpen);
-    source.addEventListener('snapshot', (event) => {
+    const handleSnapshot = (event: MessageEvent) => {
       if (closed) return;
       try {
         const data = JSON.parse((event as MessageEvent).data || '{}') as {
@@ -325,8 +328,8 @@ export function useDroneRegistryEvents(enabled = true): {
       } finally {
         setLoading(false);
       }
-    });
-    source.addEventListener('delta', (event) => {
+    };
+    const handleDelta = (event: MessageEvent) => {
       if (closed) return;
       try {
         const data = JSON.parse((event as MessageEvent).data || '{}') as {
@@ -353,8 +356,8 @@ export function useDroneRegistryEvents(enabled = true): {
       } finally {
         setLoading(false);
       }
-    });
-    source.addEventListener('stream-error', (event) => {
+    };
+    const handleStreamError = (event: MessageEvent) => {
       if (closed) return;
       try {
         const data = JSON.parse((event as MessageEvent).data || '{}') as { error?: string };
@@ -365,17 +368,19 @@ export function useDroneRegistryEvents(enabled = true): {
         setConnected(false);
         setLoading(false);
       }
-    });
-    source.onerror = () => {
-      if (closed) return;
-      setConnected(false);
-      setLoading(false);
-      setError((prev) => prev ?? 'Drone registry event stream disconnected.');
     };
+    const unsubscribe = subscribeDesktopEvents({
+      handlers: {
+        registry_snapshot: handleSnapshot,
+        registry_delta: handleDelta,
+        registry_stream_error: handleStreamError,
+      },
+      onConnectedChange: markConnection,
+    });
 
     return () => {
       closed = true;
-      source.close();
+      unsubscribe();
     };
   }, [enabled]);
 
@@ -430,16 +435,15 @@ export function useDroneHubRegistryData({
   setChatHeaderRepoPath,
 }: UseDroneHubRegistryDataArgs) {
   const droneEvents = useDroneRegistryEvents();
-  const dronePollIntervalMs = droneEvents.connected ? 60_000 : 2_000;
   const {
     value: polledDronesResp,
     error: dronesPollError,
     loading: dronesPollLoading,
   } = usePoll<{ ok: true; drones: DroneSummary[] }>(
-    () => fetchJson('/api/drones'),
-    dronePollIntervalMs,
+    (signal) => fetchJson('/api/drones', { signal }),
+    2_000,
     [droneEvents.connected],
-    { isEqual: sameDroneResponse },
+    { enabled: !droneEvents.connected, isEqual: sameDroneResponse },
   );
   const dronesResp = droneEvents.connected
     ? droneEvents.value

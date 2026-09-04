@@ -3,8 +3,89 @@ import {
   createChatManagementRouteHandler,
   resolveReadStateChatEntry,
 } from '../src/hub/routes/chat-management-routes';
+import {
+  createChatPromptRouteHandler,
+  projectTranscriptActivity,
+} from '../src/hub/routes/chat-prompt-routes';
 
 describe('chat management route helpers', () => {
+  test('projects heavyweight run activity to a stable compact summary', () => {
+    const activity = {
+      version: 1,
+      source: 'codex',
+      updatedAt: '2026-09-04T10:00:00.000Z',
+      truncated: true,
+      messages: [
+        {
+          id: 'message-1',
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'working' },
+            { type: 'toolCall', id: 'tool-1', name: 'shell', arguments: {} },
+          ],
+        },
+        { id: 'message-2', role: 'toolResult', toolCallId: 'tool-1', content: 'x'.repeat(10_000) },
+      ],
+    };
+
+    expect(projectTranscriptActivity([{ id: 'turn-1', activity }], 'summary')).toEqual([
+      {
+        id: 'turn-1',
+        activitySummary: {
+          available: true,
+          version: 1,
+          source: 'codex',
+          updatedAt: '2026-09-04T10:00:00.000Z',
+          messageCount: 2,
+          toolCallCount: 1,
+          truncated: true,
+        },
+      },
+    ]);
+    expect(projectTranscriptActivity([{ id: 'turn-1', activity }], 'none')).toEqual([
+      { id: 'turn-1' },
+    ]);
+  });
+
+  test('loads full run activity for one stable turn id without reading a chat snapshot', async () => {
+    const activity = {
+      version: 1,
+      source: 'codex',
+      updatedAt: '2026-09-04T10:00:00.000Z',
+      messages: [],
+    };
+    let response: any = null;
+    const handler = createChatPromptRouteHandler({
+      normalizeChatName: (value: unknown) => String(value),
+      normalizeDroneIdentity: (value: unknown) => String(value),
+      resolveCanonicalDroneOrPendingForReadRef: async () => ({
+        kind: 'real',
+        id: 'drone-a',
+        drone: {},
+      }),
+      readTranscriptTurnsByIdsFromStore: ({ turnIds }: any) =>
+        turnIds[0] === 'turn-7' ? [{ id: 'turn-7', activity }] : [],
+      createRequestTimer: () => ({ mark: () => {}, setHeader: () => {} }),
+      jsonWithEtag: (_req: any, _res: any, status: number, body: any) => {
+        response = { status, body };
+      },
+    } as any);
+
+    expect(
+      await handler({
+        req: { headers: {} } as any,
+        res: {} as any,
+        url: new URL('http://hub.test/api/drones/drone-a/chats/default/turns/turn-7/activity'),
+        method: 'GET',
+        parts: ['api', 'drones', 'drone-a', 'chats', 'default', 'turns', 'turn-7', 'activity'],
+      }),
+    ).toBe(true);
+    expect(response).toEqual({
+      status: 200,
+      body: { ok: true, droneId: 'drone-a', chatName: 'default', turnId: 'turn-7', activity },
+    });
+  });
+
   test('uses the canonical chat store when the lifecycle projection has no chats', () => {
     const canonicalChat = { id: 'chat-id', agent: { kind: 'builtin', id: 'codex' } };
 

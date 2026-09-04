@@ -127,7 +127,7 @@ describe('drone status runtime', () => {
     await runtime.refreshNow('timing-failure');
   });
 
-  test('backs off unchanged interval probes while forced refreshes remain immediate', async () => {
+  test('backs off unchanged entries across interval and registry-write refreshes', async () => {
     let nowMs = 0;
     let probes = 0;
     const timings: any[] = [];
@@ -166,7 +166,14 @@ describe('drone status runtime', () => {
     );
 
     await runtime.refreshNow('registry-write');
+    expect(probes).toBe(2);
+
+    drone.hostPort = 10_001;
+    await runtime.refreshNow('registry-write');
     expect(probes).toBe(3);
+
+    await runtime.refreshNow('startup');
+    expect(probes).toBe(4);
   });
 
   test('starts the quiet period after a slow probe completes', async () => {

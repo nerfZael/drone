@@ -35,6 +35,22 @@ export function chatInfoForSelection(
   return chatInfoKey === expectedKey && payloadChatName === expectedChatName ? chatInfo : null;
 }
 
+export function chatConfigAvailableForSelection(
+  chatInfo: ChatInfo | null,
+  chatInfoKey: string,
+  selectionKey: string,
+): boolean {
+  return Boolean(chatInfo && selectionKey && chatInfoKey === selectionKey);
+}
+
+export function shouldBlockChatContentForConfig(input: {
+  configPending: boolean;
+  transcriptAvailable: boolean;
+  transcriptError: boolean;
+}): boolean {
+  return input.configPending && !input.transcriptAvailable && !input.transcriptError;
+}
+
 export function chatMetadataEligibleForSelection(input: {
   hasDroneSummary: boolean;
   droneProvisioning: boolean;

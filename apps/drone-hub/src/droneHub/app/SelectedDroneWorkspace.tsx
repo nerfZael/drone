@@ -70,6 +70,7 @@ import type { ChatModelOption, StartupSeedState } from './app-types';
 import {
   chatConfigResolutionState,
   genericChatComposerAvailable,
+  shouldBlockChatContentForConfig,
   shouldShowDroneStartupFailureEmptyState,
 } from './chat-selection-model';
 import type { RepoOpErrorMeta } from './helpers';
@@ -96,7 +97,7 @@ import {
   useDropdownDismiss,
 } from '../../ui/dropdown';
 import { UiTooltip, type UiMenuSelectEntry } from '../../ui/components';
-import { fetchDroneChatTranscript } from './chat-api';
+import { fetchDroneChatTranscript, fetchDroneChatTurnActivity } from './chat-api';
 import { useDroneHubUiStore, useSelectedDroneWorkspaceUiState } from './use-drone-hub-ui-store';
 import { CliPendingPromptStrip } from './CliPendingPromptStrip';
 import { formatBytes } from './selected-drone-workspace-utils';
@@ -672,6 +673,16 @@ export function SelectedDroneWorkspace({
     () => explicitSelectedChat || resolveChatNameForDrone(currentDrone, selectedChat),
     [currentDrone, explicitSelectedChat, selectedChat],
   );
+  const loadTranscriptActivity = React.useCallback(
+    (turnId: string, signal: AbortSignal) =>
+      fetchDroneChatTurnActivity({
+        droneId: currentDrone.id,
+        chatName: activeChatName,
+        turnId,
+        signal,
+      }),
+    [activeChatName, currentDrone.id],
+  );
   const selectedChatIsDraft = currentDrone.draftChats?.[activeChatName] === true;
   const currentDroneIsDraft = currentDrone.draft === true || currentDrone.hubPhase === 'draft';
   const currentChatIsDraft = currentDroneIsDraft || selectedChatIsDraft;
@@ -1022,6 +1033,11 @@ export function SelectedDroneWorkspace({
     startupFailed: currentDrone.hubPhase === 'error',
   });
   const chatConfigPending = chatConfigResolution === 'loading';
+  const blockChatContentForConfig = shouldBlockChatContentForConfig({
+    configPending: chatConfigPending,
+    transcriptAvailable: transcripts !== null,
+    transcriptError: Boolean(transcriptError),
+  });
   const chatConfigFailed = chatConfigResolution === 'unavailable';
   const droneStartupFailed = chatConfigResolution === 'drone-error';
   const droneStartupError = String(
@@ -1120,7 +1136,7 @@ export function SelectedDroneWorkspace({
   ]);
   React.useEffect(() => {
     const target = { droneId: currentDrone.id, chatName: activeChatName };
-    if (chatConfigPending) return;
+    if (blockChatContentForConfig) return;
     if (chatConfigFailed) {
       markChatLoadContentCommitted(target, 'unavailable');
       return;
@@ -1136,7 +1152,7 @@ export function SelectedDroneWorkspace({
   }, [
     activeChatName,
     chatConfigFailed,
-    chatConfigPending,
+    blockChatContentForConfig,
     chatUiMode,
     currentDrone.id,
     loadingSession,
@@ -1587,6 +1603,7 @@ export function SelectedDroneWorkspace({
             droneHomePath={currentDroneHomePath}
             showRoleIcons={false}
             dockerSnapshotsEnabled={dockerSnapshotAfterAgentMessageEnabled}
+            loadActivity={loadTranscriptActivity}
             interstitialContent={externalQuestionTimelinePlacement.byGroupIndex
               .get(groupIndex)
               ?.map((request) => (
@@ -2473,7 +2490,7 @@ export function SelectedDroneWorkspace({
                       ) : null
                     }
                   />
-                ) : chatConfigPending ? (
+                ) : blockChatContentForConfig ? (
                   <ChatSurfaceLoadingView
                     resetKey={`${selectedDroneIdentity}:${selectedChat ?? ''}:loading`}
                     draftPersistenceKey={chatDraftKey}

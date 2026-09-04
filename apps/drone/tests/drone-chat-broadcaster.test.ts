@@ -44,12 +44,16 @@ describe('DroneChatBroadcaster', () => {
       modelReadStarted = resolve;
     });
     const events: Array<{ event: string; data: any }> = [];
+    let modelReads = 0;
     const broadcaster = new DroneChatBroadcaster({
       loadModel: async () => {
+        modelReads += 1;
         modelReadStarted?.();
-        await new Promise<void>((resolve) => {
-          releaseModel = resolve;
-        });
+        if (modelReads === 1) {
+          await new Promise<void>((resolve) => {
+            releaseModel = resolve;
+          });
+        }
         return { drones: {} };
       },
       normalizeDroneId: (value) => String(value).trim(),
@@ -75,6 +79,44 @@ describe('DroneChatBroadcaster', () => {
           ),
       ),
     ).toBe(true);
+    broadcaster.stop();
+  });
+
+  test('queues a required snapshot when a client reconnects during a refresh', async () => {
+    let releaseModel: (() => void) | null = null;
+    let modelReadStarted: (() => void) | null = null;
+    const started = new Promise<void>((resolve) => {
+      modelReadStarted = resolve;
+    });
+    const events: Array<{ event: string; data: any }> = [];
+    let modelReads = 0;
+    const broadcaster = new DroneChatBroadcaster({
+      loadModel: async () => {
+        modelReads += 1;
+        modelReadStarted?.();
+        if (modelReads === 1) {
+          await new Promise<void>((resolve) => {
+            releaseModel = resolve;
+          });
+        }
+        return { drones: {} };
+      },
+      normalizeDroneId: (value) => String(value).trim(),
+      normalizeChatName: (value) => String(value).trim(),
+      nowIso: () => '2026-08-27T00:00:00.000Z',
+      writeSseEvent: (_response, event, data) => events.push({ event, data }),
+    });
+    broadcaster.clients.add({ destroyed: false, writableEnded: false, write() {} } as any);
+    broadcaster.lastByKey.set('existing\0default', 'existing');
+
+    const firstRefresh = broadcaster.refresh();
+    await started;
+    void broadcaster.refresh({ broadcastSnapshot: true });
+    releaseModel?.();
+    await firstRefresh;
+    await Bun.sleep(30);
+
+    expect(events.some(({ event }) => event === 'snapshot')).toBe(true);
     broadcaster.stop();
   });
 });

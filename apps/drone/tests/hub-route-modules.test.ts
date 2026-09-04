@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { HubRouter } from '../src/hub/hub-router';
 import { createEditorRouteHandler } from '../src/hub/routes/editor-routes';
 import { createDroneLifecycleRouteHandler } from '../src/hub/routes/drone-lifecycle-routes';
+import { createDroneProvisioningRouteHandler } from '../src/hub/routes/drone-provisioning-routes';
 import { registerFleetRoutes } from '../src/hub/routes/fleet-routes';
 import { registerGroupRoutes } from '../src/hub/routes/group-routes';
 import {
@@ -27,6 +28,49 @@ function routeHarness(body: unknown = null) {
 }
 
 describe('extracted Hub route modules', () => {
+  test('serves the live broadcaster snapshot without rebuilding the fleet list', async () => {
+    const clients = new Set<any>([{}]);
+    let snapshotBuilds = 0;
+    const handler = createDroneProvisioningRouteHandler({
+      buildDroneRegistrySnapshot: async () => {
+        snapshotBuilds += 1;
+        return { ok: true, drones: [{ id: 'fresh' }] };
+      },
+      createRequestTimer: () => ({ mark: () => {}, setHeader: () => {} }),
+      droneRegistrySseClients: clients,
+      hasDroneRegistrySseConsumers: () => clients.size > 0,
+      getDroneRegistrySseFreshSnapshot: () => ({ ok: true, drones: [{ id: 'cached' }] }),
+      logSlowHubRequest: () => {},
+    } as any);
+    const request = async () => {
+      let body: any = null;
+      const response = {
+        writableEnded: false,
+        statusCode: 0,
+        setHeader: () => {},
+        end(data: string) {
+          body = JSON.parse(data);
+          this.writableEnded = true;
+        },
+      };
+      expect(await handler({
+        req: { headers: {} } as any,
+        res: response as any,
+        url: new URL('http://hub.test/api/drones'),
+        method: 'GET',
+        parts: ['api', 'drones'],
+      })).toBe(true);
+      return body;
+    };
+
+    expect(await request()).toEqual({ ok: true, drones: [{ id: 'cached' }] });
+    expect(snapshotBuilds).toBe(0);
+
+    clients.clear();
+    expect(await request()).toEqual({ ok: true, drones: [{ id: 'fresh' }] });
+    expect(snapshotBuilds).toBe(1);
+  });
+
   test('lists archived drones from canonical lifecycle state without loading the full registry', async () => {
     const responses: Array<{ status: number; body: any }> = [];
     const response = {

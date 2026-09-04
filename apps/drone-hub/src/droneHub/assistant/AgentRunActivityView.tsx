@@ -46,6 +46,7 @@ export function AgentRunActivityView({
   preRunDurationMs,
   at,
   autoExpandFinalMessage = false,
+  initiallyExpanded = false,
   plan,
   messageExtras,
   interstitialContent,
@@ -57,6 +58,7 @@ export function AgentRunActivityView({
   preRunDurationMs?: number;
   at?: string;
   autoExpandFinalMessage?: boolean;
+  initiallyExpanded?: boolean;
   plan?: AgentPlan;
   messageExtras?: Omit<AgentMessageExtrasProps, 'text' | 'tasks'>;
   interstitialContent?: React.ReactNode;
@@ -105,7 +107,7 @@ export function AgentRunActivityView({
   const parsedStart = activityTimestampMs(startedAt) ?? fallbackStart;
   const parsedEnd = activityTimestampMs(endedAt);
   const [now, setNow] = React.useState(() => Date.now());
-  const [expanded, setExpanded] = React.useState(active);
+  const [expanded, setExpanded] = React.useState(active || initiallyExpanded);
 
   React.useEffect(() => {
     if (!active) return;
@@ -114,8 +116,8 @@ export function AgentRunActivityView({
   }, [active]);
 
   React.useEffect(() => {
-    setExpanded(active);
-  }, [active]);
+    setExpanded(active || initiallyExpanded);
+  }, [active, initiallyExpanded]);
 
   const durationMs = Math.max(0, (active ? now : (parsedEnd ?? parsedStart)) - parsedStart);
   const normalizedPreRunDurationMs = Number.isFinite(preRunDurationMs)

@@ -297,6 +297,7 @@ import { createCompanionWebSocketServer } from './companion/companion-websocket-
 import { CompanionTelemetryService } from './companion/companion-telemetry';
 import { createCompanionCapability } from './device-mesh/companion-capability';
 import { registerAssistantRoutes } from './routes/assistant-routes';
+import { registerDesktopEventRoutes } from './routes/desktop-event-routes';
 import { registerAgentRunDiffRoutes } from './routes/agent-run-diff-routes';
 import { NativeChatLifecycle } from './assistant/native-chat-lifecycle';
 import { buildNativeModelCatalog } from './assistant/native-model-catalog';
@@ -5365,7 +5366,10 @@ async function startDroneHubApiServerWithLifecycle(
   }
 
   const droneChatBroadcaster = new DroneChatBroadcaster({
-    loadModel: loadCanonicalActiveModel,
+    // Stream fingerprints only need chat membership, pending state, and the
+    // latest turn. Loading every historical turn made the initial global chat
+    // stream scan the entire fleet before an interactive chat request could run.
+    loadModel: loadCanonicalSummaryModel,
     normalizeDroneId: normalizeDroneIdentity,
     normalizeChatName,
     nowIso,
@@ -5560,6 +5564,13 @@ async function startDroneHubApiServerWithLifecycle(
 
   const apiRouter = new HubRouter(json, readJsonBody);
   registerCompanionRoutes(apiRouter, companionTelemetry);
+  registerDesktopEventRoutes(apiRouter, {
+    assistantService,
+    droneChatBroadcaster,
+    droneRegistryBroadcaster,
+    nowIso,
+    writeSseEvent: writeHubSseEvent,
+  });
 
   registerSystemRoutes(apiRouter, {
     buildId: HUB_API_BUILD_ID,
@@ -6097,6 +6108,7 @@ async function startDroneHubApiServerWithLifecycle(
     readChatMetadataFromStore,
     readChatReadStateFromStore,
     readChatSnapshot,
+    readTranscriptTurnsByIdsFromStore,
     resolveInterruptedPendingPrompt,
     removeDockerSnapshotImagesBestEffort,
     renameNativeChatSession: (input: { id: string; droneId: string; chatName: string }) =>
@@ -6141,7 +6153,8 @@ async function startDroneHubApiServerWithLifecycle(
     resolveCanonicalGroupReference,
     findDroneEntryByIdentity,
     findDroneIdByRef,
-    getDroneRegistrySseLastSnapshot: () => droneRegistryBroadcaster.snapshot,
+    getDroneRegistrySseFreshSnapshot: () => droneRegistryBroadcaster.freshSnapshot,
+    hasDroneRegistrySseConsumers: () => droneRegistryBroadcaster.hasConsumers,
     gitResolveRemoteBranchForCreate,
     isSafePromptId,
     loadCanonicalActiveModel,
@@ -6173,7 +6186,6 @@ async function startDroneHubApiServerWithLifecycle(
     resolveEffectiveLlmProvider,
     resolveStableDroneOrPendingIdFromRef,
     scheduleDroneRegistryBroadcasterRefresh,
-    scheduleDroneStatusRefresh,
     setFleetActorConfig,
     startDroneChatBroadcaster,
     startDroneRegistryBroadcaster,

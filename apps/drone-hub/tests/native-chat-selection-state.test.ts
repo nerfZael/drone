@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  chatConfigAvailableForSelection,
   chatNamesForConfigSelection,
   chatConfigResolutionState,
   chatInfoForSelection,
   chatMetadataEligibleForSelection,
   genericChatComposerAvailable,
+  shouldBlockChatContentForConfig,
   shouldShowDroneStartupFailureEmptyState,
 } from '../src/droneHub/app/chat-selection-model';
 import {
@@ -22,6 +24,42 @@ const drone = {
 } as any;
 
 describe('native chat selection state', () => {
+  test('does not treat a remembered selection key as resolved without current metadata', () => {
+    const selectionKey = `${drone.id}\u0000default`;
+    expect(chatConfigAvailableForSelection(null, selectionKey, selectionKey)).toBe(false);
+    expect(
+      chatConfigAvailableForSelection(
+        { chat: 'default', agent: { kind: 'native' } } as any,
+        selectionKey,
+        selectionKey,
+      ),
+    ).toBe(true);
+    expect(
+      chatConfigAvailableForSelection(
+        { chat: 'default', agent: { kind: 'native' } } as any,
+        'another-drone\u0000default',
+        selectionKey,
+      ),
+    ).toBe(false);
+  });
+
+  test('keeps a loaded transcript visible while configuration catches up', () => {
+    expect(
+      shouldBlockChatContentForConfig({
+        configPending: true,
+        transcriptAvailable: false,
+        transcriptError: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldBlockChatContentForConfig({
+        configPending: true,
+        transcriptAvailable: true,
+        transcriptError: false,
+      }),
+    ).toBe(false);
+  });
+
   test('uses the optimistic chat seed to choose the correct initial surface', () => {
     const nativeAgent = { kind: 'native' as const };
     expect(startupAgentForChatSelection({

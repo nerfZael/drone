@@ -6,6 +6,7 @@ import { parseCanvasChatNodeId } from './app-config';
 import type { DroneDeleteMode } from './settings-types';
 import { useDroneCanvasStore } from '../canvas/use-drone-canvas-store';
 import { droneRenameErrorMessage, type DroneRenameTarget } from './drone-rename';
+import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
 import {
   claimDroneOperation,
   droneActionState,
@@ -43,6 +44,7 @@ export function useDroneMutationActions({
   setOptimisticallyRenamedDrones,
   onNameSuggestionFailure,
 }: UseDroneMutationActionsArgs) {
+  const confirm = useAppConfirmDialog();
   const [droneOperations, setDroneOperations] = React.useState<DroneOperationsById>({});
   const droneOperationsRef = React.useRef<DroneOperationsById>({});
   const [renameDroneTarget, setRenameDroneTarget] = React.useState<DroneRenameTarget | null>(
@@ -317,9 +319,12 @@ export function useDroneMutationActions({
       if (droneOperationsRef.current[droneId] || optimisticallyDeletedDrones[droneId]) {
         return;
       }
-      const ok = window.confirm(
-        `Set "${droneName}" as the base image for new containers?\n\nThis will commit the current drone container into a new Docker image and update your DVM base config (same as: dvm base set).\n\nContinue?`,
-      );
+      const ok = await confirm({
+        title: `Set "${droneName}" as the base image?`,
+        message:
+          'This will commit the current drone container into a new Docker image and update your DVM base config (same as: dvm base set).',
+        confirmLabel: 'Set as base image',
+      });
       if (!ok) return;
 
       if (
@@ -343,7 +348,7 @@ export function useDroneMutationActions({
         finishDroneOperation(droneId, 'set-base-image');
       }
     },
-    [beginDroneOperation, drones, finishDroneOperation, optimisticallyDeletedDrones, requestJson],
+    [beginDroneOperation, confirm, drones, finishDroneOperation, optimisticallyDeletedDrones, requestJson],
   );
 
   const startDroneContainer = React.useCallback(
