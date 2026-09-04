@@ -128,6 +128,7 @@ export const TranscriptTurn = React.memo(
     const activitySummary = isSilentCompletion || isUserOnly ? undefined : item.activitySummary;
     const [hydratedActivity, setHydratedActivity] = React.useState<AgentRunActivity | null>(null);
     const [activityHydratedAt, setActivityHydratedAt] = React.useState<string | null>(null);
+    const [expandHydratedActivity, setExpandHydratedActivity] = React.useState(false);
     const [activityLoading, setActivityLoading] = React.useState(false);
     const [activityLoadError, setActivityLoadError] = React.useState<string | null>(null);
     const activityLoadControllerRef = React.useRef<AbortController | null>(null);
@@ -135,6 +136,7 @@ export const TranscriptTurn = React.memo(
       activityLoadControllerRef.current?.abort();
       setHydratedActivity(null);
       setActivityHydratedAt(null);
+      setExpandHydratedActivity(false);
       setActivityLoading(false);
       setActivityLoadError(null);
     }, [activitySummary?.updatedAt, item.id]);
@@ -288,7 +290,10 @@ export const TranscriptTurn = React.memo(
               }
               trailing={activityLoading ? <IconSpinner className="h-3.5 w-3.5" /> : <span>›</span>}
               expanded={false}
-              onToggle={() => void requestActivity()}
+              onToggle={() => {
+                setExpandHydratedActivity(true);
+                void requestActivity();
+              }}
               toggleLabel="run details"
             />
             {activityLoadError ? (
@@ -307,7 +312,7 @@ export const TranscriptTurn = React.memo(
             preRunDurationMs={preRunDurationMs}
             at={agentIso}
             autoExpandFinalMessage={autoExpandAgentMessage}
-            initiallyExpanded={Boolean(hydratedActivity)}
+            initiallyExpanded={expandHydratedActivity}
             plan={item.agentPlan}
             messageExtras={{
               messageId,

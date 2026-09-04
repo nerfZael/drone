@@ -203,7 +203,7 @@ import { createTerminalPaneSessionsState } from './droneHub/terminal/terminal-ta
 import { useTerminalPaneSessions } from './droneHub/terminal/use-terminal-pane-sessions';
 import type { DronePortMapping, DroneSummary, PortReachabilityByHostPort } from './droneHub/types';
 import type {
-  GlobalDictationDestination,
+  GlobalDictationDroneDestination,
   GlobalDictationSendResult,
   GlobalDictationTarget,
   GlobalDictationTargetResult,
@@ -4562,7 +4562,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     return result.ok === true;
   }, [cloneDroneChat, currentDrone, selectDroneChat, selectedChat, selectedGroupMultiChat]);
   const resolveGlobalDictationTarget = React.useCallback(
-    (destination: GlobalDictationDestination): GlobalDictationTargetResult => {
+    (destination: GlobalDictationDroneDestination): GlobalDictationTargetResult => {
       if (destination === 'root-drone') {
         const selectionContext = resolveCurrentSelectionDraftContext();
         const repoPath = normalizeCreateRepoPath(selectionContext?.repoPath ?? activeRepoPath);

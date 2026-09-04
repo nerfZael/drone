@@ -24,5 +24,6 @@ export function globalDictationShortcutAction(
   if (code === 'numpad2') return { destination: 'group-drone' };
   if (code === 'numpad3') return { destination: 'new-chat' };
   if (code === 'numpad4') return { destination: 'clone-chat' };
+  if (code === 'numpad5') return { destination: 'companion' };
   return null;
 }

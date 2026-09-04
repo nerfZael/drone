@@ -38,6 +38,8 @@ export type CompanionProposalHistoryEntry = {
   autoApproved: boolean;
 };
 
+type CompanionTextSubmitResult = { ok: true } | { ok: false; error: string };
+
 type CompanionContextValue = {
   status: CompanionStatus;
   recordingPaused: boolean;
@@ -56,6 +58,7 @@ type CompanionContextValue = {
   proposalExecuting: boolean;
   autoApprove: boolean;
   proposalHistory: CompanionProposalHistoryEntry[];
+  submitText(prompt: string): Promise<CompanionTextSubmitResult>;
   toggle(): Promise<void>;
   stop(): void;
   toggleRecordingPause(): void;
@@ -375,6 +378,30 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     if (!started && controller.getSnapshot().status !== 'error') controller.resetIfNoSession();
   }, [close, controller, run, voice]);
 
+  const submitText = React.useCallback(
+    async (prompt: string): Promise<CompanionTextSubmitResult> => {
+      const text = String(prompt ?? '').trim();
+      if (!text) return { ok: false, error: 'There is no dictated text to send.' };
+      if (voice.status !== 'idle') {
+        return { ok: false, error: 'Companion is already handling a voice recording.' };
+      }
+      const status = controller.getSnapshot().status;
+      if (status === 'working' || proposalExecutingRef.current) {
+        return { ok: false, error: 'Companion is already working.' };
+      }
+      if (status === 'cancelled' || status === 'error') {
+        await close();
+      }
+      await run(text);
+      const next = controller.getSnapshot();
+      if (next.status === 'error') {
+        return { ok: false, error: next.error || 'Companion could not start.' };
+      }
+      return { ok: true };
+    },
+    [close, controller, run, voice.status],
+  );
+
   React.useEffect(
     () => () => {
       void controller.close();
@@ -420,6 +447,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       proposalExecuting,
       autoApprove,
       proposalHistory,
+      submitText,
       toggle,
       stop,
       toggleRecordingPause,
@@ -445,6 +473,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       proposalHistory,
       state,
       stop,
+      submitText,
       toggle,
       toggleRecordingPause,
       toggleAutoApprove,

@@ -1,9 +1,10 @@
 import React from 'react';
 import { ChatComposerEditor } from '../chat/ChatComposerEditor';
 import { formatChatVoiceDuration } from '../chat/use-chat-voice-recorder';
+import { useCompanion } from '../companion/CompanionContext';
 import { useIdleMonacoEditorPreload } from '../files/monaco-editor-loader';
 import type {
-  GlobalDictationDestination,
+  GlobalDictationDroneDestination,
   GlobalDictationSendResult,
   GlobalDictationTarget,
   GlobalDictationTargetResult,
@@ -12,13 +13,21 @@ import { useGlobalDictation } from './use-global-dictation';
 
 export type GlobalDictationOverlayProps = {
   activeChatLabel: string;
-  resolveTarget(destination: GlobalDictationDestination): GlobalDictationTargetResult;
+  resolveTarget(destination: GlobalDictationDroneDestination): GlobalDictationTargetResult;
   send(target: GlobalDictationTarget, text: string): Promise<GlobalDictationSendResult>;
 };
 
 export function GlobalDictationOverlay(props: GlobalDictationOverlayProps) {
   useIdleMonacoEditorPreload();
-  const dictation = useGlobalDictation(props);
+  const companion = useCompanion();
+  const sendToCompanion = React.useCallback(
+    async (text: string): Promise<GlobalDictationSendResult> => {
+      if (!companion) return { ok: false, error: 'Companion is unavailable.' };
+      return await companion.submitText(text);
+    },
+    [companion],
+  );
+  const dictation = useGlobalDictation({ ...props, sendToCompanion });
   if (!dictation.open) return null;
 
   const recordingActive =
@@ -197,7 +206,7 @@ export function GlobalDictationOverlay(props: GlobalDictationOverlayProps) {
         </span>
       </div>
 
-      <div className="grid shrink-0 grid-cols-5 gap-1 border-t border-[var(--border-subtle)] bg-[var(--surface-soft)] px-2 py-1.5">
+      <div className="grid shrink-0 grid-cols-6 gap-1 border-t border-[var(--border-subtle)] bg-[var(--surface-soft)] px-2 py-1.5">
         <DestinationButton
           shortcut="0"
           label="Current"
@@ -226,6 +235,12 @@ export function GlobalDictationOverlay(props: GlobalDictationOverlayProps) {
           shortcut="4"
           label="Clone"
           onClick={() => void dictation.requestSend('clone-chat')}
+          disabled={dictation.finalizing}
+        />
+        <DestinationButton
+          shortcut="5"
+          label="Companion"
+          onClick={() => void dictation.requestSend('companion')}
           disabled={dictation.finalizing}
         />
       </div>

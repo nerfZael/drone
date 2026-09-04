@@ -2288,7 +2288,7 @@ export function AssistantDock({
     nativeTranscriptItems.push({
       key: runKey,
       kind: 'tool',
-      content: ({ isLatestActivity }) => (
+      content: (
         <ToolRunActivity
           key={runKey}
           items={runItems}
@@ -2297,7 +2297,6 @@ export function AssistantDock({
           endedAt={endedAt}
           completedDurationMs={requestRun.durationMs}
           droneNameById={droneNameById}
-          initiallyExpanded={runActive || runAwaitingApproval || isLatestActivity}
           awaitingApproval={runAwaitingApproval}
           approvalStartedAt={activeApprovalStartedAt}
         />

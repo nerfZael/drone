@@ -13,6 +13,7 @@ import {
 } from './global-dictation-storage';
 import type {
   GlobalDictationDestination,
+  GlobalDictationDroneDestination,
   GlobalDictationSendResult,
   GlobalDictationTarget,
   GlobalDictationTargetResult,
@@ -39,8 +40,9 @@ type FailedDictationClip = {
 };
 
 type GlobalDictationControllerOptions = {
-  resolveTarget(destination: GlobalDictationDestination): GlobalDictationTargetResult;
+  resolveTarget(destination: GlobalDictationDroneDestination): GlobalDictationTargetResult;
   send(target: GlobalDictationTarget, text: string): Promise<GlobalDictationSendResult>;
+  sendToCompanion(text: string): Promise<GlobalDictationSendResult>;
 };
 
 export function useGlobalDictation(options: GlobalDictationControllerOptions) {
@@ -62,8 +64,10 @@ export function useGlobalDictation(options: GlobalDictationControllerOptions) {
   const finalizingRef = React.useRef(false);
   const resolveTargetRef = React.useRef(options.resolveTarget);
   const sendRef = React.useRef(options.send);
+  const sendToCompanionRef = React.useRef(options.sendToCompanion);
   resolveTargetRef.current = options.resolveTarget;
   sendRef.current = options.send;
+  sendToCompanionRef.current = options.sendToCompanion;
 
   const setOpen = React.useCallback((next: boolean) => {
     openRef.current = next;
@@ -286,16 +290,22 @@ export function useGlobalDictation(options: GlobalDictationControllerOptions) {
   const requestSend = React.useCallback(
     async (destination: GlobalDictationDestination) => {
       if (finalizingRef.current) return;
-      const targetResult = resolveTargetRef.current(destination);
-      if (!targetResult.ok) {
-        setOpen(true);
-        setError(targetResult.error);
-        return;
+      let target: GlobalDictationTarget | null = null;
+      let targetLabel = 'Companion';
+      if (destination !== 'companion') {
+        const targetResult = resolveTargetRef.current(destination);
+        if (!targetResult.ok) {
+          setOpen(true);
+          setError(targetResult.error);
+          return;
+        }
+        target = targetResult.target;
+        targetLabel = target.label;
       }
 
       finalizingRef.current = true;
       setFinalizing(true);
-      setDestinationLabel(targetResult.target.label);
+      setDestinationLabel(targetLabel);
       setOpen(true);
       setError('');
       try {
@@ -314,7 +324,11 @@ export function useGlobalDictation(options: GlobalDictationControllerOptions) {
         }
 
         setNetworkSending(true);
-        const result = await sendRef.current(targetResult.target, prompt);
+        const result = destination === 'companion'
+          ? await sendToCompanionRef.current(prompt)
+          : target
+            ? await sendRef.current(target, prompt)
+            : { ok: false as const, error: 'The dictation destination is invalid.' };
         if (!result.ok) {
           setError(result.error || 'The dictated text could not be sent.');
           return;

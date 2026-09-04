@@ -1177,7 +1177,6 @@ describe('agent chat surface adapters', () => {
           },
         ]}
         active
-        initiallyExpanded
       />,
     );
     const transferringHtml = renderToStaticMarkup(
@@ -1196,7 +1195,6 @@ describe('agent chat surface adapters', () => {
           },
         ]}
         active
-        initiallyExpanded
       />,
     );
     const groupedTransferringHtml = renderToStaticMarkup(
@@ -1213,7 +1211,6 @@ describe('agent chat surface adapters', () => {
           },
         }))}
         active
-        initiallyExpanded
       />,
     );
     const completedTransferHtml = renderToStaticMarkup(
@@ -1231,7 +1228,6 @@ describe('agent chat surface adapters', () => {
           },
         ]}
         active
-        initiallyExpanded
       />,
     );
     const pendingApplyPatchHtml = renderToStaticMarkup(
@@ -1250,7 +1246,6 @@ describe('agent chat surface adapters', () => {
           },
         ]}
         active
-        initiallyExpanded
       />,
     );
 
@@ -1394,7 +1389,7 @@ describe('agent chat surface adapters', () => {
         call: { id: `list-call-${index}`, name: 'list_files', args: {} },
       })),
     ];
-    const html = renderToStaticMarkup(<ToolRunActivity items={items} active initiallyExpanded />);
+    const html = renderToStaticMarkup(<ToolRunActivity items={items} active />);
 
     expect(html).toContain('8 tool calls');
     expect(html).toContain('Read file');

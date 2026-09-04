@@ -1280,7 +1280,6 @@ export function ToolRunActivity({
   endedAt,
   completedDurationMs,
   droneNameById = {},
-  initiallyExpanded = active,
   awaitingApproval = false,
   approvalStartedAt,
 }: {
@@ -1290,13 +1289,13 @@ export function ToolRunActivity({
   endedAt?: number;
   completedDurationMs?: number;
   droneNameById?: AssistantDroneNameMap;
-  initiallyExpanded?: boolean;
   awaitingApproval?: boolean;
   approvalStartedAt?: number;
 }) {
   const [expansionMode, setExpansionMode] = React.useState<'auto' | 'manual' | 'collapsed'>(
-    initiallyExpanded ? 'auto' : 'collapsed',
+    active || awaitingApproval ? 'auto' : 'collapsed',
   );
+  const userControlledExpansion = React.useRef(false);
   const expanded = expansionMode !== 'collapsed';
   const fallbackStart = React.useRef(Date.now()).current;
   const normalizedApprovalStartedAt = Number.isFinite(approvalStartedAt)
@@ -1316,6 +1315,16 @@ export function ToolRunActivity({
     setNow(Date.now());
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
+  }, [active, awaitingApproval]);
+
+  React.useEffect(() => {
+    if (!active && !awaitingApproval) {
+      userControlledExpansion.current = false;
+      setExpansionMode('collapsed');
+      return;
+    }
+    if (userControlledExpansion.current) return;
+    setExpansionMode('auto');
   }, [active, awaitingApproval]);
 
   React.useEffect(() => {
@@ -1367,9 +1376,10 @@ export function ToolRunActivity({
         }
         trailing={<ToolRunChevron open={expanded} />}
         expanded={expanded}
-        onToggle={() =>
-          setExpansionMode((current) => (current === 'collapsed' ? 'manual' : 'collapsed'))
-        }
+        onToggle={() => {
+          userControlledExpansion.current = true;
+          setExpansionMode((current) => (current === 'collapsed' ? 'manual' : 'collapsed'));
+        }}
       />
       {expanded ? (
         <div className="dh-agent-activity-scrollbar mt-1 max-h-72 space-y-1 overflow-y-auto overscroll-contain">

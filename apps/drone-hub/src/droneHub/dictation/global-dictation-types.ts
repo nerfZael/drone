@@ -1,9 +1,11 @@
-export type GlobalDictationDestination =
+export type GlobalDictationDroneDestination =
   | 'current-chat'
   | 'root-drone'
   | 'group-drone'
   | 'new-chat'
   | 'clone-chat';
+
+export type GlobalDictationDestination = GlobalDictationDroneDestination | 'companion';
 
 export type GlobalDictationTarget =
   | {
