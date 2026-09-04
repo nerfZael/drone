@@ -948,12 +948,7 @@ async function resolveSetupStatusResponse(): Promise<any> {
   const repoCount = (await listCanonicalRepositories()).length;
   const llmSettings = await resolveLlmSettingsResponse();
   const activeProvider = llmSettings.provider.selected;
-  const activeProviderSettings =
-    activeProvider === 'gemini'
-      ? llmSettings.gemini
-      : activeProvider === 'codex'
-        ? llmSettings.codex
-        : llmSettings.openai;
+  const activeProviderSettings = llmSettings[activeProvider];
   const dockerCommand = await checkHostCommand('docker');
   let dockerStatus: { status: 'ready' | 'missing' | 'warning'; detail: string | null } = {
     status: dockerCommand.available ? 'ready' : 'missing',
@@ -3827,10 +3822,11 @@ async function logProviderApiKeyResolution(
 }
 
 async function logHubLlmStartupSnapshot() {
-  const [openai, gemini, codex] = await Promise.all([
+  const [openai, gemini, codex, openrouter] = await Promise.all([
     collectProviderApiKeyDiagnostics('openai'),
     collectProviderApiKeyDiagnostics('gemini'),
     collectProviderApiKeyDiagnostics('codex'),
+    collectProviderApiKeyDiagnostics('openrouter'),
   ]);
   hubLog('info', 'hub llm configuration snapshot', {
     ...llmProviderEnvLogMeta(),
@@ -3838,6 +3834,7 @@ async function logHubLlmStartupSnapshot() {
     openai,
     gemini,
     codex,
+    openrouter,
   });
 }
 

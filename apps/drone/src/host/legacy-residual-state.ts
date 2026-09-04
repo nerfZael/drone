@@ -14,7 +14,7 @@ const CANONICAL_TOP_LEVEL = new Set([
 ]);
 const RETIRED_TOP_LEVEL = new Set(['playbooks', 'playbookRunQueue', 'playbookFindings']);
 const CANONICAL_SETTINGS = new Set([
-  'openai', 'gemini', 'groq', 'exa', 'llm', 'deleteAction', 'filesystem',
+  'openai', 'gemini', 'openrouter', 'groq', 'exa', 'llm', 'deleteAction', 'filesystem',
   'uiPreferences', 'backups', 'agents',
   'nonRepoEnvironment', 'syncSets',
 ]);

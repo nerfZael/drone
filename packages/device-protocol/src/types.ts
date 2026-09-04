@@ -21,7 +21,7 @@ export type CapabilityGrant = {
   operations: string[];
 };
 
-export type ProviderCredentialId = 'openai' | 'codex' | 'groq';
+export type ProviderCredentialId = 'openai' | 'codex' | 'openrouter' | 'groq';
 
 export type ProviderCredentialRequest = {
   version: 1;

@@ -103,8 +103,8 @@ ciphertext. Imported credentials are stored in Android Secure Store. Copies are 
 not background synchronization. Copied Codex access tokens are refreshed on the phone with the
 copied refresh token when they approach expiry.
 
-Hub computers can use the matching **Provider credentials** panel to copy an OpenAI key or a
-file-based Codex login from another Hub. Codex credentials held only in an operating-system
-keychain cannot be exported by this prototype.
+Hub computers can use the matching **Provider credentials** panel to copy an OpenAI key,
+OpenRouter key, GROQ key, or file-based Codex login from another Hub. Codex credentials held only in
+an operating-system keychain cannot be exported by this prototype.
 
 The private P-256 key is encrypted through Expo Secure Store. It is loaded into JavaScript memory for prototype signing, so a native non-exportable Android key implementation remains production hardening. Forwarded application payloads are signed but rely on TLS until destination-only encryption is implemented.

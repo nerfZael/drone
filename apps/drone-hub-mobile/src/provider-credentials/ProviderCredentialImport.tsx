@@ -10,9 +10,10 @@ import {
 import { useMesh } from '../mesh/MeshContext';
 import { colors } from '../theme';
 import { fetchProviderCredential } from './fetch-provider-credential';
-import type { ProviderCredentialId } from './provider-credential-crypto';
 
-function credentialLabel(credential: ProviderCredentialId): string {
+type ImportableCredential = 'openai' | 'codex' | 'groq';
+
+function credentialLabel(credential: ImportableCredential): string {
   return credential === 'codex'
     ? 'Codex login'
     : credential === 'groq'
@@ -24,8 +25,8 @@ export function ProviderCredentialImport({
   onImported,
   onImportStarted,
 }: {
-  onImported(credential: ProviderCredentialId): void;
-  onImportStarted?(credential: ProviderCredentialId): void;
+  onImported(credential: ImportableCredential): void;
+  onImportStarted?(credential: ImportableCredential): void;
 }) {
   const mesh = useMesh();
   const sources = mesh.devices.filter(
@@ -38,9 +39,9 @@ export function ProviderCredentialImport({
   );
   const [sourceDeviceId, setSourceDeviceId] = React.useState('');
   const [busy, setBusy] = React.useState(false);
-  const [saved, setSaved] = React.useState<ProviderCredentialId | null>(null);
+  const [saved, setSaved] = React.useState<ImportableCredential | null>(null);
   const [pendingCopy, setPendingCopy] = React.useState<{
-    credential: ProviderCredentialId;
+    credential: ImportableCredential;
     sourceDeviceId: string;
     sourceName: string;
   } | null>(null);
@@ -48,7 +49,7 @@ export function ProviderCredentialImport({
   const source = sources.find((device) => device.id === sourceDeviceId) ?? sources[0];
   const self = mesh.devices.find((device) => device.id === mesh.identity?.id);
 
-  const allowed = (credential: ProviderCredentialId) =>
+  const allowed = (credential: ImportableCredential) =>
     Boolean(
       self?.administrator &&
         self.grants.some(
@@ -58,7 +59,7 @@ export function ProviderCredentialImport({
         ),
     );
 
-  const copy = (credential: ProviderCredentialId) => {
+  const copy = (credential: ImportableCredential) => {
     if (!source || !mesh.identity) return;
     setPendingCopy({
       credential,

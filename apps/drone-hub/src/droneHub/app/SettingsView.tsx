@@ -113,6 +113,8 @@ export function SettingsView({
     llm.clearingOpenAiSettings ||
     llm.savingGeminiSettings ||
     llm.clearingGeminiSettings ||
+    llm.savingOpenRouterSettings ||
+    llm.clearingOpenRouterSettings ||
     llm.savingGroqSettings ||
     llm.clearingGroqSettings ||
     llm.savingLlmProvider ||

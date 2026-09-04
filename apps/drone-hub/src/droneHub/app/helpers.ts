@@ -210,10 +210,15 @@ export function normalizeContainerPathInput(raw: string): string {
   return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
 }
 
-export function maybeExtractApiKey(raw: string, provider: 'openai' | 'gemini' | 'groq'): string {
+export function maybeExtractApiKey(raw: string, provider: 'openai' | 'gemini' | 'openrouter' | 'groq'): string {
   const text = String(raw ?? '');
   if (provider === 'groq') return text;
-  const envName = provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY';
+  const envName =
+    provider === 'gemini'
+      ? 'GEMINI_API_KEY'
+      : provider === 'openrouter'
+        ? 'OPENROUTER_API_KEY'
+        : 'OPENAI_API_KEY';
   const lines = text.split(/\r?\n/);
   for (const rawLine of lines) {
     const line = String(rawLine ?? '').trim();

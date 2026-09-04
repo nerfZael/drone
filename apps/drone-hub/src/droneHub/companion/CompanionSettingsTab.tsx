@@ -9,7 +9,7 @@ import {
   useCompanionSettings,
 } from './use-companion-settings';
 
-const PROVIDER_LABELS = { openai: 'OpenAI', codex: 'Codex', gemini: 'Gemini' } as const;
+const PROVIDER_LABELS = { openai: 'OpenAI', codex: 'Codex', gemini: 'Gemini', openrouter: 'OpenRouter' } as const;
 
 export function CompanionSettingsTab({ settings }: {
   settings: ReturnType<typeof useCompanionSettings>;
@@ -64,6 +64,7 @@ export function CompanionSettingsTab({ settings }: {
               { value: 'openai', label: 'OpenAI' },
               { value: 'codex', label: 'Codex' },
               { value: 'gemini', label: 'Gemini' },
+              { value: 'openrouter', label: 'OpenRouter' },
             ]}
             onValueChange={setProvider}
             disabled={saving}

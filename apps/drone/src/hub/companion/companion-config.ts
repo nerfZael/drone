@@ -286,8 +286,8 @@ export function normalizeCompanionSettings(value: unknown): CompanionSettings {
   const raw = input as Record<string, unknown>;
   const migrateLegacyDefaults = raw.schemaVersion !== COMPANION_SETTINGS_SCHEMA_VERSION;
   const provider = raw.provider;
-  if (provider !== 'openai' && provider !== 'gemini' && provider !== 'codex') {
-    throw new Error('Companion provider must be openai, codex, or gemini');
+  if (provider !== 'openai' && provider !== 'gemini' && provider !== 'codex' && provider !== 'openrouter') {
+    throw new Error('Companion provider must be openai, codex, gemini, or openrouter');
   }
   const requestedModel = String(raw.model ?? '').trim();
   const requestedThinking = String(raw.thinkingLevel ?? '').trim() as CompanionThinkingLevel;
@@ -346,8 +346,8 @@ export async function writeCompanionSettings(value: unknown): Promise<CompanionS
   const provider = raw.provider;
   const model = String(raw.model ?? '').trim();
   const thinkingLevel = String(raw.thinkingLevel ?? '').trim() as CompanionThinkingLevel;
-  if (provider !== 'openai' && provider !== 'gemini' && provider !== 'codex') {
-    throw new Error('provider must be openai, codex, or gemini');
+  if (provider !== 'openai' && provider !== 'gemini' && provider !== 'codex' && provider !== 'openrouter') {
+    throw new Error('provider must be openai, codex, gemini, or openrouter');
   }
   if (!matchingModel(provider, model, thinkingLevel)) {
     throw new Error('model and thinkingLevel are not supported for this provider');
@@ -360,7 +360,7 @@ export async function writeCompanionSettings(value: unknown): Promise<CompanionS
 export async function companionSettingsResponse() {
   const settings = await readCompanionSettings();
   const credentialEntries = await Promise.all(
-    (['openai', 'codex', 'gemini'] as const).map(async (provider) => [
+    (['openai', 'codex', 'gemini', 'openrouter'] as const).map(async (provider) => [
       provider,
       Boolean((await resolveEffectiveProviderApiKeySettings(provider)).apiKey),
     ] as const),

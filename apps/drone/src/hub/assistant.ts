@@ -59,6 +59,7 @@ import {
   DEFAULT_OPENAI_MODEL,
   DEFAULT_GEMINI_MODEL,
   DEFAULT_CODEX_MODEL,
+  DEFAULT_OPENROUTER_MODEL,
   DEFAULT_THREAD_TITLE,
   ASSISTANT_SYSTEM_PROMPT_RUNTIME_APPENDIX,
   ASSISTANT_MULTI_TARGET_PROMPT_LINE,
@@ -226,6 +227,7 @@ async function defaultAssistantProvider(): Promise<LlmProviderId> {
 
 function defaultModelForProvider(provider: LlmProviderId): string {
   if (provider === 'codex') return DEFAULT_CODEX_MODEL;
+  if (provider === 'openrouter') return DEFAULT_OPENROUTER_MODEL;
   return provider === 'gemini' ? DEFAULT_GEMINI_MODEL : DEFAULT_OPENAI_MODEL;
 }
 

@@ -81,7 +81,7 @@ describe('desktop typography system', () => {
   test('reuses one API key card instead of duplicating provider controls', () => {
     const settings = readSource('../src/droneHub/app/GeneralSettingsTab.tsx');
 
-    expect(settings.match(/<ApiKeySettingsCard/g)?.length).toBe(3);
+    expect(settings.match(/<ApiKeySettingsCard/g)?.length).toBe(4);
     expect(settings).toContain('<UiSegmentedControl');
     expect(settings).toContain('name="openai-api-key"');
   });

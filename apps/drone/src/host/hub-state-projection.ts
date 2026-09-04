@@ -68,7 +68,7 @@ function overlayCanonicalSettings(registry: any): void {
     }
     const settings = registry.settings;
     const updatedAt = row.updated_at;
-    const provider = /^api-key\.(openai|gemini|groq|exa)$/.exec(row.setting_key)?.[1];
+    const provider = /^api-key\.(openai|gemini|openrouter|groq|exa)$/.exec(row.setting_key)?.[1];
     if (provider) {
       if (value?.apiKey) settings[provider] = { apiKey: value.apiKey, updatedAt };
       else delete settings[provider];
