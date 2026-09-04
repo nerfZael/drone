@@ -10,13 +10,19 @@ type AgentModelCatalogAdapter = {
 const CODEX_CACHE_COMMAND = [
   'set -euo pipefail',
   'paths=("${CODEX_HOME:-$HOME/.codex}/models_cache.json" "$HOME/.codex/models_cache.json" "/root/.codex/models_cache.json" "/dvm-data/home/.codex/models_cache.json")',
+  'best_path=""',
+  'best_mtime=-1',
   'for p in "${paths[@]}"; do',
-  '  if [ -f "$p" ]; then',
-  '    cat "$p"',
-  '    exit 0',
+  '  [ -f "$p" ] || continue',
+  '  mtime="$(stat -c %Y -- "$p" 2>/dev/null || stat -f %m "$p" 2>/dev/null || echo 0)"',
+  '  [[ "$mtime" =~ ^[0-9]+$ ]] || mtime=0',
+  '  if (( mtime > best_mtime )); then',
+  '    best_path="$p"',
+  '    best_mtime="$mtime"',
   '  fi',
   'done',
-  'exit 1',
+  '[ -n "$best_path" ] || exit 1',
+  'cat "$best_path"',
 ].join('\n');
 
 const CLAUDE_EMBEDDED_MODELS_COMMAND = [

@@ -6,6 +6,7 @@ import {
   parseClaudeEmbeddedModels,
   parseClaudeModelHelp,
   parseCodexModelCache,
+  parseCodexModelCacheFetchedAt,
 } from './parsers';
 import type {
   AgentModelCatalogCacheEntry,
@@ -59,13 +60,26 @@ export class AgentModelCatalogService {
     const key = cacheKey(request);
     const cached = this.readCache(key);
     // Codex refreshes this file independently, so check it before applying the Hub cache TTL.
-    const currentCodexModels =
+    const currentCodexSnapshot =
       request.agentId === 'codex' ? await this.readHostCodexModelCache() : null;
-    if (currentCodexModels) {
+    if (currentCodexSnapshot) {
       if (
         !request.forceRefresh &&
         cached &&
-        JSON.stringify(cached.models) === JSON.stringify(currentCodexModels)
+        JSON.stringify(cached.models) === JSON.stringify(currentCodexSnapshot.models)
+      ) {
+        return resultFromEntry(cached, 'cache');
+      }
+      const snapshotTimestamp = currentCodexSnapshot.fetchedAt
+        ? Date.parse(currentCodexSnapshot.fetchedAt)
+        : NaN;
+      const cachedTimestamp = cached?.discoveredAt ? Date.parse(cached.discoveredAt) : NaN;
+      if (
+        cached?.models.length &&
+        cached.installationFingerprint === 'host:codex-cache' &&
+        Number.isFinite(snapshotTimestamp) &&
+        Number.isFinite(cachedTimestamp) &&
+        snapshotTimestamp < cachedTimestamp
       ) {
         return resultFromEntry(cached, 'cache');
       }
@@ -73,8 +87,10 @@ export class AgentModelCatalogService {
         key,
         agentId: request.agentId,
         runtime: 'host',
-        models: currentCodexModels,
-        discoveredAt: new Date(this.runtime.now?.() ?? Date.now()).toISOString(),
+        models: currentCodexSnapshot.models,
+        discoveredAt:
+          currentCodexSnapshot.fetchedAt ??
+          new Date(this.runtime.now?.() ?? Date.now()).toISOString(),
         installationFingerprint: 'host:codex-cache',
       };
       this.failedRefreshes.delete(key);
@@ -112,13 +128,19 @@ export class AgentModelCatalogService {
     return this.refresh(key, request, cached);
   }
 
-  private async readHostCodexModelCache(): Promise<AgentModelCatalogResult['models'] | null> {
+  private async readHostCodexModelCache(): Promise<{
+    models: AgentModelCatalogResult['models'];
+    fetchedAt: string | null;
+  } | null> {
     const command = agentModelCatalogAdapter('codex').modelCacheCommand;
     if (!command) return null;
     try {
       const result = await this.runtime.runHost(command, this.runtime.timeoutMs());
-      const models = result.code === 0 ? parseCodexModelCache(String(result.stdout ?? '')) : [];
-      return models.length > 0 ? models : null;
+      const raw = String(result.stdout ?? '');
+      const models = result.code === 0 ? parseCodexModelCache(raw) : [];
+      return models.length > 0
+        ? { models, fetchedAt: parseCodexModelCacheFetchedAt(raw) }
+        : null;
     } catch {
       return null;
     }

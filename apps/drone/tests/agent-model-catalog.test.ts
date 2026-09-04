@@ -7,6 +7,7 @@ import {
   parseClaudeEmbeddedModels,
   parseClaudeModelHelp,
   parseCodexModelCache,
+  parseCodexModelCacheFetchedAt,
 } from '../src/hub/agent-model-catalog/parsers';
 import { modelListCommands } from '../src/hub/agent-model-catalog/adapters';
 import type { AgentModelCatalogRuntime } from '../src/hub/agent-model-catalog/types';
@@ -40,21 +41,25 @@ describe('agent model catalog', () => {
   });
 
   test('reads Codex model cache metadata', () => {
-    expect(
-      parseCodexModelCache(
-        JSON.stringify({
-          current_model: 'gpt-current',
-          models: [
-            {
-              slug: 'gpt-current',
-              display_name: 'GPT Current',
-              supported_reasoning_efforts: ['medium', 'high'],
-              default_reasoning_effort: 'medium',
-            },
+    const cache = JSON.stringify({
+      fetched_at: '2026-09-05T00:01:02.123456789Z',
+      current_model: 'gpt-current',
+      models: [
+        {
+          slug: 'gpt-current',
+          display_name: 'GPT Current',
+          visibility: 'list',
+          priority: 1,
+          supported_reasoning_levels: [
+            { effort: 'medium', description: 'Balanced' },
+            { effort: 'high', description: 'Deeper reasoning' },
           ],
-        }),
-      ),
-    ).toEqual([
+          default_reasoning_level: 'medium',
+        },
+      ],
+    });
+    expect(parseCodexModelCacheFetchedAt(cache)).toBe('2026-09-05T00:01:02.123Z');
+    expect(parseCodexModelCache(cache)).toEqual([
       {
         id: 'gpt-current',
         label: 'GPT Current',
@@ -143,6 +148,7 @@ describe('agent model catalog', () => {
         return {
           code: 0,
           stdout: JSON.stringify({
+            fetched_at: '2026-01-01T00:01:00.000Z',
             models: [
               { slug: 'gpt-5.6-sol', display_name: 'GPT-5.6-Sol', visibility: 'list' },
               { slug: 'gpt-5.6-terra', display_name: 'GPT-5.6-Terra', visibility: 'list' },
@@ -177,10 +183,53 @@ describe('agent model catalog', () => {
       'gpt-5.6-luna',
     ]);
     expect(result.source).toBe('live');
+    expect(result.discoveredAt).toBe('2026-01-01T00:01:00.000Z');
     expect(containerCalls).toBe(0);
     expect(hostCommands).toHaveLength(1);
     expect(hostCommands[0]).toContain('CODEX_HOME');
     expect(hostCommands[0]).toContain('/dvm-data/home/.codex/models_cache.json');
+    expect(hostCommands[0]).toContain('stat -c %Y');
+  });
+
+  test('does not roll a Codex catalog back to an older host cache snapshot', async () => {
+    const runtime: AgentModelCatalogRuntime = {
+      async runContainer() {
+        return { code: 1 };
+      },
+      async runHost() {
+        return {
+          code: 0,
+          stdout: JSON.stringify({
+            fetched_at: '2026-09-05T00:00:00.000Z',
+            models: [{ slug: 'gpt-5.6-sol', display_name: 'GPT-5.6-Sol' }],
+          }),
+        };
+      },
+      hostModelListCommand: () => null,
+      timeoutMs: () => 1_000,
+    };
+    const service = new AgentModelCatalogService(runtime, {
+      read: () => ({
+        key: 'v5:shared:codex',
+        agentId: 'codex',
+        runtime: 'host',
+        models: [{ id: 'gpt-6-astra', label: 'GPT-6-Astra' }] as any,
+        discoveredAt: '2026-09-05T01:00:00.000Z',
+        installationFingerprint: 'host:codex-cache',
+      }),
+      async write() {
+        throw new Error('an older snapshot must not be written');
+      },
+    });
+
+    const result = await service.get({
+      agentId: 'codex',
+      target: { runtime: 'container', containerName: 'drone-a' },
+      forceRefresh: true,
+    });
+
+    expect(result.models.map((model) => model.id)).toEqual(['gpt-6-astra']);
+    expect(result.source).toBe('cache');
   });
 
   test('uses Codex visibility and priority metadata', () => {

@@ -220,3 +220,14 @@ export function parseCodexModelCache(raw: string): AgentModelCatalogModel[] {
     return [];
   }
 }
+
+export function parseCodexModelCacheFetchedAt(raw: string): string | null {
+  try {
+    const parsed = JSON.parse(String(raw ?? ''));
+    const value = String(parsed?.fetched_at ?? parsed?.fetchedAt ?? '').trim();
+    const timestamp = Date.parse(value);
+    return value && Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
+  } catch {
+    return null;
+  }
+}

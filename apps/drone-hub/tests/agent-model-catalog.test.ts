@@ -45,7 +45,7 @@ describe('agent model catalog', () => {
     }]);
   });
 
-  test('caches one catalog per agent without a runtime namespace', () => {
+  test('caches one timestamped catalog per agent without a runtime namespace', () => {
     const storage = new Map<string, string>();
     const previousLocalStorage = (globalThis as any).localStorage;
     (globalThis as any).localStorage = {
@@ -70,12 +70,44 @@ describe('agent model catalog', () => {
     };
     try {
       cacheAgentModelCatalog('codex', {
+        discoveredAt: '2026-09-05T00:00:00.000Z',
         models: [{ id: 'gpt-shared', label: 'GPT Shared' }],
       });
 
       const cached = JSON.parse(Array.from(storage.values())[0] ?? '{}');
       expect(Object.keys(cached)).toEqual(['codex']);
-      expect(cached.codex[0]?.id).toBe('gpt-shared');
+      expect(cached.codex.models[0]?.id).toBe('gpt-shared');
+      expect(cached.codex.discoveredAt).toBe('2026-09-05T00:00:00.000Z');
+    } finally {
+      if (previousLocalStorage === undefined) delete (globalThis as any).localStorage;
+      else (globalThis as any).localStorage = previousLocalStorage;
+    }
+  });
+
+  test('does not replace a newer non-empty catalog with an older response', () => {
+    const storage = new Map<string, string>();
+    const previousLocalStorage = (globalThis as any).localStorage;
+    (globalThis as any).localStorage = {
+      getItem(key: string) {
+        return storage.get(key) ?? null;
+      },
+      setItem(key: string, value: string) {
+        storage.set(key, value);
+      },
+    };
+    try {
+      cacheAgentModelCatalog('codex', {
+        discoveredAt: '2026-09-05T01:00:00.000Z',
+        models: [{ id: 'gpt-6-astra', label: 'GPT-6-Astra' }],
+      });
+      cacheAgentModelCatalog('codex', {
+        discoveredAt: '2026-09-05T00:00:00.000Z',
+        models: [{ id: 'gpt-5.6-sol', label: 'GPT-5.6-Sol' }],
+      });
+
+      const cached = JSON.parse(Array.from(storage.values())[0] ?? '{}');
+      expect(cached.codex.models.map((model: any) => model.id)).toEqual(['gpt-6-astra']);
+      expect(cached.codex.discoveredAt).toBe('2026-09-05T01:00:00.000Z');
     } finally {
       if (previousLocalStorage === undefined) delete (globalThis as any).localStorage;
       else (globalThis as any).localStorage = previousLocalStorage;
