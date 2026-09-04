@@ -1133,7 +1133,7 @@ export function createChatManagementRouteHandler(
           Object.prototype.hasOwnProperty.call(body, 'dockerSnapshotAfterAgentMessageEnabled'),
         );
         let model: string | null = null;
-        let provider: 'openai' | 'codex' | 'gemini' | null = null;
+        let provider: 'openai' | 'codex' | 'gemini' | 'openrouter' | null = null;
         let reasoning: string | null = null;
         let agentPermissionMode: AgentPermissionMode = 'execute';
         let approvalPolicy: AgentApprovalPolicy = 'ask';
@@ -1154,8 +1154,8 @@ export function createChatManagementRouteHandler(
         }
         if (hasProviderField) {
           const candidate = String(body?.provider ?? '').trim().toLowerCase();
-          if (candidate !== 'openai' && candidate !== 'codex' && candidate !== 'gemini') {
-            json(res, 400, { ok: false, error: 'provider must be openai, codex, or gemini' });
+          if (candidate !== 'openai' && candidate !== 'codex' && candidate !== 'gemini' && candidate !== 'openrouter') {
+            json(res, 400, { ok: false, error: 'provider must be openai, codex, gemini, or openrouter' });
             return;
           }
           provider = candidate;

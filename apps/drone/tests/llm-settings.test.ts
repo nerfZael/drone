@@ -9,6 +9,7 @@ import {
   collectProviderApiKeyDiagnostics,
   describeSecretValue,
   resolveNameSuggestionLlmSettings,
+  upsertStoredLlmProvider,
   upsertStoredProviderApiKey,
 } from '../src/hub/hub-settings';
 import { getSocketListenSupport } from './socket-listen-support';
@@ -17,7 +18,12 @@ const listenSupport = getSocketListenSupport();
 const describeSocketSuite = listenSupport.ok ? describe : describe.skip;
 
 async function withTempDroneDataDirAndEnv<T>(
-  env: Partial<Record<'OPENAI_API_KEY' | 'GEMINI_API_KEY' | 'DRONE_HUB_CODEX_AUTH_FILE', string | undefined>>,
+  env: Partial<
+    Record<
+      'OPENAI_API_KEY' | 'GEMINI_API_KEY' | 'OPENROUTER_API_KEY' | 'DRONE_HUB_CODEX_AUTH_FILE',
+      string | undefined
+    >
+  >,
   fn: () => Promise<T>,
 ): Promise<T> {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-llm-settings-'));
@@ -27,6 +33,7 @@ async function withTempDroneDataDirAndEnv<T>(
   const previousDataDir = process.env.DRONE_DATA_DIR;
   const previousOpenAi = process.env.OPENAI_API_KEY;
   const previousGemini = process.env.GEMINI_API_KEY;
+  const previousOpenRouter = process.env.OPENROUTER_API_KEY;
   const previousCodexAuthFile = process.env.DRONE_HUB_CODEX_AUTH_FILE;
 
   process.env.DRONE_DATA_DIR = droneDataDir;
@@ -34,6 +41,8 @@ async function withTempDroneDataDirAndEnv<T>(
   else process.env.OPENAI_API_KEY = env.OPENAI_API_KEY;
   if (env.GEMINI_API_KEY === undefined) delete process.env.GEMINI_API_KEY;
   else process.env.GEMINI_API_KEY = env.GEMINI_API_KEY;
+  if (env.OPENROUTER_API_KEY === undefined) delete process.env.OPENROUTER_API_KEY;
+  else process.env.OPENROUTER_API_KEY = env.OPENROUTER_API_KEY;
   if (env.DRONE_HUB_CODEX_AUTH_FILE === undefined) delete process.env.DRONE_HUB_CODEX_AUTH_FILE;
   else process.env.DRONE_HUB_CODEX_AUTH_FILE = env.DRONE_HUB_CODEX_AUTH_FILE;
   resetDroneRootDirForTests();
@@ -47,6 +56,8 @@ async function withTempDroneDataDirAndEnv<T>(
     else process.env.OPENAI_API_KEY = previousOpenAi;
     if (previousGemini == null) delete process.env.GEMINI_API_KEY;
     else process.env.GEMINI_API_KEY = previousGemini;
+    if (previousOpenRouter == null) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = previousOpenRouter;
     if (previousCodexAuthFile == null) delete process.env.DRONE_HUB_CODEX_AUTH_FILE;
     else process.env.DRONE_HUB_CODEX_AUTH_FILE = previousCodexAuthFile;
     resetDroneRootDirForTests();
@@ -88,6 +99,21 @@ describe('LLM settings diagnostics', () => {
       expect(diagnostics.env.present).toBe(true);
       expect(diagnostics.env.hasValue).toBe(true);
       expect(diagnostics.env.trimmedLength).toBe('env-openai-key'.length);
+      expect(diagnostics.env.fingerprint).not.toBeNull();
+      expect(diagnostics.stored.hasValue).toBe(false);
+      expect(diagnostics.effective.source).toBe('environment');
+      expect(diagnostics.effective.hasValue).toBe(true);
+      expect(diagnostics.effective.fingerprint).toBe(diagnostics.env.fingerprint);
+    });
+  });
+
+  test('reports environment-backed OpenRouter keys', async () => {
+    await withTempDroneDataDirAndEnv({ OPENROUTER_API_KEY: '  env-openrouter-key  ' }, async () => {
+      const diagnostics = await collectProviderApiKeyDiagnostics('openrouter');
+      expect(diagnostics.envVar).toBe('OPENROUTER_API_KEY');
+      expect(diagnostics.env.present).toBe(true);
+      expect(diagnostics.env.hasValue).toBe(true);
+      expect(diagnostics.env.trimmedLength).toBe('env-openrouter-key'.length);
       expect(diagnostics.env.fingerprint).not.toBeNull();
       expect(diagnostics.stored.hasValue).toBe(false);
       expect(diagnostics.effective.source).toBe('environment');
@@ -172,6 +198,17 @@ describe('LLM settings diagnostics', () => {
       expect(resolved.source).toBe('environment');
     });
   });
+
+  test('uses the selected OpenRouter provider for name suggestions when configured', async () => {
+    await withTempDroneDataDirAndEnv({ OPENROUTER_API_KEY: 'openrouter-key' }, async () => {
+      await upsertStoredLlmProvider('openrouter');
+
+      const resolved = await resolveNameSuggestionLlmSettings();
+      expect(resolved.provider).toBe('openrouter');
+      expect(resolved.apiKey).toBe('openrouter-key');
+      expect(resolved.source).toBe('environment');
+    });
+  });
 });
 
 describeSocketSuite('LLM settings api', () => {
@@ -235,6 +272,37 @@ describeSocketSuite('LLM settings api', () => {
     expect(revealed.data.hasKey).toBe(true);
     expect(revealed.data.source).toBe('settings');
     expect(revealed.data.apiKey).toBe('stored-openai-key');
+  });
+
+  test('stores OpenRouter key for Hub agent settings', async () => {
+    const initial = await apiFetch('/api/settings/llm');
+    expect(initial.r.status).toBe(200);
+    expect(initial.data.openrouter.hasKey).toBe(false);
+
+    const saved = await apiFetch('/api/settings/openrouter', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ apiKey: 'stored-openrouter-key' }),
+    });
+    expect(saved.r.status).toBe(200);
+    expect(saved.data.hasKey).toBe(true);
+    expect(saved.data.source).toBe('settings');
+    expect(saved.data.apiKey).toBeUndefined();
+
+    const hidden = await apiFetch('/api/settings/openrouter');
+    expect(hidden.r.status).toBe(200);
+    expect(hidden.data.hasKey).toBe(true);
+    expect(hidden.data.keyHint).toBe('stor...-key');
+    expect(hidden.data.apiKey).toBeUndefined();
+
+    const revealed = await apiFetch('/api/settings/openrouter?reveal=1');
+    expect(revealed.r.status).toBe(200);
+    expect(revealed.data.apiKey).toBe('stored-openrouter-key');
+
+    const cleared = await apiFetch('/api/settings/openrouter', { method: 'DELETE' });
+    expect(cleared.r.status).toBe(200);
+    expect(cleared.data.hasKey).toBe(false);
+    expect(cleared.data.source).toBeNull();
   });
 
   test('stores GROQ key for voice transcription settings', async () => {

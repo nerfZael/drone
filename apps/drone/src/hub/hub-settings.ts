@@ -63,8 +63,8 @@ export function hubLog(level: 'info' | 'warn' | 'error', message: string, meta?:
   console.log(`[DroneHub] ${message}`, payload);
 }
 
-export type LlmProviderId = 'openai' | 'gemini' | 'codex';
-export type StoredApiKeyProviderId = 'openai' | 'gemini' | 'groq' | 'exa';
+export type LlmProviderId = 'openai' | 'gemini' | 'codex' | 'openrouter';
+export type StoredApiKeyProviderId = 'openai' | 'gemini' | 'openrouter' | 'groq' | 'exa';
 export type ApiKeySettingsSource = 'settings' | 'environment' | 'codex-cli' | null;
 export type EffectiveProviderApiKeySettings = {
   apiKey: string | null;
@@ -80,7 +80,7 @@ export type SecretValueDiagnostics = {
 };
 export type ProviderApiKeyResolutionDiagnostics = {
   provider: LlmProviderId;
-  envVar: 'OPENAI_API_KEY' | 'GEMINI_API_KEY' | 'DRONE_HUB_CODEX_AUTH_FILE';
+  envVar: 'OPENAI_API_KEY' | 'GEMINI_API_KEY' | 'DRONE_HUB_CODEX_AUTH_FILE' | 'OPENROUTER_API_KEY';
   env: SecretValueDiagnostics;
   stored: {
     hasValue: boolean;
@@ -206,6 +206,8 @@ export const DEFAULT_VOICE_INPUT_SETTINGS: VoiceInputSettings = {
 };
 export const VOICE_INPUT_CUSTOM_SILENCE_MILLIS_MIN = 250;
 export const VOICE_INPUT_CUSTOM_SILENCE_MILLIS_MAX = 10_000;
+export const LLM_PROVIDER_IDS = ['openai', 'gemini', 'codex', 'openrouter'] as const satisfies readonly LlmProviderId[];
+export const STORED_API_KEY_PROVIDER_IDS = ['openai', 'gemini', 'openrouter', 'groq', 'exa'] as const satisfies readonly StoredApiKeyProviderId[];
 
 export const VOICE_INPUT_SILENCE_MILLIS_BY_PRESET: Record<
   Exclude<VoiceInputEndThoughtPreset, 'custom'>,
@@ -226,7 +228,7 @@ export function parseLlmProvider(raw: unknown): LlmProviderId | null {
   const s = String(raw ?? '')
     .trim()
     .toLowerCase();
-  if (s === 'openai' || s === 'gemini' || s === 'codex') return s;
+  if (s === 'openai' || s === 'gemini' || s === 'codex' || s === 'openrouter') return s;
   if (s === 'google') return 'gemini';
   if (s === 'openai-codex' || s === 'chatgpt' || s === 'chatgpt-codex') return 'codex';
   return null;
@@ -514,13 +516,15 @@ async function putCanonicalSetting<T>(key: string, value: T | null): Promise<voi
   await (await getHubSettingsRepository()).put<T | null>(key, value);
 }
 
-function providerApiKeyEnvVar(provider: LlmProviderId): 'OPENAI_API_KEY' | 'GEMINI_API_KEY' | 'DRONE_HUB_CODEX_AUTH_FILE' {
+function providerApiKeyEnvVar(provider: LlmProviderId): ProviderApiKeyResolutionDiagnostics['envVar'] {
   if (provider === 'codex') return 'DRONE_HUB_CODEX_AUTH_FILE';
+  if (provider === 'openrouter') return 'OPENROUTER_API_KEY';
   return provider === 'openai' ? 'OPENAI_API_KEY' : 'GEMINI_API_KEY';
 }
 
 export function providerDisplayName(provider: LlmProviderId): string {
   if (provider === 'codex') return 'Codex';
+  if (provider === 'openrouter') return 'OpenRouter';
   return provider === 'openai' ? 'OpenAI' : 'Gemini';
 }
 
@@ -530,9 +534,11 @@ async function getStoredProviderApiKey(provider: StoredApiKeyProviderId): Promis
       ? reg.settings?.openai
       : provider === 'gemini'
         ? reg.settings?.gemini
-        : provider === 'groq'
-          ? reg.settings?.groq
-          : reg.settings?.exa;
+        : provider === 'openrouter'
+          ? reg.settings?.openrouter
+          : provider === 'groq'
+            ? reg.settings?.groq
+            : reg.settings?.exa;
     const apiKey = normalizeApiKey(block?.apiKey);
     return apiKey ? { value: { apiKey }, updatedAt: legacyUpdatedAt(block) } : null;
   });
@@ -788,11 +794,17 @@ export async function resolveEffectiveLlmProvider(): Promise<EffectiveLlmProvide
 }
 
 export async function resolveNameSuggestionLlmSettings(): Promise<{
-  provider: 'codex' | 'openai';
+  provider: LlmProviderId;
   apiKey: string | null;
   source: ApiKeySettingsSource;
   updatedAt: string | null;
 }> {
+  const selected = await resolveEffectiveLlmProvider();
+  if (selected.source !== 'default') {
+    const selectedCredential = await resolveEffectiveProviderApiKeySettings(selected.provider);
+    if (selectedCredential.apiKey) return { provider: selected.provider, ...selectedCredential };
+  }
+
   const codex = await resolveEffectiveProviderApiKeySettings('codex');
   if (codex.apiKey) return { provider: 'codex', ...codex };
 
@@ -825,13 +837,15 @@ export async function resolveLlmSettingsResponse(): Promise<{
   openai: { hasKey: boolean; source: ApiKeySettingsSource; keyHint: string | null; updatedAt: string | null };
   gemini: { hasKey: boolean; source: ApiKeySettingsSource; keyHint: string | null; updatedAt: string | null };
   codex: { hasKey: boolean; source: ApiKeySettingsSource; keyHint: string | null; updatedAt: string | null };
+  openrouter: { hasKey: boolean; source: ApiKeySettingsSource; keyHint: string | null; updatedAt: string | null };
   groq: { hasKey: boolean; source: ApiKeySettingsSource; keyHint: string | null; updatedAt: string | null };
 }> {
-  const [provider, openai, gemini, codex, groq] = await Promise.all([
+  const [provider, openai, gemini, codex, openrouter, groq] = await Promise.all([
     resolveEffectiveLlmProvider(),
     resolveEffectiveProviderApiKeySettings('openai'),
     resolveEffectiveProviderApiKeySettings('gemini'),
     resolveEffectiveProviderApiKeySettings('codex'),
+    resolveEffectiveProviderApiKeySettings('openrouter'),
     resolveGroqApiKeySettings(),
   ]);
   return {
@@ -840,6 +854,7 @@ export async function resolveLlmSettingsResponse(): Promise<{
     openai: providerKeySettingsResponse(openai),
     gemini: providerKeySettingsResponse(gemini),
     codex: providerKeySettingsResponse(codex),
+    openrouter: providerKeySettingsResponse(openrouter),
     groq: providerKeySettingsResponse(groq),
   };
 }

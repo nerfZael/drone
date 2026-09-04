@@ -2,7 +2,17 @@ import React from 'react';
 import type { MeshDevice } from './use-device-mesh';
 
 type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
-type Credential = 'openai' | 'codex' | 'groq';
+type Credential = 'openai' | 'codex' | 'openrouter' | 'groq';
+
+function credentialLabel(credential: Credential): string {
+  return credential === 'codex'
+    ? 'Codex login'
+    : credential === 'openrouter'
+      ? 'OpenRouter API key'
+      : credential === 'groq'
+        ? 'GROQ API key'
+        : 'OpenAI API key';
+}
 
 export function ProviderCredentialTransferPanel({
   requestJson,
@@ -31,16 +41,11 @@ export function ProviderCredentialTransferPanel({
 
   const importCredential = async (credential: Credential) => {
     if (!selectedSource) return;
-    const label =
-      credential === 'codex'
-        ? 'Codex login'
-        : credential === 'groq'
-          ? 'GROQ API key'
-          : 'OpenAI API key';
+    const label = credentialLabel(credential);
     const warning =
       credential === 'codex'
         ? `Replace this computer's file-based Codex login with the login from ${selectedSource.name}?`
-        : `Copy the ${credential === 'groq' ? 'GROQ' : 'OpenAI'} API key from ${selectedSource.name} to this computer?`;
+        : `Copy the ${credentialLabel(credential).toLowerCase()} from ${selectedSource.name} to this computer?`;
     if (!window.confirm(warning)) return;
     setBusy(credential);
     setError(null);
@@ -109,6 +114,14 @@ export function ProviderCredentialTransferPanel({
             className="h-9 rounded border border-[var(--border-subtle)] px-3 text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg)] disabled:opacity-50"
           >
             {busy === 'codex' ? 'Copying…' : 'Copy Codex login'}
+          </button>
+          <button
+            type="button"
+            disabled={!selectedSource || !selfIsAdministrator || busy !== null}
+            onClick={() => void importCredential('openrouter')}
+            className="h-9 rounded border border-[var(--border-subtle)] px-3 text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg)] disabled:opacity-50"
+          >
+            {busy === 'openrouter' ? 'Copying…' : 'Copy OpenRouter key'}
           </button>
           <button
             type="button"

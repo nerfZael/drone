@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import type { HubRouter } from '../hub-router';
 import type { HubServices } from '../application/hub-services';
 import {
+  LLM_PROVIDER_IDS,
   type LlmProviderId,
   type StoredApiKeyProviderId,
 } from '../hub-settings';
@@ -171,6 +172,7 @@ export function registerSettingsRoutes(
     { path: '/api/settings/openai', provider: 'openai' },
     { path: '/api/settings/gemini', provider: 'gemini' },
     { path: '/api/settings/codex', provider: 'codex' },
+    { path: '/api/settings/openrouter', provider: 'openrouter' },
     { path: '/api/settings/groq', provider: 'groq' },
     { path: '/api/settings/exa', provider: 'exa' },
   ];
@@ -248,12 +250,7 @@ export function registerSettingsRoutes(
   apiRouter.get('/api/settings/llm', async ({ method, json: respond }) => {
     const data = await resolveLlmSettingsResponse();
     const selectedProvider = data.provider.selected;
-    const selectedProviderSettings =
-      selectedProvider === 'openai'
-        ? data.openai
-        : selectedProvider === 'gemini'
-          ? data.gemini
-          : data.codex;
+    const selectedProviderSettings = data[selectedProvider];
     if (!selectedProviderSettings.hasKey) {
       await logProviderApiKeyResolution(
         'warn',
@@ -272,7 +269,7 @@ export function registerSettingsRoutes(
   apiRouter.post('/api/settings/llm', async ({ readJson, fail, json: respond }) => {
     const body = await readJson<any>();
     const provider = parseLlmProvider(body?.provider);
-    if (!provider) return fail(400, 'provider must be openai, gemini, or codex');
+    if (!provider) return fail(400, `provider must be one of: ${LLM_PROVIDER_IDS.join(', ')}`);
     await upsertStoredLlmProvider(provider);
     respond(200, await resolveLlmSettingsResponse());
   });

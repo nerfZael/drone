@@ -11,7 +11,7 @@ type CompanionProposalOperationBase = {
 export type CompanionProposalChatOverrides = {
   /** Existing Drone Hub agent key, for example native, builtin:codex, or custom:my-agent. */
   agent?: string;
-  provider?: 'openai' | 'codex' | 'gemini';
+  provider?: 'openai' | 'codex' | 'gemini' | 'openrouter';
   model?: string;
   reasoning?: string;
   agentPermissionMode?: 'read' | 'write' | 'execute';
@@ -181,7 +181,7 @@ export const COMPANION_PROPOSAL_FORMAT = [
   '  create_chat also accepts optional agent, provider, model, reasoning, agentPermissionMode, and approvalPolicy overrides. copyFromChat copies configuration only.',
   '- clone_chat: { id, type, droneId, sourceChat, chatName, draft? } (clones history and configuration)',
   'Agent overrides use "native", "builtin:cursor", "builtin:codex", "builtin:claude", "builtin:opencode", "builtin:pi", "builtin:blip", or an existing "custom:<id>" agent. Custom agents are unavailable on mobile and host runtime targets.',
-  'Provider is openai, codex, or gemini and only applies to the native agent. agentPermissionMode is read, write, or execute. approvalPolicy is ask, auto, or none. Unsupported agent combinations fail validation during Apply.',
+  'Provider is openai, codex, gemini, or openrouter and only applies to the native agent. agentPermissionMode is read, write, or execute. approvalPolicy is ask, auto, or none. Unsupported agent combinations fail validation during Apply.',
   '- delete_chat: { id, type, droneId, chatName } (the default chat cannot be deleted)',
   '- rename_chat: { id, type, droneId, chatName, newName } (the default chat cannot be renamed)',
   '- send_message: { id, type, droneId, chatName?, message, delivery?: "asap" | "queue" }',
@@ -678,7 +678,7 @@ function validateChatOverrides(
 ): CompanionProposalChatOverrides {
   const overrides: CompanionProposalChatOverrides = {
     ...optionalNonEmptyField(operation, 'agent', path, 200),
-    ...optionalEnumField(operation, 'provider', path, ['openai', 'codex', 'gemini'] as const),
+    ...optionalEnumField(operation, 'provider', path, ['openai', 'codex', 'gemini', 'openrouter'] as const),
     ...optionalNonEmptyField(operation, 'model', path, 200),
     ...optionalNonEmptyField(operation, 'reasoning', path, 200),
     ...optionalEnumField(

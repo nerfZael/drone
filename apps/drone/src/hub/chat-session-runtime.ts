@@ -1638,7 +1638,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
             throw error;
           }
           const provider = String(opts.provider ?? '').trim().toLowerCase();
-          if (provider === 'openai' || provider === 'codex' || provider === 'gemini') {
+          if (provider === 'openai' || provider === 'codex' || provider === 'gemini' || provider === 'openrouter') {
             cur.nativeProvider = provider;
           } else {
             delete cur.nativeProvider;

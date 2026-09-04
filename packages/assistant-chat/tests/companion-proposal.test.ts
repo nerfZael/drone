@@ -143,6 +143,16 @@ describe('Companion proposal contract', () => {
           repoBranchSource: 'host',
         },
         {
+          id: 'openrouter-chat',
+          type: 'create_chat',
+          droneId: '$configured',
+          chatName: 'openrouter-work',
+          agent: 'native',
+          provider: 'openrouter',
+          model: 'openrouter/auto',
+          reasoning: 'medium',
+        },
+        {
           id: 'cloned-chat',
           type: 'clone_chat',
           droneId: '$configured',
@@ -168,8 +178,15 @@ describe('Companion proposal contract', () => {
       agentPermissionMode: 'write',
       approvalPolicy: 'none',
     });
-    expect(proposal.operations[1]).toMatchObject({ type: 'clone_chat', sourceChat: 'default' });
-    expect(proposal.operations[2]).toMatchObject({ type: 'clone_drone', group: '', cloneChats: false });
+    expect(proposal.operations[1]).toMatchObject({
+      type: 'create_chat',
+      agent: 'native',
+      provider: 'openrouter',
+      model: 'openrouter/auto',
+      reasoning: 'medium',
+    });
+    expect(proposal.operations[2]).toMatchObject({ type: 'clone_chat', sourceChat: 'default' });
+    expect(proposal.operations[3]).toMatchObject({ type: 'clone_drone', group: '', cloneChats: false });
   });
 
   test('rejects contradictory or unsupported overrides', () => {

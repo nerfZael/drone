@@ -19,6 +19,7 @@ import {
 
 function llmProviderLabel(provider: LlmProviderId | null | undefined): string {
   if (provider === 'codex') return 'Codex';
+  if (provider === 'openrouter') return 'OpenRouter';
   if (provider === 'gemini') return 'Gemini';
   return 'OpenAI';
 }
@@ -151,6 +152,11 @@ export function GeneralSettingsTab({
     clearingOpenAiSettings,
     showOpenAiKey,
     revealingOpenAiKey,
+    openRouterSettingsDraft,
+    savingOpenRouterSettings,
+    clearingOpenRouterSettings,
+    showOpenRouterKey,
+    revealingOpenRouterKey,
     groqSettingsDraft,
     savingGroqSettings,
     clearingGroqSettings,
@@ -162,6 +168,7 @@ export function GeneralSettingsTab({
     setLlmDefaultReasoningDraft,
     updateOpenAiSettingsDraft,
     updateGeminiSettingsDraft,
+    updateOpenRouterSettingsDraft,
     updateGroqSettingsDraft,
     loadLlmSettings,
     saveLlmProviderSettings,
@@ -307,7 +314,7 @@ export function GeneralSettingsTab({
         {llmSettingsLoading && !llmSettings ? (
           <div className="text-[var(--text-12)] text-[var(--muted-dim)]">Loading settings…</div>
         ) : (
-          <div className="grid grid-cols-1 xl:grid-cols-5 gap-3">
+          <div className="grid grid-cols-1 xl:grid-cols-6 gap-3">
             <div className="dh-settings-row px-3 py-3">
               <div className="dh-type-label">Active provider</div>
               <div className="mt-2 dh-type-control text-[var(--fg-secondary)]">
@@ -349,6 +356,15 @@ export function GeneralSettingsTab({
               </div>
             </div>
             <div className="dh-settings-row px-3 py-3">
+              <div className="dh-type-label">OpenRouter key</div>
+              <div className="mt-2 dh-type-control text-[var(--fg-secondary)]">
+                {llmSettings?.openrouter.hasKey ? llmSettings.openrouter.keyHint ?? 'Configured' : 'Not configured'}
+              </div>
+              <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">
+                {llmSettings?.openrouter.updatedAt ? `Updated ${new Date(llmSettings.openrouter.updatedAt).toLocaleString()}` : 'Stored only when set in Hub'}
+              </div>
+            </div>
+            <div className="dh-settings-row px-3 py-3">
               <div className="dh-type-label">GROQ key</div>
               <div className="mt-2 dh-type-control text-[var(--fg-secondary)]">
                 {llmSettings?.groq.hasKey ? llmSettings.groq.keyHint ?? 'Configured' : 'Not configured'}
@@ -369,10 +385,11 @@ export function GeneralSettingsTab({
           label="Active provider"
           value={llmProviderDraft}
           options={[
-            { value: 'openai', label: 'OpenAI' },
-            { value: 'gemini', label: 'Gemini' },
-            { value: 'codex', label: 'Codex' },
-          ]}
+              { value: 'openai', label: 'OpenAI' },
+              { value: 'gemini', label: 'Gemini' },
+              { value: 'codex', label: 'Codex' },
+              { value: 'openrouter', label: 'OpenRouter' },
+            ]}
           onValueChange={setLlmProviderDraft}
           disabled={savingLlmProvider || llmSettingsLoading}
         />
@@ -506,6 +523,25 @@ export function GeneralSettingsTab({
           onToggleVisibility={() => void toggleApiKeyVisibility('gemini')}
           onSave={() => void mutateApiKeySettings('gemini', 'save')}
           onClear={() => void mutateApiKeySettings('gemini', 'clear')}
+        />
+
+        <ApiKeySettingsCard
+          title="OpenRouter API key"
+          hasKey={Boolean(llmSettings?.openrouter.hasKey)}
+          keyHint={llmSettings?.openrouter.keyHint}
+          updatedAt={llmSettings?.openrouter.updatedAt}
+          emptyLabel="No OpenRouter key configured."
+          draft={openRouterSettingsDraft}
+          name="openrouter-api-key"
+          placeholder="sk-or-..."
+          showKey={showOpenRouterKey}
+          revealing={revealingOpenRouterKey}
+          saving={savingOpenRouterSettings}
+          clearing={clearingOpenRouterSettings}
+          onDraftChange={updateOpenRouterSettingsDraft}
+          onToggleVisibility={() => void toggleApiKeyVisibility('openrouter')}
+          onSave={() => void mutateApiKeySettings('openrouter', 'save')}
+          onClear={() => void mutateApiKeySettings('openrouter', 'clear')}
         />
 
         <ApiKeySettingsCard

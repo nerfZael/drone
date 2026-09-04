@@ -71,8 +71,8 @@ export function registerAgentModelCatalogRoutes(
     const forceRefresh = parseBoolParam(url.searchParams.get('refresh'), false);
     if (requestedAgent === 'native') {
       const requestedProvider = String(url.searchParams.get('provider') ?? '').trim().toLowerCase();
-      if (requestedProvider && !['openai', 'codex', 'gemini'].includes(requestedProvider)) {
-        return fail(400, 'provider must be openai, codex, or gemini');
+      if (requestedProvider && !['openai', 'codex', 'gemini', 'openrouter'].includes(requestedProvider)) {
+        return fail(400, 'provider must be openai, codex, gemini, or openrouter');
       }
       const catalog = await deps.nativeModelCatalog(requestedProvider || undefined);
       json(200, { ok: true, agent: 'native', runtime, ...catalog, source: 'native' });

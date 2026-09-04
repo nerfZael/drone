@@ -552,16 +552,16 @@ describe('agent model catalog', () => {
     await router.handle(
       { method: 'GET' } as any,
       {} as any,
-      new URL('http://hub.test/api/model-catalog?agent=native&provider=gemini'),
+      new URL('http://hub.test/api/model-catalog?agent=native&provider=openrouter'),
     );
 
-    expect(providers).toEqual(['gemini']);
+    expect(providers).toEqual(['openrouter']);
     expect(responses[0]).toMatchObject({
       status: 200,
       body: {
         ok: true,
         agent: 'native',
-        provider: 'gemini',
+        provider: 'openrouter',
         models: [{ id: 'gemini-model', reasoningLevels: ['high'] }],
       },
     });

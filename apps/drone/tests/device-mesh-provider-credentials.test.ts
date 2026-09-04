@@ -8,6 +8,8 @@ import {
   openProviderCredential,
   sealProviderCredential,
 } from '../src/hub/device-mesh/features/provider-credentials/provider-credential-envelope';
+import { upsertStoredProviderApiKey } from '../src/hub/hub-settings';
+import { withTempDroneDataDir } from './test-helpers';
 
 function identity(id: string): LocalDeviceIdentity {
   const pair = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
@@ -95,5 +97,44 @@ describe('provider credential transfer', () => {
         },
       ),
     ).rejects.toMatchObject({ code: 'ADMIN_REQUIRED' });
+  });
+
+  test('exports an OpenRouter API key to an administrator device', async () => {
+    await withTempDroneDataDir('provider-credential-openrouter-', async () => {
+      await upsertStoredProviderApiKey('openrouter', 'openrouter-secret');
+      const sender = identity('desktop_1');
+      const recipient = identity('phone_1');
+      const transfer = createProviderCredentialRequest();
+      const capability = createProviderCredentialsCapability(sender);
+
+      const envelope = await capability.invoke(
+        'openrouter.export',
+        transfer.request,
+        {
+          sourceDevice: {
+            ...recipient,
+            administrator: true,
+            grants: [],
+            endpoints: [],
+            revokedAt: null,
+            addedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+          requestId: 'request_1',
+        },
+      );
+      const plaintext = openProviderCredential({
+        envelope,
+        privateKey: transfer.privateKey,
+        senderDeviceId: sender.id,
+        recipientDeviceId: recipient.id,
+        senderIdentityPublicKey: sender.publicKey,
+      });
+
+      expect(JSON.parse(plaintext)).toMatchObject({
+        kind: 'openrouter-api-key',
+        apiKey: 'openrouter-secret',
+      });
+    });
   });
 });
