@@ -58,6 +58,7 @@ describe('Hub request infrastructure', () => {
     expect(handled).toBe(true);
     expect(allowedResponse.statusCode).toBe(204);
     expect(allowedResponse.getHeader('access-control-allow-origin')).toBe('http://hub.test');
+    expect(allowedResponse.getHeader('timing-allow-origin')).toBe('http://hub.test');
     expect(allowedResponse.getHeader('access-control-allow-headers')).toContain(
       'x-drone-transcription-quality',
     );

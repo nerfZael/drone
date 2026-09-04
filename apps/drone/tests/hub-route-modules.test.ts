@@ -394,7 +394,9 @@ describe('extracted Hub route modules', () => {
           name: 'chat_state',
           startMs: 20,
           durationMs: 1390,
+          queueMs: 8,
           outcome: 'completed',
+          transport: 'direct_api',
           resourceTimingStatus: 'collected',
           resourceTiming: {
             startMs: 20.12,
@@ -450,6 +452,8 @@ describe('extracted Hub route modules', () => {
       resourceEntriesDropped: 3,
       requests: [
         {
+          queueMs: 8,
+          transport: 'direct_api',
           resourceTimingStatus: 'collected',
           resourceTiming: expect.any(String),
         },

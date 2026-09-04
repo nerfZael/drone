@@ -51,7 +51,10 @@ type DroneStatusProbeTiming = {
 // longer than a minute under load, which in turn caused poll requests to queue
 // another full sweep. Keep the bound conservative but large enough for fleets.
 const STATUS_REFRESH_CONCURRENCY = 16;
-const STATUS_REFRESH_INTERVAL_MS = 15_000;
+const STATUS_REFRESH_MIN_DELAY_MS = 500;
+const STATUS_PROBE_BASE_INTERVAL_MS = 15_000;
+const STATUS_PROBE_STAGGER_WINDOW_MS = 15_000;
+const STATUS_INTERVAL_BATCH_SIZE = 8;
 const STATUS_STABLE_MAX_INTERVAL_MS = 120_000;
 const STATUS_CACHE_MAX_ENTRIES = 500;
 
@@ -62,6 +65,7 @@ export function createDroneStatusRuntime(deps: DroneStatusRuntimeDependencies) {
   let loop: ManagedLoop | null = null;
   let refreshSource = 'interval';
   let refreshRunning = false;
+  let nextRefreshDelayMs = STATUS_PROBE_BASE_INTERVAL_MS;
 
   function cachedForEntry(drone: any): CachedDroneStatusSummary {
     pruneCache();
@@ -69,11 +73,16 @@ export function createDroneStatusRuntime(deps: DroneStatusRuntimeDependencies) {
   }
 
   function schedule(source: string, delayMs = 0): void {
-    // A running sweep already observes the fleet state at least as recently as
-    // this request. The regular interval will pick up changes that land after a
-    // particular drone was probed; requesting an immediate whole-fleet rerun
-    // here can otherwise keep the monitor permanently saturated.
-    if (refreshRunning) return;
+    // A periodic batch only observes a small portion of the fleet. Preserve an
+    // immediate, coalesced follow-up for registry changes so a newly created or
+    // reconfigured drone is not left behind the periodic backlog.
+    if (refreshRunning) {
+      if (source === 'registry-write') {
+        refreshSource = source;
+        loop?.wake(delayMs);
+      }
+      return;
+    }
     refreshSource = source;
     loop?.wake(delayMs);
   }
@@ -82,7 +91,7 @@ export function createDroneStatusRuntime(deps: DroneStatusRuntimeDependencies) {
     if (loop) return;
     refreshSource = 'startup';
     loop = new ManagedLoop({
-      intervalMs: STATUS_REFRESH_INTERVAL_MS,
+      intervalMs: () => nextRefreshDelayMs,
       run: async () => {
         const source = refreshSource;
         refreshSource = 'interval';
@@ -104,11 +113,13 @@ export function createDroneStatusRuntime(deps: DroneStatusRuntimeDependencies) {
     const phases: DroneStatusRefreshTiming['phases'] = [];
     let droneCount = 0;
     let changedCount = 0;
+    let currentDrones: any[] = [];
     try {
       let phaseStartedAt = performance.now();
       const model = await deps.loadModel();
       phases.push({ name: 'loadModel', durationMs: performance.now() - phaseStartedAt });
       const drones = Object.values(model?.drones ?? {}) as any[];
+      currentDrones = drones;
       droneCount = drones.length;
       phaseStartedAt = performance.now();
       const probeTiming: DroneStatusProbeTiming = {
@@ -124,8 +135,11 @@ export function createDroneStatusRuntime(deps: DroneStatusRuntimeDependencies) {
       // naturally cache misses. Background refresh sources honor per-entry
       // backoff; explicit refreshNow callers can still request a full sweep.
       const force = source !== 'interval' && source !== 'registry-write';
-      const changed = await mapConcurrent(drones, STATUS_REFRESH_CONCURRENCY, async (drone) =>
-        refreshEntry(drone, probeTiming, force),
+      const dronesToProbe = selectDronesToProbe(drones, probeTiming, force, source);
+      const changed = await mapConcurrent(
+        dronesToProbe,
+        STATUS_REFRESH_CONCURRENCY,
+        async (drone) => refreshEntry(drone, probeTiming),
       );
       phases.push({ name: 'probeStatuses', durationMs: performance.now() - phaseStartedAt });
       phases.push({
@@ -154,6 +168,7 @@ export function createDroneStatusRuntime(deps: DroneStatusRuntimeDependencies) {
       });
     } finally {
       refreshRunning = false;
+      nextRefreshDelayMs = delayUntilNextProbe(currentDrones);
       try {
         deps.onTiming?.({
           source,
@@ -168,19 +183,30 @@ export function createDroneStatusRuntime(deps: DroneStatusRuntimeDependencies) {
     }
   }
 
+  function delayUntilNextProbe(drones: any[]): number {
+    const checkedAtMs = now();
+    let earliestDueAtMs = Number.POSITIVE_INFINITY;
+    for (const drone of drones) {
+      const key = cacheKey(drone);
+      const previous = cache.get(key);
+      const scheduled = probeSchedule.get(key);
+      if (!previous || !scheduled) return STATUS_REFRESH_MIN_DELAY_MS;
+      earliestDueAtMs = Math.min(earliestDueAtMs, scheduled.nextProbeAtMs);
+    }
+    if (!Number.isFinite(earliestDueAtMs)) return STATUS_PROBE_BASE_INTERVAL_MS;
+    return Math.max(
+      STATUS_REFRESH_MIN_DELAY_MS,
+      Math.min(STATUS_STABLE_MAX_INTERVAL_MS, earliestDueAtMs - checkedAtMs),
+    );
+  }
+
   async function refreshEntry(
     drone: any,
     timing: DroneStatusProbeTiming,
-    force: boolean,
   ): Promise<boolean> {
     const key = cacheKey(drone);
     const previous = cache.get(key);
     const scheduled = probeSchedule.get(key);
-    const checkedAtMs = now();
-    if (!force && previous && scheduled && checkedAtMs < scheduled.nextProbeAtMs) {
-      timing.skippedCount += 1;
-      return false;
-    }
     let next: CachedDroneStatusSummary;
     try {
       next = await probe(drone, timing);
@@ -200,16 +226,53 @@ export function createDroneStatusRuntime(deps: DroneStatusRuntimeDependencies) {
     const unchangedCount = changed ? 0 : Math.min(3, (scheduled?.unchangedCount ?? 0) + 1);
     const nextIntervalMs = Math.min(
       STATUS_STABLE_MAX_INTERVAL_MS,
-      STATUS_REFRESH_INTERVAL_MS * 2 ** unchangedCount,
+      STATUS_PROBE_BASE_INTERVAL_MS * 2 ** unchangedCount,
     );
     probeSchedule.set(key, {
       unchangedCount,
       // A slow network probe should not consume its own quiet period. Anchor
       // the next check after completion so overloaded fleets actually back off.
-      nextProbeAtMs: now() + nextIntervalMs,
+      // Spread fleet probes across time instead of assigning every entry the
+      // same deadline and creating a periodic host-wide thundering herd.
+      nextProbeAtMs:
+        now() +
+        Math.min(
+          STATUS_STABLE_MAX_INTERVAL_MS,
+          nextIntervalMs + statusProbeStaggerMs(key),
+        ),
     });
     pruneCache();
     return changed;
+  }
+
+  function selectDronesToProbe(
+    drones: any[],
+    timing: DroneStatusProbeTiming,
+    force: boolean,
+    source: string,
+  ): any[] {
+    if (force) return drones;
+    const checkedAtMs = now();
+    const due = drones
+      .map((drone, index) => {
+        const key = cacheKey(drone);
+        const previous = cache.get(key);
+        const scheduled = probeSchedule.get(key);
+        return {
+          drone,
+          index,
+          dueAtMs: previous && scheduled ? scheduled.nextProbeAtMs : Number.NEGATIVE_INFINITY,
+        };
+      })
+      .filter((entry) => checkedAtMs >= entry.dueAtMs)
+      // When a slow fleet leaves a backlog, keep the oldest deadlines first so
+      // early registry entries cannot repeatedly jump ahead and starve the tail.
+      .sort((left, right) => left.dueAtMs - right.dueAtMs || left.index - right.index);
+    const selected = (
+      source === 'interval' ? due.slice(0, STATUS_INTERVAL_BATCH_SIZE) : due
+    ).map((entry) => entry.drone);
+    timing.skippedCount += drones.length - selected.length;
+    return selected;
   }
 
   async function probe(
@@ -301,6 +364,15 @@ export function createDroneStatusRuntime(deps: DroneStatusRuntimeDependencies) {
   }
 
   return { cachedForEntry, refreshNow: refresh, schedule, start, stop };
+}
+
+function statusProbeStaggerMs(key: string): number {
+  let hash = 2_166_136_261;
+  for (let index = 0; index < key.length; index += 1) {
+    hash ^= key.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return (hash >>> 0) % STATUS_PROBE_STAGGER_WINDOW_MS;
 }
 
 async function mapConcurrent<T, R>(

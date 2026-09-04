@@ -43,6 +43,47 @@ function contentType(filePath) {
   return 'application/octet-stream';
 }
 
+function runtimeConfigScript(config) {
+  const serialized = JSON.stringify(config)
+    .replace(/</g, '\\u003c')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+  return `<script>globalThis.__DRONE_HUB_RUNTIME_CONFIG__=${serialized};</script>`;
+}
+
+function injectRuntimeConfig(html, config) {
+  const script = runtimeConfigScript(config);
+  return /<head(?:\s[^>]*)?>/i.test(html)
+    ? html.replace(/<head(?:\s[^>]*)?>/i, (head) => `${head}${script}`)
+    : `${script}${html}`;
+}
+
+function allowProxyCors(req, res, allowedOrigin) {
+  const origin = String(req.headers.origin || '').trim().toLowerCase();
+  if (!origin) return true;
+  if (!allowedOrigin || origin !== allowedOrigin.toLowerCase()) return false;
+  res.setHeader('access-control-allow-origin', allowedOrigin);
+  res.setHeader('timing-allow-origin', allowedOrigin);
+  res.setHeader('access-control-allow-methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  res.setHeader(
+    'access-control-allow-headers',
+    [
+      'content-type',
+      'authorization',
+      'if-none-match',
+      'mcp-session-id',
+      'x-drone-transcription-quality',
+      'x-drone-transcription-language',
+      'x-drone-transcription-prompt-base64',
+      'x-drone-companion-message-id',
+    ].join(', '),
+  );
+  res.setHeader('access-control-expose-headers', 'etag,mcp-session-id,server-timing');
+  res.setHeader('access-control-max-age', '600');
+  res.setHeader('vary', 'origin');
+  return true;
+}
+
 function staticAssetPath(staticDir, pathname) {
   let decoded;
   try {
@@ -170,11 +211,23 @@ async function startDesktopStaticUiServer({ staticDir, apiHost, apiPort, apiToke
   const requests = new Set();
   const shutdown = new AbortController();
   let proxyOrigin = '';
+  let directApiBase = '';
   const server = http.createServer((req, res) => {
     const request = (async () => {
       try {
         const requestUrl = new URL(req.url || '/', `http://${req.headers.host || '127.0.0.1'}`);
         if (requestUrl.pathname.startsWith('/api/')) {
+          if (!allowProxyCors(req, res, proxyOrigin)) {
+            res.statusCode = 403;
+            res.setHeader('content-type', 'application/json; charset=utf-8');
+            res.end(JSON.stringify({ ok: false, error: 'origin not allowed' }));
+            return;
+          }
+          if (String(req.method || 'GET').toUpperCase() === 'OPTIONS') {
+            res.statusCode = 204;
+            res.end();
+            return;
+          }
           await proxyApiRequest({ req, res, apiHost, apiPort, apiToken, signal: shutdown.signal });
           return;
         }
@@ -190,6 +243,11 @@ async function startDesktopStaticUiServer({ staticDir, apiHost, apiPort, apiToke
           res.setHeader('cache-control', 'no-store');
         } else if (requestUrl.pathname.startsWith('/assets/')) {
           res.setHeader('cache-control', 'public, max-age=31536000, immutable');
+        }
+        if (path.extname(filePath).toLowerCase() === '.html') {
+          const html = await fs.promises.readFile(filePath, 'utf8');
+          res.end(injectRuntimeConfig(html, { directApiBase }));
+          return;
         }
         fs.createReadStream(filePath).pipe(res);
       } catch (error) {
@@ -229,9 +287,14 @@ async function startDesktopStaticUiServer({ staticDir, apiHost, apiPort, apiToke
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : 0;
   proxyOrigin = `http://127.0.0.1:${port}`;
+  // Chromium applies its HTTP/1.1 connection limit per origin. EventSource
+  // streams stay on 127.0.0.1 while fetch/WebSocket traffic uses localhost,
+  // giving critical API requests an independent connection pool.
+  directApiBase = `http://localhost:${port}`;
   let closePromise = null;
   return {
     url: `http://127.0.0.1:${port}`,
+    directApiBase,
     close: () => {
       if (closePromise) return closePromise;
       closePromise = (async () => {
@@ -247,6 +310,7 @@ async function startDesktopStaticUiServer({ staticDir, apiHost, apiPort, apiToke
 }
 
 module.exports = {
+  injectRuntimeConfig,
   resolveDesktopStaticUiDir,
   resolveHubApiTokenPath,
   startDesktopStaticUiServer,

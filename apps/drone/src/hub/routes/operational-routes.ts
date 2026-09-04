@@ -117,6 +117,10 @@ export function normalizeChatLoadTelemetry(raw: unknown): Record<string, unknown
           }),
       );
       const optionalDuration = (value: unknown) => boundedTelemetryMs(value);
+      const queueMs = version === 2 ? boundedV2TelemetryMs(item?.queueMs) : undefined;
+      const transport = ['direct_api', 'ui_origin'].includes(item?.transport)
+        ? item.transport
+        : undefined;
       const statusCode = Number(item?.status);
       const responseBytes = Number(item?.responseBytes);
       const resourceTiming: Record<string, number | string> = {};
@@ -158,6 +162,7 @@ export function normalizeChatLoadTelemetry(raw: unknown): Record<string, unknown
           startMs,
           durationMs: requestDurationMs,
           outcome,
+          ...(queueMs !== undefined ? { queueMs } : {}),
           ...(optionalDuration(item?.fetchMs) !== undefined
             ? { fetchMs: optionalDuration(item.fetchMs) }
             : {}),
@@ -178,6 +183,7 @@ export function normalizeChatLoadTelemetry(raw: unknown): Record<string, unknown
           ...(Object.keys(serverTiming).length > 0 ? { serverTiming } : {}),
           ...(version === 2 ? { resourceTimingStatus } : {}),
           ...(version === 2 && resourceTimingStatus === 'collected' ? { resourceTiming } : {}),
+          ...(version === 2 && transport ? { transport } : {}),
         },
       ];
     });

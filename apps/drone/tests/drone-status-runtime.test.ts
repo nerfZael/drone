@@ -155,9 +155,9 @@ describe('drone status runtime', () => {
     });
 
     await runtime.refreshNow('interval');
-    nowMs = 15_000;
-    await runtime.refreshNow('interval');
     nowMs = 30_000;
+    await runtime.refreshNow('interval');
+    nowMs = 45_000;
     await runtime.refreshNow('interval');
 
     expect(probes).toBe(2);
@@ -174,6 +174,53 @@ describe('drone status runtime', () => {
 
     await runtime.refreshNow('startup');
     expect(probes).toBe(4);
+  });
+
+  test('staggered interval batches do not reprobe a large fleet all at once', async () => {
+    const fleetSize = 144;
+    let nowMs = 0;
+    let probes = 0;
+    const timings: any[] = [];
+    const drones = Object.fromEntries(
+      Array.from({ length: fleetSize }, (_, index) => [
+        `drone-${index}`,
+        {
+          id: `drone-${index}`,
+          runtime: 'container',
+          hostPort: 10_000 + index,
+          token: `token-${index}`,
+        },
+      ]),
+    );
+    const runtime = createDroneStatusRuntime({
+      loadModel: async () => ({ drones }),
+      log: () => {},
+      makeClient: () => ({}),
+      normalizeDroneId: (value) => String(value ?? ''),
+      normalizeRuntime: (value) => String(value ?? ''),
+      now: () => nowMs,
+      onChanged: () => {},
+      onTiming: (timing) => timings.push(timing),
+      readStatus: async () => {
+        probes += 1;
+        return { state: 'ready' };
+      },
+      resolveHostPort: async () => null,
+    });
+
+    await runtime.refreshNow('startup');
+    expect(probes).toBe(fleetSize);
+
+    nowMs = 30_000;
+    await runtime.refreshNow('interval');
+
+    expect(probes).toBe(fleetSize + 8);
+    expect(timings.at(-1).phases).toContainEqual(
+      expect.objectContaining({ name: 'readStatuses', operationCount: 8 }),
+    );
+    expect(timings.at(-1).phases).toContainEqual(
+      expect.objectContaining({ name: 'skipStableStatuses', operationCount: fleetSize - 8 }),
+    );
   });
 
   test('starts the quiet period after a slow probe completes', async () => {
@@ -258,5 +305,56 @@ describe('drone status runtime', () => {
     await runtime.stop();
 
     expect(probes).toBe(1);
+  });
+
+  test('keeps an immediate registry refresh requested during a periodic batch', async () => {
+    let releaseFirstProbe!: () => void;
+    const firstProbeReleased = new Promise<void>((resolve) => {
+      releaseFirstProbe = resolve;
+    });
+    let firstProbeStarted!: () => void;
+    const firstProbeObserved = new Promise<void>((resolve) => {
+      firstProbeStarted = resolve;
+    });
+    let secondProbeStarted!: () => void;
+    const secondProbeObserved = new Promise<void>((resolve) => {
+      secondProbeStarted = resolve;
+    });
+    let probes = 0;
+    const drone = {
+      id: 'drone',
+      runtime: 'container',
+      hostPort: 10_000,
+      token: 'token',
+    };
+    const runtime = createDroneStatusRuntime({
+      loadModel: async () => ({ drones: { drone } }),
+      log: () => {},
+      makeClient: () => ({}),
+      normalizeDroneId: (value) => String(value ?? ''),
+      normalizeRuntime: (value) => String(value ?? ''),
+      onChanged: () => {},
+      readStatus: async () => {
+        probes += 1;
+        if (probes === 1) {
+          firstProbeStarted();
+          await firstProbeReleased;
+        } else {
+          secondProbeStarted();
+        }
+        return { state: 'ready' };
+      },
+      resolveHostPort: async () => null,
+    });
+
+    runtime.start();
+    await firstProbeObserved;
+    drone.hostPort = 10_001;
+    runtime.schedule('registry-write');
+    releaseFirstProbe();
+    await secondProbeObserved;
+    await runtime.stop();
+
+    expect(probes).toBe(2);
   });
 });

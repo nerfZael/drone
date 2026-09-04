@@ -9,6 +9,10 @@ interface ImportMeta {
 }
 
 interface Window {
+  readonly __DRONE_HUB_RUNTIME_CONFIG__?: {
+    readonly directApiBase?: string;
+    readonly directApiToken?: string;
+  };
   readonly droneHubDesktop?: {
     onNavigationZoom(callback: (payload: { action?: unknown }) => void): () => void;
   };

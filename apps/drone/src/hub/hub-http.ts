@@ -123,6 +123,7 @@ export function withCors(
   if (!origin || !allowedOrigins.has(origin)) return false;
 
   res.setHeader('access-control-allow-origin', origin);
+  res.setHeader('timing-allow-origin', origin);
   res.setHeader('access-control-allow-methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   res.setHeader(
     'access-control-allow-headers',

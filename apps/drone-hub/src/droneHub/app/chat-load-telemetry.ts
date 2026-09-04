@@ -30,6 +30,7 @@ type ChatLoadRequestRecord = {
   name: string;
   startMs: number;
   durationMs: number;
+  queueMs?: number;
   fetchMs?: number;
   bodyMs?: number;
   parseMs?: number;
@@ -38,6 +39,7 @@ type ChatLoadRequestRecord = {
   serverTiming?: Record<string, number>;
   resourceTimingStatus: 'collected' | 'not_found' | 'unavailable';
   resourceTiming?: ResourceTimingRecord;
+  transport?: 'direct_api' | 'ui_origin';
   outcome: 'completed' | 'error' | 'aborted';
 };
 
@@ -464,6 +466,22 @@ function requestUrl(raw: string): URL | null {
   }
 }
 
+function requestTransport(responseUrlRaw: string | undefined): ChatLoadRequestRecord['transport'] {
+  if (!responseUrlRaw || typeof location === 'undefined') return undefined;
+  try {
+    return new URL(responseUrlRaw, location.href).origin === location.origin
+      ? 'ui_origin'
+      : 'direct_api';
+  } catch {
+    return undefined;
+  }
+}
+
+function resourceQueueMs(timing: ResourceTimingRecord | undefined): number | undefined {
+  if (typeof timing?.requestStartMs !== 'number') return undefined;
+  return roundedMs(Math.max(0, timing.requestStartMs - (timing.fetchStartMs ?? 0)));
+}
+
 export type ChatLoadRequestObservation = {
   response: (response: Response) => void;
   finish: (input?: { responseBytes?: number; parseMs?: number }) => void;
@@ -504,10 +522,14 @@ export function observeChatLoadRequest(urlRaw: string): ChatLoadRequestObservati
         return Boolean(candidateUrl && requestMatchesTarget(candidateUrl, span.target));
       },
     });
+    const resourceTiming = resource.timing;
+    const queueMs = resourceQueueMs(resourceTiming);
+    const transport = requestTransport(responseUrl);
     span.requests.push({
       name: requestName(url),
       startMs: roundedMs(startedAt - span.startedMonoMs),
       durationMs: roundedMs(finishedAt - startedAt),
+      ...(queueMs !== undefined ? { queueMs } : {}),
       ...(fetchMs !== undefined ? { fetchMs } : {}),
       ...(bodyMs !== undefined ? { bodyMs } : {}),
       ...(parseMs !== undefined ? { parseMs } : {}),
@@ -517,7 +539,8 @@ export function observeChatLoadRequest(urlRaw: string): ChatLoadRequestObservati
         : {}),
       ...(timing ? { serverTiming: timing } : {}),
       resourceTimingStatus: resource.status,
-      ...(resource.timing ? { resourceTiming: resource.timing } : {}),
+      ...(resourceTiming ? { resourceTiming } : {}),
+      ...(transport ? { transport } : {}),
       outcome,
     });
   };
@@ -551,6 +574,7 @@ export const chatLoadTelemetryTesting = {
   correlateResourceEntry,
   longTaskFromEntry,
   resourceStartedDuringNavigation,
+  resourceQueueMs,
   maxLongTasks: MAX_CHAT_LOAD_LONG_TASKS,
   reset() {
     if (activeSpan) {

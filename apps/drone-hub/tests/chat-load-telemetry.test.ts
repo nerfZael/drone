@@ -86,6 +86,23 @@ describe('chat load telemetry', () => {
     expect(timing).not.toHaveProperty('name');
   });
 
+  test('measures browser request queue time from Resource Timing', () => {
+    expect(
+      chatLoadTelemetryTesting.resourceQueueMs({
+        requestStartMs: 25,
+        fetchStartMs: 10,
+      }),
+    ).toBe(15);
+    expect(chatLoadTelemetryTesting.resourceQueueMs({ requestStartMs: 7 })).toBe(7);
+    expect(
+      chatLoadTelemetryTesting.resourceQueueMs({
+        requestStartMs: 5,
+        fetchStartMs: 10,
+      }),
+    ).toBe(0);
+    expect(chatLoadTelemetryTesting.resourceQueueMs(undefined)).toBeUndefined();
+  });
+
   test('correlates the closest unused Resource Timing entry within the request window', () => {
     const makeEntry = (startTime: number) =>
       ({

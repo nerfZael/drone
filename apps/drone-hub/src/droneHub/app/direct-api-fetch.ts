@@ -1,4 +1,11 @@
 function directApiBase(): string {
+  const runtimeConfig =
+    typeof window === 'undefined' ? undefined : window.__DRONE_HUB_RUNTIME_CONFIG__;
+  if (runtimeConfig) {
+    return String(runtimeConfig.directApiBase ?? '')
+      .trim()
+      .replace(/\/+$/, '');
+  }
   try {
     return String(import.meta.env.VITE_DRONE_HUB_DIRECT_API_BASE ?? '').replace(/\/+$/, '');
   } catch {
@@ -7,11 +14,18 @@ function directApiBase(): string {
 }
 
 function directApiToken(): string {
+  const runtimeConfig =
+    typeof window === 'undefined' ? undefined : window.__DRONE_HUB_RUNTIME_CONFIG__;
+  if (runtimeConfig) return String(runtimeConfig.directApiToken ?? '').trim();
   try {
     return String(import.meta.env.VITE_DRONE_HUB_DIRECT_API_TOKEN ?? '').trim();
   } catch {
     return '';
   }
+}
+
+function isPriorityChatApiPath(pathname: string): boolean {
+  return /^\/api\/drones\/[^/]+\/chats\/[^/]+(?:\/|$)/.test(pathname);
 }
 
 function rewriteApiUrl(raw: string): string | null {
@@ -21,7 +35,10 @@ function rewriteApiUrl(raw: string): string | null {
     const current = new URL(window.location.href);
     const url = new URL(raw, current);
     if (url.origin !== current.origin) return null;
-    if (!url.pathname.startsWith('/api/')) return null;
+    // Keep this pool reserved for interactive chat traffic. Large fleet reads
+    // and long-lived fetch streams must stay on the UI origin or they can use
+    // every direct-origin HTTP/1.1 socket and queue the chat state request.
+    if (!isPriorityChatApiPath(url.pathname)) return null;
     return `${base}${url.pathname}${url.search}${url.hash}`;
   } catch {
     return null;
@@ -69,8 +86,9 @@ export function installDirectApiFetch(): void {
   if (typeof window === 'undefined') return;
   const base = directApiBase();
   if (!base) return;
-  const token = directApiToken();
-  if (!token) return;
+  // Vite sends interactive chat traffic straight to the authenticated Hub API.
+  // Packaged/static desktop mode instead points at a second loopback hostname
+  // on its token-injecting proxy, so no browser-visible token is required there.
   const currentFetch = ((window.fetch as any).__droneHubDirectApiOriginal ?? window.fetch).bind(window) as typeof window.fetch;
 
   const patchedFetch = ((input: RequestInfo | URL, init?: RequestInit) => {

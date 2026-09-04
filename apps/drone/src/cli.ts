@@ -559,6 +559,54 @@ function contentTypeForStaticFile(filePath: string): string {
   return 'application/octet-stream';
 }
 
+function droneHubRuntimeConfigScript(config: { directApiBase: string }): string {
+  const serialized = JSON.stringify(config)
+    .replace(/</g, '\\u003c')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+  return `<script>globalThis.__DRONE_HUB_RUNTIME_CONFIG__=${serialized};</script>`;
+}
+
+function injectDroneHubRuntimeConfig(
+  html: string,
+  config: { directApiBase: string },
+): string {
+  const script = droneHubRuntimeConfigScript(config);
+  return /<head(?:\s[^>]*)?>/i.test(html)
+    ? html.replace(/<head(?:\s[^>]*)?>/i, (head) => `${head}${script}`)
+    : `${script}${html}`;
+}
+
+function allowStaticProxyCors(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  allowedOrigin: string,
+): boolean {
+  const origin = String(req.headers.origin ?? '').trim().toLowerCase();
+  if (!origin) return true;
+  if (!allowedOrigin || origin !== allowedOrigin.toLowerCase()) return false;
+  res.setHeader('access-control-allow-origin', allowedOrigin);
+  res.setHeader('timing-allow-origin', allowedOrigin);
+  res.setHeader('access-control-allow-methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  res.setHeader(
+    'access-control-allow-headers',
+    [
+      'content-type',
+      'authorization',
+      'if-none-match',
+      'mcp-session-id',
+      'x-drone-transcription-quality',
+      'x-drone-transcription-language',
+      'x-drone-transcription-prompt-base64',
+      'x-drone-companion-message-id',
+    ].join(', '),
+  );
+  res.setHeader('access-control-expose-headers', 'etag,mcp-session-id,server-timing');
+  res.setHeader('access-control-max-age', '600');
+  res.setHeader('vary', 'origin');
+  return true;
+}
+
 function safeDroneHubStaticPath(staticDir: string, pathname: string): string | null {
   let decoded = '/';
   try {
@@ -583,7 +631,12 @@ function shouldServeDroneHubIndexFallback(pathname: string): boolean {
   return decoded === '/' || decoded === '/index.html' || !path.posix.extname(decoded);
 }
 
-async function serveDroneHubStaticAsset(staticDir: string, req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+async function serveDroneHubStaticAsset(
+  staticDir: string,
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  runtimeConfig: { directApiBase: string },
+): Promise<void> {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? '127.0.0.1'}`);
   const resolved = safeDroneHubStaticPath(staticDir, url.pathname);
   const fallback = path.join(staticDir, 'index.html');
@@ -608,6 +661,11 @@ async function serveDroneHubStaticAsset(staticDir: string, req: http.IncomingMes
     res.setHeader('cache-control', 'no-store');
   } else if (url.pathname.startsWith('/assets/')) {
     res.setHeader('cache-control', 'public, max-age=31536000, immutable');
+  }
+  if (path.extname(filePath).toLowerCase() === '.html') {
+    const html = await fs.readFile(filePath, 'utf8');
+    res.end(injectDroneHubRuntimeConfig(html, runtimeConfig));
+    return;
   }
   fsSync.createReadStream(filePath).pipe(res);
 }
@@ -716,10 +774,23 @@ async function startStaticDroneHubUiServer(opts: {
 }): Promise<StaticDroneHubUiServer> {
   const host = String(opts.host ?? '127.0.0.1').trim() || '127.0.0.1';
   const sockets = new Set<net.Socket>();
+  let uiOrigin = '';
+  let directApiBase = '';
   const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? '/', `http://${req.headers.host ?? host}`);
       if (url.pathname.startsWith('/api/')) {
+        if (!allowStaticProxyCors(req, res, uiOrigin)) {
+          res.statusCode = 403;
+          res.setHeader('content-type', 'application/json; charset=utf-8');
+          res.end(JSON.stringify({ ok: false, error: 'origin not allowed' }));
+          return;
+        }
+        if (String(req.method ?? 'GET').toUpperCase() === 'OPTIONS') {
+          res.statusCode = 204;
+          res.end();
+          return;
+        }
         await proxyDroneHubApiRequest({
           req,
           res,
@@ -729,7 +800,7 @@ async function startStaticDroneHubUiServer(opts: {
         });
         return;
       }
-      await serveDroneHubStaticAsset(opts.staticDir, req, res);
+      await serveDroneHubStaticAsset(opts.staticDir, req, res, { directApiBase });
     } catch (error: any) {
       if (res.headersSent) {
         if (!res.destroyed) res.destroy(error);
@@ -765,6 +836,10 @@ async function startStaticDroneHubUiServer(opts: {
   });
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : opts.port;
+  uiOrigin = `http://127.0.0.1:${port}`;
+  // Keep long-lived same-origin EventSource connections separate from API
+  // fetches under Chromium's per-origin HTTP/1.1 connection limit.
+  directApiBase = `http://localhost:${port}`;
   return {
     host,
     port,
