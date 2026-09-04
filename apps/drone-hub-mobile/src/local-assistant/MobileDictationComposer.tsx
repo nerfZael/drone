@@ -312,7 +312,7 @@ function ComposerIconButton({
       accessibilityLabel={label}
       accessibilityState={{ disabled }}
       disabled={disabled}
-      hitSlop={2}
+      hitSlop={9}
       onPress={onPress}
       style={({ pressed }) => [
         styles.headerButton,
@@ -344,7 +344,7 @@ function RecordingButton({
       accessibilityLabel={label}
       accessibilityState={{ disabled }}
       disabled={disabled}
-      hitSlop={3}
+      hitSlop={6}
       onPress={onPress}
       style={({ pressed }) => [
         styles.recordingButton,

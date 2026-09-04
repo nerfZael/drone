@@ -159,10 +159,11 @@ export function useMobileChatVoiceRecorder({
         activeUri: recordingUriRef.current,
         eventUri: next.url,
         failed: next.hasError || Boolean(next.mediaServicesDidReset),
-        // prepareToRecordAsync reports its own errors. Until it gives this
-        // generation a URI, a callback cannot safely be attributed to it and
-        // may be the delayed stop event from the previous recording.
-        ignoreFailureWithoutActiveUri: sessionRef.current.status === 'starting',
+        // prepareToRecordAsync reports its own errors. Without an active URI,
+        // startup and idle callbacks cannot safely be attributed to the current
+        // generation and may be a delayed stop event from the previous clip.
+        ignoreFailureWithoutActiveUri:
+          sessionRef.current.status === 'starting' || sessionRef.current.kind === 'idle',
       });
       if (!event.handleFailure) return;
       generationRef.current += 1;
@@ -480,6 +481,10 @@ export function useMobileChatVoiceRecorder({
           setStatusValue('stopped');
           await recorder.stop();
           uri ||= recorder.uri || '';
+        }
+        if (generationRef.current !== generation) {
+          await releaseMicrophone();
+          return null;
         }
         if (!uri) throw new Error('The voice recording could not be saved.');
         recordingUriRef.current = null;

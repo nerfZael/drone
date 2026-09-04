@@ -71,6 +71,7 @@ export function useMobileDictation(options: {
   const persistenceTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const clipsRef = React.useRef<TranscriptionClip[]>([]);
   const clipSequenceRef = React.useRef(0);
+  const ownsRecorderErrorRef = React.useRef(false);
   const recordingCommandsRef = React.useRef<Promise<void>>(Promise.resolve());
   const resolveTargetRef = React.useRef(options.resolveTarget);
   const sendRef = React.useRef(options.send);
@@ -143,6 +144,14 @@ export function useMobileDictation(options: {
   }, [notice]);
 
   React.useEffect(() => {
+    const message = voice.error.trim();
+    if (!message || !ownsRecorderErrorRef.current) return;
+    setError(message);
+    voice.setError('');
+    if (voice.session.kind === 'idle') ownsRecorderErrorRef.current = false;
+  }, [voice.error, voice.session.kind, voice.setError]);
+
+  React.useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
@@ -158,6 +167,7 @@ export function useMobileDictation(options: {
       if (session.kind === 'dictation') {
         void discardRecordingRef.current('dictation');
       }
+      ownsRecorderErrorRef.current = false;
     };
   }, [persistImmediately]);
 
@@ -237,6 +247,10 @@ export function useMobileDictation(options: {
 
   const enqueueClip = React.useCallback(
     (clip: MobileVoiceRecordingClip): Promise<void> | null => {
+      if (!mountedRef.current) {
+        deleteMobileVoiceRecordingFile(clip.uri);
+        return null;
+      }
       if (clip.durationMillis < MINIMUM_RECORDING_MILLIS) {
         deleteMobileVoiceRecordingFile(clip.uri);
         setNotice('Recording too short — discarded.');
@@ -260,9 +274,11 @@ export function useMobileDictation(options: {
 
   const stopAndTranscribe = React.useCallback(async () => {
     const clip = await voice.finishRecording('dictation');
+    ownsRecorderErrorRef.current = false;
     if (!clip) {
       const message = voice.getError().trim();
       if (message) setError(message);
+      voice.setError('');
       return;
     }
     enqueueClip(clip);
@@ -295,9 +311,14 @@ export function useMobileDictation(options: {
         setError('Another voice feature is already using the microphone.');
         return;
       }
+      voice.setError('');
+      ownsRecorderErrorRef.current = true;
       const started = await voice.startRecording('dictation');
       if (!started) {
-        setError(voice.getError().trim() || 'The recording could not be started.');
+        const message = voice.getError().trim();
+        setError((current) => message || current || 'The recording could not be started.');
+        voice.setError('');
+        ownsRecorderErrorRef.current = false;
       }
     });
   }, [runRecordingCommand, setOpen, stopAndTranscribe, voice]);
@@ -325,6 +346,7 @@ export function useMobileDictation(options: {
       const session = voice.getRecordingSession();
       if (session.kind !== 'dictation') return;
       await voice.discardRecording('dictation');
+      ownsRecorderErrorRef.current = false;
       setNotice('Recording discarded.');
       setError('');
     });
@@ -349,6 +371,7 @@ export function useMobileDictation(options: {
     setError('');
     setNotice('');
     voice.setError('');
+    ownsRecorderErrorRef.current = false;
     clearQueuedClips();
     try {
       await recordingCommandsRef.current;
@@ -356,6 +379,11 @@ export function useMobileDictation(options: {
         await voice.discardRecording('dictation');
       }
     } finally {
+      // A stop command already in flight can save and enqueue its clip after
+      // the first clear. Sweep again after recorder commands settle so Close
+      // remains destructive even in that race.
+      clearQueuedClips();
+      setText('');
       finalizingRef.current = false;
       if (mountedRef.current) setFinalizing(false);
       persistImmediately();

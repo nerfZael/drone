@@ -2221,7 +2221,10 @@ export function DronesScreen({
     let destinationChat = target.chatName;
     let updatedDrone: MobileDroneSummary | null = null;
     if (target.destination === 'new-chat' || target.destination === 'clone-chat') {
-      const suggestedChat = suggestNextMobileDroneChatName(target.chatNames);
+      const sourceDrone = droneListSnapshotRef.current.drones.find(
+        (drone) => drone.id === target.droneId,
+      );
+      const suggestedChat = suggestNextMobileDroneChatName(sourceDrone?.chats ?? target.chatNames);
       const result = await requestDroneControl(target.deviceId, 'chat.create', {
         droneId: target.droneId,
         name: suggestedChat,
@@ -2229,9 +2232,6 @@ export function DronesScreen({
         mode: target.destination === 'clone-chat' ? 'fork' : 'copy-config',
       });
       destinationChat = String(result?.chatName ?? suggestedChat).trim() || suggestedChat;
-      const sourceDrone = droneListSnapshotRef.current.drones.find(
-        (drone) => drone.id === target.droneId,
-      );
       if (sourceDrone) {
         const nextChats = normalizedChatMutationList(result?.chats, [
           ...new Set([...sourceDrone.chats, destinationChat]),
@@ -3533,9 +3533,17 @@ export function DronesScreen({
                           }
                           onStop={() => void stopChat()}
                           onOpenDictation={() => {
-                            const initialPrompt = promptRef.current;
+                            // Keep text attached to images/files in the normal
+                            // composer; dictation destinations only send text.
+                            const initialPrompt =
+                              promptAttachmentsRef.current.length === 0 ? promptRef.current : '';
                             void dictation.openAndStart(initialPrompt).then((adopted) => {
-                              if (!adopted || promptRef.current !== initialPrompt) return;
+                              if (
+                                !adopted ||
+                                promptRef.current !== initialPrompt ||
+                                promptAttachmentsRef.current.length > 0
+                              )
+                                return;
                               promptRef.current = '';
                               setPrompt('');
                             });
