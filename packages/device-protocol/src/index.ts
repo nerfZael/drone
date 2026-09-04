@@ -1,4 +1,5 @@
 export * from './canonical-json';
+export * from './capability-events';
 export * from './capabilities';
 export * from './command-jobs';
 export * from './mesh-limits';

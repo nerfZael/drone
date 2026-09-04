@@ -35,6 +35,7 @@ export function createDeviceCoreCapability(
   store: DeviceMeshStore,
   listCapabilities: () => CapabilityHandler['descriptor'][],
   onMembershipChange: () => void | Promise<void> = () => undefined,
+  onAccessChange: (deviceId: string) => void | Promise<void> = () => undefined,
 ): CapabilityHandler {
   return {
     descriptor: DEVICE_CORE_CAPABILITY,
@@ -102,6 +103,11 @@ export function createDeviceCoreCapability(
           source.grants = grants;
           source.updatedAt = new Date().toISOString();
         });
+        try {
+          await onAccessChange(context.sourceDevice.id);
+        } catch {
+          // Access is already durable; expiry still bounds any cleanup that could not run.
+        }
         return { grants };
       }
       throw Object.assign(new Error(`unsupported device-core operation: ${operation}`), {

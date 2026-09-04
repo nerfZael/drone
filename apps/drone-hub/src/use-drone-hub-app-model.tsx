@@ -984,6 +984,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setChatApprovalPolicy,
     setDockerSnapshotAfterAgentMessageEnabled,
     handleSetAgentFailure,
+    resolveChatInfoFromState,
+    rejectChatInfoFromState,
   } = useChatConfigState({
     selectedDrone,
     selectedChat,
@@ -2358,6 +2360,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     patchQueuedPrompt,
     removeQueuedPrompt,
     requestJson,
+    onChatInfoResolvedFromState: resolveChatInfoFromState,
+    onChatInfoRejectedFromState: rejectChatInfoFromState,
     onAutoRenameChatFromFirstPrompt: handleAutoRenameChatFromFirstPrompt,
   });
   const sendPromptText = React.useCallback(

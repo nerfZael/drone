@@ -20,20 +20,19 @@ import { NativeFileTypeIcon } from '../components/FileTypeIcon';
 import { ThemedTextInput } from '../components/ThemedTextInput';
 import { readMeshJsonContent } from '../mesh/read-mesh-json-content';
 import { colors } from '../theme';
-
-type FileExplorerEntry = {
-  name: string;
-  path: string;
-  kind: 'directory' | 'file' | 'other';
-  isGitIgnored: boolean;
-};
-
-type DirectoryState = {
-  entries: FileExplorerEntry[];
-  loading: boolean;
-  error: string | null;
-  loaded: boolean;
-};
+import { BoundedSwrCache } from './bounded-swr-cache';
+import {
+  MobileDirectoryContextCache,
+  mobileDirectoryErrorMode,
+  retainMobileExplorerEntries,
+  type MobileDirectoryState as DirectoryState,
+  type MobileExplorerEntry as FileExplorerEntry,
+} from './mobile-directory-cache';
+import { MobileDirectoryRequestTracker } from './mobile-directory-request-tracker';
+import {
+  mobileDirectoryCacheKey,
+  mobileFileActionInvalidationPaths,
+} from './mobile-file-cache-key';
 
 type VisibleExplorerRow =
   | {
@@ -73,6 +72,7 @@ type RequestDroneControl = (
   destinationId: string,
   operation: DroneControlOperation,
   payload?: any,
+  signal?: AbortSignal,
 ) => Promise<any>;
 
 function normalizeEntries(raw: unknown): FileExplorerEntry[] {
@@ -121,6 +121,7 @@ function fileNameStemSelectionEnd(name: string): number {
 }
 
 export function MobileFileExplorer({
+  active,
   targetId,
   droneId,
   chatName,
@@ -128,7 +129,9 @@ export function MobileFileExplorer({
   selectedPath,
   requestDroneControl,
   onOpenFile,
+  onPathsChanged,
 }: {
+  active: boolean;
   targetId: string;
   droneId: string;
   chatName: string;
@@ -136,13 +139,30 @@ export function MobileFileExplorer({
   selectedPath: string;
   requestDroneControl: RequestDroneControl;
   onOpenFile(path: string): void;
+  onPathsChanged(paths: readonly string[]): void;
 }) {
   const [directories, setDirectories] = React.useState<Record<string, DirectoryState>>({});
   const directoriesRef = React.useRef(directories);
+  const directoryContextRef = React.useRef(new MobileDirectoryContextCache());
   const contextVersionRef = React.useRef(0);
   const directoryRequestSeqRef = React.useRef<Record<string, number>>({});
+  const directoryAbortControllersRef = React.useRef(new Map<string, AbortController>());
+  const directoryRequestsRef = React.useRef(new MobileDirectoryRequestTracker());
+  const loadDirectoryRef = React.useRef<((path: string, force?: boolean) => Promise<void>) | null>(
+    null,
+  );
+  const directoryCacheRef = React.useRef<BoundedSwrCache<MobileDirectoryContextCache> | null>(null);
+  if (!directoryCacheRef.current) {
+    directoryCacheRef.current = new BoundedSwrCache({
+      maxEntries: 4,
+      maxAgeMs: 2 * 60_000,
+    });
+  }
   directoriesRef.current = directories;
   const [expanded, setExpanded] = React.useState<ReadonlySet<string>>(() => new Set());
+  const [refreshing, setRefreshing] = React.useState<ReadonlySet<string>>(() => new Set());
+  const refreshingRef = React.useRef(refreshing);
+  refreshingRef.current = refreshing;
   const [actionMenuEntry, setActionMenuEntry] = React.useState<
     FileExplorerEntry | null | undefined
   >(undefined);
@@ -152,108 +172,226 @@ export function MobileFileExplorer({
   const [actionError, setActionError] = React.useState<string | null>(null);
   const actionInputRef = React.useRef<NativeTextInput | null>(null);
   const suppressPressUntilRef = React.useRef(0);
-  const contextKey = `${targetId}\0${droneId}\0${chatName}\0${rootPath}`;
+  const contextKey = mobileDirectoryCacheKey({ targetId, droneId, chatName, rootPath });
+  const currentContextKeyRef = React.useRef(contextKey);
+  currentContextKeyRef.current = contextKey;
+
+  const adoptDirectories = React.useCallback(
+    (next: Record<string, DirectoryState>) => {
+      directoriesRef.current = next;
+      for (const path of Object.keys(directoryRequestSeqRef.current)) {
+        if (!(path in next)) delete directoryRequestSeqRef.current[path];
+      }
+      const retainedRefreshing = [...refreshingRef.current].filter((path) => path in next);
+      if (retainedRefreshing.length !== refreshingRef.current.size) {
+        const nextRefreshing = new Set(retainedRefreshing);
+        refreshingRef.current = nextRefreshing;
+        setRefreshing(nextRefreshing);
+      }
+      directoryCacheRef.current!.set(contextKey, directoryContextRef.current);
+      setDirectories((current) => (current === next ? current : next));
+      setExpanded((current) => {
+        const retained = [...current].filter((path) => path in next);
+        return retained.length === current.size ? current : new Set(retained);
+      });
+    },
+    [contextKey],
+  );
+
+  const commitDirectories = React.useCallback(
+    (updates: ReadonlyArray<{ path: string; state: DirectoryState }>) => {
+      adoptDirectories(directoryContextRef.current.update(updates, rootPath));
+    },
+    [adoptDirectories, rootPath],
+  );
 
   const loadDirectory = React.useCallback(
     async (path: string, force = false) => {
       const requestContextVersion = contextVersionRef.current;
+      const requestContextKey = contextKey;
       const existing = directoriesRef.current[path];
-      if (!force && (existing?.loading || existing?.loaded)) return;
+      if (!force && existing?.loaded) return;
+      const requestToken = directoryRequestsRef.current.begin(path, force);
+      if (!requestToken) return;
+      const background = existing?.loaded === true;
       const requestSeq = (directoryRequestSeqRef.current[path] ?? 0) + 1;
       directoryRequestSeqRef.current[path] = requestSeq;
-      setDirectories((current) => ({
-        ...current,
-        [path]: {
-          entries: current[path]?.entries ?? [],
-          loading: true,
-          error: null,
-          loaded: current[path]?.loaded ?? false,
-        },
-      }));
+      const requestController = new AbortController();
+      directoryAbortControllersRef.current.set(path, requestController);
+      if (background) {
+        const nextRefreshing = new Set(refreshingRef.current).add(path);
+        refreshingRef.current = nextRefreshing;
+        setRefreshing(nextRefreshing);
+      } else {
+        commitDirectories([
+          {
+            path,
+            state: {
+              entries: existing?.entries ?? [],
+              loading: true,
+              error: null,
+              loaded: false,
+            },
+          },
+        ]);
+      }
       try {
-        let result = await requestDroneControl(targetId, 'files.list', {
-          droneId,
-          chatName,
-          path,
-          contentOffset: 0,
-        });
+        let result = await requestDroneControl(
+          targetId,
+          'files.list',
+          {
+            droneId,
+            chatName,
+            path,
+            contentOffset: 0,
+          },
+          requestController.signal,
+        );
         if (result?.contentChunk) {
           let firstChunkAvailable = true;
           const firstChunk = result.contentChunk;
-          result = await readMeshJsonContent(async (contentOffset) => {
-            if (
-              contextVersionRef.current !== requestContextVersion ||
-              directoryRequestSeqRef.current[path] !== requestSeq
-            ) {
-              throw new Error('The selected workspace changed while files were loading');
-            }
-            if (contentOffset === 0 && firstChunkAvailable) {
-              firstChunkAvailable = false;
-              return firstChunk;
-            }
-            const next = await requestDroneControl(targetId, 'files.list', {
-              droneId,
-              chatName,
-              path,
-              contentOffset,
-            });
-            return next?.contentChunk ?? {};
-          });
+          result = await readMeshJsonContent(
+            async (contentOffset, snapshotToken, signal) => {
+              if (
+                currentContextKeyRef.current !== requestContextKey ||
+                contextVersionRef.current !== requestContextVersion ||
+                directoryRequestSeqRef.current[path] !== requestSeq
+              ) {
+                throw new Error('The selected workspace changed while files were loading');
+              }
+              if (contentOffset === 0 && firstChunkAvailable) {
+                firstChunkAvailable = false;
+                return firstChunk;
+              }
+              const next = await requestDroneControl(
+                targetId,
+                'files.list',
+                {
+                  droneId,
+                  chatName,
+                  path,
+                  contentOffset,
+                  ...(snapshotToken ? { snapshotToken } : {}),
+                },
+                signal,
+              );
+              return next?.contentChunk ?? {};
+            },
+            {
+              isCancelled: () =>
+                currentContextKeyRef.current !== requestContextKey ||
+                contextVersionRef.current !== requestContextVersion ||
+                directoryRequestSeqRef.current[path] !== requestSeq,
+              signal: requestController.signal,
+              cancelSnapshot: async (snapshotToken) => {
+                await requestDroneControl(targetId, 'files.list', {
+                  droneId,
+                  chatName,
+                  path,
+                  snapshotToken,
+                  cancelSnapshot: true,
+                });
+              },
+            },
+          );
         }
         if (
+          currentContextKeyRef.current !== requestContextKey ||
           contextVersionRef.current !== requestContextVersion ||
           directoryRequestSeqRef.current[path] !== requestSeq
         )
           return;
         const resolvedPath = String(result?.path ?? path);
+        const normalizedEntries = normalizeEntries(result?.entries);
+        const previousEntries = directoriesRef.current[path]?.entries ?? [];
         const nextState: DirectoryState = {
-          entries: normalizeEntries(result?.entries),
+          entries: retainMobileExplorerEntries(previousEntries, normalizedEntries),
           loading: false,
           error: null,
           loaded: true,
         };
-        setDirectories((current) => ({
-          ...current,
-          [path]: nextState,
-          ...(resolvedPath !== path ? { [resolvedPath]: nextState } : {}),
-        }));
+        commitDirectories([
+          { path, state: nextState },
+          ...(resolvedPath !== path ? [{ path: resolvedPath, state: nextState }] : []),
+        ]);
       } catch (nextError: any) {
         if (
+          currentContextKeyRef.current !== requestContextKey ||
           contextVersionRef.current !== requestContextVersion ||
           directoryRequestSeqRef.current[path] !== requestSeq
         )
           return;
         const message = String(nextError?.message ?? nextError ?? 'Unable to list files.');
-        setDirectories((current) => ({
-          ...current,
-          [path]: {
-            entries: current[path]?.entries ?? [],
-            loading: false,
-            error: /not granted|not permitted|access|denied/i.test(message)
-              ? `${message}. Enable “drone-control: files.list” for this phone in Devices.`
-              : message,
-            loaded: false,
+        const current = directoriesRef.current[path];
+        commitDirectories([
+          {
+            path,
+            state: {
+              entries: current?.entries ?? [],
+              loading: false,
+              error: /not granted|not permitted|access|denied/i.test(message)
+                ? `${message}. Enable “drone-control: files.list” for this phone in Devices.`
+                : message,
+              loaded: current?.loaded === true,
+            },
           },
-        }));
+        ]);
+      } finally {
+        if (directoryAbortControllersRef.current.get(path) === requestController) {
+          directoryAbortControllersRef.current.delete(path);
+        }
+        const requestIsCurrent =
+          currentContextKeyRef.current === requestContextKey &&
+          contextVersionRef.current === requestContextVersion &&
+          directoryRequestSeqRef.current[path] === requestSeq;
+        if (requestIsCurrent && refreshingRef.current.has(path)) {
+          const next = new Set(refreshingRef.current);
+          next.delete(path);
+          refreshingRef.current = next;
+          setRefreshing(next);
+        }
+        const runTrailing = directoryRequestsRef.current.finish(path, requestToken);
+        if (requestIsCurrent && runTrailing) {
+          void loadDirectoryRef.current?.(path, true);
+        }
       }
     },
-    [chatName, droneId, requestDroneControl, targetId],
+    [chatName, commitDirectories, contextKey, droneId, requestDroneControl, targetId],
   );
+  loadDirectoryRef.current = loadDirectory;
 
   React.useEffect(() => {
+    for (const controller of directoryAbortControllersRef.current.values()) controller.abort();
+    directoryAbortControllersRef.current.clear();
     contextVersionRef.current += 1;
     directoryRequestSeqRef.current = {};
-    setDirectories({});
+    directoryRequestsRef.current.reset();
+    const cached = directoryCacheRef.current!.get(contextKey) ?? new MobileDirectoryContextCache();
+    directoryContextRef.current = cached;
+    directoriesRef.current = cached.directories;
+    setDirectories(cached.directories);
     setExpanded(new Set());
+    const nextRefreshing = new Set<string>();
+    refreshingRef.current = nextRefreshing;
+    setRefreshing(nextRefreshing);
     setActionMenuEntry(undefined);
     setEditor(null);
     setActionInput('');
     setActionError(null);
-    void loadDirectory(rootPath, true);
+    setActionLoading(false);
     return () => {
+      for (const controller of directoryAbortControllersRef.current.values()) controller.abort();
+      directoryAbortControllersRef.current.clear();
       contextVersionRef.current += 1;
+      directoryRequestsRef.current.reset();
     };
-  }, [contextKey, loadDirectory, rootPath]);
+  }, [contextKey]);
+
+  React.useEffect(() => {
+    if (!active) return;
+    const cachedRoot = directoriesRef.current[rootPath];
+    void loadDirectory(rootPath, Boolean(cachedRoot?.loaded || cachedRoot?.loading));
+  }, [active, loadDirectory, rootPath]);
 
   const toggleDirectory = (path: string) => {
     const willExpand = !expanded.has(path);
@@ -263,7 +401,10 @@ export function MobileFileExplorer({
       else next.delete(path);
       return next;
     });
-    if (willExpand) void loadDirectory(path);
+    if (willExpand) {
+      const cachedDirectory = directoriesRef.current[path];
+      void loadDirectory(path, Boolean(cachedDirectory?.loaded || cachedDirectory?.loading));
+    }
   };
 
   const refreshExplorer = React.useCallback(() => {
@@ -298,6 +439,8 @@ export function MobileFileExplorer({
 
   const submitAction = React.useCallback(async () => {
     if (!editor || actionLoading) return;
+    const requestContextVersion = contextVersionRef.current;
+    const requestContextKey = contextKey;
     const name = actionInput.trim();
     if (!name) {
       setActionError('Enter a name.');
@@ -323,12 +466,28 @@ export function MobileFileExplorer({
           ? { path: editor.entry?.path }
           : { targetDir: editor.targetDirectory }),
       });
+      if (
+        currentContextKeyRef.current !== requestContextKey ||
+        contextVersionRef.current !== requestContextVersion
+      )
+        return;
       const createdPath = String(
         result?.path ?? mobileExplorerJoinPath(editor.targetDirectory, name),
       );
       const targetPath = String(
         result?.targetPath ?? mobileExplorerJoinPath(editor.targetDirectory, name),
       );
+      const invalidatedPaths = mobileFileActionInvalidationPaths({
+        action: editor.mode,
+        sourcePath: editor.entry?.path,
+        createdPath,
+        targetPath,
+      });
+      const nextDirectories = directoryContextRef.current.deletePaths(invalidatedPaths);
+      if (nextDirectories !== directoriesRef.current) {
+        adoptDirectories(nextDirectories);
+      }
+      onPathsChanged(invalidatedPaths);
       setEditor(null);
       setActionInput('');
       await loadDirectory(editor.targetDirectory, true);
@@ -339,6 +498,11 @@ export function MobileFileExplorer({
         onOpenFile(editor.mode === 'rename' ? targetPath : createdPath);
       }
     } catch (nextError: any) {
+      if (
+        currentContextKeyRef.current !== requestContextKey ||
+        contextVersionRef.current !== requestContextVersion
+      )
+        return;
       const message = String(nextError?.message ?? nextError ?? 'Unable to update this item.');
       setActionError(
         /not granted|not permitted|access|denied/i.test(message)
@@ -346,17 +510,24 @@ export function MobileFileExplorer({
           : message,
       );
     } finally {
-      setActionLoading(false);
+      if (
+        currentContextKeyRef.current === requestContextKey &&
+        contextVersionRef.current === requestContextVersion
+      )
+        setActionLoading(false);
     }
   }, [
     actionInput,
     actionLoading,
+    adoptDirectories,
     cancelAction,
     chatName,
+    contextKey,
     droneId,
     editor,
     loadDirectory,
     onOpenFile,
+    onPathsChanged,
     requestDroneControl,
     selectedPath,
     targetId,
@@ -420,7 +591,7 @@ export function MobileFileExplorer({
         }
         if (!open) continue;
         const child = directories[entry.path];
-        if (child?.loading || child?.error) {
+        if ((child?.loading && !child.loaded) || (child?.error && !child.loaded)) {
           visible.push({
             kind: 'state',
             key: `state:${entry.path}`,
@@ -429,14 +600,33 @@ export function MobileFileExplorer({
             loading: child.loading,
             error: child.error,
           });
-        } else {
-          visit(entry.path, depth + 1);
+          continue;
         }
+        if (child?.error) {
+          visible.push({
+            kind: 'state',
+            key: `state:${entry.path}`,
+            path: entry.path,
+            depth: depth + 1,
+            loading: false,
+            error: child.error,
+          });
+        } else if (refreshing.has(entry.path)) {
+          visible.push({
+            kind: 'state',
+            key: `state:${entry.path}`,
+            path: entry.path,
+            depth: depth + 1,
+            loading: true,
+            error: null,
+          });
+        }
+        visit(entry.path, depth + 1);
       }
     };
     visit(rootPath, 0);
     return visible;
-  }, [directories, editor, expanded, rootPath, selectedPath]);
+  }, [directories, editor, expanded, refreshing, rootPath, selectedPath]);
   return (
     <View style={styles.explorer}>
       <View style={styles.toolbar}>
@@ -457,14 +647,30 @@ export function MobileFileExplorer({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Refresh files"
-          disabled={root?.loading}
+          disabled={root?.loading || refreshing.has(rootPath)}
           hitSlop={8}
           onPress={refreshExplorer}
-          style={({ pressed }) => [root?.loading && styles.disabled, pressed && styles.pressed]}
+          style={({ pressed }) => [
+            (root?.loading || refreshing.has(rootPath)) && styles.disabled,
+            pressed && styles.pressed,
+          ]}
         >
           <RefreshCw color={colors.muted} size={15} strokeWidth={2} />
         </Pressable>
       </View>
+      {mobileDirectoryErrorMode(root) === 'stale' ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Retry workspace refresh"
+          onPress={() => void loadDirectory(rootPath, true)}
+          style={styles.staleErrorBanner}
+        >
+          <Text numberOfLines={2} style={styles.staleErrorText}>
+            Refresh failed: {root?.error}
+          </Text>
+          <Text style={styles.retryText}>Retry</Text>
+        </Pressable>
+      ) : null}
       <FlatList
         data={rows}
         keyExtractor={(row) => row.key}
@@ -820,6 +1026,18 @@ const styles = StyleSheet.create({
     backgroundColor: colors.dangerDark,
   },
   actionErrorText: { minWidth: 0, flex: 1, color: colors.danger, fontSize: 9, lineHeight: 13 },
+  staleErrorBanner: {
+    minHeight: 34,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.warningBorder,
+    backgroundColor: colors.warningDark,
+  },
+  staleErrorText: { minWidth: 0, flex: 1, color: colors.warning, fontSize: 9 },
   cancelActionText: { color: colors.accent, fontSize: 10, fontWeight: '800' },
   pressed: { opacity: 0.65 },
   disabled: { opacity: 0.35 },

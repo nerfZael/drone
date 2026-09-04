@@ -14,6 +14,10 @@ import {
 } from '../security/device-identity';
 import { MeshSocket } from './MeshSocket';
 import {
+  activeDevicePublicKey,
+  MobileCapabilityEventGuard,
+} from './mobile-capability-event-guard';
+import {
   MeshConnectionManager,
   type MeshAppState,
   type MeshDeviceConnectionState,
@@ -90,6 +94,7 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
   const capabilityRouter = React.useRef<MobileCapabilityRouter | null>(null);
   const refreshRef = React.useRef<() => Promise<void>>(async () => undefined);
   const topologyRefreshTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const capabilityEventGuard = React.useRef(new MobileCapabilityEventGuard());
   const eventListeners = React.useRef(
     new Set<{
       capability: string;
@@ -152,6 +157,7 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
             nextIdentity,
             nextProfile.devices.find((device) => device.id === connection.deviceId)?.publicKey ??
               {},
+            (deviceId) => activeDevicePublicKey(profileRef.current?.devices, deviceId),
             () => connectionManager.handleSocketState(socket),
             () => {
               if (topologyRefreshTimer.current) clearTimeout(topologyRefreshTimer.current);
@@ -159,6 +165,7 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
             },
             emitCapabilityEvent,
             capabilityRouter.current!,
+            capabilityEventGuard.current,
           );
           return socket;
         });
@@ -219,6 +226,7 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
       active = false;
       if (topologyRefreshTimer.current) clearTimeout(topologyRefreshTimer.current);
       connectionManager.clear(false);
+      capabilityEventGuard.current.clear();
     };
   }, [connect, connectionManager]);
 
@@ -441,6 +449,7 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
 
   const forgetMesh = React.useCallback(async () => {
     connectionManager.clear();
+    capabilityEventGuard.current.clear();
     await clearMeshProfile();
     profileRef.current = null;
     setProfile(null);

@@ -134,6 +134,7 @@ export class DeviceMeshHttp {
   private eventRevision = 0;
   private readonly unsubscribeStoreChanges: () => void;
   private readonly unsubscribeConnectionChanges: () => void;
+  private readonly unsubscribeCapabilityEvents: () => void;
 
   constructor(
     private readonly identity: LocalDeviceIdentity,
@@ -149,11 +150,15 @@ export class DeviceMeshHttp {
     this.unsubscribeConnectionChanges = this.router.subscribeConnections(() =>
       this.publishChange('connections'),
     );
+    this.unsubscribeCapabilityEvents = this.router.subscribeCapabilityEvents((event) =>
+      this.publishCapabilityEvent(event),
+    );
   }
 
   close(): void {
     this.unsubscribeStoreChanges();
     this.unsubscribeConnectionChanges();
+    this.unsubscribeCapabilityEvents();
     for (const [response, keepAlive] of this.eventClients) {
       clearInterval(keepAlive);
       if (!response.destroyed) response.end();
@@ -162,15 +167,37 @@ export class DeviceMeshHttp {
   }
 
   private publishChange(reason: 'state' | 'connections'): void {
+    this.publishEvent('change', (revision) => ({ revision, reason }));
+  }
+
+  private publishCapabilityEvent(event: Record<string, any>): void {
+    this.publishEvent('capability', (revision) => ({ ...event, revision }));
+  }
+
+  private publishEvent(
+    eventName: 'change' | 'capability',
+    dataForRevision: (revision: number) => Record<string, any>,
+  ): void {
     this.eventRevision += 1;
-    const payload = `event: change\ndata: ${JSON.stringify({ revision: this.eventRevision, reason })}\n\n`;
+    const payload = `event: ${eventName}\ndata: ${JSON.stringify(dataForRevision(this.eventRevision))}\n\n`;
     for (const response of this.eventClients.keys()) {
-      try {
-        response.write(payload);
-      } catch {
-        this.removeEventClient(response);
-      }
+      this.writeEventClient(response, payload);
     }
+  }
+
+  private writeEventClient(response: http.ServerResponse, payload: string): boolean {
+    try {
+      if (response.write(payload)) return true;
+    } catch {
+      // The stream is removed below.
+    }
+    this.removeEventClient(response);
+    try {
+      if (!response.destroyed) response.destroy();
+    } catch {
+      // The stream has already been removed from the tracked client set.
+    }
+    return false;
   }
 
   private removeEventClient(response: http.ServerResponse): void {
@@ -185,13 +212,16 @@ export class DeviceMeshHttp {
     response.setHeader('cache-control', 'no-cache, no-transform');
     response.setHeader('connection', 'keep-alive');
     response.flushHeaders?.();
-    response.write(`event: ready\ndata: ${JSON.stringify({ revision: this.eventRevision })}\n\n`);
+    if (
+      !this.writeEventClient(
+        response,
+        `event: ready\ndata: ${JSON.stringify({ revision: this.eventRevision })}\n\n`,
+      )
+    ) {
+      return;
+    }
     const keepAlive = setInterval(() => {
-      try {
-        response.write(': keepalive\n\n');
-      } catch {
-        this.removeEventClient(response);
-      }
+      this.writeEventClient(response, ': keepalive\n\n');
     }, 25_000);
     keepAlive.unref?.();
     this.eventClients.set(response, keepAlive);
@@ -668,6 +698,9 @@ export class DeviceMeshHttp {
       current.updatedAt = new Date().toISOString();
       return current;
     });
+    if (Array.isArray(body.grants)) {
+      await this.router.accessChanged(deviceId).catch(() => undefined);
+    }
     await this.router.broadcastMembership();
     json(response, 200, { ok: true, device });
   }

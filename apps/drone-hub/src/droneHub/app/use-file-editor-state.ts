@@ -45,6 +45,8 @@ import {
   type RememberedEditorFile,
 } from './drone-file-editor-state';
 import { appendFileDictationLine } from '../files/file-dictation-text';
+import { readDesktopFile } from '../files/read-desktop-file';
+import { desktopMediaFileKindForExtension } from '../files/desktop-media-file-kind';
 
 type RequestJson = typeof requestJsonFn;
 
@@ -114,9 +116,7 @@ function parseFileTooLargeMessage(msgRaw: string): { size: number; maxBytes: num
 
 function oversizedFileKindForPath(pathRaw: string): OpenedFileKind {
   const ext = String(pathRaw ?? '').trim().toLowerCase().split(/[?#]/)[0]?.split('.').pop() ?? '';
-  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico', 'avif', 'tif', 'tiff'].includes(ext)) return 'image';
-  if (['mp4', 'webm', 'mov', 'm4v', 'ogv', 'ogg', 'avi', 'mkv', 'wmv'].includes(ext)) return 'video';
-  return 'large-text';
+  return desktopMediaFileKindForExtension(ext) ?? 'large-text';
 }
 
 function confirmDiscardDirtyTabs(tabs: OpenedFileTab[], actionLabel: string): boolean {
@@ -156,7 +156,7 @@ function readPayloadToTabState(data: Extract<DroneFsReadPayload, { ok: true }>):
   const nextMime = typeof (data as any).mime === 'string' ? String((data as any).mime).trim().toLowerCase() : '';
   const nextSize = Number((data as any).size);
   const nextContent = nextKind === 'text' && typeof (data as any).content === 'string' ? (data as any).content : '';
-  const nextPath = typeof (data as any).path === 'string' ? String((data as any).path).trim() : '';
+  const nextPath = typeof (data as any).path === 'string' ? String((data as any).path) : '';
   return {
     kind: nextKind,
     mime: nextMime || null,
@@ -504,7 +504,7 @@ export function useFileEditorState({
     if (activeTab.loaded || activeTab.loading) return;
     const activeId = activeTab.tabId;
     const droneId = String(activeTab.droneId ?? '').trim();
-    const filePath = String(activeTab.path ?? '').trim();
+    const filePath = String(activeTab.path ?? '');
     if (!droneId || !filePath) return;
     const seq = requestSeqRef.current + 1;
     requestSeqRef.current = seq;
@@ -534,9 +534,7 @@ export function useFileEditorState({
     contentRef.current = '';
 
     let cancelled = false;
-    void requestJson<Extract<DroneFsReadPayload, { ok: true }>>(
-      `/api/drones/${encodeURIComponent(droneId)}/fs/file?path=${encodeURIComponent(filePath)}`,
-    )
+    void readDesktopFile(requestJson, droneId, filePath)
       .then((data) => {
         if (cancelled || requestSeqRef.current !== seq) return;
         const nextLoadedState = readPayloadToTabState(data);
@@ -607,9 +605,7 @@ export function useFileEditorState({
           return;
         }
 
-        void requestJson<Extract<DroneFsReadPayload, { ok: true }>>(
-          `/api/drones/${encodeURIComponent(droneId)}/fs/file?path=${encodeURIComponent(fallbackPath)}`,
-        )
+        void readDesktopFile(requestJson, droneId, fallbackPath)
           .then((data) => {
             if (cancelled || requestSeqRef.current !== seq) return;
             const nextLoadedState = readPayloadToTabState(data);
@@ -757,9 +753,7 @@ export function useFileEditorState({
       }
       const nextSeq = (liveReloadSeqByTabRef.current.get(tabId) ?? 0) + 1;
       liveReloadSeqByTabRef.current.set(tabId, nextSeq);
-      void requestJson<Extract<DroneFsReadPayload, { ok: true }>>(
-        `/api/drones/${encodeURIComponent(currentTab.droneId)}/fs/file?path=${encodeURIComponent(currentTab.path)}`,
-      )
+      void readDesktopFile(requestJson, currentTab.droneId, currentTab.path)
         .then((data) => {
           if (liveReloadSeqByTabRef.current.get(tabId) !== nextSeq) return;
           const nextLoadedState = readPayloadToTabState(data);

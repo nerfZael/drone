@@ -9,7 +9,14 @@ const dvm = createDvmApi();
 export async function run(
   cmd: string,
   args: string[],
-  opts?: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number; input?: string | Buffer },
+  opts?: {
+    cwd?: string;
+    env?: NodeJS.ProcessEnv;
+    timeoutMs?: number;
+    input?: string | Buffer;
+    maxOutputBytes?: number;
+    signal?: AbortSignal;
+  },
 ): Promise<RunResult> {
   return await new Promise<RunResult>((resolve) => {
     const child = spawn(cmd, args, {
@@ -21,17 +28,51 @@ export async function run(
     let stdout = '';
     let stderr = '';
     let done = false;
+    let outputBytes = 0;
     let timeout: ReturnType<typeof setTimeout> | null = null;
+
+    const stopChild = () => {
+      try {
+        child.kill('SIGTERM');
+      } catch {
+        // ignore
+      }
+      const killTimer = setTimeout(() => {
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          // ignore
+        }
+      }, 1500);
+      killTimer.unref?.();
+    };
+
+    const abort = () => {
+      stopChild();
+      finish({ code: 130, stdout, stderr: `${stderr}Command aborted` });
+    };
 
     const finish = (res: RunResult) => {
       if (done) return;
       done = true;
       if (timeout) clearTimeout(timeout);
+      opts?.signal?.removeEventListener('abort', abort);
       resolve(res);
     };
 
-    child.stdout!.on('data', (d) => (stdout += d.toString('utf8')));
-    child.stderr!.on('data', (d) => (stderr += d.toString('utf8')));
+    const appendOutput = (stream: 'stdout' | 'stderr', chunk: Buffer) => {
+      if (done) return;
+      outputBytes += chunk.length;
+      if (opts?.maxOutputBytes && outputBytes > opts.maxOutputBytes) {
+        stopChild();
+        finish({ code: 125, stdout, stderr: `${stderr}Command output limit exceeded` });
+        return;
+      }
+      if (stream === 'stdout') stdout += chunk.toString('utf8');
+      else stderr += chunk.toString('utf8');
+    };
+    child.stdout!.on('data', (d) => appendOutput('stdout', Buffer.from(d)));
+    child.stderr!.on('data', (d) => appendOutput('stderr', Buffer.from(d)));
     child.on('error', (err: any) => {
       finish({ code: 127, stdout, stderr: `${stderr}${err?.message ?? String(err)}` });
     });
@@ -40,6 +81,9 @@ export async function run(
       // The process may exit before consuming all optional input.
     });
     if (opts?.input != null) child.stdin?.end(opts.input);
+    if (opts?.signal?.aborted) abort();
+    else opts?.signal?.addEventListener('abort', abort, { once: true });
+    if (done) return;
 
     const timeoutMs =
       typeof opts?.timeoutMs === 'number' && Number.isFinite(opts.timeoutMs) && opts.timeoutMs > 0
@@ -47,18 +91,7 @@ export async function run(
         : 0;
     if (timeoutMs > 0) {
       timeout = setTimeout(() => {
-        try {
-          child.kill('SIGTERM');
-        } catch {
-          // ignore
-        }
-        setTimeout(() => {
-          try {
-            child.kill('SIGKILL');
-          } catch {
-            // ignore
-          }
-        }, 1500);
+        stopChild();
         finish({
           code: 124,
           stdout,
@@ -125,11 +158,18 @@ export async function dvmExec(
   container: string,
   cmd: string,
   args: string[] = [],
-  opts?: { timeoutMs?: number; containerAlreadyReady?: boolean },
+  opts?: {
+    timeoutMs?: number;
+    containerAlreadyReady?: boolean;
+    maxOutputBytes?: number;
+    signal?: AbortSignal;
+  },
 ): Promise<RunResult> {
   return await dvm.exec(container, cmd, args, {
     timeoutMs: opts?.timeoutMs,
     containerAlreadyReady: opts?.containerAlreadyReady,
+    maxOutputBytes: opts?.maxOutputBytes,
+    signal: opts?.signal,
   });
 }
 

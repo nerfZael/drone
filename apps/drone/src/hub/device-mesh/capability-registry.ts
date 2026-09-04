@@ -26,6 +26,18 @@ export class CapabilityRegistry {
     );
   }
 
+  async disconnectDevice(deviceId: string): Promise<void> {
+    await Promise.all(
+      [...this.handlers.values()].map((handler) => handler.disconnectDevice?.(deviceId)),
+    );
+  }
+
+  async accessChanged(deviceId: string): Promise<void> {
+    await Promise.all(
+      [...this.handlers.values()].map((handler) => handler.accessChanged?.(deviceId)),
+    );
+  }
+
   async invoke(
     capability: string,
     version: number,

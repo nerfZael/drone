@@ -1,4 +1,5 @@
 import React from 'react';
+import { CoalescedRefresh } from './coalesced-refresh';
 import { subscribeDeviceMeshChanges } from './device-mesh-events';
 
 type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
@@ -54,33 +55,38 @@ export function useDeviceMesh(requestJson: RequestJson) {
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const invitationRequest = React.useRef<Promise<void> | null>(null);
+  const statusRefresh = React.useRef(new CoalescedRefresh());
 
-  const load = React.useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const readStatus = React.useCallback(async (reportErrors: boolean) => {
+    if (reportErrors) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const next = await requestJson<{ ok: true } & MeshStatus>('/api/device-mesh');
       setStatus((current) => sameMeshStatus(current, next) ? current : next);
     } catch (nextError: any) {
-      setError(nextError?.message ?? String(nextError));
+      if (reportErrors) setError(nextError?.message ?? String(nextError));
     } finally {
-      setLoading(false);
+      if (reportErrors) setLoading(false);
     }
   }, [requestJson]);
+
+  const load = React.useCallback(
+    async () => await statusRefresh.current.request(() => readStatus(true), 1),
+    [readStatus],
+  );
 
   React.useEffect(() => void load(), [load]);
 
-  const refreshStatus = React.useCallback(async () => {
-    try {
-      const next = await requestJson<{ ok: true } & MeshStatus>('/api/device-mesh');
-      setStatus((current) => sameMeshStatus(current, next) ? current : next);
-    } catch {
-      // The stream reconnects automatically; keep the last usable status meanwhile.
-    }
-  }, [requestJson]);
+  const refreshStatus = React.useCallback(
+    async () => await statusRefresh.current.request(() => readStatus(false)),
+    [readStatus],
+  );
 
   React.useEffect(() => {
-    const unsubscribe = subscribeDeviceMeshChanges(() => void refreshStatus());
+    const reconcile = () => void refreshStatus();
+    const unsubscribe = subscribeDeviceMeshChanges(reconcile, { onReady: reconcile });
     const refreshAfterResume = () => {
       if (document.visibilityState === 'visible') void refreshStatus();
     };

@@ -8,6 +8,9 @@ import type { URL } from 'node:url';
 import type { ResolvedDrone } from './drone-lifecycle-service';
 import type { ContainerFsEntry } from './filesystem-media';
 import { createAssistantFilesystemService } from './assistant-filesystem-service';
+import { mapInBatches } from './map-in-batches';
+
+const HOST_DIRECTORY_METADATA_BATCH_SIZE = 64;
 
 type FilesystemRuntimeDependencyName =
   | 'NON_REPO_HOME_CWD'
@@ -366,10 +369,9 @@ export function createFilesystemRuntime(dependencies: FilesystemRuntimeDependenc
     }
 
     const dirents = await fs.readdir(resolvedPath, { withFileTypes: true });
-    const entries: ContainerFsEntry[] = [];
-    for (const d of dirents) {
-      const name = String(d?.name ?? '').trim();
-      if (!name || name === '.' || name === '..') continue;
+    const entries = await mapInBatches(dirents, HOST_DIRECTORY_METADATA_BATCH_SIZE, async (d) => {
+      const name = String(d?.name ?? '');
+      if (!name || name === '.' || name === '..') return null;
       const fullPath = path.join(resolvedPath, name);
       let stat: any = null;
       try {
@@ -384,7 +386,7 @@ export function createFilesystemRuntime(dependencies: FilesystemRuntimeDependenc
             ? 'file'
             : 'other';
       const ext = kind === 'file' ? extensionLower(name) || null : null;
-      entries.push({
+      return {
         name,
         path: fullPath,
         kind,
@@ -394,10 +396,11 @@ export function createFilesystemRuntime(dependencies: FilesystemRuntimeDependenc
         ext,
         isImage: kind === 'file' ? isLikelyImagePath(name) : false,
         isVideo: kind === 'file' ? isLikelyVideoPath(name) : false,
-      });
-    }
-    sortFsEntries(entries);
-    return { resolvedPath, entries };
+      } satisfies ContainerFsEntry;
+    });
+    const presentEntries = entries.filter((entry): entry is ContainerFsEntry => entry != null);
+    sortFsEntries(presentEntries);
+    return { resolvedPath, entries: presentEntries };
   }
 
   function parseFsSearchOutput(
@@ -641,11 +644,33 @@ export function createFilesystemRuntime(dependencies: FilesystemRuntimeDependenc
       .filter(Boolean);
   }
 
+  function assertIndependentMutationPaths(
+    runtime: 'host' | 'container',
+    paths: string[],
+  ): void {
+    for (let leftIndex = 0; leftIndex < paths.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < paths.length; rightIndex += 1) {
+        const left = paths[leftIndex] ?? '';
+        const right = paths[rightIndex] ?? '';
+        if (
+          fsPathStartsWithOrEqualsForRuntime(runtime, left, right) ||
+          fsPathStartsWithOrEqualsForRuntime(runtime, right, left)
+        ) {
+          throw fsMutationError(400, 'batch paths must not overlap');
+        }
+      }
+    }
+  }
+
   async function assertHostDirectory(targetPath: string): Promise<void> {
     const st = await fs.stat(targetPath);
     if (!st.isDirectory()) {
       throw fsMutationError(404, `path is not a directory: ${targetPath}`);
     }
+  }
+
+  async function assertHostPathExists(targetPath: string): Promise<void> {
+    await fs.lstat(targetPath);
   }
 
   async function assertHostPathDoesNotExist(targetPath: string): Promise<void> {
@@ -703,9 +728,13 @@ export function createFilesystemRuntime(dependencies: FilesystemRuntimeDependenc
     if (action === 'delete') {
       const paths = normalizeFsMutationPathsForRuntime(drone, body?.paths ?? body?.path);
       if (paths.length === 0) throw fsMutationError(400, 'missing paths');
+      assertIndependentMutationPaths(runtime, paths);
       for (const sourcePath of paths) {
         if (!sourcePath || sourcePath === path.parse(sourcePath).root)
           throw fsMutationError(400, 'cannot delete root');
+        await assertHostPathExists(sourcePath);
+      }
+      for (const sourcePath of paths) {
         await fs.rm(sourcePath, { recursive: true, force: false });
       }
       return { action, paths };
@@ -717,8 +746,11 @@ export function createFilesystemRuntime(dependencies: FilesystemRuntimeDependenc
         fallbackToHome: false,
       });
       if (paths.length === 0) throw fsMutationError(400, 'missing paths');
+      assertIndependentMutationPaths(runtime, paths);
       if (!targetDir) throw fsMutationError(400, 'missing target directory');
       await assertHostDirectory(targetDir);
+      const operations: Array<{ sourcePath: string; targetPath: string }> = [];
+      const targetPaths = new Set<string>();
       for (const sourcePath of paths) {
         if (!sourcePath || sourcePath === path.parse(sourcePath).root)
           throw fsMutationError(400, 'invalid source path');
@@ -731,7 +763,15 @@ export function createFilesystemRuntime(dependencies: FilesystemRuntimeDependenc
             `cannot ${action === 'move' ? 'move' : 'copy'} a directory into itself`,
           );
         }
+        await assertHostPathExists(sourcePath);
+        if (targetPaths.has(targetPath)) {
+          throw fsMutationError(409, `multiple sources target the same path: ${targetPath}`);
+        }
+        targetPaths.add(targetPath);
         await assertHostPathDoesNotExist(targetPath);
+        operations.push({ sourcePath, targetPath });
+      }
+      for (const { sourcePath, targetPath } of operations) {
         if (action === 'move') {
           await fs.rename(sourcePath, targetPath);
         } else {
@@ -808,14 +848,15 @@ export function createFilesystemRuntime(dependencies: FilesystemRuntimeDependenc
     if (action === 'delete') {
       const paths = normalizeFsMutationPathsForRuntime(drone, body?.paths ?? body?.path);
       if (paths.length === 0) throw fsMutationError(400, 'missing paths');
+      assertIndependentMutationPaths(runtime, paths);
       for (const sourcePath of paths) {
         if (!sourcePath || sourcePath === '/') throw fsMutationError(400, 'cannot delete root');
         lines.push(
           `source=${bashQuote(sourcePath)}`,
           '[ -e "$source" ] || [ -L "$source" ] || fail 4 "path not found: $source"',
-          'rm -rf -- "$source"',
         );
       }
+      for (const sourcePath of paths) lines.push(`rm -rf -- ${bashQuote(sourcePath)}`);
       lines.push('printf "__OK__\\n"');
       return { script: lines.join('\n'), result: { action, paths } };
     }
@@ -826,7 +867,10 @@ export function createFilesystemRuntime(dependencies: FilesystemRuntimeDependenc
         fallbackToHome: false,
       });
       if (paths.length === 0) throw fsMutationError(400, 'missing paths');
+      assertIndependentMutationPaths(runtime, paths);
       if (!targetDir) throw fsMutationError(400, 'missing target directory');
+      const operations: Array<{ sourcePath: string; targetPath: string }> = [];
+      const targetPaths = new Set<string>();
       lines.push(
         `target_dir=${bashQuote(targetDir)}`,
         '[ -d "$target_dir" ] || fail 4 "path is not a directory: $target_dir"',
@@ -836,6 +880,11 @@ export function createFilesystemRuntime(dependencies: FilesystemRuntimeDependenc
         const name = fsPathBaseNameForRuntime(runtime, sourcePath);
         assertValidFsChildName(name);
         const targetPath = fsJoinChildForRuntime(runtime, targetDir, name);
+        if (targetPaths.has(targetPath)) {
+          throw fsMutationError(409, `multiple sources target the same path: ${targetPath}`);
+        }
+        targetPaths.add(targetPath);
+        operations.push({ sourcePath, targetPath });
         lines.push(
           `source=${bashQuote(sourcePath)}`,
           `target=${bashQuote(targetPath)}`,
@@ -846,13 +895,18 @@ export function createFilesystemRuntime(dependencies: FilesystemRuntimeDependenc
           lines.push(
             'case "$target" in "$source"|"$source"/*) fail 2 "cannot move a directory into itself" ;; esac',
           );
-          lines.push('mv -- "$source" "$target"');
         } else {
           lines.push(
             'case "$target" in "$source"|"$source"/*) fail 2 "cannot copy a directory into itself" ;; esac',
           );
-          lines.push('cp -a -- "$source" "$target"');
         }
+      }
+      for (const { sourcePath, targetPath } of operations) {
+        lines.push(
+          action === 'move'
+            ? `mv -- ${bashQuote(sourcePath)} ${bashQuote(targetPath)}`
+            : `cp -a -- ${bashQuote(sourcePath)} ${bashQuote(targetPath)}`,
+        );
       }
       lines.push('printf "__OK__\\n"');
       return { script: lines.join('\n'), result: { action, paths, targetDir } };
@@ -997,6 +1051,7 @@ export function createFilesystemRuntime(dependencies: FilesystemRuntimeDependenc
     listHostFsDirectory,
     parseFsSearchOutput,
     buildFsSearchScript,
+    containerFsMutationScript,
     handleFsActionRoute,
     assistantAbortDroneTransferFile,
     assistantBatchDroneFiles,

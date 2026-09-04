@@ -624,11 +624,13 @@ export function createChatPromptRouteHandler(
           const includeTranscript = transcriptMode !== 'none';
           const includePending = !['none', 'false', '0'].includes(pendingMode);
           const includeSubscriptions = parseBoolParam(u.searchParams.get('subscriptions'), false);
+          const includeConfigDetails = parseBoolParam(u.searchParams.get('config'), false);
           const includeReadState = parseBoolParam(
             u.searchParams.get('readState'),
             includeSubscriptions,
           );
-          const includeVolatileState = includeSubscriptions || includeReadState;
+          const includeVolatileState =
+            includeSubscriptions || includeReadState || includeConfigDetails;
           const includeTranscriptMeta = parseBoolParam(u.searchParams.get('transcriptMeta'), true);
           const selection =
             transcriptMode === 'full'
@@ -649,6 +651,7 @@ export function createChatPromptRouteHandler(
             tailRaw,
             includeTranscript,
             includePending,
+            includeConfigDetails,
             maintenance: 'schedule',
             includeDockerSnapshotMaintenance: true,
             ifNoneMatch: includeVolatileState ? '' : String(req.headers['if-none-match'] ?? ''),
@@ -706,7 +709,7 @@ export function createChatPromptRouteHandler(
               : {}),
           };
           if (includeVolatileState) {
-            json(res, 200, responseBody);
+            jsonWithEtag(req, res, 200, responseBody);
           } else if (snapshot.responseEtag) {
             jsonWithKnownEtag(req, res, 200, responseBody, snapshot.responseEtag);
           } else {

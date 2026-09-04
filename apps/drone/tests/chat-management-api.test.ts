@@ -1325,6 +1325,26 @@ describeSocketSuite('chat management api', () => {
     expect((state.data?.pending ?? []).map((row: any) => row.id)).toContain('queued-1');
     expect((state.data?.pending ?? []).map((row: any) => row.id)).toContain('prompt-2');
 
+    const stateWithConfig = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=1&subscriptions=true&readState=false&config=true`,
+    );
+    expect(stateWithConfig.r.status).toBe(200);
+    expect(stateWithConfig.data).toMatchObject({
+      ok: true,
+      id: droneId,
+      chat: 'default',
+      agent: state.data?.agent,
+      agentLocked: true,
+      model: 'configured-model',
+      reasoning: null,
+      agentPermissionMode: 'execute',
+      approvalPolicy: 'ask',
+      dockerSnapshotAfterAgentMessageEnabled: false,
+      sessionName: 'drone-hub-chat-default',
+    });
+    expect(stateWithConfig.data?.createdAt).toBeTruthy();
+    expect(stateWithConfig.data?.subscriptions).toEqual([]);
+
     const etag = state.r.headers.get('etag');
     expect(etag).toMatch(/^"sha256-/);
     const unchanged = await apiFetch(
@@ -1335,6 +1355,18 @@ describeSocketSuite('chat management api', () => {
     );
     expect(unchanged.r.status).toBe(304);
     expect(unchanged.data).toBeNull();
+
+    const stateWithSubscriptions = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=1&subscriptions=true`,
+    );
+    const subscriptionsEtag = stateWithSubscriptions.r.headers.get('etag');
+    expect(subscriptionsEtag).toMatch(/^"sha256-/);
+    const subscriptionsUnchanged = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=1&subscriptions=true`,
+      { headers: { 'if-none-match': subscriptionsEtag ?? '' } },
+    );
+    expect(subscriptionsUnchanged.r.status).toBe(304);
+    expect(subscriptionsUnchanged.data).toBeNull();
 
     await updateRegistry((reg: any) => {
       const entry = reg?.drones?.[droneId]?.chats?.default;
@@ -1661,6 +1693,23 @@ describeSocketSuite('chat management api', () => {
     expect(state.data?.ok).toBe(false);
     expect(state.data?.error).toBe(transcript.data?.error);
     expect(state.data?.agent).toEqual(transcript.data?.agent);
+
+    const stateWithConfig = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=50&subscriptions=true&readState=false&config=true`,
+    );
+    expect(stateWithConfig.r.status).toBe(200);
+    expect(stateWithConfig.data).toMatchObject({
+      ok: true,
+      chat: 'default',
+      agent: {
+        kind: 'custom',
+        id: 'custom-test',
+        label: 'Custom Test',
+        command: 'custom-agent',
+      },
+      transcripts: [],
+      agentLocked: false,
+    });
   });
 
   test('archives chats when delete mode is archive and supports restore/delete-now', async () => {

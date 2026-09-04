@@ -37,6 +37,7 @@ import {
   usePersistedLocalStorageItem,
   usePoll,
 } from './hooks';
+import { sameDroneFsEntries } from '../files/same-drone-fs-entries';
 
 const FS_LIST_CACHE_MAX_AGE_MS = 5 * 60_000;
 const FS_LIST_POLL_LOADING_MS = 8_000;
@@ -47,6 +48,15 @@ type FsListCacheEntry = {
   atMs: number;
   payload: Extract<DroneFsListPayload, { ok: true }>;
 };
+
+export function sameDroneFsListPayload(
+  left: DroneFsListPayload | null,
+  right: Extract<DroneFsListPayload, { ok: true }>,
+): boolean {
+  if (!left?.ok) return false;
+  if (left.id !== right.id || left.name !== right.name || left.path !== right.path) return false;
+  return sameDroneFsEntries(left.entries, right.entries);
+}
 
 const fsListCache = new Map<string, FsListCacheEntry>();
 
@@ -73,6 +83,16 @@ export function invalidateFsListCacheForPath(droneIdRaw: string, pathRaw: string
   const slash = filePath.lastIndexOf('/');
   const parentPath = slash > 0 ? filePath.slice(0, slash) : '/';
   fsListCache.delete(fsListCacheKey(droneId, parentPath || '/'));
+}
+
+export function invalidateFsListCacheForDirectory(
+  droneIdRaw: string,
+  directoryPathRaw: string,
+): void {
+  const droneId = String(droneIdRaw ?? '').trim();
+  const directoryPath = String(directoryPathRaw ?? '').trim() || '/';
+  if (!droneId) return;
+  fsListCache.delete(fsListCacheKey(droneId, directoryPath));
 }
 
 export function invalidateFsListCachesForDrone(droneIdRaw: string): void {
@@ -229,7 +249,7 @@ export function useFilesAndPortsPaneState({
         hasLoadedData = true;
         const payload = data as Extract<DroneFsListPayload, { ok: true }>;
         writeFsListCache(cacheKey, payload);
-        setFsResp(payload);
+        setFsResp((current) => (sameDroneFsListPayload(current, payload) ? current : payload));
         setFsError(null);
       } catch (e: any) {
         if (!mounted) return;

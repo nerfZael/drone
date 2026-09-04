@@ -65,6 +65,12 @@ import {
   groupChatTimelineItems,
 } from './chat-timeline-items';
 import { timelineUserFollowUps } from './chat-timeline-follow-ups';
+import {
+  createGroupChatOlderLoadCoordinator,
+  groupChatScrollTopAfterPrepend,
+  groupChatTailHasOlder,
+  type GroupChatScrollAnchor,
+} from './group-chat-history';
 
 const DirtyDroneApplyModal = React.lazy(async () => {
   const { DirtyDroneApplyModal } = await import('./DirtyDroneApplyModal');
@@ -122,6 +128,9 @@ export function GroupMultiChatColumn({
   );
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [hasOlder, setHasOlder] = React.useState(false);
+  const [olderLoading, setOlderLoading] = React.useState(false);
+  const [olderError, setOlderError] = React.useState<string | null>(null);
   const [promptError, setPromptError] = React.useState<string | null>(null);
   const [sendingPromptCount, setSendingPromptCount] = React.useState(0);
   const sendingPrompt = sendingPromptCount > 0;
@@ -161,6 +170,10 @@ export function GroupMultiChatColumn({
   const [droneHubPermissionsOpen, setDroneHubPermissionsOpen] = React.useState(false);
   const columnScrollRef = React.useRef<HTMLDivElement | null>(null);
   const transcriptEtagRef = React.useRef<string | null>(null);
+  const transcriptsRef = React.useRef<TranscriptItem[] | null>(transcripts);
+  const olderScrollAnchorRef = React.useRef<GroupChatScrollAnchor | null>(null);
+  const loadOlderHistoryRef = React.useRef<() => void>(() => {});
+  transcriptsRef.current = transcripts;
   const draftKey = React.useMemo(
     () => chatInputDraftKeyForDroneChat(drone.id, chatName),
     [drone.id, chatName],
@@ -230,7 +243,6 @@ export function GroupMultiChatColumn({
     let loadedInitialTail = false;
     let eventsConnected = false;
     let reloadAfterCurrentLoad = false;
-    let reloadAfterBackgroundFull = false;
     const clearTimer = () => {
       if (timer == null) return;
       clearTimeout(timer);
@@ -243,9 +255,12 @@ export function GroupMultiChatColumn({
     setInitialPendingResp(null);
     transcriptEtagRef.current = null;
     fullTranscriptLoadedRef.current = false;
+    setHasOlder(false);
+    setOlderLoading(false);
+    setOlderError(null);
     setError(null);
     setLoading(true);
-    let backgroundFullBusy = false;
+    let olderHistoryAvailable = false;
 
     const loadFullTranscript = async (): Promise<void> => {
       const data = await fetchDroneChatTranscriptCached({
@@ -261,35 +276,46 @@ export function GroupMultiChatColumn({
       }
       transcriptEtagRef.current = data.etag;
       fullTranscriptLoadedRef.current = true;
-      setTranscripts((prev) =>
-        sameTranscriptItems(prev, data.transcripts) ? prev : data.transcripts,
-      );
+      olderHistoryAvailable = false;
+      setHasOlder(false);
+      const current = transcriptsRef.current;
+      if (!sameTranscriptItems(current, data.transcripts)) {
+        const node = columnScrollRef.current;
+        olderScrollAnchorRef.current = node
+          ? { scrollHeight: node.scrollHeight, scrollTop: node.scrollTop }
+          : null;
+        transcriptsRef.current = data.transcripts;
+        setTranscripts(data.transcripts);
+      }
       setError(null);
     };
 
-    const startBackgroundFullLoad = () => {
-      if (backgroundFullBusy) return;
-      backgroundFullBusy = true;
-      void loadFullTranscript()
-        .catch((err: any) => {
-          if (!mounted) return;
-          if (isNotFoundError(err)) {
-            transcriptEtagRef.current = null;
-            setTranscripts((prev) => (Array.isArray(prev) && prev.length === 0 ? prev : []));
-            setError(null);
-            return;
-          }
-          setError(err?.message ?? String(err));
-        })
-        .finally(() => {
-          backgroundFullBusy = false;
-          if (reloadAfterBackgroundFull && mounted) {
-            reloadAfterBackgroundFull = false;
-            clearTimer();
-            void loop();
-          }
-        });
+    const olderHistoryLoads = createGroupChatOlderLoadCoordinator({
+      load: loadFullTranscript,
+      onError(error) {
+        if (isNotFoundError(error)) {
+          transcriptEtagRef.current = null;
+          setTranscripts((prev) => (Array.isArray(prev) && prev.length === 0 ? prev : []));
+          olderHistoryAvailable = false;
+          setHasOlder(false);
+          setError(null);
+          return;
+        }
+        setOlderError(error instanceof Error ? error.message : String(error));
+      },
+      onLoadingChange: setOlderLoading,
+      resumePolling() {
+        clearTimer();
+        void loop();
+      },
+    });
+
+    const startOlderHistoryLoad = () => {
+      if (!olderHistoryAvailable || olderHistoryLoads.isLoading()) return;
+      setOlderError(null);
+      if (olderHistoryLoads.request(busy) === 'started') clearTimer();
     };
+    loadOlderHistoryRef.current = startOlderHistoryLoad;
 
     const load = async (): Promise<boolean> => {
       if (busy) {
@@ -308,13 +334,13 @@ export function GroupMultiChatColumn({
       busy = true;
       let scheduleNext = true;
       try {
-        const shouldLoadTailFirst = !loadedInitialTail && !fullTranscriptLoadedRef.current;
-        if (shouldLoadTailFirst) {
+        if (!loadedInitialTail) {
           const data = await fetchDroneChatState(requestJson, {
             droneId: drone.id,
             chatName,
             turn: 'all',
             tail: INITIAL_TRANSCRIPT_TAIL_TURNS,
+            includeTranscriptMeta: true,
           });
           if (!mounted) return false;
           loadedInitialTail = true;
@@ -324,14 +350,44 @@ export function GroupMultiChatColumn({
           setTranscripts((prev) =>
             sameTranscriptItems(prev, data.transcripts) ? prev : data.transcripts,
           );
+          transcriptsRef.current = data.transcripts;
+          olderHistoryAvailable = groupChatTailHasOlder(
+            data.transcriptTotal,
+            data.transcripts.length,
+            INITIAL_TRANSCRIPT_TAIL_TURNS,
+          );
+          setHasOlder(olderHistoryAvailable);
           setError(null);
           setLoading(false);
-          startBackgroundFullLoad();
-        } else if (backgroundFullBusy) {
-          reloadAfterBackgroundFull = true;
+        } else if (olderHistoryLoads.isLoading()) {
           scheduleNext = false;
         } else {
-          await loadFullTranscript();
+          const data = await fetchDroneChatTranscriptCached({
+            droneId: drone.id,
+            chatName,
+            turn: 'all',
+            ...(fullTranscriptLoadedRef.current
+              ? {}
+              : { tail: INITIAL_TRANSCRIPT_TAIL_TURNS }),
+            etag: transcriptEtagRef.current,
+          });
+          if (!mounted) return false;
+          if (!data.notModified) {
+            transcriptEtagRef.current = data.etag;
+            setTranscripts((prev) =>
+              sameTranscriptItems(prev, data.transcripts) ? prev : data.transcripts,
+            );
+            transcriptsRef.current = data.transcripts;
+            if (!fullTranscriptLoadedRef.current) {
+              olderHistoryAvailable = groupChatTailHasOlder(
+                null,
+                data.transcripts.length,
+                INITIAL_TRANSCRIPT_TAIL_TURNS,
+              );
+              setHasOlder(olderHistoryAvailable);
+            }
+          }
+          setError(null);
         }
       } catch (err: any) {
         if (!mounted) return false;
@@ -345,7 +401,14 @@ export function GroupMultiChatColumn({
       } finally {
         busy = false;
         if (mounted) setLoading(false);
-        if (reloadAfterCurrentLoad && mounted) {
+        if (
+          mounted &&
+          olderHistoryLoads.startQueuedAfterRegularLoad(olderHistoryAvailable)
+        ) {
+          reloadAfterCurrentLoad = false;
+          scheduleNext = false;
+          clearTimer();
+        } else if (reloadAfterCurrentLoad && mounted) {
           reloadAfterCurrentLoad = false;
           scheduleNext = false;
           clearTimer();
@@ -393,12 +456,34 @@ export function GroupMultiChatColumn({
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
       mounted = false;
+      loadOlderHistoryRef.current = () => {};
+      olderHistoryLoads.dispose();
       setChatEventsConnected(false);
       unsubscribeChatEvents();
       clearTimer();
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, [chatCacheKey, chatName, drone.hubPhase, drone.id]);
+
+  const olderHistoryTriggerArmedRef = React.useRef(true);
+  React.useEffect(() => {
+    olderHistoryTriggerArmedRef.current = true;
+  }, [chatName, drone.id]);
+  React.useEffect(() => {
+    const node = columnScrollRef.current;
+    if (!node || !hasOlder) return;
+    const loadAtTop = () => {
+      if (node.scrollTop > 96) {
+        olderHistoryTriggerArmedRef.current = true;
+        return;
+      }
+      if (node.scrollTop > 40 || !olderHistoryTriggerArmedRef.current || olderLoading) return;
+      olderHistoryTriggerArmedRef.current = false;
+      loadOlderHistoryRef.current();
+    };
+    node.addEventListener('scroll', loadAtTop, { passive: true });
+    return () => node.removeEventListener('scroll', loadAtTop);
+  }, [hasOlder, olderLoading]);
 
   const pendingPollEnabled =
     initialPendingResp?.key === chatCacheKey || transcripts !== null || Boolean(error);
@@ -544,7 +629,16 @@ export function GroupMultiChatColumn({
 
   React.useEffect(() => {
     if (loading) return;
-    const id = requestAnimationFrame(() => scrollColumnToBottom());
+    const anchor = olderScrollAnchorRef.current;
+    olderScrollAnchorRef.current = null;
+    const id = requestAnimationFrame(() => {
+      const node = columnScrollRef.current;
+      if (anchor && node) {
+        node.scrollTop = groupChatScrollTopAfterPrepend(anchor, node.scrollHeight);
+        return;
+      }
+      scrollColumnToBottom();
+    });
     return () => cancelAnimationFrame(id);
   }, [
     chatName,
@@ -1075,6 +1169,28 @@ export function GroupMultiChatColumn({
           </div>
         ) : (transcripts && transcripts.length > 0) || visiblePendingPrompts.length > 0 ? (
           <div className="space-y-5">
+            {olderLoading ? (
+              <div className="text-center text-[var(--text-10)] text-[var(--muted)]" role="status">
+                Loading older messages…
+              </div>
+            ) : olderError ? (
+              <button
+                type="button"
+                className="block w-full text-center text-[var(--text-10)] text-[var(--red)] hover:underline"
+                onClick={() => loadOlderHistoryRef.current()}
+                title={olderError}
+              >
+                Older messages failed to load. Retry
+              </button>
+            ) : hasOlder ? (
+              <button
+                type="button"
+                className="block w-full text-center text-[var(--text-10)] text-[var(--muted)] hover:text-[var(--fg-secondary)]"
+                onClick={() => loadOlderHistoryRef.current()}
+              >
+                Load older messages
+              </button>
+            ) : null}
             {timelineGroups.map((group, index) => {
               const entry = group.primary;
               const followUps = timelineUserFollowUps(group.followUps, {

@@ -5,7 +5,6 @@ import type {
   ChatAgentConfig,
   ChatInfo,
 } from '../../domain';
-import { normalizeChatInfoPayload } from '../../domain';
 import type { DroneSummary } from '../types';
 import {
   chatMetadataEligibleForSelection,
@@ -14,7 +13,7 @@ import {
   chatSelectionKey,
 } from './chat-selection-model';
 import { isDroneStartingOrSeeding } from './helpers';
-import { fetchJson, isNotFoundError } from './hooks';
+import { isNotFoundError } from './hooks';
 import { useAgentModelCatalog } from './use-agent-model-catalog';
 import { markChatLoadConfigResolved, type ChatLoadSurface } from './chat-load-telemetry';
 import {
@@ -198,7 +197,6 @@ export function useChatConfigState({
       setLoadingChatInfo(false);
       return;
     }
-    let mounted = true;
     if (cachedChatInfo) {
       markChatLoadConfigResolved(
         { droneId: selectedDrone, chatName: selectedChat },
@@ -215,77 +213,88 @@ export function useChatConfigState({
     }
     setLoadingChatInfo(true);
     setChatInfoError(null);
-    fetchJson<any>(
-      `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(selectedChat)}?turns=0`,
-    )
-      .then((data) => {
-        if (!mounted) return;
-        const nextChatInfo = normalizeChatInfoPayload(data);
-        if (
-          !chatInfoForSelection(
-            nextChatInfo,
-            selectedChatInfoKey,
-            selectedDrone,
-            selectedChat,
-          )
-        ) {
-          throw new Error('Chat metadata response did not match the selected chat.');
-        }
-        setChatInfo(nextChatInfo);
-        setChatInfoError(null);
-        markChatLoadConfigResolved(
-          { droneId: selectedDrone, chatName: selectedChat },
-          {
-            surface: chatLoadSurfaceForAgent(nextChatInfo.agent),
-            agentKind:
-              nextChatInfo.agent.kind === 'builtin'
-                ? `builtin:${nextChatInfo.agent.id}`
-                : nextChatInfo.agent.kind,
-            runtime: selectedDroneRuntime,
-          },
-        );
-      })
-      .catch((e: any) => {
-        if (!mounted) return;
-        const msg = e?.message ?? String(e);
-        if (isNotFoundError(e)) deleteChatRuntimeCache(selectedChatInfoKey);
-        setChatInfo(isNotFoundError(e) ? null : cachedChatInfo);
-        setChatInfoError(isNotFoundError(e) ? null : msg);
-        markChatLoadConfigResolved(
-          { droneId: selectedDrone, chatName: selectedChat },
-          cachedChatInfo && !isNotFoundError(e)
-            ? {
-                surface: chatLoadSurfaceForAgent(cachedChatInfo.agent),
-                agentKind:
-                  cachedChatInfo.agent.kind === 'builtin'
-                    ? `builtin:${cachedChatInfo.agent.id}`
-                    : cachedChatInfo.agent.kind,
-                runtime: selectedDroneRuntime,
-                status: 'error',
-              }
-            : { surface: 'unavailable', runtime: selectedDroneRuntime, status: 'error' },
-        );
-      })
-      .finally(() => {
-        if (!mounted) return;
-        setLoadingChatInfo(false);
-      });
-    return () => {
-      mounted = false;
-    };
   }, [
     selectedDrone,
     selectedChat,
-    hasSelectedDroneSummary,
-    selectedDroneHubPhase,
-    selectedDroneProvisioning,
-    selectedDroneStartupFailed,
-    selectedDroneHasChatList,
-    selectedDroneChatsKey,
+    chatConfigEligible,
     selectedChatInfoKey,
-    selectedChatListed,
     selectedDroneRuntime,
   ]);
+
+  const rejectChatInfoFromState = React.useCallback(
+    (error: unknown) => {
+      if (!selectedDrone || !selectedChat || !chatConfigEligible) return;
+      const notFound = isNotFoundError(error);
+      const message = error instanceof Error ? error.message : String(error);
+      if (notFound) deleteChatRuntimeCache(selectedChatInfoKey);
+      setChatInfo(notFound ? null : cachedChatInfo);
+      setChatInfoError(notFound ? null : message);
+      setLoadingChatInfo(false);
+      markChatLoadConfigResolved(
+        { droneId: selectedDrone, chatName: selectedChat },
+        cachedChatInfo && !notFound
+          ? {
+              surface: chatLoadSurfaceForAgent(cachedChatInfo.agent),
+              agentKind:
+                cachedChatInfo.agent.kind === 'builtin'
+                  ? `builtin:${cachedChatInfo.agent.id}`
+                  : cachedChatInfo.agent.kind,
+              runtime: selectedDroneRuntime,
+              status: 'error',
+            }
+          : { surface: 'unavailable', runtime: selectedDroneRuntime, status: 'error' },
+      );
+    },
+    [
+      cachedChatInfo,
+      chatConfigEligible,
+      selectedChat,
+      selectedChatInfoKey,
+      selectedDrone,
+      selectedDroneRuntime,
+    ],
+  );
+
+  const resolveChatInfoFromState = React.useCallback(
+    (nextChatInfo: ChatInfo) => {
+      if (!selectedDrone || !selectedChat || !chatConfigEligible) return;
+      if (
+        !chatInfoForSelection(
+          nextChatInfo,
+          selectedChatInfoKey,
+          selectedDrone,
+          selectedChat,
+        )
+      ) {
+        rejectChatInfoFromState(
+          new Error('Chat state response did not match the selected chat.'),
+        );
+        return;
+      }
+      setChatInfo(nextChatInfo);
+      setChatInfoError(null);
+      setLoadingChatInfo(false);
+      markChatLoadConfigResolved(
+        { droneId: selectedDrone, chatName: selectedChat },
+        {
+          surface: chatLoadSurfaceForAgent(nextChatInfo.agent),
+          agentKind:
+            nextChatInfo.agent.kind === 'builtin'
+              ? `builtin:${nextChatInfo.agent.id}`
+              : nextChatInfo.agent.kind,
+          runtime: selectedDroneRuntime,
+        },
+      );
+    },
+    [
+      chatConfigEligible,
+      rejectChatInfoFromState,
+      selectedChat,
+      selectedChatInfoKey,
+      selectedDrone,
+      selectedDroneRuntime,
+    ],
+  );
 
   const setChatAgent = React.useCallback(
     async (agent: ChatAgentConfig) => {
@@ -512,5 +521,7 @@ export function useChatConfigState({
     setChatApprovalPolicy,
     setDockerSnapshotAfterAgentMessageEnabled,
     handleSetAgentFailure,
+    resolveChatInfoFromState,
+    rejectChatInfoFromState,
   };
 }

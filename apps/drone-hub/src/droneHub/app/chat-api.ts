@@ -1,9 +1,12 @@
 import { sameAgentPlan } from '@drone/assistant-chat';
 import type { ChatSendPayload } from '../chat';
+import { requestJsonConditional } from '../http';
 import type { PendingPrompt, TranscriptItem } from '../types';
 import {
   normalizeChatResourceSubscriptionsPayload,
+  normalizeChatInfoPayload,
   type ChatResourceSubscriptionInfo,
+  type ChatInfo,
 } from '../../domain';
 import { clientTimeZone } from './client-time-zone';
 
@@ -43,7 +46,18 @@ export type FetchDroneChatStateResult = {
   pending: PendingPrompt[];
   chatId: string | null;
   subscriptions: ChatResourceSubscriptionInfo[];
+  transcriptTotal: number | null;
 };
+
+export type FetchDroneChatStateCachedResult =
+  | { etag: string | null; notModified: true }
+  | {
+      transcripts: TranscriptItem[];
+      pending: PendingPrompt[];
+      chatInfo: ChatInfo | null;
+      etag: string | null;
+      notModified: false;
+    };
 
 export type DroneChatEventRef = {
   droneId?: string;
@@ -77,14 +91,6 @@ export function droneChatEventMatches(
       normalizeEventText(ref?.droneId) === droneId &&
       (normalizeEventText(ref?.chatName) || 'default') === chatName,
   );
-}
-
-function buildUnexpectedHtmlError(url: string): string {
-  const path = String(url ?? '').trim();
-  if (path.startsWith('/api/')) {
-    return `Expected JSON from ${path}, but received HTML. The Hub API is likely unreachable. Start via 'drone hub' or set DRONE_HUB_API_PORT for the Vite dev server.`;
-  }
-  return `Expected JSON from ${path || 'request'}, but received HTML.`;
 }
 
 function sameOptionalText(left: unknown, right: unknown): boolean {
@@ -334,6 +340,7 @@ export async function fetchDroneChatState(
     chatName: string;
     turn?: 'all' | 'last' | number;
     tail?: number;
+    includeTranscriptMeta?: boolean;
   },
 ): Promise<FetchDroneChatStateResult> {
   const droneId = String(opts.droneId ?? '').trim();
@@ -345,21 +352,65 @@ export async function fetchDroneChatState(
     qs.set('transcript', 'tail');
   }
   qs.set('subscriptions', 'true');
-  qs.set('transcriptMeta', '0');
+  qs.set('transcriptMeta', opts.includeTranscriptMeta ? '1' : '0');
   const data = await requestJson<{
     ok: true;
     chatId?: string | null;
     transcripts: TranscriptItem[];
     pending: PendingPrompt[];
     subscriptions?: unknown;
+    transcript?: { total?: unknown };
   }>(
     `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/state?${qs.toString()}`,
   );
+  const transcriptTotal = data?.transcript?.total;
   return {
     transcripts: Array.isArray(data?.transcripts) ? data.transcripts : [],
     pending: Array.isArray(data?.pending) ? data.pending : [],
     chatId: String(data?.chatId ?? '').trim() || null,
     subscriptions: normalizeChatResourceSubscriptionsPayload(data?.subscriptions),
+    transcriptTotal: Number.isSafeInteger(transcriptTotal) ? Number(transcriptTotal) : null,
+  };
+}
+
+export async function fetchDroneChatStateCached(opts: {
+  droneId: string;
+  chatName: string;
+  turn?: 'all' | 'last' | number;
+  tail?: number;
+  etag?: string | null;
+  includeConfig?: boolean;
+  includeTranscript?: boolean;
+}): Promise<FetchDroneChatStateCachedResult> {
+  const droneId = String(opts.droneId ?? '').trim();
+  const chatName = String(opts.chatName ?? '').trim() || 'default';
+  const turn = opts.turn ?? 'all';
+  const qs = new URLSearchParams({ turn: String(turn) });
+  if (opts.includeTranscript === false) {
+    qs.set('transcript', 'none');
+    qs.set('pending', 'none');
+  } else if (typeof opts.tail === 'number' && Number.isFinite(opts.tail) && opts.tail > 0) {
+    qs.set('tail', String(Math.floor(opts.tail)));
+    qs.set('transcript', 'tail');
+  }
+  qs.set('subscriptions', opts.includeConfig ? 'true' : 'false');
+  qs.set('readState', 'false');
+  qs.set('transcriptMeta', '0');
+  if (opts.includeConfig) qs.set('config', 'true');
+  const url = `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/state?${qs.toString()}`;
+  const response = await fetchJsonCached<{
+    ok: true;
+    transcripts: TranscriptItem[];
+    pending: PendingPrompt[];
+    agent?: unknown;
+  }>(url, opts.etag);
+  if (response.notModified) return { etag: response.etag, notModified: true };
+  return {
+    transcripts: Array.isArray(response.data?.transcripts) ? response.data.transcripts : [],
+    pending: Array.isArray(response.data?.pending) ? response.data.pending : [],
+    chatInfo: opts.includeConfig ? normalizeChatInfoPayload(response.data) : null,
+    etag: response.etag,
+    notModified: false,
   };
 }
 
@@ -381,56 +432,29 @@ export async function fetchDroneChatTranscriptCached(opts: {
   qs.set('pending', 'none');
   qs.set('transcriptMeta', '0');
   const url = `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/state?${qs.toString()}`;
-  const headers = new Headers();
-  const etag = String(opts.etag ?? '').trim();
-  if (etag) headers.set('if-none-match', etag);
-  const response = await fetch(url, { headers });
-  if (response.status === 304) {
-    return { transcripts: [], etag: etag || null, notModified: true };
-  }
-  const text = await response.text();
-  const contentType = String(response.headers.get('content-type') ?? '').toLowerCase();
-  const looksHtml = contentType.includes('text/html') || /^\s*</.test(text);
-  let data: any = null;
-  if (text) {
-    try {
-      data = JSON.parse(text);
-    } catch {
-      const error = new Error(
-        looksHtml
-          ? buildUnexpectedHtmlError(url)
-          : `Expected JSON from ${url}, but response was not valid JSON.`,
-      ) as Error & {
-        status?: number;
-        data?: any;
-      };
-      error.status = response.status;
-      throw error;
-    }
-  }
-  if (!response.ok) {
-    const error = new Error(
-      data?.error ? String(data.error) : `${response.status} ${response.statusText}`,
-    ) as Error & {
-      status?: number;
-      data?: any;
-    };
-    error.status = response.status;
-    error.data = data;
-    throw error;
-  }
-  if (data == null) {
-    const error = new Error(`Expected JSON from ${url}, but response body was empty.`) as Error & {
-      status?: number;
-      data?: any;
-    };
-    error.status = response.status;
-    error.data = data;
-    throw error;
+  const response = await fetchJsonCached<{ ok: true; transcripts: TranscriptItem[] }>(
+    url,
+    opts.etag,
+  );
+  if (response.notModified) {
+    return { transcripts: [], etag: response.etag, notModified: true };
   }
   return {
-    transcripts: Array.isArray(data?.transcripts) ? data.transcripts : [],
-    etag: response.headers.get('etag'),
+    transcripts: Array.isArray(response.data?.transcripts) ? response.data.transcripts : [],
+    etag: response.etag,
     notModified: false,
   };
+}
+
+async function fetchJsonCached<T>(
+  url: string,
+  etagRaw: string | null | undefined,
+): Promise<
+  | { data: null; etag: string | null; notModified: true }
+  | { data: T; etag: string | null; notModified: false }
+> {
+  const headers = new Headers();
+  const etag = String(etagRaw ?? '').trim();
+  if (etag) headers.set('if-none-match', etag);
+  return requestJsonConditional<T>(url, { headers });
 }

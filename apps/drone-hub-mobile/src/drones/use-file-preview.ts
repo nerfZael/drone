@@ -18,6 +18,10 @@ import {
   type MobileFilePreview,
 } from './file-preview-model';
 import type { MobileDroneSummary } from './drone-sidebar-model';
+import { BoundedSwrCache } from './bounded-swr-cache';
+import { mobileFileCacheKey } from './mobile-file-cache-key';
+import { mobilePreviewErrorMode } from './mobile-preview-error-state';
+import { readPipelinedMediaChunks } from './read-pipelined-media-chunks';
 
 type PreviewRequest = {
   targetId: string;
@@ -32,7 +36,13 @@ type RequestDroneControl = (
   destinationId: string,
   operation: DroneControlOperation,
   payload?: any,
+  signal?: AbortSignal,
 ) => Promise<any>;
+
+type CachedFilePreview = {
+  file: File | null;
+  preview: MobileFilePreview;
+};
 
 function deleteCachedFile(file: File | null) {
   if (!file) return;
@@ -41,6 +51,18 @@ function deleteCachedFile(file: File | null) {
   } catch {
     // Cache cleanup is best effort.
   }
+}
+
+function sameFilePreview(left: MobileFilePreview, right: MobileFilePreview): boolean {
+  return (
+    left.path === right.path &&
+    left.kind === right.kind &&
+    left.mime === right.mime &&
+    left.size === right.size &&
+    left.mtimeMs === right.mtimeMs &&
+    left.revision === right.revision &&
+    left.content === right.content
+  );
 }
 
 export function useFilePreview({
@@ -68,71 +90,157 @@ export function useFilePreview({
   const [saving, setSaving] = React.useState(false);
   const [saveError, setSaveError] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const [refreshError, setRefreshError] = React.useState<string | null>(null);
   const previewFileRef = React.useRef<File | null>(null);
   const previewRef = React.useRef<MobileFilePreview | null>(null);
+  const previewCacheRef = React.useRef<BoundedSwrCache<CachedFilePreview> | null>(null);
+  if (!previewCacheRef.current) {
+    previewCacheRef.current = new BoundedSwrCache({
+      maxEntries: 6,
+      maxAgeMs: 2 * 60_000,
+      onEvict: ({ file }) => {
+        if (file) setTimeout(() => deleteCachedFile(file), 500);
+      },
+    });
+  }
   const loadVersion = React.useRef(0);
+  const loadAbortRef = React.useRef<AbortController | null>(null);
   const saveVersion = React.useRef(0);
   previewRef.current = preview;
 
-  const discardCachedPreview = React.useCallback(() => {
-    const file = previewFileRef.current;
+  const clearActivePreview = React.useCallback(() => {
     previewFileRef.current = null;
-    if (!file) return;
-    setTimeout(() => deleteCachedFile(file), 500);
   }, []);
-  React.useEffect(() => () => discardCachedPreview(), [discardCachedPreview]);
+  const resetPreviewSelection = React.useCallback(
+    (nextWorkspaceContext: Omit<PreviewRequest, 'path' | 'line'> | null) => {
+      loadVersion.current += 1;
+      loadAbortRef.current?.abort();
+      loadAbortRef.current = null;
+      saveVersion.current += 1;
+      setWorkspaceContext(nextWorkspaceContext);
+      setRequest(null);
+      setPreview(null);
+      setError(null);
+      setRefreshError(null);
+      setSaveError(null);
+      setLoading(false);
+      setSaving(false);
+      clearActivePreview();
+    },
+    [clearActivePreview],
+  );
+  React.useEffect(
+    () => () => {
+      loadAbortRef.current?.abort();
+      previewCacheRef.current?.clear();
+    },
+    [],
+  );
+
+  const commitPreview = React.useCallback(
+    (nextRequest: PreviewRequest, next: CachedFilePreview) => {
+      const key = mobileFileCacheKey(nextRequest);
+      const current = previewCacheRef.current!.get(key);
+      const retained =
+        current && sameFilePreview(current.preview, next.preview)
+          ? current
+          : previewCacheRef.current!.set(key, next);
+      if (retained === current && next.file && next.file !== current.file) {
+        setTimeout(() => deleteCachedFile(next.file), 500);
+      }
+      previewFileRef.current = retained.file;
+      previewRef.current = retained.preview;
+      setPreview((value) => (value === retained.preview ? value : retained.preview));
+    },
+    [],
+  );
 
   const load = React.useCallback(
-    async (nextRequest: PreviewRequest, options?: { background?: boolean }) => {
+    async (
+      nextRequest: PreviewRequest,
+      options?: { background?: boolean; transferRestarted?: boolean },
+    ) => {
+      loadAbortRef.current?.abort();
+      const loadController = new AbortController();
+      loadAbortRef.current = loadController;
       const version = ++loadVersion.current;
       const background = options?.background === true && previewRef.current != null;
       if (!background) setLoading(true);
-      setError(null);
+      if (!background) setError(null);
+      setRefreshError(null);
       if (!background) {
         setPreview(null);
-        discardCachedPreview();
+        clearActivePreview();
       }
       try {
-        let firstResult: any = await requestDroneControl(nextRequest.targetId, 'file.preview', {
-          droneId: nextRequest.droneId,
-          chatName: nextRequest.chatName,
-          path: nextRequest.path,
-          contentOffset: 0,
-        });
+        let firstResult: any = await requestDroneControl(
+          nextRequest.targetId,
+          'file.preview',
+          {
+            droneId: nextRequest.droneId,
+            chatName: nextRequest.chatName,
+            path: nextRequest.path,
+            contentOffset: 0,
+          },
+          loadController.signal,
+        );
         if (firstResult?.contentChunk) {
           let firstAvailable = true;
-          const content = await readMeshJsonContent(async (contentOffset) => {
-            if (contentOffset === 0 && firstAvailable) {
-              firstAvailable = false;
-              return firstResult.contentChunk;
-            }
-            const next = await requestDroneControl(nextRequest.targetId, 'file.preview', {
-              droneId: nextRequest.droneId,
-              chatName: nextRequest.chatName,
-              path: nextRequest.path,
-              contentOffset,
-            });
-            return next?.contentChunk ?? {};
-          });
+          const content = await readMeshJsonContent(
+            async (contentOffset, snapshotToken, signal) => {
+              if (contentOffset === 0 && firstAvailable) {
+                firstAvailable = false;
+                return firstResult.contentChunk;
+              }
+              const next = await requestDroneControl(
+                nextRequest.targetId,
+                'file.preview',
+                {
+                  droneId: nextRequest.droneId,
+                  chatName: nextRequest.chatName,
+                  path: nextRequest.path,
+                  contentOffset,
+                  ...(snapshotToken ? { snapshotToken } : {}),
+                },
+                signal,
+              );
+              return next?.contentChunk ?? {};
+            },
+            {
+              isCancelled: () => version !== loadVersion.current,
+              signal: loadController.signal,
+              cancelSnapshot: async (snapshotToken) => {
+                await requestDroneControl(nextRequest.targetId, 'file.preview', {
+                  droneId: nextRequest.droneId,
+                  chatName: nextRequest.chatName,
+                  path: nextRequest.path,
+                  snapshotToken,
+                  cancelSnapshot: true,
+                });
+              },
+            },
+          );
           if (version !== loadVersion.current) return;
           const path = String(content?.path ?? nextRequest.path).trim() || nextRequest.path;
-          setPreview({
-            path,
-            name: mobileFileName(path),
-            kind:
-              content?.kind === 'binary' || content?.kind === 'image' || content?.kind === 'video'
-                ? content.kind
-                : 'text',
-            mime: String(content?.mime ?? 'text/plain'),
-            size: Math.max(0, Number(content?.size) || 0),
-            mtimeMs: Number.isFinite(Number(content?.mtimeMs)) ? Number(content.mtimeMs) : null,
-            revision:
-              typeof content?.revision === 'string' && content.revision.trim()
-                ? content.revision.trim()
-                : null,
-            ...(typeof content?.content === 'string' ? { content: content.content } : {}),
+          commitPreview(nextRequest, {
+            file: null,
+            preview: {
+              path,
+              name: mobileFileName(path),
+              kind:
+                content?.kind === 'binary' || content?.kind === 'image' || content?.kind === 'video'
+                  ? content.kind
+                  : 'text',
+              mime: String(content?.mime ?? 'text/plain'),
+              size: Math.max(0, Number(content?.size) || 0),
+              mtimeMs: Number.isFinite(Number(content?.mtimeMs)) ? Number(content.mtimeMs) : null,
+              revision:
+                typeof content?.revision === 'string' && content.revision.trim()
+                  ? content.revision.trim()
+                  : null,
+              ...(typeof content?.content === 'string' ? { content: content.content } : {}),
+            },
           });
-          if (background) discardCachedPreview();
           return;
         }
 
@@ -188,46 +296,74 @@ export function useFilePreview({
             offset = inlineBytes.length;
             firstResult = null;
           }
-          while (offset < totalBytes) {
-            const result =
-              offset === 0
-                ? firstResult
-                : await requestDroneControl(nextRequest.targetId, 'file.preview', {
+          if (offset < totalBytes) {
+            await readPipelinedMediaChunks({
+              firstResult,
+              totalBytes,
+              requestResult: async (contentOffset, snapshotToken, signal) =>
+                await requestDroneControl(
+                  nextRequest.targetId,
+                  'file.preview',
+                  {
                     droneId: nextRequest.droneId,
                     chatName: nextRequest.chatName,
                     path: nextRequest.path,
-                    contentOffset: offset,
+                    contentOffset,
                     expectedRevision: metadata.revision,
-                  });
+                    ...(snapshotToken ? { snapshotToken, mediaSnapshot: true } : {}),
+                  },
+                  signal,
+                ),
+              validateResult: (result, contentOffset) => {
+                const resultPreview = result?.preview;
+                const chunk = result?.mediaChunk;
+                const bytes = toByteArray(String(chunk?.dataBase64 ?? ''));
+                const nextOffset = contentOffset + bytes.length;
+                const expectedMtime = Number(metadata.mtimeMs);
+                const resultMtime = Number(resultPreview?.mtimeMs);
+                const expectedRevision =
+                  typeof metadata.revision === 'string' ? metadata.revision : null;
+                const resultRevision =
+                  typeof resultPreview?.revision === 'string' ? resultPreview.revision : null;
+                if (
+                  resultPreview?.kind !== metadata.kind ||
+                  Number(resultPreview?.size) !== totalBytes ||
+                  (Number.isFinite(expectedMtime) &&
+                    Number.isFinite(resultMtime) &&
+                    resultMtime !== expectedMtime) ||
+                  (expectedRevision && resultRevision !== expectedRevision) ||
+                  chunk?.encoding !== 'base64-binary' ||
+                  Number(chunk?.offset) !== contentOffset ||
+                  Number(chunk?.bytes) !== bytes.length ||
+                  Number(chunk?.totalBytes) !== totalBytes ||
+                  bytes.length === 0 ||
+                  chunk?.done !== (nextOffset === totalBytes)
+                ) {
+                  throw new Error('The selected device returned an invalid media chunk');
+                }
+                const snapshotToken =
+                  typeof chunk?.snapshotToken === 'string' && chunk.snapshotToken.trim()
+                    ? chunk.snapshotToken.trim()
+                    : undefined;
+                return { bytes, snapshotToken, done: chunk?.done === true };
+              },
+              appendBytes,
+              isCancelled: () => version !== loadVersion.current,
+              signal: loadController.signal,
+              cancelSnapshot: async (snapshotToken) => {
+                await requestDroneControl(nextRequest.targetId, 'file.preview', {
+                  droneId: nextRequest.droneId,
+                  chatName: nextRequest.chatName,
+                  path: nextRequest.path,
+                  expectedRevision: metadata.revision,
+                  mediaSnapshot: true,
+                  snapshotToken,
+                  cancelSnapshot: true,
+                });
+              },
+            });
+            offset = totalBytes;
             firstResult = null;
-            const resultPreview = result?.preview;
-            const chunk = result?.mediaChunk;
-            const bytes = toByteArray(String(chunk?.dataBase64 ?? ''));
-            const nextOffset = offset + bytes.length;
-            const expectedMtime = Number(metadata.mtimeMs);
-            const resultMtime = Number(resultPreview?.mtimeMs);
-            const expectedRevision =
-              typeof metadata.revision === 'string' ? metadata.revision : null;
-            const resultRevision =
-              typeof resultPreview?.revision === 'string' ? resultPreview.revision : null;
-            if (
-              resultPreview?.kind !== metadata.kind ||
-              Number(resultPreview?.size) !== totalBytes ||
-              (Number.isFinite(expectedMtime) &&
-                Number.isFinite(resultMtime) &&
-                resultMtime !== expectedMtime) ||
-              (expectedRevision && resultRevision !== expectedRevision) ||
-              chunk?.encoding !== 'base64-binary' ||
-              Number(chunk?.offset) !== offset ||
-              Number(chunk?.bytes) !== bytes.length ||
-              Number(chunk?.totalBytes) !== totalBytes ||
-              bytes.length === 0 ||
-              chunk?.done !== (nextOffset === totalBytes)
-            ) {
-              throw new Error('The selected device returned an invalid media chunk');
-            }
-            appendBytes(bytes);
-            offset = nextOffset;
           }
         } catch (mediaError) {
           cacheHandle?.close();
@@ -249,10 +385,31 @@ export function useFilePreview({
             bytes.set(chunk, position);
             position += chunk.length;
           }
-          setPreview({
+          commitPreview(nextRequest, {
+            file: null,
+            preview: {
+              path,
+              name: mobileFileName(path),
+              kind: 'image',
+              mime,
+              size: totalBytes,
+              mtimeMs: Number.isFinite(Number(metadata.mtimeMs)) ? Number(metadata.mtimeMs) : null,
+              revision:
+                typeof metadata.revision === 'string' && metadata.revision.trim()
+                  ? metadata.revision.trim()
+                  : null,
+              content: new TextDecoder().decode(bytes),
+            },
+          });
+          return;
+        }
+        if (!cacheFile) throw new Error('The media preview cache could not be created');
+        commitPreview(nextRequest, {
+          file: cacheFile,
+          preview: {
             path,
             name: mobileFileName(path),
-            kind: 'image',
+            kind: metadata.kind,
             mime,
             size: totalBytes,
             mtimeMs: Number.isFinite(Number(metadata.mtimeMs)) ? Number(metadata.mtimeMs) : null,
@@ -260,44 +417,40 @@ export function useFilePreview({
               typeof metadata.revision === 'string' && metadata.revision.trim()
                 ? metadata.revision.trim()
                 : null,
-            content: new TextDecoder().decode(bytes),
-          });
-          if (background) discardCachedPreview();
+            uri: cacheFile.uri,
+          },
+        });
+      } catch (nextError: any) {
+        if (
+          version === loadVersion.current &&
+          !options?.transferRestarted &&
+          String(nextError?.code ?? '') === 'TRANSFER_EXPIRED'
+        ) {
+          await load(nextRequest, { background, transferRestarted: true });
           return;
         }
-        if (!cacheFile) throw new Error('The media preview cache could not be created');
-        const previousCacheFile = previewFileRef.current;
-        previewFileRef.current = cacheFile;
-        setPreview({
-          path,
-          name: mobileFileName(path),
-          kind: metadata.kind,
-          mime,
-          size: totalBytes,
-          mtimeMs: Number.isFinite(Number(metadata.mtimeMs)) ? Number(metadata.mtimeMs) : null,
-          revision:
-            typeof metadata.revision === 'string' && metadata.revision.trim()
-              ? metadata.revision.trim()
-              : null,
-          uri: cacheFile.uri,
-        });
-        if (previousCacheFile && previousCacheFile !== cacheFile) {
-          setTimeout(() => deleteCachedFile(previousCacheFile), 500);
-        }
-      } catch (nextError: any) {
         if (version === loadVersion.current) {
           const message = nextError?.message ?? String(nextError);
-          setError(
-            /not granted|not permitted|access|denied/i.test(message)
-              ? `${message}. Enable “drone-control: file.preview” for this phone in Devices if needed.`
-              : message,
-          );
+          const displayMessage = /not granted|not permitted|access|denied/i.test(message)
+            ? `${message}. Enable “drone-control: file.preview” for this phone in Devices if needed.`
+            : message;
+          if (
+            mobilePreviewErrorMode({
+              background,
+              previewKind: previewRef.current?.kind ?? null,
+            }) === 'refresh'
+          ) {
+            setRefreshError(displayMessage);
+          } else {
+            setError(displayMessage);
+          }
         }
       } finally {
+        if (loadAbortRef.current === loadController) loadAbortRef.current = null;
         if (version === loadVersion.current && !background) setLoading(false);
       }
     },
-    [discardCachedPreview, requestDroneControl],
+    [clearActivePreview, commitPreview, requestDroneControl],
   );
 
   const open = React.useCallback(
@@ -323,37 +476,30 @@ export function useFilePreview({
       setRequest(nextRequest);
       setSaving(false);
       setSaveError(null);
-      void load(nextRequest);
+      const cached = previewCacheRef.current!.get(mobileFileCacheKey(nextRequest));
+      if (cached) {
+        previewFileRef.current = cached.file;
+        previewRef.current = cached.preview;
+        setPreview(cached.preview);
+        setLoading(false);
+        setError(null);
+        setRefreshError(null);
+        void load(nextRequest, { background: true });
+      } else {
+        void load(nextRequest);
+      }
     },
     [chatName, load, phoneTarget, selectedDrone, targetId],
   );
 
   const openExplorer = React.useCallback(() => {
     if (!selectedDrone) return;
-    loadVersion.current += 1;
-    saveVersion.current += 1;
-    setWorkspaceContext({ targetId, droneId: selectedDrone.id, chatName, phoneTarget });
-    setRequest(null);
-    setPreview(null);
-    setError(null);
-    setSaveError(null);
-    setLoading(false);
-    setSaving(false);
-    discardCachedPreview();
-  }, [chatName, discardCachedPreview, phoneTarget, selectedDrone, targetId]);
+    resetPreviewSelection({ targetId, droneId: selectedDrone.id, chatName, phoneTarget });
+  }, [chatName, phoneTarget, resetPreviewSelection, selectedDrone, targetId]);
 
   const close = React.useCallback(() => {
-    loadVersion.current += 1;
-    saveVersion.current += 1;
-    setWorkspaceContext(null);
-    setRequest(null);
-    setPreview(null);
-    setError(null);
-    setLoading(false);
-    setSaving(false);
-    setSaveError(null);
-    discardCachedPreview();
-  }, [discardCachedPreview]);
+    resetPreviewSelection(null);
+  }, [resetPreviewSelection]);
 
   const requestIsCurrent = Boolean(
     request &&
@@ -428,14 +574,16 @@ export function useFilePreview({
     if (!phoneTarget && subscribeFileChanges) {
       unsubscribeEvent = subscribeFileChanges((payload) => {
         const eventPath = String(payload?.path ?? '');
+        const eventDroneId = String(payload?.droneId ?? '');
         const eventRevision =
           typeof payload?.revision === 'string' && payload.revision.trim()
             ? payload.revision.trim()
             : null;
-        if (
-          String(payload?.droneId ?? '') !== request.droneId ||
-          (eventPath !== request.path && eventPath !== previewRef.current?.path)
-        ) {
+        if (eventDroneId !== request.droneId) return;
+        if (eventPath !== request.path && eventPath !== previewRef.current?.path) {
+          if (eventPath) {
+            previewCacheRef.current!.delete(mobileFileCacheKey({ ...request, path: eventPath }));
+          }
           return;
         }
         if (eventRevision && eventRevision === previewRef.current?.revision) return;
@@ -487,6 +635,7 @@ export function useFilePreview({
     line: requestIsCurrent ? (request?.line ?? null) : null,
     loading: requestIsCurrent && loading,
     error: requestIsCurrent ? error : null,
+    refreshError: requestIsCurrent ? refreshError : null,
     saving: requestIsCurrent && saving,
     saveError: requestIsCurrent ? saveError : null,
     rootPath: selectedDrone && !phoneTarget ? mobileDroneWorkspaceRoot(selectedDrone) : '',
@@ -495,7 +644,28 @@ export function useFilePreview({
     openExplorer,
     close,
     retry: () => {
-      if (request && requestIsCurrent) void load(request);
+      if (request && requestIsCurrent) {
+        void load(request, { background: previewRef.current != null });
+      }
+    },
+    invalidatePaths: (paths: readonly string[]) => {
+      if (!workspaceContext) return;
+      const normalizedPaths = new Set(
+        paths.map((path) => String(path ?? '').trim()).filter(Boolean),
+      );
+      if (
+        requestIsCurrent &&
+        request &&
+        (normalizedPaths.has(request.path) ||
+          (previewRef.current?.path ? normalizedPaths.has(previewRef.current.path) : false))
+      ) {
+        loadVersion.current += 1;
+        loadAbortRef.current?.abort();
+        loadAbortRef.current = null;
+      }
+      for (const path of normalizedPaths) {
+        previewCacheRef.current!.delete(mobileFileCacheKey({ ...workspaceContext, path }));
+      }
     },
     save: async (content: string, expectedRevision?: string | null) => {
       if (!request || !requestIsCurrent || preview?.kind !== 'text' || saving) return false;
@@ -527,22 +697,27 @@ export function useFilePreview({
       try {
         const result = await requestDroneControl(request.targetId, 'file.write', writePayload);
         if (saveVersion.current !== version) return false;
-        setPreview((current) =>
-          current?.path === savedPath
-            ? {
-                ...current,
-                content,
-                size: Math.max(0, Number(result?.size) || contentBytes),
-                mtimeMs: Number.isFinite(Number(result?.mtimeMs))
-                  ? Number(result.mtimeMs)
-                  : current.mtimeMs,
-                revision:
-                  typeof result?.revision === 'string' && result.revision.trim()
-                    ? result.revision.trim()
-                    : current.revision,
-              }
-            : current,
-        );
+        setPreview((current) => {
+          if (current?.path !== savedPath) return current;
+          const next = {
+            ...current,
+            content,
+            size: Math.max(0, Number(result?.size) || contentBytes),
+            mtimeMs: Number.isFinite(Number(result?.mtimeMs))
+              ? Number(result.mtimeMs)
+              : current.mtimeMs,
+            revision:
+              typeof result?.revision === 'string' && result.revision.trim()
+                ? result.revision.trim()
+                : current.revision,
+          };
+          const retained = previewCacheRef.current!.set(mobileFileCacheKey(request), {
+            file: previewFileRef.current,
+            preview: next,
+          });
+          previewRef.current = retained.preview;
+          return retained.preview;
+        });
         return true;
       } catch (nextError: any) {
         if (saveVersion.current !== version) return false;

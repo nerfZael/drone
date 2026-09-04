@@ -40,6 +40,7 @@ export type DeviceMeshState = {
 export type CapabilityContext = {
   sourceDevice: MeshDevice;
   requestId: string;
+  signal?: AbortSignal;
 };
 
 export type CapabilityHandler = {
@@ -47,6 +48,8 @@ export type CapabilityHandler = {
   invoke(operation: string, payload: unknown, context: CapabilityContext): Promise<unknown>;
   close?(): void | Promise<void>;
   revokeDevice?(deviceId: string): void | Promise<void>;
+  disconnectDevice?(deviceId: string): void | Promise<void>;
+  accessChanged?(deviceId: string): void | Promise<void>;
 };
 
 export type DeviceMeshAdminUpdate = {

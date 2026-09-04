@@ -21,7 +21,12 @@ import {
   reconcileOptimisticPendingPrompt,
 } from './optimistic-pending-prompts';
 import { createCanvasChatNodeId } from './app-config';
-import { droneChatEventMatches, fetchDroneChatState, sameTranscriptItems, sendDroneChatPrompt } from './chat-api';
+import {
+  droneChatEventMatches,
+  fetchDroneChatStateCached,
+  sameTranscriptItems,
+  sendDroneChatPrompt,
+} from './chat-api';
 import { subscribeDroneChatEvents } from './chat-events';
 import { droneChatQueueKey, isDroneStartingOrSeeding, parseDroneChatQueueKey, shouldReadChatRuntimeForHubPhase } from './helpers';
 import { fetchJson, isNotFoundError, resolvePollIntervalMs, usePoll } from './hooks';
@@ -96,6 +101,8 @@ type UseChatRuntimeOrchestrationArgs = {
   patchQueuedPrompt: (key: string, id: string, patch: Partial<QueuedPrompt>) => void;
   removeQueuedPrompt: (key: string, id: string) => void;
   requestJson: RequestJson;
+  onChatInfoResolvedFromState: (chatInfo: ChatInfo) => void;
+  onChatInfoRejectedFromState: (error: unknown) => void;
   onAutoRenameChatFromFirstPrompt?: (droneId: string, chatName: string, prompt: string) => void;
 };
 
@@ -207,6 +214,8 @@ export function useChatRuntimeOrchestration({
   patchQueuedPrompt,
   removeQueuedPrompt,
   requestJson,
+  onChatInfoResolvedFromState,
+  onChatInfoRejectedFromState,
   onAutoRenameChatFromFirstPrompt,
 }: UseChatRuntimeOrchestrationArgs) {
   const [sendingPromptCountByChatKey, setSendingPromptCountByChatKey] = React.useState<Record<string, number>>({});
@@ -241,6 +250,11 @@ export function useChatRuntimeOrchestration({
   const selectedChatRef = React.useRef(selectedChat);
   const selectedChatInfoRef = React.useRef({ key: selectedChatCacheKey, value: chatInfo });
   selectedChatInfoRef.current = { key: selectedChatCacheKey, value: chatInfo };
+  const onChatInfoResolvedFromStateRef = React.useRef(onChatInfoResolvedFromState);
+  const onChatInfoRejectedFromStateRef = React.useRef(onChatInfoRejectedFromState);
+  onChatInfoResolvedFromStateRef.current = onChatInfoResolvedFromState;
+  onChatInfoRejectedFromStateRef.current = onChatInfoRejectedFromState;
+  const chatConfigResolvedKeyRef = React.useRef('');
   const transcriptStateKeyRef = React.useRef(selectedChatCacheKey);
   const sessionStateKeyRef = React.useRef(selectedChatCacheKey);
   const optimisticPendingPromptsChatKeyRef = React.useRef(selectedChatCacheKey);
@@ -908,6 +922,8 @@ export function useChatRuntimeOrchestration({
     let eventsConnected = false;
     let reloadAfterCurrentLoad = false;
     let consecutiveTransientFailures = 0;
+    let stateEtag: string | null = null;
+    let chatConfigResolved = chatConfigResolvedKeyRef.current === selectedChatCacheKey;
     const clearTimer = () => {
       if (timer == null) return;
       clearTimeout(timer);
@@ -929,17 +945,33 @@ export function useChatRuntimeOrchestration({
       const initial = transcriptsRef.current === null && !transcriptErrorRef.current;
       if (initial && mounted) setLoadingTranscript(true);
       try {
-        const data = await fetchDroneChatState(requestJson, {
+        const data = await fetchDroneChatStateCached({
           droneId: selectedDrone,
           chatName: selectedChat,
           turn: 'all',
           tail: INITIAL_TRANSCRIPT_TAIL_TURNS,
+          etag: stateEtag,
+          includeConfig: !chatConfigResolved,
         });
         if (!mounted) return;
-        const currentChatInfo =
-          selectedChatInfoRef.current.key === selectedChatCacheKey
+        stateEtag = data.etag;
+        if (data.notModified) {
+          setTranscriptError(null);
+          consecutiveTransientFailures = 0;
+          return;
+        }
+        if (!chatConfigResolved) {
+          if (!data.chatInfo) {
+            throw new Error('Chat state response did not include chat configuration.');
+          }
+          chatConfigResolved = true;
+          chatConfigResolvedKeyRef.current = selectedChatCacheKey;
+          onChatInfoResolvedFromStateRef.current(data.chatInfo);
+        }
+        const currentChatInfo = data.chatInfo ??
+          (selectedChatInfoRef.current.key === selectedChatCacheKey
             ? selectedChatInfoRef.current.value
-            : null;
+            : null);
         writeChatRuntimeCache(selectedChatCacheKey, {
           transcripts: data.transcripts,
           pending: data.pending,
@@ -962,7 +994,9 @@ export function useChatRuntimeOrchestration({
         );
       } catch (e: any) {
         if (!mounted) return;
+        if (!chatConfigResolved) onChatInfoRejectedFromStateRef.current(e);
         if (isNotFoundError(e)) {
+          stateEtag = null;
           // Treat 404 as "no transcript yet" to avoid a scary error state for brand new chats.
           const currentChatInfo =
             selectedChatInfoRef.current.key === selectedChatCacheKey
@@ -1074,6 +1108,32 @@ export function useChatRuntimeOrchestration({
     setTranscriptError,
     setTranscripts,
   ]);
+
+  React.useEffect(() => {
+    if (chatUiMode !== 'cli' || !selectedDrone || !selectedChat) return;
+    if (chatConfigResolvedKeyRef.current === selectedChatCacheKey) return;
+    let mounted = true;
+    void fetchDroneChatStateCached({
+      droneId: selectedDrone,
+      chatName: selectedChat,
+      includeConfig: true,
+      includeTranscript: false,
+    })
+      .then((data) => {
+        if (!mounted) return;
+        if (data.notModified || !data.chatInfo) {
+          throw new Error('Chat state response did not include chat configuration.');
+        }
+        chatConfigResolvedKeyRef.current = selectedChatCacheKey;
+        onChatInfoResolvedFromStateRef.current(data.chatInfo);
+      })
+      .catch((error) => {
+        if (mounted) onChatInfoRejectedFromStateRef.current(error);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [chatUiMode, selectedChat, selectedChatCacheKey, selectedDrone]);
 
   React.useEffect(() => {
     if (chatUiMode !== 'cli') return;

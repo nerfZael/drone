@@ -8,6 +8,12 @@ import type {
 import { requestJson, requestJsonWithTimeout } from '../http';
 import type { ChatAttachmentPayload } from '../chat/ChatInput';
 import { sendRemoteChatPrompt } from './remote-chat-attachments';
+import { subscribeDeviceMeshChanges } from './device-mesh-events';
+import { createRemoteLoadCoordinator } from './remote-load-coordinator';
+import { remoteDroneRefreshPlan } from './remote-drone-refresh';
+
+const REMOTE_IDLE_FALLBACK_POLL_MS = 30_000;
+const REMOTE_ACTIVE_FALLBACK_POLL_MS = 4_000;
 
 export type RemoteDroneSummary = {
   id: string;
@@ -206,10 +212,41 @@ export function useRemoteDroneHub(targetDeviceId: string, routeAvailable: boolea
   const [chatError, setChatError] = React.useState<string | null>(null);
   const targetRef = React.useRef(targetDeviceId);
   const routeAvailableRef = React.useRef(routeAvailable);
+  const currentRouteAvailableRef = React.useRef(routeAvailable);
   const listVersion = React.useRef(0);
-  const listRequests = React.useRef(new Map<string, symbol>());
   const chatVersion = React.useRef(0);
+  const selectedDroneIdRef = React.useRef(selectedDroneId);
+  const selectedChatRef = React.useRef(selectedChat);
+  const mountedRef = React.useRef(true);
+  const runDronesLoadRef = React.useRef<(targetId: string, quiet: boolean) => Promise<void>>(
+    async () => {},
+  );
+  const runChatLoadRef = React.useRef<
+    (targetId: string, droneId: string, chatName: string, quiet: boolean) => Promise<void>
+  >(async () => {});
+  const dronesLoadCoordinatorRef = React.useRef<ReturnType<
+    typeof createRemoteLoadCoordinator
+  > | null>(null);
+  if (!dronesLoadCoordinatorRef.current) {
+    dronesLoadCoordinatorRef.current = createRemoteLoadCoordinator((targetId, options) =>
+      runDronesLoadRef.current(targetId, options.quiet),
+    );
+  }
+  const dronesLoadCoordinator = dronesLoadCoordinatorRef.current;
+  const chatLoadCoordinatorRef = React.useRef<ReturnType<
+    typeof createRemoteLoadCoordinator
+  > | null>(null);
+  if (!chatLoadCoordinatorRef.current) {
+    chatLoadCoordinatorRef.current = createRemoteLoadCoordinator((key, options) => {
+      const [targetId, droneId, chatName] = key.split('\0');
+      return runChatLoadRef.current(targetId ?? '', droneId ?? '', chatName ?? '', options.quiet);
+    });
+  }
+  const chatLoadCoordinator = chatLoadCoordinatorRef.current;
   targetRef.current = targetDeviceId;
+  currentRouteAvailableRef.current = routeAvailable;
+  selectedDroneIdRef.current = selectedDroneId;
+  selectedChatRef.current = selectedChat;
 
   const selectedDrone = drones.find((drone) => drone.id === selectedDroneId) ?? null;
   const waiting = Boolean(
@@ -219,92 +256,145 @@ export function useRemoteDroneHub(targetDeviceId: string, routeAvailable: boolea
       pendingQuestionRequests.length > 0,
   );
 
-  const loadDrones = React.useCallback(
-    async (quiet = false) => {
-      if (!targetDeviceId || !routeAvailable) {
-        if (!quiet) setLoadingDrones(false);
+  runDronesLoadRef.current = async (requestTargetId, quiet) => {
+    if (
+      !requestTargetId ||
+      targetRef.current !== requestTargetId ||
+      !currentRouteAvailableRef.current
+    ) {
+      if (!quiet && mountedRef.current && targetRef.current === requestTargetId) {
+        setLoadingDrones(false);
+      }
+      return;
+    }
+    const version = ++listVersion.current;
+    if (!quiet) setLoadingDrones(true);
+    try {
+      const result = await remoteControl<unknown>(
+        requestTargetId,
+        'drones.list',
+        {},
+        undefined,
+        12_000,
+      );
+      if (
+        !mountedRef.current ||
+        targetRef.current !== requestTargetId ||
+        listVersion.current !== version
+      )
         return;
-      }
-      if (listRequests.current.has(targetDeviceId)) return;
-      const requestToken = Symbol(targetDeviceId);
-      listRequests.current.set(targetDeviceId, requestToken);
-      const version = ++listVersion.current;
-      if (!quiet) setLoadingDrones(true);
-      try {
-        const result = await remoteControl<unknown>(
-          targetDeviceId,
-          'drones.list',
-          {},
-          undefined,
-          12_000,
-        );
-        if (targetRef.current !== targetDeviceId || listVersion.current !== version) return;
-        const next = normalizeRemoteDrones(result);
-        setDrones(next);
-        setSelectedDroneId((current) =>
-          current && next.some((drone) => drone.id === current) ? current : '',
-        );
-        setListError(null);
-      } catch (error: any) {
-        if (targetRef.current === targetDeviceId && !quiet)
-          setListError(error?.message ?? String(error));
-      } finally {
-        if (listRequests.current.get(targetDeviceId) === requestToken) {
-          listRequests.current.delete(targetDeviceId);
-        }
-        if (targetRef.current === targetDeviceId && !quiet) setLoadingDrones(false);
-      }
-    },
-    [routeAvailable, targetDeviceId],
+      const next = normalizeRemoteDrones(result);
+      setDrones(next);
+      setSelectedDroneId((current) =>
+        current && next.some((drone) => drone.id === current) ? current : '',
+      );
+      setListError(null);
+    } catch (error: any) {
+      if (mountedRef.current && targetRef.current === requestTargetId && !quiet)
+        setListError(error?.message ?? String(error));
+    } finally {
+      if (mountedRef.current && targetRef.current === requestTargetId && !quiet)
+        setLoadingDrones(false);
+    }
+  };
+
+  const loadDrones = React.useCallback(
+    (quiet = false) => dronesLoadCoordinator.request(targetRef.current, { quiet }),
+    [dronesLoadCoordinator],
   );
 
-  const loadChat = React.useCallback(
-    async (droneId: string, chatName: string, quiet = false) => {
-      if (!routeAvailable || !droneId || !chatName) return;
-      const version = ++chatVersion.current;
-      if (!quiet) setLoadingChat(true);
-      try {
-        const result = await remoteControl<any>(targetDeviceId, 'chat.read', {
-          droneId,
-          chatName,
-        });
-        if (
-          targetRef.current !== targetDeviceId ||
-          chatVersion.current !== version ||
-          selectedDroneId !== droneId ||
-          selectedChat !== chatName
-        )
-          return;
-        setMessages(normalizeRemoteChatMessages(result));
-        setPendingCount(Array.isArray(result?.pending) ? result.pending.length : 0);
-        setPendingApprovals(
-          Array.isArray(result?.pendingApprovals)
-            ? result.pendingApprovals.filter(
-                (approval: NativeChatApproval) => approval?.status === 'pending',
-              )
-            : [],
-        );
-        setPendingQuestionRequests(
-          Array.isArray(result?.pendingQuestionRequests)
-            ? result.pendingQuestionRequests.filter(
-                (request: ChatQuestionRequest) => request?.status === 'pending',
-              )
-            : [],
-        );
-        setNativeChatId(text(result?.nativeChatId));
-        setAttachmentMode(result?.agent?.kind === 'native' ? 'files' : 'images');
-        setChatError(null);
-      } catch (error: any) {
-        if (targetRef.current === targetDeviceId && !quiet)
-          setChatError(error?.message ?? String(error));
-      } finally {
-        if (targetRef.current === targetDeviceId && !quiet) setLoadingChat(false);
+  runChatLoadRef.current = async (requestTargetId, droneId, chatName, quiet) => {
+    if (
+      !currentRouteAvailableRef.current ||
+      targetRef.current !== requestTargetId ||
+      !droneId ||
+      !chatName
+    ) {
+      if (
+        mountedRef.current &&
+        !quiet &&
+        targetRef.current === requestTargetId &&
+        selectedDroneIdRef.current === droneId &&
+        selectedChatRef.current === chatName
+      ) {
+        setLoadingChat(false);
       }
+      return;
+    }
+    const version = ++chatVersion.current;
+    if (!quiet) setLoadingChat(true);
+    try {
+      const result = await remoteControl<any>(requestTargetId, 'chat.read', {
+        droneId,
+        chatName,
+      });
+      if (
+        !mountedRef.current ||
+        targetRef.current !== requestTargetId ||
+        chatVersion.current !== version ||
+        selectedDroneIdRef.current !== droneId ||
+        selectedChatRef.current !== chatName
+      )
+        return;
+      setMessages(normalizeRemoteChatMessages(result));
+      setPendingCount(Array.isArray(result?.pending) ? result.pending.length : 0);
+      setPendingApprovals(
+        Array.isArray(result?.pendingApprovals)
+          ? result.pendingApprovals.filter(
+              (approval: NativeChatApproval) => approval?.status === 'pending',
+            )
+          : [],
+      );
+      setPendingQuestionRequests(
+        Array.isArray(result?.pendingQuestionRequests)
+          ? result.pendingQuestionRequests.filter(
+              (request: ChatQuestionRequest) => request?.status === 'pending',
+            )
+          : [],
+      );
+      setNativeChatId(text(result?.nativeChatId));
+      setAttachmentMode(result?.agent?.kind === 'native' ? 'files' : 'images');
+      setChatError(null);
+    } catch (error: any) {
+      if (
+        mountedRef.current &&
+        targetRef.current === requestTargetId &&
+        selectedDroneIdRef.current === droneId &&
+        selectedChatRef.current === chatName &&
+        !quiet
+      )
+        setChatError(error?.message ?? String(error));
+    } finally {
+      if (
+        mountedRef.current &&
+        targetRef.current === requestTargetId &&
+        selectedDroneIdRef.current === droneId &&
+        selectedChatRef.current === chatName &&
+        !quiet
+      )
+        setLoadingChat(false);
+    }
+  };
+
+  const loadChat = React.useCallback(
+    (droneId: string, chatName: string, quiet = false) => {
+      if (
+        !quiet &&
+        selectedDroneIdRef.current === droneId &&
+        selectedChatRef.current === chatName
+      ) {
+        setLoadingChat(true);
+        setChatError(null);
+      }
+      const key = `${targetRef.current}\0${droneId}\0${chatName}`;
+      return chatLoadCoordinator.request(key, { quiet });
     },
-    [routeAvailable, selectedChat, selectedDroneId, targetDeviceId],
+    [chatLoadCoordinator],
   );
 
   React.useEffect(() => {
+    dronesLoadCoordinator.reset();
+    chatLoadCoordinator.reset();
     listVersion.current += 1;
     chatVersion.current += 1;
     setDrones([]);
@@ -319,32 +409,103 @@ export function useRemoteDroneHub(targetDeviceId: string, routeAvailable: boolea
     setChatError(null);
     setLoadingDrones(true);
     void loadDrones();
-  }, [targetDeviceId]); // loadDrones intentionally changes when reachability changes.
+  }, [chatLoadCoordinator, dronesLoadCoordinator, loadDrones, targetDeviceId]);
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      dronesLoadCoordinator.reset();
+      chatLoadCoordinator.reset();
+    };
+  }, [chatLoadCoordinator, dronesLoadCoordinator]);
 
   React.useEffect(() => {
     const reconnected = routeAvailable && !routeAvailableRef.current;
     routeAvailableRef.current = routeAvailable;
-    if (reconnected) void loadDrones();
-  }, [loadDrones, routeAvailable]); // Refresh immediately after a route reconnects.
+    if (!reconnected) return;
+    void loadDrones();
+    if (selectedDroneIdRef.current && selectedChatRef.current) {
+      void loadChat(selectedDroneIdRef.current, selectedChatRef.current, true);
+    }
+  }, [loadChat, loadDrones, routeAvailable]); // Refresh immediately after a route reconnects.
 
   React.useEffect(() => {
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible') void loadDrones(true);
-    }, 3_000);
+    }, REMOTE_IDLE_FALLBACK_POLL_MS);
     return () => window.clearInterval(timer);
   }, [loadDrones]);
 
   React.useEffect(() => {
     if (!selectedDroneId || !selectedChat) return;
     void loadChat(selectedDroneId, selectedChat);
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') void loadChat(selectedDroneId, selectedChat, true);
-    }, 2_500);
-    return () => window.clearInterval(timer);
   }, [loadChat, selectedChat, selectedDroneId]);
 
+  React.useEffect(() => {
+    if (!selectedDroneId || !selectedChat) return;
+    const timer = window.setInterval(
+      () => {
+        if (document.visibilityState === 'visible')
+          void loadChat(selectedDroneId, selectedChat, true);
+      },
+      waiting ? REMOTE_ACTIVE_FALLBACK_POLL_MS : REMOTE_IDLE_FALLBACK_POLL_MS,
+    );
+    return () => window.clearInterval(timer);
+  }, [loadChat, selectedChat, selectedDroneId, waiting]);
+
+  React.useEffect(() => {
+    let timer: number | null = null;
+    let refreshDrones = false;
+    let refreshChat = false;
+    const flush = () => {
+      timer = null;
+      if (document.visibilityState !== 'visible') return;
+      if (refreshDrones) void loadDrones(true);
+      if (refreshChat && selectedDroneIdRef.current && selectedChatRef.current) {
+        void loadChat(selectedDroneIdRef.current, selectedChatRef.current, true);
+      }
+      refreshDrones = false;
+      refreshChat = false;
+    };
+    const schedule = (delayMs = 150) => {
+      if (timer != null) return;
+      timer = window.setTimeout(flush, delayMs);
+    };
+    const refreshAfterResume = () => {
+      if (document.visibilityState !== 'visible') return;
+      refreshDrones = true;
+      refreshChat = true;
+      schedule(0);
+    };
+    const unsubscribe = subscribeDeviceMeshChanges(() => undefined, {
+      onCapabilityEvent(event) {
+        if (event.sourceDeviceId !== targetDeviceId) return;
+        const plan = remoteDroneRefreshPlan(event, {
+          droneId: selectedDroneIdRef.current,
+          chatName: selectedChatRef.current,
+        });
+        refreshDrones ||= plan.refreshDrones;
+        refreshChat ||= plan.refreshChat;
+        if (refreshDrones || refreshChat) schedule();
+      },
+      onConnectionChange(connected) {
+        if (connected) refreshAfterResume();
+      },
+    });
+    document.addEventListener('visibilitychange', refreshAfterResume);
+    return () => {
+      unsubscribe();
+      if (timer != null) window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', refreshAfterResume);
+    };
+  }, [loadChat, loadDrones, targetDeviceId]);
+
   const selectChat = React.useCallback((droneId: string, chatName: string) => {
+    chatLoadCoordinator.reset();
     chatVersion.current += 1;
+    selectedDroneIdRef.current = droneId;
+    selectedChatRef.current = chatName;
     setSelectedDroneId(droneId);
     setSelectedChat(chatName);
     setMessages([]);
@@ -354,7 +515,7 @@ export function useRemoteDroneHub(targetDeviceId: string, routeAvailable: boolea
     setAttachmentMode('images');
     setPendingCount(0);
     setChatError(null);
-  }, []);
+  }, [chatLoadCoordinator]);
 
   const selectDrone = React.useCallback((drone: RemoteDroneSummary) => {
     const chat = drone.chats.includes('default') ? 'default' : (drone.chats[0] ?? '');

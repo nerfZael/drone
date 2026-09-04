@@ -1,4 +1,4 @@
-import { DRONE_CONTROL_CAPABILITY, MESH_BINARY_CHUNK_BYTES } from '@drone/device-protocol';
+import { DRONE_CONTROL_CAPABILITY } from '@drone/device-protocol';
 import {
   filterCompletedPendingPrompts,
   isSendInNewChatQueueAction,
@@ -19,8 +19,13 @@ import {
 } from './drone-chat-page';
 import { trimJsonArrayToBytes } from '../builtin-agent-activity';
 import { isLikelyImagePath, isLikelyVideoPath } from '../filesystem-media';
-import { localHubRequest, type LocalHubAccess } from './local-hub-request';
-import { meshJsonContentChunk } from './mesh-content-chunk';
+import {
+  localHubBinaryRequest,
+  localHubBoundedJsonRequest,
+  localHubRequest,
+  type LocalHubAccess,
+} from './local-hub-request';
+import { MeshContentSnapshotStore } from './mesh-content-chunk';
 import type { MeshChatAttachmentStore } from './mesh-chat-attachment-store';
 import { fitMeshChatPayload } from './fit-mesh-chat-payload';
 import { compactChatQuestionRequests, compactNativeChatReadResponse } from './native-chat-response';
@@ -450,6 +455,7 @@ export function createDroneControlCapability(
   };
   const fileWatches = new Map<string, FileWatch>();
   const fileWatchStarts = new Map<string, Promise<FileWatch>>();
+  const contentSnapshots = new MeshContentSnapshotStore();
   let closed = false;
   const stopWatch = (key: string) => {
     const watch = fileWatches.get(key);
@@ -570,6 +576,24 @@ export function createDroneControlCapability(
     descriptor: DRONE_CONTROL_CAPABILITY,
     async invoke(operation, rawPayload, context) {
       const payload = object(rawPayload);
+      const sourceDeviceId = optionalText(context?.sourceDevice?.id) ?? '__direct__';
+      const snapshotOwner = contentSnapshots.captureOwner(sourceDeviceId);
+      const operationSignal = context?.signal
+        ? AbortSignal.any([snapshotOwner.signal, context.signal])
+        : snapshotOwner.signal;
+      const loadJsonSnapshot = async (
+        scope: string,
+        offset: unknown,
+        load: (signal: AbortSignal, maxBytes: number) => Promise<unknown>,
+      ) => {
+        const reservation = await contentSnapshots.reserveJson(snapshotOwner, operationSignal);
+        try {
+          const value = await load(reservation.signal, reservation.maxBytes);
+          return reservation.commitJson({ value, scope, offset });
+        } finally {
+          reservation.release();
+        }
+      };
       if (operation === 'drones.list') {
         const createModelAgent = optionalText(payload.createModelAgent);
         if (createModelAgent) {
@@ -1042,11 +1066,35 @@ export function createDroneControlCapability(
       }
       if (operation === 'files.list') {
         const directoryPath = optionalText(payload.path) ?? '';
-        const listing = await localHubRequest(
-          access,
-          `/api/drones/${encodedDrone}/fs/list?path=${encodeURIComponent(directoryPath)}`,
-        );
-        return { contentChunk: meshJsonContentChunk(listing, payload.contentOffset) };
+        const scope = ['files.list', droneId, directoryPath].join('\u0000');
+        if (payload.snapshotToken) {
+          if (payload.cancelSnapshot === true) {
+            contentSnapshots.cancel({
+              snapshotToken: payload.snapshotToken,
+              sourceDeviceId,
+              scope,
+            });
+            return { cancelled: true };
+          }
+          return {
+            contentChunk: contentSnapshots.resume({
+              snapshotToken: payload.snapshotToken,
+              sourceDeviceId,
+              scope,
+              encoding: 'base64-json-utf8',
+              offset: payload.contentOffset,
+            }).chunk,
+          };
+        }
+        return {
+          contentChunk: await loadJsonSnapshot(scope, payload.contentOffset, (signal, maxBytes) =>
+            localHubBoundedJsonRequest(
+              access,
+              `/api/drones/${encodedDrone}/fs/list?path=${encodeURIComponent(directoryPath)}`,
+              { signal, maxBytes },
+            ),
+          ),
+        };
       }
       if (operation === 'file.action') {
         const action = requiredText(payload.action, 'action');
@@ -1100,6 +1148,7 @@ export function createDroneControlCapability(
       }
       if (operation === 'file.preview') {
         const filePath = requiredText(payload.path, 'path');
+        const contentScope = ['file.preview', droneId, filePath].join('\u0000');
         const watchAction = optionalText(payload.watch);
         const watchId = optionalText(payload.watchId) ?? 'default';
         const watchKey = `${droneId}\u0000${filePath}`;
@@ -1133,34 +1182,105 @@ export function createDroneControlCapability(
             revision: watch.revision,
           };
         }
+        if (payload.snapshotToken) {
+          const resumedRevision = optionalText(payload.expectedRevision);
+          const isMediaSnapshot = Boolean(resumedRevision || payload.mediaSnapshot === true);
+          const resumeScope = isMediaSnapshot
+            ? [contentScope, resumedRevision ?? ''].join('\u0000')
+            : contentScope;
+          if (isMediaSnapshot && !resumedRevision) {
+            throw Object.assign(new Error('expectedRevision is required to resume media'), {
+              code: 'INVALID_REQUEST',
+            });
+          }
+          if (payload.cancelSnapshot === true) {
+            contentSnapshots.cancel({
+              snapshotToken: payload.snapshotToken,
+              sourceDeviceId,
+              scope: resumeScope,
+            });
+            return { cancelled: true };
+          }
+          const resumed = contentSnapshots.resume({
+            snapshotToken: payload.snapshotToken,
+            sourceDeviceId,
+            scope: resumeScope,
+            encoding: isMediaSnapshot ? 'base64-binary' : 'base64-json-utf8',
+            offset: payload.contentOffset,
+          });
+          if (resumed.chunk.encoding === 'base64-binary') {
+            return { preview: resumed.metadata, mediaChunk: resumed.chunk };
+          }
+          return { contentChunk: resumed.chunk };
+        }
         const fsFilePath = `/api/drones/${encodedDrone}/fs/file?path=${encodeURIComponent(filePath)}`;
         if (payload.metadataOnly === true) {
           return {
             preview: await localHubRequest(
               access,
               `${fsFilePath}&metadata=1&revision=${payload.includeRevision === false ? '0' : '1'}`,
+              { signal: operationSignal },
             ),
           };
         }
         const likelyMedia = isLikelyImagePath(filePath) || isLikelyVideoPath(filePath);
         const expectedRevision = optionalText(payload.expectedRevision);
         let metadata: any;
-        try {
-          metadata = await localHubRequest(
-            access,
-            likelyMedia ? `${fsFilePath}&metadata=1&revision=0` : fsFilePath,
+        if (likelyMedia) {
+          metadata = await localHubRequest(access, `${fsFilePath}&metadata=1&revision=0`, {
+            signal: operationSignal,
+          });
+        } else {
+          const jsonReservation = await contentSnapshots.reserveJson(
+            snapshotOwner,
+            operationSignal,
           );
-        } catch (error: any) {
-          if (error?.code !== 'HUB_413' || likelyMedia) throw error;
-          metadata = await localHubRequest(access, `${fsFilePath}&metadata=1`);
-          if (metadata?.kind !== 'image' && metadata?.kind !== 'video') throw error;
-        }
-        if (metadata?.kind !== 'image' && metadata?.kind !== 'video') {
-          return {
-            contentChunk: meshJsonContentChunk(metadata, payload.contentOffset),
-          };
+          try {
+            try {
+              metadata = await localHubBoundedJsonRequest(access, fsFilePath, {
+                signal: jsonReservation.signal,
+                maxBytes: jsonReservation.maxBytes,
+              });
+            } catch (error: any) {
+              if (error?.code !== 'HUB_413') throw error;
+              metadata = await localHubBoundedJsonRequest(access, `${fsFilePath}&metadata=1`, {
+                signal: jsonReservation.signal,
+                maxBytes: jsonReservation.maxBytes,
+              });
+              if (metadata?.kind !== 'image' && metadata?.kind !== 'video') throw error;
+            }
+            if (metadata?.kind !== 'image' && metadata?.kind !== 'video') {
+              return {
+                contentChunk: jsonReservation.commitJson({
+                  value: metadata,
+                  scope: contentScope,
+                  offset: payload.contentOffset,
+                }),
+              };
+            }
+          } finally {
+            jsonReservation.release();
+          }
         }
 
+        const initialMediaKind = metadata.kind;
+        const initialMediaPath = requiredText(metadata?.path ?? filePath, 'preview path');
+        metadata = await localHubRequest(access, `${fsFilePath}&metadata=1&revision=1`, {
+          signal: operationSignal,
+        });
+        if (metadata?.kind !== 'image' && metadata?.kind !== 'video') {
+          throw Object.assign(new Error('the file is no longer previewable media'), {
+            code: 'FILE_CHANGED_DURING_READ',
+          });
+        }
+        if (
+          metadata.kind !== initialMediaKind ||
+          requiredText(metadata?.path ?? filePath, 'preview path') !== initialMediaPath
+        ) {
+          throw Object.assign(new Error('the file changed while it was loading'), {
+            code: 'FILE_CHANGED_DURING_READ',
+          });
+        }
         const size = Number(metadata?.size);
         if (!Number.isSafeInteger(size) || size < 0)
           throw Object.assign(new Error('the Hub returned invalid file metadata'), {
@@ -1177,62 +1297,79 @@ export function createDroneControlCapability(
             ),
             { code: 'FILE_TOO_LARGE' },
           );
-        if (!optionalText(metadata?.revision) && !expectedRevision) {
-          metadata = await localHubRequest(access, `${fsFilePath}&metadata=1&revision=1`);
-        }
-        const revision = optionalText(metadata?.revision) ?? expectedRevision ?? null;
+        const revision = optionalText(metadata?.revision);
         const previewPath = requiredText(metadata?.path ?? filePath, 'preview path');
-
-        const requestedOffset = Number(payload.contentOffset);
-        const offset =
-          Number.isSafeInteger(requestedOffset) && requestedOffset > 0 ? requestedOffset : 0;
-        if (offset >= size)
-          throw Object.assign(new Error('media preview offset is outside the file'), {
-            code: 'INVALID_REQUEST',
-          });
-        const chunk = await localHubRequest(
-          access,
-          `/api/drones/${encodedDrone}/fs/chunk?path=${encodeURIComponent(previewPath)}&offset=${offset}&limit=${MESH_BINARY_CHUNK_BYTES}`,
-        );
-        const dataBase64 = String(chunk?.dataBase64 ?? '');
-        const bytes = Buffer.from(dataBase64, 'base64');
-        if (
-          chunk?.kind !== 'binary-chunk' ||
-          Number(chunk?.offset) !== offset ||
-          Number(chunk?.nextOffset) !== offset + bytes.length ||
-          Number(chunk?.size) !== size ||
-          bytes.toString('base64') !== dataBase64
-        ) {
-          throw Object.assign(new Error('the Hub returned an invalid media chunk'), {
+        if (!revision) {
+          throw Object.assign(new Error('the Hub did not return a media revision'), {
             code: 'INVALID_RESPONSE',
           });
         }
-        return {
-          preview: {
+        if (expectedRevision && revision !== expectedRevision) {
+          throw Object.assign(new Error('the file changed while it was loading'), {
+            code: 'FILE_REVISION_MISMATCH',
+          });
+        }
+        // The binary reader preallocates exactly the authoritative byte count. Reserve that
+        // working buffer so concurrent reads and retained snapshots share one memory ceiling.
+        const snapshotReservation = await contentSnapshots.reserve(
+          sourceDeviceId,
+          size,
+          operationSignal,
+          snapshotOwner,
+        );
+        try {
+          const media = await localHubBinaryRequest(
+            access,
+            `/api/drones/${encodedDrone}/fs/media?path=${encodeURIComponent(previewPath)}&revision=${encodeURIComponent(revision)}&maxBytes=${MOBILE_FILE_MEDIA_MAX_BYTES}`,
+            {
+              maxBytes: MOBILE_FILE_MEDIA_MAX_BYTES,
+              expectedBytes: size,
+              signal: snapshotReservation.signal,
+            },
+          );
+          if (media.bytes.length !== size) {
+            throw Object.assign(new Error('the Hub returned an invalid media chunk'), {
+              code: 'INVALID_RESPONSE',
+            });
+          }
+          if (
+            (metadata.kind === 'image' && !media.contentType.toLowerCase().startsWith('image/')) ||
+            (metadata.kind === 'video' && !media.contentType.toLowerCase().startsWith('video/'))
+          ) {
+            throw Object.assign(new Error('the Hub returned a different media type'), {
+              code: 'FILE_CHANGED_DURING_READ',
+            });
+          }
+          const preview = {
             path: previewPath,
             kind: metadata.kind,
-            mime: String(metadata.mime ?? chunk?.mime ?? ''),
+            mime: String(metadata.mime ?? media.contentType ?? ''),
             size,
             mtimeMs: Number.isFinite(Number(metadata.mtimeMs)) ? Number(metadata.mtimeMs) : null,
             revision,
-          },
-          mediaChunk: {
-            encoding: 'base64-binary',
-            offset,
-            bytes: bytes.length,
-            totalBytes: size,
-            done: offset + bytes.length >= size,
-            dataBase64,
-          },
-        };
+          };
+          const snapshot = snapshotReservation.commitBinary({
+            content: media.bytes,
+            scope: [contentScope, revision].join('\u0000'),
+            metadata: preview,
+            offset: payload.contentOffset,
+          });
+          return {
+            preview,
+            mediaChunk: snapshot.chunk,
+          };
+        } finally {
+          snapshotReservation.release();
+        }
       }
 
       const chatName = requiredText(payload.chatName ?? 'default', 'chatName');
       const chatPath = `/api/drones/${encodedDrone}/chats/${encodeURIComponent(chatName)}`;
-      const resolveNativeChat = async (requestedId?: string) => {
+      const resolveNativeChat = async (requestedId?: string, signal?: AbortSignal) => {
         const snapshot = await localHubRequest(access, `${chatPath}/native`, {
           method: 'POST',
           body: '{}',
+          signal,
         });
         const nativeChatId = requiredText(snapshot?.nativeChatId, 'nativeChatId');
         if (requestedId && requestedId !== nativeChatId) {
@@ -1296,136 +1433,174 @@ export function createDroneControlCapability(
         }
         const messageId = optionalText(payload.messageId);
         const turnId = optionalText(payload.turnId);
-        const contentOnlyRead = Boolean(messageId || turnId);
-        const turnNumber = Number(payload.turnNumber);
-        const hasTurnNumber = Number.isSafeInteger(turnNumber) && turnNumber > 0;
-        const selectedTurnQuery =
-          turnId && hasTurnNumber
-            ? `selected&turn=${turnNumber}`
-            : turnId || messageId
-              ? 'none'
-              : 'page&limit=100';
-        const before = Number(payload.before);
-        const beforeQuery = Number.isSafeInteger(before) && before > 0 ? `&before=${before}` : '';
-        let legacyTranscriptLoaded = false;
-        let result: any;
-        try {
-          result = await localHubRequest(
-            access,
-            `${chatPath}/state?transcript=${selectedTurnQuery}&pending=${contentOnlyRead ? 'none' : 'all'}&subscriptions=${contentOnlyRead ? '0' : '1'}&readState=${contentOnlyRead ? '0' : '1'}&transcriptMeta=0${beforeQuery}`,
-          );
-        } catch (error: any) {
-          if (error?.code !== 'HUB_410') throw error;
-          const [legacy, pendingResult] = await Promise.all([
-            localHubRequest(access, chatPath),
-            contentOnlyRead
-              ? Promise.resolve(null)
-              : localHubRequest(access, `${chatPath}/pending`),
-          ]);
-          result = {
-            ...legacy,
-            transcripts: Array.isArray(legacy?.turns) ? legacy.turns : [],
-            pending: pendingResult?.pending,
+        const contentScope = [
+          'chat.read',
+          droneId,
+          chatName,
+          messageId ? `message:${messageId}` : `turn:${turnId ?? ''}`,
+        ].join('\u0000');
+        if (payload.snapshotToken && (messageId || turnId)) {
+          if (payload.cancelSnapshot === true) {
+            contentSnapshots.cancel({
+              snapshotToken: payload.snapshotToken,
+              sourceDeviceId,
+              scope: contentScope,
+            });
+            return { cancelled: true };
+          }
+          return {
+            droneId,
+            chatName,
+            contentChunk: contentSnapshots.resume({
+              snapshotToken: payload.snapshotToken,
+              sourceDeviceId,
+              scope: contentScope,
+              encoding: 'base64-json-utf8',
+              offset: payload.contentOffset,
+            }).chunk,
           };
-          legacyTranscriptLoaded = true;
         }
-        const latestAgentTurnId = optionalText(result?.readState?.latestAgentTurnId) ?? null;
-        const latestAgentRevision = Number.isSafeInteger(result?.readState?.latestAgentRevision)
-          ? Number(result.readState.latestAgentRevision)
-          : 0;
-        const subscriptions = contentOnlyRead
-          ? []
-          : compactChatSubscriptions(result?.subscriptions);
-        const questionRequests = contentOnlyRead
-          ? []
-          : await localHubRequest(
-              access,
-              `/api/chat-question-requests?${new URLSearchParams({
+        const contentOnlyRead = Boolean(messageId || turnId);
+        const contentReservation = contentOnlyRead
+          ? await contentSnapshots.reserveJson(snapshotOwner, operationSignal)
+          : null;
+        try {
+          const turnNumber = Number(payload.turnNumber);
+          const hasTurnNumber = Number.isSafeInteger(turnNumber) && turnNumber > 0;
+          const selectedTurnQuery =
+            turnId && hasTurnNumber
+              ? `selected&turn=${turnNumber}`
+              : turnId || messageId
+                ? 'none'
+                : 'page&limit=100';
+          const before = Number(payload.before);
+          const beforeQuery = Number.isSafeInteger(before) && before > 0 ? `&before=${before}` : '';
+          let legacyTranscriptLoaded = false;
+          let result: any;
+          try {
+            const statePath = `${chatPath}/state?transcript=${selectedTurnQuery}&pending=${contentOnlyRead ? 'none' : 'all'}&subscriptions=${contentOnlyRead ? '0' : '1'}&readState=${contentOnlyRead ? '0' : '1'}&transcriptMeta=0${beforeQuery}`;
+            result = contentReservation
+              ? await localHubBoundedJsonRequest(access, statePath, {
+                  signal: contentReservation.signal,
+                  maxBytes: contentReservation.maxBytes,
+                })
+              : await localHubRequest(access, statePath);
+          } catch (error: any) {
+            if (error?.code !== 'HUB_410') throw error;
+            const [legacy, pendingResult] = await Promise.all([
+              contentReservation
+                ? localHubBoundedJsonRequest(access, chatPath, {
+                    signal: contentReservation.signal,
+                    maxBytes: contentReservation.maxBytes,
+                  })
+                : localHubRequest(access, chatPath),
+              contentOnlyRead
+                ? Promise.resolve(null)
+                : localHubRequest(access, `${chatPath}/pending`),
+            ]);
+            result = {
+              ...legacy,
+              transcripts: Array.isArray(legacy?.turns) ? legacy.turns : [],
+              pending: pendingResult?.pending,
+            };
+            legacyTranscriptLoaded = true;
+          }
+          const latestAgentTurnId = optionalText(result?.readState?.latestAgentTurnId) ?? null;
+          const latestAgentRevision = Number.isSafeInteger(result?.readState?.latestAgentRevision)
+            ? Number(result.readState.latestAgentRevision)
+            : 0;
+          const subscriptions = contentOnlyRead
+            ? []
+            : compactChatSubscriptions(result?.subscriptions);
+          const questionRequests = contentOnlyRead
+            ? []
+            : await localHubRequest(
+                access,
+                `/api/chat-question-requests?${new URLSearchParams({
+                  droneId,
+                  chatName,
+                  includeResolved: 'true',
+                  limit: '12',
+                }).toString()}`,
+              ).then((response: any) => compactChatQuestionRequests(response?.requests));
+          const pendingQuestionRequests = questionRequests.filter(
+            (request: any) => request?.status === 'pending',
+          );
+          const marked = contentOnlyRead
+            ? null
+            : await localHubRequest(access, `${chatPath}/read`, {
+                method: 'POST',
+                body: JSON.stringify({
+                  latestAgentTurnId,
+                  latestAgentRevision,
+                  updatedByDeviceId: context?.sourceDevice?.id ?? null,
+                }),
+              });
+          if (result?.agent?.kind === 'native') {
+            const { nativeChatId, snapshot: ensured } = await resolveNativeChat(
+              undefined,
+              contentReservation?.signal,
+            );
+            if (messageId) {
+              const entry = await localHubBoundedJsonRequest(
+                access,
+                `/api/assistant/threads/${encodeURIComponent(nativeChatId)}/messages/${encodeURIComponent(messageId)}`,
+                {
+                  signal: contentReservation!.signal,
+                  maxBytes: contentReservation!.maxBytes,
+                },
+              );
+              return {
                 droneId,
                 chatName,
-                includeResolved: 'true',
-                limit: '12',
-              }).toString()}`,
-            ).then((response: any) => compactChatQuestionRequests(response?.requests));
-        const pendingQuestionRequests = questionRequests.filter(
-          (request: any) => request?.status === 'pending',
-        );
-        const marked = contentOnlyRead
-          ? null
-          : await localHubRequest(access, `${chatPath}/read`, {
-              method: 'POST',
-              body: JSON.stringify({
-                latestAgentTurnId,
-                latestAgentRevision,
-                updatedByDeviceId: context?.sourceDevice?.id ?? null,
-              }),
-            });
-        if (result?.agent?.kind === 'native') {
-          const { nativeChatId, snapshot: ensured } = await resolveNativeChat();
-          if (messageId) {
-            const entry = await localHubRequest(
+                historyKind: 'message-content',
+                nativeChatId,
+                messageId,
+                contentChunk: contentReservation!.commitJson({
+                  value: entry,
+                  scope: contentScope,
+                  offset: payload.contentOffset,
+                }),
+              };
+            }
+            const history = await localHubRequest(
               access,
-              `/api/assistant/threads/${encodeURIComponent(nativeChatId)}/messages/${encodeURIComponent(messageId)}`,
+              `/api/assistant/threads/${encodeURIComponent(nativeChatId)}/history?limit=60${Number.isSafeInteger(Number(payload.before)) && Number(payload.before) > 0 ? `&before=${Number(payload.before)}` : ''}`,
             );
-            return {
-              droneId,
-              chatName,
-              historyKind: 'message-content',
+            const nativeThread = Array.isArray(ensured?.threads)
+              ? ensured.threads.find((item: any) => String(item?.id ?? '') === nativeChatId)
+              : null;
+            return compactNativeChatReadResponse({
               nativeChatId,
-              messageId,
-              contentChunk: meshJsonContentChunk(entry, payload.contentOffset),
-            };
+              snapshot: { ...ensured, pendingQuestionRequests, questionRequests },
+              history,
+              metadata: {
+                droneId,
+                chatName,
+                agent: result.agent,
+                model:
+                  nativeThread != null ? String(nativeThread.model ?? '') : (result.model ?? null),
+                reasoning: nativeThread != null ? String(nativeThread.thinkingLevel ?? '') : null,
+                readState: marked?.readState ?? result?.readState ?? null,
+                agentPermissionMode:
+                  nativeThread != null
+                    ? nativeThread.agentPermissionMode === 'read' ||
+                      nativeThread.agentPermissionMode === 'write'
+                      ? nativeThread.agentPermissionMode
+                      : 'execute'
+                    : (result.agentPermissionMode ?? 'execute'),
+                approvalPolicy:
+                  nativeThread != null
+                    ? nativeThread.approvalPolicy === 'none'
+                      ? 'none'
+                      : 'ask'
+                    : (result.approvalPolicy ?? 'ask'),
+                ...(subscriptions ? { subscriptions } : {}),
+              },
+            });
           }
-          const history = await localHubRequest(
-            access,
-            `/api/assistant/threads/${encodeURIComponent(nativeChatId)}/history?limit=60${Number.isSafeInteger(Number(payload.before)) && Number(payload.before) > 0 ? `&before=${Number(payload.before)}` : ''}`,
-          );
-          const nativeThread = Array.isArray(ensured?.threads)
-            ? ensured.threads.find((item: any) => String(item?.id ?? '') === nativeChatId)
-            : null;
-          return compactNativeChatReadResponse({
-            nativeChatId,
-            snapshot: { ...ensured, pendingQuestionRequests, questionRequests },
-            history,
-            metadata: {
-              droneId,
-              chatName,
-              agent: result.agent,
-              model:
-                nativeThread != null ? String(nativeThread.model ?? '') : (result.model ?? null),
-              reasoning: nativeThread != null ? String(nativeThread.thinkingLevel ?? '') : null,
-              readState: marked?.readState ?? result?.readState ?? null,
-              agentPermissionMode:
-                nativeThread != null
-                  ? nativeThread.agentPermissionMode === 'read' ||
-                    nativeThread.agentPermissionMode === 'write'
-                    ? nativeThread.agentPermissionMode
-                    : 'execute'
-                  : (result.agentPermissionMode ?? 'execute'),
-              approvalPolicy:
-                nativeThread != null
-                  ? nativeThread.approvalPolicy === 'none'
-                    ? 'none'
-                    : 'ask'
-                  : (result.approvalPolicy ?? 'ask'),
-              ...(subscriptions ? { subscriptions } : {}),
-            },
-          });
-        }
-        if (turnId) {
-          let turn = (Array.isArray(result?.transcripts) ? result.transcripts : []).find(
-            (item: any, index: number) => {
-              const itemId = String(item?.id ?? '').trim();
-              const turnNumber = Number(item?.turn);
-              return (
-                (itemId ||
-                  (Number.isFinite(turnNumber) ? `turn-${turnNumber}` : `turn-${index}`)) === turnId
-              );
-            },
-          );
-          if (!turn && !hasTurnNumber && !legacyTranscriptLoaded) {
-            const legacy = await localHubRequest(access, chatPath);
-            turn = (Array.isArray(legacy?.turns) ? legacy.turns : []).find(
+          if (turnId) {
+            let turn = (Array.isArray(result?.transcripts) ? result.transcripts : []).find(
               (item: any, index: number) => {
                 const itemId = String(item?.id ?? '').trim();
                 const turnNumber = Number(item?.turn);
@@ -1436,51 +1611,74 @@ export function createDroneControlCapability(
                 );
               },
             );
+            if (!turn && !hasTurnNumber && !legacyTranscriptLoaded) {
+              const legacy = await localHubBoundedJsonRequest(access, chatPath, {
+                signal: contentReservation!.signal,
+                maxBytes: contentReservation!.maxBytes,
+              });
+              turn = (Array.isArray(legacy?.turns) ? legacy.turns : []).find(
+                (item: any, index: number) => {
+                  const itemId = String(item?.id ?? '').trim();
+                  const turnNumber = Number(item?.turn);
+                  return (
+                    (itemId ||
+                      (Number.isFinite(turnNumber) ? `turn-${turnNumber}` : `turn-${index}`)) ===
+                    turnId
+                  );
+                },
+              );
+            }
+            if (!turn)
+              throw Object.assign(new Error(`unknown chat turn: ${turnId}`), {
+                code: 'NOT_FOUND',
+              });
+            return {
+              droneId,
+              chatName,
+              historyKind: 'turn-content',
+              turnId,
+              contentChunk: contentReservation!.commitJson({
+                value: turn,
+                scope: contentScope,
+                offset: payload.contentOffset,
+              }),
+            };
           }
-          if (!turn)
-            throw Object.assign(new Error(`unknown chat turn: ${turnId}`), {
-              code: 'NOT_FOUND',
-            });
-          return {
+          const pending = filterCompletedPendingPrompts(
+            compactPendingPrompts(result?.pending),
+            result.transcripts,
+          );
+          const metadata = {
             droneId,
             chatName,
-            historyKind: 'turn-content',
-            turnId,
-            contentChunk: meshJsonContentChunk(turn, payload.contentOffset),
+            historyKind: 'turns',
+            agent: result.agent ?? null,
+            model: result.model ?? null,
+            reasoning: result.reasoning ?? null,
+            pending,
+            pendingQuestionRequests,
+            questionRequests,
+            readState: marked?.readState ?? result?.readState ?? null,
+            agentPermissionMode:
+              result.agentPermissionMode === 'read' || result.agentPermissionMode === 'write'
+                ? result.agentPermissionMode
+                : 'execute',
+            approvalPolicy:
+              result.approvalPolicy === 'auto' || result.approvalPolicy === 'none'
+                ? result.approvalPolicy
+                : 'ask',
+            ...(subscriptions ? { subscriptions } : {}),
           };
+          return fitMeshChatPayload(metadata, (turnBudget) =>
+            boundedDroneChatPage(
+              result.transcripts,
+              legacyTranscriptLoaded ? payload.before : undefined,
+              turnBudget,
+            ),
+          );
+        } finally {
+          contentReservation?.release();
         }
-        const pending = filterCompletedPendingPrompts(
-          compactPendingPrompts(result?.pending),
-          result.transcripts,
-        );
-        const metadata = {
-          droneId,
-          chatName,
-          historyKind: 'turns',
-          agent: result.agent ?? null,
-          model: result.model ?? null,
-          reasoning: result.reasoning ?? null,
-          pending,
-          pendingQuestionRequests,
-          questionRequests,
-          readState: marked?.readState ?? result?.readState ?? null,
-          agentPermissionMode:
-            result.agentPermissionMode === 'read' || result.agentPermissionMode === 'write'
-              ? result.agentPermissionMode
-              : 'execute',
-          approvalPolicy:
-            result.approvalPolicy === 'auto' || result.approvalPolicy === 'none'
-              ? result.approvalPolicy
-              : 'ask',
-          ...(subscriptions ? { subscriptions } : {}),
-        };
-        return fitMeshChatPayload(metadata, (turnBudget) =>
-          boundedDroneChatPage(
-            result.transcripts,
-            legacyTranscriptLoaded ? payload.before : undefined,
-            turnBudget,
-          ),
-        );
       }
       if (operation === 'chat.models') {
         const requestedNativeChatId = optionalText(payload.nativeChatId);
@@ -1844,13 +2042,22 @@ export function createDroneControlCapability(
     },
     close() {
       closed = true;
+      contentSnapshots.close();
       for (const key of [...fileWatches.keys()]) stopWatch(key);
     },
     revokeDevice(deviceId) {
+      contentSnapshots.revokeDevice(deviceId);
       for (const [key, watch] of fileWatches) {
         watch.subscribers.delete(deviceId);
         if (watch.subscribers.size === 0) stopWatch(key);
       }
+    },
+    disconnectDevice(deviceId) {
+      // Transfers are connection-scoped: a reconnect starts from a fresh, authorized snapshot.
+      contentSnapshots.revokeDevice(deviceId);
+    },
+    accessChanged(deviceId) {
+      contentSnapshots.revokeDevice(deviceId);
     },
   };
 }

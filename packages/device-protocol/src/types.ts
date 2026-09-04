@@ -118,12 +118,17 @@ export type CapabilityResponse = {
 export type CapabilityEvent = {
   type: 'capability.event';
   version: 1;
+  eventId: string;
   sourceDeviceId: string;
+  targetDeviceId: string;
   capability: string;
   capabilityVersion: number;
   event: string;
   payload: Record<string, any>;
   issuedAt: string;
+  expiresAt: string;
+  maxHops: 1;
+  signature: string;
 };
 
 export type MeshSocketMessage =

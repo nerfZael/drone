@@ -1,5 +1,6 @@
-import http from 'node:http';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
@@ -166,6 +167,12 @@ describeSocketSuite('host runtime routing api', () => {
       Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7bKJYAAAAASUVORK5CYII=', 'base64'),
     );
     fs.writeFileSync(videoPath, Buffer.alloc(2 * 1024 * 1024 + 1));
+    const unusualHostName = ' leading\tfile.txt ';
+    fs.writeFileSync(path.join(droneRoot, unusualHostName), 'odd');
+    fs.mkdirSync(path.join(droneRoot, 'linked-directory'));
+    fs.symlinkSync('note.txt', path.join(droneRoot, 'file-link'));
+    fs.symlinkSync('linked-directory', path.join(droneRoot, 'directory-link'));
+    fs.symlinkSync('missing.txt', path.join(droneRoot, 'dangling-link'));
 
     await seedHostDrone(droneId, { cwd: droneRoot, repoPath: '' });
 
@@ -183,6 +190,11 @@ describeSocketSuite('host runtime routing api', () => {
     const entryNames = ((listResp.data?.entries ?? []) as Array<{ name?: string }>).map((e) => String(e?.name ?? ''));
     expect(entryNames).toContain('note.txt');
     expect(entryNames).toContain('thumb.png');
+    expect(entryNames).toContain(unusualHostName);
+    const listedEntries = (listResp.data?.entries ?? []) as Array<{ name?: string; kind?: string }>;
+    expect(listedEntries.find((entry) => entry.name === 'file-link')?.kind).toBe('other');
+    expect(listedEntries.find((entry) => entry.name === 'directory-link')?.kind).toBe('other');
+    expect(listedEntries.find((entry) => entry.name === 'dangling-link')?.kind).toBe('other');
 
     const readResp = await apiFetch(
       `/api/drones/${encodeURIComponent(droneId)}/fs/file?path=${encodeURIComponent(notePath)}`,
@@ -402,6 +414,177 @@ describeSocketSuite('host runtime routing api', () => {
     );
     expect(thumbResp.status).toBe(200);
     expect(String(thumbResp.headers.get('content-type') ?? '')).toContain('image/');
+  });
+
+  test('validates media and thumbnail revisions before enabling browser caching', async () => {
+    const droneId = 'host-media-cache';
+    const droneRoot = path.join(tempRoot, 'host-media-cache');
+    const imagePath = path.join(droneRoot, 'pixel.png');
+    const imageBytes = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7bKJYAAAAASUVORK5CYII=',
+      'base64',
+    );
+    const revision = `sha256:${crypto.createHash('sha256').update(imageBytes).digest('hex')}`;
+    const staleRevision = `sha256:${'0'.repeat(64)}`;
+    fs.mkdirSync(droneRoot, { recursive: true });
+    fs.writeFileSync(imagePath, imageBytes);
+    await seedHostDrone(droneId, { cwd: droneRoot, repoPath: '' });
+
+    const routeUrl = (route: 'media' | 'thumb', requestedRevision?: string) => {
+      const url = new URL(
+        `${baseUrl}/api/drones/${encodeURIComponent(droneId)}/fs/${route}`,
+      );
+      url.searchParams.set('path', imagePath);
+      if (requestedRevision) url.searchParams.set('revision', requestedRevision);
+      return url;
+    };
+    const authorizedFetch = (url: URL, init?: RequestInit) =>
+      fetch(url, {
+        ...init,
+        headers: { ...init?.headers, authorization: `Bearer ${token}` },
+      });
+
+    const unversionedMedia = await authorizedFetch(routeUrl('media'));
+    expect(unversionedMedia.status).toBe(200);
+    expect(unversionedMedia.headers.get('cache-control')).toBe('no-store');
+    const unversionedThumb = await authorizedFetch(routeUrl('thumb'));
+    expect(unversionedThumb.status).toBe(200);
+    expect(unversionedThumb.headers.get('cache-control')).toBe('no-store');
+
+    const versionedMedia = await authorizedFetch(routeUrl('media', revision));
+    expect(versionedMedia.status).toBe(200);
+    expect(versionedMedia.headers.get('cache-control')).toBe(
+      'private, max-age=31536000, immutable',
+    );
+    expect(Buffer.from(await versionedMedia.arrayBuffer())).toEqual(imageBytes);
+    const versionedThumb = await authorizedFetch(routeUrl('thumb', revision));
+    expect(versionedThumb.status).toBe(200);
+    expect(versionedThumb.headers.get('cache-control')).toBe(
+      'private, max-age=31536000, immutable',
+    );
+
+    for (const route of ['media', 'thumb'] as const) {
+      const mismatch = await authorizedFetch(routeUrl(route, staleRevision));
+      expect(mismatch.status).toBe(409);
+      expect(mismatch.headers.get('cache-control')).toBe('no-store');
+      expect(await mismatch.json()).toMatchObject({
+        ok: false,
+        code: 'FILE_REVISION_MISMATCH',
+        currentRevision: revision,
+      });
+    }
+
+    const rangedMedia = await authorizedFetch(routeUrl('media', revision), {
+      headers: { range: 'bytes=1-4' },
+    });
+    expect(rangedMedia.status).toBe(206);
+    expect(rangedMedia.headers.get('cache-control')).toBe(
+      'private, max-age=31536000, immutable',
+    );
+    expect(rangedMedia.headers.get('content-range')).toBe(`bytes 1-4/${imageBytes.length}`);
+    expect(Buffer.from(await rangedMedia.arrayBuffer())).toEqual(imageBytes.subarray(1, 5));
+
+    const unversionedRange = await authorizedFetch(routeUrl('media'), {
+      headers: { range: 'bytes=-3' },
+    });
+    expect(unversionedRange.status).toBe(206);
+    expect(unversionedRange.headers.get('cache-control')).toBe('no-store');
+    expect(unversionedRange.headers.get('content-range')).toBe(
+      `bytes ${imageBytes.length - 3}-${imageBytes.length - 1}/${imageBytes.length}`,
+    );
+    expect(Buffer.from(await unversionedRange.arrayBuffer())).toEqual(imageBytes.subarray(-3));
+
+    const fullHead = await authorizedFetch(routeUrl('media', revision), { method: 'HEAD' });
+    expect(fullHead.status).toBe(200);
+    expect(fullHead.headers.get('content-length')).toBe(String(imageBytes.length));
+    expect(fullHead.headers.get('cache-control')).toBe(
+      'private, max-age=31536000, immutable',
+    );
+    expect(await fullHead.text()).toBe('');
+
+    const rangeHead = await authorizedFetch(routeUrl('media', revision), {
+      method: 'HEAD',
+      headers: { range: 'bytes=1-4' },
+    });
+    expect(rangeHead.status).toBe(206);
+    expect(rangeHead.headers.get('content-range')).toBe(`bytes 1-4/${imageBytes.length}`);
+    expect(rangeHead.headers.get('content-length')).toBe('4');
+    expect(await rangeHead.text()).toBe('');
+
+    const mismatchHead = await authorizedFetch(routeUrl('media', staleRevision), {
+      method: 'HEAD',
+    });
+    expect(mismatchHead.status).toBe(409);
+    expect(mismatchHead.headers.get('cache-control')).toBe('no-store');
+    expect(await mismatchHead.text()).toBe('');
+
+    const exactEof = await authorizedFetch(routeUrl('media'), {
+      headers: { range: `bytes=${imageBytes.length - 1}-` },
+    });
+    expect(exactEof.status).toBe(206);
+    expect(Buffer.from(await exactEof.arrayBuffer())).toEqual(imageBytes.subarray(-1));
+    const largeSuffix = await authorizedFetch(routeUrl('media'), {
+      headers: { range: `bytes=-${imageBytes.length + 20}` },
+    });
+    expect(largeSuffix.status).toBe(206);
+    expect(Buffer.from(await largeSuffix.arrayBuffer())).toEqual(imageBytes);
+
+    for (const range of ['bytes=999-', 'bytes=-0', 'bytes=invalid', 'bytes=0-1,4-5']) {
+      const invalidRange = await authorizedFetch(routeUrl('media', revision), {
+        headers: { range },
+      });
+      expect(invalidRange.status).toBe(416);
+      expect(invalidRange.headers.get('content-range')).toBe(`bytes */${imageBytes.length}`);
+      expect(invalidRange.headers.get('accept-ranges')).toBe('bytes');
+    }
+
+    const emptyPath = path.join(droneRoot, 'empty.png');
+    fs.writeFileSync(emptyPath, '');
+    const emptyUrl = routeUrl('media');
+    emptyUrl.searchParams.set('path', emptyPath);
+    const emptyHead = await authorizedFetch(emptyUrl, { method: 'HEAD' });
+    expect(emptyHead.status).toBe(200);
+    expect(emptyHead.headers.get('content-length')).toBe('0');
+    const emptyRange = await authorizedFetch(emptyUrl, {
+      headers: { range: 'bytes=0-' },
+    });
+    expect(emptyRange.status).toBe(416);
+    expect(emptyRange.headers.get('content-range')).toBe('bytes */0');
+
+    const boundedUrl = routeUrl('media');
+    boundedUrl.searchParams.set('maxBytes', String(imageBytes.length - 1));
+    const bounded = await authorizedFetch(boundedUrl);
+    expect(bounded.status).toBe(413);
+    expect(await bounded.json()).toMatchObject({ ok: false });
+  });
+
+  test('preflights every host batch mutation before changing the first item', async () => {
+    const droneId = 'host-fs-preflight';
+    const droneRoot = path.join(tempRoot, 'host-fs-preflight');
+    const destination = path.join(droneRoot, 'destination');
+    const existing = path.join(droneRoot, 'existing.txt');
+    const missing = path.join(droneRoot, 'missing.txt');
+    fs.mkdirSync(destination, { recursive: true });
+    fs.writeFileSync(existing, 'keep me');
+    await seedHostDrone(droneId, { cwd: droneRoot, repoPath: '' });
+
+    const action = async (body: unknown) =>
+      await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/fs/action`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+    for (const mutation of [
+      { action: 'delete', paths: [existing, missing] },
+      { action: 'move', paths: [existing, missing], targetDir: destination },
+      { action: 'copy', paths: [existing, missing], targetDir: destination },
+    ]) {
+      const response = await action(mutation);
+      expect(response.r.status).toBe(404);
+      expect(fs.readFileSync(existing, 'utf8')).toBe('keep me');
+      expect(fs.existsSync(path.join(destination, 'existing.txt'))).toBe(false);
+    }
   });
 
   test('streams hash revision changes for an open host file', async () => {

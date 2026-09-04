@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 
+import { fetchDroneChatStateCached } from '../src/droneHub/app/chat-api';
 import {
   beginChatLoadNavigation,
   chatLoadTelemetryTesting,
@@ -201,6 +202,79 @@ describe('chat load telemetry', () => {
           longTasks: expect.any(String),
         },
       });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('records conditional chat state 200 and 304 responses during navigation', async () => {
+    const originalFetch = globalThis.fetch;
+    const reports: any[] = [];
+    let stateRequests = 0;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/telemetry/chat-load') {
+        reports.push(JSON.parse(String(init?.body ?? '{}')));
+        return new Response(JSON.stringify({ ok: true }), { status: 202 });
+      }
+      stateRequests += 1;
+      if (stateRequests === 1) {
+        return new Response(JSON.stringify({ ok: true, transcripts: [], pending: [] }), {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+            etag: '"state-1"',
+            'server-timing': 'transcript;dur=3',
+          },
+        });
+      }
+      expect(new Headers(init?.headers).get('if-none-match')).toBe('"state-1"');
+      return new Response(null, {
+        status: 304,
+        headers: { etag: '"state-1"', 'server-timing': 'transcript;dur=1' },
+      });
+    }) as typeof fetch;
+
+    try {
+      beginChatLoadNavigation({ target, source: 'chat' });
+      const first = await fetchDroneChatStateCached({
+        droneId: target.droneId,
+        chatName: target.chatName,
+      });
+      expect(first.notModified).toBe(false);
+      const second = await fetchDroneChatStateCached({
+        droneId: target.droneId,
+        chatName: target.chatName,
+        etag: first.etag,
+      });
+      expect(second).toEqual({ etag: '"state-1"', notModified: true });
+
+      markChatLoadConfigResolved(target, { surface: 'transcript' });
+      markChatLoadPrimaryResolved(target, {
+        surface: 'transcript',
+        cacheStatus: 'hit',
+        itemCount: 0,
+      });
+      markChatLoadContentCommitted(target, 'transcript');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(reports).toHaveLength(1);
+      expect(reports[0].requests).toMatchObject([
+        {
+          name: 'chat_state',
+          status: 200,
+          outcome: 'completed',
+          responseBytes: expect.any(Number),
+          serverTiming: { transcript: 3 },
+        },
+        {
+          name: 'chat_state',
+          status: 304,
+          outcome: 'completed',
+          responseBytes: 0,
+          serverTiming: { transcript: 1 },
+        },
+      ]);
     } finally {
       globalThis.fetch = originalFetch;
     }

@@ -36,6 +36,7 @@ import {
   MOBILE_MEDIA_PREVIEW_MAX_BYTES,
   MOBILE_TEXT_PREVIEW_MAX_BYTES,
 } from './file-preview-model';
+import { createLocalDroneSummaryIndex } from './local-drone-summary-index';
 
 const LOCAL_DRONES_KEY = 'droneHub.nativeDrones.v1';
 const LOCAL_GROUPS_KEY = 'droneHub.nativeGroups.v1';
@@ -386,44 +387,36 @@ function useLocalDroneControlValue() {
             },
           };
         }
-        const threadById = new Map(assistant.threads.map((thread) => [thread.id, thread]));
+        const summaryIndex = createLocalDroneSummaryIndex(
+          assistant.threads,
+          assistant.pendingApprovals,
+        );
         return {
           schemaVersion: 2,
-          drones: dronesRef.current.map((drone) => ({
-            id: drone.id,
-            name: drone.name,
-            runtime: 'host',
-            phase: drone.draft === true ? 'draft' : 'ready',
-            status: drone.draft === true ? 'Draft' : 'ready',
-            ...(drone.draft === true ? { draft: true } : {}),
-            group: drone.group,
-            repoPath: '',
-            chats: Object.keys(drone.chats),
-            ...(drone.draft === true || Object.keys(drone.draftChats ?? {}).length > 0
-              ? {
-                  draftChats: localDroneDraftChatMap(drone),
-                }
-              : {}),
-            busyChats: Object.entries(drone.chats).flatMap(([chatName, threadId]) =>
-              assistant.runningThreadId === threadId ||
-              threadById.get(threadId)?.status === 'running'
-                ? [chatName]
-                : [],
-            ),
-            approvalChats: Object.entries(drone.chats).flatMap(([chatName, threadId]) =>
-              assistant.pendingApprovals.some((approval) => approval.threadId === threadId)
-                ? [chatName]
-                : [],
-            ),
-            approvalRequired: Object.values(drone.chats).some((threadId) =>
-              assistant.pendingApprovals.some((approval) => approval.threadId === threadId),
-            ),
-            createdAt: drone.createdAt,
-            lastActivityAt: Object.values(drone.chats)
-              .map((threadId) => threadById.get(threadId)?.updatedAt ?? '')
-              .sort()
-              .at(-1),
-          })),
+          drones: dronesRef.current.map((drone) => {
+            const summary = summaryIndex.summarizeChats(
+              drone.chats,
+              assistant.runningThreadId,
+            );
+            return {
+              id: drone.id,
+              name: drone.name,
+              runtime: 'host',
+              phase: drone.draft === true ? 'draft' : 'ready',
+              status: drone.draft === true ? 'Draft' : 'ready',
+              ...(drone.draft === true ? { draft: true } : {}),
+              group: drone.group,
+              repoPath: '',
+              chats: Object.keys(drone.chats),
+              ...(drone.draft === true || Object.keys(drone.draftChats ?? {}).length > 0
+                ? {
+                    draftChats: localDroneDraftChatMap(drone),
+                  }
+                : {}),
+              ...summary,
+              createdAt: drone.createdAt,
+            };
+          }),
           sidebar: {
             registeredRepoPaths: [],
             groupCreatedAtByName: Object.fromEntries(
