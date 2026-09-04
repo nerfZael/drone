@@ -4,7 +4,7 @@ import {
   groupCompanionToolActivity,
   type CompanionStatus,
 } from '@drone/assistant-chat';
-import { AgentRunSummaryLine } from '../chat/WorkingElapsedStatus';
+import { formatWorkingDuration } from '../chat/WorkingElapsedStatus';
 import { ChatMessageBody } from '../chat/ChatMessageBody';
 import { formatChatVoiceDuration } from '../chat/use-chat-voice-recorder';
 import { useCompanion } from './CompanionContext';
@@ -93,6 +93,7 @@ export function CompanionOverlay() {
   const companion = useCompanion();
   const workspace = useCompanionWorkspace();
   const [expanded, setExpanded] = React.useState(false);
+  const [transcriptExpanded, setTranscriptExpanded] = React.useState(false);
   const [, tick] = React.useState(0);
   React.useEffect(() => {
     if (companion?.status !== 'working') return;
@@ -100,7 +101,10 @@ export function CompanionOverlay() {
     return () => window.clearInterval(timer);
   }, [companion?.status]);
   React.useEffect(() => {
-    if (companion?.status === 'idle') setExpanded(false);
+    if (companion?.status === 'idle') {
+      setExpanded(false);
+      setTranscriptExpanded(false);
+    }
   }, [companion?.status]);
   if (!companion || companion.status === 'idle') return null;
   const active = companion.status === 'working';
@@ -120,6 +124,13 @@ export function CompanionOverlay() {
           companionStatus={companion.status}
           droneNames={companion.proposalDroneNames}
           resolveDroneName={(droneId) => workspace?.resolveDroneName(droneId) ?? null}
+          resolveCreationDefaults={(repoPath) => {
+            try {
+              return workspace?.resolveDroneCreationDefaults(repoPath) ?? null;
+            } catch {
+              return null;
+            }
+          }}
           onExecute={() => void companion.executeProposal()}
           onDiscard={companion.discardProposal}
         />
@@ -128,23 +139,43 @@ export function CompanionOverlay() {
         className="flex max-h-[calc(100vh-2rem)] w-full flex-col overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--panel)] shadow-2xl min-[860px]:w-[28rem]"
         aria-label="Companion"
       >
-      <div className="flex shrink-0 items-center gap-3 border-b border-[var(--border-subtle)] px-4 py-3">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
+      {/* Header doubles as the user's message once a transcript exists. */}
+      <div className="flex shrink-0 items-start gap-2.5 border-b border-[var(--border-subtle)] py-2 pl-3.5 pr-2">
+        <div className="flex h-7 shrink-0 items-center">
           <CompanionStatusIndicator
             status={companion.status}
             recordingPaused={companion.recordingPaused}
           />
-          <div className="truncate text-sm font-[var(--weight-semibold)] text-[var(--fg)]">
-            Companion
-          </div>
-          {companion.status === 'recording' ? (
-            <span
-              className="shrink-0 font-mono text-[10px] tabular-nums text-[var(--muted)]"
-              aria-label={`${formatChatVoiceDuration(companion.durationMillis)} elapsed`}
+        </div>
+        <div className="flex min-h-7 min-w-0 flex-1 items-center">
+          {companion.transcript ? (
+            <button
+              type="button"
+              onClick={() => setTranscriptExpanded((value) => !value)}
+              aria-expanded={transcriptExpanded}
+              aria-label={transcriptExpanded ? 'Collapse your message' : 'Expand your message'}
+              title={transcriptExpanded ? undefined : companion.transcript}
+              className={`w-full whitespace-pre-wrap break-words rounded-sm text-left text-xs leading-relaxed text-[var(--fg-secondary)] outline-none hover:text-[var(--fg)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${
+                transcriptExpanded ? '' : 'line-clamp-[10]'
+              }`}
             >
-              {formatChatVoiceDuration(companion.durationMillis)}
-            </span>
-          ) : null}
+              {companion.transcript}
+            </button>
+          ) : (
+            <div className="flex min-w-0 items-center gap-2 text-xs font-[var(--weight-semibold)] text-[var(--fg)]">
+              <span className="truncate">
+                {companionStatusLabel(companion.status, companion.recordingPaused)}
+              </span>
+              {companion.status === 'recording' ? (
+                <span
+                  className="shrink-0 font-mono text-[10px] font-[var(--weight-regular)] tabular-nums text-[var(--muted)]"
+                  aria-label={`${formatChatVoiceDuration(companion.durationMillis)} elapsed`}
+                >
+                  {formatChatVoiceDuration(companion.durationMillis)}
+                </span>
+              ) : null}
+            </div>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           {companion.status === 'recording' ? (
@@ -216,97 +247,118 @@ export function CompanionOverlay() {
           </button>
         </div>
       </div>
-      <div className="min-h-0 overflow-y-auto">
-        {companion.transcript ? (
-          <div className="border-b border-[var(--border-subtle)] px-4 py-2 text-xs text-[var(--muted)]">
-            “{companion.transcript}”
-          </div>
-        ) : null}
-        {active || companion.activity.length > 0 ? (
-          <div className="px-1">
-            <AgentRunSummaryLine
-              active={active}
-              durationMs={duration}
-              detail={
-                companion.activity.length
-                  ? `${companion.activity.length} tool ${companion.activity.length === 1 ? 'call' : 'calls'}`
-                  : undefined
-              }
-              expanded={expanded}
-              onToggle={() => setExpanded((value) => !value)}
-              trailing={<Chevron open={expanded} />}
-            />
-            {expanded && companion.activity.length ? (
-              <div className="dh-agent-activity-scrollbar max-h-52 overflow-y-auto border-l border-[var(--border-subtle)] px-3 py-2">
-                {activityGroups.map((group) => (
-                  <React.Fragment key={group.key}>
-                    {group.parallel ? (
-                      <div
-                        className="flex items-center gap-2 py-1 text-[9px] uppercase tracking-wider text-[var(--muted-dim)]"
-                        aria-label={`${group.items.length} tool calls ran in parallel`}
-                      >
-                        <span className="h-px flex-1 bg-[var(--border-subtle)]" />
-                        <span>Parallel · {group.items.length}</span>
-                        <span className="h-px flex-1 bg-[var(--border-subtle)]" />
-                      </div>
-                    ) : null}
-                    {group.items.map((item) => (
-                      <details
-                        key={item.callId}
-                        className="py-1 text-xs"
-                      >
-                        <summary className="cursor-pointer text-[var(--fg-secondary)]">
-                          {item.status === 'running'
-                            ? 'Running'
-                            : item.status === 'failed'
-                              ? 'Failed'
-                              : 'Completed'}{' '}
-                          · {companionToolActivityLabel(item)}
-                        </summary>
-                        <div className="mt-1 space-y-2 text-[10px] text-[var(--muted-dim)]">
-                          {item.args !== undefined ? (
-                            <div>
-                              <div className="font-[var(--weight-semibold)] uppercase tracking-wide">Arguments</div>
-                              <pre className="overflow-auto whitespace-pre-wrap break-words">
-                                {JSON.stringify(item.args, null, 2)}
-                              </pre>
-                            </div>
-                          ) : null}
-                          {item.error !== undefined ? (
-                            <div>
-                              <div className="font-[var(--weight-semibold)] uppercase tracking-wide">Error</div>
-                              <pre className="overflow-auto whitespace-pre-wrap break-words">
-                                {JSON.stringify(item.error, null, 2)}
-                              </pre>
-                            </div>
-                          ) : item.result !== undefined ? (
-                            <div>
-                              <div className="font-[var(--weight-semibold)] uppercase tracking-wide">Result</div>
-                              <pre className="overflow-auto whitespace-pre-wrap break-words">
-                                {JSON.stringify(item.result, null, 2)}
-                              </pre>
-                            </div>
-                          ) : null}
-                        </div>
-                      </details>
-                    ))}
-                  </React.Fragment>
-                ))}
-              </div>
+
+      {/* Body: the reply is what the user came for. */}
+      {companion.error || companion.reply ? (
+        <div className="min-h-0 overflow-y-auto">
+          {companion.error ? (
+            <div className="mx-3 mt-2.5 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-xs text-[var(--red)]">
+              {companion.error}
+            </div>
+          ) : null}
+          {companion.reply ? (
+            <div className="px-3.5 py-2.5">
+              <ChatMessageBody role="assistant" text={companion.reply} autoExpand />
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* Footer: run duration and tool calls, secondary but one click away. */}
+      {active || companion.activity.length > 0 ? (
+        <div className="shrink-0 border-t border-[var(--border-subtle)]">
+          <button
+            type="button"
+            aria-expanded={expanded}
+            aria-label={`${expanded ? 'Collapse' : 'Expand'} tool calls`}
+            onClick={() => setExpanded((value) => !value)}
+            disabled={companion.activity.length === 0}
+            className="flex h-7 w-full items-center gap-2 px-3.5 text-left text-[11px] text-[var(--muted)] transition-colors hover:text-[var(--fg-secondary)] focus-visible:text-[var(--fg-secondary)] focus-visible:outline-none disabled:cursor-default disabled:hover:text-[var(--muted)]"
+          >
+            {active ? (
+              <svg className="h-3 w-3 shrink-0 animate-spin text-[var(--accent)] motion-reduce:animate-none" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.5" opacity="0.25" />
+                <path d="M6 1.5a4.5 4.5 0 0 1 4.5 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
             ) : null}
-          </div>
-        ) : null}
-        {companion.error ? (
-          <div className="m-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-xs text-[var(--red)]">
-            {companion.error}
-          </div>
-        ) : null}
-        {companion.reply ? (
-          <div className="px-4 py-3">
-            <ChatMessageBody role="assistant" text={companion.reply} autoExpand />
-          </div>
-        ) : null}
-      </div>
+            <span className="tabular-nums">
+              {active ? 'Working' : 'Worked'} for {formatWorkingDuration(duration)}
+            </span>
+            {companion.activity.length ? (
+              <span className="text-[var(--muted-dim)]">
+                · {companion.activity.length} tool {companion.activity.length === 1 ? 'call' : 'calls'}
+              </span>
+            ) : null}
+            {companion.activity.length ? (
+              <span className="ml-auto text-[var(--muted-dim)]"><Chevron open={expanded} /></span>
+            ) : null}
+          </button>
+          {expanded && companion.activity.length ? (
+            <div className="dh-agent-activity-scrollbar max-h-52 overflow-y-auto border-t border-[var(--border-subtle)] px-3.5 py-1.5">
+              {activityGroups.map((group) => (
+                <React.Fragment key={group.key}>
+                  {group.parallel ? (
+                    <div
+                      className="flex items-center gap-2 py-1 text-[9px] uppercase tracking-wider text-[var(--muted-dim)]"
+                      aria-label={`${group.items.length} tool calls ran in parallel`}
+                    >
+                      <span className="h-px flex-1 bg-[var(--border-subtle)]" />
+                      <span>Parallel · {group.items.length}</span>
+                      <span className="h-px flex-1 bg-[var(--border-subtle)]" />
+                    </div>
+                  ) : null}
+                  {group.items.map((item) => (
+                    <details
+                      key={item.callId}
+                      className="py-0.5 text-[11px]"
+                    >
+                      <summary className="flex cursor-pointer items-center gap-1.5 text-[var(--fg-secondary)]">
+                        <span
+                          className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                            item.status === 'running'
+                              ? 'animate-pulse bg-[var(--accent)]'
+                              : item.status === 'failed'
+                                ? 'bg-[var(--red)]'
+                                : 'bg-[var(--green)]'
+                          }`}
+                          aria-label={item.status === 'running' ? 'Running' : item.status === 'failed' ? 'Failed' : 'Completed'}
+                          role="img"
+                        />
+                        <span className="truncate">{companionToolActivityLabel(item)}</span>
+                      </summary>
+                      <div className="mt-1 space-y-2 pl-3 text-[10px] text-[var(--muted-dim)]">
+                        {item.args !== undefined ? (
+                          <div>
+                            <div className="font-[var(--weight-semibold)] uppercase tracking-wide">Arguments</div>
+                            <pre className="overflow-auto whitespace-pre-wrap break-words">
+                              {JSON.stringify(item.args, null, 2)}
+                            </pre>
+                          </div>
+                        ) : null}
+                        {item.error !== undefined ? (
+                          <div>
+                            <div className="font-[var(--weight-semibold)] uppercase tracking-wide">Error</div>
+                            <pre className="overflow-auto whitespace-pre-wrap break-words">
+                              {JSON.stringify(item.error, null, 2)}
+                            </pre>
+                          </div>
+                        ) : item.result !== undefined ? (
+                          <div>
+                            <div className="font-[var(--weight-semibold)] uppercase tracking-wide">Result</div>
+                            <pre className="overflow-auto whitespace-pre-wrap break-words">
+                              {JSON.stringify(item.result, null, 2)}
+                            </pre>
+                          </div>
+                        ) : null}
+                      </div>
+                    </details>
+                  ))}
+                </React.Fragment>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       </aside>
     </div>
   );

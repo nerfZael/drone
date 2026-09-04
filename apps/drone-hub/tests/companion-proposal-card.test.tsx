@@ -2,7 +2,7 @@ import React from 'react';
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 
-import { CompanionProposalCard } from '../src/droneHub/companion/CompanionProposalCard';
+import { CompanionProposalCard, creationDetailRows } from '../src/droneHub/companion/CompanionProposalCard';
 
 describe('Companion proposal card', () => {
   test('renders the proposal operations and review actions', () => {
@@ -28,11 +28,13 @@ describe('Companion proposal card', () => {
     );
 
     expect(html).toContain('Review setup');
-    expect(html).toContain('<summary');
-    expect(html).toContain('Description');
-    expect(html).not.toContain('open=""');
+    // The title lives in the footer and toggles the description, collapsed by default.
+    expect(html).toContain('title="Show description"');
+    expect(html).not.toContain('id="proposal-description"');
+    expect(html).not.toContain('Create a draft and queue a follow-up.');
     expect(html).toContain('Create draft drone');
-    expect(html).toContain('Message to');
+    expect(html).toContain('Send message');
+    expect(html).toContain('↑ Step 1');
     expect(html).toContain('Reviewer');
     expect(html).toContain('/workspace/repo');
     expect(html).toContain('/workspace/repo / Ungrouped');
@@ -73,7 +75,8 @@ describe('Companion proposal card', () => {
       />,
     );
 
-    expect(html).toContain('Message to');
+    expect(html).toContain('Send message');
+    expect(html).toContain('Send immediately');
     expect(html).toContain('Review Prompt and Shot Architecture');
     expect(html).toContain(message);
     expect(html).not.toContain('drone-uuid');
@@ -163,11 +166,91 @@ describe('Companion proposal card', () => {
     expect(html).toContain('Backend/Payments');
     expect(html).toContain('aria-controls="proposal-operation-details-create"');
     expect(html).toContain('aria-controls="proposal-operation-details-clone-chat"');
+    // Runtime, agent and model surface inline as pills; the rest stays behind the disclosure.
+    expect(html).toContain('>Host<');
+    expect(html).toContain('>Built-in<');
+    expect(html).toContain('>GPT-5.3 Codex<');
     expect(html).not.toContain('>Runtime<');
-    expect(html).not.toContain('>gpt-5.3-codex<');
+    expect(html).not.toContain('>Approval policy<');
+    // A later step that targets the drone created earlier links back to that step.
+    expect(html).toContain('↑ Step 1');
     expect(html).toContain('Clone chat');
     expect(html).not.toContain('>Clone history from<');
-    expect(html).toContain('Clone drone source-drone as');
+    expect(html).toContain('Clone drone');
+    expect(html).toContain('source-drone');
+    expect(html).toContain('source-copy');
+  });
+
+  test('fills omitted creation settings from saved defaults and marks them as such', () => {
+    const html = renderToStaticMarkup(
+      <CompanionProposalCard
+        proposal={{
+          version: 1,
+          title: 'Spin up a reviewer',
+          operations: [
+            { id: 'create', type: 'create_drone', name: 'Reviewer', prompt: 'Review.', model: 'claude-sonnet-5' },
+          ],
+        }}
+        defaultRepoPath="/workspace/repo"
+        execution={null}
+        executing={false}
+        companionStatus="completed"
+        resolveCreationDefaults={() => ({
+          mode: 'with-chat',
+          runtime: 'container',
+          persistVolume: true,
+          spawnAgentKey: 'builtin:claude',
+          spawnModel: 'gpt-5.3-codex',
+          spawnReasoning: 'high',
+          spawnAgentPermissionMode: 'write',
+          spawnApprovalPolicy: 'auto',
+          repoBranchSource: 'host',
+          repoCreateRemoteBranch: '',
+        })}
+        onExecute={() => undefined}
+        onDiscard={() => undefined}
+      />,
+    );
+
+    // Inline pills: inherited runtime/agent, explicit model joined with the inherited reasoning.
+    expect(html).toContain('>Container<');
+    expect(html).toContain('>Claude Code<');
+    expect(html).toContain('>claude-sonnet-5 · High<');
+    expect(html).toContain('title="Agent (saved default)"');
+    expect(html).not.toContain('Saved default');
+  });
+
+  test('detail rows show resolved default values and label them', () => {
+    const operation = {
+      id: 'create',
+      type: 'create_drone' as const,
+      name: 'Reviewer',
+      prompt: 'Review.',
+      runtime: 'host' as const,
+    };
+    const defaults = {
+      mode: 'with-chat' as const,
+      runtime: 'container' as const,
+      persistVolume: true,
+      spawnAgentKey: 'builtin:claude',
+      spawnModel: 'gpt-5.3-codex',
+      spawnReasoning: 'high',
+      spawnAgentPermissionMode: 'write' as const,
+      spawnApprovalPolicy: 'auto' as const,
+      repoBranchSource: 'host' as const,
+      repoCreateRemoteBranch: '',
+    };
+    const rows = creationDetailRows('/workspace/repo', operation, defaults);
+    const byLabel = Object.fromEntries(rows.map((row) => [row.label, row.value]));
+    expect(byLabel.Runtime).toBe('Host');
+    expect(byLabel.Agent).toBe('Claude Code (default)');
+    expect(byLabel.Model).toBe('GPT-5.3 Codex (default)');
+    expect(byLabel.Reasoning).toBe('High (default)');
+    expect(byLabel['Persist volume']).toBe('On (default)');
+    expect(byLabel['Approval policy']).toBe('Auto (default)');
+
+    const unresolved = creationDetailRows('/workspace/repo', operation, null);
+    expect(unresolved.find((row) => row.label === 'Agent')?.value).toBe('Saved default');
   });
 
   test('uses inline progress icons and preserves snapshotted drone names', () => {
@@ -200,10 +283,11 @@ describe('Companion proposal card', () => {
     expect(applyingHtml).toContain('Operation 1 applied');
     expect(applyingHtml).toContain('Applying operation 2');
     expect(applyingHtml).toContain('animate-spin');
-    expect(applyingHtml).toContain('Delete drone Refactoring opportunities review');
-    expect(applyingHtml).toContain('Delete drone Security code review');
-    expect(applyingHtml).not.toContain('Delete drone drone-one');
-    expect(applyingHtml).not.toContain('Delete drone drone-two');
+    expect(applyingHtml).toContain('Delete drone');
+    expect(applyingHtml).toContain('Refactoring opportunities review');
+    expect(applyingHtml).toContain('Security code review');
+    expect(applyingHtml).not.toContain('drone-one');
+    expect(applyingHtml).not.toContain('drone-two');
 
     const appliedHtml = renderToStaticMarkup(
       <CompanionProposalCard
@@ -225,9 +309,11 @@ describe('Companion proposal card', () => {
       />,
     );
 
-    expect(appliedHtml.match(/>Applied<\/div>/g)).toHaveLength(1);
+    // The Apply button carries the success state; no separate status pill duplicates it.
+    expect(appliedHtml.match(/>Applied</g)).toHaveLength(1);
+    expect(appliedHtml).toContain('>Applied</button>');
     expect(appliedHtml.match(/aria-label="Operation \d applied"/g)).toHaveLength(2);
-    expect(appliedHtml).toContain('Delete drone Refactoring opportunities review');
-    expect(appliedHtml).toContain('Delete drone Security code review');
+    expect(appliedHtml).toContain('Refactoring opportunities review');
+    expect(appliedHtml).toContain('Security code review');
   });
 });

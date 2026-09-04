@@ -7,6 +7,7 @@ import type {
   CompanionTextSnapshot,
 } from '@drone/assistant-chat';
 import { useActiveComposer } from '../chat/ActiveComposerContext';
+import type { DesktopNewDronePreferences } from '../app/new-drone-preferences';
 
 export type { CompanionTextSnapshot } from '@drone/assistant-chat';
 
@@ -20,6 +21,8 @@ export type CompanionTextTarget = {
 export type CompanionWorkspaceTarget = {
   getAppContext(): Record<string, unknown>;
   resolveDroneName(droneId: string): string | null;
+  /** Effective new-drone preferences a create_drone operation inherits when it omits overrides. */
+  resolveDroneCreationDefaults(repoPath: string): DesktopNewDronePreferences | null;
   executeProposal(
     proposal: CompanionProposal,
     context: CompanionProposalExecutionContext,
@@ -39,6 +42,7 @@ type CompanionWorkspaceContextValue = {
   focusEditor(id: string): void;
   getAppContext(): Record<string, unknown>;
   resolveDroneName(droneId: string): string | null;
+  resolveDroneCreationDefaults(repoPath: string): DesktopNewDronePreferences | null;
   executeProposal(
     proposal: CompanionProposal,
     context: CompanionProposalExecutionContext,
@@ -122,6 +126,8 @@ export function CompanionWorkspaceProvider({ children }: { children: React.React
       focusEditor,
       getAppContext: () => resolveWorkspaceTarget().getAppContext(),
       resolveDroneName: (droneId) => resolveWorkspaceTarget().resolveDroneName(droneId),
+      resolveDroneCreationDefaults: (repoPath) =>
+        resolveWorkspaceTarget().resolveDroneCreationDefaults(repoPath),
       executeProposal: async (proposal, context, onProgress) =>
         await resolveWorkspaceTarget().executeProposal(proposal, context, onProgress),
       openDroneChat: async (args) => await resolveWorkspaceTarget().openDroneChat(args),

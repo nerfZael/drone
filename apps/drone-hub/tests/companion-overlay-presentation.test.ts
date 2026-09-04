@@ -9,7 +9,7 @@ describe('Companion overlay presentation', () => {
     );
 
     expect(source).toContain('const [expanded, setExpanded] = React.useState(false)');
-    expect(source).toContain("if (companion?.status === 'idle') setExpanded(false)");
+    expect(source).toMatch(/if \(companion\?\.status === 'idle'\) \{\s*setExpanded\(false\);/);
     expect(source).not.toContain("open={item.status === 'running'}");
   });
 });

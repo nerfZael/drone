@@ -3031,11 +3031,25 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         if (Number(error?.status ?? 0) !== 404) throw error;
       }
     };
+    const resolveDroneCreationDefaults = (repoPath: string) => {
+      const rememberedPreferences = loadDesktopNewDronePreferences(repoPath);
+      const basePreferences =
+        rememberedPreferences ?? normalizeDesktopNewDronePreferences({});
+      if (!basePreferences) return null;
+      const spawnContexts = useDroneHubUiStore.getState().spawnContextByRepoKey;
+      return resolveCompanionDroneCreationPreferences({
+        remembered: rememberedPreferences,
+        defaults: basePreferences,
+        spawnContext: resolveSpawnContextPreferencesForRepo(spawnContexts, repoPath),
+        hasSpawnContext: hasSpawnContextPreferencesForRepo(spawnContexts, repoPath),
+      });
+    };
     return companionWorkspace.registerWorkspaceTarget({
       resolveDroneName: (droneId) => {
         const drone = droneByIdRef.current[String(droneId ?? '').trim()];
         return drone ? String(drone.name ?? '').trim() || drone.id : null;
       },
+      resolveDroneCreationDefaults,
       getAppContext: () => ({
         appView,
         activeRepoPath: activeRepoPath || null,
@@ -3091,23 +3105,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           },
           createDrone: async (operation) => {
             const repoPath = operation.repoPath ?? executionContext.defaultRepoPath;
-            const rememberedPreferences = loadDesktopNewDronePreferences(repoPath);
-            const basePreferences =
-              rememberedPreferences ?? normalizeDesktopNewDronePreferences({});
-            if (!basePreferences) throw new Error('could not resolve new-drone preferences');
-            const spawnContexts = useDroneHubUiStore.getState().spawnContextByRepoKey;
-            const creationPreferences = resolveCompanionDroneCreationPreferences({
-              remembered: rememberedPreferences,
-              defaults: basePreferences,
-              spawnContext: resolveSpawnContextPreferencesForRepo(
-                spawnContexts,
-                repoPath,
-              ),
-              hasSpawnContext: hasSpawnContextPreferencesForRepo(
-                spawnContexts,
-                repoPath,
-              ),
-            });
+            const creationPreferences = resolveDroneCreationDefaults(repoPath);
+            if (!creationPreferences) throw new Error('could not resolve new-drone preferences');
             const effectiveCreationPreferences = {
               ...creationPreferences,
               ...(operation.runtime ? { runtime: operation.runtime } : {}),
