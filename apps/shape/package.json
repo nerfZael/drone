@@ -1,0 +1,29 @@
+{
+  "name": "shape",
+  "version": "0.1.0",
+  "private": true,
+  "main": "expo/AppEntry.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "android:native": "expo run:android",
+    "ios": "expo run:ios",
+    "build": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "video": "node scripts/render-demo.cjs"
+  },
+  "dependencies": {
+    "@shopify/react-native-skia": "2.6.2",
+    "expo": "^57.0.4",
+    "expo-status-bar": "^57.0.0",
+    "react": "19.2.3",
+    "react-native": "^0.86.0",
+    "react-native-gesture-handler": "~2.32.0",
+    "react-native-reanimated": "4.5.0",
+    "react-native-worklets": "0.10.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "typescript": "~6.0.3"
+  }
+}
