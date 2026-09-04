@@ -19,6 +19,12 @@ const CODEX_CACHE_COMMAND = [
   'exit 1',
 ].join('\n');
 
+const CLAUDE_EMBEDDED_MODELS_COMMAND = [
+  'set -euo pipefail',
+  'bin="$(command -v claude)"',
+  `LC_ALL=C grep -aoE 'id:"claude-[^"]+",family:"(haiku|sonnet|opus|fable)",display_name:"[^"]+"' "$bin" | sort -u`,
+].join('\n');
+
 const ADAPTERS: Record<BuiltinAgentId, AgentModelCatalogAdapter> = {
   cursor: {
     binary: 'agent',
@@ -38,8 +44,12 @@ const ADAPTERS: Record<BuiltinAgentId, AgentModelCatalogAdapter> = {
   },
   claude: {
     binary: 'claude',
-    explicitCommands: ['claude models --json', 'claude models'],
+    // Claude Code has no model-list subcommand. Passing `models` is interpreted
+    // as a prompt and starts a paid agent turn, so discovery must stay on the
+    // non-interactive metadata embedded in the installed CLI.
+    explicitCommands: [],
     hostSupported: true,
+    modelCacheCommand: CLAUDE_EMBEDDED_MODELS_COMMAND,
   },
   opencode: {
     binary: 'opencode',

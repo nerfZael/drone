@@ -4,8 +4,11 @@ import { AgentModelCatalogService } from '../src/hub/agent-model-catalog/service
 import { registerAgentModelCatalogRoutes } from '../src/hub/agent-model-catalog/routes';
 import {
   parseAgentModelList,
+  parseClaudeEmbeddedModels,
+  parseClaudeModelHelp,
   parseCodexModelCache,
 } from '../src/hub/agent-model-catalog/parsers';
+import { modelListCommands } from '../src/hub/agent-model-catalog/adapters';
 import type { AgentModelCatalogRuntime } from '../src/hub/agent-model-catalog/types';
 import { HubRouter } from '../src/hub/hub-router';
 
@@ -60,6 +63,70 @@ describe('agent model catalog', () => {
         defaultReasoningLevel: 'medium',
       },
     ]);
+  });
+
+  test('discovers versioned Claude models without treating a prompt as a command', async () => {
+    const commands: string[] = [];
+    const help = `
+      --model <model>  Model for the current session. Provide an alias for the latest model
+                       (e.g. 'fable', 'opus', or 'sonnet') or a model's full name
+                       (e.g. 'claude-fable-5').
+    `;
+    expect(parseClaudeModelHelp(help).map((model) => model.id)).toEqual([
+      'fable',
+      'opus',
+      'sonnet',
+    ]);
+    expect(modelListCommands('claude', help)).toEqual([]);
+    const embeddedModels = [
+      'id:"claude-sonnet-4-6",family:"sonnet",display_name:"Sonnet 4.6"',
+      'id:"claude-sonnet-5",family:"sonnet",display_name:"Sonnet 5"',
+      'id:"claude-fable-5",family:"fable",display_name:"Fable 5"',
+      'id:"claude-fable-5-1",family:"fable",display_name:"Fable 5.1"',
+      'id:"claude-opus-4-8",family:"opus",display_name:"Opus 4.8"',
+      'id:"claude-opus-5",family:"opus",display_name:"Opus 5"',
+      'id:"claude-haiku-4-5",family:"haiku",display_name:"Haiku 4.5"',
+    ].join('\n');
+    expect(parseClaudeEmbeddedModels(embeddedModels).map((model) => model.id)).toEqual([
+      'claude-sonnet-5',
+      'claude-fable-5-1',
+      'claude-opus-5',
+      'claude-haiku-4-5',
+    ]);
+
+    const runtime: AgentModelCatalogRuntime = {
+      async runContainer(_containerName, command) {
+        commands.push(command);
+        if (command.startsWith('command -v')) return { code: 0 };
+        if (command === 'claude --help') return { code: 0, stdout: help };
+        if (command === 'claude --version') return { code: 0, stdout: '2.1.260' };
+        if (command.includes('grep -aoE')) return { code: 0, stdout: embeddedModels };
+        throw new Error(`Unexpected Claude discovery command: ${command}`);
+      },
+      async runHost() {
+        return { code: 1 };
+      },
+      hostModelListCommand: () => null,
+      timeoutMs: () => 1_000,
+    };
+
+    const result = await new AgentModelCatalogService(runtime).get({
+      agentId: 'claude',
+      target: { runtime: 'container', containerName: 'drone-a' },
+    });
+
+    expect(result.models.map((model) => model.id)).toEqual([
+      'claude-sonnet-5',
+      'claude-fable-5-1',
+      'claude-opus-5',
+      'claude-haiku-4-5',
+    ]);
+    expect(commands.slice(0, 3)).toEqual([
+      'command -v claude >/dev/null 2>&1',
+      'claude --help',
+      'claude --version',
+    ]);
+    expect(commands[3]).toContain('grep -aoE');
   });
 
   test('uses an updated Codex cache even while the Drone Hub catalog is still fresh', async () => {

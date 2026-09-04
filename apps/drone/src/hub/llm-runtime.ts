@@ -64,6 +64,23 @@ function parseJsonObject(raw: string): any {
   throw new Error('LLM response did not contain a JSON object');
 }
 
+function codexJsonSchemaInstruction(z: any, schema: any): string {
+  if (!schema) return '';
+  try {
+    const jsonSchema =
+      typeof z?.toJSONSchema === 'function'
+        ? z.toJSONSchema(schema, { target: 'draft-07' })
+        : typeof schema?.toJSONSchema === 'function'
+          ? schema.toJSONSchema({ target: 'draft-07' })
+          : null;
+    return jsonSchema
+      ? `Your response must match this JSON Schema exactly:\n${JSON.stringify(jsonSchema)}`
+      : '';
+  } catch {
+    return '';
+  }
+}
+
 export function codexObjectCompletionOptions(opts: {
   apiKey: string;
   reasoning?: GenerateObjectInput['reasoning'];
@@ -87,6 +104,7 @@ async function generateCodexObject(apiKey: string, z: any, input: GenerateObject
     {
       systemPrompt: [
         input.system ? String(input.system) : '',
+        codexJsonSchemaInstruction(z, input.schema),
         'Return a single valid JSON object only. Do not wrap it in Markdown.',
       ]
         .filter(Boolean)

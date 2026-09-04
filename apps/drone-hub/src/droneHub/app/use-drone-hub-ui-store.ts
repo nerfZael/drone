@@ -1307,15 +1307,18 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       setSpawnAgentKey: (next) =>
         set((s) => {
           const spawnAgentKey = normalizeSpawnAgentKeyValue(resolveNext(s.spawnAgentKey, next));
+          const agentChanged = spawnAgentKey !== s.spawnAgentKey;
           const nextByRepoKey = buildUpdatedSpawnContextByRepoKey(
             s.spawnContextByRepoKey,
             s.spawnContextRepoPath,
             {
               spawnAgentKey,
+              ...(agentChanged ? { spawnModel: '', spawnReasoning: '' } : {}),
             },
           );
           return {
             spawnAgentKey,
+            ...(agentChanged ? { spawnModel: '', spawnReasoning: '' } : {}),
             spawnContextByRepoKey: nextByRepoKey,
           };
         }),

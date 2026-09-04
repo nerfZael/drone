@@ -313,7 +313,7 @@ export function useChatConfigState({
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ agent }),
+          body: JSON.stringify({ agent, model: null, reasoning: null }),
         },
       );
       setChatInfo((prev) => ({
@@ -323,8 +323,8 @@ export function useChatConfigState({
         subscriptions: prev?.subscriptions ?? [],
         agent,
         agentLocked: prev?.agentLocked ?? false,
-        model: prev?.model ?? null,
-        reasoning: prev?.reasoning ?? null,
+        model: null,
+        reasoning: null,
         agentPermissionMode: readOnlySupported
           ? (prev?.agentPermissionMode ?? 'execute')
           : 'execute',

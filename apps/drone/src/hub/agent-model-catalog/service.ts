@@ -1,7 +1,12 @@
 import { normalizeExternalModelCatalogModels } from '@drone/assistant-chat';
 
 import { agentModelCatalogAdapter, modelListCommands } from './adapters';
-import { parseAgentModelList, parseCodexModelCache } from './parsers';
+import {
+  parseAgentModelList,
+  parseClaudeEmbeddedModels,
+  parseClaudeModelHelp,
+  parseCodexModelCache,
+} from './parsers';
 import type {
   AgentModelCatalogCacheEntry,
   AgentModelCatalogRequest,
@@ -13,7 +18,7 @@ import type {
 const SUCCESS_TTL_MS = 6 * 60 * 60 * 1000;
 const FAILURE_TTL_MS = 5 * 60 * 1000;
 const MAX_STALE_MS = 7 * 24 * 60 * 60 * 1000;
-const CACHE_SCHEMA_VERSION = 3;
+const CACHE_SCHEMA_VERSION = 5;
 
 function cacheKey(request: AgentModelCatalogRequest): string {
   return `v${CACHE_SCHEMA_VERSION}:shared:${request.agentId}`;
@@ -255,7 +260,10 @@ export class AgentModelCatalogService {
       ]);
       const versionText = commandOutput(version).replace(/\s+/g, ' ').slice(0, 200);
       const installationFingerprint = `host:${request.agentId}:${versionText || 'unknown-version'}`;
-      const commands = modelListCommands(request.agentId, commandOutput(help));
+      const helpText = commandOutput(help);
+      const claudeHelpModels =
+        request.agentId === 'claude' ? parseClaudeModelHelp(helpText) : [];
+      const commands = modelListCommands(request.agentId, helpText);
       for (const modelCommand of commands) {
         const result = await this.runtime.runHost(modelCommand, timeoutMs);
         if (result.code !== 0) continue;
@@ -266,9 +274,15 @@ export class AgentModelCatalogService {
       if (adapter.modelCacheCommand) {
         const result = await this.runtime.runHost(adapter.modelCacheCommand, timeoutMs);
         if (result.code === 0) {
-          const models = parseCodexModelCache(String(result.stdout ?? ''));
+          const models =
+            request.agentId === 'claude'
+              ? parseClaudeEmbeddedModels(String(result.stdout ?? ''))
+              : parseCodexModelCache(String(result.stdout ?? ''));
           if (models.length > 0) return { models, installationFingerprint };
         }
+      }
+      if (claudeHelpModels.length > 0) {
+        return { models: claudeHelpModels, installationFingerprint };
       }
 
       return {
@@ -308,7 +322,10 @@ export class AgentModelCatalogService {
     ]);
     const versionText = commandOutput(version).replace(/\s+/g, ' ').slice(0, 200);
     const installationFingerprint = `container:${request.agentId}:${versionText || 'unknown-version'}`;
-    const commands = modelListCommands(request.agentId, commandOutput(help));
+    const helpText = commandOutput(help);
+    const claudeHelpModels =
+      request.agentId === 'claude' ? parseClaudeModelHelp(helpText) : [];
+    const commands = modelListCommands(request.agentId, helpText);
     for (const command of commands) {
       const result = await this.runtime.runContainer(containerName, command, timeoutMs);
       if (result.code !== 0) continue;
@@ -323,9 +340,15 @@ export class AgentModelCatalogService {
         timeoutMs,
       );
       if (result.code === 0) {
-        const models = parseCodexModelCache(String(result.stdout ?? ''));
+        const models =
+          request.agentId === 'claude'
+            ? parseClaudeEmbeddedModels(String(result.stdout ?? ''))
+            : parseCodexModelCache(String(result.stdout ?? ''));
         if (models.length > 0) return { models, installationFingerprint };
       }
+    }
+    if (claudeHelpModels.length > 0) {
+      return { models: claudeHelpModels, installationFingerprint };
     }
 
     return {

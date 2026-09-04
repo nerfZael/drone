@@ -1045,4 +1045,19 @@ describe('formatTranscriptJobFailure', () => {
       }),
     ).toBe('authentication failed (exit 4)');
   });
+
+  test('surfaces captured stderr instead of a generic agent failure', () => {
+    expect(
+      formatTranscriptJobFailure({
+        agentId: 'claude',
+        stdoutRaw: '',
+        stderrRaw:
+          '--dangerously-skip-permissions cannot be used with root/sudo privileges for security reasons',
+        fallbackRaw: 'claude agent failed',
+        exitCode: 1,
+      }),
+    ).toBe(
+      '--dangerously-skip-permissions cannot be used with root/sudo privileges for security reasons (exit 1)',
+    );
+  });
 });

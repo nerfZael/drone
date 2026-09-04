@@ -44,6 +44,13 @@ import {
 } from './provisioned-prompt-handoff';
 import { pendingChatForkSourceSessionId } from './chat-fork';
 
+export function claudeSandboxEnvironmentLines(runtime: unknown): string[] {
+  // Claude Code refuses bypassPermissions under root unless the caller explicitly
+  // identifies the environment as a deliberate sandbox. Container drones are that
+  // boundary; host-runtime agents must not inherit this assertion.
+  return runtime === 'container' ? ['export IS_SANDBOX=1'] : [];
+}
+
 type ChatPromptRuntimeDependencyName =
   | 'NON_REPO_HOME_CWD'
   | 'PROMPT_SKILL_SYNC_WARNINGS'
@@ -998,6 +1005,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           ...buildContainerManagedEnvLines(d),
           ...managedEnvLines,
           ...managedChatMcpEnvLines,
+          ...claudeSandboxEnvironmentLines(runtime),
           `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
           cdCommand,
           `claude --print --dangerously-skip-permissions --output-format stream-json --verbose${modelArg}${

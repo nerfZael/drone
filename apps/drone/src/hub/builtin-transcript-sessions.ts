@@ -1774,7 +1774,9 @@ export function formatTranscriptJobFailure(opts: {
       ? Math.floor(opts.exitCode)
       : null;
 
-  let detail = fallback || stderr || stdout || '';
+  const genericFallback = `${opts.agentId} agent failed`;
+  let detail =
+    fallback && fallback !== genericFallback ? fallback : stderr || stdout || fallback || '';
   if (opts.agentId === 'codex') {
     detail = formatCodexJobFailure(stdout, stderr, detail);
   }

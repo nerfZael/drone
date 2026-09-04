@@ -126,6 +126,60 @@ export function parseAgentModelList(raw: string): AgentModelCatalogModel[] {
   return collector.models;
 }
 
+export function parseClaudeModelHelp(raw: string): AgentModelCatalogModel[] {
+  const text = stripAnsi(raw).replace(/\s+/g, ' ').trim();
+  const aliasExamples = text.match(
+    /Provide an alias for the latest model\s*\(e\.g\.\s*([^)]*)\)/i,
+  )?.[1];
+  if (!aliasExamples) return [];
+
+  const collector = createCollector();
+  for (const match of aliasExamples.matchAll(/['"`]([A-Za-z0-9][A-Za-z0-9._+\[\]-]*)['"`]/g)) {
+    const id = String(match[1] ?? '').trim();
+    if (!id) continue;
+    collector.add(id, `${id[0]?.toUpperCase() ?? ''}${id.slice(1)}`);
+  }
+  return collector.models;
+}
+
+export function parseClaudeEmbeddedModels(raw: string): AgentModelCatalogModel[] {
+  const latestByFamily = new Map<
+    string,
+    { id: string; label: string; version: number[] }
+  >();
+  const compareVersions = (left: number[], right: number[]): number => {
+    const length = Math.max(left.length, right.length);
+    for (let index = 0; index < length; index += 1) {
+      const difference = (left[index] ?? 0) - (right[index] ?? 0);
+      if (difference !== 0) return difference;
+    }
+    return 0;
+  };
+
+  for (const line of stripAnsi(raw).split('\n')) {
+    const match = line.match(
+      /id:"(claude-[^"]+)",family:"(haiku|sonnet|opus|fable)",display_name:"([^"]+)"/i,
+    );
+    if (!match) continue;
+    const [, id = '', familyRaw = '', label = ''] = match;
+    const family = familyRaw.toLowerCase();
+    const version = (label.match(/\d+(?:\.\d+)*/) ?? ['0'])[0]
+      .split('.')
+      .map((part) => Number(part));
+    const previous = latestByFamily.get(family);
+    if (!previous || compareVersions(version, previous.version) > 0) {
+      latestByFamily.set(family, { id, label, version });
+    }
+  }
+
+  const collector = createCollector();
+  for (const family of ['sonnet', 'fable', 'opus', 'haiku']) {
+    const model = latestByFamily.get(family);
+    if (model) collector.add(model.id, model.label);
+  }
+  return collector.models;
+}
+
 export function parseCodexModelCache(raw: string): AgentModelCatalogModel[] {
   try {
     const parsed = JSON.parse(String(raw ?? ''));

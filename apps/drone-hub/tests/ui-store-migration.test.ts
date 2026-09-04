@@ -18,6 +18,49 @@ import {
 import { sanitizeShortcutBindings } from '../src/droneHub/app/shortcuts';
 
 describe('drone hub ui store migration', () => {
+  test('clears model-specific settings when the spawn agent changes', () => {
+    const previous = useDroneHubUiStore.getState();
+    try {
+      useDroneHubUiStore.setState({
+        spawnContextRepoPath: '',
+        spawnContextByRepoKey: {
+          __no_repo__: {
+            spawnAgentKey: 'builtin:codex',
+            spawnModel: 'gpt-5.6-sol',
+            spawnReasoning: 'high',
+            spawnAgentPermissionMode: 'execute',
+            spawnApprovalPolicy: 'ask',
+            repoBranchSource: 'host',
+            repoCreateRemoteBranch: '',
+          },
+        },
+        spawnAgentKey: 'builtin:codex',
+        spawnModel: 'gpt-5.6-sol',
+        spawnReasoning: 'high',
+      });
+
+      useDroneHubUiStore.getState().setSpawnAgentKey('builtin:claude');
+
+      const state = useDroneHubUiStore.getState();
+      expect(state.spawnAgentKey).toBe('builtin:claude');
+      expect(state.spawnModel).toBe('');
+      expect(state.spawnReasoning).toBe('');
+      expect(state.spawnContextByRepoKey.__no_repo__).toMatchObject({
+        spawnAgentKey: 'builtin:claude',
+        spawnModel: '',
+        spawnReasoning: '',
+      });
+    } finally {
+      useDroneHubUiStore.setState({
+        spawnContextRepoPath: previous.spawnContextRepoPath,
+        spawnContextByRepoKey: previous.spawnContextByRepoKey,
+        spawnAgentKey: previous.spawnAgentKey,
+        spawnModel: previous.spawnModel,
+        spawnReasoning: previous.spawnReasoning,
+      });
+    }
+  });
+
   test('drops the legacy path-keyed repository group cache', () => {
     const migrated = migrateDroneHubUiPersistedState(
       {

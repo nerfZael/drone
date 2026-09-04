@@ -143,6 +143,11 @@ describe('name suggestion model', () => {
       ).rejects.toThrow('stop after request capture');
       expect(requestBody?.model).toBe(DEFAULT_DRONE_NAME_MODEL_ID);
       expect(requestBody?.reasoning).toEqual({ effort: 'none', summary: 'auto' });
+      expect(requestBody?.instructions).toContain(
+        'Your response must match this JSON Schema exactly:',
+      );
+      expect(requestBody?.instructions).toContain('"required":["name"]');
+      expect(requestBody?.instructions).toContain('"name"');
     } finally {
       globalThis.fetch = originalFetch;
       globalThis.WebSocket = originalWebSocket;
