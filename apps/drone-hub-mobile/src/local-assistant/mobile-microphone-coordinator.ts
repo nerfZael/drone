@@ -1,4 +1,4 @@
-export type MobileMicrophoneOwner = 'single-shot' | 'continuous' | 'companion';
+export type MobileMicrophoneOwner = 'single-shot' | 'continuous' | 'companion' | 'dictation';
 
 export type MobileMicrophoneLease = {
   readonly owner: MobileMicrophoneOwner;

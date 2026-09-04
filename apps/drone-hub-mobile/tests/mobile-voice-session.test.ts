@@ -42,6 +42,23 @@ describe('mobile voice session', () => {
     expect(resolveMobileCompanionVoiceStatus('idle', session)).toBe('idle');
   });
 
+  test('publishes the global dictation recorder through the shared snapshot', () => {
+    const session = resolveMobileVoiceSession({
+      ...idleInput,
+      recordingSession: { kind: 'dictation', status: 'recording' },
+      recordingDurationMillis: 2_500,
+      microphoneAvailable: false,
+    });
+
+    expect(session).toEqual({
+      kind: 'dictation',
+      status: 'recording',
+      durationMillis: 2_500,
+      microphoneAvailable: false,
+    });
+    expect(resolveMobileCompanionVoiceStatus('idle', session)).toBe('idle');
+  });
+
   test('normalizes paused and unexpectedly stopped Companion recordings', () => {
     const paused = resolveMobileVoiceSession({
       ...idleInput,

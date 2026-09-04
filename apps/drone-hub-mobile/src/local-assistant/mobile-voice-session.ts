@@ -3,7 +3,7 @@ import type { MobileContinuousVoiceMode } from './mobile-continuous-dictation';
 import type { MobileContinuousVoiceStatus } from './mobile-continuous-voice-lifecycle';
 import type { MobileVoiceRecordingStatus } from './mobile-voice-transcription-model';
 
-export type MobileRecordedVoiceSessionOwner = 'single-shot' | 'companion';
+export type MobileRecordedVoiceSessionOwner = 'single-shot' | 'companion' | 'dictation';
 
 export type MobileRecordedVoiceSession =
   | { kind: 'idle'; status: 'idle' }
@@ -18,7 +18,7 @@ export type MobileVoiceSession = { microphoneAvailable: boolean } & (
       status: 'idle';
     }
   | {
-      kind: 'single-shot' | 'companion';
+      kind: MobileRecordedVoiceSessionOwner;
       status: Exclude<MobileVoiceRecordingStatus, 'idle'>;
       durationMillis: number;
     }
