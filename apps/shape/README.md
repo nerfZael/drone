@@ -2,6 +2,8 @@
 
 A full-screen Expo and React Native shader study. It renders a rotatable 3D solid that can morph into a softly moving blob.
 
+The main form periodically buds smaller droplets that travel into bottom lanes, harden into triangular prisms, and continue spinning independently.
+
 ## Run it
 
 From the repository root:

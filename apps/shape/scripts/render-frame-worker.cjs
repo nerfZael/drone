@@ -6,13 +6,16 @@ const CanvasKitInit = require("canvaskit-wasm/bin/full/canvaskit");
 
 const MORPH_TAPS = [0.9, 2.05, 6.65, 6.9, 7.15];
 const SHAPE_TAPS = [2.55, 3.1, 3.65, 4.2, 4.75, 5.3, 5.85];
+const CHILD_COUNT = 5;
+const CHILD_LIFETIME_SECONDS = 9;
 
 async function renderFrames() {
   const CanvasKit = await CanvasKitInit();
-  const effect = CanvasKit.RuntimeEffect.Make(readShaderSource());
+  const mainEffect = CanvasKit.RuntimeEffect.Make(readShaderSource("morph-shader.ts"));
+  const miniEffect = CanvasKit.RuntimeEffect.Make(readShaderSource("mini-prism-shader.ts"));
   const surface = CanvasKit.MakeSurface(workerData.width, workerData.height);
 
-  if (!effect || !surface) {
+  if (!mainEffect || !miniEffect || !surface) {
     throw new Error("Could not initialize the shader renderer.");
   }
 
@@ -25,7 +28,7 @@ async function renderFrames() {
     frame += workerData.workerCount
   ) {
     const time = frame / workerData.framesPerSecond;
-    const shader = effect.makeShader([
+    let shader = mainEffect.makeShader([
       workerData.width,
       workerData.height,
       -0.18 + Math.sin(time * 0.72) * 0.24,
@@ -38,12 +41,38 @@ async function renderFrames() {
 
     paint.setShader(shader);
     canvas.drawRect(CanvasKit.XYWHRect(0, 0, workerData.width, workerData.height), paint);
-    surface.flush();
+    shader.delete();
 
+    const childBoxSize = 96 * (workerData.width / 390);
+    for (let index = 0; index < CHILD_COUNT; index += 1) {
+      const motion = getMiniMotion(time, index, workerData.width, workerData.height);
+      shader = miniEffect.makeShader([
+        motion.centerX,
+        motion.centerY,
+        childBoxSize,
+        time,
+        motion.phase,
+        index / CHILD_COUNT,
+        motion.opacity,
+        1,
+      ]);
+      paint.setShader(shader);
+      canvas.drawRect(
+        CanvasKit.XYWHRect(
+          motion.centerX - childBoxSize / 2,
+          motion.centerY - childBoxSize / 2,
+          childBoxSize,
+          childBoxSize,
+        ),
+        paint,
+      );
+      shader.delete();
+    }
+
+    surface.flush();
     const image = surface.makeImageSnapshot();
     const png = image.encodeToBytes();
     image.delete();
-    shader.delete();
 
     if (!png) {
       throw new Error(`Could not encode frame ${frame}.`);
@@ -55,16 +84,40 @@ async function renderFrames() {
   }
 
   paint.delete();
-  effect.delete();
+  mainEffect.delete();
+  miniEffect.delete();
   surface.delete();
 }
 
-function readShaderSource() {
+function readShaderSource(fileName) {
   const shaderFile = fs.readFileSync(
-    path.join(workerData.rootDirectory, "src/morph-shader.ts"),
+    path.join(workerData.rootDirectory, "src", fileName),
     "utf8",
   );
   return shaderFile.slice(shaderFile.indexOf("`") + 1, shaderFile.lastIndexOf("`"));
+}
+
+function getMiniMotion(time, index, width, height) {
+  const startDelay = 1.1 + index * 1.35;
+  const localTime = time - startDelay;
+  const isActive = localTime >= 0 ? 1 : 0;
+  const phase = (Math.max(localTime, 0) % CHILD_LIFETIME_SECONDS) / CHILD_LIFETIME_SECONDS;
+  const travel = phase < 0.04
+    ? 0
+    : 1 - Math.pow(1 - Math.min(1, (phase - 0.04) / 0.42), 3);
+  const laneWidth = Math.min(width * 0.16, 64 * (width / 390));
+  const laneOffset = (index - (CHILD_COUNT - 1) / 2) * laneWidth;
+  const separation = Math.sin(Math.min(1, travel) * Math.PI) * width * 0.025;
+  const direction = index % 2 === 0 ? -1 : 1;
+  const fadeIn = Math.min(1, phase / 0.035);
+  const fadeOut = 1 - Math.max(0, Math.min(1, (phase - 0.90) / 0.10));
+
+  return {
+    centerX: width * 0.5 + laneOffset * travel + separation * direction,
+    centerY: height * 0.54 + (height * 0.87 - height * 0.54) * travel,
+    opacity: isActive * fadeIn * fadeOut,
+    phase,
+  };
 }
 
 function getAnimatedValue(time, taps, duration, toggles) {

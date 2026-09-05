@@ -10,6 +10,7 @@ import {
   withTiming,
 } from "react-native-reanimated";
 
+import { MiniPrisms } from "./MiniPrisms";
 import { morphShader } from "./morph-shader";
 
 const SHAPE_COUNT = 8;
@@ -94,6 +95,13 @@ export function MorphingForm() {
           <Fill>
             {morphShader ? <Shader source={morphShader} uniforms={uniforms} /> : null}
           </Fill>
+          <MiniPrisms
+            clock={clock}
+            height={height}
+            pixelRatio={pixelRatio}
+            reduceMotion={reduceMotion}
+            width={width}
+          />
         </Canvas>
       </View>
     </GestureDetector>
