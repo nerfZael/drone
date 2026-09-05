@@ -1,12 +1,22 @@
-import { Rect, Shader } from "@shopify/react-native-skia";
+import { Rect, Shader, Text, matchFont } from "@shopify/react-native-skia";
+import type { SkFont } from "@shopify/react-native-skia";
+import { useMemo } from "react";
 import type { SharedValue } from "react-native-reanimated";
 import { useDerivedValue } from "react-native-reanimated";
 
 import { miniPrismShader } from "./mini-prism-shader";
 
-const CHILD_COUNT = 5;
 const CHILD_BOX_SIZE = 96;
 const CHILD_LIFETIME_SECONDS = 9;
+const CHILD_NAMES = [
+  "FastRabbit",
+  "QuickFox",
+  "SwiftOtter",
+  "BrightOwl",
+  "NimbleWolf",
+] as const;
+const CHILD_COUNT = CHILD_NAMES.length;
+const LABEL_OFFSET = 38;
 
 type MiniPrismsProps = {
   clock: SharedValue<number>;
@@ -17,16 +27,33 @@ type MiniPrismsProps = {
 };
 
 type MiniPrismProps = MiniPrismsProps & {
+  font: SkFont;
   index: number;
+  name: string;
 };
 
 export function MiniPrisms(props: MiniPrismsProps) {
-  return Array.from({ length: CHILD_COUNT }, (_, index) => (
-    <MiniPrism key={index} {...props} index={index} />
+  const font = useMemo(
+    () => matchFont({ fontFamily: "System", fontSize: 9.5, fontWeight: "500" }),
+    [],
+  );
+
+  return CHILD_NAMES.map((name, index) => (
+    <MiniPrism key={name} {...props} font={font} index={index} name={name} />
   ));
 }
 
-function MiniPrism({ clock, height, index, pixelRatio, reduceMotion, width }: MiniPrismProps) {
+function MiniPrism({
+  clock,
+  font,
+  height,
+  index,
+  name,
+  pixelRatio,
+  reduceMotion,
+  width,
+}: MiniPrismProps) {
+  const labelWidth = font.measureText(name).width;
   const motion = useDerivedValue(() => {
     const seconds = clock.value / 1000;
     const startDelay = 1.1 + index * 1.35;
@@ -48,10 +75,12 @@ function MiniPrism({ clock, height, index, pixelRatio, reduceMotion, width }: Mi
     const centerY = startY + (endY - startY) * travel;
     const fadeIn = Math.min(1, phase / 0.035);
     const fadeOut = 1 - Math.max(0, Math.min(1, (phase - 0.90) / 0.10));
+    const labelReveal = Math.max(0, Math.min(1, (phase - 0.28) / 0.08));
 
     return {
       centerX,
       centerY,
+      labelOpacity: (reduceMotion ? 0.78 : isActive) * fadeOut * labelReveal * 0.72,
       opacity: (reduceMotion ? 0.78 : isActive) * fadeIn * fadeOut,
       phase,
       seconds: reduceMotion ? index * 0.7 : seconds,
@@ -60,6 +89,9 @@ function MiniPrism({ clock, height, index, pixelRatio, reduceMotion, width }: Mi
 
   const x = useDerivedValue(() => motion.value.centerX - CHILD_BOX_SIZE / 2);
   const y = useDerivedValue(() => motion.value.centerY - CHILD_BOX_SIZE / 2);
+  const labelX = useDerivedValue(() => motion.value.centerX - labelWidth / 2);
+  const labelY = useDerivedValue(() => motion.value.centerY + LABEL_OFFSET);
+  const labelOpacity = useDerivedValue(() => motion.value.labelOpacity);
   const uniforms = useDerivedValue(() => ({
     boxSize: CHILD_BOX_SIZE,
     center: [motion.value.centerX, motion.value.centerY],
@@ -73,8 +105,18 @@ function MiniPrism({ clock, height, index, pixelRatio, reduceMotion, width }: Mi
   if (!miniPrismShader) return null;
 
   return (
-    <Rect height={CHILD_BOX_SIZE} width={CHILD_BOX_SIZE} x={x} y={y}>
-      <Shader source={miniPrismShader} uniforms={uniforms} />
-    </Rect>
+    <>
+      <Rect height={CHILD_BOX_SIZE} width={CHILD_BOX_SIZE} x={x} y={y}>
+        <Shader source={miniPrismShader} uniforms={uniforms} />
+      </Rect>
+      <Text
+        color="#B8B2CE"
+        font={font}
+        opacity={labelOpacity}
+        text={name}
+        x={labelX}
+        y={labelY}
+      />
+    </>
   );
 }

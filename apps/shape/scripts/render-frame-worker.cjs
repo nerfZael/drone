@@ -6,8 +6,15 @@ const CanvasKitInit = require("canvaskit-wasm/bin/full/canvaskit");
 
 const MORPH_TAPS = [0.9, 2.05, 6.65, 6.9, 7.15];
 const SHAPE_TAPS = [2.55, 3.1, 3.65, 4.2, 4.75, 5.3, 5.85];
-const CHILD_COUNT = 5;
 const CHILD_LIFETIME_SECONDS = 9;
+const CHILD_NAMES = ["FastRabbit", "QuickFox", "SwiftOtter", "BrightOwl", "NimbleWolf"];
+const CHILD_COUNT = CHILD_NAMES.length;
+const LABEL_OFFSET = 38;
+const LABEL_FONT_PATHS = [
+  process.env.SHAPE_DEMO_FONT,
+  "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+  "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+].filter(Boolean);
 
 async function renderFrames() {
   const CanvasKit = await CanvasKitInit();
@@ -21,6 +28,17 @@ async function renderFrames() {
 
   const canvas = surface.getCanvas();
   const paint = new CanvasKit.Paint();
+  const labelPaint = new CanvasKit.Paint();
+  const fontData = readFontData();
+  const typeface = CanvasKit.Typeface.MakeFreeTypeFaceFromData(fontData);
+
+  if (!typeface) {
+    throw new Error("Could not initialize the demo label typeface.");
+  }
+
+  const displayScale = workerData.width / 390;
+  const labelFont = new CanvasKit.Font(typeface, 9.5 * displayScale);
+  labelPaint.setAntiAlias(true);
 
   for (
     let frame = workerData.workerIndex;
@@ -43,9 +61,11 @@ async function renderFrames() {
     canvas.drawRect(CanvasKit.XYWHRect(0, 0, workerData.width, workerData.height), paint);
     shader.delete();
 
-    const childBoxSize = 96 * (workerData.width / 390);
+    const childBoxSize = 96 * displayScale;
+    const childMotions = [];
     for (let index = 0; index < CHILD_COUNT; index += 1) {
       const motion = getMiniMotion(time, index, workerData.width, workerData.height);
+      childMotions.push(motion);
       shader = miniEffect.makeShader([
         motion.centerX,
         motion.centerY,
@@ -69,6 +89,23 @@ async function renderFrames() {
       shader.delete();
     }
 
+    for (let index = 0; index < CHILD_COUNT; index += 1) {
+      const motion = childMotions[index];
+      const name = CHILD_NAMES[index];
+      const glyphs = labelFont.getGlyphIDs(name);
+      const labelWidth = labelFont
+        .getGlyphWidths(glyphs)
+        .reduce((sum, glyphWidth) => sum + glyphWidth, 0);
+      labelPaint.setColor(CanvasKit.Color(184, 178, 206, motion.labelOpacity));
+      canvas.drawText(
+        name,
+        motion.centerX - labelWidth / 2,
+        motion.centerY + LABEL_OFFSET * displayScale,
+        labelPaint,
+        labelFont,
+      );
+    }
+
     surface.flush();
     const image = surface.makeImageSnapshot();
     const png = image.encodeToBytes();
@@ -84,9 +121,23 @@ async function renderFrames() {
   }
 
   paint.delete();
+  labelPaint.delete();
+  labelFont.delete();
+  typeface.delete();
   mainEffect.delete();
   miniEffect.delete();
   surface.delete();
+}
+
+function readFontData() {
+  const fontPath = LABEL_FONT_PATHS.find((candidate) => fs.existsSync(candidate));
+
+  if (!fontPath) {
+    throw new Error("No demo font found. Set SHAPE_DEMO_FONT to a .ttf file.");
+  }
+
+  const data = fs.readFileSync(fontPath);
+  return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
 }
 
 function readShaderSource(fileName) {
@@ -111,10 +162,12 @@ function getMiniMotion(time, index, width, height) {
   const direction = index % 2 === 0 ? -1 : 1;
   const fadeIn = Math.min(1, phase / 0.035);
   const fadeOut = 1 - Math.max(0, Math.min(1, (phase - 0.90) / 0.10));
+  const labelReveal = Math.max(0, Math.min(1, (phase - 0.28) / 0.08));
 
   return {
     centerX: width * 0.5 + laneOffset * travel + separation * direction,
     centerY: height * 0.54 + (height * 0.87 - height * 0.54) * travel,
+    labelOpacity: isActive * fadeOut * labelReveal * 0.72,
     opacity: isActive * fadeIn * fadeOut,
     phase,
   };
