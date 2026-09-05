@@ -1,5 +1,5 @@
 import { Canvas, Fill, Shader, useClock } from "@shopify/react-native-skia";
-import { StyleSheet, useWindowDimensions, View } from "react-native";
+import { PixelRatio, StyleSheet, useWindowDimensions, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import {
   Easing,
@@ -24,9 +24,11 @@ export function MorphingForm() {
   const shape = useSharedValue(0);
   const shapeTarget = useSharedValue(0);
   const reduceMotion = useReducedMotion();
+  const pixelRatio = PixelRatio.get();
 
   const uniforms = useDerivedValue(() => ({
     morph: morph.value,
+    pixelRatio,
     resolution: [width, height],
     rotation: [rotationX.value, rotationY.value],
     shape: shape.value,

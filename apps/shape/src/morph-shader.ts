@@ -6,6 +6,7 @@ export const morphShader = Skia.RuntimeEffect.Make(`
   uniform float time;
   uniform float morph;
   uniform float shape;
+  uniform float pixelRatio;
 
   const float PI = 3.14159265;
   const float PHI = 1.61803399;
@@ -147,21 +148,31 @@ export const morphShader = Skia.RuntimeEffect.Make(`
   }
 
   float3 sceneNormal(float3 point) {
-    const float epsilon = 0.0025;
-    float center = sceneDistance(point);
-    return normalize(float3(
-      sceneDistance(point + float3(epsilon, 0.0, 0.0)) - center,
-      sceneDistance(point + float3(0.0, epsilon, 0.0)) - center,
-      sceneDistance(point + float3(0.0, 0.0, epsilon)) - center
-    ));
+    const float epsilon = 0.0016;
+    const float3 directionA = float3(1.0, -1.0, -1.0);
+    const float3 directionB = float3(-1.0, -1.0, 1.0);
+    const float3 directionC = float3(-1.0, 1.0, -1.0);
+    const float3 directionD = float3(1.0, 1.0, 1.0);
+    return normalize(
+      directionA * sceneDistance(point + directionA * epsilon)
+      + directionB * sceneDistance(point + directionB * epsilon)
+      + directionC * sceneDistance(point + directionC * epsilon)
+      + directionD * sceneDistance(point + directionD * epsilon)
+    );
   }
 
-  half4 main(float2 position) {
-    float shortestSide = min(resolution.x, resolution.y);
-    float2 screenUv = position / resolution;
-    float2 point = (position - resolution * 0.5) / shortestSide;
-    point.y *= -1.0;
+  float3 toneMap(float3 color) {
+    color = max(color, float3(0.0));
+    return clamp(
+      (color * (2.51 * color + 0.03))
+        / (color * (2.43 * color + 0.59) + 0.14),
+      0.0,
+      1.0
+    );
+  }
 
+  float3 backgroundColor(float2 position) {
+    float2 screenUv = position / resolution;
     float vignette = 1.0 - smoothstep(0.18, 0.82, distance(screenUv, float2(0.5)));
     float3 background = mix(
       float3(0.012, 0.014, 0.035),
@@ -169,7 +180,14 @@ export const morphShader = Skia.RuntimeEffect.Make(`
       screenUv.y * 0.54 + vignette * 0.12
     );
     float grain = hash21(floor(position * 0.55)) - 0.5;
-    background += grain * 0.010;
+    return background + grain * 0.010;
+  }
+
+  float3 renderScene(float2 position, out float edgeMetric) {
+    float shortestSide = min(resolution.x, resolution.y);
+    float2 point = (position - resolution * 0.5) / shortestSide;
+    point.y *= -1.0;
+    float3 background = backgroundColor(position);
 
     float3 rayOrigin = float3(0.0, 0.0, 3.15);
     float3 rayDirection = normalize(float3(point * 1.72, -1.72));
@@ -188,7 +206,8 @@ export const morphShader = Skia.RuntimeEffect.Make(`
         float distanceToScene = sceneDistance(samplePoint);
         closest = min(closest, abs(distanceToScene));
 
-        if (distanceToScene < 0.0022) {
+        float hitEpsilon = max(0.00055, travel * 0.00052);
+        if (distanceToScene < hitEpsilon) {
           hit = 1.0;
           break;
         }
@@ -200,6 +219,11 @@ export const morphShader = Skia.RuntimeEffect.Make(`
     }
 
     if (hit > 0.5) {
+      for (int refinement = 0; refinement < 3; refinement += 1) {
+        float refinedDistance = sceneDistance(rayOrigin + rayDirection * travel);
+        travel += refinedDistance * mix(0.86, 0.58, morph);
+      }
+
       float3 surfacePoint = rayOrigin + rayDirection * travel;
       float3 normal = sceneNormal(surfacePoint);
       float3 viewDirection = -rayDirection;
@@ -221,14 +245,46 @@ export const morphShader = Skia.RuntimeEffect.Make(`
       material += float3(0.65, 0.86, 1.0) * specular * 1.15;
       material += mix(float3(0.18, 0.30, 1.0), float3(0.72, 0.25, 1.0), palette)
         * fresnel * 0.68;
+      material = toneMap(material);
 
       float fog = smoothstep(2.0, 4.8, travel) * 0.24;
       background = mix(material, background, fog);
+      edgeMetric = abs(dot(normal, viewDirection));
     } else {
       float glow = exp(-closest * 18.0) * 0.16;
       background += float3(0.20, 0.22, 1.0) * glow;
+      edgeMetric = min(1.0, closest * 14.0);
     }
 
-    return half4(background, 1.0);
+    return background;
+  }
+
+  half4 main(float2 position) {
+    float edgeMetric = 1.0;
+    float3 color = renderScene(position, edgeMetric);
+
+    if (edgeMetric < 0.22) {
+      float ignoredMetric = 1.0;
+      float sampleOffset = 0.32 / max(pixelRatio, 1.0);
+      float3 antialiasedColor = renderScene(
+        position + float2(-sampleOffset, -sampleOffset),
+        ignoredMetric
+      );
+      antialiasedColor += renderScene(
+        position + float2(sampleOffset, -sampleOffset),
+        ignoredMetric
+      );
+      antialiasedColor += renderScene(
+        position + float2(-sampleOffset, sampleOffset),
+        ignoredMetric
+      );
+      antialiasedColor += renderScene(
+        position + float2(sampleOffset, sampleOffset),
+        ignoredMetric
+      );
+      color = antialiasedColor * 0.25;
+    }
+
+    return half4(color, 1.0);
   }
 `);
