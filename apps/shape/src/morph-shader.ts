@@ -171,6 +171,22 @@ export const morphShader = Skia.RuntimeEffect.Make(`
     );
   }
 
+  float3 spectralPalette(float phase) {
+    float position = fract(phase) * 5.0;
+    float blend = smoothstep(0.0, 1.0, fract(position));
+    float3 indigo = float3(0.16, 0.04, 0.72);
+    float3 cyan = float3(0.03, 0.82, 1.0);
+    float3 chartreuse = float3(0.70, 1.0, 0.14);
+    float3 coral = float3(1.0, 0.20, 0.10);
+    float3 magenta = float3(0.96, 0.07, 0.82);
+
+    if (position < 1.0) return mix(indigo, cyan, blend);
+    if (position < 2.0) return mix(cyan, chartreuse, blend);
+    if (position < 3.0) return mix(chartreuse, coral, blend);
+    if (position < 4.0) return mix(coral, magenta, blend);
+    return mix(magenta, indigo, blend);
+  }
+
   float3 backgroundColor(float2 position) {
     float2 screenUv = position / resolution;
     float vignette = 1.0 - smoothstep(0.18, 0.82, distance(screenUv, float2(0.5)));
@@ -235,16 +251,16 @@ export const morphShader = Skia.RuntimeEffect.Make(`
       float specular = pow(max(dot(normal, halfDirection), 0.0), mix(46.0, 18.0, morph));
       float fresnel = pow(1.0 - max(dot(normal, viewDirection), 0.0), 2.2);
 
-      float palette = 0.5 + 0.5 * normal.x;
-      palette += normal.y * 0.16 + sin(surfacePoint.y * 3.0 + time * 0.25) * morph * 0.08;
-      palette = clamp(palette, 0.0, 1.0);
-      float3 cool = float3(0.09, 0.30, 1.0);
-      float3 warm = float3(0.74, 0.20, 1.0);
-      float3 material = mix(cool, warm, palette);
-      material *= 0.44 + diffuse * 0.60 + secondary * 0.18;
-      material += float3(0.65, 0.86, 1.0) * specular * 1.15;
-      material += mix(float3(0.18, 0.30, 1.0), float3(0.72, 0.25, 1.0), palette)
-        * fresnel * 0.68;
+      float colorFlow = sin(
+        surfacePoint.y * 5.5 - surfacePoint.x * 2.0 + time * 0.45
+      ) * 0.035;
+      float palettePhase = 0.50 + normal.x * 0.18 + normal.y * 0.12
+        + surfacePoint.y * 0.10 + time * 0.032 + colorFlow;
+      float3 material = spectralPalette(palettePhase);
+      material *= 0.42 + diffuse * 0.62;
+      material += spectralPalette(palettePhase + 0.13) * secondary * 0.16;
+      material += float3(0.82, 0.94, 1.0) * specular * 1.12;
+      material += spectralPalette(palettePhase + 0.24) * fresnel * 0.62;
       material = toneMap(material);
 
       float fog = smoothstep(2.0, 4.8, travel) * 0.24;
@@ -252,7 +268,7 @@ export const morphShader = Skia.RuntimeEffect.Make(`
       edgeMetric = abs(dot(normal, viewDirection));
     } else {
       float glow = exp(-closest * 18.0) * 0.16;
-      background += float3(0.20, 0.22, 1.0) * glow;
+      background += spectralPalette(time * 0.032 + 0.08) * glow;
       edgeMetric = min(1.0, closest * 14.0);
     }
 

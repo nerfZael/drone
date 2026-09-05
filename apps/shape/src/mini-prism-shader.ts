@@ -79,6 +79,22 @@ export const miniPrismShader = Skia.RuntimeEffect.Make(`
     );
   }
 
+  float3 spectralPalette(float phaseValue) {
+    float position = fract(phaseValue) * 5.0;
+    float blend = smoothstep(0.0, 1.0, fract(position));
+    float3 indigo = float3(0.16, 0.04, 0.72);
+    float3 cyan = float3(0.03, 0.82, 1.0);
+    float3 chartreuse = float3(0.70, 1.0, 0.14);
+    float3 coral = float3(1.0, 0.20, 0.10);
+    float3 magenta = float3(0.96, 0.07, 0.82);
+
+    if (position < 1.0) return mix(indigo, cyan, blend);
+    if (position < 2.0) return mix(cyan, chartreuse, blend);
+    if (position < 3.0) return mix(chartreuse, coral, blend);
+    if (position < 4.0) return mix(coral, magenta, blend);
+    return mix(magenta, indigo, blend);
+  }
+
   half4 renderPrism(float2 position) {
     if (opacity < 0.001) return half4(0.0);
 
@@ -124,15 +140,14 @@ export const miniPrismShader = Skia.RuntimeEffect.Make(`
       28.0
     );
     float fresnel = pow(1.0 - max(dot(normal, viewDirection), 0.0), 2.0);
-    float palette = clamp(0.5 + normal.x * 0.42 + normal.y * 0.12, 0.0, 1.0);
-    float3 material = mix(
-      float3(0.08, 0.42, 1.0),
-      float3(0.78, 0.20, 1.0),
-      palette
-    );
-    material *= 0.48 + diffuse * 0.62;
-    material += float3(0.72, 0.90, 1.0) * specular;
-    material += float3(0.30, 0.34, 1.0) * fresnel * 0.48;
+    float colorFlow = sin(surfacePoint.y * 5.5 - surfacePoint.x * 2.0 + time * 0.45)
+      * 0.035;
+    float palettePhase = 0.50 + normal.x * 0.18 + normal.y * 0.12
+      + surfacePoint.y * 0.10 + time * 0.032 + seed * 0.08 + colorFlow;
+    float3 material = spectralPalette(palettePhase);
+    material *= 0.44 + diffuse * 0.64;
+    material += float3(0.82, 0.94, 1.0) * specular;
+    material += spectralPalette(palettePhase + 0.24) * fresnel * 0.52;
     material = toneMap(material);
     return half4(material * opacity, opacity);
   }
@@ -159,11 +174,8 @@ export const miniPrismShader = Skia.RuntimeEffect.Make(`
       0.0,
       1.0
     );
-    float3 material = mix(
-      float3(0.08, 0.38, 0.94),
-      float3(0.70, 0.17, 0.94),
-      sideLight
-    );
+    float neckPhase = time * 0.032 + seed * 0.08 + sideLight * 0.18;
+    float3 material = spectralPalette(neckPhase);
     float highlight = pow(max(1.0 - distanceToNeck / max(radius, 0.001), 0.0), 3.0);
     material = toneMap(material * (0.60 + sideLight * 0.24) + highlight * 0.36);
     float alpha = coverage * opacity * connection;
