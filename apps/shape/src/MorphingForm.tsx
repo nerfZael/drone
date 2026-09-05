@@ -11,6 +11,7 @@ import {
 } from "react-native-reanimated";
 
 import { MiniPrisms } from "./MiniPrisms";
+import { getActiveMitosis, getBudCenter } from "./mitosis-motion";
 import { morphShader } from "./morph-shader";
 
 const SHAPE_COUNT = 8;
@@ -27,14 +28,23 @@ export function MorphingForm() {
   const reduceMotion = useReducedMotion();
   const pixelRatio = PixelRatio.get();
 
-  const uniforms = useDerivedValue(() => ({
-    morph: morph.value,
-    pixelRatio,
-    resolution: [width, height],
-    rotation: [rotationX.value, rotationY.value],
-    shape: shape.value,
-    time: reduceMotion ? 0 : clock.value / 1000,
-  }));
+  const uniforms = useDerivedValue(() => {
+    const seconds = reduceMotion ? 0 : clock.value / 1000;
+    const activeMitosis = getActiveMitosis(seconds);
+    const budCenter = activeMitosis.index < 0
+      ? { x: 0, y: 0, z: 0 }
+      : getBudCenter(activeMitosis.index, activeMitosis.phase, shape.value, morph.value);
+
+    return {
+      mitosis: [budCenter.x, budCenter.y, budCenter.z, activeMitosis.phase],
+      morph: morph.value,
+      pixelRatio,
+      resolution: [width, height],
+      rotation: [rotationX.value, rotationY.value],
+      shape: shape.value,
+      time: seconds,
+    };
+  });
 
   const pan = Gesture.Pan()
     .minDistance(4)
@@ -98,8 +108,12 @@ export function MorphingForm() {
           <MiniPrisms
             clock={clock}
             height={height}
+            morph={morph}
             pixelRatio={pixelRatio}
             reduceMotion={reduceMotion}
+            rotationX={rotationX}
+            rotationY={rotationY}
+            shape={shape}
             width={width}
           />
         </Canvas>
