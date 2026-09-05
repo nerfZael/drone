@@ -90,10 +90,19 @@ describe('repoOps git-native helpers', () => {
       expect(listed.remoteBranches.map((entry) => entry.ref)).toContain('origin/release/next');
       expect(listed.remoteBranches.some((entry) => entry.ref.endsWith('/HEAD'))).toBe(false);
 
+      writeAndCommit(sourceRepo, 'release.txt', 'newest\n', 'advance release');
+      runOrThrow('git', ['push', 'origin', 'release/next'], sourceRepo);
+      const newestRemoteSha = runOrThrow('git', ['rev-parse', 'HEAD'], sourceRepo).trim();
+      const staleHostSha = runOrThrow('git', ['rev-parse', 'origin/release/next'], hostClone).trim();
+      expect(staleHostSha).not.toBe(newestRemoteSha);
+
       const resolved = await gitResolveRemoteBranchForCreate(hostClone, 'origin/release/next');
       expect(resolved.repoRoot).toBe(hostClone);
       expect(resolved.remoteBranch).toBe('origin/release/next');
-      expect(resolved.oid).toMatch(/^[0-9a-f]{40}$/);
+      expect(resolved.oid).toBe(newestRemoteSha);
+      expect(runOrThrow('git', ['rev-parse', 'origin/release/next'], hostClone).trim()).toBe(
+        newestRemoteSha,
+      );
     } finally {
       cleanupSource();
       fs.rmSync(remoteRoot, { recursive: true, force: true });
