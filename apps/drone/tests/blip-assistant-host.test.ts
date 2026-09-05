@@ -18,6 +18,44 @@ import { ensureTestNativeChat } from './native-chat-test-helpers';
 import { withTempDroneDataDir } from './test-helpers';
 
 describe('Blip assistant host', () => {
+  test('Stop cancels every prompt waiting for initialization and permits a later prompt', async () => {
+    await withTempDroneDataDir('blip-stop-startup-', async () => {
+      const faux = registerFauxProvider({ api: 'faux', provider: 'faux', tokensPerSecond: 0 });
+      faux.setResponses([fauxAssistantMessage('Only the new prompt runs')]);
+      const started = Promise.withResolvers<void>();
+      const resume = Promise.withResolvers<void>();
+      const host = new BlipAssistantHost(async () => {
+        started.resolve();
+        await resume.promise;
+        return {
+          provider: 'faux',
+          model: faux.getModel().id,
+          thinkingLevel: 'off',
+          systemPrompt: 'Test',
+          tools: [],
+        };
+      });
+      try {
+        const first = host.promptThread('stopped-thread', 'Must not run');
+        const second = host.promptThread('stopped-thread', 'Must not run either');
+        const settled = Promise.allSettled([first, second]);
+        await started.promise;
+        host.stopThread('stopped-thread');
+        resume.resolve();
+        expect((await settled).map((result) => result.status)).toEqual(['rejected', 'rejected']);
+        expect((await host.historyPage('stopped-thread')).entries).toHaveLength(0);
+        await host.promptThread('stopped-thread', 'New prompt');
+        expect(
+          (await host.historyPage('stopped-thread')).entries.map((entry) => entry.message.role),
+        ).toEqual(['user', 'assistant']);
+      } finally {
+        resume.resolve();
+        await host.close();
+        faux.unregister();
+      }
+    });
+  });
+
   test('maps user-facing provider names to Blip providers', () => {
     expect(toBlipModelProvider('openai')).toBe('openai');
     expect(toBlipModelProvider('codex')).toBe('openai-codex');

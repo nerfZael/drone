@@ -2106,12 +2106,18 @@ export class HubAssistantService {
   async stopThread(threadId: string): Promise<AssistantSnapshot> {
     await this.ensureLoaded();
     const thread = this.getThread(threadId);
-    await getChatQuestionRequestService().skipPendingForChat(
-      thread.ownerDroneId ?? '',
-      thread.ownerChatName ?? 'default',
-      'chat_stopped',
-    );
     this.runtimeStopDelegate?.(threadId);
+    await this.promptQueue()?.cancelPendingForChat(this.promptQueueIdentity(thread));
+    try {
+      await getChatQuestionRequestService().skipPendingForChat(
+        thread.ownerDroneId ?? '',
+        thread.ownerChatName ?? 'default',
+        'chat_stopped',
+      );
+    } finally {
+      // Resolving a suspended question can resume its runtime continuation.
+      this.runtimeStopDelegate?.(threadId);
+    }
     await this.persist();
     return await this.threadSnapshot(threadId);
   }
@@ -2764,11 +2770,13 @@ export class HubAssistantService {
     const thread = this.getThread(threadId);
     const queue = this.requirePromptQueue();
     const identity = this.promptQueueIdentity(thread);
-    await queue.update({
+    const updated = await queue.update({
       ...identity,
       promptId,
       patch: { state: 'sent', error: undefined },
+      expectedStates: ['sending'],
     });
+    if (!updated) return;
     await queue.completeRecovery({ ...identity, recoveryPromptId: promptId });
     thread.updatedAt = nowIso();
     await this.persist();
@@ -2781,16 +2789,19 @@ export class HubAssistantService {
     const queue = this.requirePromptQueue();
     const identity = this.promptQueueIdentity(thread);
     const current = queue.get({ ...identity, promptId });
-    await queue.update({
+    const cancelled = (error as any)?.name === 'AbortError';
+    const updated = await queue.update({
       ...identity,
       promptId,
-      patch: { state: 'failed', error: message },
+      patch: { state: cancelled ? 'cancelled' : 'failed', error: message },
+      expectedStates: ['sending'],
     });
+    if (!updated) return;
     if (!current?.action && isAgentTransportInterruption(message)) {
       await queue.pauseAfterInterruption({ ...identity, promptId });
     }
-    thread.status = 'error';
-    thread.error = message;
+    thread.status = cancelled ? 'idle' : 'error';
+    thread.error = cancelled ? null : message;
     thread.updatedAt = nowIso();
     await this.persist();
   }

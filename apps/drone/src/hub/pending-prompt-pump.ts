@@ -1,5 +1,12 @@
 import { KeyedWorkQueue } from '../background/keyed-work-queue';
 
+export class PendingPromptCancelledError extends Error {
+  constructor() {
+    super('Prompt delivery cancelled');
+    this.name = 'AbortError';
+  }
+}
+
 export interface PendingPromptPumpTarget {
   droneId: string;
   chatName: string;
@@ -43,13 +50,26 @@ type PendingPromptRetryTimer = {
 export class PendingPromptPump {
   readonly #workQueue: KeyedWorkQueue<PendingPromptPumpTarget>;
   readonly #retryTimers = new Map<string, PendingPromptRetryTimer[]>();
+  readonly #activeControllers = new Map<string, AbortController>();
   #abortController = new AbortController();
 
   constructor(private readonly deps: PendingPromptPumpDependencies) {
     this.#workQueue = new KeyedWorkQueue({
       key: (target) => this.#key(target.droneId, target.chatName),
       concurrency: () => this.deps.concurrencyLimit(),
-      run: async (target) => await this.deps.run(target, this.#abortController.signal),
+      run: async (target) => {
+        const key = this.#key(target.droneId, target.chatName);
+        const controller = new AbortController();
+        this.#activeControllers.set(key, controller);
+        try {
+          await this.deps.run(
+            target,
+            AbortSignal.any([controller.signal, this.#abortController.signal]),
+          );
+        } finally {
+          if (this.#activeControllers.get(key) === controller) this.#activeControllers.delete(key);
+        }
+      },
     });
   }
 
@@ -103,6 +123,7 @@ export class PendingPromptPump {
     const key = this.#key(droneId, chatName);
     this.#workQueue.remove(key);
     this.#clearRetry(key);
+    this.#activeControllers.get(key)?.abort(new PendingPromptCancelledError());
   }
 
   migrate(droneIdRaw: string, fromChatNameRaw: string, toChatNameRaw: string): void {
@@ -129,6 +150,7 @@ export class PendingPromptPump {
       for (const entry of entries) clearTimeout(entry.timer);
     }
     this.#retryTimers.clear();
+    this.#abortController.abort(new Error('Prompt delivery reset'));
     await this.#workQueue.reset();
     if (this.#abortController.signal.aborted) this.#abortController = new AbortController();
   }

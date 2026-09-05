@@ -113,8 +113,13 @@ export function NewDroneScreen({
     agent: MobileDroneAgentId,
     runtime: MobileDroneCreateRuntime,
     refresh?: boolean,
+    signal?: AbortSignal,
   ): Promise<MobileDroneCreateModel[]>;
-  onLoadRepoBranches(repoPath: string, refresh?: boolean): Promise<MobileDroneCreateRepo>;
+  onLoadRepoBranches(
+    repoPath: string,
+    refresh?: boolean,
+    signal?: AbortSignal,
+  ): Promise<MobileDroneCreateRepo>;
   onLoadRepoPreferences(repoPath: string): Promise<MobileDroneCreatePreferences | null>;
   onDraftContentChange(content: MobileNewDroneDraftContent): void;
   onCreate(
@@ -136,9 +141,7 @@ export function NewDroneScreen({
   const [agentPickerOpen, setAgentPickerOpen] = React.useState(false);
   const [accessPickerOpen, setAccessPickerOpen] = React.useState(false);
   const [agentPermissionMode, setAgentPermissionMode] =
-    React.useState<MobileDroneAgentPermissionMode>(
-      initialValues?.agentPermissionMode ?? 'execute',
-    );
+    React.useState<MobileDroneAgentPermissionMode>(initialValues?.agentPermissionMode ?? 'execute');
   const [approvalPolicy, setApprovalPolicy] = React.useState<MobileDroneApprovalPolicy>(
     initialValues?.approvalPolicy ?? 'ask',
   );
@@ -205,21 +208,27 @@ export function NewDroneScreen({
     return () => subscription.remove();
   }, [scrollMessageIntoView]);
 
+  const modelAbortRef = React.useRef<AbortController | null>(null);
+
   const detectModels = React.useCallback(
     async (refresh = false) => {
+      modelAbortRef.current?.abort();
+      const controller = new AbortController();
+      modelAbortRef.current = controller;
       const requestId = modelRequestId.current + 1;
       modelRequestId.current = requestId;
       setModelsLoading(true);
       setModelsError(null);
       try {
-        const next = await onDetectModels(agent, runtime, refresh);
-        if (modelRequestId.current !== requestId) return;
+        const next = await onDetectModels(agent, runtime, refresh, controller.signal);
+        if (controller.signal.aborted || modelRequestId.current !== requestId) return;
         setModels(next);
       } catch (error: any) {
-        if (modelRequestId.current !== requestId) return;
+        if (controller.signal.aborted || modelRequestId.current !== requestId) return;
         setModelsError(String(error?.message ?? error ?? 'Could not detect models.'));
       } finally {
-        if (modelRequestId.current === requestId) setModelsLoading(false);
+        if (!controller.signal.aborted && modelRequestId.current === requestId)
+          setModelsLoading(false);
       }
     },
     [agent, onDetectModels, runtime],
@@ -227,6 +236,7 @@ export function NewDroneScreen({
 
   React.useEffect(() => {
     void detectModels(false);
+    return () => modelAbortRef.current?.abort();
   }, [detectModels]);
 
   React.useEffect(() => {
@@ -261,14 +271,17 @@ export function NewDroneScreen({
       return;
     }
     setBranchesLoading(true);
-    void onLoadRepoBranches(repoPath)
+    const controller = new AbortController();
+    void onLoadRepoBranches(repoPath, false, controller.signal)
       .catch((error: any) => {
-        if (branchRequestId.current !== requestId) return;
+        if (controller.signal.aborted || branchRequestId.current !== requestId) return;
         setBranchesLoadError(String(error?.message ?? error ?? 'Could not load branches.'));
       })
       .finally(() => {
-        if (branchRequestId.current === requestId) setBranchesLoading(false);
+        if (!controller.signal.aborted && branchRequestId.current === requestId)
+          setBranchesLoading(false);
       });
+    return () => controller.abort();
   }, [onLoadRepoBranches, repoPath, selectedRepo?.branchesLoaded]);
 
   React.useEffect(() => {

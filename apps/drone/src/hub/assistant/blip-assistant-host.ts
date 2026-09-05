@@ -38,7 +38,7 @@ export class BlipAssistantHost {
     Set<(event: BlipRuntimeEvent) => Promise<void> | void>
   >();
   private readonly invalidatedThreads = new Set<string>();
-  private readonly abortRequestedThreads = new Set<string>();
+  private readonly promptControllers = new Map<string, Set<AbortController>>();
   private readonly loadedTools = new Map<string, AgentTool<any>[]>();
   private readonly loadedConfigurations = new Map<string, BlipAssistantThreadConfiguration>();
 
@@ -75,14 +75,16 @@ export class BlipAssistantHost {
     onEvent?: (event: BlipRuntimeEvent) => Promise<void> | void,
     deliveryMode?: 'queue' | 'asap',
   ): Promise<void> {
+    const controller = new AbortController();
+    const controllers = this.promptControllers.get(threadId) ?? new Set<AbortController>();
+    controllers.add(controller);
+    this.promptControllers.set(threadId, controllers);
     if (onEvent) {
       this.subscribeEvents(threadId, onEvent);
     }
     try {
       const handle = await this.handle(threadId);
-      if (this.abortRequestedThreads.delete(threadId)) {
-        throw new Error('Assistant run cancelled');
-      }
+      controller.signal.throwIfAborted();
       const effectiveDeliveryMode =
         deliveryMode ?? this.loadedConfigurations.get(threadId)?.promptDeliveryMode;
       if (handle.running && effectiveDeliveryMode === 'asap') {
@@ -90,7 +92,10 @@ export class BlipAssistantHost {
         await handle.waitForIdle();
       } else if (handle.running) await handle.enqueue(prompt);
       else await handle.prompt(prompt);
+      controller.signal.throwIfAborted();
     } finally {
+      controllers.delete(controller);
+      if (controllers.size === 0) this.promptControllers.delete(threadId);
       if (onEvent) {
         const sinks = this.eventSinks.get(threadId);
         sinks?.delete(onEvent);
@@ -128,12 +133,12 @@ export class BlipAssistantHost {
   }
 
   abortThread(threadId: string): void {
-    const handle = this.handles.get(threadId);
-    if (handle) {
-      handle.abort();
-      return;
+    // Every pending prompt owns a signal, including prompts waiting for session setup.
+    // Aborting the handle alone misses that window and allows a late prompt to start.
+    for (const controller of this.promptControllers.get(threadId) ?? []) {
+      controller.abort(Object.assign(new Error('Assistant run cancelled'), { name: 'AbortError' }));
     }
-    if (this.handlePromises.has(threadId)) this.abortRequestedThreads.add(threadId);
+    this.handles.get(threadId)?.abort();
   }
 
   historyPage(
@@ -360,7 +365,7 @@ export class BlipAssistantHost {
   }
 
   stopThread(threadId: string): void {
-    this.handles.get(threadId)?.abort();
+    this.abortThread(threadId);
   }
 
   invalidateThread(threadId: string): void {
@@ -400,7 +405,7 @@ export class BlipAssistantHost {
       if (sessionId) await this.repository.delete(sessionId);
     }
     this.handles.delete(threadId);
-    this.abortRequestedThreads.delete(threadId);
+    this.promptControllers.delete(threadId);
     this.invalidatedThreads.delete(threadId);
     this.loadedTools.delete(threadId);
     await this.disposeConfiguration(threadId);

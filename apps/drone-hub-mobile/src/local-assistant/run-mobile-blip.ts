@@ -1,3 +1,4 @@
+import { throwIfAborted } from '@drone/device-protocol';
 import { createBlipSession, createPortableId, type BlipRuntimeEvent } from '@blip/core';
 import { mergeWorkspaceTransferProgress } from '@drone/assistant-chat';
 import { Type, type AgentTool } from '@mariozechner/pi-agent-core/portable';
@@ -103,6 +104,7 @@ export async function runMobileBlip(input: {
     signal?: AbortSignal;
   }): Promise<boolean>;
 }): Promise<LocalAssistantMessage[]> {
+  throwIfAborted(input.signal);
   const providerId = input.provider === 'codex' ? 'openai-codex' : 'openai';
   const repository = new MobileSessionRepository(
     input.thread,
@@ -228,8 +230,10 @@ export async function runMobileBlip(input: {
   });
   const abort = () => handle.abort();
   input.signal.addEventListener('abort', abort, { once: true });
-  if (input.signal.aborted) handle.abort();
   try {
+    // A stop during asynchronous session creation must prevent prompt() entirely.
+    // Aborting an idle handle is insufficient: prompt() starts a fresh run.
+    throwIfAborted(input.signal);
     await handle.prompt({ text: input.prompt, images: input.promptImages ?? [] });
     if (input.signal.aborted)
       throw Object.assign(new Error('Assistant run stopped'), { name: 'AbortError' });

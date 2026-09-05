@@ -41,6 +41,73 @@ function sidebarOperations(
 }
 
 describe('device mesh drone summaries', () => {
+  test('Stop dispatches without reading chat metadata and survives caller cancellation', async () => {
+    const originalFetch = globalThis.fetch;
+    const sent = Promise.withResolvers<void>();
+    const acknowledgement = Promise.withResolvers<Response>();
+    const requests: string[] = [];
+    const capability = createDroneControlCapability({
+      baseUrl: () => 'http://127.0.0.1:7777',
+      apiToken: 'test',
+    });
+    const controller = new AbortController();
+    globalThis.fetch = (async (input, init) => {
+      requests.push(new URL(String(input)).pathname);
+      expect(init?.method).toBe('POST');
+      expect(requests.at(-1)).toBe('/api/drones/drone-a/chats/default/stop');
+      sent.resolve();
+      const response = await acknowledgement.promise;
+      expect(init?.signal?.aborted).not.toBe(true);
+      return response;
+    }) as typeof fetch;
+    try {
+      const stopped = capability.invoke('chat.stop', { droneId: 'drone-a' }, {
+        sourceDevice: { id: 'phone' },
+        signal: controller.signal,
+      } as never);
+      await sent.promise;
+      controller.abort();
+      acknowledgement.resolve(Response.json({ stopped: true }));
+      await expect(stopped).resolves.toMatchObject({ stopped: true });
+      expect(requests).toHaveLength(1);
+    } finally {
+      acknowledgement.resolve(Response.json({ stopped: true }));
+      capability.close();
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('cancels model discovery at the Hub request boundary', async () => {
+    const originalFetch = globalThis.fetch;
+    const started = Promise.withResolvers<AbortSignal>();
+    const capability = createDroneControlCapability({
+      baseUrl: () => 'http://127.0.0.1:7777',
+      apiToken: 'test',
+    });
+    globalThis.fetch = (async (_input, init) => {
+      const signal = init!.signal!;
+      started.resolve(signal);
+      return new Promise<Response>((_resolve, reject) =>
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true }),
+      );
+    }) as typeof fetch;
+    try {
+      const controller = new AbortController();
+      const read = capability.invoke('drones.list', { createModelAgent: 'native' }, {
+        sourceDevice: { id: 'phone' },
+        signal: controller.signal,
+      } as never);
+      void read.catch(() => undefined);
+      const signal = await started.promise;
+      controller.abort();
+      await expect(read).rejects.toMatchObject({ name: 'AbortError' });
+      expect(signal.aborted).toBe(true);
+    } finally {
+      capability.close();
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('cancels a stalled native history read while another drone remains readable', async () => {
     const originalFetch = globalThis.fetch;
     const historyStarted = Promise.withResolvers<AbortSignal>();

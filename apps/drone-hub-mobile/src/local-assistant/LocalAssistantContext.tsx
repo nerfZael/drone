@@ -1,3 +1,4 @@
+import { throwIfAborted } from '@drone/device-protocol';
 import React from 'react';
 import * as Crypto from 'expo-crypto';
 import { isAgentTransportInterruption, promptQueueInterruptionBlocks } from '@drone/assistant-chat';
@@ -97,6 +98,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
   const [error, setError] = React.useState<string | null>(null);
   const [pendingApprovals, setPendingApprovals] = React.useState<LocalAssistantApproval[]>([]);
   const threadsRef = React.useRef<LocalAssistantThread[]>([]);
+  const stopVersionsRef = React.useRef(new Map<string, number>());
   const abortRef = React.useRef<{ threadId: string; controller: AbortController } | null>(null);
   const sendPromptRef = React.useRef<
     (threadId: string, prompt: string, promptImages?: LocalAssistantPromptImage[]) => Promise<void>
@@ -395,6 +397,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
           loadLocalAssistantSettings(),
           loadLocalBlipSessionSnapshot(current),
         ]);
+        throwIfAborted(controller.signal);
         if (settings.provider === 'openai' && !apiKey)
           throw new Error('Add an OpenAI API key in Settings before sending a prompt');
         if (!mesh.identity) throw new Error('Phone device identity is not ready');
@@ -415,6 +418,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
               }
             : {}),
         });
+        throwIfAborted(controller.signal);
         if (!running) throw new Error('Built-in chat was not found');
         const workspaceRuntime = createWorkspaceToolRuntime(running, mesh.request);
         const messages = await runMobileBlip({
@@ -578,6 +582,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
     const candidate = candidates[0];
     if (!candidate) return;
     const { thread, prompt: queued } = candidate;
+    const stopVersion = stopVersionsRef.current.get(thread.id);
     drainingQueuedPromptRef.current = true;
     void (async () => {
       try {
@@ -592,7 +597,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
             queuedPrompts: latest.queuedPrompts.filter((prompt) => prompt.id !== queued.id),
           };
         });
-        if (!claimed) return;
+        if (!claimed || stopVersionsRef.current.get(thread.id) !== stopVersion) return;
         await sendPromptRef.current(thread.id, queued.prompt, queued.promptImages);
       } catch (nextError: any) {
         await mutateThread(thread.id, (latest) => ({
@@ -646,9 +651,17 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
     [mutateThread],
   );
 
-  const stop = React.useCallback((threadId: string) => {
-    if (abortRef.current?.threadId === threadId) abortRef.current.controller.abort();
-  }, []);
+  const stop = React.useCallback(
+    (threadId: string) => {
+      stopVersionsRef.current.set(threadId, (stopVersionsRef.current.get(threadId) ?? 0) + 1);
+      if (abortRef.current?.threadId === threadId) abortRef.current.controller.abort();
+      void mutateThread(threadId, (latest) => ({
+        ...latest,
+        queuedPrompts: latest.queuedPrompts.filter((prompt) => prompt.status !== 'queued'),
+      })).catch((error) => setError(error?.message ?? String(error)));
+    },
+    [mutateThread],
+  );
 
   const value: LocalAssistantContextValue = {
     threads,

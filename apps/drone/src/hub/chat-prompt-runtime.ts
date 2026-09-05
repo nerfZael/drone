@@ -28,6 +28,7 @@ import {
   nativeAssistantOwnsPromptDelivery,
   pendingPromptKeepsChatBusy,
   PendingPromptPump,
+  PendingPromptCancelledError,
 } from './pending-prompt-pump';
 import type { PendingPrompt } from './drone-pending-prompts';
 import { chatPromptAcceptancePlan } from './prompt-acceptance';
@@ -1517,11 +1518,11 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     const chatName = normalizeChatName(opts.chatName);
     if (!droneId) throw new Error('missing droneId');
 
-    await ensureChatEntry({ droneId, chatName });
-    await reconcileChatFromDaemon({ droneId, chatName });
-
-    const regAny: any = await loadRegistry();
-    const entry = regAny?.drones?.[droneId]?.chats?.[chatName] ?? null;
+    // Interrupt local delivery before any I/O. Stop must not wait for a daemon
+    // history read, and an in-flight preparation must not enqueue after Stop.
+    if (!opts.promptIds?.length) pendingPromptPump.delete(droneId, chatName);
+    const stored = readChatFromStore({ droneId, chatName });
+    const entry = stored.available ? stored.chat : opts.droneEntry?.chats?.[chatName];
     const transcriptIds = transcriptTurnIdsFromEntry(entry);
     const pending = (await readPendingPrompts({ droneId, chatName })).filter(
       (item: any) => !transcriptIds.has(item.id),
@@ -1548,6 +1549,20 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       .filter((item: any) => item.state === 'sending' || item.state === 'sent')
       .map((item: any) => item.id);
 
+    const stoppedPromptIds: string[] = [];
+    const clearedPromptIds: string[] = [];
+    // Clear queued work before interrupting the active turn, so its completion
+    // cannot dispatch a follow-up. Include any prompt claimed during this race.
+    for (const id of queuedIds) {
+      const cancelled = await cancelQueuedPendingPrompt({ droneId, chatName, promptId: id });
+      if (cancelled.status === 'cancelled') clearedPromptIds.push(id);
+      else if (
+        cancelled.status === 'already-submitted' &&
+        (cancelled.pendingState === 'sending' || cancelled.pendingState === 'sent')
+      )
+        activeIds.push(id);
+    }
+
     if (activeIds.length > 0) {
       const token =
         typeof opts.droneEntry?.token === 'string' ? String(opts.droneEntry.token).trim() : '';
@@ -1562,24 +1577,19 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         throw new Error('drone daemon not reachable (missing hostPort/token)');
 
       const client = makeClient(hostPort, token);
-      for (const promptId of activeIds) {
-        try {
-          // eslint-disable-next-line no-await-in-loop
-          await dronePromptCancel(client, promptId);
-        } catch (e: any) {
-          const msg = e?.message ?? String(e);
-          if (!isNotFoundErrorMessage(msg)) throw e;
-        }
-      }
+      const results = await Promise.allSettled(
+        activeIds.map(async (promptId: string) => {
+          try {
+            await dronePromptCancel(client, promptId);
+          } catch (e: any) {
+            if (!isNotFoundErrorMessage(e?.message ?? String(e))) throw e;
+          }
+        }),
+      );
+      const failure = results.find((result) => result.status === 'rejected');
+      if (failure?.status === 'rejected') throw failure.reason;
     }
 
-    const stoppedPromptIds: string[] = [];
-    const clearedPromptIds: string[] = [];
-    for (const id of queuedIds) {
-      // eslint-disable-next-line no-await-in-loop
-      const cancelled = await cancelQueuedPendingPrompt({ droneId, chatName, promptId: id });
-      if (cancelled.status === 'cancelled') clearedPromptIds.push(id);
-    }
     for (const id of activeIds) {
       // eslint-disable-next-line no-await-in-loop
       await updatePendingPrompt({
@@ -2196,7 +2206,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     chatName: string;
     droneEntry: any;
   }): Promise<StopChatResponseResult> {
-    await ensureChatEntry({ droneId: opts.droneId, chatName: opts.chatName });
     const { chat } = await getChatEntry({ droneId: opts.droneId, chatName: opts.chatName });
     const agent = inferChatAgent(chat, opts.droneEntry);
     if (agent.kind === 'builtin') {
@@ -2408,6 +2417,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           throwIfBackgroundPromptAborted(opts.signal);
         } catch (error) {
           if (backgroundPromptWasAborted(opts.signal)) {
+            if (opts.signal.reason instanceof PendingPromptCancelledError) return;
             await releasePendingPromptClaim({
               droneId,
               chatName,
@@ -2531,6 +2541,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           enqueueTimeoutMs,
           `queued prompt enqueue failed for ${droneId}/${chatName}`,
         );
+        throwIfBackgroundPromptAborted(opts.signal);
         if (r?.turnOk === false) {
           await deliveryTiming.measure(
             'persistDeliveryState',
@@ -2563,6 +2574,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       } catch (e: any) {
         if (backgroundPromptWasAborted(opts.signal)) {
           deliveryOutcome = 'paused';
+          if (opts.signal.reason instanceof PendingPromptCancelledError) return;
           await releasePendingPromptClaim({
             droneId,
             chatName,

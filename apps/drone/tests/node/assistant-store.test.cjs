@@ -84,6 +84,37 @@ afterEach(async () => {
 });
 
 describe('assistant SQLite store', () => {
+  test('Stop clears native follow-ups and rejects late completion of the stopped claim', async () => {
+    useTempDataDir('native-stop');
+    const service = assistantService();
+    const { chatId } = await service.ensureNativeThread({
+      id: 'native-stop',
+      droneId: 'drone-1',
+      chatName: 'default',
+    });
+    await service.enqueueThreadPromptWithResult(chatId, { id: 'active', prompt: 'First' });
+    await service.enqueueThreadPromptWithResult(chatId, { id: 'follow-up', prompt: 'Next' });
+    await service.claimNextQueuedPrompt(chatId);
+    const interrupted = [];
+    service.setRuntimeStopDelegate((id) => interrupted.push(id));
+    await service.stopThread(chatId);
+    await service.completeQueuedPrompt(chatId, 'active');
+    await service.failQueuedPrompt(chatId, 'active', new Error('Late transport failure'));
+    const queue = getPromptQueueRepository();
+    assert.equal(
+      queue.get({ droneId: 'drone-1', chatName: 'default', promptId: 'active' }).state,
+      'cancelled',
+    );
+    assert.equal(
+      queue.get({ droneId: 'drone-1', chatName: 'default', promptId: 'follow-up' }).state,
+      'cancelled',
+    );
+    assert.equal(await service.hasQueuedPrompts(chatId), false);
+    assert.ok(interrupted.includes(chatId));
+    await service.enqueueThreadPromptWithResult(chatId, { id: 'new', prompt: 'Continue' });
+    assert.equal((await service.claimNextQueuedPrompt(chatId)).id, 'new');
+  });
+
   test('drops obsolete runtime-owned tables without touching unrelated data', async () => {
     const dataDir = useTempDataDir('obsolete-tables');
     const databasePath = path.join(dataDir, 'hub.sqlite');

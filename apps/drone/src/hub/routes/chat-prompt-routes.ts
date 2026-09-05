@@ -575,8 +575,12 @@ export function createChatPromptRouteHandler(
         const droneRef = decodeURIComponent(parts[2]);
         const chatName = normalizeChatName(decodeURIComponent(parts[4]));
         try {
-          const resolved = await resolveDroneOrRespond(res, droneRef);
-          if (!resolved) return;
+          const resolved = await resolveCanonicalDroneOrPendingForReadRef(droneRef);
+          if (!resolved) {
+            json(res, 404, { error: `unknown drone: ${droneRef}` });
+            return;
+          }
+          if (resolved.kind !== 'real') throw new Error('Drone is still starting');
           const droneId = resolved.id;
           const drone = resolved.drone;
           const droneName = String(drone?.name ?? droneRef).trim() || droneRef;

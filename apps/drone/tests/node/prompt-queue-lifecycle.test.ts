@@ -4,6 +4,55 @@ import test from 'node:test';
 import { PromptQueueRepository } from '../../src/host/prompt-queue-repository';
 import { memoryHubDatabase } from './helpers/memory-hub-database';
 
+test('native Stop atomically cancels active and queued work only in the selected chat', async () => {
+  const { database, close } = memoryHubDatabase();
+  try {
+    const queue = new PromptQueueRepository(database);
+    for (const [id, chatName] of [
+      ['active', 'a'],
+      ['queued', 'a'],
+      ['other', 'b'],
+    ]) {
+      await queue.enqueue({
+        droneId: 'drone',
+        chatName,
+        prompt: {
+          id,
+          at: new Date().toISOString(),
+          prompt: id,
+          state: 'queued',
+        },
+      });
+    }
+    await queue.claim({
+      droneId: 'drone',
+      chatName: 'a',
+      promptId: 'active',
+      leaseOwner: 'native:test',
+    });
+    await queue.cancelPendingForChat({ droneId: 'drone', chatName: 'a' });
+    assert.equal(
+      await queue.update({
+        droneId: 'drone',
+        chatName: 'a',
+        promptId: 'active',
+        expectedStates: ['sending'],
+        patch: { state: 'sent' },
+      }),
+      false,
+    );
+    for (const promptId of ['active', 'queued']) {
+      const row = queue.get({ droneId: 'drone', chatName: 'a', promptId });
+      assert.equal(row?.state, 'cancelled');
+      assert.equal(row?.leaseOwner, undefined);
+    }
+    assert.equal(queue.nextQueued({ droneId: 'drone', chatName: 'a' }), null);
+    assert.equal(queue.nextQueued({ droneId: 'drone', chatName: 'b' })?.id, 'other');
+  } finally {
+    close();
+  }
+});
+
 test('shutdown claim release requeues without consuming a delivery attempt', async () => {
   const { database, close } = memoryHubDatabase();
   try {

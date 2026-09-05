@@ -105,7 +105,5 @@ describe('mobile file explorer presentation', () => {
       'utf8',
     );
     expect(hook).toContain('refreshError: requestIsCurrent ? refreshError : null');
-    expect(hook).toContain('loadAbortRef.current?.abort()');
-    expect(hook).toContain('signal: loadController.signal');
   });
 });

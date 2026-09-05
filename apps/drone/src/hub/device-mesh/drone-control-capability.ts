@@ -589,6 +589,7 @@ export function createDroneControlCapability(
             const createModelCatalog = await localHubRequest(
               access,
               '/api/model-catalog?agent=native',
+              { signal: operationSignal },
             );
             return {
               schemaVersion: 6,
@@ -600,6 +601,7 @@ export function createDroneControlCapability(
           const createModelCatalog = await localHubRequest(
             access,
             `/api/model-catalog?agent=${encodeURIComponent(createModelAgent)}&runtime=${runtime}${refresh}`,
+            { signal: operationSignal },
           );
           return { schemaVersion: 5, createModelCatalog };
         }
@@ -623,6 +625,7 @@ export function createDroneControlCapability(
             const result = await localHubRequest(
               access,
               `/api/repos/branches?repoPath=${encodeURIComponent(createRepoPath)}`,
+              { signal: operationSignal },
             );
             const branches = Array.isArray(result.remoteBranches) ? result.remoteBranches : [];
             const remoteBranches: NonNullable<ReturnType<typeof compactCreateRepoBranch>>[] = [];
@@ -659,6 +662,7 @@ export function createDroneControlCapability(
               },
             };
           } catch (error: any) {
+            operationSignal.throwIfAborted();
             return {
               schemaVersion: 6,
               createRepo: {
@@ -682,12 +686,13 @@ export function createDroneControlCapability(
           preferencesRequest,
           deleteSettingsRequest,
         ] = await Promise.allSettled([
-          localHubRequest(access, '/api/drones'),
+          localHubRequest(access, '/api/drones', { signal: operationSignal }),
           hubServices.repositories.list(),
           hubServices.groups.list(),
           hubServices.settings.uiPreferences.read(),
           hubServices.settings.readDeleteAction(),
         ]);
+        operationSignal.throwIfAborted();
         if (dronesRequest.status === 'rejected') throw dronesRequest.reason;
         const result = dronesRequest.value;
         const reposResult = object(reposRequest.status === 'fulfilled' ? reposRequest.value : {});
@@ -1555,7 +1560,9 @@ export function createDroneControlCapability(
           const thread = Array.isArray(ensured?.threads)
             ? ensured.threads.find((item: any) => String(item?.id ?? '') === nativeChatId)
             : null;
-          const catalog = await localHubRequest(access, '/api/model-catalog?agent=native');
+          const catalog = await localHubRequest(access, '/api/model-catalog?agent=native', {
+            signal: operationSignal,
+          });
           const provider =
             optionalText(catalog?.provider) ?? optionalText(thread?.provider) ?? 'openai';
           const models = Array.isArray(catalog?.models) ? catalog.models : [];
@@ -1579,7 +1586,9 @@ export function createDroneControlCapability(
           };
         }
         const refresh = payload.refresh === true ? '?refresh=1' : '';
-        const result = await localHubRequest(access, `${chatPath}/models${refresh}`);
+        const result = await localHubRequest(access, `${chatPath}/models${refresh}`, {
+          signal: operationSignal,
+        });
         return {
           droneId,
           chatName,
@@ -1877,6 +1886,11 @@ export function createDroneControlCapability(
         }
       }
       if (operation === 'chat.stop') {
+        // Stop is a durable command. Dispatch directly; metadata/history reads and
+        // the lifetime of the caller's screen must not delay or revoke it.
+        if (!optionalText(payload.promptId)) {
+          return await localHubRequest(access, `${chatPath}/stop`, { method: 'POST', body: '{}' });
+        }
         const chat = await localHubRequest(access, chatPath);
         if (chat?.agent?.kind === 'native') {
           const { nativeChatId } = await resolveNativeChat();

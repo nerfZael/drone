@@ -40,6 +40,7 @@ import {
 } from './mobile-voice-transcription-model';
 import { useSharedMobileChatVoiceRecorder } from './MobileChatVoiceRecorderContext';
 import { useMobileCompanion } from './MobileCompanionContext';
+import { useMobileTranscriptionQueue } from './use-mobile-transcription-queue';
 import { MobileContinuousVoiceModePicker } from './MobileContinuousVoiceModePicker';
 import {
   MobileDictationComposer,
@@ -347,7 +348,7 @@ export function AssistantComposer({
     startRecording,
     toggleRecordingPause,
     discardRecording,
-    stopRecordingForTranscript,
+    finishRecording,
     continuousVoice,
     continuousDictation,
   } = useSharedMobileChatVoiceRecorder();
@@ -357,7 +358,26 @@ export function AssistantComposer({
   const voiceDurationMillis = voiceSession.kind === 'single-shot' ? voiceSession.durationMillis : 0;
   const targetKey = String(voiceResetKey ?? '').trim();
   const voiceActive = voiceStatus !== 'idle';
-  const localRecorderOpen = !onOpenDictation && voiceActive;
+  // Finished clips transcribe in parallel while the user keeps recording; their
+  // text lands in the draft in recording order.
+  const appendVoiceTranscript = React.useCallback(
+    (transcript: string) => {
+      const result = resolveMobileVoiceTranscriptDraft({
+        draft: valueRef.current,
+        transcript,
+        action: 'append',
+      });
+      valueRef.current = result.nextDraft;
+      onChangeText(result.message);
+    },
+    [onChangeText],
+  );
+  const transcriptionQueue = useMobileTranscriptionQueue({
+    onTranscript: appendVoiceTranscript,
+    onNotice: setVoiceError,
+    onError: setVoiceError,
+  });
+  const localRecorderOpen = !onOpenDictation && (voiceActive || transcriptionQueue.hasClips);
   const voiceRecordAccessibilityLabel =
     voiceSession.kind === 'continuous'
       ? 'Continuous voice is using the microphone'
@@ -427,7 +447,7 @@ export function AssistantComposer({
       voiceActive,
     });
   const canSend =
-    (Boolean(value.trim()) || hasAttachments || voiceCanStop) &&
+    (Boolean(value.trim()) || hasAttachments || voiceCanStop || transcriptionQueue.hasClips) &&
     !sending &&
     editable &&
     !sendBlocked &&
@@ -599,38 +619,22 @@ export function AssistantComposer({
     setContinuousModePickerOpen(true);
   }, []);
 
-  const stopVoiceForAction = React.useCallback(
-    async (action: 'append' | 'send'): Promise<string | null> => {
-      if (!voiceCanStop || voiceActionInFlight) return null;
-      const token = voiceActionTokenRef.current + 1;
-      voiceActionTokenRef.current = token;
-      setVoiceActionInFlight(true);
-      try {
-        const transcript = await stopRecordingForTranscript('single-shot');
-        if (voiceActionTokenRef.current !== token) return null;
-        const currentDraft = valueRef.current;
-        const result = resolveMobileVoiceTranscriptDraft({
-          draft: currentDraft,
-          transcript,
-          action,
-        });
-        if (result.message === currentDraft) {
-          setVoiceError((current) => current || 'No speech detected.');
-          return null;
-        }
-        valueRef.current = result.nextDraft;
-        if (action === 'append') onChangeText(result.message);
-        return result.message;
-      } finally {
-        if (voiceActionTokenRef.current === token) setVoiceActionInFlight(false);
-      }
-    },
-    [onChangeText, stopRecordingForTranscript, voiceActionInFlight, voiceCanStop],
-  );
+  const finishVoiceIntoQueue = React.useCallback(async () => {
+    if (!voiceCanStop) return;
+    const clip = await finishRecording('single-shot');
+    if (clip) transcriptionQueue.enqueue(clip);
+  }, [finishRecording, transcriptionQueue.enqueue, voiceCanStop]);
 
-  const stopVoiceAndFillDraft = React.useCallback(async () => {
-    await stopVoiceForAction('append');
-  }, [stopVoiceForAction]);
+  const stopVoiceAndFillDraft = finishVoiceIntoQueue;
+
+  const toggleLocalRecording = React.useCallback(async () => {
+    if (voiceCanStop) {
+      await finishVoiceIntoQueue();
+      return;
+    }
+    if (voiceStatus !== 'idle') return;
+    await beginVoiceRecording();
+  }, [beginVoiceRecording, finishVoiceIntoQueue, voiceCanStop, voiceStatus]);
 
   const changeText = React.useCallback(
     (nextValue: string) => {
@@ -643,20 +647,53 @@ export function AssistantComposer({
   const send = React.useCallback(async () => {
     if (!canSend) return;
     if (await sendDictation()) return;
-    if (!voiceActive) {
+    if (!voiceActive && !transcriptionQueue.hasClips) {
       setVoiceError('');
       onSend();
       return;
     }
-    const nextDraft = await stopVoiceForAction('send');
-    if (nextDraft?.trim()) {
-      setVoiceError('');
-      onSend(nextDraft.trim());
-    } else if (hasAttachments) {
-      setVoiceError('');
-      onSend();
+    // Sending never drops speech: stop the live recording, wait for every
+    // queued transcription to land in the draft, then send the whole draft.
+    const token = voiceActionTokenRef.current + 1;
+    voiceActionTokenRef.current = token;
+    setVoiceActionInFlight(true);
+    try {
+      await finishVoiceIntoQueue();
+      const complete = await transcriptionQueue.awaitAll();
+      if (voiceActionTokenRef.current !== token) return;
+      if (!complete) {
+        setVoiceError('A transcription failed. Retry or discard it before sending.');
+        return;
+      }
+      const draft = valueRef.current.trim();
+      if (draft) {
+        setVoiceError('');
+        valueRef.current = '';
+        onSend(draft);
+      } else if (hasAttachments) {
+        setVoiceError('');
+        onSend();
+      } else {
+        setVoiceError((current) => current || 'No speech detected.');
+      }
+    } finally {
+      if (voiceActionTokenRef.current === token) setVoiceActionInFlight(false);
     }
-  }, [canSend, hasAttachments, onSend, sendDictation, stopVoiceForAction, voiceActive]);
+  }, [
+    canSend,
+    finishVoiceIntoQueue,
+    hasAttachments,
+    onSend,
+    sendDictation,
+    setVoiceError,
+    transcriptionQueue,
+    voiceActive,
+  ]);
+
+  const discardVoiceAndQueue = React.useCallback(() => {
+    discardVoice();
+    transcriptionQueue.clear();
+  }, [discardVoice, transcriptionQueue.clear]);
 
   const collapseEmptyComposer = React.useCallback(() => {
     inputRef.current?.blur();
@@ -992,19 +1029,26 @@ export function AssistantComposer({
             chatName=""
             recordingStatus={voiceStatus}
             recordingDurationMillis={voiceDurationMillis}
-            pendingCount={voiceStatus === 'transcribing' ? 1 : 0}
+            pendingCount={transcriptionQueue.pendingCount}
             error={voiceError}
             notice=""
+            failedTranscriptionError={transcriptionQueue.failedClip?.error}
             finalizing={voiceActionInFlight}
             networkSending={sending}
-            microphoneUnavailable={voiceStatus === 'transcribing'}
+            microphoneUnavailable={false}
             onChangeText={changeText}
-            onClose={discardVoice}
-            onToggleRecording={stopVoiceAndFillDraft}
+            onClose={discardVoiceAndQueue}
+            onToggleRecording={toggleLocalRecording}
             onTogglePause={() => toggleRecordingPause('single-shot')}
             onCancelRecording={discardVoice}
-            onRetryFailedTranscription={() => undefined}
-            onDiscardFailedTranscription={() => undefined}
+            onRetryFailedTranscription={() => {
+              setVoiceError('');
+              transcriptionQueue.retryFailed();
+            }}
+            onDiscardFailedTranscription={() => {
+              setVoiceError('');
+              transcriptionQueue.discardFailed();
+            }}
             onPrimaryPress={send}
             primaryActionAccessibilityLabel="Send recording"
             primaryActionDisabled={!canSend}

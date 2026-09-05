@@ -1,3 +1,4 @@
+import { drainNativePrompts } from './native-prompt-drain';
 import { createNativePromptSubmitter } from './native-prompt-submission';
 import type http from 'node:http';
 import type { BlipSessionState } from '@blip/core';
@@ -922,6 +923,11 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
     await blipAssistantHost.promptThread(threadId, prompt);
   });
   assistantService.setRuntimeStopDelegate((threadId) => {
+    assistantPromptDrains
+      .get(threadId)
+      ?.controller.abort(
+        Object.assign(new Error('Assistant run cancelled'), { name: 'AbortError' }),
+      );
     blipAssistantHost.stopThread(threadId);
   });
   assistantService.setApprovalDecisionDelegate(async (threadId, approvalId, approved) => {
@@ -959,7 +965,10 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
   type AssistantPromptInput =
     | string
     | { text: string; images: Array<{ type: 'image'; data: string; mimeType: string }> };
-  const assistantPromptDrains = new Map<string, Promise<void>>();
+  const assistantPromptDrains = new Map<
+    string,
+    { controller: AbortController; promise: Promise<void> }
+  >();
   const notifyNativePromptQueueChanged = async (threadId: string): Promise<void> => {
     if (!onNativePromptQueueChanged) return;
     const owner = await assistantService.nativeThreadOwner(threadId);
@@ -975,27 +984,30 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
     threadId: string,
   ): { started: boolean; promise: Promise<void> } => {
     const existing = assistantPromptDrains.get(threadId);
-    if (existing) return { started: false, promise: existing };
+    if (existing) {
+      return {
+        started: false,
+        promise: existing.controller.signal.aborted
+          ? existing.promise.then(() => startAssistantPromptDrain(threadId).promise)
+          : existing.promise,
+      };
+    }
+    const controller = new AbortController();
     const promise = Promise.resolve()
-      .then(async () => {
-        await blipAssistantHost.waitForThreadIdle(threadId);
-        while (true) {
-          const queued = await assistantService.claimNextQueuedPrompt(threadId);
-          if (!queued) break;
-          await notifyNativePromptQueueChanged(threadId);
-          try {
-            await blipAssistantHost.waitForThreadIdle(threadId);
-            await blipAssistantHost.promptThread(threadId, queuedPromptInput(queued));
-            await assistantService.completeQueuedPrompt(threadId, queued.id);
-          } catch (error) {
-            await assistantService.failQueuedPrompt(threadId, queued.id, error);
-          } finally {
-            await notifyNativePromptQueueChanged(threadId);
-          }
-        }
-      })
+      .then(() =>
+        drainNativePrompts({
+          signal: controller.signal,
+          waitForIdle: () => blipAssistantHost.waitForThreadIdle(threadId),
+          claimNext: () => assistantService.claimNextQueuedPrompt(threadId),
+          notify: () => notifyNativePromptQueueChanged(threadId),
+          run: (queued) => blipAssistantHost.promptThread(threadId, queuedPromptInput(queued)),
+          complete: (id) => assistantService.completeQueuedPrompt(threadId, id),
+          fail: (id, error) => assistantService.failQueuedPrompt(threadId, id, error),
+        }),
+      )
       .finally(() => {
         assistantPromptDrains.delete(threadId);
+        if (controller.signal.aborted) return;
         void assistantService
           .hasQueuedPrompts(threadId)
           .then((hasQueued) => {
@@ -1011,7 +1023,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
           })
           .catch(() => {});
       });
-    assistantPromptDrains.set(threadId, promise);
+    assistantPromptDrains.set(threadId, { controller, promise });
     return { started: true, promise };
   };
 

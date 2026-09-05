@@ -14,15 +14,15 @@ describe('pending prompt ownership', () => {
   });
 
   test('does not keep native chats busy after native delivery completes', () => {
-    expect(
-      pendingPromptKeepsChatBusy({ state: 'queued', hasTurn: false, native: true }),
-    ).toBe(false);
-    expect(
-      pendingPromptKeepsChatBusy({ state: 'queued', hasTurn: false, native: false }),
-    ).toBe(false);
-    expect(
-      pendingPromptKeepsChatBusy({ state: 'sending', hasTurn: false, native: true }),
-    ).toBe(true);
+    expect(pendingPromptKeepsChatBusy({ state: 'queued', hasTurn: false, native: true })).toBe(
+      false,
+    );
+    expect(pendingPromptKeepsChatBusy({ state: 'queued', hasTurn: false, native: false })).toBe(
+      false,
+    );
+    expect(pendingPromptKeepsChatBusy({ state: 'sending', hasTurn: false, native: true })).toBe(
+      true,
+    );
     expect(
       pendingPromptKeepsChatBusy({
         state: 'sending',
@@ -31,19 +31,48 @@ describe('pending prompt ownership', () => {
         countsAsAgentRun: false,
       }),
     ).toBe(false);
-    expect(
-      pendingPromptKeepsChatBusy({ state: 'sent', hasTurn: false, native: true }),
-    ).toBe(false);
-    expect(
-      pendingPromptKeepsChatBusy({ state: 'sent', hasTurn: false, native: false }),
-    ).toBe(true);
-    expect(
-      pendingPromptKeepsChatBusy({ state: 'sent', hasTurn: true, native: false }),
-    ).toBe(false);
+    expect(pendingPromptKeepsChatBusy({ state: 'sent', hasTurn: false, native: true })).toBe(false);
+    expect(pendingPromptKeepsChatBusy({ state: 'sent', hasTurn: false, native: false })).toBe(true);
+    expect(pendingPromptKeepsChatBusy({ state: 'sent', hasTurn: true, native: false })).toBe(false);
   });
 });
 
 describe('pending prompt retry scheduling', () => {
+  test('deleting one chat aborts its active delivery and trailing work without aborting another chat', async () => {
+    const signals = new Map<string, AbortSignal>();
+    const bothStarted = Promise.withResolvers<void>();
+    const runs: string[] = [];
+    const pump = new PendingPromptPump({
+      normalizeDroneId: (value) => value,
+      normalizeChatName: (value) => value,
+      concurrencyLimit: () => 2,
+      defaultRetryDelayMs: () => 1_000,
+      run: async ({ chatName }, signal) => {
+        runs.push(chatName);
+        signals.set(chatName, signal);
+        if (signals.size === 2) bothStarted.resolve();
+        await new Promise<void>((resolve) =>
+          signal.addEventListener('abort', () => resolve(), { once: true }),
+        );
+      },
+    });
+    try {
+      pump.enqueue('drone', 'a');
+      pump.enqueue('drone', 'b');
+      await bothStarted.promise;
+      pump.enqueue('drone', 'a');
+      pump.delete('drone', 'a');
+      expect(signals.get('a')?.aborted).toBe(true);
+      expect(signals.get('b')?.aborted).toBe(false);
+      // Reset must abort active work before waiting for it to finish.
+      await pump.reset();
+      expect(signals.get('b')?.aborted).toBe(true);
+      expect(runs).toEqual(['a', 'b']);
+    } finally {
+      await pump.stop();
+    }
+  });
+
   test('preserves a delayed retry when the same chat is also enqueued immediately', async () => {
     let runCount = 0;
     const pump = new PendingPromptPump({

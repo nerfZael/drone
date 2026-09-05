@@ -108,7 +108,6 @@ export function useFilePreview({
   }
   const loadVersion = React.useRef(0);
   const previewReadsRef = React.useRef(new MobileChatReadCoordinator(() => {}));
-  const loadAbortRef = React.useRef<AbortController | null>(null);
   const saveVersion = React.useRef(0);
   previewRef.current = preview;
 
@@ -119,8 +118,6 @@ export function useFilePreview({
     (nextWorkspaceContext: Omit<PreviewRequest, 'path' | 'line'> | null) => {
       loadVersion.current += 1;
       previewReadsRef.current.reset();
-      loadAbortRef.current?.abort();
-      loadAbortRef.current = null;
       saveVersion.current += 1;
       setWorkspaceContext(nextWorkspaceContext);
       setRequest(null);
@@ -136,8 +133,9 @@ export function useFilePreview({
   );
   React.useEffect(
     () => () => {
+      loadVersion.current += 1;
+      saveVersion.current += 1;
       previewReadsRef.current.reset();
-      loadAbortRef.current?.abort();
       previewCacheRef.current?.clear();
     },
     [],
@@ -164,11 +162,9 @@ export function useFilePreview({
   const loadPreview = React.useCallback(
     async (
       nextRequest: PreviewRequest,
+      signal: AbortSignal,
       options?: { background?: boolean; transferRestarted?: boolean },
     ) => {
-      loadAbortRef.current?.abort();
-      const loadController = new AbortController();
-      loadAbortRef.current = loadController;
       const version = ++loadVersion.current;
       const background = options?.background === true && previewRef.current != null;
       if (!background) setLoading(true);
@@ -188,12 +184,12 @@ export function useFilePreview({
             path: nextRequest.path,
             contentOffset: 0,
           },
-          loadController.signal,
+          signal,
         );
-        if (version !== loadVersion.current) return;
+        if (signal.aborted || version !== loadVersion.current) return;
         if (firstResult?.content) {
           const content = firstResult.content;
-          if (version !== loadVersion.current) return;
+          if (signal.aborted || version !== loadVersion.current) return;
           const path = String(content?.path ?? nextRequest.path).trim() || nextRequest.path;
           commitPreview(nextRequest, {
             file: null,
@@ -271,7 +267,7 @@ export function useFilePreview({
             const localHandle = localFile.open(FileMode.ReadOnly);
             try {
               while (offset < totalBytes) {
-                throwIfAborted(loadController.signal);
+                throwIfAborted(signal);
                 const bytes = localHandle.readBytes(Math.min(64 * 1024, totalBytes - offset));
                 if (!bytes.length) throw new Error('Phone preview ended early');
                 appendBytes(bytes);
@@ -288,7 +284,7 @@ export function useFilePreview({
               throw new Error('The device did not authorize an HTTP download');
             const response = await streamingFetch(transfer.url, {
               headers: { authorization: 'Bearer ' + transfer.token },
-              signal: loadController.signal,
+              signal,
               redirect: 'error',
             });
             if (!response.ok || !response.body)
@@ -297,6 +293,7 @@ export function useFilePreview({
             try {
               while (true) {
                 const { value, done } = await reader.read();
+                throwIfAborted(signal);
                 if (value) {
                   if (offset + value.byteLength > totalBytes)
                     throw new Error('Download exceeds declared size');
@@ -321,7 +318,7 @@ export function useFilePreview({
           cacheHandle?.close();
         }
         if (offset !== totalBytes) throw new Error('The media preview did not finish loading');
-        if (version !== loadVersion.current) {
+        if (signal.aborted || version !== loadVersion.current) {
           deleteCachedFile(cacheFile);
           return;
         }
@@ -368,12 +365,13 @@ export function useFilePreview({
           },
         });
       } catch (nextError: any) {
+        if (signal.aborted) return;
         if (
           version === loadVersion.current &&
           !options?.transferRestarted &&
           String(nextError?.code ?? '') === 'TRANSFER_EXPIRED'
         ) {
-          await loadPreview(nextRequest, { background, transferRestarted: true });
+          await loadPreview(nextRequest, signal, { background, transferRestarted: true });
           return;
         }
         if (version === loadVersion.current) {
@@ -393,7 +391,6 @@ export function useFilePreview({
           }
         }
       } finally {
-        if (loadAbortRef.current === loadController) loadAbortRef.current = null;
         if (version === loadVersion.current && !background) setLoading(false);
       }
     },
@@ -404,7 +401,9 @@ export function useFilePreview({
     (nextRequest: PreviewRequest, options?: { background?: boolean }) => {
       const key = mobileFileCacheKey(nextRequest);
       previewReadsRef.current.cancelExcept(key);
-      return previewReadsRef.current.request(key, () => loadPreview(nextRequest, options));
+      return previewReadsRef.current.request(key, (signal) =>
+        loadPreview(nextRequest, signal, options),
+      );
     },
     [loadPreview],
   );
@@ -628,8 +627,6 @@ export function useFilePreview({
       ) {
         loadVersion.current += 1;
         previewReadsRef.current.reset();
-        loadAbortRef.current?.abort();
-        loadAbortRef.current = null;
       }
       for (const path of normalizedPaths) {
         previewCacheRef.current!.delete(mobileFileCacheKey({ ...workspaceContext, path }));

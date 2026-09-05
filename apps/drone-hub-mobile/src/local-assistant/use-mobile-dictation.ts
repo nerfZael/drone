@@ -1,10 +1,6 @@
 import React from 'react';
 import { AppState } from 'react-native';
-import { readGroqApiKey } from './local-assistant-settings';
-import {
-  appendMobileDictationTranscript,
-  drainReadyMobileDictationTranscripts,
-} from './mobile-dictation-queue';
+import { appendMobileDictationTranscript } from './mobile-dictation-queue';
 import {
   normalizeMobileDictationText,
   readMobileDictationState,
@@ -17,27 +13,11 @@ import type {
   MobileDictationTarget,
   MobileDictationTargetResult,
 } from './mobile-dictation-types';
-import { transcribeMobileVoiceRecording } from './mobile-groq-transcription';
 import { useSharedMobileChatVoiceRecorder } from './MobileChatVoiceRecorderContext';
-import {
-  deleteMobileVoiceRecordingFile,
-  type MobileVoiceRecordingClip,
-} from './use-mobile-chat-voice-recorder';
+import { useMobileTranscriptionQueue } from './use-mobile-transcription-queue';
 import type { MobileVoiceRecordingStatus } from './mobile-voice-transcription-model';
 
-const MINIMUM_RECORDING_MILLIS = 1_000;
 const PERSIST_DEBOUNCE_MILLIS = 300;
-
-type TranscriptionClip = {
-  id: string;
-  uri: string;
-  status: 'pending' | 'ready' | 'failed';
-  text: string;
-  error: string;
-  attempt: number;
-  abortController: AbortController | null;
-  task: Promise<void> | null;
-};
 
 export function useMobileDictation(options: {
   resolveTarget(destination: MobileDictationDroneDestination): MobileDictationTargetResult;
@@ -50,7 +30,6 @@ export function useMobileDictation(options: {
   const [text, setTextState] = React.useState('');
   const [error, setError] = React.useState('');
   const [notice, setNotice] = React.useState('');
-  const [, setQueueRevision] = React.useState(0);
   const [finalizing, setFinalizing] = React.useState(false);
   const [networkSending, setNetworkSending] = React.useState(false);
   const openRef = React.useRef(open);
@@ -71,8 +50,6 @@ export function useMobileDictation(options: {
   const interactedRef = React.useRef(false);
   const finalizingRef = React.useRef(false);
   const persistenceTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const clipsRef = React.useRef<TranscriptionClip[]>([]);
-  const clipSequenceRef = React.useRef(0);
   const ownsRecorderErrorRef = React.useRef(false);
   const recordingCommandsRef = React.useRef<Promise<void>>(Promise.resolve());
   const resolveTargetRef = React.useRef(options.resolveTarget);
@@ -161,12 +138,6 @@ export function useMobileDictation(options: {
       mountedRef.current = false;
       if (persistenceTimerRef.current) clearTimeout(persistenceTimerRef.current);
       persistImmediately();
-      for (const clip of clipsRef.current) {
-        clip.attempt += 1;
-        clip.abortController?.abort();
-        deleteMobileVoiceRecordingFile(clip.uri);
-      }
-      clipsRef.current = [];
       const session = getRecordingSessionRef.current();
       if (session.kind === 'dictation') {
         void discardRecordingRef.current('dictation');
@@ -175,10 +146,6 @@ export function useMobileDictation(options: {
     };
   }, [persistImmediately]);
 
-  const refreshQueue = React.useCallback(() => {
-    if (mountedRef.current) setQueueRevision((current) => current + 1);
-  }, []);
-
   const appendTranscript = React.useCallback(
     (transcript: string) => {
       setText((current) => appendMobileDictationTranscript(current, transcript));
@@ -186,95 +153,12 @@ export function useMobileDictation(options: {
     [setText],
   );
 
-  const flushReadyClips = React.useCallback(() => {
-    const previousLength = clipsRef.current.length;
-    const transcripts = drainReadyMobileDictationTranscripts(clipsRef.current);
-    for (const transcript of transcripts) appendTranscript(transcript);
-    if (clipsRef.current.length !== previousLength) refreshQueue();
-  }, [appendTranscript, refreshQueue]);
-
-  const transcribeClip = React.useCallback(
-    (clip: TranscriptionClip) => {
-      clip.abortController?.abort();
-      clip.attempt += 1;
-      const attempt = clip.attempt;
-      const abortController = new AbortController();
-      clip.abortController = abortController;
-      clip.status = 'pending';
-      clip.error = '';
-      clip.text = '';
-      const task = readGroqApiKey()
-        .then((apiKey) =>
-          transcribeMobileVoiceRecording({
-            uri: clip.uri,
-            apiKey,
-            signal: abortController.signal,
-            deleteFile: false,
-          }),
-        )
-        .then((transcript) => {
-          if (clip.attempt !== attempt || abortController.signal.aborted) return;
-          clip.status = 'ready';
-          clip.text = transcript;
-          deleteMobileVoiceRecordingFile(clip.uri);
-        })
-        .catch((transcriptionError: unknown) => {
-          if (clip.attempt !== attempt || abortController.signal.aborted) return;
-          const message =
-            transcriptionError instanceof Error
-              ? transcriptionError.message
-              : String(transcriptionError ?? 'Transcription failed.');
-          if (message === 'No speech detected.') {
-            clip.status = 'ready';
-            clip.text = '';
-            deleteMobileVoiceRecordingFile(clip.uri);
-            setNotice('No speech was detected in that recording.');
-            return;
-          }
-          clip.status = 'failed';
-          clip.error = message;
-          setError(message);
-        })
-        .finally(() => {
-          if (clip.attempt !== attempt) return;
-          clip.abortController = null;
-          clip.task = null;
-          flushReadyClips();
-          refreshQueue();
-        });
-      clip.task = task;
-      refreshQueue();
-      return task;
-    },
-    [flushReadyClips, refreshQueue],
-  );
-
-  const enqueueClip = React.useCallback(
-    (clip: MobileVoiceRecordingClip): Promise<void> | null => {
-      if (!mountedRef.current) {
-        deleteMobileVoiceRecordingFile(clip.uri);
-        return null;
-      }
-      if (clip.durationMillis < MINIMUM_RECORDING_MILLIS) {
-        deleteMobileVoiceRecordingFile(clip.uri);
-        setNotice('Recording too short — discarded.');
-        return null;
-      }
-      const queued: TranscriptionClip = {
-        id: `mobile-dictation-${Date.now().toString(36)}-${++clipSequenceRef.current}`,
-        uri: clip.uri,
-        status: 'pending',
-        text: '',
-        error: '',
-        attempt: 0,
-        abortController: null,
-        task: null,
-      };
-      clipsRef.current.push(queued);
-      return transcribeClip(queued);
-    },
-    [transcribeClip],
-  );
+  const queue = useMobileTranscriptionQueue({
+    onTranscript: appendTranscript,
+    onNotice: setNotice,
+    onError: setError,
+  });
+  const enqueueClip = queue.enqueue;
 
   const stopAndTranscribe = React.useCallback(async () => {
     const clip = await voice.finishRecording('dictation');
@@ -356,15 +240,7 @@ export function useMobileDictation(options: {
     });
   }, [runRecordingCommand, voice]);
 
-  const clearQueuedClips = React.useCallback(() => {
-    for (const clip of clipsRef.current) {
-      clip.attempt += 1;
-      clip.abortController?.abort();
-      deleteMobileVoiceRecordingFile(clip.uri);
-    }
-    clipsRef.current = [];
-    refreshQueue();
-  }, [refreshQueue]);
+  const clearQueuedClips = queue.clear;
 
   const discardAndClose = React.useCallback(async () => {
     if (finalizingRef.current) return;
@@ -396,32 +272,17 @@ export function useMobileDictation(options: {
 
   const retryFailedClip = React.useCallback(() => {
     if (finalizingRef.current) return;
-    const clip = clipsRef.current.find((candidate) => candidate.status === 'failed');
-    if (!clip) return;
     setError('');
-    void transcribeClip(clip);
-  }, [transcribeClip]);
+    queue.retryFailed();
+  }, [queue.retryFailed]);
 
   const discardFailedClip = React.useCallback(() => {
     if (finalizingRef.current) return;
-    const index = clipsRef.current.findIndex((candidate) => candidate.status === 'failed');
-    if (index < 0) return;
-    const [clip] = clipsRef.current.splice(index, 1);
-    clip?.abortController?.abort();
-    deleteMobileVoiceRecordingFile(clip?.uri);
     setError('');
-    flushReadyClips();
-    refreshQueue();
-  }, [flushReadyClips, refreshQueue]);
+    queue.discardFailed();
+  }, [queue.discardFailed]);
 
-  const awaitOutstandingTranscriptions = React.useCallback(async (): Promise<boolean> => {
-    const tasks = clipsRef.current
-      .map((clip) => clip.task)
-      .filter((task): task is Promise<void> => Boolean(task));
-    await Promise.allSettled(tasks);
-    flushReadyClips();
-    return clipsRef.current.length === 0;
-  }, [flushReadyClips]);
+  const awaitOutstandingTranscriptions = queue.awaitAll;
 
   const requestSend = React.useCallback(
     async (destination: MobileDictationDestination) => {
@@ -499,8 +360,6 @@ export function useMobileDictation(options: {
 
   const recordingSession = voice.session.kind === 'dictation' ? voice.session : null;
   const recordingStatus: MobileVoiceRecordingStatus = recordingSession?.status ?? 'idle';
-  const pendingCount = clipsRef.current.filter((clip) => clip.status === 'pending').length;
-  const failedClip = clipsRef.current.find((clip) => clip.status === 'failed') ?? null;
   const microphoneUnavailable = voice.session.kind !== 'idle' && voice.session.kind !== 'dictation';
 
   return {
@@ -509,8 +368,8 @@ export function useMobileDictation(options: {
     text,
     error,
     notice,
-    pendingCount,
-    failedClip: failedClip ? { id: failedClip.id, error: failedClip.error } : null,
+    pendingCount: queue.pendingCount,
+    failedClip: queue.failedClip,
     finalizing,
     networkSending,
     recordingStatus,

@@ -28,7 +28,7 @@ describe('mobile assistant composer controls', () => {
       new URL('../src/local-assistant/AssistantComposer.tsx', import.meta.url),
       'utf8',
     );
-    const start = source.indexOf('const stopVoiceAndFillDraft = React.useCallback');
+    const start = source.indexOf('const finishVoiceIntoQueue = React.useCallback');
     const end = source.indexOf('const changeText = React.useCallback', start);
     const stopAndTranscribeSource = source.slice(start, end);
 

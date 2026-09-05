@@ -1,3 +1,4 @@
+import { throwIfAborted } from '@drone/device-protocol';
 import React from 'react';
 import {
   beginMobileChatLoad,
@@ -452,9 +453,14 @@ export function DronesScreen({
   const sidebarPreferenceVersionRef = React.useRef<number | null>(null);
   const commitDroneListSnapshot = React.useCallback((next: MobileDroneListSnapshot) => {
     const current = droneListSnapshotRef.current;
-    if (current.targetId === next.targetId && current.drones === next.drones &&
-      current.sidebar === next.sidebar && current.sidebarSnapshotStatus === next.sidebarSnapshotStatus &&
-      current.sidebarPreferenceVersion === next.sidebarPreferenceVersion) return;
+    if (
+      current.targetId === next.targetId &&
+      current.drones === next.drones &&
+      current.sidebar === next.sidebar &&
+      current.sidebarSnapshotStatus === next.sidebarSnapshotStatus &&
+      current.sidebarPreferenceVersion === next.sidebarPreferenceVersion
+    )
+      return;
     droneListSnapshotRef.current = next;
     droneSidebarOrderRef.current = next.sidebar;
     sidebarPreferenceVersionRef.current = next.sidebarPreferenceVersion;
@@ -716,103 +722,117 @@ export function DronesScreen({
       // Notifications can display the active read while scheduling one newer read.
       if (!allowCurrentSnapshot) droneListVersion.current += 1;
       return droneListRefreshRef.current.request(targetId, quiet, async (quiet, signal) => {
-      const requestVersion = ++droneListVersion.current;
-      const busyRequestVersion = quiet ? 0 : ++busyVersion.current;
-      if (!quiet) setBusy('drones');
-      if (!quiet) setDroneListError(null);
-      if (!quiet) setError(null);
-      try {
-        const normalized = await loadMobileDroneList(requestDroneControl, targetId, quiet, signal);
-        if (signal.aborted || targetIdRef.current !== targetId || droneListVersion.current !== requestVersion) return;
-        const confirmedSnapshot = resolveMobileDroneListSnapshot({
-          current: droneListSnapshotRef.current,
-          targetId,
-          payload: normalized,
-          keepCurrentSidebar: false,
-        });
-        sidebarJournalRef.current = replaceSidebarConfirmedState(sidebarJournalRef.current, {
-          drones: confirmedSnapshot.drones,
-          sidebar: confirmedSnapshot.sidebar,
-        });
-        const visibleSidebar = sidebarOptimisticJournalValue(
-          sidebarJournalRef.current,
-          applyMobileSidebarJournalCommand,
-        );
-        const nextDrones = visibleSidebar.drones;
-        setDeleteMode(normalized.deleteMode);
-        if (!quiet || normalized.createRepos.length > 0) {
-          setCreateRepos((current) => {
-            const currentByPath = new Map(current.map((repo) => [repo.path, repo]));
-            return normalized.createRepos.map(
-              (repo) =>
-                createRepoBranchesCache.current.get(`${targetId}:${repo.path}`) ??
-                currentByPath.get(repo.path) ??
-                repo,
-            );
-          });
-        }
-        loadedDronesTargetIdRef.current = targetId;
-        commitDroneListSnapshot({
-          ...confirmedSnapshot,
-          drones: nextDrones,
-          sidebar: visibleSidebar.sidebar,
-        });
-        const currentSelected = selectedRef.current;
-        const nextSelected = currentSelected
-          ? (nextDrones.find((drone) => drone.id === currentSelected.id) ?? null)
-          : null;
-        if (!nextSelected) {
-          if (currentSelected) transitionToDroneChat(null);
-        } else {
-          selectedRef.current = nextSelected;
-          setSelected(nextSelected);
-          const nextChats = nextSelected.chats;
-          setChats(nextChats);
-          if (nextChats.length === 0 && !isMobileDroneStarting(nextSelected)) {
-            transitionToChat('');
-          }
+        const requestVersion = ++droneListVersion.current;
+        const busyRequestVersion = quiet ? 0 : ++busyVersion.current;
+        if (!quiet) setBusy('drones');
+        if (!quiet) setDroneListError(null);
+        if (!quiet) setError(null);
+        try {
+          const normalized = await loadMobileDroneList(
+            requestDroneControl,
+            targetId,
+            quiet,
+            signal,
+          );
           if (
-            isMobileDroneStarting(currentSelected!) &&
-            !isMobileDroneStarting(nextSelected) &&
-            nextChats.includes(chatNameRef.current)
-          ) {
-            void readChatRef.current(nextSelected.id, chatNameRef.current).catch(() => undefined);
+            signal.aborted ||
+            targetIdRef.current !== targetId ||
+            droneListVersion.current !== requestVersion
+          )
+            return;
+          const confirmedSnapshot = resolveMobileDroneListSnapshot({
+            current: droneListSnapshotRef.current,
+            targetId,
+            payload: normalized,
+            keepCurrentSidebar: false,
+          });
+          sidebarJournalRef.current = replaceSidebarConfirmedState(sidebarJournalRef.current, {
+            drones: confirmedSnapshot.drones,
+            sidebar: confirmedSnapshot.sidebar,
+          });
+          const visibleSidebar = sidebarOptimisticJournalValue(
+            sidebarJournalRef.current,
+            applyMobileSidebarJournalCommand,
+          );
+          const nextDrones = visibleSidebar.drones;
+          setDeleteMode(normalized.deleteMode);
+          if (!quiet || normalized.createRepos.length > 0) {
+            setCreateRepos((current) => {
+              const currentByPath = new Map(current.map((repo) => [repo.path, repo]));
+              return normalized.createRepos.map(
+                (repo) =>
+                  createRepoBranchesCache.current.get(`${targetId}:${repo.path}`) ??
+                  currentByPath.get(repo.path) ??
+                  repo,
+              );
+            });
           }
-          if (!nextChats.includes(chatNameRef.current) && !isMobileDroneStarting(nextSelected)) {
-            const fallbackChat = nextChats[0];
-            if (fallbackChat) {
-              transitionToChat(fallbackChat);
-              void readChatRef.current(nextSelected.id, fallbackChat).catch(() => undefined);
+          loadedDronesTargetIdRef.current = targetId;
+          commitDroneListSnapshot({
+            ...confirmedSnapshot,
+            drones: nextDrones,
+            sidebar: visibleSidebar.sidebar,
+          });
+          const currentSelected = selectedRef.current;
+          const nextSelected = currentSelected
+            ? (nextDrones.find((drone) => drone.id === currentSelected.id) ?? null)
+            : null;
+          if (!nextSelected) {
+            if (currentSelected) transitionToDroneChat(null);
+          } else {
+            selectedRef.current = nextSelected;
+            setSelected(nextSelected);
+            const nextChats = nextSelected.chats;
+            setChats(nextChats);
+            if (nextChats.length === 0 && !isMobileDroneStarting(nextSelected)) {
+              transitionToChat('');
+            }
+            if (
+              isMobileDroneStarting(currentSelected!) &&
+              !isMobileDroneStarting(nextSelected) &&
+              nextChats.includes(chatNameRef.current)
+            ) {
+              void readChatRef.current(nextSelected.id, chatNameRef.current).catch(() => undefined);
+            }
+            if (!nextChats.includes(chatNameRef.current) && !isMobileDroneStarting(nextSelected)) {
+              const fallbackChat = nextChats[0];
+              if (fallbackChat) {
+                transitionToChat(fallbackChat);
+                void readChatRef.current(nextSelected.id, fallbackChat).catch(() => undefined);
+              }
             }
           }
-        }
-        if (
-          (normalized.schemaVersion == null || normalized.schemaVersion < 2) &&
-          nextDrones.length > 0 &&
-          nextDrones.every((drone) => !drone.repoPath)
-        ) {
-          setError(
-            'This device returned the legacy drone list without repository metadata. Update and restart DroneHub on the selected device.',
-          );
-        }
-      } catch (nextError: any) {
-        if (!signal.aborted && targetIdRef.current === targetId && droneListVersion.current === requestVersion) {
-          const message = nextError?.message ?? String(nextError);
-          if (!quiet) {
-            setDroneListError(message);
-            setError(message);
+          if (
+            (normalized.schemaVersion == null || normalized.schemaVersion < 2) &&
+            nextDrones.length > 0 &&
+            nextDrones.every((drone) => !drone.repoPath)
+          ) {
+            setError(
+              'This device returned the legacy drone list without repository metadata. Update and restart DroneHub on the selected device.',
+            );
           }
+        } catch (nextError: any) {
+          if (
+            !signal.aborted &&
+            targetIdRef.current === targetId &&
+            droneListVersion.current === requestVersion
+          ) {
+            const message = nextError?.message ?? String(nextError);
+            if (!quiet) {
+              setDroneListError(message);
+              setError(message);
+            }
+          }
+        } finally {
+          if (targetIdRef.current === targetId && droneListVersion.current === requestVersion)
+            setDronesLoaded(true);
+          if (
+            !quiet &&
+            targetIdRef.current === targetId &&
+            busyVersion.current === busyRequestVersion
+          )
+            setBusy('');
         }
-      } finally {
-        if (targetIdRef.current === targetId && droneListVersion.current === requestVersion)
-          setDronesLoaded(true);
-        if (
-          !quiet &&
-          targetIdRef.current === targetId &&
-          busyVersion.current === busyRequestVersion
-        )
-          setBusy('');
-      }
       });
     },
     [
@@ -1502,7 +1522,9 @@ export function DronesScreen({
     chatName: string;
     attachments: readonly MobileChatAttachment[];
   }): Promise<string[]> => {
-    return uploadChatAttachments(input.attachments, async (item) => {
+    return uploadChatAttachments(
+      input.attachments,
+      async (item) => {
         const attachment = await mesh.uploadChatAttachment({
           targetDeviceId: input.destinationId,
           droneId: input.droneId,
@@ -1512,7 +1534,9 @@ export function DronesScreen({
           bytes: item.bytes,
         });
         return attachment.attachmentId;
-    }, (ids) => abortRemoteChatAttachments(input, ids));
+      },
+      (ids) => abortRemoteChatAttachments(input, ids),
+    );
   };
 
   const sendChatPromptWithAttachments = async (input: {
@@ -1870,7 +1894,11 @@ export function DronesScreen({
   }, [createDrone]);
 
   const loadCreateRepoBranches = React.useCallback(
-    async (repoPath: string, refresh = false): Promise<MobileDroneCreateRepo> => {
+    async (
+      repoPath: string,
+      refresh = false,
+      signal?: AbortSignal,
+    ): Promise<MobileDroneCreateRepo> => {
       const destinationId = targetId;
       const cacheKey = `${destinationId}:${repoPath}`;
       if (!refresh) {
@@ -1883,10 +1911,16 @@ export function DronesScreen({
       let branchesError: string | null = null;
       const branches = new Map<string, MobileDroneCreateRepo['remoteBranches'][number]>();
       for (let pageNumber = 0; pageNumber < 100; pageNumber += 1) {
-        const result = await requestDroneControl(destinationId, 'drones.list', {
-          createRepoPath: repoPath,
-          createRepoCursor: cursor,
-        });
+        const result = await requestDroneControl(
+          destinationId,
+          'drones.list',
+          {
+            createRepoPath: repoPath,
+            createRepoCursor: cursor,
+          },
+          signal,
+        );
+        throwIfAborted(signal);
         if (targetIdRef.current !== destinationId)
           throw new Error('The selected Drone Hub changed while branches were loading');
         const page = normalizeMobileDroneCreateRepo(result?.createRepo);
@@ -1931,13 +1965,20 @@ export function DronesScreen({
       agent: MobileDroneAgentId,
       runtime: 'container' | 'host',
       refresh = false,
+      signal?: AbortSignal,
     ): Promise<MobileDroneCreateModel[]> => {
       const destinationId = targetId;
-      const result = await requestDroneControl(destinationId, 'drones.list', {
-        createModelAgent: agent,
-        createModelRuntime: runtime,
-        refreshCreateModels: refresh,
-      });
+      const result = await requestDroneControl(
+        destinationId,
+        'drones.list',
+        {
+          createModelAgent: agent,
+          createModelRuntime: runtime,
+          refreshCreateModels: refresh,
+        },
+        signal,
+      );
+      throwIfAborted(signal);
       if (targetIdRef.current !== destinationId) return [];
       const catalog = result?.createModelCatalog;
       const models = normalizeMobileDroneCreateModelCatalog(catalog, agent);
@@ -1959,9 +2000,16 @@ export function DronesScreen({
         droneId,
         chatName: activeChat,
       });
-      if (targetIdRef.current !== destinationId) return;
-      await readChat(droneId, activeChat);
-      await loadDrones(true);
+      if (
+        targetIdRef.current !== destinationId ||
+        selectedRef.current?.id !== droneId ||
+        chatNameRef.current !== activeChat
+      )
+        return;
+      // The stop acknowledgement releases the control immediately. Refreshes have
+      // their own cancellation lifetime and must not hold Stop or redirect navigation.
+      void readChat(droneId, activeChat).catch(() => undefined);
+      void loadDrones(true);
     });
 
   const cancelPendingPrompt = (promptId: string) => {
@@ -1986,8 +2034,8 @@ export function DronesScreen({
         setPendingPrompts((current) =>
           current.filter((item) => String(item?.id ?? '') !== promptId),
         );
-        await readChat(droneId, activeChat);
-        await loadDrones(true);
+        void readChat(droneId, activeChat).catch(() => undefined);
+        void loadDrones(true);
       })
       .catch((nextError: any) => {
         if (
@@ -2993,22 +3041,40 @@ export function DronesScreen({
   ]);
   React.useEffect(() => () => onHeaderChange(null), [onHeaderChange]);
 
+  const modelAbortRef = React.useRef<AbortController | null>(null);
+  React.useEffect(() => {
+    if (!modelOpen) return;
+    return () => {
+      modelAbortRef.current?.abort();
+      modelRequestVersion.current += 1;
+    };
+  }, [modelOpen, targetId, selected?.id, chatName]);
+
   const openModelPicker = async () => {
     if (!selected || running) return;
     const destinationId = targetId;
     const droneId = selected.id;
     const activeChat = chatName;
+    modelAbortRef.current?.abort();
+    const controller = new AbortController();
+    modelAbortRef.current = controller;
     const requestVersion = ++modelRequestVersion.current;
     setModelOpen(true);
     setModelBusy(true);
     setError(null);
     try {
-      const result = await requestDroneControl(destinationId, 'chat.models', {
-        droneId,
-        chatName: activeChat,
-        nativeChatId,
-        refresh: true,
-      });
+      const result = await requestDroneControl(
+        destinationId,
+        'chat.models',
+        {
+          droneId,
+          chatName: activeChat,
+          nativeChatId,
+          refresh: true,
+        },
+        controller.signal,
+      );
+      throwIfAborted(controller.signal);
       if (
         targetIdRef.current !== destinationId ||
         selectedRef.current?.id !== droneId ||
@@ -3038,7 +3104,11 @@ export function DronesScreen({
       const discoveryError = String(result?.error ?? '').trim();
       if (discoveryError && options.length === 0) setError(discoveryError);
     } catch (nextError: any) {
-      if (targetIdRef.current === destinationId && modelRequestVersion.current === requestVersion)
+      if (
+        !controller.signal.aborted &&
+        targetIdRef.current === destinationId &&
+        modelRequestVersion.current === requestVersion
+      )
         setError(nextError?.message ?? String(nextError));
     } finally {
       if (modelRequestVersion.current === requestVersion) setModelBusy(false);

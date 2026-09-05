@@ -14,6 +14,81 @@ afterEach(() => {
 });
 
 describe('phone Blip session', () => {
+  test('a pre-cancelled phone prompt never reaches the model transport', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let requests = 0;
+    globalThis.fetch = (async () => {
+      requests += 1;
+      throw new Error('Unexpected model request');
+    }) as typeof fetch;
+    const thread: LocalAssistantThread = {
+      id: 'cancelled',
+      title: 'Cancelled',
+      createdAt: '2026-09-06T00:00:00.000Z',
+      updatedAt: '2026-09-06T00:00:00.000Z',
+      model: 'gpt-test',
+      thinkingLevel: 'low',
+      status: 'idle',
+      error: null,
+      workspaceTargets: [],
+      messages: [],
+      queuedPrompts: [],
+    };
+    await expect(
+      runMobileBlip({
+        provider: 'openai',
+        apiKey: 'test-key',
+        codexAuth: null,
+        prompt: 'Must not run',
+        thread,
+        history: [],
+        workspaceRuntime: createWorkspaceToolRuntime(thread, async () => ({})),
+        signal: controller.signal,
+        onMessages: async () => {},
+        onStreamingMessages: () => {},
+      }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(requests).toBe(0);
+  });
+
+  test('Stop during phone session setup prevents the subsequent model request', async () => {
+    const controller = new AbortController();
+    let requests = 0;
+    globalThis.fetch = (async () => {
+      requests += 1;
+      throw new Error('Unexpected model request');
+    }) as typeof fetch;
+    const thread: LocalAssistantThread = {
+      id: 'cancelled-setup',
+      title: 'Cancelled',
+      createdAt: '2026-09-06T00:00:00.000Z',
+      updatedAt: '2026-09-06T00:00:00.000Z',
+      model: 'gpt-test',
+      thinkingLevel: 'low',
+      status: 'idle',
+      error: null,
+      workspaceTargets: [],
+      messages: [],
+      queuedPrompts: [],
+    };
+    const run = runMobileBlip({
+      provider: 'openai',
+      apiKey: 'test-key',
+      codexAuth: null,
+      prompt: 'Must not run',
+      thread,
+      history: [],
+      workspaceRuntime: createWorkspaceToolRuntime(thread, async () => ({})),
+      signal: controller.signal,
+      onMessages: async () => {},
+      onStreamingMessages: () => {},
+    });
+    controller.abort();
+    await expect(run).rejects.toMatchObject({ name: 'AbortError' });
+    expect(requests).toBe(0);
+  });
+
   test('sends prompt images to the mobile Built-in model transport', async () => {
     const thread: LocalAssistantThread = {
       id: 'mobile_blip_image',

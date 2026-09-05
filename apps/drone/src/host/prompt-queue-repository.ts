@@ -1036,11 +1036,13 @@ export class PromptQueueRepository {
       >
     >;
     now?: string;
+    expectedStates?: readonly PromptQueueState[];
   }): Promise<boolean> {
     const now = normalizeIso(opts.patch.updatedAt ?? opts.now, new Date().toISOString());
     return await this.database.writeTransaction('update prompt', (connection) => {
       const current = rowForPrompt(connection, opts.droneId, opts.chatName, opts.promptId);
-      if (!current) return false;
+      if (!current || (opts.expectedStates && !opts.expectedStates.includes(current.state)))
+        return false;
       const nextState = opts.patch.state ? normalizeState(opts.patch.state) : current.state;
       const next: PromptQueueItem = {
         ...current,
@@ -1048,7 +1050,7 @@ export class PromptQueueRepository {
         state: nextState,
         updatedAt: now,
       };
-      const terminal = nextState === 'sent' || nextState === 'failed';
+      const terminal = nextState === 'sent' || nextState === 'failed' || nextState === 'cancelled';
       const queued = nextState === 'queued';
       const error = opts.patch.error === undefined ? current.lastError : opts.patch.error;
       const info = connection
@@ -1453,6 +1455,25 @@ export class PromptQueueRepository {
         cancelled: Number(info.changes ?? 0) === 1,
         state: current.state,
       };
+    });
+  }
+
+  /** Stop a native chat atomically so its drain cannot claim a follow-up. */
+  async cancelPendingForChat(opts: { droneId: string; chatName: string }): Promise<void> {
+    await this.database.writeTransaction('stop native chat prompt queue', (connection) => {
+      const at = new Date().toISOString();
+      connection
+        .prepare('DELETE FROM prompt_queue_pauses WHERE drone_id = ? AND chat_name = ?')
+        .run(opts.droneId, opts.chatName);
+      connection
+        .prepare(
+          `UPDATE prompts
+        SET state = 'cancelled', updated_at = ?, last_error = 'Stopped by user',
+          lease_owner = NULL, lease_expires_at = NULL,
+          payload_json = json_set(payload_json, '$.state', 'cancelled', '$.error', 'Stopped by user', '$.updatedAt', ?)
+        WHERE drone_id = ? AND chat_name = ? AND state IN ('queued', 'sending')`,
+        )
+        .run(at, at, opts.droneId, opts.chatName);
     });
   }
 

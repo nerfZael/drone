@@ -200,6 +200,7 @@ export class CompanionRuntime {
           await this.host.prepareThread(threadId);
         }
       }
+      if (this.cancelledRunIds.has(runId)) throw new Error('Companion run cancelled');
       telemetry?.markAgentRunStarted();
       if (telemetry) {
         await telemetry.measure('agentRunMs', () =>
