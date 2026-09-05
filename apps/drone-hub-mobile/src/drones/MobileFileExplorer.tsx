@@ -8,11 +8,11 @@ import {
   Text,
   type TextInput as NativeTextInput,
   View,
+  type ViewProps,
 } from 'react-native';
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import FileQuestion from 'lucide-react-native/icons/file-question-mark';
-import Folder from 'lucide-react-native/icons/folder';
 import Plus from 'lucide-react-native/icons/plus';
 import RefreshCw from 'lucide-react-native/icons/refresh-cw';
 import type { DroneControlOperation } from '@drone/device-protocol';
@@ -129,6 +129,8 @@ export function MobileFileExplorer({
   requestDroneControl,
   onOpenFile,
   onPathsChanged,
+  renderHeader,
+  onRequestExpand,
 }: {
   active: boolean;
   targetId: string;
@@ -139,6 +141,8 @@ export function MobileFileExplorer({
   requestDroneControl: RequestDroneControl;
   onOpenFile(path: string): void;
   onPathsChanged(paths: readonly string[]): void;
+  renderHeader(actions: ViewProps['children']): ViewProps['children'];
+  onRequestExpand(): void;
 }) {
   const [directories, setDirectories] = React.useState<Record<string, DirectoryState>>({});
   const directoriesRef = React.useRef(directories);
@@ -368,6 +372,7 @@ export function MobileFileExplorer({
 
   const beginAction = React.useCallback(
     (mode: ExplorerActionMode, entry: FileExplorerEntry | null) => {
+      onRequestExpand();
       const targetDirectory = entry ? mobileExplorerParentPath(entry.path, rootPath) : rootPath;
       setActionMenuEntry(undefined);
       setActionError(null);
@@ -379,7 +384,7 @@ export function MobileFileExplorer({
         anchorPath: entry?.path ?? null,
       });
     },
-    [rootPath],
+    [onRequestExpand, rootPath],
   );
 
   const cancelAction = React.useCallback(() => {
@@ -581,35 +586,38 @@ export function MobileFileExplorer({
   }, [directories, editor, expanded, refreshing, rootPath, selectedPath]);
   return (
     <View style={styles.explorer}>
-      <View style={styles.toolbar}>
-        <Folder color={colors.accentAlt} size={15} strokeWidth={1.9} />
-        <Text numberOfLines={1} style={styles.rootLabel}>
-          Workspace
-        </Text>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Create workspace item"
-          disabled={actionLoading}
-          hitSlop={8}
-          onPress={() => setActionMenuEntry(null)}
-          style={({ pressed }) => [actionLoading && styles.disabled, pressed && styles.pressed]}
-        >
-          <Plus color={colors.muted} size={16} strokeWidth={2} />
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Refresh files"
-          disabled={root?.loading || refreshing.has(rootPath)}
-          hitSlop={8}
-          onPress={refreshExplorer}
-          style={({ pressed }) => [
-            (root?.loading || refreshing.has(rootPath)) && styles.disabled,
-            pressed && styles.pressed,
-          ]}
-        >
-          <RefreshCw color={colors.muted} size={15} strokeWidth={2} />
-        </Pressable>
-      </View>
+      {renderHeader(
+        <View style={styles.headerActions}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Create workspace item"
+            disabled={actionLoading}
+            hitSlop={8}
+            onPress={() => setActionMenuEntry(null)}
+            style={({ pressed }) => [
+              styles.headerAction,
+              actionLoading && styles.disabled,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Plus color={colors.muted} size={16} strokeWidth={2} />
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Refresh files"
+            disabled={root?.loading || refreshing.has(rootPath)}
+            hitSlop={8}
+            onPress={refreshExplorer}
+            style={({ pressed }) => [
+              styles.headerAction,
+              (root?.loading || refreshing.has(rootPath)) && styles.disabled,
+              pressed && styles.pressed,
+            ]}
+          >
+            <RefreshCw color={colors.muted} size={15} strokeWidth={2} />
+          </Pressable>
+        </View>,
+      )}
       {mobileDirectoryErrorMode(root) === 'stale' ? (
         <Pressable
           accessibilityRole="button"
@@ -847,24 +855,8 @@ export function MobileFileExplorer({
 
 const styles = StyleSheet.create({
   explorer: { flex: 1, minHeight: 0, backgroundColor: colors.mantle },
-  toolbar: {
-    minHeight: 34,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderSubtle,
-  },
-  rootLabel: {
-    minWidth: 0,
-    flex: 1,
-    color: colors.muted,
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-  },
+  headerAction: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   content: { paddingVertical: 5, paddingBottom: 18 },
   emptyContent: { flexGrow: 1 },
   row: {

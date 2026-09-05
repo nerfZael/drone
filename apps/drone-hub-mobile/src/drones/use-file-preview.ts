@@ -20,6 +20,7 @@ import {
 import type { MobileDroneSummary } from './drone-sidebar-model';
 import { BoundedSwrCache } from './bounded-swr-cache';
 import { mobileFileCacheKey } from './mobile-file-cache-key';
+import { MobileLastViewedFiles } from './mobile-last-viewed-files';
 import { mobilePreviewErrorMode } from './mobile-preview-error-state';
 
 type PreviewRequest = {
@@ -79,6 +80,7 @@ export function useFilePreview({
   requestDroneControl: RequestDroneControl;
   subscribeFileChanges?: (listener: (payload: Record<string, any>) => void) => () => void;
 }) {
+  const lastViewedFilesRef = React.useRef(new MobileLastViewedFiles());
   const [request, setRequest] = React.useState<PreviewRequest | null>(null);
   const [workspaceContext, setWorkspaceContext] = React.useState<Omit<
     PreviewRequest,
@@ -397,6 +399,7 @@ export function useFilePreview({
           : resolveMobileDroneFilePath(selectedDrone, reference.path),
         line: reference.line,
       };
+      lastViewedFilesRef.current.remember(nextRequest, { ...reference, path: nextRequest.path });
       setWorkspaceContext({
         targetId: nextRequest.targetId,
         droneId: nextRequest.droneId,
@@ -425,8 +428,11 @@ export function useFilePreview({
 
   const openExplorer = React.useCallback(() => {
     if (!selectedDrone) return;
-    resetPreviewSelection({ targetId, droneId: selectedDrone.id, chatName, phoneTarget });
-  }, [chatName, phoneTarget, resetPreviewSelection, selectedDrone, targetId]);
+    const context = { targetId, droneId: selectedDrone.id, chatName, phoneTarget };
+    const previous = lastViewedFilesRef.current.recall(context);
+    if (previous) open(previous);
+    else resetPreviewSelection(context);
+  }, [chatName, open, phoneTarget, resetPreviewSelection, selectedDrone, targetId]);
 
   const close = React.useCallback(() => {
     resetPreviewSelection(null);

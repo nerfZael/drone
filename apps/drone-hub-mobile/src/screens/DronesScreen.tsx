@@ -18,6 +18,7 @@ import {
 import {
   ActivityIndicator,
   Alert,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -26,6 +27,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { ChatFilesCarousel } from '../drones/ChatFilesCarousel';
 import MessageCircle from 'lucide-react-native/icons/message-circle';
 import WifiOff from 'lucide-react-native/icons/wifi-off';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -545,6 +547,7 @@ export function DronesScreen({
   const newDroneDraftContentRef = React.useRef<MobileNewDroneDraftContent | null>(null);
   const newDroneDraftSavePromiseRef = React.useRef<Promise<void> | null>(null);
   const [composerFocusKey, setComposerFocusKey] = React.useState('');
+  const [restingChatComposerHeight, setRestingChatComposerHeight] = React.useState(98);
   const targetIdRef = React.useRef(targetId);
   const selectedRef = React.useRef(selected);
   const chatNameRef = React.useRef(chatName);
@@ -2409,6 +2412,25 @@ export function DronesScreen({
     requestDroneControl,
     subscribeFileChanges,
   });
+  const [filesPageOpen, setFilesPageOpen] = React.useState(false);
+  const prepareFilesPage = React.useCallback(() => {
+    if (!filePreview.visible) filePreview.openExplorer();
+  }, [filePreview.visible, filePreview.openExplorer]);
+  const openFilesPage = React.useCallback(() => {
+    Keyboard.dismiss();
+    prepareFilesPage();
+    setFilesPageOpen(true);
+  }, [prepareFilesPage]);
+  const openFileReference = React.useCallback(
+    (reference: Parameters<typeof filePreview.open>[0]) => {
+      filePreview.open(reference);
+      setFilesPageOpen(true);
+    },
+    [filePreview.open],
+  );
+  React.useEffect(() => {
+    setFilesPageOpen(false);
+  }, [targetId, selected?.id, chatName, workspaceVisible]);
   const companionHighlightedDroneIds = useMobileCompanionWorkspaceTarget({
     targetDeviceId: targetId,
     targetName: activeTarget?.name ?? 'Drone Hub',
@@ -2427,7 +2449,7 @@ export function DronesScreen({
     prompt,
     setPrompt,
     openFile: {
-      visible: filePreview.visible,
+      visible: workspaceVisible && filesPageOpen && filePreview.visible,
       path: filePreview.displayPath,
       kind: filePreview.preview?.kind ?? 'loading',
     },
@@ -2718,7 +2740,7 @@ export function DronesScreen({
             backNavigation: true,
             onNewDrone: openNewDroneFromCurrent,
             onNewChat: () => void createNewChat(),
-            onOpenFiles: filePreview.openExplorer,
+            onOpenFiles: openFilesPage,
             ...(targetCanCloneDrone
               ? {
                   onClone: () => void cloneDrone(selected),
@@ -2861,7 +2883,7 @@ export function DronesScreen({
     phoneTarget,
     requestDroneControl,
     running,
-    filePreview.openExplorer,
+    openFilesPage,
   ]);
   React.useEffect(() => () => onHeaderChange(null), [onHeaderChange]);
 
@@ -3143,6 +3165,7 @@ export function DronesScreen({
     <View style={styles.screen}>
       <AppDrawer
         open={drawerOpen}
+        swipeEnabled={!filesPageOpen}
         navigationItems={draftAwareNavigationItems}
         showDrones
         drones={drawerDrones}
@@ -3200,432 +3223,461 @@ export function DronesScreen({
         onDeleteDroneChat={deleteDrawerChat}
         onReorderSidebar={targetReachable && targetCanReorderSidebar ? reorderSidebar : undefined}
       />
-      <KeyboardAvoidingView
-        style={styles.content}
-        behavior={Platform.OS === 'android' ? 'height' : 'padding'}
-        keyboardVerticalOffset={insets.top + APP_HEADER_HEIGHT}
+      <ChatFilesCarousel
+        open={filesPageOpen}
+        enabled={Boolean(selected && workspaceVisible && !drawerOpen)}
+        onOpenChange={setFilesPageOpen}
+        onReveal={prepareFilesPage}
+        renderFiles={(active) => (
+          <FilePreviewModal
+            embedded
+            visible={active && workspaceVisible}
+            preview={filePreview.preview}
+            displayPath={filePreview.displayPath}
+            line={filePreview.line}
+            loading={filePreview.loading}
+            error={filePreview.error}
+            refreshError={filePreview.refreshError}
+            saving={filePreview.saving}
+            saveError={filePreview.saveError}
+            targetId={targetId}
+            droneId={selected?.id ?? ''}
+            chatName={chatName}
+            rootPath={filePreview.rootPath}
+            workspaceName={selected?.name ?? ''}
+            selectedPath={filePreview.selectedPath}
+            requestDroneControl={requestDroneControl}
+            onOpenPath={(path) => filePreview.open({ raw: path, path, line: null, column: null })}
+            onSave={filePreview.save}
+            onClose={() => setFilesPageOpen(false)}
+            onRetry={filePreview.retry}
+            onPreviewPathsChanged={filePreview.invalidatePaths}
+          />
+        )}
       >
-        {!targetReachable && targetSupportsDrones && !selected ? (
-          <View style={styles.deviceOffline}>
-            <View style={styles.deviceOfflineIcon}>
-              {targetReconnecting ? (
-                <ActivityIndicator color={colors.warning} size="small" />
-              ) : (
-                <WifiOff color={colors.warning} size={28} strokeWidth={1.7} />
-              )}
-              <View style={styles.deviceOfflineIndicator} />
-            </View>
-            <Text style={styles.deviceOfflineTitle}>
-              {targetConnectionState === 'reconnecting'
-                ? `Reconnecting to ${activeTarget?.name ?? 'this device'}`
-                : targetConnectionState === 'suspended'
-                  ? `${activeTarget?.name ?? 'This device'} connection paused`
-                  : `${activeTarget?.name ?? 'This device'} is offline`}
-            </Text>
-            <Text style={styles.deviceOfflineBody}>
-              {targetReconnecting
-                ? 'Drone Hub is restoring the secure connection. This normally takes a moment.'
-                : 'Drone Hub can’t reach this device. Make sure the app is running there and that both devices are connected to the internet or the same local network.'}
-            </Text>
-            {!targetReconnecting ? (
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => void mesh.retryDeviceConnection(targetId)}
-                style={({ pressed }) => [
-                  styles.deviceOfflineRetry,
-                  pressed && styles.chatTabPressed,
-                ]}
-              >
-                <Text style={styles.deviceOfflineRetryText}>Retry connection</Text>
-              </Pressable>
-            ) : null}
-            <View style={styles.deviceOfflineAutomatic}>
-              <View style={styles.deviceOfflinePulse} />
-              <Text style={styles.deviceOfflineAutomaticText}>Checking automatically</Text>
-            </View>
-          </View>
-        ) : dronesLoading && !selected ? (
-          <MobileLoadingState accessibilityLabel="Loading drones" label="Loading drones…" />
-        ) : selected ? (
-          <View style={styles.chatWorkspace}>
-            {!targetReachable ? (
-              <View style={styles.offlineChatNotice}>
+        <KeyboardAvoidingView
+          style={styles.content}
+          behavior={Platform.OS === 'android' ? 'height' : 'padding'}
+          keyboardVerticalOffset={insets.top + APP_HEADER_HEIGHT}
+        >
+          {!targetReachable && targetSupportsDrones && !selected ? (
+            <View style={styles.deviceOffline}>
+              <View style={styles.deviceOfflineIcon}>
+                {targetReconnecting ? (
+                  <ActivityIndicator color={colors.warning} size="small" />
+                ) : (
+                  <WifiOff color={colors.warning} size={28} strokeWidth={1.7} />
+                )}
                 <View style={styles.deviceOfflineIndicator} />
-                <View style={styles.offlineChatNoticeCopy}>
-                  <Text style={styles.offlineChatNoticeTitle}>
-                    {targetConnectionState === 'reconnecting'
-                      ? 'Reconnecting to device'
-                      : targetConnectionState === 'suspended'
-                        ? 'Connection paused'
-                        : 'Device offline'}
-                  </Text>
-                  <Text style={styles.offlineChatNoticeBody}>
-                    {targetReconnecting
-                      ? 'This chat is readable. Sending will resume as soon as the secure connection is restored.'
-                      : 'This chat is readable. Sending will resume when it reconnects.'}
-                  </Text>
-                </View>
               </View>
-            ) : null}
-            {visibleChats.length === 0 ? (
-              <View style={styles.emptyDrone}>
-                <MessageCircle color={colors.muted} size={28} strokeWidth={1.6} />
-                <Text style={styles.emptyDroneTitle}>This drone has no chats yet.</Text>
-                <Text style={styles.emptyDroneBody}>
-                  Create a chat to start working with the Built-in agent.
-                </Text>
+              <Text style={styles.deviceOfflineTitle}>
+                {targetConnectionState === 'reconnecting'
+                  ? `Reconnecting to ${activeTarget?.name ?? 'this device'}`
+                  : targetConnectionState === 'suspended'
+                    ? `${activeTarget?.name ?? 'This device'} connection paused`
+                    : `${activeTarget?.name ?? 'This device'} is offline`}
+              </Text>
+              <Text style={styles.deviceOfflineBody}>
+                {targetReconnecting
+                  ? 'Drone Hub is restoring the secure connection. This normally takes a moment.'
+                  : 'Drone Hub can’t reach this device. Make sure the app is running there and that both devices are connected to the internet or the same local network.'}
+              </Text>
+              {!targetReconnecting ? (
                 <Pressable
                   accessibilityRole="button"
-                  disabled={!targetReachable || busy === 'create-chat'}
-                  onPress={() => void createNewChat()}
+                  onPress={() => void mesh.retryDeviceConnection(targetId)}
                   style={({ pressed }) => [
-                    styles.emptyDroneButton,
-                    !targetReachable && styles.disabledAction,
+                    styles.deviceOfflineRetry,
                     pressed && styles.chatTabPressed,
                   ]}
                 >
-                  {busy === 'create-chat' ? (
-                    <ActivityIndicator color={colors.onAccent} size="small" />
-                  ) : (
-                    <Text style={styles.emptyDroneButtonText}>Create chat</Text>
-                  )}
+                  <Text style={styles.deviceOfflineRetryText}>Retry connection</Text>
                 </Pressable>
-                {visibleChatError ? <ErrorBanner message={visibleChatError} /> : null}
+              ) : null}
+              <View style={styles.deviceOfflineAutomatic}>
+                <View style={styles.deviceOfflinePulse} />
+                <Text style={styles.deviceOfflineAutomaticText}>Checking automatically</Text>
               </View>
-            ) : (
-              <>
-                {accessOpen && phoneTarget && nativeChatId ? (
-                  <ScrollView
-                    style={styles.transcriptScroll}
-                    contentContainerStyle={styles.transcriptContent}
+            </View>
+          ) : dronesLoading && !selected ? (
+            <MobileLoadingState accessibilityLabel="Loading drones" label="Loading drones…" />
+          ) : selected ? (
+            <View style={styles.chatWorkspace}>
+              {!targetReachable ? (
+                <View style={styles.offlineChatNotice}>
+                  <View style={styles.deviceOfflineIndicator} />
+                  <View style={styles.offlineChatNoticeCopy}>
+                    <Text style={styles.offlineChatNoticeTitle}>
+                      {targetConnectionState === 'reconnecting'
+                        ? 'Reconnecting to device'
+                        : targetConnectionState === 'suspended'
+                          ? 'Connection paused'
+                          : 'Device offline'}
+                    </Text>
+                    <Text style={styles.offlineChatNoticeBody}>
+                      {targetReconnecting
+                        ? 'This chat is readable. Sending will resume as soon as the secure connection is restored.'
+                        : 'This chat is readable. Sending will resume when it reconnects.'}
+                    </Text>
+                  </View>
+                </View>
+              ) : null}
+              {visibleChats.length === 0 ? (
+                <View style={styles.emptyDrone}>
+                  <MessageCircle color={colors.muted} size={28} strokeWidth={1.6} />
+                  <Text style={styles.emptyDroneTitle}>This drone has no chats yet.</Text>
+                  <Text style={styles.emptyDroneBody}>
+                    Create a chat to start working with the Built-in agent.
+                  </Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={!targetReachable || busy === 'create-chat'}
+                    onPress={() => void createNewChat()}
+                    style={({ pressed }) => [
+                      styles.emptyDroneButton,
+                      !targetReachable && styles.disabledAction,
+                      pressed && styles.chatTabPressed,
+                    ]}
                   >
-                    {localAssistant.threads.find((thread) => thread.id === nativeChatId) ? (
-                      <LocalWorkspaceEditor
-                        thread={
-                          localAssistant.threads.find((thread) => thread.id === nativeChatId)!
-                        }
-                        onRequestClose={() => {
-                          if (accessDirty) setConfirmAccessDiscard(true);
-                          else setAccessOpen(false);
-                        }}
-                        onApplied={() => {
-                          setAccessDirty(false);
-                          setAccessOpen(false);
-                        }}
-                        onDirtyChange={setAccessDirty}
-                      />
-                    ) : null}
-                  </ScrollView>
-                ) : (
-                  <>
-                    {visibleChatError || nativeThread?.error ? (
-                      <View style={styles.chatError}>
-                        <ErrorBanner
-                          message={visibleChatError || String(nativeThread?.error ?? '')}
-                        />
-                      </View>
-                    ) : null}
+                    {busy === 'create-chat' ? (
+                      <ActivityIndicator color={colors.onAccent} size="small" />
+                    ) : (
+                      <Text style={styles.emptyDroneButtonText}>Create chat</Text>
+                    )}
+                  </Pressable>
+                  {visibleChatError ? <ErrorBanner message={visibleChatError} /> : null}
+                </View>
+              ) : (
+                <>
+                  {accessOpen && phoneTarget && nativeChatId ? (
                     <ScrollView
-                      ref={latestMessageScroll.ref}
                       style={styles.transcriptScroll}
-                      contentContainerStyle={[
-                        styles.transcriptContent,
-                        !latestMessageScroll.contentVisible && styles.transcriptContentHidden,
-                      ]}
-                      keyboardDismissMode="interactive"
-                      keyboardShouldPersistTaps="handled"
-                      onLayout={latestMessageScroll.onLayout}
-                      onContentSizeChange={latestMessageScroll.onContentSizeChange}
-                      onScroll={latestMessageScroll.onScroll}
-                      scrollEventThrottle={16}
+                      contentContainerStyle={styles.transcriptContent}
                     >
-                      {chatHistoryPage.hasOlder || olderHistoryBusy ? (
-                        <View
-                          accessibilityLiveRegion="polite"
-                          accessibilityRole={olderHistoryBusy ? 'progressbar' : undefined}
-                          accessibilityLabel={
-                            olderHistoryBusy ? 'Loading older chat messages' : undefined
+                      {localAssistant.threads.find((thread) => thread.id === nativeChatId) ? (
+                        <LocalWorkspaceEditor
+                          thread={
+                            localAssistant.threads.find((thread) => thread.id === nativeChatId)!
                           }
-                          style={styles.loadOlderStatus}
-                        >
-                          {olderHistoryBusy ? (
-                            <ActivityIndicator color={colors.accent} size="small" />
-                          ) : null}
+                          onRequestClose={() => {
+                            if (accessDirty) setConfirmAccessDiscard(true);
+                            else setAccessOpen(false);
+                          }}
+                          onApplied={() => {
+                            setAccessDirty(false);
+                            setAccessOpen(false);
+                          }}
+                          onDirtyChange={setAccessDirty}
+                        />
+                      ) : null}
+                    </ScrollView>
+                  ) : (
+                    <>
+                      {visibleChatError || nativeThread?.error ? (
+                        <View style={styles.chatError}>
+                          <ErrorBanner
+                            message={visibleChatError || String(nativeThread?.error ?? '')}
+                          />
                         </View>
                       ) : null}
-                      <RenderErrorBoundary
-                        key={`${targetId}:${selected.id}:${chatName}`}
-                        fallback={
-                          <ErrorBanner message="This transcript could not be rendered safely. Switch chats and return to retry." />
-                        }
+                      <ScrollView
+                        ref={latestMessageScroll.ref}
+                        style={styles.transcriptScroll}
+                        contentContainerStyle={[
+                          styles.transcriptContent,
+                          !latestMessageScroll.contentVisible && styles.transcriptContentHidden,
+                        ]}
+                        keyboardDismissMode="interactive"
+                        keyboardShouldPersistTaps="handled"
+                        onLayout={latestMessageScroll.onLayout}
+                        onContentSizeChange={latestMessageScroll.onContentSizeChange}
+                        onScroll={latestMessageScroll.onScroll}
+                        scrollEventThrottle={16}
                       >
-                        <MobileAssistantTranscript
-                          messages={transcriptMessages}
-                          loading={chatLoading}
-                          running={running}
-                          awaitingApproval={awaitingApproval}
-                          approvalStartedAt={approvalStartedAt}
-                          emptyTitle="This drone chat is ready."
-                          emptyBody="Send a prompt to start the conversation."
-                          assistantLabel="Agent"
-                          queuedPrompts={visiblePendingPrompts}
-                          cancellingPromptId={cancellingPromptId}
-                          onCancelQueuedPrompt={cancelPendingPrompt}
-                          creatingQueuedChatId={creatingQueuedChatId}
-                          onCreateQueuedChatNow={createQueuedChatNow}
-                          resolvingInterruptionId={resolvingInterruptionId}
-                          onResolveInterruption={resolvePendingPromptInterruption}
-                          queueInterruption={normalizePromptQueueInterruption(
-                            nativeThread?.queueInterruption,
-                          )}
-                          interruptedPromptId={String(nativeThread?.interruptedPromptId ?? '')}
-                          linkedPullRequests={linkedPullRequests}
-                          onLoadFullMessage={(message) => void loadFullChatMessage(message)}
-                          fullMessageLoadingId={fullMessageBusyId}
-                          onOpenFileReference={filePreview.open}
-                          onLoadRunFileDiff={loadRunFileDiff}
-                          onLoadRunFiles={loadRunFiles}
-                          questionRequests={questionRequests}
-                          renderQuestionRequest={(request) =>
-                            request.status === 'pending' ? (
-                              <MobileQuestionRequestCard
-                                request={request}
-                                busy={questionBusyId === request.id}
-                                disabled={!targetReachable}
-                                onSubmit={({ responses, notes }) =>
-                                  resolveQuestionRequest(request, {
-                                    action: 'submit',
-                                    responses,
-                                    ...(notes ? { notes } : {}),
-                                  })
-                                }
-                                onSkip={(notes) =>
-                                  resolveQuestionRequest(request, {
-                                    action: 'skip',
-                                    ...(notes ? { notes } : {}),
-                                  })
-                                }
-                              />
-                            ) : (
-                              <MobileQuestionResultCard request={request} />
-                            )
-                          }
-                          onDeleteMessageRequest={
-                            nativeMessages !== null
-                              ? ({ message, deleteFollowing }) => {
-                                  const messageId = String((message as any)?.id ?? '').trim();
-                                  if (!selected || !messageId) return;
-                                  const destinationId = targetId;
-                                  void requestDroneControl(destinationId, 'chat.message.delete', {
-                                    droneId: selected.id,
-                                    chatName,
-                                    nativeChatId,
-                                    messageId,
-                                    deleteFollowing,
-                                  })
-                                    .then(() => readChat(selected.id, chatName))
-                                    .catch((nextError: any) =>
-                                      setError(nextError?.message ?? String(nextError)),
-                                    );
-                                }
-                              : undefined
-                          }
-                        />
-                      </RenderErrorBoundary>
-                      {pendingApprovals.map((approval) => (
-                        <AssistantApprovalCard
-                          key={approval.id}
-                          approval={approval}
-                          busy={approvalBusyId === approval.id}
-                          disabled={!targetReachable}
-                          onResolve={(approved) => resolveNativeApproval(approval, approved)}
-                        />
-                      ))}
-                      {codexPendingApprovals.map((approval) => (
-                        <CodexApprovalCard
-                          key={approval.id}
-                          approval={approval}
-                          busy={approvalBusyId === approval.id}
-                          disabled={!targetReachable}
-                          onResolve={(decision) => resolveCodexApproval(approval, decision)}
-                        />
-                      ))}
-                    </ScrollView>
-                    {dictation.open ? (
-                      <MobileDictationComposer
-                        value={dictation.text}
-                        deviceName={activeTarget?.name ?? 'This device'}
-                        droneName={selected.name}
-                        chatName={chatName}
-                        groupName={selected.group}
-                        recordingStatus={dictation.recordingStatus}
-                        recordingDurationMillis={dictation.recordingDurationMillis}
-                        pendingCount={dictation.pendingCount}
-                        error={dictation.error}
-                        notice={dictation.notice}
-                        failedTranscriptionError={dictation.failedClip?.error}
-                        finalizing={dictation.finalizing}
-                        networkSending={dictation.networkSending}
-                        microphoneUnavailable={dictation.microphoneUnavailable}
-                        onChangeText={dictation.setText}
-                        onClose={dictation.discardAndClose}
-                        onToggleRecording={dictation.toggleRecording}
-                        onTogglePause={dictation.togglePause}
-                        onCancelRecording={dictation.cancelRecording}
-                        onRetryFailedTranscription={dictation.retryFailedClip}
-                        onDiscardFailedTranscription={dictation.discardFailedClip}
-                        onDestinationPress={dictation.requestSend}
-                      />
-                    ) : (
-                      <>
-                        <View style={styles.composerMetadataRow}>
-                          <View style={styles.composerMetadataLeading}>
-                            <DroneRuntimeIndicator
-                              runtime={selected.runtime === 'host' ? 'host' : 'container'}
-                            />
-                            <ChatSubscriptionIndicator subscriptions={chatSubscriptions} />
+                        {chatHistoryPage.hasOlder || olderHistoryBusy ? (
+                          <View
+                            accessibilityLiveRegion="polite"
+                            accessibilityRole={olderHistoryBusy ? 'progressbar' : undefined}
+                            accessibilityLabel={
+                              olderHistoryBusy ? 'Loading older chat messages' : undefined
+                            }
+                            style={styles.loadOlderStatus}
+                          >
+                            {olderHistoryBusy ? (
+                              <ActivityIndicator color={colors.accent} size="small" />
+                            ) : null}
                           </View>
-                          <DroneBranchIndicator branch={selected.repoBranch} />
-                        </View>
-                        <AssistantComposer
-                          focusKey={composerFocusKey}
-                          voiceResetKey={`${targetId}:${selected.id}:${chatName}`}
-                          value={prompt}
-                          onChangeText={setPrompt}
-                          onSend={async (
-                            promptOverride,
-                            deliveryMode,
-                            promptId,
-                            preserveComposer,
-                          ) =>
-                            await sendPrompt(
+                        ) : null}
+                        <RenderErrorBoundary
+                          key={`${targetId}:${selected.id}:${chatName}`}
+                          fallback={
+                            <ErrorBanner message="This transcript could not be rendered safely. Switch chats and return to retry." />
+                          }
+                        >
+                          <MobileAssistantTranscript
+                            messages={transcriptMessages}
+                            loading={chatLoading}
+                            running={running}
+                            awaitingApproval={awaitingApproval}
+                            approvalStartedAt={approvalStartedAt}
+                            emptyTitle="This drone chat is ready."
+                            emptyBody="Send a prompt to start the conversation."
+                            assistantLabel="Agent"
+                            queuedPrompts={visiblePendingPrompts}
+                            cancellingPromptId={cancellingPromptId}
+                            onCancelQueuedPrompt={cancelPendingPrompt}
+                            creatingQueuedChatId={creatingQueuedChatId}
+                            onCreateQueuedChatNow={createQueuedChatNow}
+                            resolvingInterruptionId={resolvingInterruptionId}
+                            onResolveInterruption={resolvePendingPromptInterruption}
+                            queueInterruption={normalizePromptQueueInterruption(
+                              nativeThread?.queueInterruption,
+                            )}
+                            interruptedPromptId={String(nativeThread?.interruptedPromptId ?? '')}
+                            linkedPullRequests={linkedPullRequests}
+                            onLoadFullMessage={(message) => void loadFullChatMessage(message)}
+                            fullMessageLoadingId={fullMessageBusyId}
+                            onOpenFileReference={openFileReference}
+                            onLoadRunFileDiff={loadRunFileDiff}
+                            onLoadRunFiles={loadRunFiles}
+                            questionRequests={questionRequests}
+                            renderQuestionRequest={(request) =>
+                              request.status === 'pending' ? (
+                                <MobileQuestionRequestCard
+                                  request={request}
+                                  busy={questionBusyId === request.id}
+                                  disabled={!targetReachable}
+                                  onSubmit={({ responses, notes }) =>
+                                    resolveQuestionRequest(request, {
+                                      action: 'submit',
+                                      responses,
+                                      ...(notes ? { notes } : {}),
+                                    })
+                                  }
+                                  onSkip={(notes) =>
+                                    resolveQuestionRequest(request, {
+                                      action: 'skip',
+                                      ...(notes ? { notes } : {}),
+                                    })
+                                  }
+                                />
+                              ) : (
+                                <MobileQuestionResultCard request={request} />
+                              )
+                            }
+                            onDeleteMessageRequest={
+                              nativeMessages !== null
+                                ? ({ message, deleteFollowing }) => {
+                                    const messageId = String((message as any)?.id ?? '').trim();
+                                    if (!selected || !messageId) return;
+                                    const destinationId = targetId;
+                                    void requestDroneControl(destinationId, 'chat.message.delete', {
+                                      droneId: selected.id,
+                                      chatName,
+                                      nativeChatId,
+                                      messageId,
+                                      deleteFollowing,
+                                    })
+                                      .then(() => readChat(selected.id, chatName))
+                                      .catch((nextError: any) =>
+                                        setError(nextError?.message ?? String(nextError)),
+                                      );
+                                  }
+                                : undefined
+                            }
+                          />
+                        </RenderErrorBoundary>
+                        {pendingApprovals.map((approval) => (
+                          <AssistantApprovalCard
+                            key={approval.id}
+                            approval={approval}
+                            busy={approvalBusyId === approval.id}
+                            disabled={!targetReachable}
+                            onResolve={(approved) => resolveNativeApproval(approval, approved)}
+                          />
+                        ))}
+                        {codexPendingApprovals.map((approval) => (
+                          <CodexApprovalCard
+                            key={approval.id}
+                            approval={approval}
+                            busy={approvalBusyId === approval.id}
+                            disabled={!targetReachable}
+                            onResolve={(decision) => resolveCodexApproval(approval, decision)}
+                          />
+                        ))}
+                      </ScrollView>
+                      <View style={dictation.open && styles.dictationComposerStack}>
+                        <View
+                          pointerEvents={dictation.open ? 'none' : 'auto'}
+                          onLayout={(event) => {
+                            const nextHeight = event.nativeEvent.layout.height;
+                            if (
+                              nextHeight > 0 &&
+                              Math.abs(nextHeight - restingChatComposerHeight) > 0.5
+                            )
+                              setRestingChatComposerHeight(nextHeight);
+                          }}
+                          style={dictation.open && styles.dictationComposerBackdrop}
+                        >
+                          <View style={styles.composerMetadataRow}>
+                            <View style={styles.composerMetadataLeading}>
+                              <DroneRuntimeIndicator
+                                runtime={selected.runtime === 'host' ? 'host' : 'container'}
+                              />
+                              <ChatSubscriptionIndicator subscriptions={chatSubscriptions} />
+                            </View>
+                            <DroneBranchIndicator branch={selected.repoBranch} />
+                          </View>
+                          <AssistantComposer
+                            focusKey={composerFocusKey}
+                            voiceResetKey={`${targetId}:${selected.id}:${chatName}`}
+                            value={prompt}
+                            onChangeText={setPrompt}
+                            onSend={async (
                               promptOverride,
                               deliveryMode,
                               promptId,
                               preserveComposer,
-                            )
-                          }
-                          onStop={() => void stopChat()}
-                          onOpenDictation={() => {
-                            // Keep text attached to images/files in the normal
-                            // composer; dictation destinations only send text.
-                            const initialPrompt =
-                              promptAttachmentsRef.current.length === 0 ? promptRef.current : '';
-                            void dictation.openAndStart(initialPrompt).then((adopted) => {
-                              if (
-                                !adopted ||
-                                promptRef.current !== initialPrompt ||
-                                promptAttachmentsRef.current.length > 0
+                            ) =>
+                              await sendPrompt(
+                                promptOverride,
+                                deliveryMode,
+                                promptId,
+                                preserveComposer,
                               )
-                                return;
-                              promptRef.current = '';
-                              setPrompt('');
-                            });
-                          }}
-                          onOpenModel={() => void openModelPicker()}
-                          modelLabel={displayedModel}
-                          reasoningLabel={chatReasoning}
-                          sending={busy === 'prompt'}
-                          running={running}
-                          editable={targetReachable}
-                          queueWhileRunning={targetReachable}
-                          placeholder={
-                            targetReachable
-                              ? 'Ask the agent'
-                              : targetReconnecting
-                                ? 'Reconnecting…'
-                                : 'Device offline'
-                          }
-                          hasAttachments={promptAttachments.length > 0}
-                          onAddAttachment={addPromptAttachment}
-                          attachmentActionsDisabled={!targetReachable || (phoneTarget && running)}
-                          sendBlocked={
-                            !targetReachable ||
-                            (phoneTarget && running && promptAttachments.length > 0)
-                          }
-                          footer={
-                            promptAttachments.length > 0 ? (
-                              <ChatAttachmentStrip
-                                attachments={promptAttachments}
-                                disabled={!targetReachable || busy === 'prompt'}
-                                onRemove={(id) =>
-                                  setPromptAttachments((current) =>
-                                    current.filter((attachment) => attachment.id !== id),
-                                  )
-                                }
-                              />
-                            ) : undefined
-                          }
-                        />
-                      </>
-                    )}
-                    <AssistantModelPicker
-                      open={modelOpen}
-                      currentProvider={chatModelProvider}
-                      currentModel={chatModel || latestModel || ''}
-                      currentThinkingLevel={chatReasoning}
-                      options={chatModels}
-                      busy={modelBusy}
-                      onClose={() => setModelOpen(false)}
-                      onSelect={(choice, selection) => void updateChatModel(choice, selection)}
-                    />
-                  </>
-                )}
-              </>
-            )}
-          </View>
-        ) : targetSupportsDrones ? (
-          <NewDroneScreen
-            key={`${targetId}:${newDroneScreenVersion}`}
-            repos={createRepos}
-            loadingOptions={
-              targetReachable && (!dronesLoaded || busy === 'drones' || createOptionsLoading)
-            }
-            busy={busy.startsWith('create-')}
-            requestError={dronesLoading ? null : error}
-            initialValues={newDroneDefaults ?? undefined}
-            localDevice={phoneTarget}
-            onDetectModels={detectCreateModels}
-            onLoadRepoBranches={loadCreateRepoBranches}
-            onLoadRepoPreferences={(repoPath) =>
-              loadMobileDroneCreatePreferences(targetId, repoPath)
-            }
-            onDraftContentChange={rememberNewDroneDraftContent}
-            onCreate={createDrone}
-          />
-        ) : (
-          <View style={styles.unavailable}>
-            <Text style={styles.unavailableText}>
-              {activeTarget
-                ? `${activeTarget.name} does not provide drone control. Choose a Drone Hub device from the drawer.`
-                : 'Choose a connected Drone Hub device from the drawer.'}
-            </Text>
-            <ErrorBanner message={error} />
-          </View>
-        )}
-      </KeyboardAvoidingView>
-      <FilePreviewModal
-        visible={workspaceVisible && filePreview.visible}
-        preview={filePreview.preview}
-        displayPath={filePreview.displayPath}
-        line={filePreview.line}
-        loading={filePreview.loading}
-        error={filePreview.error}
-        refreshError={filePreview.refreshError}
-        saving={filePreview.saving}
-        saveError={filePreview.saveError}
-        targetId={targetId}
-        droneId={selected?.id ?? ''}
-        chatName={chatName}
-        rootPath={filePreview.rootPath}
-        selectedPath={filePreview.selectedPath}
-        requestDroneControl={requestDroneControl}
-        onOpenPath={(path) => filePreview.open({ raw: path, path, line: null, column: null })}
-        onSave={filePreview.save}
-        onClose={filePreview.close}
-        onRetry={filePreview.retry}
-        onPreviewPathsChanged={filePreview.invalidatePaths}
-      />
+                            }
+                            onStop={() => void stopChat()}
+                            onOpenDictation={() => {
+                              // Keep text attached to images/files in the normal
+                              // composer; dictation destinations only send text.
+                              const initialPrompt =
+                                promptAttachmentsRef.current.length === 0 ? promptRef.current : '';
+                              void dictation.openAndStart(initialPrompt).then((adopted) => {
+                                if (
+                                  !adopted ||
+                                  promptRef.current !== initialPrompt ||
+                                  promptAttachmentsRef.current.length > 0
+                                )
+                                  return;
+                                promptRef.current = '';
+                                setPrompt('');
+                              });
+                            }}
+                            onOpenModel={() => void openModelPicker()}
+                            modelLabel={displayedModel}
+                            reasoningLabel={chatReasoning}
+                            sending={busy === 'prompt'}
+                            running={running}
+                            editable={targetReachable}
+                            queueWhileRunning={targetReachable}
+                            placeholder={
+                              targetReachable
+                                ? 'Ask the agent'
+                                : targetReconnecting
+                                  ? 'Reconnecting…'
+                                  : 'Device offline'
+                            }
+                            hasAttachments={promptAttachments.length > 0}
+                            onAddAttachment={addPromptAttachment}
+                            attachmentActionsDisabled={!targetReachable || (phoneTarget && running)}
+                            sendBlocked={
+                              !targetReachable ||
+                              (phoneTarget && running && promptAttachments.length > 0)
+                            }
+                            footer={
+                              promptAttachments.length > 0 ? (
+                                <ChatAttachmentStrip
+                                  attachments={promptAttachments}
+                                  disabled={!targetReachable || busy === 'prompt'}
+                                  onRemove={(id) =>
+                                    setPromptAttachments((current) =>
+                                      current.filter((attachment) => attachment.id !== id),
+                                    )
+                                  }
+                                />
+                              ) : undefined
+                            }
+                          />
+                        </View>
+                        {dictation.open ? (
+                          <MobileDictationComposer
+                            value={dictation.text}
+                            deviceName={activeTarget?.name ?? 'This device'}
+                            droneName={selected.name}
+                            chatName={chatName}
+                            groupName={selected.group}
+                            recordingStatus={dictation.recordingStatus}
+                            recordingDurationMillis={dictation.recordingDurationMillis}
+                            pendingCount={dictation.pendingCount}
+                            error={dictation.error}
+                            notice={dictation.notice}
+                            failedTranscriptionError={dictation.failedClip?.error}
+                            finalizing={dictation.finalizing}
+                            networkSending={dictation.networkSending}
+                            microphoneUnavailable={dictation.microphoneUnavailable}
+                            onChangeText={dictation.setText}
+                            onClose={() => {
+                              Keyboard.dismiss();
+                              setComposerFocusKey('');
+                              return dictation.discardAndClose();
+                            }}
+                            onToggleRecording={dictation.toggleRecording}
+                            onTogglePause={dictation.togglePause}
+                            onCancelRecording={dictation.cancelRecording}
+                            onRetryFailedTranscription={dictation.retryFailedClip}
+                            onDiscardFailedTranscription={dictation.discardFailedClip}
+                            onDestinationPress={dictation.requestSend}
+                            morphToComposer
+                            morphTargetHeight={Math.max(52, restingChatComposerHeight - 14)}
+                          />
+                        ) : null}
+                      </View>
+                      <AssistantModelPicker
+                        open={modelOpen}
+                        currentProvider={chatModelProvider}
+                        currentModel={chatModel || latestModel || ''}
+                        currentThinkingLevel={chatReasoning}
+                        options={chatModels}
+                        busy={modelBusy}
+                        onClose={() => setModelOpen(false)}
+                        onSelect={(choice, selection) => void updateChatModel(choice, selection)}
+                      />
+                    </>
+                  )}
+                </>
+              )}
+            </View>
+          ) : targetSupportsDrones ? (
+            <NewDroneScreen
+              key={`${targetId}:${newDroneScreenVersion}`}
+              repos={createRepos}
+              loadingOptions={
+                targetReachable && (!dronesLoaded || busy === 'drones' || createOptionsLoading)
+              }
+              busy={busy.startsWith('create-')}
+              requestError={dronesLoading ? null : error}
+              initialValues={newDroneDefaults ?? undefined}
+              localDevice={phoneTarget}
+              onDetectModels={detectCreateModels}
+              onLoadRepoBranches={loadCreateRepoBranches}
+              onLoadRepoPreferences={(repoPath) =>
+                loadMobileDroneCreatePreferences(targetId, repoPath)
+              }
+              onDraftContentChange={rememberNewDroneDraftContent}
+              onCreate={createDrone}
+            />
+          ) : (
+            <View style={styles.unavailable}>
+              <Text style={styles.unavailableText}>
+                {activeTarget
+                  ? `${activeTarget.name} does not provide drone control. Choose a Drone Hub device from the drawer.`
+                  : 'Choose a connected Drone Hub device from the drawer.'}
+              </Text>
+              <ErrorBanner message={error} />
+            </View>
+          )}
+        </KeyboardAvoidingView>
+      </ChatFilesCarousel>
       <TextInputDialog
         visible={Boolean(renameCandidate)}
         title="Rename drone"
@@ -3850,6 +3902,8 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 17,
   },
+  dictationComposerStack: { position: 'relative' },
+  dictationComposerBackdrop: { position: 'absolute', top: 0, right: 0, left: 0 },
   composerMetadataLeading: {
     minWidth: 0,
     flex: 1,

@@ -895,7 +895,7 @@ describe('mobile sidebar presentation', () => {
     expect(drawerSource).toContain('drawerRefreshFrameRef.current = requestAnimationFrame');
     expect(drawerSource).toContain("import { Drawer } from 'react-native-drawer-layout'");
     expect(drawerSource).toContain('drawerType="front"');
-    expect(drawerSource).toContain('swipeEnabled={Boolean(drawerProps)}');
+    expect(drawerSource).toContain('swipeEnabled={Boolean(drawerProps) && (drawerOpen || drawerSwipeEnabled)}');
     expect(drawerSource).toContain('return Math.max(0, windowWidth);');
     expect(drawerSource).toContain('swipeEdgeWidth={windowWidth}');
     expect(drawerSource).toContain('width: windowWidth');

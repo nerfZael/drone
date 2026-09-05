@@ -10,7 +10,7 @@ describe('mobile assistant composer controls', () => {
     const collapsedStart = source.indexOf('{!expanded ? (');
     const expandedStart = source.indexOf('{expanded ? (', collapsedStart);
     const collapsedControls = source.slice(collapsedStart, expandedStart);
-    const idleExpandedStart = source.indexOf("{voiceStatus === 'idle'", expandedStart);
+    const idleExpandedStart = source.indexOf("voiceStatus === 'idle'", expandedStart);
     const activeVoiceStart = source.indexOf(') : continuousVoiceOwned ?', idleExpandedStart);
     const idleExpandedControls = source.slice(idleExpandedStart, activeVoiceStart);
     const continuousIconIndex = idleExpandedControls.indexOf('icon={AudioLines}');

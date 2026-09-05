@@ -54,7 +54,7 @@ describe('mobile file explorer presentation', () => {
     expect(source).toContain(
       "accessibilityLabel={wordWrap ? 'Turn off word wrap' : 'Turn on word wrap'}",
     );
-    expect(source).toContain('active={explorerExpanded}');
+    expect(source).toContain('active={visible && (explorerExpanded || explorerDragging)}');
   });
 
   test('loads the root directory only while the explorer is open', () => {

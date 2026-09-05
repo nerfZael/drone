@@ -140,6 +140,7 @@ function devicePlatformLabel(platform: string): string {
 
 export type AppDrawerProps = {
   open: boolean;
+  swipeEnabled?: boolean;
   navigationItems: AppDrawerNavigationItem[];
   showDrones?: boolean;
   drones?: MobileDroneSummary[];
@@ -239,6 +240,7 @@ function mobileSidebarChatId(droneId: string, chatName: string): string {
 export function AppDrawerProvider({ children }: { children: React.ReactNode }) {
   const [drawerProps, setDrawerProps] = React.useState<AppDrawerProps | null>(null);
   const [drawerOpen, setDrawerOpen] = React.useState(false);
+  const [drawerSwipeEnabled, setDrawerSwipeEnabled] = React.useState(true);
   const { width: windowWidth } = useWindowDimensions();
   // The workspace currently resolves different @types/react versions for the app and the drawer.
   // Keep the compatibility cast scoped to that package boundary instead of erasing the type.
@@ -252,6 +254,7 @@ export function AppDrawerProvider({ children }: { children: React.ReactNode }) {
     drawerOpenRef.current = nextProps?.open ?? false;
     drawerPropsRef.current = nextProps;
     setDrawerOpen(nextProps?.open ?? false);
+    setDrawerSwipeEnabled(nextProps?.swipeEnabled !== false);
     setDrawerProps((currentProps) => {
       if (!nextProps) {
         return wasOpen || drawerTransitionActiveRef.current ? currentProps : null;
@@ -347,7 +350,7 @@ export function AppDrawerProvider({ children }: { children: React.ReactNode }) {
         drawerStyle={[styles.drawer, { width: appDrawerWidth(windowWidth) }]}
         overlayStyle={styles.backdrop}
         overlayAccessibilityLabel="Close app menu"
-        swipeEnabled={Boolean(drawerProps)}
+        swipeEnabled={Boolean(drawerProps) && (drawerOpen || drawerSwipeEnabled)}
         swipeEdgeWidth={windowWidth}
         swipeMinDistance={24}
         swipeMinVelocity={320}

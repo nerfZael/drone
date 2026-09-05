@@ -41,7 +41,7 @@ import {
 import { useSharedMobileChatVoiceRecorder } from './MobileChatVoiceRecorderContext';
 import { useMobileCompanion } from './MobileCompanionContext';
 import { MobileContinuousVoiceModePicker } from './MobileContinuousVoiceModePicker';
-import { MobileDictationComposerPreview } from './MobileDictationComposer';
+import { MobileDictationComposer, MobileDictationComposerPreview } from './MobileDictationComposer';
 import type { MobileContinuousVoiceMode } from './mobile-continuous-dictation';
 import {
   useMobileComposerContinuousVoice,
@@ -118,26 +118,25 @@ function useSwipeUpVoiceGesture({
 
 function SwipeUpVoiceComposer({
   enabled,
-  expandsToDictation,
+  usesChatDictation,
   gesture,
   progress,
   children,
   style,
 }: {
   enabled: boolean;
-  expandsToDictation: boolean;
+  usesChatDictation: boolean;
   gesture: React.ComponentProps<typeof GestureDetector>['gesture'];
   progress: SharedValue<number>;
   children: React.ComponentProps<typeof View>['children'];
-  style: React.ComponentProps<typeof View>['style'];
+  style: React.ComponentProps<typeof Animated.View>['style'];
 }) {
   React.useEffect(() => {
     if (!enabled) progress.value = withTiming(0, { duration: 120 });
   }, [enabled, progress]);
 
   const composerStyle = useAnimatedStyle(() => ({
-    minHeight: interpolate(progress.value, [0, 1], [52, expandsToDictation ? 177 : 119]),
-    marginHorizontal: interpolate(progress.value, [0, 1], [0, expandsToDictation ? -9 : 0]),
+    minHeight: interpolate(progress.value, [0, 1], [52, 177]),
     transform: [
       { translateY: interpolate(progress.value, [0, 1], [0, -3]) },
       { scale: interpolate(progress.value, [0, 1], [1, 0.995]) },
@@ -158,37 +157,10 @@ function SwipeUpVoiceComposer({
           pointerEvents="none"
           style={[styles.swipeVoicePreview, previewStyle]}
         >
-          {expandsToDictation ? (
-            <MobileDictationComposerPreview />
-          ) : (
-            <>
-              <View style={styles.swipeVoiceDraftSpace} />
-              <View style={styles.voiceFeedback}>
-                <View style={styles.voiceStatusRow}>
-                  <View style={styles.voiceStatusDot} />
-                  <Text style={styles.voiceFeedbackText}>Ready to record</Text>
-                  <Text style={styles.voiceTimer}>0:00</Text>
-                </View>
-              </View>
-              <View style={styles.controls}>
-                <View style={[styles.voiceButton, styles.voiceButtonDanger]}>
-                  <X color={colors.danger} size={16} strokeWidth={2.2} />
-                </View>
-                <View style={styles.controlSpacer} />
-                <View style={styles.voicePrimaryControls}>
-                  <View style={styles.voiceButton}>
-                    <Pause color={colors.textSecondary} size={16} strokeWidth={2.2} />
-                  </View>
-                  <View style={[styles.voiceButton, styles.voiceButtonSuccess]}>
-                    <Square color={colors.online} size={16} strokeWidth={2.2} />
-                  </View>
-                </View>
-                <View style={[styles.iconButton, styles.iconButtonAccent]}>
-                  <ArrowUp color={colors.onAccent} size={17} strokeWidth={2.6} />
-                </View>
-              </View>
-            </>
-          )}
+          <MobileDictationComposerPreview
+            primaryActionLabel={usesChatDictation ? 'Current chat' : 'Send'}
+            showDestinationMenu={usesChatDictation}
+          />
         </Animated.View>
       </Animated.View>
     </GestureDetector>
@@ -358,6 +330,7 @@ export function AssistantComposer({
   const [focused, setFocused] = React.useState(false);
   const [voiceActionInFlight, setVoiceActionInFlight] = React.useState(false);
   const [continuousModePickerOpen, setContinuousModePickerOpen] = React.useState(false);
+  const [restingComposerHeight, setRestingComposerHeight] = React.useState(92);
   const companion = useMobileCompanion();
   const {
     error: sharedVoiceError,
@@ -376,6 +349,7 @@ export function AssistantComposer({
   const voiceDurationMillis = voiceSession.kind === 'single-shot' ? voiceSession.durationMillis : 0;
   const targetKey = String(voiceResetKey ?? '').trim();
   const voiceActive = voiceStatus !== 'idle';
+  const localRecorderOpen = !onOpenDictation && voiceActive;
   const voiceRecordAccessibilityLabel =
     voiceSession.kind === 'continuous'
       ? 'Continuous voice is using the microphone'
@@ -669,282 +643,333 @@ export function AssistantComposer({
 
   return (
     <View style={styles.frame}>
-      <SwipeUpVoiceComposer
-        enabled={!voiceRecordActionDisabled}
-        expandsToDictation={Boolean(onOpenDictation)}
-        gesture={swipeUpVoiceGesture}
-        progress={swipeVoiceProgress}
-        style={[
-          styles.composer,
-          expanded && styles.composerExpanded,
-          Boolean(leadingControl) && styles.composerWithLeadingControl,
-        ]}
-      >
-        <GestureDetector gesture={swipeUpVoiceInputGesture}>
-          <ThemedTextInput
-            ref={inputRef}
-            value={value}
-            onChangeText={changeText}
-            onFocus={(event) => {
-              if (suppressInputFocusRef.current || voiceActive) {
-                inputRef.current?.blur();
-                Keyboard.dismiss();
-                return;
-              }
-              setFocused(true);
-              onInputFocus?.(event.nativeEvent.target);
-            }}
-            onBlur={() => {
-              setFocused(false);
-              onInputBlur?.();
-            }}
-            editable={editable && (!running || queueWhileRunning) && !voiceActive}
-            showSoftInputOnFocus={!voiceActive}
-            multiline
-            maxLength={maxLength}
-            placeholder={placeholder}
-            placeholderTextColor={colors.secondary}
-            textAlignVertical="top"
+      <View style={localRecorderOpen && styles.localRecorderStack}>
+        <View
+          pointerEvents={localRecorderOpen ? 'none' : 'auto'}
+          onLayout={(event) => {
+            const nextHeight = event.nativeEvent.layout.height;
+            if (nextHeight > 0 && Math.abs(nextHeight - restingComposerHeight) > 0.5)
+              setRestingComposerHeight(nextHeight);
+          }}
+          style={localRecorderOpen && styles.localRecorderBackdrop}
+        >
+          <SwipeUpVoiceComposer
+            enabled={!voiceRecordActionDisabled}
+            usesChatDictation={Boolean(onOpenDictation)}
+            gesture={swipeUpVoiceGesture}
+            progress={swipeVoiceProgress}
             style={[
-              styles.input,
-              expanded && styles.inputExpanded,
-              !expanded &&
-                (attachmentsEnabled
-                  ? styles.inputWithCollapsedVoice
-                  : styles.inputWithCollapsedVoiceOnly),
-              !expanded && showAssistantStop && styles.inputWithCollapsedStop,
+              styles.composer,
+              expanded && styles.composerExpanded,
+              Boolean(leadingControl) && styles.composerWithLeadingControl,
             ]}
-          />
-        </GestureDetector>
-        {!expanded ? (
-          <>
-            {attachmentsEnabled ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Add image"
-                accessibilityState={{ disabled: attachmentActionDisabled }}
-                disabled={attachmentActionDisabled}
-                hitSlop={6}
-                onPress={onAddAttachment}
-                style={({ pressed }) => [
-                  styles.collapsedAddButton,
-                  attachmentActionDisabled && styles.disabled,
-                  pressed && styles.pressed,
+          >
+            <GestureDetector gesture={swipeUpVoiceInputGesture}>
+              <ThemedTextInput
+                ref={inputRef}
+                value={value}
+                onChangeText={changeText}
+                onFocus={(event) => {
+                  if (suppressInputFocusRef.current || voiceActive) {
+                    inputRef.current?.blur();
+                    Keyboard.dismiss();
+                    return;
+                  }
+                  setFocused(true);
+                  onInputFocus?.(event.nativeEvent.target);
+                }}
+                onBlur={() => {
+                  setFocused(false);
+                  onInputBlur?.();
+                }}
+                editable={editable && (!running || queueWhileRunning) && !voiceActive}
+                showSoftInputOnFocus={!voiceActive}
+                multiline
+                maxLength={maxLength}
+                placeholder={placeholder}
+                placeholderTextColor={colors.secondary}
+                textAlignVertical="top"
+                style={[
+                  styles.input,
+                  expanded && styles.inputExpanded,
+                  !expanded &&
+                    (attachmentsEnabled
+                      ? styles.inputWithCollapsedVoice
+                      : styles.inputWithCollapsedVoiceOnly),
+                  !expanded && showAssistantStop && styles.inputWithCollapsedStop,
                 ]}
-              >
-                <Plus color={colors.textSecondary} size={17} strokeWidth={2.1} />
-              </Pressable>
-            ) : null}
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={voiceRecordAccessibilityLabel}
-              accessibilityState={{ disabled: voiceRecordActionDisabled }}
-              disabled={voiceRecordActionDisabled}
-              hitSlop={6}
-              onPress={activateVoiceRecording}
-              style={({ pressed }) => [
-                styles.collapsedVoiceButton,
-                showAssistantStop && styles.collapsedVoiceButtonWithStop,
-                voiceRecordActionDisabled && styles.disabled,
-                pressed && styles.pressed,
-              ]}
-            >
-              <Mic color={colors.textSecondary} size={17} strokeWidth={2.1} />
-            </Pressable>
-            {showAssistantStop ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Stop assistant"
-                hitSlop={6}
-                onPress={() => onStop?.()}
-                style={({ pressed }) => [styles.collapsedStopButton, pressed && styles.pressed]}
-              >
-                <Square color={colors.danger} size={15} strokeWidth={2.2} fill={colors.danger} />
-              </Pressable>
-            ) : null}
-          </>
-        ) : null}
-        {voiceError || voiceStatusText || (continuousVoiceOwned && continuousStatusText) ? (
-          <View style={styles.voiceFeedback}>
-            {voiceError ? (
-              <Text
-                accessibilityLiveRegion="polite"
-                numberOfLines={2}
-                style={[styles.voiceFeedbackText, styles.voiceFeedbackError]}
-              >
-                {voiceError}
-              </Text>
-            ) : (
-              <View style={styles.voiceStatusRow}>
-                <View
-                  style={[
-                    styles.voiceStatusDot,
-                    voiceStatus === 'paused' && styles.voiceStatusDotPaused,
-                    voiceStatus === 'transcribing' && styles.voiceStatusDotTranscribing,
-                    continuousVoiceOwned &&
-                      continuousSession.status === 'speech' &&
-                      styles.voiceStatusDotSpeech,
-                    continuousVoiceOwned &&
-                      continuousSession.status === 'error' &&
-                      styles.voiceStatusDotError,
-                  ]}
-                />
-                <Text accessibilityLiveRegion="polite" style={styles.voiceFeedbackText}>
-                  {continuousVoiceOwned ? continuousStatusText : voiceStatusText}
-                </Text>
-                <Text
-                  accessibilityLabel={`${continuousVoiceOwned ? continuousDurationText : voiceDurationText} elapsed`}
-                  style={styles.voiceTimer}
-                >
-                  {continuousVoiceOwned ? continuousDurationText : voiceDurationText}
-                </Text>
-              </View>
-            )}
-          </View>
-        ) : null}
-        {expanded ? (
-          <View style={styles.controls}>
-            {voiceStatus === 'idle' && !continuousVoiceOwned ? (
+              />
+            </GestureDetector>
+            {!expanded ? (
               <>
                 {attachmentsEnabled ? (
-                  <IconButton
-                    label="Add image"
-                    icon={Plus}
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Add image"
+                    accessibilityState={{ disabled: attachmentActionDisabled }}
                     disabled={attachmentActionDisabled}
-                    onPress={onAddAttachment!}
-                  />
+                    hitSlop={6}
+                    onPress={onAddAttachment}
+                    style={({ pressed }) => [
+                      styles.collapsedAddButton,
+                      attachmentActionDisabled && styles.disabled,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <Plus color={colors.textSecondary} size={17} strokeWidth={2.1} />
+                  </Pressable>
                 ) : null}
-                {leadingControl}
-                <View style={styles.controlSpacer} />
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel="Choose model and reasoning"
-                  disabled={!editable || running}
-                  onPress={onOpenModel}
+                  accessibilityLabel={voiceRecordAccessibilityLabel}
+                  accessibilityState={{ disabled: voiceRecordActionDisabled }}
+                  disabled={voiceRecordActionDisabled}
+                  hitSlop={6}
+                  onPress={activateVoiceRecording}
                   style={({ pressed }) => [
-                    styles.modelControl,
-                    (!editable || running) && styles.disabled,
+                    styles.collapsedVoiceButton,
+                    showAssistantStop && styles.collapsedVoiceButtonWithStop,
+                    voiceRecordActionDisabled && styles.disabled,
                     pressed && styles.pressed,
                   ]}
                 >
-                  <Text numberOfLines={1} style={styles.modelLabel}>
-                    {model}
-                    {reasoning ? ` ${reasoning}` : ''}
-                  </Text>
-                  <ChevronDown color={colors.secondary} size={14} strokeWidth={2.2} />
+                  <Mic color={colors.textSecondary} size={17} strokeWidth={2.1} />
                 </Pressable>
-                <IconButton
-                  label={
-                    continuousVoiceElsewhere
-                      ? 'Continuous voice is active in another chat'
-                      : 'Choose continuous voice mode'
-                  }
-                  icon={AudioLines}
-                  disabled={continuousVoiceActionDisabled}
-                  onPress={openContinuousVoiceModePicker}
-                />
-                <IconButton
-                  label={voiceRecordAccessibilityLabel}
-                  icon={Mic}
-                  disabled={voiceRecordActionDisabled}
-                  onPress={activateVoiceRecording}
-                />
+                {showAssistantStop ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Stop assistant"
+                    hitSlop={6}
+                    onPress={() => onStop?.()}
+                    style={({ pressed }) => [styles.collapsedStopButton, pressed && styles.pressed]}
+                  >
+                    <Square
+                      color={colors.danger}
+                      size={15}
+                      strokeWidth={2.2}
+                      fill={colors.danger}
+                    />
+                  </Pressable>
+                ) : null}
               </>
-            ) : continuousVoiceOwned ? (
-              <>
-                <VoiceIconButton
-                  label={
-                    continuousVoiceMode === 'dictation'
-                      ? 'Cancel continuous dictation and keep transcribed text'
-                      : 'Cancel continuous voice and discard unsent audio'
-                  }
-                  icon={X}
-                  tone="danger"
-                  disabled={continuousActionInFlight && continuousSession.status !== 'starting'}
-                  onPress={() => void cancelContinuousVoice()}
-                />
-                <View style={styles.controlSpacer} />
-                <View style={styles.voicePrimaryControls}>
-                  <VoiceIconButton
-                    label={`${continuousSession.status === 'paused' || continuousSession.status === 'error' ? 'Resume' : 'Pause'} ${continuousVoiceMode}`}
-                    icon={
-                      continuousSession.status === 'paused' || continuousSession.status === 'error'
-                        ? Play
-                        : Pause
-                    }
-                    tone={
-                      continuousSession.status === 'paused' || continuousSession.status === 'error'
-                        ? 'paused'
-                        : 'default'
-                    }
-                    disabled={
-                      continuousActionInFlight ||
-                      continuousSession.status === 'starting' ||
-                      continuousSession.status === 'stopping'
-                    }
-                    onPress={() => void toggleContinuousVoicePause()}
-                  />
-                  <VoiceIconButton
-                    label={
-                      continuousVoiceMode === 'dictation'
-                        ? 'Stop continuous dictation and keep text'
-                        : 'Stop continuous voice after pending thoughts are sent'
-                    }
-                    icon={Square}
-                    tone="success"
-                    disabled={
-                      continuousActionInFlight ||
-                      continuousSession.status === 'starting' ||
-                      continuousSession.status === 'stopping' ||
-                      continuousSession.status === 'error'
-                    }
-                    onPress={() => void finishContinuousVoice()}
-                  />
-                </View>
-              </>
-            ) : (
-              <>
-                <VoiceIconButton
-                  label="Discard recording"
-                  icon={X}
-                  tone="danger"
-                  disabled={voiceStatus === 'transcribing' || voiceActionInFlight}
-                  onPress={discardVoice}
-                />
-                <View style={styles.controlSpacer} />
-                <View style={styles.voicePrimaryControls}>
-                  <VoiceIconButton
-                    label={voiceStatus === 'paused' ? 'Resume recording' : 'Pause recording'}
-                    icon={voiceStatus === 'paused' ? Play : Pause}
-                    tone={voiceStatus === 'paused' ? 'paused' : 'default'}
-                    disabled={!voiceCanPause || voiceActionInFlight}
-                    onPress={() => toggleRecordingPause('single-shot')}
-                  />
-                  <VoiceIconButton
-                    label="Stop recording and transcribe"
-                    icon={Square}
-                    tone="success"
-                    disabled={!voiceCanStop || voiceActionInFlight}
-                    onPress={() => void stopVoiceAndFillDraft()}
-                  />
-                </View>
-              </>
-            )}
-            {showAssistantStop ? (
-              <IconButton label="Stop assistant" icon={Square} onPress={() => onStop?.()} />
             ) : null}
-            {!running || queueWhileRunning ? (
-              <IconButton
-                label="Send message"
-                icon={ArrowUp}
-                accent
-                disabled={!canSend}
-                onPress={() => void send()}
-              />
+            {!localRecorderOpen &&
+            (voiceError || voiceStatusText || (continuousVoiceOwned && continuousStatusText)) ? (
+              <View style={styles.voiceFeedback}>
+                {voiceError ? (
+                  <Text
+                    accessibilityLiveRegion="polite"
+                    numberOfLines={2}
+                    style={[styles.voiceFeedbackText, styles.voiceFeedbackError]}
+                  >
+                    {voiceError}
+                  </Text>
+                ) : (
+                  <View style={styles.voiceStatusRow}>
+                    <View
+                      style={[
+                        styles.voiceStatusDot,
+                        voiceStatus === 'paused' && styles.voiceStatusDotPaused,
+                        voiceStatus === 'transcribing' && styles.voiceStatusDotTranscribing,
+                        continuousVoiceOwned &&
+                          continuousSession.status === 'speech' &&
+                          styles.voiceStatusDotSpeech,
+                        continuousVoiceOwned &&
+                          continuousSession.status === 'error' &&
+                          styles.voiceStatusDotError,
+                      ]}
+                    />
+                    <Text accessibilityLiveRegion="polite" style={styles.voiceFeedbackText}>
+                      {continuousVoiceOwned ? continuousStatusText : voiceStatusText}
+                    </Text>
+                    <Text
+                      accessibilityLabel={`${continuousVoiceOwned ? continuousDurationText : voiceDurationText} elapsed`}
+                      style={styles.voiceTimer}
+                    >
+                      {continuousVoiceOwned ? continuousDurationText : voiceDurationText}
+                    </Text>
+                  </View>
+                )}
+              </View>
             ) : null}
-          </View>
+            {expanded ? (
+              <View style={styles.controls}>
+                {(localRecorderOpen || voiceStatus === 'idle') && !continuousVoiceOwned ? (
+                  <>
+                    {attachmentsEnabled ? (
+                      <IconButton
+                        label="Add image"
+                        icon={Plus}
+                        disabled={attachmentActionDisabled}
+                        onPress={onAddAttachment!}
+                      />
+                    ) : null}
+                    {leadingControl}
+                    <View style={styles.controlSpacer} />
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Choose model and reasoning"
+                      disabled={!editable || running}
+                      onPress={onOpenModel}
+                      style={({ pressed }) => [
+                        styles.modelControl,
+                        (!editable || running) && styles.disabled,
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      <Text numberOfLines={1} style={styles.modelLabel}>
+                        {model}
+                        {reasoning ? ` ${reasoning}` : ''}
+                      </Text>
+                      <ChevronDown color={colors.secondary} size={14} strokeWidth={2.2} />
+                    </Pressable>
+                    <IconButton
+                      label={
+                        continuousVoiceElsewhere
+                          ? 'Continuous voice is active in another chat'
+                          : 'Choose continuous voice mode'
+                      }
+                      icon={AudioLines}
+                      disabled={continuousVoiceActionDisabled}
+                      onPress={openContinuousVoiceModePicker}
+                    />
+                    <IconButton
+                      label={voiceRecordAccessibilityLabel}
+                      icon={Mic}
+                      disabled={voiceRecordActionDisabled}
+                      onPress={activateVoiceRecording}
+                    />
+                  </>
+                ) : continuousVoiceOwned ? (
+                  <>
+                    <VoiceIconButton
+                      label={
+                        continuousVoiceMode === 'dictation'
+                          ? 'Cancel continuous dictation and keep transcribed text'
+                          : 'Cancel continuous voice and discard unsent audio'
+                      }
+                      icon={X}
+                      tone="danger"
+                      disabled={continuousActionInFlight && continuousSession.status !== 'starting'}
+                      onPress={() => void cancelContinuousVoice()}
+                    />
+                    <View style={styles.controlSpacer} />
+                    <View style={styles.voicePrimaryControls}>
+                      <VoiceIconButton
+                        label={`${continuousSession.status === 'paused' || continuousSession.status === 'error' ? 'Resume' : 'Pause'} ${continuousVoiceMode}`}
+                        icon={
+                          continuousSession.status === 'paused' ||
+                          continuousSession.status === 'error'
+                            ? Play
+                            : Pause
+                        }
+                        tone={
+                          continuousSession.status === 'paused' ||
+                          continuousSession.status === 'error'
+                            ? 'paused'
+                            : 'default'
+                        }
+                        disabled={
+                          continuousActionInFlight ||
+                          continuousSession.status === 'starting' ||
+                          continuousSession.status === 'stopping'
+                        }
+                        onPress={() => void toggleContinuousVoicePause()}
+                      />
+                      <VoiceIconButton
+                        label={
+                          continuousVoiceMode === 'dictation'
+                            ? 'Stop continuous dictation and keep text'
+                            : 'Stop continuous voice after pending thoughts are sent'
+                        }
+                        icon={Square}
+                        tone="success"
+                        disabled={
+                          continuousActionInFlight ||
+                          continuousSession.status === 'starting' ||
+                          continuousSession.status === 'stopping' ||
+                          continuousSession.status === 'error'
+                        }
+                        onPress={() => void finishContinuousVoice()}
+                      />
+                    </View>
+                  </>
+                ) : (
+                  <>
+                    <VoiceIconButton
+                      label="Discard recording"
+                      icon={X}
+                      tone="danger"
+                      disabled={voiceStatus === 'transcribing' || voiceActionInFlight}
+                      onPress={discardVoice}
+                    />
+                    <View style={styles.controlSpacer} />
+                    <View style={styles.voicePrimaryControls}>
+                      <VoiceIconButton
+                        label={voiceStatus === 'paused' ? 'Resume recording' : 'Pause recording'}
+                        icon={voiceStatus === 'paused' ? Play : Pause}
+                        tone={voiceStatus === 'paused' ? 'paused' : 'default'}
+                        disabled={!voiceCanPause || voiceActionInFlight}
+                        onPress={() => toggleRecordingPause('single-shot')}
+                      />
+                      <VoiceIconButton
+                        label="Stop recording and transcribe"
+                        icon={Square}
+                        tone="success"
+                        disabled={!voiceCanStop || voiceActionInFlight}
+                        onPress={() => void stopVoiceAndFillDraft()}
+                      />
+                    </View>
+                  </>
+                )}
+                {showAssistantStop ? (
+                  <IconButton label="Stop assistant" icon={Square} onPress={() => onStop?.()} />
+                ) : null}
+                {!running || queueWhileRunning ? (
+                  <IconButton
+                    label="Send message"
+                    icon={ArrowUp}
+                    accent
+                    disabled={!canSend}
+                    onPress={() => void send()}
+                  />
+                ) : null}
+              </View>
+            ) : null}
+          </SwipeUpVoiceComposer>
+        </View>
+        {localRecorderOpen ? (
+          <MobileDictationComposer
+            value={value}
+            deviceName=""
+            droneName="New drone"
+            chatName=""
+            recordingStatus={voiceStatus}
+            recordingDurationMillis={voiceDurationMillis}
+            pendingCount={voiceStatus === 'transcribing' ? 1 : 0}
+            error={voiceError}
+            notice=""
+            finalizing={voiceActionInFlight}
+            networkSending={sending}
+            microphoneUnavailable={false}
+            onChangeText={changeText}
+            onClose={discardVoice}
+            onToggleRecording={stopVoiceAndFillDraft}
+            onTogglePause={() => toggleRecordingPause('single-shot')}
+            onCancelRecording={discardVoice}
+            onRetryFailedTranscription={() => undefined}
+            onDiscardFailedTranscription={() => undefined}
+            onPrimaryPress={send}
+            primaryActionLabel="Send"
+            primaryActionAccessibilityLabel="Send recording"
+            primaryActionDisabled={!canSend}
+            showDestinationMenu={false}
+            standalone={false}
+            morphToComposer
+            morphTargetHeight={restingComposerHeight}
+          />
         ) : null}
-      </SwipeUpVoiceComposer>
+      </View>
       {footer ? <View style={styles.footer}>{footer}</View> : null}
       <MobileContinuousVoiceModePicker
         visible={continuousModePickerOpen}
@@ -962,6 +987,8 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
     backgroundColor: colors.background,
   },
+  localRecorderStack: { position: 'relative' },
+  localRecorderBackdrop: { position: 'absolute', top: 0, right: 0, left: 0 },
   composer: {
     minHeight: 52,
     borderRadius: 7,
@@ -986,7 +1013,6 @@ const styles = StyleSheet.create({
     zIndex: 30,
     overflow: 'hidden',
   },
-  swipeVoiceDraftSpace: { minHeight: 44 },
   input: {
     minHeight: 50,
     maxHeight: 132,
