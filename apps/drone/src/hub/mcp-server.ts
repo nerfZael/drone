@@ -6,6 +6,7 @@ import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { RegisteredTool } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import type { ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import { allocateUntitledChatName } from '@drone/assistant-chat';
 import {
   applySidebarMove,
@@ -3643,6 +3644,49 @@ const DRONE_PRINCIPAL_TOOLS = new Set([
 
 const DRONE_DEFAULTED_TOOLS = new Set<string>(WORKFLOW_DRONE_DEFAULTED_TOOL_NAMES);
 
+const READ_ONLY_MCP_TOOLS = new Set([
+  'list_drones',
+  'list_repos',
+  'list_agent_models',
+  'search_chat_messages',
+  'list_groups',
+  'list_whiteboards',
+  'read_whiteboard',
+  'capture_whiteboard',
+  'list_chats',
+  'get_chat_tree',
+  'list_resource_subscriptions',
+  'get_resource_subscription',
+  'read_chat',
+  ...CHANGE_REQUEST_PUBLIC_REVIEW_TOOL_NAMES.filter(
+    (name) => name !== 'prepare_change_request_review',
+  ),
+  'list_workflows',
+  'get_workflow',
+  'list_workflow_runs',
+  'get_workflow_run',
+]);
+
+const DESTRUCTIVE_MCP_TOOLS = new Set([
+  'delete_chat',
+  'delete_chat_group',
+  'cancel_resource_subscription',
+  'delete_workflow',
+  'cancel_workflow_run',
+  'close_change_request',
+  CHANGE_REQUEST_MERGE_TOOL_NAME,
+]);
+
+function droneHubMcpToolAnnotations(name: string): ToolAnnotations {
+  const readOnly = READ_ONLY_MCP_TOOLS.has(name);
+  return {
+    readOnlyHint: readOnly,
+    destructiveHint: !readOnly && DESTRUCTIVE_MCP_TOOLS.has(name),
+    idempotentHint: readOnly,
+    openWorldHint: false,
+  };
+}
+
 function assertedDroneRefs(args: any): string[] {
   const direct = [
     args?.drone,
@@ -3767,16 +3811,26 @@ function registerAuthorizedTools(server: McpServer, context: DroneHubMcpServerCo
     config: any,
     handler: (args: any, extra: any) => Promise<any>,
   ) =>
-    registerTool(name, config, async (args: any, extra: any) => {
-      const effectiveArgs =
-        context.principal.kind === 'drone' &&
-        DRONE_DEFAULTED_TOOLS.has(name) &&
-        !cleanString(args?.drone)
-          ? { ...args, drone: context.principal.droneId }
-          : args;
-      authorizeDroneHubMcpTool(context, name, effectiveArgs);
-      return projectMcpResultForPrincipal(context, name, await handler(effectiveArgs, extra));
-    });
+    registerTool(
+      name,
+      {
+        ...config,
+        annotations: {
+          ...droneHubMcpToolAnnotations(name),
+          ...(config?.annotations ?? {}),
+        },
+      },
+      async (args: any, extra: any) => {
+        const effectiveArgs =
+          context.principal.kind === 'drone' &&
+          DRONE_DEFAULTED_TOOLS.has(name) &&
+          !cleanString(args?.drone)
+            ? { ...args, drone: context.principal.droneId }
+            : args;
+        authorizeDroneHubMcpTool(context, name, effectiveArgs);
+        return projectMcpResultForPrincipal(context, name, await handler(effectiveArgs, extra));
+      },
+    );
   registerTools(server, context);
   (server as any).registerTool = registerTool;
 }

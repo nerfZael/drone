@@ -208,6 +208,7 @@ describe('MCP server projection', () => {
       expect(codexText).toContain('# drone-hub-managed-mcp-start');
       expect(codexText).toContain('url = "http://host.docker.internal:8788/mcp"');
       expect(codexText).toContain('tool_timeout_sec = 86400');
+      expect(codexText).toContain('approval_mode = "writes"');
       expect(codexText).toContain('http_headers = { "Authorization" = "Bearer new-token" }');
     } finally {
       fs.rmSync(tempRoot, { recursive: true, force: true });

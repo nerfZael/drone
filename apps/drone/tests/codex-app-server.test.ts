@@ -100,6 +100,46 @@ describe('Codex App Server event compatibility', () => {
     ).toEqual([{ type: 'error', message: 'provider failed' }]);
   });
 
+  test('does not attribute unavailable MCP approval handling to the user', () => {
+    expect(
+      normalizeCodexAppServerItem({
+        id: 'mcp-1',
+        type: 'mcpToolCall',
+        status: 'failed',
+        error: { message: 'user rejected MCP tool call' },
+      }),
+    ).toMatchObject({
+      type: 'mcp_tool_call',
+      status: 'failed',
+      error: {
+        message:
+          'MCP tool call required approval, but Drone Hub could not present an approval request.',
+      },
+    });
+
+    expect(
+      normalizeCodexAppServerItem({
+        id: 'mcp-2',
+        type: 'mcpToolCall',
+        status: 'declined',
+        error: 'user rejected MCP tool call',
+      }).error,
+    ).toBe('user rejected MCP tool call');
+
+    expect(
+      translateCodexAppServerNotification({
+        method: 'error',
+        params: { error: { message: 'user rejected MCP tool call' } },
+      }),
+    ).toEqual([
+      {
+        type: 'error',
+        message: 'user rejected MCP tool call',
+        denial_code: 'approval_unavailable',
+      },
+    ]);
+  });
+
   test('uses the App Server approval response shape for current and legacy requests', () => {
     expect(
       codexApprovalResponse(

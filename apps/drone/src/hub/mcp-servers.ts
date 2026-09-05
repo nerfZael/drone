@@ -470,6 +470,7 @@ function renderCodexMcpBlock(servers: McpServerRecord[]): string {
     lines.push('', `[mcp_servers.${server.name}]`);
     if (server.name === 'drone-hub') {
       lines.push(`tool_timeout_sec = ${INTERACTIVE_MCP_TOOL_TIMEOUT_SECONDS}`);
+      lines.push('approval_mode = "writes"');
     }
     if (server.transport === 'http') {
       lines.push(`url = ${tomlString(server.url ?? '')}`);

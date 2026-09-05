@@ -453,6 +453,30 @@ describe('Drone Hub assistant MCP transport', () => {
       const catalogNames = catalog.tools.map((tool) => tool.name).sort();
       const displayedMcpNames = ASSISTANT_TOOL_SUMMARIES.filter((tool) => tool.group?.kind === 'mcp' && tool.group.id === 'drone-hub').map((tool) => tool.name).sort();
       expect(displayedMcpNames).toEqual(catalogNames);
+      expect(catalog.tools.find((tool) => tool.name === 'list_drones')?.annotations).toEqual({
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      });
+      expect(catalog.tools.find((tool) => tool.name === 'send_message')?.annotations).toEqual({
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      });
+      expect(catalog.tools.find((tool) => tool.name === 'delete_chat')?.annotations).toEqual({
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: false,
+      });
+      expect(
+        catalog.tools.find((tool) => tool.name === 'get_change_request')?.annotations,
+      ).toMatchObject({ readOnlyHint: true });
+      expect(
+        catalog.tools.find((tool) => tool.name === 'list_workflows')?.annotations,
+      ).toMatchObject({ readOnlyHint: true });
       expect(catalog.tools.find((tool) => tool.name === 'ask_questions')?.description).toContain(
         'custom-answer field',
       );

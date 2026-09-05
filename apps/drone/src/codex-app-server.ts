@@ -244,6 +244,19 @@ function snakeCaseItemType(type: string): string {
   return known[type] ?? type.replace(/[A-Z]/g, (value) => `_${value.toLowerCase()}`);
 }
 
+const MCP_APPROVAL_UNAVAILABLE_MESSAGE =
+  'MCP tool call required approval, but Drone Hub could not present an approval request.';
+
+function normalizeMcpToolCallError(raw: unknown): unknown {
+  if (typeof raw === 'string') {
+    return /user rejected MCP tool call/i.test(raw) ? MCP_APPROVAL_UNAVAILABLE_MESSAGE : raw;
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+  const message = (raw as any).message;
+  if (typeof message !== 'string' || !/user rejected MCP tool call/i.test(message)) return raw;
+  return { ...(raw as any), message: MCP_APPROVAL_UNAVAILABLE_MESSAGE };
+}
+
 export function normalizeCodexAppServerItem(raw: any): any {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
   const item = { ...raw, type: snakeCaseItemType(String(raw.type ?? '')) };
@@ -253,6 +266,9 @@ export function normalizeCodexAppServerItem(raw: any): any {
   if (item.type === 'reasoning') {
     if (Array.isArray(raw.summary)) item.summary = raw.summary.join('\n');
     if (Array.isArray(raw.content)) item.content = raw.content.join('\n');
+  }
+  if (item.type === 'mcp_tool_call' && String(raw.status ?? '').toLowerCase() !== 'declined') {
+    item.error = normalizeMcpToolCallError(raw.error);
   }
   return item;
 }
@@ -354,12 +370,18 @@ export function translateCodexAppServerNotification(
   return [];
 }
 
-function codexDenialCode(raw: any): 'sandbox_denied' | 'policy_denied' | 'approval_unavailable' | null {
+function codexDenialCode(
+  raw: any,
+): 'sandbox_denied' | 'policy_denied' | 'approval_unavailable' | null {
   const info = raw?.codexErrorInfo;
   if (info === 'sandboxError') return 'sandbox_denied';
   if (info === 'cyberPolicy') return 'policy_denied';
   const message = errorMessage(raw);
-  if (/approval.*(?:unavailable|not available|unsupported)|no approval handler/i.test(message)) {
+  if (
+    /approval.*(?:unavailable|not available|unsupported)|no approval handler|user rejected MCP tool call/i.test(
+      message,
+    )
+  ) {
     return 'approval_unavailable';
   }
   return null;
