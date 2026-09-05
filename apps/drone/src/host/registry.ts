@@ -1105,12 +1105,62 @@ export async function loadRegistryCompatibilityBase(): Promise<DroneRegistry> {
   return mergeRegistryResidualState(raw, state);
 }
 
+let registryProjectionLoad: Promise<DroneRegistry> | null = null;
+let registryProjectionJoinedCallers = new Set<string>();
+
+function registryProjectionDiagnosticsEnabled(): boolean {
+  return ['1', 'true', 'yes', 'on'].includes(
+    String(process.env.DRONE_HUB_MEMORY_DIAGNOSTICS ?? '').trim().toLowerCase(),
+  );
+}
+
+function registryProjectionCaller(): string {
+  return String(new Error().stack ?? '')
+    .split('\n')
+    .slice(2, 6)
+    .map((line) => line.trim())
+    .join(' <- ');
+}
+
 export async function loadRegistry(): Promise<DroneRegistry> {
   if ((globalThis as any).Bun) return await loadRegistryCompatibilityBase();
+  const caller = registryProjectionCaller();
+  if (registryProjectionLoad) {
+    registryProjectionJoinedCallers.add(caller);
+    return await registryProjectionLoad;
+  }
   // Dynamic import keeps the migration seed acyclic: the projection itself
   // reads `loadRegistryCompatibilityBase`, never this projected entry point.
-  const { buildHubStateProjection } = await import('./hub-state-projection');
-  return await buildHubStateProjection();
+  const startedAt = performance.now();
+  const memoryBefore = registryProjectionDiagnosticsEnabled() ? process.memoryUsage() : null;
+  registryProjectionJoinedCallers = new Set();
+  const load = import('./hub-state-projection').then(async ({ buildHubStateProjection }) =>
+    await buildHubStateProjection(),
+  );
+  registryProjectionLoad = load;
+  try {
+    const registry = await load;
+    if (registryProjectionDiagnosticsEnabled()) {
+      const memoryAfter = process.memoryUsage();
+      console.warn('[DroneHub] compatibility registry projection timing', {
+        at: new Date().toISOString(),
+        durationMs: Math.round((performance.now() - startedAt) * 10) / 10,
+        caller,
+        joinedCallers: [...registryProjectionJoinedCallers],
+        memoryBefore: {
+          rssBytes: memoryBefore?.rss ?? null,
+          heapUsedBytes: memoryBefore?.heapUsed ?? null,
+        },
+        memoryAfter: {
+          rssBytes: memoryAfter.rss,
+          heapUsedBytes: memoryAfter.heapUsed,
+        },
+      });
+    }
+    return registry;
+  } finally {
+    if (registryProjectionLoad === load) registryProjectionLoad = null;
+  }
 }
 
 export async function saveRegistry(reg: DroneRegistry): Promise<void> {

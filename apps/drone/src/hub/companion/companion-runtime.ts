@@ -3,13 +3,13 @@ import type { AgentTool } from '@mariozechner/pi-agent-core';
 import type { BlipRuntimeEvent, BlipToolProvider } from '@blip/core';
 import type { CompanionClientTelemetry } from '@drone/assistant-chat';
 
-import { loadRegistry } from '../../host/registry';
 import { BlipAssistantHost } from '../assistant/blip-assistant-host';
 import { loadBlipMcp, loadBlipTools } from '../assistant/blip-runtime-loader';
 import { HubSessionRepository } from '../assistant/hub-session-repository';
 import { createInProcessDroneHubMcpClient } from '../assistant/in-process-drone-hub-mcp';
 import type { AssistantDroneSummary } from '../assistant/assistant-contracts';
 import type { HubServices } from '../application/hub-services';
+import { loadDroneSummaryRegistry } from '../drone-summary-registry';
 import {
   resolveBlipProviderApiKey,
   resolveEffectiveProviderApiKeySettings,
@@ -278,8 +278,8 @@ export class CompanionRuntime {
     if (!context) throw new Error('Companion run context is unavailable');
     const telemetry = this.telemetryByThreadId.get(threadId);
     const registry = telemetry
-      ? await telemetry.measure('handle.registryMs', () => loadRegistry())
-      : await loadRegistry();
+      ? await telemetry.measure('handle.registryMs', () => loadDroneSummaryRegistry())
+      : await loadDroneSummaryRegistry();
     const drones = telemetry
       ? await telemetry.measure('handle.droneSummariesMs', async () =>
           this.deps.buildDroneSummaries(registry),

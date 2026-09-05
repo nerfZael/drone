@@ -1,4 +1,4 @@
-import { loadRegistry } from '../../host/registry';
+import { loadDroneSummaryRegistry } from '../drone-summary-registry';
 import { listCanonicalGroups } from '../groups-repositories';
 import { isWorkflowChildDroneEntry } from '../workflows/workflow-child-drone-metadata';
 import { isUngroupedGroupName } from './group-name';
@@ -21,7 +21,7 @@ export async function listGroups(repoPath?: string): Promise<{
   groups: GroupSummary[];
   total: number;
 }> {
-  const registry = await loadRegistry();
+  const registry = await loadDroneSummaryRegistry();
   const canonical = await listCanonicalGroups(repoPath);
   const canonicalById = new Map(canonical.map((group) => [group.id, group]));
   const canonicalByScopeAndName = new Map(

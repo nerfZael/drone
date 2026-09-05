@@ -108,7 +108,11 @@ import type {
 } from './chat-types';
 import { createDeviceMeshService } from './device-mesh';
 import { createBackgroundLifecycle, type BackgroundLifecycle } from './background-lifecycle';
-import { startHubMemoryDiagnostics } from './hub-memory-diagnostics';
+import {
+  captureHubProcessMemory,
+  hubMemoryDiagnosticsEnabled,
+  startHubMemoryDiagnostics,
+} from './hub-memory-diagnostics';
 import {
   canonicalRepositoriesMap,
   ensureCanonicalGroup,
@@ -832,10 +836,13 @@ function logSlowHubRequest(
 ) {
   const totalMs = timer.total();
   if (totalMs < 250) return;
+  const timing = timer.snapshot();
   hubLog('warn', `slow ${label} request`, {
     ...(meta ?? {}),
     durationMs: Math.round(totalMs),
-    timing: timer.snapshot(),
+    timing,
+    phases: timing.phases,
+    ...(hubMemoryDiagnosticsEnabled() ? { memory: captureHubProcessMemory() } : {}),
   });
 }
 
@@ -3126,13 +3133,13 @@ function createHubRuntimeGraph(
     enqueuePendingPromptPump: (...args: any[]) => promptRuntime.enqueuePendingPromptPump(...args),
     hubLog,
     inferChatAgent,
-    loadRegistry,
     makeClient,
     normalizeChatName,
     normalizeDroneIdentity,
     nowIso,
     projectCanonicalChatToRegistry,
     readChatFromStore,
+    resolveDroneOrPendingForReadRef: resolveCanonicalDroneOrPendingForReadRef,
     resolveHostPort,
     rollbackTranscriptToTurnInStore,
     runHostCommand,
@@ -5727,7 +5734,7 @@ async function startDroneHubApiServerWithLifecycle(
     nativeChatHistoryPage: (threadId, input) => blipAssistantHost.historyPage(threadId, input),
     getChatEntry,
     inferChatAgent,
-    resolveDroneOrPendingForReadRef,
+    resolveDroneOrPendingForReadRef: resolveCanonicalDroneOrPendingForReadRef,
     createRequestTimer,
     logSlowHubRequest,
   });

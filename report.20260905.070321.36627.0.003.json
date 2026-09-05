@@ -1,0 +1,3574 @@
+
+{
+  "header": {
+    "reportVersion": 4,
+    "event": "Allocation failed - JavaScript heap out of memory",
+    "trigger": "OOMError",
+    "filename": "report.20260905.070321.36627.0.003.json",
+    "dumpEventTime": "2026-09-05T07:03:21Z",
+    "dumpEventTimeStamp": "1788584601356",
+    "processId": 36627,
+    "threadId": 0,
+    "cwd": "/home/zael/dev/me/drone",
+    "commandLine": [
+      "/home/zael/.nvm/versions/node/v20.19.2/bin/node",
+      "--heapsnapshot-near-heap-limit=2",
+      "--report-on-fatalerror",
+      "--diagnostic-dir=/home/zael/dev/me/drone/data/profiles/default/drone",
+      "/home/zael/dev/me/drone/apps/drone/dist/cli.js",
+      "hub",
+      "run",
+      "--port",
+      "5174",
+      "--api-port",
+      "8787",
+      "--host",
+      "127.0.0.1",
+      "--ui-mode",
+      "dev",
+      "--container-mcp-host",
+      "172.17.0.1",
+      "--container-mcp-port",
+      "8788"
+    ],
+    "nodejsVersion": "v20.19.2",
+    "glibcVersionRuntime": "2.39",
+    "glibcVersionCompiler": "2.28",
+    "wordSize": 64,
+    "arch": "x64",
+    "platform": "linux",
+    "componentVersions": {
+      "acorn": "8.14.0",
+      "ada": "2.9.2",
+      "ares": "1.34.5",
+      "brotli": "1.1.0",
+      "cjs_module_lexer": "1.4.1",
+      "cldr": "46.0",
+      "icu": "76.1",
+      "llhttp": "9.2.1",
+      "modules": "115",
+      "napi": "9",
+      "nghttp2": "1.61.0",
+      "nghttp3": "0.7.0",
+      "ngtcp2": "1.1.0",
+      "node": "20.19.2",
+      "openssl": "3.0.15+quic",
+      "simdutf": "6.0.3",
+      "tz": "2025a",
+      "undici": "6.21.2",
+      "unicode": "16.0",
+      "uv": "1.46.0",
+      "uvwasi": "0.0.21",
+      "v8": "11.3.244.8-node.26",
+      "zlib": "1.3.0.1-motley-82a5fec"
+    },
+    "release": {
+      "name": "node",
+      "lts": "Iron",
+      "headersUrl": "https://nodejs.org/download/release/v20.19.2/node-v20.19.2-headers.tar.gz",
+      "sourceUrl": "https://nodejs.org/download/release/v20.19.2/node-v20.19.2.tar.gz"
+    },
+    "osName": "Linux",
+    "osRelease": "7.0.0-29-generic",
+    "osVersion": "#29~24.04.2-Ubuntu SMP PREEMPT_DYNAMIC Wed Aug 12 17:25:56 UTC 2",
+    "osMachine": "x86_64",
+    "cpus": [
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 5348,
+        "user": 168037180,
+        "nice": 18370,
+        "sys": 61546800,
+        "idle": 1090026600,
+        "irq": 0
+      },
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 5338,
+        "user": 256799120,
+        "nice": 39000,
+        "sys": 89278870,
+        "idle": 977394970,
+        "irq": 0
+      },
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 5348,
+        "user": 140630780,
+        "nice": 10400,
+        "sys": 53148890,
+        "idle": 1137952450,
+        "irq": 0
+      },
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 5332,
+        "user": 238311920,
+        "nice": 24330,
+        "sys": 94614900,
+        "idle": 996371550,
+        "irq": 0
+      },
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 5283,
+        "user": 336917810,
+        "nice": 38970,
+        "sys": 124777330,
+        "idle": 873655740,
+        "irq": 0
+      },
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 5300,
+        "user": 206748110,
+        "nice": 18550,
+        "sys": 81032550,
+        "idle": 1047364580,
+        "irq": 0
+      },
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 5349,
+        "user": 123403550,
+        "nice": 7610,
+        "sys": 44527310,
+        "idle": 1167652350,
+        "irq": 0
+      },
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 5346,
+        "user": 100971120,
+        "nice": 7090,
+        "sys": 36677280,
+        "idle": 1198430330,
+        "irq": 0
+      },
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 5050,
+        "user": 108244510,
+        "nice": 10390,
+        "sys": 32391490,
+        "idle": 1199530590,
+        "irq": 0
+      },
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 5090,
+        "user": 98655630,
+        "nice": 8220,
+        "sys": 26226740,
+        "idle": 1216023140,
+        "irq": 0
+      },
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 5102,
+        "user": 131304660,
+        "nice": 12660,
+        "sys": 36693330,
+        "idle": 1172428930,
+        "irq": 0
+      },
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 4903,
+        "user": 97500010,
+        "nice": 6410,
+        "sys": 24280210,
+        "idle": 1219900450,
+        "irq": 0
+      },
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 5066,
+        "user": 160474580,
+        "nice": 20420,
+        "sys": 46733850,
+        "idle": 1133070550,
+        "irq": 0
+      },
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 5092,
+        "user": 126819160,
+        "nice": 9960,
+        "sys": 33299710,
+        "idle": 1181089460,
+        "irq": 0
+      },
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 5061,
+        "user": 95314970,
+        "nice": 6550,
+        "sys": 23232540,
+        "idle": 1223858620,
+        "irq": 0
+      },
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 5060,
+        "user": 86262880,
+        "nice": 4610,
+        "sys": 21550950,
+        "idle": 1234786340,
+        "irq": 0
+      },
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 5351,
+        "user": 105582810,
+        "nice": 5040,
+        "sys": 35701140,
+        "idle": 1193054890,
+        "irq": 0
+      },
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 5357,
+        "user": 309140510,
+        "nice": 22850,
+        "sys": 79631630,
+        "idle": 949463420,
+        "irq": 0
+      },
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 5353,
+        "user": 94135270,
+        "nice": 4180,
+        "sys": 33030910,
+        "idle": 1207414450,
+        "irq": 0
+      },
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 5356,
+        "user": 116515950,
+        "nice": 5110,
+        "sys": 40599170,
+        "idle": 1176968000,
+        "irq": 0
+      },
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 5355,
+        "user": 187112140,
+        "nice": 12770,
+        "sys": 61213210,
+        "idle": 1086606120,
+        "irq": 0
+      },
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 5303,
+        "user": 109182140,
+        "nice": 3770,
+        "sys": 38344280,
+        "idle": 1186581940,
+        "irq": 0
+      },
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 5357,
+        "user": 86560170,
+        "nice": 3350,
+        "sys": 30886600,
+        "idle": 1216836050,
+        "irq": 0
+      },
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 5357,
+        "user": 77760230,
+        "nice": 3840,
+        "sys": 29056040,
+        "idle": 1227128620,
+        "irq": 0
+      },
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 5089,
+        "user": 91858380,
+        "nice": 4480,
+        "sys": 20091690,
+        "idle": 1228867760,
+        "irq": 0
+      },
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 5069,
+        "user": 87438410,
+        "nice": 4090,
+        "sys": 19242040,
+        "idle": 1233847650,
+        "irq": 0
+      },
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 5062,
+        "user": 96824080,
+        "nice": 5440,
+        "sys": 20967770,
+        "idle": 1222711580,
+        "irq": 0
+      },
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 5091,
+        "user": 84682780,
+        "nice": 5320,
+        "sys": 18362400,
+        "idle": 1237362420,
+        "irq": 0
+      },
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 2982,
+        "user": 100471130,
+        "nice": 5530,
+        "sys": 21943160,
+        "idle": 1218041810,
+        "irq": 0
+      },
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 5100,
+        "user": 95007800,
+        "nice": 5270,
+        "sys": 20061160,
+        "idle": 1225382130,
+        "irq": 0
+      },
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 4755,
+        "user": 82729800,
+        "nice": 4400,
+        "sys": 17920340,
+        "idle": 1239705490,
+        "irq": 0
+      },
+      {
+        "model": "AMD Ryzen 9 9950X 16-Core Processor",
+        "speed": 5041,
+        "user": 77748680,
+        "nice": 3740,
+        "sys": 17392000,
+        "idle": 1244908840,
+        "irq": 0
+      }
+    ],
+    "networkInterfaces": [
+      {
+        "name": "lo",
+        "internal": true,
+        "mac": "00:00:00:00:00:00",
+        "address": "127.0.0.1",
+        "netmask": "255.0.0.0",
+        "family": "IPv4"
+      },
+      {
+        "name": "enp14s0",
+        "internal": false,
+        "mac": "34:5a:60:7e:5f:70",
+        "address": "192.168.178.27",
+        "netmask": "255.255.255.0",
+        "family": "IPv4"
+      },
+      {
+        "name": "br-ea911747efa0",
+        "internal": false,
+        "mac": "a2:b5:97:59:8b:d3",
+        "address": "172.20.0.1",
+        "netmask": "255.255.0.0",
+        "family": "IPv4"
+      },
+      {
+        "name": "br-0f32cf843fa0",
+        "internal": false,
+        "mac": "66:ff:b4:60:3a:3e",
+        "address": "172.22.0.1",
+        "netmask": "255.255.0.0",
+        "family": "IPv4"
+      },
+      {
+        "name": "br-1a6fd3826f1d",
+        "internal": false,
+        "mac": "66:26:ea:37:66:e3",
+        "address": "172.18.0.1",
+        "netmask": "255.255.0.0",
+        "family": "IPv4"
+      },
+      {
+        "name": "docker0",
+        "internal": false,
+        "mac": "6e:15:cf:09:82:3a",
+        "address": "172.17.0.1",
+        "netmask": "255.255.0.0",
+        "family": "IPv4"
+      },
+      {
+        "name": "lxdbr0",
+        "internal": false,
+        "mac": "00:16:3e:dc:81:6c",
+        "address": "10.15.207.1",
+        "netmask": "255.255.255.0",
+        "family": "IPv4"
+      },
+      {
+        "name": "tailscale0",
+        "internal": false,
+        "mac": "00:00:00:00:00:00",
+        "address": "100.124.1.33",
+        "netmask": "255.255.255.255",
+        "family": "IPv4"
+      },
+      {
+        "name": "lo",
+        "internal": true,
+        "mac": "00:00:00:00:00:00",
+        "address": "::1",
+        "netmask": "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+        "family": "IPv6",
+        "scopeid": 0
+      },
+      {
+        "name": "enp14s0",
+        "internal": false,
+        "mac": "34:5a:60:7e:5f:70",
+        "address": "fdad:77bf:916c:0:8ad0:c361:3227:1d30",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 0
+      },
+      {
+        "name": "enp14s0",
+        "internal": false,
+        "mac": "34:5a:60:7e:5f:70",
+        "address": "fdad:77bf:916c:0:c827:7116:d86c:23b2",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 0
+      },
+      {
+        "name": "enp14s0",
+        "internal": false,
+        "mac": "34:5a:60:7e:5f:70",
+        "address": "fdad:77bf:916c:0:25bc:5a9:f7a0:20a6",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 0
+      },
+      {
+        "name": "enp14s0",
+        "internal": false,
+        "mac": "34:5a:60:7e:5f:70",
+        "address": "fe80::a127:3b2b:a98a:f9f9",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 2
+      },
+      {
+        "name": "br-ea911747efa0",
+        "internal": false,
+        "mac": "a2:b5:97:59:8b:d3",
+        "address": "fe80::a0b5:97ff:fe59:8bd3",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 5
+      },
+      {
+        "name": "br-0f32cf843fa0",
+        "internal": false,
+        "mac": "66:ff:b4:60:3a:3e",
+        "address": "fe80::64ff:b4ff:fe60:3a3e",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 6
+      },
+      {
+        "name": "br-1a6fd3826f1d",
+        "internal": false,
+        "mac": "66:26:ea:37:66:e3",
+        "address": "fe80::6426:eaff:fe37:66e3",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 8
+      },
+      {
+        "name": "docker0",
+        "internal": false,
+        "mac": "6e:15:cf:09:82:3a",
+        "address": "fe80::6c15:cfff:fe09:823a",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 9
+      },
+      {
+        "name": "lxdbr0",
+        "internal": false,
+        "mac": "00:16:3e:dc:81:6c",
+        "address": "fd42:15d3:9d73:41be::1",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 0
+      },
+      {
+        "name": "lxdbr0",
+        "internal": false,
+        "mac": "00:16:3e:dc:81:6c",
+        "address": "fe80::216:3eff:fedc:816c",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 10
+      },
+      {
+        "name": "vetheedae98",
+        "internal": false,
+        "mac": "76:96:cb:6e:95:75",
+        "address": "fe80::7496:cbff:fe6e:9575",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 14
+      },
+      {
+        "name": "vetha02285d",
+        "internal": false,
+        "mac": "9a:de:97:a5:d8:89",
+        "address": "fe80::98de:97ff:fea5:d889",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 15
+      },
+      {
+        "name": "veth371671d",
+        "internal": false,
+        "mac": "12:58:40:05:70:c3",
+        "address": "fe80::1058:40ff:fe05:70c3",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 17
+      },
+      {
+        "name": "vethd22bf25",
+        "internal": false,
+        "mac": "ee:e4:dd:ff:5c:49",
+        "address": "fe80::ece4:ddff:feff:5c49",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 18
+      },
+      {
+        "name": "veth83538ae",
+        "internal": false,
+        "mac": "fe:30:1e:b6:a7:32",
+        "address": "fe80::fc30:1eff:feb6:a732",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 19
+      },
+      {
+        "name": "veth8ffd5c0",
+        "internal": false,
+        "mac": "4a:b1:01:af:6d:53",
+        "address": "fe80::48b1:1ff:feaf:6d53",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 22
+      },
+      {
+        "name": "vetha66f0df",
+        "internal": false,
+        "mac": "22:24:cc:cd:99:8d",
+        "address": "fe80::2024:ccff:fecd:998d",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 23
+      },
+      {
+        "name": "veth7b890d3",
+        "internal": false,
+        "mac": "2a:7e:52:fb:76:63",
+        "address": "fe80::287e:52ff:fefb:7663",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 24
+      },
+      {
+        "name": "veth1878fe2",
+        "internal": false,
+        "mac": "76:f8:3c:77:80:04",
+        "address": "fe80::74f8:3cff:fe77:8004",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 25
+      },
+      {
+        "name": "vethce42f7c",
+        "internal": false,
+        "mac": "8a:af:28:27:92:7c",
+        "address": "fe80::88af:28ff:fe27:927c",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 27
+      },
+      {
+        "name": "veth0926f07",
+        "internal": false,
+        "mac": "66:32:1a:d8:3d:c3",
+        "address": "fe80::6432:1aff:fed8:3dc3",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 29
+      },
+      {
+        "name": "veth88d8a22",
+        "internal": false,
+        "mac": "ee:3a:50:ae:3a:f8",
+        "address": "fe80::ec3a:50ff:feae:3af8",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 30
+      },
+      {
+        "name": "veth092112f",
+        "internal": false,
+        "mac": "de:4f:d6:8f:73:87",
+        "address": "fe80::dc4f:d6ff:fe8f:7387",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 31
+      },
+      {
+        "name": "vetha134038",
+        "internal": false,
+        "mac": "76:a3:c9:11:27:f2",
+        "address": "fe80::74a3:c9ff:fe11:27f2",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 32
+      },
+      {
+        "name": "vethf5bbd7e",
+        "internal": false,
+        "mac": "86:12:9e:d7:d0:cd",
+        "address": "fe80::8412:9eff:fed7:d0cd",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 33
+      },
+      {
+        "name": "vethb317426",
+        "internal": false,
+        "mac": "c6:ca:74:ed:f4:56",
+        "address": "fe80::c4ca:74ff:feed:f456",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 34
+      },
+      {
+        "name": "veth60c8752",
+        "internal": false,
+        "mac": "9a:0b:12:38:2c:32",
+        "address": "fe80::980b:12ff:fe38:2c32",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 35
+      },
+      {
+        "name": "vetha2b0477",
+        "internal": false,
+        "mac": "32:e8:a0:45:24:12",
+        "address": "fe80::30e8:a0ff:fe45:2412",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 37
+      },
+      {
+        "name": "vethf9d05e4",
+        "internal": false,
+        "mac": "52:bf:5a:29:30:92",
+        "address": "fe80::50bf:5aff:fe29:3092",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 39
+      },
+      {
+        "name": "veth177027b",
+        "internal": false,
+        "mac": "8a:90:63:7b:4b:d1",
+        "address": "fe80::8890:63ff:fe7b:4bd1",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 41
+      },
+      {
+        "name": "vethaeca079",
+        "internal": false,
+        "mac": "5a:ec:d1:38:27:01",
+        "address": "fe80::58ec:d1ff:fe38:2701",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 42
+      },
+      {
+        "name": "veth8c15c55",
+        "internal": false,
+        "mac": "1a:0a:83:f6:58:0b",
+        "address": "fe80::180a:83ff:fef6:580b",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 43
+      },
+      {
+        "name": "veth49bc070",
+        "internal": false,
+        "mac": "f6:08:2d:ae:f2:bc",
+        "address": "fe80::f408:2dff:feae:f2bc",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 44
+      },
+      {
+        "name": "veth4d2221b",
+        "internal": false,
+        "mac": "42:e3:72:bc:41:f3",
+        "address": "fe80::40e3:72ff:febc:41f3",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 45
+      },
+      {
+        "name": "veth8386352",
+        "internal": false,
+        "mac": "ea:4d:fa:ea:72:4c",
+        "address": "fe80::e84d:faff:feea:724c",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 46
+      },
+      {
+        "name": "veth8edf9ea",
+        "internal": false,
+        "mac": "2e:ef:47:02:77:5a",
+        "address": "fe80::2cef:47ff:fe02:775a",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 47
+      },
+      {
+        "name": "veth2f13e1e",
+        "internal": false,
+        "mac": "56:6b:55:da:ab:1f",
+        "address": "fe80::546b:55ff:feda:ab1f",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 48
+      },
+      {
+        "name": "veth7d686cc",
+        "internal": false,
+        "mac": "86:4e:1e:f9:28:c8",
+        "address": "fe80::844e:1eff:fef9:28c8",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 49
+      },
+      {
+        "name": "veth6f8762e",
+        "internal": false,
+        "mac": "66:ed:af:6f:19:64",
+        "address": "fe80::64ed:afff:fe6f:1964",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 50
+      },
+      {
+        "name": "veth8a03c18",
+        "internal": false,
+        "mac": "f6:9b:9f:94:ba:7e",
+        "address": "fe80::f49b:9fff:fe94:ba7e",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 51
+      },
+      {
+        "name": "veth2151ff5",
+        "internal": false,
+        "mac": "d6:87:55:3d:6d:f9",
+        "address": "fe80::d487:55ff:fe3d:6df9",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 52
+      },
+      {
+        "name": "vethac7dcde",
+        "internal": false,
+        "mac": "16:82:4d:60:82:17",
+        "address": "fe80::1482:4dff:fe60:8217",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 53
+      },
+      {
+        "name": "veth0cc60a3",
+        "internal": false,
+        "mac": "d6:e6:a4:0b:a4:b3",
+        "address": "fe80::d4e6:a4ff:fe0b:a4b3",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 54
+      },
+      {
+        "name": "veth610fc2d",
+        "internal": false,
+        "mac": "fe:17:0b:73:85:d3",
+        "address": "fe80::fc17:bff:fe73:85d3",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 55
+      },
+      {
+        "name": "veth4356691",
+        "internal": false,
+        "mac": "1a:90:89:36:7e:be",
+        "address": "fe80::1890:89ff:fe36:7ebe",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 56
+      },
+      {
+        "name": "veth116d12b",
+        "internal": false,
+        "mac": "aa:10:70:39:9e:e7",
+        "address": "fe80::a810:70ff:fe39:9ee7",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 57
+      },
+      {
+        "name": "veth5c02956",
+        "internal": false,
+        "mac": "0e:8d:53:b3:84:20",
+        "address": "fe80::c8d:53ff:feb3:8420",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 58
+      },
+      {
+        "name": "veth641213f",
+        "internal": false,
+        "mac": "c6:05:91:b5:ee:99",
+        "address": "fe80::c405:91ff:feb5:ee99",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 59
+      },
+      {
+        "name": "vethee643fb",
+        "internal": false,
+        "mac": "d2:fe:91:03:74:39",
+        "address": "fe80::d0fe:91ff:fe03:7439",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 60
+      },
+      {
+        "name": "veth5909960",
+        "internal": false,
+        "mac": "9a:6b:2c:dd:5d:29",
+        "address": "fe80::986b:2cff:fedd:5d29",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 61
+      },
+      {
+        "name": "vethfc3ddb6",
+        "internal": false,
+        "mac": "fe:a8:a1:5c:2f:93",
+        "address": "fe80::fca8:a1ff:fe5c:2f93",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 62
+      },
+      {
+        "name": "veth645395f",
+        "internal": false,
+        "mac": "b2:4a:34:1c:ee:cb",
+        "address": "fe80::b04a:34ff:fe1c:eecb",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 63
+      },
+      {
+        "name": "veth1717b42",
+        "internal": false,
+        "mac": "5a:ca:65:d4:dd:f0",
+        "address": "fe80::58ca:65ff:fed4:ddf0",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 65
+      },
+      {
+        "name": "vethfa7fbfb",
+        "internal": false,
+        "mac": "ae:78:bd:8b:95:d9",
+        "address": "fe80::ac78:bdff:fe8b:95d9",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 66
+      },
+      {
+        "name": "veth001babb",
+        "internal": false,
+        "mac": "62:66:bd:a8:5f:16",
+        "address": "fe80::6066:bdff:fea8:5f16",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 67
+      },
+      {
+        "name": "vethfadf8d1",
+        "internal": false,
+        "mac": "5e:5e:07:ab:18:c3",
+        "address": "fe80::5c5e:7ff:feab:18c3",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 68
+      },
+      {
+        "name": "veth8b103f8",
+        "internal": false,
+        "mac": "9a:1a:f3:d3:3d:f2",
+        "address": "fe80::981a:f3ff:fed3:3df2",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 69
+      },
+      {
+        "name": "vethe1c142c",
+        "internal": false,
+        "mac": "4a:d8:0e:f2:bd:32",
+        "address": "fe80::48d8:eff:fef2:bd32",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 72
+      },
+      {
+        "name": "vethdc9f920",
+        "internal": false,
+        "mac": "e2:fa:2a:b0:cd:c3",
+        "address": "fe80::e0fa:2aff:feb0:cdc3",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 73
+      },
+      {
+        "name": "vethff33915",
+        "internal": false,
+        "mac": "2e:73:0f:38:0a:7d",
+        "address": "fe80::2c73:fff:fe38:a7d",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 74
+      },
+      {
+        "name": "vethcdbd4a0",
+        "internal": false,
+        "mac": "f2:19:86:99:e1:c4",
+        "address": "fe80::f019:86ff:fe99:e1c4",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 75
+      },
+      {
+        "name": "vethdf4f3af",
+        "internal": false,
+        "mac": "fe:53:74:79:75:c6",
+        "address": "fe80::fc53:74ff:fe79:75c6",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 76
+      },
+      {
+        "name": "vethd4e3a1e",
+        "internal": false,
+        "mac": "1a:a8:c1:56:50:ba",
+        "address": "fe80::18a8:c1ff:fe56:50ba",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 77
+      },
+      {
+        "name": "veth64c839a",
+        "internal": false,
+        "mac": "e2:02:52:03:1d:f1",
+        "address": "fe80::e002:52ff:fe03:1df1",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 79
+      },
+      {
+        "name": "vetha548482",
+        "internal": false,
+        "mac": "92:ea:ec:bc:6a:c6",
+        "address": "fe80::90ea:ecff:febc:6ac6",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 80
+      },
+      {
+        "name": "veth0f050bb",
+        "internal": false,
+        "mac": "0a:e8:88:ea:43:bd",
+        "address": "fe80::8e8:88ff:feea:43bd",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 81
+      },
+      {
+        "name": "vethd17d65c",
+        "internal": false,
+        "mac": "2a:28:cf:52:55:d6",
+        "address": "fe80::2828:cfff:fe52:55d6",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 82
+      },
+      {
+        "name": "veth19e3ce1",
+        "internal": false,
+        "mac": "82:04:2f:1b:f9:4a",
+        "address": "fe80::8004:2fff:fe1b:f94a",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 83
+      },
+      {
+        "name": "veth86f2867",
+        "internal": false,
+        "mac": "1e:bc:9f:c7:58:26",
+        "address": "fe80::1cbc:9fff:fec7:5826",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 84
+      },
+      {
+        "name": "veth1162ebc",
+        "internal": false,
+        "mac": "6a:8a:fe:a0:06:66",
+        "address": "fe80::688a:feff:fea0:666",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 85
+      },
+      {
+        "name": "vethc3a7abe",
+        "internal": false,
+        "mac": "06:67:82:ce:4f:e0",
+        "address": "fe80::467:82ff:fece:4fe0",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 87
+      },
+      {
+        "name": "veth9647be5",
+        "internal": false,
+        "mac": "8a:99:96:3d:f0:f3",
+        "address": "fe80::8899:96ff:fe3d:f0f3",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 88
+      },
+      {
+        "name": "veth917a2cd",
+        "internal": false,
+        "mac": "6e:55:84:0d:22:6f",
+        "address": "fe80::6c55:84ff:fe0d:226f",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 89
+      },
+      {
+        "name": "veth9fe597e",
+        "internal": false,
+        "mac": "e2:cb:01:8e:d5:85",
+        "address": "fe80::e0cb:1ff:fe8e:d585",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 91
+      },
+      {
+        "name": "vethfc56823",
+        "internal": false,
+        "mac": "2a:40:e8:49:13:a0",
+        "address": "fe80::2840:e8ff:fe49:13a0",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 95
+      },
+      {
+        "name": "vethbf5ef65",
+        "internal": false,
+        "mac": "46:52:38:1f:f6:44",
+        "address": "fe80::4452:38ff:fe1f:f644",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 96
+      },
+      {
+        "name": "vethad6ac82",
+        "internal": false,
+        "mac": "06:75:a7:ee:6f:9d",
+        "address": "fe80::475:a7ff:feee:6f9d",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 98
+      },
+      {
+        "name": "veth487be8e",
+        "internal": false,
+        "mac": "ce:ab:fe:a2:91:17",
+        "address": "fe80::ccab:feff:fea2:9117",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 99
+      },
+      {
+        "name": "veth8d0d544",
+        "internal": false,
+        "mac": "0a:a7:70:0b:c9:30",
+        "address": "fe80::8a7:70ff:fe0b:c930",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 102
+      },
+      {
+        "name": "veth0dab088",
+        "internal": false,
+        "mac": "0a:4c:5d:ab:82:df",
+        "address": "fe80::84c:5dff:feab:82df",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 103
+      },
+      {
+        "name": "vethc4f7573",
+        "internal": false,
+        "mac": "12:2a:96:55:9f:95",
+        "address": "fe80::102a:96ff:fe55:9f95",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 104
+      },
+      {
+        "name": "veth51f311b",
+        "internal": false,
+        "mac": "aa:62:fb:ef:06:c5",
+        "address": "fe80::a862:fbff:feef:6c5",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 105
+      },
+      {
+        "name": "vethbcae616",
+        "internal": false,
+        "mac": "fa:14:a8:2d:6d:3e",
+        "address": "fe80::f814:a8ff:fe2d:6d3e",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 106
+      },
+      {
+        "name": "veth8ba30d9",
+        "internal": false,
+        "mac": "1e:85:71:e0:ae:a4",
+        "address": "fe80::1c85:71ff:fee0:aea4",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 107
+      },
+      {
+        "name": "veth89f0eb0",
+        "internal": false,
+        "mac": "92:48:a4:42:3b:a3",
+        "address": "fe80::9048:a4ff:fe42:3ba3",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 108
+      },
+      {
+        "name": "vethb294287",
+        "internal": false,
+        "mac": "02:ac:fc:15:31:1e",
+        "address": "fe80::ac:fcff:fe15:311e",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 109
+      },
+      {
+        "name": "veth07bb2d5",
+        "internal": false,
+        "mac": "42:c5:8e:70:ac:bc",
+        "address": "fe80::40c5:8eff:fe70:acbc",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 110
+      },
+      {
+        "name": "veth97c1747",
+        "internal": false,
+        "mac": "72:06:93:2e:ac:c6",
+        "address": "fe80::7006:93ff:fe2e:acc6",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 112
+      },
+      {
+        "name": "veth68f41b1",
+        "internal": false,
+        "mac": "9e:55:5f:18:71:aa",
+        "address": "fe80::9c55:5fff:fe18:71aa",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 114
+      },
+      {
+        "name": "veth9c67b9d",
+        "internal": false,
+        "mac": "12:17:d5:60:de:13",
+        "address": "fe80::1017:d5ff:fe60:de13",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 115
+      },
+      {
+        "name": "vetha278349",
+        "internal": false,
+        "mac": "6e:02:f3:26:09:f8",
+        "address": "fe80::6c02:f3ff:fe26:9f8",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 116
+      },
+      {
+        "name": "veth7fea783",
+        "internal": false,
+        "mac": "16:09:fe:85:2e:82",
+        "address": "fe80::1409:feff:fe85:2e82",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 117
+      },
+      {
+        "name": "veth1a38748",
+        "internal": false,
+        "mac": "de:33:0c:f6:5f:1b",
+        "address": "fe80::dc33:cff:fef6:5f1b",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 119
+      },
+      {
+        "name": "veth7f257db",
+        "internal": false,
+        "mac": "8e:aa:82:5c:bf:f5",
+        "address": "fe80::8caa:82ff:fe5c:bff5",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 121
+      },
+      {
+        "name": "veth1c461ea",
+        "internal": false,
+        "mac": "7e:a7:22:6e:3b:ec",
+        "address": "fe80::7ca7:22ff:fe6e:3bec",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 122
+      },
+      {
+        "name": "veth59c1341",
+        "internal": false,
+        "mac": "ee:4f:5c:29:55:ee",
+        "address": "fe80::ec4f:5cff:fe29:55ee",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 123
+      },
+      {
+        "name": "veth9c8e065",
+        "internal": false,
+        "mac": "56:3f:d8:2c:59:2c",
+        "address": "fe80::543f:d8ff:fe2c:592c",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 124
+      },
+      {
+        "name": "veth314f2c3",
+        "internal": false,
+        "mac": "0e:e1:0a:b3:d1:11",
+        "address": "fe80::ce1:aff:feb3:d111",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 126
+      },
+      {
+        "name": "vethd768fa7",
+        "internal": false,
+        "mac": "e2:0f:1f:44:e4:d0",
+        "address": "fe80::e00f:1fff:fe44:e4d0",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 128
+      },
+      {
+        "name": "veth0f99ddf",
+        "internal": false,
+        "mac": "86:c3:06:e4:92:16",
+        "address": "fe80::84c3:6ff:fee4:9216",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 129
+      },
+      {
+        "name": "vethfd745c7",
+        "internal": false,
+        "mac": "3e:4b:bd:55:1f:d9",
+        "address": "fe80::3c4b:bdff:fe55:1fd9",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 130
+      },
+      {
+        "name": "vethf54d0dd",
+        "internal": false,
+        "mac": "02:08:93:a5:5d:74",
+        "address": "fe80::8:93ff:fea5:5d74",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 131
+      },
+      {
+        "name": "vethf617282",
+        "internal": false,
+        "mac": "be:ce:5d:ac:3f:85",
+        "address": "fe80::bcce:5dff:feac:3f85",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 132
+      },
+      {
+        "name": "veth00861aa",
+        "internal": false,
+        "mac": "ee:be:61:18:b3:89",
+        "address": "fe80::ecbe:61ff:fe18:b389",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 136
+      },
+      {
+        "name": "veth5467ecc",
+        "internal": false,
+        "mac": "92:ca:9e:53:ff:62",
+        "address": "fe80::90ca:9eff:fe53:ff62",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 137
+      },
+      {
+        "name": "veth29e76da",
+        "internal": false,
+        "mac": "16:20:ff:3f:38:66",
+        "address": "fe80::1420:ffff:fe3f:3866",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 138
+      },
+      {
+        "name": "veth8e1ad01",
+        "internal": false,
+        "mac": "52:3c:d5:ad:98:47",
+        "address": "fe80::503c:d5ff:fead:9847",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 139
+      },
+      {
+        "name": "veth86ab2f6",
+        "internal": false,
+        "mac": "ca:23:d4:01:ab:ca",
+        "address": "fe80::c823:d4ff:fe01:abca",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 140
+      },
+      {
+        "name": "veth5b93f15",
+        "internal": false,
+        "mac": "56:b7:60:79:66:bb",
+        "address": "fe80::54b7:60ff:fe79:66bb",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 143
+      },
+      {
+        "name": "veth186f24b",
+        "internal": false,
+        "mac": "8a:97:19:45:a3:b2",
+        "address": "fe80::8897:19ff:fe45:a3b2",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 145
+      },
+      {
+        "name": "veth5b75bd2",
+        "internal": false,
+        "mac": "82:7c:9d:f9:b6:0d",
+        "address": "fe80::807c:9dff:fef9:b60d",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 146
+      },
+      {
+        "name": "veth6c5a85d",
+        "internal": false,
+        "mac": "72:1f:41:e2:f5:2c",
+        "address": "fe80::701f:41ff:fee2:f52c",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 147
+      },
+      {
+        "name": "veth04805c7",
+        "internal": false,
+        "mac": "ba:5e:d7:ee:b2:25",
+        "address": "fe80::b85e:d7ff:feee:b225",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 148
+      },
+      {
+        "name": "vethdf94292",
+        "internal": false,
+        "mac": "32:ac:e0:0a:0d:ff",
+        "address": "fe80::30ac:e0ff:fe0a:dff",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 149
+      },
+      {
+        "name": "vethf4c3239",
+        "internal": false,
+        "mac": "ee:96:8e:c3:c8:66",
+        "address": "fe80::ec96:8eff:fec3:c866",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 150
+      },
+      {
+        "name": "veth9864247",
+        "internal": false,
+        "mac": "46:04:71:8e:40:75",
+        "address": "fe80::4404:71ff:fe8e:4075",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 152
+      },
+      {
+        "name": "veth23c1137",
+        "internal": false,
+        "mac": "0a:f7:74:43:91:b0",
+        "address": "fe80::8f7:74ff:fe43:91b0",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 153
+      },
+      {
+        "name": "vethad942c2",
+        "internal": false,
+        "mac": "2a:a1:e5:03:dd:f4",
+        "address": "fe80::28a1:e5ff:fe03:ddf4",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 156
+      },
+      {
+        "name": "vetha3b59c3",
+        "internal": false,
+        "mac": "ba:89:71:8e:a3:66",
+        "address": "fe80::b889:71ff:fe8e:a366",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 157
+      },
+      {
+        "name": "vethe9834df",
+        "internal": false,
+        "mac": "4e:ed:77:31:e2:a6",
+        "address": "fe80::4ced:77ff:fe31:e2a6",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 158
+      },
+      {
+        "name": "veth43bd8a5",
+        "internal": false,
+        "mac": "06:d4:24:a8:93:63",
+        "address": "fe80::4d4:24ff:fea8:9363",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 160
+      },
+      {
+        "name": "vethd218f6d",
+        "internal": false,
+        "mac": "16:72:af:20:94:ac",
+        "address": "fe80::1472:afff:fe20:94ac",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 161
+      },
+      {
+        "name": "veth690e53e",
+        "internal": false,
+        "mac": "6a:80:47:90:20:77",
+        "address": "fe80::6880:47ff:fe90:2077",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 163
+      },
+      {
+        "name": "veth9119f17",
+        "internal": false,
+        "mac": "d6:ed:38:8a:4a:d1",
+        "address": "fe80::d4ed:38ff:fe8a:4ad1",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 164
+      },
+      {
+        "name": "veth631c68a",
+        "internal": false,
+        "mac": "ee:fd:fc:37:78:8a",
+        "address": "fe80::ecfd:fcff:fe37:788a",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 166
+      },
+      {
+        "name": "vethb4ae3e9",
+        "internal": false,
+        "mac": "5e:7a:24:60:66:b7",
+        "address": "fe80::5c7a:24ff:fe60:66b7",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 167
+      },
+      {
+        "name": "vethd93856d",
+        "internal": false,
+        "mac": "52:ca:fe:f1:3c:ca",
+        "address": "fe80::50ca:feff:fef1:3cca",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 168
+      },
+      {
+        "name": "vethdd57edf",
+        "internal": false,
+        "mac": "aa:f9:f1:5c:3c:af",
+        "address": "fe80::a8f9:f1ff:fe5c:3caf",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 169
+      },
+      {
+        "name": "vethaaf2f2f",
+        "internal": false,
+        "mac": "ae:fb:0a:fc:eb:e8",
+        "address": "fe80::acfb:aff:fefc:ebe8",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 172
+      },
+      {
+        "name": "veth91dd2d7",
+        "internal": false,
+        "mac": "1a:dc:c6:8b:cf:b7",
+        "address": "fe80::18dc:c6ff:fe8b:cfb7",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 173
+      },
+      {
+        "name": "vethb252c5c",
+        "internal": false,
+        "mac": "1e:57:9d:5a:b2:4a",
+        "address": "fe80::1c57:9dff:fe5a:b24a",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 174
+      },
+      {
+        "name": "veth26e4d00",
+        "internal": false,
+        "mac": "c2:af:20:95:fe:6c",
+        "address": "fe80::c0af:20ff:fe95:fe6c",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 176
+      },
+      {
+        "name": "veth587d220",
+        "internal": false,
+        "mac": "32:23:06:d5:8b:72",
+        "address": "fe80::3023:6ff:fed5:8b72",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 177
+      },
+      {
+        "name": "veth45be533",
+        "internal": false,
+        "mac": "1a:e8:58:4e:c1:18",
+        "address": "fe80::18e8:58ff:fe4e:c118",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 178
+      },
+      {
+        "name": "veth7024bb3",
+        "internal": false,
+        "mac": "8e:ec:43:5f:97:03",
+        "address": "fe80::8cec:43ff:fe5f:9703",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 179
+      },
+      {
+        "name": "vethe777a49",
+        "internal": false,
+        "mac": "82:5b:22:48:ae:d4",
+        "address": "fe80::805b:22ff:fe48:aed4",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 192
+      },
+      {
+        "name": "veth1f402ce",
+        "internal": false,
+        "mac": "1e:84:4b:58:82:3f",
+        "address": "fe80::1c84:4bff:fe58:823f",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 291
+      },
+      {
+        "name": "vethe37cdee",
+        "internal": false,
+        "mac": "fe:bd:6b:26:74:6b",
+        "address": "fe80::fcbd:6bff:fe26:746b",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 295
+      },
+      {
+        "name": "vethad16cc5",
+        "internal": false,
+        "mac": "ea:8a:28:e8:88:e7",
+        "address": "fe80::e88a:28ff:fee8:88e7",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 297
+      },
+      {
+        "name": "vethb7a05bb",
+        "internal": false,
+        "mac": "1e:36:be:ea:03:ed",
+        "address": "fe80::1c36:beff:feea:3ed",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 299
+      },
+      {
+        "name": "veth164c850",
+        "internal": false,
+        "mac": "6e:ce:b6:7f:d4:b7",
+        "address": "fe80::6cce:b6ff:fe7f:d4b7",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 300
+      },
+      {
+        "name": "veth06b7c9d",
+        "internal": false,
+        "mac": "26:41:41:1d:cd:65",
+        "address": "fe80::2441:41ff:fe1d:cd65",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 301
+      },
+      {
+        "name": "vethb097d2c",
+        "internal": false,
+        "mac": "26:e8:0a:05:92:7c",
+        "address": "fe80::24e8:aff:fe05:927c",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 302
+      },
+      {
+        "name": "veth731520b",
+        "internal": false,
+        "mac": "96:57:8a:b0:3a:f1",
+        "address": "fe80::9457:8aff:feb0:3af1",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 303
+      },
+      {
+        "name": "veth27b2d31",
+        "internal": false,
+        "mac": "f6:a0:d4:60:43:f1",
+        "address": "fe80::f4a0:d4ff:fe60:43f1",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 305
+      },
+      {
+        "name": "vethe4607cd",
+        "internal": false,
+        "mac": "3e:37:09:d1:98:98",
+        "address": "fe80::3c37:9ff:fed1:9898",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 306
+      },
+      {
+        "name": "veth3a0b0ac",
+        "internal": false,
+        "mac": "32:44:2b:a0:d1:d7",
+        "address": "fe80::3044:2bff:fea0:d1d7",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 307
+      },
+      {
+        "name": "veth69a1425",
+        "internal": false,
+        "mac": "1a:76:8c:2c:d6:ac",
+        "address": "fe80::1876:8cff:fe2c:d6ac",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 308
+      },
+      {
+        "name": "vethca2ec2d",
+        "internal": false,
+        "mac": "96:28:40:7d:00:54",
+        "address": "fe80::9428:40ff:fe7d:54",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 309
+      },
+      {
+        "name": "veth00c52af",
+        "internal": false,
+        "mac": "aa:35:f2:52:23:b7",
+        "address": "fe80::a835:f2ff:fe52:23b7",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 310
+      },
+      {
+        "name": "vethf09a6f6",
+        "internal": false,
+        "mac": "22:23:27:3f:95:d4",
+        "address": "fe80::2023:27ff:fe3f:95d4",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 314
+      },
+      {
+        "name": "veth90aca2a",
+        "internal": false,
+        "mac": "ea:d5:e4:98:23:db",
+        "address": "fe80::e8d5:e4ff:fe98:23db",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 315
+      },
+      {
+        "name": "veth03059fd",
+        "internal": false,
+        "mac": "3a:c5:f6:8a:14:f9",
+        "address": "fe80::38c5:f6ff:fe8a:14f9",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 316
+      },
+      {
+        "name": "veth26d8b99",
+        "internal": false,
+        "mac": "ce:a5:93:83:b3:eb",
+        "address": "fe80::cca5:93ff:fe83:b3eb",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 341
+      },
+      {
+        "name": "vethf1f747d",
+        "internal": false,
+        "mac": "c6:f3:7c:58:e4:b2",
+        "address": "fe80::c4f3:7cff:fe58:e4b2",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 343
+      },
+      {
+        "name": "vethe5a07cc",
+        "internal": false,
+        "mac": "5e:9a:bb:77:5f:6a",
+        "address": "fe80::5c9a:bbff:fe77:5f6a",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 344
+      },
+      {
+        "name": "vethf898731",
+        "internal": false,
+        "mac": "0e:c3:6f:7e:b5:de",
+        "address": "fe80::cc3:6fff:fe7e:b5de",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 345
+      },
+      {
+        "name": "veth1df1124",
+        "internal": false,
+        "mac": "0e:ad:4c:8b:89:71",
+        "address": "fe80::cad:4cff:fe8b:8971",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 369
+      },
+      {
+        "name": "veth10f03a2",
+        "internal": false,
+        "mac": "52:95:24:cb:b9:40",
+        "address": "fe80::5095:24ff:fecb:b940",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 375
+      },
+      {
+        "name": "vethb29a5f5",
+        "internal": false,
+        "mac": "36:a6:94:e1:5c:f3",
+        "address": "fe80::34a6:94ff:fee1:5cf3",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 377
+      },
+      {
+        "name": "veth9431329",
+        "internal": false,
+        "mac": "62:f8:e8:0c:aa:a7",
+        "address": "fe80::60f8:e8ff:fe0c:aaa7",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 379
+      },
+      {
+        "name": "vethd09349b",
+        "internal": false,
+        "mac": "4a:be:b8:96:3b:19",
+        "address": "fe80::48be:b8ff:fe96:3b19",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 381
+      },
+      {
+        "name": "veth2cce3a9",
+        "internal": false,
+        "mac": "4a:d4:f2:0d:7d:6a",
+        "address": "fe80::48d4:f2ff:fe0d:7d6a",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 382
+      },
+      {
+        "name": "veth8cabb13",
+        "internal": false,
+        "mac": "a6:5d:c8:3a:27:7e",
+        "address": "fe80::a45d:c8ff:fe3a:277e",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 383
+      },
+      {
+        "name": "veth37c4737",
+        "internal": false,
+        "mac": "aa:b7:7f:ec:65:b1",
+        "address": "fe80::a8b7:7fff:feec:65b1",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 384
+      },
+      {
+        "name": "veth6211ead",
+        "internal": false,
+        "mac": "46:3e:26:c2:13:8d",
+        "address": "fe80::443e:26ff:fec2:138d",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 385
+      },
+      {
+        "name": "veth57ecdb3",
+        "internal": false,
+        "mac": "4a:30:a8:91:e3:43",
+        "address": "fe80::4830:a8ff:fe91:e343",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 390
+      },
+      {
+        "name": "veth320919e",
+        "internal": false,
+        "mac": "4a:1a:78:dd:06:2e",
+        "address": "fe80::481a:78ff:fedd:62e",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 391
+      },
+      {
+        "name": "vethd1a7999",
+        "internal": false,
+        "mac": "a2:c5:f6:47:19:2c",
+        "address": "fe80::a0c5:f6ff:fe47:192c",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 392
+      },
+      {
+        "name": "vethdb64e3c",
+        "internal": false,
+        "mac": "ba:ad:70:d4:e3:cc",
+        "address": "fe80::b8ad:70ff:fed4:e3cc",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 393
+      },
+      {
+        "name": "veth410b176",
+        "internal": false,
+        "mac": "66:07:35:26:7e:32",
+        "address": "fe80::6407:35ff:fe26:7e32",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 394
+      },
+      {
+        "name": "vetheffcfe6",
+        "internal": false,
+        "mac": "36:14:33:e5:dd:b2",
+        "address": "fe80::3414:33ff:fee5:ddb2",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 395
+      },
+      {
+        "name": "veth762c73a",
+        "internal": false,
+        "mac": "76:8d:b4:8c:3f:14",
+        "address": "fe80::748d:b4ff:fe8c:3f14",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 396
+      },
+      {
+        "name": "vethc7a0630",
+        "internal": false,
+        "mac": "de:35:27:55:58:ee",
+        "address": "fe80::dc35:27ff:fe55:58ee",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 397
+      },
+      {
+        "name": "vethc950bea",
+        "internal": false,
+        "mac": "2e:eb:4c:21:b7:30",
+        "address": "fe80::2ceb:4cff:fe21:b730",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 410
+      },
+      {
+        "name": "veth8aa908c",
+        "internal": false,
+        "mac": "56:eb:a7:7f:87:3f",
+        "address": "fe80::54eb:a7ff:fe7f:873f",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 411
+      },
+      {
+        "name": "veth40ec963",
+        "internal": false,
+        "mac": "2a:f8:86:ec:9b:9e",
+        "address": "fe80::28f8:86ff:feec:9b9e",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 412
+      },
+      {
+        "name": "veth01607ff",
+        "internal": false,
+        "mac": "7a:7c:93:c7:fd:78",
+        "address": "fe80::787c:93ff:fec7:fd78",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 413
+      },
+      {
+        "name": "veth9f042e8",
+        "internal": false,
+        "mac": "a6:d4:26:11:73:aa",
+        "address": "fe80::a4d4:26ff:fe11:73aa",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 450
+      },
+      {
+        "name": "veth3a76609",
+        "internal": false,
+        "mac": "a6:0c:02:e1:20:99",
+        "address": "fe80::a40c:2ff:fee1:2099",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 454
+      },
+      {
+        "name": "veth3ef611f",
+        "internal": false,
+        "mac": "02:f8:b5:50:0a:7d",
+        "address": "fe80::f8:b5ff:fe50:a7d",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 455
+      },
+      {
+        "name": "vethfe69c76",
+        "internal": false,
+        "mac": "5a:d9:c7:38:4c:d8",
+        "address": "fe80::58d9:c7ff:fe38:4cd8",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 457
+      },
+      {
+        "name": "veth2afbac7",
+        "internal": false,
+        "mac": "a6:75:4a:6e:22:0a",
+        "address": "fe80::a475:4aff:fe6e:220a",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 458
+      },
+      {
+        "name": "vethea9e196",
+        "internal": false,
+        "mac": "62:e5:5e:5c:ca:03",
+        "address": "fe80::60e5:5eff:fe5c:ca03",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 461
+      },
+      {
+        "name": "veth4699a40",
+        "internal": false,
+        "mac": "7a:a2:5d:bb:b1:39",
+        "address": "fe80::78a2:5dff:febb:b139",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 462
+      },
+      {
+        "name": "veth5650bf5",
+        "internal": false,
+        "mac": "ca:c3:37:36:f4:62",
+        "address": "fe80::c8c3:37ff:fe36:f462",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 466
+      },
+      {
+        "name": "vethb3e9ccb",
+        "internal": false,
+        "mac": "f2:06:b4:a1:be:8c",
+        "address": "fe80::f006:b4ff:fea1:be8c",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 467
+      },
+      {
+        "name": "veth18dd319",
+        "internal": false,
+        "mac": "ae:b7:88:da:51:4e",
+        "address": "fe80::acb7:88ff:feda:514e",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 470
+      },
+      {
+        "name": "vethc47ba34",
+        "internal": false,
+        "mac": "42:f6:44:8d:0a:95",
+        "address": "fe80::40f6:44ff:fe8d:a95",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 472
+      },
+      {
+        "name": "vethaec48ca",
+        "internal": false,
+        "mac": "72:f3:c0:43:34:bf",
+        "address": "fe80::70f3:c0ff:fe43:34bf",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 473
+      },
+      {
+        "name": "veth32c5bad",
+        "internal": false,
+        "mac": "ce:f6:6b:09:ef:a2",
+        "address": "fe80::ccf6:6bff:fe09:efa2",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 475
+      },
+      {
+        "name": "veth0ed318f",
+        "internal": false,
+        "mac": "d6:b0:83:f2:22:ef",
+        "address": "fe80::d4b0:83ff:fef2:22ef",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 476
+      },
+      {
+        "name": "vethe120966",
+        "internal": false,
+        "mac": "46:9a:a5:50:2b:0d",
+        "address": "fe80::449a:a5ff:fe50:2b0d",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 478
+      },
+      {
+        "name": "vethd859b65",
+        "internal": false,
+        "mac": "da:eb:77:1d:45:c7",
+        "address": "fe80::d8eb:77ff:fe1d:45c7",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 479
+      },
+      {
+        "name": "veth65e9a3d",
+        "internal": false,
+        "mac": "8a:81:8a:e6:93:72",
+        "address": "fe80::8881:8aff:fee6:9372",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 480
+      },
+      {
+        "name": "vethfd9b70b",
+        "internal": false,
+        "mac": "72:f5:9c:28:2d:6c",
+        "address": "fe80::70f5:9cff:fe28:2d6c",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 511
+      },
+      {
+        "name": "veth6e15948",
+        "internal": false,
+        "mac": "ea:0e:af:a2:95:66",
+        "address": "fe80::e80e:afff:fea2:9566",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 512
+      },
+      {
+        "name": "vetha340be9",
+        "internal": false,
+        "mac": "2e:5e:34:e8:b7:eb",
+        "address": "fe80::2c5e:34ff:fee8:b7eb",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 513
+      },
+      {
+        "name": "veth1bcb80a",
+        "internal": false,
+        "mac": "1a:e0:90:5b:18:69",
+        "address": "fe80::18e0:90ff:fe5b:1869",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 514
+      },
+      {
+        "name": "veth5862201",
+        "internal": false,
+        "mac": "c2:de:c4:32:ce:57",
+        "address": "fe80::c0de:c4ff:fe32:ce57",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 515
+      },
+      {
+        "name": "veth3a57f77",
+        "internal": false,
+        "mac": "ba:93:49:ce:6c:90",
+        "address": "fe80::b893:49ff:fece:6c90",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 516
+      },
+      {
+        "name": "veth07fbdfe",
+        "internal": false,
+        "mac": "62:69:c2:b0:20:04",
+        "address": "fe80::6069:c2ff:feb0:2004",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 519
+      },
+      {
+        "name": "vethc9c428e",
+        "internal": false,
+        "mac": "7a:22:02:86:dc:bd",
+        "address": "fe80::7822:2ff:fe86:dcbd",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 520
+      },
+      {
+        "name": "veth7dbc152",
+        "internal": false,
+        "mac": "ba:ef:00:9e:4e:4a",
+        "address": "fe80::b8ef:ff:fe9e:4e4a",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 521
+      },
+      {
+        "name": "vethc824c5a",
+        "internal": false,
+        "mac": "12:bd:8a:d0:2b:a6",
+        "address": "fe80::10bd:8aff:fed0:2ba6",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 522
+      },
+      {
+        "name": "veth753a014",
+        "internal": false,
+        "mac": "2a:17:31:d4:8d:10",
+        "address": "fe80::2817:31ff:fed4:8d10",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 535
+      },
+      {
+        "name": "veth31d5f6c",
+        "internal": false,
+        "mac": "f6:b3:20:c6:e1:c4",
+        "address": "fe80::f4b3:20ff:fec6:e1c4",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 536
+      },
+      {
+        "name": "veth200192d",
+        "internal": false,
+        "mac": "a6:50:df:1c:27:27",
+        "address": "fe80::a450:dfff:fe1c:2727",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 537
+      },
+      {
+        "name": "veth5b7db9b",
+        "internal": false,
+        "mac": "f6:64:e7:42:46:47",
+        "address": "fe80::f464:e7ff:fe42:4647",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 538
+      },
+      {
+        "name": "veth02fe5d7",
+        "internal": false,
+        "mac": "16:51:82:8e:44:bd",
+        "address": "fe80::1451:82ff:fe8e:44bd",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 541
+      },
+      {
+        "name": "vethd0825d4",
+        "internal": false,
+        "mac": "62:61:de:93:f6:b9",
+        "address": "fe80::6061:deff:fe93:f6b9",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 568
+      },
+      {
+        "name": "vethe73d9da",
+        "internal": false,
+        "mac": "0a:86:57:74:9a:08",
+        "address": "fe80::886:57ff:fe74:9a08",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 569
+      },
+      {
+        "name": "vethc216fbd",
+        "internal": false,
+        "mac": "ba:28:3f:1c:b3:9d",
+        "address": "fe80::b828:3fff:fe1c:b39d",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 570
+      },
+      {
+        "name": "veth2c54f53",
+        "internal": false,
+        "mac": "12:63:75:1d:1d:88",
+        "address": "fe80::1063:75ff:fe1d:1d88",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 571
+      },
+      {
+        "name": "veth4dae871",
+        "internal": false,
+        "mac": "2e:fb:b0:76:74:d3",
+        "address": "fe80::2cfb:b0ff:fe76:74d3",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 572
+      },
+      {
+        "name": "veth600a616",
+        "internal": false,
+        "mac": "4e:4c:ec:1d:1e:ed",
+        "address": "fe80::4c4c:ecff:fe1d:1eed",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 584
+      },
+      {
+        "name": "vethc7560e3",
+        "internal": false,
+        "mac": "76:bd:41:6a:be:93",
+        "address": "fe80::74bd:41ff:fe6a:be93",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 585
+      },
+      {
+        "name": "tailscale0",
+        "internal": false,
+        "mac": "00:00:00:00:00:00",
+        "address": "fd7a:115c:a1e0::a034:122",
+        "netmask": "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+        "family": "IPv6",
+        "scopeid": 0
+      },
+      {
+        "name": "tailscale0",
+        "internal": false,
+        "mac": "00:00:00:00:00:00",
+        "address": "fe80::44da:5939:d497:6b36",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 586
+      },
+      {
+        "name": "vethe19a327",
+        "internal": false,
+        "mac": "ea:16:fc:43:86:22",
+        "address": "fe80::506d:ecff:fe17:8b6f",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 587
+      },
+      {
+        "name": "veth56c9b6f",
+        "internal": false,
+        "mac": "0e:4a:66:09:a1:70",
+        "address": "fe80::c4a:66ff:fe09:a170",
+        "netmask": "ffff:ffff:ffff:ffff::",
+        "family": "IPv6",
+        "scopeid": 588
+      }
+    ],
+    "host": "zael-tux-desktop"
+  },
+  "javascriptStack": {
+    "message": "No stack.",
+    "stack": [
+      "Unavailable."
+    ],
+    "errorProperties": {
+    }
+  },
+  "javascriptHeap": {
+    "totalMemory": 4453588992,
+    "executableMemory": 6463488,
+    "totalCommittedMemory": 4451434496,
+    "availableMemory": 29570520,
+    "totalGlobalHandlesMemory": 122880,
+    "usedGlobalHandlesMemory": 12640,
+    "usedMemory": 4360269096,
+    "memoryLimit": 4445962240,
+    "mallocedMemory": 1089656,
+    "externalMemory": 20335611,
+    "peakMallocedMemory": 50541832,
+    "nativeContextCount": 2,
+    "detachedContextCount": 0,
+    "doesZapGarbage": 0,
+    "heapSpaces": {
+      "read_only_space": {
+        "memorySize": 0,
+        "committedMemory": 0,
+        "capacity": 0,
+        "used": 0,
+        "available": 0
+      },
+      "new_space": {
+        "memorySize": 2097152,
+        "committedMemory": 548864,
+        "capacity": 1030880,
+        "used": 0,
+        "available": 1030880
+      },
+      "old_space": {
+        "memorySize": 3369824256,
+        "committedMemory": 3369766912,
+        "capacity": 3312578920,
+        "used": 3311650552,
+        "available": 928368
+      },
+      "code_space": {
+        "memorySize": 5767168,
+        "committedMemory": 5218304,
+        "capacity": 4742400,
+        "used": 4742400,
+        "available": 0
+      },
+      "shared_space": {
+        "memorySize": 0,
+        "committedMemory": 0,
+        "capacity": 0,
+        "used": 0,
+        "available": 0
+      },
+      "new_large_object_space": {
+        "memorySize": 0,
+        "committedMemory": 0,
+        "capacity": 27611272,
+        "used": 0,
+        "available": 27611272
+      },
+      "large_object_space": {
+        "memorySize": 1075204096,
+        "committedMemory": 1075204096,
+        "capacity": 1043232048,
+        "used": 1043232048,
+        "available": 0
+      },
+      "code_large_object_space": {
+        "memorySize": 696320,
+        "committedMemory": 696320,
+        "capacity": 644096,
+        "used": 644096,
+        "available": 0
+      },
+      "shared_large_object_space": {
+        "memorySize": 0,
+        "committedMemory": 0,
+        "capacity": 0,
+        "used": 0,
+        "available": 0
+      }
+    }
+  },
+  "nativeStack": [
+    {
+      "pc": "0x0000000000d6a508",
+      "symbol": " [/home/zael/.nvm/versions/node/v20.19.2/bin/node]"
+    },
+    {
+      "pc": "0x0000000000d6cffa",
+      "symbol": "node::TriggerNodeReport(v8::Isolate*, node::Environment*, char const*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, v8::Local<v8::Value>) [/home/zael/.nvm/versions/node/v20.19.2/bin/node]"
+    },
+    {
+      "pc": "0x0000000000d6d887",
+      "symbol": "node::TriggerNodeReport(v8::Isolate*, char const*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, v8::Local<v8::Value>) [/home/zael/.nvm/versions/node/v20.19.2/bin/node]"
+    },
+    {
+      "pc": "0x0000000000b8ceb7",
+      "symbol": "node::OOMErrorHandler(char const*, v8::OOMDetails const&) [/home/zael/.nvm/versions/node/v20.19.2/bin/node]"
+    },
+    {
+      "pc": "0x0000000000f04610",
+      "symbol": "v8::Utils::ReportOOMFailure(v8::internal::Isolate*, char const*, v8::OOMDetails const&) [/home/zael/.nvm/versions/node/v20.19.2/bin/node]"
+    },
+    {
+      "pc": "0x0000000000f048f7",
+      "symbol": "v8::internal::V8::FatalProcessOutOfMemory(v8::internal::Isolate*, char const*, v8::OOMDetails const&) [/home/zael/.nvm/versions/node/v20.19.2/bin/node]"
+    },
+    {
+      "pc": "0x0000000001116545",
+      "symbol": " [/home/zael/.nvm/versions/node/v20.19.2/bin/node]"
+    },
+    {
+      "pc": "0x000000000112e3c8",
+      "symbol": "v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags) [/home/zael/.nvm/versions/node/v20.19.2/bin/node]"
+    },
+    {
+      "pc": "0x00000000011044e1",
+      "symbol": "v8::internal::HeapAllocator::AllocateRawWithLightRetrySlowPath(int, v8::internal::AllocationType, v8::internal::AllocationOrigin, v8::internal::AllocationAlignment) [/home/zael/.nvm/versions/node/v20.19.2/bin/node]"
+    },
+    {
+      "pc": "0x0000000001105675",
+      "symbol": "v8::internal::HeapAllocator::AllocateRawWithRetryOrFailSlowPath(int, v8::internal::AllocationType, v8::internal::AllocationOrigin, v8::internal::AllocationAlignment) [/home/zael/.nvm/versions/node/v20.19.2/bin/node]"
+    },
+    {
+      "pc": "0x00000000010e1d96",
+      "symbol": "v8::internal::Factory::AllocateRaw(int, v8::internal::AllocationType, v8::internal::AllocationAlignment) [/home/zael/.nvm/versions/node/v20.19.2/bin/node]"
+    },
+    {
+      "pc": "0x00000000010d39c4",
+      "symbol": "v8::internal::FactoryBase<v8::internal::Factory>::AllocateRawWithImmortalMap(int, v8::internal::AllocationType, v8::internal::Map, v8::internal::AllocationAlignment) [/home/zael/.nvm/versions/node/v20.19.2/bin/node]"
+    },
+    {
+      "pc": "0x00000000010d6cd7",
+      "symbol": "v8::internal::FactoryBase<v8::internal::Factory>::NewRawTwoByteString(int, v8::internal::AllocationType) [/home/zael/.nvm/versions/node/v20.19.2/bin/node]"
+    },
+    {
+      "pc": "0x00000000010ed20b",
+      "symbol": "v8::internal::Factory::NewStringFromUtf8(v8::base::Vector<char const> const&, v8::internal::AllocationType) [/home/zael/.nvm/versions/node/v20.19.2/bin/node]"
+    },
+    {
+      "pc": "0x0000000000f16ea2",
+      "symbol": "v8::String::NewFromUtf8(v8::Isolate*, char const*, v8::NewStringType, int) [/home/zael/.nvm/versions/node/v20.19.2/bin/node]"
+    },
+    {
+      "pc": "0x00007af29018e5b1",
+      "symbol": "Data::GetValueJS(v8::Isolate*, sqlite3_stmt*, int, bool) [/home/zael/dev/me/drone/node_modules/better-sqlite3/build/Release/better_sqlite3.node]"
+    },
+    {
+      "pc": "0x00007af29018e983",
+      "symbol": "Data::GetFlatRowJS(v8::Isolate*, v8::Local<v8::Context>, sqlite3_stmt*, bool) [/home/zael/dev/me/drone/node_modules/better-sqlite3/build/Release/better_sqlite3.node]"
+    },
+    {
+      "pc": "0x00007af290193008",
+      "symbol": "Statement::JS_all(v8::FunctionCallbackInfo<v8::Value> const&) [/home/zael/dev/me/drone/node_modules/better-sqlite3/build/Release/better_sqlite3.node]"
+    },
+    {
+      "pc": "0x0000000000f6ca3f",
+      "symbol": "v8::internal::FunctionCallbackArguments::Call(v8::internal::CallHandlerInfo) [/home/zael/.nvm/versions/node/v20.19.2/bin/node]"
+    },
+    {
+      "pc": "0x0000000000f6d2ad",
+      "symbol": " [/home/zael/.nvm/versions/node/v20.19.2/bin/node]"
+    },
+    {
+      "pc": "0x0000000000f6d775",
+      "symbol": "v8::internal::Builtin_HandleApiCall(int, unsigned long*, v8::internal::Isolate*) [/home/zael/.nvm/versions/node/v20.19.2/bin/node]"
+    },
+    {
+      "pc": "0x0000000001977df6",
+      "symbol": " [/home/zael/.nvm/versions/node/v20.19.2/bin/node]"
+    }
+  ],
+  "resourceUsage": {
+    "free_memory": 93422325760,
+    "total_memory": 200067891200,
+    "rss": 6673731584,
+    "constrained_memory": 18446744073709551615,
+    "available_memory": 93422325760,
+    "userCpuSeconds": 968.42,
+    "kernelCpuSeconds": 166.164,
+    "cpuConsumptionPercent": 8.79249,
+    "userCpuConsumptionPercent": 7.5048,
+    "kernelCpuConsumptionPercent": 1.28769,
+    "maxRss": 6793375744,
+    "pageFaults": {
+      "IORequired": 7,
+      "IONotRequired": 83460428
+    },
+    "fsActivity": {
+      "reads": 792,
+      "writes": 31684224
+    }
+  },
+  "uvthreadResourceUsage": {
+    "userCpuSeconds": 618.269,
+    "kernelCpuSeconds": 112.835,
+    "cpuConsumptionPercent": 5.66572,
+    "userCpuConsumptionPercent": 4.7913,
+    "kernelCpuConsumptionPercent": 0.874418,
+    "fsActivity": {
+      "reads": 560,
+      "writes": 31563056
+    }
+  },
+  "libuv": [
+    {
+      "type": "async",
+      "is_active": true,
+      "is_referenced": false,
+      "address": "0x0000000044bfec90"
+    },
+    {
+      "type": "async",
+      "is_active": true,
+      "is_referenced": false,
+      "address": "0x00000000057263e0"
+    },
+    {
+      "type": "timer",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x0000000044c4cb20",
+      "repeat": 0,
+      "firesInMsFromNow": 1,
+      "expired": false
+    },
+    {
+      "type": "check",
+      "is_active": true,
+      "is_referenced": false,
+      "address": "0x0000000044c4cbb8"
+    },
+    {
+      "type": "idle",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x0000000044c4cc30"
+    },
+    {
+      "type": "prepare",
+      "is_active": true,
+      "is_referenced": false,
+      "address": "0x0000000044c4cca8"
+    },
+    {
+      "type": "check",
+      "is_active": true,
+      "is_referenced": false,
+      "address": "0x0000000044c4cd20"
+    },
+    {
+      "type": "async",
+      "is_active": true,
+      "is_referenced": false,
+      "address": "0x0000000044c4cd98"
+    },
+    {
+      "type": "tcp",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x0000000044e06db0",
+      "localEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 8787
+      },
+      "remoteEndpoint": null,
+      "sendBufferSize": 16384,
+      "recvBufferSize": 131072,
+      "fd": 28,
+      "writeQueueSize": 0,
+      "readable": false,
+      "writable": false
+    },
+    {
+      "type": "tcp",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x0000000044e00e60",
+      "localEndpoint": {
+        "host": "zael-tux-desktop",
+        "ip4": "172.17.0.1",
+        "port": 8788
+      },
+      "remoteEndpoint": null,
+      "sendBufferSize": 16384,
+      "recvBufferSize": 131072,
+      "fd": 29,
+      "writeQueueSize": 0,
+      "readable": false,
+      "writable": false
+    },
+    {
+      "type": "process",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x0000000044d142f8",
+      "pid": 36712
+    },
+    {
+      "type": "tcp",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x0000000044d15660",
+      "localEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 46798
+      },
+      "remoteEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 37505
+      },
+      "sendBufferSize": 4194304,
+      "recvBufferSize": 131072,
+      "fd": 73,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "tcp",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x0000000045fa95e0",
+      "localEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 50908
+      },
+      "remoteEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 36051
+      },
+      "sendBufferSize": 4194304,
+      "recvBufferSize": 131072,
+      "fd": 74,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "tcp",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x0000000045fa9a70",
+      "localEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 40936
+      },
+      "remoteEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 39767
+      },
+      "sendBufferSize": 4194304,
+      "recvBufferSize": 131072,
+      "fd": 75,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "tcp",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x00000000460485e0",
+      "localEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 41446
+      },
+      "remoteEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 46445
+      },
+      "sendBufferSize": 4194304,
+      "recvBufferSize": 131072,
+      "fd": 76,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "tcp",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x00000000460279f0",
+      "localEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 52378
+      },
+      "remoteEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 38529
+      },
+      "sendBufferSize": 4194304,
+      "recvBufferSize": 976918,
+      "fd": 77,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "tcp",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x0000000045af35e0",
+      "localEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 53692
+      },
+      "remoteEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 37753
+      },
+      "sendBufferSize": 4194304,
+      "recvBufferSize": 131072,
+      "fd": 78,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "tcp",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x0000000046007710",
+      "localEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 60838
+      },
+      "remoteEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 34897
+      },
+      "sendBufferSize": 4194304,
+      "recvBufferSize": 131072,
+      "fd": 79,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "tcp",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x000000004602efd0",
+      "localEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 8791
+      },
+      "remoteEndpoint": null,
+      "sendBufferSize": 16384,
+      "recvBufferSize": 131072,
+      "fd": 27,
+      "writeQueueSize": 0,
+      "readable": false,
+      "writable": false
+    },
+    {
+      "type": "tcp",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x0000000045ffab40",
+      "localEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 8787
+      },
+      "remoteEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 49100
+      },
+      "sendBufferSize": 4194304,
+      "recvBufferSize": 131072,
+      "fd": 113,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "tcp",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x0000000046197c40",
+      "localEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 8787
+      },
+      "remoteEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 49128
+      },
+      "sendBufferSize": 4194304,
+      "recvBufferSize": 131072,
+      "fd": 114,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "signal",
+      "is_active": true,
+      "is_referenced": false,
+      "address": "0x0000000045fc05d8",
+      "signum": 2,
+      "signal": "SIGINT"
+    },
+    {
+      "type": "signal",
+      "is_active": true,
+      "is_referenced": false,
+      "address": "0x00000000454c2388",
+      "signum": 15,
+      "signal": "SIGTERM"
+    },
+    {
+      "type": "tcp",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x0000000044e21190",
+      "localEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 55798
+      },
+      "remoteEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 40409
+      },
+      "sendBufferSize": 4194304,
+      "recvBufferSize": 131072,
+      "fd": 50,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "tcp",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x0000000044cf1b90",
+      "localEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 39258
+      },
+      "remoteEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 42061
+      },
+      "sendBufferSize": 4194304,
+      "recvBufferSize": 131072,
+      "fd": 46,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "tcp",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x0000000045fe83b0",
+      "localEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 8787
+      },
+      "remoteEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 57156
+      },
+      "sendBufferSize": 4194304,
+      "recvBufferSize": 131072,
+      "fd": 43,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "tcp",
+      "is_active": true,
+      "is_referenced": false,
+      "address": "0x00000000467cd2d0",
+      "localEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 44986
+      },
+      "remoteEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 34897
+      },
+      "sendBufferSize": 4194304,
+      "recvBufferSize": 131072,
+      "fd": 52,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "tcp",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x00000000470608c0",
+      "localEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 36090
+      },
+      "remoteEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 40409
+      },
+      "sendBufferSize": 4194304,
+      "recvBufferSize": 131072,
+      "fd": 38,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "tcp",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x00000000464fbd60",
+      "localEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 45132
+      },
+      "remoteEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 46445
+      },
+      "sendBufferSize": 4194304,
+      "recvBufferSize": 131072,
+      "fd": 54,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "tcp",
+      "is_active": true,
+      "is_referenced": false,
+      "address": "0x0000000046bdb390",
+      "localEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 44872
+      },
+      "remoteEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 39767
+      },
+      "sendBufferSize": 4194304,
+      "recvBufferSize": 131072,
+      "fd": 55,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "tcp",
+      "is_active": true,
+      "is_referenced": false,
+      "address": "0x0000000046951ec0",
+      "localEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 48336
+      },
+      "remoteEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 37505
+      },
+      "sendBufferSize": 4194304,
+      "recvBufferSize": 131072,
+      "fd": 56,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "pipe",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x00000000470a2530",
+      "localEndpoint": null,
+      "remoteEndpoint": "/run/docker.sock",
+      "sendBufferSize": 212992,
+      "recvBufferSize": 212992,
+      "fd": 35,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "tcp",
+      "is_active": true,
+      "is_referenced": false,
+      "address": "0x0000000045f83f60",
+      "localEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 47486
+      },
+      "remoteEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 4040
+      },
+      "sendBufferSize": 4194304,
+      "recvBufferSize": 131072,
+      "fd": 44,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "tcp",
+      "is_active": true,
+      "is_referenced": false,
+      "address": "0x0000000046c30730",
+      "localEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 48112
+      },
+      "remoteEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 42061
+      },
+      "sendBufferSize": 4194304,
+      "recvBufferSize": 131072,
+      "fd": 48,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "tcp",
+      "is_active": true,
+      "is_referenced": false,
+      "address": "0x0000000046e59bf0",
+      "localEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 56622
+      },
+      "remoteEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 34897
+      },
+      "sendBufferSize": 4194304,
+      "recvBufferSize": 131072,
+      "fd": 37,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "tcp",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x00000000467cf6d0",
+      "localEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 47490
+      },
+      "remoteEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 4040
+      },
+      "sendBufferSize": 4194304,
+      "recvBufferSize": 131072,
+      "fd": 49,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "timer",
+      "is_active": true,
+      "is_referenced": false,
+      "address": "0x000000004649e368",
+      "repeat": 0,
+      "firesInMsFromNow": 7553,
+      "expired": false
+    },
+    {
+      "type": "tcp",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x0000000046e545e0",
+      "localEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 8787
+      },
+      "remoteEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 54300
+      },
+      "sendBufferSize": 4194304,
+      "recvBufferSize": 131072,
+      "fd": 26,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "tcp",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x00000000468505e0",
+      "localEndpoint": {
+        "host": "zael-tux-desktop",
+        "ip4": "172.17.0.1",
+        "port": 8788
+      },
+      "remoteEndpoint": {
+        "host": "172.17.0.52",
+        "ip4": "172.17.0.52",
+        "port": 45028
+      },
+      "sendBufferSize": 87040,
+      "recvBufferSize": 131072,
+      "fd": 30,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "pipe",
+      "is_active": false,
+      "is_referenced": true,
+      "address": "0x000000004678a2e0",
+      "localEndpoint": null,
+      "remoteEndpoint": "/run/docker.sock",
+      "sendBufferSize": 212992,
+      "recvBufferSize": 212992,
+      "fd": 40,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "tcp",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x000000004678a490",
+      "localEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 8787
+      },
+      "remoteEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 54312
+      },
+      "sendBufferSize": 4194304,
+      "recvBufferSize": 131072,
+      "fd": 41,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "tcp",
+      "is_active": false,
+      "is_referenced": true,
+      "address": "0x00000000462097b0",
+      "localEndpoint": {
+        "host": "localhost",
+        "ip4": "127.0.0.1",
+        "port": 40892
+      },
+      "remoteEndpoint": null,
+      "sendBufferSize": 16384,
+      "recvBufferSize": 131072,
+      "fd": 42,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "pipe",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x00007af268345c50",
+      "localEndpoint": null,
+      "remoteEndpoint": null,
+      "sendBufferSize": 212992,
+      "recvBufferSize": 212992,
+      "fd": 31,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "pipe",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x00000000467834d0",
+      "localEndpoint": null,
+      "remoteEndpoint": null,
+      "sendBufferSize": 212992,
+      "recvBufferSize": 212992,
+      "fd": 33,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "process",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x000000004626e1f8",
+      "pid": 1141907
+    },
+    {
+      "type": "pipe",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x0000000046849cb0",
+      "localEndpoint": null,
+      "remoteEndpoint": null,
+      "sendBufferSize": 212992,
+      "recvBufferSize": 212992,
+      "fd": 32,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "pipe",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x00000000467cc760",
+      "localEndpoint": null,
+      "remoteEndpoint": null,
+      "sendBufferSize": 212992,
+      "recvBufferSize": 212992,
+      "fd": 39,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "process",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x00000000467d5408",
+      "pid": 1141908
+    },
+    {
+      "type": "loop",
+      "is_active": true,
+      "address": "0x0000000005736ca0",
+      "loopIdleTimeSeconds": 12120.4
+    }
+  ],
+  "workers": [
+  ],
+  "environmentVariables": {
+    "SHELL": "/bin/bash",
+    "SESSION_MANAGER": "local/zael-tux-desktop:@/tmp/.ICE-unix/3033,unix/zael-tux-desktop:/tmp/.ICE-unix/3033",
+    "CODEX_MANAGED_PACKAGE_ROOT": "/home/zael/.nvm/versions/node/v20.19.2/lib/node_modules/@openai/codex",
+    "QT_ACCESSIBILITY": "1",
+    "COLORTERM": "truecolor",
+    "XDG_CONFIG_DIRS": "/etc/xdg/xdg-ubuntu-xorg:/etc/xdg",
+    "NVM_INC": "/home/zael/.nvm/versions/node/v20.19.2/include/node",
+    "XDG_MENU_PREFIX": "gnome-",
+    "TERM_PROGRAM_VERSION": "1.132.1",
+    "GNOME_DESKTOP_SESSION_ID": "this-is-deprecated",
+    "COPILOT_DEBUG_NONCE": "4e3ed452ec2727fe6a52b832928520a7",
+    "GNOME_SHELL_SESSION_MODE": "ubuntu",
+    "SSH_AUTH_SOCK": "/run/user/1000/keyring/ssh",
+    "WORKTREE_ROOT": "/home/zael/worktrees",
+    "MEMORY_PRESSURE_WRITE": "c29tZSAyMDAwMDAgMjAwMDAwMAA=",
+    "XMODIFIERS": "@im=ibus",
+    "DESKTOP_SESSION": "ubuntu-xorg",
+    "GH_PAGER": "cat",
+    "GTK_MODULES": "gail:atk-bridge",
+    "PWD": "/home/zael/dev/me/drone",
+    "LOGNAME": "zael",
+    "XDG_SESSION_DESKTOP": "ubuntu-xorg",
+    "XDG_SESSION_TYPE": "x11",
+    "CODEX_MANAGED_BY_NPM": "1",
+    "GPG_AGENT_INFO": "/run/user/1000/gnupg/S.gpg-agent:0:1",
+    "SYSTEMD_EXEC_PID": "3070",
+    "XAUTHORITY": "/run/user/1000/gdm/Xauthority",
+    "VSCODE_GIT_ASKPASS_NODE": "/usr/share/code/code",
+    "GJS_DEBUG_TOPICS": "JS ERROR;JS LOG",
+    "WINDOWPATH": "2",
+    "HOME": "/home/zael",
+    "CODEX_SESSION_ID": "01a06e77-766c-7511-a37b-208d6536c3f7",
+    "USERNAME": "zael",
+    "LANG": "en_US.UTF-8",
+    "LS_COLORS": "rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=00:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.avif=01;35:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:*~=00;90:*#=00;90:*.bak=00;90:*.crdownload=00;90:*.dpkg-dist=00;90:*.dpkg-new=00;90:*.dpkg-old=00;90:*.dpkg-tmp=00;90:*.old=00;90:*.orig=00;90:*.part=00;90:*.rej=00;90:*.rpmnew=00;90:*.rpmorig=00;90:*.rpmsave=00;90:*.swp=00;90:*.tmp=00;90:*.ucf-dist=00;90:*.ucf-new=00;90:*.ucf-old=00;90:",
+    "XDG_CURRENT_DESKTOP": "ubuntu:GNOME",
+    "MEMORY_PRESSURE_WATCH": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/session.slice/org.gnome.Shell@x11.service/memory.pressure",
+    "GIT_ASKPASS": "/usr/share/code/resources/app/extensions/git/dist/askpass.sh",
+    "INVOCATION_ID": "57348b082d4d486895b532b294d23c57",
+    "MANAGERPID": "2520",
+    "CHROME_DESKTOP": "code.desktop",
+    "GJS_DEBUG_OUTPUT": "stderr",
+    "NVM_DIR": "/home/zael/.nvm",
+    "VSCODE_GIT_ASKPASS_EXTRA_ARGS": "",
+    "VSCODE_PYTHON_AUTOACTIVATE_GUARD": "1",
+    "CODEX_PERMISSION_PROFILE": ":workspace",
+    "LESSCLOSE": "/usr/bin/lesspipe %s %s",
+    "XDG_SESSION_CLASS": "user",
+    "TERM": "xterm-256color",
+    "CODEX_THREAD_ID": "01a06e77-766c-7511-a37b-208d6536c3f7",
+    "LESSOPEN": "| /usr/bin/lesspipe %s",
+    "USER": "zael",
+    "GIT_PAGER": "cat",
+    "VSCODE_GIT_IPC_HANDLE": "/run/user/1000/vscode-git-0635148109.sock",
+    "CLUTTER_DISABLE_MIPMAPPED_TEXT": "1",
+    "DISPLAY": ":0",
+    "SHLVL": "1",
+    "NVM_CD_FLAGS": "",
+    "GSM_SKIP_SSH_AGENT_WORKAROUND": "true",
+    "PAGER": "cat",
+    "QT_IM_MODULE": "ibus",
+    "NO_COLOR": "1",
+    "FC_FONTATIONS": "1",
+    "CODEX_CI": "1",
+    "LC_CTYPE": "C.UTF-8",
+    "XDG_RUNTIME_DIR": "/run/user/1000",
+    "DEBUGINFOD_URLS": "https://debuginfod.ubuntu.com ",
+    "LC_ALL": "C.UTF-8",
+    "VSCODE_GIT_ASKPASS_MAIN": "/usr/share/code/resources/app/extensions/git/dist/askpass-main.js",
+    "JOURNAL_STREAM": "10:38044",
+    "XDG_DATA_DIRS": "/usr/share/ubuntu-xorg:/usr/share/gnome:/usr/local/share/:/usr/share/:/var/lib/snapd/desktop",
+    "GDK_BACKEND": "x11",
+    "CODEX_SANDBOX_NETWORK_DISABLED": "1",
+    "PATH": "/home/zael/.nvm/versions/node/v20.19.2/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path:/home/zael/.local/bin:/home/zael/.codex/tmp/arg0/codex-arg00QtioJ:/home/zael/.nvm/versions/node/v20.19.2/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path:/home/zael/.local/bin:/home/zael/.config/Code/User/globalStorage/github.copilot-chat/debugCommand:/home/zael/.config/Code/User/globalStorage/github.copilot-chat/copilotCli:/home/zael/.local/bin:/home/zael/.local/bin:/home/zael/.nvm/versions/node/v20.19.2/bin:/home/zael/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/snap/bin:/home/zael/.foundry/bin:/home/zael/.foundry/bin",
+    "GDMSESSION": "ubuntu-xorg",
+    "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
+    "NVM_BIN": "/home/zael/.nvm/versions/node/v20.19.2/bin",
+    "GIO_LAUNCHED_DESKTOP_FILE_PID": "379329",
+    "GIO_LAUNCHED_DESKTOP_FILE": "/usr/share/applications/code.desktop",
+    "TERM_PROGRAM": "vscode",
+    "_": "/usr/bin/env",
+    "DRONE_HUB_MEMORY_DIAGNOSTICS": "1",
+    "DRONE_HUB_HEAP_DIAGNOSTICS": "1",
+    "DRONE_HUB_DAEMON": "1",
+    "GEMINI_API_KEY": "AIzaSyC7oF7n9gidioNZxllHITLkQbfP-GMqb_Q"
+  },
+  "userLimits": {
+    "core_file_size_blocks": {
+      "soft": 0,
+      "hard": "unlimited"
+    },
+    "data_seg_size_kbytes": {
+      "soft": "unlimited",
+      "hard": "unlimited"
+    },
+    "file_size_blocks": {
+      "soft": "unlimited",
+      "hard": "unlimited"
+    },
+    "max_locked_memory_bytes": {
+      "soft": 25008484352,
+      "hard": 25008484352
+    },
+    "max_memory_size_kbytes": {
+      "soft": "unlimited",
+      "hard": "unlimited"
+    },
+    "open_files": {
+      "soft": 1048576,
+      "hard": 1048576
+    },
+    "stack_size_bytes": {
+      "soft": 8388608,
+      "hard": "unlimited"
+    },
+    "cpu_time_seconds": {
+      "soft": "unlimited",
+      "hard": "unlimited"
+    },
+    "max_user_processes": {
+      "soft": 709747,
+      "hard": 709747
+    },
+    "virtual_memory_kbytes": {
+      "soft": "unlimited",
+      "hard": "unlimited"
+    }
+  },
+  "sharedObjects": [
+    "linux-vdso.so.1",
+    "/lib/x86_64-linux-gnu/libdl.so.2",
+    "/lib/x86_64-linux-gnu/libstdc++.so.6",
+    "/lib/x86_64-linux-gnu/libm.so.6",
+    "/lib/x86_64-linux-gnu/libgcc_s.so.1",
+    "/lib/x86_64-linux-gnu/libpthread.so.0",
+    "/lib/x86_64-linux-gnu/libc.so.6",
+    "/lib64/ld-linux-x86-64.so.2",
+    "/home/zael/dev/me/drone/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
+    "/lib/x86_64-linux-gnu/libnss_mdns4_minimal.so.2"
+  ]
+}

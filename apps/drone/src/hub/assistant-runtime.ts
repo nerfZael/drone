@@ -5,6 +5,7 @@ import { loadRegistry } from '../host/registry';
 import { normalizeDroneRuntime } from '../host/runtime';
 import { HubAssistantService, type AssistantDroneSummary } from './assistant';
 import { resolveStableDroneOrPendingIdFromRef } from './drone-lifecycle-registry';
+import { loadDroneSummaryRegistry } from './drone-summary-registry';
 import { fleetActorConfig } from './fleet-helpers';
 import { BlipAssistantHost } from './assistant/blip-assistant-host';
 import { loadBlipMcp, loadBlipTools } from './assistant/blip-runtime-loader';
@@ -192,7 +193,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
 
   const assistantService = new HubAssistantService({
     listDrones: async (): Promise<AssistantDroneSummary[]> => {
-      const regAny: any = await loadRegistry();
+      const regAny: any = await loadDroneSummaryRegistry();
       return buildAssistantDroneSummariesFromRegistry(regAny);
     },
     listDroneFiles: async ({ droneId, path }) => await assistantListDroneFiles({ droneId, path }),

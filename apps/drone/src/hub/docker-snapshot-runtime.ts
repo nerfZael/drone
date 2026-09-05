@@ -12,13 +12,13 @@ type DockerSnapshotRuntimeDependencyName =
   | 'enqueuePendingPromptPump'
   | 'hubLog'
   | 'inferChatAgent'
-  | 'loadRegistry'
   | 'makeClient'
   | 'normalizeChatName'
   | 'normalizeDroneIdentity'
   | 'nowIso'
   | 'projectCanonicalChatToRegistry'
   | 'readChatFromStore'
+  | 'resolveDroneOrPendingForReadRef'
   | 'resolveHostPort'
   | 'rollbackTranscriptToTurnInStore'
   | 'runHostCommand'
@@ -39,13 +39,13 @@ export function createDockerSnapshotRuntime(deps: DockerSnapshotRuntimeDependenc
     enqueuePendingPromptPump,
     hubLog,
     inferChatAgent,
-    loadRegistry,
     makeClient,
     normalizeChatName,
     normalizeDroneIdentity,
     nowIso,
     projectCanonicalChatToRegistry,
     readChatFromStore,
+    resolveDroneOrPendingForReadRef,
     resolveHostPort,
     rollbackTranscriptToTurnInStore,
     runHostCommand,
@@ -458,11 +458,9 @@ export function createDockerSnapshotRuntime(deps: DockerSnapshotRuntimeDependenc
       imageRef: string;
     }> = [];
 
-    const regSnap: any = await loadRegistry();
-    const initialTurns: DockerTranscriptTurn[] = Array.isArray(
-      regSnap?.drones?.[droneId]?.chats?.[chatName]?.turns,
-    )
-      ? regSnap.drones[droneId].chats[chatName].turns
+    const stored = readChatFromStore({ droneId, chatName });
+    const initialTurns: DockerTranscriptTurn[] = Array.isArray(stored?.chat?.turns)
+      ? stored.chat.turns
       : [];
     for (const turn of initialTurns as any[]) {
       const promptId = String(turn?.id ?? '').trim();
@@ -648,8 +646,8 @@ export function createDockerSnapshotRuntime(deps: DockerSnapshotRuntimeDependenc
     const chatName = normalizeChatName(opts.chatName);
     const promptId = String(opts.promptId ?? '').trim();
     if (!droneId || !chatName || !promptId) return null;
-    const reg = await loadRegistry();
-    const d = (reg as any)?.drones?.[droneId];
+    const resolved = await resolveDroneOrPendingForReadRef(droneId);
+    const d = resolved?.kind === 'real' ? resolved.drone : null;
     const stored = readChatFromStore({ droneId, chatName });
     const chat = stored.available ? stored.chat : null;
     if (
@@ -912,8 +910,8 @@ export function createDockerSnapshotRuntime(deps: DockerSnapshotRuntimeDependenc
 
     let imageRef = '';
     let droneEntry: any = null;
-    const reg = await loadRegistry();
-    const d = (reg as any)?.drones?.[droneId];
+    const resolved = await resolveDroneOrPendingForReadRef(droneId);
+    const d = resolved?.kind === 'real' ? resolved.drone : null;
     const stored = readChatFromStore({ droneId, chatName });
     const chat = stored.available ? stored.chat : null;
     const turns: DockerTranscriptTurn[] = Array.isArray(chat?.turns) ? chat.turns : [];

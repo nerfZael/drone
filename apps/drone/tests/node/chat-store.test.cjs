@@ -6,6 +6,8 @@ const { spawnSync } = require('node:child_process');
 const { afterEach, describe, test } = require('node:test');
 
 const { requireHubDatabase, resetHubDatabaseForTests } = require('../../dist/host/hub-database.js');
+const { getDroneLifecycleRepository } = require('../../dist/host/drone-lifecycle-repository.js');
+const { getCatalogStore } = require('../../dist/host/catalog-store.js');
 const { getPromptQueueRepository } = require('../../dist/host/prompt-queue-repository.js');
 const { resetDroneRootDirForTests } = require('../../dist/host/paths.js');
 const {
@@ -569,14 +571,42 @@ describe('canonical chat and transcript repository', () => {
     await requireHubDatabase().writeTransaction('expand archived chat fixture', (connection) => {
       connection.prepare(`UPDATE canonical_archived_chats
         SET chat_json = CAST(zeroblob(?) AS TEXT)
-        WHERE drone_id = ? AND chat_name = ?`).run(128 * 1024 * 1024, 'drone-1', 'large');
+      WHERE drone_id = ? AND chat_name = ?`).run(128 * 1024 * 1024, 'drone-1', 'large');
+    });
+    const catalog = await getCatalogStore();
+    await catalog.putGroup({
+      id: 'group-1',
+      repoPath: '',
+      name: 'Group 1',
+      label: 'Group 1',
+      parentId: null,
+      createdAt: '2026-02-01T00:00:00.000Z',
+      updatedAt: '2026-02-01T00:00:00.000Z',
+    });
+    const lifecycle = await getDroneLifecycleRepository();
+    await lifecycle.upsert('real', 'drone-1', {
+      id: 'drone-1',
+      name: 'Drone 1',
+      runtime: 'host',
+      repoPath: '',
+      group: 'Group 1',
+      groupId: 'group-1',
+      createdAt: '2026-02-01T00:00:00.000Z',
     });
     await resetHubDatabaseForTests();
 
     const transcriptStorePath = path.resolve(__dirname, '../../dist/hub/transcript-store.js');
+    const summaryRegistryPath = path.resolve(__dirname, '../../dist/hub/drone-summary-registry.js');
+    const listGroupsPath = path.resolve(__dirname, '../../dist/hub/application/list-groups.js');
     const resultPath = path.join(dataDir, 'bounded-metadata-result.json');
-    const script = `const fs = require('node:fs');const store = require(${JSON.stringify(transcriptStorePath)});` +
-      `fs.writeFileSync(${JSON.stringify(resultPath)},JSON.stringify(store.listArchivedChatMetadataFromStore({droneId:'drone-1'})));`;
+    const script = `const fs=require('node:fs');const store=require(${JSON.stringify(transcriptStorePath)});` +
+      `const summaries=require(${JSON.stringify(summaryRegistryPath)});` +
+      `const groups=require(${JSON.stringify(listGroupsPath)});` +
+      `(async()=>{const metadata=store.listArchivedChatMetadataFromStore({droneId:'drone-1'});` +
+      `const summary=await summaries.loadDroneSummaryRegistry();` +
+      `const groupList=await groups.listGroups();` +
+      `fs.writeFileSync(${JSON.stringify(resultPath)},JSON.stringify({metadata,summary,groupList}));})()` +
+      `.catch(error=>{console.error(error);process.exitCode=1});`;
     const childEnv = { ...process.env, DRONE_DATA_DIR: dataDir };
     delete childEnv.NODE_TEST_CONTEXT;
     const child = spawnSync(process.execPath, ['--max-old-space-size=64', '-e', script], {
@@ -588,10 +618,14 @@ describe('canonical chat and transcript repository', () => {
 
     assert.equal(child.status, 0, child.stderr);
     const result = JSON.parse(fs.readFileSync(resultPath, 'utf8'));
-    assert.equal(result.archivedChats.length, 1);
-    assert.equal(result.archivedChats[0].chatName, 'large');
-    assert.equal(result.archivedChats[0].storedContentBytes, null);
-    assert.equal('chat' in result.archivedChats[0], false);
+    assert.equal(result.metadata.archivedChats.length, 1);
+    assert.equal(result.metadata.archivedChats[0].chatName, 'large');
+    assert.equal(result.metadata.archivedChats[0].storedContentBytes, null);
+    assert.equal('chat' in result.metadata.archivedChats[0], false);
+    assert.equal(result.summary.drones['drone-1'].name, 'Drone 1');
+    assert.equal('archivedChats' in result.summary.drones['drone-1'], false);
+    assert.equal(result.groupList.groups[0].id, 'group-1');
+    assert.equal(result.groupList.groups[0].droneCount, 1);
   });
 
   test('atomically archives, restores with collision allocation, and deletes canonical chats', async () => {

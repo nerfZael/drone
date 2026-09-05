@@ -6,7 +6,7 @@ import { getHubDatabase } from '../host/hub-database';
 import { loadRegistry, loadRegistryRawSnapshot, updateRegistry } from '../host/registry';
 
 const repositoriesBackfilled = new WeakSet<CatalogStore>();
-const groupBackfillSignatureByStore = new WeakMap<CatalogStore, string>();
+const groupsBackfilled = new WeakSet<CatalogStore>();
 
 async function catalogStoreOrCompatibility(): Promise<CatalogStore | null> {
   try {
@@ -90,13 +90,10 @@ export async function listCanonicalGroups(repoPath?: string): Promise<CatalogGro
     const groups = legacyGroups(await loadRegistry());
     return repoPath === undefined ? groups : groups.filter((group) => group.repoPath === repoPath);
   }
-  const legacy = legacyGroups(await loadRegistryRawSnapshot());
-  const signature = JSON.stringify(legacy.map((group) => [
-    group.id, group.repoPath, group.name, group.parentId, group.label,
-  ]));
-  if (groupBackfillSignatureByStore.get(store) !== signature) {
+  if (!groupsBackfilled.has(store)) {
+    const legacy = legacyGroups(await loadRegistryRawSnapshot());
     await store.backfillGroups(legacy);
-    groupBackfillSignatureByStore.set(store, signature);
+    groupsBackfilled.add(store);
   }
   return store.listGroups(repoPath);
 }

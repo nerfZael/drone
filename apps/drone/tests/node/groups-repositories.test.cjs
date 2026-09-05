@@ -6,7 +6,7 @@ const { execFileSync } = require('node:child_process');
 const { afterEach, test } = require('node:test');
 
 const { getCatalogStore } = require('../../dist/host/catalog-store.js');
-const { resetHubDatabaseForTests } = require('../../dist/host/hub-database.js');
+const { requireHubDatabase, resetHubDatabaseForTests } = require('../../dist/host/hub-database.js');
 const { HubOutboxRepository } = require('../../dist/host/hub-outbox.js');
 const { resetDroneRootDirForTests } = require('../../dist/host/paths.js');
 const { saveRegistry } = require('../../dist/host/registry.js');
@@ -62,6 +62,25 @@ test('canonical tombstones beat repeated legacy imports for groups and repositor
   assert.deepEqual(await listCanonicalGroups(), []);
   assert.deepEqual(await listCanonicalRepositories(), []);
   assert.equal(await resolveCanonicalRepository('/repo'), null);
+});
+
+test('group reads do not reload the immutable legacy registry after initial backfill', async () => {
+  useDataDir('one-time-group-backfill');
+  const at = '2026-01-01T00:00:00.000Z';
+  await saveRegistry({
+    version: 2,
+    drones: {}, pending: {}, archived: {},
+    groups: { legacy: { name: 'legacy', createdAt: at, updatedAt: at } },
+  });
+  assert.deepEqual((await listCanonicalGroups()).map((group) => group.name), ['legacy']);
+
+  requireHubDatabase().read((connection) =>
+    connection
+      .prepare("UPDATE hub_registry_state SET registry_json = ? WHERE id = 'current'")
+      .run('{"version":2,"drones":'),
+  );
+
+  assert.deepEqual((await listCanonicalGroups()).map((group) => group.name), ['legacy']);
 });
 
 test('independent environment and agents updates serialize without lost fields and append outbox events', async () => {
