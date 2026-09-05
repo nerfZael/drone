@@ -4,6 +4,7 @@ export const morphShader = Skia.RuntimeEffect.Make(`
   uniform float2 resolution;
   uniform float2 rotation;
   uniform float time;
+  uniform float4 mitosis;
   uniform float morph;
   uniform float shape;
   uniform float pixelRatio;
@@ -133,18 +134,45 @@ export const morphShader = Skia.RuntimeEffect.Make(`
     return length(point) - (0.72 + breathing + lowFrequency * 0.10 + highFrequency * 0.035);
   }
 
+  float parentDistance(float3 point, float scale) {
+    float3 scaledPoint = point / scale;
+    float shapeFloor = floor(shape);
+    float shapeBlend = smoothstep(0.0, 1.0, fract(shape));
+    float solidA = solidDistance(scaledPoint, shapeFloor);
+    float solidB = solidDistance(scaledPoint, shapeFloor + 1.0);
+    float solid = mix(solidA, solidB, shapeBlend);
+    float easedMorph = morph * morph * (3.0 - 2.0 * morph);
+    return mix(solid, blobDistance(scaledPoint, time), easedMorph) * scale;
+  }
+
+  float mitosisAmount(float phaseValue) {
+    if (phaseValue < 0.0 || phaseValue >= 0.22) return 0.0;
+    return smoothstep(0.0, 0.10, phaseValue)
+      * (1.0 - smoothstep(0.17, 0.22, phaseValue));
+  }
+
+  float smoothUnion(float distanceA, float distanceB, float radius) {
+    float blend = clamp(0.5 + 0.5 * (distanceB - distanceA) / radius, 0.0, 1.0);
+    return mix(distanceB, distanceA, blend) - radius * blend * (1.0 - blend);
+  }
+
+  float addBud(float scene, float3 point, float phaseValue) {
+    if (phaseValue < 0.0 || phaseValue >= 0.20) return scene;
+    float growth = smoothstep(0.0, 0.10, phaseValue);
+    float radius = mix(0.025, 0.105, growth);
+    float bud = length(point - mitosis.xyz) - radius;
+    float unionRadius = mix(0.10, 0.006, smoothstep(0.075, 0.17, phaseValue));
+    return smoothUnion(scene, bud, unionRadius);
+  }
+
   float sceneDistance(float3 worldPoint) {
     float ambientRotation = time * 0.16;
     float3 point = rotateY(worldPoint, -(rotation.y + ambientRotation));
     point = rotateX(point, -rotation.x);
 
-    float shapeFloor = floor(shape);
-    float shapeBlend = smoothstep(0.0, 1.0, fract(shape));
-    float solidA = solidDistance(point, shapeFloor);
-    float solidB = solidDistance(point, shapeFloor + 1.0);
-    float solid = mix(solidA, solidB, shapeBlend);
-    float easedMorph = morph * morph * (3.0 - 2.0 * morph);
-    return mix(solid, blobDistance(point, time), easedMorph);
+    float parentScale = 1.0 - mitosisAmount(mitosis.w) * 0.018;
+    float scene = parentDistance(point, parentScale);
+    return addBud(scene, point, mitosis.w);
   }
 
   float3 sceneNormal(float3 point) {
@@ -211,8 +239,13 @@ export const morphShader = Skia.RuntimeEffect.Make(`
     float closest = 10.0;
     float hit = 0.0;
     float sphereProjection = dot(rayOrigin, rayDirection);
+    float budGrowth = smoothstep(0.0, 0.10, mitosis.w);
+    float budRadius = mix(0.025, 0.105, budGrowth);
+    float boundRadius = mitosis.w < 0.0
+      ? 1.10
+      : max(1.10, length(mitosis.xyz) + budRadius + 0.10);
     float sphereDiscriminant = sphereProjection * sphereProjection
-      - (dot(rayOrigin, rayOrigin) - 1.21);
+      - (dot(rayOrigin, rayOrigin) - boundRadius * boundRadius);
 
     if (sphereDiscriminant > 0.0) {
       travel = max(0.0, -sphereProjection - sqrt(sphereDiscriminant));
