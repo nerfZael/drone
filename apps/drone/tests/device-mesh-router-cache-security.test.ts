@@ -9,7 +9,7 @@ import {
   capabilityRequestSigningText,
   type SignedCapabilityRequest,
 } from '@drone/device-protocol';
-import { WebSocket } from 'ws';
+import { DeviceHttpChannel } from '../src/hub/device-mesh/device-http-channel';
 
 import { CapabilityRegistry } from '../src/hub/device-mesh/capability-registry';
 import { DeviceMeshAuditStore } from '../src/hub/device-mesh/device-mesh-audit-store';
@@ -76,7 +76,10 @@ describe('device mesh router response replay', () => {
     const connection = {
       peerDeviceId: phone.id,
       outbound: false,
-      ws: { readyState: WebSocket.OPEN, send: (value: string) => sent.push(JSON.parse(value)) },
+      ws: {
+        readyState: DeviceHttpChannel.OPEN,
+        send: (value: string) => sent.push(JSON.parse(value)),
+      },
     } as any;
     const issuedAt = new Date();
     const unsigned: Omit<SignedCapabilityRequest, 'signature'> = {
@@ -99,6 +102,25 @@ describe('device mesh router response replay', () => {
       signature: signDeviceText(phone, capabilityRequestSigningText(unsigned)),
     };
     try {
+      const cancellation = new AbortController();
+      const invocationKey = `${phone.id}:cancellation-isolation`;
+      (router as any).activeInvocations.set(invocationKey, {
+        channel: connection.ws,
+        controller: cancellation,
+      });
+      const cancel = Buffer.from(
+        JSON.stringify({
+          type: 'capability.cancel',
+          sourceDeviceId: phone.id,
+          targetDeviceId: desktop.id,
+          requestId: 'cancellation-isolation',
+        }),
+      );
+      await (router as any).onMessage({ ...connection, ws: { ...connection.ws } }, cancel);
+      expect(cancellation.signal.aborted).toBe(false);
+      await (router as any).onMessage(connection, cancel);
+      expect(cancellation.signal.aborted).toBe(true);
+      (router as any).activeInvocations.delete(invocationKey);
       await (router as any).onMessage(connection, Buffer.from(JSON.stringify(request)));
       await (router as any).onMessage(connection, Buffer.from(JSON.stringify(request)));
       expect(invokes).toBe(1);
@@ -181,13 +203,13 @@ describe('device mesh router response replay', () => {
       new DeviceMeshAuditStore(path.join(root, 'audit.json')),
     );
     class FakeSocket extends EventEmitter {
-      readyState = WebSocket.OPEN;
+      readyState = DeviceHttpChannel.OPEN;
       bufferedAmount = 0;
       send(_value: string, callback?: (error?: Error) => void) {
         callback?.();
       }
       close() {
-        this.readyState = WebSocket.CLOSED;
+        this.readyState = 3;
         this.emit('close');
       }
     }

@@ -78,7 +78,13 @@ describe('cross-device workspace policy', () => {
     });
     expect(policy.homeTargets[0]).toMatchObject({ read: false, write: true });
     expect(policy.deviceGrants[0]).toMatchObject({ read: false, write: true });
-    const capability = createWorkspaceCapability(policies);
+    let ticket: any;
+    const capability = createWorkspaceCapability(policies, {
+      issue: (input: any) => {
+        ticket = input;
+        return { url: 'https://peer/content', token: 'secret' };
+      },
+    } as any);
     const sourceDevice = {
       id: 'device_writer',
       name: 'Writer',
@@ -107,20 +113,10 @@ describe('cross-device workspace policy', () => {
         },
         context,
       ),
-    ).toEqual({ offset: 0 });
-    expect(
-      await capability.invoke(
-        'files.transfer.write',
-        {
-          workspaceId: 'main',
-          path: 'drop.bin',
-          transferId: 'write-only',
-          offset: 0,
-          dataBase64: 'YWJj',
-        },
-        context,
-      ),
-    ).toEqual({ offset: 3 });
+    ).toMatchObject({ offset: 0, upload: { url: 'https://peer/content' } });
+    expect(ticket.method).toBe('PUT');
+    expect(await ticket.authorized()).toBe(true);
+    await fs.writeFile(await ticket.resolve(), 'abc');
     await capability.invoke(
       'files.transfer.commit',
       {

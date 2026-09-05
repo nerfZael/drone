@@ -2,18 +2,13 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import type { Socket } from 'node:net';
-import type { Duplex } from 'node:stream';
 import path from 'node:path';
 import { deviceMeshJson } from './device-mesh-http';
-import {
-  detectDeviceMeshNgrokUrl,
-  DeviceMeshNgrok,
-  type NgrokDetection,
-} from './device-mesh-ngrok';
+import { DeviceMeshTailscale, type TailscaleStatus } from './device-mesh-tailscale';
 
 export const DEFAULT_DEVICE_MESH_INGRESS_PORT = 8791;
 
-export type DeviceMeshEndpointSource = 'manual' | 'ngrok' | null;
+export type DeviceMeshEndpointSource = 'manual' | 'tailscale' | null;
 
 type DeviceMeshIngressConfig = {
   version: 1;
@@ -30,7 +25,7 @@ export type DeviceMeshIngressStatus = {
   publicEndpoint: string | null;
   endpointSource: DeviceMeshEndpointSource;
   error: string | null;
-  ngrok: NgrokDetection;
+  tailscale: TailscaleStatus;
 };
 
 type Listener = {
@@ -44,8 +39,6 @@ type PublicHttpHandler = (
   response: http.ServerResponse,
   url: URL,
 ) => Promise<boolean>;
-
-type UpgradeHandler = (request: http.IncomingMessage, socket: Duplex, head: Buffer) => boolean;
 
 function normalizePort(value: unknown, allowZero = false): number {
   const port = Number(value);
@@ -87,22 +80,25 @@ async function closeListener(listener: Listener | null): Promise<void> {
 
 export class DeviceMeshIngress {
   private readonly configPath: string;
-  private readonly ngrok: DeviceMeshNgrok;
+  private readonly tailscale = new DeviceMeshTailscale();
   private listener: Listener | null = null;
   private config: DeviceMeshIngressConfig;
   private error: string | null = null;
-  private ngrokDetection: NgrokDetection = { url: null, error: null };
-  private ngrokTimer: ReturnType<typeof setInterval> | null = null;
+  private tailscaleStatus: TailscaleStatus = {
+    connected: false,
+    dnsName: '',
+    peers: [],
+    error: null,
+  };
+  private lastAnnouncement = 0;
 
   constructor(
     rootDir: string,
     defaultPort: number,
     private readonly handlePublicHttp: PublicHttpHandler,
-    private readonly handleUpgrade: UpgradeHandler,
     private readonly announceEndpoint: (endpoint: string | null) => Promise<void>,
   ) {
     this.configPath = path.join(rootDir, 'ingress.json');
-    this.ngrok = new DeviceMeshNgrok(rootDir);
     this.config = {
       version: 1,
       port: normalizePort(defaultPort, true),
@@ -120,18 +116,14 @@ export class DeviceMeshIngress {
         this.config.port = this.listener.port;
         await this.writeConfig();
       }
-      if (this.config.endpointSource === 'ngrok') {
-        this.ngrokDetection = await detectDeviceMeshNgrokUrl(this.listener.port);
-        if (this.ngrokDetection.url) await this.applyNgrokEndpoint(this.ngrokDetection.url);
-        else await this.recoverManagedNgrok();
-      }
+      this.tailscaleStatus = await this.tailscale.status();
       this.error = null;
       await this.announceEndpoint(this.config.publicEndpoint);
+      this.lastAnnouncement = Date.now();
     } catch (error: any) {
       this.error = error?.message ?? String(error);
       await this.announceEndpoint(null);
     }
-    this.refreshNgrokMonitor();
   }
 
   status(): DeviceMeshIngressStatus {
@@ -142,7 +134,7 @@ export class DeviceMeshIngress {
       publicEndpoint: this.config.publicEndpoint,
       endpointSource: this.config.endpointSource,
       error: this.error,
-      ngrok: this.ngrokDetection,
+      tailscale: this.tailscaleStatus,
     };
   }
 
@@ -150,7 +142,6 @@ export class DeviceMeshIngress {
     port?: unknown;
     publicEndpoint?: unknown;
   }): Promise<DeviceMeshIngressStatus> {
-    const stopManagedNgrok = this.config.endpointSource === 'ngrok';
     const port = normalizePort(input.port ?? this.config.port);
     const publicEndpoint = normalizeEndpoint(input.publicEndpoint);
     await this.ensureListener(port);
@@ -163,46 +154,51 @@ export class DeviceMeshIngress {
     };
     await this.writeConfig();
     this.error = null;
-    this.ngrokDetection = { url: null, error: null };
-    this.refreshNgrokMonitor();
     await this.announceEndpoint(publicEndpoint);
-    if (stopManagedNgrok) {
-      await this.ngrok.stop().catch((error: any) => {
-        this.error = `could not stop the previous ngrok tunnel: ${error?.message ?? String(error)}`;
-      });
-    }
     return this.status();
   }
 
-  async detectAndUseNgrok(): Promise<DeviceMeshIngressStatus> {
-    if (!this.listener) throw new Error('mesh ingress is not running');
-    const detection = await detectDeviceMeshNgrokUrl(this.listener.port);
-    this.ngrokDetection = detection;
-    if (!detection.url)
-      throw new Error(detection.error ?? 'no ngrok tunnel was found for this port');
-    await this.applyNgrokEndpoint(detection.url);
-    return this.status();
-  }
-
-  async startNgrok(): Promise<{
-    status: DeviceMeshIngressStatus;
-    process: Awaited<ReturnType<DeviceMeshNgrok['start']>>;
-  }> {
-    if (!this.listener) throw new Error('mesh ingress is not running');
-    const process = await this.ngrok.start(this.listener.port);
-    this.config.publicEndpoint = null;
-    this.config.endpointSource = 'ngrok';
-    this.config.updatedAt = new Date().toISOString();
+  async enableTailscale(): Promise<DeviceMeshIngressStatus> {
+    if (!this.listener) throw new Error('Mesh ingress is not running');
+    const endpoint = await this.tailscale.enable(this.listener.port);
+    await this.update({ publicEndpoint: endpoint });
+    this.config.endpointSource = 'tailscale';
     await this.writeConfig();
-    await this.announceEndpoint(null);
-    this.refreshNgrokMonitor();
-    await this.waitForManagedNgrokEndpoint();
-    return { status: this.status(), process };
+    this.tailscaleStatus = await this.tailscale.status();
+    return this.status();
+  }
+
+  async refreshTailscale(): Promise<TailscaleStatus> {
+    this.tailscaleStatus = await this.tailscale.status();
+    if (
+      this.config.endpointSource === 'tailscale' &&
+      this.listener &&
+      this.tailscaleStatus.connected
+    ) {
+      const previous = this.config.publicEndpoint ? new URL(this.config.publicEndpoint) : null;
+      if (!previous || previous.hostname !== this.tailscaleStatus.dnsName) {
+        const endpoint = await this.tailscale.enable(
+          this.listener.port,
+          Number(previous?.port || 8791),
+        );
+        this.config = {
+          ...this.config,
+          publicEndpoint: endpoint,
+          updatedAt: new Date().toISOString(),
+        };
+        await this.writeConfig();
+        await this.announceEndpoint(endpoint);
+        this.lastAnnouncement = Date.now();
+      }
+    }
+    if (Date.now() - this.lastAnnouncement > 24 * 60 * 60_000) {
+      await this.announceEndpoint(this.config.publicEndpoint);
+      this.lastAnnouncement = Date.now();
+    }
+    return this.tailscaleStatus;
   }
 
   async close(): Promise<void> {
-    if (this.ngrokTimer) clearInterval(this.ngrokTimer);
-    this.ngrokTimer = null;
     const listener = this.listener;
     this.listener = null;
     await closeListener(listener);
@@ -235,9 +231,7 @@ export class DeviceMeshIngress {
       sockets.add(socket);
       socket.on('close', () => sockets.delete(socket));
     });
-    server.on('upgrade', (request, socket, head) => {
-      if (!this.handleUpgrade(request, socket, head)) socket.destroy();
-    });
+    server.on('upgrade', (_request, socket) => socket.destroy());
     try {
       await new Promise<void>((resolve, reject) => {
         server.once('error', reject);
@@ -257,87 +251,16 @@ export class DeviceMeshIngress {
     return { server, sockets, port: actualPort };
   }
 
-  private async applyNgrokEndpoint(endpoint: string): Promise<void> {
-    this.config.publicEndpoint = normalizeEndpoint(endpoint);
-    this.config.endpointSource = 'ngrok';
-    this.config.updatedAt = new Date().toISOString();
-    await this.writeConfig();
-    await this.announceEndpoint(this.config.publicEndpoint);
-    this.refreshNgrokMonitor();
-  }
-
-  private refreshNgrokMonitor(): void {
-    if (this.ngrokTimer) clearInterval(this.ngrokTimer);
-    this.ngrokTimer = null;
-    if (this.config.endpointSource !== 'ngrok' || !this.listener) return;
-    this.ngrokTimer = setInterval(() => {
-      void this.refreshNgrokEndpoint().catch((error: any) => {
-        this.ngrokDetection = {
-          url: null,
-          error: error?.message ?? String(error),
-        };
-      });
-    }, 10_000);
-    this.ngrokTimer.unref?.();
-  }
-
-  private async refreshNgrokEndpoint(): Promise<void> {
-    if (!this.listener || this.config.endpointSource !== 'ngrok') return;
-    const detection = await detectDeviceMeshNgrokUrl(this.listener.port);
-    this.ngrokDetection = detection;
-    if (detection.url && detection.url !== this.config.publicEndpoint) {
-      await this.applyNgrokEndpoint(detection.url);
-      return;
-    }
-    if (!detection.url) await this.recoverManagedNgrok();
-  }
-
-  private async recoverManagedNgrok(): Promise<void> {
-    if (!this.listener || this.config.endpointSource !== 'ngrok') return;
-    if (this.config.publicEndpoint) {
-      this.config.publicEndpoint = null;
-      this.config.updatedAt = new Date().toISOString();
-      await this.writeConfig();
-      await this.announceEndpoint(null);
-    }
-    try {
-      await this.ngrok.start(this.listener.port);
-    } catch (error: any) {
-      this.ngrokDetection = {
-        url: null,
-        error: `could not start ngrok: ${error?.message ?? String(error)}`,
-      };
-      return;
-    }
-    await this.waitForManagedNgrokEndpoint();
-  }
-
-  private async waitForManagedNgrokEndpoint(): Promise<void> {
-    if (!this.listener || this.config.endpointSource !== 'ngrok') return;
-    for (let attempt = 0; attempt < 8; attempt += 1) {
-      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 500));
-      const detection = await detectDeviceMeshNgrokUrl(this.listener.port);
-      this.ngrokDetection = detection;
-      if (!detection.url) continue;
-      await this.applyNgrokEndpoint(detection.url);
-      return;
-    }
-    if (!this.ngrokDetection.error) {
-      this.ngrokDetection = {
-        url: null,
-        error: 'ngrok started, but no tunnel URL appeared. Check the mesh ngrok log.',
-      };
-    }
-  }
-
   private async readConfig(): Promise<DeviceMeshIngressConfig> {
     try {
       const input = JSON.parse(await fs.readFile(this.configPath, 'utf8')) as any;
-      if (input?.version !== 1) return this.config;
+      if (input?.version !== 1) throw new Error('Unsupported mesh ingress configuration');
       const port = normalizePort(input.port);
-      const publicEndpoint = normalizeEndpoint(input.publicEndpoint);
+      // Old tunnel addresses are route hints, not identities or user content.
+      const publicEndpoint =
+        input.endpointSource === 'ngrok' ? null : normalizeEndpoint(input.publicEndpoint);
       const endpointSource: DeviceMeshEndpointSource =
-        input.endpointSource === 'ngrok' ? 'ngrok' : publicEndpoint ? 'manual' : null;
+        input.endpointSource === 'tailscale' ? 'tailscale' : publicEndpoint ? 'manual' : null;
       return {
         version: 1,
         port,
@@ -345,13 +268,18 @@ export class DeviceMeshIngress {
         endpointSource,
         updatedAt: typeof input.updatedAt === 'string' ? input.updatedAt : new Date().toISOString(),
       };
-    } catch {
-      return this.config;
+    } catch (error: any) {
+      if (error?.code === 'ENOENT') return this.config;
+      throw error;
     }
   }
 
   private async writeConfig(): Promise<void> {
     await fs.mkdir(path.dirname(this.configPath), { recursive: true });
+    // Preserve the original persisted configuration before the first update.
+    await fs.copyFile(this.configPath, `${this.configPath}.pre-http-v2`, 1).catch((error: any) => {
+      if (!['ENOENT', 'EEXIST'].includes(error?.code)) throw error;
+    });
     const temporaryPath = `${this.configPath}.${process.pid}.${crypto.randomUUID()}.tmp`;
     await fs.writeFile(temporaryPath, JSON.stringify(this.config, null, 2), { mode: 0o600 });
     await fs.rename(temporaryPath, this.configPath);

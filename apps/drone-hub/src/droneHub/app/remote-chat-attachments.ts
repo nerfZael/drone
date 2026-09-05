@@ -5,10 +5,6 @@ import {
 } from '@drone/assistant-chat';
 import type { ChatAttachmentPayload } from '../chat/ChatInput';
 
-// Desktop uploads travel through the local JSON bridge before entering the mesh. Keep the
-// encoded chunk comfortably below that bridge's 128 KiB request limit.
-const DESKTOP_ATTACHMENT_CHUNK_BYTES = 64 * 1024;
-
 type RemotePromptRequest = (payload: Record<string, unknown>) => Promise<any>;
 
 function normalizedBase64(value: string): string {
@@ -26,9 +22,7 @@ function decodedBase64Bytes(encoded: string): number {
 
 function remoteAttachmentPolicyError(issue: ChatAttachmentValidationIssue): Error {
   if (issue.code === 'too_many_attachments') {
-    return new Error(
-      `A prompt can include up to ${CHAT_ATTACHMENT_POLICY.maxCount} attachments.`,
-    );
+    return new Error(`A prompt can include up to ${CHAT_ATTACHMENT_POLICY.maxCount} attachments.`);
   }
   if (issue.code === 'invalid_mime') {
     return new Error('An attachment has an invalid MIME type.');
@@ -80,6 +74,7 @@ async function uploadAttachment(
   droneId: string,
   chatName: string,
   attachment: ChatAttachmentPayload & { dataBase64: string },
+  fetchImpl: typeof fetch,
 ): Promise<string> {
   const prepared = await request({
     droneId,
@@ -95,42 +90,25 @@ async function uploadAttachment(
   if (!uploadId) throw new Error('The remote device did not create an attachment upload.');
 
   try {
-    const reportedMaxChunkBytes = Number(prepared?.maxChunkBytes);
-    if (Number.isSafeInteger(reportedMaxChunkBytes) && reportedMaxChunkBytes < 3) {
-      throw new Error('The remote device returned an invalid attachment chunk limit.');
-    }
-    const maxChunkBytes = Math.max(
-      3,
-      Math.min(
-        DESKTOP_ATTACHMENT_CHUNK_BYTES,
-        Number.isSafeInteger(reportedMaxChunkBytes)
-          ? reportedMaxChunkBytes
-          : DESKTOP_ATTACHMENT_CHUNK_BYTES,
-      ),
+    if (!prepared.uploadUrl || !prepared.uploadToken)
+      throw new Error('The destination did not authorize an HTTP upload');
+    const bytes = Uint8Array.from(atob(attachment.dataBase64), (character) =>
+      character.charCodeAt(0),
     );
-    const maxChunkBase64Characters = Math.max(4, Math.floor(maxChunkBytes / 3) * 4);
-    let offset = 0;
-    for (
-      let characterOffset = 0;
-      characterOffset < attachment.dataBase64.length;
-      characterOffset += maxChunkBase64Characters
-    ) {
-      const dataBase64 = attachment.dataBase64.slice(
-        characterOffset,
-        characterOffset + maxChunkBase64Characters,
-      );
-      const chunkBytes = decodedBase64Bytes(dataBase64);
-      const result = await request({
-        droneId,
-        chatName,
-        attachmentTransfer: { action: 'write', uploadId, offset, dataBase64 },
-      });
-      const nextOffset = Number(result?.offset);
-      if (!Number.isSafeInteger(nextOffset) || nextOffset !== offset + chunkBytes) {
-        throw new Error('The remote attachment offset did not advance correctly.');
-      }
-      offset = nextOffset;
-    }
+    const response = await fetchImpl(String(prepared.uploadUrl), {
+      method: 'PUT',
+      redirect: 'error',
+      headers: {
+        'content-type': 'application/octet-stream',
+        'x-upload-token': String(prepared.uploadToken),
+        'x-upload-offset': '0',
+      },
+      body: new Blob([bytes]),
+    });
+    if (!response.ok) throw new Error('HTTP upload failed (' + response.status + ')');
+    const uploaded = await response.json();
+    if (uploaded.offset !== bytes.length || uploaded.complete !== true)
+      throw new Error('HTTP upload was incomplete');
     const committed = await request({
       droneId,
       chatName,
@@ -153,6 +131,7 @@ export async function sendRemoteChatPrompt(input: {
   attachments: readonly ChatAttachmentPayload[];
   deliveryMode: 'queue' | 'asap';
   request: RemotePromptRequest;
+  fetchImpl?: typeof fetch;
 }): Promise<any> {
   const attachments = validateAttachments(input.attachments);
   if (!input.prompt.trim() && attachments.length === 0) {
@@ -163,7 +142,13 @@ export async function sendRemoteChatPrompt(input: {
   try {
     for (const attachment of attachments) {
       attachmentIds.push(
-        await uploadAttachment(input.request, input.droneId, input.chatName, attachment),
+        await uploadAttachment(
+          input.request,
+          input.droneId,
+          input.chatName,
+          attachment,
+          input.fetchImpl ?? fetch,
+        ),
       );
     }
     return await input.request({

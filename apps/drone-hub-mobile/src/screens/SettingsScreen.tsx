@@ -18,13 +18,12 @@ import { LocalAssistantSettingsCard } from '../local-assistant/LocalAssistantSet
 import { MobileVoiceInputSettingsCard } from '../local-assistant/MobileVoiceInputSettingsCard';
 import { MobileReadingSettingsCard } from './MobileReadingSettingsCard';
 
-export type SettingsTab = 'display' | 'assistant' | 'devices' | 'pairing';
+export type SettingsTab = 'display' | 'assistant' | 'devices';
 
 const SETTINGS_TABS: Array<TopTabOption<SettingsTab>> = [
   { value: 'display', label: 'Display', icon: Type },
   { value: 'assistant', label: 'Built-in', icon: Bot },
-  { value: 'devices', label: 'Devices', icon: Smartphone },
-  { value: 'pairing', label: 'Pairing', icon: Link2 },
+  { value: 'devices', label: 'Connections', icon: Smartphone },
 ];
 
 export function SettingsScreen({
@@ -48,6 +47,7 @@ export function SettingsScreen({
   const [forgetting, setForgetting] = React.useState(false);
   const [results, setResults] = React.useState<Record<string, string>>({});
   const [error, setError] = React.useState<string | null>(null);
+  const [advanced, setAdvanced] = React.useState(false);
 
   React.useEffect(() => setPhoneName(currentPhoneName), [currentPhoneName]);
 
@@ -102,8 +102,13 @@ export function SettingsScreen({
             <LocalAssistantSettingsCard />
             <MobileVoiceInputSettingsCard />
           </>
-        ) : tab === 'devices' ? (
+        ) : (
           <>
+            <View style={styles.section}>
+              <Button icon={Link2} onPress={onPair}>
+                Add or reconnect a device
+              </Button>
+            </View>
             <View style={styles.section}>
               <Label>This phone</Label>
               <ThemedTextInput
@@ -117,7 +122,6 @@ export function SettingsScreen({
                 style={styles.nameInput}
                 underlineColorAndroid="transparent"
               />
-              <Text style={textStyles.mono}>{mesh.identity?.id}</Text>
               <Button
                 icon={Check}
                 onPress={() => void renamePhone()}
@@ -128,98 +132,98 @@ export function SettingsScreen({
                 Save phone name
               </Button>
             </View>
-            <View style={styles.section}>
-              <Label>Device network</Label>
-              <Text style={[textStyles.mono, styles.network]}>{mesh.profile?.networkId}</Text>
-            </View>
-            <View style={styles.section}>
-              <Label>Connections</Label>
-              <View style={styles.routes}>
-                {(mesh.profile?.connections ?? []).map((connection, index) => (
-                  <View
-                    key={connection.deviceId}
-                    style={[styles.route, index > 0 && styles.routeDivider]}
-                  >
-                    <View style={styles.routeHead}>
-                      <Text style={textStyles.heading}>
-                        {mesh.devices.find((device) => device.id === connection.deviceId)?.name ??
-                          connection.deviceId}
-                      </Text>
-                      <View style={styles.routeStatus}>
-                        <Text style={styles.role}>{connection.role}</Text>
-                        <Text style={styles.result}>
-                          {results[connection.deviceId] ??
-                            mobileDeviceConnectionLabel(
-                              mesh.connectionStatesByDevice[connection.deviceId] ?? 'offline',
-                            ).toUpperCase()}
+            <Button tone="quiet" onPress={() => setAdvanced((value) => !value)}>
+              {advanced ? 'Hide connection details' : 'Connection details & troubleshooting'}
+            </Button>
+            {advanced && (
+              <>
+                <View style={styles.section}>
+                  <Label>Connections</Label>
+                  <View style={styles.routes}>
+                    {(mesh.profile?.connections ?? []).map((connection, index) => (
+                      <View
+                        key={connection.deviceId}
+                        style={[styles.route, index > 0 && styles.routeDivider]}
+                      >
+                        <View style={styles.routeHead}>
+                          <Text style={textStyles.heading}>
+                            {mesh.devices.find((device) => device.id === connection.deviceId)
+                              ?.name ?? connection.deviceId}
+                          </Text>
+                          <View style={styles.routeStatus}>
+                            <Text style={styles.role}>{connection.role}</Text>
+                            <Text style={styles.result}>
+                              {results[connection.deviceId] ??
+                                mobileDeviceConnectionLabel(
+                                  mesh.connectionStatesByDevice[connection.deviceId] ?? 'offline',
+                                ).toUpperCase()}
+                            </Text>
+                          </View>
+                        </View>
+                        <Text style={[textStyles.mono, styles.endpoint]}>
+                          {connection.endpoint}
                         </Text>
+                        {connection.role === 'backup' ? (
+                          <View style={styles.primaryAction}>
+                            <Button
+                              tone="quiet"
+                              icon={Star}
+                              onPress={() => void mesh.makePrimary(connection.deviceId)}
+                              style={styles.inlineButton}
+                            >
+                              Make primary
+                            </Button>
+                          </View>
+                        ) : null}
                       </View>
-                    </View>
-                    <Text style={[textStyles.mono, styles.endpoint]}>{connection.endpoint}</Text>
-                    {connection.role === 'backup' ? (
-                      <View style={styles.primaryAction}>
-                        <Button
-                          tone="quiet"
-                          icon={Star}
-                          onPress={() => void mesh.makePrimary(connection.deviceId)}
-                          style={styles.inlineButton}
-                        >
-                          Make primary bridge
-                        </Button>
-                      </View>
-                    ) : null}
+                    ))}
                   </View>
-                ))}
-              </View>
-              <Button
-                tone="quiet"
-                icon={Activity}
-                onPress={() => void diagnose()}
-                loading={checking}
-                style={styles.checkButton}
-              >
-                Run connection check
-              </Button>
-            </View>
-          </>
-        ) : (
-          <>
-            <View style={styles.section}>
-              <Label>Device mesh</Label>
-              <Text style={textStyles.body}>
-                Replace an unreachable Hub route by scanning a fresh code. Your existing device
-                identity and permissions are preserved.
-              </Text>
-              <View style={styles.meshActions}>
-                <Button icon={Link2} onPress={onPair} style={styles.meshButton}>
-                  Update connection
-                </Button>
-                <Button
-                  tone="danger"
-                  icon={Trash2}
-                  onPress={() => setConfirmForget(true)}
-                  style={styles.meshButton}
-                >
-                  Forget mesh
-                </Button>
-              </View>
-            </View>
-            <View style={styles.section}>
-              <Label>Security</Label>
-              <Text style={[textStyles.body, styles.security]}>
-                The private identity is encrypted by Android secure storage. Requests are signed,
-                expire after one minute, and are checked again on the target. Provider credential
-                copies are encrypted specifically for this phone before forwarding.
-              </Text>
-            </View>
+                  <Button
+                    tone="quiet"
+                    icon={Activity}
+                    onPress={() => void diagnose()}
+                    loading={checking}
+                    style={styles.checkButton}
+                  >
+                    Run connection check
+                  </Button>
+                </View>
+                <View style={styles.section}>
+                  <Label>Reset connections</Label>
+                  <Text style={textStyles.body}>
+                    Remove saved connections from this phone. This does not delete your chats or
+                    files.
+                  </Text>
+                  <View style={styles.meshActions}>
+                    <Button
+                      tone="danger"
+                      icon={Trash2}
+                      onPress={() => setConfirmForget(true)}
+                      style={styles.meshButton}
+                    >
+                      Forget connections
+                    </Button>
+                  </View>
+                </View>
+                <View style={styles.section}>
+                  <Label>Device identity & security</Label>
+                  <Text style={textStyles.mono}>{mesh.identity?.id}</Text>
+                  <Text style={[textStyles.mono, styles.network]}>{mesh.profile?.networkId}</Text>
+                  <Text style={[textStyles.body, styles.security]}>
+                    Private keys stay in secure storage. Credential transfers are encrypted for this
+                    phone.
+                  </Text>
+                </View>
+              </>
+            )}
           </>
         )}
       </ScrollView>
       <ConfirmDialog
         visible={confirmForget}
-        title="Forget this mesh?"
+        title="Forget saved connections?"
         message="This removes all saved device routes and permissions from the phone. Your phone identity remains, but you will need a new pairing code to reconnect."
-        confirmLabel="Forget mesh"
+        confirmLabel="Forget connections"
         destructive
         busy={forgetting}
         onCancel={() => setConfirmForget(false)}

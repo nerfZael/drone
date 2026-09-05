@@ -229,7 +229,8 @@ function Shell() {
   }
 
   const openPairing = () => {
-    setPairReturnTab('settings');
+    setPairReturnTab('devices');
+    setTab('devices');
     setPairing(true);
   };
   const navigateToTab = (nextTab: Tab) => {
@@ -248,7 +249,7 @@ function Shell() {
     {
       id: 'devices',
       label: 'Devices',
-      active: !pairingVisible && tab === 'devices',
+      active: pairingVisible || tab === 'devices',
       onPress: () => navigateToTab('devices'),
     },
     {
@@ -259,9 +260,7 @@ function Shell() {
     },
   ];
   const title = pairingVisible
-    ? mesh.profile
-      ? 'Update connection'
-      : 'Pair device'
+    ? 'Devices'
     : (
         {
           drones: 'Drones',
@@ -360,9 +359,7 @@ function Shell() {
             ? [
                 {
                   id: 'auto-approve',
-                  label: dronesHeader.autoApprove
-                    ? 'Ask for approvals'
-                    : 'Never ask for approvals',
+                  label: dronesHeader.autoApprove ? 'Ask for approvals' : 'Never ask for approvals',
                   icon: Check,
                   onPress: dronesHeader.onToggleAutoApprove,
                 },
@@ -391,9 +388,15 @@ function Shell() {
     <ScrollView keyboardShouldPersistTaps="handled">
       {mesh.profile ? (
         <View style={styles.pairBack}>
-          <Pressable onPress={() => setPairing(false)} style={styles.backButton}>
+          <Pressable
+            onPress={() => {
+              setPairing(false);
+              setTab('devices');
+            }}
+            style={styles.backButton}
+          >
             <ChevronLeft color={colors.accent} size={17} strokeWidth={2.4} />
-            <Text style={styles.backText}>Settings</Text>
+            <Text style={styles.backText}>Your devices</Text>
           </Pressable>
         </View>
       ) : null}
@@ -431,7 +434,7 @@ function Shell() {
       {!pairingVisible && tab === 'settings' ? (
         <SettingsScreen tab={settingsTab} onTabChange={setSettingsTab} onPair={openPairing} />
       ) : null}
-      {!pairingVisible && tab === 'devices' ? <DevicesScreen /> : null}
+      {!pairingVisible && tab === 'devices' ? <DevicesScreen onPair={openPairing} /> : null}
     </>
   );
 

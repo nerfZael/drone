@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Crypto from 'expo-crypto';
-import { Directory, File, Paths } from 'expo-file-system';
+import { Directory, File, FileMode, Paths } from 'expo-file-system';
 import React from 'react';
 import { fromByteArray } from 'base64-js';
 import { sha256 } from '@noble/hashes/sha2.js';
@@ -42,7 +42,6 @@ const LOCAL_DRONES_KEY = 'droneHub.nativeDrones.v1';
 const LOCAL_GROUPS_KEY = 'droneHub.nativeGroups.v1';
 const LOCAL_PINNED_DRONES_KEY = 'droneHub.nativePinnedDrones.v1';
 const LOCAL_SIDEBAR_ORDER_KEY = 'droneHub.nativeSidebarOrder.v1';
-const LOCAL_PREVIEW_CHUNK_BYTES = 128 * 1024;
 
 type LocalGroupRecord = { id: string; name: string; createdAt: string };
 
@@ -130,21 +129,6 @@ function localArtifactChildName(raw: unknown): string {
   return name;
 }
 
-function localJsonChunk(value: unknown, offsetRaw: unknown) {
-  const content = new TextEncoder().encode(JSON.stringify(value));
-  const requested = Number(offsetRaw);
-  const offset = Number.isSafeInteger(requested) && requested > 0 ? requested : 0;
-  const chunk = content.slice(offset, offset + LOCAL_PREVIEW_CHUNK_BYTES);
-  return {
-    encoding: 'base64-json-utf8',
-    offset,
-    bytes: chunk.length,
-    totalBytes: content.length,
-    done: offset + chunk.length >= content.length,
-    dataBase64: fromByteArray(chunk),
-  };
-}
-
 function promptImages(raw: unknown): LocalAssistantPromptImage[] {
   if (!Array.isArray(raw)) return [];
   return raw.slice(0, 8).flatMap((attachment): LocalAssistantPromptImage[] => {
@@ -201,6 +185,7 @@ function useLocalDroneControlValue() {
   });
   const writeRef = React.useRef(Promise.resolve());
   const loadedRef = React.useRef(false);
+  const storageErrorRef = React.useRef<Error | null>(null);
   const readyRef = React.useRef<{
     promise: Promise<void>;
     resolve(): void;
@@ -233,23 +218,23 @@ function useLocalDroneControlValue() {
     await write;
   }, []);
 
-  const replaceDronesAndGroups = React.useCallback(async (
-    nextDrones: LocalDroneRecord[],
-    nextGroups: LocalGroupRecord[],
-  ) => {
-    dronesRef.current = nextDrones;
-    groupsRef.current = nextGroups;
-    setDrones(nextDrones);
-    setGroups(nextGroups);
-    const write = writeRef.current.then(async () => {
-      await Promise.all([
-        AsyncStorage.setItem(LOCAL_DRONES_KEY, JSON.stringify(nextDrones)),
-        AsyncStorage.setItem(LOCAL_GROUPS_KEY, JSON.stringify(nextGroups)),
-      ]);
-    });
-    writeRef.current = write.catch(() => undefined);
-    await write;
-  }, []);
+  const replaceDronesAndGroups = React.useCallback(
+    async (nextDrones: LocalDroneRecord[], nextGroups: LocalGroupRecord[]) => {
+      dronesRef.current = nextDrones;
+      groupsRef.current = nextGroups;
+      setDrones(nextDrones);
+      setGroups(nextGroups);
+      const write = writeRef.current.then(async () => {
+        await Promise.all([
+          AsyncStorage.setItem(LOCAL_DRONES_KEY, JSON.stringify(nextDrones)),
+          AsyncStorage.setItem(LOCAL_GROUPS_KEY, JSON.stringify(nextGroups)),
+        ]);
+      });
+      writeRef.current = write.catch(() => undefined);
+      await write;
+    },
+    [],
+  );
 
   React.useEffect(() => {
     if (assistant.loading || loadedRef.current) return;
@@ -259,9 +244,14 @@ function useLocalDroneControlValue() {
       .then(async (stored): Promise<LocalDroneRecord[]> => {
         if (stored !== null) {
           try {
+            if ((await AsyncStorage.getItem(`${LOCAL_DRONES_KEY}.preHttpV2`)) === null)
+              await AsyncStorage.setItem(`${LOCAL_DRONES_KEY}.preHttpV2`, stored);
+            if (!Array.isArray(JSON.parse(stored))) throw new Error('Invalid drone store');
             return cleanLocalDroneRecords(JSON.parse(stored));
           } catch {
-            await AsyncStorage.removeItem(LOCAL_DRONES_KEY);
+            throw new Error(
+              'Saved phone drones could not be read. Their data is preserved; restore the store before continuing.',
+            );
           }
         }
         const migrated = createLegacyPhoneDroneRecord(assistant.threads);
@@ -270,7 +260,10 @@ function useLocalDroneControlValue() {
         await AsyncStorage.setItem(LOCAL_DRONES_KEY, JSON.stringify(next));
         return next;
       })
-      .catch((): LocalDroneRecord[] => []);
+      .catch((error): LocalDroneRecord[] => {
+        storageErrorRef.current = error;
+        return [];
+      });
     const loadPinnedDroneIds = AsyncStorage.getItem(LOCAL_PINNED_DRONES_KEY)
       .then((stored): string[] => {
         if (!stored) return [];
@@ -282,7 +275,10 @@ function useLocalDroneControlValue() {
       .catch((): string[] => []);
     const loadGroups = AsyncStorage.getItem(LOCAL_GROUPS_KEY)
       .then((stored): LocalGroupRecord[] => cleanLocalGroups(stored ? JSON.parse(stored) : []))
-      .catch((): LocalGroupRecord[] => []);
+      .catch((error): LocalGroupRecord[] => {
+        storageErrorRef.current = error;
+        return [];
+      });
     const loadSidebarOrder = AsyncStorage.getItem(LOCAL_SIDEBAR_ORDER_KEY)
       .then((stored) => {
         const value: unknown = stored ? JSON.parse(stored) : {};
@@ -297,10 +293,18 @@ function useLocalDroneControlValue() {
           sidebarChatGroupByChat: localStringMap(source.sidebarChatGroupByChat),
           sidebarChatNodeOrderByParent: localStringListMap(source.sidebarChatNodeOrderByParent),
           mutedSidebarGroupIds: Array.isArray(source.mutedSidebarGroupIds)
-            ? [...new Set(source.mutedSidebarGroupIds.map((id) => String(id ?? '').trim()).filter(Boolean))]
+            ? [
+                ...new Set(
+                  source.mutedSidebarGroupIds.map((id) => String(id ?? '').trim()).filter(Boolean),
+                ),
+              ]
             : [],
           mutedDroneIds: Array.isArray(source.mutedDroneIds)
-            ? [...new Set(source.mutedDroneIds.map((id) => String(id ?? '').trim()).filter(Boolean))]
+            ? [
+                ...new Set(
+                  source.mutedDroneIds.map((id) => String(id ?? '').trim()).filter(Boolean),
+                ),
+              ]
             : [],
           mutedChatIds: Array.isArray(source.mutedChatIds)
             ? [...new Set(source.mutedChatIds.map((id) => String(id ?? '').trim()).filter(Boolean))]
@@ -320,6 +324,7 @@ function useLocalDroneControlValue() {
     void Promise.all([loadDrones, loadGroups, loadPinnedDroneIds, loadSidebarOrder])
       .then(async ([nextDrones, storedGroups, nextPinnedDroneIds, nextSidebarOrder]) => {
         if (!active) return;
+        if (storageErrorRef.current) return;
         const groupByName = new Map(storedGroups.map((group) => [group.name, group]));
         for (const drone of nextDrones) {
           if (!drone.group || groupByName.has(drone.group)) continue;
@@ -355,6 +360,7 @@ function useLocalDroneControlValue() {
   const request = React.useCallback(
     async (operation: DroneControlOperation, payload: any = {}): Promise<any> => {
       await readyRef.current!.promise;
+      if (storageErrorRef.current) throw storageErrorRef.current;
       const getDrone = () => {
         const drone = dronesRef.current.find(
           (candidate) => candidate.id === String(payload.droneId ?? ''),
@@ -394,10 +400,7 @@ function useLocalDroneControlValue() {
         return {
           schemaVersion: 2,
           drones: dronesRef.current.map((drone) => {
-            const summary = summaryIndex.summarizeChats(
-              drone.chats,
-              assistant.runningThreadId,
-            );
+            const summary = summaryIndex.summarizeChats(drone.chats, assistant.runningThreadId);
             return {
               id: drone.id,
               name: drone.name,
@@ -479,11 +482,14 @@ function useLocalDroneControlValue() {
         if (newName.startsWith(`${group.name}/`)) {
           throw new Error('A group cannot be moved inside itself.');
         }
-        const inRenamedTree = (name: string) => name === group.name || name.startsWith(`${group.name}/`);
+        const inRenamedTree = (name: string) =>
+          name === group.name || name.startsWith(`${group.name}/`);
         const renamedName = (name: string) =>
           name === group.name ? newName : `${newName}${name.slice(group.name.length)}`;
         const renamedNames = new Set(
-          groupsRef.current.filter((candidate) => inRenamedTree(candidate.name)).map((candidate) => renamedName(candidate.name)),
+          groupsRef.current
+            .filter((candidate) => inRenamedTree(candidate.name))
+            .map((candidate) => renamedName(candidate.name)),
         );
         if (
           groupsRef.current.some(
@@ -558,16 +564,12 @@ function useLocalDroneControlValue() {
               : dronesRef.current;
           let nextGroups = groupsRef.current;
           let canonicalGroup: { id: string; repoPath: string; name: string } | null = null;
-          if (
-            command.intent.kind === 'move-into-folder' &&
-            command.intent.itemKind === 'folder'
-          ) {
+          if (command.intent.kind === 'move-into-folder' && command.intent.itemKind === 'folder') {
             const folderIntent = command.intent;
             const destination = sidebarMoveDestination(folderIntent);
             const source = groupsRef.current.find(
               (group) =>
-                group.id === folderIntent.sourceGroupId ||
-                group.name === folderIntent.sourceGroup,
+                group.id === folderIntent.sourceGroupId || group.name === folderIntent.sourceGroup,
             );
             if (!destination?.nextGroup || !source) {
               throw new Error(`Unknown group: ${folderIntent.sourceGroup}`);
@@ -757,9 +759,10 @@ function useLocalDroneControlValue() {
           ? assistant.threads.find((candidate) => candidate.id === sourceId)
           : null;
         if (copyConfig && !sourceThread) throw new Error('Source chat was not found.');
-        const thread = sourceId && !copyConfig
-          ? await assistant.cloneThread(sourceId)
-          : await assistant.createThread(chatName);
+        const thread =
+          sourceId && !copyConfig
+            ? await assistant.cloneThread(sourceId)
+            : await assistant.createThread(chatName);
         await assistant.updateThread(thread.id, {
           title: chatName,
           artifactWorkspace: sourceThread?.artifactWorkspace ?? true,
@@ -893,12 +896,7 @@ function useLocalDroneControlValue() {
               ? -1
               : 1,
         );
-        return {
-          contentChunk: localJsonChunk(
-            { ok: true, path: parts.join('/'), entries },
-            payload.contentOffset,
-          ),
-        };
+        return { ok: true, path: parts.join('/'), entries };
       }
       if (operation === 'file.action') {
         const { thread } = getThread();
@@ -1015,6 +1013,24 @@ function useLocalDroneControlValue() {
             },
           };
         }
+        if (mediaKind) {
+          const hash = sha256.create();
+          const handle = file.open(FileMode.ReadOnly);
+          try {
+            let remaining = size;
+            while (remaining > 0) {
+              const bytes = handle.readBytes(Math.min(64 * 1024, remaining));
+              if (!bytes.length) throw new Error('Phone file changed while reading');
+              hash.update(bytes);
+              remaining -= bytes.length;
+            }
+          } finally {
+            handle.close();
+          }
+          const revision = `sha256:${Array.from(hash.digest(), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+          const preview = { path: parts.join('/'), kind: mediaKind, mime, size, mtimeMs, revision };
+          return payload.metadataOnly === true ? { preview } : { preview, localFileUri: file.uri };
+        }
         const bytes = await file.bytes();
         const kind = mediaKind ?? (bytes.includes(0) ? 'binary' : 'text');
         const preview = {
@@ -1030,13 +1046,7 @@ function useLocalDroneControlValue() {
           const { content: _content, ...metadata } = preview;
           return { preview: metadata };
         }
-        if (kind !== 'image' && kind !== 'video') {
-          return { contentChunk: localJsonChunk(preview, payload.contentOffset) };
-        }
-        return {
-          preview,
-          mediaDataBase64: fromByteArray(bytes),
-        };
+        return { content: preview };
       }
       if (operation === 'chat.read') {
         const { drone, chatName, thread } = getThread();

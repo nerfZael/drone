@@ -1,14 +1,21 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
-import { MESH_BINARY_CHUNK_BYTES, WORKSPACE_CAPABILITY } from '@drone/device-protocol';
+import { WORKSPACE_CAPABILITY } from '@drone/device-protocol';
 import type { CapabilityHandler } from '../../device-mesh-types';
 import { isAssistantTransferTemporaryName } from '../../../assistant/is-assistant-transfer-temporary-name';
 import { CommandJobStore } from './command-job-store';
 import { CrossDeviceAssistantPolicyStore } from './policy-store';
 
 const MAX_FILE_BYTES = 192 * 1024;
+
+async function transferFileDigest(file: string): Promise<string> {
+  const hash = crypto.createHash('sha256');
+  for await (const bytes of createReadStream(file)) hash.update(bytes);
+  return hash.digest('hex');
+}
 const MAX_SEARCH_ENTRIES = 5_000;
 const MAX_CONTENT_SEARCH_BYTES = 16 * 1024 * 1024;
 const MAX_TRANSFER_DIRECTORY_ENTRIES = 500;
@@ -34,12 +41,7 @@ async function writeTransferBytes(
 ): Promise<void> {
   let written = 0;
   while (written < buffer.length) {
-    const result = await handle.write(
-      buffer,
-      written,
-      buffer.length - written,
-      position + written,
-    );
+    const result = await handle.write(buffer, written, buffer.length - written, position + written);
     if (result.bytesWritten <= 0) throw new Error('destination stopped writing transfer data');
     written += result.bytesWritten;
   }
@@ -137,8 +139,11 @@ function boundedInteger(
     : fallback;
 }
 
+import type { WorkspaceHttpTransfers } from '../../workspace-http-transfers';
+
 export function createWorkspaceCapability(
   policies: CrossDeviceAssistantPolicyStore,
+  transfers?: WorkspaceHttpTransfers,
 ): CapabilityHandler {
   const commandJobs = new CommandJobStore();
   const unsubscribe = policies.onChange(() => {
@@ -178,7 +183,6 @@ export function createWorkspaceCapability(
         operation === 'files.write' ||
         operation === 'files.transfer.mkdir' ||
         operation === 'files.transfer.prepare' ||
-        operation === 'files.transfer.write' ||
         operation === 'files.transfer.commit' ||
         operation === 'files.transfer.abort'
           ? 'write'
@@ -195,6 +199,14 @@ export function createWorkspaceCapability(
           code: 'ROOT_NOT_FOUND',
         });
       const rootPath = await fs.realpath(root.path);
+      const transferAuthorized = async (access: 'read' | 'write') => {
+        const currentRoot = await policies.root(rootId);
+        return Boolean(
+          currentRoot &&
+          (await fs.realpath(currentRoot.path)) === rootPath &&
+          (await policies.deviceGrant(context.sourceDevice.id, rootId))?.[access],
+        );
+      };
       if (operation === 'commands.start')
         return commandJobs.start({
           sourceDeviceId: context.sourceDevice.id,
@@ -287,25 +299,19 @@ export function createWorkspaceCapability(
       }
 
       if (operation === 'files.transfer.read') {
+        if (!transfers) throw new Error('HTTP workspace transfers are unavailable');
         const target = await existingPath(rootPath, requestedPath);
-        const offset = boundedInteger(payload.offset, 0, 0, Number.MAX_SAFE_INTEGER);
-        const length = boundedInteger(
-          payload.length,
-          MESH_BINARY_CHUNK_BYTES,
-          1,
-          MESH_BINARY_CHUNK_BYTES,
-        );
-        const handle = await fs.open(target, 'r');
-        try {
-          const buffer = Buffer.alloc(length);
-          const { bytesRead } = await handle.read(buffer, 0, length, offset);
-          return {
-            dataBase64: buffer.subarray(0, bytesRead).toString('base64'),
-            bytes: bytesRead,
-          };
-        } finally {
-          await handle.close();
-        }
+        const info = await fs.stat(target);
+        return {
+          download: transfers.issue({
+            source: context.sourceDevice.id,
+            method: 'GET',
+            size: info.size,
+            revision: `"${info.size}-${info.mtimeMs}-${info.ino}"`,
+            resolve: () => existingPath(rootPath, requestedPath),
+            authorized: () => transferAuthorized('read'),
+          }),
+        };
       }
 
       if (operation === 'files.transfer.mkdir') {
@@ -336,50 +342,28 @@ export function createWorkspaceCapability(
           throw error;
         });
         if (partial && (!partial.isFile() || partial.size > size)) {
-          await fs.rm(temp, { force: true });
-          partial = null;
+          throw Object.assign(
+            new Error(
+              'Existing partial transfer does not match the declared file; its bytes were preserved',
+            ),
+            { code: 'TRANSFER_SIZE_MISMATCH' },
+          );
         }
         if (!partial) {
           const handle = await fs.open(temp, 'wx');
           await handle.close();
         }
-        return { offset: partial?.size ?? 0 };
-      }
-
-      if (operation === 'files.transfer.write') {
-        const target = await writePath(rootPath, requestedPath);
-        const id = transferId(payload.transferId);
-        const offset = boundedInteger(payload.offset, 0, 0, Number.MAX_SAFE_INTEGER);
-        const data = Buffer.from(String(payload.dataBase64 ?? ''), 'base64');
-        if (data.length > MESH_BINARY_CHUNK_BYTES)
-          throw Object.assign(new Error('transfer chunk is too large'), {
-            code: 'INVALID_REQUEST',
-          });
-        const temp = transferTempPath(target, id);
-        const tempInfo = await fs.lstat(temp);
-        if (!tempInfo.isFile())
-          throw Object.assign(new Error('transfer temporary path is not a file'), {
-            code: 'INVALID_REQUEST',
-          });
-        const handle = await fs.open(temp, 'r+');
-        try {
-          const info = await handle.stat();
-          if (info.size === offset + data.length) {
-            const existing = Buffer.alloc(data.length);
-            if ((await readTransferBytes(handle, existing, offset)) && existing.equals(data))
-              return { offset: info.size };
-          }
-          if (info.size !== offset)
-            throw Object.assign(
-              new Error(`transfer offset mismatch: expected ${info.size}, received ${offset}`),
-              { code: 'TRANSFER_OFFSET_MISMATCH' },
-            );
-          await writeTransferBytes(handle, data, offset);
-          await handle.sync();
-          return { offset: offset + data.length };
-        } finally {
-          await handle.close();
-        }
+        if (!transfers) throw new Error('HTTP workspace transfers are unavailable');
+        return {
+          offset: partial?.size ?? 0,
+          upload: transfers.issue({
+            source: context.sourceDevice.id,
+            method: 'PUT',
+            size,
+            resolve: async () => transferTempPath(await writePath(rootPath, requestedPath), id),
+            authorized: () => transferAuthorized('write'),
+          }),
+        };
       }
 
       if (operation === 'files.transfer.commit') {
@@ -393,7 +377,20 @@ export function createWorkspaceCapability(
         });
         if (!info) {
           const committed = await fs.stat(target).catch(() => null);
-          if (committed?.isFile() && committed.size === size) return { ok: true };
+          const receipt = await fs
+            .readFile(`${temp}.receipt.json`, 'utf8')
+            .then(
+              (raw) => JSON.parse(raw),
+              () => null,
+            )
+            .catch(() => null);
+          if (
+            receipt?.size === size &&
+            committed?.isFile() &&
+            committed.size === size &&
+            receipt.sha256 === (await transferFileDigest(target))
+          )
+            return { ok: true };
           throw Object.assign(new Error('transfer temporary file was not found'), {
             code: 'TRANSFER_INCOMPLETE',
           });
@@ -416,7 +413,17 @@ export function createWorkspaceCapability(
               code: 'FILE_EXISTS',
             });
         }
-        await fs.rename(temp, target);
+        const digest = await transferFileDigest(temp);
+        if (payload.overwrite === true) await fs.rename(temp, target);
+        else {
+          // An atomic no-clobber link closes the stat/rename race with another local writer.
+          await fs.link(temp, target);
+          await fs.unlink(temp);
+        }
+        const receiptPath = `${temp}.receipt.json`;
+        const receiptTemp = `${receiptPath}.${crypto.randomUUID()}.tmp`;
+        await fs.writeFile(receiptTemp, JSON.stringify({ size, sha256: digest }), { mode: 0o600 });
+        await fs.rename(receiptTemp, receiptPath);
         return { ok: true };
       }
 

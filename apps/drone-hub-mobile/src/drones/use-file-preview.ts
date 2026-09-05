@@ -1,9 +1,8 @@
 import React from 'react';
+import { fetch as streamingFetch } from 'expo/fetch';
 import { AppState } from 'react-native';
-import { toByteArray } from 'base64-js';
 import { File, FileMode, Paths, type FileHandle } from 'expo-file-system';
 import type { DroneControlOperation } from '@drone/device-protocol';
-import { readMeshJsonContent } from '../mesh/read-mesh-json-content';
 import type { MobileFileReference } from '../local-assistant/file-reference';
 import {
   MOBILE_FILE_EDIT_MAX_BYTES,
@@ -21,7 +20,6 @@ import type { MobileDroneSummary } from './drone-sidebar-model';
 import { BoundedSwrCache } from './bounded-swr-cache';
 import { mobileFileCacheKey } from './mobile-file-cache-key';
 import { mobilePreviewErrorMode } from './mobile-preview-error-state';
-import { readPipelinedMediaChunks } from './read-pipelined-media-chunks';
 
 type PreviewRequest = {
   targetId: string;
@@ -184,42 +182,8 @@ export function useFilePreview({
           },
           loadController.signal,
         );
-        if (firstResult?.contentChunk) {
-          let firstAvailable = true;
-          const content = await readMeshJsonContent(
-            async (contentOffset, snapshotToken, signal) => {
-              if (contentOffset === 0 && firstAvailable) {
-                firstAvailable = false;
-                return firstResult.contentChunk;
-              }
-              const next = await requestDroneControl(
-                nextRequest.targetId,
-                'file.preview',
-                {
-                  droneId: nextRequest.droneId,
-                  chatName: nextRequest.chatName,
-                  path: nextRequest.path,
-                  contentOffset,
-                  ...(snapshotToken ? { snapshotToken } : {}),
-                },
-                signal,
-              );
-              return next?.contentChunk ?? {};
-            },
-            {
-              isCancelled: () => version !== loadVersion.current,
-              signal: loadController.signal,
-              cancelSnapshot: async (snapshotToken) => {
-                await requestDroneControl(nextRequest.targetId, 'file.preview', {
-                  droneId: nextRequest.droneId,
-                  chatName: nextRequest.chatName,
-                  path: nextRequest.path,
-                  snapshotToken,
-                  cancelSnapshot: true,
-                });
-              },
-            },
-          );
+        if (firstResult?.content) {
+          const content = firstResult.content;
           if (version !== loadVersion.current) return;
           const path = String(content?.path ?? nextRequest.path).trim() || nextRequest.path;
           commitPreview(nextRequest, {
@@ -285,83 +249,49 @@ export function useFilePreview({
             if (svg) chunks.push(bytes);
             else cacheHandle?.writeBytes(bytes);
           };
-          const inlineBytes = firstResult?.mediaDataBase64
-            ? toByteArray(String(firstResult.mediaDataBase64))
-            : null;
-          if (inlineBytes) {
-            if (inlineBytes.length !== totalBytes) {
-              throw new Error('The phone returned an invalid media preview');
+          if (firstResult?.localFileUri && nextRequest.phoneTarget) {
+            const localFile = new File(String(firstResult.localFileUri));
+            const localHandle = localFile.open(FileMode.ReadOnly);
+            try {
+              while (offset < totalBytes) {
+                loadController.signal.throwIfAborted();
+                const bytes = localHandle.readBytes(Math.min(64 * 1024, totalBytes - offset));
+                if (!bytes.length) throw new Error('Phone preview ended early');
+                appendBytes(bytes);
+                offset += bytes.length;
+              }
+            } finally {
+              localHandle.close();
             }
-            appendBytes(inlineBytes);
-            offset = inlineBytes.length;
             firstResult = null;
           }
           if (offset < totalBytes) {
-            await readPipelinedMediaChunks({
-              firstResult,
-              totalBytes,
-              requestResult: async (contentOffset, snapshotToken, signal) =>
-                await requestDroneControl(
-                  nextRequest.targetId,
-                  'file.preview',
-                  {
-                    droneId: nextRequest.droneId,
-                    chatName: nextRequest.chatName,
-                    path: nextRequest.path,
-                    contentOffset,
-                    expectedRevision: metadata.revision,
-                    ...(snapshotToken ? { snapshotToken, mediaSnapshot: true } : {}),
-                  },
-                  signal,
-                ),
-              validateResult: (result, contentOffset) => {
-                const resultPreview = result?.preview;
-                const chunk = result?.mediaChunk;
-                const bytes = toByteArray(String(chunk?.dataBase64 ?? ''));
-                const nextOffset = contentOffset + bytes.length;
-                const expectedMtime = Number(metadata.mtimeMs);
-                const resultMtime = Number(resultPreview?.mtimeMs);
-                const expectedRevision =
-                  typeof metadata.revision === 'string' ? metadata.revision : null;
-                const resultRevision =
-                  typeof resultPreview?.revision === 'string' ? resultPreview.revision : null;
-                if (
-                  resultPreview?.kind !== metadata.kind ||
-                  Number(resultPreview?.size) !== totalBytes ||
-                  (Number.isFinite(expectedMtime) &&
-                    Number.isFinite(resultMtime) &&
-                    resultMtime !== expectedMtime) ||
-                  (expectedRevision && resultRevision !== expectedRevision) ||
-                  chunk?.encoding !== 'base64-binary' ||
-                  Number(chunk?.offset) !== contentOffset ||
-                  Number(chunk?.bytes) !== bytes.length ||
-                  Number(chunk?.totalBytes) !== totalBytes ||
-                  bytes.length === 0 ||
-                  chunk?.done !== (nextOffset === totalBytes)
-                ) {
-                  throw new Error('The selected device returned an invalid media chunk');
-                }
-                const snapshotToken =
-                  typeof chunk?.snapshotToken === 'string' && chunk.snapshotToken.trim()
-                    ? chunk.snapshotToken.trim()
-                    : undefined;
-                return { bytes, snapshotToken, done: chunk?.done === true };
-              },
-              appendBytes,
-              isCancelled: () => version !== loadVersion.current,
+            const transfer = firstResult?.transfer;
+            if (!transfer?.url || !transfer?.token)
+              throw new Error('The device did not authorize an HTTP download');
+            const response = await streamingFetch(transfer.url, {
+              headers: { authorization: 'Bearer ' + transfer.token },
               signal: loadController.signal,
-              cancelSnapshot: async (snapshotToken) => {
-                await requestDroneControl(nextRequest.targetId, 'file.preview', {
-                  droneId: nextRequest.droneId,
-                  chatName: nextRequest.chatName,
-                  path: nextRequest.path,
-                  expectedRevision: metadata.revision,
-                  mediaSnapshot: true,
-                  snapshotToken,
-                  cancelSnapshot: true,
-                });
-              },
+              redirect: 'error',
             });
+            if (!response.ok || !response.body)
+              throw new Error('HTTP download failed (' + response.status + ')');
+            const reader = response.body.getReader();
+            try {
+              while (true) {
+                const { value, done } = await reader.read();
+                if (value) {
+                  if (offset + value.byteLength > totalBytes)
+                    throw new Error('Download exceeds declared size');
+                  appendBytes(value);
+                  offset += value.byteLength;
+                }
+                if (done) break;
+              }
+            } finally {
+              await reader.cancel().catch(() => undefined);
+            }
+            if (offset !== totalBytes) throw new Error('The HTTP download was incomplete');
             offset = totalBytes;
             firstResult = null;
           }

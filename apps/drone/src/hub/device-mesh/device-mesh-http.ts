@@ -2,6 +2,8 @@ import crypto from 'node:crypto';
 import type http from 'node:http';
 import QRCode from 'qrcode';
 import {
+  canonicalJson,
+  readBoundedHttpText,
   pairingClaimSigningText,
   parsePairingPayload,
   WORKSPACE_CAPABILITY,
@@ -235,6 +237,82 @@ export class DeviceMeshHttp {
     response: http.ServerResponse,
     url: URL,
   ): Promise<boolean> {
+    if (await this.router.handleHttp(request, response, url)) return true;
+    if (request.method === 'GET' && url.pathname === '/.well-known/dronehub') {
+      const nonce = String(url.searchParams.get('nonce') ?? '');
+      if (!/^[a-zA-Z0-9_-]{20,128}$/.test(nonce)) {
+        json(response, 400, { ok: false, error: 'discovery nonce is required' });
+        return true;
+      }
+      const state = await this.store.read();
+      const descriptor = {
+        protocol: 'dronehub-device-mesh',
+        protocolVersion: 2,
+        nonce,
+        device: publicIdentity(state.devices[state.selfDeviceId]),
+        endpoint: this.invitationEndpoint(),
+        route: state.routes[state.selfDeviceId] ?? null,
+      };
+      json(response, 200, {
+        ...descriptor,
+        signature: signDeviceText(this.identity, canonicalJson(descriptor)),
+      });
+      return true;
+    }
+    if (request.method === 'POST' && url.pathname === '/api/device-mesh/pairing/request') {
+      const body = await readBody(request);
+      const device = publicIdentity(body.device);
+      const endpoint = this.invitationEndpoint();
+      const expires = Date.parse(String(body.expiresAt));
+      if (
+        !endpoint ||
+        body.endpoint !== endpoint ||
+        body.inviterDeviceId !== this.identity.id ||
+        !Number.isFinite(expires) ||
+        expires <= Date.now() ||
+        expires > Date.now() + 10 * 60_000 ||
+        typeof body.token !== 'string' ||
+        !/^[a-zA-Z0-9_-]{32,128}$/.test(body.token) ||
+        !verifyDeviceText(
+          device.publicKey,
+          pairingClaimSigningText({
+            token: body.token,
+            claimSecret: body.claimSecret,
+            inviterDeviceId: body.inviterDeviceId,
+            endpoint: body.endpoint,
+            expiresAt: body.expiresAt,
+            device,
+          }),
+          String(body.signature ?? ''),
+        )
+      )
+        throw new Error('invalid pairing request proof');
+      await this.store.update((state) => {
+        if (!state.devices[state.selfDeviceId]?.administrator)
+          throw new Error('this Hub cannot enroll devices');
+        if (state.devices[device.id]?.revokedAt) throw new Error('device is revoked');
+        if (
+          Object.values(state.invitations).some((item) => item.tokenHash === secretHash(body.token))
+        )
+          throw new Error('pairing request already used');
+        if (
+          Object.values(state.pending).filter((item) => !item.approval && !item.rejectedAt)
+            .length >= 50
+        )
+          throw new Error('too many pending pairing requests');
+        const id = crypto.randomUUID();
+        state.invitations[id] = {
+          id,
+          tokenHash: secretHash(body.token),
+          endpoint,
+          createdAt: new Date().toISOString(),
+          expiresAt: body.expiresAt,
+          claimedAt: null,
+        };
+      });
+      await this.claim(request, response, body);
+      return true;
+    }
     const method = String(request.method ?? 'GET').toUpperCase();
     const parts = url.pathname.split('/').filter(Boolean);
     for (const extension of this.extensions) {
@@ -299,6 +377,7 @@ export class DeviceMeshHttp {
             .filter((item) => !item.approval && !item.rejectedAt)
             .map(({ claimSecretHash: _secret, approval: _approval, ...item }) => item),
           connectedDeviceIds: this.router.connectedDeviceIds(),
+          connectionErrors: this.router.connectionErrors?.() ?? {},
           capabilities: this.capabilities.list(),
           routes: Object.values(state.routes),
         });
@@ -326,6 +405,41 @@ export class DeviceMeshHttp {
       }
       if (method === 'POST' && url.pathname === '/api/device-mesh/joins') {
         await this.join(request, response);
+        return true;
+      }
+      if (method === 'POST' && url.pathname === '/api/device-mesh/joins-discovered') {
+        const body = await readBody(request);
+        const endpoint = publicEndpoint(body.endpoint);
+        const nonce = crypto.randomBytes(24).toString('base64url');
+        const discoveryResponse = await fetch(`${endpoint}/.well-known/dronehub?nonce=${nonce}`, {
+          signal: AbortSignal.timeout(10_000),
+          redirect: 'error',
+        });
+        if (!discoveryResponse.ok) throw new Error('could not verify discovered Hub');
+        const descriptor = JSON.parse(await readBoundedHttpText(discoveryResponse, 16 * 1024));
+        const { signature, ...unsigned } = descriptor;
+        const peer = publicIdentity(descriptor.device);
+        if (
+          descriptor.protocolVersion !== 2 ||
+          descriptor.nonce !== nonce ||
+          peer.id !== body.deviceId ||
+          descriptor.endpoint !== endpoint ||
+          !verifyDeviceText(peer.publicKey, canonicalJson(unsigned), String(signature))
+        )
+          throw new Error('discovered Hub identity changed');
+        const payload: PairingPayload = {
+          version: 1,
+          endpoint,
+          inviterDeviceId: peer.id,
+          token: crypto.randomBytes(32).toString('base64url'),
+          expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
+        };
+        const id = crypto.randomUUID();
+        this.joins.set(id, { status: 'pending' });
+        void this.runJoin(id, payload, true).catch((error: any) => {
+          this.joins.set(id, { status: 'failed', error: error?.message ?? String(error) });
+        });
+        json(response, 202, { ok: true, joinId: id });
         return true;
       }
       if (method === 'GET' && parts.length === 4 && parts[2] === 'joins') {
@@ -433,8 +547,12 @@ export class DeviceMeshHttp {
     });
   }
 
-  private async claim(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
-    const body = await readBody(request);
+  private async claim(
+    request: http.IncomingMessage,
+    response: http.ServerResponse,
+    suppliedBody?: any,
+  ): Promise<void> {
+    const body = suppliedBody ?? (await readBody(request));
     const token = String(body.token ?? '');
     const claimSecret = String(body.claimSecret ?? '');
     const signature = String(body.signature ?? '');
@@ -510,7 +628,11 @@ export class DeviceMeshHttp {
     json(response, 202, { ok: true, joinId: id });
   }
 
-  private async runJoin(joinId: string, payload: PairingPayload): Promise<void> {
+  private async runJoin(
+    joinId: string,
+    payload: PairingPayload,
+    discovered = false,
+  ): Promise<void> {
     const state = await this.store.read();
     const self = state.devices[state.selfDeviceId];
     const established = Object.keys(state.devices).some(
@@ -531,14 +653,17 @@ export class DeviceMeshHttp {
       expiresAt: payload.expiresAt,
       device: self,
     };
-    const claimedResponse = await fetch(`${payload.endpoint}/api/device-mesh/invitations/claim`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        ...unsignedClaim,
-        signature: signDeviceText(this.identity, pairingClaimSigningText(unsignedClaim)),
-      }),
-    });
+    const claimedResponse = await fetch(
+      `${payload.endpoint}/api/device-mesh/${discovered ? 'pairing/request' : 'invitations/claim'}`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          ...unsignedClaim,
+          signature: signDeviceText(this.identity, pairingClaimSigningText(unsignedClaim)),
+        }),
+      },
+    );
     const claimed = (await claimedResponse.json().catch(() => ({}))) as any;
     if (!claimedResponse.ok)
       throw new Error(String(claimed?.error ?? 'destination Hub rejected the pairing code'));

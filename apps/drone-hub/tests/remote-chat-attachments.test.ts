@@ -12,11 +12,14 @@ function imageAttachment(bytes: number) {
 }
 
 describe('desktop remote chat attachments', () => {
-  test('uploads bounded chunks before sending attachment ids with the prompt', async () => {
+  test('uploads one binary HTTP body before sending attachment ids with the prompt', async () => {
     const actions: string[] = [];
-    const writeBodySizes: number[] = [];
-    let offset = 0;
+    let uploads = 0;
     const result = await sendRemoteChatPrompt({
+      fetchImpl: (async (_url, init) => {
+        const size = (init!.body as Blob).size;
+        return Response.json({ offset: size, complete: true });
+      }) as typeof fetch,
       droneId: 'drone-1',
       chatName: 'default',
       prompt: 'Review this screenshot',
@@ -33,27 +36,23 @@ describe('desktop remote chat attachments', () => {
           return { accepted: true };
         }
         actions.push(transfer.action);
-        if (transfer.action === 'prepare') return { uploadId: 'upload-1', maxChunkBytes: 50_000 };
-        if (transfer.action === 'write') {
-          writeBodySizes.push(Buffer.byteLength(JSON.stringify(payload)));
-          expect(transfer.offset).toBe(offset);
-          offset += Buffer.from(transfer.dataBase64, 'base64').length;
-          return { offset };
-        }
+        if (transfer.action === 'prepare')
+          return { uploadId: 'upload-1', uploadUrl: 'https://peer/upload', uploadToken: 'secret' };
         if (transfer.action === 'commit') return { attachmentId: 'attachment-1' };
         return { aborted: true };
       },
     });
 
     expect(result).toEqual({ accepted: true });
-    expect(actions).toEqual(['prepare', 'write', 'write', 'write', 'write', 'commit', 'prompt']);
-    expect(writeBodySizes.every((size) => size < 128 * 1024)).toBe(true);
+    expect(actions).toEqual(['prepare', 'commit', 'prompt']);
   });
 
   test('aborts committed uploads when the final prompt fails', async () => {
     const actions: string[] = [];
     await expect(
       sendRemoteChatPrompt({
+        fetchImpl: (async (_url, init) =>
+          Response.json({ offset: (init!.body as Blob).size, complete: true })) as typeof fetch,
         droneId: 'drone-1',
         chatName: 'default',
         prompt: '',
@@ -61,15 +60,19 @@ describe('desktop remote chat attachments', () => {
         request: async (payload: any) => {
           const action = payload.attachmentTransfer?.action ?? 'prompt';
           actions.push(action);
-          if (action === 'prepare') return { uploadId: 'upload-1' };
-          if (action === 'write') return { offset: 10 };
+          if (action === 'prepare')
+            return {
+              uploadId: 'upload-1',
+              uploadUrl: 'https://peer/upload',
+              uploadToken: 'secret',
+            };
           if (action === 'commit') return { attachmentId: 'upload-1' };
           if (action === 'abort') return { aborted: true };
           throw new Error('remote chat rejected the prompt');
         },
       }),
     ).rejects.toThrow('remote chat rejected the prompt');
-    expect(actions).toEqual(['prepare', 'write', 'commit', 'prompt', 'abort']);
+    expect(actions).toEqual(['prepare', 'commit', 'prompt', 'abort']);
   });
 
   test('supports source files for remote native chats', async () => {
@@ -80,6 +83,8 @@ describe('desktop remote chat attachments', () => {
     };
     let sentAttachmentIds: string[] = [];
     await sendRemoteChatPrompt({
+      fetchImpl: (async (_url, init) =>
+        Response.json({ offset: (init!.body as Blob).size, complete: true })) as typeof fetch,
       droneId: 'drone-1',
       chatName: 'default',
       prompt: 'Review this file',
@@ -87,10 +92,16 @@ describe('desktop remote chat attachments', () => {
       request: async (payload: any) => {
         const action = payload.attachmentTransfer?.action;
         if (action === 'prepare') {
-          expect(payload.attachmentTransfer).toMatchObject({ name: 'review.ts', mime: 'text/plain' });
-          return { uploadId: 'upload-file' };
+          expect(payload.attachmentTransfer).toMatchObject({
+            name: 'review.ts',
+            mime: 'text/plain',
+          });
+          return {
+            uploadId: 'upload-file',
+            uploadUrl: 'https://peer/upload',
+            uploadToken: 'secret',
+          };
         }
-        if (action === 'write') return { offset: 10 };
         if (action === 'commit') return { attachmentId: 'attachment-file' };
         sentAttachmentIds = payload.attachmentIds;
         return { accepted: true };
@@ -102,6 +113,8 @@ describe('desktop remote chat attachments', () => {
   test('normalizes MIME aliases before preparing a remote upload', async () => {
     const attachment = { ...imageAttachment(1), mime: 'image/jpg' };
     await sendRemoteChatPrompt({
+      fetchImpl: (async (_url, init) =>
+        Response.json({ offset: (init!.body as Blob).size, complete: true })) as typeof fetch,
       droneId: 'drone-1',
       chatName: 'default',
       prompt: '',
@@ -110,9 +123,8 @@ describe('desktop remote chat attachments', () => {
         const action = payload.attachmentTransfer?.action;
         if (action === 'prepare') {
           expect(payload.attachmentTransfer.mime).toBe('image/jpeg');
-          return { uploadId: 'upload-1' };
+          return { uploadId: 'upload-1', uploadUrl: 'https://peer/upload', uploadToken: 'secret' };
         }
-        if (action === 'write') return { offset: 1 };
         if (action === 'commit') return { attachmentId: 'attachment-1' };
         return { accepted: true };
       },
@@ -123,6 +135,8 @@ describe('desktop remote chat attachments', () => {
     let requested = false;
     await expect(
       sendRemoteChatPrompt({
+        fetchImpl: (async (_url, init) =>
+          Response.json({ offset: (init!.body as Blob).size, complete: true })) as typeof fetch,
         droneId: 'drone-1',
         chatName: 'default',
         prompt: '',

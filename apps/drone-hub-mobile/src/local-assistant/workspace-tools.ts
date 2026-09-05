@@ -1,3 +1,5 @@
+import { createHttpWorkspaceAdapter } from '@drone/device-protocol';
+import { createWorkspaceUploadSink } from '../mesh/workspace-upload-sink';
 import {
   WorkspaceTargetCatalog,
   type WorkspaceCapability,
@@ -25,6 +27,10 @@ type MeshRequest = (
   payload: unknown,
   signal?: AbortSignal,
 ) => Promise<any>;
+type HttpTransferPlatform = Pick<
+  Parameters<typeof createHttpWorkspaceAdapter>[0],
+  'createSink' | 'fetchImpl'
+>;
 
 const definitions: Record<
   string,
@@ -133,6 +139,7 @@ class MobileWorkspaceTarget implements WorkspaceTarget {
     readonly policy: LocalWorkspaceTarget,
     id: string,
     private readonly request: MeshRequest,
+    platform?: HttpTransferPlatform,
   ) {
     this.descriptor = {
       id,
@@ -160,39 +167,18 @@ class MobileWorkspaceTarget implements WorkspaceTarget {
         },
         signal,
       );
-    this.transfer = {
-      ...(policy.read
-        ? {
-            source: {
-              stat: (path: string, signal?: AbortSignal) =>
-                transferRequest('files.transfer.stat', { path }, signal),
-              list: async (path: string, signal?: AbortSignal) =>
-                (await transferRequest('files.transfer.list', { path }, signal)).entries,
-              readChunk: (path: string, offset: number, length: number, signal?: AbortSignal) =>
-                transferRequest('files.transfer.read', { path, offset, length }, signal),
-            },
-          }
-        : {}),
-      ...(policy.write
-        ? {
-            destination: {
-              createDirectory: async (path: string, signal?: AbortSignal) => {
-                await transferRequest('files.transfer.mkdir', { path }, signal);
-              },
-              prepareFile: (input: Record<string, unknown>, signal?: AbortSignal) =>
-                transferRequest('files.transfer.prepare', input, signal),
-              writeChunk: (input: Record<string, unknown>, signal?: AbortSignal) =>
-                transferRequest('files.transfer.write', input, signal),
-              commitFile: async (input: Record<string, unknown>, signal?: AbortSignal) => {
-                await transferRequest('files.transfer.commit', input, signal);
-              },
-              abortFile: async (input: Record<string, unknown>, signal?: AbortSignal) => {
-                await transferRequest('files.transfer.abort', input, signal);
-              },
-            },
-          }
-        : {}),
-    };
+    this.transfer = createHttpWorkspaceAdapter({
+      request: transferRequest,
+      read: policy.read,
+      write: policy.write,
+      createSink: platform?.createSink ?? createWorkspaceUploadSink,
+      fetchImpl:
+        platform?.fetchImpl ??
+        ((async (...args: Parameters<typeof fetch>) => {
+          const { fetch: nativeFetch } = await import('expo/fetch');
+          return nativeFetch(...args);
+        }) as unknown as typeof fetch),
+    });
   }
 
   async execute(call: WorkspaceTargetCall): Promise<any> {
@@ -232,9 +218,14 @@ class MobileWorkspaceTarget implements WorkspaceTarget {
 }
 
 function artifactPathParts(value: unknown): string[] {
-  const path = String(value ?? '.').trim().replace(/\\/g, '/');
+  const path = String(value ?? '.')
+    .trim()
+    .replace(/\\/g, '/');
   if (!path || path === '.') return [];
-  if (path.startsWith('/') || path.split('/').some((part) => !part || part === '.' || part === '..')) {
+  if (
+    path.startsWith('/') ||
+    path.split('/').some((part) => !part || part === '.' || part === '..')
+  ) {
     throw new Error('Artifact paths must be workspace-relative and cannot contain . or ..');
   }
   return path.split('/');
@@ -249,7 +240,12 @@ class MobileArtifactsTarget implements WorkspaceTarget {
       kind: 'local' as const,
       label: 'Assistant Artifacts',
       rootLabel: 'Assistant Artifacts',
-      capabilities: ['files.list', 'files.read', 'files.search', 'files.write'] as WorkspaceCapability[],
+      capabilities: [
+        'files.list',
+        'files.read',
+        'files.search',
+        'files.write',
+      ] as WorkspaceCapability[],
     };
     this.threadId = threadId;
   }
@@ -265,17 +261,28 @@ class MobileArtifactsTarget implements WorkspaceTarget {
     return new File(root, ...parts);
   }
 
-  private async search(directory: any, Directory: any, File: any, base: string, query: string, mode: string, output: string[], limit: number): Promise<void> {
+  private async search(
+    directory: any,
+    Directory: any,
+    File: any,
+    base: string,
+    query: string,
+    mode: string,
+    output: string[],
+    limit: number,
+  ): Promise<void> {
     if (output.length >= limit || !directory.exists) return;
     for (const entry of directory.list()) {
       if (output.length >= limit) return;
       const relative = base ? `${base}/${entry.name}` : entry.name;
       if (entry instanceof Directory) {
-        if (mode === 'name' && entry.name.toLowerCase().includes(query)) output.push(`${relative}/`);
+        if (mode === 'name' && entry.name.toLowerCase().includes(query))
+          output.push(`${relative}/`);
         await this.search(entry, Directory, File, relative, query, mode, output, limit);
       } else if (entry instanceof File) {
         if (mode === 'name' && entry.name.toLowerCase().includes(query)) output.push(relative);
-        if (mode === 'content' && (await entry.text()).toLowerCase().includes(query)) output.push(relative);
+        if (mode === 'content' && (await entry.text()).toLowerCase().includes(query))
+          output.push(relative);
       }
     }
   }
@@ -284,19 +291,30 @@ class MobileArtifactsTarget implements WorkspaceTarget {
     // Expo's filesystem module loads React Native bindings, so defer it until an artifact tool is
     // actually used. This also keeps the portable workspace runtime testable outside Android.
     const { Directory, File, Paths } = await import('expo-file-system');
-    const root = new Directory(Paths.document, 'drone-hub-native-artifacts-v1', encodeURIComponent(this.threadId));
+    const root = new Directory(
+      Paths.document,
+      'drone-hub-native-artifacts-v1',
+      encodeURIComponent(this.threadId),
+    );
     root.create({ idempotent: true, intermediates: true });
     const parts = artifactPathParts(call.args.path);
     if (call.tool === 'list_files') {
       const directory = this.directory(root, Directory, parts);
-      if (!directory.exists) throw new Error(`Artifact directory not found: ${parts.join('/') || '.'}`);
+      if (!directory.exists)
+        throw new Error(`Artifact directory not found: ${parts.join('/') || '.'}`);
       const limit = Math.max(1, Math.min(1000, Number(call.args.limit) || 200));
-      const entries = directory.list().slice(0, limit).map((entry: any) => ({
-        name: entry.name,
-        type: entry instanceof Directory ? 'directory' : 'file',
-        ...(entry instanceof File ? { size: entry.size } : {}),
-      }));
-      return { content: [{ type: 'text', text: JSON.stringify(entries, null, 2) }], details: { entries, target: this.descriptor } };
+      const entries = directory
+        .list()
+        .slice(0, limit)
+        .map((entry: any) => ({
+          name: entry.name,
+          type: entry instanceof Directory ? 'directory' : 'file',
+          ...(entry instanceof File ? { size: entry.size } : {}),
+        }));
+      return {
+        content: [{ type: 'text', text: JSON.stringify(entries, null, 2) }],
+        details: { entries, target: this.descriptor },
+      };
     }
     if (call.tool === 'read_file') {
       const file = this.file(root, File, parts);
@@ -305,7 +323,15 @@ class MobileArtifactsTarget implements WorkspaceTarget {
       const offset = Math.max(0, Number(call.args.offset) || 0);
       const limit = Math.max(1, Math.min(5000, Number(call.args.limit) || 1000));
       const text = lines.slice(offset, offset + limit).join('\n');
-      return { content: [{ type: 'text', text }], details: { path: parts.join('/'), offset, lines: Math.min(limit, Math.max(0, lines.length - offset)), target: this.descriptor } };
+      return {
+        content: [{ type: 'text', text }],
+        details: {
+          path: parts.join('/'),
+          offset,
+          lines: Math.min(limit, Math.max(0, lines.length - offset)),
+          target: this.descriptor,
+        },
+      };
     }
     if (call.tool === 'search_files') {
       const directory = this.directory(root, Directory, parts);
@@ -313,17 +339,37 @@ class MobileArtifactsTarget implements WorkspaceTarget {
       if (!query) throw new Error('A search query is required');
       const mode = call.args.mode === 'content' ? 'content' : 'name';
       const matches: string[] = [];
-      await this.search(directory, Directory, File, parts.join('/'), query, mode, matches, Math.max(1, Math.min(500, Number(call.args.limit) || 100)));
-      return { content: [{ type: 'text', text: matches.join('\n') }], details: { matches, target: this.descriptor } };
+      await this.search(
+        directory,
+        Directory,
+        File,
+        parts.join('/'),
+        query,
+        mode,
+        matches,
+        Math.max(1, Math.min(500, Number(call.args.limit) || 100)),
+      );
+      return {
+        content: [{ type: 'text', text: matches.join('\n') }],
+        details: { matches, target: this.descriptor },
+      };
     }
     if (call.tool === 'write_file') {
       const file = this.file(root, File, parts);
-      if (call.args.mode === 'create' && file.exists) throw new Error(`Artifact file already exists: ${parts.join('/')}`);
+      if (call.args.mode === 'create' && file.exists)
+        throw new Error(`Artifact file already exists: ${parts.join('/')}`);
       const parentParts = parts.slice(0, -1);
-      if (parentParts.length > 0) this.directory(root, Directory, parentParts).create({ idempotent: true, intermediates: true });
+      if (parentParts.length > 0)
+        this.directory(root, Directory, parentParts).create({
+          idempotent: true,
+          intermediates: true,
+        });
       file.create({ overwrite: true, intermediates: true });
       file.write(String(call.args.content ?? ''));
-      return { content: [{ type: 'text', text: `Wrote ${parts.join('/')}.` }], details: { path: parts.join('/'), size: file.size, target: this.descriptor } };
+      return {
+        content: [{ type: 'text', text: `Wrote ${parts.join('/')}.` }],
+        details: { path: parts.join('/'), size: file.size, target: this.descriptor },
+      };
     }
     throw new Error(`Unsupported artifact tool: ${call.tool}`);
   }
@@ -341,10 +387,13 @@ export class MobileWorkspaceToolRuntime {
   readonly tools: LocalAssistantTool[];
   private readonly catalog: WorkspaceTargetCatalog;
 
-  constructor(thread: LocalAssistantThread, request: MeshRequest) {
-    const targets: WorkspaceTarget[] = [...workspaceChoices(thread.workspaceTargets).map(
-      (choice) => new MobileWorkspaceTarget(choice.target, choice.handle, request),
-    ), ...(thread.artifactWorkspace ? [new MobileArtifactsTarget(thread.id)] : [])];
+  constructor(thread: LocalAssistantThread, request: MeshRequest, platform?: HttpTransferPlatform) {
+    const targets: WorkspaceTarget[] = [
+      ...workspaceChoices(thread.workspaceTargets).map(
+        (choice) => new MobileWorkspaceTarget(choice.target, choice.handle, request, platform),
+      ),
+      ...(thread.artifactWorkspace ? [new MobileArtifactsTarget(thread.id)] : []),
+    ];
     this.catalog = new WorkspaceTargetCatalog(targets);
     const descriptors = this.catalog.list();
     const workspaceTools = Object.entries(definitions).flatMap(([name, definition]) => {
@@ -454,10 +503,7 @@ export class MobileWorkspaceToolRuntime {
     this.tools = [...selectionTools, ...workspaceTools, ...transferTools];
   }
 
-  private resolveTargetId(
-    capability: WorkspaceCapability,
-    args: Record<string, unknown>,
-  ): string {
+  private resolveTargetId(capability: WorkspaceCapability, args: Record<string, unknown>): string {
     const requestedTarget = String(args.target ?? args.workspace ?? '').trim();
     let targetId = requestedTarget;
     if (!targetId) {
@@ -526,7 +572,9 @@ export class MobileWorkspaceToolRuntime {
     }
     const definition = definitions[name];
     if (!definition) throw new Error(`Unsupported workspace tool: ${input.name}`);
-    const invocation = this.catalog.beginCall(this.resolveTargetId(definition.capability, input.args));
+    const invocation = this.catalog.beginCall(
+      this.resolveTargetId(definition.capability, input.args),
+    );
     try {
       const { target: _target, workspace: _workspace, ...args } = input.args;
       const result = await invocation.target.execute({
@@ -544,8 +592,12 @@ export class MobileWorkspaceToolRuntime {
   }
 }
 
-export function createWorkspaceToolRuntime(thread: LocalAssistantThread, request: MeshRequest) {
-  return new MobileWorkspaceToolRuntime(thread, request);
+export function createWorkspaceToolRuntime(
+  thread: LocalAssistantThread,
+  request: MeshRequest,
+  platform?: HttpTransferPlatform,
+) {
+  return new MobileWorkspaceToolRuntime(thread, request, platform);
 }
 
 export function workspaceToolsForThread(thread: LocalAssistantThread): LocalAssistantTool[] {

@@ -48,16 +48,28 @@ describe('phone assistant workspace tools', () => {
             (runtime as any).__retried = true;
             throw new Error('connection closed');
           }
-          return { dataBase64: 'YWJj', bytes: 3 };
+          return { download: { url: 'https://source/file', token: 'secret', size: 3 } };
         }
-        if (operation === 'files.transfer.prepare') return { offset: 0 };
-        if (operation === 'files.transfer.write') {
+        if (operation === 'files.transfer.prepare') {
           expect(deviceId).toBe('destination_device');
           expect(payload.workspaceId).toBe('destination');
-          return { offset: 3 };
+          return {
+            offset: 0,
+            upload: { url: 'https://destination/file', token: 'secret', size: 3 },
+          };
         }
         if (operation === 'files.transfer.commit') return { ok: true };
         throw new Error(`unexpected operation: ${operation}`);
+      },
+      {
+        fetchImpl: (async () => new Response('abc')) as typeof fetch,
+        createSink: async () => ({
+          write: async (bytes) => {
+            expect(new TextDecoder().decode(bytes)).toBe('abc');
+          },
+          finish: async () => 3,
+          close: async () => undefined,
+        }),
       },
     );
     expect(runtime.tools.map((tool) => tool.function.name)).toContain('transfer_files');

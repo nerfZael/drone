@@ -28,7 +28,9 @@ export function migrateDeviceMeshGrants(grants: readonly CapabilityGrant[]): Cap
   ];
   const next = grants.map((grant) => ({
     ...grant,
-    operations: grant.operations.filter((operation: string) => !legacySidebarOperations.has(operation)),
+    operations: grant.operations.filter(
+      (operation: string) => !legacySidebarOperations.has(operation),
+    ),
   }));
   const droneControl = next.find(
     (grant) => grant.capability === 'drone-control' && grant.version === 1,
@@ -85,8 +87,11 @@ export class DeviceMeshStore {
 
   async read(): Promise<DeviceMeshState> {
     if (this.state) return this.state;
+    let loadedExisting = false;
     try {
-      this.state = JSON.parse(await fs.readFile(this.statePath, 'utf8')) as DeviceMeshState;
+      const raw = await fs.readFile(this.statePath, 'utf8');
+      loadedExisting = true;
+      this.state = JSON.parse(raw) as DeviceMeshState;
       this.state.routes ??= {};
       this.state.invitations ??= {};
       this.state.pending ??= {};
@@ -100,12 +105,15 @@ export class DeviceMeshStore {
       }
       if (this.state.selfDeviceId !== this.identity.id || !this.state.devices[this.identity.id]) {
         throw new Error(
-          'device mesh identity does not match its state; restore the original identity or remove the device-mesh data directory',
+          'device mesh identity does not match its state; data is preserved; restore the original identity before continuing',
         );
       }
       if (grantsMigrated) await this.persist();
     } catch (error: any) {
-      if (error?.code !== 'ENOENT') throw error;
+      if (loadedExisting || error?.code !== 'ENOENT') {
+        this.state = null;
+        throw error;
+      }
       const at = now();
       const self: MeshDevice = {
         id: this.identity.id,
@@ -203,6 +211,11 @@ export class DeviceMeshStore {
     if (!state) return;
     this.writes = this.writes.then(async () => {
       await fs.mkdir(path.dirname(this.statePath), { recursive: true });
+      try {
+        await fs.copyFile(this.statePath, `${this.statePath}.pre-http-v2`, 1);
+      } catch (error: any) {
+        if (error?.code !== 'ENOENT' && error?.code !== 'EEXIST') throw error;
+      }
       const tempPath = `${this.statePath}.${process.pid}.tmp`;
       await fs.writeFile(tempPath, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
       await fs.rename(tempPath, this.statePath);

@@ -86,6 +86,8 @@ function wait(ms: number, signal: AbortSignal): Promise<void> {
 export async function claimPairing(
   payload: PairingPayload,
   identity: MobileDeviceIdentity,
+  signal?: AbortSignal,
+  discovered = false,
 ): Promise<{
   pendingId: string;
   claimSecret: string;
@@ -102,14 +104,19 @@ export async function claimPairing(
     expiresAt: payload.expiresAt,
     device: identity,
   };
-  const response = await fetch(`${payload.endpoint}/api/device-mesh/invitations/claim`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      ...unsignedClaim,
-      signature: await identity.sign(pairingClaimSigningText(unsignedClaim)),
-    }),
-  });
+  const response = await fetch(
+    `${payload.endpoint}/api/device-mesh/${discovered ? 'pairing/request' : 'invitations/claim'}`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      signal,
+      redirect: 'error',
+      body: JSON.stringify({
+        ...unsignedClaim,
+        signature: await identity.sign(pairingClaimSigningText(unsignedClaim)),
+      }),
+    },
+  );
   const body = await responseJson(response);
   return { pendingId: String(body.pendingId), claimSecret };
 }
@@ -121,8 +128,15 @@ export async function waitForPairingApproval(
   signal: AbortSignal,
 ): Promise<PairingApproval> {
   while (!signal.aborted) {
+    if (Date.now() >= Date.parse(payload.expiresAt))
+      throw new Error('Pairing request expired. Find the Hub and request approval again.');
     const url = `${payload.endpoint}/api/device-mesh/invitations/${encodeURIComponent(pendingId)}/status?claimSecret=${encodeURIComponent(claimSecret)}`;
-    const body = await responseJson(await fetch(url, { signal }));
+    const body = await responseJson(
+      await fetch(url, {
+        signal: AbortSignal.any([signal, AbortSignal.timeout(10000)]),
+        redirect: 'error',
+      }),
+    );
     if (body.status === 'approved') return body.approval as PairingApproval;
     if (body.status === 'rejected')
       throw new Error('The other device rejected this pairing request.');

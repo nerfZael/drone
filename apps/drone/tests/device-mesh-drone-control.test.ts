@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { MESH_BINARY_CHUNK_BYTES, MESH_CHAT_PAYLOAD_BYTES } from '@drone/device-protocol';
+import { MESH_CHAT_PAYLOAD_BYTES } from '@drone/device-protocol';
 import {
   createDroneControlCapability,
   deviceMeshDroneSummary,
@@ -2279,14 +2279,7 @@ describe('device mesh drone summaries', () => {
         droneId: 'one',
         path: '/work/repo',
       });
-      expect(listResult.contentChunk).toMatchObject({
-        encoding: 'base64-json-utf8',
-        offset: 0,
-        done: true,
-      });
-      expect(
-        JSON.parse(Buffer.from(listResult.contentChunk.dataBase64, 'base64').toString('utf8')),
-      ).toMatchObject({ path: '/work/repo', entries: [{ name: 'src' }] });
+      expect(listResult).toMatchObject({ path: '/work/repo', entries: [{ name: 'src' }] });
       await expect(
         capability.invoke('file.action', {
           droneId: 'one',
@@ -2340,7 +2333,7 @@ describe('device mesh drone summaries', () => {
     }
   });
 
-  test('chunks large mobile directory listings below the mesh response limit', async () => {
+  test('returns a large directory listing in one bounded JSON response', async () => {
     const originalFetch = globalThis.fetch;
     let listRequests = 0;
     const entries = Array.from({ length: 3_000 }, (_, index) => ({
@@ -2367,46 +2360,16 @@ describe('device mesh drone summaries', () => {
         },
         context,
       );
-      expect(first.contentChunk).toMatchObject({
-        encoding: 'base64-json-utf8',
-        offset: 0,
-        done: false,
-      });
-      const second: any = await capability.invoke(
-        'files.list',
-        {
-          droneId: 'one',
-          path: '/work/repo',
-          contentOffset: first.contentChunk.bytes,
-          snapshotToken: first.contentChunk.snapshotToken,
-        },
-        context,
-      );
-      expect(second.contentChunk).toMatchObject({
-        encoding: 'base64-json-utf8',
-        offset: first.contentChunk.bytes,
-      });
-      expect(first.contentChunk.totalBytes).toBeGreaterThan(first.contentChunk.bytes);
-      expect(second.contentChunk.snapshotToken).toBe(first.contentChunk.snapshotToken);
+      expect(first).toMatchObject({ path: '/work/repo', entries });
       expect(listRequests).toBe(1);
-      await expect(
-        capability.invoke(
-          'files.list',
-          {
-            droneId: 'one',
-            path: '/work/other',
-            contentOffset: first.contentChunk.bytes,
-            snapshotToken: first.contentChunk.snapshotToken,
-          },
-          context,
-        ),
-      ).rejects.toThrow('does not match');
+      expect(Buffer.byteLength(JSON.stringify(first))).toBeGreaterThan(256 * 1024);
+      expect(Buffer.byteLength(JSON.stringify(first))).toBeLessThan(6 * 1024 * 1024);
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 
-  test('prevents directory snapshots from publishing after owner lifecycle cleanup', async () => {
+  test('prevents directory reads from publishing after owner lifecycle cleanup', async () => {
     const originalFetch = globalThis.fetch;
     try {
       for (const lifecycle of ['revokeDevice', 'disconnectDevice', 'accessChanged'] as const) {
@@ -2458,7 +2421,7 @@ describe('device mesh drone summaries', () => {
             sourceDevice: { id: 'phone-a' },
             requestId: `${lifecycle}-new`,
           } as any),
-        ).resolves.toMatchObject({ contentChunk: { encoding: 'base64-json-utf8' } });
+        ).resolves.toMatchObject({ entries: expect.any(Array) });
         capability.close?.();
       }
     } finally {
@@ -2466,152 +2429,69 @@ describe('device mesh drone summaries', () => {
     }
   });
 
-  test('returns chunked text and media file previews', async () => {
+  test('returns text as JSON and media as a scoped HTTP download without fetching binary data', async () => {
     const originalFetch = globalThis.fetch;
-    const mediaBytes = Buffer.alloc(MESH_BINARY_CHUNK_BYTES + 3, 7);
-    const mediaRequests: string[] = [];
-    const mediaMaxRequests: string[] = [];
-    const fileRequests: string[] = [];
-    globalThis.fetch = (async (input, init) => {
+    const tickets: any[] = [];
+    globalThis.fetch = (async (input) => {
       const url = new URL(String(input));
-      const filePath = url.searchParams.get('path');
-      if (url.pathname.endsWith('/fs/file')) {
-        fileRequests.push(
-          `${url.searchParams.get('metadata') ?? ''}:${url.searchParams.get('revision') ?? ''}`,
-        );
-        const body = filePath?.endsWith('.md')
+      expect(url.pathname.endsWith('/fs/file')).toBe(true);
+      return Response.json(
+        url.searchParams.get('path')?.endsWith('.md')
           ? {
-              ok: true,
               path: '/work/repo/README.md',
               kind: 'text',
               mime: 'text/markdown',
-              content: '# Preview',
               size: 9,
-              mtimeMs: 100,
-              revision: url.searchParams.get('revision') === '0' ? null : 'sha256:text',
+              content: '# Preview',
+              revision: 'sha256:text',
             }
           : {
-              ok: true,
               path: '/work/repo/demo.mp4',
               kind: 'video',
               mime: 'video/mp4',
-              size: mediaBytes.length,
-              mtimeMs: 200,
-              revision: url.searchParams.get('revision') === '0' ? null : 'sha256:video',
-            };
-        return Response.json(body);
-      }
-      if (url.pathname.endsWith('/fs/media')) {
-        mediaRequests.push(url.searchParams.get('revision') ?? '');
-        mediaMaxRequests.push(url.searchParams.get('maxBytes') ?? '');
-        return new Response(mediaBytes, { headers: { 'content-type': 'video/mp4' } });
-      }
-      return Response.json({ error: 'not found' }, { status: 404 });
-    }) as typeof fetch;
-    try {
-      const capability = createDroneControlCapability({
-        baseUrl: () => 'http://127.0.0.1:7777',
-        apiToken: 'test',
-      });
-      const textResult: any = await capability.invoke('file.preview', {
-        droneId: 'one',
-        path: '/work/repo/README.md',
-      });
-      const decodedText = JSON.parse(
-        Buffer.from(textResult.contentChunk.dataBase64, 'base64').toString('utf8'),
+              size: 300000,
+              revision: 'sha256:video',
+            },
       );
-      expect(decodedText).toMatchObject({
-        kind: 'text',
-        mime: 'text/markdown',
-        content: '# Preview',
-        revision: 'sha256:text',
+    }) as typeof fetch;
+    const capability = createDroneControlCapability(
+      { baseUrl: () => 'http://127.0.0.1:7777', apiToken: 'test' },
+      undefined,
+      {
+        transfers: {
+          prepare: (...args: any[]) => {
+            tickets.push(args);
+            return { url: 'https://peer/content', token: 'secret' };
+          },
+        } as any,
+      },
+    );
+    try {
+      expect(
+        await capability.invoke('file.preview', { droneId: 'one', path: '/work/repo/README.md' }),
+      ).toMatchObject({
+        content: { content: '# Preview', revision: 'sha256:text' },
       });
-
-      await expect(
-        capability.invoke('file.preview', {
-          droneId: 'one',
-          path: '/work/repo/README.md',
-          metadataOnly: true,
-        }),
-      ).resolves.toMatchObject({
-        preview: { kind: 'text', revision: 'sha256:text' },
+      expect(
+        await capability.invoke('file.preview', { droneId: 'one', path: '/work/repo/demo.mp4' }, {
+          sourceDevice: { id: 'phone' },
+        } as any),
+      ).toMatchObject({
+        preview: { size: 300000, revision: 'sha256:video' },
+        transfer: { url: 'https://peer/content', token: 'secret' },
       });
-
-      const firstMedia: any = await capability.invoke('file.preview', {
-        droneId: 'one',
-        path: '/work/repo/demo.mp4',
-      });
-      expect(firstMedia).toMatchObject({
-        preview: {
-          kind: 'video',
-          mime: 'video/mp4',
-          size: mediaBytes.length,
-          revision: 'sha256:video',
-        },
-        mediaChunk: {
-          encoding: 'base64-binary',
-          offset: 0,
-          bytes: MESH_BINARY_CHUNK_BYTES,
-          totalBytes: mediaBytes.length,
-          done: false,
-        },
-      });
+      expect(tickets[0][0]).toBe('phone');
+      expect(tickets[0][1]).toContain('revision=sha256%3Avideo');
+      expect(tickets[0][2]).toBe(300000);
       await expect(
         capability.invoke('file.preview', {
           droneId: 'one',
           path: '/work/repo/demo.mp4',
-          contentOffset: MESH_BINARY_CHUNK_BYTES,
-          expectedRevision: 'sha256:other',
-          mediaSnapshot: true,
-          snapshotToken: firstMedia.mediaChunk.snapshotToken,
+          expectedRevision: 'sha256:old',
         }),
-      ).rejects.toThrow('does not match');
-      await expect(
-        capability.invoke('file.preview', {
-          droneId: 'one',
-          path: '/work/repo/demo.mp4',
-          contentOffset: MESH_BINARY_CHUNK_BYTES,
-          expectedRevision: 'sha256:video',
-          mediaSnapshot: true,
-          snapshotToken: firstMedia.mediaChunk.snapshotToken,
-        }),
-      ).resolves.toMatchObject({
-        preview: { revision: 'sha256:video' },
-        mediaChunk: {
-          offset: MESH_BINARY_CHUNK_BYTES,
-          bytes: 3,
-          totalBytes: mediaBytes.length,
-          done: true,
-        },
-      });
-      const cancelledMedia: any = await capability.invoke('file.preview', {
-        droneId: 'one',
-        path: '/work/repo/demo.mp4',
-      });
-      await expect(
-        capability.invoke('file.preview', {
-          droneId: 'one',
-          path: '/work/repo/demo.mp4',
-          expectedRevision: 'sha256:video',
-          mediaSnapshot: true,
-          snapshotToken: cancelledMedia.mediaChunk.snapshotToken,
-          cancelSnapshot: true,
-        }),
-      ).resolves.toEqual({ cancelled: true });
-      await expect(
-        capability.invoke('file.preview', {
-          droneId: 'one',
-          path: '/work/repo/demo.mp4',
-          contentOffset: MESH_BINARY_CHUNK_BYTES,
-          expectedRevision: 'sha256:video',
-          mediaSnapshot: true,
-          snapshotToken: cancelledMedia.mediaChunk.snapshotToken,
-        }),
-      ).rejects.toMatchObject({ code: 'TRANSFER_EXPIRED' });
-      expect(mediaRequests).toEqual(['sha256:video', 'sha256:video']);
-      expect(mediaMaxRequests).toEqual([String(32 * 1024 * 1024), String(32 * 1024 * 1024)]);
-      expect(fileRequests).toEqual([':', '1:1', '1:0', '1:1', '1:0', '1:1']);
+      ).rejects.toMatchObject({ code: 'FILE_REVISION_MISMATCH' });
     } finally {
+      capability.close?.();
       globalThis.fetch = originalFetch;
     }
   });
@@ -2635,10 +2515,14 @@ describe('device mesh drone summaries', () => {
       }
       return Response.json({ error: 'not found' }, { status: 404 });
     }) as typeof fetch;
-    const capability = createDroneControlCapability({
-      baseUrl: () => 'http://127.0.0.1:7777',
-      apiToken: 'test',
-    });
+    const capability = createDroneControlCapability(
+      {
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      },
+      undefined,
+      { transfers: { prepare: () => ({ url: 'https://peer/content', token: 'secret' }) } } as any,
+    );
     const base = {
       ok: true,
       path: '/work/repo/demo.mp4',
@@ -2660,7 +2544,7 @@ describe('device mesh drone summaries', () => {
       await expect(
         capability.invoke('file.preview', { droneId: 'one', path: base.path }),
       ).resolves.toMatchObject({ preview: { size: 4, revision: 'sha256:smaller' } });
-      expect(mediaRequests).toBe(1);
+      expect(mediaRequests).toBe(0);
 
       initial = { ...base, size: 4, revision: null };
       authoritative = { ...base, path: '/work/repo/other.mp4', size: 4, revision: 'sha256:moved' };
@@ -2680,165 +2564,65 @@ describe('device mesh drone summaries', () => {
           expectedRevision: 'sha256:old',
         }),
       ).rejects.toMatchObject({ code: 'FILE_REVISION_MISMATCH' });
-      expect(mediaRequests).toBe(1);
+      expect(mediaRequests).toBe(0);
     } finally {
       capability.close?.();
       globalThis.fetch = originalFetch;
     }
   });
 
-  test('keeps two concurrent media snapshots live with size-based reservations', async () => {
+  test('does not issue media tickets after revocation, disconnect, or access changes', async () => {
     const originalFetch = globalThis.fetch;
-    const mediaBytes = Buffer.alloc(MESH_BINARY_CHUNK_BYTES * 2 + 3, 9);
-    let mediaStarted = 0;
-    let releaseMedia!: () => void;
-    const mediaGate = new Promise<void>((resolve) => {
-      releaseMedia = resolve;
-    });
-    globalThis.fetch = (async (input) => {
-      const url = new URL(String(input));
-      const filePath = url.searchParams.get('path') ?? '/work/repo/demo.mp4';
-      if (url.pathname.endsWith('/fs/file')) {
-        return Response.json({
-          ok: true,
-          path: filePath,
-          kind: 'video',
-          mime: 'video/mp4',
-          size: mediaBytes.length,
-          mtimeMs: 1,
-          revision: url.searchParams.get('revision') === '0' ? null : `sha256:${filePath}`,
-        });
-      }
-      if (url.pathname.endsWith('/fs/media')) {
-        mediaStarted += 1;
-        await mediaGate;
-        return new Response(mediaBytes, {
-          headers: { 'content-type': 'video/mp4', 'content-length': String(mediaBytes.length) },
-        });
-      }
-      return Response.json({ error: 'not found' }, { status: 404 });
-    }) as typeof fetch;
-    const capability = createDroneControlCapability({
-      baseUrl: () => 'http://127.0.0.1:7777',
-      apiToken: 'test',
-    });
     try {
-      const firstPromise: Promise<any> = capability.invoke(
-        'file.preview',
-        { droneId: 'one', path: '/work/repo/first.mp4' },
-        { sourceDevice: { id: 'phone-a' }, requestId: 'first' } as any,
-      );
-      const secondPromise: Promise<any> = capability.invoke(
-        'file.preview',
-        { droneId: 'one', path: '/work/repo/second.mp4' },
-        { sourceDevice: { id: 'phone-b' }, requestId: 'second' } as any,
-      );
-      for (let attempt = 0; attempt < 20 && mediaStarted < 2; attempt += 1) await Bun.sleep(1);
-      expect(mediaStarted).toBe(2);
-      releaseMedia();
-      const [first, second] = await Promise.all([firstPromise, secondPromise]);
-      expect(first.mediaChunk.snapshotToken).toBeString();
-      expect(second.mediaChunk.snapshotToken).toBeString();
-
-      for (const [result, sourceDeviceId, filePath] of [
-        [first, 'phone-a', '/work/repo/first.mp4'],
-        [second, 'phone-b', '/work/repo/second.mp4'],
-      ] as const) {
-        await expect(
-          capability.invoke(
-            'file.preview',
-            {
-              droneId: 'one',
-              path: filePath,
-              contentOffset: MESH_BINARY_CHUNK_BYTES,
-              expectedRevision: `sha256:${filePath}`,
-              mediaSnapshot: true,
-              snapshotToken: result.mediaChunk.snapshotToken,
-            },
-            { sourceDevice: { id: sourceDeviceId }, requestId: `${sourceDeviceId}-next` } as any,
-          ),
-        ).resolves.toMatchObject({
-          mediaChunk: { offset: MESH_BINARY_CHUNK_BYTES },
+      for (const lifecycle of ['revokeDevice', 'disconnectDevice', 'accessChanged'] as const) {
+        let release!: () => void;
+        let started!: () => void;
+        let tickets = 0;
+        const gate = new Promise<void>((resolve) => {
+          release = resolve;
         });
-      }
-    } finally {
-      releaseMedia();
-      capability.close?.();
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  test('aborts owner reservations and rejects late media after lifecycle cleanup', async () => {
-    const originalFetch = globalThis.fetch;
-    const mediaBytes = Buffer.alloc(MESH_BINARY_CHUNK_BYTES + 1, 4);
-    try {
-      for (const lifecycle of [
-        'revokeDevice',
-        'disconnectDevice',
-        'accessChanged',
-        'close',
-      ] as const) {
-        let mediaStarted = false;
-        let mediaSignal: AbortSignal | undefined;
-        let finishMedia!: () => void;
-        let holdMedia = true;
-        const mediaGate = new Promise<void>((resolve) => {
-          finishMedia = resolve;
+        const ready = new Promise<void>((resolve) => {
+          started = resolve;
         });
-        globalThis.fetch = (async (input, init) => {
-          const url = new URL(String(input));
-          if (url.pathname.endsWith('/fs/file')) {
-            return Response.json({
-              ok: true,
-              path: '/work/repo/video.mp4',
-              kind: 'video',
-              mime: 'video/mp4',
-              size: mediaBytes.length,
-              mtimeMs: 1,
-              revision: url.searchParams.get('revision') === '0' ? null : 'sha256:video',
-            });
-          }
-          if (url.pathname.endsWith('/fs/media')) {
-            mediaStarted = true;
-            mediaSignal = init?.signal ?? undefined;
-            if (holdMedia) await mediaGate;
-            return new Response(mediaBytes, {
-              headers: {
-                'content-type': 'video/mp4',
-                'content-length': String(mediaBytes.length),
-              },
-            });
-          }
-          return Response.json({ error: 'not found' }, { status: 404 });
+        globalThis.fetch = (async () => {
+          started();
+          await gate;
+          return Response.json({
+            path: '/work/video.mp4',
+            kind: 'video',
+            mime: 'video/mp4',
+            size: 10,
+            revision: 'sha256:video',
+          });
         }) as typeof fetch;
-        const capability = createDroneControlCapability({
-          baseUrl: () => 'http://127.0.0.1:7777',
-          apiToken: 'test',
-        });
-        const pending = capability.invoke(
-          'file.preview',
-          { droneId: 'one', path: '/work/repo/video.mp4' },
-          { sourceDevice: { id: 'phone-a' }, requestId: lifecycle } as any,
+        const capability = createDroneControlCapability(
+          { baseUrl: () => 'http://127.0.0.1:7777', apiToken: 'test' },
+          undefined,
+          {
+            transfers: {
+              prepare: () => {
+                tickets++;
+                return {};
+              },
+            },
+          } as any,
         );
-        for (let attempt = 0; attempt < 20 && !mediaStarted; attempt += 1) await Bun.sleep(1);
-        expect(mediaStarted).toBe(true);
-
-        if (lifecycle === 'close') capability.close?.();
-        else await capability[lifecycle]?.('phone-a');
-        expect(mediaSignal?.aborted).toBe(true);
-        finishMedia();
-        await expect(pending).rejects.toMatchObject({
-          code: lifecycle === 'close' ? 'CAPABILITY_CLOSED' : 'TRANSFER_EXPIRED',
-        });
-
-        if (lifecycle !== 'close') {
-          holdMedia = false;
-          await expect(
-            capability.invoke('file.preview', { droneId: 'one', path: '/work/repo/video.mp4' }, {
-              sourceDevice: { id: 'phone-b' },
-              requestId: `${lifecycle}-next`,
-            } as any),
-          ).resolves.toMatchObject({ mediaChunk: { snapshotToken: expect.any(String) } });
+        try {
+          const pending = capability.invoke(
+            'file.preview',
+            { droneId: 'one', path: '/work/video.mp4' },
+            { sourceDevice: { id: 'phone' } } as any,
+          );
+          const settled = pending.then(
+            () => null,
+            (error: unknown) => error,
+          );
+          await ready;
+          await capability[lifecycle]?.('phone');
+          release();
+          expect(await settled).toBeInstanceOf(Error);
+          expect(tickets).toBe(0);
+        } finally {
           capability.close?.();
         }
       }

@@ -21,6 +21,7 @@ export type MeshStatus = {
   devices: MeshDevice[];
   pending: Array<{ id: string; device: MeshDevice; requestedAt: string }>;
   connectedDeviceIds: string[];
+  connectionErrors?: Record<string, string>;
   capabilities: MeshCapability[];
 };
 export type MeshInvitation = {
@@ -57,20 +58,23 @@ export function useDeviceMesh(requestJson: RequestJson) {
   const invitationRequest = React.useRef<Promise<void> | null>(null);
   const statusRefresh = React.useRef(new CoalescedRefresh());
 
-  const readStatus = React.useCallback(async (reportErrors: boolean) => {
-    if (reportErrors) {
-      setLoading(true);
-      setError(null);
-    }
-    try {
-      const next = await requestJson<{ ok: true } & MeshStatus>('/api/device-mesh');
-      setStatus((current) => sameMeshStatus(current, next) ? current : next);
-    } catch (nextError: any) {
-      if (reportErrors) setError(nextError?.message ?? String(nextError));
-    } finally {
-      if (reportErrors) setLoading(false);
-    }
-  }, [requestJson]);
+  const readStatus = React.useCallback(
+    async (reportErrors: boolean) => {
+      if (reportErrors) {
+        setLoading(true);
+        setError(null);
+      }
+      try {
+        const next = await requestJson<{ ok: true } & MeshStatus>('/api/device-mesh');
+        setStatus((current) => (sameMeshStatus(current, next) ? current : next));
+      } catch (nextError: any) {
+        if (reportErrors) setError(nextError?.message ?? String(nextError));
+      } finally {
+        if (reportErrors) setLoading(false);
+      }
+    },
+    [requestJson],
+  );
 
   const load = React.useCallback(
     async () => await statusRefresh.current.request(() => readStatus(true), 1),

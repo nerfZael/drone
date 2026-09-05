@@ -868,7 +868,8 @@ async function readManagedHubStateAtRoot(rootDir: string): Promise<ManagedHubSta
     containerMcp: parseManagedHubContainerMcpState(parsed.containerMcp),
     startedAt: typeof parsed.startedAt === 'string' ? parsed.startedAt : new Date().toISOString(),
     logPath: typeof parsed.logPath === 'string' ? parsed.logPath : path.join(rootDir, 'hub.log'),
-    buildId: typeof parsed.buildId === 'string' && parsed.buildId.trim() ? parsed.buildId.trim() : null,
+    buildId:
+      typeof parsed.buildId === 'string' && parsed.buildId.trim() ? parsed.buildId.trim() : null,
     launchEnv: parsed.launchEnv ?? null,
   };
 }
@@ -2990,10 +2991,7 @@ function createHubRuntimeGraph(
       hubLog('info', message, meta);
     },
   });
-  const {
-    resolveManagedChatMcpEnv,
-    syncManagedFilesForDrone,
-  } = mcpProjectionFeature;
+  const { resolveManagedChatMcpEnv, syncManagedFilesForDrone } = mcpProjectionFeature;
 
   const chatSessionRuntime = createChatSessionRuntime({
     applyChatReconciliationInStore,
@@ -5275,12 +5273,14 @@ async function startDroneHubApiServerWithLifecycle(
     record('snapshotEventLoopDelay', eventLoopStartedAt);
     const sourcesStartedAt = performance.now();
     const [regAny, canonicalGroups, preferences] = await Promise.all([
-      measureSource('snapshotRegistry', async () =>
-        await loadPreparedDroneRegistryForSummary(source, timing),
+      measureSource(
+        'snapshotRegistry',
+        async () => await loadPreparedDroneRegistryForSummary(source, timing),
       ),
       measureSource('snapshotGroups', async () => await listCanonicalGroups()),
-      measureSource('snapshotPreferences', async () =>
-        await hubApplication.settings.uiPreferences.read(),
+      measureSource(
+        'snapshotPreferences',
+        async () => await hubApplication.settings.uiPreferences.read(),
       ),
     ]);
     record('snapshotSources', sourcesStartedAt);
@@ -6315,7 +6315,6 @@ async function startDroneHubApiServerWithLifecycle(
     allowedOrigins,
     webSocketServer: wss,
     companionWebSocketServer: companionWss,
-    handleDeviceMeshUpgrade: (req, socket, head) => deviceMesh.handleUpgrade(req, socket, head),
     isSafeSessionName: isSafeTmuxSessionName,
     parseSince: parseOptionalNonNegativeInt,
     parseMaxBytes: (raw) =>

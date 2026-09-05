@@ -84,7 +84,7 @@ describe('mobile file explorer presentation', () => {
     expect(explorer).toContain('directoryRequestsRef.current.finish(path, requestToken)');
     expect(explorer).toContain('void loadDirectoryRef.current?.(path, true)');
     expect(explorer).toContain('directoryAbortControllersRef.current.set(path, requestController)');
-    expect(explorer).toContain('signal: requestController.signal');
+    expect(explorer).toContain('requestController.signal');
     expect(explorer).toContain(
       'for (const controller of directoryAbortControllersRef.current.values()) controller.abort()',
     );

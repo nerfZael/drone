@@ -36,130 +36,63 @@ describe('mesh chat attachment upload', () => {
     expect(requested).toBe(false);
   });
 
-  test('aborts the upload session when a relay chunk fails', async () => {
-    const actions: string[] = [];
-    await expect(
-      uploadMeshChatAttachment({
-        droneId: 'drone-1',
-        chatName: 'default',
-        name: 'photo.png',
-        mime: 'image/png',
-        bytes: new Uint8Array(10),
-        request: async (payload: any) => {
-          const action = payload.attachmentTransfer.action;
-          actions.push(action);
-          if (action === 'prepare') return { uploadId: 'upload-1', maxChunkBytes: 5 };
-          if (action === 'write') throw new Error('relay disconnected');
-          return { aborted: true };
-        },
-      }),
-    ).rejects.toThrow('relay disconnected');
-    expect(actions).toEqual(['prepare', 'write', 'abort']);
-  });
-
-  test('falls back to bounded mesh chunks when direct HTTP is unavailable', async () => {
-    const actions: string[] = [];
-    let generation = 0;
-    let offset = 0;
-    const result = await uploadMeshChatAttachment({
-      endpoint: 'https://desktop.example',
-      droneId: 'drone-1',
-      chatName: 'default',
-      name: 'photo.png',
-      mime: 'image/png',
-      bytes: new Uint8Array(300_000).fill(7),
-      fetchImpl: async () => {
-        throw new Error('offline');
-      },
-      request: async (payload: any) => {
-        const transfer = payload.attachmentTransfer;
-        actions.push(transfer.action);
-        if (transfer.action === 'prepare') {
-          generation += 1;
-          offset = 0;
-          return { uploadId: `upload-${generation}`, uploadToken: 'token', maxChunkBytes: 100_000 };
-        }
-        if (transfer.action === 'abort') return { aborted: true };
-        if (transfer.action === 'write') {
-          expect(transfer.offset).toBe(offset);
-          offset += Buffer.from(transfer.dataBase64, 'base64').length;
-          return { offset };
-        }
-        return {
-          attachmentId: transfer.uploadId,
-          name: 'photo.png',
-          mime: 'image/png',
-          size: offset,
-        };
-      },
+  for (const failure of ['offline', 'incomplete', 'commit']) {
+    test('aborts HTTP upload on ' + failure + ' without legacy fallback', async () => {
+      const actions: string[] = [];
+      await expect(
+        uploadMeshChatAttachment({
+          droneId: 'drone-1',
+          chatName: 'default',
+          name: 'notes.txt',
+          mime: 'text/plain',
+          bytes: new Uint8Array([1]),
+          fetchImpl: (async () => {
+            if (failure === 'offline') throw new Error('offline');
+            return Response.json({ offset: failure === 'incomplete' ? 0 : 1, complete: true });
+          }) as typeof fetch,
+          request: async (payload: any) => {
+            const action = payload.attachmentTransfer.action;
+            actions.push(action);
+            if (action === 'prepare')
+              return { uploadId: 'u1', uploadUrl: 'https://peer/upload', uploadToken: 'secret' };
+            return { aborted: true };
+          },
+        }),
+      ).rejects.toThrow(failure === 'commit' ? 'invalid committed attachment' : failure);
+      expect(actions).toEqual(
+        failure === 'commit' ? ['prepare', 'commit', 'abort'] : ['prepare', 'abort'],
+      );
     });
+  }
 
-    expect(actions).toEqual(['prepare', 'abort', 'prepare', 'write', 'write', 'write', 'commit']);
-    expect(result).toEqual({
-      attachmentId: 'upload-2',
-      name: 'photo.png',
-      mime: 'image/png',
-      size: 300_000,
-    });
-  });
-
-  test('falls back when a direct upload reports an incomplete offset', async () => {
+  test('uploads binary body once and commits validated metadata', async () => {
     const actions: string[] = [];
-    let generation = 0;
-    let offset = 0;
+    let requests = 0;
     const result = await uploadMeshChatAttachment({
-      endpoint: 'https://desktop.example',
       droneId: 'drone-1',
       chatName: 'default',
       name: 'notes.txt',
       mime: 'text/plain',
-      bytes: new Uint8Array(4).fill(7),
-      fetchImpl: async () => new Response(JSON.stringify({ offset: 0 }), { status: 200 }),
+      bytes: new Uint8Array([1, 2]),
+      fetchImpl: (async (url, init) => {
+        requests++;
+        expect(url).toBe('https://peer/upload');
+        expect((init?.headers as any)['x-upload-token']).toBe('secret');
+        expect(new Uint8Array(await (init!.body as Blob).arrayBuffer())).toEqual(
+          new Uint8Array([1, 2]),
+        );
+        return Response.json({ offset: 2, complete: true });
+      }) as typeof fetch,
       request: async (payload: any) => {
-        const transfer = payload.attachmentTransfer;
-        actions.push(transfer.action);
-        if (transfer.action === 'prepare') {
-          generation += 1;
-          offset = 0;
-          return { uploadId: `upload-${generation}`, uploadToken: 'token', maxChunkBytes: 2 };
-        }
-        if (transfer.action === 'abort') return { aborted: true };
-        if (transfer.action === 'write') {
-          offset += Buffer.from(transfer.dataBase64, 'base64').length;
-          return { offset };
-        }
-        return {
-          attachmentId: transfer.uploadId,
-          name: 'notes.txt',
-          mime: 'text/plain',
-          size: offset,
-        };
+        const action = payload.attachmentTransfer.action;
+        actions.push(action);
+        if (action === 'prepare')
+          return { uploadId: 'u1', uploadUrl: 'https://peer/upload', uploadToken: 'secret' };
+        return { attachmentId: 'a1', name: 'notes.txt', mime: 'text/plain', size: 2 };
       },
     });
-
-    expect(actions).toEqual(['prepare', 'abort', 'prepare', 'write', 'write', 'commit']);
-    expect(result.attachmentId).toBe('upload-2');
-  });
-
-  test('aborts when the commit response is invalid', async () => {
-    const actions: string[] = [];
-    await expect(
-      uploadMeshChatAttachment({
-        droneId: 'drone-1',
-        chatName: 'default',
-        name: 'notes.txt',
-        mime: 'text/plain',
-        bytes: new Uint8Array([1]),
-        request: async (payload: any) => {
-          const transfer = payload.attachmentTransfer;
-          actions.push(transfer.action);
-          if (transfer.action === 'prepare') return { uploadId: 'upload-1' };
-          if (transfer.action === 'write') return { offset: 1 };
-          if (transfer.action === 'commit') return { attachmentId: '' };
-          return { aborted: true };
-        },
-      }),
-    ).rejects.toThrow('invalid committed attachment');
-    expect(actions).toEqual(['prepare', 'write', 'commit', 'abort']);
+    expect(result.attachmentId).toBe('a1');
+    expect(requests).toBe(1);
+    expect(actions).toEqual(['prepare', 'commit']);
   });
 });

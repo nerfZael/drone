@@ -1,3 +1,5 @@
+import { createHttpWorkspaceAdapter } from '@drone/device-protocol';
+import { createWorkspaceUploadSink } from '../../workspace-upload-sink';
 import { runWorkspaceCommandJob, WORKSPACE_CAPABILITY } from '@drone/device-protocol';
 import type { HomeWorkspaceTarget } from './policy-types';
 
@@ -62,39 +64,12 @@ export class RemoteWorkspaceTarget {
         },
         signal,
       );
-    this.transfer = {
-      ...(policy.read
-        ? {
-            source: {
-              stat: (path: string, signal?: AbortSignal) =>
-                transferRequest('files.transfer.stat', { path }, signal),
-              list: async (path: string, signal?: AbortSignal) =>
-                (await transferRequest('files.transfer.list', { path }, signal)).entries,
-              readChunk: (path: string, offset: number, length: number, signal?: AbortSignal) =>
-                transferRequest('files.transfer.read', { path, offset, length }, signal),
-            },
-          }
-        : {}),
-      ...(policy.write
-        ? {
-            destination: {
-              createDirectory: async (path: string, signal?: AbortSignal) => {
-                await transferRequest('files.transfer.mkdir', { path }, signal);
-              },
-              prepareFile: (input: Record<string, unknown>, signal?: AbortSignal) =>
-                transferRequest('files.transfer.prepare', input, signal),
-              writeChunk: (input: Record<string, unknown>, signal?: AbortSignal) =>
-                transferRequest('files.transfer.write', input, signal),
-              commitFile: async (input: Record<string, unknown>, signal?: AbortSignal) => {
-                await transferRequest('files.transfer.commit', input, signal);
-              },
-              abortFile: async (input: Record<string, unknown>, signal?: AbortSignal) => {
-                await transferRequest('files.transfer.abort', input, signal);
-              },
-            },
-          }
-        : {}),
-    };
+    this.transfer = createHttpWorkspaceAdapter({
+      request: transferRequest,
+      read: policy.read,
+      write: policy.write,
+      createSink: createWorkspaceUploadSink,
+    });
   }
 
   async execute(call: {

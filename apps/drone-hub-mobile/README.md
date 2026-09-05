@@ -14,6 +14,8 @@ SDK, USB debugging, and a phone visible to `adb devices`.
 
 To pair:
 
+Open **Devices → Add device** on both devices. On Android, **Nearby** finds Hubs on the same Wi-Fi; **Scan QR**, **Address**, and **Code** are alternative methods. Desktop **Find phones** also scans Tailscale peers across networks. Connection diagnostics and reset live under mobile **Settings → Connections → Connection details & troubleshooting**. See [the discovery test guide](PHONE_DISCOVERY_TEST.md) for native build requirements and real-device checks.
+
 1. Open **Settings → Devices** on an existing Drone Hub.
 2. Enter its reachable HTTPS URL and create a pairing QR.
 3. Scan the QR in this app.
@@ -65,7 +67,7 @@ Chat Completions transport currently commits each model response as a unit. Stop
 session, its model request, and active cancellable mesh command jobs.
 
 Remote drone chats use the `drone-control` capability. While connected, authorized chat-change
-notifications travel over the existing authenticated mesh WebSocket and trigger a debounced refresh
+notifications travel over the authenticated mesh SSE subscription and trigger a debounced refresh
 of the drone list and open transcript.
 
 Drone chat messages detect linked GitHub pull requests and can show their state, checks, review,

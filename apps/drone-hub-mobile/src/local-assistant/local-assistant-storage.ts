@@ -284,24 +284,31 @@ export async function loadLocalAssistantThreads(): Promise<LocalAssistantThread[
   const threads = parseLocalAssistantThreads(stored);
   if (threads) return threads;
   if (stored !== null) {
-    await AsyncStorage.removeItem(THREADS_KEY);
+    throw new Error(
+      'Saved chats could not be read. Their data is preserved; restore the chat store before continuing.',
+    );
   }
 
   const legacyStored = await AsyncStorage.getItem(LEGACY_ASSISTANT_THREADS_KEY);
   const legacyThreads = parseLocalAssistantThreads(legacyStored);
   if (!legacyThreads) {
-    if (legacyStored !== null) await AsyncStorage.removeItem(LEGACY_ASSISTANT_THREADS_KEY);
+    if (legacyStored !== null)
+      throw new Error('Existing chats could not be read. Their data is preserved.');
     return [];
   }
 
   // Keep the old value until the canonical write succeeds so an interrupted upgrade cannot lose
   // the user's chats. Transcript files and assistant preferences remain compatible with the new UI.
   await AsyncStorage.setItem(THREADS_KEY, JSON.stringify(legacyThreads));
-  await AsyncStorage.removeItem(LEGACY_ASSISTANT_THREADS_KEY);
   return legacyThreads;
 }
 
 export async function saveLocalAssistantThreads(threads: LocalAssistantThread[]): Promise<void> {
+  const previous = await AsyncStorage.getItem(THREADS_KEY);
+  if (previous !== null && !parseLocalAssistantThreads(previous))
+    throw new Error('Refusing to overwrite unreadable saved chats');
+  if (previous !== null && (await AsyncStorage.getItem(`${THREADS_KEY}.preHttpV2`)) === null)
+    await AsyncStorage.setItem(`${THREADS_KEY}.preHttpV2`, previous);
   const clean = threads
     .map(cleanThread)
     .filter((thread: LocalAssistantThread | null): thread is LocalAssistantThread =>

@@ -1,4 +1,5 @@
 import { describe, expect, mock, test } from 'bun:test';
+mock.module('expo/fetch', () => ({ fetch: globalThis.fetch }));
 
 mock.module('expo-crypto', () => ({
   getRandomBytes: (length: number) => new Uint8Array(length),
@@ -9,11 +10,11 @@ mock.module('../src/security/device-identity', () => ({
   verifyP256Signature: () => true,
 }));
 
-const { MeshSocket } = await import('../src/mesh/MeshSocket');
+const { MeshSession } = await import('../src/mesh/MeshSession');
 
-describe('MeshSocket requests', () => {
+describe('MeshSession requests', () => {
   test('adopts a refreshed endpoint without disconnecting the live socket', () => {
-    const socket = new MeshSocket(
+    const socket = new MeshSession(
       { deviceId: 'peer-a', endpoint: 'https://old.test', role: 'primary' },
       'network-a',
       {
@@ -61,7 +62,7 @@ describe('MeshSocket requests', () => {
       releaseSigning = resolve;
     });
     const sent: string[] = [];
-    const socket = new MeshSocket(
+    const socket = new MeshSession(
       { deviceId: 'peer-a', endpoint: 'https://peer-a.test', role: 'primary' },
       'network-a',
       {
@@ -118,7 +119,7 @@ describe('MeshSocket requests', () => {
     const signingGate = Promise.withResolvers<void>();
     const oldSent: string[] = [];
     const nextSent: string[] = [];
-    const socket = new MeshSocket(
+    const socket = new MeshSession(
       { deviceId: 'peer-a', endpoint: 'https://peer-a.test', role: 'primary' },
       'network-a',
       {
@@ -174,7 +175,7 @@ describe('MeshSocket requests', () => {
     const signingStarted = Promise.withResolvers<void>();
     const signingGate = Promise.withResolvers<void>();
     const sent: string[] = [];
-    const socket = new MeshSocket(
+    const socket = new MeshSession(
       { deviceId: 'peer-a', endpoint: 'https://peer-a.test', role: 'primary' },
       'network-a',
       {
@@ -225,7 +226,7 @@ describe('MeshSocket requests', () => {
     const signingGate = Promise.withResolvers<void>();
     const oldSent: string[] = [];
     const nextSent: string[] = [];
-    const socket = new MeshSocket(
+    const socket = new MeshSession(
       { deviceId: 'peer-a', endpoint: 'https://peer-a.test', role: 'primary' },
       'network-a',
       {
@@ -293,9 +294,9 @@ describe('MeshSocket requests', () => {
     expect(nextSent).toEqual([]);
   });
 
-  test('cancels a snapshot returned after its initial request was aborted', async () => {
+  test('discards a late HTTP result after cancellation without sending legacy cleanup requests', async () => {
     const sent: string[] = [];
-    const socket = new MeshSocket(
+    const socket = new MeshSession(
       { deviceId: 'peer-a', endpoint: 'https://peer-a.test', role: 'primary' },
       'network-a',
       {
@@ -343,10 +344,9 @@ describe('MeshSocket requests', () => {
     const original = JSON.parse(sent[0] ?? '{}');
     controller.abort();
     await expect(request).rejects.toMatchObject({ name: 'AbortError' });
-    expect(internals.pending.size).toBe(1);
+    expect(internals.pending.size).toBe(0);
 
     const connectTimer = setTimeout(() => undefined, 1_000);
-    const cancellationTimer = setTimeout(() => undefined, 1_000);
     await internals.handleMessage(
       JSON.stringify({
         type: 'capability.response',
@@ -355,13 +355,7 @@ describe('MeshSocket requests', () => {
         sourceDeviceId: 'target-a',
         targetDeviceId: 'mobile-a',
         ok: true,
-        result: {
-          contentChunk: {
-            snapshotToken: 'snapshot-a',
-            encoding: 'base64-json-utf8',
-            dataBase64: 'e30=',
-          },
-        },
+        result: { entries: [] },
       }),
       () => undefined,
       () => undefined,
@@ -371,35 +365,8 @@ describe('MeshSocket requests', () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(internals.pending.size).toBe(1);
-    const cancellation = JSON.parse(sent[1] ?? '{}');
-    expect(cancellation).toMatchObject({
-      targetDeviceId: 'target-a',
-      capability: 'drone-control',
-      operation: 'files.list',
-      payload: {
-        droneId: 'drone-a',
-        path: '/work/repo',
-        snapshotToken: 'snapshot-a',
-        cancelSnapshot: true,
-      },
-    });
-
-    await internals.handleMessage(
-      JSON.stringify({
-        type: 'capability.response',
-        version: 1,
-        requestId: cancellation.requestId,
-        sourceDeviceId: 'target-a',
-        targetDeviceId: 'mobile-a',
-        ok: true,
-        result: { cancelled: true },
-      }),
-      () => undefined,
-      () => undefined,
-      cancellationTimer,
-    );
-    clearTimeout(cancellationTimer);
     expect(internals.pending.size).toBe(0);
+    expect(sent).toHaveLength(2);
+    expect(JSON.parse(sent[1]).type).toBe('capability.cancel');
   });
 });

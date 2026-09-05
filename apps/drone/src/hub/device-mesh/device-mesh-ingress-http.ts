@@ -5,6 +5,7 @@ import {
   type DeviceMeshHttpExtension,
 } from './device-mesh-http';
 import { DeviceMeshIngress } from './device-mesh-ingress';
+import { tailscaleSetupError } from './device-mesh-tailscale';
 
 export class DeviceMeshIngressHttp implements DeviceMeshHttpExtension {
   constructor(private readonly ingress: DeviceMeshIngress) {}
@@ -28,14 +29,24 @@ export class DeviceMeshIngressHttp implements DeviceMeshHttpExtension {
       deviceMeshJson(response, 200, { ok: true, status });
       return true;
     }
-    if (url.pathname === '/api/device-mesh/ingress/ngrok/detect' && method === 'POST') {
-      const status = await this.ingress.detectAndUseNgrok();
-      deviceMeshJson(response, 200, { ok: true, status });
+    if (url.pathname === '/api/device-mesh/ingress/tailscale' && method === 'GET') {
+      const tailscale = await this.ingress.refreshTailscale();
+      deviceMeshJson(response, 200, { ok: true, tailscale });
       return true;
     }
-    if (url.pathname === '/api/device-mesh/ingress/ngrok/start' && method === 'POST') {
-      const result = await this.ingress.startNgrok();
-      deviceMeshJson(response, 200, { ok: true, ...result });
+    if (url.pathname === '/api/device-mesh/ingress/tailscale' && method === 'POST') {
+      try {
+        const status = await this.ingress.enableTailscale();
+        deviceMeshJson(response, 200, { ok: true, status });
+      } catch (error) {
+        const failure = tailscaleSetupError(error);
+        deviceMeshJson(response, 400, {
+          ok: false,
+          error: failure.message,
+          code: failure.code,
+          details: failure.details,
+        });
+      }
       return true;
     }
     return false;

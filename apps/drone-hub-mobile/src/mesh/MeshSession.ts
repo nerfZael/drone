@@ -1,7 +1,10 @@
+import { fetch as expoFetch } from 'expo/fetch';
+import { DeviceHttpEventClient } from '@drone/device-protocol';
 import * as Crypto from 'expo-crypto';
 import {
+  DeviceReadClientCache,
   capabilityRequestSigningText,
-  MESH_SAFE_MESSAGE_BYTES,
+  DEVICE_HTTP_MAX_JSON_BYTES,
   socketAuthSigningText,
   socketServerAuthSigningText,
   type CapabilityResponse,
@@ -18,22 +21,14 @@ import {
 } from './mobile-capability-event-guard';
 import { validateCapabilityEvent } from './validate-capability-event';
 
-function websocketUrl(endpoint: string, deviceId: string): string {
-  const url = new URL(endpoint);
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-  url.pathname = '/api/device-mesh/ws';
-  url.search = `deviceId=${encodeURIComponent(deviceId)}`;
-  return url.toString();
-}
-
 type PendingRequest = {
+  decode(value: unknown): unknown;
   resolve(value: unknown): void;
   reject(error: Error): void;
   timer: ReturnType<typeof setTimeout>;
   targetDeviceId: string;
   signal?: AbortSignal;
   onAbort?: () => void;
-  aborted: boolean;
   capability: string;
   operation: string;
   payload: unknown;
@@ -41,11 +36,17 @@ type PendingRequest = {
 
 const MESH_REQUEST_TIMEOUT_MS = 40_000;
 
-export class MeshSocket {
-  private socket: WebSocket | null = null;
+export class MeshSession {
+  private readonly readCache = new DeviceReadClientCache();
+  private socket: DeviceHttpEventClient | null = null;
   private ready = false;
   private pending = new Map<string, PendingRequest>();
   private connectPromise: Promise<void> | null = null;
+  private lastEventId = '';
+  private readonly reverseRequests = new Map<
+    string,
+    { session: DeviceHttpEventClient; controller: AbortController }
+  >();
 
   constructor(
     connection: MeshConnection,
@@ -56,7 +57,8 @@ export class MeshSocket {
     private readonly onState: () => void,
     private readonly onTopologyChange: () => void,
     private readonly onCapabilityEvent: (event: CapabilityEvent) => void,
-    private readonly capabilityRouter: Pick<MobileCapabilityRouter, 'handle'>,
+    private readonly capabilityRouter: Pick<MobileCapabilityRouter, 'handle'> &
+      Partial<Pick<MobileCapabilityRouter, 'authorized'>>,
     private readonly capabilityEventGuard: MobileCapabilityEventGuard,
   ) {
     this.connection = connection;
@@ -79,7 +81,12 @@ export class MeshSocket {
     if (this.ready) return;
     if (this.connectPromise) return await this.connectPromise;
     const attempt = new Promise<void>((resolve, reject) => {
-      const socket = new WebSocket(websocketUrl(this.connection.endpoint, this.identity.id));
+      const socket = new DeviceHttpEventClient(
+        this.connection.endpoint,
+        this.identity.id,
+        expoFetch as unknown as typeof fetch,
+        this.lastEventId,
+      );
       this.socket = socket;
       const timeout = setTimeout(() => {
         socket.close();
@@ -99,6 +106,7 @@ export class MeshSocket {
         reject(new Error(`Could not reach ${this.connection.endpoint}`));
       };
       socket.onclose = () => {
+        this.lastEventId = socket.lastEventId;
         clearTimeout(timeout);
         if (this.socket !== socket) {
           reject(new Error('Device connection was replaced'));
@@ -122,6 +130,7 @@ export class MeshSocket {
 
   disconnect(): void {
     const socket = this.socket;
+    if (socket) this.lastEventId = socket.lastEventId;
     this.socket = null;
     this.ready = false;
     this.rejectPending('Device connection closed');
@@ -137,8 +146,9 @@ export class MeshSocket {
   ): Promise<unknown> {
     if (signal?.aborted) throw meshRequestCancelledError();
     const socket = this.socket;
-    if (!this.ready || !socket || socket.readyState !== WebSocket.OPEN)
+    if (!this.ready || !socket || socket.readyState !== DeviceHttpEventClient.OPEN)
       throw new Error('No mesh connection is available');
+    const read = this.readCache.prepare(targetDeviceId, capability, operation, payload);
     const issuedAt = new Date();
     const unsigned: Omit<SignedCapabilityRequest, 'signature'> = {
       type: 'capability.request',
@@ -149,7 +159,7 @@ export class MeshSocket {
       capability,
       capabilityVersion: 1,
       operation,
-      payload,
+      payload: read.payload,
       issuedAt: issuedAt.toISOString(),
       expiresAt: new Date(issuedAt.getTime() + 60_000).toISOString(),
       nonce: Crypto.getRandomBytes(18).reduce(
@@ -165,7 +175,7 @@ export class MeshSocket {
     // Signing can yield to the native key store. Do not miss an abort that arrives before the
     // pending-request listener can be installed.
     if (signal?.aborted) throw meshRequestCancelledError();
-    if (!this.ready || this.socket !== socket || socket.readyState !== WebSocket.OPEN) {
+    if (!this.ready || this.socket !== socket || socket.readyState !== DeviceHttpEventClient.OPEN) {
       throw new Error('Mesh connection changed while the request was being signed');
     }
     const serialized = JSON.stringify(request);
@@ -173,27 +183,27 @@ export class MeshSocket {
       typeof TextEncoder === 'undefined'
         ? serialized.length * 3
         : new TextEncoder().encode(serialized).byteLength;
-    if (requestBytes > MESH_SAFE_MESSAGE_BYTES) throw new Error('Mesh request is too large');
+    if (requestBytes > DEVICE_HTTP_MAX_JSON_BYTES) throw new Error('Mesh request is too large');
     return await new Promise((resolve, reject) => {
       if (signal?.aborted) {
         reject(meshRequestCancelledError());
         return;
       }
       const onAbort = () => {
-        const pending = this.pending.get(request.requestId);
-        if (pending && canReturnAbandonedSnapshot(pending)) {
-          pending.aborted = true;
-          clearTimeout(pending.timer);
-          pending.timer = setTimeout(
-            () => {
-              this.pending.delete(request.requestId);
-            },
-            Math.max(0, Date.parse(request.expiresAt) - Date.now() + 5_000),
+        try {
+          socket.send(
+            JSON.stringify({
+              type: 'capability.cancel',
+              sourceDeviceId: this.identity.id,
+              targetDeviceId,
+              requestId: request.requestId,
+            }),
           );
-        } else {
-          clearTimeout(timer);
-          this.pending.delete(request.requestId);
+        } catch {
+          /* Closed session. */
         }
+        clearTimeout(timer);
+        this.pending.delete(request.requestId);
         reject(meshRequestCancelledError());
       };
       const timer = setTimeout(() => {
@@ -202,13 +212,13 @@ export class MeshSocket {
         reject(new Error('Target device did not respond in time.'));
       }, MESH_REQUEST_TIMEOUT_MS);
       this.pending.set(request.requestId, {
+        decode: read.decode,
         resolve,
         reject,
         timer,
         targetDeviceId,
         signal,
         onAbort,
-        aborted: false,
         capability,
         operation,
         payload,
@@ -230,10 +240,10 @@ export class MeshSocket {
     resolveConnect: () => void,
     rejectConnect: (error: Error) => void,
     connectTimer: ReturnType<typeof setTimeout>,
-    sourceSocket: WebSocket | null = this.socket,
+    sourceSocket: DeviceHttpEventClient | null = this.socket,
   ): Promise<void> {
     if (!sourceSocket || this.socket !== sourceSocket) return;
-    if (meshSocketFrameIsTooLarge(raw)) {
+    if (new TextEncoder().encode(raw).byteLength > DEVICE_HTTP_MAX_JSON_BYTES) {
       sourceSocket.close(1009, 'mesh message is too large');
       return;
     }
@@ -255,7 +265,8 @@ export class MeshSocket {
       const signature = await this.identity.sign(
         socketAuthSigningText(this.identity.id, String(message.nonce)),
       );
-      if (this.socket !== sourceSocket || sourceSocket.readyState !== WebSocket.OPEN) return;
+      if (this.socket !== sourceSocket || sourceSocket.readyState !== DeviceHttpEventClient.OPEN)
+        return;
       sourceSocket.send(
         JSON.stringify({
           type: 'auth.response',
@@ -274,6 +285,7 @@ export class MeshSocket {
       }
       this.ready = true;
       this.onState();
+      this.onTopologyChange();
       resolveConnect();
       return;
     }
@@ -281,6 +293,7 @@ export class MeshSocket {
       throw new Error(String(message.message ?? 'Device authentication failed'));
     }
     if (
+      message.type === 'stream.reset' ||
       message.type === 'mesh.membership' ||
       message.type === 'mesh.route' ||
       message.type === 'mesh.revocation'
@@ -314,15 +327,91 @@ export class MeshSocket {
       if (eventDecision === 'accept') this.onCapabilityEvent(event);
       return;
     }
+    if (message.type === 'capability.cancel') {
+      const pending = this.reverseRequests.get(`${message.sourceDeviceId}:${message.requestId}`);
+      if (pending?.session === sourceSocket) pending.controller.abort();
+      return;
+    }
     if (message.type === 'capability.request') {
-      const response = await this.capabilityRouter.handle(message);
-      if (response && this.socket === sourceSocket && sourceSocket.readyState === WebSocket.OPEN) {
-        const serialized = JSON.stringify(response);
-        const responseBytes =
-          typeof TextEncoder === 'undefined'
-            ? serialized.length * 3
-            : new TextEncoder().encode(serialized).byteLength;
-        if (responseBytes <= MESH_SAFE_MESSAGE_BYTES) sourceSocket.send(serialized);
+      const reverseKey = `${message.sourceDeviceId}:${message.requestId}`;
+      if (this.reverseRequests.has(reverseKey)) return;
+      if (this.reverseRequests.size >= 100) {
+        sourceSocket.close(4008, 'Too many reverse requests');
+        return;
+      }
+      const controller = new AbortController();
+      this.reverseRequests.set(reverseKey, { session: sourceSocket, controller });
+      const reverseSignal = sourceSocket.signal
+        ? AbortSignal.any([sourceSocket.signal, controller.signal])
+        : controller.signal;
+      try {
+        let response = await this.capabilityRouter.handle(message, reverseSignal);
+        if (response?.ok && (response.result as any)?.localFileUri) {
+          const result = response.result as any;
+          const access = new AbortController();
+          const check = () => {
+            if (this.socket !== sourceSocket || !this.capabilityRouter.authorized?.(message))
+              access.abort();
+          };
+          check();
+          const policyTimer = setInterval(check, 250);
+          try {
+            access.signal.throwIfAborted();
+            const tickets = await sourceSocket.prepareResultUpload(
+              message.requestId,
+              message.sourceDeviceId,
+              result.preview.size,
+              result.preview.revision,
+            );
+            const { uploadNativeFile } = await import('./native-http-upload');
+            const uploaded = await uploadNativeFile(
+              tickets.upload.url,
+              result.localFileUri,
+              {
+                authorization: `Bearer ${tickets.upload.token}`,
+                'content-type': 'application/octet-stream',
+                'x-upload-offset': '0',
+              },
+              AbortSignal.any([
+                access.signal,
+                reverseSignal,
+                AbortSignal.timeout(Math.max(1, Date.parse(message.expiresAt) - Date.now())),
+              ]),
+            );
+            if (uploaded.offset !== result.preview.size)
+              throw new Error('Phone preview upload is incomplete');
+            response = {
+              ...response,
+              result: { preview: result.preview, transfer: tickets.download },
+            };
+          } catch (error: any) {
+            response = {
+              ...response,
+              ok: false,
+              error: {
+                code: 'TRANSFER_FAILED',
+                message: error?.message ?? 'Phone preview upload failed',
+              },
+            };
+            delete (response as any).result;
+          } finally {
+            clearInterval(policyTimer);
+          }
+        }
+        if (
+          response &&
+          this.socket === sourceSocket &&
+          sourceSocket.readyState === DeviceHttpEventClient.OPEN
+        ) {
+          const serialized = JSON.stringify(response);
+          const responseBytes =
+            typeof TextEncoder === 'undefined'
+              ? serialized.length * 3
+              : new TextEncoder().encode(serialized).byteLength;
+          if (responseBytes <= DEVICE_HTTP_MAX_JSON_BYTES) sourceSocket.send(serialized);
+        }
+      } finally {
+        this.reverseRequests.delete(reverseKey);
       }
       return;
     }
@@ -338,49 +427,19 @@ export class MeshSocket {
     clearTimeout(pending.timer);
     pending.signal?.removeEventListener('abort', pending.onAbort!);
     this.pending.delete(response.requestId);
-    if (pending.aborted) {
-      if (response.ok) void this.cancelAbandonedSnapshot(pending, response.result);
-      return;
-    }
-    if (response.ok) pending.resolve(response.result);
-    else
+    if (response.ok) {
+      try {
+        pending.resolve(pending.decode(response.result));
+      } catch (error: any) {
+        this.readCache.clear();
+        pending.reject(error);
+      }
+    } else
       pending.reject(
         Object.assign(new Error(response.error?.message ?? 'Operation failed'), {
           code: response.error?.code ?? 'OPERATION_FAILED',
         }),
       );
-  }
-
-  private async cancelAbandonedSnapshot(pending: PendingRequest, result: unknown): Promise<void> {
-    if (
-      pending.capability !== 'drone-control' ||
-      !['files.list', 'file.preview', 'chat.read'].includes(pending.operation)
-    )
-      return;
-    const value = objectRecord(result);
-    const contentChunk = objectRecord(value.contentChunk);
-    const mediaChunk = objectRecord(value.mediaChunk);
-    const snapshotToken = textValue(contentChunk.snapshotToken ?? mediaChunk.snapshotToken);
-    if (!snapshotToken) return;
-    const originalPayload = objectRecord(pending.payload);
-    const preview = objectRecord(value.preview);
-    const expectedRevision = textValue(preview.revision ?? originalPayload.expectedRevision);
-    try {
-      await this.request(pending.targetDeviceId, pending.capability, pending.operation, {
-        ...originalPayload,
-        snapshotToken,
-        cancelSnapshot: true,
-        ...(mediaChunk.snapshotToken
-          ? {
-              mediaSnapshot: true,
-              ...(expectedRevision ? { expectedRevision } : {}),
-            }
-          : {}),
-      });
-    } catch {
-      // The socket may have disconnected with the original request. Server expiry remains the
-      // final bounded cleanup path when the best-effort cancellation cannot be delivered.
-    }
   }
 
   private rejectPending(message: string): void {
@@ -395,22 +454,4 @@ export class MeshSocket {
 
 function meshRequestCancelledError(): Error {
   return Object.assign(new Error('Mesh request cancelled'), { name: 'AbortError' });
-}
-
-function objectRecord(value: unknown): Record<string, any> {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, any>)
-    : {};
-}
-
-function textValue(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function canReturnAbandonedSnapshot(request: PendingRequest): boolean {
-  return (
-    request.capability === 'drone-control' &&
-    ['files.list', 'file.preview', 'chat.read'].includes(request.operation) &&
-    !textValue(objectRecord(request.payload).snapshotToken)
-  );
 }

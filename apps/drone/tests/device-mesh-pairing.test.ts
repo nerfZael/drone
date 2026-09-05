@@ -4,19 +4,9 @@ import fs from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import {
-  capabilityEventSigningText,
-  pairingClaimSigningText,
-  type CapabilityEvent,
-  type PairingClaim,
-} from '@drone/device-protocol';
-import { WebSocket } from 'ws';
+import { pairingClaimSigningText, type PairingClaim } from '@drone/device-protocol';
 import { createDeviceMeshService } from '../src/hub/device-mesh';
-import {
-  loadOrCreateDeviceIdentity,
-  signDeviceText,
-  signSocketChallenge,
-} from '../src/hub/device-mesh/device-identity';
+import { loadOrCreateDeviceIdentity, signDeviceText } from '../src/hub/device-mesh/device-identity';
 
 type TestHub = {
   rootDir: string;
@@ -29,7 +19,7 @@ type TestHub = {
 
 const hubs: TestHub[] = [];
 
-async function startHub(): Promise<TestHub> {
+async function startHub(fileEntries?: unknown[]): Promise<TestHub> {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'drone-mesh-test-'));
   const token = `token-${crypto.randomUUID()}`;
   let url = '';
@@ -41,13 +31,21 @@ async function startHub(): Promise<TestHub> {
   const server = http.createServer(async (request, response) => {
     const requestUrl = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
     if (!(await service.handleHttp(request, response, requestUrl))) {
+      if (
+        fileEntries &&
+        requestUrl.pathname.endsWith('/fs/list') &&
+        request.headers.authorization === `Bearer ${token}`
+      ) {
+        response
+          .writeHead(200, { 'content-type': 'application/json' })
+          .end(JSON.stringify({ path: '/workspace', entries: fileEntries }));
+        return;
+      }
       response.statusCode = 404;
       response.end();
     }
   });
-  server.on('upgrade', (request, socket, head) => {
-    if (!service.handleUpgrade(request, socket, head)) socket.destroy();
-  });
+  server.on('upgrade', (_request, socket) => socket.destroy());
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('test Hub did not bind');
@@ -141,6 +139,108 @@ afterEach(async () => {
 });
 
 describe('desktop device pairing', () => {
+  test('a phone without a listening server requests pairing and waits for desktop approval', async () => {
+    const hub = await startHub();
+    const before = await adminJson(hub, '/api/device-mesh');
+    const identity = await loadOrCreateDeviceIdentity(path.join(hub.rootDir, 'test-phone'));
+    const device = {
+      id: identity.id,
+      name: 'My phone',
+      platform: 'android' as const,
+      publicKey: identity.publicKey,
+    };
+    const claim = {
+      token: crypto.randomBytes(32).toString('base64url'),
+      claimSecret: crypto.randomBytes(32).toString('base64url'),
+      inviterDeviceId: before.selfDeviceId,
+      endpoint: hub.ingressUrl,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      device,
+    };
+    const response = await fetch(`${hub.ingressUrl}/api/device-mesh/pairing/request`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ...claim,
+        signature: signDeviceText(identity, pairingClaimSigningText(claim)),
+      }),
+    });
+    expect(response.ok).toBe(true);
+    const { pendingId } = await response.json();
+    const pending = (await adminJson(hub, '/api/device-mesh')).pending.find(
+      (entry: any) => entry.id === pendingId,
+    );
+    expect(pending.device.platform).toBe('android');
+    expect((await hub.service.store.read()).devices[device.id]).toBeUndefined();
+    const statusUrl = `${hub.ingressUrl}/api/device-mesh/invitations/${pendingId}/status?claimSecret=${claim.claimSecret}`;
+    expect((await (await fetch(statusUrl)).json()).status).toBe('pending');
+    await adminJson(hub, `/api/device-mesh/pending/${pendingId}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({
+        administrator: false,
+        grants: [{ capability: 'drone-control', version: 1, operations: ['drones.list'] }],
+      }),
+    });
+    const approved = await (await fetch(statusUrl)).json();
+    expect(approved.status).toBe('approved');
+    expect(approved.approval.device.id).toBe(device.id);
+    const stored = (await hub.service.store.read()).devices[device.id];
+    expect(stored.endpoints).toEqual([]);
+    expect(stored.administrator).toBe(false);
+  });
+  test('pairs discovered Hubs without invitation codes and transfers JSON beyond the old socket limit', async () => {
+    const entries = Array.from({ length: 4000 }, (_, index) => ({
+      name: `${index}-${'x'.repeat(160)}`,
+      kind: 'file',
+    }));
+    const destination = await startHub(entries);
+    const source = await startHub();
+    const destinationState = await adminJson(destination, '/api/device-mesh');
+    const sourceState = await adminJson(source, '/api/device-mesh');
+    await adminJson(source, `/api/device-mesh/devices/${sourceState.selfDeviceId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ name: 'Discovered source' }),
+    });
+    const join = await adminJson(source, '/api/device-mesh/joins-discovered', {
+      method: 'POST',
+      body: JSON.stringify({
+        endpoint: destination.ingressUrl,
+        deviceId: destinationState.selfDeviceId,
+      }),
+    });
+    const pending = await waitFor(
+      async () => (await adminJson(destination, '/api/device-mesh')).pending[0] ?? null,
+    );
+    await adminJson(destination, `/api/device-mesh/pending/${pending.id}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({
+        administrator: true,
+        grants: [{ capability: 'drone-control', version: 1, operations: ['files.list'] }],
+      }),
+    });
+    await waitFor(async () =>
+      (await adminJson(source, `/api/device-mesh/joins/${join.joinId}`)).status === 'approved'
+        ? true
+        : null,
+    );
+    await waitFor(async () =>
+      (await adminJson(source, '/api/device-mesh')).connectedDeviceIds.includes(
+        destinationState.selfDeviceId,
+      )
+        ? true
+        : null,
+    );
+    const result = await adminJson(source, '/api/device-mesh/drone-control', {
+      method: 'POST',
+      body: JSON.stringify({
+        targetDeviceId: destinationState.selfDeviceId,
+        operation: 'files.list',
+        payload: { droneId: 'one', path: '/workspace' },
+      }),
+    });
+    expect(result.result.entries).toEqual(entries);
+    expect(Buffer.byteLength(JSON.stringify(result))).toBeGreaterThan(512 * 1024);
+  });
   test('pushes authenticated mesh changes without polling', async () => {
     const hub = await startHub();
     const unauthorized = await fetch(`${hub.url}/api/device-mesh/events`);
@@ -178,79 +278,40 @@ describe('desktop device pairing', () => {
     await pairHubs(remote, desktop, [
       { capability: 'drone-control', version: 1, operations: ['drones.list', 'chat.read'] },
     ]);
-    const remoteIdentity = await loadOrCreateDeviceIdentity(remote.rootDir);
     const desktopIdentity = await loadOrCreateDeviceIdentity(desktop.rootDir);
-    const socket = new WebSocket(
-      `${desktop.ingressUrl.replace('http:', 'ws:')}/api/device-mesh/ws?deviceId=${encodeURIComponent(remoteIdentity.id)}`,
+    await waitFor(async () =>
+      (await adminJson(remote, '/api/device-mesh')).connectedDeviceIds.includes(desktopIdentity.id)
+        ? true
+        : null,
     );
-    const challenge = JSON.parse(
-      String(
-        await new Promise((resolve, reject) => {
-          socket.once('message', resolve);
-          socket.once('error', reject);
-        }),
-      ),
-    );
-    const ready = new Promise((resolve, reject) => {
-      socket.once('message', resolve);
-      socket.once('error', reject);
-    });
-    socket.send(
-      JSON.stringify({
-        type: 'auth.response',
-        deviceId: remoteIdentity.id,
-        signature: signSocketChallenge(remoteIdentity, challenge.nonce),
-      }),
-    );
-    await ready;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
     const events = await fetch(`${desktop.url}/api/device-mesh/events`, {
       headers: { authorization: `Bearer ${desktop.token}` },
+      signal: controller.signal,
     });
-    const reader = events.body?.getReader();
-    if (!reader) throw new Error('event response did not include a stream');
-    const decoder = new TextDecoder();
-    await reader.read();
-
-    const pushed = reader.read();
-    const issuedAt = new Date();
-    const unsigned: Omit<CapabilityEvent, 'signature'> = {
-      type: 'capability.event',
-      version: 1,
-      eventId: crypto.randomUUID(),
-      sourceDeviceId: remoteIdentity.id,
-      targetDeviceId: desktopIdentity.id,
-      capability: 'drone-control',
-      capabilityVersion: 1,
-      event: 'chat.changed',
-      payload: {
+    const reader = events.body!.getReader();
+    try {
+      await reader.read();
+      await remote.service.broadcastDroneChatChange({
         droneId: 'drone-1',
         chatName: 'default',
         reason: 'runtime_tool_call_progress',
-      },
-      issuedAt: issuedAt.toISOString(),
-      expiresAt: new Date(issuedAt.getTime() + 60_000).toISOString(),
-      maxHops: 1,
-    };
-    socket.send(
-      JSON.stringify({
-        ...unsigned,
-        signature: signDeviceText(remoteIdentity, capabilityEventSigningText(unsigned)),
-      }),
-    );
-    const event = await Promise.race([
-      pushed,
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('capability event timed out')), 2_000),
-      ),
-    ]);
-    const body = decoder.decode(event.value);
-    expect(body).toContain('event: capability');
-    expect(body).toContain('runtime_tool_call_progress');
-    await reader.cancel();
-    const closed = new Promise((resolve) => socket.once('close', resolve));
-    socket.close();
-    await closed;
-  }, 10_000);
+      });
+      const decoder = new TextDecoder();
+      let body = '';
+      while (!body.includes('runtime_tool_call_progress')) {
+        const next = await reader.read();
+        if (next.done) throw new Error('Event subscription ended before delivery');
+        body += decoder.decode(next.value);
+      }
+      expect(body).toContain('event: capability');
+    } finally {
+      clearTimeout(timeout);
+      await reader.cancel();
+      controller.abort();
+    }
+  }, 10000);
 
   test('keeps the administration API off the public mesh listener', async () => {
     const hub = await startHub();
@@ -261,6 +322,20 @@ describe('desktop device pairing', () => {
       headers: { authorization: `Bearer ${hub.token}` },
     });
     expect(administration.status).toBe(404);
+    expect(
+      (
+        await fetch(`${hub.ingressUrl}/api/device-mesh/phones`, {
+          headers: { authorization: `Bearer ${hub.token}` },
+        })
+      ).status,
+    ).toBe(404);
+    expect((await fetch(`${hub.url}/api/device-mesh/phones`)).status).toBe(401);
+    expect(
+      (await fetch(`${hub.url}/api/device-mesh/lan-discovery`, { method: 'POST' })).status,
+    ).toBe(401);
+    expect(
+      (await fetch(`${hub.ingressUrl}/api/device-mesh/lan-discovery`, { method: 'POST' })).status,
+    ).toBe(404);
   });
 
   test('joins through a one-time code and keeps grants destination-local', async () => {

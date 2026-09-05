@@ -1,3 +1,5 @@
+import { Readable } from 'node:stream';
+import type http from 'node:http';
 import { describe, expect, test } from 'bun:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -28,6 +30,7 @@ describe('device mesh native attachment prompts', () => {
       const capability = createDroneControlCapability(
         { baseUrl: () => 'http://127.0.0.1:7777', apiToken: 'test' },
         store,
+        { transfers: { attachmentUrl: () => 'https://peer/upload' } } as any,
       );
       const context = { sourceDevice: { id: 'phone-1' } } as never;
       const prepared: any = await capability.invoke(
@@ -44,19 +47,11 @@ describe('device mesh native attachment prompts', () => {
         },
         context,
       );
-      await capability.invoke(
-        'chat.prompt',
-        {
-          droneId: 'drone-1',
-          chatName: 'default',
-          attachmentTransfer: {
-            action: 'write',
-            uploadId: prepared.uploadId,
-            offset: 0,
-            dataBase64: Buffer.from('image').toString('base64'),
-          },
-        },
-        context,
+      await store.writeHttp(
+        prepared.uploadId,
+        prepared.uploadToken,
+        0,
+        Readable.from([Buffer.from('image')]) as http.IncomingMessage,
       );
       await capability.invoke(
         'chat.prompt',

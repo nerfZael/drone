@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { MeshConnectionManager, type ManagedMeshSocket } from '../src/mesh/MeshConnectionManager';
+import { MeshConnectionManager, type ManagedMeshSession } from '../src/mesh/MeshConnectionManager';
 
-class FakeSocket implements ManagedMeshSocket {
+class FakeSocket implements ManagedMeshSession {
   connected = false;
   connectCalls = 0;
   disconnectCalls = 0;

@@ -44,7 +44,7 @@ function grantsFromOperations(
     .filter((grant) => grant.operations.length > 0);
 }
 
-export function DevicesScreen() {
+export function DevicesScreen({ onPair }: { onPair(): void }) {
   const mesh = useMesh();
   const [refreshing, setRefreshing] = React.useState(false);
   const [selectedDeviceId, setSelectedDeviceId] = React.useState('');
@@ -57,8 +57,15 @@ export function DevicesScreen() {
   const [permissionsSaving, setPermissionsSaving] = React.useState(false);
   const [confirmSave, setConfirmSave] = React.useState(false);
   const [pendingDeviceId, setPendingDeviceId] = React.useState('');
+  const [pendingPair, setPendingPair] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const permissionsRequestVersion = React.useRef(0);
+  React.useEffect(
+    () => () => {
+      permissionsRequestVersion.current++;
+    },
+    [],
+  );
   const orderedDevices = React.useMemo(
     () => currentDeviceFirst(mesh.devices, mesh.identity?.id),
     [mesh.devices, mesh.identity?.id],
@@ -74,6 +81,8 @@ export function DevicesScreen() {
     setRefreshing(true);
     try {
       await mesh.refreshDevices();
+    } catch (nextError: any) {
+      setError(nextError?.message ?? String(nextError));
     } finally {
       setRefreshing(false);
     }
@@ -171,6 +180,14 @@ export function DevicesScreen() {
           />
         }
       >
+        <View style={{ gap: 12, marginBottom: 8 }}>
+          <Button
+            disabled={permissionsSaving}
+            onPress={() => (permissionsDirty ? setPendingPair(true) : onPair())}
+          >
+            Add device
+          </Button>
+        </View>
         <ErrorBanner message={error} />
         <View style={styles.list}>
           {orderedDevices.map((device) => {
@@ -342,7 +359,7 @@ export function DevicesScreen() {
             <View style={styles.empty}>
               <Network color={colors.subtle} size={28} strokeWidth={1.6} />
               <Text style={styles.emptyTitle}>No trusted devices yet</Text>
-              <Text style={styles.emptyBody}>Pull to refresh after pairing a Drone Hub.</Text>
+              <Text style={styles.emptyBody}>Add a device to get started.</Text>
             </View>
           ) : null}
         </View>
@@ -357,13 +374,21 @@ export function DevicesScreen() {
         onConfirm={() => void savePermissions()}
       />
       <ConfirmDialog
-        visible={Boolean(pendingDeviceId)}
+        visible={Boolean(pendingDeviceId) || pendingPair}
         title="Discard permission changes?"
-        message={`You have ${changes} unsaved ${changes === 1 ? 'change' : 'changes'}. Discard them and open another device?`}
+        message={`You have ${changes} unsaved ${changes === 1 ? 'change' : 'changes'}. Discard them and continue?`}
         confirmLabel="Discard changes"
         destructive
-        onCancel={() => setPendingDeviceId('')}
+        onCancel={() => {
+          setPendingDeviceId('');
+          setPendingPair(false);
+        }}
         onConfirm={() => {
+          if (pendingPair) {
+            setPendingPair(false);
+            onPair();
+            return;
+          }
           const nextDevice = mesh.devices.find((device) => device.id === pendingDeviceId);
           setPendingDeviceId('');
           if (nextDevice) void loadDevicePermissions(nextDevice);

@@ -1,7 +1,8 @@
 import type { CapabilityDescriptor } from '@drone/device-protocol';
 import type { CapabilityContext, CapabilityHandler } from './device-mesh-types';
 
-const MAX_RESULT_BYTES = 220 * 1024;
+// Keep room for the authenticated response envelope under the 8 MiB HTTP JSON limit.
+const MAX_RESULT_BYTES = 6 * 1024 * 1024;
 
 export class CapabilityRegistry {
   private readonly handlers = new Map<string, CapabilityHandler>();

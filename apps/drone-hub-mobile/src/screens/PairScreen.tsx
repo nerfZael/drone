@@ -1,29 +1,47 @@
 import React from 'react';
+import * as Crypto from 'expo-crypto';
+import { fetch as expoFetch } from 'expo/fetch';
 import { StyleSheet, Text, View } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import QrCode from 'lucide-react-native/icons/qr-code';
-import ShieldCheck from 'lucide-react-native/icons/shield-check';
-import { Button, Card, ErrorBanner, Label, textStyles } from '../components/Ui';
+import { Button, Card, ErrorBanner, textStyles } from '../components/Ui';
+import { TopTabs } from '../components/TopTabs';
 import { ThemedTextInput } from '../components/ThemedTextInput';
 import { useMesh } from '../mesh/MeshContext';
 import { readPairingCode } from '../mesh/pair-device';
+import { discoverHub, type DiscoveredHub } from '../mesh/discover-hub';
+import { mobileDeviceIdForPublicKey } from '../security/device-identity';
 import { colors } from '../theme';
+import { PhoneDiscoverabilityCard } from './PhoneDiscoverabilityCard';
 
 export function PairScreen({ onComplete }: { onComplete(): void }) {
   const mesh = useMesh();
   const updatingConnection = Boolean(mesh.profile);
+  const [method, setMethod] = React.useState<'nearby' | 'qr' | 'address' | 'code'>('nearby');
   const [permission, requestPermission] = useCameraPermissions();
   const [code, setCode] = React.useState('');
   const [scanning, setScanning] = React.useState(false);
   const [pairing, setPairing] = React.useState(false);
+  const [address, setAddress] = React.useState('');
+  const [finding, setFinding] = React.useState(false);
+  const [hub, setHub] = React.useState<DiscoveredHub | null>(null);
   const [status, setStatus] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
   const abort = React.useRef<AbortController | null>(null);
   const pairingRef = React.useRef(false);
+  const alive = React.useRef(true);
+  const cameraPending = React.useRef(false);
+  const methodRef = React.useRef(method);
+  methodRef.current = method;
 
-  React.useEffect(() => () => abort.current?.abort(), []);
+  React.useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      abort.current?.abort();
+    };
+  }, []);
 
-  const pair = async (raw: string) => {
+  const pair = async (raw: string, discovered = false) => {
     if (pairingRef.current) return;
     pairingRef.current = true;
     setPairing(true);
@@ -31,151 +49,223 @@ export function PairScreen({ onComplete }: { onComplete(): void }) {
     setError(null);
     setStatus(
       updatingConnection
-        ? 'Verifying this phone and updating its saved connection…'
-        : 'Request sent. Approve this new phone on the other Hub.',
+        ? 'Connecting… New connections need approval on the other Hub.'
+        : 'Approve this phone on the other Hub.',
     );
-    abort.current = new AbortController();
+    const controller = new AbortController();
+    abort.current = controller;
     try {
-      await mesh.pair(readPairingCode(raw.trim()), abort.current.signal);
-      onComplete();
+      await mesh.pair(readPairingCode(raw.trim()), controller.signal, discovered);
+      if (alive.current && !controller.signal.aborted) onComplete();
     } catch (nextError: any) {
-      setError(nextError?.message ?? String(nextError));
-      setStatus('');
+      if (alive.current) {
+        if (!controller.signal.aborted) setError(nextError?.message ?? String(nextError));
+        setStatus('');
+      }
     } finally {
       pairingRef.current = false;
-      setPairing(false);
+      if (alive.current) {
+        setPairing(false);
+        setStatus('');
+      }
     }
   };
 
-  const openScanner = async () => {
-    if (!permission?.granted) {
-      const next = await requestPermission();
-      if (!next.granted) {
-        setError(
-          'Camera permission is needed to scan a pairing code. You can paste the code instead.',
-        );
-        return;
+  const findHub = async () => {
+    if (pairingRef.current) return;
+    pairingRef.current = true;
+    setFinding(true);
+    setHub(null);
+    setError(null);
+    setStatus('Looking for a DroneHub on Tailscale…');
+    const controller = new AbortController();
+    abort.current = controller;
+    try {
+      const found = await discoverHub(address, {
+        nonce: Crypto.randomUUID(),
+        signal: controller.signal,
+        keyId: mobileDeviceIdForPublicKey,
+        fetchImpl: expoFetch as unknown as typeof fetch,
+      });
+      if (alive.current && !controller.signal.aborted) setHub(found);
+    } catch (error: any) {
+      if (alive.current && !controller.signal.aborted) setError(error?.message ?? String(error));
+    } finally {
+      pairingRef.current = false;
+      if (alive.current) {
+        setFinding(false);
+        setStatus('');
       }
     }
-    setScanning(true);
+  };
+
+  const requestHubApproval = (selectedHub = hub) => {
+    if (!selectedHub) return;
+    void pair(
+      JSON.stringify({
+        version: 1,
+        endpoint: selectedHub.endpoint,
+        inviterDeviceId: selectedHub.id,
+        token: Array.from(Crypto.getRandomBytes(32), (byte) =>
+          byte.toString(16).padStart(2, '0'),
+        ).join(''),
+        expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
+      }),
+      true,
+    );
+  };
+
+  const openScanner = async () => {
+    if (cameraPending.current) return;
+    cameraPending.current = true;
+    try {
+      const granted = permission?.granted || (await requestPermission()).granted;
+      if (!alive.current || methodRef.current !== 'qr') return;
+      if (!granted) {
+        setError('Allow camera access to scan, or use Code instead.');
+      } else {
+        setError(null);
+        setScanning(true);
+      }
+    } catch (error: any) {
+      if (alive.current && methodRef.current === 'qr')
+        setError(error?.message ?? 'Could not open camera.');
+    } finally {
+      cameraPending.current = false;
+    }
   };
 
   return (
     <View style={styles.page}>
-      <View style={styles.hero}>
-        <View style={styles.heroIcon}>
-          <ShieldCheck color={colors.accent} size={27} strokeWidth={2} />
-        </View>
-        <View style={styles.heroCopy}>
-          <Label>Private device mesh</Label>
-          <Text style={[textStyles.title, styles.title]}>
-            {updatingConnection ? 'Update a connection.' : 'Pair without an account.'}
-          </Text>
-          <Text style={textStyles.body}>
-            {updatingConnection
-              ? 'Scan a fresh code from a Hub you already trust. Your phone proves its existing identity, updates the route, and keeps its permissions.'
-              : 'Scan a short-lived code from a Drone Hub computer. That computer must approve this phone before anything is shared.'}
-          </Text>
-        </View>
-      </View>
+      <Text style={textStyles.title}>Add device</Text>
+      {!pairing && (
+        <>
+          <TopTabs
+            value={method}
+            disabled={finding}
+            options={[
+              { value: 'nearby', label: 'Nearby' },
+              { value: 'qr', label: 'Scan QR' },
+              { value: 'address', label: 'Address' },
+              { value: 'code', label: 'Code' },
+            ]}
+            onChange={(next) => {
+              abort.current?.abort();
+              setMethod(next);
+              setScanning(false);
+              setError(null);
+              setStatus('');
+            }}
+          />
+          {method === 'nearby' && (
+            <PhoneDiscoverabilityCard
+              identity={mesh.identity}
+              disabled={pairing || finding || scanning}
+              onConfirm={(found) => requestHubApproval(found)}
+            />
+          )}
+          {method === 'address' && (
+            <Card>
+              <Text style={textStyles.heading}>Hub address</Text>
+              <ThemedTextInput
+                value={address}
+                onChangeText={(value) => {
+                  setAddress(value);
+                  setHub(null);
+                }}
+                placeholder="desktop.your-tailnet.ts.net"
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!finding && !pairing}
+                style={[styles.input, { minHeight: 48 }]}
+              />
+              <Button
+                onPress={() => void findHub()}
+                disabled={!address.trim() || pairing || finding}
+                loading={finding}
+              >
+                Find Hub
+              </Button>
+              {hub && (
+                <View style={{ gap: 10, marginTop: 12 }}>
+                  <Text style={textStyles.heading}>Found {hub.name}</Text>
+                  <Text style={textStyles.body}>{hub.endpoint}</Text>
+                  <Button onPress={() => requestHubApproval()} disabled={pairing || finding}>
+                    Request pairing
+                  </Button>
+                </View>
+              )}
+            </Card>
+          )}
 
-      {scanning ? (
-        <Card style={styles.cameraCard}>
-          <CameraView
-            style={styles.camera}
-            barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-            onBarcodeScanned={({ data }) => void pair(data)}
-          />
-          <View style={styles.reticle} pointerEvents="none" />
-          <Button tone="quiet" onPress={() => setScanning(false)}>
-            Cancel scan
-          </Button>
-        </Card>
-      ) : (
-        <Card>
-          <View style={styles.cardHeading}>
-            <View style={styles.cardIcon}>
-              <QrCode color={colors.accentAlt} size={18} strokeWidth={2.2} />
-            </View>
-            <Text style={textStyles.heading}>
-              {updatingConnection ? 'Replace an unreachable route' : 'Add your first route'}
-            </Text>
-          </View>
-          <Text style={[textStyles.body, styles.copy]}>
-            The QR code contains an address and one-time secret. Your permanent private key stays in
-            Android secure storage and signs the connection request.
-          </Text>
-          <Button onPress={() => void openScanner()} disabled={pairing}>
-            {updatingConnection ? 'Scan connection QR' : 'Scan pairing QR'}
-          </Button>
-          <View style={styles.divider}>
-            <View style={styles.line} />
-            <Text style={styles.or}>OR PASTE</Text>
-            <View style={styles.line} />
-          </View>
-          <ThemedTextInput
-            value={code}
-            onChangeText={setCode}
-            placeholder={updatingConnection ? 'Paste connection JSON' : 'Paste pairing JSON'}
-            placeholderTextColor={colors.subtle}
-            multiline
-            autoCapitalize="none"
-            autoCorrect={false}
-            style={styles.input}
-          />
-          <Button
-            tone="quiet"
-            onPress={() => void pair(code)}
-            disabled={!code.trim()}
-            loading={pairing}
-          >
-            {updatingConnection ? 'Update connection' : 'Request approval'}
-          </Button>
-        </Card>
+          {method === 'qr' &&
+            (scanning ? (
+              <Card style={styles.cameraCard}>
+                <CameraView
+                  style={styles.camera}
+                  barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+                  onBarcodeScanned={({ data }) => void pair(data)}
+                />
+                <View style={styles.reticle} pointerEvents="none" />
+                <Button tone="quiet" onPress={() => setScanning(false)}>
+                  Cancel scan
+                </Button>
+              </Card>
+            ) : (
+              <Card>
+                <Text style={textStyles.body}>
+                  On the desktop, open Devices → Add device → Use a QR code.
+                </Text>
+                <Button onPress={() => void openScanner()} disabled={pairing || finding}>
+                  Open camera
+                </Button>
+              </Card>
+            ))}
+          {method === 'code' && (
+            <Card>
+              <Text style={textStyles.heading}>Pairing code</Text>
+              <ThemedTextInput
+                value={code}
+                onChangeText={setCode}
+                placeholder="Paste a pairing code from the other Hub"
+                placeholderTextColor={colors.subtle}
+                multiline
+                autoCapitalize="none"
+                autoCorrect={false}
+                style={styles.input}
+              />
+              <Button
+                tone="quiet"
+                onPress={() => void pair(code)}
+                disabled={!code.trim() || finding}
+                loading={pairing}
+              >
+                Connect
+              </Button>
+            </Card>
+          )}
+        </>
       )}
 
       {status ? (
         <Card>
           <Text style={styles.waiting}>{status}</Text>
-          <Button tone="quiet" onPress={() => abort.current?.abort()} disabled={!pairing}>
+          <Button
+            tone="quiet"
+            onPress={() => abort.current?.abort()}
+            disabled={!pairing && !finding}
+          >
             Cancel
           </Button>
         </Card>
       ) : null}
       <ErrorBanner message={error ?? mesh.error} />
-      {mesh.identity ? <Text style={styles.identity}>THIS DEVICE · {mesh.identity.id}</Text> : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   page: { padding: 20, paddingBottom: 32, gap: 18 },
-  hero: { gap: 15 },
-  heroIcon: {
-    width: 52,
-    height: 52,
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: colors.accentBorder,
-    backgroundColor: colors.accentDark,
-  },
-  heroCopy: { maxWidth: 500 },
-  title: { marginTop: 6, marginBottom: 8 },
-  cardHeading: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  cardIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.accentDark,
-  },
-  copy: { marginTop: 6, marginBottom: 16 },
-  divider: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 16 },
-  line: { flex: 1, height: 1, backgroundColor: colors.border },
-  or: { color: colors.muted, fontSize: 9, fontWeight: '800', letterSpacing: 1.2 },
   input: {
     minHeight: 92,
     color: colors.text,
@@ -202,11 +292,4 @@ const styles = StyleSheet.create({
     borderRadius: 18,
   },
   waiting: { color: colors.warning, fontSize: 14, lineHeight: 20, marginBottom: 12 },
-  identity: {
-    color: colors.subtle,
-    fontSize: 9,
-    fontFamily: 'monospace',
-    textAlign: 'center',
-    marginTop: 4,
-  },
 });

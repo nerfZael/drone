@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream';
 import { afterEach, describe, expect, test } from 'bun:test';
 import fs from 'node:fs/promises';
 import http from 'node:http';
@@ -13,7 +14,7 @@ afterEach(async () => {
 });
 
 describe('mesh chat attachment store', () => {
-  test('removes abandoned upload files when the store starts', async () => {
+  test('preserves recoverable upload files when the store starts', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mesh-chat-recovery-'));
     roots.push(root);
     await fs.writeFile(path.join(root, 'mesh-upload-abandoned.part'), 'partial');
@@ -21,7 +22,10 @@ describe('mesh chat attachment store', () => {
     const store = new MeshChatAttachmentStore(root);
     try {
       await store.initialize();
-      expect(await fs.readdir(root)).toEqual(['unrelated.txt']);
+      expect((await fs.readdir(root)).sort()).toEqual([
+        'mesh-upload-abandoned.part',
+        'unrelated.txt',
+      ]);
     } finally {
       await store.close();
     }
@@ -72,12 +76,14 @@ describe('mesh chat attachment store', () => {
         mime: 'text/plain',
         size: 1,
       });
-      await store.writeMesh({
-        sourceDeviceId: 'phone-1',
-        uploadId: prepared.uploadId,
-        offset: 0,
-        dataBase64: Buffer.from('x').toString('base64'),
-      });
+      await store.writeHttp(
+        prepared.uploadId,
+        prepared.uploadToken,
+        0,
+        Readable.from([
+          Buffer.from(Buffer.from('x').toString('base64'), 'base64'),
+        ]) as http.IncomingMessage,
+      );
       await expect(store.commit('phone-1', prepared.uploadId)).resolves.toMatchObject({
         name: 'a'.repeat(240),
       });
@@ -99,28 +105,34 @@ describe('mesh chat attachment store', () => {
         mime: 'application/octet-stream',
         size: 2,
       });
-      const firstWrite = store.writeMesh({
-        sourceDeviceId: 'phone-1',
-        uploadId: prepared.uploadId,
-        offset: 0,
-        dataBase64: Buffer.from('a').toString('base64'),
-      });
+      const firstWrite = store.writeHttp(
+        prepared.uploadId,
+        prepared.uploadToken,
+        0,
+        Readable.from([
+          Buffer.from(Buffer.from('a').toString('base64'), 'base64'),
+        ]) as http.IncomingMessage,
+      );
       await expect(
-        store.writeMesh({
-          sourceDeviceId: 'phone-1',
-          uploadId: prepared.uploadId,
-          offset: 0,
-          dataBase64: Buffer.from('b').toString('base64'),
-        }),
+        store.writeHttp(
+          prepared.uploadId,
+          prepared.uploadToken,
+          0,
+          Readable.from([
+            Buffer.from(Buffer.from('b').toString('base64'), 'base64'),
+          ]) as http.IncomingMessage,
+        ),
       ).rejects.toMatchObject({ code: 'TRANSFER_BUSY' });
       await firstWrite;
       await expect(
-        store.writeMesh({
-          sourceDeviceId: 'phone-1',
-          uploadId: prepared.uploadId,
-          offset: 1,
-          dataBase64: Buffer.from('b').toString('base64'),
-        }),
+        store.writeHttp(
+          prepared.uploadId,
+          prepared.uploadToken,
+          1,
+          Readable.from([
+            Buffer.from(Buffer.from('b').toString('base64'), 'base64'),
+          ]) as http.IncomingMessage,
+        ),
       ).resolves.toMatchObject({ offset: 2, complete: true });
     } finally {
       await store.close();
@@ -157,7 +169,7 @@ describe('mesh chat attachment store', () => {
     }
   });
 
-  test('accepts resumable mesh chunks and scopes committed images to their chat', async () => {
+  test('accepts resumable HTTP bodies and scopes committed images to their chat', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mesh-chat-attachments-'));
     roots.push(root);
     const store = new MeshChatAttachmentStore(root);
@@ -171,18 +183,22 @@ describe('mesh chat attachment store', () => {
         mime: 'image/png',
         size: source.length,
       });
-      await store.writeMesh({
-        sourceDeviceId: 'phone-1',
-        uploadId: prepared.uploadId,
-        offset: 0,
-        dataBase64: source.subarray(0, 5).toString('base64'),
-      });
-      await store.writeMesh({
-        sourceDeviceId: 'phone-1',
-        uploadId: prepared.uploadId,
-        offset: 5,
-        dataBase64: source.subarray(5).toString('base64'),
-      });
+      await store.writeHttp(
+        prepared.uploadId,
+        prepared.uploadToken,
+        0,
+        Readable.from([
+          Buffer.from(source.subarray(0, 5).toString('base64'), 'base64'),
+        ]) as http.IncomingMessage,
+      );
+      await store.writeHttp(
+        prepared.uploadId,
+        prepared.uploadToken,
+        5,
+        Readable.from([
+          Buffer.from(source.subarray(5).toString('base64'), 'base64'),
+        ]) as http.IncomingMessage,
+      );
       await store.commit('phone-1', prepared.uploadId);
 
       await expect(
@@ -221,12 +237,12 @@ describe('mesh chat attachment store', () => {
         mime: 'text/plain',
         size: source.length,
       });
-      await store.writeMesh({
-        sourceDeviceId: 'desktop-1',
-        uploadId: prepared.uploadId,
-        offset: 0,
-        dataBase64: source.toString('base64'),
-      });
+      await store.writeHttp(
+        prepared.uploadId,
+        prepared.uploadToken,
+        0,
+        Readable.from([Buffer.from(source.toString('base64'), 'base64')]) as http.IncomingMessage,
+      );
       await store.commit('desktop-1', prepared.uploadId);
       await expect(
         store.attachments('desktop-1', 'drone-1', 'default', [prepared.uploadId]),
@@ -249,12 +265,14 @@ describe('mesh chat attachment store', () => {
         mime: 'text/plain',
         size: 1,
       });
-      await store.writeMesh({
-        sourceDeviceId: 'desktop-1',
-        uploadId: prepared.uploadId,
-        offset: 0,
-        dataBase64: Buffer.from('x').toString('base64'),
-      });
+      await store.writeHttp(
+        prepared.uploadId,
+        prepared.uploadToken,
+        0,
+        Readable.from([
+          Buffer.from(Buffer.from('x').toString('base64'), 'base64'),
+        ]) as http.IncomingMessage,
+      );
       await store.commit('desktop-1', prepared.uploadId);
       await expect(store.abort('desktop-1', prepared.uploadId)).resolves.toEqual({ aborted: true });
       await expect(

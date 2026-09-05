@@ -1,4 +1,6 @@
 import React from 'react';
+import * as Crypto from 'expo-crypto';
+import { acceptDeviceDirectory } from './device-directory';
 import { AppState } from 'react-native';
 import type {
   CapabilityDescriptor,
@@ -9,14 +11,12 @@ import type {
 } from '@drone/device-protocol';
 import {
   loadDeviceIdentity,
+  mobileDeviceIdForPublicKey,
   saveDeviceName,
   type MobileDeviceIdentity,
 } from '../security/device-identity';
-import { MeshSocket } from './MeshSocket';
-import {
-  activeDevicePublicKey,
-  MobileCapabilityEventGuard,
-} from './mobile-capability-event-guard';
+import { MeshSession } from './MeshSession';
+import { activeDevicePublicKey, MobileCapabilityEventGuard } from './mobile-capability-event-guard';
 import {
   MeshConnectionManager,
   type MeshAppState,
@@ -28,6 +28,7 @@ import {
   type RegisteredMobileCapability,
 } from './mobile-capability-router';
 import { uploadMeshChatAttachment } from './upload-mesh-chat-attachment';
+import { acceptMobileRequest } from './mobile-request-journal';
 import { claimPairing, validatePairingApproval, waitForPairingApproval } from './pair-device';
 import { assertKnownRecoveryTarget } from './pairing-recovery';
 import {
@@ -45,7 +46,7 @@ type MeshContextValue = {
   connectionErrorsByDevice: Record<string, string>;
   loading: boolean;
   error: string | null;
-  pair(payload: PairingPayload, signal: AbortSignal): Promise<void>;
+  pair(payload: PairingPayload, signal: AbortSignal, discovered?: boolean): Promise<void>;
   request(
     targetDeviceId: string,
     capability: string,
@@ -108,9 +109,9 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
         subscription.listener(event);
     }
   }, []);
-  const connectionManagerRef = React.useRef<MeshConnectionManager<MeshSocket> | null>(null);
+  const connectionManagerRef = React.useRef<MeshConnectionManager<MeshSession> | null>(null);
   if (!connectionManagerRef.current) {
-    connectionManagerRef.current = new MeshConnectionManager<MeshSocket>({
+    connectionManagerRef.current = new MeshConnectionManager<MeshSession>({
       onChange: () => setRevision((value) => value + 1),
       onConnectionError: (deviceId, nextError) => {
         if (!nextError && connectionManagerRef.current?.connectedDeviceIds.length) setError(null);
@@ -161,8 +162,8 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
             reusable.updateConnection(connection);
             return reusable;
           }
-          let socket!: MeshSocket;
-          socket = new MeshSocket(
+          let socket!: MeshSession;
+          socket = new MeshSession(
             connection,
             nextProfile.networkId,
             nextIdentity,
@@ -223,6 +224,7 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
           nextIdentity,
           () => profileRef.current?.devices ?? [],
           (id) => capabilityHandlers.current.get(id),
+          acceptMobileRequest,
         );
         setIdentity(nextIdentity);
         setProfile(nextProfile);
@@ -284,9 +286,8 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
       const direct = connectionManager.sockets.find(
         (socket) => socket.connected && socket.connection.deviceId === input.targetDeviceId,
       );
-      const knownEndpoint = profile?.devices.find(
-        (device) => device.id === input.targetDeviceId,
-      )?.endpoints[0];
+      const knownEndpoint = profile?.devices.find((device) => device.id === input.targetDeviceId)
+        ?.endpoints[0];
       return await uploadMeshChatAttachment({
         endpoint: direct?.connection.endpoint ?? knownEndpoint ?? null,
         droneId: input.droneId,
@@ -307,9 +308,18 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
     }
     const target = connectionManager.connectedDeviceIds[0];
     if (!target) return;
-    const result: any = await request(target, 'device-core', 'devices.list');
-    if (!Array.isArray(result?.devices)) return;
-    const devices = result.devices as MeshDevice[];
+    if (!profile) return;
+    const nonce = Crypto.randomUUID();
+    const result: any = await request(target, 'device-core', 'devices.list', {
+      directoryNonce: nonce,
+    });
+    const { devices, routeSequences } = await acceptDeviceDirectory(
+      profile,
+      target,
+      nonce,
+      result?.directory,
+      mobileDeviceIdForPublicKey,
+    );
     const selfDevice = devices.find((device) => device.id === identity?.id);
     if (identity && selfDevice?.name && selfDevice.name !== identity.name) {
       const name = await saveDeviceName(selfDevice.name);
@@ -338,7 +348,11 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
         .map((connection) => [connection.deviceId, connection]),
     );
     for (const device of devices) {
-      if (device.id === identity?.id || device.revokedAt || device.endpoints.length === 0) continue;
+      if (device.id === identity?.id || device.revokedAt) continue;
+      if (device.endpoints.length === 0) {
+        if (routeSequences[device.id] !== undefined) connectionMap.delete(device.id);
+        continue;
+      }
       const current = connectionMap.get(device.id);
       connectionMap.set(device.id, {
         deviceId: device.id,
@@ -347,7 +361,13 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
       });
     }
     const next = profile
-      ? { ...profile, devices, connections: [...connectionMap.values()], capabilitiesByDevice }
+      ? {
+          ...profile,
+          devices,
+          routeSequences,
+          connections: [...connectionMap.values()],
+          capabilitiesByDevice,
+        }
       : null;
     if (next) {
       profileRef.current = next;
@@ -415,12 +435,13 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
   );
 
   const pair = React.useCallback(
-    async (payload: PairingPayload, signal: AbortSignal) => {
+    async (payload: PairingPayload, signal: AbortSignal, discovered = false) => {
       if (!identity) throw new Error('Device identity is not ready');
       setError(null);
       const current = await loadMeshProfile();
+      signal.throwIfAborted();
       assertKnownRecoveryTarget(payload, current);
-      const claim = await claimPairing(payload, identity);
+      const claim = await claimPairing(payload, identity, signal, discovered);
       const approval: PairingApproval = await validatePairingApproval(
         payload,
         await waitForPairingApproval(payload, claim.pendingId, claim.claimSecret, signal),
@@ -444,12 +465,18 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
       const next: MeshProfile = {
         networkId: approval.networkId,
         connections,
-        devices: approval.devices,
+        devices: approval.devices.map((device) => ({
+          ...device,
+          grants:
+            current?.devices.find((existing) => existing.id === device.id)?.grants ?? device.grants,
+        })),
+        routeSequences: current?.routeSequences,
         capabilitiesByDevice: {
           ...(current?.capabilitiesByDevice ?? {}),
           [payload.inviterDeviceId]: approval.capabilities,
         },
       };
+      signal.throwIfAborted();
       await saveMeshProfile(next);
       profileRef.current = next;
       setProfile(next);

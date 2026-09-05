@@ -30,6 +30,18 @@ export async function loadOrCreateDeviceIdentity(rootDir: string): Promise<Local
     privateKey = crypto.createPrivateKey(await fs.readFile(privateKeyPath, 'utf8'));
   } catch (error: any) {
     if (error?.code !== 'ENOENT') throw error;
+    // Existing membership must never be rebound to a newly generated key after an upgrade.
+    const existingState = await fs.stat(path.join(rootDir, 'state.json')).then(
+      () => true,
+      (stateError: any) => {
+        if (stateError?.code === 'ENOENT') return false;
+        throw stateError;
+      },
+    );
+    if (existingState)
+      throw new Error(
+        'Device identity is missing; restore the original key. Existing mesh data has been preserved.',
+      );
     const pair = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
     privateKey = pair.privateKey;
     await fs.writeFile(

@@ -46,7 +46,6 @@ import {
 import { MobileAssistantTranscript } from '../local-assistant/LocalAssistantTranscript';
 import { useLatestMessageScroll } from '../local-assistant/use-latest-message-scroll';
 import { useMesh } from '../mesh/MeshContext';
-import { readMeshJsonContent } from '../mesh/read-mesh-json-content';
 import { colors } from '../theme';
 import {
   NewDroneScreen,
@@ -1175,46 +1174,25 @@ export function DronesScreen({
     const controller = new AbortController();
     fullMessageAbortRef.current = controller;
     try {
-      const content = await readMeshJsonContent(
-        async (contentOffset, snapshotToken, signal) => {
-          const result = await requestDroneControl(
-            destinationId,
-            'chat.read',
-            {
-              droneId,
-              chatName: activeChat,
-              ...(native
-                ? { messageId }
-                : {
-                    turnId,
-                    ...(Number.isSafeInteger(turnNumber) && Number(turnNumber) > 0
-                      ? { turnNumber }
-                      : {}),
-                  }),
-              contentOffset,
-              ...(snapshotToken ? { snapshotToken } : {}),
-            },
-            signal,
-          );
-          return result?.contentChunk ?? {};
-        },
+      const result = await requestDroneControl(
+        destinationId,
+        'chat.read',
         {
-          signal: controller.signal,
-          isCancelled: () =>
-            targetIdRef.current !== destinationId ||
-            selectedRef.current?.id !== droneId ||
-            chatNameRef.current !== activeChat,
-          cancelSnapshot: async (snapshotToken) => {
-            await requestDroneControl(destinationId, 'chat.read', {
-              droneId,
-              chatName: activeChat,
-              ...(native ? { messageId } : { turnId }),
-              snapshotToken,
-              cancelSnapshot: true,
-            });
-          },
+          droneId,
+          chatName: activeChat,
+          ...(native
+            ? { messageId }
+            : {
+                turnId,
+                ...(Number.isSafeInteger(turnNumber) && Number(turnNumber) > 0
+                  ? { turnNumber }
+                  : {}),
+              }),
         },
+        controller.signal,
       );
+      const content = result?.content;
+
       if (
         targetIdRef.current !== destinationId ||
         selectedRef.current?.id !== droneId ||
@@ -1601,9 +1579,9 @@ export function DronesScreen({
       const createdDroneId = String(
         result?.id ?? result?.droneId ?? result?.drone?.id ?? '',
       ).trim();
-      const createdDroneName = String(
-        result?.name ?? result?.drone?.name ?? payload.name ?? createdDroneId,
-      ).trim() || createdDroneId;
+      const createdDroneName =
+        String(result?.name ?? result?.drone?.name ?? payload.name ?? createdDroneId).trim() ||
+        createdDroneId;
       if (createdDroneId) {
         options.onCreated?.({ droneId: createdDroneId, droneName: createdDroneName });
       }
@@ -1632,7 +1610,9 @@ export function DronesScreen({
           status: isDraft ? 'Draft' : (result?.drone?.status ?? 'Starting…'),
           busyChats: isDraft
             ? []
-            : (Array.isArray(result?.drone?.busyChats) ? result.drone.busyChats : ['default']),
+            : Array.isArray(result?.drone?.busyChats)
+              ? result.drone.busyChats
+              : ['default'],
           draft: isDraft,
           groupId: result?.drone?.groupId ?? result?.groupId,
           createdAt:

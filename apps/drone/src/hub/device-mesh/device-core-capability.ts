@@ -36,6 +36,7 @@ export function createDeviceCoreCapability(
   listCapabilities: () => CapabilityHandler['descriptor'][],
   onMembershipChange: () => void | Promise<void> = () => undefined,
   onAccessChange: (deviceId: string) => void | Promise<void> = () => undefined,
+  signDirectory?: (value: unknown) => string,
 ): CapabilityHandler {
   return {
     descriptor: DEVICE_CORE_CAPABILITY,
@@ -49,7 +50,20 @@ export function createDeviceCoreCapability(
       }
       if (operation === 'devices.list') {
         const state = await store.read();
+        const directory = {
+          type: 'device.directory',
+          version: 2,
+          networkId: state.networkId,
+          issuerDeviceId: state.selfDeviceId,
+          nonce: String(payloadObject(payload).directoryNonce ?? ''),
+          issuedAt: new Date().toISOString(),
+          devices: Object.values(state.devices).map((device) => ({ ...device, grants: [] })),
+          routes: Object.values(state.routes),
+        };
         return {
+          ...(signDirectory
+            ? { directory: { ...directory, signature: signDirectory(directory) } }
+            : {}),
           selfDeviceId: state.selfDeviceId,
           devices: Object.values(state.devices)
             .filter((device) => !device.revokedAt)

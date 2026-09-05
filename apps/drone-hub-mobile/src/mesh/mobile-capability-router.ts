@@ -2,7 +2,7 @@ import {
   canonicalJson,
   capabilityRequestSigningText,
   isGranted,
-  MESH_SAFE_MESSAGE_BYTES,
+  DEVICE_HTTP_MAX_JSON_BYTES,
   parseSignedCapabilityRequest,
   type CapabilityDescriptor,
   type CapabilityResponse,
@@ -16,7 +16,7 @@ import { verifyP256Signature } from '../security/p256-signature';
 export type MobileCapabilityHandler = (
   operation: string,
   payload: unknown,
-  context: { sourceDevice: MeshDevice; requestId: string },
+  context: { sourceDevice: MeshDevice; requestId: string; signal?: AbortSignal },
 ) => Promise<unknown>;
 
 export type RegisteredMobileCapability = {
@@ -69,6 +69,15 @@ export function mobileCapabilityGranted(
 }
 
 export class MobileCapabilityRouter {
+  authorized(
+    request: Pick<
+      SignedCapabilityRequest,
+      'sourceDeviceId' | 'capability' | 'capabilityVersion' | 'operation'
+    >,
+  ): boolean {
+    const source = this.devices().find((device) => device.id === request.sourceDeviceId);
+    return Boolean(source && !source.revokedAt && mobileCapabilityGranted(source, request));
+  }
   private readonly replay = new Map<string, number>();
   private readonly responses = new Map<
     string,
@@ -79,9 +88,10 @@ export class MobileCapabilityRouter {
     private readonly identity: MobileDeviceIdentity,
     private readonly devices: () => readonly MeshDevice[],
     private readonly capability: (id: string) => RegisteredMobileCapability | undefined,
+    private readonly acceptRequest?: (request: SignedCapabilityRequest) => Promise<boolean>,
   ) {}
 
-  async handle(value: unknown): Promise<CapabilityResponse | null> {
+  async handle(value: unknown, signal?: AbortSignal): Promise<CapabilityResponse | null> {
     if (!value || typeof value !== 'object' || (value as any).type !== 'capability.request') {
       return null;
     }
@@ -114,26 +124,10 @@ export class MobileCapabilityRouter {
 
     const responseKey = `${request.sourceDeviceId}:${request.requestId}`;
     const fingerprint = requestFingerprint(request);
-    const cached = this.responses.get(responseKey);
-    if (cached) {
-      return cached.fingerprint === fingerprint
-        ? cached.response
-        : errorResponse(
-            this.identity,
-            request,
-            'DUPLICATE_REQUEST_ID',
-            'request id was already used with different request data',
-          );
-    }
 
     const source = this.devices().find((device) => device.id === request.sourceDeviceId);
     if (!source || source.revokedAt) {
-      return errorResponse(
-        this.identity,
-        request,
-        'DEVICE_REVOKED',
-        'source device is not active',
-      );
+      return errorResponse(this.identity, request, 'DEVICE_REVOKED', 'source device is not active');
     }
     const issued = Date.parse(request.issuedAt);
     const expires = Date.parse(request.expiresAt);
@@ -152,22 +146,9 @@ export class MobileCapabilityRouter {
       );
     }
     const replayKey = `${source.id}:${request.nonce}`;
-    if ((this.replay.get(replayKey) ?? 0) > now) {
-      return errorResponse(
-        this.identity,
-        request,
-        'REPLAYED_REQUEST',
-        'request nonce was already used',
-      );
-    }
+
     const { signature, ...unsigned } = request;
-    if (
-      !verifyP256Signature(
-        source.publicKey,
-        capabilityRequestSigningText(unsigned),
-        signature,
-      )
-    ) {
+    if (!verifyP256Signature(source.publicKey, capabilityRequestSigningText(unsigned), signature)) {
       return errorResponse(
         this.identity,
         request,
@@ -198,13 +179,55 @@ export class MobileCapabilityRouter {
       );
     }
 
+    const cached = this.responses.get(responseKey);
+    if (cached) {
+      return cached.fingerprint === fingerprint
+        ? cached.response
+        : errorResponse(
+            this.identity,
+            request,
+            'DUPLICATE_REQUEST_ID',
+            'request id was already used with different request data',
+          );
+    }
+
+    if ((this.replay.get(replayKey) ?? 0) > now) {
+      return errorResponse(
+        this.identity,
+        request,
+        'REPLAYED_REQUEST',
+        'request nonce was already used',
+      );
+    }
     this.replay.set(replayKey, expires);
     let response: CapabilityResponse;
     try {
+      signal?.throwIfAborted();
+      if (
+        !/\.(list|read|stat|search|preview|models|status|poll)$/.test(request.operation) &&
+        this.acceptRequest &&
+        !(await this.acceptRequest(request))
+      ) {
+        return errorResponse(
+          this.identity,
+          request,
+          'REQUEST_OUTCOME_UNKNOWN',
+          'This request was already accepted. Refresh its result; it will not be executed again.',
+        );
+      }
       const result = await registered.invoke(request.operation, request.payload, {
         sourceDevice: source,
         requestId: request.requestId,
+        signal,
       });
+      signal?.throwIfAborted();
+      if (!this.authorized(request))
+        return errorResponse(
+          this.identity,
+          request,
+          'PERMISSION_DENIED',
+          'Phone access changed while the request was running',
+        );
       response = {
         type: 'capability.response',
         version: 1,
@@ -214,12 +237,12 @@ export class MobileCapabilityRouter {
         ok: true,
         result,
       };
-      if (serializedBytes(response) > MESH_SAFE_MESSAGE_BYTES) {
+      if (serializedBytes(response) > DEVICE_HTTP_MAX_JSON_BYTES) {
         response = errorResponse(
           this.identity,
           request,
           'RESPONSE_TOO_LARGE',
-          'phone response is too large; request a smaller page or chunk',
+          'phone response is too large; request a smaller page',
         );
       }
     } catch (error: any) {

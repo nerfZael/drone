@@ -13,7 +13,6 @@ export function createTerminalWebSocketUpgradeHandler(opts: {
   allowedOrigins: Set<string>;
   webSocketServer: WebSocketServer;
   companionWebSocketServer?: WebSocketServer;
-  handleDeviceMeshUpgrade: (req: http.IncomingMessage, socket: Duplex, head: Buffer) => boolean;
   isSafeSessionName: (value: string) => boolean;
   parseSince: (value: string | null) => number | undefined;
   parseMaxBytes: (value: string | null) => number;
@@ -22,7 +21,6 @@ export function createTerminalWebSocketUpgradeHandler(opts: {
 }): (req: http.IncomingMessage, socket: Duplex, head: Buffer) => Promise<void> {
   return async (req, socket, head) => {
     try {
-      if (opts.handleDeviceMeshUpgrade(req, socket, head)) return;
       const originRaw = typeof req.headers.origin === 'string' ? req.headers.origin : '';
       if (originRaw) {
         const origin = normalizeOrigin(originRaw);

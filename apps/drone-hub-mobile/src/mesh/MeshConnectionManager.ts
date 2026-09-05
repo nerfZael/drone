@@ -5,7 +5,7 @@ export type MeshDeviceConnectionState = 'connected' | 'reconnecting' | 'suspende
 
 export type MeshAppState = 'active' | 'background' | 'inactive' | 'unknown' | 'extension';
 
-export type ManagedMeshSocket = {
+export type ManagedMeshSession = {
   readonly connection: { deviceId: string };
   readonly connected: boolean;
   connect(): Promise<void>;
@@ -23,7 +23,7 @@ type MeshConnectionManagerOptions = {
   cancelScheduled?(handle: TimerHandle): void;
 };
 
-export class MeshConnectionManager<Socket extends ManagedMeshSocket> {
+export class MeshConnectionManager<Socket extends ManagedMeshSession> {
   private socketsValue: Socket[] = [];
   private readonly states = new Map<string, MeshDeviceConnectionState>();
   private lifecycle: 'active' | 'grace' | 'suspended' = 'active';

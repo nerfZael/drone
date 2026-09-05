@@ -71,7 +71,6 @@ export const WORKSPACE_CAPABILITY: CapabilityDescriptor = {
     'files.transfer.read',
     'files.transfer.mkdir',
     'files.transfer.prepare',
-    'files.transfer.write',
     'files.transfer.commit',
     'files.transfer.abort',
     'commands.run',
@@ -85,7 +84,13 @@ export const WORKSPACE_CAPABILITY: CapabilityDescriptor = {
 export const PROVIDER_CREDENTIALS_CAPABILITY: CapabilityDescriptor = {
   id: 'provider-credentials',
   version: 1,
-  operations: ['credentials.inspect', 'openai.export', 'codex.export', 'openrouter.export', 'groq.export'],
+  operations: [
+    'credentials.inspect',
+    'openai.export',
+    'codex.export',
+    'openrouter.export',
+    'groq.export',
+  ],
 };
 
 export const COMPANION_CAPABILITY: CapabilityDescriptor = {

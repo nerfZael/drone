@@ -9,7 +9,7 @@ import {
   type CapabilityEvent,
   type CapabilityGrant,
 } from '@drone/device-protocol';
-import { WebSocket } from 'ws';
+import { DeviceHttpChannel } from '../src/hub/device-mesh/device-http-channel';
 
 import { CapabilityRegistry } from '../src/hub/device-mesh/capability-registry';
 import { DeviceMeshAuditStore } from '../src/hub/device-mesh/device-mesh-audit-store';
@@ -112,7 +112,7 @@ function signedEvent(
 
 function fakeSocket(sendValue: (value: string) => void = () => undefined) {
   return {
-    readyState: WebSocket.OPEN,
+    readyState: DeviceHttpChannel.OPEN,
     send: sendValue,
     close: () => undefined,
   } as any;

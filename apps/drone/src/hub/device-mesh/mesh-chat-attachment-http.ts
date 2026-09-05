@@ -16,6 +16,23 @@ export class MeshChatAttachmentHttp implements DeviceMeshHttpExtension {
   ): Promise<boolean> {
     const parts = url.pathname.split('/').filter(Boolean);
     if (
+      parts.length === 4 &&
+      parts[0] === 'api' &&
+      parts[1] === 'device-mesh' &&
+      parts[2] === 'attachments'
+    ) {
+      response.setHeader('access-control-allow-origin', '*');
+      response.setHeader('access-control-allow-methods', 'PUT, OPTIONS');
+      response.setHeader(
+        'access-control-allow-headers',
+        'content-type, x-upload-token, x-upload-offset',
+      );
+      if (request.method === 'OPTIONS') {
+        response.writeHead(204).end();
+        return true;
+      }
+    }
+    if (
       String(request.method ?? 'GET').toUpperCase() !== 'PUT' ||
       parts.length !== 4 ||
       parts[0] !== 'api' ||

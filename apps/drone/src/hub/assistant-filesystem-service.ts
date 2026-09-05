@@ -367,8 +367,8 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
     };
   }
 
-  // This chunk can cross the JSON/base64 device-mesh fallback, whose envelope
-  // must remain below the 256 KiB WebSocket message limit.
+  // Bounded local workspace-engine I/O. Remote adapters stream binary HTTP bodies;
+  // this buffer size does not impose network chunk requests or a wire limit.
   const ASSISTANT_TRANSFER_CHUNK_BYTES = 128 * 1024;
 
   function assistantTransferId(raw: unknown): string {

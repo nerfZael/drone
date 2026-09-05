@@ -319,21 +319,29 @@ describe('phone Blip session', () => {
           };
         }
         if (deviceId === 'desktop_1' && operation === 'files.transfer.read') {
+          return { download: { url: `https://source/${payload.path}`, token: 'secret', size: 3 } };
+        }
+        if (operation === 'files.transfer.prepare')
           return {
-            dataBase64: payload.path.endsWith('/a.txt') ? 'b25l' : 'dHdv',
-            bytes: 3,
+            offset: 0,
+            upload: { url: `https://destination/${payload.path}`, token: 'secret', size: 3 },
           };
-        }
-        if (operation === 'files.transfer.prepare') return { offset: 0 };
-        if (operation === 'files.transfer.write') {
-          if (payload.path.endsWith('/b.txt')) {
-            throw Object.assign(new Error('destination disconnected'), {
-              code: 'INVALID_REQUEST',
-            });
-          }
-          return { offset: 3 };
-        }
         return {};
+      },
+      {
+        fetchImpl: (async (url) =>
+          new Response(String(url).endsWith('/a.txt') ? 'one' : 'two')) as typeof fetch,
+        createSink: async () => ({
+          write: async () => undefined,
+          finish: async (ticket) => {
+            if (ticket.url.endsWith('/b.txt'))
+              throw Object.assign(new Error('destination disconnected'), {
+                code: 'INVALID_REQUEST',
+              });
+            return 3;
+          },
+          close: async () => undefined,
+        }),
       },
     );
 

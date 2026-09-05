@@ -160,7 +160,7 @@ describe('mobile sidebar presentation', () => {
       'utf8',
     );
     const socketSource = readFileSync(
-      new URL('../src/mesh/MeshSocket.ts', import.meta.url),
+      new URL('../src/mesh/MeshSession.ts', import.meta.url),
       'utf8',
     );
 
@@ -483,8 +483,10 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain('repoNavigationHead: {\n    minHeight: 48,\n    marginBottom: 8,');
     expect(source).not.toContain('showChats={false}');
     expect(source).toContain('color: colors.sidebarSubitemFg,');
-    expect(source).toContain('droneChildren: {\n    position: \'relative\',');
-    expect(source).toContain('style={[styles.groupChildrenGuide, { left: drawerTreeRowPaddingLeft(depth) + 8 }]}');
+    expect(source).toContain("droneChildren: {\n    position: 'relative',");
+    expect(source).toContain(
+      'style={[styles.groupChildrenGuide, { left: drawerTreeRowPaddingLeft(depth) + 8 }]}',
+    );
     expect(source).toContain('node={child}\n              depth={depth + 1}');
     expect(modelSource).toContain('sidebarChatOrderByDrone: Record<string, string[]>;');
     expect(modelSource).toContain(
@@ -947,12 +949,8 @@ describe('mobile sidebar presentation', () => {
     const chatRowStart = drawerSource.indexOf('function DrawerDroneChatRow');
     const chatTreeStart = drawerSource.indexOf('function DrawerDroneChatTreeEntry');
     const droneNodeStart = drawerSource.indexOf('function DrawerDroneNode');
-    expect(drawerSource.slice(chatRowStart, chatTreeStart)).toContain(
-      '<MobileSidebarDragTarget',
-    );
-    expect(drawerSource.slice(chatTreeStart, droneNodeStart)).toContain(
-      '<MobileSidebarDragTarget',
-    );
+    expect(drawerSource.slice(chatRowStart, chatTreeStart)).toContain('<MobileSidebarDragTarget');
+    expect(drawerSource.slice(chatTreeStart, droneNodeStart)).toContain('<MobileSidebarDragTarget');
     expect(drawerSource.slice(droneNodeStart)).toContain('<MobileSidebarDragTarget');
     expect(drawerSource).toContain('label={`${folder.label} group`}');
     expect(drawerSource).toContain("kind: 'move-into-folder'");

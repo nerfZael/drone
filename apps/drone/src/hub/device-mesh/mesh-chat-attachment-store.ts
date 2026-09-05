@@ -7,7 +7,6 @@ import {
   validateChatAttachments,
   type ChatAttachmentValidationIssue,
 } from '@drone/assistant-chat';
-import { MESH_BINARY_CHUNK_BYTES } from '@drone/device-protocol';
 
 const MAX_ACTIVE_UPLOADS_PER_DEVICE = 16;
 const MAX_ACTIVE_UPLOAD_BYTES_PER_DEVICE = 40 * 1024 * 1024;
@@ -64,7 +63,10 @@ export class MeshChatAttachmentStore {
   private readonly uploads = new Map<string, Upload>();
   private readonly cleanupTimer: ReturnType<typeof setInterval>;
 
-  constructor(private readonly rootDir: string) {
+  constructor(
+    private readonly rootDir: string,
+    private readonly authorized: (source: string) => Promise<boolean> = async () => true,
+  ) {
     this.cleanupTimer = setInterval(() => void this.prune(), 5 * 60_000);
     this.cleanupTimer.unref?.();
   }
@@ -72,11 +74,25 @@ export class MeshChatAttachmentStore {
   async initialize(): Promise<void> {
     await fs.mkdir(this.rootDir, { recursive: true, mode: 0o700 });
     const entries = await fs.readdir(this.rootDir);
-    await Promise.all(
-      entries
-        .filter((name) => /^mesh-upload-[^.]+\.part$/u.test(name))
-        .map((name) => fs.rm(path.join(this.rootDir, name), { force: true })),
-    );
+    // Preserve pre-upgrade partial files. New upload metadata permits restart recovery.
+    for (const name of entries.filter((name) => /^mesh-upload-[a-zA-Z0-9-]+\.json$/.test(name))) {
+      const upload = JSON.parse(await fs.readFile(path.join(this.rootDir, name), 'utf8')) as Upload;
+      if (
+        name !== `${upload.id}.json` ||
+        !/^mesh-upload-[a-zA-Z0-9-]+$/.test(upload.id) ||
+        typeof upload.sourceDeviceId !== 'string' ||
+        !Number.isSafeInteger(upload.size) ||
+        upload.size <= 0 ||
+        upload.size > CHAT_ATTACHMENT_POLICY.maxBytesEach ||
+        !Number.isFinite(upload.expiresAt) ||
+        typeof upload.tokenHash !== 'string'
+      ) {
+        throw new Error('Invalid persisted upload metadata; existing files have been preserved');
+      }
+      upload.filePath = path.join(this.rootDir, `${upload.id}.part`);
+      upload.busy = false;
+      if (upload.expiresAt > Date.now()) this.uploads.set(upload.id, upload);
+    }
   }
 
   async prepare(input: {
@@ -139,33 +155,19 @@ export class MeshChatAttachmentStore {
       committed: false,
       busy: false,
     };
+    await this.persist(upload);
     this.uploads.set(id, upload);
     return {
       uploadId: id,
       uploadToken: token,
-      maxChunkBytes: MESH_BINARY_CHUNK_BYTES,
       expiresAt: new Date(upload.expiresAt).toISOString(),
     };
   }
 
-  async writeMesh(input: {
-    sourceDeviceId: string;
-    uploadId: unknown;
-    offset: unknown;
-    dataBase64: unknown;
-  }) {
-    const upload = this.forSource(input.uploadId, input.sourceDeviceId);
-    const encoded = String(input.dataBase64 ?? '').trim();
-    if (!encoded || encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/u.test(encoded))
-      throw new Error('attachment chunk is not valid base64');
-    const data = Buffer.from(encoded, 'base64');
-    if (data.length === 0 || data.length > MESH_BINARY_CHUNK_BYTES)
-      throw new Error('attachment chunk is empty or too large');
-    return await this.write(upload, input.offset, data);
-  }
-
   async writeHttp(uploadId: string, token: string, offset: unknown, request: http.IncomingMessage) {
     const upload = this.authorizedUpload(uploadId, token);
+    if (!(await this.authorized(upload.sourceDeviceId)))
+      throw Object.assign(new Error('Upload permission was revoked'), { code: 'UNAUTHORIZED' });
     this.beginOperation(upload);
     try {
       const parsedOffset = Number(offset);
@@ -181,6 +183,8 @@ export class MeshChatAttachmentStore {
       let written = 0;
       try {
         for await (const raw of request) {
+          if (!(await this.authorized(upload.sourceDeviceId)))
+            throw new Error('Upload permission was revoked');
           const chunk = Buffer.from(raw);
           if (parsedOffset + written + chunk.length > upload.size)
             throw new Error('attachment upload exceeds its declared size');
@@ -193,6 +197,7 @@ export class MeshChatAttachmentStore {
         await handle.close();
       }
       upload.expiresAt = Date.now() + UPLOAD_TTL_MS;
+      await this.persist(upload);
       return {
         uploadId: upload.id,
         offset: parsedOffset + written,
@@ -217,10 +222,10 @@ export class MeshChatAttachmentStore {
           .createHash('sha256')
           .update(await fs.readFile(upload.filePath))
           .digest('hex');
-        if (!safeEqual(digest, upload.sha256))
-          throw new Error('attachment checksum did not match');
+        if (!safeEqual(digest, upload.sha256)) throw new Error('attachment checksum did not match');
       }
       upload.committed = true;
+      await this.persist(upload);
       return {
         attachmentId: upload.id,
         name: upload.name,
@@ -251,9 +256,7 @@ export class MeshChatAttachmentStore {
   ) {
     const rawIds = Array.isArray(attachmentIds) ? attachmentIds : [];
     if (rawIds.length > CHAT_ATTACHMENT_POLICY.maxCount)
-      throw new Error(
-        `too many prompt attachments (max ${CHAT_ATTACHMENT_POLICY.maxCount})`,
-      );
+      throw new Error(`too many prompt attachments (max ${CHAT_ATTACHMENT_POLICY.maxCount})`);
     const ids = [...new Set(rawIds.map((value) => String(value ?? '').trim()).filter(Boolean))];
     const uploads = ids.map((id) => this.forSource(id, sourceDeviceId));
     for (const upload of uploads) {
@@ -267,9 +270,7 @@ export class MeshChatAttachmentStore {
         throw new Error('prompt attachments exceed 20 MiB in total');
       }
       if (attachmentPolicy.issue.code === 'too_many_attachments') {
-        throw new Error(
-          `too many prompt attachments (max ${CHAT_ATTACHMENT_POLICY.maxCount})`,
-        );
+        throw new Error(`too many prompt attachments (max ${CHAT_ATTACHMENT_POLICY.maxCount})`);
       }
       throw attachmentPolicyError(attachmentPolicy.issue);
     }
@@ -291,6 +292,7 @@ export class MeshChatAttachmentStore {
         if (!upload) return;
         this.uploads.delete(id);
         await fs.rm(upload.filePath, { force: true });
+        await fs.rm(path.join(this.rootDir, `${upload.id}.json`), { force: true });
       }),
     );
   }
@@ -299,7 +301,7 @@ export class MeshChatAttachmentStore {
     clearInterval(this.cleanupTimer);
     const uploads = [...this.uploads.values()];
     this.uploads.clear();
-    await Promise.all(uploads.map((upload) => fs.rm(upload.filePath, { force: true })));
+    await Promise.all(uploads.map((upload) => this.persist(upload)));
   }
 
   private forSource(uploadId: unknown, sourceDeviceId: string): Upload {
@@ -334,36 +336,11 @@ export class MeshChatAttachmentStore {
     return upload;
   }
 
-  private async write(upload: Upload, offsetRaw: unknown, data: Buffer) {
-    this.beginOperation(upload);
-    try {
-      const offset = Number(offsetRaw);
-      if (!Number.isSafeInteger(offset) || offset < 0)
-        throw new Error('attachment offset is invalid');
-      const stat = await fs.stat(upload.filePath);
-      if (stat.size !== offset)
-        throw Object.assign(
-          new Error(`attachment offset mismatch: expected ${stat.size}, received ${offset}`),
-          { code: 'TRANSFER_OFFSET_MISMATCH' },
-        );
-      if (offset + data.length > upload.size)
-        throw new Error('attachment exceeds its declared size');
-      const handle = await fs.open(upload.filePath, 'a');
-      try {
-        await handle.write(data);
-        await handle.sync();
-      } finally {
-        await handle.close();
-      }
-      upload.expiresAt = Date.now() + UPLOAD_TTL_MS;
-      return {
-        uploadId: upload.id,
-        offset: offset + data.length,
-        complete: offset + data.length === upload.size,
-      };
-    } finally {
-      upload.busy = false;
-    }
+  private async persist(upload: Upload): Promise<void> {
+    const target = path.join(this.rootDir, `${upload.id}.json`);
+    const temporary = `${target}.${crypto.randomUUID()}.tmp`;
+    await fs.writeFile(temporary, JSON.stringify({ ...upload, busy: false }), { mode: 0o600 });
+    await fs.rename(temporary, target);
   }
 
   private beginOperation(upload: Upload, allowCommitted = false): void {
@@ -380,6 +357,7 @@ export class MeshChatAttachmentStore {
     const expired = [...this.uploads.values()].filter(
       (upload) => !upload.busy && upload.expiresAt <= Date.now(),
     );
-    await this.remove(expired.map((upload) => upload.id));
+    // Expiry removes network authority, while preserving recoverable content on disk.
+    for (const upload of expired) this.uploads.delete(upload.id);
   }
 }

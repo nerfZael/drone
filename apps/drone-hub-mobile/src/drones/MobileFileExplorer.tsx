@@ -18,7 +18,6 @@ import RefreshCw from 'lucide-react-native/icons/refresh-cw';
 import type { DroneControlOperation } from '@drone/device-protocol';
 import { NativeFileTypeIcon } from '../components/FileTypeIcon';
 import { ThemedTextInput } from '../components/ThemedTextInput';
-import { readMeshJsonContent } from '../mesh/read-mesh-json-content';
 import { colors } from '../theme';
 import { BoundedSwrCache } from './bounded-swr-cache';
 import {
@@ -247,54 +246,7 @@ export function MobileFileExplorer({
           },
           requestController.signal,
         );
-        if (result?.contentChunk) {
-          let firstChunkAvailable = true;
-          const firstChunk = result.contentChunk;
-          result = await readMeshJsonContent(
-            async (contentOffset, snapshotToken, signal) => {
-              if (
-                currentContextKeyRef.current !== requestContextKey ||
-                contextVersionRef.current !== requestContextVersion ||
-                directoryRequestSeqRef.current[path] !== requestSeq
-              ) {
-                throw new Error('The selected workspace changed while files were loading');
-              }
-              if (contentOffset === 0 && firstChunkAvailable) {
-                firstChunkAvailable = false;
-                return firstChunk;
-              }
-              const next = await requestDroneControl(
-                targetId,
-                'files.list',
-                {
-                  droneId,
-                  chatName,
-                  path,
-                  contentOffset,
-                  ...(snapshotToken ? { snapshotToken } : {}),
-                },
-                signal,
-              );
-              return next?.contentChunk ?? {};
-            },
-            {
-              isCancelled: () =>
-                currentContextKeyRef.current !== requestContextKey ||
-                contextVersionRef.current !== requestContextVersion ||
-                directoryRequestSeqRef.current[path] !== requestSeq,
-              signal: requestController.signal,
-              cancelSnapshot: async (snapshotToken) => {
-                await requestDroneControl(targetId, 'files.list', {
-                  droneId,
-                  chatName,
-                  path,
-                  snapshotToken,
-                  cancelSnapshot: true,
-                });
-              },
-            },
-          );
-        }
+
         if (
           currentContextKeyRef.current !== requestContextKey ||
           contextVersionRef.current !== requestContextVersion ||

@@ -14,6 +14,7 @@ export type MeshProfile = {
   connections: MeshConnection[];
   devices: MeshDevice[];
   capabilitiesByDevice: Record<string, CapabilityDescriptor[]>;
+  routeSequences?: Record<string, number>;
 };
 
 export async function loadMeshProfile(): Promise<MeshProfile | null> {
@@ -45,12 +46,17 @@ export async function loadMeshProfile(): Promise<MeshProfile | null> {
     profile.capabilitiesByDevice ??= {};
     return profile;
   } catch {
-    await AsyncStorage.removeItem(PROFILE_KEY);
-    return null;
+    throw new Error(
+      'The saved device profile could not be read. Its data has been preserved; restore the profile before pairing again.',
+    );
   }
 }
 
 export async function saveMeshProfile(profile: MeshProfile): Promise<void> {
+  if ((await AsyncStorage.getItem(`${PROFILE_KEY}.preHttpV2`)) === null) {
+    const previous = await AsyncStorage.getItem(PROFILE_KEY);
+    if (previous !== null) await AsyncStorage.setItem(`${PROFILE_KEY}.preHttpV2`, previous);
+  }
   await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
 }
 

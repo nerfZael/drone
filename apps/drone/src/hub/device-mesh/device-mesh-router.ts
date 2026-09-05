@@ -1,13 +1,11 @@
 import crypto from 'node:crypto';
 import type http from 'node:http';
-import type { Duplex } from 'node:stream';
 import {
   capabilityEventPolicy,
   capabilityEventSigningText,
   capabilityRequestSigningText,
   isGranted,
-  MESH_MAX_MESSAGE_BYTES,
-  MESH_SAFE_MESSAGE_BYTES,
+  DEVICE_HTTP_MAX_JSON_BYTES,
   parseSignedCapabilityRequest,
   socketAuthSigningText,
   socketServerAuthSigningText,
@@ -17,7 +15,8 @@ import {
   type MeshDevice,
   type SignedCapabilityRequest,
 } from '@drone/device-protocol';
-import { RawData, WebSocket, WebSocketServer } from 'ws';
+import { DeviceHttpChannel } from './device-http-channel';
+import { DeviceHttpChannelServer } from './device-http-channel-server';
 import { CapabilityRegistry } from './capability-registry';
 import { DeviceMembershipSynchronizer } from './device-membership-synchronizer';
 import { DeviceMeshAuditStore } from './device-mesh-audit-store';
@@ -31,9 +30,12 @@ import {
 } from './device-identity';
 import { DeviceMeshStore } from './device-mesh-store';
 import { DeviceRouteManager } from './device-route-manager';
+import { DeviceEventReplay } from './device-event-replay';
+import { DeviceRequestJournal } from './device-request-journal';
+import { DeviceReadResponses } from './device-read-responses';
 
 type AuthenticatedSocket = {
-  ws: WebSocket;
+  ws: DeviceHttpChannel;
   peerDeviceId: string;
   outbound: boolean;
   lifecycle?: AbortController;
@@ -56,9 +58,9 @@ const CAPABILITY_EVENT_MAX_RELAY_SENDS_PER_BROADCAST = 100;
 const CAPABILITY_EVENT_MAX_RELAYS_PER_TARGET = 3;
 const CAPABILITY_EVENT_ROUTE_TTL_MS = 5 * 60_000;
 const MAX_MESH_CONNECTIONS = 100;
-const MESH_MAX_BUFFERED_BYTES = MESH_SAFE_MESSAGE_BYTES * 2;
+const MESH_MAX_BUFFERED_BYTES = 240 * 1024 * 2;
 
-function send(ws: WebSocket, payload: unknown): boolean {
+function send(ws: DeviceHttpChannel, payload: unknown): boolean {
   try {
     return sendSerialized(ws, JSON.stringify(payload));
   } catch {
@@ -66,21 +68,28 @@ function send(ws: WebSocket, payload: unknown): boolean {
   }
 }
 
-function sendSerialized(ws: WebSocket, serialized: string): boolean {
-  if (ws.readyState !== WebSocket.OPEN) return false;
+function sendSerialized(ws: DeviceHttpChannel, serialized: string, cursor?: string): boolean {
+  if (ws.readyState !== DeviceHttpChannel.OPEN) return false;
   const bytes = Buffer.byteLength(serialized);
-  if (bytes > MESH_SAFE_MESSAGE_BYTES) return false;
+  if (bytes > DEVICE_HTTP_MAX_JSON_BYTES) return false;
   const bufferedBytes = Number(ws.bufferedAmount) || 0;
-  if (bufferedBytes + bytes > MESH_MAX_BUFFERED_BYTES) {
+  const budget = ws.isHttpMessage?.(serialized)
+    ? DEVICE_HTTP_MAX_JSON_BYTES * 2
+    : MESH_MAX_BUFFERED_BYTES;
+  if (bufferedBytes + bytes > budget) {
     closeSocket(ws, 1013, 'mesh connection is backpressured');
     return false;
   }
   try {
-    ws.send(serialized, (error) => {
-      if (error && ws.readyState === WebSocket.OPEN) {
-        closeSocket(ws, 1011, 'mesh send failed');
-      }
-    });
+    ws.send(
+      serialized,
+      (error) => {
+        if (error && ws.readyState === DeviceHttpChannel.OPEN) {
+          closeSocket(ws, 1011, 'mesh send failed');
+        }
+      },
+      cursor,
+    );
     return true;
   } catch {
     closeSocket(ws, 1011, 'mesh send failed');
@@ -88,7 +97,7 @@ function sendSerialized(ws: WebSocket, serialized: string): boolean {
   }
 }
 
-function closeSocket(ws: WebSocket, code: number, reason: string): void {
+function closeSocket(ws: DeviceHttpChannel, code: number, reason: string): void {
   try {
     ws.close(code, reason);
   } catch {
@@ -104,20 +113,8 @@ function serializedBytes(value: unknown): number {
   }
 }
 
-function socketUrl(endpoint: string, deviceId: string): string {
-  const url = new URL(endpoint);
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-  url.pathname = '/api/device-mesh/ws';
-  url.search = `deviceId=${encodeURIComponent(deviceId)}`;
-  url.hash = '';
-  return url.toString();
-}
-
 function isBulkTransferRequest(request: SignedCapabilityRequest): boolean {
-  if (
-    request.capability === WORKSPACE_CAPABILITY.id &&
-    (request.operation === 'files.transfer.read' || request.operation === 'files.transfer.write')
-  )
+  if (request.capability === WORKSPACE_CAPABILITY.id && request.operation === 'files.transfer.read')
     return true;
   if (
     request.capability === 'drone-control' &&
@@ -134,15 +131,7 @@ function isBulkTransferRequest(request: SignedCapabilityRequest): boolean {
   );
 }
 
-function isSnapshotChunkResponse(response: CapabilityResponse): boolean {
-  const result =
-    response.ok && response.result && typeof response.result === 'object'
-      ? (response.result as Record<string, any>)
-      : null;
-  return Boolean(result?.contentChunk?.dataBase64 || result?.mediaChunk?.dataBase64);
-}
-
-function usesTransferSnapshot(request: SignedCapabilityRequest): boolean {
+function usesBoundedRead(request: SignedCapabilityRequest): boolean {
   return (
     request.capability === 'drone-control' &&
     (request.operation === 'files.list' ||
@@ -152,31 +141,36 @@ function usesTransferSnapshot(request: SignedCapabilityRequest): boolean {
 }
 
 export class DeviceMeshRouter {
-  private readonly server = new WebSocketServer({
-    noServer: true,
-    maxPayload: MESH_MAX_MESSAGE_BYTES,
-  });
+  private readonly eventReplay = new DeviceEventReplay();
+  private readonly readResponses = new DeviceReadResponses();
+  private readonly eventCursors = new Map<string, string>();
+  private readonly server: DeviceHttpChannelServer;
   private readonly connections = new Map<string, AuthenticatedSocket>();
   private readonly routes = new Map<
     string,
     {
-      sourceWs: WebSocket;
+      sourceWs: DeviceHttpChannel;
       sourceDeviceId: string;
-      targetWs: WebSocket;
+      targetWs: DeviceHttpChannel;
       targetDeviceId: string;
       requestId: string;
       timer: ReturnType<typeof setTimeout>;
     }
   >();
-  private readonly capabilitySourceSockets = new Map<string, Set<WebSocket>>();
+  private readonly capabilitySourceSockets = new Map<string, Set<DeviceHttpChannel>>();
   private readonly replay = new Map<string, number>();
+  private readonly activeInvocations = new Map<
+    string,
+    { channel?: DeviceHttpChannel; controller: AbortController }
+  >();
+  private readonly cancelledInvocations = new WeakMap<DeviceHttpChannel, Map<string, number>>();
   private readonly responses = new DeviceMeshResponseCache();
   private readonly requestTimes = new Map<string, number[]>();
   private readonly bulkRequestTimes = new Map<string, number[]>();
   private readonly capabilityEventDirectPeerTimes = new Map<string, number[]>();
   private readonly capabilityEventRelaySourceTimes = new Map<string, number[]>();
   private readonly capabilityEventInvalidRelayTimes = new Map<string, number[]>();
-  private readonly capabilityEventRelayValidations = new WeakMap<WebSocket, number>();
+  private readonly capabilityEventRelayValidations = new WeakMap<DeviceHttpChannel, number>();
   private readonly capabilityEventSourceTimes = new Map<string, number[]>();
   private readonly capabilityEventTypeTimes = new Map<string, number[]>();
   private readonly seenCapabilityEvents = new Map<string, number>();
@@ -186,6 +180,7 @@ export class DeviceMeshRouter {
   >();
   private capabilityEventPruneTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly connecting = new Set<string>();
+  private readonly peerErrors = new Map<string, string>();
   private readonly connectionListeners = new Set<() => void>();
   private readonly capabilityEventListeners = new Set<(event: Record<string, any>) => void>();
   private reconnectTimer: ReturnType<typeof setInterval> | null = null;
@@ -198,15 +193,21 @@ export class DeviceMeshRouter {
     private readonly capabilities: CapabilityRegistry,
     private readonly routeManager: DeviceRouteManager,
     private readonly audit: DeviceMeshAuditStore,
+    private readonly requestJournal?: DeviceRequestJournal,
+    prepareResult?: (
+      request: SignedCapabilityRequest,
+      size: number,
+      revision: string,
+    ) => Promise<unknown>,
   ) {
     this.membership = new DeviceMembershipSynchronizer(identity, store);
     this.requestClient = new DeviceMeshRequestClient(identity, (targetDeviceId) => {
       const direct = this.connections.get(targetDeviceId);
       return direct?.ws ?? this.connections.values().next().value?.ws;
     });
-    this.server.on('connection', (ws: WebSocket, request: http.IncomingMessage) => {
+    this.server = new DeviceHttpChannelServer((ws, request) => {
       void this.authenticateInbound(ws, request).catch(() => ws.close(1011, 'mesh unavailable'));
-    });
+    }, prepareResult);
   }
 
   start(): void {
@@ -247,6 +248,9 @@ export class DeviceMeshRouter {
   connectedDeviceIds(): string[] {
     return [...this.connections.keys()];
   }
+  connectionErrors(): Record<string, string> {
+    return Object.fromEntries(this.peerErrors);
+  }
 
   subscribeConnections(listener: () => void): () => void {
     this.connectionListeners.add(listener);
@@ -268,16 +272,18 @@ export class DeviceMeshRouter {
     }
   }
 
-  handleUpgrade(request: http.IncomingMessage, socket: Duplex, head: Buffer): boolean {
-    const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
-    if (url.pathname !== '/api/device-mesh/ws') return false;
-    this.server.handleUpgrade(request, socket, head, (ws) =>
-      this.server.emit('connection', ws, request),
-    );
-    return true;
+  handleHttp(
+    request: http.IncomingMessage,
+    response: http.ServerResponse,
+    url: URL,
+  ): Promise<boolean> {
+    return this.server.handle(request, response, url);
   }
 
   disconnect(deviceId: string): void {
+    for (const [key, invocation] of this.activeInvocations)
+      if (key.startsWith(`${deviceId}:`)) invocation.controller.abort();
+    this.eventReplay.deleteDevice(deviceId);
     this.responses.deleteDevice(deviceId);
     this.clearCapabilityEventPeer(deviceId);
     void this.capabilities.disconnectDevice(deviceId);
@@ -285,6 +291,10 @@ export class DeviceMeshRouter {
   }
 
   async accessChanged(deviceId: string): Promise<void> {
+    for (const [key, invocation] of this.activeInvocations)
+      if (key.startsWith(`${deviceId}:`)) invocation.controller.abort();
+    this.readResponses.clear();
+    this.eventReplay.deleteDevice(deviceId);
     this.responses.deleteDevice(deviceId);
     await this.capabilities.accessChanged(deviceId);
   }
@@ -307,6 +317,7 @@ export class DeviceMeshRouter {
   async broadcastMembership(): Promise<void> {
     const event = await this.membership.membershipEvent();
     for (const connection of this.connections.values()) send(connection.ws, event);
+    void this.connectToKnownPeers().catch(() => undefined);
   }
 
   async broadcastRevocation(deviceId: string): Promise<void> {
@@ -377,8 +388,9 @@ export class DeviceMeshRouter {
         signature: signDeviceText(this.identity, capabilityEventSigningText(unsigned)),
       } satisfies CapabilityEvent;
       const serialized = JSON.stringify(signed);
+      const cursor = this.eventReplay.append(peer.id, signed);
       if (direct) {
-        if (sendSerialized(direct.ws, serialized)) continue;
+        if (sendSerialized(direct.ws, serialized, cursor)) continue;
       }
       const attemptedRelays = new Set<string>();
       if (direct) attemptedRelays.add(direct.peerDeviceId);
@@ -418,7 +430,10 @@ export class DeviceMeshRouter {
     }
   }
 
-  private async authenticateInbound(ws: WebSocket, request: http.IncomingMessage): Promise<void> {
+  private async authenticateInbound(
+    ws: DeviceHttpChannel,
+    request: http.IncomingMessage,
+  ): Promise<void> {
     const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
     const requestedDeviceId = String(url.searchParams.get('deviceId') ?? '').trim();
     const state = await this.store.read();
@@ -464,7 +479,23 @@ export class DeviceMeshRouter {
           deviceId: this.identity.id,
           networkId: state.networkId,
           capabilities: this.capabilities.list(),
+          // Refresh state on every attachment; replay is advisory and never the source of truth.
+          reconcile: true,
         });
+        const replay = this.eventReplay.after(
+          requestedDeviceId,
+          String(request.headers['last-event-id'] ?? ''),
+        );
+        if (replay.reset) send(ws, { type: 'stream.reset', cursor: this.eventReplay.cursor });
+        else
+          for (const entry of replay.entries) {
+            const policy = capabilityEventPolicy(entry.event.capability, entry.event.event);
+            if (
+              policy &&
+              isGranted(device.grants, entry.event.capability, 1, policy.requiredOperation)
+            )
+              sendSerialized(ws, JSON.stringify(entry.event), entry.cursor);
+          }
       } catch {
         ws.close(4001, 'authentication failed');
       }
@@ -490,6 +521,7 @@ export class DeviceMeshRouter {
       existing.ws.close(4000, 'replaced');
     }
     this.connections.set(connection.peerDeviceId, connection);
+    this.peerErrors.delete(connection.peerDeviceId);
     this.notifyConnectionsChanged();
     connection.ws.on('message', (raw) => {
       void this.onMessage(connection, raw).catch(() =>
@@ -497,6 +529,8 @@ export class DeviceMeshRouter {
       );
     });
     connection.ws.on('close', () => {
+      if (connection.ws.lastEventId)
+        this.eventCursors.set(connection.peerDeviceId, connection.ws.lastEventId);
       this.cleanupConnectionCapabilities(connection);
       if (this.connections.get(connection.peerDeviceId)?.ws === connection.ws) {
         this.connections.delete(connection.peerDeviceId);
@@ -552,7 +586,11 @@ export class DeviceMeshRouter {
       const endpoint = device.endpoints[0];
       this.connecting.add(device.id);
       try {
-        const ws = new WebSocket(socketUrl(endpoint, state.selfDeviceId));
+        const ws = DeviceHttpChannel.connect(
+          endpoint,
+          state.selfDeviceId,
+          this.eventCursors.get(device.id),
+        );
         const authTimeout = setTimeout(() => ws.close(4001, 'authentication timeout'), 12_000);
         authTimeout.unref?.();
         ws.once('close', () => {
@@ -592,7 +630,11 @@ export class DeviceMeshRouter {
             ws.close();
           }
         });
-        ws.on('error', () => ws.close());
+        ws.on('error', (error: Error) => {
+          this.peerErrors.set(device.id, error.message || 'Device connection failed');
+          this.notifyConnectionsChanged();
+          ws.close();
+        });
       } catch {
         this.connecting.delete(device.id);
         // Reconnect loop will try the next time the app is reachable.
@@ -600,7 +642,7 @@ export class DeviceMeshRouter {
     }
   }
 
-  private async onMessage(connection: AuthenticatedSocket, raw: RawData): Promise<void> {
+  private async onMessage(connection: AuthenticatedSocket, raw: string): Promise<void> {
     let message: any;
     try {
       message = JSON.parse(raw.toString());
@@ -700,6 +742,24 @@ export class DeviceMeshRouter {
       }
       return;
     }
+    if (message?.type === 'capability.cancel') {
+      // Cancellation is scoped to the authenticated hop that submitted the signed request.
+      // A relay can cancel its own in-flight delivery, but never work submitted by another hop.
+      const key = `${String(message.sourceDeviceId)}:${String(message.requestId)}`;
+      const active = this.activeInvocations.get(key);
+      if (active?.channel === connection.ws) active.controller.abort();
+      let cancelled = this.cancelledInvocations.get(connection.ws);
+      if (!cancelled) {
+        cancelled = new Map();
+        this.cancelledInvocations.set(connection.ws, cancelled);
+      }
+      for (const [id, expires] of cancelled) if (expires <= Date.now()) cancelled.delete(id);
+      if (cancelled.size < 100) cancelled.set(key, Date.now() + 120000);
+      const route = this.routes.get(key);
+      if (route?.sourceWs === connection.ws && route.targetDeviceId === message.targetDeviceId)
+        send(route.targetWs, message);
+      return;
+    }
     if (message?.type === 'capability.response') {
       if (this.requestClient.acceptResponse(message, connection.ws)) return;
       const routeKey = `${String(message.targetDeviceId ?? '')}:${String(message.requestId ?? '')}`;
@@ -722,7 +782,7 @@ export class DeviceMeshRouter {
                 targetDeviceId: route.targetDeviceId,
               },
               'RESPONSE_TOO_LARGE',
-              'mesh response is too large; request a smaller page or chunk',
+              'mesh response is too large; request a smaller page or use HTTP content',
             ),
           );
         }
@@ -841,11 +901,7 @@ export class DeviceMeshRouter {
     if (response.ok && request.sourceDeviceId !== connection.peerDeviceId) {
       this.rememberCapabilityEventRoute(request.sourceDeviceId, connection.peerDeviceId);
     }
-    if (
-      request.capability !== WORKSPACE_CAPABILITY.id &&
-      !bulkTransfer &&
-      !isSnapshotChunkResponse(response)
-    ) {
+    if (request.capability !== WORKSPACE_CAPABILITY.id && !bulkTransfer) {
       this.responses.set({
         key: responseKey,
         deviceId: request.sourceDeviceId,
@@ -943,14 +999,14 @@ export class DeviceMeshRouter {
     return event;
   }
 
-  private beginCapabilityEventRelayValidation(ws: WebSocket): boolean {
+  private beginCapabilityEventRelayValidation(ws: DeviceHttpChannel): boolean {
     const active = this.capabilityEventRelayValidations.get(ws) ?? 0;
     if (active >= CAPABILITY_EVENT_MAX_RELAY_VALIDATIONS) return false;
     this.capabilityEventRelayValidations.set(ws, active + 1);
     return true;
   }
 
-  private finishCapabilityEventRelayValidation(ws: WebSocket): void {
+  private finishCapabilityEventRelayValidation(ws: DeviceHttpChannel): void {
     const active = (this.capabilityEventRelayValidations.get(ws) ?? 1) - 1;
     if (active > 0) this.capabilityEventRelayValidations.set(ws, active);
     else this.capabilityEventRelayValidations.delete(ws);
@@ -1035,12 +1091,22 @@ export class DeviceMeshRouter {
     if (!('state' in validation)) return validation;
     const { state, source, expires, replayKey } = validation;
     this.replay.set(replayKey, expires);
+    const readOnly = /\.(list|read|stat|search|preview|models|status|poll)$/.test(
+      request.operation,
+    );
+    if (!readOnly && this.requestJournal && !(await this.requestJournal.accept(request))) {
+      return this.errorResponse(
+        request,
+        'REQUEST_OUTCOME_UNKNOWN',
+        'This request was accepted before. Refresh its result or job state; it will not be executed again.',
+      );
+    }
     const connectionSignal = connection?.lifecycle?.signal;
     if (connectionSignal?.aborted) {
       return this.errorResponse(request, 'TRANSFER_CANCELLED', 'mesh connection was replaced');
     }
-    const transferSnapshotRequest = usesTransferSnapshot(request);
-    if (connection && transferSnapshotRequest) {
+    const boundedReadRequest = usesBoundedRead(request);
+    if (connection && boundedReadRequest) {
       connection.capabilitySourceDeviceIds ??= new Set();
       connection.capabilitySourceDeviceIds.add(source.id);
       let sourceSockets = this.capabilitySourceSockets.get(source.id);
@@ -1051,13 +1117,24 @@ export class DeviceMeshRouter {
       sourceSockets.add(connection.ws);
     }
     const invocationController = new AbortController();
+    const invocationKey = `${source.id}:${request.requestId}`;
+    this.activeInvocations.set(invocationKey, {
+      channel: connection?.ws,
+      controller: invocationController,
+    });
+    if (
+      connection &&
+      (this.cancelledInvocations.get(connection.ws)?.get(invocationKey) ?? 0) > Date.now()
+    )
+      invocationController.abort();
     const abortInvocation = () => invocationController.abort();
     connectionSignal?.addEventListener('abort', abortInvocation, { once: true });
-    const expiryTimer = transferSnapshotRequest
+    const expiryTimer = boundedReadRequest
       ? setTimeout(abortInvocation, Math.max(0, expires - Date.now()))
       : null;
     expiryTimer?.unref?.();
     try {
+      invocationController.signal.throwIfAborted();
       const result = await this.capabilities.invoke(
         request.capability,
         request.capabilityVersion,
@@ -1074,6 +1151,8 @@ export class DeviceMeshRouter {
           code: 'TRANSFER_CANCELLED',
         });
       }
+      const stillAuthorized = await this.validateRequest(request, false);
+      if (!('state' in stillAuthorized)) return stillAuthorized;
       await this.recordAudit(request, 'allowed');
       const response: CapabilityResponse = {
         type: 'capability.response',
@@ -1082,9 +1161,9 @@ export class DeviceMeshRouter {
         sourceDeviceId: state.selfDeviceId,
         targetDeviceId: source.id,
         ok: true,
-        result,
+        result: this.readResponses.encode(request, result),
       };
-      if (Buffer.byteLength(JSON.stringify(response)) > MESH_SAFE_MESSAGE_BYTES) {
+      if (Buffer.byteLength(JSON.stringify(response)) > DEVICE_HTTP_MAX_JSON_BYTES) {
         return this.errorResponse(
           request,
           'RESPONSE_TOO_LARGE',
@@ -1100,12 +1179,14 @@ export class DeviceMeshRouter {
         error?.message ?? String(error),
       );
     } finally {
+      this.activeInvocations.delete(invocationKey);
       if (expiryTimer) clearTimeout(expiryTimer);
       connectionSignal?.removeEventListener('abort', abortInvocation);
     }
   }
 
   private cleanupConnectionCapabilities(connection: AuthenticatedSocket): void {
+    this.readResponses.clear();
     if (connection.capabilityCleanupStarted) return;
     connection.capabilityCleanupStarted = true;
     connection.lifecycle?.abort();

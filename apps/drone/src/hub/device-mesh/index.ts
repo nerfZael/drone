@@ -1,13 +1,20 @@
 import type http from 'node:http';
-import type { Duplex } from 'node:stream';
 import path from 'node:path';
+import { canonicalJson, isGranted } from '@drone/device-protocol';
 import { CapabilityRegistry } from './capability-registry';
 import { DeviceMeshAuditStore } from './device-mesh-audit-store';
 import { createDeviceCoreCapability } from './device-core-capability';
-import { loadOrCreateDeviceIdentity } from './device-identity';
+import { loadOrCreateDeviceIdentity, signDeviceText } from './device-identity';
 import { DeviceMeshHttp, type DeviceMeshHttpExtension } from './device-mesh-http';
 import { DeviceMeshIngressHttp } from './device-mesh-ingress-http';
 import { DeviceMeshIngress } from './device-mesh-ingress';
+import { DeviceMeshDiscovery } from './device-mesh-discovery';
+import { DevicePhoneDiscovery } from './device-phone-discovery';
+import { DeviceLanDiscovery } from './device-lan-discovery';
+import { DeviceHttpTransfers } from './device-http-transfers';
+import { DeviceRequestJournal } from './device-request-journal';
+import { WorkspaceHttpTransfers } from './workspace-http-transfers';
+import { DeviceResultUploads } from './device-result-uploads';
 import { MeshChatAttachmentHttp } from './mesh-chat-attachment-http';
 import { MeshChatAttachmentStore } from './mesh-chat-attachment-store';
 import { DeviceMeshRouter } from './device-mesh-router';
@@ -40,7 +47,21 @@ export async function createDeviceMeshService(options: {
   await store.read();
   await store.prunePairingState();
   const capabilities = new CapabilityRegistry();
-  const chatAttachments = new MeshChatAttachmentStore(path.join(options.rootDir, 'attachments'));
+  let ingress: DeviceMeshIngress;
+  const transfers = new DeviceHttpTransfers(
+    { baseUrl: options.localHubBaseUrl, apiToken: options.apiToken },
+    store,
+    () => ingress?.status().publicEndpoint ?? null,
+  );
+  const chatAttachments = new MeshChatAttachmentStore(
+    path.join(options.rootDir, 'attachments'),
+    async (source) => {
+      const device = (await store.read()).devices[source];
+      return Boolean(
+        device && !device.revokedAt && isGranted(device.grants, 'drone-control', 1, 'chat.prompt'),
+      );
+    },
+  );
   await chatAttachments.initialize();
   let router: DeviceMeshRouter;
   capabilities.register(
@@ -49,6 +70,7 @@ export async function createDeviceMeshService(options: {
       () => capabilities.list(),
       () => router.broadcastMembership(),
       (deviceId) => router.accessChanged(deviceId),
+      (value) => signDeviceText(identity, `drone-directory-v2\n${canonicalJson(value)}`),
     ),
   );
   capabilities.register(
@@ -56,6 +78,7 @@ export async function createDeviceMeshService(options: {
       { baseUrl: options.localHubBaseUrl, apiToken: options.apiToken },
       chatAttachments,
       {
+        transfers,
         sidebarCommands: options.sidebarCommands,
         hubServices: options.hubServices,
         createdDroneAutoRename: options.createdDroneAutoRename,
@@ -74,11 +97,28 @@ export async function createDeviceMeshService(options: {
     path.join(options.rootDir, 'cross-device-assistant.json'),
   );
   const localHubAccess = { baseUrl: options.localHubBaseUrl, apiToken: options.apiToken };
-  capabilities.register(createWorkspaceCapability(assistantPolicies));
+  const workspaceTransfers = new WorkspaceHttpTransfers(
+    store,
+    () => ingress?.status().publicEndpoint ?? null,
+  );
+  capabilities.register(createWorkspaceCapability(assistantPolicies, workspaceTransfers));
   capabilities.register(createProviderCredentialsCapability(identity));
   const routeManager = new DeviceRouteManager(identity, store);
   const audit = new DeviceMeshAuditStore(path.join(options.rootDir, 'audit.json'));
-  router = new DeviceMeshRouter(identity, store, capabilities, routeManager, audit);
+  const resultUploads = new DeviceResultUploads(
+    path.join(options.rootDir, 'http-result-previews'),
+    store,
+    workspaceTransfers,
+  );
+  router = new DeviceMeshRouter(
+    identity,
+    store,
+    capabilities,
+    routeManager,
+    audit,
+    new DeviceRequestJournal(path.join(options.rootDir, 'http-request-journal')),
+    (request, size, revision) => resultUploads.prepare(request, size, revision),
+  );
   const extensions: DeviceMeshHttpExtension[] = [
     new DesktopDroneControlHttp(router, store),
     new MeshChatAttachmentHttp(chatAttachments),
@@ -87,7 +127,8 @@ export async function createDeviceMeshService(options: {
     ),
     new ProviderCredentialsHttp(identity, router, store),
   ];
-  let ingress: DeviceMeshIngress;
+  extensions.push(transfers);
+  extensions.push(workspaceTransfers);
   const httpHandler = new DeviceMeshHttp(
     identity,
     store,
@@ -105,20 +146,28 @@ export async function createDeviceMeshService(options: {
     options.rootDir,
     options.ingressPort ?? 0,
     (request, response, url) => httpHandler.handlePublic(request, response, url),
-    (request, socket, head) => router.handleUpgrade(request, socket, head),
     (endpoint) => router.announceEndpoint(endpoint),
   );
   extensions.push(new DeviceMeshIngressHttp(ingress));
+  const discovery = new DeviceMeshDiscovery(ingress, store, routeManager);
+  extensions.push(discovery);
+  const lanDiscovery = new DeviceLanDiscovery(identity, () => ingress.status().publicEndpoint);
+  extensions.push(lanDiscovery);
+  extensions.push(
+    new DevicePhoneDiscovery(ingress, store, identity, fetch, () => lanDiscovery.phonePeers()),
+  );
+  let discoveryTimer: ReturnType<typeof setInterval> | null = null;
   let pairingPruneTimer: ReturnType<typeof setInterval> | null = null;
 
   return {
     handleHttp: (request: http.IncomingMessage, response: http.ServerResponse, url: URL) =>
       httpHandler.handle(request, response, url),
-    handleUpgrade: (request: http.IncomingMessage, socket: Duplex, head: Buffer) =>
-      router.handleUpgrade(request, socket, head),
     start: async () => {
       router.start();
       await ingress.start();
+      void discovery.scan().catch(() => undefined);
+      discoveryTimer = setInterval(() => void discovery.scan().catch(() => undefined), 60_000);
+      discoveryTimer.unref?.();
       pairingPruneTimer = setInterval(
         () => void store.prunePairingState().catch(() => undefined),
         10 * 60_000,
@@ -126,10 +175,16 @@ export async function createDeviceMeshService(options: {
       pairingPruneTimer.unref?.();
     },
     close: async () => {
+      lanDiscovery.close();
+      if (discoveryTimer) clearInterval(discoveryTimer);
+      discoveryTimer = null;
       if (pairingPruneTimer) clearInterval(pairingPruneTimer);
       pairingPruneTimer = null;
       await ingress.close();
       await chatAttachments.close();
+      transfers.close();
+      workspaceTransfers.close();
+      resultUploads.close();
       await capabilities.close();
       httpHandler.close();
       router.close();
