@@ -7,6 +7,7 @@ import {
 import { errorMessage, readRawBody } from '../hub-http';
 import type { HubRouter } from '../hub-router';
 import type { CompanionTelemetryService } from '../companion/companion-telemetry';
+import { mobileChatLoadStore } from '../mobile-chat-load-store';
 
 type ServiceFunction = (...args: any[]) => any;
 const GROQ_SPEECH_TIMEOUT_MS = 30_000;
@@ -99,6 +100,7 @@ export function normalizeChatLoadTelemetry(raw: unknown): Record<string, unknown
     .slice(0, 24)
     .flatMap((item: any) => {
       const name = boundedTelemetryText(item?.name, 48);
+      const requestId = boundedTelemetryText(item?.requestId, 128);
       const requestDurationMs = boundedTelemetryMs(item?.durationMs);
       const startMs = boundedTelemetryMs(item?.startMs);
       const outcome = ['completed', 'error', 'aborted'].includes(item?.outcome)
@@ -148,8 +150,7 @@ export function normalizeChatLoadTelemetry(raw: unknown): Record<string, unknown
         }
       }
       const hasCompleteResourceTiming =
-        typeof resourceTiming.startMs === 'number' &&
-        typeof resourceTiming.durationMs === 'number';
+        typeof resourceTiming.startMs === 'number' && typeof resourceTiming.durationMs === 'number';
       const resourceTimingStatus =
         item?.resourceTimingStatus === 'collected' && hasCompleteResourceTiming
           ? 'collected'
@@ -159,6 +160,7 @@ export function normalizeChatLoadTelemetry(raw: unknown): Record<string, unknown
       return [
         {
           name,
+          ...(requestId ? { requestId } : {}),
           startMs,
           durationMs: requestDurationMs,
           outcome,
@@ -199,9 +201,7 @@ export function normalizeChatLoadTelemetry(raw: unknown): Record<string, unknown
     ...(surface ? { surface } : {}),
     agentKind: boundedTelemetryText(body.agentKind, 64) || null,
     runtime: body.runtime === 'host' || body.runtime === 'container' ? body.runtime : null,
-    cacheStatus: ['hit', 'miss', 'none'].includes(body.cacheStatus)
-      ? body.cacheStatus
-      : 'none',
+    cacheStatus: ['hit', 'miss', 'none'].includes(body.cacheStatus) ? body.cacheStatus : 'none',
     ...(Number.isSafeInteger(itemCount) && itemCount >= 0 && itemCount <= 100_000
       ? { itemCount }
       : {}),
@@ -414,6 +414,24 @@ export function registerOperationalRoutes(
     json(202, { ok: true });
   });
 
+  apiRouter.get('/api/telemetry/mobile-chat-loads', async ({ url, json }) => {
+    const since = url.searchParams.get('since') || undefined;
+    if (since && !Number.isFinite(Date.parse(since))) {
+      json(400, { error: 'Invalid since timestamp' });
+      return;
+    }
+    json(200, {
+      records: mobileChatLoadStore().list({
+        deviceId: url.searchParams.get('deviceId') ?? undefined,
+        droneId: url.searchParams.get('droneId') ?? undefined,
+        chatName: url.searchParams.get('chatName') ?? undefined,
+        requestId: url.searchParams.get('requestId') ?? undefined,
+        since,
+        limit: Number(url.searchParams.get('limit')) || 20,
+      }),
+    });
+  });
+
   apiRouter.post('/api/chats/idle/status', async ({ readJson, json }) => {
     const body = await readJson<any>();
     const mode =
@@ -471,9 +489,7 @@ export function registerOperationalRoutes(
   apiRouter.post('/api/audio/transcriptions', async ({ req, json }) => {
     const messageIdRaw = String(req.headers['x-drone-companion-message-id'] ?? '').trim();
     const messageId =
-      messageIdRaw &&
-      messageIdRaw.length <= 128 &&
-      !/[\u0000-\u001f\u007f]/.test(messageIdRaw)
+      messageIdRaw && messageIdRaw.length <= 128 && !/[\u0000-\u001f\u007f]/.test(messageIdRaw)
         ? messageIdRaw
         : '';
     const startedAt = performance.now();
@@ -490,9 +506,7 @@ export function registerOperationalRoutes(
       }
     };
     try {
-      const groqSettings: any = await measure<any>('settingsMs', () =>
-        resolveGroqApiKeySettings(),
-      );
+      const groqSettings: any = await measure<any>('settingsMs', () => resolveGroqApiKeySettings());
       if (!groqSettings.apiKey) {
         json(400, {
           ok: false,
@@ -517,15 +531,12 @@ export function registerOperationalRoutes(
             req.headers['x-drone-transcription-quality'] === 'accurate' ? 'accurate' : 'fast',
           language: String(req.headers['x-drone-transcription-language'] ?? '').trim() || null,
           prompt: (() => {
-            const encoded = String(
-              req.headers['x-drone-transcription-prompt-base64'] ?? '',
-            ).trim();
+            const encoded = String(req.headers['x-drone-transcription-prompt-base64'] ?? '').trim();
             if (!encoded) return null;
             try {
               return (
-                Buffer.from(encoded.slice(0, 8_000), 'base64')
-                  .toString('utf8')
-                  .slice(-1_200) || null
+                Buffer.from(encoded.slice(0, 8_000), 'base64').toString('utf8').slice(-1_200) ||
+                null
               );
             } catch {
               return null;

@@ -3,6 +3,8 @@ import React from 'react';
 import * as Crypto from 'expo-crypto';
 import { acceptDeviceDirectory } from './device-directory';
 import { AppState } from 'react-native';
+import { finishMobileChatLoad } from '../diagnostics/mobile-chat-load';
+import { mobileChatLoadBuffer } from '../diagnostics/mobile-chat-load-runtime';
 import type {
   CapabilityDescriptor,
   CapabilityEvent,
@@ -274,6 +276,39 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
     },
     [connectionManager],
   );
+
+  React.useEffect(() => {
+    const flush = () => {
+      if (AppState.currentState !== 'active') return;
+      void mobileChatLoadBuffer
+        .flush(async (target, records) => {
+          // Phone-local loads are stored on the primary connected desktop Hub.
+          const destination =
+            target === identity?.id ? connectionManager.connectedDeviceIds[0] : target;
+          if (!destination) throw new Error('No diagnostic destination connected');
+          const result = (await request(
+            destination,
+            'device-core',
+            'diagnostics.chat-load.upload',
+            { records },
+          )) as { accepted?: unknown };
+          if (!Array.isArray(result?.accepted))
+            throw new Error('Invalid diagnostic acknowledgement');
+          return { accepted: result.accepted.filter((id): id is string => typeof id === 'string') };
+        })
+        .catch(() => undefined);
+    };
+    flush();
+    const timer = setInterval(flush, 15_000);
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') finishMobileChatLoad('backgrounded');
+      else flush();
+    });
+    return () => {
+      clearInterval(timer);
+      subscription.remove();
+    };
+  }, [request, revision, identity?.id, connectionManager]);
 
   const uploadChatAttachment = React.useCallback(
     async (input: {

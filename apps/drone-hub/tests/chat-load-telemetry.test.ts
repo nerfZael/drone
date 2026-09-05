@@ -167,7 +167,7 @@ describe('chat load telemetry', () => {
       request?.response(
         new Response('{}', {
           status: 200,
-          headers: { 'server-timing': 'lifecycle;dur=2.5, rows;dur=4' },
+          headers: { 'server-timing': 'lifecycle;dur=2.5, rows;dur=4', 'x-drone-request-id': 'request-123' },
         }),
       );
       request?.finish({ responseBytes: 2, parseMs: 0.2 });
@@ -211,6 +211,7 @@ describe('chat load telemetry', () => {
             parseMs: 0.2,
             outcome: 'completed',
             serverTiming: { lifecycle: 2.5, rows: 4 },
+            requestId: 'request-123',
             resourceTimingStatus: expect.any(String),
           },
         ],

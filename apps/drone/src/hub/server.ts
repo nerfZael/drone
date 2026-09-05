@@ -544,6 +544,7 @@ import { createDroneRuntime, importContainerDroneRuntime } from './drone-runtime
 import { createDockerSnapshotRuntime } from './docker-snapshot-runtime';
 import { createDroneStatusRuntime } from './drone-status-runtime';
 import { startHubHttpTransport } from './hub-http-transport';
+import { observeHubHttpRequest, startHubStallMonitor } from './hub-performance-diagnostics';
 import { hubChangeEvents } from './hub-change-events';
 import { dispatchChatOutboxProjection } from './hub-outbox-projection-dispatch';
 import {
@@ -6261,6 +6262,7 @@ async function startDroneHubApiServerWithLifecycle(
   });
 
   const handleHubHttpRequest: http.RequestListener = async (req, res) => {
+    observeHubHttpRequest(req, res, hubLog);
     try {
       const method = (req.method ?? 'GET').toUpperCase();
       if (prepareHubHttpRequest(req, res, allowedOrigins, json)) return;
@@ -6361,6 +6363,8 @@ async function startDroneHubApiServerWithLifecycle(
       : {}),
   });
   actualPort = httpTransport.port;
+  const stopStallMonitor = startHubStallMonitor(hubLog);
+  registerBackgroundResource('performance diagnostics', async () => stopStallMonitor());
   registerBackgroundResource('HTTP transport', httpTransport.close);
   releaseMcpProjectionConfig = bindMcpProjectionConfig({
     signingSecret: mcpToken,

@@ -21,8 +21,10 @@ import {
   type MobileCapabilityEventGuard,
 } from './mobile-capability-event-guard';
 import { validateCapabilityEvent } from './validate-capability-event';
+import { observeMobileChatRequest } from '../diagnostics/mobile-chat-load';
 
 type PendingRequest = {
+  observation?: ReturnType<typeof observeMobileChatRequest>;
   decode(value: unknown): unknown;
   resolve(value: unknown): void;
   reject(error: Error): void;
@@ -104,7 +106,13 @@ export class MeshSession {
       };
       socket.onerror = () => {
         clearTimeout(timeout);
-        reject(new Error(`Could not reach ${this.connection.endpoint}`));
+        // A command POST and the long-lived event subscription are independent HTTP requests.
+        // Only an event-stream/authentication failure should replace the whole session; request
+        // failures are delivered to their own callbacks below.
+        if (!this.ready) {
+          socket.close();
+          reject(new Error(`Could not reach ${this.connection.endpoint}`));
+        }
       };
       socket.onclose = () => {
         this.lastEventId = socket.lastEventId;
@@ -169,71 +177,116 @@ export class MeshSession {
       ),
       maxHops: 1,
     };
-    const request: SignedCapabilityRequest = {
-      ...unsigned,
-      signature: await this.identity.sign(capabilityRequestSigningText(unsigned)),
-    };
-    // Signing can yield to the native key store. Do not miss an abort that arrives before the
-    // pending-request listener can be installed.
-    if (signal?.aborted) throw meshRequestCancelledError();
-    if (!this.ready || this.socket !== socket || socket.readyState !== DeviceHttpEventClient.OPEN) {
-      throw new Error('Mesh connection changed while the request was being signed');
-    }
-    const serialized = JSON.stringify(request);
-    const requestBytes =
-      typeof TextEncoder === 'undefined'
-        ? serialized.length * 3
-        : new TextEncoder().encode(serialized).byteLength;
-    if (requestBytes > DEVICE_HTTP_MAX_JSON_BYTES) throw new Error('Mesh request is too large');
-    return await new Promise((resolve, reject) => {
-      if (signal?.aborted) {
-        reject(meshRequestCancelledError());
-        return;
-      }
-      const onAbort = () => {
-        try {
-          socket.send(
-            JSON.stringify({
-              type: 'capability.cancel',
-              sourceDeviceId: this.identity.id,
-              targetDeviceId,
-              requestId: request.requestId,
-            }),
-          );
-        } catch {
-          /* Closed session. */
-        }
-        clearTimeout(timer);
-        this.pending.delete(request.requestId);
-        reject(meshRequestCancelledError());
+    const observation = observeMobileChatRequest(
+      targetDeviceId,
+      operation,
+      payload,
+      unsigned.requestId,
+    );
+    try {
+      const request: SignedCapabilityRequest = {
+        ...unsigned,
+        signature: await this.identity.sign(capabilityRequestSigningText(unsigned)),
       };
-      const timer = setTimeout(() => {
-        signal?.removeEventListener('abort', onAbort);
-        this.pending.delete(request.requestId);
-        reject(new Error('Target device did not respond in time.'));
-      }, MESH_REQUEST_TIMEOUT_MS);
-      this.pending.set(request.requestId, {
-        decode: read.decode,
-        resolve,
-        reject,
-        timer,
-        targetDeviceId,
-        signal,
-        onAbort,
-        capability,
-        operation,
-        payload,
-      });
-      signal?.addEventListener('abort', onAbort, { once: true });
-      try {
-        socket.send(serialized);
-      } catch (error) {
-        clearTimeout(timer);
-        signal?.removeEventListener('abort', onAbort);
-        this.pending.delete(request.requestId);
-        reject(error instanceof Error ? error : new Error(String(error)));
+      observation?.mark('signedMs');
+      // Signing can yield to the native key store. Do not miss an abort that arrives before the
+      // pending-request listener can be installed.
+      if (signal?.aborted) throw meshRequestCancelledError();
+      if (
+        !this.ready ||
+        this.socket !== socket ||
+        socket.readyState !== DeviceHttpEventClient.OPEN
+      ) {
+        throw new Error('Mesh connection changed while the request was being signed');
       }
-    });
+      const serialized = JSON.stringify(request);
+      const requestBytes =
+        typeof TextEncoder === 'undefined'
+          ? serialized.length * 3
+          : new TextEncoder().encode(serialized).byteLength;
+      if (requestBytes > DEVICE_HTTP_MAX_JSON_BYTES) throw new Error('Mesh request is too large');
+      return await new Promise((resolve, reject) => {
+        if (signal?.aborted) {
+          reject(meshRequestCancelledError());
+          return;
+        }
+        const onAbort = () => {
+          try {
+            socket.send(
+              JSON.stringify({
+                type: 'capability.cancel',
+                sourceDeviceId: this.identity.id,
+                targetDeviceId,
+                requestId: request.requestId,
+              }),
+            );
+          } catch {
+            /* Closed session. */
+          }
+          clearTimeout(timer);
+          this.pending.delete(request.requestId);
+          reject(meshRequestCancelledError());
+        };
+        const timer = setTimeout(() => {
+          signal?.removeEventListener('abort', onAbort);
+          this.pending.delete(request.requestId);
+          reject(new Error('Target device did not respond in time.'));
+        }, MESH_REQUEST_TIMEOUT_MS);
+        this.pending.set(request.requestId, {
+          observation,
+          decode: read.decode,
+          resolve: (value) => {
+            observation?.finish('completed');
+            resolve(value);
+          },
+          reject: (error) => {
+            observation?.finish(error.name === 'AbortError' ? 'aborted' : 'error');
+            reject(error);
+          },
+          timer,
+          targetDeviceId,
+          signal,
+          onAbort,
+          capability,
+          operation,
+          payload,
+        });
+        signal?.addEventListener('abort', onAbort, { once: true });
+        try {
+          observation?.mark('sentMs');
+          socket.send(
+            serialized,
+            (error) => {
+              if (!error) return;
+              const pending = this.pending.get(request.requestId);
+              if (!pending) return;
+              clearTimeout(pending.timer);
+              pending.signal?.removeEventListener('abort', pending.onAbort!);
+              this.pending.delete(request.requestId);
+              pending.reject(error);
+            },
+            observation
+              ? (timing) => {
+                  observation?.timing('fetchMs', timing.fetchMs);
+                  observation?.timing('bodyMs', timing.bodyMs);
+                  observation?.timing('responseBytes', timing.responseBytes);
+                  observation?.serverId(timing.serverRequestId);
+                  for (const [name, value] of Object.entries(timing.serverTiming))
+                    observation?.timing(`server.${name}`, value);
+                }
+              : undefined,
+          );
+        } catch (error) {
+          clearTimeout(timer);
+          signal?.removeEventListener('abort', onAbort);
+          this.pending.delete(request.requestId);
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
+      });
+    } catch (error) {
+      observation?.finish((error as Error)?.name === 'AbortError' ? 'aborted' : 'error');
+      throw error;
+    }
   }
 
   private async handleMessage(
@@ -248,7 +301,9 @@ export class MeshSession {
       sourceSocket.close(1009, 'mesh message is too large');
       return;
     }
+    const parseStarted = performance.now();
     const message = JSON.parse(raw);
+    const parseMs = performance.now() - parseStarted;
     if (message.type === 'auth.challenge') {
       if (
         message.deviceId !== this.connection.deviceId ||
@@ -420,6 +475,13 @@ export class MeshSession {
     const response = message as CapabilityResponse;
     const pending = this.pending.get(response.requestId);
     if (!pending) return;
+    pending.observation?.timing('parseMs', parseMs);
+    pending.observation?.mark('responseMs');
+    if (response.diagnostics) {
+      pending.observation?.timing('serverPreInvokeMs', response.diagnostics.preInvokeMs);
+      pending.observation?.timing('serverInvokeMs', response.diagnostics.invokeMs);
+      pending.observation?.timing('serverPostInvokeMs', response.diagnostics.postInvokeMs);
+    }
     if (
       response.sourceDeviceId !== pending.targetDeviceId ||
       response.targetDeviceId !== this.identity.id
@@ -430,7 +492,10 @@ export class MeshSession {
     this.pending.delete(response.requestId);
     if (response.ok) {
       try {
-        pending.resolve(pending.decode(response.result));
+        const decodeStarted = performance.now();
+        const decoded = pending.decode(response.result);
+        pending.observation?.timing('decodeMs', performance.now() - decodeStarted);
+        pending.resolve(decoded);
       } catch (error: any) {
         this.readCache.clear();
         pending.reject(error);

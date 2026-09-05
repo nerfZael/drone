@@ -105,6 +105,7 @@ export type SignedCapabilityRequest = {
 };
 
 export type CapabilityResponse = {
+  diagnostics?: { preInvokeMs: number; invokeMs: number; postInvokeMs: number };
   type: 'capability.response';
   version: 1;
   requestId: string;

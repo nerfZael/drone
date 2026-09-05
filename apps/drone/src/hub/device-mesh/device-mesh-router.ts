@@ -1086,6 +1086,7 @@ export class DeviceMeshRouter {
     request: SignedCapabilityRequest,
     connection?: AuthenticatedSocket,
   ): Promise<CapabilityResponse> {
+    const executionStarted = performance.now();
     for (const [key, expiry] of this.replay) if (expiry <= Date.now()) this.replay.delete(key);
     const validation = await this.validateRequest(request, true);
     if (!('state' in validation)) return validation;
@@ -1135,6 +1136,7 @@ export class DeviceMeshRouter {
     expiryTimer?.unref?.();
     try {
       invocationController.signal.throwIfAborted();
+      const invocationStarted = performance.now();
       const result = await this.capabilities.invoke(
         request.capability,
         request.capabilityVersion,
@@ -1146,6 +1148,7 @@ export class DeviceMeshRouter {
           signal: invocationController.signal,
         },
       );
+      const invocationFinished = performance.now();
       if (invocationController.signal.aborted) {
         throw Object.assign(new Error('mesh request expired or its connection was replaced'), {
           code: 'TRANSFER_CANCELLED',
@@ -1163,6 +1166,13 @@ export class DeviceMeshRouter {
         ok: true,
         result: this.readResponses.encode(request, result),
       };
+      if (request.capability === 'drone-control' && request.operation === 'chat.read') {
+        response.diagnostics = {
+          preInvokeMs: invocationStarted - executionStarted,
+          invokeMs: invocationFinished - invocationStarted,
+          postInvokeMs: performance.now() - invocationFinished,
+        };
+      }
       if (Buffer.byteLength(JSON.stringify(response)) > DEVICE_HTTP_MAX_JSON_BYTES) {
         return this.errorResponse(
           request,

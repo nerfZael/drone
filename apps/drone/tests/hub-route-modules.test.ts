@@ -327,6 +327,7 @@ describe('extracted Hub route modules', () => {
         responseBytes: 1024,
         outcome: 'completed',
         serverTiming: { lifecycle: 2, rows: 5 },
+        requestId: 'request-123',
       }],
     });
     registerOperationalRoutes(router, {
@@ -349,7 +350,7 @@ describe('extracted Hub route modules', () => {
         navigationId: 'navigation-1',
         durationMs: 42.3,
         milestones: { click: 0, content_painted: 42.3 },
-        requests: [{ name: 'chat_state', serverTiming: '{"lifecycle":2,"rows":5}' }],
+        requests: [{ name: 'chat_state', requestId: 'request-123', serverTiming: '{"lifecycle":2,"rows":5}' }],
       },
     });
     expect(logs[0].meta.milestones).not.toHaveProperty('injected');

@@ -1,5 +1,16 @@
 import React from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, {
+  cancelAnimation,
+  Easing,
+  interpolate,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 import Bot from 'lucide-react-native/icons/bot';
 import ChevronUp from 'lucide-react-native/icons/chevron-up';
 import Copy from 'lucide-react-native/icons/copy';
@@ -15,6 +26,10 @@ import { ThemedTextInput } from '../components/ThemedTextInput';
 import { colors } from '../theme';
 import type { MobileDictationDestination } from './mobile-dictation-types';
 import { MOBILE_DICTATION_MAX_CHARS } from './mobile-dictation-storage';
+import {
+  mobileDictationDismissProgress,
+  mobileDictationShouldDismiss,
+} from './mobile-dictation-dismiss';
 import {
   formatMobileVoiceDuration,
   type MobileVoiceRecordingStatus,
@@ -32,6 +47,60 @@ const DESTINATION_ACTIONS: DestinationAction[] = [
   { destination: 'new-chat', label: 'New chat', icon: MessageSquarePlus },
   { destination: 'clone-chat', label: 'Clone chat', icon: Copy },
 ];
+
+export function MobileDictationComposerPreview() {
+  return (
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <View accessible={false} style={styles.headerHandle} />
+        <View style={styles.statusRow}>
+          <View style={[styles.statusDot, styles.statusDotReady]} />
+          <Text style={styles.statusText}>Ready to record</Text>
+        </View>
+        <ComposerIconButton
+          label="Discard and close dictation"
+          icon={X}
+          onPress={() => undefined}
+        />
+      </View>
+
+      <View style={styles.editorFrame} />
+
+      <View style={styles.bottomToolbar}>
+        <View style={styles.recordingControls}>
+          <RecordingButton
+            label="Discard current recording"
+            icon={X}
+            tone="danger"
+            disabled
+            onPress={() => undefined}
+          />
+          <RecordingButton
+            label="Pause recording"
+            icon={Pause}
+            disabled
+            onPress={() => undefined}
+          />
+          <View style={styles.recordButton}>
+            <Mic color={colors.onAccent} size={20} strokeWidth={2.2} />
+          </View>
+        </View>
+        <View style={styles.toolbarSpacer} />
+        <View style={styles.sendControls}>
+          <View style={[styles.destinationMenuButton, styles.disabled]}>
+            <ChevronUp color={colors.accent} size={16} strokeWidth={2.2} />
+          </View>
+          <View style={[styles.currentChatButton, styles.disabled]}>
+            <Send color={colors.onAccent} size={16} strokeWidth={2.3} />
+            <Text style={styles.currentChatLabel} numberOfLines={1}>
+              Current chat
+            </Text>
+          </View>
+        </View>
+      </View>
+    </View>
+  );
+}
 
 export function MobileDictationComposer({
   value,
@@ -93,6 +162,64 @@ export function MobileDictationComposer({
   const recordDisabled = controlsDisabled || (!recordingActive && microphoneUnavailable);
   const message = failedTranscriptionError || error || notice;
   const messageIsError = Boolean(failedTranscriptionError || error);
+  const dismissY = useSharedValue(0);
+  const cardHeight = useSharedValue(177);
+
+  const close = React.useCallback(() => {
+    void onClose();
+  }, [onClose]);
+  const dismissGesture = React.useMemo(
+    () =>
+      Gesture.Pan()
+        .enabled(!controlsDisabled)
+        .maxPointers(1)
+        .activeOffsetY(12)
+        .failOffsetX([-60, 60])
+        .failOffsetY(-14)
+        .shouldCancelWhenOutside(false)
+        .onBegin(() => cancelAnimation(dismissY))
+        .onUpdate((event) => {
+          dismissY.value = Math.max(0, event.translationY);
+        })
+        .onEnd((event) => {
+          if (
+            mobileDictationShouldDismiss({
+              translationX: event.translationX,
+              translationY: event.translationY,
+              velocityY: event.velocityY,
+              cardHeight: cardHeight.value,
+            })
+          ) {
+            dismissY.value = withTiming(
+              Math.max(240, cardHeight.value + 32),
+              { duration: 180, easing: Easing.in(Easing.quad) },
+              (finished) => {
+                if (finished) runOnJS(close)();
+              },
+            );
+          } else {
+            dismissY.value = withSpring(0, { damping: 22, stiffness: 260 });
+          }
+        })
+        .onFinalize((_event, success) => {
+          if (!success) dismissY.value = withSpring(0, { damping: 22, stiffness: 260 });
+        }),
+    [cardHeight, close, controlsDisabled, dismissY],
+  );
+  const dismissStyle = useAnimatedStyle(() => {
+    const progress = mobileDictationDismissProgress({
+      translationX: 0,
+      translationY: dismissY.value,
+      cardHeight: cardHeight.value,
+    });
+    return {
+      opacity: interpolate(progress, [0, 1], [1, 0.68]),
+      transform: [
+        { translateY: dismissY.value },
+        { scale: interpolate(progress, [0, 1], [1, 0.985]) },
+      ],
+    };
+  });
 
   const send = (destination: MobileDictationDestination) => {
     if (sendDisabled) return;
@@ -101,38 +228,46 @@ export function MobileDictationComposer({
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <View style={styles.statusRow}>
-          <View
-            style={[
-              styles.statusDot,
-              recordingStatus === 'paused' && styles.statusDotPaused,
-              !recordingActive && styles.statusDotReady,
-              Boolean(error) && styles.statusDotError,
-            ]}
+    <Animated.View
+      onLayout={(event) => {
+        cardHeight.value = event.nativeEvent.layout.height;
+      }}
+      style={[styles.container, dismissStyle]}
+    >
+      <GestureDetector gesture={dismissGesture}>
+        <View collapsable={false} style={styles.header}>
+          <View accessible={false} style={styles.headerHandle} />
+          <View style={styles.statusRow}>
+            <View
+              style={[
+                styles.statusDot,
+                recordingStatus === 'paused' && styles.statusDotPaused,
+                !recordingActive && styles.statusDotReady,
+                Boolean(error) && styles.statusDotError,
+              ]}
+            />
+            <Text style={styles.statusText}>
+              {mobileDictationStatusLabel({
+                recordingStatus,
+                recordingDurationMillis,
+                pendingCount,
+                finalizing,
+                networkSending,
+                microphoneUnavailable,
+              })}
+            </Text>
+            {recordingActive && pendingCount > 0 ? (
+              <Text style={styles.pendingText}>{pendingCount} transcribing</Text>
+            ) : null}
+          </View>
+          <ComposerIconButton
+            label="Discard and close dictation"
+            icon={X}
+            disabled={controlsDisabled}
+            onPress={() => void onClose()}
           />
-          <Text style={styles.statusText}>
-            {mobileDictationStatusLabel({
-              recordingStatus,
-              recordingDurationMillis,
-              pendingCount,
-              finalizing,
-              networkSending,
-              microphoneUnavailable,
-            })}
-          </Text>
-          {recordingActive && pendingCount > 0 ? (
-            <Text style={styles.pendingText}>{pendingCount} transcribing</Text>
-          ) : null}
         </View>
-        <ComposerIconButton
-          label="Discard and close dictation"
-          icon={X}
-          disabled={controlsDisabled}
-          onPress={() => void onClose()}
-        />
-      </View>
+      </GestureDetector>
 
       <View style={styles.editorFrame}>
         <ThemedTextInput
@@ -291,7 +426,7 @@ export function MobileDictationComposer({
           ))}
         </View>
       ) : null}
-    </View>
+    </Animated.View>
   );
 }
 
@@ -423,7 +558,23 @@ const styles = StyleSheet.create({
     borderTopColor: colors.accentBorder,
     backgroundColor: colors.panelRaised,
   },
-  header: { minHeight: 26, flexDirection: 'row', alignItems: 'center', gap: 4 },
+  header: {
+    minHeight: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingTop: 6,
+  },
+  headerHandle: {
+    position: 'absolute',
+    top: 1,
+    left: '50%',
+    width: 34,
+    height: 3,
+    marginLeft: -17,
+    borderRadius: 2,
+    backgroundColor: colors.borderStrong,
+  },
   statusRow: { minWidth: 0, flex: 1, flexDirection: 'row', alignItems: 'center', gap: 5 },
   statusDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.danger },
   statusDotPaused: { backgroundColor: colors.warning },

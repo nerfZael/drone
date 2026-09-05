@@ -1,4 +1,12 @@
 import React from 'react';
+import {
+  beginMobileChatLoad,
+  finishMobileChatLoad,
+  markMobileChatLoad,
+  mobileChatApplied,
+  mobileChatCommitted,
+  observeMobileChatRequest,
+} from '../diagnostics/mobile-chat-load';
 import { fromByteArray } from 'base64-js';
 import {
   buildModelCatalogChoices,
@@ -60,6 +68,7 @@ import { DroneRuntimeIndicator } from '../drones/NewDroneRuntimePicker';
 import { DroneBranchIndicator } from '../drones/DroneBranchIndicator';
 import { ChatSubscriptionIndicator } from '../drones/ChatSubscriptionIndicator';
 import { clientTimeZone } from '../drones/client-time-zone';
+import { mobileDroneChatErrorMessage } from '../drones/mobile-drone-chat-error';
 import {
   normalizeMobileChatSubscriptions,
   type MobileChatSubscription,
@@ -387,12 +396,33 @@ export function DronesScreen({
           }),
         );
       }
-      return destinationId === mesh.identity?.id
-        ? localDroneControl.request(operation, payload)
-        : mesh.request(destinationId, 'drone-control', operation, payload, signal);
+      if (destinationId !== mesh.identity?.id)
+        return mesh.request(destinationId, 'drone-control', operation, payload, signal);
+      const observation = observeMobileChatRequest(
+        destinationId,
+        operation,
+        payload,
+        `local-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      );
+      return localDroneControl.request(operation, payload).then(
+        (value) => {
+          observation?.finish('completed');
+          return value;
+        },
+        (error) => {
+          observation?.finish('error');
+          throw error;
+        },
+      );
     },
     [localDroneControl.request, mesh.identity?.id, mesh.request],
   );
+  const [chatLoadCommit, setChatLoadCommit] =
+    React.useState<ReturnType<typeof mobileChatApplied>>(null);
+  React.useLayoutEffect(() => {
+    mobileChatCommitted(chatLoadCommit);
+  }, [chatLoadCommit]);
+  React.useEffect(() => () => finishMobileChatLoad('superseded'), []);
   const [droneListSnapshot, setDroneListSnapshot] = React.useState<MobileDroneListSnapshot>(
     EMPTY_MOBILE_DRONE_LIST_SNAPSHOT,
   );
@@ -493,6 +523,7 @@ export function DronesScreen({
   const [dronesLoaded, setDronesLoaded] = React.useState(false);
   const [droneListError, setDroneListError] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const visibleChatError = mobileDroneChatErrorMessage(error);
   const chatReadErrorRef = React.useRef<string | null>(null);
   const [deleteCandidate, setDeleteCandidate] = React.useState<MobileDroneSummary | null>(null);
   const [deleting, setDeleting] = React.useState(false);
@@ -527,7 +558,6 @@ export function DronesScreen({
   const modelRequestVersion = React.useRef(0);
   const createDefaultsRequestVersion = React.useRef(0);
   const createOptionsRequestVersion = React.useRef(0);
-  const chatTabsRef = React.useRef<ScrollView>(null);
   const createRepoBranchesCache = React.useRef(new Map<string, MobileDroneCreateRepo>());
   const loadedDronesTargetIdRef = React.useRef('');
   const loadDronesRef = React.useRef<(quiet?: boolean) => Promise<void>>(async () => {});
@@ -892,30 +922,45 @@ export function DronesScreen({
     const knownChats = drone.chats;
     const knownChat =
       requestedChat && knownChats.includes(requestedChat) ? requestedChat : (knownChats[0] ?? '');
+    const loadTarget = {
+      targetDeviceId: destinationId,
+      droneId: drone.id,
+      chatName: knownChat || 'default',
+    };
+    beginMobileChatLoad(loadTarget, true);
     transitionToDroneChat(drone, knownChat);
+    markMobileChatLoad(loadTarget, 'selectionApplied');
     // Starting clones publish a chat change when their copied chats are ready. Reading now
     // returns a transient conflict and replaces the useful starting state with an error.
     if (options.deferChatLoad) return;
-    await loadMobileChatWithListRecovery({
-      initialChat: knownChat,
-      knownChats,
-      requestedChat,
-      listChats: async () => {
-        const result = await requestDroneControl(destinationId, 'chats.list', {
-          droneId: drone.id,
-        });
-        return result?.chats;
-      },
-      readChat: (nextChat) => readChat(drone.id, nextChat, { useCache: true }),
-      isCurrent: () =>
-        targetIdRef.current === destinationId && openDroneVersion.current === requestVersion,
-      applyListedSelection(nextChats, nextChat) {
-        setChats(nextChats);
-        if (nextChat === chatNameRef.current) return;
-        chatReadVersion.current += 1;
-        transitionToChat(nextChat);
-      },
-    });
+    try {
+      await loadMobileChatWithListRecovery({
+        initialChat: knownChat,
+        knownChats,
+        requestedChat,
+        listChats: async () => {
+          const result = await requestDroneControl(destinationId, 'chats.list', {
+            droneId: drone.id,
+          });
+          return result?.chats;
+        },
+        readChat: (nextChat) => {
+          beginMobileChatLoad({ ...loadTarget, chatName: nextChat }, true);
+          return readChat(drone.id, nextChat, { useCache: true });
+        },
+        isCurrent: () =>
+          targetIdRef.current === destinationId && openDroneVersion.current === requestVersion,
+        applyListedSelection(nextChats, nextChat) {
+          setChats(nextChats);
+          if (nextChat === chatNameRef.current) return;
+          chatReadVersion.current += 1;
+          transitionToChat(nextChat);
+        },
+      });
+    } catch (error) {
+      if (openDroneVersion.current === requestVersion) finishMobileChatLoad('error');
+      throw error;
+    }
   };
 
   const openDrone = (drone: MobileDroneSummary, requestedChat?: string) =>
@@ -928,6 +973,8 @@ export function DronesScreen({
   ): Promise<void> => {
     const destinationId = targetId;
     const key = mobileChatCacheKey(destinationId, droneId, nextChat);
+    const loadTarget = { targetDeviceId: destinationId, droneId, chatName: nextChat };
+    markMobileChatLoad(loadTarget, 'readRequested');
     if (options.useCache) {
       const cached = chatReadCacheRef.current!.get(key);
       if (
@@ -937,6 +984,7 @@ export function DronesScreen({
         chatNameRef.current === nextChat
       ) {
         applyChatReadResult(cached, droneId, nextChat);
+        setChatLoadCommit(mobileChatApplied(loadTarget, 'cached'));
       }
     }
     return chatReadCoordinatorRef.current!.request(key, async () => {
@@ -948,11 +996,13 @@ export function DronesScreen({
         return;
       }
       const requestVersion = ++chatReadVersion.current;
+      markMobileChatLoad(loadTarget, 'coordinatorStarted');
       try {
         const result = await requestDroneControl(destinationId, 'chat.read', {
           droneId,
           chatName: nextChat,
         });
+        markMobileChatLoad(loadTarget, 'freshResponse');
         if (
           targetIdRef.current !== destinationId ||
           selectedRef.current?.id !== droneId ||
@@ -966,6 +1016,7 @@ export function DronesScreen({
           (current, next) => JSON.stringify(current) === JSON.stringify(next),
         );
         applyChatReadResult(retained, droneId, nextChat);
+        setChatLoadCommit(mobileChatApplied(loadTarget, 'fresh'));
         const previousChatReadError = chatReadErrorRef.current;
         chatReadErrorRef.current = null;
         if (previousChatReadError) {
@@ -1304,13 +1355,6 @@ export function DronesScreen({
       realtimeTimer.current = null;
     };
   }, [invalidateChatReadCache, mesh.subscribe, targetId, targetSupportsDrones]);
-
-  const selectChat = (nextChat: string) =>
-    selected &&
-    run('chat', async () => {
-      transitionToChat(nextChat);
-      await readChat(selected.id, nextChat, { useCache: true });
-    });
 
   const addPromptImages = async () => {
     try {
@@ -2653,12 +2697,6 @@ export function DronesScreen({
     [commitDroneListSnapshot, requestDroneControl, targetId],
   );
   React.useEffect(() => {
-    const frame = requestAnimationFrame(() =>
-      chatTabsRef.current?.scrollToEnd({ animated: false }),
-    );
-    return () => cancelAnimationFrame(frame);
-  }, [selected?.id, visibleChats.length]);
-  React.useEffect(() => {
     if (!targetReachable && targetSupportsDrones) {
       onHeaderChange({
         title: selected?.name ?? activeTarget?.name ?? 'Device offline',
@@ -3135,6 +3173,7 @@ export function DronesScreen({
           void (targetReachable ? loadDrones() : mesh.retryDeviceConnection(targetId))
         }
         onSelectDevice={(deviceId) => {
+          finishMobileChatLoad('superseded');
           void saveNewDroneDraftBeforeNavigation().then(() => {
             chatReadVersion.current += 1;
             openDroneVersion.current += 1;
@@ -3151,6 +3190,7 @@ export function DronesScreen({
         onSelectDroneChat={(droneId, nextChat) => {
           const drone = drones.find((item) => item.id === droneId);
           if (!drone) return;
+          beginMobileChatLoad({ targetDeviceId: targetId, droneId, chatName: nextChat });
           navigateToDrones();
           onDrawerOpenChange(false);
           void saveNewDroneDraftBeforeNavigation().then(() => openDrone(drone, nextChat));
@@ -3250,7 +3290,7 @@ export function DronesScreen({
                     <Text style={styles.emptyDroneButtonText}>Create chat</Text>
                   )}
                 </Pressable>
-                {error ? <ErrorBanner message={error} /> : null}
+                {visibleChatError ? <ErrorBanner message={visibleChatError} /> : null}
               </View>
             ) : (
               <>
@@ -3278,57 +3318,11 @@ export function DronesScreen({
                   </ScrollView>
                 ) : (
                   <>
-                    {visibleChats.length > 1 ? (
-                      <View style={styles.chatTabsFrame}>
-                        <ScrollView
-                          ref={chatTabsRef}
-                          horizontal
-                          showsHorizontalScrollIndicator={false}
-                          contentContainerStyle={styles.chats}
-                        >
-                          {visibleChats.map((chat) => {
-                            const active = chat === chatName;
-                            const chatBusy = selected.busyChats.includes(chat);
-                            const chatUnread =
-                              !active && (selected.unreadChats ?? []).includes(chat);
-                            return (
-                              <Pressable
-                                key={chat}
-                                accessibilityLabel={`${chat}${chatUnread ? ', unread' : ''}`}
-                                accessibilityRole="tab"
-                                accessibilityState={{ selected: active }}
-                                onPress={() => !active && void selectChat(chat)}
-                                style={({ pressed }) => [
-                                  styles.chatTab,
-                                  active && styles.chatTabActive,
-                                  pressed && styles.chatTabPressed,
-                                ]}
-                              >
-                                <MessageCircle
-                                  color={active ? colors.accent : colors.muted}
-                                  size={13}
-                                  strokeWidth={active ? 2.2 : 1.8}
-                                />
-                                <Text
-                                  numberOfLines={1}
-                                  style={[styles.chatText, active && styles.chatTextActive]}
-                                >
-                                  {chat}
-                                </Text>
-                                {chatBusy ? (
-                                  <ActivityIndicator color={colors.warning} size="small" />
-                                ) : chatUnread ? (
-                                  <View accessible={false} style={styles.chatUnreadDot} />
-                                ) : null}
-                              </Pressable>
-                            );
-                          })}
-                        </ScrollView>
-                      </View>
-                    ) : null}
-                    {error || nativeThread?.error ? (
+                    {visibleChatError || nativeThread?.error ? (
                       <View style={styles.chatError}>
-                        <ErrorBanner message={error || String(nativeThread?.error ?? '')} />
+                        <ErrorBanner
+                          message={visibleChatError || String(nativeThread?.error ?? '')}
+                        />
                       </View>
                     ) : null}
                     <ScrollView
@@ -3835,32 +3829,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accent,
   },
   emptyDroneButtonText: { color: colors.onAccent, fontSize: 14, fontWeight: '800' },
-  chatTabsFrame: {
-    minHeight: 39,
-    justifyContent: 'center',
-    backgroundColor: colors.background,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderSubtle,
-  },
-  chats: { gap: 3, paddingHorizontal: 10 },
-  chatTab: {
-    minHeight: 38,
-    maxWidth: 190,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 7,
-    paddingHorizontal: 10,
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
-  },
-  chatTabActive: {
-    borderBottomColor: colors.accent,
-  },
   chatTabPressed: { opacity: 0.72 },
-  chatText: { flexShrink: 1, color: colors.secondary, fontSize: 10, fontWeight: '700' },
-  chatTextActive: { color: colors.accent },
-  chatUnreadDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.warning },
   chatError: { paddingHorizontal: 12, paddingTop: 9 },
   transcriptScroll: { flex: 1 },
   transcriptContent: { flexGrow: 1 },

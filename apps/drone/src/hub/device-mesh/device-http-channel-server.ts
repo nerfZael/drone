@@ -36,6 +36,7 @@ export class DeviceHttpChannelServer {
       return true;
     }
     if (request.method === 'GET') {
+      request.socket.setTimeout(0);
       if (request.headers['x-device-protocol'] !== String(DEVICE_HTTP_PROTOCOL)) {
         response.writeHead(426).end();
         return true;

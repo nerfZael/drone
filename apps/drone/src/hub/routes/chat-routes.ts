@@ -15,6 +15,7 @@ import {
   type ChatTranscriptRouteDependencies,
 } from './chat-transcript-routes';
 import type { LegacyRouteHandler } from './legacy-route';
+import { markHubChatRouteEntry } from '../hub-performance-diagnostics';
 
 export type ChatRouteDependencies = ChatPromptRouteDependencies &
   ChatManagementRouteDependencies &
@@ -29,6 +30,7 @@ export function createChatRouteHandler(deps: ChatRouteDependencies): LegacyRoute
     createChatSnapshotRouteHandler(deps),
   ];
   return async (request) => {
+    markHubChatRouteEntry(request.req);
     for (const handler of handlers) {
       if (await handler(request)) return true;
     }

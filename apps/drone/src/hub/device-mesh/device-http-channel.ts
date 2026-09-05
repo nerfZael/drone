@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { gzip } from 'node:zlib';
 import type http from 'node:http';
+import { retainHubRequestTiming } from '../hub-performance-diagnostics';
 import {
   DeviceHttpEventClient,
   DEVICE_HTTP_MAX_JSON_BYTES,
@@ -57,6 +58,8 @@ export class DeviceHttpChannel extends EventEmitter {
     if (message?.type === 'capability.response')
       this.pendingResults.delete(`${message.targetDeviceId}:${message.requestId}`);
     if (message?.type === 'capability.request') {
+      if (message.capability === 'drone-control' && message.operation === 'chat.read')
+        retainHubRequestTiming(response);
       const key = `${message.sourceDeviceId}:${message.requestId}`;
       if (this.replies.has(key) || this.replies.size >= 100) {
         response.writeHead(409).end();

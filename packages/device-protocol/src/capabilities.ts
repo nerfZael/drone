@@ -6,6 +6,7 @@ export const DEVICE_CORE_CAPABILITY: CapabilityDescriptor = {
   operations: [
     'device.describe',
     'device.ping',
+    'diagnostics.chat-load.upload',
     'devices.list',
     'device.rename-self',
     'device.access.update-self',

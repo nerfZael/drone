@@ -28,6 +28,7 @@ type PrimaryResult = {
 
 type ChatLoadRequestRecord = {
   name: string;
+  requestId?: string;
   startMs: number;
   durationMs: number;
   queueMs?: number;
@@ -499,6 +500,7 @@ export function observeChatLoadRequest(urlRaw: string): ChatLoadRequestObservati
   let responseStatus: number | undefined;
   let timing: Record<string, number> | undefined;
   let responseUrl: string | undefined;
+  let requestId: string | undefined;
   let finished = false;
   const complete = (
     outcome: ChatLoadRequestRecord['outcome'],
@@ -527,6 +529,7 @@ export function observeChatLoadRequest(urlRaw: string): ChatLoadRequestObservati
     const transport = requestTransport(responseUrl);
     span.requests.push({
       name: requestName(url),
+      ...(requestId ? { requestId } : {}),
       startMs: roundedMs(startedAt - span.startedMonoMs),
       durationMs: roundedMs(finishedAt - startedAt),
       ...(queueMs !== undefined ? { queueMs } : {}),
@@ -549,6 +552,7 @@ export function observeChatLoadRequest(urlRaw: string): ChatLoadRequestObservati
       responseAt = monotonicNow();
       responseStatus = response.status;
       responseUrl = boundedText(response.url, 2_048);
+      requestId = boundedText(response.headers.get('x-drone-request-id'), 128);
       timing = serverTimingFromHeader(response.headers.get('server-timing'));
     },
     finish(input) {

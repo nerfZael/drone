@@ -138,7 +138,7 @@ export function withCors(
       'x-drone-companion-message-id',
     ].join(','),
   );
-  res.setHeader('access-control-expose-headers', 'etag,mcp-session-id,server-timing');
+  res.setHeader('access-control-expose-headers', 'etag,mcp-session-id,server-timing,x-drone-request-id');
   res.setHeader('access-control-max-age', '600');
   return true;
 }

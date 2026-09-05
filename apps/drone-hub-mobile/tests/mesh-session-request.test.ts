@@ -221,6 +221,47 @@ describe('MeshSession requests', () => {
     expect(internals.pending.size).toBe(0);
   });
 
+  test('rejects one failed command without dropping the event session', async () => {
+    const socket = new MeshSession(
+      { deviceId: 'peer-a', endpoint: 'https://peer-a.test', role: 'primary' },
+      'network-a',
+      {
+        id: 'mobile-a',
+        name: 'Mobile',
+        platform: 'android',
+        publicKey: {},
+        sign: async () => 'signature',
+      },
+      {},
+      () => undefined,
+      () => undefined,
+      () => undefined,
+      () => undefined,
+      { handle: async () => null },
+      { inspectEnvelope: () => 'accept', acceptValidated: () => 'accept' },
+    );
+    const internals = socket as unknown as {
+      ready: boolean;
+      socket: Pick<WebSocket, 'readyState'> & {
+        send(value: string, callback?: (error?: Error) => void): void;
+      };
+      pending: Map<string, unknown>;
+    };
+    internals.ready = true;
+    internals.socket = {
+      readyState: WebSocket.OPEN,
+      send(_value, callback) {
+        callback?.(new Error('Command POST failed'));
+      },
+    };
+
+    await expect(socket.request('peer-a', 'drone-control', 'chat.read', {})).rejects.toThrow(
+      'Command POST failed',
+    );
+    expect(socket.connected).toBe(true);
+    expect(internals.pending.size).toBe(0);
+  });
+
   test('does not send a stale authentication signature on a replacement socket', async () => {
     const signingStarted = Promise.withResolvers<void>();
     const signingGate = Promise.withResolvers<void>();

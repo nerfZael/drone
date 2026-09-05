@@ -133,7 +133,17 @@ export class DeviceHttpEventClient {
     }
   }
 
-  send(data: string, callback?: (error?: Error) => void): void {
+  send(
+    data: string,
+    callback?: (error?: Error) => void,
+    onTiming?: (timing: {
+      fetchMs: number;
+      bodyMs: number;
+      responseBytes: number;
+      serverRequestId?: string;
+      serverTiming: Record<string, number>;
+    }) => void,
+  ): void {
     if (this.readyState !== DeviceHttpEventClient.OPEN) throw new Error('Device session is closed');
     const bytes = new TextEncoder().encode(data).byteLength;
     if (
@@ -143,6 +153,7 @@ export class DeviceHttpEventClient {
       throw new Error('Device HTTP request queue is full');
     }
     this.bufferedAmount += bytes;
+    const started = performance.now();
     void this.fetcher(this.url, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${this.token}` },
@@ -151,18 +162,40 @@ export class DeviceHttpEventClient {
       redirect: 'error',
     })
       .then(async (response) => {
+        const headersAt = performance.now();
         if (!response.ok) throw new Error(`Device request failed (${response.status})`);
+        let body = '';
         if (response.status !== 204) {
-          const body = await readBoundedHttpText(response);
-          if (body && !this.lifetime.signal.aborted) this.onmessage?.({ data: body });
+          body = await readBoundedHttpText(response);
         }
+        if (onTiming) {
+          const serverTiming: Record<string, number> = {};
+          for (const item of (response.headers.get('server-timing') ?? '')
+            .split(',')
+            .slice(0, 24)) {
+            const match = /^\s*([a-zA-Z][a-zA-Z0-9_.]{0,47});dur=([\d.]+)/.exec(item);
+            if (match && Number.isFinite(Number(match[2])))
+              serverTiming[match[1]!] = Number(match[2]);
+          }
+          try {
+            onTiming?.({
+              fetchMs: headersAt - started,
+              bodyMs: performance.now() - headersAt,
+              responseBytes: new TextEncoder().encode(body).byteLength,
+              serverTiming,
+              serverRequestId: response.headers.get('x-drone-request-id') ?? undefined,
+            });
+          } catch {
+            /* Diagnostics cannot interrupt delivery. */
+          }
+        }
+        if (body && !this.lifetime.signal.aborted) this.onmessage?.({ data: body });
         callback?.();
       })
       .catch((error) => {
         callback?.(asError(error));
         if (!this.lifetime.signal.aborted) {
           this.onerror?.(asError(error));
-          this.close();
         }
       })
       .finally(() => {

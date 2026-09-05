@@ -1,6 +1,7 @@
 import { DEVICE_CORE_CAPABILITY, WORKSPACE_CAPABILITY } from '@drone/device-protocol';
 import type { DeviceMeshStore } from './device-mesh-store';
 import type { CapabilityHandler } from './device-mesh-types';
+import { mobileChatLoadStore } from '../mobile-chat-load-store';
 
 function payloadObject(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
@@ -41,6 +42,9 @@ export function createDeviceCoreCapability(
   return {
     descriptor: DEVICE_CORE_CAPABILITY,
     async invoke(operation, payload, context) {
+      if (operation === 'diagnostics.chat-load.upload') {
+        return mobileChatLoadStore().upload(context.sourceDevice.id, payloadObject(payload).records);
+      }
       if (operation === 'device.describe') {
         const state = await store.read();
         return { device: state.devices[state.selfDeviceId], capabilities: listCapabilities() };
