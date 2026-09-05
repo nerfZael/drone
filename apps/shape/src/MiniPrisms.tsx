@@ -6,7 +6,8 @@ import { useDerivedValue } from "react-native-reanimated";
 
 import { miniPrismShader } from "./mini-prism-shader";
 
-const CHILD_BOX_SIZE = 96;
+const CHILD_OBJECT_SIZE = 96;
+const CHILD_RENDER_SIZE = 144;
 const CHILD_LIFETIME_SECONDS = 9;
 const CHILD_NAMES = [
   "FastRabbit",
@@ -62,22 +63,29 @@ function MiniPrism({
     const phase = reduceMotion
       ? 0.68
       : ((Math.max(localTime, 0) % CHILD_LIFETIME_SECONDS) / CHILD_LIFETIME_SECONDS);
-    const travel = phase < 0.04
+    const travel = phase < 0.14
       ? 0
-      : 1 - Math.pow(1 - Math.min(1, (phase - 0.04) / 0.42), 3);
+      : 1 - Math.pow(1 - Math.min(1, (phase - 0.14) / 0.28), 3);
     const laneWidth = Math.min(width * 0.16, 64);
     const laneOffset = (index - (CHILD_COUNT - 1) / 2) * laneWidth;
+    const attachmentOffset = (index - (CHILD_COUNT - 1) / 2) * width * 0.014;
     const separation = Math.sin(Math.min(1, travel) * Math.PI) * width * 0.025;
     const direction = index % 2 === 0 ? -1 : 1;
-    const centerX = width * 0.5 + laneOffset * travel + separation * direction;
-    const startY = height * 0.54;
+    const attachmentX = width * 0.5 + attachmentOffset;
+    const attachmentY = height * 0.603;
+    const budProgress = 1 - Math.pow(1 - Math.min(1, phase / 0.11), 3);
+    const budY = attachmentY + height * 0.028 * budProgress;
+    const centerX = attachmentX + (laneOffset - attachmentOffset) * travel
+      + separation * direction;
     const endY = height * 0.87;
-    const centerY = startY + (endY - startY) * travel;
+    const centerY = budY + (endY - budY) * travel;
     const fadeIn = Math.min(1, phase / 0.035);
     const fadeOut = 1 - Math.max(0, Math.min(1, (phase - 0.90) / 0.10));
     const labelReveal = Math.max(0, Math.min(1, (phase - 0.28) / 0.08));
 
     return {
+      attachmentX,
+      attachmentY,
       centerX,
       centerY,
       labelOpacity: (reduceMotion ? 0.78 : isActive) * fadeOut * labelReveal * 0.72,
@@ -87,13 +95,14 @@ function MiniPrism({
     };
   });
 
-  const x = useDerivedValue(() => motion.value.centerX - CHILD_BOX_SIZE / 2);
-  const y = useDerivedValue(() => motion.value.centerY - CHILD_BOX_SIZE / 2);
+  const x = useDerivedValue(() => motion.value.centerX - CHILD_RENDER_SIZE / 2);
+  const y = useDerivedValue(() => motion.value.centerY - CHILD_RENDER_SIZE / 2);
   const labelX = useDerivedValue(() => motion.value.centerX - labelWidth / 2);
   const labelY = useDerivedValue(() => motion.value.centerY + LABEL_OFFSET);
   const labelOpacity = useDerivedValue(() => motion.value.labelOpacity);
   const uniforms = useDerivedValue(() => ({
-    boxSize: CHILD_BOX_SIZE,
+    attachment: [motion.value.attachmentX, motion.value.attachmentY],
+    boxSize: CHILD_OBJECT_SIZE,
     center: [motion.value.centerX, motion.value.centerY],
     opacity: motion.value.opacity,
     phase: motion.value.phase,
@@ -106,7 +115,7 @@ function MiniPrism({
 
   return (
     <>
-      <Rect height={CHILD_BOX_SIZE} width={CHILD_BOX_SIZE} x={x} y={y}>
+      <Rect height={CHILD_RENDER_SIZE} width={CHILD_RENDER_SIZE} x={x} y={y}>
         <Shader source={miniPrismShader} uniforms={uniforms} />
       </Rect>
       <Text

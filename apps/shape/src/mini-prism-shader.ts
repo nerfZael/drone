@@ -2,6 +2,7 @@ import { Skia } from "@shopify/react-native-skia";
 
 export const miniPrismShader = Skia.RuntimeEffect.Make(`
   uniform float2 center;
+  uniform float2 attachment;
   uniform float boxSize;
   uniform float time;
   uniform float phase;
@@ -39,7 +40,7 @@ export const miniPrismShader = Skia.RuntimeEffect.Make(`
   }
 
   float objectScale() {
-    float growth = smoothstep(0.0, 0.15, phase);
+    float growth = smoothstep(0.0, 0.14, phase);
     float release = 1.0 - smoothstep(0.90, 1.0, phase);
     return mix(0.16, 1.0, growth) * mix(0.55, 1.0, release);
   }
@@ -51,7 +52,7 @@ export const miniPrismShader = Skia.RuntimeEffect.Make(`
     point = rotateX(point, -(time * 0.21 + seed * 1.9));
     float droplet = length(point) - 0.53;
     float prism = triangularPrismDistance(point);
-    float hardening = smoothstep(0.08, 0.30, phase);
+    float hardening = smoothstep(0.14, 0.32, phase);
     return mix(droplet, prism, hardening) * scale;
   }
 
@@ -136,12 +137,51 @@ export const miniPrismShader = Skia.RuntimeEffect.Make(`
     return half4(material * opacity, opacity);
   }
 
+  half4 renderConnection(float2 position) {
+    float connection = 1.0 - smoothstep(0.115, 0.17, phase);
+    if (opacity * connection < 0.001) return half4(0.0);
+
+    float2 segment = center - attachment;
+    float segmentLengthSquared = max(dot(segment, segment), 0.0001);
+    float along = clamp(dot(position - attachment, segment) / segmentLengthSquared, 0.0, 1.0);
+    float2 nearest = attachment + segment * along;
+    float distanceToNeck = length(position - nearest);
+    float displayScale = boxSize / 96.0;
+    float growth = smoothstep(0.0, 0.055, phase);
+    float pinch = smoothstep(0.065, 0.155, phase) * sin(along * 3.14159265);
+    float radius = mix(2.0, 8.5, growth) * displayScale;
+    radius *= 1.0 - pinch * 0.84;
+
+    float feather = 0.72 / max(pixelRatio, 1.0);
+    float coverage = 1.0 - smoothstep(radius - feather, radius + feather, distanceToNeck);
+    float sideLight = clamp(
+      0.5 + (position.x - nearest.x) / max(radius * 2.0, 0.001),
+      0.0,
+      1.0
+    );
+    float3 material = mix(
+      float3(0.08, 0.38, 0.94),
+      float3(0.70, 0.17, 0.94),
+      sideLight
+    );
+    float highlight = pow(max(1.0 - distanceToNeck / max(radius, 0.001), 0.0), 3.0);
+    material = toneMap(material * (0.60 + sideLight * 0.24) + highlight * 0.36);
+    float alpha = coverage * opacity * connection;
+    return half4(material * alpha, alpha);
+  }
+
+  half4 renderChild(float2 position) {
+    half4 connection = renderConnection(position);
+    half4 prism = renderPrism(position);
+    return prism + connection * (1.0 - prism.a);
+  }
+
   half4 main(float2 position) {
     float sampleOffset = 0.28 / max(pixelRatio, 1.0);
-    half4 color = renderPrism(position + float2(-sampleOffset, -sampleOffset));
-    color += renderPrism(position + float2(sampleOffset, -sampleOffset));
-    color += renderPrism(position + float2(-sampleOffset, sampleOffset));
-    color += renderPrism(position + float2(sampleOffset, sampleOffset));
+    half4 color = renderChild(position + float2(-sampleOffset, -sampleOffset));
+    color += renderChild(position + float2(sampleOffset, -sampleOffset));
+    color += renderChild(position + float2(-sampleOffset, sampleOffset));
+    color += renderChild(position + float2(sampleOffset, sampleOffset));
     return color * 0.25;
   }
 `);

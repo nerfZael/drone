@@ -61,7 +61,8 @@ async function renderFrames() {
     canvas.drawRect(CanvasKit.XYWHRect(0, 0, workerData.width, workerData.height), paint);
     shader.delete();
 
-    const childBoxSize = 96 * displayScale;
+    const childObjectSize = 96 * displayScale;
+    const childRenderSize = 144 * displayScale;
     const childMotions = [];
     for (let index = 0; index < CHILD_COUNT; index += 1) {
       const motion = getMiniMotion(time, index, workerData.width, workerData.height);
@@ -69,7 +70,9 @@ async function renderFrames() {
       shader = miniEffect.makeShader([
         motion.centerX,
         motion.centerY,
-        childBoxSize,
+        motion.attachmentX,
+        motion.attachmentY,
+        childObjectSize,
         time,
         motion.phase,
         index / CHILD_COUNT,
@@ -79,10 +82,10 @@ async function renderFrames() {
       paint.setShader(shader);
       canvas.drawRect(
         CanvasKit.XYWHRect(
-          motion.centerX - childBoxSize / 2,
-          motion.centerY - childBoxSize / 2,
-          childBoxSize,
-          childBoxSize,
+          motion.centerX - childRenderSize / 2,
+          motion.centerY - childRenderSize / 2,
+          childRenderSize,
+          childRenderSize,
         ),
         paint,
       );
@@ -153,20 +156,28 @@ function getMiniMotion(time, index, width, height) {
   const localTime = time - startDelay;
   const isActive = localTime >= 0 ? 1 : 0;
   const phase = (Math.max(localTime, 0) % CHILD_LIFETIME_SECONDS) / CHILD_LIFETIME_SECONDS;
-  const travel = phase < 0.04
+  const travel = phase < 0.14
     ? 0
-    : 1 - Math.pow(1 - Math.min(1, (phase - 0.04) / 0.42), 3);
+    : 1 - Math.pow(1 - Math.min(1, (phase - 0.14) / 0.28), 3);
   const laneWidth = Math.min(width * 0.16, 64 * (width / 390));
   const laneOffset = (index - (CHILD_COUNT - 1) / 2) * laneWidth;
+  const attachmentOffset = (index - (CHILD_COUNT - 1) / 2) * width * 0.014;
   const separation = Math.sin(Math.min(1, travel) * Math.PI) * width * 0.025;
   const direction = index % 2 === 0 ? -1 : 1;
+  const attachmentX = width * 0.5 + attachmentOffset;
+  const attachmentY = height * 0.603;
+  const budProgress = 1 - Math.pow(1 - Math.min(1, phase / 0.11), 3);
+  const budY = attachmentY + height * 0.028 * budProgress;
   const fadeIn = Math.min(1, phase / 0.035);
   const fadeOut = 1 - Math.max(0, Math.min(1, (phase - 0.90) / 0.10));
   const labelReveal = Math.max(0, Math.min(1, (phase - 0.28) / 0.08));
 
   return {
-    centerX: width * 0.5 + laneOffset * travel + separation * direction,
-    centerY: height * 0.54 + (height * 0.87 - height * 0.54) * travel,
+    attachmentX,
+    attachmentY,
+    centerX: attachmentX + (laneOffset - attachmentOffset) * travel
+      + separation * direction,
+    centerY: budY + (height * 0.87 - budY) * travel,
     labelOpacity: isActive * fadeOut * labelReveal * 0.72,
     opacity: isActive * fadeIn * fadeOut,
     phase,
