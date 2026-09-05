@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "shape",
+    "slug": "shape",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#070812",
+    "androidStatusBar": {
+      "backgroundColor": "#070812",
+      "barStyle": "light-content"
+    },
+    "androidNavigationBar": {
+      "backgroundColor": "#070812",
+      "barStyle": "light-content"
+    },
+    "android": {
+      "package": "com.dronehub.shape"
+    },
+    "ios": {
+      "bundleIdentifier": "com.dronehub.shape"
+    }
+  }
+}

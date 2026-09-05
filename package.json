@@ -23,6 +23,7 @@
     "blip": "bun run --filter @mariozechner/pi-ai build && bun run --filter @mariozechner/pi-agent-core build && bun run --filter @blip/workspace build && bun run --filter @blip/tools build && bun run --filter @blip/core build && bun run --filter @blip/cli dev -- --workspace \"$PWD\"",
     "drone-hub": "bun run --filter drone-hub dev",
     "deploy": "bun run build && bun run drone hub restart && bun run apk:release",
+    "deploy:shape": "bun run --filter shape build && bun run --filter shape android:native -- --variant release",
     "apk": "bun run drone:mobile:android:install",
     "apk:release": "bun run --filter @drone/device-protocol build && bun run --filter @drone/assistant-chat build && bun run --filter drone-hub-mobile android:native -- --variant release",
     "drone-hub:app": "bun run --filter drone-hub build && bun run --filter drone build && node apps/drone/dist/cli.js hub app --static-ui-dir apps/drone-hub/dist",
