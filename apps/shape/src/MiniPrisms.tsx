@@ -1,6 +1,7 @@
 import { Rect, Shader, Text, matchFont } from "@shopify/react-native-skia";
 import type { SkFont } from "@shopify/react-native-skia";
 import { useMemo } from "react";
+import { Platform } from "react-native";
 import type { SharedValue } from "react-native-reanimated";
 import { useDerivedValue } from "react-native-reanimated";
 
@@ -17,7 +18,7 @@ const CHILD_NAMES = [
   "NimbleWolf",
 ] as const;
 const CHILD_COUNT = CHILD_NAMES.length;
-const LABEL_OFFSET = 38;
+const LABEL_OFFSET = CHILD_BOX_SIZE / 2 + 12;
 
 type MiniPrismsProps = {
   clock: SharedValue<number>;
@@ -39,7 +40,15 @@ type MiniPrismProps = MiniPrismsProps & {
 
 export function MiniPrisms(props: MiniPrismsProps) {
   const font = useMemo(
-    () => matchFont({ fontFamily: "System", fontSize: 9.5, fontWeight: "500" }),
+    () => matchFont({
+      fontFamily: Platform.select({
+        android: "sans-serif",
+        default: "System",
+        ios: "Helvetica",
+      }),
+      fontSize: 9,
+      fontWeight: "600",
+    }),
     [],
   );
 
@@ -129,7 +138,7 @@ function MiniPrism({
         <Shader source={miniPrismShader} uniforms={uniforms} />
       </Rect>
       <Text
-        color="#B8B2CE"
+        color="#F3EFFF"
         font={font}
         opacity={labelOpacity}
         text={name}

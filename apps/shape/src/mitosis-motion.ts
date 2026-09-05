@@ -20,6 +20,59 @@ type BudProjectionInput = {
   width: number;
 };
 
+// Keep worklet dependencies above their callers. The worklets Babel transform
+// rewrites function declarations to initialized variables, so source-order
+// hoisting does not survive in a release bundle.
+function mix(start: number, end: number, amount: number) {
+  "worklet";
+  return start + (end - start) * amount;
+}
+
+function smoothProgress(value: number) {
+  "worklet";
+  return value * value * (3 - 2 * value);
+}
+
+function smoothRange(start: number, end: number, value: number) {
+  "worklet";
+  return smoothProgress(Math.max(0, Math.min(1, (value - start) / (end - start))));
+}
+
+function normalize3(x: number, y: number, z: number) {
+  "worklet";
+  const length = Math.sqrt(x * x + y * y + z * z);
+  return { x: x / length, y: y / length, z: z / length };
+}
+
+function getSolidSupport(shape: number) {
+  "worklet";
+  const index = shape % 8;
+  if (index === 0) return 0.62;
+  if (index === 1) return 0.55;
+  if (index === 2) return 1.08;
+  if (index === 3) return 0.79;
+  if (index === 4) return 0.82;
+  if (index === 5) return 0.47;
+  if (index === 6) return 0.64;
+  return 0.68;
+}
+
+function getShapeSupport(shape: number) {
+  "worklet";
+  const shapeFloor = Math.floor(shape);
+  const blend = smoothProgress(shape - shapeFloor);
+  return mix(getSolidSupport(shapeFloor), getSolidSupport(shapeFloor + 1), blend);
+}
+
+function getTorusWeight(shape: number) {
+  "worklet";
+  const shapeFloor = Math.floor(shape);
+  const index = shapeFloor % 8;
+  const nextIndex = (index + 1) % 8;
+  const blend = smoothProgress(shape - shapeFloor);
+  return (index === 7 ? 1 - blend : 0) + (nextIndex === 7 ? blend : 0);
+}
+
 export function getActiveMitosis(seconds: number): ActiveMitosis {
   "worklet";
   if (seconds < 1.1) return { index: -1, phase: -1 };
@@ -85,54 +138,4 @@ export function projectBudCenter(input: BudProjectionInput) {
     x: input.width * 0.5 + (worldX / depth) * shortestSide,
     y: input.height * 0.5 - (rotatedY / depth) * shortestSide,
   };
-}
-
-function getShapeSupport(shape: number) {
-  "worklet";
-  const shapeFloor = Math.floor(shape);
-  const blend = smoothProgress(shape - shapeFloor);
-  return mix(getSolidSupport(shapeFloor), getSolidSupport(shapeFloor + 1), blend);
-}
-
-function getTorusWeight(shape: number) {
-  "worklet";
-  const shapeFloor = Math.floor(shape);
-  const index = shapeFloor % 8;
-  const nextIndex = (index + 1) % 8;
-  const blend = smoothProgress(shape - shapeFloor);
-  return (index === 7 ? 1 - blend : 0) + (nextIndex === 7 ? blend : 0);
-}
-
-function getSolidSupport(shape: number) {
-  "worklet";
-  const index = shape % 8;
-  if (index === 0) return 0.62;
-  if (index === 1) return 0.55;
-  if (index === 2) return 1.08;
-  if (index === 3) return 0.79;
-  if (index === 4) return 0.82;
-  if (index === 5) return 0.47;
-  if (index === 6) return 0.64;
-  return 0.68;
-}
-
-function normalize3(x: number, y: number, z: number) {
-  "worklet";
-  const length = Math.sqrt(x * x + y * y + z * z);
-  return { x: x / length, y: y / length, z: z / length };
-}
-
-function smoothRange(start: number, end: number, value: number) {
-  "worklet";
-  return smoothProgress(Math.max(0, Math.min(1, (value - start) / (end - start))));
-}
-
-function smoothProgress(value: number) {
-  "worklet";
-  return value * value * (3 - 2 * value);
-}
-
-function mix(start: number, end: number, amount: number) {
-  "worklet";
-  return start + (end - start) * amount;
 }
