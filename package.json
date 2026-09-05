@@ -62,6 +62,7 @@
     "turbo": "^2.0.0"
   },
   "trustedDependencies": [
+    "@shopify/react-native-skia",
     "better-sqlite3",
     "onnxruntime-node"
   ],

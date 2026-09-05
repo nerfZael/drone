@@ -1,6 +1,5 @@
 {
   "lockfileVersion": 1,
-  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "drone-monorepo",
@@ -432,6 +431,7 @@
   },
   "trustedDependencies": [
     "better-sqlite3",
+    "@shopify/react-native-skia",
   ],
   "patchedDependencies": {
     "react-native-drawer-layout@4.2.7": "patches/react-native-drawer-layout@4.2.7.patch",

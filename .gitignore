@@ -160,6 +160,11 @@ artifacts/
 local.properties
 **/.runtime/
 
+# Expo local state and generated Shape native projects
+.expo/
+apps/shape/android/
+apps/shape/ios/
+
 
 AGENTS.md
 CLAUDE.md
