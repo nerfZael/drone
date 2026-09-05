@@ -143,6 +143,7 @@ export class DeviceHttpEventClient {
       serverRequestId?: string;
       serverTiming: Record<string, number>;
     }) => void,
+    signal?: AbortSignal,
   ): void {
     if (this.readyState !== DeviceHttpEventClient.OPEN) throw new Error('Device session is closed');
     const bytes = new TextEncoder().encode(data).byteLength;
@@ -154,11 +155,16 @@ export class DeviceHttpEventClient {
     }
     this.bufferedAmount += bytes;
     const started = performance.now();
+    const request = new AbortController();
+    const abort = () => request.abort();
+    this.lifetime.signal.addEventListener('abort', abort, { once: true });
+    signal?.addEventListener('abort', abort, { once: true });
+    if (this.lifetime.signal.aborted || signal?.aborted) abort();
     void this.fetcher(this.url, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${this.token}` },
       body: data,
-      signal: this.lifetime.signal,
+      signal: request.signal,
       redirect: 'error',
     })
       .then(async (response) => {
@@ -189,16 +195,18 @@ export class DeviceHttpEventClient {
             /* Diagnostics cannot interrupt delivery. */
           }
         }
-        if (body && !this.lifetime.signal.aborted) this.onmessage?.({ data: body });
+        if (body && !request.signal.aborted) this.onmessage?.({ data: body });
         callback?.();
       })
       .catch((error) => {
         callback?.(asError(error));
-        if (!this.lifetime.signal.aborted) {
+        if (!request.signal.aborted) {
           this.onerror?.(asError(error));
         }
       })
       .finally(() => {
+        this.lifetime.signal.removeEventListener('abort', abort);
+        signal?.removeEventListener('abort', abort);
         this.bufferedAmount -= bytes;
       });
   }

@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   ActivityIndicator,
+  BackHandler,
   Keyboard,
   Pressable,
   StyleSheet,
@@ -20,15 +21,15 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
+import ArrowUp from 'lucide-react-native/icons/arrow-up';
 import Bot from 'lucide-react-native/icons/bot';
-import ChevronUp from 'lucide-react-native/icons/chevron-up';
 import Copy from 'lucide-react-native/icons/copy';
 import Layers from 'lucide-react-native/icons/layers';
 import MessageSquarePlus from 'lucide-react-native/icons/message-square-plus';
 import Mic from 'lucide-react-native/icons/mic';
 import Pause from 'lucide-react-native/icons/pause';
 import Play from 'lucide-react-native/icons/play';
-import Send from 'lucide-react-native/icons/send';
+import Sparkles from 'lucide-react-native/icons/sparkles';
 import Square from 'lucide-react-native/icons/square';
 import X from 'lucide-react-native/icons/x';
 import { ThemedTextInput } from '../components/ThemedTextInput';
@@ -56,65 +57,67 @@ const DESTINATION_ACTIONS: DestinationAction[] = [
   { destination: 'group-drone', label: 'Group drone', icon: Layers },
   { destination: 'new-chat', label: 'New chat', icon: MessageSquarePlus },
   { destination: 'clone-chat', label: 'Clone chat', icon: Copy },
+  { destination: 'companion', label: 'Companion', icon: Sparkles },
 ];
 
+const EDITOR_HEIGHT = 92;
+const CONTROLS_ROW_HEIGHT = 44;
+const DESTINATION_ROW_HEIGHT = 46;
+const CARD_PADDING_BOTTOM = 4;
+
+/** Resting height of the dictation card (excluding standalone margins). */
+export function mobileDictationComposerHeight({
+  showDestinations,
+}: {
+  showDestinations: boolean;
+}): number {
+  return (
+    EDITOR_HEIGHT +
+    CONTROLS_ROW_HEIGHT +
+    (showDestinations ? DESTINATION_ROW_HEIGHT : 0) +
+    CARD_PADDING_BOTTOM +
+    2
+  );
+}
+
 export function MobileDictationComposerPreview({
-  primaryActionLabel = 'Current chat',
   showDestinationMenu = true,
 }: {
-  primaryActionLabel?: string;
   showDestinationMenu?: boolean;
 } = {}) {
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
+    <View style={[styles.card, styles.previewCard]}>
+      <View style={styles.editorArea} />
+      <View style={styles.controlsRow}>
         <View style={styles.statusRow}>
           <View style={[styles.statusDot, styles.statusDotReady]} />
-          <Text style={styles.statusText}>Ready to record</Text>
+          <Text style={styles.statusText}>Ready</Text>
         </View>
-        <ComposerIconButton
-          label="Discard and close dictation"
-          icon={X}
-          onPress={() => undefined}
-        />
-      </View>
-
-      <View style={styles.editorFrame} />
-
-      <View style={styles.bottomToolbar}>
-        <View style={styles.recordingControls}>
-          <RecordingButton
-            label="Discard current recording"
-            icon={X}
-            tone="danger"
-            disabled
-            onPress={() => undefined}
-          />
-          <RecordingButton
-            label="Pause recording"
-            icon={Pause}
-            disabled
-            onPress={() => undefined}
-          />
-          <View style={styles.recordButton}>
-            <Mic color={colors.onAccent} size={20} strokeWidth={2.2} />
+        <GhostButton label="Discard current recording" icon={X} tone="danger" disabled />
+        <View style={styles.controlsSpacer} />
+        <View style={styles.rightControls}>
+          <GhostButton label="Pause recording" icon={Pause} disabled />
+          <View style={styles.primaryButton}>
+            <Mic color={colors.onAccent} size={18} strokeWidth={2.3} />
+          </View>
+          <View style={styles.sendDivider} />
+          <View style={[styles.primaryButton, styles.disabled]}>
+            <ArrowUp color={colors.onAccent} size={18} strokeWidth={2.6} />
           </View>
         </View>
-        <View style={styles.toolbarSpacer} />
-        <View style={styles.sendControls}>
-          {showDestinationMenu ? (
-            <View style={[styles.destinationMenuButton, styles.disabled]}>
-              <ChevronUp color={colors.accent} size={16} strokeWidth={2.2} />
+      </View>
+      {showDestinationMenu ? (
+        <View style={styles.destinationRow}>
+          {DESTINATION_ACTIONS.map(({ destination, label, icon: Icon }) => (
+            <View key={destination} style={[styles.destinationButton, styles.disabled]}>
+              <Icon color={colors.muted} size={14} strokeWidth={2.1} />
+              <Text style={styles.destinationLabel} numberOfLines={1}>
+                {label}
+              </Text>
             </View>
-          ) : null}
-          <View style={[styles.currentChatButton, styles.disabled]}>
-            <Send color={colors.onAccent} size={16} strokeWidth={2.3} />
-            <Text style={styles.currentChatLabel} numberOfLines={1}>
-              {primaryActionLabel}
-            </Text>
-          </View>
+          ))}
         </View>
-      </View>
+      ) : null}
     </View>
   );
 }
@@ -143,13 +146,13 @@ export function MobileDictationComposer({
   onDiscardFailedTranscription,
   onDestinationPress,
   onPrimaryPress,
-  primaryActionLabel = 'Current chat',
   primaryActionAccessibilityLabel,
   primaryActionDisabled = false,
   showDestinationMenu = true,
   standalone = true,
   morphToComposer = false,
   morphTargetHeight = 92,
+  placeholder = 'Ask the agent',
 }: {
   value: string;
   deviceName: string;
@@ -174,15 +177,14 @@ export function MobileDictationComposer({
   onDiscardFailedTranscription(): void;
   onDestinationPress?(destination: MobileDictationDestination): void | Promise<void>;
   onPrimaryPress?(): void | Promise<void>;
-  primaryActionLabel?: string;
   primaryActionAccessibilityLabel?: string;
   primaryActionDisabled?: boolean;
   showDestinationMenu?: boolean;
   standalone?: boolean;
   morphToComposer?: boolean;
   morphTargetHeight?: number;
+  placeholder?: string;
 }) {
-  const [destinationMenuOpen, setDestinationMenuOpen] = React.useState(false);
   const [editorAtTop, setEditorAtTop] = React.useState(true);
   const editorAtTopRef = React.useRef(true);
   const editorRef = React.useRef<NativeTextInput>(null);
@@ -199,15 +201,27 @@ export function MobileDictationComposer({
     primaryActionDisabled ||
     (!value.trim() && !recordingActive && pendingCount === 0 && !failedTranscriptionError);
   const recordDisabled = controlsDisabled || (!recordingActive && microphoneUnavailable);
+  const pauseDisabled =
+    (recordingStatus !== 'recording' && recordingStatus !== 'paused') || controlsDisabled;
   const message = failedTranscriptionError || error || notice;
   const messageIsError = Boolean(failedTranscriptionError || error);
+  const restingHeight = mobileDictationComposerHeight({ showDestinations: showDestinationMenu });
   const dismissY = useSharedValue(0);
-  const cardHeight = useSharedValue(177);
-  const dismissStartHeight = useSharedValue(177);
+  const cardHeight = useSharedValue(restingHeight);
+  const dismissStartHeight = useSharedValue(restingHeight);
 
   const close = React.useCallback(() => {
     void onClose();
   }, [onClose]);
+
+  React.useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (!controlsDisabled) close();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [close, controlsDisabled]);
+
   const beginDismissGesture = React.useCallback(() => {
     if (focusSuppressionTimerRef.current) clearTimeout(focusSuppressionTimerRef.current);
     focusSuppressionTimerRef.current = null;
@@ -322,7 +336,6 @@ export function MobileDictationComposer({
 
   const send = (destination: MobileDictationDestination) => {
     if (sendDisabled) return;
-    setDestinationMenuOpen(false);
     if (destination === 'current-chat' && onPrimaryPress) void onPrimaryPress();
     else void onDestinationPress?.(destination);
   };
@@ -343,46 +356,14 @@ export function MobileDictationComposer({
           dismissStartHeight.value = event.nativeEvent.layout.height;
         }}
         style={[
-          styles.container,
-          styles.cardContainer,
-          standalone && styles.standaloneContainer,
-          morphToComposer && styles.morphContainer,
+          styles.card,
+          recordingActive && styles.cardRecording,
+          standalone && styles.standaloneCard,
+          morphToComposer && styles.morphCard,
           dismissStyle,
         ]}
       >
-        <View style={styles.header}>
-          <View style={styles.statusRow}>
-            <View
-              style={[
-                styles.statusDot,
-                recordingStatus === 'paused' && styles.statusDotPaused,
-                !recordingActive && styles.statusDotReady,
-                Boolean(error) && styles.statusDotError,
-              ]}
-            />
-            <Text style={styles.statusText}>
-              {mobileDictationStatusLabel({
-                recordingStatus,
-                recordingDurationMillis,
-                pendingCount,
-                finalizing,
-                networkSending,
-                microphoneUnavailable,
-              })}
-            </Text>
-            {recordingActive && pendingCount > 0 ? (
-              <Text style={styles.pendingText}>{pendingCount} transcribing</Text>
-            ) : null}
-          </View>
-          <ComposerIconButton
-            label="Discard and close dictation"
-            icon={X}
-            disabled={controlsDisabled}
-            onPress={() => void onClose()}
-          />
-        </View>
-
-        <View style={styles.editorFrame}>
+        <View style={styles.editorArea}>
           <GestureDetector gesture={editorDismissGesture}>
             <ThemedTextInput
               ref={editorRef}
@@ -399,62 +380,87 @@ export function MobileDictationComposer({
               maxLength={MOBILE_DICTATION_MAX_CHARS}
               multiline
               textAlignVertical="top"
-              placeholder="Your recordings and notes will appear here…"
-              placeholderTextColor={colors.mutedDim}
+              placeholder={placeholder}
+              placeholderTextColor={colors.secondary}
               style={styles.editor}
             />
           </GestureDetector>
+          {message ? (
+            <View pointerEvents="box-none" style={styles.messageOverlay}>
+              <View style={styles.messagePill}>
+                <Text
+                  style={[styles.messageText, messageIsError && styles.messageTextError]}
+                  numberOfLines={2}
+                >
+                  {message}
+                </Text>
+                {failedTranscriptionError ? (
+                  <>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Retry failed transcription"
+                      disabled={controlsDisabled}
+                      onPress={onRetryFailedTranscription}
+                      style={({ pressed }) => [styles.messageAction, pressed && styles.pressed]}
+                    >
+                      <Text style={styles.messageActionText}>Retry</Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Discard failed transcription"
+                      disabled={controlsDisabled}
+                      onPress={onDiscardFailedTranscription}
+                      style={({ pressed }) => [styles.messageAction, pressed && styles.pressed]}
+                    >
+                      <Text style={styles.messageActionText}>Discard</Text>
+                    </Pressable>
+                  </>
+                ) : null}
+              </View>
+            </View>
+          ) : null}
         </View>
 
-        {message ? (
-          <View style={[styles.messageRow, messageIsError && styles.messageRowError]}>
-            <Text
-              style={[styles.messageText, messageIsError && styles.messageTextError]}
-              numberOfLines={2}
-            >
-              {message}
+        <View style={styles.controlsRow}>
+          <View style={styles.statusRow}>
+            <View
+              style={[
+                styles.statusDot,
+                recordingStatus === 'paused' && styles.statusDotPaused,
+                !recordingActive && styles.statusDotReady,
+                Boolean(error) && styles.statusDotError,
+              ]}
+            />
+            <Text accessibilityLiveRegion="polite" style={styles.statusText} numberOfLines={1}>
+              {mobileDictationStatusLabel({
+                recordingStatus,
+                recordingDurationMillis,
+                pendingCount,
+                finalizing,
+                networkSending,
+                microphoneUnavailable,
+              })}
             </Text>
-            {failedTranscriptionError ? (
-              <>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Retry failed transcription"
-                  disabled={controlsDisabled}
-                  onPress={onRetryFailedTranscription}
-                  style={({ pressed }) => [styles.messageAction, pressed && styles.pressed]}
-                >
-                  <Text style={styles.messageActionText}>Retry</Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Discard failed transcription"
-                  disabled={controlsDisabled}
-                  onPress={onDiscardFailedTranscription}
-                  style={({ pressed }) => [styles.messageAction, pressed && styles.pressed]}
-                >
-                  <Text style={styles.messageActionText}>Discard</Text>
-                </Pressable>
-              </>
+            {recordingActive && pendingCount > 0 ? (
+              <Text style={styles.pendingText} numberOfLines={1}>
+                · {pendingCount} transcribing
+              </Text>
             ) : null}
           </View>
-        ) : null}
-
-        <View style={styles.bottomToolbar}>
-          <View style={styles.recordingControls}>
-            <RecordingButton
-              label="Discard current recording"
-              icon={X}
-              tone="danger"
-              disabled={!recordingActive || controlsDisabled}
-              onPress={() => void onCancelRecording()}
-            />
-            <RecordingButton
+          <GhostButton
+            label="Discard current recording"
+            icon={X}
+            tone="danger"
+            disabled={!recordingActive || controlsDisabled}
+            onPress={() => void onCancelRecording()}
+          />
+          <View style={styles.controlsSpacer} />
+          <View style={styles.rightControls}>
+            <GhostButton
               label={recordingStatus === 'paused' ? 'Resume recording' : 'Pause recording'}
               icon={recordingStatus === 'paused' ? Play : Pause}
-              disabled={
-                (recordingStatus !== 'recording' && recordingStatus !== 'paused') ||
-                controlsDisabled
-              }
+              tone={recordingStatus === 'paused' ? 'accent' : 'default'}
+              disabled={pauseDisabled}
               onPress={onTogglePause}
             />
             <Pressable
@@ -462,41 +468,21 @@ export function MobileDictationComposer({
               accessibilityLabel={recordingActive ? 'Stop and transcribe' : 'Start recording'}
               accessibilityState={{ disabled: recordDisabled }}
               disabled={recordDisabled}
+              hitSlop={4}
               onPress={() => void onToggleRecording()}
               style={({ pressed }) => [
-                styles.recordButton,
-                recordingActive && styles.stopButton,
+                recordingActive ? styles.ghostButton : styles.primaryButton,
                 recordDisabled && styles.disabled,
-                pressed && styles.pressed,
+                pressed && (recordingActive ? styles.ghostButtonPressed : styles.pressed),
               ]}
             >
-              {recordingStatus === 'starting' ? (
-                <ActivityIndicator color={colors.onAccent} size="small" />
-              ) : recordingActive ? (
-                <Square color={colors.onAccent} fill={colors.onAccent} size={17} strokeWidth={2} />
+              {recordingActive ? (
+                <Square color={colors.danger} fill={colors.danger} size={15} strokeWidth={2} />
               ) : (
-                <Mic color={colors.onAccent} size={20} strokeWidth={2.2} />
+                <Mic color={colors.onAccent} size={18} strokeWidth={2.3} />
               )}
             </Pressable>
-          </View>
-          <View style={styles.toolbarSpacer} />
-          <View style={styles.sendControls}>
-            {showDestinationMenu ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Show other dictation destinations"
-                accessibilityState={{ expanded: destinationMenuOpen, disabled: controlsDisabled }}
-                disabled={controlsDisabled}
-                onPress={() => setDestinationMenuOpen((current) => !current)}
-                style={({ pressed }) => [
-                  styles.destinationMenuButton,
-                  controlsDisabled && styles.disabled,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <ChevronUp color={colors.accent} size={16} strokeWidth={2.2} />
-              </Pressable>
-            ) : null}
+            <View style={styles.sendDivider} />
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={
@@ -504,9 +490,10 @@ export function MobileDictationComposer({
               }
               accessibilityState={{ disabled: sendDisabled }}
               disabled={sendDisabled}
+              hitSlop={4}
               onPress={() => send('current-chat')}
               style={({ pressed }) => [
-                styles.currentChatButton,
+                styles.primaryButton,
                 sendDisabled && styles.disabled,
                 pressed && styles.pressed,
               ]}
@@ -514,17 +501,14 @@ export function MobileDictationComposer({
               {networkSending ? (
                 <ActivityIndicator color={colors.onAccent} size="small" />
               ) : (
-                <Send color={colors.onAccent} size={16} strokeWidth={2.3} />
+                <ArrowUp color={colors.onAccent} size={18} strokeWidth={2.6} />
               )}
-              <Text style={styles.currentChatLabel} numberOfLines={1}>
-                {primaryActionLabel}
-              </Text>
             </Pressable>
           </View>
         </View>
 
-        {showDestinationMenu && destinationMenuOpen ? (
-          <View style={styles.destinationMenu}>
+        {showDestinationMenu ? (
+          <View style={styles.destinationRow}>
             {DESTINATION_ACTIONS.map(({ destination, label, icon: Icon }) => (
               <Pressable
                 key={destination}
@@ -538,15 +522,16 @@ export function MobileDictationComposer({
                   chatName,
                   groupName,
                 })}
+                hitSlop={4}
                 onPress={() => send(destination)}
                 style={({ pressed }) => [
-                  styles.destinationMenuItem,
+                  styles.destinationButton,
                   sendDisabled && styles.disabled,
-                  pressed && styles.pressed,
+                  pressed && styles.destinationButtonPressed,
                 ]}
               >
-                <Icon color={colors.accent} size={15} strokeWidth={2.2} />
-                <Text style={styles.destinationMenuLabel} numberOfLines={1}>
+                <Icon color={colors.muted} size={14} strokeWidth={2.1} />
+                <Text style={styles.destinationLabel} numberOfLines={1}>
                   {label}
                 </Text>
               </Pressable>
@@ -558,37 +543,7 @@ export function MobileDictationComposer({
   );
 }
 
-function ComposerIconButton({
-  label,
-  icon: Icon,
-  disabled = false,
-  onPress,
-}: {
-  label: string;
-  icon: typeof X;
-  disabled?: boolean;
-  onPress(): void;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ disabled }}
-      disabled={disabled}
-      hitSlop={9}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.headerButton,
-        disabled && styles.disabled,
-        pressed && styles.pressed,
-      ]}
-    >
-      <Icon color={colors.muted} size={14} strokeWidth={2} />
-    </Pressable>
-  );
-}
-
-function RecordingButton({
+function GhostButton({
   label,
   icon: Icon,
   tone = 'default',
@@ -597,30 +552,27 @@ function RecordingButton({
 }: {
   label: string;
   icon: typeof X;
-  tone?: 'default' | 'danger';
+  tone?: 'default' | 'danger' | 'accent';
   disabled?: boolean;
-  onPress(): void;
+  onPress?(): void;
 }) {
+  const color =
+    tone === 'danger' ? colors.danger : tone === 'accent' ? colors.accent : colors.textSecondary;
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ disabled }}
       disabled={disabled}
-      hitSlop={6}
+      hitSlop={4}
       onPress={onPress}
       style={({ pressed }) => [
-        styles.recordingButton,
-        tone === 'danger' && styles.recordingButtonDanger,
+        styles.ghostButton,
         disabled && styles.disabled,
-        pressed && styles.pressed,
+        pressed && styles.ghostButtonPressed,
       ]}
     >
-      <Icon
-        color={tone === 'danger' ? colors.danger : colors.textSecondary}
-        size={18}
-        strokeWidth={2.1}
-      />
+      <Icon color={color} size={18} strokeWidth={2.2} />
     </Pressable>
   );
 }
@@ -644,6 +596,9 @@ function destinationAccessibilityLabel(input: {
   if (input.destination === 'new-chat') {
     return `Send dictation to a new chat in ${input.droneName}`;
   }
+  if (input.destination === 'companion') {
+    return 'Send dictation to Companion';
+  }
   return `Send dictation to a clone of the current chat in ${input.droneName}`;
 }
 
@@ -661,186 +616,157 @@ function mobileDictationStatusLabel(input: {
       ? `Finishing ${input.pendingCount} transcription${input.pendingCount === 1 ? '' : 's'}…`
       : 'Preparing to send…';
   }
-  if (input.recordingStatus === 'starting') return 'Starting…';
-  if (input.recordingStatus === 'recording' || input.recordingStatus === 'paused') {
-    const state = input.recordingStatus === 'paused' ? 'Paused' : 'Recording';
-    return `${state} · ${formatMobileVoiceDuration(input.recordingDurationMillis)}`;
+  // 'starting' and 'stopped' last a few frames; showing their own labels reads
+  // as a flicker, so they borrow the neighbouring state's label instead.
+  if (input.recordingStatus === 'starting' || input.recordingStatus === 'recording') {
+    return formatMobileVoiceDuration(input.recordingDurationMillis);
   }
-  if (input.recordingStatus === 'stopped') return 'Stopping…';
-  if (input.recordingStatus === 'transcribing' || input.pendingCount > 0) {
-    return `${input.pendingCount || 1} transcribing`;
+  if (input.recordingStatus === 'paused') {
+    return `Paused · ${formatMobileVoiceDuration(input.recordingDurationMillis)}`;
+  }
+  if (
+    input.recordingStatus === 'stopped' ||
+    input.recordingStatus === 'transcribing' ||
+    input.pendingCount > 0
+  ) {
+    return input.pendingCount > 1 ? `${input.pendingCount} transcribing` : 'Transcribing…';
   }
   if (input.microphoneUnavailable) return 'Microphone in use';
-  return 'Ready to record';
+  return 'Ready';
 }
 
 const styles = StyleSheet.create({
-  container: {
+  card: {
     position: 'relative',
     flexShrink: 0,
-    gap: 5,
-    paddingHorizontal: 5,
-    paddingTop: 5,
-    paddingBottom: 6,
-    borderTopWidth: 1,
-    borderTopColor: colors.accentBorder,
-    backgroundColor: colors.panelRaised,
-  },
-  cardContainer: {
+    paddingBottom: CARD_PADDING_BOTTOM,
     borderRadius: 7,
     borderWidth: 1,
-    borderColor: colors.accentBorder,
+    borderColor: colors.composerBorder,
+    backgroundColor: colors.panelRaised,
     shadowColor: colors.shadow,
     shadowOpacity: 0.08,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 5 },
     elevation: 2,
   },
-  standaloneContainer: {
+  cardRecording: { borderColor: colors.accentBorder },
+  previewCard: { flex: 1 },
+  standaloneCard: {
     marginHorizontal: 9,
     marginTop: 6,
     marginBottom: 8,
   },
-  morphContainer: { overflow: 'hidden' },
-  header: {
-    minHeight: 26,
+  morphCard: { overflow: 'hidden' },
+  editorArea: { height: EDITOR_HEIGHT, overflow: 'hidden' },
+  editor: {
+    flex: 1,
+    minHeight: EDITOR_HEIGHT,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 6,
+    color: colors.text,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  messageOverlay: {
+    position: 'absolute',
+    right: 8,
+    bottom: 6,
+    left: 8,
+    alignItems: 'flex-start',
+  },
+  messagePill: {
+    maxWidth: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 7,
+    backgroundColor: colors.panel,
+  },
+  messageText: {
+    minWidth: 0,
+    flexShrink: 1,
+    color: colors.warning,
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  messageTextError: { color: colors.danger },
+  messageAction: { paddingHorizontal: 2, paddingVertical: 4 },
+  messageActionText: { color: colors.accent, fontSize: 10, fontWeight: '800' },
+  controlsRow: {
+    height: CONTROLS_ROW_HEIGHT,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+    paddingLeft: 14,
+    paddingRight: 6,
   },
-  statusRow: { minWidth: 0, flex: 1, flexDirection: 'row', alignItems: 'center', gap: 5 },
+  controlsSpacer: { flex: 1, minWidth: 8 },
+  statusRow: { minWidth: 0, flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: 6 },
   statusDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.danger },
   statusDotPaused: { backgroundColor: colors.warning },
   statusDotReady: { backgroundColor: colors.accent },
   statusDotError: { backgroundColor: colors.danger },
-  statusText: { color: colors.textSecondary, fontSize: 8.5, fontFamily: 'monospace' },
-  pendingText: { color: colors.accent, fontSize: 8.5, fontWeight: '700' },
-  headerButton: {
-    width: 26,
-    height: 26,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.controlSurface,
+  statusText: {
+    flexShrink: 1,
+    color: colors.textSecondary,
+    fontFamily: 'monospace',
+    fontSize: 11,
+    fontVariant: ['tabular-nums'],
   },
-  editorFrame: {
-    height: 90,
-    borderRadius: 7,
-    borderWidth: 1,
-    borderColor: colors.accentBorder,
-    backgroundColor: colors.background,
-    overflow: 'hidden',
-  },
-  editor: {
-    minHeight: 88,
-    flex: 1,
-    paddingHorizontal: 12,
-    paddingTop: 9,
-    paddingBottom: 7,
-    color: colors.text,
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  messageRow: {
-    minHeight: 30,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 8,
-    borderRadius: 7,
-    backgroundColor: colors.warningDark,
-  },
-  messageRowError: { backgroundColor: colors.dangerDark },
-  messageText: { minWidth: 0, flex: 1, color: colors.warning, fontSize: 9 },
-  messageTextError: { color: colors.danger },
-  messageAction: { paddingHorizontal: 3, paddingVertical: 6 },
-  messageActionText: { color: colors.accent, fontSize: 9, fontWeight: '800' },
-  recordingControls: {
-    minHeight: 40,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  recordingButton: {
+  pendingText: { flexShrink: 1, color: colors.accent, fontSize: 10, fontWeight: '700' },
+  rightControls: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  ghostButton: {
     width: 36,
     height: 36,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.borderStrong,
-    backgroundColor: colors.controlSurface,
   },
-  recordingButtonDanger: { borderColor: colors.dangerBorder, backgroundColor: colors.dangerDark },
-  recordButton: {
-    width: 40,
+  ghostButtonPressed: { backgroundColor: colors.whiteWash },
+  primaryButton: {
+    width: 36,
+    height: 36,
+    marginLeft: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    backgroundColor: colors.accent,
+  },
+  sendDivider: {
+    width: 1,
+    height: 20,
+    marginHorizontal: 8,
+    backgroundColor: colors.borderStrong,
+    opacity: 0.55,
+  },
+  destinationRow: {
+    height: DESTINATION_ROW_HEIGHT,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    paddingHorizontal: 6,
+  },
+  destinationButton: {
+    flex: 1,
     height: 40,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 10,
-    backgroundColor: colors.accent,
-  },
-  stopButton: { backgroundColor: colors.danger },
-  bottomToolbar: {
-    minHeight: 40,
-    flexDirection: 'row',
-    alignItems: 'center',
+    gap: 3,
     paddingHorizontal: 2,
-  },
-  toolbarSpacer: { flex: 1 },
-  sendControls: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  destinationMenuButton: {
-    width: 34,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.borderStrong,
-    backgroundColor: colors.controlSurface,
-  },
-  currentChatButton: {
-    minWidth: 124,
-    height: 40,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 7,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    borderColor: colors.accent,
-    backgroundColor: colors.accent,
-  },
-  currentChatLabel: { color: colors.onAccent, fontSize: 10, fontWeight: '800' },
-  destinationMenu: {
-    position: 'absolute',
-    right: 5,
-    bottom: 51,
-    zIndex: 10,
-    elevation: 8,
-    width: 244,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 4,
-    padding: 5,
-    borderRadius: 9,
-    borderWidth: 1,
-    borderColor: colors.borderStrong,
-    backgroundColor: colors.panel,
-  },
-  destinationMenuItem: {
-    width: '49.1%',
-    minHeight: 40,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    paddingHorizontal: 9,
     borderRadius: 7,
-    backgroundColor: colors.controlSurface,
   },
-  destinationMenuLabel: { minWidth: 0, color: colors.text, fontSize: 9.5, fontWeight: '700' },
+  destinationButtonPressed: { backgroundColor: colors.whiteWash },
+  destinationLabel: {
+    maxWidth: '100%',
+    color: colors.muted,
+    fontSize: 9,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
   disabled: { opacity: 0.4 },
   pressed: { opacity: 0.72 },
 });

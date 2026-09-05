@@ -12,6 +12,46 @@ function deferred() {
 }
 
 describe('MobileChatReadCoordinator', () => {
+  test('cancels obsolete reads and allows A → B → A without joining the old A', async () => {
+    const coordinator = new MobileChatReadCoordinator(() => undefined);
+    const oldA = deferred();
+    let oldSignal!: AbortSignal;
+    const first = coordinator.request('a', async (signal) => {
+      oldSignal = signal;
+      await oldA.promise;
+    });
+    coordinator.cancelExcept('b');
+    expect(oldSignal.aborted).toBe(true);
+    const second = coordinator.request('a', async () => {});
+    expect(second).not.toBe(first);
+    await second;
+    oldA.resolve();
+    await first;
+    expect(coordinator.isActive('a')).toBe(false);
+  });
+
+  test('continuous refresh requests still let each completed snapshot be applied', async () => {
+    const coordinator = new MobileChatReadCoordinator(() => undefined);
+    const reads = [deferred(), deferred()];
+    const applied: number[] = [];
+    let calls = 0;
+    const task = async (signal: AbortSignal) => {
+      const index = calls++;
+      await reads[index]!.promise;
+      if (!signal.aborted) applied.push(index);
+    };
+    const first = coordinator.request('chat', task);
+    for (let i = 0; i < 20; i++) coordinator.request('chat', task);
+    reads[0]!.resolve();
+    await first;
+    expect(applied).toEqual([0]);
+    expect(calls).toBe(2);
+    reads[1]!.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(applied).toEqual([0, 1]);
+  });
+
   test('coalesces repeated refreshes and runs one trailing read without overlap', async () => {
     const activeStates: boolean[] = [];
     const reads = [deferred(), deferred()];

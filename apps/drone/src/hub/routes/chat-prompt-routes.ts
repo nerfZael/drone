@@ -52,6 +52,7 @@ type ChatPromptRouteDependencyName =
   | 'pushPendingStartupPrompt'
   | 'promoteQueuedNewChatAction'
   | 'readChatReadStateFromStore'
+  | 'readChatMetadataFromStore'
   | 'readChatSnapshot'
   | 'readTranscriptTurnsByIdsFromStore'
   | 'resolveInterruptedPendingPrompt'
@@ -144,6 +145,7 @@ export function createChatPromptRouteHandler(
     pushPendingStartupPrompt,
     promoteQueuedNewChatAction,
     readChatReadStateFromStore,
+    readChatMetadataFromStore,
     readChatSnapshot,
     readTranscriptTurnsByIdsFromStore,
     resolveInterruptedPendingPrompt,
@@ -241,7 +243,7 @@ export function createChatPromptRouteHandler(
             : 'human';
 
         try {
-          const resolved = await resolveDroneOrPendingForReadRef(droneRef);
+          const resolved = await resolveCanonicalDroneOrPendingForReadRef(droneRef);
           timer.mark('resolve');
           if (!resolved) {
             timer.setHeader(res);
@@ -254,7 +256,10 @@ export function createChatPromptRouteHandler(
           const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
           const chat = normalizeChatName(chatName);
           const existingChatEntry =
-            resolved.kind === 'real' ? ((drone as any)?.chats?.[chat] ?? null) : null;
+            resolved.kind === 'real'
+              ? (readChatMetadataFromStore({ droneId, chatName: chat }).chat ??
+                ((globalThis as any).Bun ? (drone as any)?.chats?.[chat] : null))
+              : null;
           if (body?.requireExistingChat === true && resolved.kind === 'pending') {
             const startupChatNames = [
               ...new Set(
@@ -310,51 +315,44 @@ export function createChatPromptRouteHandler(
               }
             | { kind: 'error'; status: number; error: string };
           if (resolved.kind === 'pending') {
-            if (attachments.length > 0) {
+            const pendingPromptId = promptIdRaw || crypto.randomBytes(9).toString('hex');
+            const queuedStatus = await pushPendingStartupPrompt({
+              droneId,
+              chatName: chat,
+              attachments,
+              pending: {
+                id: pendingPromptId,
+                at: submittedAt,
+                prompt,
+                ...(typeof body?.cwd === 'string' ? { cwd: body.cwd } : {}),
+                ...(deliveryMode ? { deliveryMode } : {}),
+                state: 'queued',
+                updatedAt: submittedAt,
+              },
+            });
+            if (queuedStatus === 'queued') {
               r = {
-                kind: 'error',
-                status: 409,
-                error: `drone "${droneId}" is still starting (attachments require an active drone)`,
+                kind: 'enqueued',
+                id: pendingPromptId,
+                pendingState: 'queued',
               };
             } else {
-              const pendingPromptId = promptIdRaw || crypto.randomBytes(9).toString('hex');
-              const queuedStatus = await pushPendingStartupPrompt({
+              r = await createOrEnqueuePromptUnified({
+                id: pendingPromptId,
                 droneId,
                 chatName: chat,
-                pending: {
-                  id: pendingPromptId,
-                  at: submittedAt,
-                  prompt,
-                  ...(typeof body?.cwd === 'string' ? { cwd: body.cwd } : {}),
-                  ...(deliveryMode ? { deliveryMode } : {}),
-                  state: 'queued',
-                  updatedAt: submittedAt,
-                },
+                prompt,
+                attachments,
+                cwd: typeof body?.cwd === 'string' ? body.cwd : null,
+                submittedAt,
+                deliveryMode,
+                submissionSource,
+                requireExistingChat: body?.requireExistingChat === true,
+                mark: (name: string) => timer.mark(name),
               });
-              if (queuedStatus === 'queued') {
-                r = {
-                  kind: 'enqueued',
-                  id: pendingPromptId,
-                  pendingState: 'queued',
-                };
-              } else {
-                r = await createOrEnqueuePromptUnified({
-                  id: pendingPromptId,
-                  droneId,
-                  chatName: chat,
-                  prompt,
-                  attachments,
-                  cwd: typeof body?.cwd === 'string' ? body.cwd : null,
-                  submittedAt,
-                  deliveryMode,
-                  submissionSource,
-                  requireExistingChat: body?.requireExistingChat === true,
-                  mark: (name: string) => timer.mark(name),
-                });
-              }
             }
           } else {
-            const liveChatEntry = (drone as any)?.chats?.[chat] ?? null;
+            const liveChatEntry = existingChatEntry;
             if (isDraftChatEntry(liveChatEntry)) {
               if (attachments.length > 0) {
                 r = {
@@ -641,7 +639,10 @@ export function createChatPromptRouteHandler(
           : null;
         timer.mark('read');
         if (!turn) {
-          json(res, 404, { ok: false, error: `unknown chat turn: ${requestedTurnId || 'missing'}` });
+          json(res, 404, {
+            ok: false,
+            error: `unknown chat turn: ${requestedTurnId || 'missing'}`,
+          });
           return;
         }
         const activity = normalizeAgentRunActivity((turn as any).activity) ?? null;
@@ -786,15 +787,16 @@ export function createChatPromptRouteHandler(
             pendingCount: snapshot.pending.length,
             status: 200,
           });
-          const responseSnapshot = activityMode === 'full'
-            ? snapshot
-            : {
-                ...snapshot,
-                transcripts: projectTranscriptActivity(
-                  snapshot.transcripts,
-                  activityMode as 'summary' | 'none',
-                ),
-              };
+          const responseSnapshot =
+            activityMode === 'full'
+              ? snapshot
+              : {
+                  ...snapshot,
+                  transcripts: projectTranscriptActivity(
+                    snapshot.transcripts,
+                    activityMode as 'summary' | 'none',
+                  ),
+                };
           const responseBody = {
             ...chatSnapshotResponseBody(responseSnapshot, { includeTranscriptMeta }),
             ...(includeReadState

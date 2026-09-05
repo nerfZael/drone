@@ -7,16 +7,23 @@ type RequestDroneList = (
   destinationId: string,
   operation: 'drones.list',
   payload: { includeCreateOptions: boolean },
+  signal?: AbortSignal,
 ) => Promise<unknown>;
 
 export async function loadMobileDroneList(
   request: RequestDroneList,
   targetId: string,
   quiet: boolean,
+  signal?: AbortSignal,
 ): Promise<NormalizedMobileDroneListPayload> {
-  const result = await request(targetId, 'drones.list', {
-    includeCreateOptions: !quiet,
-  });
+  const result = await request(
+    targetId,
+    'drones.list',
+    {
+      includeCreateOptions: !quiet,
+    },
+    signal,
+  );
   if (
     !result ||
     typeof result !== 'object' ||

@@ -67,9 +67,7 @@ export function projectPromptRuntimeChatEntry(input: {
     pendingPrompts:
       input.rows.available && Array.isArray(input.rows.pending) ? input.rows.pending : [],
     turns:
-      input.rows.available && Array.isArray(input.rows.pendingTurns)
-        ? input.rows.pendingTurns
-        : [],
+      input.rows.available && Array.isArray(input.rows.pendingTurns) ? input.rows.pendingTurns : [],
   };
 }
 
@@ -249,21 +247,21 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
 
     const failed = String(pendingEntry?.phase ?? '') === 'error';
     const at =
-      String(seed?.submittedAt ?? pendingEntry?.createdAt ?? pendingEntry?.updatedAt ?? '').trim() ||
-      nowIso();
+      String(
+        seed?.submittedAt ?? pendingEntry?.createdAt ?? pendingEntry?.updatedAt ?? '',
+      ).trim() || nowIso();
     prompts.push({
       id: seedId,
       at,
       prompt: seedPrompt,
-      ...(typeof seed?.model === 'string' && seed.model.trim()
-        ? { model: seed.model.trim() }
-        : {}),
+      ...(typeof seed?.model === 'string' && seed.model.trim() ? { model: seed.model.trim() } : {}),
       ...(typeof seed?.cwd === 'string' ? { cwd: seed.cwd } : {}),
       state: failed ? 'failed' : 'queued',
       ...(failed
         ? {
             error:
-              String(pendingEntry?.error ?? '').trim() || 'Drone failed before the prompt was sent.',
+              String(pendingEntry?.error ?? '').trim() ||
+              'Drone failed before the prompt was sent.',
           }
         : {}),
       updatedAt: String(pendingEntry?.updatedAt ?? at),
@@ -406,13 +404,12 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     chatName: string;
     createIfMissing?: boolean;
   }): Promise<void> {
-    const reg: any = await loadRegistry();
     const droneId = normalizeDroneIdentity(opts.droneId);
-    const d = droneId ? reg?.drones?.[droneId] : null;
-    if (!d) throw new Error(`unknown drone: ${opts.droneId}`);
     if (!(globalThis as any).Bun) {
-      await importDroneChatsFromRegistry({ droneId, chats: d.chats });
-      const stored = readChatFromStore({ droneId, chatName: opts.chatName }).chat;
+      const resolved = await resolveCanonicalDroneOrPendingForReadRef(droneId);
+      if (resolved?.kind !== 'real') throw new Error(`unknown drone: ${opts.droneId}`);
+      const d = resolved.drone;
+      const stored = readChatMetadataFromStore({ droneId, chatName: opts.chatName }).chat;
       if (stored) {
         if (typeof stored.id !== 'string' || !stored.id.trim()) {
           await updateChatInStore({
@@ -965,8 +962,10 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
         (opts.agent.kind === 'native' && opts.chatId
           ? await nativeChatHasHistory(opts.chatId)
           : false),
-      dockerSnapshotAfterAgentMessageEnabled:
-        dockerSnapshotAfterAgentMessageEnabledForChat(opts.droneEntry, opts.chatEntry),
+      dockerSnapshotAfterAgentMessageEnabled: dockerSnapshotAfterAgentMessageEnabledForChat(
+        opts.droneEntry,
+        opts.chatEntry,
+      ),
       sessionName: hubChatSessionName(opts.chatName || 'default'),
       createdAt: String(opts.chatEntry?.createdAt ?? '').trim(),
     };
@@ -1270,17 +1269,17 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     const agent = inferChatAgent(entry as any, context.droneEntry);
     const transcriptResult =
       opts.includeTranscript && !(opts.includeConfigDetails && agent.kind === 'custom')
-      ? await buildTranscriptRowsForChat({
-          droneId,
-          droneName: context.droneName,
-          chatName: opts.chatName,
-          chatEntry: entry,
-          droneEntry: context.droneEntry,
-          selection: opts.selection,
-          tailRaw: opts.tailRaw,
-          activityMode: opts.activityMode,
-        })
-      : null;
+        ? await buildTranscriptRowsForChat({
+            droneId,
+            droneName: context.droneName,
+            chatName: opts.chatName,
+            chatEntry: entry,
+            droneEntry: context.droneEntry,
+            selection: opts.selection,
+            tailRaw: opts.tailRaw,
+            activityMode: opts.activityMode,
+          })
+        : null;
     if (transcriptResult && !transcriptResult.ok) return transcriptResult;
 
     if (opts.maintenance === 'run') {
@@ -1526,8 +1525,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       ...(snapshot.agentLocked !== undefined ? { agentLocked: snapshot.agentLocked } : {}),
       ...(snapshot.dockerSnapshotAfterAgentMessageEnabled !== undefined
         ? {
-            dockerSnapshotAfterAgentMessageEnabled:
-              snapshot.dockerSnapshotAfterAgentMessageEnabled,
+            dockerSnapshotAfterAgentMessageEnabled: snapshot.dockerSnapshotAfterAgentMessageEnabled,
           }
         : {}),
       ...(snapshot.sessionName !== undefined ? { sessionName: snapshot.sessionName } : {}),
@@ -1570,11 +1568,16 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     droneHubMcpAccessScope?: unknown;
     addDroneHubMcpAccessDroneIds?: string[];
   }) {
-    const registry: any = await loadRegistry();
     const droneId = normalizeDroneIdentity(opts.droneId);
-    const d = droneId ? registry?.drones?.[droneId] : null;
+    const resolved = await resolveCanonicalDroneOrPendingForReadRef(droneId);
+    const registry: any = (globalThis as any).Bun ? await loadRegistry() : null;
+    const d = registry
+      ? registry?.drones?.[droneId]
+      : resolved?.kind === 'real'
+        ? resolved.drone
+        : null;
     if (!d) throw new Error(`unknown drone: ${opts.droneId}`);
-    await importDroneChatsFromRegistry({ droneId, chats: d.chats });
+    if (registry) await importDroneChatsFromRegistry({ droneId, chats: d.chats });
     await updateChatInStore({
       droneId,
       chatName: opts.chatName,
@@ -1637,8 +1640,15 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
             error.statusCode = 400;
             throw error;
           }
-          const provider = String(opts.provider ?? '').trim().toLowerCase();
-          if (provider === 'openai' || provider === 'codex' || provider === 'gemini' || provider === 'openrouter') {
+          const provider = String(opts.provider ?? '')
+            .trim()
+            .toLowerCase();
+          if (
+            provider === 'openai' ||
+            provider === 'codex' ||
+            provider === 'gemini' ||
+            provider === 'openrouter'
+          ) {
             cur.nativeProvider = provider;
           } else {
             delete cur.nativeProvider;
@@ -1724,7 +1734,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       },
     });
     await projectCanonicalChatToRegistry(droneId, opts.chatName);
-    const updatedChat = readChatFromStore({ droneId, chatName: opts.chatName }).chat;
+    const updatedChat = readChatMetadataFromStore({ droneId, chatName: opts.chatName }).chat;
     const updatedAgent = inferChatAgent(updatedChat, d);
     if (
       opts.setApprovalPolicy &&

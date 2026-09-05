@@ -24,6 +24,7 @@ import {
   type SidebarTreeFolderNode,
 } from '@drone/hub-model/sidebar';
 import { mobileRunDetails } from '../local-assistant/mobile-transcript-runs';
+import { retainSnapshotValue } from './retain-snapshot-value';
 import {
   mobileMessageDetailsWithAsapFollowUps,
   type MobileAsapFollowUp,
@@ -585,11 +586,25 @@ export function resolveMobileDroneListSnapshot({
     currentHasUsableSidebar &&
     (!payloadHasUsableSidebar || payloadHasOlderPreferenceVersion || keepCurrentSidebar);
 
+  const sameTarget = current.targetId === targetId;
+  const previousById = new Map(sameTarget ? current.drones.map((drone) => [drone.id, drone]) : []);
+  const drones = payload.drones.map((drone) => {
+    const previous = previousById.get(drone.id);
+    return previous ? retainSnapshotValue(previous, drone) : drone;
+  });
+
   return {
     targetId,
-    drones: payload.drones,
+    drones:
+      sameTarget &&
+      drones.length === current.drones.length &&
+      drones.every((drone, index) => drone === current.drones[index])
+        ? current.drones
+        : drones,
     sidebar: usePayloadSidebar
-      ? payload.sidebar
+      ? sameTarget
+        ? retainSnapshotValue(current.sidebar, payload.sidebar)
+        : payload.sidebar
       : preserveCurrentSidebar
         ? current.sidebar
         : EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
@@ -692,8 +707,7 @@ export function buildMobileDroneRepoGroups(
     sidebarGroupCreatedAtByName: order.groupCreatedAtByName,
     repoScopedGroupPathsByRepoGroup: canonicalGroupIndex.pathsByRepoGroup,
     repoScopedGroupIdByPathByRepoGroup: canonicalGroupIndex.idsByPathByRepoGroup,
-    repoScopedGroupCreatedAtByPathByRepoGroup:
-      canonicalGroupIndex.createdAtByPathByRepoGroup,
+    repoScopedGroupCreatedAtByPathByRepoGroup: canonicalGroupIndex.createdAtByPathByRepoGroup,
   });
   const dronesById = new Map(drones.map((drone) => [String(drone.id ?? '').trim(), drone]));
 

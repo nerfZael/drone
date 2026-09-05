@@ -2,7 +2,7 @@ import React from 'react';
 import {
   ActivityIndicator,
   Pressable,
-  ScrollView,
+  FlatList,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -46,11 +46,23 @@ export function NewDroneRepoPicker({
   const selectedLabel = selectedRepo ? mobileRepoLabel(selectedRepo.path) : 'No repo';
   const compact = window.width < 420;
   const normalizedQuery = query.trim().toLocaleLowerCase();
-  const filteredRepos = normalizedQuery
-    ? repos.filter((repo) =>
-        `${mobileRepoLabel(repo.path)} ${repo.path}`.toLocaleLowerCase().includes(normalizedQuery),
-      )
-    : repos;
+  const searchIndex = React.useMemo(
+    () =>
+      repos.map((repo) => ({
+        repo,
+        search: `${mobileRepoLabel(repo.path)} ${repo.path}`.toLocaleLowerCase(),
+      })),
+    [repos],
+  );
+  const filteredRepos = React.useMemo(
+    () =>
+      normalizedQuery
+        ? searchIndex
+            .filter((entry) => entry.search.includes(normalizedQuery))
+            .map((entry) => entry.repo)
+        : repos,
+    [normalizedQuery, repos, searchIndex],
+  );
 
   return (
     <AnchoredPickerPopover
@@ -114,21 +126,28 @@ export function NewDroneRepoPicker({
           style={styles.searchInput}
         />
       </View>
-      <ScrollView
+      <FlatList
         accessibilityRole="radiogroup"
         keyboardShouldPersistTaps="handled"
         style={styles.scroll}
         contentContainerStyle={styles.list}
-      >
-        {!normalizedQuery || 'no repository'.includes(normalizedQuery) ? (
-          <RepoRow
-            label="No repository"
-            detail="Create without a repository"
-            selected={!value}
-            onPress={() => onSelect('')}
-          />
-        ) : null}
-        {filteredRepos.map((repo) => (
+        data={filteredRepos}
+        keyExtractor={(repo) => repo.path}
+        extraData={value}
+        initialNumToRender={8}
+        maxToRenderPerBatch={8}
+        windowSize={3}
+        ListHeaderComponent={
+          !normalizedQuery || 'no repository'.includes(normalizedQuery) ? (
+            <RepoRow
+              label="No repository"
+              detail="Create without a repository"
+              selected={!value}
+              onPress={() => onSelect('')}
+            />
+          ) : null
+        }
+        renderItem={({ item: repo }) => (
           <RepoRow
             key={repo.path}
             label={mobileRepoLabel(repo.path)}
@@ -136,15 +155,15 @@ export function NewDroneRepoPicker({
             selected={repo.path === value}
             onPress={() => onSelect(repo.path)}
           />
-        ))}
-        {filteredRepos.length === 0 &&
-        normalizedQuery &&
-        !'no repository'.includes(normalizedQuery) ? (
-          <View style={styles.stateRow}>
-            <Text style={styles.stateText}>No matching repositories.</Text>
-          </View>
-        ) : null}
-      </ScrollView>
+        )}
+        ListEmptyComponent={
+          normalizedQuery && !'no repository'.includes(normalizedQuery) ? (
+            <View style={styles.stateRow}>
+              <Text style={styles.stateText}>No matching repositories.</Text>
+            </View>
+          ) : null
+        }
+      />
     </AnchoredPickerPopover>
   );
 }

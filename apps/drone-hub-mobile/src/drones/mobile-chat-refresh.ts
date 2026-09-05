@@ -64,22 +64,41 @@ export async function loadMobileChatWithListRecovery(options: {
         (error: unknown) => ({ error }),
       )
     : null;
-  const rawListedChats = await options.listChats();
-  if (!options.isCurrent()) return;
-  const listedChats = Array.isArray(rawListedChats)
-    ? rawListedChats.map((chat) => String(chat ?? '').trim()).filter(Boolean)
-    : [];
-  const chats = listedChats.length > 0 ? [...new Set(listedChats)] : [...options.knownChats];
-  const chatName =
-    options.requestedChat && chats.includes(options.requestedChat)
-      ? options.requestedChat
-      : (chats[0] ?? '');
-  options.applyListedSelection(chats, chatName);
-  if (!options.isCurrent()) return;
-  if (initialRead && chatName === options.initialChat) {
-    const outcome = await initialRead;
-    if (outcome.error) throw outcome.error;
-    return;
-  }
-  if (chatName) await options.readChat(chatName);
+  const recovery = (async () => {
+    let rawListedChats: unknown;
+    try {
+      rawListedChats = await options.listChats();
+    } catch (error) {
+      if (initialRead) {
+        const outcome = await initialRead;
+        if (!outcome.error) return;
+        throw outcome.error;
+      }
+      throw error;
+    }
+    if (!options.isCurrent()) return;
+    const listedChats = Array.isArray(rawListedChats)
+      ? rawListedChats.map((chat) => String(chat ?? '').trim()).filter(Boolean)
+      : [];
+    const chats = listedChats.length > 0 ? [...new Set(listedChats)] : [...options.knownChats];
+    const chatName =
+      options.requestedChat && chats.includes(options.requestedChat)
+        ? options.requestedChat
+        : (chats[0] ?? '');
+    options.applyListedSelection(chats, chatName);
+    if (!options.isCurrent()) return;
+    if (initialRead && chatName === options.initialChat) {
+      const outcome = await initialRead;
+      if (outcome.error) throw outcome.error;
+      return;
+    }
+    if (chatName) await options.readChat(chatName);
+  })();
+  if (!initialRead) return recovery;
+  // Metadata recovery continues independently; it must not hold visible history
+  // or the navigation busy state hostage to a slow/failed chat-list request.
+  return Promise.race([
+    recovery,
+    initialRead.then((outcome) => (outcome.error ? recovery : undefined)),
+  ]);
 }

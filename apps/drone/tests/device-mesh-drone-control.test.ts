@@ -41,6 +41,49 @@ function sidebarOperations(
 }
 
 describe('device mesh drone summaries', () => {
+  test('cancels a stalled native history read while another drone remains readable', async () => {
+    const originalFetch = globalThis.fetch;
+    const historyStarted = Promise.withResolvers<AbortSignal>();
+    const capability = createDroneControlCapability({
+      baseUrl: () => 'http://127.0.0.1:7777',
+      apiToken: 'test',
+    });
+    globalThis.fetch = (async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith('/history')) {
+        const signal = init!.signal!;
+        historyStarted.resolve(signal);
+        return new Promise<Response>((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+        });
+      }
+      if (path.endsWith('/chats')) return Response.json({ chats: ['default'] });
+      if (path.endsWith('/state')) return Response.json({ agent: { kind: 'native' } });
+      if (path.endsWith('/native')) return Response.json({ nativeChatId: 'thread-a' });
+      return Response.json({ ok: true });
+    }) as typeof fetch;
+    try {
+      const controller = new AbortController();
+      const read = capability.invoke('chat.read', { droneId: 'slow-drone', chatName: 'default' }, {
+        sourceDevice: { id: 'phone-1' },
+        signal: controller.signal,
+      } as never);
+      void read.catch(() => undefined);
+      const signal = await historyStarted.promise;
+      const other = await capability.invoke('chats.list', { droneId: 'other-drone' });
+      expect(other).toMatchObject({ chats: ['default'] });
+      controller.abort();
+      await expect(read).rejects.toMatchObject({ name: 'AbortError' });
+      expect(signal.aborted).toBe(true);
+      expect(await capability.invoke('chats.list', { droneId: 'other-drone' })).toMatchObject({
+        chats: ['default'],
+      });
+    } finally {
+      capability.close();
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('exposes proposal group mutations through drone control', async () => {
     const calls: Array<[string, unknown]> = [];
     const capability = createDroneControlCapability(

@@ -12,6 +12,7 @@ import {
 } from './mobile-dictation-storage';
 import type {
   MobileDictationDestination,
+  MobileDictationDroneDestination,
   MobileDictationSendResult,
   MobileDictationTarget,
   MobileDictationTargetResult,
@@ -39,8 +40,9 @@ type TranscriptionClip = {
 };
 
 export function useMobileDictation(options: {
-  resolveTarget(destination: MobileDictationDestination): MobileDictationTargetResult;
+  resolveTarget(destination: MobileDictationDroneDestination): MobileDictationTargetResult;
   send(target: MobileDictationTarget, text: string): Promise<MobileDictationSendResult>;
+  sendToCompanion(text: string): Promise<MobileDictationSendResult>;
 }) {
   const voice = useSharedMobileChatVoiceRecorder();
   const [hydrated, setHydrated] = React.useState(false);
@@ -75,10 +77,12 @@ export function useMobileDictation(options: {
   const recordingCommandsRef = React.useRef<Promise<void>>(Promise.resolve());
   const resolveTargetRef = React.useRef(options.resolveTarget);
   const sendRef = React.useRef(options.send);
+  const sendToCompanionRef = React.useRef(options.sendToCompanion);
   const getRecordingSessionRef = React.useRef(voice.getRecordingSession);
   const discardRecordingRef = React.useRef(voice.discardRecording);
   resolveTargetRef.current = options.resolveTarget;
   sendRef.current = options.send;
+  sendToCompanionRef.current = options.sendToCompanion;
   getRecordingSessionRef.current = voice.getRecordingSession;
   discardRecordingRef.current = voice.discardRecording;
 
@@ -422,11 +426,15 @@ export function useMobileDictation(options: {
   const requestSend = React.useCallback(
     async (destination: MobileDictationDestination) => {
       if (finalizingRef.current) return;
-      const targetResult = resolveTargetRef.current(destination);
-      if (!targetResult.ok) {
-        setOpen(true);
-        setError(targetResult.error);
-        return;
+      let target: MobileDictationTarget | null = null;
+      if (destination !== 'companion') {
+        const targetResult = resolveTargetRef.current(destination);
+        if (!targetResult.ok) {
+          setOpen(true);
+          setError(targetResult.error);
+          return;
+        }
+        target = targetResult.target;
       }
 
       finalizingRef.current = true;
@@ -457,7 +465,9 @@ export function useMobileDictation(options: {
         }
 
         setNetworkSending(true);
-        const result = await sendRef.current(targetResult.target, prompt);
+        const result = target
+          ? await sendRef.current(target, prompt)
+          : await sendToCompanionRef.current(prompt);
         if (!result.ok) {
           setError(result.error || 'The dictated text could not be sent.');
           return;

@@ -74,6 +74,8 @@ type RequestDroneControl = (
   signal?: AbortSignal,
 ) => Promise<any>;
 
+const explorerNameCollator = new Intl.Collator(undefined, { sensitivity: 'base' });
+
 function normalizeEntries(raw: unknown): FileExplorerEntry[] {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -88,7 +90,7 @@ function normalizeEntries(raw: unknown): FileExplorerEntry[] {
     })
     .sort((left, right) =>
       left.kind === right.kind
-        ? left.name.localeCompare(right.name, undefined, { sensitivity: 'base' })
+        ? explorerNameCollator.compare(left.name, right.name)
         : left.kind === 'directory'
           ? -1
           : 1,

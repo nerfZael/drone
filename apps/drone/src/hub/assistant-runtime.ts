@@ -1,7 +1,8 @@
+import { createNativePromptSubmitter } from './native-prompt-submission';
 import type http from 'node:http';
 import type { BlipSessionState } from '@blip/core';
 
-import { loadRegistry } from '../host/registry';
+import { resolveCanonicalDroneOrPendingForReadRef } from './drone-lifecycle-service';
 import { normalizeDroneRuntime } from '../host/runtime';
 import { HubAssistantService, type AssistantDroneSummary } from './assistant';
 import { resolveStableDroneOrPendingIdFromRef } from './drone-lifecycle-registry';
@@ -342,9 +343,9 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
           return;
         }
         const turnId = activeRunTurnId;
-        const capture = loadRegistry()
-          .then(async (registry: any) => {
-            const drone = registry?.drones?.[droneId];
+        const capture = resolveCanonicalDroneOrPendingForReadRef(droneId)
+          .then(async (resolved) => {
+            const drone = resolved?.kind === 'real' ? resolved.drone : null;
             if (!drone) return null;
             const baseline = await captureDroneRunFileChangesBaseline({
               droneId,
@@ -399,23 +400,26 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
             Promise.all(baselineByDroneId.values()),
             pendingArtifactBaseline,
           ]);
-          const registry: any = captures.some(Boolean) ? await loadRegistry() : null;
           const workspaceCaptures = captures.flatMap((capture) => {
             if (!capture) return [];
             const droneId = String(capture.baseline.droneId ?? '').trim();
             if (!droneId) return [];
-            const drone = registry?.drones?.[droneId] ?? capture.drone;
             return [
-              finalizeDroneRunFileChangesWorkspace({ baseline: capture.baseline, drone }).catch(
-                (error: any) => {
+              resolveCanonicalDroneOrPendingForReadRef(droneId)
+                .then((resolved) =>
+                  finalizeDroneRunFileChangesWorkspace({
+                    baseline: capture.baseline,
+                    drone: resolved?.kind === 'real' ? resolved.drone : capture.drone,
+                  }),
+                )
+                .catch((error: any) => {
                   hubLog('warn', 'failed finalizing native agent run file changes', {
                     threadId,
                     droneId,
                     error: String(error?.message ?? error ?? 'unknown error'),
                   });
                   return null;
-                },
-              ),
+                }),
             ];
           });
           if (capturedArtifactBaseline) {
@@ -1011,64 +1015,13 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
     return { started: true, promise };
   };
 
-  const submitAssistantPrompt = async (input: {
-    threadId: string;
-    promptId?: string;
-    prompt: string;
-    promptImages?: Array<{ type: 'image'; data: string; mimeType: string }>;
-    deliveryMode?: 'queue' | 'asap';
-    submissionSource?: import('../host/prompt-queue-repository').PromptSubmissionSource;
-  }) => {
-    await assistantService.beginNativeThreadPrompt(input.threadId);
-    const promptInput: AssistantPromptInput = input.promptImages?.length
-      ? { text: input.prompt, images: input.promptImages }
-      : input.prompt;
-    const deliveryMode =
-      input.deliveryMode ?? (await assistantService.promptDeliveryMode(input.threadId));
-    const enqueueResult = await assistantService.enqueueThreadPromptWithResult(input.threadId, {
-      id: input.promptId,
-      prompt: input.prompt,
-      promptImages: input.promptImages,
-      deliveryMode,
-      submissionSource: input.submissionSource,
-    });
-    // Enqueueing can resolve a pending question request and resume the thread.
-    // Re-check after the durable queue event so an ASAP message can steer that
-    // resumed turn instead of waiting for it to finish.
-    const steerImmediately =
-      deliveryMode === 'asap' && blipAssistantHost.isThreadRunning(input.threadId);
-    const queued = enqueueResult.prompt;
-    await notifyNativePromptQueueChanged(input.threadId);
-    // Prompt IDs are idempotency keys. A retry after an accepted request must
-    // not claim or deliver the same durable queue row a second time.
-    if (!enqueueResult.inserted) return queued;
-    if (steerImmediately && !enqueueResult.interruptedPromptId) {
-      const claimed = await assistantService.claimQueuedPrompt(input.threadId, queued.id, {
-        allowConcurrent: true,
-      });
-      if (!claimed) throw new Error('built-in prompt could not be claimed');
-      await notifyNativePromptQueueChanged(input.threadId);
-      void blipAssistantHost
-        .promptThread(input.threadId, promptInput, undefined, 'asap')
-        .then(async () => {
-          await assistantService.completeQueuedPrompt(input.threadId, queued.id);
-          await notifyNativePromptQueueChanged(input.threadId);
-        })
-        .catch(async (error) => {
-          await assistantService.failQueuedPrompt(input.threadId, queued.id, error);
-          await notifyNativePromptQueueChanged(input.threadId);
-        });
-      return queued;
-    }
-    const drain = startAssistantPromptDrain(input.threadId);
-    void drain.promise.catch((error: any) => {
-      hubLog('warn', 'assistant queued prompt drain failed', {
-        threadId: input.threadId,
-        error: error?.message ?? String(error),
-      });
-    });
-    return queued;
-  };
+  const submitAssistantPrompt = createNativePromptSubmitter({
+    assistantService,
+    blipAssistantHost,
+    notifyNativePromptQueueChanged,
+    startAssistantPromptDrain,
+    hubLog,
+  });
   void assistantService
     .threadIdsWithQueuedPrompts()
     .then((threadIds) => {

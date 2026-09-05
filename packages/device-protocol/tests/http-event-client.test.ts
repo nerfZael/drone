@@ -2,6 +2,42 @@ import { describe, expect, test } from 'bun:test';
 import { DeviceEventParser, DeviceHttpEventClient } from '../src/http-event-client';
 
 describe('HTTP device events', () => {
+  test('cancels one HTTP request without closing the session or delaying another request', async () => {
+    let slowSignal: AbortSignal | undefined;
+    const stream = new ReadableStream<Uint8Array>({ start() {} });
+    const client = new DeviceHttpEventClient('https://device.test', 'phone', (async (_, init) => {
+      if (init?.method !== 'POST')
+        return new Response(stream, { headers: { 'x-device-session': 'session' } });
+      if (init.body === 'slow') {
+        slowSignal = init.signal as AbortSignal;
+        return await new Promise((_, reject) => {
+          slowSignal.addEventListener(
+            'abort',
+            () => reject(new DOMException('Cancelled', 'AbortError')),
+            { once: true },
+          );
+        });
+      }
+      return Response.json({ ok: true });
+    }) as typeof fetch);
+    await Promise.resolve();
+    await Promise.resolve();
+    const errors: Error[] = [];
+    client.onerror = (error) => errors.push(error);
+    const controller = new AbortController();
+    const slow = new Promise<Error | undefined>((resolve) =>
+      client.send('slow', resolve, undefined, controller.signal),
+    );
+    const fast = new Promise<Error | undefined>((resolve) => client.send('fast', resolve));
+    expect(await fast).toBeUndefined();
+    controller.abort();
+    expect((await slow)?.name).toBe('AbortError');
+    expect(slowSignal?.aborted).toBe(true);
+    expect(errors).toEqual([]);
+    expect(client.readyState).toBe(DeviceHttpEventClient.OPEN);
+    client.close();
+  });
+
   test('delivers response timing before the message and tolerates observer failures', async () => {
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {

@@ -1,8 +1,9 @@
 type ActiveRead = {
   key: string;
+  controller: AbortController;
   promise: Promise<void>;
   refreshQueued: boolean;
-  task: () => Promise<void>;
+  task: (signal: AbortSignal) => Promise<void>;
 };
 
 export class MobileChatReadCoordinator {
@@ -10,7 +11,7 @@ export class MobileChatReadCoordinator {
 
   constructor(private readonly onActiveChange: () => void) {}
 
-  request(key: string, task: () => Promise<void>): Promise<void> {
+  request(key: string, task: (signal: AbortSignal) => Promise<void>): Promise<void> {
     const active = this.activeByKey.get(key);
     if (active) {
       active.refreshQueued = true;
@@ -24,21 +25,33 @@ export class MobileChatReadCoordinator {
     return this.activeByKey.has(key);
   }
 
-  reset(): void {
-    if (this.activeByKey.size === 0) return;
-    this.activeByKey.clear();
+  cancelExcept(key: string): void {
+    for (const [activeKey, entry] of this.activeByKey) {
+      if (activeKey === key) continue;
+      this.activeByKey.delete(activeKey);
+      entry.controller.abort();
+    }
     this.onActiveChange();
   }
 
-  private start(key: string, task: () => Promise<void>): Promise<void> {
+  reset(): void {
+    this.cancelExcept('');
+  }
+
+  private start(key: string, task: (signal: AbortSignal) => Promise<void>): Promise<void> {
     const entry: ActiveRead = {
       key,
+      controller: new AbortController(),
       promise: Promise.resolve(),
       refreshQueued: false,
       task,
     };
-    entry.promise = task();
     this.activeByKey.set(key, entry);
+    try {
+      entry.promise = task(entry.controller.signal);
+    } catch (error) {
+      entry.promise = Promise.reject(error);
+    }
     this.onActiveChange();
     void entry.promise.then(
       () => this.finish(entry),

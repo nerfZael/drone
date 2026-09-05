@@ -68,6 +68,8 @@ type MobileCompanionContextValue = {
   available: boolean;
   unavailableReason: string;
   toggle(): Promise<void>;
+  /** Send already-transcribed text to Companion as if it had just been spoken. */
+  submitText(prompt: string): Promise<{ ok: true } | { ok: false; error: string }>;
   close(): Promise<void>;
   executeProposal(): Promise<void>;
   discardProposal(): void;
@@ -386,6 +388,29 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     [close, controller, executeMobileTool, mesh.request, mesh.subscribe],
   );
 
+  const submitText = React.useCallback(
+    async (prompt: string): Promise<{ ok: true } | { ok: false; error: string }> => {
+      const text = String(prompt ?? '').trim();
+      if (!text) return { ok: false, error: 'There is no dictated text to send.' };
+      if (!available) return { ok: false, error: unavailableReason || 'Companion is unavailable.' };
+      if (companionVoiceActive) {
+        return { ok: false, error: 'Companion is already handling a voice recording.' };
+      }
+      const status = controller.getSnapshot().status;
+      if (status === 'working' || proposalExecutingRef.current) {
+        return { ok: false, error: 'Companion is already working.' };
+      }
+      if (status === 'cancelled' || status === 'error') await close();
+      await run(text);
+      const next = controller.getSnapshot();
+      if (next.status === 'error') {
+        return { ok: false, error: next.error || 'Companion could not start.' };
+      }
+      return { ok: true };
+    },
+    [available, close, companionVoiceActive, controller, run, unavailableReason],
+  );
+
   const toggle = React.useCallback(async () => {
     if (
       companionVoiceActive &&
@@ -491,6 +516,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       available,
       unavailableReason,
       toggle,
+      submitText,
       close,
       executeProposal,
       discardProposal,
@@ -511,6 +537,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       proposalDefaultRepoPath,
       proposalExecuting,
       state,
+      submitText,
       toggle,
       unavailableReason,
     ],

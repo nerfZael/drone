@@ -11,4 +11,11 @@ describe('mobile drone chat errors', () => {
   test('keeps real chat and operation errors visible', () => {
     expect(mobileDroneChatErrorMessage('Prompt was rejected')).toBe('Prompt was rejected');
   });
+
+  test('startup conflicts are normal only while the selected drone is starting', () => {
+    const message = 'drone "new-drone" is still starting';
+    expect(mobileDroneChatErrorMessage(message, true)).toBeNull();
+    expect(mobileDroneChatErrorMessage(message, false)).toBe(message);
+    expect(mobileDroneChatErrorMessage('Disk is full', true)).toBe('Disk is full');
+  });
 });

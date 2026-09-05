@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { updateRegistry } from '../src/host/registry';
+import { normalizeChatImageAttachments } from '../src/hub/chat-attachments';
 import {
   createDronePendingPromptStore,
   filterCompletedSentPromptBlockers,
@@ -13,6 +14,7 @@ import { resetTranscriptStoreForTests } from '../src/hub/transcript-store';
 import { withTempDroneDataDir } from './test-helpers';
 
 const pendingStateHelpers = createPendingDroneStateHelpers({
+  normalizeChatImageAttachments,
   normalizeChatName: (raw: any) => String(raw ?? 'default').trim() || 'default',
   nowIso: () => '2026-03-26T10:00:00.000Z',
 });
@@ -36,8 +38,9 @@ describe('drone pending prompt store', () => {
       { id: 'unresolved', at, prompt: 'unresolved', state: 'sent' as const },
       { id: 'follow-up', at, prompt: 'follow-up', state: 'queued' as const },
     ];
-    expect(filterCompletedSentPromptBlockers(prompts, [{ id: 'completed' }]).map(({ id }) => id))
-      .toEqual(['unresolved', 'follow-up']);
+    expect(
+      filterCompletedSentPromptBlockers(prompts, [{ id: 'completed' }]).map(({ id }) => id),
+    ).toEqual(['unresolved', 'follow-up']);
   });
 
   test('keeps the Hub queued fallback while using canonical pending states', () => {
@@ -71,7 +74,11 @@ describe('drone pending prompt store', () => {
     await withTempDroneDataDir('drone-pending-prompts-', async () => {
       await updateRegistry((reg: any) => {
         reg.drones = {
-          'drone-1': { id: 'drone-1', name: 'drone-1', chats: { default: { createdAt: '2026-03-26T09:00:00.000Z' } } },
+          'drone-1': {
+            id: 'drone-1',
+            name: 'drone-1',
+            chats: { default: { createdAt: '2026-03-26T09:00:00.000Z' } },
+          },
         };
       });
 
@@ -97,9 +104,16 @@ describe('drone pending prompt store', () => {
         },
       });
 
-      const beforeClaim = await pendingPromptStore.readPendingPrompts({ droneId: 'drone-1', chatName: 'default' });
+      const beforeClaim = await pendingPromptStore.readPendingPrompts({
+        droneId: 'drone-1',
+        chatName: 'default',
+      });
       expect(beforeClaim).toHaveLength(1);
-      expect(beforeClaim[0]).toMatchObject({ id: 'prompt-1', prompt: 'first revised', state: 'queued' });
+      expect(beforeClaim[0]).toMatchObject({
+        id: 'prompt-1',
+        prompt: 'first revised',
+        state: 'queued',
+      });
 
       const claimed = await pendingPromptStore.claimQueuedPendingPromptForSending({
         droneId: 'drone-1',
@@ -108,7 +122,10 @@ describe('drone pending prompt store', () => {
       });
 
       expect(claimed).toBe(true);
-      const afterClaim = await pendingPromptStore.readPendingPrompts({ droneId: 'drone-1', chatName: 'default' });
+      const afterClaim = await pendingPromptStore.readPendingPrompts({
+        droneId: 'drone-1',
+        chatName: 'default',
+      });
       expect(afterClaim[0]).toMatchObject({ id: 'prompt-1', state: 'sending' });
       expect(
         pendingPromptStore.readPendingPrompt({
@@ -152,7 +169,10 @@ describe('drone pending prompt store', () => {
       });
 
       expect(claimed).toBe(true);
-      const afterClaim = await pendingPromptStore.readPendingPrompts({ droneId: 'drone-legacy', chatName: 'default' });
+      const afterClaim = await pendingPromptStore.readPendingPrompts({
+        droneId: 'drone-legacy',
+        chatName: 'default',
+      });
       expect(afterClaim[0]).toMatchObject({ id: 'legacy-queued', state: 'sending' });
     });
   });
@@ -197,7 +217,10 @@ describe('drone pending prompt store', () => {
         },
       });
 
-      const pending = await pendingPromptStore.readPendingPrompts({ droneId: 'drone-observed', chatName: 'default' });
+      const pending = await pendingPromptStore.readPendingPrompts({
+        droneId: 'drone-observed',
+        chatName: 'default',
+      });
       expect(pending).toHaveLength(1);
       expect(pending[0]).toMatchObject({
         id: 'status-stale',
@@ -222,7 +245,14 @@ describe('drone pending prompt store', () => {
             chats: {
               default: {
                 createdAt: '2026-03-26T09:00:00.000Z',
-                pendingPrompts: [{ id: 'queued-1', at: '2026-03-26T09:01:00.000Z', prompt: 'queued', state: 'queued' }],
+                pendingPrompts: [
+                  {
+                    id: 'queued-1',
+                    at: '2026-03-26T09:01:00.000Z',
+                    prompt: 'queued',
+                    state: 'queued',
+                  },
+                ],
                 turns: [{ id: 'sent-1', at: '2026-03-26T09:03:00.000Z', output: 'done', ok: true }],
               },
             },
@@ -267,7 +297,10 @@ describe('drone pending prompt store', () => {
       });
       expect(queued).toBe('queued');
 
-      const startupPrompts = await pendingPromptStore.readPendingStartupPrompts({ droneId: 'drone-3', chatName: 'ops' });
+      const startupPrompts = await pendingPromptStore.readPendingStartupPrompts({
+        droneId: 'drone-3',
+        chatName: 'ops',
+      });
       expect(startupPrompts).toEqual([
         {
           id: 'startup-1',
@@ -281,13 +314,54 @@ describe('drone pending prompt store', () => {
     });
   });
 
+  test('retains attached follow-ups until provisioning can stage their files', async () => {
+    await withTempDroneDataDir('drone-startup-attachments-', async () => {
+      await updateRegistry((reg: any) => {
+        reg.pending = { starting: { id: 'starting', name: 'starting', startupQueuedPrompts: [] } };
+      });
+      const attachments = normalizeChatImageAttachments([
+        {
+          name: 'note.txt',
+          mime: 'text/plain',
+          dataBase64: Buffer.from('Hello').toString('base64'),
+        },
+      ]);
+      expect(
+        await pendingPromptStore.pushPendingStartupPrompt({
+          droneId: 'starting',
+          chatName: 'default',
+          attachments,
+          pending: {
+            id: 'attached',
+            at: '2026-03-26T09:05:00.000Z',
+            prompt: 'Read this',
+            state: 'queued',
+          },
+        }),
+      ).toBe('queued');
+      const pending = await pendingPromptStore.readPendingStartupPrompts({
+        droneId: 'starting',
+        chatName: 'default',
+      });
+      expect(pending[0]?.attachments).toEqual(attachments);
+    });
+  });
+
   test('prunes transcript-completed pending prompts unless kept in the recent grace window', () => {
     const entry = {
       pendingPrompts: [
-        { id: 'done-1', at: '2026-03-26T09:00:00.000Z', prompt: 'done', state: 'sent', updatedAt: '2026-03-26T09:01:00.000Z' },
+        {
+          id: 'done-1',
+          at: '2026-03-26T09:00:00.000Z',
+          prompt: 'done',
+          state: 'sent',
+          updatedAt: '2026-03-26T09:01:00.000Z',
+        },
         { id: 'live-1', at: '2026-03-26T09:02:00.000Z', prompt: 'live', state: 'sending' },
       ],
-      turns: [{ id: 'done-1', at: '2026-03-26T09:01:30.000Z', completedAt: '2026-03-26T09:01:30.000Z' }],
+      turns: [
+        { id: 'done-1', at: '2026-03-26T09:01:30.000Z', completedAt: '2026-03-26T09:01:30.000Z' },
+      ],
     };
 
     const pruned = pendingPromptStore.pendingPromptsFromChatEntry(entry);
@@ -295,7 +369,15 @@ describe('drone pending prompt store', () => {
 
     const keptRecent = pendingPromptStore.pruneCompletedPendingPrompts(
       pendingPromptStore.pendingPromptsFromChatEntry({
-        pendingPrompts: [{ id: 'done-1', at: '2026-03-26T09:00:00.000Z', prompt: 'done', state: 'sent', updatedAt: '2026-03-26T09:01:00.000Z' }],
+        pendingPrompts: [
+          {
+            id: 'done-1',
+            at: '2026-03-26T09:00:00.000Z',
+            prompt: 'done',
+            state: 'sent',
+            updatedAt: '2026-03-26T09:01:00.000Z',
+          },
+        ],
       }),
       [{ id: 'done-1', completedAt: '2026-03-26T09:01:30.000Z' }],
       { keepRecentlyCompleted: true, nowMs: Date.parse('2026-03-26T09:02:00.000Z') },

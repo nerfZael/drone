@@ -21,6 +21,8 @@ import type { MobileDroneSummary } from './drone-sidebar-model';
 import { BoundedSwrCache } from './bounded-swr-cache';
 import { mobileFileCacheKey } from './mobile-file-cache-key';
 import { MobileLastViewedFiles } from './mobile-last-viewed-files';
+import { MobileChatReadCoordinator } from './mobile-chat-read-coordinator';
+import { canReuseMobileMediaPreview } from './reuse-media-preview';
 import { mobilePreviewErrorMode } from './mobile-preview-error-state';
 
 type PreviewRequest = {
@@ -105,6 +107,7 @@ export function useFilePreview({
     });
   }
   const loadVersion = React.useRef(0);
+  const previewReadsRef = React.useRef(new MobileChatReadCoordinator(() => {}));
   const loadAbortRef = React.useRef<AbortController | null>(null);
   const saveVersion = React.useRef(0);
   previewRef.current = preview;
@@ -115,6 +118,7 @@ export function useFilePreview({
   const resetPreviewSelection = React.useCallback(
     (nextWorkspaceContext: Omit<PreviewRequest, 'path' | 'line'> | null) => {
       loadVersion.current += 1;
+      previewReadsRef.current.reset();
       loadAbortRef.current?.abort();
       loadAbortRef.current = null;
       saveVersion.current += 1;
@@ -132,6 +136,7 @@ export function useFilePreview({
   );
   React.useEffect(
     () => () => {
+      previewReadsRef.current.reset();
       loadAbortRef.current?.abort();
       previewCacheRef.current?.clear();
     },
@@ -156,7 +161,7 @@ export function useFilePreview({
     [],
   );
 
-  const load = React.useCallback(
+  const loadPreview = React.useCallback(
     async (
       nextRequest: PreviewRequest,
       options?: { background?: boolean; transferRestarted?: boolean },
@@ -185,6 +190,7 @@ export function useFilePreview({
           },
           loadController.signal,
         );
+        if (version !== loadVersion.current) return;
         if (firstResult?.content) {
           const content = firstResult.content;
           if (version !== loadVersion.current) return;
@@ -214,6 +220,14 @@ export function useFilePreview({
         const metadata = firstResult?.preview;
         if (!metadata || (metadata.kind !== 'image' && metadata.kind !== 'video')) {
           throw new Error('The selected device returned an invalid file preview');
+        }
+        const cached = previewCacheRef.current!.get(mobileFileCacheKey(nextRequest));
+        if (
+          cached &&
+          canReuseMobileMediaPreview(cached.preview, metadata, cached.file?.exists === true)
+        ) {
+          commitPreview(nextRequest, cached);
+          return;
         }
         const totalBytes = Number(metadata.size);
         if (
@@ -359,7 +373,7 @@ export function useFilePreview({
           !options?.transferRestarted &&
           String(nextError?.code ?? '') === 'TRANSFER_EXPIRED'
         ) {
-          await load(nextRequest, { background, transferRestarted: true });
+          await loadPreview(nextRequest, { background, transferRestarted: true });
           return;
         }
         if (version === loadVersion.current) {
@@ -384,6 +398,15 @@ export function useFilePreview({
       }
     },
     [clearActivePreview, commitPreview, requestDroneControl],
+  );
+
+  const load = React.useCallback(
+    (nextRequest: PreviewRequest, options?: { background?: boolean }) => {
+      const key = mobileFileCacheKey(nextRequest);
+      previewReadsRef.current.cancelExcept(key);
+      return previewReadsRef.current.request(key, () => loadPreview(nextRequest, options));
+    },
+    [loadPreview],
   );
 
   const open = React.useCallback(
@@ -461,6 +484,7 @@ export function useFilePreview({
   React.useEffect(() => {
     if (!request || !preview || !requestIsCurrent) return;
     let active = true;
+    const metadataAbort = new AbortController();
     let checking = false;
     let checkCount = 0;
     const checkForChange = async (forceRevision = false) => {
@@ -469,13 +493,18 @@ export function useFilePreview({
       try {
         checkCount += 1;
         const includeRevision = !phoneTarget || forceRevision || checkCount % 15 === 0;
-        const result = await requestDroneControl(request.targetId, 'file.preview', {
-          droneId: request.droneId,
-          chatName: request.chatName,
-          path: request.path,
-          metadataOnly: true,
-          includeRevision,
-        });
+        const result = await requestDroneControl(
+          request.targetId,
+          'file.preview',
+          {
+            droneId: request.droneId,
+            chatName: request.chatName,
+            path: request.path,
+            metadataOnly: true,
+            includeRevision,
+          },
+          metadataAbort.signal,
+        );
         if (!active) return;
         const nextRevision =
           typeof result?.preview?.revision === 'string' && result.preview.revision.trim()
@@ -537,6 +566,7 @@ export function useFilePreview({
     }
     return () => {
       active = false;
+      metadataAbort.abort();
       clearInterval(interval);
       appStateSubscription.remove();
       unsubscribeEvent?.();
@@ -597,6 +627,7 @@ export function useFilePreview({
           (previewRef.current?.path ? normalizedPaths.has(previewRef.current.path) : false))
       ) {
         loadVersion.current += 1;
+        previewReadsRef.current.reset();
         loadAbortRef.current?.abort();
         loadAbortRef.current = null;
       }

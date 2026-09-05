@@ -5,12 +5,15 @@ import type {
   MobileDroneCreateRuntime,
 } from '../drones/NewDroneScreen';
 
-export type MobileDictationDestination =
+export type MobileDictationDroneDestination =
   | 'current-chat'
   | 'root-drone'
   | 'group-drone'
   | 'new-chat'
   | 'clone-chat';
+
+/** Drone destinations plus the on-device Companion, which takes the text as if it were spoken. */
+export type MobileDictationDestination = MobileDictationDroneDestination | 'companion';
 
 export type MobileDictationChatTarget = {
   destination: 'current-chat' | 'new-chat' | 'clone-chat';

@@ -337,6 +337,7 @@ describe('MeshSession requests', () => {
 
   test('discards a late HTTP result after cancellation without sending legacy cleanup requests', async () => {
     const sent: string[] = [];
+    let httpSignal: AbortSignal | undefined;
     const socket = new MeshSession(
       { deviceId: 'peer-a', endpoint: 'https://peer-a.test', role: 'primary' },
       'network-a',
@@ -357,7 +358,9 @@ describe('MeshSession requests', () => {
     );
     const internals = socket as unknown as {
       ready: boolean;
-      socket: Pick<WebSocket, 'readyState' | 'send'>;
+      socket: Pick<WebSocket, 'readyState'> & {
+        send(value: string, callback?: unknown, timing?: unknown, signal?: AbortSignal): void;
+      };
       pending: Map<string, unknown>;
       handleMessage(
         raw: string,
@@ -369,8 +372,9 @@ describe('MeshSession requests', () => {
     internals.ready = true;
     internals.socket = {
       readyState: WebSocket.OPEN,
-      send(value) {
+      send(value, _callback, _timing, signal) {
         sent.push(String(value));
+        if (signal) httpSignal = signal;
       },
     };
     const controller = new AbortController();
@@ -383,9 +387,12 @@ describe('MeshSession requests', () => {
     );
     await Promise.resolve();
     const original = JSON.parse(sent[0] ?? '{}');
+    expect(httpSignal?.aborted).toBe(false);
     controller.abort();
     await expect(request).rejects.toMatchObject({ name: 'AbortError' });
     expect(internals.pending.size).toBe(0);
+    expect(httpSignal?.aborted).toBe(true);
+    expect(socket.connected).toBe(true);
 
     const connectTimer = setTimeout(() => undefined, 1_000);
     await internals.handleMessage(

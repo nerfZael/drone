@@ -14,6 +14,57 @@ function deferred<T>() {
 }
 
 describe('mobile chat refresh', () => {
+  test('a slow chat list does not keep an already-read conversation loading', async () => {
+    const list = deferred<string[]>();
+    let finished = false;
+    const loading = loadMobileChatWithListRecovery({
+      initialChat: 'default',
+      knownChats: ['default'],
+      listChats: () => list.promise,
+      readChat: async () => {},
+      isCurrent: () => true,
+      applyListedSelection: () => {},
+    }).then(() => {
+      finished = true;
+    });
+    await loading;
+    expect(finished).toBe(true);
+    list.resolve(['default']);
+  });
+
+  test('a failed chat list does not replace successfully loaded history with an error', async () => {
+    await expect(
+      loadMobileChatWithListRecovery({
+        initialChat: 'default',
+        knownChats: ['default'],
+        listChats: async () => {
+          throw new Error('metadata unavailable');
+        },
+        readChat: async () => {},
+        isCurrent: () => true,
+        applyListedSelection: () => {},
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  test('a late list response cannot navigate away from a newer selection', async () => {
+    const list = deferred<string[]>();
+    let current = true;
+    const selections: string[] = [];
+    await loadMobileChatWithListRecovery({
+      initialChat: 'default',
+      knownChats: ['default'],
+      listChats: () => list.promise,
+      readChat: async () => {},
+      isCurrent: () => current,
+      applyListedSelection: (_, chat) => selections.push(chat),
+    });
+    current = false;
+    list.resolve(['other']);
+    await Promise.resolve();
+    expect(selections).toEqual([]);
+  });
+
   test('starts the known chat read before the chat list resolves', async () => {
     const list = deferred<string[]>();
     const calls: string[] = [];

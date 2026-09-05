@@ -968,7 +968,9 @@ export function createDroneControlCapability(
         return { deleted: true, droneId };
       }
       if (operation === 'chats.list') {
-        const result = await localHubRequest(access, `/api/drones/${encodedDrone}/chats`);
+        const result = await localHubRequest(access, `/api/drones/${encodedDrone}/chats`, {
+          signal: operationSignal,
+        });
         return {
           droneId,
           chats: result.chats ?? [],
@@ -1263,7 +1265,10 @@ export function createDroneControlCapability(
 
       const chatName = requiredText(payload.chatName ?? 'default', 'chatName');
       const chatPath = `/api/drones/${encodedDrone}/chats/${encodeURIComponent(chatName)}`;
-      const resolveNativeChat = async (requestedId?: string, signal?: AbortSignal) => {
+      const resolveNativeChat = async (
+        requestedId?: string,
+        signal: AbortSignal = operationSignal,
+      ) => {
         const snapshot = await localHubRequest(access, `${chatPath}/native`, {
           method: 'POST',
           body: '{}',
@@ -1278,6 +1283,8 @@ export function createDroneControlCapability(
         return { nativeChatId, snapshot };
       };
       if (operation === 'chat.read') {
+        const readHub = (pathname: string, init?: RequestInit) =>
+          localHubRequest(access, pathname, { ...init, signal: operationSignal });
         const diffArtifactId = optionalText(payload.diffArtifactId);
         const diffPath = optionalText(payload.diffPath);
         const diffList = payload.diffList === true;
@@ -1290,8 +1297,7 @@ export function createDroneControlCapability(
               },
             );
           }
-          const response = await localHubRequest(
-            access,
+          const response = await readHub(
             diffList
               ? `/api/agent-run-diffs/${encodeURIComponent(diffArtifactId)}/files?offset=${Math.max(0, Math.floor(Number(payload.diffListOffset) || 0))}&limit=${Math.max(1, Math.min(500, Math.floor(Number(payload.diffListLimit) || 20)))}`
               : `/api/agent-run-diffs/${encodeURIComponent(diffArtifactId)}/file?path=${encodeURIComponent(diffPath!)}`,
@@ -1299,7 +1305,7 @@ export function createDroneControlCapability(
           const owner = object(diffList ? response?.files?.owner : response?.diff?.owner);
           const ownerThreadId = optionalText(owner.threadId);
           if (ownerThreadId) {
-            const identity = await localHubRequest(access, `${chatPath}/native`);
+            const identity = await readHub(`${chatPath}/native`);
             if (requiredText(identity?.nativeChatId, 'nativeChatId') !== ownerThreadId) {
               throw Object.assign(
                 new Error('changed-files artifact does not belong to this chat'),
@@ -1355,7 +1361,7 @@ export function createDroneControlCapability(
                   signal: contentReservation.signal,
                   maxBytes: contentReservation.maxBytes,
                 })
-              : await localHubRequest(access, statePath);
+              : await readHub(statePath);
           } catch (error: any) {
             if (error?.code !== 'HUB_410') throw error;
             const [legacy, pendingResult] = await Promise.all([
@@ -1364,10 +1370,8 @@ export function createDroneControlCapability(
                     signal: contentReservation.signal,
                     maxBytes: contentReservation.maxBytes,
                   })
-                : localHubRequest(access, chatPath),
-              contentOnlyRead
-                ? Promise.resolve(null)
-                : localHubRequest(access, `${chatPath}/pending`),
+                : readHub(chatPath),
+              contentOnlyRead ? Promise.resolve(null) : readHub(`${chatPath}/pending`),
             ]);
             result = {
               ...legacy,
@@ -1385,8 +1389,7 @@ export function createDroneControlCapability(
             : compactChatSubscriptions(result?.subscriptions);
           const questionRequests = contentOnlyRead
             ? []
-            : await localHubRequest(
-                access,
+            : await readHub(
                 `/api/chat-question-requests?${new URLSearchParams({
                   droneId,
                   chatName,
@@ -1399,7 +1402,7 @@ export function createDroneControlCapability(
           );
           const marked = contentOnlyRead
             ? null
-            : await localHubRequest(access, `${chatPath}/read`, {
+            : await readHub(`${chatPath}/read`, {
                 method: 'POST',
                 body: JSON.stringify({
                   latestAgentTurnId,
@@ -1431,8 +1434,7 @@ export function createDroneControlCapability(
                 content: entry,
               };
             }
-            const history = await localHubRequest(
-              access,
+            const history = await readHub(
               `/api/assistant/threads/${encodeURIComponent(nativeChatId)}/history?limit=60${Number.isSafeInteger(Number(payload.before)) && Number(payload.before) > 0 ? `&before=${Number(payload.before)}` : ''}`,
             );
             const nativeThread = Array.isArray(ensured?.threads)
@@ -1837,7 +1839,11 @@ export function createDroneControlCapability(
             code: 'INVALID_REQUEST',
           });
         try {
-          const chat = await localHubRequest(access, chatPath);
+          const chat = await localHubRequest(access, chatPath).catch((error) => {
+            if (error?.code === 'HUB_409' && /still starting/i.test(error?.message ?? ''))
+              return null;
+            throw error;
+          });
           if (chat?.agent?.kind === 'native') {
             const { nativeChatId } = await resolveNativeChat();
             const acknowledgement = await submitNativeChatPrompt(

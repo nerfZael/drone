@@ -25,9 +25,7 @@ export type PromptQueuedEvent = {
   submissionSource?: PromptSubmissionSource;
 };
 
-const promptQueuedListeners = new Set<
-  (event: PromptQueuedEvent) => Promise<void> | void
->();
+const promptQueuedListeners = new Set<(event: PromptQueuedEvent) => Promise<void> | void>();
 
 export function subscribePromptQueued(
   listener: (event: PromptQueuedEvent) => Promise<void> | void,
@@ -44,6 +42,10 @@ export type PromptQueueItem = {
   messageId?: string;
   cwd?: string | null;
   attachments?: unknown;
+  nativePrompt?: {
+    text: string;
+    images: Array<{ type: 'image'; data: string; mimeType: string }>;
+  };
   deliveryMode?: 'queue' | 'asap';
   queueInterruption?: PromptQueueInterruption;
   action?: ChatQueueAction;
@@ -986,6 +988,29 @@ export class PromptQueueRepository {
           | undefined,
       ),
     );
+  }
+
+  async prepareQueuedNativePrompt(opts: {
+    droneId: string;
+    chatName: string;
+    promptId: string;
+    nativePrompt: NonNullable<PromptQueueItem['nativePrompt']>;
+  }): Promise<PromptQueueRecord | null> {
+    return await this.database.writeTransaction('prepare native prompt', (connection) => {
+      // Preserve the original message and attachment references for the transcript.
+      // Preparation is idempotent and cannot alter an already claimed delivery.
+      connection
+        .prepare(
+          `
+        UPDATE prompts
+        SET payload_json = json_set(payload_json, '$.nativePrompt', json(?))
+        WHERE drone_id = ? AND chat_name = ? AND prompt_id = ?
+          AND state = 'queued' AND json_type(payload_json, '$.nativePrompt') IS NULL
+      `,
+        )
+        .run(JSON.stringify(opts.nativePrompt), opts.droneId, opts.chatName, opts.promptId);
+      return rowForPrompt(connection, opts.droneId, opts.chatName, opts.promptId);
+    });
   }
 
   async update(opts: {

@@ -5,12 +5,12 @@ import type {
 } from '../drones/NewDroneScreen';
 import type { MobileDroneSummary } from '../drones/drone-sidebar-model';
 import type {
-  MobileDictationDestination,
+  MobileDictationDroneDestination,
   MobileDictationTargetResult,
 } from './mobile-dictation-types';
 
 export function resolveMobileDictationTarget(input: {
-  destination: MobileDictationDestination;
+  destination: MobileDictationDroneDestination;
   deviceId: string;
   targetReachable: boolean;
   selectedDrone: MobileDroneSummary | null;

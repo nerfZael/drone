@@ -1339,21 +1339,14 @@ export class HubAssistantService {
       : thread.accessScope.droneIds;
     const addedDroneIds = Array.isArray(input.addDroneIds) ? input.addDroneIds : [];
     thread.accessScope = makeAssistantAccessScope({
-      readMode:
-        (input as any).readMode ??
-        input.mode ??
-        thread.accessScope.readMode,
-      writeMode:
-        (input as any).writeMode ??
-        input.mode ??
-        thread.accessScope.writeMode,
+      readMode: (input as any).readMode ?? input.mode ?? thread.accessScope.readMode,
+      writeMode: (input as any).writeMode ?? input.mode ?? thread.accessScope.writeMode,
       executeMode:
         (input as any).executeMode ??
         (input as any).writeMode ??
         input.mode ??
         thread.accessScope.executeMode,
-      changeRequestCreate:
-        input.changeRequestCreate ?? thread.accessScope.changeRequestCreate,
+      changeRequestCreate: input.changeRequestCreate ?? thread.accessScope.changeRequestCreate,
       changeRequestMerge: input.changeRequestMerge ?? thread.accessScope.changeRequestMerge,
       droneIds: thread.ownerDroneId
         ? [thread.ownerDroneId, ...requestedDroneIds, ...addedDroneIds]
@@ -1703,8 +1696,10 @@ export class HubAssistantService {
         });
         metadataChanged = true;
       }
-      if (metadataChanged) existing.updatedAt = nowIso();
-      await this.persist();
+      if (metadataChanged) {
+        existing.updatedAt = nowIso();
+        await this.persist();
+      }
       return await this.threadSnapshot(id);
     }
     const requestedModel = cleanOptionalString(input.model);
@@ -2295,11 +2290,13 @@ export class HubAssistantService {
       record.attachments && typeof record.attachments === 'object'
         ? (record.attachments as any)
         : {};
-    const promptImages = Array.isArray(attachments.promptImages) ? attachments.promptImages : [];
+    const promptImages =
+      record.nativePrompt?.images ??
+      (Array.isArray(attachments.promptImages) ? attachments.promptImages : []);
     return sanitizeQueuedPrompt(
       {
         id: record.id,
-        prompt: record.prompt,
+        prompt: record.nativePrompt?.text ?? record.prompt,
         promptImages,
         imageCount: promptImages.length,
         createdAt: record.at,
@@ -2662,6 +2659,7 @@ export class HubAssistantService {
     },
   ): Promise<{
     inserted: boolean;
+    needsDrain: boolean;
     prompt: AssistantQueuedPrompt;
     interruptedPromptId?: string;
   }> {
@@ -2682,7 +2680,21 @@ export class HubAssistantService {
     const id = cleanOptionalString(input.id) || makeAssistantId('prompt');
     const existing = this.requirePromptQueue().get({ ...identity, promptId: id });
     if (existing) {
-      return { inserted: false, prompt: this.queuedPromptFromRecord(existing, false) };
+      const prepared =
+        existing.state === 'queued' &&
+        !existing.nativePrompt &&
+        !Array.isArray((existing.attachments as any)?.promptImages)
+          ? ((await this.requirePromptQueue().prepareQueuedNativePrompt({
+              ...identity,
+              promptId: id,
+              nativePrompt: { text: prompt, images: promptImages },
+            })) ?? existing)
+          : existing;
+      return {
+        inserted: false,
+        needsDrain: prepared.state === 'queued',
+        prompt: this.queuedPromptFromRecord(prepared, false),
+      };
     }
     if (this.queuedPromptsForThread(thread, false).length >= ASSISTANT_QUEUED_PROMPT_LIMIT) {
       throw new Error(`assistant prompt queue is full (max ${ASSISTANT_QUEUED_PROMPT_LIMIT})`);
@@ -2703,6 +2715,7 @@ export class HubAssistantService {
     await this.persist();
     return {
       inserted: queued.inserted,
+      needsDrain: queued.prompt.state === 'queued',
       prompt: this.queuedPromptFromRecord(queued.prompt, false),
       ...(queued.interruptedPromptId ? { interruptedPromptId: queued.interruptedPromptId } : {}),
     };
@@ -2728,6 +2741,9 @@ export class HubAssistantService {
     const queue = this.requirePromptQueue();
     const queued = queue.get({ ...identity, promptId });
     if (!queued || isSendInNewChatQueueAction(queued.action)) return null;
+    // The generic worker must load staged attachments before native delivery.
+    if (Array.isArray(queued.attachments) && queued.attachments.length && !queued.nativePrompt)
+      return null;
     const claim = options?.allowConcurrent
       ? queue.claimForSteering.bind(queue)
       : queue.claim.bind(queue);

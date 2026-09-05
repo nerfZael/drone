@@ -33,7 +33,11 @@ import {
   gitTopLevel,
   importBundleHeadToHostRef,
 } from './repoOps';
-import { upsertChatInStore } from './transcript-store';
+import {
+  upsertChatInStore,
+  listChatsFromStore,
+  readChatMetadataFromStore,
+} from './transcript-store';
 import type { EnqueuePromptOptions } from './chat-prompt-runtime';
 import type { ManagedDroneStateSyncResult } from './managed-drone-state-sync';
 import type { ProvisionedPromptHandoff } from './provisioned-prompt-handoff';
@@ -168,6 +172,21 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
     const value = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
     return value && value.length <= 32 && /^[a-z0-9._-]+$/.test(value) ? value : null;
   };
+
+  async function loadProvisioningDrone(droneId: string): Promise<any | null> {
+    if ((globalThis as any).Bun) {
+      return findDroneEntryByIdentity(await loadRegistry(), droneId)?.entry ?? null;
+    }
+    const resolved = await resolveCanonicalDroneOrPendingForReadRef(droneId);
+    if (resolved?.kind !== 'real') return null;
+    const chats = Object.fromEntries(
+      listChatsFromStore({ droneId }).chats.flatMap((chatName) => {
+        const chat = readChatMetadataFromStore({ droneId, chatName }).chat;
+        return chat ? [[chatName, chat]] : [];
+      }),
+    );
+    return { ...resolved.drone, chats };
+  }
 
   async function updatePendingDrone(
     droneIdRaw: string,
@@ -475,13 +494,9 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
     let sharedPathsSyncPromise: Promise<{ repositoryFilesMayHaveChanged: boolean } | void> | null =
       null;
     try {
-      const registrySnapshot = await timing.measure(
-        'loadPromotionState',
-        async () => await loadRegistry(),
+      const cloneSourceLatest = await timing.measure('loadPromotionState', async () =>
+        cloneFrom ? await loadProvisioningDrone(cloneFrom) : null,
       );
-      const cloneSourceLatest = cloneFrom
-        ? findDroneEntryByIdentity(registrySnapshot, cloneFrom)?.entry
-        : null;
       await timing.measure(
         'promoteDrone',
         async () =>
@@ -560,8 +575,8 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
           }),
       );
       postPromotionSeedMetadataStartedAt = performance.now();
-      const registryAfterPromotion: any = await loadRegistry();
-      const foundAfterPromotion = findDroneEntryByIdentity(registryAfterPromotion, pendingDroneId);
+      const promotedDrone = await loadProvisioningDrone(pendingDroneId);
+      const foundAfterPromotion = promotedDrone ? { entry: promotedDrone } : null;
       if (foundAfterPromotion) {
         materializeSeedChatConfigOnDroneEntry(
           foundAfterPromotion.entry,
@@ -1036,11 +1051,9 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
     let sharedPathsSyncResult: { repositoryFilesMayHaveChanged: boolean } | null = null;
     let postCreateSyncSucceeded = false;
     try {
-      const regAfterCreate: any = await timing.measure(
-        'loadPostCreateState',
-        async () => await loadRegistry(),
+      const createdDrone = await timing.measure('loadPostCreateState', () =>
+        loadProvisioningDrone(pendingDroneId),
       );
-      const createdDrone = findDroneEntryByIdentity(regAfterCreate, pendingDroneId)?.entry ?? null;
       if (createdDrone) {
         postCreateDroneEntry = createdDrone;
         if (sharedPathsSyncPromise) {
@@ -1088,11 +1101,7 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
       'clearProvisioningMetadata',
       async () => await setDroneHubMetaByIdentity({ droneId: pendingDroneId, hub: null }),
     );
-    if (
-      postCreateDroneEntry &&
-      postCreateSyncSucceeded &&
-      deps.registerProvisionedPromptHandoff
-    ) {
+    if (postCreateDroneEntry && postCreateSyncSucceeded && deps.registerProvisionedPromptHandoff) {
       const firstQueuedByChat = new Map<string, PendingStartupPrompt>();
       for (const queued of queuedPromptsForMaterialization) {
         const chatName = deps.normalizeChatName(queued.chatName);

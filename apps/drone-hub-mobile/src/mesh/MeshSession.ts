@@ -183,6 +183,7 @@ export class MeshSession {
       payload,
       unsigned.requestId,
     );
+    const requestLifetime = new AbortController();
     try {
       const request: SignedCapabilityRequest = {
         ...unsigned,
@@ -210,7 +211,8 @@ export class MeshSession {
           reject(meshRequestCancelledError());
           return;
         }
-        const onAbort = () => {
+        const cancelRemote = () => {
+          requestLifetime.abort();
           try {
             socket.send(
               JSON.stringify({
@@ -223,6 +225,9 @@ export class MeshSession {
           } catch {
             /* Closed session. */
           }
+        };
+        const onAbort = () => {
+          cancelRemote();
           clearTimeout(timer);
           this.pending.delete(request.requestId);
           reject(meshRequestCancelledError());
@@ -230,6 +235,7 @@ export class MeshSession {
         const timer = setTimeout(() => {
           signal?.removeEventListener('abort', onAbort);
           this.pending.delete(request.requestId);
+          cancelRemote();
           reject(new Error('Target device did not respond in time.'));
         }, MESH_REQUEST_TIMEOUT_MS);
         this.pending.set(request.requestId, {
@@ -275,6 +281,7 @@ export class MeshSession {
                     observation?.timing(`server.${name}`, value);
                 }
               : undefined,
+            requestLifetime.signal,
           );
         } catch (error) {
           clearTimeout(timer);
@@ -286,6 +293,8 @@ export class MeshSession {
     } catch (error) {
       observation?.finish((error as Error)?.name === 'AbortError' ? 'aborted' : 'error');
       throw error;
+    } finally {
+      requestLifetime.abort();
     }
   }
 

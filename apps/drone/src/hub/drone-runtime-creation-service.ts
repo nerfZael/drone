@@ -1,3 +1,4 @@
+import { readCanonicalDroneLifecycleModel } from './canonical-drone-read-model';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
@@ -116,7 +117,12 @@ const defaultDeps: DroneRuntimeCreationDeps = {
   getContainerPorts: dvmPorts,
   hostCommandExists,
   launchHostDaemon: launchHostDroneDaemon,
-  loadRegistry,
+  loadRegistry: async () => {
+    const lifecycle = !(globalThis as any).Bun ? readCanonicalDroneLifecycleModel() : null;
+    return lifecycle
+      ? ({ version: 2, ...lifecycle } as Awaited<ReturnType<typeof loadRegistry>>)
+      : await loadRegistry();
+  },
   persistRealDroneEntry: async (droneId, entry) => {
     const canonical = await upsertCanonicalDroneLifecycle('real', droneId, entry);
     if (canonical) return;
@@ -509,7 +515,9 @@ export async function createDroneRuntime(
       ]),
     );
     if (writeToken.code !== 0) {
-      throw new Error(writeToken.stderr || writeToken.stdout || 'failed writing token in container');
+      throw new Error(
+        writeToken.stderr || writeToken.stdout || 'failed writing token in container',
+      );
     }
 
     await measureRuntimePhase(input, 'copyDaemonRuntime', async () =>
