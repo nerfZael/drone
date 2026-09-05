@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  BackHandler,
   Modal,
   Pressable,
   ScrollView,
@@ -194,7 +195,23 @@ function Shell() {
   const activeDeviceId = deviceSelectionLoaded
     ? resolveAvailableDeviceSelection(devicePickerItems, selectedDeviceId)
     : '';
-  const pairingVisible = pairing || !mesh.profile;
+  const pairingVisible = pairing;
+  React.useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (appDrawerOpen) return false;
+      if (pairingVisible) {
+        setPairing(false);
+        setTab('devices');
+        return true;
+      }
+      if (tab !== 'drones') {
+        setTab('drones');
+        return true;
+      }
+      return false;
+    });
+    return () => subscription.remove();
+  }, [appDrawerOpen, pairingVisible, tab]);
   React.useEffect(() => {
     let active = true;
     void loadSelectedDeviceId()
@@ -234,7 +251,7 @@ function Shell() {
     setPairing(true);
   };
   const navigateToTab = (nextTab: Tab) => {
-    if (nextTab === 'devices' || nextTab === 'settings') setAppDrawerOpen(false);
+    setAppDrawerOpen(false);
     if (!pairingVisible && tab === nextTab) return;
     setPairing(false);
     setTab(nextTab);
@@ -386,20 +403,20 @@ function Shell() {
     : [];
   const pairingContent = pairingVisible ? (
     <ScrollView keyboardShouldPersistTaps="handled">
-      {mesh.profile ? (
-        <View style={styles.pairBack}>
-          <Pressable
-            onPress={() => {
-              setPairing(false);
-              setTab('devices');
-            }}
-            style={styles.backButton}
-          >
-            <ChevronLeft color={colors.accent} size={17} strokeWidth={2.4} />
-            <Text style={styles.backText}>Your devices</Text>
-          </Pressable>
-        </View>
-      ) : null}
+      <View style={styles.pairBack}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Back to your devices"
+          onPress={() => {
+            setPairing(false);
+            setTab('devices');
+          }}
+          style={styles.backButton}
+        >
+          <ChevronLeft color={colors.accent} size={17} strokeWidth={2.4} />
+          <Text style={styles.backText}>Your devices</Text>
+        </Pressable>
+      </View>
       <PairScreen
         onComplete={() => {
           setPairing(false);
@@ -410,26 +427,21 @@ function Shell() {
   ) : null;
   const content = (
     <>
-      {mesh.profile ? (
-        <View
-          pointerEvents={!pairingVisible && tab === 'drones' ? 'auto' : 'none'}
-          style={[
-            styles.tabContent,
-            (pairingVisible || tab !== 'drones') && styles.tabContentHidden,
-          ]}
-        >
-          <DronesScreen
-            drawerOpen={appDrawerOpen}
-            workspaceVisible={!pairingVisible && tab === 'drones'}
-            navigationItems={navigationItems}
-            onDrawerOpenChange={setAppDrawerOpen}
-            onHeaderChange={handleDronesHeaderChange}
-            selectedDeviceId={activeDeviceId}
-            devicePickerItems={devicePickerItems}
-            onDeviceChange={selectDevice}
-          />
-        </View>
-      ) : null}
+      <View
+        pointerEvents={!pairingVisible && tab === 'drones' ? 'auto' : 'none'}
+        style={[styles.tabContent, (pairingVisible || tab !== 'drones') && styles.tabContentHidden]}
+      >
+        <DronesScreen
+          drawerOpen={appDrawerOpen}
+          workspaceVisible={!pairingVisible && tab === 'drones'}
+          navigationItems={navigationItems}
+          onDrawerOpenChange={setAppDrawerOpen}
+          onHeaderChange={handleDronesHeaderChange}
+          selectedDeviceId={activeDeviceId}
+          devicePickerItems={devicePickerItems}
+          onDeviceChange={selectDevice}
+        />
+      </View>
       {pairingContent}
       {!pairingVisible && tab === 'settings' ? (
         <SettingsScreen tab={settingsTab} onTabChange={setSettingsTab} onPair={openPairing} />
@@ -442,54 +454,50 @@ function Shell() {
     <SafeAreaView style={styles.safe} edges={['top', 'right', 'bottom', 'left']}>
       <View style={styles.header}>
         <View pointerEvents="none" style={styles.headerAccent} />
-        {mesh.profile ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={hasBackNavigation ? 'Open drone navigation' : 'Toggle app menu'}
-            onPress={toggleAppDrawer}
-            style={styles.titleButton}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={hasBackNavigation ? 'Open drone navigation' : 'Toggle app menu'}
+          onPress={toggleAppDrawer}
+          style={styles.titleButton}
+        >
+          <View
+            style={[
+              styles.menuButton,
+              hasBackNavigation && styles.contextBackButton,
+              appDrawerOpen && styles.menuButtonActive,
+            ]}
           >
-            <View
-              style={[
-                styles.menuButton,
-                hasBackNavigation && styles.contextBackButton,
-                appDrawerOpen && styles.menuButtonActive,
-              ]}
-            >
-              {hasBackNavigation ? (
-                <ChevronLeft
-                  color={appDrawerOpen ? colors.accent : colors.text}
-                  size={22}
-                  strokeWidth={2.1}
-                />
-              ) : (
-                <Menu
-                  color={appDrawerOpen ? colors.accent : colors.text}
-                  size={19}
-                  strokeWidth={2.2}
-                />
-              )}
-            </View>
-            {hasContextHeader ? (
-              <View style={styles.contextTitle}>
-                <View style={styles.contextTitleRow}>
-                  <Text numberOfLines={1} style={styles.contextTitleText}>
-                    {dronesHeader?.title}
-                  </Text>
-                </View>
-                {dronesHeader?.subtitle ? (
-                  <Text numberOfLines={1} style={styles.contextSubtitle}>
-                    {dronesHeader.subtitle}
-                  </Text>
-                ) : null}
-              </View>
+            {hasBackNavigation ? (
+              <ChevronLeft
+                color={appDrawerOpen ? colors.accent : colors.text}
+                size={22}
+                strokeWidth={2.1}
+              />
             ) : (
-              <Text style={styles.title}>{title}</Text>
+              <Menu
+                color={appDrawerOpen ? colors.accent : colors.text}
+                size={19}
+                strokeWidth={2.2}
+              />
             )}
-          </Pressable>
-        ) : (
-          <Text style={styles.title}>{title}</Text>
-        )}
+          </View>
+          {hasContextHeader ? (
+            <View style={styles.contextTitle}>
+              <View style={styles.contextTitleRow}>
+                <Text numberOfLines={1} style={styles.contextTitleText}>
+                  {dronesHeader?.title}
+                </Text>
+              </View>
+              {dronesHeader?.subtitle ? (
+                <Text numberOfLines={1} style={styles.contextSubtitle}>
+                  {dronesHeader.subtitle}
+                </Text>
+              ) : null}
+            </View>
+          ) : (
+            <Text style={styles.title}>{title}</Text>
+          )}
+        </Pressable>
         <View style={styles.headerActions}>
           {headerMenuActions.length > 0 ? (
             <Pressable

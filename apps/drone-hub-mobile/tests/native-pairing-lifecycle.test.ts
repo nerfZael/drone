@@ -1,5 +1,9 @@
 import { expect, test } from 'bun:test';
-import { startNativePairing, stopNativePairing } from '../src/mesh/native-pairing-lifecycle';
+import {
+  startNativePairing,
+  stopNativePairing,
+  refreshNativePairing,
+} from '../src/mesh/native-pairing-lifecycle';
 
 test('a cancelled pending start is cleaned up before the next screen starts its listener', async () => {
   let finish!: () => void;
@@ -34,6 +38,26 @@ test('a cancelled pending start is cleaned up before the next screen starts its 
   await stop;
   expect(await next).toBe(true);
   expect(calls).toEqual(['start:old', 'stop', 'stop', 'start:new']);
+});
+
+test('proof renewal leaves the listener running and stale renewals cannot reach the next session', async () => {
+  const calls: string[] = [];
+  const native = {
+    start: async (descriptor: string) => {
+      calls.push(`start:${descriptor}`);
+    },
+    refresh: async (descriptor: string) => {
+      calls.push(`refresh:${descriptor}`);
+    },
+    stop: async () => {
+      calls.push('stop');
+    },
+  };
+  await startNativePairing(native, 'session', () => true);
+  expect(await refreshNativePairing(native, 'new-proof', () => true)).toBe(true);
+  expect(await refreshNativePairing(native, 'stale-proof', () => false)).toBe(false);
+  await stopNativePairing(native);
+  expect(calls).toEqual(['start:session', 'refresh:new-proof', 'stop']);
 });
 
 test('cancelled queued starts never open a listener and failures do not poison later attempts', async () => {

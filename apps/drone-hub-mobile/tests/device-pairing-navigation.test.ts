@@ -10,6 +10,15 @@ test('pairing belongs to Devices, not a separate Settings tab', () => {
   expect(source('screens/SettingsScreen.tsx')).not.toContain("value: 'pairing'");
 });
 
+test('unpaired phones can leave pairing and use the app menu and local drones', () => {
+  const shell = source('shell/MeshApp.tsx');
+  expect(shell).toContain('const pairingVisible = pairing;');
+  expect(shell).not.toContain('pairing || !mesh.profile');
+  expect(shell).not.toContain('{mesh.profile ? (');
+  expect(shell).toContain('Back to your devices');
+  expect(shell).toContain("BackHandler.addEventListener('hardwareBackPress'");
+});
+
 test('only the selected pairing method is mounted and pending approval replaces the form', () => {
   const pair = source('screens/PairScreen.tsx');
   expect(pair).toContain("('nearby')");
@@ -34,7 +43,7 @@ test('pairing cancellation is checked before persisting an approved profile', ()
     context.indexOf('async (payload: PairingPayload'),
     context.indexOf('const forgetMesh'),
   );
-  expect(pairing).toContain('signal.throwIfAborted();\n      await saveMeshProfile(next);');
+  expect(pairing).toContain('throwIfAborted(signal);\n      await saveMeshProfile(next);');
   const screen = source('screens/PairScreen.tsx');
   expect(screen).toContain('alive.current && !controller.signal.aborted');
   expect(screen).toContain("!alive.current || methodRef.current !== 'qr'");

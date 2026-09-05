@@ -1,3 +1,4 @@
+import { throwIfAborted } from '@drone/device-protocol';
 import { fetch as expoFetch } from 'expo/fetch';
 import { DeviceHttpEventClient } from '@drone/device-protocol';
 import * as Crypto from 'expo-crypto';
@@ -356,7 +357,7 @@ export class MeshSession {
           check();
           const policyTimer = setInterval(check, 250);
           try {
-            access.signal.throwIfAborted();
+            throwIfAborted(access.signal);
             const tickets = await sourceSocket.prepareResultUpload(
               message.requestId,
               message.sourceDeviceId,

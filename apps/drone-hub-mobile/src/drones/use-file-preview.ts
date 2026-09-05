@@ -1,3 +1,4 @@
+import { throwIfAborted } from '@drone/device-protocol';
 import React from 'react';
 import { fetch as streamingFetch } from 'expo/fetch';
 import { AppState } from 'react-native';
@@ -254,7 +255,7 @@ export function useFilePreview({
             const localHandle = localFile.open(FileMode.ReadOnly);
             try {
               while (offset < totalBytes) {
-                loadController.signal.throwIfAborted();
+                throwIfAborted(loadController.signal);
                 const bytes = localHandle.readBytes(Math.min(64 * 1024, totalBytes - offset));
                 if (!bytes.length) throw new Error('Phone preview ended early');
                 appendBytes(bytes);

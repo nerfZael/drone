@@ -1,3 +1,4 @@
+import { throwIfAborted } from './abort-signal';
 import type {
   WorkspaceRequest,
   WorkspaceUploadSink,
@@ -85,7 +86,7 @@ export function createHttpWorkspaceDestination(
     },
     async writeChunk(input: Record<string, unknown>, signal?: AbortSignal) {
       return exclusive(input, async () => {
-        signal?.throwIfAborted();
+        throwIfAborted(signal);
         const state = uploads.get(String(input.transferId));
         if (!state || input.offset !== state.offset)
           throw new Error('Workspace upload offset mismatch');

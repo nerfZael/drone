@@ -1,3 +1,4 @@
+import { throwIfAborted } from '@drone/device-protocol';
 import React from 'react';
 import * as Crypto from 'expo-crypto';
 import { acceptDeviceDirectory } from './device-directory';
@@ -439,7 +440,7 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
       if (!identity) throw new Error('Device identity is not ready');
       setError(null);
       const current = await loadMeshProfile();
-      signal.throwIfAborted();
+      throwIfAborted(signal);
       assertKnownRecoveryTarget(payload, current);
       const claim = await claimPairing(payload, identity, signal, discovered);
       const approval: PairingApproval = await validatePairingApproval(
@@ -476,7 +477,7 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
           [payload.inviterDeviceId]: approval.capabilities,
         },
       };
-      signal.throwIfAborted();
+      throwIfAborted(signal);
       await saveMeshProfile(next);
       profileRef.current = next;
       setProfile(next);

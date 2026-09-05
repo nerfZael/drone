@@ -1,3 +1,4 @@
+import { throwIfAborted } from '@drone/device-protocol';
 import { discoverHub, hubDiscoveryEndpoints, type DiscoveredHub } from './discover-hub';
 
 /** DNS-SD metadata is not proof of identity; verify with discoverHub before pairing. */
@@ -7,7 +8,7 @@ export async function verifyNearbyHub(
   options: Parameters<typeof discoverHub>[1],
 ): Promise<DiscoveredHub> {
   const hub = await discoverHub(candidate.endpoint, options);
-  options.signal.throwIfAborted();
+  throwIfAborted(options.signal);
   if (hub.id !== candidate.id)
     throw new Error('Nearby Hub identity did not match. Pairing was not started.');
   return hub;

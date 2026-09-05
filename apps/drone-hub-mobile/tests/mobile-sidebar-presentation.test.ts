@@ -816,7 +816,7 @@ describe('mobile sidebar presentation', () => {
       "accessibilityLabel={hasBackNavigation ? 'Open drone navigation'",
     );
     expect(shellSource).toContain('hasBackNavigation && styles.contextBackButton');
-    expect(shellSource).toContain('<ChevronLeft\n                  color={appDrawerOpen');
+    expect(shellSource).toMatch(/<ChevronLeft\s+color=\{appDrawerOpen/);
     expect(shellSource).toContain(
       '<MoreVertical color={colors.muted} size={19} strokeWidth={2} />',
     );

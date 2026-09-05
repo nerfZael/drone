@@ -1,3 +1,4 @@
+import { throwIfAborted } from '@drone/device-protocol';
 import type { WorkspaceUploadSink } from '@drone/device-protocol';
 import { uploadNativeFile } from './native-http-upload';
 
@@ -19,7 +20,7 @@ export async function createWorkspaceUploadSink(): Promise<WorkspaceUploadSink> 
         handle.close();
         handleClosed = true;
       }
-      signal?.throwIfAborted();
+      throwIfAborted(signal);
       let remainder: InstanceType<typeof File> | null = null;
       try {
         if (skipBytes) {
@@ -35,7 +36,7 @@ export async function createWorkspaceUploadSink(): Promise<WorkspaceUploadSink> 
             source.offset = skipBytes;
             let remaining = file.size - skipBytes;
             while (remaining > 0) {
-              signal?.throwIfAborted();
+              throwIfAborted(signal);
               const bytes = source.readBytes(Math.min(64 * 1024, remaining));
               if (!bytes.length) throw new Error('Staged upload ended early');
               destination.writeBytes(bytes);

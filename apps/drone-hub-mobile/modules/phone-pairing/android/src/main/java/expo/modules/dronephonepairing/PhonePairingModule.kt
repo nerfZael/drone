@@ -16,11 +16,14 @@ class PhonePairingModule : Module() {
   @Volatile private var foreground = true
   private var nearby: NearbyPairing? = null
   private var listenerSession = ""
+  @Volatile private var listenerDescriptor = ""
+  @Volatile private var proofDeadline = 0L
 
   override fun definition() = ModuleDefinition {
     Name("DronePhonePairing")
     Events("offer", "stopped", "nearbyHub", "nearbyLost", "nearbyError")
     AsyncFunction("start") { descriptor: String -> startListener(descriptor) }
+    AsyncFunction("refresh") { descriptor: String -> refreshDescriptor(descriptor) }
     AsyncFunction("stop") { stopListener() }
     OnActivityEntersForeground { foreground = true }
     OnActivityEntersBackground { foreground = false; stopListener() }
@@ -32,11 +35,22 @@ class PhonePairingModule : Module() {
     val old = listener
     val oldSession = listenerSession
     listenerSession = ""
+    listenerDescriptor = ""
+    proofDeadline = 0L
     listener = null
     try { old?.close() } catch (_: Exception) {}
     try { client?.close() } catch (_: Exception) {}
     client = null
     if (old != null) sendEvent("stopped", mapOf("session" to oldSession))
+  }
+
+  @Synchronized private fun refreshDescriptor(descriptor: String) {
+    require(foreground && listener != null) { "Discovery is no longer active" }
+    require(descriptor.toByteArray(Charsets.UTF_8).size <= 8192) { "Pairing descriptor is too large" }
+    require(org.json.JSONObject(descriptor).getString("session") == listenerSession) { "Stale discovery session" }
+    listenerDescriptor = descriptor
+    // Fail closed if JS stops renewing proofs, without timing out a healthy foreground screen.
+    proofDeadline = SystemClock.elapsedRealtime() + 120000
   }
 
   @Synchronized private fun startListener(descriptor: String) {
@@ -54,20 +68,30 @@ class PhonePairingModule : Module() {
     } catch (error: Exception) { server.close(); throw error }
     listener = server
     listenerSession = session
+    refreshDescriptor(descriptor)
     if (nearby == null) nearby = NearbyPairing(requireNotNull(appContext.reactContext)) { event, body -> sendEvent(event, body) }
     nearby?.start(descriptor)
-    val deadline = SystemClock.elapsedRealtime() + 120000
     Thread({
       var requests = 0
+      var windowStart = SystemClock.elapsedRealtime()
       try {
-        while (listener === server && SystemClock.elapsedRealtime() < deadline && requests < 64) {
+        while (listener === server && SystemClock.elapsedRealtime() < proofDeadline) {
           try {
             val socket = server.accept()
             synchronized(this) {
               if (listener !== server) { socket.close(); return@Thread }
               client = socket
             }
-            socket.use { requests++; serve(it, descriptor, deadline) }
+            if (SystemClock.elapsedRealtime() - windowStart >= 120000) {
+              requests = 0
+              windowStart = SystemClock.elapsedRealtime()
+            }
+            if (requests >= 64) {
+              socket.close()
+              Thread.sleep(100)
+              continue
+            }
+            socket.use { requests++; serve(it, listenerDescriptor, proofDeadline) }
           } catch (_: SocketTimeoutException) {
           } catch (_: Exception) {
             // Malformed or disconnected clients cannot escape this bounded session.

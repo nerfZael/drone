@@ -1,3 +1,4 @@
+import { throwIfAborted } from '@drone/device-protocol';
 import React from 'react';
 import { AppState, Platform, Text, View } from 'react-native';
 import { fetch as expoFetch } from 'expo/fetch';
@@ -14,10 +15,15 @@ import { mobileDeviceIdForPublicKey, type MobileDeviceIdentity } from '../securi
 import { verifyPhoneOffer } from '../mesh/verify-phone-offer';
 import type { DiscoveredHub } from '../mesh/discover-hub';
 import { parseNearbyHub, verifyNearbyHub, type NearbyHub } from '../mesh/nearby-hub';
-import { startNativePairing, stopNativePairing } from '../mesh/native-pairing-lifecycle';
+import {
+  startNativePairing,
+  stopNativePairing,
+  refreshNativePairing,
+} from '../mesh/native-pairing-lifecycle';
 
 type Listener = {
   start(descriptor: string): Promise<void>;
+  refresh(descriptor: string): Promise<void>;
   stop(): Promise<void>;
   addListener(
     event: string,
@@ -76,11 +82,13 @@ export function PhoneDiscoverabilityCard({
     const subscriptions: { remove(): void }[] = [];
     let timer: ReturnType<typeof setTimeout> | undefined;
     let searchTimer: ReturnType<typeof setTimeout> | undefined;
+    let offerTimer: ReturnType<typeof setTimeout> | undefined;
     const stop = () => {
       if (session.current !== nonce) return;
       session.current = '';
       clearTimeout(timer);
       clearTimeout(searchTimer);
+      clearTimeout(offerTimer);
       verification.current?.abort();
       verification.current = null;
       subscriptions.forEach((subscription) => subscription.remove());
@@ -98,7 +106,7 @@ export function PhoneDiscoverabilityCard({
           'Nearby discovery is currently available in the Android build. Use QR or Find a Hub on this platform.',
         );
       native = requireOptionalNativeModule<Listener>('DronePhonePairing');
-      if (!native)
+      if (!native || typeof native.refresh !== 'function')
         throw new Error(
           'Nearby discovery needs a new native Android build. A JavaScript reload is not enough.',
         );
@@ -116,6 +124,7 @@ export function PhoneDiscoverabilityCard({
       };
       let claimed = false;
       let offers = 0;
+      let offerWindow = Date.now();
       subscriptions.push(
         native.addListener('stopped', (event) => {
           if (event.session === nonce) stop();
@@ -148,6 +157,10 @@ export function PhoneDiscoverabilityCard({
       );
       subscriptions.push(
         native.addListener('offer', (event) => {
+          if (Date.now() - offerWindow >= 120000) {
+            offerWindow = Date.now();
+            offers = 0;
+          }
           if (session.current !== nonce || claimed || ++offers > 16) return;
           void (async () => {
             try {
@@ -167,6 +180,15 @@ export function PhoneDiscoverabilityCard({
                 hub: { id: incoming.hub.id, name: incoming.hub.name, endpoint: incoming.endpoint },
                 code: phonePairingCode(digest),
               });
+              clearTimeout(offerTimer);
+              offerTimer = setTimeout(
+                () => {
+                  if (session.current !== nonce) return;
+                  claimed = false;
+                  setOffer(null);
+                },
+                Math.max(0, Date.parse(incoming.expiresAt) - Date.now()),
+              );
             } catch {
               /* Invalid offers never become user-visible pairing requests. */
             }
@@ -182,7 +204,23 @@ export function PhoneDiscoverabilityCard({
       if (session.current !== nonce) return;
       setActive(true);
       searchTimer = setTimeout(() => setSearched(true), 8000);
-      timer = setTimeout(stop, 120000);
+      const renew = async () => {
+        if (session.current !== nonce) return;
+        try {
+          const refreshed = { ...presence, expiresAt: new Date(Date.now() + 120000).toISOString() };
+          const descriptor = JSON.stringify({
+            ...refreshed,
+            signature: await identity.sign(phonePairingSigningText(refreshed)),
+          });
+          if (await refreshNativePairing(native!, descriptor, () => session.current === nonce))
+            timer = setTimeout(() => void renew(), 60000);
+        } catch (error: any) {
+          if (session.current !== nonce) return;
+          setError(error?.message ?? 'Discovery could not refresh. Tap Start discovery to retry.');
+          stop();
+        }
+      };
+      timer = setTimeout(() => void renew(), 60000);
     } catch (error: any) {
       if (session.current === nonce) {
         setError(error?.message ?? String(error));
@@ -206,7 +244,7 @@ export function PhoneDiscoverabilityCard({
         keyId: mobileDeviceIdForPublicKey,
         fetchImpl: expoFetch as unknown as typeof fetch,
       });
-      controller.signal.throwIfAborted();
+      throwIfAborted(controller.signal);
       stopRef.current();
       onConfirm(hub);
     } catch (error: any) {
@@ -276,9 +314,7 @@ export function PhoneDiscoverabilityCard({
         </View>
       )}
       <ErrorBanner message={error} />
-      {active && (
-        <Text style={textStyles.body}>Visible for 2 minutes, while this screen is open.</Text>
-      )}
+      {active && <Text style={textStyles.body}>Visible while this screen is open.</Text>}
     </Card>
   );
 }

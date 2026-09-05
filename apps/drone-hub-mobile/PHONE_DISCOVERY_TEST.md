@@ -1,6 +1,6 @@
 # Nearby pairing: Android test
 
-Opening **Devices → Add device → Nearby** on Android starts a two-minute discovery window automatically. Changing methods stops discovery. It does not add an account, hosted directory, persistent phone server, or new content-storage format. iOS has no native discovery/listener implementation in this change and shows an explicit unsupported message; QR/address pairing still works there.
+Opening **Devices → Add device → Nearby** on Android starts discovery automatically. It remains active while this screen is foregrounded, until you stop it or change methods. Signed presence proofs are refreshed every minute and expire after two minutes; the listener and Wi-Fi advertisement stay open during renewal. This adds no account, hosted directory, background server, or new storage format. iOS has no native discovery/listener implementation; QR/address pairing remains available.
 
 ## Install and try
 
@@ -14,14 +14,14 @@ This rebuild is required: reloading JavaScript cannot add the native module. Ins
 
 1. Run the updated desktop Hub and enable its Tailscale HTTPS access.
 2. Keep Tailscale connected on the phone, with incoming connections allowed. Tailnet rules must allow desktop-to-phone TCP 8792 and phone-to-desktop HTTPS.
-3. Open **Devices → Add device → Nearby** on the phone. Keep it foregrounded. After two minutes, tap **Start discovery** to try again.
+3. Open **Devices → Add device → Nearby** on the phone. Keep it foregrounded. Wait more than two minutes and verify discovery remains active without pressing Start again.
 4. In desktop **Devices → Add device**, click **Find phones**, select the phone with **Connect**, and compare the four-group verification code with the phone.
 5. Only if the codes match, tap **Codes match — connect** on the phone. Approve the request at the top of desktop Add device. Expand **Permissions** to choose access; permissions still default to none.
 6. The temporary listener closes on phone confirmation. Normal HTTPS/SSE connections take over.
 
 Repeat with the phone on cellular and the desktop on its usual network. That is the important real-Tailscale validation; a same-Wi-Fi success alone is not enough.
 
-Also check that Stop discovery, backgrounding the app, leaving the pairing screen, and the two-minute deadline make the phone stop answering fresh probes. A desktop's old result row is not proof that the listener remains open: pressing Pair phone must fail once its session is closed/expired.
+Check that Stop discovery, backgrounding the app, leaving this screen, and switching methods stop fresh probes. Return to Nearby and verify discovery resumes. After several minutes, connect from the desktop and complete pairing. A stale desktop row does not prove that the listener is open. Codes still expire individually; request a new one if you let it expire.
 
 ## Same-Wi-Fi automatic discovery
 
@@ -30,7 +30,7 @@ Also check that Stop discovery, backgrounding the app, leaving the pairing scree
 3. Select **Connect** beside the discovered desktop, then approve its request on the desktop. The advertised identity is checked against a fresh signed HTTPS descriptor before any request is sent.
 4. Alternatively, wait up to about 15 seconds for the phone to appear automatically on the desktop, choose **Connect**, and compare/confirm the codes as above. **Find phones** additionally scans Tailscale peers when the devices are on different networks.
 5. Check Stop/Start on both screens. Leaving the desktop pairing section withdraws its advertisement; backgrounding the desktop window pauses it. If the browser crashes, its lease expires within about 45 seconds. Leaving or backgrounding mobile Pairing closes its browser, advertisement, and listener. Returning to foreground resumes a fresh window unless you explicitly pressed Stop.
-6. Test with no desktop Add device screen open: after eight seconds mobile should show “No devices found yet”. Switching to **Scan QR**, **Address**, or **Code** must close nearby discovery; returning to **Nearby** starts a fresh window.
+6. Test with no desktop Add device screen open: after eight seconds mobile should show “No devices found yet”. Switching to **Scan QR**, **Address**, or **Code** must close nearby discovery; returning to **Nearby** starts a fresh session.
 
 Wi-Fi discovery uses mDNS/DNS-SD (`_dronehub._tcp`, UDP 5353). Guest-network isolation, blocked multicast, or a host firewall can prevent discovery even when HTTPS/Tailscale works. This is local-network discovery, not tailnet enumeration. LAN offers to the temporary phone listener use TCP 8792. Normal pairing requests, files, chats, and transcripts still use the advertised HTTPS/Tailscale address; this does not add an unencrypted LAN data plane or remove the Tailscale requirement. The current Android target is SDK 36; future target-SDK upgrades must revisit Android's local-network runtime permission requirements.
 
@@ -40,8 +40,8 @@ Wi-Fi discovery uses mDNS/DNS-SD (`_dronehub._tcp`, UDP 5353). Guest-network iso
 - HTTP on this bootstrap port is a deliberate exception to the normal HTTPS device protocol. Desktop probes use Tailscale IPv4 peer addresses (100.64.0.0/10) or mDNS-advertised private LAN IPv4 addresses on fixed port 8792. LAN bootstrap metadata is public, not encrypted; signatures and code comparison protect the pairing decision. There is no Tailscale Serve or public Funnel configured on the phone.
 - Signatures, short-lived session identifiers, and comparison of the code on both screens bind discovery to the intended devices. A received offer does not grant permissions. Never approve a mismatching code.
 - The comparison code uses 64 bits of the signed offer's digest, not a six-digit PIN: offers are public, so short codes would permit practical offline attempts to imitate an observed code.
-- Native requests are bounded to 8 KiB headers / 8 KiB bodies, short read deadlines, one handled connection at a time, and 64 requests per window. JavaScript verifies at most 16 received offers and presents the first valid offer. To choose another desktop, reject and start a fresh window.
+- Native requests are bounded to 8 KiB headers / 8 KiB bodies, short read deadlines, one connection at a time, and 64 requests per two minutes. JavaScript verifies at most 16 offers per two minutes and presents the first valid offer until confirmation, rejection, or code expiry. These limits do not terminate a healthy discovery session.
 - Desktop scans are bounded: local scans run while Add device is visible; broad Tailscale phone scans require Find phones. Offers can only target a phone from a recent verified scan, not an arbitrary user-provided URL. Retries within a session retain the same verification code.
-- The listener closes after two minutes, cancellation, backgrounding, or module destruction. It starts on entering Pairing, not in Devices or at general app startup. Existing phone identities, chats, grants, files, and transcripts are not reset.
+- The listener closes on Stop, leaving Nearby, backgrounding, or module destruction. It also fails closed if JavaScript stops refreshing proofs. There is no fixed user-facing discovery timeout. Existing identities, chats, grants, files, and transcripts are not reset.
 
 Automated checks cover signature tampering, expired sessions, wrong recipients, revocations, restricted probe addresses, confirmation-code agreement, retry stability, and the existing phone approval flow. Native compilation / APK assembly do not prove that the separate Tailscale Android app forwards inbound connections on your phone; that remains the purpose of this test.

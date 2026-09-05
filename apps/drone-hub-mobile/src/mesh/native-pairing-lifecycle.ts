@@ -26,3 +26,15 @@ export function startNativePairing(
 export function stopNativePairing(native: NativePairing) {
   return serialize(() => native.stop());
 }
+
+export function refreshNativePairing(
+  native: NativePairing & { refresh(descriptor: string): Promise<void> },
+  descriptor: string,
+  isCurrent: () => boolean,
+) {
+  return serialize(async () => {
+    if (!isCurrent()) return false;
+    await native.refresh(descriptor);
+    return isCurrent();
+  });
+}

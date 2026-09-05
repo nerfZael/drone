@@ -1,3 +1,4 @@
+import { throwIfAborted } from '@drone/device-protocol';
 import { canonicalJson, readBoundedHttpText } from '@drone/device-protocol';
 import { verifyP256Signature } from '../security/p256-signature';
 
@@ -32,7 +33,7 @@ export async function discoverHub(
 ): Promise<DiscoveredHub> {
   const endpoints = hubDiscoveryEndpoints(address);
   for (const endpoint of endpoints) {
-    options.signal.throwIfAborted();
+    throwIfAborted(options.signal);
     try {
       const response = await (options.fetchImpl ?? fetch)(
         `${endpoint}/.well-known/dronehub?nonce=${encodeURIComponent(options.nonce)}`,
@@ -63,7 +64,7 @@ export async function discoverHub(
         throw new Error('Invalid Hub discovery proof');
       return { id: device.id, name: device.name, endpoint };
     } catch {
-      options.signal.throwIfAborted();
+      throwIfAborted(options.signal);
     }
   }
   throw new Error(

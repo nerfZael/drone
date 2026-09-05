@@ -179,6 +179,24 @@ test('temporary phone discovery and offers bind both identities, session, expiry
   ).rejects.toThrow();
   revoked = true;
   await expect(discovery.offer(phone.id)).rejects.toThrow('revoked');
+  revoked = false;
+  const originalNow = Date.now;
+  try {
+    const future = originalNow() + 121000;
+    Date.now = () => future;
+    presence.expiresAt = new Date(future + 120000).toISOString();
+    signed.expiresAt = presence.expiresAt;
+    signed.signature = signDeviceText(phone, phonePairingSigningText(presence));
+    await discovery.scan();
+    const renewed = await discovery.offer(phone.id);
+    expect(renewed.expiresAt).toBe(presence.expiresAt);
+    expect(renewed.code).not.toBe(result.code);
+    await verifyPhoneOffer(offered!, presence.session, phone.id, async (key) =>
+      deviceIdForPublicKey(key),
+    );
+  } finally {
+    Date.now = originalNow;
+  }
 });
 
 test('phone discovery probes only Tailscale IPv4 addresses', () => {

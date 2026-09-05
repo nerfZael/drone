@@ -167,7 +167,9 @@ export class DevicePhoneDiscovery implements DeviceMeshHttpExtension {
       throw new Error('This Hub cannot enroll devices');
     if (state.devices[deviceId]?.revokedAt) throw new Error('This phone has been revoked');
     const self = state.devices[this.identity.id];
-    const offer: PhonePairingOffer = phone.offer ?? {
+    const offer: PhonePairingOffer = (phone.offer && validPhonePairingWindow(phone.offer.expiresAt)
+      ? phone.offer
+      : undefined) ?? {
       type: 'dronehub.phone.offer',
       version: 1,
       session: phone.presence.session,

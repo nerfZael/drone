@@ -1,3 +1,4 @@
+import { throwIfAborted } from './abort-signal';
 import type { WorkspaceRequest } from './http-workspace-types';
 
 type Download = {
@@ -58,7 +59,7 @@ export function createHttpWorkspaceSource(request: WorkspaceRequest, fetchImpl: 
     list: async (path: string, signal?: AbortSignal) =>
       (await request('files.transfer.list', { path }, signal)).entries,
     async readChunk(path: string, offset: number, length: number, signal?: AbortSignal) {
-      signal?.throwIfAborted();
+      throwIfAborted(signal);
       if (
         !Number.isSafeInteger(offset) ||
         offset < 0 ||
@@ -86,13 +87,13 @@ export function createHttpWorkspaceSource(request: WorkspaceRequest, fetchImpl: 
         }, 30_000);
         (state.idle as ReturnType<typeof setTimeout> & { unref?(): void }).unref?.();
         try {
-          signal?.throwIfAborted();
+          throwIfAborted(signal);
           const bytes = new Uint8Array(Math.min(length, Math.max(0, state.size - offset)));
           let used = 0;
           while (used < bytes.length) {
             if (!state.pending.length) {
               const next = await state.reader.read();
-              signal?.throwIfAborted();
+              throwIfAborted(signal);
               if (next.done) throw new Error('Workspace download ended before its declared size');
               state.pending = next.value;
             }

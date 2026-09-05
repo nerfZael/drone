@@ -10,3 +10,4 @@ export * from './phone-pairing';
 export * from './sidebar';
 export * from './types';
 export * from './validation';
+export { throwIfAborted } from './abort-signal';

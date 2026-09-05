@@ -1,3 +1,4 @@
+import { throwIfAborted } from '@drone/device-protocol';
 import {
   canonicalJson,
   capabilityRequestSigningText,
@@ -202,7 +203,7 @@ export class MobileCapabilityRouter {
     this.replay.set(replayKey, expires);
     let response: CapabilityResponse;
     try {
-      signal?.throwIfAborted();
+      throwIfAborted(signal);
       if (
         !/\.(list|read|stat|search|preview|models|status|poll)$/.test(request.operation) &&
         this.acceptRequest &&
@@ -220,7 +221,7 @@ export class MobileCapabilityRouter {
         requestId: request.requestId,
         signal,
       });
-      signal?.throwIfAborted();
+      throwIfAborted(signal);
       if (!this.authorized(request))
         return errorResponse(
           this.identity,
