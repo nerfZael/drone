@@ -229,7 +229,7 @@ function IconButton({
     >
       <Icon
         color={accent ? colors.onAccent : colors.textSecondary}
-        size={17}
+        size={18}
         strokeWidth={accent ? 2.6 : 2.1}
       />
     </Pressable>
@@ -274,7 +274,7 @@ function VoiceIconButton({
         pressed && styles.pressed,
       ]}
     >
-      <Icon color={color} size={16} strokeWidth={2.2} />
+      <Icon color={color} size={18} strokeWidth={2.2} />
     </Pressable>
   );
 }
@@ -842,7 +842,7 @@ export function AssistantComposer({
                       pressed && styles.pressed,
                     ]}
                   >
-                    <Plus color={colors.textSecondary} size={17} strokeWidth={2.1} />
+                    <Plus color={colors.textSecondary} size={18} strokeWidth={2.1} />
                   </Pressable>
                 ) : null}
                 <Pressable
@@ -859,7 +859,7 @@ export function AssistantComposer({
                     pressed && styles.pressed,
                   ]}
                 >
-                  <Mic color={colors.textSecondary} size={17} strokeWidth={2.1} />
+                  <Mic color={colors.textSecondary} size={18} strokeWidth={2.1} />
                 </Pressable>
                 {showAssistantStop ? (
                   <Pressable
@@ -953,7 +953,7 @@ export function AssistantComposer({
                         {model}
                         {reasoning ? ` ${reasoning}` : ''}
                       </Text>
-                      <ChevronDown color={colors.secondary} size={14} strokeWidth={2.2} />
+                      <ChevronDown color={colors.textSecondary} size={15} strokeWidth={2.2} />
                     </Pressable>
                     <IconButton
                       label={
@@ -1121,27 +1121,27 @@ export function AssistantComposer({
 
 const styles = StyleSheet.create({
   frame: {
-    paddingHorizontal: 9,
+    paddingHorizontal: 12,
     paddingTop: 6,
-    paddingBottom: 8,
+    paddingBottom: 10,
     backgroundColor: colors.background,
   },
   localRecorderStack: { position: 'relative' },
   localRecorderBackdrop: { position: 'absolute', top: 0, right: 0, left: 0 },
   composer: {
     minHeight: 52,
-    borderRadius: 7,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: colors.composerBorder,
     backgroundColor: colors.panelRaised,
     shadowColor: colors.shadow,
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
     elevation: 2,
     overflow: 'hidden',
   },
-  composerExpanded: { borderRadius: 7, borderColor: colors.accentBorder },
+  composerExpanded: { borderRadius: 16, borderColor: colors.accentBorder },
   composerWithLeadingControl: { overflow: 'visible' },
   swipeVoicePreview: {
     position: 'absolute',
@@ -1153,47 +1153,47 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   input: {
-    minHeight: 50,
-    maxHeight: 132,
+    minHeight: 52,
+    maxHeight: 140,
     color: colors.text,
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 15,
+    lineHeight: 22,
     paddingHorizontal: 16,
     paddingTop: 15,
-    paddingBottom: 11,
+    paddingBottom: 13,
   },
-  inputExpanded: { minHeight: 44, paddingTop: 12, paddingBottom: 0 },
-  inputWithCollapsedVoice: { paddingLeft: 54, paddingRight: 54 },
-  inputWithCollapsedVoiceOnly: { paddingLeft: 16, paddingRight: 54 },
-  inputWithCollapsedStop: { paddingRight: 97 },
+  inputExpanded: { minHeight: 46, paddingTop: 13, paddingBottom: 0 },
+  inputWithCollapsedVoice: { paddingLeft: 56, paddingRight: 56 },
+  inputWithCollapsedVoiceOnly: { paddingLeft: 16, paddingRight: 56 },
+  inputWithCollapsedStop: { paddingRight: 100 },
   collapsedAddButton: {
     position: 'absolute',
-    left: 9,
-    top: 9,
-    width: 34,
-    height: 34,
-    borderRadius: 5,
+    left: 8,
+    top: 8,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
   },
   collapsedVoiceButton: {
     position: 'absolute',
-    right: 9,
-    top: 9,
-    width: 34,
-    height: 34,
-    borderRadius: 5,
+    right: 8,
+    top: 8,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
   },
   collapsedVoiceButtonWithStop: { right: 52 },
   collapsedStopButton: {
     position: 'absolute',
-    right: 9,
-    top: 9,
-    width: 34,
-    height: 34,
-    borderRadius: 5,
+    right: 8,
+    top: 8,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: colors.dangerBorder,
     backgroundColor: colors.dangerDark,
@@ -1201,40 +1201,40 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   controls: {
-    minHeight: 47,
+    minHeight: 52,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
-    paddingHorizontal: 9,
-    paddingBottom: 9,
+    gap: 8,
+    paddingHorizontal: 8,
+    paddingBottom: 8,
   },
   controlSpacer: { flex: 1 },
-  voiceFeedback: { paddingHorizontal: 12, paddingTop: 5, paddingBottom: 8 },
-  voiceStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  voiceStatusDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.danger },
+  voiceFeedback: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 8 },
+  voiceStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  voiceStatusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.danger },
   voiceStatusDotPaused: { backgroundColor: colors.warning },
   voiceStatusDotTranscribing: { backgroundColor: colors.accent },
   voiceStatusDotSpeech: { backgroundColor: colors.online },
   voiceStatusDotError: { backgroundColor: colors.danger },
   voiceFeedbackText: {
+    flexShrink: 1,
     color: colors.accent,
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: '600',
-    letterSpacing: 0.25,
   },
-  voiceFeedbackError: { color: colors.danger, fontWeight: '600', letterSpacing: 0 },
+  voiceFeedbackError: { color: colors.danger, fontWeight: '600' },
   voiceTimer: {
+    marginLeft: 'auto',
     color: colors.text,
-    fontFamily: 'monospace',
-    fontSize: 11,
-    fontWeight: '400',
+    fontSize: 12,
+    fontWeight: '500',
     fontVariant: ['tabular-nums'],
   },
   voicePrimaryControls: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   voiceButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 8,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
@@ -1245,26 +1245,28 @@ const styles = StyleSheet.create({
   voiceButtonSuccess: { borderColor: colors.onlineBorder, backgroundColor: colors.onlineDark },
   voiceButtonPaused: { borderColor: colors.accentBorder, backgroundColor: colors.accentWash },
   iconButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 5,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
     backgroundColor: colors.controlSurface,
   },
-  iconButtonAccent: { borderColor: colors.accent, backgroundColor: colors.accent },
-  footer: { paddingTop: 8, paddingBottom: 6 },
+  iconButtonAccent: { backgroundColor: colors.accent },
+  footer: { paddingTop: 8, paddingBottom: 4 },
   modelControl: {
-    minHeight: 32,
+    minHeight: 36,
     maxWidth: '58%',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    paddingHorizontal: 8,
+    paddingLeft: 12,
+    paddingRight: 8,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
   },
-  modelLabel: { color: colors.secondary, fontSize: 11, fontWeight: '500', flexShrink: 1 },
+  modelLabel: { color: colors.textSecondary, fontSize: 12, fontWeight: '500', flexShrink: 1 },
   disabled: { opacity: 0.4 },
   pressed: { opacity: 0.72 },
 });

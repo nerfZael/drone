@@ -88,17 +88,17 @@ export function AssistantApprovalCard({
 }
 
 const styles = StyleSheet.create({
-  card: { marginHorizontal: 12, marginBottom: 10, gap: 8 },
+  card: { marginHorizontal: 16, marginBottom: 10, gap: 8 },
   eyebrow: {
     color: colors.accent,
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 0.8,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.6,
     textTransform: 'uppercase',
   },
-  title: { color: colors.textStrong, fontSize: 14, fontWeight: '800' },
-  details: { color: colors.muted, fontFamily: 'monospace', fontSize: 11, lineHeight: 17 },
-  warning: { color: colors.warning, fontSize: 12, lineHeight: 18 },
+  title: { color: colors.textStrong, fontSize: 15, fontWeight: '700' },
+  details: { color: colors.muted, fontFamily: 'monospace', fontSize: 12, lineHeight: 18 },
+  warning: { color: colors.warning, fontSize: 13, lineHeight: 19 },
   actions: { flexDirection: 'row', gap: 8 },
   button: { flex: 1 },
 });

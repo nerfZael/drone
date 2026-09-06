@@ -160,7 +160,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 5,
   },
-  triggerLabel: { color: colors.textSecondary, fontSize: 11, fontWeight: '600' },
+  triggerLabel: { color: colors.textSecondary, fontSize: 12, fontWeight: '500' },
   chevronOpen: { transform: [{ rotate: '180deg' }] },
   menu: {
     padding: 6,

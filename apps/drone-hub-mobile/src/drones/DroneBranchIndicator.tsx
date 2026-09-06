@@ -14,7 +14,7 @@ export function DroneBranchIndicator({ branch: branchRaw }: { branch?: string | 
       accessibilityLabel={`Current branch: ${branch}`}
       style={styles.indicator}
     >
-      <GitBranch color={colors.mutedDim} size={15} strokeWidth={2} />
+      <GitBranch color={colors.mutedDim} size={14} strokeWidth={2} />
       <Text numberOfLines={1} style={styles.label}>
         {branch}
       </Text>
@@ -36,8 +36,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
     flexShrink: 1,
     color: colors.textSecondary,
-    fontFamily: 'monospace',
-    fontSize: 11,
-    fontWeight: '600',
+    fontSize: 12,
+    fontWeight: '500',
   },
 });

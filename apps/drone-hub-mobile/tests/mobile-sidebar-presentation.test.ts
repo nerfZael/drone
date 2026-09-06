@@ -115,23 +115,23 @@ describe('mobile sidebar presentation', () => {
     );
     const shellSource = readFileSync(new URL('../src/shell/MeshApp.tsx', import.meta.url), 'utf8');
 
-    expect(drawerSource).toContain('deviceOptionActiveEdge');
+    expect(drawerSource).toContain('deviceOptionActive: { backgroundColor: colors.sidebarSelectionWash }');
     expect(drawerSource).toContain('borderColor: colors.sidebarMutedDim');
     expect(drawerSource).toContain('shadowColor: colors.online');
     expect(drawerSource).toContain('<Text numberOfLines={1} style={styles.devicePlatform}>');
     expect(drawerSource).toContain('{devicePlatformLabel(device.platform)}');
     expect(drawerSource).toContain("platform === 'server' || platform === 'desktop'");
-    expect(drawerSource).toContain('deviceOptionsContent: {\n    padding: 0,');
+    expect(drawerSource).toContain('deviceOptionsContent: {\n    padding: 4,');
     expect(drawerSource).not.toContain('deviceOptionsContent: {\n    padding: 5,');
     expect(shellSource).toContain("detail: 'This device'");
     expect(shellSource).toContain("platform: current?.platform ?? 'android'");
     expect(shellSource).toContain('platform: device.platform');
-    expect(drawerSource).toContain('width: 232,');
+    expect(drawerSource).toContain('<DrawerDeviceChip');
     expect(drawerSource).toContain(
-      "deviceOptionName: { color: colors.sidebarFg, fontSize: 12, fontWeight: '400' }",
+      "deviceOptionName: { color: colors.sidebarFg, fontSize: 15, fontWeight: '500' }",
     );
     expect(drawerSource).toContain('deviceOptionNameActive: { color: colors.sidebarFgActive }');
-    expect(drawerSource).toContain('backgroundColor: colors.sidebarSelectionEdge');
+    expect(drawerSource).toContain('{devicesNavigationItem && deviceMenuOpen ? (');
     expect(drawerSource).toContain('accessibilityLabel="Manage devices"');
     expect(drawerSource).toContain('deviceSettingsActionLabel');
     expect(drawerSource).not.toContain('<SidebarNetworkIcon');
@@ -142,7 +142,7 @@ describe('mobile sidebar presentation', () => {
     expect(drawerSource).not.toContain('<View style={styles.navigation}>');
     expect(drawerSource).not.toContain('function navigationIcon');
     expect(drawerSource).toContain(
-      "devicePickerName: { color: colors.text, fontSize: 12, fontWeight: '400' }",
+      "deviceChipName: { flexShrink: 1, color: colors.text, fontSize: 13, fontWeight: '500' }",
     );
   });
 
@@ -218,22 +218,22 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain("repoCopy: { flex: 1, minWidth: 0, justifyContent: 'center' }");
     expect(source).not.toContain('const projectCount =');
     expect(source).not.toContain('repoListHeader: {');
-    expect(source).toContain('style={styles.repoIconSlot}');
+    expect(source).toContain('containsSelectedDrone && styles.repoIconSlotActive,');
     expect(source).toContain('repoIconSlot: {');
     expect(source).toContain('{isUngrouped ? (');
     expect(source).toContain('<SidebarFolderOutlineIcon');
     expect(source).not.toContain('repoIconFrame: {');
     expect(source).toContain('repoUngroupedDivider: {');
     expect(source).not.toContain('styles.repoGroup');
-    expect(source).toContain('repoRow: {\n    minHeight: 50,');
-    expect(source).toContain('paddingHorizontal: 14,');
-    expect(source).toContain('paddingVertical: 7,');
+    expect(source).toContain('repoRow: {\n    minHeight: 56,\n    marginHorizontal: DRAWER_ROW_INSET,');
+    expect(source).toContain('paddingHorizontal: 10,');
+    expect(source).toContain('paddingVertical: 8,');
     expect(source).toContain(
-      "repoName: { color: colors.sidebarHeadingFg, fontSize: 13, fontWeight: '600' }",
+      "repoName: { color: colors.sidebarHeadingFg, fontSize: 15, fontWeight: '600' }",
     );
     expect(source).toContain('repoPath: {\n    marginTop: 2,');
-    expect(source).toContain('fontSize: 8.5,');
-    expect(source).toContain('opacity: 0.55,');
+    expect(source).toContain('repoIconSlotActive: { backgroundColor: colors.accentDark }');
+    expect(source).toContain('style={styles.repoDisclosure}');
     expect(source).toContain(
       "repoNameActive: { color: colors.sidebarDroneActiveFg, fontWeight: '600' }",
     );
@@ -263,8 +263,8 @@ describe('mobile sidebar presentation', () => {
       'utf8',
     );
 
-    expect(source).toContain('fleetStateText: {\n    minWidth: 11,');
-    expect(source).toContain("fontFamily: 'monospace',\n    textAlign: 'left',");
+    expect(source).toContain('fleetStateText: {\n    minWidth: 12,');
+    expect(source).toContain("fontVariant: ['tabular-nums'],\n    textAlign: 'left',");
   });
 
   test('derives the selected drone approval state from the active native thread', () => {
@@ -294,18 +294,18 @@ describe('mobile sidebar presentation', () => {
     expect(source).not.toContain('<Text style={styles.switchItemState}>{stateLabel}</Text>');
     expect(source).not.toContain('styles.switchItemTimeSlot');
     expect(source).not.toContain('styles.chatCount');
-    expect(source).toContain('selected ? <View style={styles.sidebarSelectionEdge} /> : null');
-    expect(source).toContain('containsSelectedDrone ? (');
+    expect(source).toContain('multiSelected && styles.switchItemRowActive,');
+    expect(source).toContain('containsSelectedDrone && styles.repoRowActive,');
     expect(source).toContain(
       'switchItemRowActive: { backgroundColor: colors.sidebarSelectionWash }',
     );
     expect(source).toContain('repoRowActive: { backgroundColor: colors.sidebarSelectionWash }');
     expect(source).toContain("droneNode: { position: 'relative' }");
-    expect(source).toContain('switchItemRow: {\n    height: 36,');
-    expect(source).toContain("fontSize: 13,\n    fontWeight: '400',");
-    expect(source).toContain('switchItemTitleActive: { color: colors.sidebarDroneActiveFg }');
+    expect(source).toContain('switchItemRow: {\n    minHeight: 44,\n    marginHorizontal: DRAWER_ROW_INSET,');
+    expect(source).toContain("fontSize: 15,\n    fontWeight: '400',");
+    expect(source).toContain('switchItemTitleActive: { color: colors.sidebarDroneActiveFg, fontWeight: \'500\' }');
     expect(source).toContain('const DRAWER_TREE_ROW_PADDING_LEFT = 12;');
-    expect(source).toContain('const DRAWER_TREE_DEPTH_INDENT = 10;');
+    expect(source).toContain('const DRAWER_TREE_DEPTH_INDENT = 12;');
     expect(source).toContain('sidebarRowPressed: { backgroundColor: colors.whiteWash }');
     expect(source).toContain('droneList: { paddingBottom: 24 }');
   });
@@ -430,11 +430,11 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain(
       '<DroneStateCounts summary={chatStateSummary} compact entity="chat" />',
     );
-    expect(source).toContain('{ marginLeft: drawerTreeRowPaddingLeft(depth) + 8 }');
-    expect(source).toContain('selectionWashInset={drawerTreeRowPaddingLeft(depth) + 8}');
+    expect(source).toContain('{ marginLeft: drawerTreeGuideLeft(depth) }');
+    expect(source).toContain('selectionWashInset={drawerTreeGuideLeft(depth) - DRAWER_ROW_INSET}');
     expect(source).toContain('hasActiveChildChat && styles.droneChatRailVisible');
     expect(source).toContain("borderLeftColor: 'transparent'");
-    expect(source).toContain('gap: 4,\n    paddingLeft: 8,\n    paddingRight: 6,');
+    expect(source).toContain('gap: 6,\n    paddingLeft: 10,\n    paddingRight: DRAWER_ROW_INSET,');
     expect(source).toContain('styles.droneChatSelectionWash, { left: -selectionWashInset }');
     expect(source).toContain('<DrawerDroneChatRow');
     expect(source).toContain('drone.draftChats?.[chatName] === true');
@@ -451,7 +451,7 @@ describe('mobile sidebar presentation', () => {
     );
     expect(source).toContain('parentSelected && styles.switchItemRowActive');
     expect(source).toContain(
-      'parentSelected ? <View style={styles.sidebarSelectionEdge} /> : null',
+      'droneChatSelectionWash: {\n    position: \'absolute\',\n    top: 0,\n    right: 4,',
     );
     expect(source).toContain('delayLongPress={600}');
     expect(source).toContain('suppressPressAfterLongPressRef.current = true;');
@@ -480,12 +480,12 @@ describe('mobile sidebar presentation', () => {
     expect(deleteFlow).not.toContain('Alert.alert');
     expect(deleteFlow).toContain('for (const name of deleteChatPlan.chatNames)');
     expect(deleteFlow).toContain('catch {');
-    expect(source).toContain('repoNavigationHead: {\n    minHeight: 48,\n    marginBottom: 8,');
+    expect(source).toContain('repoNavigationHead: {\n    minHeight: 56,\n    marginBottom: 4,');
     expect(source).not.toContain('showChats={false}');
     expect(source).toContain('color: colors.sidebarSubitemFg,');
     expect(source).toContain("droneChildren: {\n    position: 'relative',");
     expect(source).toContain(
-      'style={[styles.groupChildrenGuide, { left: drawerTreeRowPaddingLeft(depth) + 8 }]}',
+      'style={[styles.groupChildrenGuide, { left: drawerTreeGuideLeft(depth) }]}',
     );
     expect(source).toContain('node={child}\n              depth={depth + 1}');
     expect(modelSource).toContain('sidebarChatOrderByDrone: Record<string, string[]>;');
@@ -548,9 +548,9 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain('{hasSelectedDirectDrone ? (');
     expect(source).toContain('styles.groupChildrenGuide');
     expect(source).toContain(
-      "groupName: { color: colors.sidebarHeadingFg, fontSize: 13, fontWeight: '400', flex: 1 }",
+      "groupName: { color: colors.sidebarHeadingFg, fontSize: 14, fontWeight: '500', flex: 1 }",
     );
-    expect(source).toContain('groupRow: {\n    minHeight: 36,');
+    expect(source).toContain('groupRow: {\n    minHeight: 40,');
     const chatGroupRows = source.slice(
       source.indexOf('function DrawerDroneChatTreeEntry'),
       source.indexOf('function DrawerDroneNode'),
@@ -584,9 +584,9 @@ describe('mobile sidebar presentation', () => {
     expect(drawerSource).toContain('data={activeRepo.entries}');
     expect(drawerSource).toContain('drones={globalPinnedDrones}');
     expect(drawerSource).toContain('<Text style={styles.pinnedHeaderText}>Pinned</Text>');
-    expect(drawerSource).toContain('pinnedSection: {\n    flexShrink: 0,\n    paddingBottom: 4,');
-    expect(drawerSource).toContain('pinnedHeader: {\n    minHeight: 32,');
-    expect(drawerSource).toContain('paddingLeft: 12,\n    paddingRight: 8,');
+    expect(drawerSource).toContain('pinnedSection: {\n    flexShrink: 0,\n    paddingBottom: 6,');
+    expect(drawerSource).toContain('pinnedHeader: {\n    minHeight: 40,');
+    expect(drawerSource).toContain('paddingLeft: 16,\n    paddingRight: DRAWER_ROW_INSET,');
     expect(drawerSource).toContain('borderBottomWidth: StyleSheet.hairlineWidth,');
     expect(drawerSource).toContain('color={colors.sidebarMutedDim}');
     expect(drawerSource).toContain('style={styles.pinnedHeaderIcon}');
@@ -596,7 +596,7 @@ describe('mobile sidebar presentation', () => {
     expect(drawerSource).toContain('accessibilityState={{ expanded: !collapsed }}');
     expect(drawerSource).toContain('onPress={onToggleCollapsed}');
     expect(drawerSource).toContain('? drones.map((drone) => (');
-    expect(drawerSource).toContain("fontSize: 10.5,\n    fontWeight: '400',");
+    expect(drawerSource).toContain("fontSize: 11,\n    fontWeight: '600',\n    letterSpacing: 0.8,\n    textTransform: 'uppercase',");
     expect(drawerSource).toContain(
       '<Text numberOfLines={1} style={styles.switchItemContextBadge}>',
     );
@@ -611,8 +611,8 @@ describe('mobile sidebar presentation', () => {
     expect(pinnedCountsIndex).toBeGreaterThan(-1);
     expect(pinnedCountsIndex).toBeLessThan(contextBadgeIndex);
     expect(regularCountsIndex).toBeGreaterThan(contextBadgeIndex);
-    expect(drawerSource).toContain('switchItemContextBadge: {\n    maxWidth: 76,');
-    expect(drawerSource).toContain('color: colors.sidebarFgActive,');
+    expect(drawerSource).toContain('switchItemContextBadge: {\n    maxWidth: 96,');
+    expect(drawerSource).toContain('color: colors.sidebarMetaFg,\n    fontSize: 10,\n    fontWeight: \'600\',');
     expect(drawerSource).toContain('borderColor: colors.border,');
     expect(drawerSource).toContain('backgroundColor: colors.sidebarSurfaceInset,');
     expect(drawerSource).not.toContain('styles.pinnedCount');
@@ -658,14 +658,14 @@ describe('mobile sidebar presentation', () => {
     expect(drawerSource).toContain("placement === 'bottom' && styles.pinnedSectionBottom");
     expect(drawerSource).toContain('pinnedSectionBottom: {\n    flexShrink: 0,');
     expect(drawerSource).toContain(
-      'pinnedSectionTop: {\n    borderBottomWidth: 1,\n    borderBottomColor: colors.borderSubtle,',
+      'pinnedSectionTop: {\n    borderBottomWidth: StyleSheet.hairlineWidth,\n    borderBottomColor: colors.borderSubtle,',
     );
     expect(drawerSource).toContain('stickyHeaderIndices={[0]}');
     expect(drawerSource).toContain("pinnedSidebarPlacement === 'top' &&");
     expect(drawerSource).toContain('globalPinnedDrones.length > 0 &&');
     expect(drawerSource).toContain('styles.repoNavigationHeadBelowPinned');
     expect(drawerSource).toContain(
-      'repoNavigationHeadBelowPinned: {\n    borderTopWidth: 1,\n    borderTopColor: colors.borderSubtle,',
+      'repoNavigationHeadBelowPinned: {\n    borderTopWidth: StyleSheet.hairlineWidth,\n    borderTopColor: colors.borderSubtle,',
     );
     expect(drawerSource).toContain('backgroundColor: colors.panel,');
     expect(drawerSource).not.toContain('pinnedSection: {\n    borderBottomWidth: 1,');
@@ -773,7 +773,7 @@ describe('mobile sidebar presentation', () => {
       '{muted ? <MutedStatusIndicator /> : collapsed ? <DroneStateCounts summary={stateSummary} compact /> : null}',
     );
     expect(source).toContain(
-      "groupRow: {\n    minHeight: 36,\n    flexDirection: 'row',\n    alignItems: 'center',\n    gap: DRAWER_TREE_LEADING_GAP,\n    paddingRight: 10,",
+      "groupRow: {\n    minHeight: 40,\n    flexDirection: 'row',\n    alignItems: 'center',\n    gap: DRAWER_TREE_LEADING_GAP,\n    paddingRight: DRAWER_ROW_INSET,",
     );
   });
 

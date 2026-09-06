@@ -21,7 +21,8 @@ import Mic from 'lucide-react-native/icons/mic';
 import X from 'lucide-react-native/icons/x';
 import Svg, { Circle, Line, Path } from 'react-native-svg';
 import { Drawer } from 'react-native-drawer-layout';
-import { colors } from '../theme';
+import { colors, radii } from '../theme';
+import { APP_HEADER_HEIGHT } from '../layout';
 import { useMobileReadingDensity } from '../mobile-reading-density';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSharedMobileChatVoiceRecorder } from './MobileChatVoiceRecorderContext';
@@ -216,15 +217,22 @@ const DrawerCompanionHighlightContext = React.createContext<ReadonlySet<string>>
 const DRAWER_WORKING_SPIN_DURATION_MS = 1_600;
 const RECENT_BLOCKED_EMPHASIS_MS = 30_000;
 const DRAWER_TREE_ROW_PADDING_LEFT = 12;
-const DRAWER_TREE_DEPTH_INDENT = 10;
-const DRAWER_TREE_LEADING_SLOT_WIDTH = 12;
-const DRAWER_TREE_LEADING_GAP = 6;
+const DRAWER_TREE_DEPTH_INDENT = 12;
+const DRAWER_TREE_LEADING_SLOT_WIDTH = 16;
+const DRAWER_TREE_LEADING_GAP = 8;
+// Rows are inset from the drawer edge so selection reads as a rounded pill.
+const DRAWER_ROW_INSET = 8;
 const PINNED_SIDEBAR_PLACEMENT_KEY = 'droneHubMobile.pinnedSidebarPlacement';
 const PINNED_SIDEBAR_COLLAPSED_KEY = 'droneHubMobile.pinnedSidebarCollapsed';
 type PinnedSidebarPlacement = 'top' | 'bottom';
 
 function drawerTreeRowPaddingLeft(depth: number): number {
   return DRAWER_TREE_ROW_PADDING_LEFT + Math.max(0, depth) * DRAWER_TREE_DEPTH_INDENT;
+}
+
+// Vertical guides and chat rails sit under the centre of the row's leading status slot.
+function drawerTreeGuideLeft(depth: number): number {
+  return drawerTreeRowPaddingLeft(depth) + DRAWER_ROW_INSET + DRAWER_TREE_LEADING_SLOT_WIDTH / 2;
 }
 
 function mobileSidebarEntryNodeId(entry: MobileDroneSidebarEntry): string {
@@ -363,112 +371,119 @@ export function AppDrawerProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-function DrawerDevicePicker({
+function DrawerDeviceChip({
+  devices,
+  activeDeviceId,
+  open,
+  onToggle,
+}: {
+  devices: DrawerDevicePickerItem[];
+  activeDeviceId: string;
+  open: boolean;
+  onToggle(): void;
+}) {
+  const activeDevice = devices.find((device) => device.id === activeDeviceId) ?? devices[0];
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${activeDevice?.name ?? 'Choose device'}, ${deviceConnectionLabel(activeDevice)}. Choose device.`}
+      accessibilityState={{ expanded: open }}
+      onPress={onToggle}
+      style={({ pressed }) => [
+        styles.deviceChip,
+        open && styles.deviceChipOpen,
+        pressed && styles.devicePickerPressed,
+      ]}
+    >
+      <View style={[styles.deviceDot, activeDevice?.connected && styles.deviceDotOnline]} />
+      <Text numberOfLines={1} style={styles.deviceChipName}>
+        {activeDevice?.name ?? 'Choose a device'}
+      </Text>
+      <SidebarChevronIcon
+        color={colors.sidebarActionFg}
+        size={14}
+        strokeWidth={2}
+        direction={open ? 'up' : 'down'}
+      />
+    </Pressable>
+  );
+}
+
+function DrawerDeviceMenu({
   devices,
   activeDeviceId,
   onSelect,
   onOpenDeviceSettings,
+  onClose,
 }: {
   devices: DrawerDevicePickerItem[];
   activeDeviceId: string;
   onSelect?(deviceId: string): void;
   onOpenDeviceSettings?(): void;
+  onClose(): void;
 }) {
-  const [open, setOpen] = React.useState(false);
-  const activeDevice = devices.find((device) => device.id === activeDeviceId) ?? devices[0];
-  React.useEffect(() => setOpen(false), [activeDeviceId]);
   return (
-    <View style={styles.devicePickerSection}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`${activeDevice?.name ?? 'Choose device'}, ${deviceConnectionLabel(activeDevice)}. Choose device.`}
-        accessibilityState={{ expanded: open }}
-        onPress={() => setOpen((current) => !current)}
-        style={({ pressed }) => [
-          styles.devicePicker,
-          open && styles.devicePickerOpen,
-          pressed && styles.devicePickerPressed,
-        ]}
+    <View style={styles.deviceOptions}>
+      <ScrollView
+        style={styles.deviceOptionsList}
+        contentContainerStyle={styles.deviceOptionsContent}
+        nestedScrollEnabled
+        keyboardShouldPersistTaps="handled"
       >
-        <View style={[styles.deviceDot, activeDevice?.connected && styles.deviceDotOnline]} />
-        <View style={styles.devicePickerTriggerCopy}>
-          <Text numberOfLines={1} style={styles.devicePickerName}>
-            {activeDevice?.name ?? 'Choose a device'}
-          </Text>
-        </View>
-        <SidebarChevronIcon
-          color={colors.sidebarActionFg}
-          size={14}
-          strokeWidth={2}
-          direction={open ? 'up' : 'down'}
-        />
-      </Pressable>
-      {open ? (
-        <View style={styles.deviceOptions}>
-          <ScrollView
-            style={styles.deviceOptionsList}
-            contentContainerStyle={styles.deviceOptionsContent}
-            nestedScrollEnabled
-            keyboardShouldPersistTaps="handled"
-          >
-            {devices.map((device, index) => {
-              const active = device.id === activeDeviceId;
-              return (
-                <Pressable
-                  key={device.id}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${device.name}, ${deviceConnectionLabel(device)}, ${devicePlatformLabel(device.platform)}`}
-                  accessibilityState={{ selected: active }}
-                  onPress={() => {
-                    setOpen(false);
-                    if (!active) onSelect?.(device.id);
-                  }}
-                  style={({ pressed }) => [
-                    styles.deviceOption,
-                    index === devices.length - 1 && styles.deviceOptionLast,
-                    active && styles.deviceOptionActive,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  {active ? <View style={styles.deviceOptionActiveEdge} /> : null}
-                  <View style={[styles.deviceDot, device.connected && styles.deviceDotOnline]} />
-                  <View style={styles.devicePickerCopy}>
-                    <Text
-                      numberOfLines={1}
-                      style={[styles.deviceOptionName, active && styles.deviceOptionNameActive]}
-                    >
-                      {device.name}
-                    </Text>
-                    {device.detail ? (
-                      <Text numberOfLines={1} style={styles.devicePickerDetail}>
-                        {device.detail}
-                      </Text>
-                    ) : null}
-                  </View>
-                  <Text numberOfLines={1} style={styles.devicePlatform}>
-                    {devicePlatformLabel(device.platform)}
-                  </Text>
-                </Pressable>
-              );
-            })}
-            {devices.length === 0 ? (
-              <Text style={styles.empty}>No compatible devices are available.</Text>
-            ) : null}
-          </ScrollView>
-          {onOpenDeviceSettings ? (
+        {devices.map((device) => {
+          const active = device.id === activeDeviceId;
+          return (
             <Pressable
+              key={device.id}
               accessibilityRole="button"
-              accessibilityLabel="Manage devices"
+              accessibilityLabel={`${device.name}, ${deviceConnectionLabel(device)}, ${devicePlatformLabel(device.platform)}`}
+              accessibilityState={{ selected: active }}
               onPress={() => {
-                setOpen(false);
-                onOpenDeviceSettings();
+                onClose();
+                if (!active) onSelect?.(device.id);
               }}
-              style={({ pressed }) => [styles.deviceSettingsAction, pressed && styles.pressed]}
+              style={({ pressed }) => [
+                styles.deviceOption,
+                active && styles.deviceOptionActive,
+                pressed && !active && styles.sidebarRowPressed,
+              ]}
             >
-              <Text style={styles.deviceSettingsActionLabel}>Manage devices</Text>
+              <View style={[styles.deviceDot, device.connected && styles.deviceDotOnline]} />
+              <View style={styles.devicePickerCopy}>
+                <Text
+                  numberOfLines={1}
+                  style={[styles.deviceOptionName, active && styles.deviceOptionNameActive]}
+                >
+                  {device.name}
+                </Text>
+                {device.detail ? (
+                  <Text numberOfLines={1} style={styles.devicePickerDetail}>
+                    {device.detail}
+                  </Text>
+                ) : null}
+              </View>
+              <Text numberOfLines={1} style={styles.devicePlatform}>
+                {devicePlatformLabel(device.platform)}
+              </Text>
             </Pressable>
-          ) : null}
-        </View>
+          );
+        })}
+        {devices.length === 0 ? (
+          <Text style={styles.empty}>No compatible devices are available.</Text>
+        ) : null}
+      </ScrollView>
+      {onOpenDeviceSettings ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Manage devices"
+          onPress={() => {
+            onClose();
+            onOpenDeviceSettings();
+          }}
+          style={({ pressed }) => [styles.deviceSettingsAction, pressed && styles.pressed]}
+        >
+          <Text style={styles.deviceSettingsActionLabel}>Manage devices</Text>
+        </Pressable>
       ) : null}
     </View>
   );
@@ -947,7 +962,7 @@ function DrawerDroneChatRow({
         }}
         style={({ pressed }) => [
           styles.droneChatRow,
-          { paddingLeft: 8 + depth * 10 },
+          { paddingLeft: 10 + depth * DRAWER_TREE_DEPTH_INDENT },
           multiSelected && styles.switchItemRowActive,
           pressed && !selected && styles.sidebarRowPressed,
         ]}
@@ -955,7 +970,6 @@ function DrawerDroneChatRow({
         {selected ? (
           <View style={[styles.droneChatSelectionWash, { left: -selectionWashInset }]} />
         ) : null}
-        {selected ? <View style={styles.sidebarSelectionEdge} /> : null}
         <SwitchItemStatusIndicator state={displayState} unread={unread} muted={muted} showReadyAnchor />
         {reorderSidebar && canReorder ? (
           <MobileSidebarDragArea
@@ -1039,7 +1053,7 @@ function DrawerDroneChatTreeEntry({
         canReorder={Object.keys(tree.nodesById).length > 1}
         activeDroneId={activeDroneId}
         activeChatName={activeChatName}
-        selectionWashInset={selectionWashInset + depth * 10}
+        selectionWashInset={selectionWashInset}
         depth={depth}
         onOpenActions={onOpenChatActions}
         onSelect={onSelect}
@@ -1142,7 +1156,7 @@ function DrawerDroneChatTreeEntry({
           onPress={() => chatTreeContext?.toggleGroup(groupId)}
           style={({ pressed }) => [
             styles.groupRow,
-            { paddingLeft: 8 + depth * 10 },
+            { paddingLeft: 10 + depth * DRAWER_TREE_DEPTH_INDENT },
             pressed && styles.sidebarRowPressed,
           ]}
         >
@@ -1180,7 +1194,7 @@ function DrawerDroneChatTreeEntry({
             {hasSelectedDirectChat ? (
               <View
                 pointerEvents="none"
-                style={[styles.groupChildrenGuide, { left: 8 + depth * 10 + 8 }]}
+                style={[styles.groupChildrenGuide, { left: 10 + depth * DRAWER_TREE_DEPTH_INDENT + 8 }]}
               />
             ) : null}
             {childIds.map((childId) => (
@@ -1485,13 +1499,12 @@ function DrawerDroneNode({
           }}
           style={({ pressed }) => [
             styles.switchItemRow,
-            { paddingLeft: drawerTreeRowPaddingLeft(depth), paddingRight: 6 },
+            { paddingLeft: drawerTreeRowPaddingLeft(depth), paddingRight: DRAWER_ROW_INSET },
             companionHighlighted && styles.switchItemRowCompanionHighlighted,
             parentSelected && styles.switchItemRowActive,
             pressed && !parentSelected && styles.sidebarRowPressed,
           ]}
         >
-          {parentSelected ? <View style={styles.sidebarSelectionEdge} /> : null}
           <View style={styles.switchItemMain}>
             {isChatDisclosure && !muted ? (
               <View accessible={false} style={styles.droneChevronSlot}>
@@ -1578,7 +1591,7 @@ function DrawerDroneNode({
           <View
             style={[
               styles.droneChatRail,
-              { marginLeft: drawerTreeRowPaddingLeft(depth) + 8 },
+              { marginLeft: drawerTreeGuideLeft(depth) },
               hasActiveChildChat && styles.droneChatRailVisible,
             ]}
           >
@@ -1593,7 +1606,7 @@ function DrawerDroneNode({
                 depth={0}
                 activeDroneId={activeDroneId}
                 activeChatName={activeChatName}
-                selectionWashInset={drawerTreeRowPaddingLeft(depth) + 8}
+                selectionWashInset={drawerTreeGuideLeft(depth) - DRAWER_ROW_INSET}
                 onOpenChatActions={operation ? undefined : onOpenChatActions}
                 onSelect={onSelect}
               />
@@ -1605,7 +1618,7 @@ function DrawerDroneNode({
         <View style={styles.droneChildren}>
           <View
             pointerEvents="none"
-            style={[styles.groupChildrenGuide, { left: drawerTreeRowPaddingLeft(depth) + 8 }]}
+            style={[styles.groupChildrenGuide, { left: drawerTreeGuideLeft(depth) }]}
           />
           {node.children.map((child) => (
             <DrawerDroneNode
@@ -1815,6 +1828,7 @@ function DrawerDroneFolder({
           }}
           style={({ pressed }) => [
             styles.groupRow,
+            styles.folderRow,
             { paddingLeft: drawerTreeRowPaddingLeft(depth) },
             pressed && styles.sidebarRowPressed,
           ]}
@@ -1837,12 +1851,12 @@ function DrawerDroneFolder({
               onDrop={moveFolder}
               onMoveAccessibility={moveFolderAccessibility}
             >
-              <Text numberOfLines={1} style={[styles.groupName, styles.draggableRowLabel]}>
+              <Text numberOfLines={1} style={[styles.groupName, styles.folderName, styles.draggableRowLabel]}>
                 {folder.label}
               </Text>
             </MobileSidebarDragArea>
           ) : (
-            <Text numberOfLines={1} style={styles.groupName}>
+            <Text numberOfLines={1} style={[styles.groupName, styles.folderName]}>
               {folder.label}
             </Text>
           )}
@@ -1854,7 +1868,7 @@ function DrawerDroneFolder({
           {hasSelectedDirectDrone ? (
             <View
               pointerEvents="none"
-              style={[styles.groupChildrenGuide, { left: drawerTreeRowPaddingLeft(depth) + 8 }]}
+              style={[styles.groupChildrenGuide, { left: drawerTreeGuideLeft(depth) }]}
             />
           ) : null}
           {folder.entries.map((entry) => (
@@ -2034,7 +2048,7 @@ function DrawerPinnedDrones({
         >
           <SidebarPinIcon
             color={colors.sidebarMutedDim}
-            size={14}
+            size={12}
             strokeWidth={1.7}
             style={styles.pinnedHeaderIcon}
           />
@@ -2329,6 +2343,11 @@ function AppDrawerView({
   onClose,
 }: AppDrawerProps) {
   const insets = useSafeAreaInsets();
+  const [deviceMenuOpen, setDeviceMenuOpen] = React.useState(false);
+  React.useEffect(() => setDeviceMenuOpen(false), [activeDeviceId]);
+  React.useEffect(() => {
+    if (!open) setDeviceMenuOpen(false);
+  }, [open]);
   const [pinnedSidebarPlacement, setPinnedSidebarPlacement] =
     React.useState<PinnedSidebarPlacement>('bottom');
   const [pinnedSidebarCollapsed, setPinnedSidebarCollapsed] = React.useState(false);
@@ -3149,44 +3168,55 @@ function AppDrawerView({
             ]}
           >
             <View style={styles.header}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Open project list"
-                disabled={!dronesNavigationItem}
-                onPress={() => {
-                  setActiveRepoId(null);
-                  dronesNavigationItem?.onPress();
-                }}
-                style={({ pressed }) => [styles.headerCopy, pressed && styles.pressed]}
-              >
-                <Text style={styles.title}>Drone Hub</Text>
-              </Pressable>
-              {devicesNavigationItem ? (
-                <DrawerDevicePicker
+              <View style={styles.headerBar}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Open project list"
+                  disabled={!dronesNavigationItem}
+                  onPress={() => {
+                    setActiveRepoId(null);
+                    dronesNavigationItem?.onPress();
+                  }}
+                  style={({ pressed }) => [styles.headerCopy, pressed && styles.pressed]}
+                >
+                  <Text style={styles.title}>Drone Hub</Text>
+                </Pressable>
+                {devicesNavigationItem ? (
+                  <DrawerDeviceChip
+                    devices={devicePickerItems}
+                    activeDeviceId={activeDeviceId}
+                    open={deviceMenuOpen}
+                    onToggle={() => setDeviceMenuOpen((current) => !current)}
+                  />
+                ) : null}
+                {settingsNavigationItem ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Open settings"
+                    accessibilityState={{ selected: settingsNavigationItem.active }}
+                    onPress={settingsNavigationItem.onPress}
+                    style={({ pressed }) => [
+                      styles.headerSettings,
+                      settingsNavigationItem.active && styles.headerSettingsActive,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <SidebarSettingsIcon
+                      color={settingsNavigationItem.active ? colors.accent : colors.sidebarActionFg}
+                      size={18}
+                      strokeWidth={settingsNavigationItem.active ? 2.2 : 1.9}
+                    />
+                  </Pressable>
+                ) : null}
+              </View>
+              {devicesNavigationItem && deviceMenuOpen ? (
+                <DrawerDeviceMenu
                   devices={devicePickerItems}
                   activeDeviceId={activeDeviceId}
                   onSelect={onSelectDevice}
-                  onOpenDeviceSettings={devicesNavigationItem?.onPress}
+                  onOpenDeviceSettings={devicesNavigationItem.onPress}
+                  onClose={() => setDeviceMenuOpen(false)}
                 />
-              ) : null}
-              {settingsNavigationItem ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Open settings"
-                  accessibilityState={{ selected: settingsNavigationItem.active }}
-                  onPress={settingsNavigationItem.onPress}
-                  style={({ pressed }) => [
-                    styles.headerSettings,
-                    settingsNavigationItem.active && styles.headerSettingsActive,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <SidebarSettingsIcon
-                    color={settingsNavigationItem.active ? colors.accent : colors.sidebarActionFg}
-                    size={16}
-                    strokeWidth={settingsNavigationItem.active ? 2.2 : 1.9}
-                  />
-                </Pressable>
               ) : null}
             </View>
             {showDrones ? (
@@ -3248,20 +3278,13 @@ function AppDrawerView({
                               pressed && styles.pressed,
                             ]}
                           >
-                            <View style={styles.groupIcon}>
-                              <SidebarFolderGitIcon
-                                color={colors.sidebarActionFg}
-                                size={14}
-                                strokeWidth={1.9}
+                            <View style={styles.repoNavigationBackIcon}>
+                              <SidebarChevronIcon
+                                color={colors.sidebarFg}
+                                size={20}
+                                strokeWidth={2.2}
+                                direction="left"
                               />
-                              <View style={styles.groupChevron}>
-                                <SidebarChevronIcon
-                                  color={colors.sidebarActionFg}
-                                  size={10}
-                                  strokeWidth={2.3}
-                                  direction="left"
-                                />
-                              </View>
                             </View>
                             <View style={styles.repoCopy}>
                               <Text numberOfLines={1} style={styles.repoNavigationTitle}>
@@ -3291,7 +3314,7 @@ function AppDrawerView({
                               pressed && styles.pressed,
                             ]}
                           >
-                            <SidebarPlusIcon color={colors.accent} size={16} />
+                            <SidebarPlusIcon color={colors.accent} size={18} />
                           </Pressable>
                         </View>
                       </>
@@ -3312,6 +3335,11 @@ function AppDrawerView({
                     contentContainerStyle={styles.droneList}
                     data={droneGroups}
                     keyExtractor={(group) => group.id}
+                    ListHeaderComponent={
+                      droneGroups.length > 0 ? (
+                        <Text style={styles.sectionCaption}>Repositories</Text>
+                      ) : null
+                    }
                     renderItem={({ item: group }) => {
                       const stateSummary =
                         repoStateSummaries.get(group.id) ?? EMPTY_MOBILE_DRONE_STATE_SUMMARY;
@@ -3332,23 +3360,25 @@ function AppDrawerView({
                               pressed && !containsSelectedDrone && styles.sidebarRowPressed,
                             ]}
                           >
-                            {containsSelectedDrone ? (
-                              <View style={styles.sidebarSelectionEdge} />
-                            ) : null}
-                            <View style={styles.repoIconSlot}>
+                            <View
+                              style={[
+                                styles.repoIconSlot,
+                                containsSelectedDrone && styles.repoIconSlotActive,
+                              ]}
+                            >
                               {isUngrouped ? (
                                 <SidebarFolderOutlineIcon
                                   color={
                                     containsSelectedDrone ? colors.accent : colors.sidebarMetaFg
                                   }
-                                  size={14}
+                                  size={16}
                                 />
                               ) : (
                                 <SidebarFolderGitIcon
                                   color={
                                     containsSelectedDrone ? colors.accent : colors.sidebarActionFg
                                   }
-                                  size={14}
+                                  size={16}
                                   strokeWidth={1.9}
                                 />
                               )}
@@ -3368,6 +3398,14 @@ function AppDrawerView({
                               </Text>
                             </View>
                             <DroneStateCounts summary={stateSummary} compact />
+                            <View style={styles.repoDisclosure}>
+                              <SidebarChevronIcon
+                                color={colors.sidebarMutedDim}
+                                size={16}
+                                strokeWidth={2}
+                                direction="right"
+                              />
+                            </View>
                           </Pressable>
                           {isUngrouped ? <View style={styles.repoUngroupedDivider} /> : null}
                         </View>
@@ -3516,100 +3554,120 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   drawerContent: { flex: 1, backgroundColor: colors.panel },
+
+  // Header: title bar aligned with the page header, device switcher beneath it.
   header: {
-    minHeight: 44,
+    position: 'relative',
+    zIndex: 30,
+    paddingHorizontal: DRAWER_ROW_INSET,
+    borderBottomColor: colors.sidebarHeaderBorder,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    backgroundColor: colors.panel,
+  },
+  headerBar: {
+    minHeight: APP_HEADER_HEIGHT,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingHorizontal: 12,
-    borderBottomColor: colors.sidebarHeaderBorder,
-    borderBottomWidth: 1,
-    backgroundColor: colors.panel,
-    zIndex: 30,
   },
-  headerCopy: { flex: 1, minWidth: 0 },
+  headerCopy: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    borderRadius: radii.medium,
+  },
   headerSettings: {
-    width: 32,
-    height: 32,
+    width: 40,
+    height: 40,
     flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 6,
+    borderRadius: radii.large,
   },
-  headerSettingsActive: { backgroundColor: colors.whiteWashSoft },
+  headerSettingsActive: { backgroundColor: colors.accentDark },
   title: {
     color: colors.textStrong,
-    fontSize: 14,
+    fontSize: 17,
     fontWeight: '700',
-    letterSpacing: 0.4,
+    letterSpacing: -0.2,
+  },
+  sectionCaption: {
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 4,
+    color: colors.sidebarMutedDim,
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.8,
     textTransform: 'uppercase',
   },
   scroll: { flex: 1 },
-  empty: { color: colors.muted, fontSize: 12, lineHeight: 18, padding: 12 },
+  empty: {
+    color: colors.muted,
+    fontSize: 13,
+    lineHeight: 19,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
   drawerLoading: {
-    minHeight: 52,
+    minHeight: 56,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 12,
+    gap: 10,
+    paddingHorizontal: 16,
   },
-  drawerLoadingText: { color: colors.sidebarSubitemFg, fontSize: 12 },
-  drawerError: { gap: 10, padding: 12 },
-  drawerErrorText: { color: colors.danger, fontSize: 11, lineHeight: 17 },
+  drawerLoadingText: { color: colors.sidebarSubitemFg, fontSize: 13 },
+  drawerError: { gap: 10, paddingHorizontal: 16, paddingVertical: 14 },
+  drawerErrorText: { color: colors.danger, fontSize: 13, lineHeight: 19 },
   retry: {
     alignSelf: 'flex-start',
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 5,
+    minHeight: 36,
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    borderRadius: radii.medium,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.panelRaised,
   },
-  retryText: { color: colors.accent, fontSize: 10, fontWeight: '600' },
+  retryText: { color: colors.accent, fontSize: 13, fontWeight: '600' },
   drawerOffline: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 9,
-    paddingHorizontal: 9,
-    paddingVertical: 12,
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
   },
   drawerOfflineCopy: { flex: 1, minWidth: 0 },
-  drawerOfflineTitle: { color: colors.textSecondary, fontSize: 10, fontWeight: '700' },
-  drawerOfflineBody: { color: colors.mutedDim, fontSize: 9, lineHeight: 14, marginTop: 2 },
-  devicePickerSection: {
-    position: 'relative',
-    width: '55%',
-    minWidth: 0,
-    maxWidth: 220,
-    alignItems: 'flex-end',
-    zIndex: 40,
-  },
-  devicePicker: {
-    minHeight: 44,
-    maxWidth: '100%',
+  drawerOfflineTitle: { color: colors.textSecondary, fontSize: 13, fontWeight: '600' },
+  drawerOfflineBody: { color: colors.mutedDim, fontSize: 12, lineHeight: 17, marginTop: 2 },
+
+  // Device switcher: a compact chip in the title bar; the list overlays the drawer below it.
+  deviceChip: {
+    maxWidth: '52%',
+    minHeight: 36,
+    flexShrink: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingHorizontal: 8,
-    borderRadius: 6,
-    backgroundColor: 'transparent',
-  },
-  devicePickerOpen: { backgroundColor: colors.whiteWash },
-  devicePickerPressed: { backgroundColor: colors.whiteWashSoft },
-  devicePickerTriggerCopy: { flexShrink: 1, minWidth: 0 },
-  devicePickerCopy: { flex: 1, minWidth: 0, justifyContent: 'center' },
-  devicePickerName: { color: colors.text, fontSize: 12, fontWeight: '400' },
-  devicePickerDetail: {
-    color: colors.sidebarMetaFg,
-    fontSize: 10,
-    fontWeight: '400',
-    marginTop: 1,
-  },
-  deviceDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+    paddingLeft: 10,
+    paddingRight: 8,
+    borderRadius: radii.pill,
     borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    backgroundColor: colors.sidebarSurfaceInset,
+  },
+  deviceChipOpen: { borderColor: colors.border, backgroundColor: colors.whiteWash },
+  deviceChipName: { flexShrink: 1, color: colors.text, fontSize: 13, fontWeight: '500' },
+  devicePickerPressed: { backgroundColor: colors.whiteWashSoft },
+  devicePickerCopy: { flex: 1, minWidth: 0, justifyContent: 'center' },
+  devicePickerDetail: { color: colors.sidebarMetaFg, fontSize: 12, marginTop: 1 },
+  deviceDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    borderWidth: 1.5,
     borderColor: colors.sidebarMutedDim,
     backgroundColor: 'transparent',
   },
@@ -3624,149 +3682,155 @@ const styles = StyleSheet.create({
   },
   deviceOptions: {
     position: 'absolute',
-    top: 46,
-    right: 0,
-    width: 232,
-    maxHeight: 208,
-    borderRadius: 8,
+    top: APP_HEADER_HEIGHT - 4,
+    left: DRAWER_ROW_INSET,
+    right: DRAWER_ROW_INSET,
+    overflow: 'hidden',
+    borderRadius: radii.large,
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
-    backgroundColor: colors.panel,
-    elevation: 8,
+    borderColor: colors.border,
+    backgroundColor: colors.panelRaised,
+    elevation: 10,
     shadowColor: colors.shadow,
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.28,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
   },
   deviceOptionsContent: {
-    padding: 0,
+    padding: 4,
   },
-  deviceOptionsList: { maxHeight: 162 },
+  deviceOptionsList: { maxHeight: 248 },
   deviceOption: {
-    position: 'relative',
-    minHeight: 42,
+    minHeight: 48,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 9,
-    paddingLeft: 10,
-    paddingRight: 9,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.borderSubtle,
+    gap: 12,
+    paddingHorizontal: 12,
+    borderRadius: radii.medium,
   },
   deviceOptionActive: { backgroundColor: colors.sidebarSelectionWash },
-  deviceOptionLast: { borderBottomWidth: 0 },
-  deviceOptionActiveEdge: {
-    position: 'absolute',
-    top: 7,
-    bottom: 7,
-    left: 0,
-    width: 2,
-    borderTopRightRadius: 2,
-    borderBottomRightRadius: 2,
-    backgroundColor: colors.sidebarSelectionEdge,
-  },
-  deviceOptionName: { color: colors.sidebarFg, fontSize: 12, fontWeight: '400' },
+  deviceOptionName: { color: colors.sidebarFg, fontSize: 15, fontWeight: '500' },
   deviceOptionNameActive: { color: colors.sidebarFgActive },
   devicePlatform: {
-    width: 52,
     flexShrink: 0,
     color: colors.sidebarMetaFg,
     fontSize: 12,
-    fontWeight: '400',
+    fontWeight: '500',
     textAlign: 'right',
   },
   deviceSettingsAction: {
-    minHeight: 44,
+    minHeight: 48,
     justifyContent: 'center',
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.borderSubtle,
   },
   deviceSettingsActionLabel: {
-    color: colors.sidebarFg,
-    fontSize: 12,
-    fontWeight: '500',
+    color: colors.accent,
+    fontSize: 14,
+    fontWeight: '600',
   },
+
+  // Repository drill-in header (sticky above the drone tree).
   repoNavigationHead: {
-    minHeight: 48,
-    marginBottom: 8,
+    minHeight: 56,
+    marginBottom: 4,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingRight: 6,
-    borderBottomWidth: 1,
+    gap: 4,
+    paddingLeft: 4,
+    paddingRight: DRAWER_ROW_INSET,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.borderSubtle,
     backgroundColor: colors.panel,
   },
   repoNavigationHeadBelowPinned: {
-    borderTopWidth: 1,
+    borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.borderSubtle,
   },
   repoNavigationBack: {
-    minHeight: 48,
+    minHeight: 56,
     flex: 1,
     minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 8,
+    gap: 4,
+    paddingRight: 8,
   },
-  repoNavigationTitle: { color: colors.text, fontSize: 14, fontWeight: '700' },
-  repoNavigationPath: {
-    marginTop: 2,
-    color: colors.sidebarMetaFg,
-    fontSize: 9,
-    fontFamily: 'monospace',
-  },
-  repoCreate: {
-    width: 36,
-    height: 36,
+  repoNavigationBackIcon: {
+    width: 40,
+    height: 40,
     flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 6,
+    borderRadius: radii.large,
+  },
+  repoNavigationTitle: {
+    color: colors.textStrong,
+    fontSize: 17,
+    fontWeight: '700',
+    letterSpacing: -0.2,
+  },
+  repoNavigationPath: {
+    marginTop: 1,
+    color: colors.sidebarMetaFg,
+    fontSize: 12,
+  },
+  repoCreate: {
+    width: 40,
+    height: 40,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: colors.accentBorder,
+    backgroundColor: colors.accentDark,
   },
   repoCreateDisabled: { opacity: 0.42 },
-  fleetStates: { flexDirection: 'row', alignItems: 'center', gap: 9 },
-  fleetStatesCompact: { flexShrink: 0, gap: 6 },
-  fleetState: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+
+  // State counts (approval / unread / working) shown on collapsed scopes.
+  fleetStates: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  fleetStatesCompact: { flexShrink: 0, gap: 8 },
+  fleetState: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   fleetStateText: {
-    minWidth: 11,
+    minWidth: 12,
     color: colors.muted,
-    fontSize: 9,
-    fontFamily: 'monospace',
+    fontSize: 11,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
     textAlign: 'left',
   },
   fleetStateTextApproval: { color: colors.warning },
   fleetStateTextWorking: { color: colors.warning },
   fleetStateTextUnread: { color: colors.online },
   droneList: { paddingBottom: 24 },
+
+  // Pinned drones.
   pinnedSection: {
     flexShrink: 0,
-    paddingBottom: 4,
+    paddingBottom: 6,
   },
   pinnedSectionTop: {
-    borderBottomWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.borderSubtle,
   },
   pinnedSectionBottom: {
     flexShrink: 0,
-    borderTopWidth: 1,
+    borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.borderSubtle,
     borderBottomWidth: 0,
   },
   pinnedHeader: {
-    minHeight: 32,
+    minHeight: 40,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingLeft: 12,
-    paddingRight: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.borderSubtle,
+    gap: 4,
+    paddingLeft: 16,
+    paddingRight: DRAWER_ROW_INSET,
   },
   pinnedHeaderToggle: {
-    minHeight: 32,
+    minHeight: 40,
     flex: 1,
     minWidth: 0,
     flexDirection: 'row',
@@ -3776,64 +3840,82 @@ const styles = StyleSheet.create({
   pinnedHeaderText: {
     flex: 1,
     color: colors.sidebarMutedDim,
-    fontSize: 10.5,
-    fontWeight: '400',
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
   },
-  pinnedHeaderIcon: { opacity: 0.72 },
+  pinnedHeaderIcon: { opacity: 0.8 },
   pinnedPlacementToggle: {
-    width: 28,
-    height: 28,
+    width: 36,
+    height: 36,
     flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 5,
+    borderRadius: radii.medium,
   },
+
+  // Repository rows (top-level drill-in list).
   repoRow: {
-    minHeight: 50,
+    minHeight: 56,
+    marginHorizontal: DRAWER_ROW_INSET,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
+    gap: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: radii.large,
     position: 'relative',
   },
   repoRowActive: { backgroundColor: colors.sidebarSelectionWash },
   repoCopy: { flex: 1, minWidth: 0, justifyContent: 'center' },
   repoIconSlot: {
-    width: 20,
-    height: 18,
+    width: 34,
+    height: 34,
     flexShrink: 0,
-    alignSelf: 'flex-start',
     alignItems: 'center',
     justifyContent: 'center',
+    borderRadius: radii.medium,
+    backgroundColor: colors.surface0,
   },
-  repoName: { color: colors.sidebarHeadingFg, fontSize: 13, fontWeight: '600' },
+  repoIconSlotActive: { backgroundColor: colors.accentDark },
+  repoName: { color: colors.sidebarHeadingFg, fontSize: 15, fontWeight: '600' },
   repoNameActive: { color: colors.sidebarDroneActiveFg, fontWeight: '600' },
   repoPath: {
     marginTop: 2,
     color: colors.sidebarMetaFg,
-    fontSize: 8.5,
-    fontFamily: 'monospace',
-    opacity: 0.55,
+    fontSize: 12,
+  },
+  repoDisclosure: {
+    width: 16,
+    height: 16,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    opacity: 0.7,
   },
   repoUngroupedDivider: {
     height: StyleSheet.hairlineWidth,
-    marginHorizontal: 14,
+    marginHorizontal: 16,
+    marginVertical: 4,
     backgroundColor: colors.borderSubtle,
   },
+
+  // Drone rows.
   droneNode: { position: 'relative' },
   switchItemRow: {
-    height: 36,
+    minHeight: 44,
+    marginHorizontal: DRAWER_ROW_INSET,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10,
+    borderRadius: radii.medium,
     position: 'relative',
   },
   switchItemRowActive: { backgroundColor: colors.sidebarSelectionWash },
   switchItemRowCompanionHighlighted: {
     backgroundColor: colors.accentWash,
-    borderLeftWidth: 2,
-    borderLeftColor: colors.accent,
+    borderWidth: 1,
+    borderColor: colors.accentBorder,
   },
   switchItemMain: {
     flex: 1,
@@ -3851,8 +3933,8 @@ const styles = StyleSheet.create({
   },
   droneChevron: { opacity: 0.75 },
   droneRuntimeIconSlot: {
-    width: 14,
-    height: 14,
+    width: 16,
+    height: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -3860,39 +3942,38 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     color: colors.sidebarDroneFg,
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: '400',
   },
-  switchItemTitleComfortable: { fontSize: 14 },
+  switchItemTitleComfortable: { fontSize: 16 },
   draggableRowLabel: { flex: 0 },
-  switchItemTitleActive: { color: colors.sidebarDroneActiveFg },
+  switchItemTitleActive: { color: colors.sidebarDroneActiveFg, fontWeight: '500' },
   switchItemDraftBadge: {
     flexShrink: 0,
     color: colors.accent,
     fontSize: 10,
-    fontWeight: '600',
-    lineHeight: 10,
-    letterSpacing: 0.2,
-    paddingHorizontal: 4,
+    fontWeight: '700',
+    lineHeight: 12,
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+    paddingHorizontal: 6,
     paddingVertical: 2,
-    borderRadius: 3,
+    borderRadius: radii.small,
     backgroundColor: colors.accentDark,
   },
   switchItemContextBadge: {
-    maxWidth: 76,
+    maxWidth: 96,
     flexShrink: 1,
-    color: colors.sidebarFgActive,
-    fontSize: 7,
-    fontWeight: '500',
-    lineHeight: 8,
-    letterSpacing: 0.1,
+    color: colors.sidebarMetaFg,
+    fontSize: 10,
+    fontWeight: '600',
+    lineHeight: 12,
+    letterSpacing: 0.4,
     textTransform: 'uppercase',
-    paddingHorizontal: 2,
-    paddingVertical: 1,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 2,
-    backgroundColor: colors.sidebarSurfaceInset,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radii.small,
+    backgroundColor: colors.surface0,
   },
   switchItemStatus: {
     width: DRAWER_TREE_LEADING_SLOT_WIDTH,
@@ -3936,17 +4017,9 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 0 },
     elevation: 1,
   },
-  sidebarSelectionEdge: {
-    position: 'absolute',
-    top: 4,
-    bottom: 4,
-    left: 0,
-    width: 2,
-    borderTopRightRadius: 2,
-    borderBottomRightRadius: 2,
-    backgroundColor: colors.sidebarSelectionEdge,
-  },
   sidebarRowPressed: { backgroundColor: colors.whiteWash },
+
+  // Chat rows nested under a drone.
   droneChatRail: {
     marginRight: 4,
     borderLeftWidth: StyleSheet.hairlineWidth,
@@ -3954,60 +4027,62 @@ const styles = StyleSheet.create({
   },
   droneChatRailVisible: { borderLeftColor: colors.borderSubtle },
   droneChatRow: {
-    height: 32,
+    minHeight: 40,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingLeft: 8,
-    paddingRight: 6,
+    gap: 6,
+    paddingLeft: 10,
+    paddingRight: DRAWER_ROW_INSET,
+    borderRadius: radii.medium,
     position: 'relative',
   },
   droneChatSelectionWash: {
     position: 'absolute',
     top: 0,
-    right: -4,
+    right: 4,
     bottom: 0,
+    borderRadius: radii.medium,
     backgroundColor: colors.sidebarSelectionWash,
   },
   droneChatLabel: {
     flex: 1,
     minWidth: 0,
     color: colors.sidebarSubitemFg,
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '400',
   },
-  droneChatLabelComfortable: { fontSize: 14 },
-  droneChatLabelActive: { color: colors.sidebarDroneFg },
+  droneChatLabelComfortable: { fontSize: 15 },
+  droneChatLabelActive: { color: colors.sidebarDroneActiveFg, fontWeight: '500' },
   droneChatDraftBadge: {
     flexShrink: 0,
     color: colors.accent,
     fontSize: 10,
-    fontWeight: '600',
-    lineHeight: 10,
-    letterSpacing: 0.3,
+    fontWeight: '700',
+    lineHeight: 12,
+    letterSpacing: 0.4,
     textTransform: 'uppercase',
-    paddingHorizontal: 4,
+    paddingHorizontal: 6,
     paddingVertical: 2,
     borderWidth: 1,
     borderColor: colors.accentAlt,
-    borderRadius: 3,
+    borderRadius: radii.small,
   },
   droneChildren: {
     position: 'relative',
   },
+
+  // Folder / group rows.
   groupRow: {
-    minHeight: 36,
+    minHeight: 40,
     flexDirection: 'row',
     alignItems: 'center',
     gap: DRAWER_TREE_LEADING_GAP,
-    paddingRight: 10,
-    borderRadius: 4,
+    paddingRight: DRAWER_ROW_INSET,
+    borderRadius: radii.medium,
   },
-  groupIcon: {
-    width: 16,
-    height: 16,
-    alignItems: 'flex-end',
-    justifyContent: 'center',
+  folderRow: {
+    minHeight: 44,
+    marginHorizontal: DRAWER_ROW_INSET,
   },
   folderChevronSlot: {
     width: 16,
@@ -4016,18 +4091,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   folderChevron: { opacity: 0.72 },
-  groupChevron: {
-    position: 'absolute',
-    left: -4,
-    top: 2,
-    width: 10,
-    height: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 5,
-    backgroundColor: colors.panel,
-  },
-  groupName: { color: colors.sidebarHeadingFg, fontSize: 13, fontWeight: '400', flex: 1 },
+  groupName: { color: colors.sidebarHeadingFg, fontSize: 14, fontWeight: '500', flex: 1 },
+  folderName: { fontSize: 15 },
   groupChildren: { position: 'relative' },
   groupChildrenGuide: {
     position: 'absolute',
@@ -4037,43 +4102,46 @@ const styles = StyleSheet.create({
     backgroundColor: colors.borderSubtle,
   },
   drawerFill: { flex: 1 },
+
+  // Footer.
   companionFooter: {
     flexShrink: 0,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.borderSubtle,
   },
   companionButton: {
     width: '100%',
-    minHeight: 40,
+    minHeight: 46,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 9,
-    paddingHorizontal: 10,
-    borderRadius: 7,
+    paddingHorizontal: 12,
+    borderRadius: radii.large,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.controlSurface,
   },
   companionButtonRecording: {
-    borderWidth: 1,
     borderColor: colors.onlineBorder,
     backgroundColor: colors.onlineDark,
   },
   companionButtonUnavailable: { opacity: 0.62 },
   companionButtonDisabled: { opacity: 0.48 },
-  companionButtonText: { color: colors.sidebarFg, fontSize: 12, fontWeight: '600' },
+  companionButtonText: { color: colors.sidebarFg, fontSize: 14, fontWeight: '600' },
   companionButtonTextRecording: { color: colors.online },
   voiceFooter: {
     flexShrink: 0,
-    gap: 10,
+    gap: 12,
     paddingHorizontal: 12,
-    paddingTop: 11,
-    paddingBottom: 12,
+    paddingVertical: 12,
     borderTopWidth: 1,
     borderTopColor: colors.accentBorder,
     backgroundColor: colors.panelRaised,
   },
-  voiceFooterStatus: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  voiceFooterStatus: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   voiceFooterDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.danger },
   voiceFooterDotPaused: { backgroundColor: colors.warning },
   voiceFooterDotTranscribing: { backgroundColor: colors.accent },
@@ -4086,30 +4154,29 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 10,
   },
-  voiceFooterLabel: { flex: 1, color: colors.accent, fontSize: 11, fontWeight: '600' },
+  voiceFooterLabel: { flex: 1, color: colors.accent, fontSize: 13, fontWeight: '600' },
   voiceFooterLabelError: { color: colors.danger },
   voiceFooterTimer: {
     color: colors.text,
-    fontFamily: 'monospace',
-    fontSize: 11,
-    fontWeight: '400',
+    fontSize: 13,
+    fontWeight: '500',
     fontVariant: ['tabular-nums'],
   },
   voiceFooterActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   voiceFooterButton: {
     flex: 1,
-    minHeight: 38,
+    minHeight: 42,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 7,
-    borderRadius: 6,
+    borderRadius: radii.large,
     borderWidth: 1,
   },
   voiceFooterCancel: { borderColor: colors.dangerBorder, backgroundColor: colors.dangerDark },
   voiceFooterStop: { borderColor: colors.onlineBorder, backgroundColor: colors.onlineDark },
   voiceFooterButtonDisabled: { opacity: 0.42 },
-  voiceFooterButtonText: { fontSize: 10, fontWeight: '600', textTransform: 'uppercase' },
+  voiceFooterButtonText: { fontSize: 13, fontWeight: '600' },
   voiceFooterCancelText: { color: colors.danger },
   voiceFooterStopText: { color: colors.online },
   pressed: { opacity: 0.65 },

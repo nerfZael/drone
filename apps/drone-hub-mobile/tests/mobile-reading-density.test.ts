@@ -20,6 +20,6 @@ describe('mobile reading density', () => {
     expect(settings).toContain("{ value: 'display', label: 'Display', icon: Type }");
     expect(settings).toContain('<MobileReadingSettingsCard />');
     expect(transcript).toContain('messageTextComfortable: { fontSize: 16, lineHeight: 24 }');
-    expect(drawer).toContain('droneChatLabelComfortable: { fontSize: 14 }');
+    expect(drawer).toContain('droneChatLabelComfortable: { fontSize: 15 }');
   });
 });

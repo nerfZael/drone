@@ -125,7 +125,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     borderRadius: 6,
   },
-  triggerText: { flexShrink: 1, color: colors.muted, fontSize: 11, fontWeight: '600' },
+  triggerText: { flexShrink: 1, color: colors.muted, fontSize: 12, fontWeight: '500' },
   pressed: { opacity: 0.7 },
   layer: {
     flex: 1,
