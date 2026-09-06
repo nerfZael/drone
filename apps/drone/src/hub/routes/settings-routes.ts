@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import { upsertNamingProvider } from '../hub-settings';
+import { loadOpenRouterCatalog, refreshOpenRouterCatalog } from '../openrouter-model-catalog';
 
 import type { HubRouter } from '../hub-router';
 import type { HubServices } from '../application/hub-services';
@@ -272,6 +274,24 @@ export function registerSettingsRoutes(
     if (!provider) return fail(400, `provider must be one of: ${LLM_PROVIDER_IDS.join(', ')}`);
     await upsertStoredLlmProvider(provider);
     respond(200, await resolveLlmSettingsResponse());
+  });
+
+  apiRouter.post('/api/settings/naming-provider', async ({ readJson, fail, json: respond }) => {
+    const provider = parseLlmProvider((await readJson<any>())?.provider);
+    if (!provider) return fail(400, `provider must be one of: ${LLM_PROVIDER_IDS.join(', ')}`);
+    await upsertNamingProvider(provider);
+    respond(200, await resolveLlmSettingsResponse());
+  });
+
+  apiRouter.get('/api/settings/openrouter/models', async ({ json: respond }) => {
+    respond(200, { ok: true, ...await loadOpenRouterCatalog() });
+  });
+  apiRouter.post('/api/settings/openrouter/models/refresh', async ({ json: respond }) => {
+    try {
+      respond(200, { ok: true, ...await refreshOpenRouterCatalog() });
+    } catch (error: any) {
+      respond(502, { ok: false, error: error?.message ?? String(error) });
+    }
   });
 
   apiRouter.get('/api/settings/github', async ({ json: respond }) => {

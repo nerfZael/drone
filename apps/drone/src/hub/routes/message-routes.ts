@@ -48,13 +48,13 @@ export function registerMessageRoutes(apiRouter: HubRouter, deps: MessageRouteDe
       if (!resolved.apiKey) {
         await logProviderApiKeyResolution(
           'warn',
-          'name-from-message rejected: missing Codex connection and OpenAI key',
+          'name-from-message rejected: missing naming provider credentials',
           provider,
           { pathname: url.pathname, method, source, requestedDroneId, messageLength },
         );
         json(412, {
           ok: false,
-          error: 'Connect Codex or configure an OpenAI API key in Settings.',
+          error: `Configure credentials for the automatic naming provider (${provider}) in Settings.`,
         });
         return;
       }

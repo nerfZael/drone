@@ -63,6 +63,31 @@ export function useLlmSettings(requestJson: RequestJsonFn) {
   const [groqDraftLoadedFromSettings, setGroqDraftLoadedFromSettings] = React.useState(false);
   const [showGroqKey, setShowGroqKey] = React.useState(false);
   const [llmSettingsNotice, setLlmSettingsNotice] = React.useState<string | null>(null);
+  const [namingProviderDraft, setNamingProviderDraft] = React.useState<LlmProviderId>('openai');
+  React.useEffect(() => {
+    if (llmQuery.data?.namingProvider) setNamingProviderDraft(llmQuery.data.namingProvider);
+  }, [llmQuery.data?.namingProvider]);
+  const namingMutation = useMutation({
+    mutationFn: () => requestJson<LlmSettingsResponse>('/api/settings/naming-provider', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ provider: namingProviderDraft }),
+    }),
+    onSuccess: (data) => {
+      queryClient.setQueryData(llmQueryKey, data);
+      setLlmSettingsNotice(`Automatic naming now uses ${providerLabel(data.namingProvider ?? namingProviderDraft)}.`);
+    },
+  });
+  const catalogQuery = useSettingsQuery<{ updatedAt: string | null; count: number }>(
+    requestJson, settingsQueryKey('openrouter-models'), '/api/settings/openrouter/models',
+  );
+  const refreshModelsMutation = useMutation({
+    mutationFn: () => requestJson<{ updatedAt: string; count: number }>('/api/settings/openrouter/models/refresh', { method: 'POST' }),
+    onSuccess: async (data) => {
+      queryClient.setQueryData(settingsQueryKey('openrouter-models'), data);
+      await defaultModelQuery.refetch();
+      setLlmSettingsNotice(`Refreshed ${data.count} OpenRouter models. They are ready to use.`);
+    },
+  });
 
   const applyLlmDrafts = React.useCallback((
     settings: LlmSettingsResponse,
@@ -413,6 +438,15 @@ export function useLlmSettings(requestJson: RequestJsonFn) {
   }, []);
 
   return {
+    namingProviderDraft,
+    setNamingProviderDraft,
+    savingNamingProvider: namingMutation.isPending,
+    saveNamingProvider: () => namingMutation.mutate(),
+    namingProviderError: namingMutation.error?.message,
+    refreshOpenRouterModels: () => refreshModelsMutation.mutate(),
+    refreshingOpenRouterModels: refreshModelsMutation.isPending,
+    openRouterModelsError: refreshModelsMutation.error?.message ?? catalogQuery.error?.message,
+    openRouterModels: catalogQuery.data,
     llmSettings: llmQuery.data ?? null,
     llmSettingsLoading: llmQuery.isFetching || defaultModelQuery.isFetching,
     llmSettingsError: settingsQueryError(llmSettingsError, false, llmQuery, defaultModelQuery),

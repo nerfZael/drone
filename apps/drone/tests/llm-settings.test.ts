@@ -10,9 +10,12 @@ import {
   describeSecretValue,
   resolveNameSuggestionLlmSettings,
   upsertStoredLlmProvider,
+  upsertNamingProvider,
+  resolveNamingProvider,
   upsertStoredProviderApiKey,
 } from '../src/hub/hub-settings';
 import { getSocketListenSupport } from './socket-listen-support';
+import { getHubSettingsRepository } from '../src/host/hub-settings-repository';
 
 const listenSupport = getSocketListenSupport();
 const describeSocketSuite = listenSupport.ok ? describe : describe.skip;
@@ -199,14 +202,27 @@ describe('LLM settings diagnostics', () => {
     });
   });
 
-  test('uses the selected OpenRouter provider for name suggestions when configured', async () => {
+  test('uses the independent naming provider and keeps it when the agent provider changes', async () => {
     await withTempDroneDataDirAndEnv({ OPENROUTER_API_KEY: 'openrouter-key' }, async () => {
-      await upsertStoredLlmProvider('openrouter');
+      await upsertNamingProvider('openrouter');
+      await upsertStoredLlmProvider('gemini');
 
       const resolved = await resolveNameSuggestionLlmSettings();
       expect(resolved.provider).toBe('openrouter');
       expect(resolved.apiKey).toBe('openrouter-key');
       expect(resolved.source).toBe('environment');
+      await upsertNamingProvider('openai');
+      expect((await resolveNameSuggestionLlmSettings()).apiKey).toBeNull();
+      expect(await resolveNamingProvider()).toBe('openai');
+    });
+  });
+
+  test('migrates the old naming provider before changing the built-in default', async () => {
+    await withTempDroneDataDirAndEnv({ OPENROUTER_API_KEY: 'openrouter-key' }, async () => {
+      await (await getHubSettingsRepository()).put('llm.provider', { provider: 'openrouter' });
+      await upsertStoredLlmProvider('gemini');
+      expect(await resolveNamingProvider()).toBe('openrouter');
+      expect((await resolveNameSuggestionLlmSettings()).provider).toBe('openrouter');
     });
   });
 });
@@ -272,6 +288,21 @@ describeSocketSuite('LLM settings api', () => {
     expect(revealed.data.hasKey).toBe(true);
     expect(revealed.data.source).toBe('settings');
     expect(revealed.data.apiKey).toBe('stored-openai-key');
+  });
+
+  test('saves independent provider settings and rejects invalid naming providers', async () => {
+    const save = (url: string, provider: string) => apiFetch(url, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ provider }),
+    });
+    expect((await save('/api/settings/naming-provider', 'gemini')).r.status).toBe(200);
+    const saved = await save('/api/settings/llm', 'openrouter');
+    expect(saved.data.provider.selected).toBe('openrouter');
+    expect(saved.data.namingProvider).toBe('gemini');
+    expect((await save('/api/settings/naming-provider', 'invalid')).r.status).toBe(400);
+    expect((await apiFetch('/api/settings/llm')).data.namingProvider).toBe('gemini');
+    const catalog = await apiFetch('/api/settings/openrouter/models');
+    expect(catalog.r.status).toBe(200);
+    expect(catalog.data).toMatchObject({ count: 0, updatedAt: null });
   });
 
   test('stores OpenRouter key for Hub agent settings', async () => {

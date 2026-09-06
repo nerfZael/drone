@@ -399,6 +399,7 @@ function createDroneProvisioningServiceHandler(
         let seedProvider =
           seedProviderRaw === 'openai' ||
           seedProviderRaw === 'gemini' ||
+          seedProviderRaw === 'openrouter' ||
           seedProviderRaw === 'codex'
             ? seedProviderRaw
             : '';

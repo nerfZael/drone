@@ -782,7 +782,26 @@ async function getStoredLlmProvider(): Promise<LlmProviderId | null> {
 }
 
 export async function upsertStoredLlmProvider(provider: LlmProviderId): Promise<void> {
+  await resolveNamingProvider();
   await putCanonicalSetting(SETTING_KEYS.llmProvider, { provider });
+}
+
+export async function upsertNamingProvider(provider: LlmProviderId): Promise<void> {
+  await putCanonicalSetting('llm.naming-provider', { provider });
+}
+
+export async function resolveNamingProvider(): Promise<LlmProviderId> {
+  const repository = await getHubSettingsRepository();
+  const saved = repository.get<{ provider: LlmProviderId }>('llm.naming-provider');
+  const provider = parseLlmProvider(saved?.value?.provider);
+  if (provider) return provider;
+  const selected = await resolveEffectiveLlmProvider();
+  const credential = await resolveEffectiveProviderApiKeySettings(selected.provider);
+  const initial = selected.source !== 'default' && credential.apiKey
+    ? selected.provider
+    : (await resolveEffectiveProviderApiKeySettings('codex')).apiKey ? 'codex' : 'openai';
+  const record = await repository.backfillIfAbsent('llm.naming-provider', { provider: initial }, null);
+  return parseLlmProvider(record?.value?.provider) ?? initial;
 }
 
 export async function resolveEffectiveLlmProvider(): Promise<EffectiveLlmProvider> {
@@ -799,17 +818,8 @@ export async function resolveNameSuggestionLlmSettings(): Promise<{
   source: ApiKeySettingsSource;
   updatedAt: string | null;
 }> {
-  const selected = await resolveEffectiveLlmProvider();
-  if (selected.source !== 'default') {
-    const selectedCredential = await resolveEffectiveProviderApiKeySettings(selected.provider);
-    if (selectedCredential.apiKey) return { provider: selected.provider, ...selectedCredential };
-  }
-
-  const codex = await resolveEffectiveProviderApiKeySettings('codex');
-  if (codex.apiKey) return { provider: 'codex', ...codex };
-
-  const openai = await resolveEffectiveProviderApiKeySettings('openai');
-  return { provider: 'openai', ...openai };
+  const provider = await resolveNamingProvider();
+  return { provider, ...await resolveEffectiveProviderApiKeySettings(provider) };
 }
 
 export function providerKeySettingsResponse(
@@ -833,6 +843,7 @@ export function providerKeySettingsResponse(
 
 export async function resolveLlmSettingsResponse(): Promise<{
   ok: true;
+  namingProvider: LlmProviderId;
   provider: { selected: LlmProviderId; source: LlmProviderSource };
   openai: { hasKey: boolean; source: ApiKeySettingsSource; keyHint: string | null; updatedAt: string | null };
   gemini: { hasKey: boolean; source: ApiKeySettingsSource; keyHint: string | null; updatedAt: string | null };
@@ -850,6 +861,7 @@ export async function resolveLlmSettingsResponse(): Promise<{
   ]);
   return {
     ok: true,
+    namingProvider: await resolveNamingProvider(),
     provider: { selected: provider.provider, source: provider.source },
     openai: providerKeySettingsResponse(openai),
     gemini: providerKeySettingsResponse(gemini),

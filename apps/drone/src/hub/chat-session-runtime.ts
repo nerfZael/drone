@@ -746,7 +746,8 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     try {
       const llm = await resolveNameSuggestionLlmSettings();
       if (!llm.apiKey) {
-        hubLog('warn', 'chat auto-rename skipped: missing Codex connection and OpenAI key', {
+        hubLog('warn', 'chat auto-rename skipped: missing naming provider credentials', {
+          provider: llm.provider,
           droneId: opts.droneId,
           chatName: opts.chatName,
         });

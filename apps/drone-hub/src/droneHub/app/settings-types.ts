@@ -21,6 +21,7 @@ export type ApiKeySettingsResponse = {
 
 export type LlmSettingsResponse = {
   ok: true;
+  namingProvider?: LlmProviderId;
   provider: {
     selected: LlmProviderId;
     source: 'settings' | 'environment' | 'default';

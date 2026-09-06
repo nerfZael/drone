@@ -316,7 +316,7 @@ export function GeneralSettingsTab({
         ) : (
           <div className="grid grid-cols-1 xl:grid-cols-6 gap-3">
             <div className="dh-settings-row px-3 py-3">
-              <div className="dh-type-label">Active provider</div>
+              <div className="dh-type-label">Built-in agent provider</div>
               <div className="mt-2 dh-type-control text-[var(--fg-secondary)]">
                 {llmProviderLabel(llmSettings?.provider.selected)}
               </div>
@@ -379,10 +379,10 @@ export function GeneralSettingsTab({
 
       <div className="dh-settings-section">
         <div className="mb-2 dh-type-heading">
-          Active provider
+          Built-in agent
         </div>
         <UiSegmentedControl
-          label="Active provider"
+          label="Built-in agent provider"
           value={llmProviderDraft}
           options={[
               { value: 'openai', label: 'OpenAI' },
@@ -449,9 +449,43 @@ export function GeneralSettingsTab({
           </UiButton>
         </div>
         <div className="mt-2 text-[var(--text-11)] leading-relaxed text-[var(--muted-dim)]">
-          New Built-in chats use this model and reasoning whenever {llmProviderLabel(llmProviderDraft)} is the active provider.
+          New Built-in chats use this provider, model, and reasoning. Existing chats keep their own selection.
         </div>
       </div>
+
+      <section className="dh-settings-section">
+        <div className="dh-type-heading">Automatic naming</div>
+        <div className="dh-type-supporting">Provider used to suggest drone names and automatically name chats. Uses the API keys configured below.</div>
+        <UiSegmentedControl
+          label="Automatic naming provider"
+          value={llm.namingProviderDraft}
+          options={[
+            { value: 'openai', label: 'OpenAI' }, { value: 'gemini', label: 'Gemini' },
+            { value: 'codex', label: 'Codex' }, { value: 'openrouter', label: 'OpenRouter' },
+          ]}
+          onValueChange={llm.setNamingProviderDraft}
+          disabled={llm.savingNamingProvider || llmSettingsLoading}
+        />
+        <UiButton variant="primary" onClick={llm.saveNamingProvider} loading={llm.savingNamingProvider}
+          disabled={llmSettingsLoading || llm.savingNamingProvider || llm.namingProviderDraft === llmSettings?.namingProvider}>
+          Save naming provider
+        </UiButton>
+        {llm.namingProviderError ? <div role="alert">{llm.namingProviderError}</div> : null}
+      </section>
+
+      <section className="dh-settings-section">
+        <div className="dh-type-heading">OpenRouter models</div>
+        <div className="dh-type-supporting">Fetch the latest models that support agent tools, then select one in the Built-in agent model picker. No restart is needed.</div>
+        <div className="dh-type-supporting">
+          {llm.openRouterModels?.updatedAt
+            ? `${llm.openRouterModels.count} models fetched ${new Date(llm.openRouterModels.updatedAt).toLocaleString()}`
+            : 'Using bundled models. Refresh to load the full catalog.'}
+        </div>
+        <UiButton onClick={llm.refreshOpenRouterModels} loading={llm.refreshingOpenRouterModels} disabled={llm.refreshingOpenRouterModels}>
+          Refresh OpenRouter models
+        </UiButton>
+        {llm.openRouterModelsError ? <div role="alert">{llm.openRouterModelsError} Your previous catalog is still available.</div> : null}
+      </section>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <div className="dh-settings-section">

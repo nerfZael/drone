@@ -34,6 +34,7 @@ type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
 type LlmSettingsLike =
   | {
       provider?: { selected?: 'openai' | 'gemini' | 'codex' | 'openrouter' };
+      namingProvider?: 'openai' | 'gemini' | 'codex' | 'openrouter';
       openai?: { hasKey?: boolean };
       gemini?: { hasKey?: boolean };
       codex?: { hasKey?: boolean };
@@ -678,7 +679,7 @@ export function useDroneHubLifecycleEffects({
     if (!draftCreateOpen) return;
     const prompt = String(draftChat?.prompt?.prompt ?? '').trim();
     if (!prompt) return;
-    const selectedProvider = llmSettings?.provider?.selected ?? 'openai';
+    const selectedProvider = llmSettings?.namingProvider ?? 'openai';
     const selectedSettings = llmSettings?.[selectedProvider];
     if (!selectedSettings?.hasKey) return;
     let mounted = true;

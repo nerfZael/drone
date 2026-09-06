@@ -11,6 +11,7 @@ import type {
 import type { BlipHistoryPage } from '@blip/protocol';
 
 import { toBlipModelProvider } from '../hub-settings';
+import { loadOpenRouterCatalog, cachedOpenRouterModel } from '../openrouter-model-catalog';
 import { HubSessionRepository } from './hub-session-repository';
 import { loadBlipNodeRuntime, loadBlipRuntime } from './blip-runtime-loader';
 
@@ -499,7 +500,8 @@ export class BlipAssistantHost {
     let handle: BlipSessionHandle | undefined;
     try {
       const provider = toBlipModelProvider(config.provider);
-      const model = nodeRuntime.resolveBlipModel(provider, config.model);
+      await loadOpenRouterCatalog();
+      const model = cachedOpenRouterModel(provider, config.model) ?? nodeRuntime.resolveBlipModel(provider, config.model);
       const sessionId = await this.repository.sessionIdForThread(threadId);
       handle = await runtime.createBlipSession({
         workspaceRoot: 'drone-hub',

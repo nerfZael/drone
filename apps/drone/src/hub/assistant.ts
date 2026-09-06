@@ -27,6 +27,7 @@ import type {
 } from '@drone/assistant-chat';
 
 import { loadAssistantState, saveAssistantState } from '../host/assistant-store';
+import { loadOpenRouterCatalog, cachedOpenRouterModel } from './openrouter-model-catalog';
 import {
   getPromptQueueRepository,
   type PromptQueueRepository,
@@ -3031,6 +3032,7 @@ export class HubAssistantService {
     await onEvent?.({ type: 'snapshot', snapshot: await this.threadSnapshot(thread.id) });
   }
   private async ensureLoaded(): Promise<void> {
+    await loadOpenRouterCatalog();
     if (this.loaded) return;
     const stored = (await loadAssistantState()) ?? undefined;
     const storedSystemPrompt = normalizeAssistantSystemPrompt(stored?.systemPrompt);
@@ -3198,7 +3200,7 @@ export class HubAssistantService {
       let reasoning = option.thinkingLevel !== 'off';
       if (runtime) {
         try {
-          const model = runtime.getModel(toBlipModelProvider(option.provider), option.id);
+          const model = cachedOpenRouterModel(option.provider, option.id) ?? runtime.getModel(toBlipModelProvider(option.provider), option.id);
           reasoning = Boolean(model?.reasoning);
         } catch {}
       }

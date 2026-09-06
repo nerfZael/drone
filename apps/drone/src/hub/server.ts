@@ -3861,7 +3861,7 @@ async function suggestCreatedDroneNameDirect(input: {
   if (!resolved.apiKey) {
     await logProviderApiKeyResolution(
       'warn',
-      'name-from-message rejected: missing Codex connection and OpenAI key',
+      'name-from-message rejected: missing naming provider credentials',
       provider,
       {
         source,
@@ -3869,7 +3869,7 @@ async function suggestCreatedDroneNameDirect(input: {
         messageLength: input.prompt.length,
       },
     );
-    throw new Error('Connect Codex or configure an OpenAI API key in Settings.');
+    throw new Error(`Configure credentials for the automatic naming provider (${provider}) in Settings.`);
   }
   const name = await retryTemporaryNameSuggestion(
     () =>

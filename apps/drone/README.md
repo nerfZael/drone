@@ -14,6 +14,12 @@ This repo’s `drone` implementation uses **`dvm` for container/session manageme
 - **Host CLI**: `apps/drone/dist/cli.js` (command: `drone`)
 - **Daemon (inside container)**: `apps/drone/dist/daemon.js` (runs an HTTP server)
 
+## Hub provider settings
+
+In **Settings → General**, **Built-in agent** selects the provider, model, and reasoning for new native chats. **Automatic naming** independently selects the provider used for drone name suggestions and automatic chat names. Both use the shared provider credentials configured on that page. Existing installations preserve their previous naming provider when these settings are first separated.
+
+To use a newly released OpenRouter model, click **Refresh OpenRouter models**, then search for it in the Built-in agent model picker. The Hub fetches tool-capable models from OpenRouter's public models API and saves their runtime metadata locally. Model refreshes require neither a rebuild nor a restart. If the refresh fails, the previous catalog remains available.
+
 ## Installation
 
 From the monorepo root:
