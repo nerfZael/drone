@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { withDroneOpLock } from './drone-op-lock';
 
 import {
   applyHubDatabaseMigrations,
@@ -3168,6 +3169,11 @@ export async function applyChatReconciliationInStore(opts: {
 }
 
 export async function renameChatInStore(opts: { droneId: string; chatName: string; newChatName: string }): Promise<boolean> {
+  // Dispatch holds this same lock from identity resolution through session startup.
+  return await withDroneOpLock(`drone:${opts.droneId}`, () => renameChatInStoreUnlocked(opts));
+}
+
+async function renameChatInStoreUnlocked(opts: { droneId: string; chatName: string; newChatName: string }): Promise<boolean> {
   const store = repository();
   if (store) {
     const renamed = await store.renameChat(opts);

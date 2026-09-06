@@ -6,6 +6,7 @@ import {
   hasBlockingPendingPrompt,
   isSendInNewChatQueueAction,
 } from '@drone/assistant-chat';
+import { resolvePromptChatName } from './prompt-chat-identity';
 
 import type { AgentPlan } from '@drone/assistant-chat';
 import { DroneApiRequestError } from '../host/api';
@@ -715,6 +716,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
 
   async function sendPromptToChat(opts: {
     id?: string;
+    chatEntryId: string;
     droneId: string;
     chatName: string;
     prompt: string;
@@ -797,14 +799,16 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       const containerName =
         String(d?.containerName ?? '').trim() || String(d?.name ?? '').trim() || droneId;
 
-      const normalizedChat = opts.chatName || 'default';
-      if (!provisioningHandoff) {
-        await measurePromptDeliveryPhase(
-          opts.timing,
-          'ensureChat',
-          async () => await ensureChatEntry({ droneId, chatName: normalizedChat }),
-        );
-      }
+      // The name may have changed while capturing the baseline or syncing files.
+      // Renames share this drone lock, so the resolved identity remains valid
+      // through agent selection and session startup. Dispatch never creates chats.
+      const normalizedChat = resolvePromptChatName({
+        droneId,
+        chatName: opts.chatName || 'default',
+        chatEntryId: opts.chatEntryId,
+        readMetadata: readChatMetadataFromStore,
+        listChats: listChatsFromStore,
+      });
 
       const { d: dWithChat, chat } = await measurePromptDeliveryPhase(
         opts.timing,
@@ -2297,7 +2301,8 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     signal: AbortSignal;
   }): Promise<void> {
     const droneId = normalizeDroneIdentity(opts.droneId);
-    const chatName = String(opts.chatName ?? '').trim() || 'default';
+    let chatName = String(opts.chatName ?? '').trim() || 'default';
+    let chatEntryId = '';
     if (!droneId) return;
 
     // Avoid unbounded loops if state keeps changing due to concurrent requests.
@@ -2305,6 +2310,13 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       const dispatchStartedEpochMs = Date.now();
       const dispatchStartedMonotonicMs = performance.now();
       throwIfBackgroundPromptAborted(opts.signal);
+      if (chatEntryId) {
+        chatName = resolvePromptChatName({
+          droneId, chatName, chatEntryId,
+          readMetadata: readChatMetadataFromStore,
+          listChats: listChatsFromStore,
+        });
+      }
       const provisioningPreview = provisionedPromptHandoffs.peekForChat({ droneId, chatName });
       const previewDrone = provisioningPreview?.droneEntry ?? null;
       const previewChat = previewDrone?.chats?.[chatName] ?? null;
@@ -2312,6 +2324,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         previewDrone && previewChat
           ? { d: previewDrone, chat: previewChat }
           : await getChatEntry({ droneId, chatName });
+      chatEntryId = String(chat?.id ?? '');
       if (isDraftChatEntry(chat)) return;
       const agent = inferChatAgent(chat, d);
       if (!agent || (agent.kind !== 'builtin' && agent.kind !== 'native')) return;
@@ -2443,6 +2456,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           // but the native assistant drain must own the queued -> sending claim.
           // Claiming here first leaves the assistant drain with no claimable row.
           await sendPromptToChat({
+            chatEntryId: String(chat?.id ?? ''),
             id,
             droneId,
             chatName,
@@ -2526,6 +2540,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         const enqueueTimeoutMs = defaultPromptEnqueueTimeoutMs();
         const r: any = await withTimeout(
           sendPromptToChat({
+            chatEntryId: String(chat?.id ?? ''),
             id,
             droneId,
             chatName,
@@ -2541,6 +2556,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           enqueueTimeoutMs,
           `queued prompt enqueue failed for ${droneId}/${chatName}`,
         );
+        chatName = r.chat;
         throwIfBackgroundPromptAborted(opts.signal);
         if (r?.turnOk === false) {
           await deliveryTiming.measure(
@@ -3039,6 +3055,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       // eslint-disable-next-line no-await-in-loop
       const r: any = await withTimeout(
         sendPromptToChat({
+          chatEntryId: String(chat?.id ?? ''),
           id,
           droneId,
           chatName,
