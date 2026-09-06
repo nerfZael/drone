@@ -172,6 +172,7 @@ import {
 } from '../drones/mobile-drone-rename';
 import { isGranted, type DroneControlOperation } from '@drone/device-protocol';
 import { useLocalAssistant } from '../local-assistant/LocalAssistantContext';
+import { WorkspaceAccessEditor } from '../local-assistant/WorkspaceAccessEditor';
 import { LocalWorkspaceEditor } from '../local-assistant/LocalWorkspaceEditor';
 import {
   AssistantApprovalCard,
@@ -2594,10 +2595,7 @@ export function DronesScreen({
     drones,
     selectedDrone: selected,
     composerAvailable: Boolean(
-      workspaceVisible &&
-      selected &&
-      chats.length > 0 &&
-      !(accessOpen && phoneTarget && nativeChatId),
+      workspaceVisible && selected && chats.length > 0 && !(accessOpen && nativeChatId),
     ),
     workspaceVisible,
     chatName,
@@ -2917,15 +2915,11 @@ export function DronesScreen({
             ...(nativeMessages !== null
               ? {
                   accessOpen,
-                  accessDisabled: running,
-                  ...(phoneTarget
-                    ? {
-                        onToggleAccess: () => {
-                          if (accessOpen && accessDirty) setConfirmAccessDiscard(true);
-                          else setAccessOpen((value) => !value);
-                        },
-                      }
-                    : {}),
+                  accessDisabled: running || !targetReachable,
+                  onToggleAccess: () => {
+                    if (accessOpen && accessDirty) setConfirmAccessDiscard(true);
+                    else setAccessOpen((value) => !value);
+                  },
                 }
               : {}),
             ...(nativeMessages !== null || chatAgentId === 'codex' || chatAgentId === 'blip'
@@ -3525,16 +3519,83 @@ export function DronesScreen({
                 </View>
               ) : (
                 <>
-                  {accessOpen && phoneTarget && nativeChatId ? (
-                    <ScrollView
-                      style={styles.transcriptScroll}
-                      contentContainerStyle={styles.transcriptContent}
+                  {!accessOpen && nativeChatId ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Choose chat workspaces"
+                      disabled={running || !targetReachable}
+                      onPress={() => setAccessOpen(true)}
+                      style={{
+                        minHeight: 44,
+                        justifyContent: 'center',
+                        paddingHorizontal: 16,
+                        opacity: running || !targetReachable ? 0.5 : 1,
+                      }}
                     >
-                      {localAssistant.threads.find((thread) => thread.id === nativeChatId) ? (
-                        <LocalWorkspaceEditor
-                          thread={
-                            localAssistant.threads.find((thread) => thread.id === nativeChatId)!
+                      <Text style={{ color: colors.accent, fontSize: 13 }}>
+                        Workspaces
+                        {phoneTarget
+                          ? ` · ${localAssistant.threads.find((thread) => thread.id === nativeChatId)?.workspaceTargets.length ?? 0}`
+                          : typeof nativeThread?.workspaceCount === 'number'
+                            ? ` · ${nativeThread.workspaceCount}`
+                            : ''}
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                  {accessOpen && nativeChatId ? (
+                    <View style={{ flex: 1 }}>
+                      {phoneTarget ? (
+                        localAssistant.threads.find((thread) => thread.id === nativeChatId) ? (
+                          <LocalWorkspaceEditor
+                            key={nativeChatId}
+                            thread={
+                              localAssistant.threads.find((thread) => thread.id === nativeChatId)!
+                            }
+                            onRequestClose={() => {
+                              if (accessDirty) setConfirmAccessDiscard(true);
+                              else setAccessOpen(false);
+                            }}
+                            onApplied={() => {
+                              setAccessDirty(false);
+                              setAccessOpen(false);
+                            }}
+                            onDirtyChange={setAccessDirty}
+                          />
+                        ) : null
+                      ) : (
+                        <WorkspaceAccessEditor
+                          key={`${targetId}:${nativeChatId}`}
+                          hubDeviceId={targetId}
+                          disabled={running || !targetReachable}
+                          load={(deviceId, signal) =>
+                            requestDroneControl(
+                              targetId,
+                              'chat.read',
+                              {
+                                droneId: selected.id,
+                                chatName,
+                                nativeChatId,
+                                workspaceAccess: true,
+                                ...(deviceId ? { workspaceDeviceId: deviceId } : {}),
+                              },
+                              signal,
+                            )
                           }
+                          save={async (access, revision) => {
+                            const result = await requestDroneControl(targetId, 'chat.update', {
+                              droneId: selected.id,
+                              chatName,
+                              nativeChatId,
+                              workspaceAccess: access,
+                              workspaceRevision: revision,
+                            });
+                            setNativeThread((current: any) =>
+                              current?.id === nativeChatId
+                                ? { ...current, workspaceCount: access.targets.length }
+                                : current,
+                            );
+                            return result;
+                          }}
                           onRequestClose={() => {
                             if (accessDirty) setConfirmAccessDiscard(true);
                             else setAccessOpen(false);
@@ -3545,8 +3606,8 @@ export function DronesScreen({
                           }}
                           onDirtyChange={setAccessDirty}
                         />
-                      ) : null}
-                    </ScrollView>
+                      )}
+                    </View>
                   ) : (
                     <>
                       {startupMessage ? (
@@ -3736,6 +3797,8 @@ export function DronesScreen({
                               )
                             }
                             onStop={() => void stopChat()}
+                            onDictationPrestart={() => void dictation.prestartRecording()}
+                            onDictationPrestartCancel={() => void dictation.cancelPrestart()}
                             onOpenDictation={() => {
                               // Keep text attached to images/files in the normal
                               // composer; dictation destinations only send text.

@@ -50,6 +50,7 @@ export type LocalAssistantContextValue = {
       model?: string;
       thinkingLevel?: LocalAssistantThinkingLevel;
       workspaceTargets?: LocalWorkspaceTarget[];
+      expectedWorkspaceTargets?: LocalWorkspaceTarget[];
       autoApprove?: boolean;
       agentPermissionMode?: 'read' | 'write' | 'execute';
       approvalPolicy?: 'ask' | 'none';
@@ -288,6 +289,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
         model?: string;
         thinkingLevel?: LocalAssistantThinkingLevel;
         workspaceTargets?: LocalWorkspaceTarget[];
+        expectedWorkspaceTargets?: LocalWorkspaceTarget[];
         autoApprove?: boolean;
         agentPermissionMode?: 'read' | 'write' | 'execute';
         approvalPolicy?: 'ask' | 'none';
@@ -295,7 +297,18 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
       },
     ) => {
       const current = threadsRef.current.find((thread) => thread.id === threadId);
-      if (!current) return;
+      if (!current) {
+        if (patch.workspaceTargets !== undefined) throw new Error('This chat no longer exists.');
+        return;
+      }
+      if (patch.workspaceTargets !== undefined && current.status === 'running')
+        throw new Error('Stop the agent before changing workspace access.');
+      if (
+        patch.workspaceTargets !== undefined &&
+        patch.expectedWorkspaceTargets !== undefined &&
+        JSON.stringify(current.workspaceTargets) !== JSON.stringify(patch.expectedWorkspaceTargets)
+      )
+        throw new Error('Workspace access changed elsewhere. Reload before applying.');
       await replaceThread({
         ...current,
         ...(patch.title !== undefined ? { title: patch.title.trim().slice(0, 160) } : {}),

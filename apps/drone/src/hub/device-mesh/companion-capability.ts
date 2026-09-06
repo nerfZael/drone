@@ -101,9 +101,13 @@ export function createCompanionCapability(
       const { runId: clientRunId, prompt, messageId, telemetry } = validation;
       let session = sessionsByDeviceId.get(sourceDeviceId);
       if (session && session.clientRunId !== clientRunId) {
-        throw Object.assign(new Error('This device already has an active Companion run'), {
-          code: 'CONFLICT',
-        });
+        // A phone only ever drives one Companion conversation. A new run id from
+        // the same device means its client was reloaded or replaced, so the
+        // stale session is cancelled rather than blocking the phone forever.
+        const stale = session;
+        sessionsByDeviceId.delete(sourceDeviceId);
+        await cancelSession(stale, true);
+        session = undefined;
       }
 
       if (!session) {

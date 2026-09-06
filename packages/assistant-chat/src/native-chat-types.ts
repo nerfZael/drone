@@ -1,3 +1,4 @@
+import type { ChatWorkspaceAccess } from './workspace-access.js';
 import type { AssistantMessage } from './assistant-message-types.js';
 import type { ChatQueueAction } from './chat-queue-actions.js';
 import type { PromptQueueInterruption } from './pending-prompts.js';
@@ -51,7 +52,7 @@ export function normalizeChangeRequestPermissions(input?: {
 export type NativeAgentWorkspaceSummary = {
   id: string;
   label: string;
-  kind: 'drone' | 'artifacts';
+  kind: 'drone' | 'host' | 'artifacts' | 'remote';
   description: string;
   capabilities: Array<'read' | 'write' | 'execute'>;
 };
@@ -84,6 +85,7 @@ export type NativeChatThread = {
   enabledTools: string[];
   /** Missing only on chats created before workspace access became configurable. */
   enabledWorkspaceIds?: string[];
+  workspaceAccess?: ChatWorkspaceAccess;
   accessScope: NativeChatAccessScope;
   agentPermissionMode: AgentPermissionMode;
   approvalPolicy: AgentApprovalPolicy;

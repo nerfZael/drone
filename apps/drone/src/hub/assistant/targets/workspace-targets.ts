@@ -9,6 +9,7 @@ export type DroneHubWorkspaceExecutor = (call: WorkspaceTargetCall) => Promise<a
 
 abstract class DroneHubWorkspaceTarget implements WorkspaceTarget {
   readonly descriptor: WorkspaceTargetDescriptor;
+  readonly transfer;
 
   protected constructor(
     descriptor: Omit<WorkspaceTargetDescriptor, 'capabilities'> & {
@@ -17,6 +18,41 @@ abstract class DroneHubWorkspaceTarget implements WorkspaceTarget {
     protected readonly executor: DroneHubWorkspaceExecutor,
   ) {
     this.descriptor = descriptor;
+    const invoke = (tool: string, args: Record<string, unknown>, signal?: AbortSignal) =>
+      this.executor({ callId: `transfer_${Date.now()}`, tool, args, signal });
+    this.transfer = {
+      ...(descriptor.capabilities.includes('files.read')
+        ? {
+            source: {
+              stat: (path: string, signal?: AbortSignal) =>
+                invoke('transfer_stat', { path }, signal),
+              list: async (path: string, signal?: AbortSignal) =>
+                (await invoke('transfer_list', { path }, signal)).entries,
+              readChunk: (path: string, offset: number, length: number, signal?: AbortSignal) =>
+                invoke('transfer_read', { path, offset, length }, signal),
+            },
+          }
+        : {}),
+      ...(descriptor.capabilities.includes('files.write')
+        ? {
+            destination: {
+              createDirectory: async (path: string, signal?: AbortSignal) => {
+                await invoke('transfer_mkdir', { path }, signal);
+              },
+              prepareFile: (args: Record<string, unknown>, signal?: AbortSignal) =>
+                invoke('transfer_prepare', args, signal),
+              writeChunk: (args: Record<string, unknown>, signal?: AbortSignal) =>
+                invoke('transfer_write', args, signal),
+              commitFile: async (args: Record<string, unknown>, signal?: AbortSignal) => {
+                await invoke('transfer_commit', args, signal);
+              },
+              abortFile: async (args: Record<string, unknown>, signal?: AbortSignal) => {
+                await invoke('transfer_abort', args, signal);
+              },
+            },
+          }
+        : {}),
+    };
   }
 
   execute(call: WorkspaceTargetCall) {
@@ -47,7 +83,6 @@ export class HostWorkspaceTarget extends DroneHubWorkspaceTarget {
 
 export class DroneWorkspaceTarget extends DroneHubWorkspaceTarget {
   readonly droneId: string;
-  readonly transfer;
 
   constructor(input: {
     id: string;
@@ -68,40 +103,5 @@ export class DroneWorkspaceTarget extends DroneHubWorkspaceTarget {
       input.execute,
     );
     this.droneId = input.droneId;
-    const invoke = (tool: string, args: Record<string, unknown>, signal?: AbortSignal) =>
-      this.executor({ callId: `transfer_${Date.now()}`, tool, args, signal });
-    this.transfer = {
-      ...(input.capabilities.includes('files.read')
-        ? {
-            source: {
-              stat: (path: string, signal?: AbortSignal) =>
-                invoke('transfer_stat', { path }, signal),
-              list: async (path: string, signal?: AbortSignal) =>
-                (await invoke('transfer_list', { path }, signal)).entries,
-              readChunk: (path: string, offset: number, length: number, signal?: AbortSignal) =>
-                invoke('transfer_read', { path, offset, length }, signal),
-            },
-          }
-        : {}),
-      ...(input.capabilities.includes('files.write')
-        ? {
-            destination: {
-              createDirectory: async (path: string, signal?: AbortSignal) => {
-                await invoke('transfer_mkdir', { path }, signal);
-              },
-              prepareFile: (args: Record<string, unknown>, signal?: AbortSignal) =>
-                invoke('transfer_prepare', args, signal),
-              writeChunk: (args: Record<string, unknown>, signal?: AbortSignal) =>
-                invoke('transfer_write', args, signal),
-              commitFile: async (args: Record<string, unknown>, signal?: AbortSignal) => {
-                await invoke('transfer_commit', args, signal);
-              },
-              abortFile: async (args: Record<string, unknown>, signal?: AbortSignal) => {
-                await invoke('transfer_abort', args, signal);
-              },
-            },
-          }
-        : {}),
-    };
   }
 }

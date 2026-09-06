@@ -1,7 +1,9 @@
 import type { AssistantDroneSummary } from './assistant-contracts';
+import type { HostWorkspace } from './host-workspaces';
 
 export type AssistantToolCallbacks = {
   listDrones: () => Promise<AssistantDroneSummary[]>;
+  listHostWorkspaces?: () => Promise<HostWorkspace[]>;
   listDroneFiles?: (opts: {
     droneId: string;
     path?: string;

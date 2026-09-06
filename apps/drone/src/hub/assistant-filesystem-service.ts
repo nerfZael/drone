@@ -1,5 +1,10 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {
+  listHostWorkspaces,
+  hostWorkspaceFilesystemEntry,
+  assertHostWorkspacePath,
+} from './assistant/host-workspaces';
 
 import {
   workspaceBatch,
@@ -191,18 +196,27 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
     const ref = String(opts.droneId ?? '').trim();
     if (!ref) throw new Error('missing droneId');
     let resolvedError = '';
-    const resolved = await resolveDroneFromRegistryRef(ref, {
-      onStillStarting: () => {
-        resolvedError = `drone "${ref}" is still starting`;
-      },
-      onUnknown: () => {
-        resolvedError = `unknown drone: ${ref}`;
-      },
-    });
+    const host = ref.startsWith('host:')
+      ? (await listHostWorkspaces()).find((workspace) => workspace.id === ref)
+      : undefined;
+    const resolved = host
+      ? {
+          id: host.id,
+          drone: hostWorkspaceFilesystemEntry(host),
+        }
+      : await resolveDroneFromRegistryRef(ref, {
+          onStillStarting: () => {
+            resolvedError = `drone "${ref}" is still starting`;
+          },
+          onUnknown: () => {
+            resolvedError = `unknown drone: ${ref}`;
+          },
+        });
     if (!resolved) throw new Error(resolvedError || `unknown drone: ${ref}`);
     const targetPath = normalizeAssistantFsPathForRuntime(resolved.drone, opts.path ?? '', {
       fallbackToHome: opts.fallbackToHome,
     });
+    if (host) await assertHostWorkspacePath(host.path, targetPath);
     const name = String(resolved.drone?.name ?? resolved.id).trim() || resolved.id;
     return {
       id: resolved.id,
@@ -1024,7 +1038,7 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
             'if command -v rg >/dev/null 2>&1; then',
             '  search_cmd() { rg -n -I --hidden --glob "!node_modules/**" --glob "!.git/**" -- "$query" "$root" || true; }',
             'else',
-            '  search_cmd() { grep -RInI --exclude-dir=.git --exclude-dir=node_modules -- "$query" "$root" 2>/dev/null || true; }',
+            '  search_cmd() { grep -rInI --exclude-dir=.git --exclude-dir=node_modules -- "$query" "$root" 2>/dev/null || true; }',
             'fi',
             'match_id=0',
             'search_cmd | head -n "$limit" | while IFS= read -r hit; do',
@@ -1062,7 +1076,7 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
             'if command -v rg >/dev/null 2>&1; then',
             '  rg -n -I --hidden --glob "!node_modules/**" --glob "!.git/**" -- "$query" "$root" | head -n "$limit" || true',
             'else',
-            '  grep -RInI --exclude-dir=.git --exclude-dir=node_modules -- "$query" "$root" 2>/dev/null | head -n "$limit" || true',
+            '  grep -rInI --exclude-dir=.git --exclude-dir=node_modules -- "$query" "$root" 2>/dev/null | head -n "$limit" || true',
             'fi',
           ].join('\n');
     const r =

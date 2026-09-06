@@ -1,3 +1,7 @@
+import {
+  createChatWorkspaceAccessService,
+  type WorkspaceAccessMesh,
+} from '../assistant/chat-workspace-access';
 import type { ServerResponse } from 'node:http';
 
 import type { AssistantUiAction } from '../assistant';
@@ -5,6 +9,7 @@ import type { HubRouter } from '../hub-router';
 
 export type AssistantRouteDependencies = {
   assistantService: any;
+  deviceMesh?: WorkspaceAccessMesh;
   blipAssistantHost: any;
   nowIso: () => string;
   writeAssistantSseEvent: (res: ServerResponse, event: string, data: any) => void;
@@ -59,6 +64,37 @@ export function registerAssistantRoutes(
     const message = errorMessage(error);
     respond(unknownPattern.test(message) ? 404 : 400, { ok: false, error: message });
   };
+
+  if (deps.deviceMesh) {
+    const workspaces = createChatWorkspaceAccessService(assistantService, deps.deviceMesh);
+    apiRouter.get('/api/assistant/threads/:threadId/workspaces', async ({ params, url, json }) => {
+      try {
+        json(
+          200,
+          await workspaces.catalog(params.threadId, url.searchParams.get('deviceId') || undefined),
+        );
+      } catch (error) {
+        respondStatusError(json, error);
+      }
+    });
+    apiRouter.post(
+      '/api/assistant/threads/:threadId/workspaces',
+      async ({ params, readJson, json }) => {
+        try {
+          const body = await readJson();
+          const result = await workspaces.save(
+            params.threadId,
+            body?.access,
+            String(body?.revision ?? ''),
+          );
+          blipAssistantHost?.invalidateThread(params.threadId);
+          json(200, result);
+        } catch (error) {
+          respondStatusError(json, error);
+        }
+      },
+    );
+  }
 
   apiRouter.get('/api/assistant/system-prompt', async ({ json: respond }) => {
     respond(200, await assistantService.systemPromptSettings());

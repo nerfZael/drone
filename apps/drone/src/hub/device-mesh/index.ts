@@ -1,3 +1,4 @@
+import type { ChatWorkspaceTarget, ChatWorkspaceOption } from '@drone/assistant-chat';
 import type http from 'node:http';
 import path from 'node:path';
 import { canonicalJson, isGranted } from '@drone/device-protocol';
@@ -142,6 +143,13 @@ export async function createDeviceMeshService(options: {
       return status.running ? status.publicEndpoint : null;
     },
   );
+  // Shared-folder roots and per-device grants live in the policy store; phones
+  // showing a workspace picker refresh from this instead of polling.
+  const unsubscribeWorkspaceChanges = assistantPolicies.onChange(() => {
+    void router
+      .broadcastCapabilityEvent('workspace', 'workspaces.changed', {}, 'workspaces.list')
+      .catch(() => undefined);
+  });
   ingress = new DeviceMeshIngress(
     options.rootDir,
     options.ingressPort ?? 0,
@@ -175,6 +183,7 @@ export async function createDeviceMeshService(options: {
       pairingPruneTimer.unref?.();
     },
     close: async () => {
+      unsubscribeWorkspaceChanges();
       lanDiscovery.close();
       if (discoveryTimer) clearInterval(discoveryTimer);
       discoveryTimer = null;
@@ -219,8 +228,67 @@ export async function createDeviceMeshService(options: {
       router.broadcastCapabilityEvent('drone-control', 'drones.changed', payload, 'drones.list'),
     broadcastDroneChatChange: (payload: Record<string, any>) =>
       router.broadcastCapabilityEvent('drone-control', 'chat.changed', payload, 'chat.read'),
-    remoteWorkspaceTargets: async (threadId: string) => {
-      const policies = await assistantPolicies.homeTargets(threadId);
+    workspaceAccessDevices: async () => {
+      const state = await store.read();
+      const self = state.devices[state.selfDeviceId];
+      return {
+        self: { id: self.id, name: self.name },
+        devices: Object.values(state.devices)
+          .filter((device) => device.id !== self.id && !device.revokedAt)
+          .map((device) => ({ id: device.id, name: device.name })),
+      };
+    },
+    listWorkspaceAccessTargets: async (deviceId: string): Promise<ChatWorkspaceOption[]> => {
+      const state = await store.read();
+      const device = state.devices[deviceId];
+      if (!device || device.revokedAt || deviceId === state.selfDeviceId)
+        throw new Error('Device unavailable');
+      const result: any = await router.request(
+        deviceId,
+        'workspace',
+        'workspaces.list',
+        {},
+        AbortSignal.timeout(10_000),
+      );
+      return (Array.isArray(result?.workspaces) ? result.workspaces : []).map((root: any) => ({
+        id: `remote:${deviceId}:${root.id}`,
+        kind: 'remote',
+        workspaceId: String(root.id),
+        deviceId,
+        deviceName: device.name,
+        name: String(root.name),
+        read: root.read === true,
+        write: root.write === true,
+        execute: root.execute === true,
+      }));
+    },
+    legacyWorkspaceAccessTargets: async (threadId: string): Promise<ChatWorkspaceTarget[]> =>
+      (await assistantPolicies.homeTargets(threadId)).map((target) => ({
+        id: `remote:${target.targetDeviceId}:${target.rootId}`,
+        kind: 'remote',
+        deviceId: target.targetDeviceId,
+        deviceName: target.deviceName,
+        workspaceId: target.rootId,
+        name: target.workspaceName,
+        read: target.read,
+        write: target.write,
+        execute: target.execute,
+      })),
+    remoteWorkspaceTargets: async (threadId: string, selection?: ChatWorkspaceTarget[]) => {
+      const policies = selection
+        ? selection
+            .filter((target) => target.kind === 'remote')
+            .map((target) => ({
+              threadId,
+              targetDeviceId: target.deviceId,
+              deviceName: target.deviceName,
+              rootId: target.workspaceId!,
+              workspaceName: target.name,
+              read: target.read,
+              write: target.write,
+              execute: target.execute,
+            }))
+        : await assistantPolicies.homeTargets(threadId);
       const state = await store.read();
       return policies.flatMap((policy) => {
         const target = state.devices[policy.targetDeviceId];

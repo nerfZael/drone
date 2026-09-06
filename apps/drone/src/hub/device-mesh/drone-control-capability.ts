@@ -1,4 +1,4 @@
-import { DRONE_CONTROL_CAPABILITY } from '@drone/device-protocol';
+import { DRONE_CONTROL_CAPABILITY, isGranted } from '@drone/device-protocol';
 import {
   filterCompletedPendingPrompts,
   isSendInNewChatQueueAction,
@@ -1287,6 +1287,31 @@ export function createDroneControlCapability(
         }
         return { nativeChatId, snapshot };
       };
+      if (
+        (operation === 'chat.read' && payload.workspaceAccess === true) ||
+        (operation === 'chat.update' && payload.workspaceAccess !== undefined)
+      ) {
+        if (!isGranted(context.sourceDevice.grants ?? [], 'drone-control', 1, 'drones.list'))
+          throw new Error('Drone listing permission is required to configure chat workspaces.');
+        const { nativeChatId } = await resolveNativeChat(optionalText(payload.nativeChatId));
+        const pathname = `/api/assistant/threads/${encodeURIComponent(nativeChatId)}/workspaces`;
+        if (operation === 'chat.read') {
+          const deviceId = optionalText(payload.workspaceDeviceId);
+          return await localHubRequest(
+            access,
+            pathname + (deviceId ? `?deviceId=${encodeURIComponent(deviceId)}` : ''),
+            { signal: operationSignal },
+          );
+        }
+        return await localHubRequest(access, pathname, {
+          method: 'POST',
+          signal: operationSignal,
+          body: JSON.stringify({
+            access: payload.workspaceAccess,
+            revision: payload.workspaceRevision,
+          }),
+        });
+      }
       if (operation === 'chat.read') {
         const readHub = (pathname: string, init?: RequestInit) =>
           localHubRequest(access, pathname, { ...init, signal: operationSignal });

@@ -150,6 +150,46 @@ describe('Companion device mesh capability', () => {
     await capability.close?.();
   });
 
+  test('replaces a stale session when the phone starts a new conversation', async () => {
+    const cancelled: string[] = [];
+    const prompts: string[] = [];
+    const runtime = {
+      cancel(runId: string) {
+        cancelled.push(runId);
+      },
+      async deleteSession(runId: string) {
+        cancelled.push(runId);
+      },
+      run(input: any) {
+        prompts.push(input.prompt);
+        return new Promise<string>(() => undefined);
+      },
+    };
+    const events: any[] = [];
+    const capability = createCompanionCapability(
+      runtime as any,
+      async (_capability, _event, payload) => {
+        events.push(payload);
+      },
+    );
+
+    await capability.invoke('run.start', { runId: 'before-reload', prompt: 'Old' }, context());
+    await waitFor(() => prompts.length === 1);
+    // The phone reloaded and lost its client state; its next run id must win.
+    await capability.invoke('run.start', { runId: 'after-reload', prompt: 'Fresh' }, context());
+    await waitFor(() => prompts.length === 2);
+
+    expect(prompts).toEqual(['Old', 'Fresh']);
+    expect(cancelled).toHaveLength(1);
+    expect(events).toContainEqual(
+      expect.objectContaining({ runId: 'before-reload', type: 'status', status: 'cancelled' }),
+    );
+    await capability.invoke('run.cancel', { runId: 'before-reload' }, context());
+    expect(cancelled).toHaveLength(1);
+    await capability.invoke('run.cancel', { runId: 'after-reload' }, context());
+    expect(cancelled).toHaveLength(2);
+  });
+
   test('queues follow-ups on the same mobile Companion session', async () => {
     const prompts: string[] = [];
     const runtimeRunIds: string[] = [];
@@ -188,9 +228,6 @@ describe('Companion device mesh capability', () => {
       { runId: 'conversation-1', messageId: 'mobile-message-2', prompt: 'Second' },
       context(),
     );
-    await expect(
-      capability.invoke('run.start', { runId: 'conversation-2', prompt: 'Conflict' }, context()),
-    ).rejects.toMatchObject({ code: 'CONFLICT' });
     await waitFor(() => prompts.length === 1);
     expect(prompts).toEqual(['First']);
 

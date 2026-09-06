@@ -5688,6 +5688,7 @@ async function startDroneHubApiServerWithLifecycle(
 
   registerAssistantRoutes(apiRouter, {
     assistantService,
+    deviceMesh,
     blipAssistantHost,
     nowIso,
     writeAssistantSseEvent,

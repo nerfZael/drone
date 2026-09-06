@@ -1,6 +1,9 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
-import type { Transport, TransportSendOptions } from '@modelcontextprotocol/sdk/shared/transport.js';
+import type {
+  Transport,
+  TransportSendOptions,
+} from '@modelcontextprotocol/sdk/shared/transport.js';
 
 import { createDroneHubMcpServer } from '../mcp-server';
 import type { HubServices } from '../application/hub-services';
@@ -14,7 +17,9 @@ class LinkedTransport implements Transport {
   onmessage?: (message: JSONRPCMessage) => void;
   private started = false;
 
-  async start(): Promise<void> { this.started = true; }
+  async start(): Promise<void> {
+    this.started = true;
+  }
 
   async send(message: JSONRPCMessage, _options?: TransportSendOptions): Promise<void> {
     if (!this.started) throw new Error('MCP transport is not started');
@@ -46,6 +51,7 @@ function linkedTransports(): [LinkedTransport, LinkedTransport] {
 
 export async function createInProcessDroneHubMcpClient(input: {
   correlationId: string;
+  workspaceDroneRefs?: Record<'read' | 'write' | 'execute', string[]>;
   allowedDroneRefs: string[];
   allowedWriteDroneRefs: string[];
   allowedDroneIds: string[];
@@ -65,6 +71,9 @@ export async function createInProcessDroneHubMcpClient(input: {
     correlationId: input.correlationId,
     ...(input.nativeThreadId ? { nativeThreadId: input.nativeThreadId } : {}),
     ...(input.hubServices ? { hubServices: input.hubServices } : {}),
+    ...(input.workspaceDroneRefs
+      ? { workspaceDroneRefs: input.workspaceDroneRefs, allowedDroneIds: input.allowedDroneIds }
+      : {}),
     ...(principal.kind === 'chat'
       ? {}
       : {

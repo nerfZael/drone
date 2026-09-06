@@ -1,3 +1,4 @@
+import { listHostWorkspaces, hostWorkspaceFilesystemEntry } from './assistant/host-workspaces';
 import { drainNativePrompts } from './native-prompt-drain';
 import { createNativePromptSubmitter } from './native-prompt-submission';
 import type http from 'node:http';
@@ -19,7 +20,7 @@ import { createInProcessDroneHubMcpClient } from './assistant/in-process-drone-h
 import type { McpTokenIdentity } from './mcp-tokens';
 import type { HubServices } from './application/hub-services';
 import { AssistantArtifactsTarget } from './assistant/targets/assistant-artifacts-target';
-import { DroneWorkspaceTarget } from './assistant/targets/workspace-targets';
+import { DroneWorkspaceTarget, HostWorkspaceTarget } from './assistant/targets/workspace-targets';
 import {
   hubLog,
   resolveBlipProviderApiKey,
@@ -111,6 +112,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
         createdAt: String((d as any)?.createdAt ?? '').trim() || null,
         runtime: normalizeDroneRuntime((d as any)?.runtime),
         repoPath: String((d as any)?.repoPath ?? '').trim(),
+        cwd: String((d as any)?.cwd ?? '').trim(),
         status: hubPhase || (busyChats.length > 0 ? 'busy' : 'ready'),
         chats,
         ...(busyChats.length > 0 ? { busyChats, busy: true } : {}),
@@ -133,6 +135,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
         createdAt: String((d as any)?.createdAt ?? '').trim() || null,
         runtime: normalizeDroneRuntime((d as any)?.runtime),
         repoPath: String((d as any)?.repoPath ?? '').trim(),
+        cwd: String((d as any)?.cwd ?? '').trim(),
         status: String((d as any)?.phase ?? 'starting').trim() || 'starting',
         chats: ['default'],
         ...(activity.lastActivityAt ? { lastActivityAt: activity.lastActivityAt } : {}),
@@ -194,6 +197,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
   }
 
   const assistantService = new HubAssistantService({
+    listHostWorkspaces,
     listDrones: async (): Promise<AssistantDroneSummary[]> => {
       const regAny: any = await loadDroneSummaryRegistry();
       return buildAssistantDroneSummariesFromRegistry(regAny);
@@ -338,21 +342,37 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
           ? Promise.resolve(durable.artifactBaseline)
           : null;
       };
+      const resolveFileChangesEntry = async (id: string) => {
+        if (id.startsWith('host:')) {
+          const workspace = (await listHostWorkspaces()).find((item) => item.id === id);
+          return workspace ? hostWorkspaceFilesystemEntry(workspace) : null;
+        }
+        const resolved = await resolveCanonicalDroneOrPendingForReadRef(id);
+        return resolved?.kind === 'real' ? resolved.drone : null;
+      };
       const captureRunFileChangesBaseline = async (droneId: string) => {
         if (!activeRunTurnId || baselineByDroneId.has(droneId)) {
           await baselineByDroneId.get(droneId);
           return;
         }
         const turnId = activeRunTurnId;
-        const capture = resolveCanonicalDroneOrPendingForReadRef(droneId)
-          .then(async (resolved) => {
-            const drone = resolved?.kind === 'real' ? resolved.drone : null;
+        const capture = resolveFileChangesEntry(droneId)
+          .then(async (drone) => {
             if (!drone) return null;
             const baseline = await captureDroneRunFileChangesBaseline({
               droneId,
               drone,
               owner: { threadId, turnId },
             });
+            if (baseline && droneId.startsWith('host:')) {
+              baseline.targetId = droneId;
+              baseline.owner = {
+                ...baseline.owner,
+                droneId: thread.ownerDroneId,
+                threadId,
+                turnId,
+              };
+            }
             return baseline ? { baseline, drone } : null;
           })
           .catch((error: any) => {
@@ -406,11 +426,11 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
             const droneId = String(capture.baseline.droneId ?? '').trim();
             if (!droneId) return [];
             return [
-              resolveCanonicalDroneOrPendingForReadRef(droneId)
-                .then((resolved) =>
+              resolveFileChangesEntry(droneId)
+                .then((drone) =>
                   finalizeDroneRunFileChangesWorkspace({
                     baseline: capture.baseline,
-                    drone: resolved?.kind === 'real' ? resolved.drone : capture.drone,
+                    drone: drone ?? capture.drone,
                   }),
                 )
                 .catch((error: any) => {
@@ -505,6 +525,15 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
         allowedDroneRefs: refsFor(readableDrones),
         allowedWriteDroneRefs: refsFor(writableDrones),
         allowedDroneIds: readableDrones.map((drone: any) => String(drone.id ?? '')).filter(Boolean),
+        ...(thread.workspaceAccess
+          ? {
+              workspaceDroneRefs: {
+                read: refsFor(readableDrones),
+                write: refsFor(writableDrones),
+                execute: refsFor(workspaceDrones.filter((drone) => drone.canExecute)),
+              },
+            }
+          : {}),
         principal: nativePrincipal,
         hubServices,
         ...(nativePrincipal ? { nativeThreadId: threadId } : {}),
@@ -542,6 +571,39 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
           });
         })
         .filter((target) => assistantService.workspaceIsEnabled(threadId, target.descriptor.id));
+      const hostTargets = (await assistantService.workspaceHostFolders(threadId)).map(
+        (workspace) =>
+          new HostWorkspaceTarget({
+            id: workspace.id,
+            label: workspace.name,
+            rootLabel: workspace.path,
+            capabilities: [
+              ...(workspace.canRead
+                ? readableWorkspaceCapabilities.filter(
+                    (capability) => workspace.repository || capability !== 'git.status',
+                  )
+                : []),
+              ...(workspace.canWrite
+                ? ([
+                    'files.write',
+                    'files.delete',
+                    'files.move',
+                    'directories.create',
+                    'directories.delete',
+                    'patch.apply',
+                  ] as const)
+                : []),
+            ],
+            execute: async (call) => {
+              if (isMutatingWorkspaceTool(call.tool))
+                await captureRunFileChangesBaseline(workspace.id);
+              return assistantService.executeDroneWorkspaceTool(threadId, workspace.id, call, {
+                parse: blipTools.parsePatch,
+                applyHunks: blipTools.applyPatchHunks,
+              });
+            },
+          }),
+      );
       const artifactTarget = assistantService.workspaceIsEnabled(threadId, `artifacts:${threadId}`)
         ? new AssistantArtifactsTarget(
             threadId,
@@ -552,18 +614,40 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
             captureRunArtifactChangesBaseline,
           )
         : null;
-      const remoteWorkspaceTargets = await deviceMesh.remoteWorkspaceTargets(threadId);
+      const remoteWorkspaceTargets = await deviceMesh.remoteWorkspaceTargets(
+        threadId,
+        thread.workspaceAccess?.targets,
+      );
       const targets = [
         ...droneTargets,
+        ...hostTargets,
         ...(artifactTarget ? [artifactTarget] : []),
         ...remoteWorkspaceTargets,
       ];
+      // Keep an unavailable default explicit instead of silently routing commands elsewhere.
+      for (const selected of thread.workspaceAccess?.targets ?? []) {
+        if (targets.some((target) => target.descriptor.id === selected.id)) continue;
+        targets.push({
+          descriptor: {
+            id: selected.id,
+            kind: selected.kind === 'remote' ? 'remote-device' : selected.kind,
+            label: `${selected.name} (unavailable)`,
+            rootLabel: selected.name,
+            capabilities: [],
+          },
+          execute: async () => {
+            throw new Error(`Workspace ${selected.name} is unavailable. Choose another workspace.`);
+          },
+        } as any);
+      }
       const preferredDroneId = Array.isArray(thread.accessScope?.droneIds)
         ? thread.accessScope.droneIds[0]
         : '';
       const activeTargetId =
+        thread.workspaceAccess?.defaultTargetId ??
         droneTargets.find((target: DroneWorkspaceTarget) => target.droneId === preferredDroneId)
-          ?.descriptor.id ?? targets[0]?.descriptor.id;
+          ?.descriptor.id ??
+        targets[0]?.descriptor.id;
       const targetCatalog = new blipTools.WorkspaceTargetCatalog(targets, activeTargetId);
       const enabledTools = new Set(Array.isArray(thread.enabledTools) ? thread.enabledTools : []);
       const supportedWorkspaceCapabilities = new Set(
@@ -809,6 +893,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
           }
         },
         permissionPreflight: async (request) => {
+          assistantService.assertWorkspaceAccessUnchanged(threadId, thread.workspaceAccess);
           let toolName = request.tool.replace(/^drone_hub__/, '');
           let args: any = request.args && typeof request.args === 'object' ? request.args : {};
           if (toolName === 'ask_questions' && request.phase === 'initial') {

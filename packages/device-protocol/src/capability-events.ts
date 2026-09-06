@@ -20,6 +20,11 @@ const POLICIES: Readonly<Record<string, CapabilityEventPolicy>> = {
     maxPayloadBytes: 8 * 1024,
     maxEventsPerMinute: 120,
   },
+  'workspace\0workspaces.changed': {
+    requiredOperation: 'workspaces.list',
+    maxPayloadBytes: 4 * 1024,
+    maxEventsPerMinute: 60,
+  },
   'companion\0run.event': {
     requiredOperation: 'run.start',
     maxPayloadBytes: 64 * 1024,

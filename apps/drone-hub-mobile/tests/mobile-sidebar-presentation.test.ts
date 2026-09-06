@@ -693,7 +693,7 @@ describe('mobile sidebar presentation', () => {
     expect(shellSource).toContain('disabled: dronesHeader.pinDisabled');
   });
 
-  test('keeps Companion at the bottom of the drawer with a top app overlay', () => {
+  test('keeps Companion at the bottom of the drawer with a bottom-sheet overlay', () => {
     const drawerSource = readFileSync(
       new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
       'utf8',
@@ -741,8 +741,10 @@ describe('mobile sidebar presentation', () => {
     expect(workspaceTargetSource).not.toContain('prepareDroneDraft');
     expect(providerSource).toContain('controller.submitPrompt({');
     expect(providerSource).toContain('controller.hasSession()');
-    expect(overlaySource).toContain("justifyContent: 'flex-start'");
-    expect(overlaySource).toContain('accessibilityLabel="Stop Companion recording"');
+    expect(overlaySource).toContain("justifyContent: 'flex-end'");
+    expect(overlaySource).toContain(
+      "accessibilityLabel={recording ? 'Stop recording' : 'Talk to Companion'}",
+    );
     expect(overlaySource).toContain('accessibilityLabel="Companion proposal"');
     expect(overlaySource).toContain('accessibilityLabel="Apply Companion proposal"');
     expect(overlaySource).toContain('<NativeMarkdown text={companion.reply} />');
@@ -895,7 +897,9 @@ describe('mobile sidebar presentation', () => {
     expect(drawerSource).toContain('drawerRefreshFrameRef.current = requestAnimationFrame');
     expect(drawerSource).toContain("import { Drawer } from 'react-native-drawer-layout'");
     expect(drawerSource).toContain('drawerType="front"');
-    expect(drawerSource).toContain('swipeEnabled={Boolean(drawerProps) && (drawerOpen || drawerSwipeEnabled)}');
+    expect(drawerSource).toContain(
+      'swipeEnabled={Boolean(drawerProps) && (drawerOpen || drawerSwipeEnabled)}',
+    );
     expect(drawerSource).toContain('return Math.max(0, windowWidth);');
     expect(drawerSource).toContain('swipeEdgeWidth={windowWidth}');
     expect(drawerSource).toContain('width: windowWidth');

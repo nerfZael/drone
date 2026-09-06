@@ -25,3 +25,5 @@ export * from './pending-prompts.js';
 export * from './pull-request-confirmation.js';
 export * from './resource-subscription-presentation.js';
 export * from './run-stop.js';
+
+export * from './workspace-access.js';

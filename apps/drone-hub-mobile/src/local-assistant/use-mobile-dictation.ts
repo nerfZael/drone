@@ -178,49 +178,101 @@ export function useMobileDictation(options: {
     return task;
   }, []);
 
+  const dictationRecordingActive = React.useCallback(() => {
+    const session = voice.getRecordingSession();
+    return (
+      session.kind === 'dictation' &&
+      (session.status === 'starting' ||
+        session.status === 'recording' ||
+        session.status === 'paused' ||
+        session.status === 'stopped')
+    );
+  }, [voice]);
+
+  /** Starts a dictation recording unless one is already running. */
+  const startRecordingIfIdle = React.useCallback(async () => {
+    if (dictationRecordingActive()) return;
+    const session = voice.getRecordingSession();
+    if (session.kind !== 'idle') {
+      setError('Another voice feature is already using the microphone.');
+      return;
+    }
+    voice.setError('');
+    ownsRecorderErrorRef.current = true;
+    const started = await voice.startRecording('dictation');
+    if (!started) {
+      const message = voice.getError().trim();
+      setError((current) => message || current || 'The recording could not be started.');
+      voice.setError('');
+      ownsRecorderErrorRef.current = false;
+    }
+  }, [dictationRecordingActive, voice]);
+
   const toggleRecording = React.useCallback(() => {
     setOpen(true);
     return runRecordingCommand(async () => {
       if (finalizingRef.current) return;
       setError('');
       setNotice('');
-      const session = voice.getRecordingSession();
-      if (
-        session.kind === 'dictation' &&
-        (session.status === 'starting' ||
-          session.status === 'recording' ||
-          session.status === 'paused' ||
-          session.status === 'stopped')
-      ) {
+      if (dictationRecordingActive()) {
         await stopAndTranscribe();
         return;
       }
-      if (session.kind !== 'idle') {
-        setError('Another voice feature is already using the microphone.');
-        return;
-      }
+      await startRecordingIfIdle();
+    });
+  }, [
+    dictationRecordingActive,
+    runRecordingCommand,
+    setOpen,
+    startRecordingIfIdle,
+    stopAndTranscribe,
+  ]);
+
+  /**
+   * Speech usually begins before the swipe-up finishes, so the recorder starts
+   * the moment the gesture is recognised, before the card is shown. If the
+   * gesture is abandoned, cancelPrestart throws the clip away.
+   */
+  const prestartRecording = React.useCallback(() => {
+    return runRecordingCommand(async () => {
+      if (finalizingRef.current || openRef.current) return;
+      if (voice.getRecordingSession().kind !== 'idle') return;
       voice.setError('');
       ownsRecorderErrorRef.current = true;
       const started = await voice.startRecording('dictation');
       if (!started) {
-        const message = voice.getError().trim();
-        setError((current) => message || current || 'The recording could not be started.');
         voice.setError('');
         ownsRecorderErrorRef.current = false;
       }
     });
-  }, [runRecordingCommand, setOpen, stopAndTranscribe, voice]);
+  }, [runRecordingCommand, voice]);
+
+  const cancelPrestart = React.useCallback(() => {
+    return runRecordingCommand(async () => {
+      if (openRef.current) return;
+      if (voice.getRecordingSession().kind !== 'dictation') return;
+      await voice.discardRecording('dictation');
+      ownsRecorderErrorRef.current = false;
+      voice.setError('');
+    });
+  }, [runRecordingCommand, voice]);
 
   const openAndStart = React.useCallback(
     async (initialText = '') => {
+      setOpen(true);
       await hydrationGateRef.current?.promise;
       if (!mountedRef.current) return false;
       const adoptInitialText = !textRef.current && Boolean(initialText.trim());
       if (adoptInitialText) setText(initialText);
-      await toggleRecording();
+      await runRecordingCommand(async () => {
+        if (finalizingRef.current) return;
+        setError('');
+        setNotice('');
+        await startRecordingIfIdle();
+      });
       return adoptInitialText;
     },
-    [setText, toggleRecording],
+    [runRecordingCommand, setOpen, setText, startRecordingIfIdle],
   );
 
   const togglePause = React.useCallback(() => {
@@ -377,6 +429,8 @@ export function useMobileDictation(options: {
     microphoneUnavailable,
     setText,
     openAndStart,
+    prestartRecording,
+    cancelPrestart,
     toggleRecording,
     togglePause,
     cancelRecording,

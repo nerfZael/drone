@@ -366,7 +366,7 @@ function Shell() {
             ? [
                 {
                   id: 'access',
-                  label: dronesHeader.accessOpen ? 'Return to chat' : 'Edit workspace access',
+                  label: dronesHeader.accessOpen ? 'Return to chat' : 'Workspaces',
                   disabled: dronesHeader.accessDisabled,
                   onPress: dronesHeader.onToggleAccess,
                 },

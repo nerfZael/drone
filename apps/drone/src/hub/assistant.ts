@@ -1,13 +1,17 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
+import { buildHostWorkspaces } from './assistant/host-workspaces';
 import {
   completedTurnIds as createCompletedTurnIds,
   isAgentTransportInterruption,
   isSendInNewChatQueueAction,
   normalizeChangeRequestPermissions,
   normalizePendingPromptState,
+  parseChatWorkspaceAccess,
+  MAX_CHAT_WORKSPACES,
 } from '@drone/assistant-chat';
 import type {
+  ChatWorkspaceAccess,
   AgentApprovalPolicy,
   AgentPermissionMode,
   NativeAgentDefaultModel,
@@ -545,7 +549,7 @@ function normalizeAssistantWorkspaceIds(raw: unknown): string[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   return Array.from(new Set(raw.map((item) => cleanOptionalString(item)).filter(Boolean))).slice(
     0,
-    100,
+    MAX_CHAT_WORKSPACES + 1, // Include the separately configured private artifacts workspace.
   );
 }
 
@@ -1052,6 +1056,9 @@ function normalizeThread(
     ...(Array.isArray(raw.enabledWorkspaceIds)
       ? { enabledWorkspaceIds: normalizeAssistantWorkspaceIds(raw.enabledWorkspaceIds) ?? [] }
       : {}),
+    ...(raw.workspaceAccess
+      ? { workspaceAccess: parseChatWorkspaceAccess(raw.workspaceAccess) }
+      : {}),
     accessScope: makeAssistantAccessScope(raw.accessScope),
     agentPermissionMode: normalizeAssistantAgentPermissionMode(raw.agentPermissionMode),
     approvalPolicy,
@@ -1373,6 +1380,13 @@ export class HubAssistantService {
     const thread = this.getThread(threadId);
     if (kind === 'write' && thread.agentPermissionMode === 'read') return new Set();
     if (kind === 'execute' && thread.agentPermissionMode !== 'execute') return new Set();
+    if (thread.workspaceAccess) {
+      return new Set(
+        thread.workspaceAccess.targets
+          .filter((target) => target.kind === 'drone' && target[kind])
+          .map((target) => target.droneId!),
+      );
+    }
     const accessScope = thread.accessScope;
     const mode =
       kind === 'write'
@@ -1397,6 +1411,22 @@ export class HubAssistantService {
     return droneId;
   }
 
+  private async requireWorkspaceInScope(
+    ref: string,
+    kind: 'read' | 'write' | 'execute',
+    threadId: string,
+  ): Promise<string> {
+    if (!ref.startsWith('host:')) return this.requireDroneInScope(ref, kind, threadId);
+    const workspaces = await this.workspaceHostFolders(threadId);
+    const workspace = workspaces.find((item) => item.id === ref);
+    if (
+      !workspace ||
+      !(kind === 'read' ? workspace.canRead : kind === 'write' ? workspace.canWrite : false)
+    )
+      throw new Error(`assistant ${kind} scope does not include workspace: ${ref}`);
+    return ref;
+  }
+
   private filterDronesForScope(
     drones: AssistantDroneSummary[],
     threadId?: string,
@@ -1416,7 +1446,11 @@ export class HubAssistantService {
   }
 
   private async applyDronePatch(threadId: string, params: any): Promise<AssistantApplyPatchResult> {
-    const droneId = await this.requireDroneInScope(params?.droneId, 'write', threadId);
+    const droneId = await this.requireWorkspaceInScope(
+      String(params?.droneId ?? ''),
+      'write',
+      threadId,
+    );
     const operations = Array.isArray(params?.operations) ? params.operations : [];
     if (operations.length === 0) throw new Error('patch has no operations');
     const applyHunks = params?.applyHunks;
@@ -1688,7 +1722,7 @@ export class HubAssistantService {
           metadataChanged = true;
         }
       }
-      if (!existing.accessScope.droneIds.includes(ownerDroneId)) {
+      if (!existing.workspaceAccess && !existing.accessScope.droneIds.includes(ownerDroneId)) {
         existing.accessScope = makeAssistantAccessScope({
           ...existing.accessScope,
           droneIds: [...existing.accessScope.droneIds, ownerDroneId],
@@ -1891,6 +1925,29 @@ export class HubAssistantService {
     thread.enabledTools = [...source.enabledTools];
     thread.autoApprove = source.autoApprove;
     thread.promptDeliveryMode = source.promptDeliveryMode;
+    if (source.workspaceAccess) {
+      thread.workspaceAccess = structuredClone(source.workspaceAccess);
+      for (const target of thread.workspaceAccess.targets) {
+        if (target.id !== `drone:${source.ownerDroneId}`) continue;
+        if (thread.workspaceAccess.defaultTargetId === target.id)
+          thread.workspaceAccess.defaultTargetId = `drone:${ownerDroneId}`;
+        target.id = `drone:${ownerDroneId}`;
+        target.droneId = ownerDroneId;
+      }
+      thread.workspaceAccess.targets = [
+        ...new Map(thread.workspaceAccess.targets.map((target) => [target.id, target])).values(),
+      ];
+      thread.enabledWorkspaceIds = [
+        ...thread.workspaceAccess.targets.map((target) => target.id),
+        ...(this.workspaceEnabled(source, `artifacts:${source.id}`) ? [`artifacts:${id}`] : []),
+      ];
+      thread.accessScope = {
+        ...thread.accessScope,
+        droneIds: thread.workspaceAccess.targets
+          .filter((target) => target.kind === 'drone')
+          .map((target) => target.droneId!),
+      };
+    }
     this.threads = [thread, ...this.threads];
     await this.persist();
     return await this.threadSnapshot(id);
@@ -2146,6 +2203,80 @@ export class HubAssistantService {
     return this.filterDronesForScope(await this.tools.listDrones(), threadId);
   }
 
+  async workspaceAccessState(threadId: string) {
+    await this.ensureLoaded();
+    const drones = await this.tools.listDrones();
+    const hostWorkspaces = this.tools.listHostWorkspaces
+      ? await this.tools.listHostWorkspaces()
+      : buildHostWorkspaces(drones, []);
+    const thread = this.getThread(threadId);
+    return {
+      thread: sanitizeThread(thread),
+      drones,
+      hostWorkspaces,
+      revision: this.workspaceAccessRevision(thread),
+    };
+  }
+
+  private workspaceAccessRevision(thread: AssistantThread): string {
+    return crypto
+      .createHash('sha256')
+      .update(
+        JSON.stringify([
+          thread.workspaceAccess ?? null,
+          thread.enabledWorkspaceIds ?? null,
+          thread.accessScope,
+          thread.agentPermissionMode,
+        ]),
+      )
+      .digest('hex');
+  }
+
+  async saveWorkspaceAccess(threadId: string, value: unknown, revision: string) {
+    await this.ensureLoaded();
+    const thread = this.getThread(threadId);
+    const access = parseChatWorkspaceAccess(value);
+    if (
+      this.runningThreadIds.has(threadId) ||
+      thread.status === 'running' ||
+      thread.status === 'waiting_for_approval' ||
+      thread.status === 'waiting_for_input'
+    )
+      throw new Error('Stop the agent before changing workspace access.');
+    if (revision !== this.workspaceAccessRevision(thread))
+      throw new Error('Workspace access changed elsewhere. Reload before applying.');
+    thread.workspaceAccess = access;
+    // Retain the separate private artifacts toggle and keep legacy summaries in sync.
+    thread.enabledWorkspaceIds = [
+      ...access.targets.map((target) => target.id),
+      ...(this.workspaceEnabled(thread, `artifacts:${threadId}`) ? [`artifacts:${threadId}`] : []),
+    ];
+    thread.accessScope = makeAssistantAccessScope({
+      ...thread.accessScope,
+      readMode: 'selected',
+      writeMode: 'selected',
+      executeMode: 'selected',
+      droneIds: access.targets
+        .filter((target) => target.kind === 'drone')
+        .map((target) => target.droneId!),
+    });
+    thread.updatedAt = nowIso();
+    const savedRevision = this.workspaceAccessRevision(thread);
+    await this.persist();
+    this.emitChange('workspace_access_changed', threadId);
+    return { access, revision: savedRevision };
+  }
+
+  assertWorkspaceAccessUnchanged(threadId: string, expected?: ChatWorkspaceAccess): void {
+    // A prompt can start while a settings save awaits persistence or while its session is loading.
+    // A cached tool set must never keep using permissions removed by that save.
+    if (
+      JSON.stringify(this.getThread(threadId).workspaceAccess ?? null) !==
+      JSON.stringify(expected ?? null)
+    )
+      throw new Error('Workspace access changed. Stop the agent and send the prompt again.');
+  }
+
   async workspaceDrones(
     threadId: string,
   ): Promise<
@@ -2167,13 +2298,31 @@ export class HubAssistantService {
     });
   }
 
+  async workspaceHostFolders(threadId: string) {
+    await this.ensureLoaded();
+    if (!this.getThread(threadId).workspaceAccess?.targets.some((target) => target.kind === 'host'))
+      return [];
+    const { thread, hostWorkspaces } = await this.workspaceAccessState(threadId);
+    return hostWorkspaces.flatMap((workspace) => {
+      const selected = thread.workspaceAccess?.targets.find(
+        (target) => target.kind === 'host' && target.id === workspace.id,
+      );
+      if (!selected || !this.workspaceIsEnabled(threadId, workspace.id)) return [];
+      const canRead = selected.read;
+      const canWrite = selected.write && thread.agentPermissionMode !== 'read';
+      return canRead || canWrite ? [{ ...workspace, canRead, canWrite, canExecute: false }] : [];
+    });
+  }
+
   private async availableWorkspacesForThread(
     threadId: string,
   ): Promise<NativeAgentWorkspaceSummary[]> {
     const thread = this.getThread(threadId);
     let drones: Awaited<ReturnType<HubAssistantService['workspaceDrones']>> = [];
+    let hostFolders: Awaited<ReturnType<HubAssistantService['workspaceHostFolders']>> = [];
     try {
       drones = await this.workspaceDrones(threadId);
+      hostFolders = await this.workspaceHostFolders(threadId);
     } catch (error: any) {
       hubLog('warn', 'assistant target catalog unavailable while building tool summary', {
         threadId,
@@ -2181,6 +2330,16 @@ export class HubAssistantService {
       });
     }
     return [
+      ...hostFolders.map((workspace) => ({
+        id: workspace.id,
+        label: workspace.name,
+        kind: 'host' as const,
+        description: workspace.repository ? 'Repository on this device' : 'Folder on this device',
+        capabilities: [
+          ...(workspace.canRead ? ['read' as const] : []),
+          ...(workspace.canWrite ? ['write' as const] : []),
+        ],
+      })),
       ...drones.map((drone) => ({
         id: `drone:${drone.id}`,
         label: drone.name || drone.id,
@@ -2192,6 +2351,21 @@ export class HubAssistantService {
           ...(drone.canExecute ? (['execute'] as const) : []),
         ],
       })),
+      ...(thread.workspaceAccess?.targets
+        .filter((target) => target.kind === 'remote')
+        .map((target) => ({
+          id: target.id,
+          label: `${target.deviceName} · ${target.name}`,
+          kind: 'remote' as const,
+          description: 'Shared folder on another device',
+          capabilities: [
+            ...(target.read ? ['read' as const] : []),
+            ...(target.write && thread.agentPermissionMode !== 'read' ? ['write' as const] : []),
+            ...(target.execute && thread.agentPermissionMode === 'execute'
+              ? ['execute' as const]
+              : []),
+          ],
+        })) ?? []),
       {
         id: `artifacts:${thread.id}`,
         label: 'Artifacts',
@@ -2238,15 +2412,18 @@ export class HubAssistantService {
         supportedCapabilities.add('files.list');
         supportedCapabilities.add('files.read');
         supportedCapabilities.add('files.search');
-        if (workspace.kind === 'drone') supportedCapabilities.add('git.status');
+        if (workspace.kind === 'drone' || workspace.kind === 'host')
+          supportedCapabilities.add('git.status');
       }
       if (capabilities.has('write')) {
         supportedCapabilities.add('files.write');
-        supportedCapabilities.add('files.delete');
-        supportedCapabilities.add('files.move');
-        supportedCapabilities.add('directories.create');
-        supportedCapabilities.add('directories.delete');
-        supportedCapabilities.add('patch.apply');
+        if (workspace.kind !== 'remote') {
+          supportedCapabilities.add('files.delete');
+          supportedCapabilities.add('files.move');
+          supportedCapabilities.add('directories.create');
+          supportedCapabilities.add('directories.delete');
+          supportedCapabilities.add('patch.apply');
+        }
       }
       if (capabilities.has('execute')) supportedCapabilities.add('shell.execute');
     }
@@ -2353,7 +2530,12 @@ export class HubAssistantService {
       'transfer_abort',
     ].includes(call.tool);
     const permission = call.tool === 'bash' ? 'execute' : write ? 'write' : 'read';
-    const droneId = await this.requireDroneInScope(droneRef, permission, threadId);
+    const droneId = await this.requireWorkspaceInScope(droneRef, permission, threadId);
+    if (
+      this.getThread(threadId).workspaceAccess &&
+      !this.workspaceIsEnabled(threadId, droneId.startsWith('host:') ? droneId : `drone:${droneId}`)
+    )
+      throw new Error('This workspace is not selected for the chat.');
     const params: any = call.args ?? {};
     if (call.tool === 'transfer_stat') {
       const result = await this.requireFileCallback('statDronePath')({

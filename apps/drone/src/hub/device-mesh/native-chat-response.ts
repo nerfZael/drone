@@ -129,6 +129,15 @@ function compactThread(thread: any) {
   return {
     id: String(thread.id ?? ''),
     title: String(thread.title ?? 'Built-in chat'),
+    ...(Array.isArray(thread.workspaceAccess?.targets)
+      ? { workspaceCount: thread.workspaceAccess.targets.length }
+      : Array.isArray(thread.enabledWorkspaceIds)
+        ? {
+            workspaceCount: thread.enabledWorkspaceIds.filter(
+              (id: string) => !id.startsWith('artifacts:'),
+            ).length,
+          }
+        : {}),
     createdAt: String(thread.createdAt ?? ''),
     updatedAt: String(thread.updatedAt ?? ''),
     status: String(thread.status ?? 'idle'),

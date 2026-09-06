@@ -1488,6 +1488,7 @@ function chatAgentFromPreferenceKey(value: string): McpConfigurableChatAgent | n
 
 type McpToolRegistrationContext = {
   principal: McpTokenIdentity;
+  workspaceDroneRefs?: Record<'read' | 'write' | 'execute', string[]>;
   allowedWriteDroneRefs?: string[];
   allowedDroneIds?: string[];
   nativeThreadId?: string;
@@ -1533,6 +1534,7 @@ async function authorizeChatSubscriptionResource(
   const droneId = cleanString(response?.resource?.droneId);
   if (
     !droneId ||
+    (context.workspaceDroneRefs && !context.workspaceDroneRefs.read.includes(droneId)) ||
     !mcpChatAccessAllowsDrone(principal.accessScope, 'read', droneId, principal.selectedDroneRefs)
   ) {
     throw new Error('MCP principal is not authorized for the requested chat resource');
@@ -1552,6 +1554,7 @@ async function authorizeChangeRequestSubscriptionResource(
   const droneId = cleanString(response?.request?.droneId);
   if (
     !droneId ||
+    (context.workspaceDroneRefs && !context.workspaceDroneRefs.read.includes(droneId)) ||
     !mcpChatAccessAllowsDrone(principal.accessScope, 'read', droneId, principal.selectedDroneRefs)
   ) {
     throw new Error('MCP principal is not authorized for the requested change request');
@@ -2615,7 +2618,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     {
       title: 'List drone chats',
       description:
-        'List chats for a Drone Hub drone, including each chat\'s configured agent, provider, model, and reasoning when explicitly set. Omitted configuration fields use Drone Hub defaults.',
+        "List chats for a Drone Hub drone, including each chat's configured agent, provider, model, and reasoning when explicitly set. Omitted configuration fields use Drone Hub defaults.",
       inputSchema: { drone: z.string() },
     },
     async (args) => {
@@ -3313,10 +3316,9 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
           if (error?.status !== 409) throw error;
         });
       } else {
-        const listed = await requestJson(
-          `/api/drones/${encodeURIComponent(args.drone)}/chats`,
-          { method: 'GET' },
-        );
+        const listed = await requestJson(`/api/drones/${encodeURIComponent(args.drone)}/chats`, {
+          method: 'GET',
+        });
         const existingChats = normalizeMcpChatList(listed);
         const existing =
           existingChats.some((entry) => entry.name === chat) ||
@@ -3744,6 +3746,12 @@ export function authorizeDroneHubMcpTool(
         : [chatAccessKindForTool(tool)];
     for (const kind of requiredKinds) {
       if (
+        context.workspaceDroneRefs &&
+        refs.some((ref) => !context.workspaceDroneRefs![kind].includes(ref))
+      ) {
+        throw new Error(`Workspace ${kind} access does not include the requested drone`);
+      }
+      if (
         !refs.every((ref) =>
           mcpChatAccessAllowsDrone(principal.accessScope, kind, ref, principal.selectedDroneRefs),
         )
@@ -3847,6 +3855,7 @@ export function createDroneHubMcpServer(
     },
     ...(input?.correlationId ? { correlationId: input.correlationId } : {}),
     ...(input?.nativeThreadId ? { nativeThreadId: input.nativeThreadId } : {}),
+    ...(input?.workspaceDroneRefs ? { workspaceDroneRefs: input.workspaceDroneRefs } : {}),
     ...(input?.allowedDroneRefs ? { allowedDroneRefs: input.allowedDroneRefs } : {}),
     ...(input?.allowedWriteDroneRefs ? { allowedWriteDroneRefs: input.allowedWriteDroneRefs } : {}),
     ...(input?.allowedDroneIds ? { allowedDroneIds: input.allowedDroneIds } : {}),

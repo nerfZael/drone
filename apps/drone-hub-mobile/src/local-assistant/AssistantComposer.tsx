@@ -67,6 +67,7 @@ function useSwipeUpVoiceGesture({
   enabled,
   onSwipeUp,
   onActivate,
+  onArm,
   onSettle,
   progress,
   includeNativeGesture = false,
@@ -74,6 +75,8 @@ function useSwipeUpVoiceGesture({
   enabled: boolean;
   onSwipeUp(): void;
   onActivate(): void;
+  /** The swipe crossed the threshold; onSwipeUp follows once the animation lands. */
+  onArm(): void;
   onSettle(): void;
   progress: SharedValue<number>;
   includeNativeGesture?: boolean;
@@ -103,6 +106,7 @@ function useSwipeUpVoiceGesture({
             velocityY: event.velocityY,
           })
         ) {
+          runOnJS(onArm)();
           progress.value = withTiming(
             1,
             { duration: 90, easing: Easing.out(Easing.quad) },
@@ -124,7 +128,7 @@ function useSwipeUpVoiceGesture({
         runOnJS(onSettle)();
       });
     return includeNativeGesture ? Gesture.Simultaneous(panGesture, Gesture.Native()) : panGesture;
-  }, [enabled, includeNativeGesture, onActivate, onSettle, onSwipeUp, progress]);
+  }, [enabled, includeNativeGesture, onActivate, onArm, onSettle, onSwipeUp, progress]);
 }
 
 function SwipeUpVoiceComposer({
@@ -283,6 +287,8 @@ export function AssistantComposer({
   onSend,
   onStop,
   onOpenDictation,
+  onDictationPrestart,
+  onDictationPrestartCancel,
   onOpenModel,
   modelLabel,
   reasoningLabel,
@@ -311,6 +317,10 @@ export function AssistantComposer({
   onSend: MobileComposerSend;
   onStop?(): void;
   onOpenDictation?(): void;
+  /** Called as soon as a swipe-up is recognised so recording can begin early. */
+  onDictationPrestart?(): void;
+  /** Called when a recognised swipe-up is abandoned before opening dictation. */
+  onDictationPrestartCancel?(): void;
   onOpenModel(): void;
   modelLabel: string;
   reasoningLabel?: string;
@@ -377,7 +387,12 @@ export function AssistantComposer({
     onNotice: setVoiceError,
     onError: setVoiceError,
   });
-  const localRecorderOpen = !onOpenDictation && (voiceActive || transcriptionQueue.hasClips);
+  // While a swipe-up is in progress the recorder may already be running
+  // (started early so no speech is lost); the card only appears once the swipe
+  // completes.
+  const [swipeUpActive, setSwipeUpActive] = React.useState(false);
+  const localRecorderOpen =
+    !onOpenDictation && (voiceActive || transcriptionQueue.hasClips) && !swipeUpActive;
   const voiceRecordAccessibilityLabel =
     voiceSession.kind === 'continuous'
       ? 'Continuous voice is using the microphone'
@@ -542,7 +557,7 @@ export function AssistantComposer({
   const activateVoiceRecording = React.useCallback(() => {
     if (voiceRecordActionDisabled) return;
     if (!onOpenDictation) {
-      void beginVoiceRecording();
+      if (!voiceActiveRef.current) void beginVoiceRecording();
       return;
     }
     // The swipe can leave the input focused on release; make sure the keyboard
@@ -558,20 +573,35 @@ export function AssistantComposer({
   }, [beginVoiceRecording, onOpenDictation, voiceRecordActionDisabled]);
   // While a swipe-up is in progress the input must not take focus or raise the
   // keyboard, otherwise Android briefly shows it before dictation opens.
-  const [swipeUpActive, setSwipeUpActive] = React.useState(false);
   const swipeUpSettleTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const swipeUpArmedRef = React.useRef(false);
+  const prestartDictation = React.useCallback(() => {
+    if (voiceRecordActionDisabled) return;
+    if (onOpenDictation) onDictationPrestart?.();
+    else if (!voiceActiveRef.current) void beginVoiceRecording();
+  }, [beginVoiceRecording, onDictationPrestart, onOpenDictation, voiceRecordActionDisabled]);
+  const cancelPrestartedDictation = React.useCallback(() => {
+    if (onOpenDictation) onDictationPrestartCancel?.();
+    else if (voiceActiveRef.current) discardVoice();
+  }, [discardVoice, onDictationPrestartCancel, onOpenDictation]);
   const beginSwipeUp = React.useCallback(() => {
     if (swipeUpSettleTimerRef.current) clearTimeout(swipeUpSettleTimerRef.current);
     swipeUpSettleTimerRef.current = null;
+    swipeUpArmedRef.current = false;
     setSwipeUpActive(true);
+    prestartDictation();
+  }, [prestartDictation]);
+  const armSwipeUp = React.useCallback(() => {
+    swipeUpArmedRef.current = true;
   }, []);
   const settleSwipeUp = React.useCallback(() => {
+    if (!swipeUpArmedRef.current) cancelPrestartedDictation();
     if (swipeUpSettleTimerRef.current) clearTimeout(swipeUpSettleTimerRef.current);
     swipeUpSettleTimerRef.current = setTimeout(() => {
       swipeUpSettleTimerRef.current = null;
       setSwipeUpActive(false);
     }, 260);
-  }, []);
+  }, [cancelPrestartedDictation]);
   React.useEffect(
     () => () => {
       if (swipeUpSettleTimerRef.current) clearTimeout(swipeUpSettleTimerRef.current);
@@ -583,6 +613,7 @@ export function AssistantComposer({
     enabled: !voiceRecordActionDisabled,
     onSwipeUp: activateVoiceRecording,
     onActivate: beginSwipeUp,
+    onArm: armSwipeUp,
     onSettle: settleSwipeUp,
     progress: swipeVoiceProgress,
   });
@@ -590,6 +621,7 @@ export function AssistantComposer({
     enabled: !voiceRecordActionDisabled,
     onSwipeUp: activateVoiceRecording,
     onActivate: beginSwipeUp,
+    onArm: armSwipeUp,
     onSettle: settleSwipeUp,
     progress: swipeVoiceProgress,
     includeNativeGesture: true,
@@ -613,11 +645,19 @@ export function AssistantComposer({
     [startContinuousVoice],
   );
 
+  // Pickers opened from the composer hide the keyboard on Android; that must
+  // not read as a back press that collapses the (still relevant) composer.
+  const keepExpandedUntilRef = React.useRef(0);
+  const keepExpandedThroughPicker = React.useCallback(() => {
+    keepExpandedUntilRef.current = Date.now() + 900;
+  }, []);
+
   const openContinuousVoiceModePicker = React.useCallback(() => {
+    keepExpandedThroughPicker();
     inputRef.current?.blur();
     Keyboard.dismiss();
     setContinuousModePickerOpen(true);
-  }, []);
+  }, [keepExpandedThroughPicker]);
 
   const finishVoiceIntoQueue = React.useCallback(async () => {
     if (!voiceCanStop) return;
@@ -720,7 +760,10 @@ export function AssistantComposer({
 
   React.useEffect(() => {
     if (Platform.OS !== 'android' || !collapsesOnBack) return;
-    const subscription = Keyboard.addListener('keyboardDidHide', collapseEmptyComposer);
+    const subscription = Keyboard.addListener('keyboardDidHide', () => {
+      if (Date.now() < keepExpandedUntilRef.current) return;
+      collapseEmptyComposer();
+    });
     return () => subscription.remove();
   }, [collapseEmptyComposer, collapsesOnBack]);
 
@@ -884,7 +927,10 @@ export function AssistantComposer({
                         label="Add image"
                         icon={Plus}
                         disabled={attachmentActionDisabled}
-                        onPress={onAddAttachment!}
+                        onPress={() => {
+                          keepExpandedThroughPicker();
+                          onAddAttachment!();
+                        }}
                       />
                     ) : null}
                     {leadingControl}
@@ -893,7 +939,10 @@ export function AssistantComposer({
                       accessibilityRole="button"
                       accessibilityLabel="Choose model and reasoning"
                       disabled={!editable || running}
-                      onPress={onOpenModel}
+                      onPress={() => {
+                        keepExpandedThroughPicker();
+                        onOpenModel();
+                      }}
                       style={({ pressed }) => [
                         styles.modelControl,
                         (!editable || running) && styles.disabled,

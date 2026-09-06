@@ -15,6 +15,7 @@ export type AssistantDroneSummary = {
   createdAt?: string | null;
   runtime: string;
   repoPath: string;
+  cwd?: string;
   status: string;
   chats: string[];
   busy?: boolean;
