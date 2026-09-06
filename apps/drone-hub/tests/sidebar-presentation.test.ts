@@ -394,8 +394,8 @@ describe('sidebar presentation', () => {
     expect(sidebarSource).toContain('inline-flex h-5 w-5 flex-shrink-0 items-center justify-center');
     expect(sidebarSource).not.toContain('inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-[5px] border');
     expect(sidebarSource).toContain('mx-1.5 h-px bg-[var(--border-subtle)]');
-    expect(sidebarSource).toContain('font-mono text-[.5625rem]');
-    expect(sidebarSource).toContain('text-[var(--sidebar-meta-fg)] opacity-55');
+    expect(sidebarSource).toContain('text-[var(--type-caption)] leading-none tabular-nums');
+    expect(sidebarSource).toContain('text-[var(--sidebar-meta-fg)] opacity-70');
     expect(sidebarSource).toContain("containsSelectedDrone ? 'dh-sidebar-row-selected' : ''");
     expect(sidebarSource).toContain(
       '{containsSelectedDrone ? <span className={sidebarSelectionEdgeClass} /> : null}',

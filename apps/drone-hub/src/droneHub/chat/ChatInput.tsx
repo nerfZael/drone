@@ -1121,7 +1121,7 @@ export function ChatInput({
       ref={composerRootRef}
       data-onboarding-id="chat.input"
       data-continuous-dictation-target={continuousDictationTargeted ? 'true' : undefined}
-      className="flex-shrink-0 bg-[var(--chat-background)] px-[.5625rem] pb-[.75rem] pt-[.375rem] [font-family:var(--chat-composer-font)]"
+      className="flex-shrink-0 bg-[var(--chat-background)] px-3 pb-3 pt-1.5 [font-family:var(--chat-composer-font)]"
       onPointerDownCapture={() => {
         markCurrentChatComposerEditorModeTarget(editorModeShortcutTargetId);
       }}
@@ -1194,7 +1194,7 @@ export function ChatInput({
           <ChatComposerContext config={composerContext} />
           {attachmentsOn && attachments.length > 0 && (
             <div className="px-3 pt-3">
-              <div className="text-[var(--text-10)] uppercase tracking-wide text-[var(--muted-dim)]">
+              <div className="text-[var(--type-caption)] text-[var(--muted-dim)]">
                 {attachments.length} attachment{attachments.length === 1 ? '' : 's'} attached
                 {imageAttachmentCount > 0 ? ` • ${imageAttachmentCount} image${imageAttachmentCount === 1 ? '' : 's'}` : ''}
                 {textAttachmentCount > 0 ? ` • ${textAttachmentCount} text attachment${textAttachmentCount === 1 ? '' : 's'}` : ''}
@@ -1285,7 +1285,7 @@ export function ChatInput({
                     aria-hidden="true"
                   />
                   <span className="truncate text-[var(--accent)]" aria-live="polite">{voiceRecordingLabel}</span>
-                  <span className="flex-shrink-0 font-mono text-[.6875rem] font-normal tabular-nums tracking-normal text-[var(--chat-composer-fg)]" aria-label={`${voiceRecordingDuration} elapsed`}>
+                  <span className="flex-shrink-0 text-[var(--type-compact)] font-normal tabular-nums tracking-normal text-[var(--chat-composer-fg)]" aria-label={`${voiceRecordingDuration} elapsed`}>
                     {voiceRecordingDuration}
                   </span>
                 </div>
@@ -1490,8 +1490,8 @@ export function ChatInput({
               }}
               rows={1}
               placeholder="Ask the agent"
-              className={`min-w-[11.25rem] max-h-[8.25rem] flex-1 resize-none border-0 bg-transparent text-[var(--chat-text-size)] leading-[1.25rem] text-[var(--chat-composer-fg)] caret-[var(--cursor)] placeholder:text-[var(--chat-composer-placeholder)] focus:outline-none ${
-                composerExpanded ? 'min-h-[2.75rem] px-0 pb-0 pt-3' : 'min-h-[3.125rem] px-[.6875rem] pb-[.6875rem] pt-[.9375rem]'
+              className={`min-w-[11.25rem] max-h-[8.25rem] flex-1 resize-none border-0 bg-transparent text-[var(--chat-text-size)] leading-[1.375rem] text-[var(--chat-composer-fg)] caret-[var(--cursor)] placeholder:text-[var(--chat-composer-placeholder)] focus:outline-none ${
+                composerExpanded ? 'min-h-[2.75rem] px-0 pb-0 pt-3' : 'min-h-[3.125rem] px-3.5 pb-3 pt-[.9375rem]'
               }`}
               disabled={composerLocked || voiceRecordingActive}
               autoFocus={Boolean(autoFocus)}
@@ -1565,7 +1565,7 @@ export function ChatInput({
                 aria-hidden="true"
               />
               <span className="text-[var(--accent)]" aria-live="polite">{voiceRecordingLabel}</span>
-              <span className="font-mono text-[.6875rem] font-normal tabular-nums tracking-normal text-[var(--chat-composer-fg)]" aria-label={`${voiceRecordingDuration} elapsed`}>
+              <span className="text-[var(--type-compact)] font-normal tabular-nums tracking-normal text-[var(--chat-composer-fg)]" aria-label={`${voiceRecordingDuration} elapsed`}>
                 {voiceRecordingDuration}
               </span>
             </div>
@@ -1589,7 +1589,7 @@ export function ChatInput({
                 {continuousVoiceLabel}
               </span>
               <span
-                className="font-mono text-[.6875rem] font-normal tabular-nums tracking-normal text-[var(--chat-composer-fg)]"
+                className="text-[var(--type-compact)] font-normal tabular-nums tracking-normal text-[var(--chat-composer-fg)]"
                 aria-label={`${continuousVoiceDuration} elapsed`}
               >
                 {continuousVoiceDuration}
@@ -1686,7 +1686,7 @@ export function ChatInput({
                   void onPublish();
                 }}
                 disabled={Boolean(disabled) || publishing}
-                className={`inline-flex h-8 items-center justify-center rounded-[var(--chat-composer-control-radius)] border px-3 text-[.625rem] font-medium uppercase tracking-wide transition-opacity ${
+                className={`inline-flex h-8 items-center justify-center rounded-[var(--chat-composer-control-radius)] border px-3 text-[var(--type-caption)] font-medium transition-opacity ${
                   Boolean(disabled) || publishing
                     ? 'cursor-not-allowed border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)] opacity-40'
                     : 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:opacity-70'
@@ -1824,7 +1824,7 @@ export function ChatInput({
                 data-chat-composer-stop-action="true"
                 onClick={() => void onStop?.()}
                 disabled={stopping}
-                className="inline-flex h-8 items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 text-[.625rem] font-medium uppercase tracking-wide text-[var(--red)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-8 items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 text-[var(--type-caption)] font-medium text-[var(--red)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-50"
                 title={stopping ? 'Stopping response' : 'Stop response'}
                 aria-label={stopping ? 'Stopping response' : 'Stop response'}
               >

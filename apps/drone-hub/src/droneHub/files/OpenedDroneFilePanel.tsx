@@ -46,6 +46,7 @@ import {
   type MonacoEditorProps,
 } from './monaco-editor-loader';
 import { editorZoomedPixels, useEditorZoomLevel } from './editor-zoom';
+import { DRONE_HUB_MONACO_FONT_FAMILY } from './monaco-editor-loader';
 import { FileDictationEditorAction } from './FileDictationEditorAction';
 import { useCompanionWorkspace } from '../companion/CompanionWorkspaceContext';
 
@@ -126,9 +127,9 @@ function PlainTextEditorFallback({
       readOnly={saving || readOnly}
       spellCheck={false}
       data-editor-zoom-surface="file-editor"
-      className="h-full w-full resize-none border-0 bg-[var(--panel-alt)] p-3 font-mono text-[var(--text-12)] leading-5 text-[var(--fg-secondary)] outline-none"
+      className="h-full w-full resize-none border-0 bg-[var(--panel)] px-4 py-4 font-mono text-[var(--type-ui)] leading-5 text-[var(--fg-secondary)] outline-none"
       style={{
-        fontSize: `${editorZoomedPixels(12, editorZoomLevel)}px`,
+        fontSize: `${editorZoomedPixels(13, editorZoomLevel)}px`,
         lineHeight: `${editorZoomedPixels(20, editorZoomLevel)}px`,
       }}
       aria-label="Plain text editor"
@@ -197,19 +198,19 @@ function LargeTextFileViewer({
   const loadedLabel = `${formatBytes(nextOffset)} / ${formatBytes(size)}`;
 
   return (
-    <div className="h-full min-h-0 flex flex-col bg-[var(--panel-alt)]">
-      <div className="flex items-center justify-between gap-3 border-b border-[var(--border-subtle)] px-3 py-2">
+    <div className="h-full min-h-0 flex flex-col bg-[var(--panel)]">
+      <div className="flex items-center justify-between gap-3 border-b border-[var(--border-subtle)] px-4 py-2.5">
         <div className="min-w-0">
-          <div className="text-[var(--text-11)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
+          <div className="text-[var(--type-ui)] font-[var(--weight-emphasis)] text-[var(--fg-secondary)]">
             Large file
           </div>
-          <div className="mt-0.5 text-[var(--text-11)] text-[var(--muted-dim)]">{loadedLabel}</div>
+          <div className="mt-0.5 text-[var(--type-compact)] text-[var(--muted-dim)]">{loadedLabel}</div>
         </div>
         <button
           type="button"
           onClick={() => void loadNextChunk()}
           disabled={loading || eof}
-          className={`h-7 px-2.5 rounded-[var(--radius-medium)] border text-[var(--text-10)] font-[var(--weight-semibold)] transition-colors ${
+          className={`h-7 px-3 rounded-[var(--radius-medium)] border text-[var(--type-compact)] font-[var(--weight-emphasis)] transition-colors ${
             loading || eof
               ? 'border-[var(--border-subtle)] bg-transparent text-[var(--muted-dim)] opacity-50 cursor-not-allowed'
               : 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:shadow-[var(--glow-accent)]'
@@ -223,7 +224,7 @@ function LargeTextFileViewer({
           {error}
         </div>
       ) : null}
-      <pre className="flex-1 min-h-0 overflow-auto whitespace-pre-wrap break-words p-3 text-[var(--text-12)] leading-5 text-[var(--fg-secondary)] font-mono">
+      <pre className="flex-1 min-h-0 overflow-auto whitespace-pre-wrap break-words px-4 py-4 text-[var(--type-ui)] leading-5 text-[var(--fg-secondary)] font-mono">
         {content || (loading ? 'Loading...' : '')}
       </pre>
     </div>
@@ -516,13 +517,20 @@ export function OpenedDroneFilePanel({
   const monacoOptions = React.useMemo<MonacoEditorProps['options']>(
     () => ({
       readOnly: Boolean(fileSaving) || readOnly,
-      fontSize: editorZoomedPixels(12, editorZoomLevel),
+      fontFamily: DRONE_HUB_MONACO_FONT_FAMILY,
+      fontSize: editorZoomedPixels(13, editorZoomLevel),
+      lineHeight: editorZoomedPixels(20, editorZoomLevel),
+      lineNumbersMinChars: 3,
+      renderLineHighlight: 'all',
+      cursorBlinking: 'smooth',
+      cursorSmoothCaretAnimation: 'on',
+      smoothScrolling: true,
       minimap: { enabled: false },
       scrollbar: DRONE_HUB_MONACO_SCROLLBAR_OPTIONS,
       wordWrap: 'on',
       scrollBeyondLastLine: false,
       automaticLayout: true,
-      padding: { top: 12, bottom: 12 },
+      padding: { top: 16, bottom: 24 },
       'semanticHighlighting.enabled': true,
       bracketPairColorization: { enabled: true },
       guides: {
@@ -851,8 +859,7 @@ export function OpenedDroneFilePanel({
                           <div
                             role="status"
                             aria-live="polite"
-                            className="pointer-events-none absolute right-0 top-full z-20 mt-1 whitespace-nowrap rounded border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-2 py-1 text-[var(--text-9)] uppercase tracking-wide text-[var(--fg-secondary)] shadow-[0_6px_14px_var(--shadow-color)]"
-                            style={{ fontFamily: 'var(--display)' }}
+                            className="pointer-events-none absolute right-0 top-full z-20 mt-1 whitespace-nowrap rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-2 py-1 text-[var(--type-caption)] text-[var(--fg-secondary)] shadow-[0_6px_14px_var(--shadow-color)]"
                           >
                             Copied
                           </div>
@@ -871,7 +878,7 @@ export function OpenedDroneFilePanel({
                     ) : null}
                     {openedFileShowsMarkdownPreview ? (
                       <div
-                        className="flex h-6 items-center gap-0.5 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--panel-alt)] p-0.5"
+                        className="flex h-7 items-center gap-0.5 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-0.5"
                         role="group"
                         aria-label="Heading expansion"
                       >
@@ -938,12 +945,12 @@ export function OpenedDroneFilePanel({
           fullScreenAction={{ active: fullScreen, onToggle: toggleFullScreen }}
         />
         {fileError ? (
-          <div className="m-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-11)] text-[var(--red)]">
+          <div className="m-3 rounded-[var(--radius-medium)] border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--type-compact)] text-[var(--red)]">
             {fileError}
           </div>
         ) : null}
         {file.externallyChanged ? (
-          <div className="mx-3 mt-3 flex items-center justify-between gap-3 rounded border border-[var(--yellow-border)] bg-[var(--yellow-subtle)] px-3 py-2 text-[var(--text-11)] text-[var(--fg-secondary)]">
+          <div className="mx-3 mt-3 flex items-center justify-between gap-3 rounded-[var(--radius-medium)] border border-[var(--yellow-border)] bg-[var(--yellow-subtle)] px-3 py-2 text-[var(--type-compact)] text-[var(--fg-secondary)]">
             <span>
               This file changed on disk{fileDirty ? ' while you have unsaved edits.' : '.'}
             </span>

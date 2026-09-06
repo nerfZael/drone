@@ -464,7 +464,7 @@ export function ReasoningBlock({ text }: { text: string }) {
   if (!trimmed) return null;
 
   return (
-    <div className="mb-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-faint)]">
+    <div className="mb-2 rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--surface-faint)]">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}

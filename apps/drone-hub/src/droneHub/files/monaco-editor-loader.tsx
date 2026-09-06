@@ -8,6 +8,9 @@ export type MonacoEditorMountHandler = NonNullable<MonacoEditorProps['onMount']>
 export type MonacoEditorInstance = Parameters<MonacoEditorMountHandler>[0];
 export type MonacoBeforeMountHandler = NonNullable<MonacoEditorProps['beforeMount']>;
 
+export const DRONE_HUB_MONACO_FONT_FAMILY =
+  "'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, monospace";
+
 export const DRONE_HUB_MONACO_SCROLLBAR_OPTIONS = {
   verticalScrollbarSize: 4,
   horizontalScrollbarSize: 4,

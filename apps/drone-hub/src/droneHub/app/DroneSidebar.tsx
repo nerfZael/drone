@@ -2643,7 +2643,7 @@ export function DroneSidebar({
               title="Open project list"
               aria-label="Open project list"
             >
-              DRONE HUB
+              Drone Hub
             </button>
             {sidebarCapabilities.headerActions ? (
               <DesktopDevicePicker
@@ -3201,18 +3201,15 @@ export function DroneSidebar({
                   title="Back to repositories"
                   aria-label="Back to repositories"
                 >
-                  <span className="relative inline-flex h-4 w-4 flex-shrink-0 items-center justify-end text-[var(--sidebar-action-fg)]">
-                    <IconFolderGit className="h-3.5 w-3.5" />
-                    <span className="absolute -left-1 top-0.5 inline-flex h-2.5 w-2.5 items-center justify-center rounded-full bg-[var(--surface-inset)] transition-colors group-hover/active-repository:bg-[var(--hover)] group-focus-within/active-repository:bg-[var(--hover)]">
-                      <IconChevronLeft className="h-2.5 w-2.5" />
-                    </span>
+                  <span className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center text-[var(--sidebar-action-fg)] transition-colors group-hover/active-repository:text-[var(--fg)] group-focus-within/active-repository:text-[var(--fg)]">
+                    <IconChevronLeft className="h-4 w-4" />
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[var(--text-12)] font-semibold text-[var(--fg)]">
+                    <span className="block truncate text-[var(--type-ui)] font-[var(--weight-strong)] text-[var(--fg)]">
                       {activeRepositoryNavigationItem.label}
                     </span>
                   </span>
-                  <span className="inline-flex flex-shrink-0 items-center gap-1.5 font-mono text-[.5625rem] leading-none">
+                  <span className="inline-flex flex-shrink-0 items-center gap-1.5 text-[var(--type-caption)] leading-none tabular-nums">
                     {activeRepositoryNavigationItem.stateSummary.approval > 0 ? (
                       <SidebarRepositoryStateCount
                         count={activeRepositoryNavigationItem.stateSummary.approval}
@@ -3311,7 +3308,7 @@ export function DroneSidebar({
                               {item.label}
                             </span>
                             <span
-                              className="mt-0.5 block truncate font-mono text-[.5625rem] font-normal text-[var(--sidebar-meta-fg)] opacity-55"
+                              className="mt-0.5 block truncate text-[var(--type-caption)] font-normal text-[var(--sidebar-meta-fg)] opacity-70"
                               title={item.repoPath || 'Drones without a repository'}
                             >
                               {item.repoPath || 'Drones without a repository'}
@@ -3319,7 +3316,7 @@ export function DroneSidebar({
                           </span>
                         </button>
                         <div className="relative mr-0.5 h-7 w-7 flex-shrink-0">
-                          <span className="pointer-events-none absolute inset-0 inline-flex items-center justify-end gap-1.5 whitespace-nowrap pr-2 font-mono text-[.5625rem] leading-none transition-opacity duration-150 group-hover/repository-row:opacity-0 group-focus-within/repository-row:opacity-0">
+                          <span className="pointer-events-none absolute inset-0 inline-flex items-center justify-end gap-1.5 whitespace-nowrap pr-2 text-[var(--type-caption)] leading-none tabular-nums transition-opacity duration-150 group-hover/repository-row:opacity-0 group-focus-within/repository-row:opacity-0">
                             {item.stateSummary.approval > 0 ? (
                               <SidebarRepositoryStateCount
                                 count={item.stateSummary.approval}

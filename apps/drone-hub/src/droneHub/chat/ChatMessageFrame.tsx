@@ -38,12 +38,12 @@ export function ChatMessageFrame({
   const surfaceClass = transparentAssistant
     ? 'py-1'
     : user
-      ? 'rounded-[var(--radius-large)] rounded-tr-sm border border-[var(--user-bubble-border)] bg-[var(--user-bubble)] px-4 py-3 text-[var(--user-bubble-fg)]'
+      ? 'rounded-[var(--radius-xlarge)] rounded-tr-[4px] border border-[var(--user-bubble-border)] bg-[var(--user-bubble)] px-4 py-2.5 text-[var(--user-bubble-fg)]'
       : warning
-        ? 'rounded-[var(--radius-large)] rounded-tl-sm border border-[var(--yellow-border)] bg-[var(--yellow-subtle)] px-4 py-3'
+        ? 'rounded-[var(--radius-xlarge)] rounded-tl-[4px] border border-[var(--yellow-border)] bg-[var(--yellow-subtle)] px-4 py-3'
         : error
-          ? 'rounded-[var(--radius-large)] rounded-tl-sm border border-[var(--red-border)] bg-[var(--red-subtle)] px-4 py-3'
-          : 'rounded-[var(--radius-large)] rounded-tl-sm border border-[var(--assistant-bubble-border)] bg-[var(--assistant-bubble)] px-4 py-3';
+          ? 'rounded-[var(--radius-xlarge)] rounded-tl-[4px] border border-[var(--red-border)] bg-[var(--red-subtle)] px-4 py-3'
+          : 'rounded-[var(--radius-xlarge)] rounded-tl-[4px] border border-[var(--assistant-bubble-border)] bg-[var(--assistant-bubble)] px-4 py-3';
   const bubble = (
     <div
       className={`group/message relative ${showRoleIcon ? (user ? 'max-w-[min(85%,var(--chat-prose-max))]' : 'min-w-0 flex-1') : user ? 'max-w-[min(85%,var(--chat-prose-max))]' : 'w-full'} min-w-[120px]`}
@@ -53,7 +53,7 @@ export function ChatMessageFrame({
           {at ? (
             <RelativeTimeText
               at={at}
-              className="pointer-events-none whitespace-nowrap font-mono text-[var(--text-9)] leading-none text-[var(--chat-user-message-time)]"
+              className="pointer-events-none whitespace-nowrap text-[var(--type-caption)] leading-none tabular-nums text-[var(--chat-user-message-time)]"
               title={new Date(at).toLocaleString()}
             />
           ) : null}
@@ -69,7 +69,7 @@ export function ChatMessageFrame({
           {at ? (
             <RelativeTimeText
               at={at}
-              className="pointer-events-none whitespace-nowrap font-mono text-[var(--text-9)] leading-none text-[var(--chat-message-time)]"
+              className="pointer-events-none whitespace-nowrap text-[var(--type-caption)] leading-none tabular-nums text-[var(--chat-message-time)]"
               title={new Date(at).toLocaleString()}
             />
           ) : null}

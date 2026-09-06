@@ -184,8 +184,8 @@
   --chat-composer-expanded-model-fg: var(--fg-secondary);
   --chat-composer-expanded-context-track: var(--border);
   --chat-composer-font: var(--sans);
-  --chat-composer-radius: var(--radius-large);
-  --chat-composer-control-radius: var(--radius-medium);
+  --chat-composer-radius: var(--radius-xlarge);
+  --chat-composer-control-radius: var(--radius-large);
   --chat-composer-shadow: 0 .5rem 1.5rem var(--shadow-color);
   --chat-composer-input: var(--surface-inset);
   --chat-composer-input-border: var(--border-subtle);
@@ -343,9 +343,9 @@
   --toolbar-control-hover-border: rgba(69, 71, 90, .68);
   --sidebar-brand-fg: #f2f4ff;
   --sidebar-brand-size: .875rem;
-  --sidebar-brand-weight: 700;
-  --sidebar-brand-letter-spacing: .025rem;
-  --sidebar-brand-transform: uppercase;
+  --sidebar-brand-weight: 600;
+  --sidebar-brand-letter-spacing: -.01em;
+  --sidebar-brand-transform: none;
   --sidebar-font: system-ui, -apple-system, sans-serif;
   --sidebar-heading-weight: 400;
   --sidebar-drone-fg: #cdd6f4;
@@ -465,8 +465,8 @@
   --chat-composer-expanded-model-fg: #cdd6f4;
   --chat-composer-expanded-context-track: rgba(127, 132, 156, .42);
   --chat-composer-font: system-ui, -apple-system, sans-serif;
-  --chat-composer-radius: .4375rem;
-  --chat-composer-control-radius: .3125rem;
+  --chat-composer-radius: .75rem;
+  --chat-composer-control-radius: .5rem;
   --chat-composer-shadow: 0 .25rem .875rem rgba(17, 17, 27, .18);
   --chat-composer-input: #313244;
   --chat-composer-input-border: transparent;
@@ -1252,7 +1252,7 @@ code, pre {
   width: 100%;
   max-width: calc(var(--document-prose-max) + 3.5rem);
   margin-inline: auto;
-  padding: clamp(18px, 2.4vw, 28px);
+  padding: clamp(24px, 3vw, 40px) clamp(20px, 3vw, 40px) 48px;
 }
 
 .dh-markdown-outline__preamble,
@@ -1370,6 +1370,7 @@ code, pre {
 }
 
 .dh-type-workspace-title {
+  font-weight: var(--weight-strong);
   color: var(--workspace-header-title-fg);
 }
 

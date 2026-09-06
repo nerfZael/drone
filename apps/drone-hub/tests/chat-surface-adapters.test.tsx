@@ -1355,8 +1355,8 @@ describe('agent chat surface adapters', () => {
     expect(html).toContain('Worked for 1h 2m 3s');
     expect(html).toContain('1 tool call');
     expect(html).toContain('class="flex min-h-9 w-full items-center gap-2');
-    expect(html).toContain('text-sm font-[var(--weight-semibold)]');
-    expect(html).toContain('text-xs text-[var(--muted-dim)]');
+    expect(html).toContain('text-[var(--type-ui)] font-[var(--weight-emphasis)]');
+    expect(html).toContain('text-[var(--type-compact)] text-[var(--muted-dim)]');
     expect(html).not.toContain('uppercase');
     expect(html).not.toContain('ml-auto');
     expect(html).not.toContain('Read file');

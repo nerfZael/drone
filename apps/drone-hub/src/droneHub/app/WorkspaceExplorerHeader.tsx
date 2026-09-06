@@ -35,7 +35,7 @@ export function WorkspaceExplorerHeader({
           dragHandle ? 'cursor-grab active:cursor-grabbing' : ''
         }`}
       >
-        <span className="dh-changes-toolbar-label">Files</span>
+        <span className="text-[var(--type-ui)] font-[var(--weight-emphasis)] text-[var(--fg-secondary)]">Files</span>
       </div>
       <UiToolbarGroup label="Explorer zoom">
         <UiToolbarButton

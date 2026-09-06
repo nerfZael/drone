@@ -11,7 +11,7 @@ import {
   invalidateFsListCachesForDrone,
 } from '../app/use-files-and-ports-pane-state';
 import { requestJson, requestJsonWithTimeout } from '../http';
-import { IconChevron } from '../icons';
+import { IconChevron, IconSpinner } from '../icons';
 import type { DroneFsEntry, DroneFsListPayload, DroneFsUploadPayload } from '../types';
 import { runDroneFsAction } from './file-actions-api';
 import type { DroneOpenedFileState } from './opened-file-types';
@@ -144,12 +144,7 @@ function hasFileDragPayload(event: React.DragEvent<HTMLElement>): boolean {
 }
 
 function InlineSpinner() {
-  return (
-    <span
-      aria-hidden="true"
-      className="inline-block h-3 w-3 rounded-full border border-[var(--accent-muted)] border-t-[var(--accent)] animate-spin"
-    />
-  );
+  return <IconSpinner className="h-3 w-3 shrink-0" size={12} />;
 }
 
 export function DroneFilesDock({
@@ -198,7 +193,7 @@ export function DroneFilesDock({
   zoom?: number;
 }) {
   const explorerZoom = clampWorkspaceExplorerZoom(Number.isFinite(zoom) ? zoom : 1);
-  const explorerRowHeightPx = Math.round(22 * explorerZoom);
+  const explorerRowHeightPx = Math.round(24 * explorerZoom);
   const explorerTextSizePx = Math.round(13 * explorerZoom * 10) / 10;
   const explorerLineHeightPx = Math.round(20 * explorerZoom);
   const explorerIconSlotPx = Math.round(16 * explorerZoom);
@@ -1058,7 +1053,7 @@ export function DroneFilesDock({
       <div
         role="treeitem"
         aria-selected="true"
-        className="relative flex w-full items-center gap-1 bg-[var(--info-subtle)] pr-1 text-left text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)]"
+        className="relative flex w-full items-center gap-1 bg-[var(--sidebar-row-selected-bg)] pr-1 text-left text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)]"
         style={{ ...explorerRowGeometryStyle, paddingLeft: `${explorerIndentPx}px` }}
       >
         <span className="inline-flex flex-shrink-0 items-center justify-center text-[var(--muted)]" style={explorerIconSlotStyle}>
@@ -1111,7 +1106,7 @@ export function DroneFilesDock({
                   role="treeitem"
                   aria-expanded={open}
                   aria-selected="true"
-                  className="relative flex w-full items-center gap-1 bg-[var(--info-subtle)] pr-1 text-left text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)]"
+                  className="relative flex w-full items-center gap-1 bg-[var(--sidebar-row-selected-bg)] pr-1 text-left text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)]"
                   style={{ ...explorerRowGeometryStyle, paddingLeft: `${indentPx}px` }}
                 >
                   <span className="inline-flex flex-shrink-0 items-center justify-center text-[var(--muted)]" style={explorerIconSlotStyle}>
@@ -1138,7 +1133,7 @@ export function DroneFilesDock({
                   onContextMenu={(event) => openEntryContextMenu(node.entry, event)}
                   className={`relative flex w-full items-center gap-1 pr-1 text-left transition-colors disabled:opacity-60 ${
                     selected
-                      ? 'bg-[var(--info-subtle)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)] hover:bg-[var(--selected)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
+                      ? 'bg-[var(--sidebar-row-selected-bg)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)] hover:bg-[var(--selected)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
                       : 'text-[var(--fg-secondary)] hover:bg-[var(--surface-strong)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
                   }`}
                   style={{ ...explorerRowGeometryStyle, paddingLeft: `${indentPx}px` }}
@@ -1150,9 +1145,9 @@ export function DroneFilesDock({
                   <span className={`min-w-0 flex-1 truncate ${ignored ? 'text-[var(--muted-dim)] opacity-60' : ''}`}>
                     {node.name}
                   </span>
-                  {childError ? <span className="px-1 text-[var(--text-9)] uppercase text-[var(--red)]">Error</span> : null}
+                  {childError ? <span className="px-1 text-[var(--type-caption)] text-[var(--red)]">Error</span> : null}
                   {childLoading ? (
-                    <span className="inline-flex items-center gap-1 px-1 text-[var(--text-9)] uppercase text-[var(--accent)]">
+                    <span className="inline-flex items-center gap-1 px-1 text-[var(--type-caption)] text-[var(--accent)]">
                       <InlineSpinner />
                       Loading
                     </span>
@@ -1203,7 +1198,7 @@ export function DroneFilesDock({
             <div
               role="treeitem"
               aria-selected="true"
-              className="relative flex w-full items-center gap-1 bg-[var(--info-subtle)] pr-1 text-left text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)]"
+              className="relative flex w-full items-center gap-1 bg-[var(--sidebar-row-selected-bg)] pr-1 text-left text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)]"
               style={{ ...explorerRowGeometryStyle, paddingLeft: `${indentPx}px` }}
             >
               <span className="inline-flex flex-shrink-0 items-center justify-center text-[var(--muted)]" style={explorerIconSlotStyle}>
@@ -1229,7 +1224,7 @@ export function DroneFilesDock({
               onContextMenu={(event) => openEntryContextMenu(entry, event)}
               className={`relative flex w-full items-center gap-1 pr-1 text-left transition-colors disabled:opacity-60 ${
                 selected
-                  ? 'bg-[var(--info-subtle)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)] hover:bg-[var(--selected)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
+                  ? 'bg-[var(--sidebar-row-selected-bg)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)] hover:bg-[var(--selected)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
                   : active
                     ? 'bg-[var(--surface-soft)] text-[var(--fg)] hover:bg-[var(--surface-strong)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
                     : 'text-[var(--fg-secondary)] hover:bg-[var(--surface-strong)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'

@@ -287,7 +287,7 @@ export function MarkdownOutlinePreview({
     return (
       <div
         ref={previewRef}
-        className="h-full w-full overflow-auto bg-[var(--panel-alt)] px-4 py-4"
+        className="h-full w-full overflow-auto bg-[var(--panel-alt)] px-6 py-6"
       >
         <MarkdownMessage
           text={text}

@@ -87,7 +87,7 @@ export function UserChatMessage({
         const clockTime = messageClockTime(followUp.at);
         return (
           <div key={followUp.key} data-user-message-follow-up="asap">
-            <div className="my-3 flex items-center gap-2 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--user-muted)]">
+            <div className="my-3 flex items-center gap-2 text-[var(--type-caption)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--user-muted)]">
               <span className="h-px min-w-4 flex-1 bg-[var(--user-bubble-border)]" />
               <span style={{ fontFamily: 'var(--display)' }}>ASAP</span>
               <span className="h-px min-w-4 flex-1 bg-[var(--user-bubble-border)]" />
@@ -95,7 +95,7 @@ export function UserChatMessage({
                 <time
                   dateTime={followUp.at}
                   title={new Date(followUp.at!).toLocaleString()}
-                  className="font-mono font-normal normal-case tracking-normal text-[var(--chat-user-message-time)]"
+                  className="font-normal normal-case tracking-normal tabular-nums text-[var(--chat-user-message-time)]"
                 >
                   {clockTime}
                 </time>

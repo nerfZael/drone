@@ -101,7 +101,7 @@ export function DroneEditorDock({
           onOpenResolvedFile={onOpenFileTargetInEditor}
         />
       ) : (
-        <div className="h-full flex items-center justify-center px-4 text-center text-[var(--text-12)] text-[var(--muted)]">
+        <div className="h-full flex items-center justify-center px-6 text-center text-[var(--type-ui)] text-[var(--muted)]">
           Select a file in the File Explorer, Changes, Pull requests, or a chat reference.
         </div>
       )}
