@@ -5,7 +5,7 @@ import React from 'react';
 import type { DroneControlOperation } from '@drone/device-protocol';
 import {
   ActivityIndicator,
-  Alert,
+  BackHandler,
   Image,
   Keyboard,
   KeyboardAvoidingView,
@@ -41,7 +41,8 @@ import { SvgXml } from 'react-native-svg';
 import { NativeFileTypeIcon } from '../components/FileTypeIcon';
 import { MobileHighlightedCode } from '../components/MobileHighlightedCode';
 import { RenderErrorBoundary } from '../components/RenderErrorBoundary';
-import { ThemedTextInput } from '../components/ThemedTextInput';
+import { ConfirmDialog } from '../components/Ui';
+import { MobileCodeEditor } from '../components/MobileCodeEditor';
 import { colors } from '../theme';
 import {
   NativeMarkdown,
@@ -291,7 +292,9 @@ export function FilePreviewModal({
   onPreviewPathsChanged(paths: readonly string[]): void;
 }) {
   const companion = useMobileCompanion();
-  const [explorerPosition, setExplorerPosition] = React.useState(embedded ? 1 : 0);
+  const [explorerPosition, setExplorerPosition] = React.useState(
+    embedded ? (selectedPath ? 1 : 2) : 0,
+  );
   const explorerExpanded = explorerPosition > 0;
   React.useEffect(() => {
     if (directoryReveal) setExplorerPosition((current) => Math.max(1, current));
@@ -486,20 +489,16 @@ export function FilePreviewModal({
     if (!visible && !embedded) setExplorerPosition(0);
   }, [embedded, visible]);
 
+  const [pendingDiscard, setPendingDiscard] = React.useState<{ proceed(): void } | null>(null);
   const confirmDiscard = React.useCallback(
     (continueAction: () => void) => {
-      if (saving) {
-        Alert.alert('Save in progress', 'Wait for this file to finish saving before leaving it.');
-        return;
-      }
+      // While a save is in flight, leaving would race it; the footer already says "Saving…".
+      if (saving) return;
       if (!dirty) {
         continueAction();
         return;
       }
-      Alert.alert('Discard unsaved changes?', 'Your edits to this file have not been saved.', [
-        { text: 'Keep editing', style: 'cancel' },
-        { text: 'Discard', style: 'destructive', onPress: continueAction },
-      ]);
+      setPendingDiscard({ proceed: continueAction });
     },
     [dirty, saving],
   );
@@ -529,10 +528,31 @@ export function FilePreviewModal({
     setMarkdownExpansionCommand(null);
   }, [preview?.path, visible]);
 
+  // Registered after the carousel's handler (it re-registers on each edit toggle), so the
+  // hardware back key leaves edit mode before it leaves the files page.
+  const leaveEditing = React.useCallback(() => {
+    if (Keyboard.isVisible()) {
+      Keyboard.dismiss();
+      return true;
+    }
+    if (!editing) return false;
+    setEditing(false);
+    return true;
+  }, [editing]);
+  React.useEffect(() => {
+    if (!embedded || !visible || !editing) return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', leaveEditing);
+    return () => subscription.remove();
+  }, [editing, embedded, leaveEditing, visible]);
+
   React.useEffect(() => {
     if (!visible) setHtmlModeSelection(null);
   }, [visible]);
 
+  const fileName = preview?.name || displayPath.split('/').at(-1) || '';
+  const parentPath = displayPath.includes('/')
+    ? displayPath.slice(0, displayPath.lastIndexOf('/'))
+    : '';
   const content = (
     <SafeAreaView style={styles.screen} edges={embedded ? [] : undefined}>
       <View style={styles.header}>
@@ -547,18 +567,20 @@ export function FilePreviewModal({
         </Pressable>
         <View style={styles.headerCopy}>
           <View style={styles.titleRow}>
-            {directoryReveal ? (
-              <FolderTree color={colors.accentAlt} size={18} />
-            ) : (
-              <NativeFileTypeIcon path={preview?.name || displayPath} size={18} />
-            )}
+            {fileName ? (
+              directoryReveal ? (
+                <FolderTree color={colors.accentAlt} size={18} />
+              ) : (
+                <NativeFileTypeIcon path={preview?.name || displayPath} size={18} />
+              )
+            ) : null}
             <Text numberOfLines={1} style={styles.title}>
-              {preview?.name || displayPath.split('/').at(-1) || 'File preview'}
+              {fileName || workspaceName || 'Files'}
             </Text>
             {dirty ? <Text style={styles.readOnly}>UNSAVED</Text> : null}
           </View>
           <Text numberOfLines={1} style={styles.path}>
-            {displayPath}
+            {fileName ? parentPath || workspaceName || '/' : 'No file open'}
           </Text>
         </View>
         <View style={styles.headingActions}>
@@ -579,26 +601,6 @@ export function FilePreviewModal({
               ]}
             >
               <WrapText color={wordWrap ? colors.accent : colors.muted} size={17} strokeWidth={2} />
-            </Pressable>
-          ) : null}
-          {editing ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Save file"
-              disabled={!dirty || saving}
-              hitSlop={8}
-              onPress={() => void saveDraft()}
-              style={({ pressed }) => [
-                styles.headingAction,
-                (!dirty || saving) && styles.disabled,
-                pressed && styles.pressed,
-              ]}
-            >
-              {saving ? (
-                <ActivityIndicator color={colors.accent} size="small" />
-              ) : (
-                <Save color={dirty ? colors.accent : colors.muted} size={17} strokeWidth={2} />
-              )}
             </Pressable>
           ) : null}
           {markdownPreview && !editing ? (
@@ -738,16 +740,14 @@ export function FilePreviewModal({
             }
           >
             {editing && preview?.kind === 'text' ? (
-              <ThemedTextInput
+              <MobileCodeEditor
                 accessibilityLabel={`Edit ${preview.name}`}
-                autoCapitalize="none"
-                autoCorrect={false}
-                multiline
+                path={preview.path}
+                mime={preview.mime}
                 maxLength={MOBILE_FILE_EDIT_MAX_BYTES}
-                textAlignVertical="top"
+                editable={!saving}
                 value={draft}
                 onChangeText={setDraft}
-                style={styles.editorInput}
               />
             ) : loading ? (
               <View style={styles.centerState}>
@@ -813,22 +813,53 @@ export function FilePreviewModal({
               <View style={styles.centerState}>
                 <FolderTree color={colors.muted} size={34} strokeWidth={1.7} />
                 <Text style={styles.stateTitle}>
-                  {directoryReveal ? 'Folder selected' : 'Choose a file'}
+                  {directoryReveal ? 'Folder selected' : 'No file open'}
                 </Text>
                 <Text style={styles.stateBody}>
                   {directoryReveal
-                    ? 'Choose a file in the explorer below to open it.'
-                    : 'Expand the file explorer below to browse this workspace.'}
+                    ? 'Tap a file below to open it here.'
+                    : 'Tap a file below to open it. Drag the list to resize it.'}
                 </Text>
               </View>
             )}
           </RenderErrorBoundary>
+          {editing && preview?.kind === 'text' ? (
+            <View style={styles.editorBar}>
+              <View style={styles.editorStatusRow}>
+                <View
+                  style={[styles.editorStatusDot, dirty && !saving && styles.editorStatusDotDirty]}
+                />
+                <Text numberOfLines={1} style={styles.editorStatus}>
+                  {saving ? 'Saving…' : dirty ? 'Unsaved changes' : 'No changes yet'}
+                </Text>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Save file"
+                disabled={!dirty || saving}
+                onPress={() => void saveDraft()}
+                style={({ pressed }) => [
+                  styles.saveButton,
+                  (!dirty || saving) && styles.saveButtonDisabled,
+                  pressed && styles.pressed,
+                ]}
+              >
+                {saving ? (
+                  <ActivityIndicator color={colors.onAccent} size="small" />
+                ) : (
+                  <Save color={colors.onAccent} size={15} strokeWidth={2.2} />
+                )}
+                <Text style={styles.saveText}>Save</Text>
+              </Pressable>
+            </View>
+          ) : null}
         </View>
         <Animated.View style={[styles.explorerDock, explorerDockStyle]}>
           <MobileFileExplorer
             renderHeader={(actions) => (
               <GestureDetector gesture={explorerGesture}>
                 <View collapsable={false} style={styles.explorerHandle}>
+                  <View pointerEvents="none" style={styles.explorerGrabber} />
                   <View style={styles.explorerHandleRow}>
                     <Pressable
                       accessibilityRole="button"
@@ -842,9 +873,11 @@ export function FilePreviewModal({
                       }
                       style={({ pressed }) => [styles.explorerToggle, pressed && styles.pressed]}
                     >
-                      <FolderTree color={colors.accentAlt} size={17} strokeWidth={1.9} />
                       <Text numberOfLines={1} style={styles.explorerTitle}>
-                        Files{workspaceName ? ` (${workspaceName})` : ''}
+                        Files
+                        {workspaceName ? (
+                          <Text style={styles.explorerWorkspace}> ({workspaceName})</Text>
+                        ) : null}
                       </Text>
                     </Pressable>
                     {actions}
@@ -866,6 +899,19 @@ export function FilePreviewModal({
           />
         </Animated.View>
       </KeyboardAvoidingView>
+      <ConfirmDialog
+        visible={pendingDiscard !== null}
+        title="Discard unsaved changes?"
+        message="Your edits to this file have not been saved."
+        confirmLabel="Discard"
+        destructive
+        onCancel={() => setPendingDiscard(null)}
+        onConfirm={() => {
+          const pending = pendingDiscard;
+          setPendingDiscard(null);
+          pending?.proceed();
+        }}
+      />
     </SafeAreaView>
   );
   if (embedded) return content;
@@ -875,7 +921,9 @@ export function FilePreviewModal({
       animationType="slide"
       statusBarTranslucent
       navigationBarTranslucent
-      onRequestClose={closeWorkspace}
+      onRequestClose={() => {
+        if (!leaveEditing()) closeWorkspace();
+      }}
     >
       <GestureHandlerRootView style={styles.screen}>{content}</GestureHandlerRootView>
     </Modal>
@@ -916,7 +964,7 @@ const styles = StyleSheet.create({
   headingActionActive: { backgroundColor: colors.accentWash },
   disabled: { opacity: 0.35 },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  title: { flexShrink: 1, color: colors.textStrong, fontSize: 15, fontWeight: '800' },
+  title: { flexShrink: 1, color: colors.textStrong, fontSize: 15, fontWeight: '700' },
   readOnly: {
     color: colors.accent,
     fontSize: 8,
@@ -929,7 +977,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 4,
   },
-  path: { color: colors.muted, fontFamily: 'monospace', fontSize: 9, marginTop: 3 },
+  path: { color: colors.muted, fontSize: 11, marginTop: 1 },
   content: { flex: 1, minHeight: 0 },
   saveErrorBanner: {
     paddingHorizontal: 12,
@@ -960,32 +1008,71 @@ const styles = StyleSheet.create({
   },
   refreshErrorText: { minWidth: 0, flex: 1, color: colors.warning, fontSize: 10 },
   refreshErrorRetry: { color: colors.accent, fontSize: 10, fontWeight: '800' },
-  editorInput: {
-    flex: 1,
-    minHeight: 0,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    color: colors.text,
-    backgroundColor: colors.background,
-    fontFamily: 'monospace',
-    fontSize: 13,
-    lineHeight: 20,
+  editorBar: {
+    height: 44,
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    marginHorizontal: 12,
+    marginTop: 6,
+    marginBottom: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface0,
+    overflow: 'hidden',
   },
+  editorStatusRow: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingLeft: 14,
+    paddingRight: 8,
+  },
+  editorStatusDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.overlay0 },
+  editorStatusDotDirty: { backgroundColor: colors.warning },
+  editorStatus: { flex: 1, minWidth: 0, color: colors.muted, fontSize: 12, fontWeight: '600' },
+  saveButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 18,
+    backgroundColor: colors.accent,
+  },
+  saveButtonDisabled: { opacity: 0.4 },
+  saveText: { color: colors.onAccent, fontSize: 13, fontWeight: '800' },
   explorerDock: {
     height: 48,
     minHeight: 48,
     overflow: 'hidden',
-    borderTopWidth: 1,
-    borderTopColor: colors.borderStrong,
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    borderColor: colors.border,
     backgroundColor: colors.mantle,
+    elevation: 12,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.45,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: -4 },
   },
   explorerHandle: {
     height: MOBILE_EXPLORER_HEADER_HEIGHT,
     flexShrink: 0,
+    paddingTop: 6,
     paddingHorizontal: 12,
-    justifyContent: 'center',
+    gap: 4,
   },
-  explorerHandleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  explorerGrabber: {
+    alignSelf: 'center',
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.surface2,
+  },
+  explorerHandleRow: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
   explorerToggle: {
     flex: 1,
     minWidth: 0,
@@ -993,14 +1080,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    paddingLeft: 4,
   },
   explorerTitle: {
     flex: 1,
     minWidth: 0,
     color: colors.textStrong,
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '800',
   },
+  explorerWorkspace: { color: colors.mutedDim, fontSize: 12, fontWeight: '500' },
   htmlModeBar: {
     paddingHorizontal: 12,
     paddingVertical: 8,

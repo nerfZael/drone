@@ -21,7 +21,8 @@ import { mobileExplorerCreationAction } from './mobile-explorer-creation';
 import Plus from 'lucide-react-native/icons/plus';
 import RefreshCw from 'lucide-react-native/icons/refresh-cw';
 import type { DroneControlOperation } from '@drone/device-protocol';
-import { NativeFileTypeIcon } from '../components/FileTypeIcon';
+import { NativeFileTypeIcon, NativeFolderTypeIcon } from '../components/FileTypeIcon';
+import { useMobileExplorerFolderIcons } from '../mobile-explorer-folder-icons';
 import { ThemedTextInput } from '../components/ThemedTextInput';
 import { colors } from '../theme';
 import { BoundedSwrCache } from './bounded-swr-cache';
@@ -152,6 +153,7 @@ export function MobileFileExplorer({
   renderHeader(actions: ViewProps['children']): ViewProps['children'];
   onRequestExpand(): void;
 }) {
+  const folderIcons = useMobileExplorerFolderIcons();
   const [directories, setDirectories] = React.useState<Record<string, DirectoryState>>({});
   const directoriesRef = React.useRef(directories);
   const directoryContextRef = React.useRef(new MobileDirectoryContextCache());
@@ -704,12 +706,12 @@ export function MobileFileExplorer({
             <View
               key={guideDepth}
               pointerEvents="none"
-              style={[styles.guide, { left: 18 + guideDepth * 16 }]}
+              style={[styles.guide, { left: 21 + guideDepth * 8 }]}
             />
           ));
           if (item.kind === 'state') {
             return item.loading ? (
-              <View style={[styles.inlineState, { paddingLeft: 12 + item.depth * 16 }]}>
+              <View style={[styles.inlineState, { paddingLeft: 12 + item.depth * 8 }]}>
                 {guideLines}
                 <ActivityIndicator color={colors.accent} size="small" />
                 <Text style={styles.inlineText}>Loading…</Text>
@@ -717,7 +719,7 @@ export function MobileFileExplorer({
             ) : (
               <Pressable
                 onPress={() => void loadDirectory(item.path, true)}
-                style={[styles.inlineState, { paddingLeft: 12 + item.depth * 16 }]}
+                style={[styles.inlineState, { paddingLeft: 12 + item.depth * 8 }]}
               >
                 {guideLines}
                 <Text numberOfLines={1} style={styles.errorText}>
@@ -737,16 +739,23 @@ export function MobileFileExplorer({
                 accessibilityLabel={
                   item.mode === 'rename' ? 'Rename item' : 'New file or folder name'
                 }
-                style={[styles.row, styles.editorRow, { paddingLeft: 12 + item.depth * 16 }]}
+                style={[styles.row, styles.editorRow, { paddingLeft: 12 + item.depth * 8 }]}
               >
                 {guideLines}
-                <View style={styles.leadingSlot}>
-                  {directoryEditor ? (
+                {directoryEditor ? (
+                  <View style={styles.chevronSlot}>
                     <ChevronRight color={colors.mutedDim} size={14} strokeWidth={2} />
-                  ) : (
-                    <NativeFileTypeIcon path={actionInput || 'untitled'} size={16} opacity={0.9} />
-                  )}
-                </View>
+                  </View>
+                ) : (
+                  <View style={styles.fileInset} />
+                )}
+                {directoryEditor ? (
+                  folderIcons ? (
+                    <NativeFolderTypeIcon path={actionInput || 'folder'} size={18} opacity={0.9} />
+                  ) : null
+                ) : (
+                  <NativeFileTypeIcon path={actionInput || 'untitled'} size={18} opacity={0.9} />
+                )}
                 <ThemedTextInput
                   ref={actionInputRef}
                   accessibilityLabel={
@@ -814,7 +823,7 @@ export function MobileFileExplorer({
               delayLongPress={420}
               style={({ pressed }) => [
                 styles.row,
-                { paddingLeft: 12 + item.depth * 16 },
+                { paddingLeft: 12 + item.depth * 8 },
                 item.selected && styles.rowSelected,
                 ignored && styles.rowIgnored,
                 pressed && styles.pressed,
@@ -822,16 +831,30 @@ export function MobileFileExplorer({
             >
               {guideLines}
               {isDirectory ? (
-                item.open ? (
-                  <ChevronDown color={colors.mutedDim} size={14} strokeWidth={2} />
-                ) : (
-                  <ChevronRight color={colors.mutedDim} size={14} strokeWidth={2} />
-                )
+                <View style={styles.chevronSlot}>
+                  {item.open ? (
+                    <ChevronDown color={colors.mutedDim} size={14} strokeWidth={2} />
+                  ) : (
+                    <ChevronRight color={colors.mutedDim} size={14} strokeWidth={2} />
+                  )}
+                </View>
+              ) : (
+                <View style={styles.fileInset} />
+              )}
+              {isDirectory ? (
+                folderIcons ? (
+                  <NativeFolderTypeIcon
+                    path={item.entry.path}
+                    open={item.open}
+                    size={18}
+                    opacity={ignored ? 0.45 : 0.95}
+                  />
+                ) : null
               ) : (
                 <NativeFileTypeIcon
                   path={item.entry.path}
-                  size={16}
-                  opacity={ignored ? 0.45 : item.selected ? 1 : 0.8}
+                  size={18}
+                  opacity={ignored ? 0.45 : item.selected ? 1 : 0.85}
                 />
               )}
               <Text
@@ -942,15 +965,15 @@ const styles = StyleSheet.create({
   explorer: { flex: 1, minHeight: 0, backgroundColor: colors.mantle },
   headerAction: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  creationHint: { color: colors.muted, fontSize: 11, paddingHorizontal: 12, paddingVertical: 6 },
-  content: { paddingVertical: 5, paddingBottom: 18 },
+  creationHint: { color: colors.muted, fontSize: 12, paddingHorizontal: 16, paddingVertical: 6 },
+  content: { paddingVertical: 4, paddingBottom: 24 },
   emptyContent: { flexGrow: 1 },
   row: {
-    minHeight: 36,
+    minHeight: 42,
     position: 'relative',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
+    gap: 6,
     paddingRight: 12,
   },
   rowSelected: {
@@ -966,9 +989,16 @@ const styles = StyleSheet.create({
     width: StyleSheet.hairlineWidth,
     backgroundColor: 'rgba(127, 132, 156, 0.28)',
   },
-  leadingSlot: { width: 16, height: 16, alignItems: 'center', justifyContent: 'center' },
-  name: { minWidth: 0, flex: 1, color: colors.text, fontSize: 11, fontFamily: 'monospace' },
-  nameSelected: { color: colors.accent, fontWeight: '700' },
+  chevronSlot: {
+    width: 14,
+    height: 14,
+    marginLeft: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fileInset: { width: 4 },
+  name: { minWidth: 0, flex: 1, color: colors.text, fontSize: 13.5, lineHeight: 18 },
+  nameSelected: { color: colors.textStrong, fontWeight: '700' },
   nameIgnored: { color: colors.mutedDim },
   editorRow: {
     backgroundColor: colors.sidebarSelectionWash,
@@ -983,12 +1013,11 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
     color: colors.textStrong,
     backgroundColor: 'transparent',
-    fontFamily: 'monospace',
-    fontSize: 11,
+    fontSize: 13.5,
     fontWeight: '700',
   },
   inlineState: {
-    minHeight: 34,
+    minHeight: 38,
     position: 'relative',
     flexDirection: 'row',
     alignItems: 'center',
@@ -1003,15 +1032,15 @@ const styles = StyleSheet.create({
     gap: 9,
     padding: 16,
   },
-  inlineText: { color: colors.muted, fontSize: 10 },
+  inlineText: { color: colors.muted, fontSize: 12 },
   errorText: {
     minWidth: 0,
     flexShrink: 1,
     color: colors.danger,
-    fontSize: 10,
+    fontSize: 11,
     textAlign: 'center',
   },
-  retryText: { color: colors.accent, fontSize: 10, fontWeight: '800' },
+  retryText: { color: colors.accent, fontSize: 11, fontWeight: '800' },
   menuBackdrop: {
     flex: 1,
     justifyContent: 'center',

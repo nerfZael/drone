@@ -6,7 +6,7 @@ import {
   highlightMobileCodeFence,
 } from '../drones/mobile-syntax-highlighting';
 
-const syntaxTokenStyles: Record<string, TextStyle> = {
+export const syntaxTokenStyles: Record<string, TextStyle> = {
   comment: { color: catppuccin.overlay1, fontStyle: 'italic' },
   prolog: { color: catppuccin.overlay1 },
   doctype: { color: catppuccin.overlay1 },
@@ -34,7 +34,20 @@ const syntaxTokenStyles: Record<string, TextStyle> = {
   function: { color: catppuccin.blue },
   'class-name': { color: catppuccin.yellow },
   regex: { color: catppuccin.peach },
-  important: { color: catppuccin.peach, fontWeight: '700' },
+  important: { fontWeight: '700' },
+  title: { color: catppuccin.lavender, fontWeight: '700' },
+  bold: { fontWeight: '700' },
+  italic: { fontStyle: 'italic' },
+  strike: { textDecorationLine: 'line-through' },
+  code: { color: catppuccin.teal },
+  'code-snippet': { color: catppuccin.teal },
+  'code-block': { color: catppuccin.text },
+  'code-language': { color: catppuccin.sky },
+  list: { color: catppuccin.mauve },
+  hr: { color: catppuccin.overlay1 },
+  blockquote: { color: catppuccin.overlay1, fontStyle: 'italic' },
+  table: { color: catppuccin.subtext0 },
+  'front-matter-block': { color: catppuccin.overlay2 },
   variable: { color: catppuccin.flamingo },
   namespace: { color: catppuccin.overlay2 },
 };

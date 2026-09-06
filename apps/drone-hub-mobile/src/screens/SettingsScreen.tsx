@@ -17,6 +17,7 @@ import { colors } from '../theme';
 import { LocalAssistantSettingsCard } from '../local-assistant/LocalAssistantSettingsCard';
 import { MobileVoiceInputSettingsCard } from '../local-assistant/MobileVoiceInputSettingsCard';
 import { MobileReadingSettingsCard } from './MobileReadingSettingsCard';
+import { MobileFilesSettingsCard } from './MobileFilesSettingsCard';
 
 export type SettingsTab = 'display' | 'assistant' | 'devices';
 
@@ -96,7 +97,10 @@ export function SettingsScreen({
           </View>
         ) : null}
         {tab === 'display' ? (
-          <MobileReadingSettingsCard />
+          <>
+            <MobileReadingSettingsCard />
+            <MobileFilesSettingsCard />
+          </>
         ) : tab === 'assistant' ? (
           <>
             <LocalAssistantSettingsCard />
