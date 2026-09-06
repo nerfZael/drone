@@ -801,23 +801,37 @@ export async function gitResolveRemoteBranchForCreate(repoPathRaw: string, remot
 
   const listed = await gitListRemoteBranches(repoRoot);
   const matched = listed.remoteBranches.find((entry) => entry.ref === remoteBranch) ?? null;
-  if (matched) {
-    return {
-      repoRoot: listed.repoRoot,
-      remoteBranch: matched.ref,
-      oid: matched.oid,
-    };
-  }
-
-  const verified = await runLocalOrThrow('git', ['-C', repoRoot, 'rev-parse', '--verify', `refs/remotes/${remoteBranch}`]).catch(() => '');
-  const oid = String(verified ?? '').trim().toLowerCase();
-  if (!/^[0-9a-f]{40}$/.test(oid)) {
+  if (!matched) {
     throw new Error(`remote branch "${remoteBranch}" was not found in ${repoRoot}`);
   }
-  return {
+
+  const refreshed = await runLocal('git', [
+    '-C',
     repoRoot,
-    remoteBranch,
-    oid,
+    'fetch',
+    '--no-tags',
+    '--force',
+    matched.remote,
+    `+refs/heads/${matched.branch}:refs/remotes/${matched.ref}`,
+  ]);
+  if (refreshed.code !== 0) {
+    const details = String(refreshed.stderr || refreshed.stdout || 'git fetch failed').trim();
+    throw new Error(
+      `Failed to refresh remote branch "${matched.ref}" before creating the drone.${details ? `\n\n${details}` : ''}`,
+    );
+  }
+  const refreshedOidRaw = await runLocalOrThrow('git', [
+    '-C',
+    repoRoot,
+    'rev-parse',
+    '--verify',
+    `refs/remotes/${matched.ref}^{commit}`,
+  ]);
+  const refreshedOid = String(refreshedOidRaw ?? '').trim().toLowerCase();
+  return {
+    repoRoot: listed.repoRoot,
+    remoteBranch: matched.ref,
+    oid: /^[0-9a-f]{40}$/.test(refreshedOid) ? refreshedOid : null,
   };
 }
 
