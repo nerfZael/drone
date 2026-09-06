@@ -191,6 +191,7 @@ type RightPanelTabContentProps = {
   onCloseTerminalSession: (droneId: string, paneKey: 'top' | 'bottom' | 'single', sessionId: string) => void;
   uiDroneName: (nameRaw: string) => string;
   currentFsPath: string;
+  explorerReveal?: { path: string; sequence: number } | null;
   fsEntries: DroneFsEntry[];
   fsLoading: boolean;
   fsError: string | null;
@@ -301,6 +302,7 @@ export function RightPanelTabContent({
   onCloseTerminalSession,
   uiDroneName,
   currentFsPath,
+  explorerReveal,
   fsEntries,
   fsLoading,
   fsError,
@@ -360,6 +362,7 @@ export function RightPanelTabContent({
           droneLabel={uiDroneName(drone.name)}
           path={currentFsPath}
           homePath={defaultFsPathForCurrentDrone}
+          reveal={explorerReveal}
           entries={fsEntries}
           loading={fsLoading}
           error={isCurrent ? fsErrorUi : fsError}

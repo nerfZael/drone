@@ -1,3 +1,4 @@
+import { APP_HEADER_HEIGHT } from '../layout';
 import { throwIfAborted } from '@drone/device-protocol';
 import React from 'react';
 import {
@@ -184,7 +185,6 @@ import { MobileQuestionResultCard } from '../local-assistant/MobileQuestionResul
 import { CodexApprovalCard } from '../drones/CodexApprovalCard';
 import type { CodexApprovalDecision, CodexPendingApproval } from '@drone/assistant-chat';
 
-const APP_HEADER_HEIGHT = 58;
 const EMPTY_CHAT_HISTORY_PAGE: MobileChatHistoryPage = {
   beforeCursor: null,
   hasOlder: false,
@@ -338,6 +338,7 @@ function mobileDroneAgentId(value: unknown): MobileDroneAgentId | null {
 }
 
 export function DronesScreen({
+  header,
   drawerOpen,
   workspaceVisible,
   navigationItems,
@@ -347,6 +348,7 @@ export function DronesScreen({
   devicePickerItems,
   onDeviceChange,
 }: {
+  header: React.JSX.Element;
   drawerOpen: boolean;
   workspaceVisible: boolean;
   navigationItems: AppDrawerNavigationItem[];
@@ -2573,17 +2575,11 @@ export function DronesScreen({
   const [filesPageOpen, setFilesPageOpen] = React.useState(false);
   const [browserOpen, setBrowserOpen] = React.useState(false);
   const openBrowser = React.useCallback(() => {
-    const operations = ['browser.targets', 'browser.open', 'browser.close'];
-    if (!operations.every((operation) => targetDroneControlCapability?.operations.includes(operation))) {
-      Alert.alert('Browser unavailable', 'Update DroneHub on the hosting device to enable remote Browser.');
-      return;
-    }
-    if (!selfDevice || !operations.every((operation) => isGranted(selfDevice.grants, 'drone-control', 1, operation))) {
-      Alert.alert('Browser access needed', 'In Devices, enable browser.targets, browser.open, and browser.close for this phone.');
-      return;
-    }
-    Keyboard.dismiss(); setBrowserOpen(true);
-  }, [targetDroneControlCapability, selfDevice]);
+    // Grants are owned by the destination. Its live browser request authorizes access;
+    // this phone's directory record cannot tell us what that target currently allows.
+    Keyboard.dismiss();
+    setBrowserOpen(true);
+  }, []);
   React.useEffect(() => { setBrowserOpen(false); }, [targetId, selected?.id, workspaceVisible]);
   const prepareFilesPage = React.useCallback(() => {
     if (!filePreview.visible) filePreview.openExplorer();
@@ -3413,8 +3409,16 @@ export function DronesScreen({
         onReorderSidebar={targetReachable && targetCanReorderSidebar ? reorderSidebar : undefined}
       />
       {browserOpen && selected && workspaceVisible ? (
-        <RemoteDroneBrowser key={`${targetId}:${selected.id}`} deviceId={targetId} droneId={selected.id}
-          droneName={selected.name} request={requestDroneControl} onClose={() => setBrowserOpen(false)} />
+        <RemoteDroneBrowser
+          key={`${targetId}:${selected.id}`}
+          deviceId={targetId}
+          droneId={selected.id}
+          droneName={selected.name}
+          targetName={activeTarget?.name ?? targetId}
+          phoneName={mesh.identity?.name ?? 'this phone'}
+          request={requestDroneControl}
+          onClose={() => setBrowserOpen(false)}
+        />
       ) : null}
       <ChatFilesCarousel
         open={filesPageOpen}
@@ -3438,9 +3442,10 @@ export function DronesScreen({
             chatName={chatName}
             rootPath={filePreview.rootPath}
             workspaceName={selected?.name ?? ''}
+            directoryReveal={filePreview.directoryReveal}
             selectedPath={filePreview.selectedPath}
             requestDroneControl={requestDroneControl}
-            onOpenPath={(path) => filePreview.open({ raw: path, path, line: null, column: null })}
+            onOpenPath={(path, line) => filePreview.open({ raw: path, path, line: line ?? null, column: null })}
             onSave={filePreview.save}
             onClose={() => setFilesPageOpen(false)}
             onRetry={filePreview.retry}
@@ -3448,6 +3453,7 @@ export function DronesScreen({
           />
         )}
       >
+        {header}
         <KeyboardAvoidingView
           style={styles.content}
           behavior={Platform.OS === 'android' ? 'height' : 'padding'}

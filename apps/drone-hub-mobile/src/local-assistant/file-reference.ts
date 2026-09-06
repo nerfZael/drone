@@ -40,10 +40,21 @@ function positiveInteger(raw: string | undefined): number | null {
   return Number.isInteger(value) && value > 0 ? value : null;
 }
 
-export function parseMobileFileReference(raw: string): MobileFileReference | null {
+export function parseMobileFileReference(
+  raw: string,
+  explicitLink = false,
+): MobileFileReference | null {
   const text = String(raw ?? '').trim();
   if (!text) return null;
   let pathToken = text;
+  if (explicitLink) {
+    try {
+      pathToken = decodeURIComponent(pathToken);
+    } catch {
+      return null;
+    }
+  }
+  if (explicitLink && /^[a-z][a-z0-9+.-]*:/i.test(pathToken) && !/^[^:]+\.[^:]+:\d+(?::\d+)?$/.test(pathToken)) return null;
   let line: number | null = null;
   let column: number | null = null;
 
@@ -56,7 +67,7 @@ export function parseMobileFileReference(raw: string): MobileFileReference | nul
     const lineSuffix = /:(\d+)(?::(\d+))?$/.exec(pathToken);
     if (lineSuffix && typeof lineSuffix.index === 'number') {
       const possiblePath = pathToken.slice(0, lineSuffix.index).trim();
-      if (isLikelyFilePath(possiblePath)) {
+      if (explicitLink || isLikelyFilePath(possiblePath)) {
         pathToken = possiblePath;
         line = positiveInteger(lineSuffix[1]);
         column = positiveInteger(lineSuffix[2]);
@@ -64,6 +75,18 @@ export function parseMobileFileReference(raw: string): MobileFileReference | nul
     }
   }
 
+  if (explicitLink) {
+    pathToken = pathToken.split(/[?#]/, 1)[0];
+    if (
+      !pathToken ||
+      pathToken.startsWith('~') ||
+      /^[a-z][a-z0-9+.-]*:/i.test(pathToken) ||
+      /[\0\r\n]/.test(pathToken) ||
+      pathToken.startsWith('//')
+    )
+      return null;
+    return { raw: text, path: pathToken.replace(/\\/g, '/'), line, column };
+  }
   if (!isLikelyFilePath(pathToken)) return null;
   let normalizedPath = pathToken.trim().replace(/\\/g, '/');
   if (normalizedPath.startsWith('./')) normalizedPath = normalizedPath.slice(2);

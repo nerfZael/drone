@@ -1,3 +1,4 @@
+import { workspaceLinkParent } from '@drone/hub-model';
 import React from 'react';
 import {
   ActivityIndicator,
@@ -13,6 +14,10 @@ import {
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import FileQuestion from 'lucide-react-native/icons/file-question-mark';
+import Check from 'lucide-react-native/icons/check';
+import X from 'lucide-react-native/icons/x';
+import Pencil from 'lucide-react-native/icons/pencil';
+import { mobileExplorerCreationAction } from './mobile-explorer-creation';
 import Plus from 'lucide-react-native/icons/plus';
 import RefreshCw from 'lucide-react-native/icons/refresh-cw';
 import type { DroneControlOperation } from '@drone/device-protocol';
@@ -58,13 +63,12 @@ type VisibleExplorerRow =
       entry: FileExplorerEntry | null;
     };
 
-type ExplorerActionMode = 'rename' | 'create-file' | 'create-directory';
+type ExplorerActionMode = 'rename' | 'create';
 
 type ExplorerEditorState = {
   mode: ExplorerActionMode;
   entry: FileExplorerEntry | null;
   targetDirectory: string;
-  anchorPath: string | null;
 };
 
 type RequestDroneControl = (
@@ -128,6 +132,7 @@ export function MobileFileExplorer({
   chatName,
   rootPath,
   selectedPath,
+  reveal,
   requestDroneControl,
   onOpenFile,
   onPathsChanged,
@@ -140,6 +145,7 @@ export function MobileFileExplorer({
   chatName: string;
   rootPath: string;
   selectedPath: string;
+  reveal?: { path: string; sequence: number } | null;
   requestDroneControl: RequestDroneControl;
   onOpenFile(path: string): void;
   onPathsChanged(paths: readonly string[]): void;
@@ -171,6 +177,7 @@ export function MobileFileExplorer({
   const [actionMenuEntry, setActionMenuEntry] = React.useState<
     FileExplorerEntry | null | undefined
   >(undefined);
+  const listRef = React.useRef<FlatList<VisibleExplorerRow>>(null);
   const [editor, setEditor] = React.useState<ExplorerEditorState | null>(null);
   const [actionInput, setActionInput] = React.useState('');
   const [actionLoading, setActionLoading] = React.useState(false);
@@ -351,6 +358,20 @@ export function MobileFileExplorer({
     void loadDirectory(rootPath, Boolean(cachedRoot?.loaded || cachedRoot?.loading));
   }, [active, loadDirectory, rootPath]);
 
+  React.useEffect(() => {
+    if (!active || !reveal) return;
+    const paths: string[] = [];
+    let path = reveal.path;
+    while (path !== rootPath) {
+      paths.push(path);
+      const parent = workspaceLinkParent(path);
+      if (parent === path) break;
+      path = parent;
+    }
+    setExpanded((current) => new Set([...current, ...paths]));
+    for (const directory of paths.reverse()) void loadDirectory(directory);
+  }, [active, reveal, rootPath, loadDirectory]);
+
   const toggleDirectory = (path: string) => {
     const willExpand = !expanded.has(path);
     setExpanded((current) => {
@@ -375,7 +396,17 @@ export function MobileFileExplorer({
   const beginAction = React.useCallback(
     (mode: ExplorerActionMode, entry: FileExplorerEntry | null) => {
       onRequestExpand();
-      const targetDirectory = entry ? mobileExplorerParentPath(entry.path, rootPath) : rootPath;
+      if (!entry) listRef.current?.scrollToOffset({ offset: 0, animated: false });
+      const targetDirectory =
+        mode === 'create' && entry?.kind === 'directory'
+          ? entry.path
+          : entry
+            ? mobileExplorerParentPath(entry.path, rootPath)
+            : rootPath;
+      if (mode === 'create' && entry?.kind === 'directory') {
+        setExpanded((current) => new Set([...current, entry.path]));
+        void loadDirectory(entry.path);
+      }
       setActionMenuEntry(undefined);
       setActionError(null);
       setActionInput(mode === 'rename' ? (entry?.name ?? '') : '');
@@ -383,10 +414,9 @@ export function MobileFileExplorer({
         mode,
         entry,
         targetDirectory,
-        anchorPath: entry?.path ?? null,
       });
     },
-    [onRequestExpand, rootPath],
+    [loadDirectory, onRequestExpand, rootPath],
   );
 
   const cancelAction = React.useCallback(() => {
@@ -413,13 +443,14 @@ export function MobileFileExplorer({
       cancelAction();
       return;
     }
+    const action = editor.mode === 'rename' ? 'rename' : mobileExplorerCreationAction(name);
     setActionLoading(true);
     setActionError(null);
     try {
       const result = await requestDroneControl(targetId, 'file.action', {
         droneId,
         chatName,
-        action: editor.mode,
+        action,
         name,
         ...(editor.mode === 'rename'
           ? { path: editor.entry?.path }
@@ -437,7 +468,7 @@ export function MobileFileExplorer({
         result?.targetPath ?? mobileExplorerJoinPath(editor.targetDirectory, name),
       );
       const invalidatedPaths = mobileFileActionInvalidationPaths({
-        action: editor.mode,
+        action,
         sourcePath: editor.entry?.path,
         createdPath,
         targetPath,
@@ -451,7 +482,7 @@ export function MobileFileExplorer({
       setActionInput('');
       await loadDirectory(editor.targetDirectory, true);
       if (
-        editor.mode === 'create-file' ||
+        action === 'create-file' ||
         (editor.mode === 'rename' && editor.entry?.path === selectedPath)
       ) {
         onOpenFile(editor.mode === 'rename' ? targetPath : createdPath);
@@ -508,16 +539,16 @@ export function MobileFileExplorer({
 
   const rows = React.useMemo(() => {
     const visible: VisibleExplorerRow[] = [];
-    if (editor && editor.mode !== 'rename' && editor.anchorPath === null) {
-      visible.push({
-        kind: 'editor',
-        key: `editor:${editor.mode}:root`,
-        depth: 0,
-        mode: editor.mode,
-        entry: null,
-      });
-    }
     const visit = (path: string, depth: number) => {
+      if (editor?.mode === 'create' && editor.targetDirectory === path) {
+        visible.push({
+          kind: 'editor',
+          key: `editor:create:${path}`,
+          depth,
+          mode: 'create',
+          entry: null,
+        });
+      }
       for (const entry of directories[path]?.entries ?? []) {
         const isDirectory = entry.kind === 'directory';
         const open = isDirectory && expanded.has(entry.path);
@@ -536,16 +567,7 @@ export function MobileFileExplorer({
             entry,
             depth,
             open,
-            selected: !isDirectory && entry.path === selectedPath,
-          });
-        }
-        if (editor && editor.mode !== 'rename' && editor.anchorPath === entry.path) {
-          visible.push({
-            kind: 'editor',
-            key: `editor:${editor.mode}:${entry.path}`,
-            depth,
-            mode: editor.mode,
-            entry,
+            selected: entry.path === selectedPath,
           });
         }
         if (!open) continue;
@@ -586,6 +608,25 @@ export function MobileFileExplorer({
     visit(rootPath, 0);
     return visible;
   }, [directories, editor, expanded, refreshing, rootPath, selectedPath]);
+  const scrolledRevealRef = React.useRef<object | null>(null);
+  const [revealScrollAttempt, setRevealScrollAttempt] = React.useState(0);
+  const revealScrollTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  React.useEffect(() => {
+    setRevealScrollAttempt(0);
+    return () => {
+      if (revealScrollTimer.current) clearTimeout(revealScrollTimer.current);
+    };
+  }, [reveal]);
+  React.useEffect(() => {
+    if (!active || !reveal || scrolledRevealRef.current === reveal) return;
+    const index = rows.findIndex((row) => row.kind === 'entry' && row.entry.path === reveal.path);
+    if (index < 0) return;
+    const frame = requestAnimationFrame(() => {
+      scrolledRevealRef.current = reveal;
+      listRef.current?.scrollToIndex({ index, viewPosition: 0.4, animated: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [active, reveal, rows, revealScrollAttempt]);
   return (
     <View style={styles.explorer}>
       {renderHeader(
@@ -595,7 +636,7 @@ export function MobileFileExplorer({
             accessibilityLabel="Create workspace item"
             disabled={actionLoading}
             hitSlop={8}
-            onPress={() => setActionMenuEntry(null)}
+            onPress={() => beginAction('create', null)}
             style={({ pressed }) => [
               styles.headerAction,
               actionLoading && styles.disabled,
@@ -633,7 +674,25 @@ export function MobileFileExplorer({
           <Text style={styles.retryText}>Retry</Text>
         </Pressable>
       ) : null}
+      {editor?.mode === 'create' ? (
+        <Text style={styles.creationHint}>
+          Add an extension for a file; no extension creates a folder.
+        </Text>
+      ) : null}
       <FlatList
+        ref={listRef}
+        onScrollToIndexFailed={({ index, averageItemLength }) => {
+          listRef.current?.scrollToOffset({ offset: index * averageItemLength, animated: false });
+          scrolledRevealRef.current = null;
+          if (revealScrollAttempt < 3) {
+            if (revealScrollTimer.current) clearTimeout(revealScrollTimer.current);
+            revealScrollTimer.current = setTimeout(
+              () => setRevealScrollAttempt((attempt) => attempt + 1),
+              100,
+            );
+          }
+        }}
+        keyboardShouldPersistTaps="handled"
         data={rows}
         keyExtractor={(row) => row.key}
         initialNumToRender={24}
@@ -670,15 +729,13 @@ export function MobileFileExplorer({
           }
           if (item.kind === 'editor') {
             const directoryEditor =
-              item.mode === 'create-directory' || item.entry?.kind === 'directory';
+              item.mode === 'create'
+                ? mobileExplorerCreationAction(actionInput) === 'create-directory'
+                : item.entry?.kind === 'directory';
             return (
               <View
                 accessibilityLabel={
-                  item.mode === 'rename'
-                    ? 'Rename item'
-                    : item.mode === 'create-file'
-                      ? 'New file name'
-                      : 'New folder name'
+                  item.mode === 'rename' ? 'Rename item' : 'New file or folder name'
                 }
                 style={[styles.row, styles.editorRow, { paddingLeft: 12 + item.depth * 16 }]}
               >
@@ -693,12 +750,10 @@ export function MobileFileExplorer({
                 <ThemedTextInput
                   ref={actionInputRef}
                   accessibilityLabel={
-                    item.mode === 'rename'
-                      ? 'Rename item'
-                      : item.mode === 'create-file'
-                        ? 'New file name'
-                        : 'New folder name'
+                    item.mode === 'rename' ? 'Rename item' : 'New file or folder name'
                   }
+                  autoFocus
+                  placeholder="file.ext or folder"
                   autoCapitalize="none"
                   autoCorrect={false}
                   blurOnSubmit={false}
@@ -712,7 +767,28 @@ export function MobileFileExplorer({
                   onSubmitEditing={() => void submitAction()}
                   style={styles.inlineNameInput}
                 />
-                {actionLoading ? <ActivityIndicator color={colors.accent} size="small" /> : null}
+                {actionLoading ? (
+                  <ActivityIndicator color={colors.accent} size="small" />
+                ) : (
+                  <>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Create or rename item"
+                      onPress={() => void submitAction()}
+                      style={styles.headerAction}
+                    >
+                      <Check color={colors.accent} size={18} />
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Cancel naming item"
+                      onPress={cancelAction}
+                      style={styles.headerAction}
+                    >
+                      <X color={colors.muted} size={18} />
+                    </Pressable>
+                  </>
+                )}
               </View>
             );
           }
@@ -723,7 +799,9 @@ export function MobileFileExplorer({
               accessibilityRole="button"
               accessibilityLabel={`${isDirectory ? (item.open ? 'Collapse folder' : 'Expand folder') : 'Open file'} ${item.entry.name}`}
               accessibilityState={
-                isDirectory ? { expanded: item.open } : { selected: item.selected }
+                isDirectory
+                  ? { expanded: item.open, selected: item.selected }
+                  : { selected: item.selected }
               }
               onPress={() => {
                 if (suppressPressUntilRef.current > Date.now()) return;
@@ -821,22 +899,27 @@ export function MobileFileExplorer({
                   pressed && styles.actionMenuPressed,
                 ]}
               >
+                <Pencil color={colors.muted} size={18} />
                 <Text style={styles.actionMenuText}>Rename</Text>
               </Pressable>
             ) : null}
             <Pressable
               accessibilityRole="menuitem"
-              onPress={() => beginAction('create-file', actionMenuEntry ?? null)}
+              onPress={() => beginAction('create', actionMenuEntry ?? null)}
               style={({ pressed }) => [styles.actionMenuItem, pressed && styles.actionMenuPressed]}
             >
-              <Text style={styles.actionMenuText}>New file here</Text>
+              <Plus color={colors.accent} size={18} />
+              <Text style={styles.actionMenuText}>
+                {actionMenuEntry?.kind === 'directory' ? 'New item inside folder' : 'New item here'}
+              </Text>
             </Pressable>
             <Pressable
-              accessibilityRole="menuitem"
-              onPress={() => beginAction('create-directory', actionMenuEntry ?? null)}
-              style={({ pressed }) => [styles.actionMenuItem, pressed && styles.actionMenuPressed]}
+              accessibilityRole="button"
+              onPress={() => setActionMenuEntry(undefined)}
+              style={styles.actionMenuItem}
             >
-              <Text style={styles.actionMenuText}>New folder here</Text>
+              <X color={colors.muted} size={18} />
+              <Text style={styles.actionMenuText}>Cancel</Text>
             </Pressable>
           </View>
         </Pressable>
@@ -859,6 +942,7 @@ const styles = StyleSheet.create({
   explorer: { flex: 1, minHeight: 0, backgroundColor: colors.mantle },
   headerAction: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  creationHint: { color: colors.muted, fontSize: 11, paddingHorizontal: 12, paddingVertical: 6 },
   content: { paddingVertical: 5, paddingBottom: 18 },
   emptyContent: { flexGrow: 1 },
   row: {
@@ -930,21 +1014,26 @@ const styles = StyleSheet.create({
   retryText: { color: colors.accent, fontSize: 10, fontWeight: '800' },
   menuBackdrop: {
     flex: 1,
-    justifyContent: 'flex-end',
-    padding: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
     backgroundColor: colors.overlaySoft,
   },
   actionMenu: {
+    width: '100%',
+    maxWidth: 360,
+    padding: 8,
+    elevation: 12,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: colors.borderStrong,
-    borderRadius: 12,
+    borderRadius: 20,
     backgroundColor: colors.panelRaised,
   },
   actionMenuTitle: {
     color: colors.muted,
     fontFamily: 'monospace',
-    fontSize: 10,
+    fontSize: 13,
     fontWeight: '800',
     paddingHorizontal: 15,
     paddingVertical: 11,
@@ -952,8 +1041,11 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   actionMenuItem: {
-    minHeight: 48,
-    justifyContent: 'center',
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderRadius: 12,
     paddingHorizontal: 15,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,

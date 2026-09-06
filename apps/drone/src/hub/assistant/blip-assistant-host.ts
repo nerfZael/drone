@@ -12,6 +12,7 @@ import type { BlipHistoryPage } from '@blip/protocol';
 
 import { toBlipModelProvider } from '../hub-settings';
 import { loadOpenRouterCatalog, cachedOpenRouterModel } from '../openrouter-model-catalog';
+import { loadCodexCatalog, discoveredCodexModel } from '../codex-model-catalog';
 import { HubSessionRepository } from './hub-session-repository';
 import { loadBlipNodeRuntime, loadBlipRuntime } from './blip-runtime-loader';
 
@@ -501,7 +502,16 @@ export class BlipAssistantHost {
     try {
       const provider = toBlipModelProvider(config.provider);
       await loadOpenRouterCatalog();
-      const model = cachedOpenRouterModel(provider, config.model) ?? nodeRuntime.resolveBlipModel(provider, config.model);
+      await loadCodexCatalog();
+      let model: import('@mariozechner/pi-ai').Model<any> | undefined = cachedOpenRouterModel(provider, config.model);
+      if (!model) {
+        try { model = nodeRuntime.resolveBlipModel(provider, config.model); }
+        catch (error) {
+          const discovered = discoveredCodexModel(provider, config.model);
+          if (!discovered) throw error;
+          model = discovered;
+        }
+      }
       const sessionId = await this.repository.sessionIdForThread(threadId);
       handle = await runtime.createBlipSession({
         workspaceRoot: 'drone-hub',

@@ -73,9 +73,10 @@ export function resolveMarkdownPreviewLinkTarget(baseFilePath: string, rawHref: 
 
   if (!pathToken) return null;
   const baseDir = basePath.includes('/') ? basePath.slice(0, basePath.lastIndexOf('/')) || '/' : '/';
+  try { pathToken = decodeURIComponent(pathToken); } catch { return null; }
   const combinedPath = pathToken.startsWith('/') ? pathToken : `${baseDir}/${pathToken}`;
   const resolvedPath = normalizeResolvedPath(combinedPath);
-  if (!resolvedPath || resolvedPath === '/') return null;
+  if (!resolvedPath) return null;
 
   return {
     path: resolvedPath,

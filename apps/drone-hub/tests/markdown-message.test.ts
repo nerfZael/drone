@@ -300,6 +300,16 @@ describe('MarkdownMessage', () => {
     expect(html).not.toContain('target="_blank"');
   });
 
+  test('routes bare and parent-directory markdown links through the workspace handler', () => {
+    const html = renderMarkdown('[docs](docs) [parent](../docs/) [folder](my%20folder/)', {
+      onOpenFileReference: () => {},
+    });
+    expect(html).toContain('aria-label="Open file docs"');
+    expect(html).toContain('aria-label="Open file ../docs/"');
+    expect(html).toContain('aria-label="Open file my folder/"');
+    expect(html).not.toContain('target="_blank"');
+  });
+
   test('renders normal external links with new-tab attributes', () => {
     const html = renderMarkdown('[docs](https://example.com/docs)');
     expect(html).toContain('href="https://example.com/docs"');

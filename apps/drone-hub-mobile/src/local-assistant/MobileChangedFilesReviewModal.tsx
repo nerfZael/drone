@@ -199,7 +199,7 @@ export function MobileChangedFilesReviewModal({
             accessibilityLabel="Close changed files review"
             hitSlop={10}
             onPress={onClose}
-            style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
+            style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}
           >
             <ChevronLeft color={colors.text} size={22} strokeWidth={2} />
           </Pressable>
@@ -310,11 +310,19 @@ const styles = StyleSheet.create({
     minHeight: 60,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 10,
+    gap: 6,
+    paddingLeft: 2,
+    paddingRight: 10,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
     backgroundColor: colors.mantle,
+  },
+  backButton: {
+    width: 28,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 9,
   },
   headerCopy: { minWidth: 0, flex: 1 },
   headerTitle: { color: colors.textStrong, fontSize: 15, fontWeight: '700' },

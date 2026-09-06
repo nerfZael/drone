@@ -1,3 +1,6 @@
+import { APP_HEADER_HEIGHT } from '../layout';
+import { resolveWorkspacePreviewLink } from '@drone/hub-model';
+import type { MobileFileReference } from '../local-assistant/file-reference';
 import React from 'react';
 import type { DroneControlOperation } from '@drone/device-protocol';
 import {
@@ -15,8 +18,6 @@ import {
   View,
 } from 'react-native';
 import ChevronLeft from 'lucide-react-native/icons/chevron-left';
-import ChevronDown from 'lucide-react-native/icons/chevron-down';
-import ChevronUp from 'lucide-react-native/icons/chevron-up';
 import ChevronsDown from 'lucide-react-native/icons/chevrons-down';
 import ChevronsUp from 'lucide-react-native/icons/chevrons-up';
 import FileQuestion from 'lucide-react-native/icons/file-question-mark';
@@ -68,7 +69,8 @@ import {
   MOBILE_EXPLORER_HEADER_HEIGHT,
   mobileExplorerExpandedHeight,
   mobileExplorerDragProgress,
-  mobileExplorerDragOpens,
+  mobileExplorerSnapPosition,
+  mobileExplorerTallHeight,
 } from './mobile-explorer-drag';
 
 const EXPLORER_SPRING = { stiffness: 700, damping: 52, mass: 1, overshootClamping: true };
@@ -145,11 +147,13 @@ function TextPreview({
   line,
   markdownExpansionCommand,
   wordWrap,
+  onOpenReference,
 }: {
   preview: MobileFilePreview;
   line: number | null;
   markdownExpansionCommand: NativeMarkdownExpansionCommand | null;
   wordWrap: boolean;
+  onOpenReference(reference: MobileFileReference): void;
 }) {
   const scrollRef = React.useRef<ScrollView | null>(null);
   const safePreview = mobileTextPreviewContent(preview.content);
@@ -168,6 +172,12 @@ function TextPreview({
       <ScrollView style={styles.bodyScroll} contentContainerStyle={styles.markdownContent}>
         <NativeMarkdown
           text={safePreview.content}
+          onOpenFileReference={(reference) =>
+            onOpenReference({
+              ...reference,
+              path: resolveWorkspacePreviewLink(preview.path, reference.path),
+            })
+          }
           documentMode
           collapsibleHeadings
           expansionCommand={markdownExpansionCommand}
@@ -244,6 +254,7 @@ export function FilePreviewModal({
   rootPath,
   workspaceName,
   selectedPath,
+  directoryReveal,
   requestDroneControl,
   onOpenPath,
   onSave,
@@ -267,19 +278,24 @@ export function FilePreviewModal({
   rootPath: string;
   workspaceName: string;
   selectedPath: string;
+  directoryReveal?: { path: string; sequence: number } | null;
   requestDroneControl: (
     destinationId: string,
     operation: DroneControlOperation,
     payload?: any,
   ) => Promise<any>;
-  onOpenPath(path: string): void;
+  onOpenPath(path: string, line?: number | null): void;
   onSave(content: string, expectedRevision?: string | null): Promise<boolean>;
   onClose(): void;
   onRetry(): void;
   onPreviewPathsChanged(paths: readonly string[]): void;
 }) {
   const companion = useMobileCompanion();
-  const [explorerExpanded, setExplorerExpanded] = React.useState(embedded);
+  const [explorerPosition, setExplorerPosition] = React.useState(embedded ? 1 : 0);
+  const explorerExpanded = explorerPosition > 0;
+  React.useEffect(() => {
+    if (directoryReveal) setExplorerPosition((current) => Math.max(1, current));
+  }, [directoryReveal]);
   const [explorerDragging, setExplorerDragging] = React.useState(false);
   const explorerProgress = useSharedValue(embedded ? 1 : 0);
   const explorerTarget = useSharedValue(embedded ? 1 : 0);
@@ -287,22 +303,26 @@ export function FilePreviewModal({
   const explorerDragStart = useSharedValue(0);
   const explorerDragTarget = useSharedValue(0);
   const explorerTravel = useSharedValue(172);
+  const explorerUpperTravel = useSharedValue(100);
   const beginExplorerDrag = React.useCallback(() => {
     Keyboard.dismiss();
     setExplorerDragging(true);
   }, []);
-  const finishExplorerDrag = React.useCallback((open: boolean) => {
-    setExplorerExpanded(open);
+  const finishExplorerDrag = React.useCallback((position: number) => {
+    setExplorerPosition(position);
     setExplorerDragging(false);
   }, []);
   React.useEffect(() => {
-    const target = explorerExpanded ? 1 : 0;
+    const target = explorerPosition;
     if (explorerTarget.value === target) return;
     explorerTarget.value = target;
     explorerProgress.value = withSpring(target, EXPLORER_SPRING);
-  }, [explorerExpanded, explorerProgress, explorerTarget]);
+  }, [explorerPosition, explorerProgress, explorerTarget]);
   const explorerDockStyle = useAnimatedStyle(() => ({
-    height: MOBILE_EXPLORER_HEADER_HEIGHT + explorerProgress.value * explorerTravel.value,
+    height:
+      MOBILE_EXPLORER_HEADER_HEIGHT +
+      Math.min(1, explorerProgress.value) * explorerTravel.value +
+      Math.max(0, explorerProgress.value - 1) * explorerUpperTravel.value,
   }));
   const explorerGesture = Gesture.Pan()
     .maxPointers(1)
@@ -321,23 +341,28 @@ export function FilePreviewModal({
         explorerDragStart.value,
         event.translationY,
         explorerTravel.value,
+        explorerUpperTravel.value,
       );
     })
     .onEnd((event) => {
-      const open = mobileExplorerDragOpens(explorerProgress.value, event.velocityY);
-      explorerTarget.value = open ? 1 : 0;
+      const position = mobileExplorerSnapPosition(
+        explorerProgress.value,
+        event.velocityY,
+        explorerDragTarget.value,
+      );
+      explorerTarget.value = position;
       explorerProgress.value = withSpring(explorerTarget.value, {
         ...EXPLORER_SPRING,
         velocity: -event.velocityY / Math.max(1, explorerTravel.value),
       });
-      runOnJS(finishExplorerDrag)(open);
+      runOnJS(finishExplorerDrag)(position);
     })
     .onFinalize((_event, success) => {
       if (!explorerGestureActive.value) return;
       explorerGestureActive.value = false;
       if (success) return;
       explorerProgress.value = withSpring(explorerDragTarget.value, EXPLORER_SPRING);
-      runOnJS(finishExplorerDrag)(explorerDragTarget.value === 1);
+      runOnJS(finishExplorerDrag)(explorerDragTarget.value);
     });
   const [wordWrap, setWordWrap] = React.useState(true);
   const [editing, setEditing] = React.useState(false);
@@ -458,7 +483,7 @@ export function FilePreviewModal({
   }, [dirty, preview?.content, preview?.kind, preview?.revision]);
 
   React.useEffect(() => {
-    if (!visible && !embedded) setExplorerExpanded(false);
+    if (!visible && !embedded) setExplorerPosition(0);
   }, [embedded, visible]);
 
   const confirmDiscard = React.useCallback(
@@ -485,9 +510,9 @@ export function FilePreviewModal({
     [embedded, confirmDiscard, onClose],
   );
   const openExplorerPath = React.useCallback(
-    (path: string) =>
+    (path: string, line?: number | null) =>
       confirmDiscard(() => {
-        onOpenPath(path);
+        onOpenPath(path, line);
       }),
     [confirmDiscard, onOpenPath],
   );
@@ -522,41 +547,21 @@ export function FilePreviewModal({
         </Pressable>
         <View style={styles.headerCopy}>
           <View style={styles.titleRow}>
-            <NativeFileTypeIcon path={preview?.name || displayPath} size={18} />
+            {directoryReveal ? (
+              <FolderTree color={colors.accentAlt} size={18} />
+            ) : (
+              <NativeFileTypeIcon path={preview?.name || displayPath} size={18} />
+            )}
             <Text numberOfLines={1} style={styles.title}>
               {preview?.name || displayPath.split('/').at(-1) || 'File preview'}
             </Text>
-            <Text style={styles.readOnly}>
-              {editing ? 'EDITING' : dirty ? 'UNSAVED' : 'PREVIEW'}
-            </Text>
+            {dirty ? <Text style={styles.readOnly}>UNSAVED</Text> : null}
           </View>
           <Text numberOfLines={1} style={styles.path}>
             {displayPath}
           </Text>
         </View>
         <View style={styles.headingActions}>
-          {canEdit ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={editing ? 'Stop editing file' : 'Edit file'}
-              hitSlop={8}
-              disabled={saving}
-              onPress={() =>
-                setEditing((current) => {
-                  if (!current) setExplorerExpanded(false);
-                  return !current;
-                })
-              }
-              style={({ pressed }) => [
-                styles.headingAction,
-                editing && styles.headingActionActive,
-                saving && styles.disabled,
-                pressed && styles.pressed,
-              ]}
-            >
-              <Pencil color={editing ? colors.accent : colors.muted} size={16} strokeWidth={2} />
-            </Pressable>
-          ) : null}
           {preview?.kind === 'text' &&
           !markdownPreview &&
           (!htmlPreview || htmlMode === 'source') &&
@@ -628,6 +633,28 @@ export function FilePreviewModal({
               </Pressable>
             </>
           ) : null}
+          {canEdit ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={editing ? 'Stop editing file' : 'Edit file'}
+              hitSlop={8}
+              disabled={saving}
+              onPress={() =>
+                setEditing((current) => {
+                  if (!current) setExplorerPosition(0);
+                  return !current;
+                })
+              }
+              style={({ pressed }) => [
+                styles.headingAction,
+                editing && styles.headingActionActive,
+                saving && styles.disabled,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Pencil color={editing ? colors.accent : colors.muted} size={16} strokeWidth={2} />
+            </Pressable>
+          ) : null}
         </View>
       </View>
 
@@ -637,6 +664,11 @@ export function FilePreviewModal({
           explorerTravel.value =
             mobileExplorerExpandedHeight(event.nativeEvent.layout.height) -
             MOBILE_EXPLORER_HEADER_HEIGHT;
+          explorerUpperTravel.value = Math.max(
+            1,
+            mobileExplorerTallHeight(event.nativeEvent.layout.height) -
+              mobileExplorerExpandedHeight(event.nativeEvent.layout.height),
+          );
         }}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
@@ -751,6 +783,7 @@ export function FilePreviewModal({
                 preview={preview}
                 line={line}
                 markdownExpansionCommand={markdownExpansionCommand}
+                onOpenReference={(reference) => openExplorerPath(reference.path, reference.line)}
                 wordWrap={wordWrap}
               />
             ) : preview?.kind === 'image' && preview.mime === 'image/svg+xml' && preview.content ? (
@@ -779,9 +812,13 @@ export function FilePreviewModal({
             ) : (
               <View style={styles.centerState}>
                 <FolderTree color={colors.muted} size={34} strokeWidth={1.7} />
-                <Text style={styles.stateTitle}>Choose a file</Text>
+                <Text style={styles.stateTitle}>
+                  {directoryReveal ? 'Folder selected' : 'Choose a file'}
+                </Text>
                 <Text style={styles.stateBody}>
-                  Expand the file explorer below to browse this workspace.
+                  {directoryReveal
+                    ? 'Choose a file in the explorer below to open it.'
+                    : 'Expand the file explorer below to browse this workspace.'}
                 </Text>
               </View>
             )}
@@ -795,14 +832,12 @@ export function FilePreviewModal({
                   <View style={styles.explorerHandleRow}>
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityLabel={
-                        explorerExpanded ? 'Collapse file explorer' : 'Expand file explorer'
-                      }
+                      accessibilityLabel={'Resize file explorer'}
                       accessibilityState={{ expanded: explorerExpanded }}
                       onPress={() =>
-                        setExplorerExpanded((current) => {
+                        setExplorerPosition((current) => {
                           if (!current) Keyboard.dismiss();
-                          return !current;
+                          return (current + 1) % 3;
                         })
                       }
                       style={({ pressed }) => [styles.explorerToggle, pressed && styles.pressed]}
@@ -811,23 +846,19 @@ export function FilePreviewModal({
                       <Text numberOfLines={1} style={styles.explorerTitle}>
                         Files{workspaceName ? ` (${workspaceName})` : ''}
                       </Text>
-                      {explorerExpanded ? (
-                        <ChevronDown color={colors.muted} size={18} strokeWidth={2} />
-                      ) : (
-                        <ChevronUp color={colors.muted} size={18} strokeWidth={2} />
-                      )}
                     </Pressable>
                     {actions}
                   </View>
                 </View>
               </GestureDetector>
             )}
-            onRequestExpand={() => setExplorerExpanded(true)}
+            onRequestExpand={() => setExplorerPosition((current) => Math.max(1, current))}
             active={visible && (explorerExpanded || explorerDragging)}
             targetId={targetId}
             droneId={droneId}
             chatName={chatName}
             rootPath={rootPath}
+            reveal={directoryReveal}
             selectedPath={selectedPath}
             requestDroneControl={requestDroneControl}
             onOpenFile={openExplorerPath}
@@ -854,18 +885,20 @@ export function FilePreviewModal({
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   header: {
-    minHeight: 60,
+    height: APP_HEADER_HEIGHT,
+    flexShrink: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 10,
+    gap: 4,
+    paddingLeft: 2,
+    paddingRight: 6,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
     backgroundColor: colors.mantle,
   },
   backButton: {
-    width: 38,
-    height: 38,
+    width: 28,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 9,

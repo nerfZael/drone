@@ -49,6 +49,7 @@ export type AgentCatalogCommandResult = {
 };
 
 export type AgentModelCatalogRuntime = {
+  discoverCodexModels?(): Promise<AgentModelCatalogModel[]>;
   runContainer(
     containerName: string,
     command: string,

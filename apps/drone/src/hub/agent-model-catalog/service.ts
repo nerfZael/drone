@@ -59,6 +59,15 @@ export class AgentModelCatalogService {
   async get(request: AgentModelCatalogRequest): Promise<AgentModelCatalogResult> {
     const key = cacheKey(request);
     const cached = this.readCache(key);
+    if (request.agentId === 'codex' && request.forceRefresh && this.runtime.discoverCodexModels) {
+      const snapshot = cached?.models.length ? null : await this.readHostCodexModelCache();
+      const fallback = cached?.models.length ? cached : snapshot ? {
+        key, agentId: request.agentId, runtime: 'host' as const, models: snapshot.models,
+        discoveredAt: snapshot.fetchedAt ?? new Date(0).toISOString(),
+        installationFingerprint: 'host:codex-cache',
+      } : null;
+      return this.refresh(key, request, fallback);
+    }
     // Codex refreshes this file independently, so check it before applying the Hub cache TTL.
     const currentCodexSnapshot =
       request.agentId === 'codex' ? await this.readHostCodexModelCache() : null;
@@ -76,10 +85,9 @@ export class AgentModelCatalogService {
       const cachedTimestamp = cached?.discoveredAt ? Date.parse(cached.discoveredAt) : NaN;
       if (
         cached?.models.length &&
-        cached.installationFingerprint === 'host:codex-cache' &&
         Number.isFinite(snapshotTimestamp) &&
         Number.isFinite(cachedTimestamp) &&
-        snapshotTimestamp < cachedTimestamp
+        snapshotTimestamp <= cachedTimestamp
       ) {
         return resultFromEntry(cached, 'cache');
       }
@@ -95,7 +103,7 @@ export class AgentModelCatalogService {
       };
       this.failedRefreshes.delete(key);
       await this.remember(entry);
-      return resultFromEntry(entry, 'live');
+      return resultFromEntry(entry, 'cache');
     }
     const now = this.runtime.now?.() ?? Date.now();
     const age = cached ? now - Date.parse(cached.discoveredAt) : Number.POSITIVE_INFINITY;
@@ -246,6 +254,9 @@ export class AgentModelCatalogService {
     installationFingerprint?: string;
     error?: string;
   }> {
+    if (request.agentId === 'codex' && this.runtime.discoverCodexModels) {
+      return { models: await this.runtime.discoverCodexModels(), installationFingerprint: 'host:codex-app-server' };
+    }
     const adapter = agentModelCatalogAdapter(request.agentId);
     const timeoutMs = this.runtime.timeoutMs();
     if (request.target.runtime === 'host') {

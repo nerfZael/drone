@@ -1,3 +1,8 @@
+import {
+  normalizeWorkspaceLinkPath,
+  workspaceLinkParent,
+  workspaceLinkIsDirectory,
+} from '@drone/hub-model';
 import { throwIfAborted } from '@drone/device-protocol';
 import React from 'react';
 import { fetch as streamingFetch } from 'expo/fetch';
@@ -89,6 +94,10 @@ export function useFilePreview({
     'path' | 'line'
   > | null>(null);
   const [preview, setPreview] = React.useState<MobileFilePreview | null>(null);
+  const [directoryReveal, setDirectoryReveal] = React.useState<{
+    path: string;
+    sequence: number;
+  } | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [saveError, setSaveError] = React.useState<string | null>(null);
@@ -121,6 +130,7 @@ export function useFilePreview({
       saveVersion.current += 1;
       setWorkspaceContext(nextWorkspaceContext);
       setRequest(null);
+      setDirectoryReveal(null);
       setPreview(null);
       setError(null);
       setRefreshError(null);
@@ -175,6 +185,31 @@ export function useFilePreview({
         clearActivePreview();
       }
       try {
+        if (!background) {
+          let directory = false;
+          try {
+            directory = await workspaceLinkIsDirectory(nextRequest.path, (parent) =>
+              requestDroneControl(
+                nextRequest.targetId,
+                'files.list',
+                {
+                  droneId: nextRequest.droneId,
+                  chatName: nextRequest.chatName,
+                  path: parent,
+                },
+                signal,
+              ),
+            );
+          } catch {
+            // The preview request below reports missing paths or access errors.
+          }
+          if (signal.aborted || version !== loadVersion.current) return;
+          if (directory) {
+            setDirectoryReveal({ path: nextRequest.path, sequence: version });
+            return;
+          }
+          setDirectoryReveal(null);
+        }
         let firstResult: any = await requestDroneControl(
           nextRequest.targetId,
           'file.preview',
@@ -416,9 +451,9 @@ export function useFilePreview({
         droneId: selectedDrone.id,
         chatName,
         phoneTarget,
-        path: phoneTarget
-          ? reference.path
-          : resolveMobileDroneFilePath(selectedDrone, reference.path),
+        path: normalizeWorkspaceLinkPath(
+          phoneTarget ? reference.path : resolveMobileDroneFilePath(selectedDrone, reference.path),
+        ),
         line: reference.line,
       };
       lastViewedFilesRef.current.remember(nextRequest, { ...reference, path: nextRequest.path });
@@ -430,6 +465,7 @@ export function useFilePreview({
       });
       saveVersion.current += 1;
       setRequest(nextRequest);
+      setDirectoryReveal(null);
       setSaving(false);
       setSaveError(null);
       const cached = previewCacheRef.current!.get(mobileFileCacheKey(nextRequest));
@@ -591,8 +627,18 @@ export function useFilePreview({
     subscribeFileChanges,
   ]);
 
+  const workspaceRoot =
+    selectedDrone && !phoneTarget ? mobileDroneWorkspaceRoot(selectedDrone) : '';
+  const revealPath = requestIsCurrent ? directoryReveal?.path : undefined;
+  const explorerRoot =
+    revealPath !== undefined &&
+    (revealPath === workspaceRoot ||
+      (workspaceRoot && workspaceRoot !== '/' && !revealPath.startsWith(`${workspaceRoot}/`)))
+      ? workspaceLinkParent(revealPath)
+      : workspaceRoot;
   return {
     visible: workspaceIsCurrent,
+    directoryReveal: requestIsCurrent ? directoryReveal : null,
     preview: requestIsCurrent ? preview : null,
     displayPath:
       requestIsCurrent && selectedDrone
@@ -604,7 +650,7 @@ export function useFilePreview({
     refreshError: requestIsCurrent ? refreshError : null,
     saving: requestIsCurrent && saving,
     saveError: requestIsCurrent ? saveError : null,
-    rootPath: selectedDrone && !phoneTarget ? mobileDroneWorkspaceRoot(selectedDrone) : '',
+    rootPath: explorerRoot,
     selectedPath: requestIsCurrent ? (preview?.path ?? request?.path ?? '') : '',
     open,
     openExplorer,

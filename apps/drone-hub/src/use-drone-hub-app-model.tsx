@@ -1,3 +1,4 @@
+import { normalizeWorkspaceLinkPath, workspaceLinkIsDirectory, workspaceLinkParent } from '@drone/hub-model';
 import React from 'react';
 import { createSidebarCommandQueue } from '@drone/hub-model/sidebar';
 import {
@@ -3577,20 +3578,50 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [resetFileExplorerToRoot, setActiveOpenedFileTab],
   );
+  const [explorerReveal, setExplorerReveal] = React.useState<{ path: string; sequence: number } | null>(null);
+  const pathNavigationVersion = React.useRef(0);
+  React.useEffect(() => {
+    pathNavigationVersion.current += 1;
+    setExplorerReveal(null);
+    return () => { pathNavigationVersion.current += 1; };
+  }, [currentDrone?.id]);
   const openFileInFilesPane = React.useCallback(
     (next: { path: string; name: string; line?: number | null; column?: number | null }) => {
-      const resolvedPath = resolveDroneFileOpenPath(currentDrone, next.path);
+      const resolvedPath = normalizeWorkspaceLinkPath(resolveDroneFileOpenPath(currentDrone, next.path));
       if (!resolvedPath) return;
       const name =
         String(next.name ?? '').trim() ||
         resolvedPath.split('/').filter(Boolean).pop() ||
         resolvedPath;
-      resetFileExplorerToRoot();
-      openEditorFile({ ...next, path: resolvedPath, name });
-      focusEditorPane();
+      const version = ++pathNavigationVersion.current;
+      const droneId = currentDrone?.id;
+      if (!droneId) return;
+      void (async () => {
+        let directory = false;
+        try {
+          directory = await workspaceLinkIsDirectory(resolvedPath, (parent) =>
+            requestJson(`/api/drones/${encodeURIComponent(droneId)}/fs/list?path=${encodeURIComponent(parent)}`),
+          );
+        } catch {
+          // Let the file editor report unavailable paths and access errors as usual.
+        }
+        if (version !== pathNavigationVersion.current) return;
+        if (directory) {
+          const root = normalizeWorkspaceLinkPath(defaultFsPathForCurrentDrone);
+          setCurrentFsPath(root && resolvedPath !== root && (root === '/' || resolvedPath.startsWith(`${root}/`))
+            ? root : workspaceLinkParent(resolvedPath));
+          setExplorerReveal({ path: resolvedPath, sequence: version });
+        } else {
+          setExplorerReveal(null);
+          resetFileExplorerToRoot();
+          openEditorFile({ ...next, path: resolvedPath, name });
+        }
+        focusEditorPane();
+      })();
     },
-    [currentDrone, focusEditorPane, openEditorFile, resetFileExplorerToRoot],
+    [currentDrone, defaultFsPathForCurrentDrone, focusEditorPane, openEditorFile, resetFileExplorerToRoot, setCurrentFsPath],
   );
+
   const openFileDictationTarget = React.useCallback(
     (target: { droneId: string; path: string; name: string }) => {
       const droneId = String(target.droneId ?? '').trim();
@@ -5164,6 +5195,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           onCloseTerminalSession={closeTerminalPaneTab}
           uiDroneName={uiDroneName}
           currentFsPath={currentFsPath}
+          explorerReveal={explorerReveal}
           fsEntries={fsEntries}
           fsLoading={fsLoading}
           fsError={fsError}
@@ -5297,6 +5329,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       onActivateChatFromCanvas,
       openDroneDropActionModal,
       filesPane,
+      explorerReveal,
       fsEntries,
       fsError,
       fsErrorUi,

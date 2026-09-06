@@ -170,6 +170,7 @@ export function DroneFilesDock({
   onCloseOpenedFilesForPaths,
   onRemapOpenedFilesForPathChange,
   openedFile,
+  reveal,
   readOnly = false,
   zoom = 1,
 }: {
@@ -192,6 +193,7 @@ export function DroneFilesDock({
   onCloseOpenedFilesForPaths?: (paths: string[]) => void;
   onRemapOpenedFilesForPathChange?: (sourcePath: string, targetPath: string) => void;
   openedFile: DroneOpenedFileState;
+  reveal?: { path: string; sequence: number } | null;
   readOnly?: boolean;
   zoom?: number;
 }) {
@@ -476,6 +478,34 @@ export function DroneFilesDock({
       void loadDirectory(directoryPath);
     }
   }, [activeFileAncestorPaths, loadDirectory, setExpandedDirs]);
+
+  const appliedRevealRef = React.useRef<string>('');
+  const scrolledRevealRef = React.useRef<object | null>(null);
+  React.useEffect(() => {
+    if (!reveal) { appliedRevealRef.current = ''; return; }
+    const key = `${workspaceStateKey}:${reveal.sequence}`;
+    if (appliedRevealRef.current === key) return;
+    appliedRevealRef.current = key;
+    setSelectedPaths(new Set([reveal.path]));
+    selectionAnchorRef.current = reveal.path;
+    const directories = [...fileAncestorDirectoryPaths(normalizedPath, reveal.path), reveal.path];
+    setExpandedDirs((previous) => {
+      const next = { ...previous };
+      for (const directory of directories) next[directory] = true;
+      return next;
+    });
+    for (const directory of directories) void loadDirectory(directory);
+  }, [reveal, workspaceStateKey, normalizedPath, loadDirectory, setExpandedDirs]);
+
+  React.useEffect(() => {
+    if (!reveal || scrolledRevealRef.current === reveal) return;
+    const row = Array.from(explorerRef.current?.querySelectorAll<HTMLElement>('[data-file-explorer-directory]') ?? [])
+      .find((element) => element.dataset.fileExplorerDirectory === reveal.path);
+    if (row) {
+      row.querySelector<HTMLElement>('[role="treeitem"]')?.scrollIntoView({ block: 'nearest' });
+      scrolledRevealRef.current = reveal;
+    }
+  }, [reveal, explorerTree]);
 
   const toggleDirectory = React.useCallback(
     (dirPath: string) => {

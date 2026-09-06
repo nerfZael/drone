@@ -25,6 +25,12 @@ type Session = {
   pending: number;
 };
 
+class TargetLookupUnavailable extends Error {
+  constructor(cause: unknown) {
+    super('Browser port lookup is temporarily unavailable', { cause });
+  }
+}
+
 function portNumber(value: unknown): number {
   const port = Number(value);
   if (!Number.isInteger(port) || port < 1 || port > 65535)
@@ -43,6 +49,10 @@ export class DeviceBrowserSessions {
   });
   private readonly unsubscribe: () => void;
   private readonly timer: ReturnType<typeof setInterval>;
+  private readonly targetReads = new Map<
+    string,
+    Promise<{ runtime: 'host' | 'container'; ports: Array<{ port: number; hostPort: number }> }>
+  >();
   private checking = false;
   private closed = false;
 
@@ -72,14 +82,33 @@ export class DeviceBrowserSessions {
       throw new Error('Browser access is not permitted for this device');
   }
 
-  private async targets(droneId: string, signal?: AbortSignal) {
+  private targets(droneId: string, signal?: AbortSignal) {
+    // Coalesce a page's concurrent resource checks, but never cache a completed mapping.
+    // Cancellable opens keep independent reads so an older open cannot hold up its replacement.
+    if (signal) return this.readTargets(droneId, signal);
+    const pending = this.targetReads.get(droneId);
+    if (pending) return pending;
+    const read = this.readTargets(droneId).finally(() => {
+      if (this.targetReads.get(droneId) === read) this.targetReads.delete(droneId);
+    });
+    this.targetReads.set(droneId, read);
+    return read;
+  }
+
+  private async readTargets(droneId: string, signal?: AbortSignal) {
     const result = await localHubRequest(
       this.access,
       `/api/drones/${encodeURIComponent(droneId)}/ports`,
       {
         signal: AbortSignal.any([AbortSignal.timeout(8000), ...(signal ? [signal] : [])]),
       },
-    );
+    ).catch((error: unknown) => {
+      const code = (error as { code?: string })?.code;
+      // An unreachable local API is not evidence that the mapping was removed.
+      if ((error as { name?: string })?.name === 'TimeoutError' || !code || /^HUB_5/.test(code))
+        throw new TargetLookupUnavailable(error);
+      throw error;
+    });
     if (result.runtime !== 'host' && result.runtime !== 'container')
       throw new Error('Hub browser targets are unavailable');
     const ports = (Array.isArray(result.ports) ? result.ports : []).map((p: any) => ({
@@ -232,6 +261,9 @@ export class DeviceBrowserSessions {
           if (!binary) ws.terminate();
         });
         const stream = createWebSocketStream(ws, { highWaterMark: 64 * 1024 });
+        // Upstream EOF unpipes the duplex before its readable end is consumed.
+        // ws streams disable autoDestroy, so close must explicitly release the slot.
+        ws.once('close', () => stream.destroy());
         const upstream = net.connect({ host: '127.0.0.1', port: current.hostPort });
         current.sockets.add(stream);
         const expiry = setTimeout(
@@ -289,8 +321,11 @@ export class DeviceBrowserSessions {
             (await this.resolve(session.droneId, session.port)) !== session.hostPort
           )
             throw new Error('Target changed');
-        } catch {
-          this.remove(session);
+        } catch (error) {
+          // New streams still require a fresh successful mapping and authorization.
+          // Preserve existing streams during temporary local API failures; expiry,
+          // revoked grants, missing targets and changed mappings still close immediately.
+          if (!(error instanceof TargetLookupUnavailable)) this.remove(session);
         }
       }
     } finally {

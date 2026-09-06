@@ -48,3 +48,14 @@ describe('mobile file references', () => {
     ).toEqual(['src/App.tsx:9', 'AGENTS.md']);
   });
 });
+
+test('explicit markdown links accept directories and relative paths without changing plain text detection', () => {
+  expect(parseMobileFileReference('docs', true)?.path).toBe('docs');
+  expect(parseMobileFileReference('../docs/', true)?.path).toBe('../docs/');
+  expect(parseMobileFileReference('my%20folder/', true)?.path).toBe('my folder/');
+  expect(parseMobileFileReference('docs')).toBeNull();
+  expect(parseMobileFileReference('src/main.ts#L12', true)?.line).toBe(12);
+  for (const href of ['https://example.com', 'mailto:a@example.com', 'tel:123', 'data:123', '#heading', '//example.com']) {
+    expect(parseMobileFileReference(href, true)).toBeNull();
+  }
+});

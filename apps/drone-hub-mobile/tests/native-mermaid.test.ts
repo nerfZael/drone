@@ -51,6 +51,31 @@ describe('native Mermaid rendering', () => {
     expect(result.xml).not.toContain('var(--');
   });
 
+  test.each([
+    ['sequence', 'sequenceDiagram\nAlice->>Bob: Hello\nBob-->>Alice: Hi'],
+    ['class inheritance', 'classDiagram\nAnimal <|-- Dog'],
+    ['bidirectional flowchart', 'flowchart LR\nA <--> B'],
+  ])('keeps %s marker orientations compatible with Android', (_type, source) => {
+    const { xml } = renderNativeMermaid(source);
+    expect(xml).not.toContain('auto-start-reverse');
+    for (const marker of xml.matchAll(/<marker\b[^>]*\borient="([^"]+)"/g)) {
+      const orientation = marker[1]!;
+      expect(orientation === 'auto' || Number.isFinite(Number(orientation))).toBe(true);
+    }
+  });
+
+  test('preserves start-arrow reversal without reversing end arrows', () => {
+    const { xml } = renderNativeMermaid('classDiagram\nAnimal <|-- Dog\nCat --|> Animal');
+    expect(xml).toContain('marker-start="url(#cls-inherit-native-start)"');
+    expect(xml).toContain('marker-end="url(#cls-inherit)"');
+    const reversed = /<marker id="cls-inherit-native-start"[^>]*>([\s\S]*?)<\/marker>/.exec(
+      xml,
+    )?.[1];
+    expect(reversed).toContain('transform="rotate(180 12 5)"');
+    const forward = /<marker id="cls-inherit"[^>]*>([\s\S]*?)<\/marker>/.exec(xml)?.[1];
+    expect(forward).not.toContain('rotate(180');
+  });
+
   test('drops unsafe flowchart style directives before rendering', () => {
     const result = renderNativeMermaid(
       'flowchart LR\nA[Start] --> B[End]\nstyle A fill:url(https://example.com/x)\nlinkStyle 0 stroke:url(https://example.com/y)',

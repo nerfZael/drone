@@ -28,6 +28,7 @@ import type {
 
 import { loadAssistantState, saveAssistantState } from '../host/assistant-store';
 import { loadOpenRouterCatalog, cachedOpenRouterModel } from './openrouter-model-catalog';
+import { loadCodexCatalog, discoveredCodexModel } from './codex-model-catalog';
 import {
   getPromptQueueRepository,
   type PromptQueueRepository,
@@ -3033,6 +3034,7 @@ export class HubAssistantService {
   }
   private async ensureLoaded(): Promise<void> {
     await loadOpenRouterCatalog();
+    await loadCodexCatalog();
     if (this.loaded) return;
     const stored = (await loadAssistantState()) ?? undefined;
     const storedSystemPrompt = normalizeAssistantSystemPrompt(stored?.systemPrompt);
@@ -3200,7 +3202,7 @@ export class HubAssistantService {
       let reasoning = option.thinkingLevel !== 'off';
       if (runtime) {
         try {
-          const model = cachedOpenRouterModel(option.provider, option.id) ?? runtime.getModel(toBlipModelProvider(option.provider), option.id);
+          const model = cachedOpenRouterModel(option.provider, option.id) ?? runtime.getModel(toBlipModelProvider(option.provider), option.id) ?? discoveredCodexModel(option.provider, option.id);
           reasoning = Boolean(model?.reasoning);
         } catch {}
       }

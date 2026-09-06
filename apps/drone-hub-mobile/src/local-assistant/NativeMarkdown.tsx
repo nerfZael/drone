@@ -190,7 +190,7 @@ function FileLinkedText({
       <Text
         key={`${segment.reference.path}:${index}`}
         accessibilityRole="link"
-        accessibilityHint="Opens a read-only file preview"
+        accessibilityHint="Opens a file or reveals a folder"
         onPress={(event) => {
           event.stopPropagation?.();
           onOpenFileReference(segment.reference);
@@ -243,7 +243,7 @@ function InlineMarkdown({
         const fileReference =
           interactive && onOpenFileReference
             && (token.type === 'code' || (token.type === 'link' && !href))
-            ? parseMobileFileReference(token.type === 'link' ? (token.href ?? '') : token.text)
+            ? parseMobileFileReference(token.type === 'link' ? (token.href ?? '') : token.text, token.type === 'link')
             : null;
         const renderedText = token.type === 'code' ? `\u202f${token.text}\u202f` : token.text;
         return (
@@ -251,7 +251,7 @@ function InlineMarkdown({
             key={`${token.type}:${index}`}
             style={[style, fileReference && styles.fileLink]}
             accessibilityRole={href || fileReference ? 'link' : undefined}
-            accessibilityHint={fileReference ? 'Opens a read-only file preview' : undefined}
+            accessibilityHint={fileReference ? 'Opens a file or reveals a folder' : undefined}
             onPress={
               href
                 ? (event) => {

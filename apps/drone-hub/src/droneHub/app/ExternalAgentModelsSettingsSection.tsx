@@ -1,4 +1,6 @@
 import React from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { settingsQueryKey } from './settings-query';
 import type { ExternalAgentModelCatalogModel } from '@drone/assistant-chat';
 import { UiButton } from '../../ui/components';
 import { cacheAgentModelCatalog } from './use-agent-model-catalog';
@@ -36,6 +38,7 @@ export function ExternalAgentModelsSettingsSection({
 }: {
   requestJson: RequestJsonFn;
 }) {
+  const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [result, setResult] = React.useState<RefreshInstalledAgentCatalogsResponse | null>(null);
@@ -49,6 +52,7 @@ export function ExternalAgentModelsSettingsSection({
         { method: 'POST' },
       );
       setResult(response);
+      await queryClient.invalidateQueries({ queryKey: settingsQueryKey('llm-default-model') });
       for (const catalog of response.catalogs) {
         if (!catalog.installed || catalog.models.length === 0) continue;
         cacheAgentModelCatalog(catalog.agent, {
@@ -61,12 +65,12 @@ export function ExternalAgentModelsSettingsSection({
     } finally {
       setRefreshing(false);
     }
-  }, [requestJson]);
+  }, [requestJson, queryClient]);
 
   const installedCatalogs = result?.catalogs.filter((catalog) => catalog.installed) ?? [];
   const skippedCount = (result?.catalogs.length ?? 0) - installedCatalogs.length;
   const updatedCount = installedCatalogs.filter(
-    (catalog) => catalog.models.length > 0 && !catalog.error,
+    (catalog) => catalog.models.length > 0 && !catalog.error && !catalog.stale && catalog.source === 'live',
   ).length;
   const failedCount = installedCatalogs.length - updatedCount;
 
@@ -78,6 +82,7 @@ export function ExternalAgentModelsSettingsSection({
           <div className="mt-1 dh-type-supporting">
             Ask every supported agent installed on this computer for its current models, then update
             Drone Hub’s model menus.
+            Codex refreshes also update the Built-in agent’s Codex provider.
           </div>
         </div>
         <UiButton
@@ -109,7 +114,7 @@ export function ExternalAgentModelsSettingsSection({
           <div className="text-[var(--text-11)] text-[var(--muted)]">
             Updated {updatedCount} {updatedCount === 1 ? 'catalog' : 'catalogs'}
             {failedCount > 0
-              ? `; ${failedCount} installed ${failedCount === 1 ? 'agent did' : 'agents did'} not return models`
+              ? `; ${failedCount} catalogs could not be refreshed (cached models are kept when available)`
               : ''}
             {skippedCount > 0 ? `; skipped ${skippedCount} not available` : ''}.
           </div>
@@ -138,7 +143,7 @@ export function ExternalAgentModelsSettingsSection({
                     </div>
                   ) : catalog.discoveredAt ? (
                     <div className="mt-1 text-[var(--text-11)] text-[var(--muted-dim)]">
-                      Updated {new Date(catalog.discoveredAt).toLocaleString()}
+                      {catalog.source === 'live' && !catalog.stale ? 'Discovered' : 'Cached'} {new Date(catalog.discoveredAt).toLocaleString()}
                     </div>
                   ) : null}
                 </div>

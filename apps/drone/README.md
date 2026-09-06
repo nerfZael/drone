@@ -11,6 +11,8 @@ This repo’s `drone` implementation uses **`dvm` for container/session manageme
 
 ## Pieces
 
+In Settings → Agents, **Refresh model lists** queries the installed Codex app server's `model/list` API. Its model IDs and reasoning choices also populate the Built-in agent's Codex provider. Failed refreshes keep cached models and report the error. New Codex model IDs unknown to the bundled runtime use conservative limits (32,768 context tokens and 4,096 output tokens); known models retain their bundled metadata.
+
 - **Host CLI**: `apps/drone/dist/cli.js` (command: `drone`)
 - **Daemon (inside container)**: `apps/drone/dist/daemon.js` (runs an HTTP server)
 

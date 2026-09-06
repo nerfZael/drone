@@ -182,7 +182,7 @@ describe('agent model catalog', () => {
       'gpt-5.6-terra',
       'gpt-5.6-luna',
     ]);
-    expect(result.source).toBe('live');
+    expect(result.source).toBe('cache');
     expect(result.discoveredAt).toBe('2026-01-01T00:01:00.000Z');
     expect(containerCalls).toBe(0);
     expect(hostCommands).toHaveLength(1);

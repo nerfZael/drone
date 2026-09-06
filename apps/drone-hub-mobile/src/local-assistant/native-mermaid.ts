@@ -147,6 +147,39 @@ function applyNodeClassStyles(svg: string, source: string): string {
   );
 }
 
+function normalizeNativeMarkerOrientations(svg: string): string {
+  // Android's MarkerView accepts only "auto" or a number. SVG 2's
+  // "auto-start-reverse" otherwise throws NumberFormatException on the UI thread.
+  // Keep the normal marker for ends, and rotate a separate copy for starts.
+  const reversedIds = new Map<string, string>();
+  const startIds = new Set(
+    Array.from(svg.matchAll(/\bmarker-start="url\(#([^)"]+)\)"/g), (match) => match[1]!),
+  );
+  const next = svg.replace(
+    /<marker\b([^>]*)>([\s\S]*?)<\/marker>/g,
+    (marker, attributes: string, contents: string) => {
+      if (!/\borient="auto-start-reverse"/.test(attributes)) return marker;
+      const normalAttributes = attributes.replace('orient="auto-start-reverse"', 'orient="auto"');
+      const normal = `<marker${normalAttributes}>${contents}</marker>`;
+      const id = /\bid="([^"]+)"/.exec(attributes)?.[1];
+      if (!id || !startIds.has(id)) return normal;
+      const refX = Number(/\brefX="([^"]+)"/.exec(attributes)?.[1] ?? 0);
+      const refY = Number(/\brefY="([^"]+)"/.exec(attributes)?.[1] ?? 0);
+      if (!Number.isFinite(refX) || !Number.isFinite(refY)) {
+        throw new Error('The diagram renderer returned unsupported SVG marker coordinates.');
+      }
+      const reversedId = `${id}-native-start`;
+      reversedIds.set(id, reversedId);
+      const reversedAttributes = normalAttributes.replace(`id="${id}"`, `id="${reversedId}"`);
+      return `${normal}<marker${reversedAttributes}><g transform="rotate(180 ${refX} ${refY})">${contents}</g></marker>`;
+    },
+  );
+  return next.replace(/\bmarker-start="url\(#([^)"]+)\)"/g, (attribute, id: string) => {
+    const reversedId = reversedIds.get(id);
+    return reversedId ? `marker-start="url(#${reversedId})"` : attribute;
+  });
+}
+
 function prepareForReactNativeSvg(svg: string, source: string): string {
   if (
     /<(?:a|animate|animateMotion|animateTransform|foreignObject|iframe|image|script|set)\b/i.test(
@@ -165,7 +198,7 @@ function prepareForReactNativeSvg(svg: string, source: string): string {
   if (next.includes('var(--') || /url\(\s*(?!#)/i.test(next)) {
     throw new Error('The diagram renderer returned unsupported SVG styling.');
   }
-  return applyNodeClassStyles(next, source);
+  return normalizeNativeMarkerOrientations(applyNodeClassStyles(next, source));
 }
 
 export function renderNativeMermaid(source: string): NativeMermaidSvg {

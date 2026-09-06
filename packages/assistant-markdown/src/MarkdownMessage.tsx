@@ -693,10 +693,14 @@ function normalizeFileRefPath(raw: string): string {
   return next;
 }
 
-function parseInlineCodeFileReference(raw: string): MarkdownFileReference | null {
+function parseInlineCodeFileReference(raw: string, explicitLink = false): MarkdownFileReference | null {
   const text = String(raw ?? '').trim();
   if (!text) return null;
   let pathToken = text;
+  if (explicitLink) {
+    try { pathToken = decodeURIComponent(pathToken); } catch { return null; }
+  }
+  if (explicitLink && /^[a-z][a-z0-9+.-]*:/i.test(pathToken) && !/^[^:]+\.[^:]+:\d+(?::\d+)?$/.test(pathToken)) return null;
   let line: number | null = null;
   let column: number | null = null;
 
@@ -709,7 +713,7 @@ function parseInlineCodeFileReference(raw: string): MarkdownFileReference | null
     const lineSuffix = /:(\d+)(?::(\d+))?$/.exec(pathToken);
     if (lineSuffix && typeof lineSuffix.index === 'number') {
       const maybePath = pathToken.slice(0, lineSuffix.index).trim();
-      if (isLikelyFilePath(maybePath)) {
+      if (explicitLink || isLikelyFilePath(maybePath)) {
         pathToken = maybePath;
         line = parsePositiveInt(lineSuffix[1]);
         column = parsePositiveInt(lineSuffix[2]);
@@ -717,6 +721,11 @@ function parseInlineCodeFileReference(raw: string): MarkdownFileReference | null
     }
   }
 
+  if (explicitLink) {
+    pathToken = pathToken.split(/[?#]/, 1)[0];
+    if (!pathToken || pathToken.startsWith('~') || /^[a-z][a-z0-9+.-]*:/i.test(pathToken) || /[\0\r\n]/.test(pathToken) || pathToken.startsWith('//')) return null;
+    return { raw: text, path: pathToken.replace(/\\/g, '/'), line, column };
+  }
   if (!isLikelyFilePath(pathToken)) return null;
   const normalizedPath = normalizeFileRefPath(pathToken);
   if (!normalizedPath || normalizedPath === '/' || normalizedPath.includes('/../') || normalizedPath.startsWith('../') || normalizedPath.startsWith('/..')) {
@@ -1024,7 +1033,7 @@ function StableMarkdownAnchor({
   const context = React.useContext(MarkdownCodeRenderContext);
   const hrefText = typeof href === 'string' ? href : '';
   const hrefFileRef = context?.onOpenFileReference
-    ? parseInlineCodeFileReference(hrefText)
+    ? parseInlineCodeFileReference(hrefText, true)
     : null;
   if (hrefFileRef && context?.onOpenFileReference) {
     const targetDescription =

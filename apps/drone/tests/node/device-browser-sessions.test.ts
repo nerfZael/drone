@@ -51,6 +51,8 @@ async function fixture(runtime: 'host' | 'container' = 'container') {
   });
   let hostPort = appPort;
   let revoked = false;
+  let lookupStatus = 200;
+  let lookups = 0;
   const listeners = new Set<() => void>();
   let nextRead: { entered(): void; wait: Promise<void> } | null = null;
   const hub = http.createServer(async (req, res) => {
@@ -59,6 +61,8 @@ async function fixture(runtime: 'host' | 'container' = 'container') {
       res.writeHead(404).end();
       return;
     }
+    lookups++;
+    res.statusCode = lookupStatus;
     res.setHeader('content-type', 'application/json');
     const held = nextRead;
     nextRead = null;
@@ -124,6 +128,10 @@ async function fixture(runtime: 'host' | 'container' = 'container') {
   };
   return {
     sessions,
+    lookupCount: () => lookups,
+    failLookups: (status: number) => {
+      lookupStatus = status;
+    },
     open,
     connect,
     appPort,
@@ -310,4 +318,69 @@ test('an older slow browser open cannot replace a newer session', async () => {
   held.release();
   const ws = f.connect(newer);
   await once(ws, 'open');
+});
+
+test(
+  'concurrent browser assets share an in-flight mapping check and release their streams',
+  { timeout: 15000 },
+  async () => {
+    const f = await fixture();
+    const session = await f.open();
+    for (let batch = 0; batch < 8; batch++) {
+      const held = f.holdNextRead();
+      const before = f.lookupCount();
+      const sockets = Array.from({ length: 12 }, () => f.connect(session));
+      const opened = Promise.all(sockets.map((ws) => once(ws, 'open')));
+      void opened.catch(() => undefined);
+      await held.started;
+      // Wait until all upgrade handlers are sharing the held read.
+      while ((f.sessions as any).sessions.get(session.sessionId).pending < sockets.length)
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      assert.equal(f.lookupCount(), before + 1);
+      held.release();
+      await opened;
+      await Promise.all(
+        sockets.map(async (ws) => {
+          const chunks: Buffer[] = [];
+          ws.on('message', (data) => chunks.push(Buffer.from(data as Buffer)));
+          const closed = once(ws, 'close');
+          ws.send(
+            Buffer.from('GET /asset.js HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n'),
+          );
+          await closed;
+          assert.match(Buffer.concat(chunks).toString(), /200 OK/);
+        }),
+      );
+    }
+    f.remap();
+    assert.match((await once(f.connect(session), 'error'))[0].message, /403/);
+  },
+);
+
+test('temporary target lookup failures preserve sessions without admitting unchecked streams', async (context) => {
+  const f = await fixture();
+  const session = await f.open();
+  const ws = f.connect(session);
+  await once(ws, 'open');
+  context.mock.method(
+    globalThis,
+    'fetch',
+    async () => {
+      throw new DOMException('Timed out', 'TimeoutError');
+    },
+    { times: 1 },
+  );
+  await (f.sessions as any).checkSessions(true);
+  assert.equal(ws.readyState, WebSocket.OPEN);
+  f.failLookups(503);
+  await (f.sessions as any).checkSessions(true);
+  assert.equal(ws.readyState, WebSocket.OPEN);
+  assert.match((await once(f.connect(session), 'error'))[0].message, /403/);
+  f.failLookups(200);
+  await once(f.connect(session), 'open');
+  f.failLookups(404);
+  const closed = once(ws, 'close');
+  await (f.sessions as any).checkSessions(true);
+  await closed;
+  assert.match((await once(f.connect(session), 'error'))[0].message, /403/);
 });

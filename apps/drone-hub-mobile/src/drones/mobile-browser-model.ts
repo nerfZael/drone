@@ -39,3 +39,59 @@ export function browserPort(value: string): number {
     throw new Error('Enter a port between 1 and 65535.');
   return port;
 }
+
+export function browserAccessDialog(
+  error: unknown,
+  targetName: string,
+  phoneName: string,
+): { title: string; message: string } | null {
+  const code = String((error as { code?: unknown } | null)?.code ?? '');
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  if (code === 'PERMISSION_DENIED' || /browser access is not permitted/i.test(message)) {
+    return {
+      title: 'Browser access needed',
+      message: `On ${targetName}, open Drone Hub → Settings → Devices. Select ${phoneName}, enable browser.targets, browser.open, and browser.close under Drone control, then Save. These permissions must be changed on ${targetName}, the target device. Return here and tap Try again.`,
+    };
+  }
+  if (
+    code === 'UNSUPPORTED_OPERATION' ||
+    code === 'CAPABILITY_NOT_FOUND' ||
+    code === 'OPERATION_NOT_FOUND'
+  ) {
+    return {
+      title: 'Browser unavailable',
+      message: `Update Drone Hub on ${targetName} to a version that supports remote Browser, then try again.`,
+    };
+  }
+  return null;
+}
+
+export function browserAddress(port: number | string, path: string): string {
+  return `:${port}${path}`;
+}
+
+/**
+ * Parse what was typed into the address bar. Accepts `3000`, `:3000/dashboard`, `/dashboard`
+ * (reusing the current port), `localhost:3000/x`, and full `http://host:3000/x` URLs.
+ */
+export function parseBrowserAddress(
+  value: string,
+  currentPort: number | null,
+): { port: number; path: string } {
+  const text = value.trim();
+  if (!text) throw new Error('Enter a port, such as 3000.');
+  if (text.startsWith('/')) {
+    if (currentPort === null) throw new Error('Enter a port before the path, such as 3000/.');
+    return { port: currentPort, path: browserPath(text) };
+  }
+  const short = /^:?(\d+)(\/.*)?$/.exec(text);
+  if (short) return { port: browserPort(short[1]), path: browserPath(short[2] ?? '/') };
+  let url: URL;
+  try {
+    url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `http://${text}`);
+  } catch {
+    throw new Error('Enter a port, such as 3000 or 3000/dashboard.');
+  }
+  const port = url.port || (url.protocol === 'https:' ? '443' : '80');
+  return { port: browserPort(port), path: browserPath(url.pathname + url.search + url.hash) };
+}

@@ -1,3 +1,4 @@
+import { APP_HEADER_HEIGHT } from '../layout';
 import React from 'react';
 import {
   BackHandler,
@@ -322,7 +323,14 @@ function Shell() {
               ]
             : []),
           ...(dronesHeader.onOpenBrowser
-            ? [{ id: 'browser', label: 'Browser', icon: Globe, onPress: dronesHeader.onOpenBrowser }]
+            ? [
+                {
+                  id: 'browser',
+                  label: 'Browser',
+                  icon: Globe,
+                  onPress: dronesHeader.onOpenBrowser,
+                },
+              ]
             : []),
           ...(dronesHeader.onClone
             ? [
@@ -429,6 +437,64 @@ function Shell() {
       />
     </ScrollView>
   ) : null;
+  const header = (
+    <View style={[styles.header, hasBackNavigation && styles.headerWithBack]}>
+      <View pointerEvents="none" style={styles.headerAccent} />
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={hasBackNavigation ? 'Open drone navigation' : 'Toggle app menu'}
+        onPress={toggleAppDrawer}
+        style={[styles.titleButton, hasBackNavigation && styles.titleButtonWithBack]}
+      >
+        <View
+          style={[
+            styles.menuButton,
+            hasBackNavigation && styles.contextBackButton,
+            appDrawerOpen && styles.menuButtonActive,
+          ]}
+        >
+          {hasBackNavigation ? (
+            <ChevronLeft
+              color={appDrawerOpen ? colors.accent : colors.text}
+              size={22}
+              strokeWidth={2.1}
+            />
+          ) : (
+            <Menu color={appDrawerOpen ? colors.accent : colors.text} size={19} strokeWidth={2.2} />
+          )}
+        </View>
+        {hasContextHeader ? (
+          <View style={styles.contextTitle}>
+            <View style={styles.contextTitleRow}>
+              <Text numberOfLines={1} style={styles.contextTitleText}>
+                {dronesHeader?.title}
+              </Text>
+            </View>
+            {dronesHeader?.subtitle ? (
+              <Text numberOfLines={1} style={styles.contextSubtitle}>
+                {dronesHeader.subtitle}
+              </Text>
+            ) : null}
+          </View>
+        ) : (
+          <Text style={styles.title}>{title}</Text>
+        )}
+      </Pressable>
+      <View style={styles.headerActions}>
+        {headerMenuActions.length > 0 ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open actions menu"
+            accessibilityState={{ expanded: headerMenuOpen }}
+            onPress={() => setHeaderMenuOpen(true)}
+            style={styles.contextMenuAction}
+          >
+            <MoreVertical color={colors.muted} size={19} strokeWidth={2} />
+          </Pressable>
+        ) : null}
+      </View>
+    </View>
+  );
   const content = (
     <>
       <View
@@ -436,6 +502,7 @@ function Shell() {
         style={[styles.tabContent, (pairingVisible || tab !== 'drones') && styles.tabContentHidden]}
       >
         <DronesScreen
+          header={header}
           drawerOpen={appDrawerOpen}
           workspaceVisible={!pairingVisible && tab === 'drones'}
           navigationItems={navigationItems}
@@ -456,66 +523,7 @@ function Shell() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'right', 'bottom', 'left']}>
-      <View style={styles.header}>
-        <View pointerEvents="none" style={styles.headerAccent} />
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={hasBackNavigation ? 'Open drone navigation' : 'Toggle app menu'}
-          onPress={toggleAppDrawer}
-          style={styles.titleButton}
-        >
-          <View
-            style={[
-              styles.menuButton,
-              hasBackNavigation && styles.contextBackButton,
-              appDrawerOpen && styles.menuButtonActive,
-            ]}
-          >
-            {hasBackNavigation ? (
-              <ChevronLeft
-                color={appDrawerOpen ? colors.accent : colors.text}
-                size={22}
-                strokeWidth={2.1}
-              />
-            ) : (
-              <Menu
-                color={appDrawerOpen ? colors.accent : colors.text}
-                size={19}
-                strokeWidth={2.2}
-              />
-            )}
-          </View>
-          {hasContextHeader ? (
-            <View style={styles.contextTitle}>
-              <View style={styles.contextTitleRow}>
-                <Text numberOfLines={1} style={styles.contextTitleText}>
-                  {dronesHeader?.title}
-                </Text>
-              </View>
-              {dronesHeader?.subtitle ? (
-                <Text numberOfLines={1} style={styles.contextSubtitle}>
-                  {dronesHeader.subtitle}
-                </Text>
-              ) : null}
-            </View>
-          ) : (
-            <Text style={styles.title}>{title}</Text>
-          )}
-        </Pressable>
-        <View style={styles.headerActions}>
-          {headerMenuActions.length > 0 ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Open actions menu"
-              accessibilityState={{ expanded: headerMenuOpen }}
-              onPress={() => setHeaderMenuOpen(true)}
-              style={styles.contextMenuAction}
-            >
-              <MoreVertical color={colors.muted} size={19} strokeWidth={2} />
-            </Pressable>
-          ) : null}
-        </View>
-      </View>
+      {pairingVisible || tab !== 'drones' ? header : null}
       <View style={styles.content}>{content}</View>
       <HeaderOverflowMenu
         open={headerMenuOpen && headerMenuActions.length > 0}
@@ -557,7 +565,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   header: {
-    height: 58,
+    height: APP_HEADER_HEIGHT,
+    flexShrink: 0,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 10,
@@ -566,6 +575,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     backgroundColor: colors.panel,
   },
+  headerWithBack: { paddingLeft: 2 },
   headerAccent: {
     position: 'absolute',
     top: 0,
@@ -590,6 +600,7 @@ const styles = StyleSheet.create({
     gap: 10,
     minHeight: 44,
   },
+  titleButtonWithBack: { gap: 4 },
   menuButton: {
     width: 36,
     height: 36,

@@ -181,6 +181,8 @@ import {
 } from './builtin-transcript-sessions';
 import { agentModelCatalogAdapter } from './agent-model-catalog/adapters';
 import { AgentModelCatalogService } from './agent-model-catalog/service';
+import { discoverCodexModels } from './agent-model-catalog/codex-discovery';
+import { saveCodexCatalog } from './codex-model-catalog';
 import { createAgentModelCatalogStore } from './agent-model-catalog/store';
 import type { AgentModelCatalogTarget } from './agent-model-catalog/types';
 import { registerAgentModelCatalogRoutes } from './agent-model-catalog/routes';
@@ -2842,6 +2844,11 @@ function stripAnsiFromCliOutput(text: string): string {
 function createHubAgentModelCatalogService(): AgentModelCatalogService {
   return new AgentModelCatalogService(
     {
+      discoverCodexModels: async () => {
+        const models = await discoverCodexModels();
+        await saveCodexCatalog(models);
+        return models;
+      },
       runContainer: async (containerName, command, timeoutMs) =>
         dvmExec(containerName, 'bash', ['-lc', command], { timeoutMs }),
       runHost: async (command, timeoutMs) =>
