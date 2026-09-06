@@ -13,6 +13,7 @@ import { DeviceMeshDiscovery } from './device-mesh-discovery';
 import { DevicePhoneDiscovery } from './device-phone-discovery';
 import { DeviceLanDiscovery } from './device-lan-discovery';
 import { DeviceHttpTransfers } from './device-http-transfers';
+import { DeviceBrowserSessions } from './device-browser-sessions';
 import { DeviceRequestJournal } from './device-request-journal';
 import { WorkspaceHttpTransfers } from './workspace-http-transfers';
 import { DeviceResultUploads } from './device-result-uploads';
@@ -49,6 +50,12 @@ export async function createDeviceMeshService(options: {
   await store.prunePairingState();
   const capabilities = new CapabilityRegistry();
   let ingress: DeviceMeshIngress;
+  const browsers = new DeviceBrowserSessions(
+    { baseUrl: options.localHubBaseUrl, apiToken: options.apiToken },
+    store,
+    () => ingress?.status().publicEndpoint ?? null,
+    () => ingress?.status().port ?? 0,
+  );
   const transfers = new DeviceHttpTransfers(
     { baseUrl: options.localHubBaseUrl, apiToken: options.apiToken },
     store,
@@ -80,6 +87,7 @@ export async function createDeviceMeshService(options: {
       chatAttachments,
       {
         transfers,
+        browsers,
         sidebarCommands: options.sidebarCommands,
         hubServices: options.hubServices,
         createdDroneAutoRename: options.createdDroneAutoRename,
@@ -155,6 +163,7 @@ export async function createDeviceMeshService(options: {
     options.ingressPort ?? 0,
     (request, response, url) => httpHandler.handlePublic(request, response, url),
     (endpoint) => router.announceEndpoint(endpoint),
+    (request, socket, head) => browsers.upgrade(request, socket, head),
   );
   extensions.push(new DeviceMeshIngressHttp(ingress));
   const discovery = new DeviceMeshDiscovery(ingress, store, routeManager);
@@ -190,6 +199,7 @@ export async function createDeviceMeshService(options: {
       if (pairingPruneTimer) clearInterval(pairingPruneTimer);
       pairingPruneTimer = null;
       await ingress.close();
+      browsers.close();
       await chatAttachments.close();
       transfers.close();
       workspaceTransfers.close();

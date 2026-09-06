@@ -97,6 +97,7 @@ export class DeviceMeshIngress {
     defaultPort: number,
     private readonly handlePublicHttp: PublicHttpHandler,
     private readonly announceEndpoint: (endpoint: string | null) => Promise<void>,
+    private readonly handleBrowserUpgrade?: (request: http.IncomingMessage, socket: import('node:stream').Duplex, head: Buffer) => Promise<void>,
   ) {
     this.configPath = path.join(rootDir, 'ingress.json');
     this.config = {
@@ -231,7 +232,11 @@ export class DeviceMeshIngress {
       sockets.add(socket);
       socket.on('close', () => sockets.delete(socket));
     });
-    server.on('upgrade', (_request, socket) => socket.destroy());
+    server.on('upgrade', (request, socket, head) => {
+      if (this.handleBrowserUpgrade && request.url?.startsWith('/api/device-mesh/v2/browser/')) {
+        void this.handleBrowserUpgrade(request, socket, head).catch(() => socket.destroy());
+      } else socket.destroy();
+    });
     try {
       await new Promise<void>((resolve, reject) => {
         server.once('error', reject);

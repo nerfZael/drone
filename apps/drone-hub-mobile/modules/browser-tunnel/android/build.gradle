@@ -1,0 +1,33 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+group = 'expo.modules.dronebrowser'
+version = '1.0.0'
+android {
+  namespace 'expo.modules.dronebrowser'
+  defaultConfig { versionCode 1; versionName '1.0.0' }
+}
+configurations {
+  browserGatewaySmokeRuntime {
+    attributes {
+      attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage, Usage.JAVA_RUNTIME))
+      attribute(Category.CATEGORY_ATTRIBUTE, objects.named(Category, Category.LIBRARY))
+      attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, objects.named(LibraryElements, LibraryElements.JAR))
+    }
+  }
+}
+dependencies {
+  implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+  browserGatewaySmokeRuntime 'com.squareup.okhttp3:okhttp:4.12.0'
+  browserGatewaySmokeRuntime 'org.jetbrains.kotlin:kotlin-stdlib:2.1.20'
+  browserGatewaySmokeRuntime 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.1.20'
+  browserGatewaySmokeRuntime 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.1.20'
+}
+
+tasks.register('browserGatewaySmoke', JavaExec) {
+  dependsOn 'compileDebugUnitTestKotlin'
+  mainClass = 'expo.modules.dronebrowser.BrowserGatewaySmokeKt'
+  classpath = files(layout.buildDirectory.dir('tmp/kotlin-classes/debugUnitTest'), layout.buildDirectory.dir('tmp/kotlin-classes/debug'))
+  classpath += configurations.browserGatewaySmokeRuntime
+}

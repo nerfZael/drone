@@ -2,6 +2,40 @@
 
 DroneHub uses private HTTPS over Tailscale for device communication, with one authenticated SSE subscription per peer. The old device-network WebSocket and ngrok runtimes are removed. Unrelated local Hub WebSockets are unchanged.
 
+Android's **Browser** action opens a selected remote drone's HTTP web app. Grant the phone
+`browser.targets`, `browser.open`, and `browser.close` under `drone-control`. Existing file
+permissions do not automatically grant browser access. Host drones accept an explicitly
+selected local service port; container drones require an existing Docker mapping. The Hub
+control API and device-ingress ports are excluded.
+
+Browser traffic uses a separate authenticated binary WebSocket tunnel over the same private
+HTTPS ingress; ordinary device messaging still uses HTTP/SSE. Sessions expire after 30 minutes,
+are bound to the requesting device and selected target, and recheck membership/grants on each
+connection. Revocation closes streams; target mappings are rechecked on connection and every
+15 seconds. Reopening is required after a mapping changes. Only one browser session per
+requesting device is retained by each Hub.
+
+Android's native `browser-tunnel` module gives the WebView a session-local loopback origin.
+The gateway handles HTTP bodies, streaming responses, cookies, redirects, and WebSocket
+upgrades without buffering complete pages or putting mesh credentials in page JavaScript.
+Its own HttpOnly cookie authenticates local requests and is removed before forwarding.
+Release builds permit cleartext only for the gateway's loopback-address pool. The Expo
+`with-browser-loopback` plugin preserves this configuration during prebuild; debug builds
+retain Metro access. Closing Browser or backgrounding the app closes the native gateway.
+Cancelled HTTP requests release their tunnels even while the upstream is silent. Pending
+opens are cancelled when leaving Browser and superseded opens cannot replace newer sessions.
+Preview responses deny camera, microphone, and location through browser permissions policies.
+
+The first version supports one HTTP service per browser session, with separate browser
+cookies from desktop. External top-level navigation and popups are blocked. Applications
+that hardcode other localhost ports, depend on an external authentication redirect, or require
+an HTTPS upstream need additional support. Use relative URLs and same-origin WebSockets for
+development-server live reload. A new Android native build and updated hosting Hub are required.
+
+Browser checks: `node --require ts-node/register --test tests/node/device-browser-sessions.test.ts`
+from `apps/drone`; `./gradlew :browser-tunnel:browserGatewaySmoke` from the mobile `android`
+directory; and `bun test apps/drone-hub-mobile/tests/mobile-browser-model.test.ts` from the repo root.
+
 In Devices settings, enable Tailscale HTTPS access, then discover and pair visible Hubs. Both machines need Tailscale connectivity and permission to reach the selected port. DroneHub uses Tailscale Serve on port 8791, probes 443 as an alternate, and refuses to overwrite another application's Serve handler. Discovery enumerates visible peers; it does not scan an IP range. QR, deep links, and manual HTTPS origins remain pairing/recovery methods.
 
 Mobile bootstraps through a known Hub, verifies its signed directory and device-owned route announcements, then connects directly to available destinations. Phones receive reverse requests over their client-opened SSE subscription; they do not need a listening HTTP server. Background operation remains subject to mobile OS suspension; foreground resume reconciles state.

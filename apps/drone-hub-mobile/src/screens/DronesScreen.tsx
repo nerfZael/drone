@@ -159,6 +159,7 @@ import { useLocalDroneControl } from '../drones/local-drone-control';
 import { mobileDeviceConnectionState } from '../drones/mobile-device-reachability';
 import { ChatAttachmentStrip } from '../drones/ChatAttachmentStrip';
 import { FilePreviewModal } from '../drones/FilePreviewModal';
+import { RemoteDroneBrowser } from '../drones/RemoteDroneBrowser';
 import { useFilePreview } from '../drones/use-file-preview';
 import {
   pickChatImages,
@@ -304,6 +305,7 @@ export type DronesAppHeaderState = {
   onNewDrone?(): void;
   onNewChat?(): void;
   onOpenFiles?(): void;
+  onOpenBrowser?(): void;
   onClone?(): void;
   cloneDisabled?: boolean;
   onRename?(): void;
@@ -2569,6 +2571,20 @@ export function DronesScreen({
     subscribeFileChanges,
   });
   const [filesPageOpen, setFilesPageOpen] = React.useState(false);
+  const [browserOpen, setBrowserOpen] = React.useState(false);
+  const openBrowser = React.useCallback(() => {
+    const operations = ['browser.targets', 'browser.open', 'browser.close'];
+    if (!operations.every((operation) => targetDroneControlCapability?.operations.includes(operation))) {
+      Alert.alert('Browser unavailable', 'Update DroneHub on the hosting device to enable remote Browser.');
+      return;
+    }
+    if (!selfDevice || !operations.every((operation) => isGranted(selfDevice.grants, 'drone-control', 1, operation))) {
+      Alert.alert('Browser access needed', 'In Devices, enable browser.targets, browser.open, and browser.close for this phone.');
+      return;
+    }
+    Keyboard.dismiss(); setBrowserOpen(true);
+  }, [targetDroneControlCapability, selfDevice]);
+  React.useEffect(() => { setBrowserOpen(false); }, [targetId, selected?.id, workspaceVisible]);
   const prepareFilesPage = React.useCallback(() => {
     if (!filePreview.visible) filePreview.openExplorer();
   }, [filePreview.visible, filePreview.openExplorer]);
@@ -2893,6 +2909,7 @@ export function DronesScreen({
             onNewDrone: openNewDroneFromCurrent,
             onNewChat: () => void createNewChat(),
             onOpenFiles: openFilesPage,
+            onOpenBrowser: !phoneTarget && Platform.OS === 'android' ? openBrowser : undefined,
             ...(targetCanCloneDrone
               ? {
                   onClone: () => void cloneDrone(selected),
@@ -3032,6 +3049,8 @@ export function DronesScreen({
     requestDroneControl,
     running,
     openFilesPage,
+    openBrowser,
+    phoneTarget,
   ]);
   React.useEffect(() => () => onHeaderChange(null), [onHeaderChange]);
 
@@ -3393,6 +3412,10 @@ export function DronesScreen({
         onDeleteDroneChat={deleteDrawerChat}
         onReorderSidebar={targetReachable && targetCanReorderSidebar ? reorderSidebar : undefined}
       />
+      {browserOpen && selected && workspaceVisible ? (
+        <RemoteDroneBrowser key={`${targetId}:${selected.id}`} deviceId={targetId} droneId={selected.id}
+          droneName={selected.name} request={requestDroneControl} onClose={() => setBrowserOpen(false)} />
+      ) : null}
       <ChatFilesCarousel
         open={filesPageOpen}
         enabled={Boolean(selected && workspaceVisible && !drawerOpen)}

@@ -2506,7 +2506,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
                     return await dvmPorts(containerName);
                   },
                 );
-          json(res, 200, { ok: true, id: droneId, name: droneName, ports });
+          json(res, 200, { ok: true, id: droneId, name: droneName, runtime, ports });
           return;
         } catch (e: any) {
           const msg = e?.message ?? String(e);

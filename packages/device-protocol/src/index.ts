@@ -2,6 +2,7 @@ export * from './canonical-json';
 export * from './chat-load-diagnostics';
 export * from './capability-events';
 export * from './capabilities';
+export * from './browser';
 export * from './command-jobs';
 export * from './mesh-limits';
 export * from './http-event-client';

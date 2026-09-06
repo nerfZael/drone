@@ -53,7 +53,6 @@ import { dispatchAssistantOpenDroneChat } from './open-drone-chat-event';
 import { useBlipThreadSession } from './useBlipThreadSession';
 import { latestActivityHasVisibleAssistantText } from './assistant-streaming-state';
 import { AssistantThreadFilesView, selectDefaultArtifactPath } from './AssistantThreadFilesView';
-import { AssistantWorkspaceAccessView } from './AssistantWorkspaceAccessView';
 import {
   AssistantCompactionRow,
   AssistantCompactionWorkingRow,
@@ -356,7 +355,6 @@ export function AssistantDock({
   const [toolsPanelOpen, setToolsPanelOpen] = React.useState(false);
   const [workspacesPanelOpen, setWorkspacesPanelOpen] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
-  const [workspaceAccessOpen, setWorkspaceAccessOpen] = React.useState(false);
   const [droneHubPermissionsOpen, setDroneHubPermissionsOpen] = React.useState(false);
   const [enabledToolDraftNames, setEnabledToolDraftNames] = React.useState<string[]>([]);
   const [enabledWorkspaceDraftIds, setEnabledWorkspaceDraftIds] = React.useState<string[]>([]);
@@ -1905,7 +1903,6 @@ export function AssistantDock({
         setDroneHubPermissionsOpen(false);
         setToolsPanelOpen(false);
         setSettingsOpen(false);
-        setWorkspaceAccessOpen(false);
         setWorkspacesPanelOpen(false);
         setFilesOpen((value) => !value);
       },
@@ -1921,13 +1918,12 @@ export function AssistantDock({
       label: 'Chat workspaces',
       icon: <IconFolder className="h-3.5 w-3.5" />,
       disabled: !activeThread,
-      active: workspacesPanelOpen || workspaceAccessOpen,
+      active: workspacesPanelOpen,
       onSelect: () => {
         setDroneHubPermissionsOpen(false);
         setFilesOpen(false);
         setToolsPanelOpen(false);
         setSettingsOpen(false);
-        setWorkspaceAccessOpen(false);
         setWorkspacesPanelOpen((value) => !value);
       },
     },
@@ -1942,7 +1938,6 @@ export function AssistantDock({
         setFilesOpen(false);
         setToolsPanelOpen(false);
         setSettingsOpen(false);
-        setWorkspaceAccessOpen(false);
         setWorkspacesPanelOpen(false);
         setDroneHubPermissionsOpen(true);
       },
@@ -1956,7 +1951,6 @@ export function AssistantDock({
       onSelect: () => {
         setDroneHubPermissionsOpen(false);
         setSettingsOpen(false);
-        setWorkspaceAccessOpen(false);
         setWorkspacesPanelOpen(false);
         setToolsPanelOpen((value) => !value);
       },
@@ -1969,7 +1963,6 @@ export function AssistantDock({
       onSelect: () => {
         setDroneHubPermissionsOpen(false);
         setToolsPanelOpen(false);
-        setWorkspaceAccessOpen(false);
         setWorkspacesPanelOpen(false);
         setSettingsOpen((value) => !value);
       },
@@ -2020,18 +2013,12 @@ export function AssistantDock({
       ) : null}
       {workspacesPanelOpen ? (
         <AssistantWorkspacesPanel
+          requestJson={requestJson}
+          threadId={activeThread?.id ?? ''}
           workspaces={availableWorkspaces}
           enabledWorkspaceIds={enabledWorkspaceDraftIds}
           disabled={!activeThread}
           onToggleWorkspace={toggleAssistantWorkspace}
-          onEnableAll={() =>
-            updateEnabledWorkspaces(availableWorkspaces.map((workspace) => workspace.id))
-          }
-          onDisableAll={() => updateEnabledWorkspaces([])}
-          onOpenRemoteAccess={() => {
-            setWorkspacesPanelOpen(false);
-            setWorkspaceAccessOpen(true);
-          }}
           onClose={() => setWorkspacesPanelOpen(false)}
           placement="composer"
         />
@@ -2500,17 +2487,6 @@ export function AssistantDock({
           </div>
         ) : null}
 
-        {workspaceAccessOpen && activeThread ? (
-          <div className="absolute inset-0 z-20 overflow-y-auto bg-[var(--panel-alt)]">
-            <AssistantWorkspaceAccessView
-              key={activeThread.id}
-              requestJson={requestJson}
-              threadId={activeThread.id}
-              threadTitle={activeThread.title}
-              onClose={() => setWorkspaceAccessOpen(false)}
-            />
-          </div>
-        ) : null}
 
         {filesOpen ? (
           <AssistantThreadFilesView

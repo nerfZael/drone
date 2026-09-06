@@ -26,6 +26,7 @@ import {
 } from './local-hub-request';
 import { DeviceReadBudget } from './device-read-budget';
 import type { DeviceHttpTransfers } from './device-http-transfers';
+import type { DeviceBrowserSessions } from './device-browser-sessions';
 import type { MeshChatAttachmentStore } from './mesh-chat-attachment-store';
 import { fitMeshChatPayload } from './fit-mesh-chat-payload';
 import { compactChatQuestionRequests, compactNativeChatReadResponse } from './native-chat-response';
@@ -428,6 +429,7 @@ export function createDroneControlCapability(
   chatAttachments?: MeshChatAttachmentStore,
   options?: {
     transfers?: DeviceHttpTransfers;
+    browsers?: DeviceBrowserSessions;
     sidebarCommands?: SidebarCommandService;
     hubServices?: HubServices;
     createdDroneAutoRename?: CreatedDroneAutoRenameOperations;
@@ -949,6 +951,10 @@ export function createDroneControlCapability(
 
       const droneId = requiredText(payload.droneId, 'droneId');
       const encodedDrone = encodeURIComponent(droneId);
+      if (operation.startsWith('browser.')) {
+        if (!options?.browsers) throw new Error('Browser access is unavailable on this Hub');
+        return options.browsers.invoke(operation, payload, sourceDeviceId, operationSignal);
+      }
       if (operation === 'drone.rename') {
         const newName = requiredText(payload.newName, 'newName');
         return await hubServices.drones.rename({

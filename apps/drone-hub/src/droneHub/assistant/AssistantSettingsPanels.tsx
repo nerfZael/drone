@@ -1,4 +1,5 @@
 import React from 'react';
+import { AssistantWorkspacePicker } from './AssistantWorkspacePicker';
 
 import { IconWrench } from '../app/icons';
 import { IconFolder } from '../icons';
@@ -165,27 +166,26 @@ export function AssistantToolsPanel({
 }
 
 export function AssistantWorkspacesPanel({
+  requestJson,
+  threadId,
   workspaces,
   enabledWorkspaceIds,
   disabled,
   onToggleWorkspace,
-  onEnableAll,
-  onDisableAll,
-  onOpenRemoteAccess,
   onClose,
   placement = 'top',
 }: {
+  requestJson: <T>(url: string, init?: RequestInit) => Promise<T>;
+  threadId: string;
   workspaces: AssistantWorkspaceSummary[];
   enabledWorkspaceIds: string[];
   disabled: boolean;
   onToggleWorkspace: (workspaceId: string, enabled: boolean) => void;
-  onEnableAll: () => void;
-  onDisableAll: () => void;
-  onOpenRemoteAccess: () => void;
   onClose: () => void;
   placement?: 'top' | 'composer';
 }) {
   const panelRef = React.useRef<HTMLDivElement>(null);
+  const [selectedCount, setSelectedCount] = React.useState(0);
   React.useEffect(() => {
     const dismiss = (event: PointerEvent) => {
       if ((event.target as Element | null)?.closest?.('[data-assistant-workspaces-trigger]')) return;
@@ -194,47 +194,43 @@ export function AssistantWorkspacesPanel({
     window.addEventListener('pointerdown', dismiss);
     return () => window.removeEventListener('pointerdown', dismiss);
   }, [onClose]);
-  const enabled = new Set(enabledWorkspaceIds);
+  // Private chat artifacts are not a workspace on any device; they keep their
+  // own switch under the picker.
+  const artifacts = workspaces.find((workspace) => workspace.kind === 'artifacts') ?? null;
+  const artifactsEnabled = Boolean(artifacts && enabledWorkspaceIds.includes(artifacts.id));
 
   return (
-    <div ref={panelRef} className={`absolute right-2 z-30 w-[min(420px,calc(100vw-2rem))] overflow-hidden rounded border border-[var(--border)] bg-[var(--panel-alt)] shadow-[0_18px_55px_var(--shadow-color)] ${placement === 'composer' ? 'bottom-full mb-2' : 'top-10'}`}>
+    <div ref={panelRef} className={`absolute right-2 z-30 flex max-h-[min(560px,calc(100vh-190px))] w-[min(480px,calc(100vw-2rem))] flex-col overflow-hidden rounded border border-[var(--border)] bg-[var(--panel-alt)] shadow-[0_18px_55px_var(--shadow-color)] ${placement === 'composer' ? 'bottom-full mb-2' : 'top-10'}`}>
       <div className="flex items-center justify-between gap-2 border-b border-[var(--border)] px-3 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <IconFolder className="h-3.5 w-3.5 text-[var(--muted)]" />
           <div className="text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--fg-strong)]" style={{ fontFamily: 'var(--display)' }}>Workspaces</div>
         </div>
-        <div className="text-[var(--text-10)] tabular-nums text-[var(--muted-dim)]">{enabledWorkspaceIds.length} / {workspaces.length}</div>
+        <div className="text-[var(--text-10)] tabular-nums text-[var(--muted-dim)]">{selectedCount} selected</div>
       </div>
-      <div className="flex items-center border-b border-[var(--border-subtle)] px-3 py-1.5">
-        <div className="inline-flex overflow-hidden rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)]" role="group" aria-label="Set all workspaces">
-          <button type="button" onClick={onEnableAll} disabled={disabled || enabledWorkspaceIds.length === workspaces.length} className="h-5 px-2 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-35">All</button>
-          <button type="button" onClick={onDisableAll} disabled={disabled || enabledWorkspaceIds.length === 0} className="h-5 border-l border-[var(--border-subtle)] px-2 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-35">None</button>
-        </div>
-      </div>
-      <div className="max-h-[min(520px,calc(100vh-190px))] overflow-y-auto p-2">
-        <div className="space-y-1">
-          {workspaces.map((workspace) => {
-            const checked = enabled.has(workspace.id);
-            return (
-              <label key={workspace.id} className={`flex cursor-pointer items-start gap-2 rounded border border-[var(--border-subtle)] px-2 py-1.5 transition-colors ${checked ? 'bg-[var(--surface-strong)]' : 'bg-[var(--surface-softest)] hover:bg-[var(--hover)]'}`}>
-                <input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onToggleWorkspace(workspace.id, event.target.checked)} className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 accent-[var(--accent)]" />
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-2">
-                    <span className="block truncate text-[var(--text-11)] font-medium text-[var(--fg-secondary)]">{workspace.label}</span>
-                    <span className="text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]">{workspace.kind === 'artifacts' ? 'Private' : workspace.capabilities.join(' · ')}</span>
-                  </span>
-                  <span className="mt-0.5 block text-[var(--text-10)] leading-snug text-[var(--muted-dim)]">{workspace.description}</span>
-                </span>
-              </label>
-            );
-          })}
-          {workspaces.length === 0 ? <div className="px-2 py-5 text-center text-[var(--text-10)] text-[var(--muted-dim)]">No local workspaces are available.</div> : null}
-        </div>
-      </div>
-      <button type="button" onClick={onOpenRemoteAccess} className="flex w-full items-center justify-between border-t border-[var(--border-subtle)] px-3 py-2 text-left text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]">
-        <span>Connected-device workspaces</span>
-        <span aria-hidden="true">→</span>
-      </button>
+      {threadId ? (
+        <AssistantWorkspacePicker
+          key={threadId}
+          requestJson={requestJson}
+          threadId={threadId}
+          disabled={disabled}
+          onSelectionChange={setSelectedCount}
+        />
+      ) : (
+        <div className="px-3 py-4 text-[var(--text-10)] text-[var(--muted-dim)]">Start a chat to choose its workspaces.</div>
+      )}
+      {artifacts ? (
+        <label className="flex cursor-pointer items-center gap-2 border-t border-[var(--border-subtle)] px-3 py-2 hover:bg-[var(--hover)]">
+          <input type="checkbox" checked={artifactsEnabled} disabled={disabled} onChange={(event) => onToggleWorkspace(artifacts.id, event.target.checked)} className="h-3.5 w-3.5 flex-shrink-0 accent-[var(--accent)]" />
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-2">
+              <span className="block truncate text-[var(--text-11)] font-medium text-[var(--fg-secondary)]">{artifacts.label}</span>
+              <span className="text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]">Private</span>
+            </span>
+            <span className="mt-0.5 block text-[var(--text-10)] leading-snug text-[var(--muted-dim)]">{artifacts.description}</span>
+          </span>
+        </label>
+      ) : null}
     </div>
   );
 }
