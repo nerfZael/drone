@@ -1231,6 +1231,11 @@ function deleteChatWithConnection(
   connection: HubDatabaseConnection,
   opts: { droneId: string; chatName: string },
 ): boolean {
+  if (connection.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'chat_question_requests'").get()) {
+    connection.prepare(`DELETE FROM chat_question_requests WHERE chat_id = (
+      SELECT json_extract(metadata_json, '$.id') FROM canonical_chats WHERE drone_id = ? AND chat_name = ?
+    )`).run(opts.droneId, opts.chatName);
+  }
   const info = connection
     .prepare('DELETE FROM canonical_chats WHERE drone_id = ? AND chat_name = ?')
     .run(opts.droneId, opts.chatName);
@@ -1488,15 +1493,10 @@ export class ChatTranscriptRepository {
       const current = this.projectChatWithConnection(connection, opts.droneId, opts.chatName);
       if (!current) throw new Error(`unknown chat: ${opts.chatName}`);
       cancelResourceSubscriptionsForChatWithConnection(connection, current.id);
-      connection.prepare('DELETE FROM canonical_chats WHERE drone_id = ? AND chat_name = ?')
-        .run(opts.droneId, opts.chatName);
-      connection.prepare(`INSERT OR REPLACE INTO canonical_chat_tombstones (
-        drone_id, chat_name, reason, replacement_chat_name, deleted_at
-      ) VALUES (?, ?, 'deleted', NULL, ?)`).run(opts.droneId, opts.chatName, new Date().toISOString());
+      deleteChatWithConnection(connection, opts);
       if (this.listChatsWithConnection(connection, opts.droneId).chats.length === 0 && opts.fallbackChat) {
         this.writeChatWithConnection(connection, opts.droneId, opts.fallbackChat.chatName, opts.fallbackChat.chatEntry);
       }
-      appendChatEvent(connection, 'chat.deleted', opts.droneId, opts.chatName, {});
       return {
         available: true,
         deletedChat: current,
@@ -1819,6 +1819,12 @@ export class ChatTranscriptRepository {
         );
         connection.prepare('DELETE FROM canonical_chat_tombstones WHERE drone_id = ? AND chat_name = ?')
           .run(opts.droneId, opts.newChatName);
+        if (connection.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'chat_question_requests'").get()) {
+          connection.prepare(`UPDATE chat_question_requests SET chat_name = ?
+            WHERE drone_id = ? AND chat_name = ? AND chat_id = (
+              SELECT json_extract(metadata_json, '$.id') FROM canonical_chats WHERE drone_id = ? AND chat_name = ?
+            )`).run(opts.newChatName, opts.droneId, opts.chatName, opts.droneId, opts.newChatName);
+        }
         appendChatEvent(connection, 'chat.renamed', opts.droneId, opts.newChatName, { previousChatName: opts.chatName });
         return true;
       }

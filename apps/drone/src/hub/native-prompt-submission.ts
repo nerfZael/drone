@@ -35,9 +35,6 @@ export function createNativePromptSubmitter({
     submissionSource?: import('../host/prompt-queue-repository').PromptSubmissionSource;
   }) => {
     await assistantService.beginNativeThreadPrompt(input.threadId);
-    const promptInput: AssistantPromptInput = input.promptImages?.length
-      ? { text: input.prompt, images: input.promptImages }
-      : input.prompt;
     const deliveryMode =
       input.deliveryMode ?? (await assistantService.promptDeliveryMode(input.threadId));
     const enqueueResult = await assistantService.enqueueThreadPromptWithResult(input.threadId, {
@@ -58,11 +55,16 @@ export function createNativePromptSubmitter({
     // into itself. The durable claim, not insertion, protects against double delivery.
     if (enqueueResult.inserted) await notifyNativePromptQueueChanged(input.threadId);
     if (!enqueueResult.needsDrain) return queued;
-    if (enqueueResult.inserted && steerImmediately && !enqueueResult.interruptedPromptId) {
+    if (steerImmediately && !enqueueResult.interruptedPromptId) {
       const claimed = await assistantService.claimQueuedPrompt(input.threadId, queued.id, {
         allowConcurrent: true,
       });
-      if (!claimed) throw new Error('built-in prompt could not be claimed');
+      // Subscriptions and provisioning may have already inserted this row. The
+      // durable claim allows them to steer and prevents duplicate handoffs.
+      if (!claimed) return queued;
+      const promptInput: AssistantPromptInput = claimed.promptImages?.length
+        ? { text: claimed.prompt, images: claimed.promptImages }
+        : claimed.prompt;
       await notifyNativePromptQueueChanged(input.threadId);
       void blipAssistantHost
         .promptThread(input.threadId, promptInput, undefined, 'asap')

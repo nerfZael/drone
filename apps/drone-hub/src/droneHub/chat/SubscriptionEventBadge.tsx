@@ -14,13 +14,13 @@ import {
 import { dispatchAssistantOpenDroneTarget } from '../assistant/open-drone-chat-event';
 import { UserChatMessage } from './UserChatMessage';
 
-export function SubscriptionEventBadge() {
+export function SubscriptionEventBadge({ label = 'Event notification' }: { label?: string } = {}) {
   return (
     <span
       className="inline-flex min-h-6 items-center rounded-t-[var(--radius-medium)] border border-b-0 border-[color-mix(in_srgb,var(--accent)_24%,var(--user-bubble-border))] bg-[color-mix(in_srgb,var(--accent)_11%,var(--user-bubble))] px-2.5 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]"
       style={{ fontFamily: 'var(--display)' }}
     >
-      Event notification
+      {label}
     </span>
   );
 }
@@ -192,9 +192,13 @@ function EventNotificationBody({ notification }: { notification: EventNotificati
 export function SubscriptionEventMessage({
   prompt,
   at,
+  footer,
+  attachmentContent,
 }: {
   prompt: unknown;
   at?: string;
+  footer?: React.ReactNode;
+  attachmentContent?: React.ReactNode;
 }) {
   const notification = React.useMemo(() => parseEventNotificationPrompt(prompt), [prompt]);
   if (!notification) return null;
@@ -202,9 +206,24 @@ export function SubscriptionEventMessage({
     <UserChatMessage
       at={at}
       copyText={eventNotificationCopyText(notification)}
-      headerEnd={<SubscriptionEventBadge />}
+      text={notification.userMessage}
+      headerEnd={
+        <SubscriptionEventBadge
+          label={
+            notification.userMessage !== undefined
+              ? `1 message + ${notification.eventCount ?? notification.events.length} event${(notification.eventCount ?? notification.events.length) === 1 ? '' : 's'}`
+              : undefined
+          }
+        />
+      }
       headerAttached
-      attachmentContent={<EventNotificationBody notification={notification} />}
+      attachmentContent={
+        <>
+          {attachmentContent}
+          <EventNotificationBody notification={notification} />
+          {footer}
+        </>
+      }
     />
   );
 }

@@ -9,6 +9,7 @@ export const RESOURCE_SUBSCRIPTION_EVENTS = [
   'change_request.merged',
   'change_request.closed',
   'cron.triggered',
+  'question_request.resolved',
 ] as const;
 
 export type ResourceSubscriptionEventType = (typeof RESOURCE_SUBSCRIPTION_EVENTS)[number];
@@ -18,7 +19,8 @@ export type ResourceSubscriptionType =
   | 'repository'
   | 'pull_request'
   | 'change_request'
-  | 'cron';
+  | 'cron'
+  | 'question_request';
 export type ResourceSubscriptionStatus = 'active' | 'completed' | 'cancelled' | 'paused';
 export const RESOURCE_SUBSCRIPTION_PAUSE_REASONS = [
   'subscriber_chat_archived',
@@ -89,8 +91,14 @@ export type ResourceEvent = {
   providerContent: Record<string, unknown>;
 };
 
+export type ResourceSubscriptionDeliveryMode = 'queue' | 'asap';
+
 export type ResourceSubscriptionSettings = {
   enabled: boolean;
+  deliveryMode: ResourceSubscriptionDeliveryMode;
+  eventDeliveryModes: Partial<
+    Record<ResourceSubscriptionEventType, ResourceSubscriptionDeliveryMode>
+  >;
   githubPollingIntervalMs: number;
   batchWindowMs: number;
   maxEventsPerPrompt: number;
@@ -103,6 +111,8 @@ export type ResourceSubscriptionSettings = {
 
 export const DEFAULT_RESOURCE_SUBSCRIPTION_SETTINGS: ResourceSubscriptionSettings = {
   enabled: true,
+  deliveryMode: 'queue',
+  eventDeliveryModes: {},
   githubPollingIntervalMs: 60_000,
   batchWindowMs: 15_000,
   maxEventsPerPrompt: 30,

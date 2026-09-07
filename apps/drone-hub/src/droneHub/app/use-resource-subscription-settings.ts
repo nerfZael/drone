@@ -4,21 +4,27 @@ import type {
   ResourceSubscriptionSettings,
   ResourceSubscriptionSettingsResponse,
 } from './settings-types';
-import { settingsErrorMessage, settingsQueryError, settingsQueryKey, useSettingsPostMutation, useSettingsQuery } from './settings-query';
+import {
+  settingsErrorMessage,
+  settingsQueryError,
+  settingsQueryKey,
+  useSettingsPostMutation,
+  useSettingsQuery,
+} from './settings-query';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 
 export type ResourceSubscriptionSettingsDraft = Record<
-  Exclude<keyof ResourceSubscriptionSettings, 'enabled'>,
+  Exclude<keyof ResourceSubscriptionSettings, 'enabled' | 'deliveryMode' | 'eventDeliveryModes'>,
   string
-> & { enabled: boolean };
+> &
+  Pick<ResourceSubscriptionSettings, 'enabled' | 'deliveryMode' | 'eventDeliveryModes'>;
 
-export type UseResourceSubscriptionSettingsResult = ReturnType<typeof useResourceSubscriptionSettings>;
+export type UseResourceSubscriptionSettingsResult = ReturnType<
+  typeof useResourceSubscriptionSettings
+>;
 
-export function useResourceSubscriptionSettings(
-  requestJson: RequestJsonFn,
-  enabled = true,
-) {
+export function useResourceSubscriptionSettings(requestJson: RequestJsonFn, enabled = true) {
   const queryClient = useQueryClient();
   const queryKey = settingsQueryKey('resource-subscriptions');
   const query = useSettingsQuery<ResourceSubscriptionSettingsResponse>(
@@ -30,9 +36,7 @@ export function useResourceSubscriptionSettings(
   const [draft, setDraft] = React.useState<ResourceSubscriptionSettingsDraft | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
-  const dirty = Boolean(
-    query.data && draft && !sameDraft(draft, toDraft(query.data.settings)),
-  );
+  const dirty = Boolean(query.data && draft && !sameDraft(draft, toDraft(query.data.settings)));
 
   const applySettings = React.useCallback((data: ResourceSubscriptionSettingsResponse) => {
     setDraft(toDraft(data.settings));
@@ -91,14 +95,25 @@ function sameDraft(
   left: ResourceSubscriptionSettingsDraft,
   right: ResourceSubscriptionSettingsDraft,
 ): boolean {
-  return (Object.keys(left) as Array<keyof ResourceSubscriptionSettingsDraft>).every(
-    (key) => left[key] === right[key],
+  return (Object.keys(left) as Array<keyof ResourceSubscriptionSettingsDraft>).every((key) =>
+    key === 'eventDeliveryModes'
+      ? [
+          ...new Set([
+            ...Object.keys(left.eventDeliveryModes),
+            ...Object.keys(right.eventDeliveryModes),
+          ]),
+        ].every(
+          (eventType) => left.eventDeliveryModes[eventType] === right.eventDeliveryModes[eventType],
+        )
+      : left[key] === right[key],
   );
 }
 
 function toDraft(settings: ResourceSubscriptionSettings): ResourceSubscriptionSettingsDraft {
   return {
     enabled: settings.enabled,
+    deliveryMode: settings.deliveryMode ?? 'queue',
+    eventDeliveryModes: { ...settings.eventDeliveryModes },
     githubPollingIntervalMs: String(Math.round(settings.githubPollingIntervalMs / 1_000)),
     batchWindowMs: String(Math.round(settings.batchWindowMs / 1_000)),
     maxEventsPerPrompt: String(settings.maxEventsPerPrompt),
@@ -136,6 +151,8 @@ function fromDraft(draft: ResourceSubscriptionSettingsDraft): ResourceSubscripti
     return null;
   return {
     enabled: draft.enabled,
+    deliveryMode: draft.deliveryMode,
+    eventDeliveryModes: { ...draft.eventDeliveryModes },
     githubPollingIntervalMs: githubPollingSeconds * 1_000,
     batchWindowMs: batchWindowSeconds * 1_000,
     maxEventsPerPrompt,

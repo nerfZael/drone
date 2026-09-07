@@ -3,8 +3,10 @@ import type { HubRouter } from '../hub-router';
 
 type ChatQuestionRoutesService = Pick<
   ChatQuestionRequestService,
+  | 'askAsync'
   | 'create'
   | 'get'
+  | 'getForChat'
   | 'listForChat'
   | 'listPending'
   | 'skip'
@@ -38,6 +40,24 @@ export function registerChatQuestionRoutes(
             )
           : service.listPending(droneId, chatName),
       });
+    } catch (error) {
+      respondError(respond, error);
+    }
+  });
+
+  router.get('/api/chat-question-requests/:requestId', async ({ params, url, json: respond }) => {
+    const droneId = url.searchParams.get('droneId');
+    const chatName = url.searchParams.get('chatName') ?? 'default';
+    const request = droneId
+      ? service.getForChat(params.requestId, droneId, chatName)
+      : service.get(params.requestId);
+    if (!request) return respond(404, { ok: false, error: 'unknown question request' });
+    respond(200, { ok: true, request });
+  });
+
+  router.post('/api/chat-question-requests/ask', async ({ readJson, json: respond }) => {
+    try {
+      respond(200, { ok: true, result: await service.askAsync((await readJson()) ?? {}) });
     } catch (error) {
       respondError(respond, error);
     }

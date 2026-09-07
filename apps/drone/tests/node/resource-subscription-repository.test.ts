@@ -789,6 +789,58 @@ async function appendOpenedEvent(
   });
 }
 
+test('batches queued and ASAP events separately without promoting queued overrides or losing events', async () => {
+  const { database, close } = memoryHubDatabase();
+  try {
+    const repository = new ResourceSubscriptionRepository(database);
+    const subscriber = { chatId: 'subscriber', droneId: 'drone-a', chatName: 'default' };
+    await repository.upsert({
+      subscriber,
+      provider: 'drone-hub',
+      resourceType: 'chat',
+      resourceId: 'target',
+      events: ['chat.idle', 'chat.failed'],
+      intent: '',
+      maxActive: 50,
+    });
+    for (const [index, eventType] of (
+      ['chat.idle', 'chat.failed', 'chat.idle'] as const
+    ).entries()) {
+      await repository.appendEvent({
+        id: `event-${index}`,
+        providerEventId: `provider-event-${index}`,
+        provider: 'drone-hub',
+        resourceType: 'chat',
+        resourceId: 'target',
+        parentResourceId: null,
+        eventType,
+        occurredAt: new Date(Date.now() + index).toISOString(),
+        summary: eventType,
+        providerContent: {},
+      });
+    }
+    const settings = {
+      ...DEFAULT_RESOURCE_SUBSCRIPTION_SETTINGS,
+      batchWindowMs: 0,
+      deliveryMode: 'asap' as const,
+      eventDeliveryModes: { 'chat.idle': 'queue' as const },
+    };
+    const first = await repository.claimBatch(settings, new Date(Date.now() + 1000));
+    assert.deepEqual(
+      first?.items.map((item) => item.event.eventType),
+      ['chat.failed'],
+    );
+    const second = await repository.claimBatch(settings, new Date(Date.now() + 1000));
+    assert.deepEqual(
+      second?.items.map((item) => item.event.eventType),
+      ['chat.idle', 'chat.idle'],
+    );
+    assert.equal(await repository.claimBatch(settings, new Date(Date.now() + 1000)), null);
+  } finally {
+    close();
+  }
+});
+
 function cronEvent(resourceId: string, occurredAt: string) {
   return {
     id: `event-${occurredAt}`,
@@ -803,3 +855,209 @@ function cronEvent(resourceId: string, occurredAt: string) {
     providerContent: { scheduledAt: occurredAt },
   };
 }
+
+test('merged subscription batches recover durably and count as one automated run', async () => {
+  const { database, close } = memoryHubDatabase();
+  try {
+    const repository = new ResourceSubscriptionRepository(database);
+    const queue = new PromptQueueRepository(database);
+    const subscriber = { chatId: 'subscriber-chat', droneId: 'drone-a', chatName: 'default' };
+    await repository.upsert({
+      subscriber,
+      provider: 'github',
+      resourceType: 'repository',
+      resourceId: 'org/repo',
+      events: ['pull_request.opened'],
+      intent: 'Review new PRs',
+      maxActive: 50,
+    });
+    const settings = {
+      ...DEFAULT_RESOURCE_SUBSCRIPTION_SETTINGS,
+      batchWindowMs: 0,
+      maxAutomatedRunsPerConversationPerHour: 1,
+    };
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      await repository.appendEvent({
+        id: `merge-event-${i}`,
+        providerEventId: `provider-${i}`,
+        provider: 'github',
+        resourceType: 'pull_request',
+        resourceId: `org/repo#${i}`,
+        parentResourceId: 'org/repo',
+        eventType: 'pull_request.opened',
+        occurredAt: new Date().toISOString(),
+        summary: `PR ${i} opened`,
+        providerContent: {},
+      });
+      const batch = await repository.claimBatch(settings, new Date(Date.now() + 1_000));
+      assert.ok(batch, 'merging does not consume another automated run');
+      ids.push(batch.promptId);
+      await queue.enqueue({
+        droneId: subscriber.droneId,
+        chatName: subscriber.chatName,
+        submissionSource: 'subscription',
+        idempotencyKey: `subscription-batch:${batch.id}`,
+        eventRunLimit: { subscriberChatId: subscriber.chatId, maxRuns: 1 },
+        prompt: {
+          id: batch.promptId,
+          at: new Date().toISOString(),
+          prompt: 'events',
+          state: 'queued',
+          eventBundle: {
+            events: batch.items.map((item) => ({
+              ...item.event,
+              deliveryId: item.deliveryId,
+              intent: item.subscription.intent,
+            })),
+          },
+        },
+      });
+      if (i === 0) await repository.completeBatch(batch.id);
+      else if (i === 1)
+        await new ResourceSubscriptionRepository(database).recoverInterruptedBatches();
+      else await repository.failBatch(batch.id, 'simulated crash after enqueue', 3);
+    }
+    assert.equal(queue.list(subscriber).length, 1);
+    for (const promptId of ids) assert.equal(queue.get({ ...subscriber, promptId })!.id, ids[0]);
+    assert.equal(await repository.claimBatch(settings, new Date(Date.now() + 2_000)), null);
+    const states = database.read((connection) =>
+      connection.prepare('SELECT state FROM subscription_deliveries').all(),
+    ) as Array<{ state: string }>;
+    assert.deepEqual(
+      states.map((row) => row.state),
+      ['delivered', 'delivered', 'delivered'],
+    );
+  } finally {
+    close();
+  }
+});
+
+test('a merge target claimed during delivery defers the next event without spending retries', async () => {
+  const { database, close } = memoryHubDatabase();
+  try {
+    const repository = new ResourceSubscriptionRepository(database);
+    const queue = new PromptQueueRepository(database);
+    const subscriber = { chatId: 'subscriber-chat', droneId: 'drone-a', chatName: 'review' };
+    await repository.upsert({
+      subscriber,
+      provider: 'github',
+      resourceType: 'repository',
+      resourceId: 'org/repo',
+      events: ['pull_request.opened'],
+      intent: 'Review PRs',
+      maxActive: 50,
+    });
+    const settings = {
+      ...DEFAULT_RESOURCE_SUBSCRIPTION_SETTINGS,
+      batchWindowMs: 0,
+      maxAutomatedRunsPerConversationPerHour: 1,
+    };
+    const batches: NonNullable<Awaited<ReturnType<typeof repository.claimBatch>>>[] = [];
+    for (let i = 0; i < 2; i++) {
+      await repository.appendEvent({
+        id: `race-${i}`,
+        providerEventId: `race-${i}`,
+        provider: 'github',
+        resourceType: 'pull_request',
+        resourceId: `org/repo#${i}`,
+        parentResourceId: 'org/repo',
+        eventType: 'pull_request.opened',
+        occurredAt: new Date().toISOString(),
+        summary: 'Opened',
+        providerContent: {},
+      });
+      const batch = (await repository.claimBatch(settings, new Date(Date.now() + 100)))!;
+      assert.ok(batch);
+      batches.push(batch);
+      if (i === 1)
+        await queue.claim({ ...subscriber, promptId: batches[0]!.promptId, leaseOwner: 'test' });
+      const enqueue = queue.enqueue({
+        ...subscriber,
+        submissionSource: 'subscription',
+        idempotencyKey: `subscription-batch:${batch.id}`,
+        eventRunLimit: { subscriberChatId: subscriber.chatId, maxRuns: 1 },
+        prompt: {
+          id: batch.promptId,
+          at: new Date().toISOString(),
+          prompt: 'events',
+          state: 'queued',
+          eventBundle: {
+            events: batch.items.map((item) => ({ ...item.event, deliveryId: item.deliveryId })),
+          },
+        },
+      });
+      if (i === 0) {
+        await enqueue;
+        await repository.completeBatch(batch.id);
+      } else {
+        await assert.rejects(enqueue, /hourly event run limit/);
+        await repository.deferRateLimitedBatch(batch.id);
+      }
+    }
+    assert.equal(queue.list(subscriber).length, 1);
+    const row = database.read((connection) =>
+      connection
+        .prepare('SELECT state, attempt_count FROM subscription_deliveries WHERE id = ?')
+        .get(batches[1]!.items[0]!.deliveryId),
+    ) as { state: string; attempt_count: number };
+    assert.deepEqual(row, { state: 'pending', attempt_count: 0 });
+  } finally {
+    close();
+  }
+});
+
+test('recovery finds merged receipts after their chat is renamed', async () => {
+  const { database, close } = memoryHubDatabase();
+  try {
+    const repository = new ResourceSubscriptionRepository(database);
+    const queue = new PromptQueueRepository(database);
+    const subscriber = { chatId: 'subscriber-chat', droneId: 'drone-a', chatName: 'review' };
+    await repository.upsert({
+      subscriber,
+      provider: 'github',
+      resourceType: 'repository',
+      resourceId: 'org/repo',
+      events: ['pull_request.opened'],
+      intent: 'Review PRs',
+      maxActive: 50,
+    });
+    const settings = { ...DEFAULT_RESOURCE_SUBSCRIPTION_SETTINGS, batchWindowMs: 0 };
+    for (let i = 0; i < 2; i++) {
+      await repository.appendEvent({
+        id: `rename-${i}`,
+        providerEventId: `rename-${i}`,
+        provider: 'github',
+        resourceType: 'pull_request',
+        resourceId: `org/repo#${i}`,
+        parentResourceId: 'org/repo',
+        eventType: 'pull_request.opened',
+        occurredAt: new Date().toISOString(),
+        summary: 'Opened',
+        providerContent: {},
+      });
+      const batch = (await repository.claimBatch(settings, new Date(Date.now() + 100)))!;
+      await queue.enqueue({
+        ...subscriber,
+        submissionSource: 'subscription',
+        idempotencyKey: `subscription-batch:${batch.id}`,
+        prompt: {
+          id: batch.promptId,
+          at: new Date().toISOString(),
+          prompt: 'events',
+          state: 'queued',
+          eventBundle: {
+            events: batch.items.map((item) => ({ ...item.event, deliveryId: item.deliveryId })),
+          },
+        },
+      });
+      if (i === 0) await repository.completeBatch(batch.id);
+    }
+    await queue.renameChat({ ...subscriber, newChatName: 'renamed' });
+    await repository.recoverInterruptedBatches();
+    assert.equal(await repository.claimBatch(settings, new Date(Date.now() + 1_000)), null);
+    assert.equal(queue.list({ droneId: subscriber.droneId, chatName: 'renamed' }).length, 1);
+  } finally {
+    close();
+  }
+});
