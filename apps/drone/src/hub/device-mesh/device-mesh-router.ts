@@ -1166,7 +1166,7 @@ export class DeviceMeshRouter {
         ok: true,
         result: this.readResponses.encode(request, result),
       };
-      if (request.capability === 'drone-control' && request.operation === 'chat.read') {
+      if (request.capability === 'drone-control' && ['chat.read', 'files.list', 'file.preview'].includes(request.operation)) {
         response.diagnostics = {
           preInvokeMs: invocationStarted - executionStarted,
           invokeMs: invocationFinished - invocationStarted,

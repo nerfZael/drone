@@ -1,4 +1,5 @@
 import React from 'react';
+import { desktopWorkspaceCommitted, desktopWorkspaceLoads } from './workspace-load-telemetry';
 import { UiCenteredLoadingState } from '../../ui/components';
 import {
   defaultTextFileViewModeForFile,
@@ -632,9 +633,24 @@ export function OpenedDroneFilePanel({
         languageActionsRef.current?.findReferences();
       });
       applyEditorCursorTarget();
+      const diagnosticId = desktopWorkspaceLoads.find('file-open', { droneId, path: activeFilePath ?? '' });
+      desktopWorkspaceLoads.mark(diagnosticId, 'editorMounted');
+      desktopWorkspaceLoads.committed(diagnosticId);
     },
-    [applyEditorCursorTarget, companionEditorTargetId, companionWorkspace, onSaveFile],
+    [activeFilePath, droneId, applyEditorCursorTarget, companionEditorTargetId, companionWorkspace, onSaveFile],
   );
+  const imageDiagnosticRef = React.useRef<HTMLImageElement | null>(null);
+  React.useEffect(() => {
+    if (fileLoading || !activeFilePath) return;
+    const id = desktopWorkspaceLoads.find('file-open', { droneId, path: activeFilePath });
+    desktopWorkspaceLoads.mark(id, 'surfaceCommitted');
+    if (fileKind === 'image') {
+      if (imageDiagnosticRef.current?.complete && imageDiagnosticRef.current.naturalWidth > 0) {
+        desktopWorkspaceLoads.mark(id, 'imageDecoded');
+        desktopWorkspaceLoads.committed(id);
+      }
+    } else if (!openedFileEditorVisible || editorRef.current) desktopWorkspaceLoads.committed(id);
+  }, [activeFilePath, droneId, fileLoading, fileKind, fileNavigationSeq, openedFileEditorVisible]);
 
   React.useEffect(() => {
     if (!openedFileEditorVisible) {
@@ -1021,6 +1037,13 @@ export function OpenedDroneFilePanel({
                 }}
               >
                 <img
+                  ref={imageDiagnosticRef}
+                  onLoad={() => {
+                    const id = desktopWorkspaceLoads.find('file-open', { droneId, path: activeFilePath ?? '' });
+                    desktopWorkspaceLoads.mark(id, 'imageDecoded');
+                    desktopWorkspaceLoads.committed(id);
+                  }}
+                  onError={() => desktopWorkspaceCommitted('file-open', droneId, activeFilePath ?? '', true)}
                   src={openedFileMediaSrc}
                   alt={fileName ?? 'image preview'}
                   draggable={false}

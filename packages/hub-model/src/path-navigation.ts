@@ -32,6 +32,18 @@ export async function workspaceLinkIsDirectory(
   );
 }
 
+/** Ordinary file links need one read, not a parent-directory listing followed by a read. */
+export async function readWorkspaceFileFirst<T>(
+  read: () => Promise<T>,
+  isDirectory: () => Promise<boolean>,
+): Promise<{ directory: true } | { directory: false; result: T }> {
+  try { return { directory: false, result: await read() }; }
+  catch (error) {
+    if (await isDirectory().catch(() => false)) return { directory: true };
+    throw error;
+  }
+}
+
 export function resolveWorkspacePreviewLink(baseFile: string, target: string): string {
   if (target.startsWith('/')) return normalizeWorkspaceLinkPath(target);
   const parent = workspaceLinkParent(baseFile);

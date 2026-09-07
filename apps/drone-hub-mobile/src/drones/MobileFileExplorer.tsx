@@ -1,5 +1,6 @@
 import { workspaceExplorerRevealDirectories } from '@drone/hub-model';
 import React from 'react';
+import { mobileWorkspaceLoads } from '../diagnostics/mobile-workspace-load';
 import {
   ActivityIndicator,
   FlatList,
@@ -155,6 +156,10 @@ export function MobileFileExplorer({
 }) {
   const folderIcons = useMobileExplorerFolderIcons();
   const [directories, setDirectories] = React.useState<Record<string, DirectoryState>>({});
+  const pendingDirectoryDiagnostics = React.useRef<string[]>([]);
+  React.useEffect(() => {
+    for (const id of pendingDirectoryDiagnostics.current.splice(0)) mobileWorkspaceLoads.committed(id);
+  }, [directories]);
   const directoriesRef = React.useRef(directories);
   const directoryContextRef = React.useRef(new MobileDirectoryContextCache());
   const contextVersionRef = React.useRef(0);
@@ -228,6 +233,10 @@ export function MobileFileExplorer({
       const requestToken = directoryRequestsRef.current.begin(path, force);
       if (!requestToken) return;
       const background = existing?.loaded === true;
+      const diagnosticId = background ? undefined : mobileWorkspaceLoads.start('directory-load', {
+        targetDeviceId: targetId, droneId, chatName, path,
+      });
+      mobileWorkspaceLoads.mark(diagnosticId, 'cacheHit', existing?.loaded ? 1 : 0);
       const requestSeq = (directoryRequestSeqRef.current[path] ?? 0) + 1;
       directoryRequestSeqRef.current[path] = requestSeq;
       const requestController = new AbortController();
@@ -261,15 +270,18 @@ export function MobileFileExplorer({
           },
           requestController.signal,
         );
+        mobileWorkspaceLoads.mark(diagnosticId, 'responseReceived');
 
         if (
           currentContextKeyRef.current !== requestContextKey ||
           contextVersionRef.current !== requestContextVersion ||
           directoryRequestSeqRef.current[path] !== requestSeq
         )
-          return;
+          { mobileWorkspaceLoads.finish(diagnosticId, 'superseded'); return; }
         const resolvedPath = String(result?.path ?? path);
         const normalizedEntries = normalizeEntries(result?.entries);
+        mobileWorkspaceLoads.mark(diagnosticId, 'entriesNormalized');
+        mobileWorkspaceLoads.mark(diagnosticId, 'entryCount', normalizedEntries.length);
         const previousEntries = directoriesRef.current[path]?.entries ?? [];
         const nextState: DirectoryState = {
           entries: retainMobileExplorerEntries(previousEntries, normalizedEntries),
@@ -281,7 +293,9 @@ export function MobileFileExplorer({
           { path, state: nextState },
           ...(resolvedPath !== path ? [{ path: resolvedPath, state: nextState }] : []),
         ]);
+        if (diagnosticId) pendingDirectoryDiagnostics.current.push(diagnosticId);
       } catch (nextError: any) {
+        mobileWorkspaceLoads.finish(diagnosticId, requestController.signal.aborted ? 'superseded' : 'error');
         if (
           currentContextKeyRef.current !== requestContextKey ||
           contextVersionRef.current !== requestContextVersion ||

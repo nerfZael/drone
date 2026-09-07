@@ -578,6 +578,7 @@ export function createDroneControlCapability(
   return {
     descriptor: DRONE_CONTROL_CAPABILITY,
     async invoke(operation, rawPayload, context) {
+      const requestAccess = { ...access, parentRequestId: context?.requestId };
       const payload = object(rawPayload);
       const sourceDeviceId = optionalText(context?.sourceDevice?.id) ?? '__direct__';
       const readOwner = readBudget.captureOwner(sourceDeviceId);
@@ -589,7 +590,7 @@ export function createDroneControlCapability(
         if (createModelAgent) {
           if (createModelAgent === 'native') {
             const createModelCatalog = await localHubRequest(
-              access,
+              requestAccess,
               '/api/model-catalog?agent=native',
               { signal: operationSignal },
             );
@@ -601,7 +602,7 @@ export function createDroneControlCapability(
           const runtime = payload.createModelRuntime === 'host' ? 'host' : 'container';
           const refresh = payload.refreshCreateModels === true ? '&refresh=1' : '';
           const createModelCatalog = await localHubRequest(
-            access,
+            requestAccess,
             `/api/model-catalog?agent=${encodeURIComponent(createModelAgent)}&runtime=${runtime}${refresh}`,
             { signal: operationSignal },
           );
@@ -625,7 +626,7 @@ export function createDroneControlCapability(
             Number.isSafeInteger(requestedCursor) && requestedCursor >= 0 ? requestedCursor : 0;
           try {
             const result = await localHubRequest(
-              access,
+              requestAccess,
               `/api/repos/branches?repoPath=${encodeURIComponent(createRepoPath)}`,
               { signal: operationSignal },
             );
@@ -688,7 +689,7 @@ export function createDroneControlCapability(
           preferencesRequest,
           deleteSettingsRequest,
         ] = await Promise.allSettled([
-          localHubRequest(access, '/api/drones', { signal: operationSignal }),
+          localHubRequest(requestAccess, '/api/drones', { signal: operationSignal }),
           hubServices.repositories.list(),
           hubServices.groups.list(),
           hubServices.settings.uiPreferences.read(),
@@ -877,7 +878,7 @@ export function createDroneControlCapability(
           ...(seedAttachments.length > 0 ? { seedAttachments } : {}),
         };
         try {
-          const created = await localHubRequest(access, '/api/drones', {
+          const created = await localHubRequest(requestAccess, '/api/drones', {
             method: 'POST',
             body: JSON.stringify(createPayload),
           });
@@ -970,7 +971,7 @@ export function createDroneControlCapability(
         const deleteMode =
           object(settings.deleteAction).mode === 'archive' ? 'archive' : 'permanent';
         await localHubRequest(
-          access,
+          requestAccess,
           deleteMode === 'archive'
             ? `/api/drones/${encodedDrone}/archive`
             : `/api/drones/${encodedDrone}`,
@@ -979,7 +980,7 @@ export function createDroneControlCapability(
         return { deleted: true, droneId };
       }
       if (operation === 'chats.list') {
-        const result = await localHubRequest(access, `/api/drones/${encodedDrone}/chats`, {
+        const result = await localHubRequest(requestAccess, `/api/drones/${encodedDrone}/chats`, {
           signal: operationSignal,
         });
         return {
@@ -995,7 +996,7 @@ export function createDroneControlCapability(
           const sourceChatName =
             optionalText(payload.sourceChatName ?? payload.chatName) ?? 'default';
           return await localHubRequest(
-            access,
+            requestAccess,
             `/api/drones/${encodedDrone}/chats/${encodeURIComponent(sourceChatName)}/pending/${encodeURIComponent(queuedActionId)}/create-now`,
             { method: 'POST', body: '{}' },
           );
@@ -1008,7 +1009,7 @@ export function createDroneControlCapability(
             : payload.mode === 'fork'
               ? 'fork'
               : undefined;
-        const result = await localHubRequest(access, `/api/drones/${encodedDrone}/chats`, {
+        const result = await localHubRequest(requestAccess, `/api/drones/${encodedDrone}/chats`, {
           method: 'POST',
           body: JSON.stringify({
             name: chatName,
@@ -1026,7 +1027,7 @@ export function createDroneControlCapability(
         const chatName = requiredText(payload.chatName, 'chatName');
         const newName = requiredText(payload.newName, 'newName');
         return await localHubRequest(
-          access,
+          requestAccess,
           `/api/drones/${encodedDrone}/chats/${encodeURIComponent(chatName)}/rename`,
           { method: 'POST', body: JSON.stringify({ newName }) },
         );
@@ -1034,7 +1035,7 @@ export function createDroneControlCapability(
       if (operation === 'chat.delete') {
         const chatName = requiredText(payload.chatName, 'chatName');
         return await localHubRequest(
-          access,
+          requestAccess,
           `/api/drones/${encodedDrone}/chats/${encodeURIComponent(chatName)}`,
           { method: 'DELETE' },
         );
@@ -1043,7 +1044,7 @@ export function createDroneControlCapability(
         const state =
           payload.state === 'open' || payload.state === 'closed' ? payload.state : 'all';
         return await localHubRequest(
-          access,
+          requestAccess,
           `/api/drones/${encodedDrone}/repo/pull-requests?state=${state}`,
         );
       }
@@ -1052,7 +1053,7 @@ export function createDroneControlCapability(
         const method =
           payload.method === 'squash' || payload.method === 'rebase' ? payload.method : 'merge';
         return await localHubRequest(
-          access,
+          requestAccess,
           `/api/drones/${encodedDrone}/repo/pull-requests/${pullNumber}/merge`,
           { method: 'POST', body: JSON.stringify({ method }) },
         );
@@ -1060,7 +1061,7 @@ export function createDroneControlCapability(
       if (operation === 'repo.pull-requests.close') {
         const pullNumber = requiredPositiveInteger(payload.pullNumber, 'pullNumber');
         return await localHubRequest(
-          access,
+          requestAccess,
           `/api/drones/${encodedDrone}/repo/pull-requests/${pullNumber}/close`,
           { method: 'POST', body: '{}' },
         );
@@ -1070,7 +1071,7 @@ export function createDroneControlCapability(
         const reservation = await readBudget.reserveJson(readOwner, operationSignal);
         try {
           const result = await localHubBoundedJsonRequest(
-            access,
+            requestAccess,
             `/api/drones/${encodedDrone}/fs/list?path=${encodeURIComponent(directoryPath)}`,
             { signal: reservation.signal, maxBytes: reservation.maxBytes },
           );
@@ -1099,7 +1100,7 @@ export function createDroneControlCapability(
                 targetDir: requiredText(payload.targetDir, 'targetDir'),
                 name: requiredText(payload.name, 'name'),
               };
-        return await localHubRequest(access, `/api/drones/${encodedDrone}/fs/action`, {
+        return await localHubRequest(requestAccess, `/api/drones/${encodedDrone}/fs/action`, {
           method: 'POST',
           body: JSON.stringify(body),
         });
@@ -1119,7 +1120,7 @@ export function createDroneControlCapability(
             { code: 'FILE_TOO_LARGE' },
           );
         }
-        return await localHubRequest(access, `/api/drones/${encodedDrone}/fs/file`, {
+        return await localHubRequest(requestAccess, `/api/drones/${encodedDrone}/fs/file`, {
           method: 'POST',
           body: JSON.stringify({
             path: filePath,
@@ -1169,7 +1170,7 @@ export function createDroneControlCapability(
         if (payload.metadataOnly === true) {
           return {
             preview: await localHubRequest(
-              access,
+              requestAccess,
               `${fsFilePath}&metadata=1&revision=${payload.includeRevision === false ? '0' : '1'}`,
               { signal: operationSignal },
             ),
@@ -1179,20 +1180,20 @@ export function createDroneControlCapability(
         const expectedRevision = optionalText(payload.expectedRevision);
         let metadata: any;
         if (likelyMedia) {
-          metadata = await localHubRequest(access, `${fsFilePath}&metadata=1&revision=0`, {
+          metadata = await localHubRequest(requestAccess, `${fsFilePath}&metadata=1&revision=0`, {
             signal: operationSignal,
           });
         } else {
           const jsonReservation = await readBudget.reserveJson(readOwner, operationSignal);
           try {
             try {
-              metadata = await localHubBoundedJsonRequest(access, fsFilePath, {
+              metadata = await localHubBoundedJsonRequest(requestAccess, fsFilePath, {
                 signal: jsonReservation.signal,
                 maxBytes: jsonReservation.maxBytes,
               });
             } catch (error: any) {
               if (error?.code !== 'HUB_413') throw error;
-              metadata = await localHubBoundedJsonRequest(access, `${fsFilePath}&metadata=1`, {
+              metadata = await localHubBoundedJsonRequest(requestAccess, `${fsFilePath}&metadata=1`, {
                 signal: jsonReservation.signal,
                 maxBytes: jsonReservation.maxBytes,
               });
@@ -1211,7 +1212,7 @@ export function createDroneControlCapability(
 
         const initialMediaKind = metadata.kind;
         const initialMediaPath = requiredText(metadata?.path ?? filePath, 'preview path');
-        metadata = await localHubRequest(access, `${fsFilePath}&metadata=1&revision=1`, {
+        metadata = await localHubRequest(requestAccess, `${fsFilePath}&metadata=1&revision=1`, {
           signal: operationSignal,
         });
         if (metadata?.kind !== 'image' && metadata?.kind !== 'video') {
@@ -1280,7 +1281,7 @@ export function createDroneControlCapability(
         requestedId?: string,
         signal: AbortSignal = operationSignal,
       ) => {
-        const snapshot = await localHubRequest(access, `${chatPath}/native`, {
+        const snapshot = await localHubRequest(requestAccess, `${chatPath}/native`, {
           method: 'POST',
           body: '{}',
           signal,
@@ -1304,12 +1305,12 @@ export function createDroneControlCapability(
         if (operation === 'chat.read') {
           const deviceId = optionalText(payload.workspaceDeviceId);
           return await localHubRequest(
-            access,
+            requestAccess,
             pathname + (deviceId ? `?deviceId=${encodeURIComponent(deviceId)}` : ''),
             { signal: operationSignal },
           );
         }
-        return await localHubRequest(access, pathname, {
+        return await localHubRequest(requestAccess, pathname, {
           method: 'POST',
           signal: operationSignal,
           body: JSON.stringify({
@@ -1320,7 +1321,7 @@ export function createDroneControlCapability(
       }
       if (operation === 'chat.read') {
         const readHub = (pathname: string, init?: RequestInit) =>
-          localHubRequest(access, pathname, { ...init, signal: operationSignal });
+          localHubRequest(requestAccess, pathname, { ...init, signal: operationSignal });
         const diffArtifactId = optionalText(payload.diffArtifactId);
         const diffPath = optionalText(payload.diffPath);
         const diffList = payload.diffList === true;
@@ -1393,7 +1394,7 @@ export function createDroneControlCapability(
           try {
             const statePath = `${chatPath}/state?transcript=${selectedTurnQuery}&pending=${contentOnlyRead ? 'none' : 'all'}&subscriptions=${contentOnlyRead ? '0' : '1'}&readState=${contentOnlyRead ? '0' : '1'}&transcriptMeta=0${beforeQuery}`;
             result = contentReservation
-              ? await localHubBoundedJsonRequest(access, statePath, {
+              ? await localHubBoundedJsonRequest(requestAccess, statePath, {
                   signal: contentReservation.signal,
                   maxBytes: contentReservation.maxBytes,
                 })
@@ -1402,7 +1403,7 @@ export function createDroneControlCapability(
             if (error?.code !== 'HUB_410') throw error;
             const [legacy, pendingResult] = await Promise.all([
               contentReservation
-                ? localHubBoundedJsonRequest(access, chatPath, {
+                ? localHubBoundedJsonRequest(requestAccess, chatPath, {
                     signal: contentReservation.signal,
                     maxBytes: contentReservation.maxBytes,
                   })
@@ -1453,7 +1454,7 @@ export function createDroneControlCapability(
             );
             if (messageId) {
               const entry = await localHubBoundedJsonRequest(
-                access,
+                requestAccess,
                 `/api/assistant/threads/${encodeURIComponent(nativeChatId)}/messages/${encodeURIComponent(messageId)}`,
                 {
                   signal: contentReservation!.signal,
@@ -1518,7 +1519,7 @@ export function createDroneControlCapability(
               },
             );
             if (!turn && !hasTurnNumber && !legacyTranscriptLoaded) {
-              const legacy = await localHubBoundedJsonRequest(access, chatPath, {
+              const legacy = await localHubBoundedJsonRequest(requestAccess, chatPath, {
                 signal: contentReservation!.signal,
                 maxBytes: contentReservation!.maxBytes,
               });
@@ -1591,7 +1592,7 @@ export function createDroneControlCapability(
           const thread = Array.isArray(ensured?.threads)
             ? ensured.threads.find((item: any) => String(item?.id ?? '') === nativeChatId)
             : null;
-          const catalog = await localHubRequest(access, '/api/model-catalog?agent=native', {
+          const catalog = await localHubRequest(requestAccess, '/api/model-catalog?agent=native', {
             signal: operationSignal,
           });
           const provider =
@@ -1617,7 +1618,7 @@ export function createDroneControlCapability(
           };
         }
         const refresh = payload.refresh === true ? '?refresh=1' : '';
-        const result = await localHubRequest(access, `${chatPath}/models${refresh}`, {
+        const result = await localHubRequest(requestAccess, `${chatPath}/models${refresh}`, {
           signal: operationSignal,
         });
         return {
@@ -1644,7 +1645,7 @@ export function createDroneControlCapability(
             payload.agentPermissionMode !== undefined ||
             payload.approvalPolicy !== undefined
           ) {
-            await localHubRequest(access, `${chatPath}/config`, {
+            await localHubRequest(requestAccess, `${chatPath}/config`, {
               method: 'POST',
               body: JSON.stringify({
                 ...(payload.agent !== undefined ? { agent: payload.agent } : {}),
@@ -1661,7 +1662,7 @@ export function createDroneControlCapability(
             });
           }
           return await localHubRequest(
-            access,
+            requestAccess,
             `/api/assistant/threads/${encodeURIComponent(nativeChatId)}`,
             {
               method: 'PATCH',
@@ -1686,7 +1687,7 @@ export function createDroneControlCapability(
             },
           );
         }
-        const updated = await localHubRequest(access, `${chatPath}/config`, {
+        const updated = await localHubRequest(requestAccess, `${chatPath}/config`, {
           method: 'POST',
           body: JSON.stringify({
             ...(payload.model !== undefined ? { model: model || null } : {}),
@@ -1702,11 +1703,11 @@ export function createDroneControlCapability(
           }),
         });
         if (payload.syncNativeThread === true) {
-          const metadata = await localHubRequest(access, chatPath);
+          const metadata = await localHubRequest(requestAccess, chatPath);
           if (metadata?.agent?.kind === 'native') {
             const { nativeChatId } = await resolveNativeChat();
             await localHubRequest(
-              access,
+              requestAccess,
               `/api/assistant/threads/${encodeURIComponent(nativeChatId)}`,
               {
                 method: 'PATCH',
@@ -1742,7 +1743,7 @@ export function createDroneControlCapability(
             throw new Error(`unsupported Codex approval decision: ${decision}`);
           }
           return await localHubRequest(
-            access,
+            requestAccess,
             `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/approvals/${encodeURIComponent(promptId)}/${encodeURIComponent(approvalId)}/${encodeURIComponent(decision)}`,
             { method: 'POST', body: '{}' },
           );
@@ -1753,7 +1754,7 @@ export function createDroneControlCapability(
         const approvalId = requiredText(payload.approvalId, 'approvalId');
         const decision = payload.approved === true ? 'approve' : 'deny';
         return await localHubRequest(
-          access,
+          requestAccess,
           `/api/assistant/threads/${encodeURIComponent(nativeChatId)}/approvals/${encodeURIComponent(approvalId)}/${decision}`,
           { method: 'POST', body: '{}' },
         );
@@ -1761,7 +1762,7 @@ export function createDroneControlCapability(
       if (operation === 'chat.questions.resolve') {
         const requestId = requiredText(payload.requestId, 'requestId');
         const requests = await localHubRequest(
-          access,
+          requestAccess,
           `/api/chat-question-requests?${new URLSearchParams({ droneId, chatName }).toString()}`,
         );
         if (
@@ -1780,7 +1781,7 @@ export function createDroneControlCapability(
           });
         }
         return await localHubRequest(
-          access,
+          requestAccess,
           `/api/chat-question-requests/${encodeURIComponent(requestId)}/${action}`,
           {
             method: 'POST',
@@ -1804,7 +1805,7 @@ export function createDroneControlCapability(
           );
         }
         return await localHubRequest(
-          access,
+          requestAccess,
           `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/pending/${encodeURIComponent(promptId)}/interruption`,
           { method: 'POST', body: JSON.stringify({ resolution }) },
         );
@@ -1815,7 +1816,7 @@ export function createDroneControlCapability(
         );
         const messageId = requiredText(payload.messageId, 'messageId');
         return await localHubRequest(
-          access,
+          requestAccess,
           `/api/assistant/threads/${encodeURIComponent(nativeChatId)}/messages/${encodeURIComponent(messageId)}?following=${payload.deleteFollowing === true}`,
           { method: 'DELETE' },
         );
@@ -1879,7 +1880,7 @@ export function createDroneControlCapability(
             code: 'INVALID_REQUEST',
           });
         try {
-          const chat = await localHubRequest(access, chatPath).catch((error) => {
+          const chat = await localHubRequest(requestAccess, chatPath).catch((error) => {
             if (error?.code === 'HUB_409' && /still starting/i.test(error?.message ?? ''))
               return null;
             throw error;
@@ -1902,7 +1903,7 @@ export function createDroneControlCapability(
                 acknowledgement?.type === 'queued' ? (acknowledgement.prompt ?? null) : null,
             };
           }
-          return await localHubRequest(access, `${chatPath}/prompt`, {
+          return await localHubRequest(requestAccess, `${chatPath}/prompt`, {
             method: 'POST',
             body: JSON.stringify({
               prompt,
@@ -1920,14 +1921,14 @@ export function createDroneControlCapability(
         // Stop is a durable command. Dispatch directly; metadata/history reads and
         // the lifetime of the caller's screen must not delay or revoke it.
         if (!optionalText(payload.promptId)) {
-          return await localHubRequest(access, `${chatPath}/stop`, { method: 'POST', body: '{}' });
+          return await localHubRequest(requestAccess, `${chatPath}/stop`, { method: 'POST', body: '{}' });
         }
-        const chat = await localHubRequest(access, chatPath);
+        const chat = await localHubRequest(requestAccess, chatPath);
         if (chat?.agent?.kind === 'native') {
           const { nativeChatId } = await resolveNativeChat();
           const promptId = optionalText(payload.promptId);
           return await localHubRequest(
-            access,
+            requestAccess,
             promptId
               ? `/api/assistant/threads/${encodeURIComponent(nativeChatId)}/queued/${encodeURIComponent(promptId)}`
               : `/api/assistant/threads/${encodeURIComponent(nativeChatId)}/stop`,
@@ -1939,12 +1940,12 @@ export function createDroneControlCapability(
         const promptId = optionalText(payload.promptId);
         if (promptId) {
           return await localHubRequest(
-            access,
+            requestAccess,
             `${chatPath}/pending/${encodeURIComponent(promptId)}`,
             { method: 'DELETE' },
           );
         }
-        return await localHubRequest(access, `${chatPath}/stop`, { method: 'POST', body: '{}' });
+        return await localHubRequest(requestAccess, `${chatPath}/stop`, { method: 'POST', body: '{}' });
       }
       throw Object.assign(new Error(`unsupported drone-control operation: ${operation}`), {
         code: 'UNSUPPORTED_OPERATION',

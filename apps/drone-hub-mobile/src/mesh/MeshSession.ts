@@ -22,6 +22,7 @@ import {
 } from './mobile-capability-event-guard';
 import { validateCapabilityEvent } from './validate-capability-event';
 import { observeMobileChatRequest } from '../diagnostics/mobile-chat-load';
+import { mobileWorkspaceLoads } from '../diagnostics/mobile-workspace-load';
 
 type PendingRequest = {
   observation?: ReturnType<typeof observeMobileChatRequest>;
@@ -177,7 +178,10 @@ export class MeshSession {
       ),
       maxHops: 1,
     };
-    const observation = observeMobileChatRequest(
+    const workspacePayload = payload as { droneId?: string; path?: string; watch?: string; metadataOnly?: boolean };
+    const observation = (capability === 'drone-control' && ['file.preview', 'files.list'].includes(operation) && !workspacePayload?.watch && !workspacePayload?.metadataOnly
+      ? mobileWorkspaceLoads.observe({ targetDeviceId, droneId: workspacePayload.droneId, path: workspacePayload.path }, operation, unsigned.requestId)
+      : null) ?? observeMobileChatRequest(
       targetDeviceId,
       operation,
       payload,

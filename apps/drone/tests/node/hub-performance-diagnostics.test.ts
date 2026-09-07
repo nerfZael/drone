@@ -103,3 +103,25 @@ test('stall monitor records real event-loop blocking and stops cleanly', async (
   await new Promise((resolve) => setTimeout(resolve, 300));
   assert.equal(logs.length, count);
 });
+
+test('fast filesystem requests preserve correlation and bounded phases without paths', async () => {
+  const { recordHubRequestPhase, measureHubRequestPhase } = await import('../../src/hub/hub-performance-diagnostics');
+  const req = { url: '/api/drones/id/fs/list?path=/private/secret', method: 'GET', headers: { 'x-drone-parent-request-id': 'mesh-123' } } as unknown as http.IncomingMessage;
+  const res = new http.ServerResponse(req);
+  const logs: any[] = [];
+  observeHubHttpRequest(req, res, (_level, _message, meta) => logs.push(meta));
+  recordHubRequestPhase(req, 'docker_stream', 12);
+  recordHubRequestPhase(req, 'docker_stream', 4);
+  recordHubRequestPhase(req, '/private/secret', 1);
+  recordHubRequestPhase(req, 'bad', NaN);
+  await assert.rejects(measureHubRequestPhase(req, 'fs_container_exec', async () => { throw new Error('failure'); }));
+  res.writeHead(200);
+  res.emit('finish');
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0].parentRequestId, 'mesh-123');
+  assert.equal(logs[0].phases.docker_stream, 16);
+  assert.ok(logs[0].phases.fs_container_exec >= 0);
+  assert.match(String(res.getHeader('server-timing')), /docker_stream;dur=16/);
+  assert.ok(!JSON.stringify(logs).includes('secret'));
+  assert.equal(logs[0].phases.bad, undefined);
+});

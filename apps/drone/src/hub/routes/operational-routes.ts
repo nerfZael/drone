@@ -8,6 +8,7 @@ import { errorMessage, readRawBody } from '../hub-http';
 import type { HubRouter } from '../hub-router';
 import type { CompanionTelemetryService } from '../companion/companion-telemetry';
 import { mobileChatLoadStore } from '../mobile-chat-load-store';
+import { normalizeMobileChatLoad } from '@drone/device-protocol';
 
 type ServiceFunction = (...args: any[]) => any;
 const GROQ_SPEECH_TIMEOUT_MS = 30_000;
@@ -411,6 +412,13 @@ export function registerOperationalRoutes(
       'chat load timing',
       serializeChatLoadTelemetryForLog(telemetry),
     );
+    json(202, { ok: true });
+  });
+
+  apiRouter.post('/api/telemetry/file-load', async ({ readJson, json }) => {
+    const record = normalizeMobileChatLoad(await readJson());
+    if (!record?.kind) { json(400, { ok: false, error: 'invalid file load telemetry' }); return; }
+    hubLog(record.status === 'completed' ? 'info' : 'warn', 'workspace file load timing', record);
     json(202, { ok: true });
   });
 

@@ -1,3 +1,4 @@
+import { desktopWorkspaceCommitted, beginDesktopWorkspaceLoad, desktopWorkspaceLoads } from './workspace-load-telemetry';
 import { workspaceExplorerLocation, workspaceExplorerRevealDirectories } from '@drone/hub-model';
 import React from 'react';
 import {
@@ -230,6 +231,9 @@ export function DroneFilesDock({
     [workspaceStateKey],
   );
   const [childEntriesByPath, setChildEntriesByPath] = React.useState<Record<string, DroneFsEntry[]>>({});
+  React.useEffect(() => {
+    for (const path of Object.keys(childEntriesByPath)) desktopWorkspaceCommitted('directory-load', droneId, path);
+  }, [childEntriesByPath, droneId]);
   const [childLoadingByPath, setChildLoadingByPath] = React.useState<Record<string, boolean>>({});
   const [childErrorByPath, setChildErrorByPath] = React.useState<Record<string, string | null>>({});
   const dragDepthRef = React.useRef(0);
@@ -396,8 +400,10 @@ export function DroneFilesDock({
       )
         return;
       const cacheKey = childDirectoryCacheKey(droneId, dirPath);
+      const diagnosticId = opts?.force ? undefined : beginDesktopWorkspaceLoad('directory-load', droneId, dirPath);
       const cached = opts?.force ? null : readChildDirectoryCache(cacheKey);
       if (cached) {
+        desktopWorkspaceLoads.mark(diagnosticId, 'cacheHit', 1);
         setChildEntriesByPath((prev) => {
           if (sameDroneFsEntries(prev[dirPath], cached)) return prev;
           return { ...prev, [dirPath]: cached };
@@ -406,6 +412,7 @@ export function DroneFilesDock({
           if (prev[dirPath] == null) return prev;
           return { ...prev, [dirPath]: null };
         });
+        desktopWorkspaceLoads.committed(diagnosticId);
         return;
       }
 
@@ -436,6 +443,7 @@ export function DroneFilesDock({
           return { ...prev, [dirPath]: null };
         });
       } catch (e: any) {
+        desktopWorkspaceLoads.finish(diagnosticId, 'error');
         if (childRequestSeqRef.current[dirPath] !== seq) return;
         const msg = String(e?.message ?? e ?? 'failed to load directory').trim() || 'failed to load directory';
         setChildErrorByPath((prev) => ({ ...prev, [dirPath]: msg }));

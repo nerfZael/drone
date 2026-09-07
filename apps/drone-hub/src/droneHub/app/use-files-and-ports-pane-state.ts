@@ -1,3 +1,4 @@
+import { desktopWorkspaceCommitted, beginDesktopWorkspaceLoad, desktopWorkspaceLoads } from '../files/workspace-load-telemetry';
 import React from 'react';
 import { usePaneReadiness } from '../panes/usePaneReadiness';
 import type {
@@ -119,6 +120,9 @@ export function useFilesAndPortsPaneState({
   const [fsPathByDrone, setFsPathByDrone] = React.useState<Record<string, string>>({});
   const [fsRefreshNonce, setFsRefreshNonce] = React.useState(0);
   const [fsResp, setFsResp] = React.useState<DroneFsListPayload | null>(null);
+  React.useEffect(() => {
+    if (fsResp?.ok) desktopWorkspaceCommitted('directory-load', String(currentDrone?.id ?? ''), fsResp.path);
+  }, [fsResp, currentDrone?.id]);
   const [fsError, setFsError] = React.useState<string | null>(null);
   const [fsLoading, setFsLoading] = React.useState(true);
   const lastFsRefreshNonceRef = React.useRef(fsRefreshNonce);
@@ -186,12 +190,15 @@ export function useFilesAndPortsPaneState({
     const forceInitialLoad = fsRefreshNonce !== lastFsRefreshNonceRef.current;
     lastFsRefreshNonceRef.current = fsRefreshNonce;
     const cacheKey = fsListCacheKey(droneId, currentFsPath);
+    const diagnosticId = beginDesktopWorkspaceLoad('directory-load', droneId, currentFsPath);
     const cached = forceInitialLoad ? null : readFsListCache(cacheKey);
     if (cached) {
+      desktopWorkspaceLoads.mark(diagnosticId, 'cacheHit', 1);
       hasLoadedData = true;
       setFsResp(cached);
       setFsError(null);
       setFsLoading(false);
+      desktopWorkspaceLoads.committed(diagnosticId);
     } else {
       setFsResp(null);
       setFsError(null);
@@ -252,6 +259,7 @@ export function useFilesAndPortsPaneState({
         setFsResp((current) => (sameDroneFsListPayload(current, payload) ? current : payload));
         setFsError(null);
       } catch (e: any) {
+        desktopWorkspaceLoads.finish(diagnosticId, 'error');
         if (!mounted) return;
         setFsError(e?.message ?? String(e));
       } finally {
@@ -279,6 +287,7 @@ export function useFilesAndPortsPaneState({
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
       mounted = false;
+      desktopWorkspaceLoads.finish(diagnosticId, 'superseded');
       clearTimer();
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };

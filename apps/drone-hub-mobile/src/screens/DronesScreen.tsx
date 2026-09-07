@@ -3427,6 +3427,7 @@ export function DronesScreen({
         onReveal={prepareFilesPage}
         renderFiles={(active) => (
           <FilePreviewModal
+            loadDiagnosticId={filePreview.loadDiagnosticId}
             embedded
             visible={active && workspaceVisible}
             preview={filePreview.preview}

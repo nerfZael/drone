@@ -5,6 +5,7 @@ import { acceptDeviceDirectory } from './device-directory';
 import { AppState } from 'react-native';
 import { finishMobileChatLoad } from '../diagnostics/mobile-chat-load';
 import { mobileChatLoadBuffer } from '../diagnostics/mobile-chat-load-runtime';
+import { mobileWorkspaceLoads } from '../diagnostics/mobile-workspace-load';
 import type {
   CapabilityDescriptor,
   CapabilityEvent,
@@ -301,7 +302,10 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
     flush();
     const timer = setInterval(flush, 15_000);
     const subscription = AppState.addEventListener('change', (state) => {
-      if (state !== 'active') finishMobileChatLoad('backgrounded');
+      if (state !== 'active') {
+        finishMobileChatLoad('backgrounded');
+        mobileWorkspaceLoads.finishAll('backgrounded');
+      }
       else flush();
     });
     return () => {

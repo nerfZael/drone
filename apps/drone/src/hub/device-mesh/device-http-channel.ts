@@ -58,7 +58,7 @@ export class DeviceHttpChannel extends EventEmitter {
     if (message?.type === 'capability.response')
       this.pendingResults.delete(`${message.targetDeviceId}:${message.requestId}`);
     if (message?.type === 'capability.request') {
-      if (message.capability === 'drone-control' && message.operation === 'chat.read')
+      if (message.capability === 'drone-control' && ['chat.read', 'files.list', 'file.preview'].includes(message.operation))
         retainHubRequestTiming(response);
       const key = `${message.sourceDeviceId}:${message.requestId}`;
       if (this.replies.has(key) || this.replies.size >= 100) {

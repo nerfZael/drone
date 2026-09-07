@@ -1,3 +1,4 @@
+import { beginDesktopWorkspaceLoad, desktopWorkspaceLoads } from './droneHub/files/workspace-load-telemetry';
 import { prepareWorkspaceFileOpen } from './droneHub/files/prepare-workspace-file-open';
 import { readDesktopFile } from './droneHub/files/read-desktop-file';
 import { workspaceExplorerLocation, normalizeWorkspaceLinkPath, workspaceLinkIsDirectory, workspaceLinkParent } from '@drone/hub-model';
@@ -3604,10 +3605,13 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const version = ++pathNavigationVersion.current;
       const droneId = currentDrone?.id;
       if (!droneId) return;
+      const diagnosticId = beginDesktopWorkspaceLoad('file-open', droneId, resolvedPath);
       focusEditorPane();
       const knownFile = Boolean(next.line) || openedEditorFileTabs.some((tab) => tab.path === resolvedPath) ||
         fsEntries.some((entry) => entry.kind === 'file' && normalizeWorkspaceLinkPath(entry.path) === resolvedPath);
       if (knownFile) {
+        const cached = openedEditorFileTabs.some((tab) => tab.path === resolvedPath);
+        desktopWorkspaceLoads.mark(diagnosticId, 'openTabHit', cached ? 1 : 0);
         setPendingFileOpen(null);
         revealFileInExplorer(resolvedPath);
         openEditorFile({ ...next, path: resolvedPath, name });
@@ -3622,12 +3626,15 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           ),
         );
         if (version !== pathNavigationVersion.current) return;
+        desktopWorkspaceLoads.mark(diagnosticId, 'pathResolved');
         setPendingFileOpen(null);
         if (directory) {
+          desktopWorkspaceLoads.mark(diagnosticId, 'directoryLink', 1);
           const root = normalizeWorkspaceLinkPath(defaultFsPathForCurrentDrone);
           setCurrentFsPath(root && resolvedPath !== root && (root === '/' || resolvedPath.startsWith(`${root}/`))
             ? root : workspaceLinkParent(resolvedPath));
           setExplorerReveal({ path: resolvedPath, sequence: version });
+          desktopWorkspaceLoads.committed(diagnosticId);
         } else {
           revealFileInExplorer(resolvedPath);
           openEditorFile({ ...next, path: resolvedPath, name, initialRead });

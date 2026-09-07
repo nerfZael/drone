@@ -157,5 +157,7 @@ describe('container filesystem media route', () => {
     expect(empty.body()).toBeUndefined();
     expect(execOptions.every((options) => options.timeoutMs === 60_000)).toBe(true);
     expect(execOptions.every((options) => options.maxOutputBytes > 0)).toBe(true);
+    expect(execOptions.every((options) => options.containerAlreadyReady === true)).toBe(true);
+    expect(execOptions.some((options) => typeof options.onTiming === 'function')).toBe(true);
   });
 });
