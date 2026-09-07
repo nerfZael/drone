@@ -33,6 +33,7 @@ import {
 import {
   loadRegistry,
   loadRegistryRawSnapshot,
+  loadRegistryCompatibilityBase,
   updateRegistry as updateHostRegistry,
 } from '../host/registry';
 import { getCatalogStore } from '../host/catalog-store';
@@ -186,6 +187,7 @@ import { discoverCodexModels } from './agent-model-catalog/codex-discovery';
 import { saveCodexCatalog } from './codex-model-catalog';
 import { createAgentModelCatalogStore } from './agent-model-catalog/store';
 import type { AgentModelCatalogTarget } from './agent-model-catalog/types';
+import { countSetupDrones } from './setup-drone-count';
 import { registerAgentModelCatalogRoutes } from './agent-model-catalog/routes';
 import {
   createCanonicalAgentsLibraryFile,
@@ -339,10 +341,7 @@ import { ResourceSubscriptionService } from './subscriptions/resource-subscripti
 import { registerChangeRequestFeature } from './change-requests/register-change-request-feature';
 import { getChangeRequestRepository } from './change-requests/change-request-repository';
 import { partitionWorkflowChatEntries } from './workflows/workflow-chat-metadata';
-import {
-  isWorkflowChildDroneEntry,
-  workflowChildDroneMetadata,
-} from './workflows/workflow-child-drone-metadata';
+import { workflowChildDroneMetadata } from './workflows/workflow-child-drone-metadata';
 import { registerWorkflowFeature } from './workflows/workflow-feature';
 import { DroneHubMcpHttpTransport } from './mcp-http-transport';
 import { createHubApplication } from './application/create-hub-application';
@@ -954,14 +953,7 @@ async function resolveSetupStatusResponse(): Promise<any> {
   const profileState = await listProfilesState();
   const setupScope = resolveHubSetupScopeKey(profileState.activeProfile);
   const welcomeDismissedAt = setupState.welcomeDismissedAtByScope[setupScope] ?? null;
-  const regAny = await loadRegistry();
-  const dronesObj =
-    regAny?.drones && typeof regAny.drones === 'object' && !Array.isArray(regAny.drones)
-      ? regAny.drones
-      : {};
-  const droneCount = Object.values(dronesObj).filter(
-    (drone) => !isWorkflowChildDroneEntry(drone),
-  ).length;
+  const droneCount = await countSetupDrones();
   const repoCount = (await listCanonicalRepositories()).length;
   const llmSettings = await resolveLlmSettingsResponse();
   const activeProvider = llmSettings.provider.selected;
@@ -5780,7 +5772,7 @@ async function startDroneHubApiServerWithLifecycle(
         models,
       };
     },
-    loadRegistry,
+    loadLifecycleRegistry: loadCanonicalLifecycleModel,
     droneRuntime,
     discoverModels: discoverAndRememberModelsForBuiltinAgent,
     hostAgentInstalled: isHostBuiltinAgentInstalled,
@@ -5916,6 +5908,7 @@ async function startDroneHubApiServerWithLifecycle(
 
   const localCheckoutService = new LocalCheckoutService({
     loadRegistry,
+    loadRegistryCompatibilityBase,
     updateRegistry,
     findDroneIdByRef,
     droneRuntime,

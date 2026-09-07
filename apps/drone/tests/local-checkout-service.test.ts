@@ -50,6 +50,7 @@ function createHarness() {
     '/repo': RETURN_SHA,
     '/repo-c': C_RETURN_SHA,
   };
+  let registryReads = 0;
   let timestamp = 0;
   let delayNextCapture: Promise<void> | null = null;
   let mergeBaseCode = 1;
@@ -91,7 +92,8 @@ function createHarness() {
   };
 
   const service = new LocalCheckoutService({
-    loadRegistry: async () => registry,
+    loadRegistry: async () => { registryReads += 1; return registry; },
+    loadRegistryCompatibilityBase: async () => registry,
     updateRegistry: async (mutator: (value: any) => any) => {
       if (failNextRegistryWrite) {
         failNextRegistryWrite = false;
@@ -185,6 +187,7 @@ function createHarness() {
     service,
     registry,
     checkouts,
+    registryReads: () => registryReads,
     hostHead: (repoRoot = '/repo') => hostHeads[repoRoot],
     setHostHead: (sha: string) => {
       hostHeads['/repo'] = sha;
@@ -208,6 +211,17 @@ function createHarness() {
 }
 
 describe('LocalCheckoutService', () => {
+  test('status polling reads checkout settings without hydrating chats', async () => {
+    const harness = createHarness();
+    await harness.service.getView();
+    expect(harness.registryReads()).toBe(0);
+    await harness.service.useLocally('a');
+    const before = harness.registryReads();
+    const view = await harness.service.getView();
+    expect(view.session?.droneId).toBe('a');
+    expect(harness.registryReads()).toBe(before);
+  });
+
   test('switches the active drone in place and returns to the original branch', async () => {
     const harness = createHarness();
 

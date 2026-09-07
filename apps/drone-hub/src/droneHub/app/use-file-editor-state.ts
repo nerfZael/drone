@@ -45,6 +45,7 @@ import {
   type RememberedEditorFile,
 } from './drone-file-editor-state';
 import { appendFileDictationLine } from '../files/file-dictation-text';
+import type { InitialFileRead } from '../files/prepare-workspace-file-open';
 import { readDesktopFile } from '../files/read-desktop-file';
 import { desktopMediaFileKindForExtension } from '../files/desktop-media-file-kind';
 
@@ -194,6 +195,7 @@ export function useFileEditorState({
   const activeTabIdRef = React.useRef<string | null>(null);
   const tabsRef = React.useRef<OpenedFileTab[]>(tabs);
   const requestSeqRef = React.useRef(0);
+  const initialFileReadRef = React.useRef<{ droneId: string; path: string; read: InitialFileRead } | null>(null);
   const liveReloadSeqByTabRef = React.useRef(new Map<string, number>());
   const navigationSeqRef = React.useRef(0);
   const locationHistoryByDroneIdRef = React.useRef<Record<string, EditorLocationHistory>>({});
@@ -287,12 +289,15 @@ export function useFileEditorState({
   }, []);
 
   const openEditorLocation = React.useCallback(
-    (next: { droneId: string; path: string; name: string; line?: number | null; column?: number | null }) => {
+    (next: { droneId: string; path: string; name: string; line?: number | null; column?: number | null; initialRead?: InitialFileRead }) => {
       const droneId = String(next.droneId ?? '').trim();
       if (!droneId) return;
       const nextPath = String(next.path ?? '').trim();
       if (!nextPath) return;
       const nextName = String(next.name ?? '').trim() || nextPath.split('/').filter(Boolean).pop() || nextPath;
+      const alreadyLoaded = tabStateByDroneIdRef.current[droneId]?.tabs.some((tab) => tab.path === nextPath && tab.loaded);
+      initialFileReadRef.current = next.initialRead && !alreadyLoaded
+        ? { droneId, path: nextPath, read: next.initialRead } : null;
       const targetLine = normalizePositiveInt(next.line);
       const targetColumn = normalizePositiveInt(next.column);
       navigationSeqRef.current += 1;
@@ -313,7 +318,7 @@ export function useFileEditorState({
   );
 
   const openEditorFile = React.useCallback(
-    (next: { path: string; name: string; line?: number | null; column?: number | null }) => {
+    (next: { path: string; name: string; line?: number | null; column?: number | null; initialRead?: InitialFileRead }) => {
       const droneId = String(currentDrone?.id ?? '').trim();
       if (!droneId) return;
       const nextPath = String(next.path ?? '').trim();
@@ -337,7 +342,7 @@ export function useFileEditorState({
           name: nextName,
         }),
       }));
-      openEditorLocation(nextLocation);
+      openEditorLocation({ ...nextLocation, initialRead: next.initialRead });
     },
     [currentDrone?.id, normalizePositiveInt, openEditorLocation, setEditorLocationHistoryForDrone],
   );
@@ -534,7 +539,12 @@ export function useFileEditorState({
     contentRef.current = '';
 
     let cancelled = false;
-    void readDesktopFile(requestJson, droneId, filePath)
+    const prepared = initialFileReadRef.current;
+    initialFileReadRef.current = null;
+    const read = prepared?.droneId === droneId && prepared.path === filePath
+      ? prepared.read
+      : readDesktopFile(requestJson, droneId, filePath);
+    void read
       .then((data) => {
         if (cancelled || requestSeqRef.current !== seq) return;
         const nextLoadedState = readPayloadToTabState(data);
@@ -837,7 +847,7 @@ export function useFileEditorState({
         navigationSeq: activeTab.navigationSeq,
       }
     : null;
-  const loading = activeTab?.loading ?? false;
+  const loading = Boolean(activeTab && (!activeTab.loaded || activeTab.loading));
   const saving = activeTab?.saving ?? false;
   const error = activeTab?.error ?? null;
   const kind = activeTab?.kind ?? 'text';

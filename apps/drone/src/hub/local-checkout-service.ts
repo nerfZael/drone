@@ -24,6 +24,7 @@ export {
 
 type LocalCheckoutServiceDependencies = LocalCheckoutSnapshotDependencies & {
   loadRegistry: () => Promise<any>;
+  loadRegistryCompatibilityBase: () => Promise<any>;
   updateRegistry: <T>(mutator: (registry: any) => T | Promise<T>) => Promise<T>;
   findDroneIdByRef: (registry: any, ref: string) => { kind: string; id: string } | null;
   droneRuntime: (drone: any) => 'host' | 'container';
@@ -419,7 +420,7 @@ export class LocalCheckoutService {
   }
 
   private async readState(): Promise<LocalCheckoutState> {
-    return localCheckoutStateFromRegistry(await this.deps.loadRegistry());
+    return localCheckoutStateFromRegistry(await this.deps.loadRegistryCompatibilityBase());
   }
 
   private async writeState(state: LocalCheckoutState): Promise<void> {

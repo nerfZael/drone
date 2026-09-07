@@ -167,3 +167,21 @@ test('Electron static proxy authenticates same-origin WebSockets without forward
   assert.equal(rejectionStatus, 403);
   assert.equal(upstreamUpgradeCount, 1);
 });
+
+test('desktop origin survives relaunch and refuses to switch origins when occupied', async (t) => {
+  const staticDir = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-hub-origin-'));
+  fs.writeFileSync(path.join(staticDir, 'index.html'), '<html><head></head></html>');
+  const options = { staticDir, apiHost: '127.0.0.1', apiPort: 1, apiToken: 'test', portFile: path.join(staticDir, 'port') };
+  let proxy;
+  t.after(async () => {
+    if (proxy) await proxy.close();
+    fs.rmSync(staticDir, { recursive: true, force: true });
+  });
+  proxy = await startDesktopStaticUiServer(options);
+  const origin = proxy.url;
+  assert.match(await (await fetch(origin)).text(), /"desktop":true/);
+  await proxy.close();
+  proxy = await startDesktopStaticUiServer(options);
+  assert.equal(proxy.url, origin);
+  await assert.rejects(startDesktopStaticUiServer(options), { code: 'EADDRINUSE' });
+});

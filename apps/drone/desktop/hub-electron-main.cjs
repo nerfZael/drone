@@ -552,22 +552,22 @@ function startHub() {
             'Restart required\n\nDrone Hub is running an older app build. Close this window, run `drone hub stop`, then reopen Drone Hub.',
           );
         }
-        if (payload.alreadyRunning) {
-          const staticDir = resolveDesktopStaticUiDir(__dirname, process.env.DRONE_HUB_STATIC_UI_DIR);
-          const tokenPath = resolveHubApiTokenPath(payload);
-          const apiHost = String(payload.state?.apiHost || '').trim();
-          const apiPort = Number(payload.state?.apiPort);
-          if (!staticDir) throw new Error('The production Drone Hub UI bundle is missing. Run `bun run --filter drone-hub build`.');
-          if (!tokenPath || !fs.existsSync(tokenPath)) throw new Error('The running Hub API token could not be found.');
-          if (!apiHost || !Number.isInteger(apiPort) || apiPort <= 0) throw new Error('The running Hub API address is invalid.');
-          desktopStaticUiServer = await startDesktopStaticUiServer({
-            staticDir,
-            apiHost,
-            apiPort,
-            apiToken: fs.readFileSync(tokenPath, 'utf8').trim(),
-          });
-          uiUrl = desktopStaticUiServer.url;
-        }
+        // Use the same persistent desktop origin for fresh and existing daemons.
+        const staticDir = resolveDesktopStaticUiDir(__dirname, process.env.DRONE_HUB_STATIC_UI_DIR);
+        const tokenPath = resolveHubApiTokenPath(payload);
+        const apiHost = String(payload.state?.apiHost || '').trim();
+        const apiPort = Number(payload.state?.apiPort);
+        if (!staticDir) throw new Error('The production Drone Hub UI bundle is missing. Run `bun run --filter drone-hub build`.');
+        if (!tokenPath || !fs.existsSync(tokenPath)) throw new Error('The running Hub API token could not be found.');
+        if (!apiHost || !Number.isInteger(apiPort) || apiPort <= 0) throw new Error('The running Hub API address is invalid.');
+        desktopStaticUiServer = await startDesktopStaticUiServer({
+          staticDir,
+          apiHost,
+          apiPort,
+          apiToken: fs.readFileSync(tokenPath, 'utf8').trim(),
+          portFile: path.join(app.getPath('userData'), 'desktop-ui-port'),
+        });
+        uiUrl = desktopStaticUiServer.url;
         if (mainWindow && !mainWindow.isDestroyed()) {
           await mainWindow.loadURL(uiUrl);
           await startPerformanceTraceAfterLoad();

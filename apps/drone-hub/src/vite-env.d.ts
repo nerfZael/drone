@@ -10,6 +10,7 @@ interface ImportMeta {
 
 interface Window {
   readonly __DRONE_HUB_RUNTIME_CONFIG__?: {
+    readonly desktop?: boolean;
     readonly directApiBase?: string;
     readonly directApiToken?: string;
   };

@@ -1,4 +1,5 @@
 import React from 'react';
+import { EditorPaneContext } from './editor-pane-context';
 import { profileStorageKey } from '../../profile-storage';
 import { WorkspaceExplorerHeader } from './WorkspaceExplorerHeader';
 import {
@@ -32,6 +33,7 @@ const EXPLORER_LAYOUT_STORAGE_KEY = profileStorageKey('droneHub.editorExplorerLa
 const EXPLORER_DRAG_TYPE = 'application/x-drone-hub-editor-explorer';
 
 export function DroneEditorWorkspace({ explorer, editor }: DroneEditorWorkspaceProps) {
+  const pane = React.useContext(EditorPaneContext);
   const rootRef = React.useRef<HTMLDivElement | null>(null);
   const resizePointerIdRef = React.useRef<number | null>(null);
   const explorerDragActiveRef = React.useRef(false);
@@ -152,10 +154,10 @@ export function DroneEditorWorkspace({ explorer, editor }: DroneEditorWorkspaceP
   const explorerPane = (
     <aside
       className="flex h-full min-h-0 flex-shrink-0 flex-col overflow-hidden bg-[var(--panel)]"
-      style={{ width: `${layout.width}px`, maxWidth: '50%' }}
+      style={pane === 'explorer' ? { width: '100%' } : { width: `${layout.width}px`, maxWidth: '50%' }}
       aria-label="File Explorer"
     >
-      <WorkspaceExplorerHeader
+      {pane === 'combined' ? <WorkspaceExplorerHeader
         zoom={explorerZoom}
         onDecreaseZoom={() =>
           setExplorerZoom((current) => clampWorkspaceExplorerZoom(current - WORKSPACE_EXPLORER_ZOOM_STEP))
@@ -164,12 +166,12 @@ export function DroneEditorWorkspace({ explorer, editor }: DroneEditorWorkspaceP
           setExplorerZoom((current) => clampWorkspaceExplorerZoom(current + WORKSPACE_EXPLORER_ZOOM_STEP))
         }
         onResetZoom={() => setExplorerZoom(WORKSPACE_EXPLORER_ZOOM_DEFAULT)}
-        dragHandle={{
+        dragHandle={pane === 'combined' ? {
           onDragStart: handleExplorerDragStart,
           onDragEnd: handleExplorerDragEnd,
           title: 'Drag to move the File Explorer to the other side',
-        }}
-      />
+        } : undefined}
+      /> : null}
       <div className="min-h-0 flex-1">{explorer(explorerZoom)}</div>
     </aside>
   );
@@ -194,6 +196,9 @@ export function DroneEditorWorkspace({ explorer, editor }: DroneEditorWorkspaceP
       className="group relative z-10 h-full w-px flex-shrink-0 touch-none cursor-col-resize bg-[var(--border)] before:absolute before:inset-y-0 before:-left-1 before:w-2 hover:bg-[var(--accent-muted)] focus-visible:bg-[var(--accent)] focus-visible:outline-none"
     />
   );
+
+  if (pane === 'explorer') return explorerPane;
+  if (pane === 'editor') return <main className="h-full min-h-0 min-w-0 overflow-hidden" aria-label="File Editor">{editor}</main>;
 
   return (
     <div

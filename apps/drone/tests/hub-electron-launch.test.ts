@@ -54,12 +54,13 @@ describe('Drone Hub Electron background launch', () => {
     expect(mainSource).toContain('env: electronNodeChildEnv(process.env)');
   });
 
-  test('serves the packaged static UI when attaching to an existing Hub', () => {
+  test('serves the packaged static UI at a persistent origin for every launch', () => {
     const mainSource = readFileSync(
       new URL('../desktop/hub-electron-main.cjs', import.meta.url),
       'utf8',
     );
-    expect(mainSource).toContain('if (payload.alreadyRunning)');
+    expect(mainSource).not.toContain('if (payload.alreadyRunning)');
+    expect(mainSource).toContain("portFile: path.join(app.getPath('userData'), 'desktop-ui-port')");
     expect(mainSource).toContain('startDesktopStaticUiServer');
     expect(mainSource).toContain('desktopStaticUiServer.url');
   });

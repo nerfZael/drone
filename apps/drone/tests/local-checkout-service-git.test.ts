@@ -109,6 +109,7 @@ async function createGitHarness() {
 
   const service = new LocalCheckoutService({
     loadRegistry: async () => registry,
+    loadRegistryCompatibilityBase: async () => registry,
     updateRegistry: async (mutator: (value: any) => any) => await mutator(registry),
     findDroneIdByRef: (_value: any, ref: string) =>
       registry.drones[ref] ? { kind: 'real', id: ref } : null,

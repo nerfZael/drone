@@ -1,4 +1,6 @@
 import React from 'react';
+import { EditorPaneContext } from './editor-pane-context';
+import { readWorkspaceExplorerWidth } from './workspace-explorer-preferences';
 import {
   DockviewDefaultTab,
   DockviewReact,
@@ -50,6 +52,7 @@ type DockableDroneWorkspaceProps = {
 };
 
 const CHAT_PANEL_ID = 'agent-chat';
+const EXPLORER_PANEL_ID = 'file-explorer';
 const TOOL_PANEL_PREFIX = 'tool:';
 const DEFAULT_WORKSPACE_TOOL_TAB: RightPanelTab = 'editor';
 const DEFAULT_NEW_TOOL_PANEL_WIDTH = 720;
@@ -100,6 +103,7 @@ function isEditorChangesTab(tab: RightPanelTab): boolean {
 }
 
 function tabFromPanelId(panelId: string): RightPanelTab | null {
+  if (panelId === EXPLORER_PANEL_ID) return 'editor';
   const raw = panelId.startsWith(TOOL_PANEL_PREFIX) ? panelId.slice(TOOL_PANEL_PREFIX.length) : '';
   return normalizeRightPanelTab(raw);
 }
@@ -116,7 +120,7 @@ function tabFromPanel(panel: WorkspaceDockPanel): RightPanelTab | null {
 function editorChangesPanels(api: DockviewApi): WorkspaceDockPanel[] {
   return api.panels.filter((panel) => {
     const idTab = tabFromPanelId(panel.id);
-    return Boolean(idTab && isEditorChangesTab(idTab));
+    return panel.id !== EXPLORER_PANEL_ID && Boolean(idTab && isEditorChangesTab(idTab));
   });
 }
 
@@ -141,6 +145,7 @@ function newToolPanelWidth(api: DockviewApi, referencePanelId: string): number {
   const availableWidth = workspaceWidth > 0 ? workspaceWidth : referenceWidth;
   if (availableWidth > 0) {
     const gridGroupCount = api.groups.filter((group) => group.api.location.type === 'grid').length;
+    if (api.panels.length === 1 && api.panels[0].id === CHAT_PANEL_ID) return Math.round(availableWidth * 2 / 3);
     const nextGroupCount = Math.max(2, gridGroupCount + 1);
     return clampNewToolPanelWidth(availableWidth / nextGroupCount);
   }
@@ -200,6 +205,21 @@ function writeStoredLayout(droneId: string, layout: SerializedDockview): void {
   localStorage.removeItem(LEGACY_LAYOUT_STORAGE_KEY);
 }
 
+function ensureExplorerPanel(api: DockviewApi, referencePanel: string, paneKey: WorkspacePaneKey): boolean {
+  if (api.getPanel(EXPLORER_PANEL_ID)) return false;
+  api.addPanel({
+    id: EXPLORER_PANEL_ID,
+    component: 'tool',
+    title: 'File Explorer',
+    params: { tab: 'editor', paneKey },
+    position: { direction: 'right', referencePanel },
+    initialWidth: readWorkspaceExplorerWidth(),
+    minimumWidth: 180,
+    minimumHeight: 180,
+  });
+  return true;
+}
+
 export function ensureWorkspaceToolPanel(api: DockviewApi, tab: RightPanelTab, paneKey: WorkspacePaneKey, referencePanel: string = CHAT_PANEL_ID): boolean {
   const id = toolPanelId(tab);
   const existing = isEditorChangesTab(tab)
@@ -218,8 +238,10 @@ export function ensureWorkspaceToolPanel(api: DockviewApi, tab: RightPanelTab, p
     if (isEditorChangesTab(tab)) {
       existing.api.setConstraints({ minimumWidth: EDITOR_PANEL_MIN_WIDTH });
     }
+    const addedExplorer = tab === 'editor' && ensureExplorerPanel(api, existing.id, paneKey);
+    if (tab === 'editor') existing.api.updateParameters({ splitEditor: true });
     existing.api.setActive();
-    return false;
+    return addedExplorer;
   }
 
   const initialWidth = newToolPanelWidth(api, referencePanel);
@@ -227,7 +249,7 @@ export function ensureWorkspaceToolPanel(api: DockviewApi, tab: RightPanelTab, p
     id,
     component: 'tool',
     title: RIGHT_PANEL_TAB_LABELS[tab],
-    params: { tab, paneKey },
+    params: { tab, paneKey, ...(tab === 'editor' ? { splitEditor: true } : {}) },
     position: {
       direction: paneKey === 'bottom' ? 'below' : 'right',
       referencePanel,
@@ -237,6 +259,10 @@ export function ensureWorkspaceToolPanel(api: DockviewApi, tab: RightPanelTab, p
     minimumWidth: isEditorChangesTab(tab) ? EDITOR_PANEL_MIN_WIDTH : 260,
     minimumHeight: 180,
   });
+  if (tab === 'editor') {
+    ensureExplorerPanel(api, id, paneKey);
+    api.getPanel(id)?.api.setActive();
+  }
   return true;
 }
 
@@ -269,7 +295,7 @@ export function refreshWorkspacePanelTitles(api: DockviewApi): void {
       continue;
     }
     const tab = tabFromPanel(panel);
-    if (tab) panel.api.setTitle(RIGHT_PANEL_TAB_LABELS[tab]);
+    if (tab) panel.api.setTitle(panel.id === EXPLORER_PANEL_ID ? 'File Explorer' : RIGHT_PANEL_TAB_LABELS[tab]);
   }
 }
 
@@ -328,7 +354,9 @@ function ToolPanel({ api, params }: IDockviewPanelProps<{ tab?: unknown; paneKey
       data-dockview-preview-host={previewHostedHere ? '1' : undefined}
       className="dh-utility-panel relative h-full"
     >
-      {previewHostedHere ? <div className="absolute inset-0 min-h-0 overflow-hidden" aria-hidden="true" /> : ctx.renderToolPane(tab, paneKey)}
+      <EditorPaneContext.Provider value={api.id === EXPLORER_PANEL_ID ? 'explorer' : 'editor'}>
+        {previewHostedHere ? <div className="absolute inset-0 min-h-0 overflow-hidden" aria-hidden="true" /> : ctx.renderToolPane(tab, paneKey)}
+      </EditorPaneContext.Provider>
     </UiPanel>
   );
 }
@@ -510,6 +538,11 @@ export function DockableDroneWorkspace({
         api.fromJSON(stored, { reuseExistingPanels: true });
         restoreRequiredWorkspacePanels(api);
         migrateEditorChangesPanels(api);
+        const editor = editorChangesPanels(api).find((panel) => tabFromPanel(panel) === 'editor');
+        if (editor && !editor.api.getParameters<{ splitEditor?: boolean }>().splitEditor) {
+          ensureExplorerPanel(api, editor.id, 'single');
+          editor.api.updateParameters({ splitEditor: true });
+        }
         refreshWorkspacePanelTitles(api);
       } else {
         resetWorkspaceToChat(api);
@@ -535,6 +568,7 @@ export function DockableDroneWorkspace({
     const api = apiRef.current;
     if (!api) return;
     lastAppliedOpenRequestRef.current = openRequestNonce;
+    const wasChatOnly = api.panels.length === 1 && api.panels[0].id === CHAT_PANEL_ID;
     let addedPanel = false;
     suppressSaveRef.current = true;
     try {
@@ -544,7 +578,10 @@ export function DockableDroneWorkspace({
       suppressSaveRef.current = false;
     }
     updateWorkspacePanelState();
-    if (addedPanel) {
+    if (addedPanel && wasChatOnly) {
+      api.getPanel(CHAT_PANEL_ID)?.api.group.api.setSize({ width: Math.round(api.width / 3) });
+      persistCurrentLayout();
+    } else if (addedPanel) {
       rebalanceWorkspaceGridGroups();
     } else {
       persistCurrentLayout();

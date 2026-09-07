@@ -1,3 +1,5 @@
+import { prepareWorkspaceFileOpen } from './droneHub/files/prepare-workspace-file-open';
+import { readDesktopFile } from './droneHub/files/read-desktop-file';
 import { normalizeWorkspaceLinkPath, workspaceLinkIsDirectory, workspaceLinkParent } from '@drone/hub-model';
 import React from 'react';
 import { createSidebarCommandQueue } from '@drone/hub-model/sidebar';
@@ -3571,18 +3573,22 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const resetFileExplorerToRoot = React.useCallback(() => {
     setCurrentFsPath(defaultFsPathForCurrentDrone);
   }, [defaultFsPathForCurrentDrone, setCurrentFsPath]);
+  const pathNavigationVersion = React.useRef(0);
+  const [pendingFileOpen, setPendingFileOpen] = React.useState<{ droneId: string; path: string } | null>(null);
   const activateOpenedEditorFileTab = React.useCallback(
     (tabId: string) => {
+      pathNavigationVersion.current += 1;
+      setPendingFileOpen(null);
       resetFileExplorerToRoot();
       setActiveOpenedFileTab(tabId);
     },
     [resetFileExplorerToRoot, setActiveOpenedFileTab],
   );
   const [explorerReveal, setExplorerReveal] = React.useState<{ path: string; sequence: number } | null>(null);
-  const pathNavigationVersion = React.useRef(0);
   React.useEffect(() => {
     pathNavigationVersion.current += 1;
     setExplorerReveal(null);
+    setPendingFileOpen(null);
     return () => { pathNavigationVersion.current += 1; };
   }, [currentDrone?.id]);
   const openFileInFilesPane = React.useCallback(
@@ -3596,16 +3602,26 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const version = ++pathNavigationVersion.current;
       const droneId = currentDrone?.id;
       if (!droneId) return;
+      focusEditorPane();
+      const knownFile = Boolean(next.line) || openedEditorFileTabs.some((tab) => tab.path === resolvedPath) ||
+        fsEntries.some((entry) => entry.kind === 'file' && normalizeWorkspaceLinkPath(entry.path) === resolvedPath);
+      if (knownFile) {
+        setPendingFileOpen(null);
+        setExplorerReveal(null);
+        resetFileExplorerToRoot();
+        openEditorFile({ ...next, path: resolvedPath, name });
+        return;
+      }
+      setPendingFileOpen({ droneId, path: resolvedPath });
       void (async () => {
-        let directory = false;
-        try {
-          directory = await workspaceLinkIsDirectory(resolvedPath, (parent) =>
+        const { directory, initialRead } = await prepareWorkspaceFileOpen(
+          () => readDesktopFile(requestJson, droneId, resolvedPath),
+          () => workspaceLinkIsDirectory(resolvedPath, (parent) =>
             requestJson(`/api/drones/${encodeURIComponent(droneId)}/fs/list?path=${encodeURIComponent(parent)}`),
-          );
-        } catch {
-          // Let the file editor report unavailable paths and access errors as usual.
-        }
+          ),
+        );
         if (version !== pathNavigationVersion.current) return;
+        setPendingFileOpen(null);
         if (directory) {
           const root = normalizeWorkspaceLinkPath(defaultFsPathForCurrentDrone);
           setCurrentFsPath(root && resolvedPath !== root && (root === '/' || resolvedPath.startsWith(`${root}/`))
@@ -3614,12 +3630,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         } else {
           setExplorerReveal(null);
           resetFileExplorerToRoot();
-          openEditorFile({ ...next, path: resolvedPath, name });
+          openEditorFile({ ...next, path: resolvedPath, name, initialRead });
         }
-        focusEditorPane();
       })();
     },
-    [currentDrone, defaultFsPathForCurrentDrone, focusEditorPane, openEditorFile, resetFileExplorerToRoot, setCurrentFsPath],
+    [currentDrone, defaultFsPathForCurrentDrone, focusEditorPane, fsEntries, openedEditorFileTabs, openEditorFile, resetFileExplorerToRoot, setCurrentFsPath],
   );
 
   const openFileDictationTarget = React.useCallback(
@@ -3627,6 +3642,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const droneId = String(target.droneId ?? '').trim();
       const path = String(target.path ?? '').trim();
       if (!droneId || !path) return;
+      pathNavigationVersion.current += 1;
+      setPendingFileOpen(null);
       const name =
         String(target.name ?? '').trim() || path.split('/').filter(Boolean).pop() || path;
       const targetDrone = droneByIdRef.current[droneId];
@@ -3674,6 +3691,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         String(next.name ?? '').trim() ||
         resolvedPath.split('/').filter(Boolean).pop() ||
         resolvedPath;
+      pathNavigationVersion.current += 1;
+      setPendingFileOpen(null);
       resetFileExplorerToRoot();
       openEditorFile({ ...next, path: resolvedPath, name });
       focusEditorPane();
@@ -3693,6 +3712,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     (pathRaw: string) => {
       const resolvedPath = resolveDroneFileOpenPath(currentDrone, pathRaw);
       if (!resolvedPath) return;
+      pathNavigationVersion.current += 1;
+      setPendingFileOpen(null);
       resetFileExplorerToRoot();
       focusEditorPane();
     },
@@ -5247,6 +5268,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             return openFileInPanelFromFilesPane({ path: entry.path, name: entry.name });
           }}
           onOpenFileTargetInEditor={openFileInFilesPane}
+          pendingFileOpenPath={pendingFileOpen && pendingFileOpen.droneId === currentDrone?.id ? pendingFileOpen.path : null}
           openedFile={{
             path: openedEditorFile?.path ?? null,
             name: openedEditorFile?.name ?? null,
@@ -5330,6 +5352,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       openDroneDropActionModal,
       filesPane,
       explorerReveal,
+      pendingFileOpen,
       fsEntries,
       fsError,
       fsErrorUi,

@@ -218,6 +218,7 @@ type RightPanelTabContentProps = {
   onOpenFileInEditor: (entry: DroneFsEntry) => void;
   onOpenFileInPanel: (entry: DroneFsEntry) => boolean;
   onOpenFileTargetInEditor: (next: { path: string; name: string; line?: number | null; column?: number | null }) => void;
+  pendingFileOpenPath?: string | null;
   openedFile: DroneOpenedFileState;
   quickOpen: {
     open: boolean;
@@ -329,6 +330,7 @@ export function RightPanelTabContent({
   onOpenFileInEditor,
   onOpenFileInPanel,
   onOpenFileTargetInEditor,
+  pendingFileOpenPath,
   openedFile,
   quickOpen,
   openedFileTabs,
@@ -387,7 +389,7 @@ export function RightPanelTabContent({
       )}
     </PaneModule>
   );
-  const fileEditor = (
+  const fileEditorContent = (
     <PaneModule tab="editor" load={loadDroneEditorDock}>
       {(DroneEditorDock) => (
         <DroneEditorDock
@@ -410,6 +412,19 @@ export function RightPanelTabContent({
         />
       )}
     </PaneModule>
+  );
+
+  const fileEditor = (
+    <div className="relative h-full min-h-0">
+      <div className="h-full" style={{ visibility: pendingFileOpenPath ? 'hidden' : undefined }}>
+        {fileEditorContent}
+      </div>
+      {pendingFileOpenPath ? (
+        <div className="absolute inset-0">
+          <UiPaneState kind="loading" title="Loading file…" description={pendingFileOpenPath} />
+        </div>
+      ) : null}
+    </div>
   );
 
   switch (tab) {

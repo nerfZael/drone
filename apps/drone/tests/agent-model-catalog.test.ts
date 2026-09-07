@@ -534,7 +534,7 @@ describe('agent model catalog', () => {
     registerAgentModelCatalogRoutes(router, {
       normalizeBuiltinAgentId: (value: string) => value,
       nativeModelCatalog: async () => ({ models: [] }),
-      loadRegistry: async () => ({ drones: {} }),
+      loadLifecycleRegistry: async () => ({ drones: {} }),
       droneRuntime: () => 'host',
       hostAgentInstalled: async (agentId: string) => agentId === 'codex' || agentId === 'opencode',
       discoverModels: async ({ agentId, forceRefresh, runtime }: any) => {
@@ -592,7 +592,7 @@ describe('agent model catalog', () => {
           }],
         };
       },
-      loadRegistry: async () => ({ drones: {} }),
+      loadLifecycleRegistry: async () => ({ drones: {} }),
       droneRuntime: () => 'container',
       hostAgentInstalled: async () => false,
       discoverModels: async () => ({ models: [] }),
@@ -616,6 +616,22 @@ describe('agent model catalog', () => {
     });
   });
 
+  test('host catalogs do not hydrate the drone registry', async () => {
+    const responses: any[] = [];
+    const router = new HubRouter((_response, status, body) => responses.push({ status, body }), async () => ({}));
+    registerAgentModelCatalogRoutes(router, {
+      normalizeBuiltinAgentId: () => 'codex',
+      nativeModelCatalog: async () => ({ models: [] }),
+      loadLifecycleRegistry: async () => { throw new Error('Host catalogs must not load drones'); },
+      droneRuntime: (drone: any) => drone.runtime,
+      hostAgentInstalled: async () => true,
+      discoverModels: async () => ({ models: [{ id: 'test-model' }], source: 'live' }),
+    });
+    await router.handle({ method: 'GET' } as any, {} as any,
+      new URL('http://hub.test/api/model-catalog?agent=codex&runtime=host'));
+    expect(responses[0]).toMatchObject({ status: 200, body: { models: [{ id: 'test-model' }] } });
+  });
+
   test('uses another shared container when the first catalog probe fails', async () => {
     const responses: Array<{ status: number; body: any }> = [];
     const calls: Array<{ containerName: string; forceRefresh: boolean }> = [];
@@ -626,7 +642,7 @@ describe('agent model catalog', () => {
     registerAgentModelCatalogRoutes(router, {
       normalizeBuiltinAgentId: (value: string) => value === 'codex' ? 'codex' : null,
       nativeModelCatalog: async () => ({ models: [] }),
-      loadRegistry: async () => ({
+      loadLifecycleRegistry: async () => ({
         drones: {
           'drone-a': { runtime: 'container', containerName: 'container-a' },
           'drone-b': { runtime: 'container', containerName: 'container-b' },

@@ -10,7 +10,7 @@ export function registerAgentModelCatalogRoutes(
   deps: {
     normalizeBuiltinAgentId: ServiceFunction;
     nativeModelCatalog: ServiceFunction;
-    loadRegistry: ServiceFunction;
+    loadLifecycleRegistry: ServiceFunction;
     droneRuntime: ServiceFunction;
     discoverModels: ServiceFunction;
     hostAgentInstalled: ServiceFunction;
@@ -82,7 +82,7 @@ export function registerAgentModelCatalogRoutes(
     const agentId = deps.normalizeBuiltinAgentId(requestedAgent);
     if (!agentId) return fail(400, 'A builtin agent is required.');
 
-    const registry: any = await deps.loadRegistry();
+    const registry: any = runtime === 'host' ? null : await deps.loadLifecycleRegistry();
     const candidates = Object.entries<any>(registry?.drones ?? {})
       .filter(([, drone]) => deps.droneRuntime(drone) === runtime)
       .filter(([droneId, drone]) =>

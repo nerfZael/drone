@@ -142,7 +142,7 @@ describe('per-drone workspace state', () => {
 
     expect(editorWorkspace).toContain("profileStorageKey('droneHub.editorExplorerLayout')");
     expect(editorWorkspace).toContain('<WorkspaceExplorerHeader');
-    expect(editorWorkspace).toContain('dragHandle={{');
+    expect(editorWorkspace).toContain("dragHandle={pane === 'combined'");
     expect(editorWorkspace).toContain('onDragOver={handleDragOver}');
     expect(editorWorkspace).toContain('onDrop={handleDrop}');
     expect(editorWorkspace).toContain("dropSide === 'left' ? 'left-0' : 'right-0'");
@@ -175,6 +175,47 @@ describe('per-drone workspace state', () => {
 
     expect(readWorkspaceExplorerWidth()).toBe(412);
     expect(readWorkspaceExplorerZoom()).toBe(0.9);
+  });
+
+  test('opens the first tool with two thirds of the workspace width', () => {
+    const added: any[] = [];
+    const api = {
+      width: 1800,
+      panels: [{ id: 'agent-chat' }],
+      groups: [],
+      getPanel: () => undefined,
+      addPanel: (panel: unknown) => added.push(panel),
+    };
+    ensureWorkspaceToolPanel(api as any, 'terminal', 'single');
+    expect(added[0].initialWidth).toBe(1200);
+  });
+
+  test('opens editor and explorer as separate panels and reuses their positions', () => {
+    const added: any[] = [];
+    const panels: any[] = [{ id: 'agent-chat' }];
+    const api = {
+      width: 1800,
+      panels,
+      groups: [],
+      getPanel: (id: string) => panels.find((panel) => panel.id === id),
+      addPanel: (options: any) => {
+        added.push(options);
+        let params = options.params;
+        panels.push({ id: options.id, api: {
+          getParameters: () => params,
+          updateParameters: (next: any) => { params = { ...params, ...next }; },
+          setTitle: () => {}, setConstraints: () => {}, setActive: () => {},
+        } });
+      },
+    };
+    expect(ensureWorkspaceToolPanel(api as any, 'editor', 'single')).toBe(true);
+    expect(added.map((panel) => panel.id)).toEqual(['tool:editor', 'file-explorer']);
+    expect(added[1].position).toEqual({ direction: 'right', referencePanel: 'tool:editor' });
+    expect(ensureWorkspaceToolPanel(api as any, 'editor', 'single')).toBe(false);
+    expect(added).toHaveLength(2);
+    panels.splice(panels.findIndex((panel) => panel.id === 'file-explorer'), 1);
+    expect(ensureWorkspaceToolPanel(api as any, 'editor', 'single')).toBe(true);
+    expect(added[2].id).toBe('file-explorer');
   });
 
   test('switches Editor and Changes inside the same Dockview panel', () => {

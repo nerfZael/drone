@@ -205,7 +205,16 @@ function proxyApiUpgrade({ req, socket, head, apiHost, apiPort, apiToken, proxyO
   return upstream;
 }
 
-async function startDesktopStaticUiServer({ staticDir, apiHost, apiPort, apiToken }) {
+async function startDesktopStaticUiServer({ staticDir, apiHost, apiPort, apiToken, portFile }) {
+  // localStorage is scoped to the port as well as the host. Keep the desktop
+  // origin across launches, and fail rather than silently lose saved settings.
+  let preferredPort = 0;
+  if (portFile && fs.existsSync(portFile)) {
+    preferredPort = Number(fs.readFileSync(portFile, 'utf8').trim());
+    if (!Number.isInteger(preferredPort) || preferredPort <= 0 || preferredPort > 65535) {
+      throw new Error('Invalid saved desktop UI port');
+    }
+  }
   const sockets = new Set();
   const upstreamSockets = new Set();
   const requests = new Set();
@@ -246,7 +255,7 @@ async function startDesktopStaticUiServer({ staticDir, apiHost, apiPort, apiToke
         }
         if (path.extname(filePath).toLowerCase() === '.html') {
           const html = await fs.promises.readFile(filePath, 'utf8');
-          res.end(injectRuntimeConfig(html, { directApiBase }));
+          res.end(injectRuntimeConfig(html, { directApiBase, desktop: true }));
           return;
         }
         fs.createReadStream(filePath).pipe(res);
@@ -282,10 +291,19 @@ async function startDesktopStaticUiServer({ staticDir, apiHost, apiPort, apiToke
   });
   await new Promise((resolve, reject) => {
     server.once('error', reject);
-    server.listen(0, '127.0.0.1', resolve);
+    server.listen(preferredPort, '127.0.0.1', resolve);
   });
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : 0;
+  if (portFile && !preferredPort) {
+    try {
+      fs.mkdirSync(path.dirname(portFile), { recursive: true });
+      fs.writeFileSync(portFile, String(port), { mode: 0o600 });
+    } catch (error) {
+      await new Promise((resolve) => server.close(resolve));
+      throw error;
+    }
+  }
   proxyOrigin = `http://127.0.0.1:${port}`;
   // Chromium applies its HTTP/1.1 connection limit per origin. EventSource
   // streams stay on 127.0.0.1 while fetch/WebSocket traffic uses localhost,

@@ -47,4 +47,35 @@ describe('direct API fetch', () => {
     expect(calls[2]?.input).toBe('/api/device-mesh/events');
     expect(calls[3]?.input).toBe('/assets/app.js');
   });
+  test('prioritizes file reads and saves without moving explorer traffic or streams into the chat pool', async () => {
+    const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    const runtimeWindow = {
+      location: new URL('http://127.0.0.1:41000/'),
+      fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+        calls.push({ input, init });
+        return new Response('{}');
+      },
+      __DRONE_HUB_RUNTIME_CONFIG__: { directApiBase: 'http://localhost:41000' },
+    } as unknown as Window & typeof globalThis;
+    Object.defineProperty(globalThis, 'window', { configurable: true, writable: true, value: runtimeWindow });
+    installDirectApiFetch();
+    await runtimeWindow.fetch('/api/drones/d1/fs/file?path=%2Fwork%2Ffile.ts');
+    await runtimeWindow.fetch(new Request('http://127.0.0.1:41000/api/drones/d1/fs/file', {
+      method: 'POST', body: '{"content":"edited"}', headers: { 'content-type': 'application/json' },
+    }));
+    await runtimeWindow.fetch('/api/drones/d1/fs/text-chunk?offset=0');
+    for (const path of ['list', 'search', 'file-events', 'media', 'download']) {
+      await runtimeWindow.fetch(`/api/drones/d1/fs/${path}`);
+    }
+    expect(calls[0].input).toBe('http://localhost:41000/api/drones/d1/fs/file?path=%2Fwork%2Ffile.ts');
+    const save = calls[1].input as Request;
+    expect(save.url).toBe('http://localhost:41000/api/drones/d1/fs/file');
+    expect(save.method).toBe('POST');
+    expect(await save.text()).toBe('{"content":"edited"}');
+    expect(calls[2].input).toBe('http://localhost:41000/api/drones/d1/fs/text-chunk?offset=0');
+    expect(calls.slice(3).map((call) => call.input)).toEqual(
+      ['list', 'search', 'file-events', 'media', 'download'].map((path) => `/api/drones/d1/fs/${path}`),
+    );
+  });
+
 });

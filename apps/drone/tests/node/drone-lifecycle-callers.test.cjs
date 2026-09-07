@@ -9,6 +9,7 @@ const { getDroneLifecycleRepository } = require('../../dist/host/drone-lifecycle
 const { resetDroneRootDirForTests } = require('../../dist/host/paths.js');
 const { saveRegistry } = require('../../dist/host/registry.js');
 const {
+  deleteCanonicalDroneLifecycle,
   listCanonicalDroneLifecycleForRead,
   patchCanonicalDroneLifecycle,
   resolveCanonicalDroneOrPendingForReadRef,
@@ -139,4 +140,30 @@ test('batch lifecycle creation is atomic and emits one outbox event per drone', 
   );
   assert.equal(repository.get('drone-3'), null);
   assert.equal(repository.get('drone-4'), null);
+});
+
+
+test('setup counts active user drones without projecting transcript history', async () => {
+  useTempDataDir();
+  await upsertCanonicalDroneLifecycle('real', 'visible', { id: 'visible', name: 'visible', runtime: 'host' });
+  await upsertCanonicalDroneLifecycle('real', 'workflow-child', {
+    id: 'workflow-child', name: 'child', runtime: 'host',
+    workflowChild: { ownerDroneId: 'visible', workflowId: 'workflow', runId: 'run', invocationId: 'invocation' },
+  });
+  await upsertCanonicalDroneLifecycle('pending', 'pending', { id: 'pending', name: 'pending', runtime: 'host' });
+  await upsertCanonicalDroneLifecycle('archived', 'archived', {
+    id: 'archived', name: 'archived', runtime: 'host',
+    archivedAt: '2026-09-01T00:00:00.000Z', deleteAt: '2026-10-01T00:00:00.000Z', archiveRetention: '30d',
+  });
+  const registry = require('../../dist/host/registry.js');
+  const original = registry.loadRegistry;
+  registry.loadRegistry = async () => { throw new Error('setup must not hydrate chat histories'); };
+  try {
+    const { countSetupDrones } = require('../../dist/hub/setup-drone-count.js');
+    assert.equal(await countSetupDrones(), 1);
+    await deleteCanonicalDroneLifecycle('visible');
+    assert.equal(await countSetupDrones(), 0);
+  } finally {
+    registry.loadRegistry = original;
+  }
 });

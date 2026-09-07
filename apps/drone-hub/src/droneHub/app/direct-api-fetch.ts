@@ -24,8 +24,9 @@ function directApiToken(): string {
   }
 }
 
-function isPriorityChatApiPath(pathname: string): boolean {
-  return /^\/api\/drones\/[^/]+\/chats\/[^/]+(?:\/|$)/.test(pathname);
+function isPriorityInteractiveApiPath(pathname: string): boolean {
+  return /^\/api\/drones\/[^/]+\/chats\/[^/]+(?:\/|$)/.test(pathname) ||
+    /^\/api\/drones\/[^/]+\/fs\/(?:file|text-chunk)$/.test(pathname);
 }
 
 function rewriteApiUrl(raw: string): string | null {
@@ -35,10 +36,10 @@ function rewriteApiUrl(raw: string): string | null {
     const current = new URL(window.location.href);
     const url = new URL(raw, current);
     if (url.origin !== current.origin) return null;
-    // Keep this pool reserved for interactive chat traffic. Large fleet reads
+    // Keep this pool reserved for interactive chat and editor requests. Fleet reads
     // and long-lived fetch streams must stay on the UI origin or they can use
     // every direct-origin HTTP/1.1 socket and queue the chat state request.
-    if (!isPriorityChatApiPath(url.pathname)) return null;
+    if (!isPriorityInteractiveApiPath(url.pathname)) return null;
     return `${base}${url.pathname}${url.search}${url.hash}`;
   } catch {
     return null;
