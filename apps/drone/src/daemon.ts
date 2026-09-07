@@ -1836,6 +1836,10 @@ async function main() {
           ...(typeof body?.forkThreadId === 'string' && body.forkThreadId.trim()
             ? { forkThreadId: body.forkThreadId.trim() }
             : {}),
+          ...(typeof body?.forkLastTurnId === 'string' && body.forkLastTurnId.trim()
+            ? { forkLastTurnId: body.forkLastTurnId.trim() } : {}),
+          ...(typeof body?.forkLastMessageId === 'string' && body.forkLastMessageId.trim()
+            ? { forkLastMessageId: body.forkLastMessageId.trim() } : {}),
           ...(body?.approvalPolicy === 'untrusted' ||
           body?.approvalPolicy === 'on-request' ||
           body?.approvalPolicy === 'never'

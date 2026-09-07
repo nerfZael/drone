@@ -1,5 +1,6 @@
 type NativeChatRuntime = {
   cloneSession: (input: any) => Promise<void>;
+  captureCheckpoint: (threadId: string) => Promise<string>;
   copyConfiguration: (input: any) => Promise<void>;
   deleteSessions: (droneEntry: any) => Promise<void>;
   error: (chatId: string) => Promise<string>;
@@ -28,6 +29,7 @@ export function createNativeChatRuntimePort() {
       };
     },
     cloneSession: async (input: any) => await requireRuntime().cloneSession(input),
+    captureCheckpoint: async (threadId: string) => await requireRuntime().captureCheckpoint(threadId),
     copyConfiguration: async (input: any) => await requireRuntime().copyConfiguration(input),
     deleteSessions: async (droneEntry: any) => await requireRuntime().deleteSessions(droneEntry),
     error: (chatId: string) => runtime?.error(chatId) ?? Promise.resolve(''),

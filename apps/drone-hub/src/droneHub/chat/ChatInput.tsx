@@ -335,6 +335,7 @@ export function ChatInput({
   React.useEffect(() => {
     return activeComposer.registerComposer({
       id: activeComposerTargetId,
+      requiresExplicitFocus: Boolean(composerRootRef.current?.closest('[data-side-chat-name]')),
       isEligible: activeComposerEligible,
       isReadable: companionComposerReadable,
       appendTranscript: (text) => appendContinuousDictationRef.current(text),
@@ -678,6 +679,7 @@ export function ChatInput({
     () =>
       registerChatComposerEditorModeTarget({
         id: editorModeShortcutTargetId,
+        requiresExplicitFocus: Boolean(composerRootRef.current?.closest('[data-side-chat-name]')),
         primary: focusTargetId === 'primary-chat',
         isEligible: () => {
           const root = composerRootRef.current;
@@ -1119,6 +1121,8 @@ export function ChatInput({
   return (
     <div
       ref={composerRootRef}
+      data-active-composer-id={activeComposerTargetId}
+      data-editor-mode-target-id={editorModeShortcutTargetId}
       data-onboarding-id="chat.input"
       data-continuous-dictation-target={continuousDictationTargeted ? 'true' : undefined}
       className="flex-shrink-0 bg-[var(--chat-background)] px-3 pb-3 pt-1.5 [font-family:var(--chat-composer-font)]"

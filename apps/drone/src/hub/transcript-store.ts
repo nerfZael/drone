@@ -1,4 +1,8 @@
 import crypto from 'node:crypto';
+import {
+  normalizeProviderMessageCheckpoint,
+  type ProviderMessageCheckpoint,
+} from './provider-message-checkpoint';
 import { withDroneOpLock } from './drone-op-lock';
 
 import {
@@ -30,6 +34,8 @@ import {
 import { ResourceSubscriptionRepository } from './subscriptions/resource-subscription-repository';
 
 export type StoredTranscriptTurn = {
+  providerCheckpoint?: ProviderMessageCheckpoint;
+  codexTurnId?: string;
   at: string;
   id?: string;
   prompt: string;
@@ -811,6 +817,7 @@ function normalizeTurn(raw: any): StoredTranscriptTurn {
         } as StoredAgentRunActivitySummary)
       : undefined;
   const skillsUsed = normalizeAgentSkillUses(raw?.skillsUsed);
+  const providerCheckpoint = normalizeProviderMessageCheckpoint(raw?.providerCheckpoint);
   const { output, silentCompletion } = normalizeSilentCompletion(
     Boolean(raw?.ok),
     raw?.output,
@@ -819,6 +826,8 @@ function normalizeTurn(raw: any): StoredTranscriptTurn {
   return {
     at,
     ...(id ? { id } : {}),
+    ...(typeof raw?.codexTurnId === 'string' && raw.codexTurnId.trim() ? { codexTurnId: raw.codexTurnId.trim() } : {}),
+    ...(providerCheckpoint ? { providerCheckpoint } : {}),
     prompt: String(raw?.prompt ?? ''),
     ok: Boolean(raw?.ok),
     output,

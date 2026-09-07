@@ -438,18 +438,35 @@ export class BlipAssistantHost {
     await this.repository.deleteThreadMessage(threadId, entryId, deleteFollowing);
   }
 
-  async cloneThread(sourceThreadId: string, targetThreadId: string): Promise<void> {
-    if (this.isThreadRunning(sourceThreadId))
+  async captureThreadCheckpoint(threadId: string): Promise<string> {
+    const sessionId = await this.repository.sessionIdForThread(threadId);
+    if (!sessionId) throw new Error('No completed assistant answer to branch from yet');
+    const entries = await this.repository.readTranscript(await this.repository.load(sessionId));
+    const checkpoint = [...entries].reverse().find((entry) =>
+      entry.type === 'message' && entry.message.role === 'assistant' &&
+      entry.message.stopReason === 'stop' &&
+      !entry.message.content.some((part) => part.type === 'toolCall') &&
+      entry.message.content.some((part) => part.type === 'text' && part.text.trim()),
+    );
+    if (!checkpoint) throw new Error('No completed assistant answer to branch from yet');
+    return checkpoint.id;
+  }
+
+  async cloneThread(sourceThreadId: string, targetThreadId: string, checkpointId?: string): Promise<void> {
+    if (!checkpointId && this.isThreadRunning(sourceThreadId))
       throw new Error('Stop this assistant thread before cloning it');
     const sourceSessionId = await this.repository.sessionIdForThread(sourceThreadId);
-    if (!sourceSessionId) return;
+    if (!sourceSessionId) {
+      if (checkpointId) throw new Error('The source session for this checkpoint is no longer available');
+      return;
+    }
     const source = await this.repository.load(sourceSessionId);
     const cloned = await this.repository.fork(source, {
       provider: source.modelProvider,
       model: source.modelId,
       permissionMode: source.permissionMode,
       toolProfile: source.toolProfile,
-    });
+    }, checkpointId);
     try {
       await this.repository.bindThread(targetThreadId, cloned.id);
     } catch (error) {

@@ -14,6 +14,13 @@ function target(id: string, options: { primary?: boolean; eligible?: boolean } =
 }
 
 describe('full-editor shortcut composer targeting', () => {
+  test('does not implicitly activate the only floating editor', () => {
+    const side = { ...target('side'), requiresExplicitFocus: true };
+    expect(selectChatComposerEditorModeTarget([side], null)).toBeNull();
+    expect(selectChatComposerEditorModeTarget([side], 'side')).toBe(side);
+    const main = target('main', { primary: true });
+    expect(selectChatComposerEditorModeTarget([side, main], 'main')).toBe(main);
+  });
   test('keeps targeting the current visible composer after focus moves elsewhere', () => {
     const primary = target('primary', { primary: true });
     const assistant = target('assistant');

@@ -13,7 +13,8 @@ import type { TranscriptItem } from '../types';
 import { AgentMessageExtras } from './AgentMessageExtras';
 import type { LinkedPullRequestContext } from './LinkedPullRequestCards';
 import { ChatMessageBody } from './ChatMessageBody';
-import { ChatMessageCopyAction } from './ChatMessageCopyAction';
+import { ChatMessageActions } from './ChatMessageActions';
+import { latestExternalCheckpointId } from '../app/side-chat-checkpoint-model';
 import {
   ImageAttachmentChips,
   isAttachmentOnlyPrompt,
@@ -123,6 +124,7 @@ export const TranscriptTurn = React.memo(
         ? stripAnsi(item.output)
         : stripAnsi(item.error || 'failed');
     const cleanedAgentMessage = cleaned;
+    const forkCheckpointId = actionsEnabled ? latestExternalCheckpointId([item]) : '';
     const providedActivity =
       isSilentCompletion || isUserOnly ? undefined : normalizeAgentRunActivity(item.activity);
     const activitySummary = isSilentCompletion || isUserOnly ? undefined : item.activitySummary;
@@ -307,6 +309,7 @@ export const TranscriptTurn = React.memo(
         {activity ? (
           <AgentRunActivityView
             activity={activity}
+            forkCheckpointId={forkCheckpointId}
             startedAt={runStartedIso}
             endedAt={agentIso}
             preRunDurationMs={preRunDurationMs}
@@ -387,7 +390,7 @@ export const TranscriptTurn = React.memo(
             plainAssistant={!showRoleIcons}
             hoverActions={
               cleanedAgentMessage ? (
-                <ChatMessageCopyAction text={cleanedAgentMessage} position="hover-rail" />
+                <ChatMessageActions text={cleanedAgentMessage} checkpointId={forkCheckpointId} />
               ) : undefined
             }
           >
@@ -490,6 +493,7 @@ export const TranscriptTurn = React.memo(
     );
   },
   (a, b) =>
+    a.item.id === b.item.id &&
     a.item.turn === b.item.turn &&
     a.item.at === b.item.at &&
     a.item.ok === b.item.ok &&

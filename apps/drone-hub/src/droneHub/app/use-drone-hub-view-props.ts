@@ -742,8 +742,8 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
           selectedDroneIdentity,
           promptError,
           sendPromptText,
-          onSendPromptInNewChat: (payload, context) =>
-            sendPromptInNewDroneChat(currentDrone, payload, context),
+          onSendPromptInNewChat: (payload, context, sourceChatName) =>
+            sendPromptInNewDroneChat(currentDrone, payload, context, sourceChatName),
           publishSelectedDraft,
           publishingDraft,
           canStopResponse,

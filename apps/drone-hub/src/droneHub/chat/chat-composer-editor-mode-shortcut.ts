@@ -1,6 +1,7 @@
 export type ChatComposerEditorModeTarget = {
   id: string;
   primary: boolean;
+  requiresExplicitFocus?: boolean;
   isEligible: () => boolean;
   toggle: () => void;
 };
@@ -13,10 +14,11 @@ export function selectChatComposerEditorModeTarget(
   currentId: string | null,
 ): ChatComposerEditorModeTarget | null {
   const eligible = candidates.filter((candidate) => candidate.isEligible());
+  const fallback = eligible.filter((candidate) => !candidate.requiresExplicitFocus);
   return (
     eligible.find((candidate) => candidate.id === currentId) ??
-    eligible.find((candidate) => candidate.primary) ??
-    (eligible.length === 1 ? eligible[0] : null) ??
+    fallback.find((candidate) => candidate.primary) ??
+    (fallback.length === 1 ? fallback[0] : null) ??
     null
   );
 }

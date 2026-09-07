@@ -454,11 +454,20 @@ export class HubSessionRepository implements SessionRepository {
     return modelMessagesFromTranscript(await this.readTranscript(session));
   }
 
-  async fork(source: BlipSessionState, input: ForkSessionInput): Promise<BlipSessionState> {
+  async fork(source: BlipSessionState, input: ForkSessionInput, checkpointId?: string): Promise<BlipSessionState> {
+    let transcriptSeed = await this.readTranscript(source);
+    if (checkpointId) {
+      const index = transcriptSeed.findIndex((entry) => entry.id === checkpointId);
+      const checkpoint = transcriptSeed[index];
+      if (!checkpoint || checkpoint.type !== 'message' || checkpoint.message.role !== 'assistant' || checkpoint.message.stopReason !== 'stop' || checkpoint.message.content.some((part) => part.type === 'toolCall') || !checkpoint.message.content.some((part) => part.type === 'text' && part.text.trim())) {
+        throw new Error('The completed assistant checkpoint is no longer available');
+      }
+      transcriptSeed = transcriptSeed.slice(0, index + 1);
+    }
     return this.create({
       ...input,
       parentSessionId: source.id,
-      transcriptSeed: await this.readTranscript(source),
+      transcriptSeed,
     });
   }
 
