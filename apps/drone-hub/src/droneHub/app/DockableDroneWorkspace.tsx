@@ -1,4 +1,7 @@
 import React from 'react';
+import { placeSideChat } from './side-chat-placement';
+import { FOCUS_SIDE_CHAT_EVENT } from './side-chat-events';
+import type { WorkspaceSideChat } from './use-workspace-side-chats';
 import { EditorPaneContext } from './editor-pane-context';
 import { readWorkspaceExplorerWidth } from './workspace-explorer-preferences';
 import {
@@ -42,6 +45,10 @@ type DockableDroneWorkspaceProps = {
   activeToolTab: RightPanelTab;
   openRequestNonce: number;
   chatContent: React.ReactNode;
+  sideChats?: WorkspaceSideChat[];
+  renderSideChat?: (chat: WorkspaceSideChat) => React.ReactNode;
+  onCloseSideChat?: (chatName: string) => void;
+  sideChatStatus?: React.ReactNode;
   renderToolPane: (tab: RightPanelTab, paneKey: WorkspacePaneKey) => React.ReactNode;
   previewTab: RightPanelTab;
   onActiveToolTabChange?: (tab: RightPanelTab) => void;
@@ -52,6 +59,7 @@ type DockableDroneWorkspaceProps = {
 };
 
 const CHAT_PANEL_ID = 'agent-chat';
+const SIDE_CHAT_PANEL_PREFIX = 'side-chat:';
 const EXPLORER_PANEL_ID = 'file-explorer';
 const TOOL_PANEL_PREFIX = 'tool:';
 const DEFAULT_WORKSPACE_TOOL_TAB: RightPanelTab = 'editor';
@@ -347,7 +355,13 @@ function ChatPanel({ containerApi }: IDockviewPanelProps) {
     const panel = containerApi.getPanel(CHAT_PANEL_ID);
     if (panel) panel.api.setTitle('Agent Chat');
   }, [containerApi]);
-  return <UiPanel flush className="h-full">{content}</UiPanel>;
+  return <UiPanel flush className="h-full" data-main-workspace-chat="true">{content}</UiPanel>;
+}
+
+function SideChatPanel({ params }: IDockviewPanelProps<{ chatName: string }>) {
+  const ctx = React.useContext(DockableDroneWorkspaceContext);
+  const chat = ctx.sideChats.find((item) => item.name === params.chatName);
+  return chat ? ctx.renderSideChat?.(chat) : null;
 }
 
 function ToolPanel({ api, params }: IDockviewPanelProps<{ tab?: unknown; paneKey?: WorkspacePaneKey }>) {
@@ -379,10 +393,15 @@ function ToolPanel({ api, params }: IDockviewPanelProps<{ tab?: unknown; paneKey
 }
 
 function WorkspaceTab(props: IDockviewPanelHeaderProps) {
+  const ctx = React.useContext(DockableDroneWorkspaceContext);
   const closeable = props.api.id !== CHAT_PANEL_ID;
   const closePanel = React.useCallback(() => {
+    if (props.api.id.startsWith(SIDE_CHAT_PANEL_PREFIX)) {
+      ctx.onCloseSideChat?.(props.api.id.slice(SIDE_CHAT_PANEL_PREFIX.length));
+      return;
+    }
     props.api.close();
-  }, [props.api]);
+  }, [props.api, ctx.onCloseSideChat]);
   const handlePointerDown = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (!closeable || event.button !== 1) return;
     event.preventDefault();
@@ -391,6 +410,7 @@ function WorkspaceTab(props: IDockviewPanelHeaderProps) {
   return (
     <DockviewDefaultTab
       {...props}
+      data-side-chat-name={props.api.id.startsWith(SIDE_CHAT_PANEL_PREFIX) ? props.api.id.slice(SIDE_CHAT_PANEL_PREFIX.length) : undefined}
       hideClose={!closeable}
       closeActionOverride={closeable ? closePanel : undefined}
       onPointerDown={handlePointerDown}
@@ -412,11 +432,15 @@ function WorkspaceWatermark() {
 
 const DockableDroneWorkspaceContext = React.createContext<{
   chatContent: React.ReactNode;
+  sideChats: WorkspaceSideChat[];
+  renderSideChat?: (chat: WorkspaceSideChat) => React.ReactNode;
+  onCloseSideChat?: (chatName: string) => void;
   renderToolPane: (tab: RightPanelTab, paneKey: WorkspacePaneKey) => React.ReactNode;
   previewTab: RightPanelTab;
   onPreviewHostChanged: () => void;
 }>({
   chatContent: null,
+  sideChats: [],
   renderToolPane: () => null,
   previewTab: 'preview',
   onPreviewHostChanged: () => {},
@@ -428,6 +452,10 @@ export function DockableDroneWorkspace({
   activeToolTab,
   openRequestNonce,
   chatContent,
+  sideChats = [],
+  renderSideChat,
+  onCloseSideChat,
+  sideChatStatus,
   renderToolPane,
   previewTab,
   onActiveToolTabChange,
@@ -437,6 +465,8 @@ export function DockableDroneWorkspace({
   onAfterToolPanelRemove,
 }: DockableDroneWorkspaceProps) {
   const apiRef = React.useRef<DockviewApi | null>(null);
+  const workspaceElementRef = React.useRef<HTMLDivElement | null>(null);
+  const [readyVersion, setReadyVersion] = React.useState(0);
   const disposablesRef = React.useRef<Array<{ dispose: () => void }>>([]);
   const removedPanelTimersRef = React.useRef<Map<string, number>>(new Map());
   const layoutSaveTimerRef = React.useRef<number | null>(null);
@@ -448,6 +478,7 @@ export function DockableDroneWorkspace({
   const lastReportedPreviewHostRef = React.useRef<PreviewHostState | null>(null);
   const lastVisibleToolTabsRef = React.useRef<string>('');
   const isMobileViewport = useMobileViewport();
+  const useMobileLayout = isMobileViewport && sideChats.length === 0;
   const [mobileActivePanel, setMobileActivePanel] = React.useState<'chat' | 'tool'>('chat');
   const [mobileToolPaneOpen, setMobileToolPaneOpen] = React.useState(false);
   const markPreviewHostChanged = React.useCallback(() => {
@@ -475,30 +506,74 @@ export function DockableDroneWorkspace({
   const contextValue = React.useMemo(
     () => ({
       chatContent,
+      sideChats,
+      renderSideChat,
+      onCloseSideChat,
       renderToolPane,
       previewTab,
       onPreviewHostChanged: markPreviewHostChanged,
     }),
-    [chatContent, markPreviewHostChanged, previewTab, renderToolPane],
+    [chatContent, sideChats, renderSideChat, onCloseSideChat, markPreviewHostChanged, previewTab, renderToolPane],
   );
-  const components = React.useMemo(() => ({ chat: ChatPanel, tool: ToolPanel }), []);
+  const components = React.useMemo(() => ({ chat: ChatPanel, tool: ToolPanel, sideChat: SideChatPanel }), []);
 
   React.useEffect(() => {
-    if (!isMobileViewport) return;
+    const focus = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (detail?.droneId !== currentDrone.id) return;
+      const panel = apiRef.current?.getPanel(`${SIDE_CHAT_PANEL_PREFIX}${detail.chatName}`);
+      if (!panel) return;
+      event.preventDefault();
+      panel.api.setActive();
+      const content = [...(workspaceElementRef.current?.querySelectorAll<HTMLElement>('[data-side-chat-name]') ?? [])]
+        .find((element) => element.dataset.sideChatName === detail.chatName && element.querySelector('[data-active-composer-id]'));
+      content?.querySelector<HTMLElement>('textarea, [contenteditable="true"]')?.focus();
+    };
+    window.addEventListener(FOCUS_SIDE_CHAT_EVENT, focus);
+    return () => window.removeEventListener(FOCUS_SIDE_CHAT_EVENT, focus);
+  }, [currentDrone.id]);
+
+  React.useEffect(() => {
+    const api = apiRef.current;
+    const root = workspaceElementRef.current;
+    if (!api || !root) return;
+    const wanted = new Set(sideChats.map((chat) => `${SIDE_CHAT_PANEL_PREFIX}${chat.name}`));
+    for (const panel of api.panels) {
+      if (panel.id.startsWith(SIDE_CHAT_PANEL_PREFIX) && !wanted.has(panel.id)) api.removePanel(panel);
+    }
+    for (const chat of sideChats) {
+      const id = `${SIDE_CHAT_PANEL_PREFIX}${chat.name}`;
+      if (api.getPanel(id)) continue;
+      const rootRect = root.getBoundingClientRect();
+      const groups = api.groups.filter((group) => group.panels.some((panel) => panel.id === CHAT_PANEL_ID || panel.id.startsWith(SIDE_CHAT_PANEL_PREFIX)));
+      const occupied = groups.map((group) => {
+        const rect = group.element.getBoundingClientRect();
+        return { x: rect.x - rootRect.x, y: rect.y - rootRect.y, width: rect.width, height: rect.height };
+      });
+      const bounds = placeSideChat({ width: api.width, height: api.height }, occupied, api.panels.filter((panel) => panel.id.startsWith(SIDE_CHAT_PANEL_PREFIX)).length);
+      api.addPanel({ id, component: 'sideChat', title: chat.name, params: { chatName: chat.name },
+        minimumWidth: Math.min(320, api.width), minimumHeight: Math.min(220, api.height),
+        floating: bounds, inactive: true,
+      });
+    }
+  }, [currentDrone.id, sideChats, readyVersion]);
+
+  React.useEffect(() => {
+    if (!useMobileLayout) return;
     const api = apiRef.current;
     if (!api || visibleToolTabs(api).length === 0) return;
     setMobileToolPaneOpen(true);
     setMobileActivePanel('tool');
-  }, [isMobileViewport]);
+  }, [useMobileLayout]);
 
   React.useEffect(() => {
-    if (!isMobileViewport) return;
+    if (!useMobileLayout) return;
     onVisibleToolTabsChange?.(
       mobileToolPaneOpen && mobileActivePanel === 'tool' ? [activeToolTab] : [],
     );
   }, [
     activeToolTab,
-    isMobileViewport,
+    useMobileLayout,
     mobileActivePanel,
     mobileToolPaneOpen,
     onVisibleToolTabsChange,
@@ -575,7 +650,7 @@ export function DockableDroneWorkspace({
 
   const applyToolOpenRequest = React.useCallback(() => {
     if (openRequestNonce === lastAppliedOpenRequestRef.current) return;
-    if (isMobileViewport) {
+    if (useMobileLayout) {
       lastAppliedOpenRequestRef.current = openRequestNonce;
       setMobileToolPaneOpen(true);
       setMobileActivePanel('tool');
@@ -605,7 +680,7 @@ export function DockableDroneWorkspace({
     }
   }, [
     activeToolTab,
-    isMobileViewport,
+    useMobileLayout,
     openRequestNonce,
     persistCurrentLayout,
     rebalanceWorkspaceGridGroups,
@@ -617,6 +692,7 @@ export function DockableDroneWorkspace({
       apiRef.current = event.api;
       loadLayout();
       applyToolOpenRequest();
+      setReadyVersion((version) => version + 1);
 
       const layoutDisposable = event.api.onDidLayoutChange(() => {
         updateWorkspacePanelState();
@@ -642,6 +718,12 @@ export function DockableDroneWorkspace({
           const api = apiRef.current;
           if (!api) return;
           if (api.getPanel(panelId)) return;
+
+          if (panelId.startsWith(SIDE_CHAT_PANEL_PREFIX)) {
+            updateWorkspacePanelState();
+            persistCurrentLayout();
+            return;
+          }
 
           if (panelId !== CHAT_PANEL_ID) {
             updateWorkspacePanelState();
@@ -739,7 +821,7 @@ export function DockableDroneWorkspace({
   }, [
     activeToolTab,
     currentDrone.id,
-    isMobileViewport,
+    useMobileLayout,
     mobileActivePanel,
     previewHostVersion,
     reportPreviewHostChange,
@@ -758,7 +840,8 @@ export function DockableDroneWorkspace({
 
   return (
     <DockableDroneWorkspaceContext.Provider value={contextValue}>
-      {isMobileViewport ? (
+      {sideChatStatus}
+      {useMobileLayout ? (
         <UiPanel flush className="dh-mobile-workspace flex-1">
           {mobileToolPaneOpen ? (
             <UiPanelToolbar
@@ -797,12 +880,13 @@ export function DockableDroneWorkspace({
                 </UiPanel>
               )
             ) : (
-              <UiPanel flush className="h-full">{chatContent}</UiPanel>
+              <UiPanel flush className="h-full" data-main-workspace-chat="true">{chatContent}</UiPanel>
             )}
           </UiPanelBody>
         </UiPanel>
       ) : (
         <div
+          ref={workspaceElementRef}
           className={`flex-1 min-h-0 min-w-0 overflow-hidden dh-dockable-workspace ${
             paneHeaderMode === 'compact' ? 'dh-dockable-workspace--compact-headers' : ''
           } ${workspacePanelCount <= 1 ? 'dh-dockable-workspace--single-panel' : ''}`}
@@ -816,9 +900,18 @@ export function DockableDroneWorkspace({
             onReady={handleReady}
             singleTabMode="fullwidth"
             floatingGroupBounds="boundedWithinViewport"
-            getTabContextMenuItems={({ panel }) =>
-              panel.id === CHAT_PANEL_ID ? [] : ['close', 'closeOthers', 'closeAll']
-            }
+            getTabContextMenuItems={({ panel, group }) => {
+              if (panel.id === CHAT_PANEL_ID || panel.id.startsWith(SIDE_CHAT_PANEL_PREFIX)) return [];
+              // Bulk tool-tab actions must not remove chats or bypass their
+              // delete confirmation when a floating chat is docked in the group.
+              const tools = group.panels.filter((item) =>
+                item.id !== CHAT_PANEL_ID && !item.id.startsWith(SIDE_CHAT_PANEL_PREFIX));
+              return [
+                'close',
+                { label: 'Close Others', action: () => tools.filter((item) => item !== panel).forEach((item) => item.api.close()) },
+                { label: 'Close All', action: () => tools.forEach((item) => item.api.close()) },
+              ];
+            }}
           />
         </div>
       )}

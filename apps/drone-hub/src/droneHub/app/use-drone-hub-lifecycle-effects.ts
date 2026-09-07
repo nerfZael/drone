@@ -1,4 +1,5 @@
 import React from 'react';
+import { requestSideChat } from './side-chat-events';
 import type { DroneSummary, PendingPrompt, TranscriptItem } from '../types';
 import type { DraftChatState, DroneErrorModalState, StartupSeedState } from './app-types';
 import type { RightPanelTab } from './app-config';
@@ -265,12 +266,14 @@ export function useDroneHubLifecycleEffects({
   }, [droneErrorModal, setDroneErrorModal]);
 
   React.useEffect(() => {
-    const focusPrimaryChatInput = (): boolean => {
+    const focusPrimaryChatInput = (preferMain: boolean = false): boolean => {
       const modalOpen = Boolean(document.querySelector('[role="dialog"][aria-modal="true"]'));
       if (modalOpen) return false;
-      const primaryInput = document.querySelector<HTMLElement>(
-        '[data-chat-input-focus-id="primary-chat"]',
-      );
+      const activeSideName = preferMain ? undefined : document.querySelector<HTMLElement>('[data-side-chat-active]')?.dataset.sideChatName;
+      const sideScope = activeSideName ? [...document.querySelectorAll<HTMLElement>('[data-side-chat-name]')].find((element) =>
+        element.dataset.sideChatName === activeSideName && element.querySelector('[data-active-composer-id]')) : null;
+      const primaryInput = sideScope?.querySelector<HTMLElement>('textarea, [contenteditable="true"]')
+        ?? document.querySelector<HTMLElement>('[data-main-workspace-chat] [data-chat-input-focus-id], [data-chat-input-focus-id="primary-chat"]');
       if (!primaryInput) return false;
       if (primaryInput.getClientRects().length === 0) return false;
       primaryInput.focus();
@@ -282,7 +285,7 @@ export function useDroneHubLifecycleEffects({
     };
 
     const focusPrimaryChatInputWithRetry = (remainingAttempts: number = 10) => {
-      if (focusPrimaryChatInput() || remainingAttempts <= 0) return;
+      if (focusPrimaryChatInput(true) || remainingAttempts <= 0) return;
       window.setTimeout(() => {
         window.requestAnimationFrame(() => {
           focusPrimaryChatInputWithRetry(remainingAttempts - 1);
@@ -391,6 +394,7 @@ export function useDroneHubLifecycleEffects({
         void cloneDroneChatFromShortcut();
         return true;
       },
+      createSideChat: () => currentDrone ? requestSideChat(currentDrone.id) : false,
       toggleSelectedDronePinned: () => toggleSelectedDronePinnedFromShortcut(),
       moveSelectedDroneToTop: () => moveSelectedDroneToTopFromShortcut(),
       toggleSelectedDronesToDo: () => toggleSelectedDronesToDoFromShortcut(),

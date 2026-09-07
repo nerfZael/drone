@@ -1,4 +1,9 @@
 import React from 'react';
+import { useWorkspaceSideChats } from './use-workspace-side-chats';
+import { WorkspaceSideChatContent } from './WorkspaceSideChatContent';
+import { focusSideChat } from './side-chat-events';
+import { latestExternalCheckpointId } from './side-chat-checkpoint-model';
+import { SideChatForkContext } from '../chat/SideChatForkContext';
 import { createPortal } from 'react-dom';
 import { useDndMonitor, useDroppable } from '@dnd-kit/core';
 import type {
@@ -501,7 +506,7 @@ type SelectedDroneWorkspaceProps = {
   selectedDroneIdentity: string;
   promptError: string | null;
   sendPromptText: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
-  onSendPromptInNewChat: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
+  onSendPromptInNewChat: (payload: ChatSendPayload, context: ChatSendContext, sourceChatName?: string) => Promise<boolean>;
   publishSelectedDraft: () => Promise<boolean>;
   publishingDraft: boolean;
   canStopResponse: boolean;
@@ -517,7 +522,7 @@ type SelectedDroneWorkspaceProps = {
   ) => Promise<void>;
   resolvingInterruptionById: Record<string, true>;
   interruptionResolutionErrorById: Record<string, string>;
-  onCreateQueuedNewChatNow: (promptId: string) => Promise<void>;
+  onCreateQueuedNewChatNow: (promptId: string, source?: { droneId: string; chatName: string }) => Promise<void>;
   focusedNewChatActionId: string;
   onCreateNewChatAutoFocusHandled: (promptId: string) => void;
   promotingNewChatActionById: Record<string, true>;
@@ -1025,6 +1030,7 @@ export function SelectedDroneWorkspace({
     onRequestDropActions,
   });
   const nativeChatActive = currentAgentKey === 'native' && !currentChatIsDraft;
+  const sideChatWorkspace = useWorkspaceSideChats(currentDrone, activeChatName);
   const chatConfigResolution = chatConfigResolutionState({
     currentChatIsDraft,
     hasChats,
@@ -2382,6 +2388,31 @@ export function SelectedDroneWorkspace({
       </DroneWorkspaceHeaderFrame>
 
       <DockableDroneWorkspace
+        sideChats={sideChatWorkspace.sideChats}
+        onCloseSideChat={(name) => void sideChatWorkspace.finish(name, false)}
+        sideChatStatus={sideChatWorkspace.status ? (
+          <div role="status" className="flex items-center gap-2 border-b border-[var(--border)] bg-[var(--panel)] px-3 py-2 text-[var(--text-12)] text-[var(--fg-secondary)]">
+            <span className="flex-1">{sideChatWorkspace.status}</span>
+            <button onClick={sideChatWorkspace.dismissStatus} aria-label="Dismiss side chat status">×</button>
+          </div>
+        ) : null}
+        renderSideChat={(chat) => (
+          <WorkspaceSideChatContent
+            messageFeatures={{ linkedPullRequestContext, droneId: currentDrone.id, droneHomePath: currentDroneHomePath, onOpenFileReference: onOpenMarkdownFileReference, onOpenLink: tryOpenMarkdownPullRequest }}
+            chat={chat}
+            drone={currentDrone}
+            busy={Boolean(sideChatWorkspace.busy)}
+            onKeep={() => void sideChatWorkspace.finish(chat.name, true)}
+            onOpenSource={() => {
+              if (!focusSideChat(currentDrone.id, chat.sourceChatName)) setSelectedChat(chat.sourceChatName);
+            }}
+            onSendPromptInNewChat={(payload, context) => onSendPromptInNewChat(payload, context, chat.name)}
+            onCreateQueuedNewChatNow={(id) => onCreateQueuedNewChatNow(id, { droneId: currentDrone.id, chatName: chat.name })}
+            onCreateNewChatAutoFocusHandled={onCreateNewChatAutoFocusHandled}
+            promotingNewChatActionById={promotingNewChatActionById}
+            promoteNewChatActionErrorById={promoteNewChatActionErrorById}
+          />
+        )}
         key={currentDrone.id}
         currentDrone={currentDrone}
         paneHeaderMode={workspacePaneHeaderMode}
@@ -2395,8 +2426,15 @@ export function SelectedDroneWorkspace({
         onBeforeWorkspaceMouseDown={captureWorkspaceChatScroll}
         onAfterToolPanelRemove={restoreWorkspaceChatScroll}
         chatContent={
+          <SideChatForkContext.Provider value={{
+            droneId: currentDrone.id,
+            chatName: activeChatName,
+            busy: Boolean(sideChatWorkspace.busy),
+            supported: ['native', 'builtin:codex', 'builtin:claude', 'builtin:opencode'].includes(currentAgentKey),
+          }}>
           <div
             ref={setFleetDropNodeRef}
+            data-side-chat-checkpoint-id={nativeChatActive ? undefined : latestExternalCheckpointId(transcripts)}
             data-fleet-assignment-drop-zone="1"
             data-fleet-assignment-drone-id={currentDrone.id}
             data-fleet-assignment-owner-id={currentDrone.id}
@@ -2715,6 +2753,7 @@ export function SelectedDroneWorkspace({
               ) : null}
             </ChatSurface>
           </div>
+          </SideChatForkContext.Provider>
         }
       />
     </>

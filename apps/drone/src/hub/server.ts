@@ -3086,6 +3086,7 @@ function createHubRuntimeGraph(
   } = chatSessionRuntime;
 
   const createDroneChat = createDroneChatCreator({
+    captureNativeChatCheckpoint: nativeChatRuntimePort.captureCheckpoint,
     buildNewChatEntry,
     cloneNativeChatSession: nativeChatRuntimePort.cloneSession,
     copyNativeChatConfiguration: nativeChatRuntimePort.copyConfiguration,
@@ -4469,6 +4470,7 @@ async function startDroneHubApiServerWithLifecycle(
     await assistantService.stopThread(nativeChatId);
   };
   releaseNativeChatRuntimePort = nativeChatRuntimePort.bind({
+    captureCheckpoint: (threadId) => blipAssistantHost.captureThreadCheckpoint(threadId),
     cloneSession: cloneNativeChatSession,
     copyConfiguration: copyNativeChatConfiguration,
     deleteSessions: deleteNativeChatSessions,
@@ -5123,7 +5125,10 @@ async function startDroneHubApiServerWithLifecycle(
       Boolean(String(d?.repo?.seededAt ?? '').trim());
     const droneId = normalizeDroneIdentity(d?.id);
     const { chats, workflowChats } = partitionWorkflowChatEntries(d.chats);
-    const workflowChatSet = new Set(workflowChats);
+    const sideChats = Object.entries(d.chats ?? {}).flatMap(([name, entry]: [string, any]) =>
+      entry?.visibility === 'side-chat' ? [{ name, ...entry.sideChatOrigin, agent: inferChatAgent(entry, d) }] : [],
+    );
+    const workflowChatSet = new Set([...workflowChats, ...sideChats.map((chat) => chat.name)]);
     const pendingBusyChats = droneId
       ? busyChatNamesForDrone(d, droneId).filter(
           (chatName: string) => !workflowChatSet.has(chatName),
@@ -5214,6 +5219,7 @@ async function startDroneHubApiServerWithLifecycle(
       statusChecking: Boolean(statusChecking),
       chats,
       workflowChats,
+      sideChats,
       unreadChats,
       chatReadStates,
       draftChats,

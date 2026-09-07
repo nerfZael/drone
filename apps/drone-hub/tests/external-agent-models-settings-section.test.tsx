@@ -1,4 +1,5 @@
 import React from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, test } from 'bun:test';
 
@@ -8,7 +9,9 @@ describe('External agent model settings', () => {
   test('renders the refresh action and supported-agent explanation', () => {
     const requestJson = async <T,>() => ({}) as T;
     const html = renderToStaticMarkup(
-      <ExternalAgentModelsSettingsSection requestJson={requestJson} />,
+      <QueryClientProvider client={new QueryClient()}>
+        <ExternalAgentModelsSettingsSection requestJson={requestJson} />
+      </QueryClientProvider>,
     );
 
     expect(html).toContain('External agent model lists');

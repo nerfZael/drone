@@ -4451,9 +4451,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       if (!droneId || (!prompt && attachments.length === 0)) return false;
 
       const requestedSourceChatName = String(sourceChatNameRaw ?? '').trim();
-      const sourceChatName = resolveChatNameForDrone(
+      const sourceChatName = requestedSourceChatName || resolveChatNameForDrone(
         droneByIdRef.current[droneId] ?? drone,
-        requestedSourceChatName || selectedChat,
+        selectedChat,
       );
       try {
         const actionId = makeId();

@@ -49,6 +49,7 @@ export class NativeChatLifecycle {
     sourceProvider?: string;
     sourceModel?: string;
     sourceThinkingLevel?: string;
+    checkpointId?: string;
   }): Promise<void> {
     await this.ensure({
       id: input.sourceId,
@@ -65,7 +66,7 @@ export class NativeChatLifecycle {
       chatName: input.chatName,
     });
     try {
-      await this.blipAssistantHost.cloneThread(input.sourceId, input.id);
+      await this.blipAssistantHost.cloneThread(input.sourceId, input.id, input.checkpointId);
     } catch (error) {
       await this.assistantService.deleteThread(input.id).catch(() => {});
       throw error;

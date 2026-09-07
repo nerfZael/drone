@@ -1,4 +1,5 @@
 import type { WorkflowPermission } from './workflow-types';
+import { isSideChatEntry } from '../side-chat-checkpoint';
 
 export const WORKFLOW_CHAT_VISIBILITY = 'workflow';
 
@@ -15,7 +16,7 @@ export function partitionWorkflowChatEntries(chats: unknown): {
   const ordinaryChats: string[] = [];
   const workflowChats: string[] = [];
   for (const [chatName, entry] of entries) {
-    (isWorkflowChatEntry(entry) ? workflowChats : ordinaryChats).push(chatName);
+    if (!isSideChatEntry(entry)) (isWorkflowChatEntry(entry) ? workflowChats : ordinaryChats).push(chatName);
   }
   return { chats: ordinaryChats, workflowChats };
 }

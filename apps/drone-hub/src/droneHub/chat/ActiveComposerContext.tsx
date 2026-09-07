@@ -1,8 +1,10 @@
 import React from 'react';
+import { markCurrentChatComposerEditorModeTarget } from './chat-composer-editor-mode-shortcut';
 import type { CompanionTextSnapshot } from '@drone/assistant-chat';
 
 export type ActiveComposer = {
   id: string;
+  requiresExplicitFocus?: boolean;
   isEligible(): boolean;
   isReadable?(): boolean;
   appendTranscript(text: string): void;
@@ -59,13 +61,18 @@ export class ActiveComposerRegistry {
   }
 
   focus(id: string): void {
-    if (this.composers.get(id)?.isEligible()) this.setActiveId(id);
+    if (this.composers.has(id)) this.setActiveId(id);
+  }
+
+  focusDefault(): void {
+    this.setActiveId(null);
+    this.ensureTargetId();
   }
 
   ensureTargetId(): string | null {
     const current = this.activeId ? this.composers.get(this.activeId) : null;
     if (current?.isEligible()) return current.id;
-    const next = [...this.composers.values()].find((composer) => composer.isEligible())?.id ?? null;
+    const next = [...this.composers.values()].find((composer) => !composer.requiresExplicitFocus && composer.isEligible())?.id ?? null;
     this.setActiveId(next);
     return next;
   }
@@ -119,7 +126,7 @@ export class ActiveComposerRegistry {
     const current = this.activeId ? this.composers.get(this.activeId) : null;
     if (current?.readSnapshot && (current.isReadable?.() ?? current.isEligible())) return current;
     const candidates = [...this.composers.values()].filter(
-      (composer) => composer.readSnapshot && (composer.isReadable?.() ?? composer.isEligible()),
+      (composer) => !composer.requiresExplicitFocus && composer.readSnapshot && (composer.isReadable?.() ?? composer.isEligible()),
     );
     const composer = candidates[candidates.length - 1];
     if (!composer) throw new Error('NO_ACTIVE_COMPOSER');
@@ -155,6 +162,30 @@ export function ActiveComposerProvider({ children }: { children: React.ReactNode
     [registry],
   );
   const focusComposer = React.useCallback((id: string) => registry.focus(id), [registry]);
+  React.useEffect(() => {
+    const routeFocus = (event: Event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const side = target?.closest<HTMLElement>('[data-side-chat-name]');
+      const hadActiveSide = Boolean(document.querySelector('[data-side-chat-active]'));
+      document.querySelectorAll('[data-side-chat-active]').forEach((element) => element.removeAttribute('data-side-chat-active'));
+      if (side) side.setAttribute('data-side-chat-active', 'true');
+      if (!side && !hadActiveSide) return;
+      const scope = side
+        ? [...document.querySelectorAll<HTMLElement>('[data-side-chat-name]')].find((element) =>
+          element.dataset.sideChatName === side.dataset.sideChatName && element.querySelector('[data-active-composer-id]'))
+        : document.querySelector('[data-main-workspace-chat]');
+      const composer = scope?.querySelector<HTMLElement>('[data-active-composer-id]');
+      if (composer?.dataset.activeComposerId) registry.focus(composer.dataset.activeComposerId);
+      else if (!side) registry.focusDefault();
+      markCurrentChatComposerEditorModeTarget(composer?.dataset.editorModeTargetId ?? '');
+    };
+    document.addEventListener('pointerdown', routeFocus, true);
+    document.addEventListener('focusin', routeFocus, true);
+    return () => {
+      document.removeEventListener('pointerdown', routeFocus, true);
+      document.removeEventListener('focusin', routeFocus, true);
+    };
+  }, [registry]);
   const ensureTargetId = React.useCallback(() => registry.ensureTargetId(), [registry]);
   const appendTranscript = React.useCallback(
     (targetId: string, text: string) => registry.appendTranscript(targetId, text),

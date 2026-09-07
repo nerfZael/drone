@@ -46,6 +46,8 @@ import {
   type ProvisionedPromptHandoff,
 } from './provisioned-prompt-handoff';
 import { pendingChatForkSourceSessionId } from './chat-fork';
+import { claudeCheckpointValidationScript } from './claude-checkpoint-fork';
+import { openCodeCheckpointForkScript } from './opencode-checkpoint-fork';
 
 export function claudeSandboxEnvironmentLines(runtime: unknown): string[] {
   // Claude Code refuses bypassPermissions under root unless the caller explicitly
@@ -551,6 +553,8 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     imagePaths?: string[];
     existingThreadId?: string;
     forkThreadId?: string;
+    forkLastTurnId?: string;
+    forkLastMessageId?: string;
     deliveryMode?: 'queue' | 'asap';
     approvalPolicy: 'untrusted' | 'on-request' | 'never';
     approvalsReviewer: 'user' | 'auto_review';
@@ -616,6 +620,8 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       ...(opts.imagePaths?.length ? { imagePaths: opts.imagePaths } : {}),
       ...(opts.existingThreadId ? { existingThreadId: opts.existingThreadId } : {}),
       ...(opts.forkThreadId ? { forkThreadId: opts.forkThreadId } : {}),
+      ...(opts.forkLastTurnId ? { forkLastTurnId: opts.forkLastTurnId } : {}),
+      ...(opts.forkLastMessageId ? { forkLastMessageId: opts.forkLastMessageId } : {}),
       ...(opts.deliveryMode ? { deliveryMode: opts.deliveryMode } : {}),
       approvalPolicy: opts.approvalPolicy,
       approvalsReviewer: opts.approvalsReviewer,
@@ -995,6 +1001,8 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
             .filter(Boolean),
           ...(existingThreadId ? { existingThreadId } : {}),
           ...(forkThreadId ? { forkThreadId } : {}),
+          ...(forkThreadId && chat.chatForkOrigin?.lastTurnId ? { forkLastTurnId: chat.chatForkOrigin.lastTurnId } : {}),
+          ...(forkThreadId && chat.chatForkOrigin?.lastMessageId ? { forkLastMessageId: chat.chatForkOrigin.lastMessageId } : {}),
           deliveryMode: opts.deliveryMode,
           approvalPolicy: approvalArg,
           approvalsReviewer: approvalPolicy === 'auto' ? 'auto_review' : 'user',
@@ -1016,6 +1024,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
 
       if (agent.kind === 'builtin' && agent.id === 'claude') {
         const forkSessionId = pendingChatForkSourceSessionId(chat, 'claude');
+        const forkMessageId = forkSessionId ? String(chat.chatForkOrigin?.lastMessageId ?? '') : '';
         const existingClaudeSessionId = forkSessionId
           ? ''
           : readBuiltinTranscriptSessionId(chat, 'claude');
@@ -1033,9 +1042,10 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           ? await cliSupportsModelFlag({ runtime, containerName, cwd, bin: 'claude' })
           : false;
         const modelArg = chatModel && supportsModel ? ` --model ${bashQuote(chatModel)}` : '';
+        const checkpointArg = forkMessageId ? ` --resume-session-at=${bashQuote(forkMessageId)}` : '';
         const sessionArg =
           sessionLaunch.mode === 'fork'
-            ? ` --resume ${bashQuote(sessionLaunch.sessionId)} --fork-session`
+            ? ` --resume ${bashQuote(sessionLaunch.sessionId)} --fork-session${checkpointArg}`
             : sessionLaunch.mode === 'resume'
               ? ` --resume ${bashQuote(sessionLaunch.sessionId)}`
               : ` --session-id ${bashQuote(sessionLaunch.sessionId)}`;
@@ -1047,6 +1057,9 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           ...claudeSandboxEnvironmentLines(runtime),
           `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
           cdCommand,
+          ...(forkMessageId
+            ? [`node -e ${bashQuote(claudeCheckpointValidationScript(forkSessionId, forkMessageId))}`]
+            : []),
           `claude --print --dangerously-skip-permissions --output-format stream-json --verbose${modelArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
         ].join('\n');
         await enqueueTranscriptPrompt({
@@ -1076,15 +1089,18 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           : false;
         const modelArg = chatModel && supportsModel ? ` --model ${bashQuote(chatModel)}` : '';
         const forkSessionId = pendingChatForkSourceSessionId(chat, 'opencode');
+        const forkMessageId = forkSessionId ? String(chat.chatForkOrigin?.lastMessageId ?? '') : '';
         const openCodeSessionId = forkSessionId
           ? ''
           : readBuiltinTranscriptSessionId(chat, 'opencode');
         const title = openCodeSessionTitle(droneLabel, normalizedChat);
-        const resumeArg = forkSessionId
-          ? ` --session ${bashQuote(forkSessionId)} --fork`
-          : openCodeSessionId
-            ? ` --session ${bashQuote(openCodeSessionId)}`
-            : '';
+        const resumeArg = forkMessageId
+          ? ' --session "$checkpoint_fork_session_id"'
+          : forkSessionId
+            ? ` --session ${bashQuote(forkSessionId)} --fork`
+            : openCodeSessionId
+              ? ` --session ${bashQuote(openCodeSessionId)}`
+              : '';
         const script = [
           'set -euo pipefail',
           ...buildContainerManagedEnvLines(d),
@@ -1092,6 +1108,9 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           ...managedChatMcpEnvLines,
           `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
           cdCommand,
+          ...(forkMessageId
+            ? [`checkpoint_fork_session_id=$(node -e ${bashQuote(openCodeCheckpointForkScript(forkSessionId, forkMessageId))})`]
+            : []),
           `opencode run --format json --title ${bashQuote(title)}${modelArg}${resumeArg} ${bashQuote(promptWithHistory)}`,
         ].join('\n');
         await enqueueTranscriptPrompt({
