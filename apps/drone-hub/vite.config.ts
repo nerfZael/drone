@@ -79,6 +79,11 @@ export default defineConfig({
     __DRONE_HUB_BUILD_TIME__: JSON.stringify(buildTime),
   },
   resolve: {
+    // Opt in for measurement; normal production bundles retain React's standard runtime.
+    alias: process.env.DRONE_HUB_REACT_PROFILE === '1' ? [
+      { find: /^react-dom\/client$/, replacement: 'react-dom/profiling' },
+      { find: /^react-dom$/, replacement: 'react-dom/profiling' },
+    ] : [],
     dedupe: ['react', 'react-dom'],
   },
   optimizeDeps: {

@@ -123,8 +123,10 @@ export const TranscriptTurn = React.memo(
         ? stripAnsi(item.output)
         : stripAnsi(item.error || 'failed');
     const cleanedAgentMessage = cleaned;
-    const providedActivity =
-      isSilentCompletion || isUserOnly ? undefined : normalizeAgentRunActivity(item.activity);
+    const providedActivity = React.useMemo(
+      () => isSilentCompletion || isUserOnly ? undefined : normalizeAgentRunActivity(item.activity),
+      [isSilentCompletion, isUserOnly, item.activity],
+    );
     const activitySummary = isSilentCompletion || isUserOnly ? undefined : item.activitySummary;
     const [hydratedActivity, setHydratedActivity] = React.useState<AgentRunActivity | null>(null);
     const [activityHydratedAt, setActivityHydratedAt] = React.useState<string | null>(null);
@@ -198,9 +200,11 @@ export const TranscriptTurn = React.memo(
       requestActivity,
     ]);
     React.useEffect(() => () => activityLoadControllerRef.current?.abort(), []);
-    const activityHasResponse = agentRunActivityHasResponse(activity);
-    const activityToolCallCount =
-      activity?.messages.reduce((count, message) => count + toolCalls(message).length, 0) ?? 0;
+    const activityHasResponse = React.useMemo(() => agentRunActivityHasResponse(activity), [activity]);
+    const activityToolCallCount = React.useMemo(
+      () => activity?.messages.reduce((count, message) => count + toolCalls(message).length, 0) ?? 0,
+      [activity],
+    );
     const showFallbackResponse =
       !isSilentCompletion && !isUserOnly && !isInterrupted && (!activityHasResponse || !item.ok);
     const renderedInlineMediaHrefs = React.useMemo(

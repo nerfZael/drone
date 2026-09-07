@@ -1,5 +1,6 @@
 import React from 'react';
-import { desktopWorkspaceCommitted, desktopWorkspaceLoads } from './workspace-load-telemetry';
+import { useWorkspaceNavigationId } from '../app/workspace-navigation-context';
+import { beginDesktopWorkspaceLoad, desktopWorkspaceCommitted, desktopWorkspaceLoads } from './workspace-load-telemetry';
 import { UiCenteredLoadingState } from '../../ui/components';
 import {
   defaultTextFileViewModeForFile,
@@ -619,6 +620,16 @@ export function OpenedDroneFilePanel({
     defineDroneHubMonacoThemes(monaco);
     configureMonacoTypeScriptDiagnostics(monaco.languages.typescript);
   }, []);
+  const workspaceNavigationId = useWorkspaceNavigationId(droneId);
+  React.useEffect(() => {
+    if (!activeFilePath || !droneId) return;
+    let id = desktopWorkspaceLoads.find('file-open', { droneId, path: activeFilePath });
+    if (!id) {
+      id = beginDesktopWorkspaceLoad('file-open', droneId, activeFilePath);
+      if (!fileLoading) desktopWorkspaceLoads.mark(id, 'cacheHit', 1);
+    }
+    return () => desktopWorkspaceLoads.finish(id, 'superseded');
+  }, [activeFilePath, droneId, fileNavigationSeq, workspaceNavigationId]);
   const handleEditorMount = React.useCallback<MonacoEditorMountHandler>(
     (editor, monaco) => {
       editorRef.current = editor;
@@ -635,6 +646,7 @@ export function OpenedDroneFilePanel({
       applyEditorCursorTarget();
       const diagnosticId = desktopWorkspaceLoads.find('file-open', { droneId, path: activeFilePath ?? '' });
       desktopWorkspaceLoads.mark(diagnosticId, 'editorMounted');
+      desktopWorkspaceLoads.mark(diagnosticId, 'editorReady');
       desktopWorkspaceLoads.committed(diagnosticId);
     },
     [activeFilePath, droneId, applyEditorCursorTarget, companionEditorTargetId, companionWorkspace, onSaveFile],
@@ -643,14 +655,18 @@ export function OpenedDroneFilePanel({
   React.useEffect(() => {
     if (fileLoading || !activeFilePath) return;
     const id = desktopWorkspaceLoads.find('file-open', { droneId, path: activeFilePath });
+    if (fileError) { desktopWorkspaceLoads.finish(id, 'error'); return; }
     desktopWorkspaceLoads.mark(id, 'surfaceCommitted');
     if (fileKind === 'image') {
       if (imageDiagnosticRef.current?.complete && imageDiagnosticRef.current.naturalWidth > 0) {
         desktopWorkspaceLoads.mark(id, 'imageDecoded');
         desktopWorkspaceLoads.committed(id);
       }
-    } else if (!openedFileEditorVisible || editorRef.current) desktopWorkspaceLoads.committed(id);
-  }, [activeFilePath, droneId, fileLoading, fileKind, fileNavigationSeq, openedFileEditorVisible]);
+    } else if (!openedFileEditorVisible || editorRef.current) {
+      desktopWorkspaceLoads.mark(id, openedFileEditorVisible ? 'editorReady' : 'previewReady');
+      desktopWorkspaceLoads.committed(id);
+    }
+  }, [activeFilePath, droneId, fileLoading, fileError, fileKind, fileNavigationSeq, openedFileEditorVisible, workspaceNavigationId]);
 
   React.useEffect(() => {
     if (!openedFileEditorVisible) {
@@ -837,6 +853,10 @@ export function OpenedDroneFilePanel({
     />
   );
   return (
+    <React.Profiler id="file-pane" onRender={(_id, _phase, duration) => {
+      const id = desktopWorkspaceLoads.find('file-open', { droneId, path: activeFilePath ?? '' });
+      desktopWorkspaceLoads.accumulate(id, 'reactRenderMs', duration);
+    }}>
     <div
       ref={panelRef}
       className="dh-opened-file-panel h-full min-h-0 overflow-hidden bg-[var(--panel-alt)]"
@@ -1137,5 +1157,6 @@ export function OpenedDroneFilePanel({
         </div>
       </div>
     </div>
+    </React.Profiler>
   );
 }

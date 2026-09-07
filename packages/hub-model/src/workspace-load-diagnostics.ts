@@ -1,7 +1,8 @@
 export type WorkspaceLoadRecord = {
   version: 1;
-  kind: 'file-open' | 'directory-load';
+  kind: 'file-open' | 'directory-load' | 'media-load';
   navigationId: string;
+  parentNavigationId?: string;
   targetDeviceId: string;
   droneId: string;
   chatName: string;
@@ -16,7 +17,7 @@ export type WorkspaceLoadRecord = {
   }>;
 };
 
-type Target = { targetDeviceId: string; droneId: string; chatName: string; path: string };
+type Target = { targetDeviceId: string; droneId: string; chatName: string; path: string; parentNavigationId?: string };
 type Span = { record: WorkspaceLoadRecord; target: Target; started: number; timer: ReturnType<typeof setTimeout> };
 
 /** Bounded, concurrent navigations. Paths are matching keys only and never leave memory. */
@@ -38,7 +39,8 @@ export class WorkspaceLoadDiagnostics {
     (timer as any).unref?.();
     this.active.set(navigationId, {
       started: this.now(), target, timer,
-      record: { version: 1, kind, navigationId, targetDeviceId: target.targetDeviceId,
+      record: { version: 1, kind, navigationId,
+        ...(target.parentNavigationId ? { parentNavigationId: target.parentNavigationId } : {}), targetDeviceId: target.targetDeviceId,
         droneId: target.droneId, chatName: target.chatName || 'default', platform: this.config.platform,
         startedAt: new Date().toISOString(), durationMs: 0, status: 'timeout', milestones: { intent: 0 }, requests: [] },
     });
@@ -54,6 +56,12 @@ export class WorkspaceLoadDiagnostics {
     const span = id && this.active.get(id);
     if ((value !== undefined && (!Number.isFinite(value) || value < 0)) || !span || !/^[a-zA-Z][a-zA-Z0-9_.]{0,47}$/.test(name) || Object.keys(span.record.milestones).length >= 32) return;
     if (span.record.milestones[name] === undefined) span.record.milestones[name] = value ?? this.elapsed(span);
+  }
+  accumulate(id: string | undefined, name: string, durationMs: number) {
+    const span = id && this.active.get(id);
+    if (!span || !/^[a-zA-Z][a-zA-Z0-9_.]{0,47}$/.test(name) || !Number.isFinite(durationMs) || durationMs < 0) return;
+    if (!Object.prototype.hasOwnProperty.call(span.record.milestones, name)) { this.mark(id, name, durationMs); return; }
+    span.record.milestones[name] = Math.min(3_600_000, span.record.milestones[name] + durationMs);
   }
   retarget(id: string | undefined, path: string) {
     const span = id && this.active.get(id);

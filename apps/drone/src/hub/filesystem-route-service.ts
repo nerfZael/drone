@@ -9,6 +9,7 @@ import { markHubChatRouteEntry, measureHubRequestPhase, recordHubRequestPhase } 
 import { browserCacheControlForFileRevision, buildContainerFsListScript } from './filesystem-media';
 import {
   buildContainerMediaRangeScript,
+  containerMediaPhases,
   parseRequestedByteRange,
   readHostMediaRange,
   type ResolvedByteRange,
@@ -1919,6 +1920,8 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
               });
             },
           );
+          for (const [name, duration] of containerMediaPhases(String(r.stderr ?? '')))
+            recordHubRequestPhase(req, name, duration);
           const stdout = String(r.stdout ?? '');
           const out = `${stdout}\n${String(r.stderr ?? '')}`;
           if (r.code !== 0) {

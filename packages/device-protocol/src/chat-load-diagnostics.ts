@@ -1,7 +1,8 @@
 export type MobileChatLoadRecord = {
   version: 1;
-  kind?: 'file-open' | 'directory-load';
+  kind?: 'file-open' | 'directory-load' | 'media-load';
   navigationId: string;
+  parentNavigationId?: string;
   targetDeviceId: string;
   droneId: string;
   chatName: string;
@@ -35,7 +36,7 @@ export function normalizeMobileChatLoad(raw: unknown): MobileChatLoadRecord | nu
     );
   if (
     !value ||
-    (value.kind !== undefined && value.kind !== 'file-open' && value.kind !== 'directory-load') ||
+    (value.kind !== undefined && value.kind !== 'file-open' && value.kind !== 'directory-load' && value.kind !== 'media-load') ||
     value.version !== 1 ||
     !text(value.navigationId) ||
     !text(value.targetDeviceId) ||
@@ -52,6 +53,7 @@ export function normalizeMobileChatLoad(raw: unknown): MobileChatLoadRecord | nu
     version: 1,
     ...(value.kind ? { kind: value.kind } : {}),
     navigationId: value.navigationId,
+    ...(text(value.parentNavigationId) ? { parentNavigationId: value.parentNavigationId } : {}),
     targetDeviceId: value.targetDeviceId,
     droneId: value.droneId,
     chatName: value.chatName,

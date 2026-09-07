@@ -1,3 +1,4 @@
+import { readDirectoryWithRetry } from './read-directory-with-retry';
 import { desktopWorkspaceCommitted, beginDesktopWorkspaceLoad, desktopWorkspaceLoads } from './workspace-load-telemetry';
 import { workspaceExplorerLocation, workspaceExplorerRevealDirectories } from '@drone/hub-model';
 import React from 'react';
@@ -12,7 +13,7 @@ import {
   invalidateFsListCacheForDirectory,
   invalidateFsListCachesForDrone,
 } from '../app/use-files-and-ports-pane-state';
-import { requestJson, requestJsonWithTimeout } from '../http';
+import { requestJson } from '../http';
 import { IconChevron, IconSpinner } from '../icons';
 import type { DroneFsEntry, DroneFsListPayload, DroneFsUploadPayload } from '../types';
 import { runDroneFsAction } from './file-actions-api';
@@ -54,7 +55,6 @@ import {
 import { TrailingDirectoryRequestTracker } from './trailing-directory-request-tracker';
 
 const CHILD_DIRECTORY_CACHE_MAX_AGE_MS = 5 * 60_000;
-const FS_LIST_REQUEST_TIMEOUT_MS = 12_000;
 
 type ChildDirectoryCacheEntry = {
   atMs: number;
@@ -67,9 +67,9 @@ function childDirectoryCacheKey(droneIdRaw: string, dirPathRaw: string): string 
   return `${String(droneIdRaw ?? '').trim()}\u0000${normalizeContainerPathInput(dirPathRaw)}`;
 }
 
-function readChildDirectoryCache(cacheKey: string): DroneFsEntry[] | null {
+function readChildDirectoryCache(cacheKey: string, allowStale = false): DroneFsEntry[] | null {
   const cached = childDirectoryCache.get(cacheKey);
-  if (!cached || Date.now() - cached.atMs > CHILD_DIRECTORY_CACHE_MAX_AGE_MS) return null;
+  if (!cached || (!allowStale && Date.now() - cached.atMs > CHILD_DIRECTORY_CACHE_MAX_AGE_MS)) return null;
   return cached.entries;
 }
 
@@ -239,6 +239,11 @@ export function DroneFilesDock({
   const dragDepthRef = React.useRef(0);
   const uploadRunRef = React.useRef(0);
   const childRequestSeqRef = React.useRef<Record<string, number>>({});
+  const childAbortRef = React.useRef(new Map<string, AbortController>());
+  React.useEffect(() => () => {
+    for (const controller of childAbortRef.current.values()) controller.abort();
+    childAbortRef.current.clear();
+  }, [workspaceStateKey]);
   const childRequestTrackerRef = React.useRef(new TrailingDirectoryRequestTracker());
   const [dragActive, setDragActive] = React.useState(false);
   const [uploading, setUploading] = React.useState(false);
@@ -401,7 +406,7 @@ export function DroneFilesDock({
         return;
       const cacheKey = childDirectoryCacheKey(droneId, dirPath);
       const diagnosticId = opts?.force ? undefined : beginDesktopWorkspaceLoad('directory-load', droneId, dirPath);
-      const cached = opts?.force ? null : readChildDirectoryCache(cacheKey);
+      const cached = readChildDirectoryCache(cacheKey, true);
       if (cached) {
         desktopWorkspaceLoads.mark(diagnosticId, 'cacheHit', 1);
         setChildEntriesByPath((prev) => {
@@ -413,20 +418,24 @@ export function DroneFilesDock({
           return { ...prev, [dirPath]: null };
         });
         desktopWorkspaceLoads.committed(diagnosticId);
-        return;
+        if (!opts?.force && readChildDirectoryCache(cacheKey)) return;
       }
 
       const seq = (childRequestSeqRef.current[dirPath] ?? 0) + 1;
       childRequestSeqRef.current[dirPath] = seq;
       childRequestTrackerRef.current.begin(dirPath, seq);
+      const lifetime = new AbortController();
+      childAbortRef.current.set(dirPath, lifetime);
       if (!cached) setChildLoadingByPath((prev) => ({ ...prev, [dirPath]: true }));
       setChildErrorByPath((prev) => ({ ...prev, [dirPath]: null }));
 
       try {
-        const data = await requestJsonWithTimeout<DroneFsListPayload>(
-          `/api/drones/${encodeURIComponent(droneId)}/fs/list?path=${encodeURIComponent(dirPath)}`,
-          undefined,
-          FS_LIST_REQUEST_TIMEOUT_MS,
+        const data = await readDirectoryWithRetry(
+          (signal) => requestJson<DroneFsListPayload>(
+            `/api/drones/${encodeURIComponent(droneId)}/fs/list?path=${encodeURIComponent(dirPath)}`,
+            { signal },
+          ), lifetime.signal,
+          (attempt) => desktopWorkspaceLoads.mark(diagnosticId, 'retryCount', attempt),
         );
         if ((data as any)?.ok !== true) {
           throw new Error(String((data as any)?.error ?? 'filesystem request failed'));
@@ -443,11 +452,13 @@ export function DroneFilesDock({
           return { ...prev, [dirPath]: null };
         });
       } catch (e: any) {
-        desktopWorkspaceLoads.finish(diagnosticId, 'error');
+        desktopWorkspaceLoads.finish(diagnosticId, lifetime.signal.aborted ? 'superseded' : e?.name === 'TimeoutError' ? 'timeout' : 'error');
+        if (lifetime.signal.aborted) return;
         if (childRequestSeqRef.current[dirPath] !== seq) return;
         const msg = String(e?.message ?? e ?? 'failed to load directory').trim() || 'failed to load directory';
         setChildErrorByPath((prev) => ({ ...prev, [dirPath]: msg }));
       } finally {
+        if (childAbortRef.current.get(dirPath) === lifetime) childAbortRef.current.delete(dirPath);
         const forceAfterBusy = childRequestTrackerRef.current.finish(dirPath, seq);
         if (childRequestSeqRef.current[dirPath] === seq) {
           setChildLoadingByPath((prev) => {
@@ -455,7 +466,7 @@ export function DroneFilesDock({
             return { ...prev, [dirPath]: false };
           });
         }
-        if (forceAfterBusy) void loadDirectory(dirPath, { force: true });
+        if (forceAfterBusy && !lifetime.signal.aborted) void loadDirectory(dirPath, { force: true });
       }
     },
     [childEntriesByPath, childErrorByPath, droneId, normalizedPath],

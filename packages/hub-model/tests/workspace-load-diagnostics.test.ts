@@ -3,6 +3,26 @@ import { WorkspaceLoadDiagnostics, type WorkspaceLoadRecord } from '../src/works
 import { readWorkspaceFileFirst } from '../src/path-navigation';
 
 const target = { targetDeviceId: 'desktop', droneId: 'drone', chatName: 'default', path: '/private/file.txt' };
+
+test('media readiness remains independent of file readiness and preserves the click identity', () => {
+  const { loads, saved, frames } = fixture();
+  const parent = { ...target, parentNavigationId: 'chat-click' };
+  const file = loads.start('file-open', parent);
+  const image1 = loads.start('media-load', { ...parent, path: '/private/image1.png' });
+  const image2 = loads.start('media-load', { ...parent, path: '/private/image2.png' });
+  loads.accumulate(file, 'reactRenderMs', 3);
+  loads.accumulate(file, 'reactRenderMs', 4);
+  loads.committed(file);
+  while (frames.length) frames.shift()!();
+  expect(saved).toHaveLength(1);
+  expect(saved[0].parentNavigationId).toBe('chat-click');
+  expect(saved[0].milestones.reactRenderMs).toBe(7);
+  expect(loads.find('media-load', { path: '/private/image1.png' })).toBe(image1);
+  loads.finish(image1, 'completed');
+  loads.finish(image2, 'error');
+  expect(saved).toHaveLength(3);
+  expect(JSON.stringify(saved)).not.toContain('/private/');
+});
 function fixture() {
   let time = 0;
   let seq = 0;

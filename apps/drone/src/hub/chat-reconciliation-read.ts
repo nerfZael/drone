@@ -7,6 +7,7 @@ export function readChatReconciliationEntry(
       chatName: string;
       indexes: number[];
       includePending: boolean;
+      reconciliationOnly?: boolean;
     }) => any;
   },
 ): any | null {
@@ -17,6 +18,7 @@ export function readChatReconciliationEntry(
     ...opts,
     indexes: [],
     includePending: true,
+    reconciliationOnly: true,
   });
   if (!rows?.available) return null;
 

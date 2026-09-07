@@ -29,6 +29,7 @@ describe('chat reconciliation reads', () => {
         chatName: 'default',
         indexes: [],
         includePending: true,
+        reconciliationOnly: true,
       },
     ]);
     expect(entry).toEqual({

@@ -192,38 +192,60 @@ export function buildContainerMediaRangeScript(input: {
     'esac',
     'count=$size',
     'if [ "$partial" -eq 1 ]; then count=$((end - start + 1)); fi',
+    'perf_begin() { perf_started=${EPOCHREALTIME:-0}; perf_started=${perf_started/./}; }',
+    'perf_end() { local now=${EPOCHREALTIME:-0}; now=${now/./}; printf "__PERF__\\t%s\\t%s\\n" "$1" "$((now - perf_started))" >&2; }',
     'mime=""',
+    'perf_begin',
     'if command -v file >/dev/null 2>&1; then mime=$(file -Lb --mime-type -- "$target" 2>/dev/null || true); fi',
+    'perf_end media_mime',
     'revision=""',
     'actual_size="$size"',
     'data=""',
     'tmp=""',
     'watchdog_pid=""',
-    'cleanup() { if [ -n "$watchdog_pid" ]; then kill "$watchdog_pid" 2>/dev/null || true; fi; if [ -n "$tmp" ]; then rm -rf -- "$tmp"; fi; }',
+    'cleanup() { if [ -n "$watchdog_pid" ]; then kill "$watchdog_pid" 2>/dev/null || true; wait "$watchdog_pid" 2>/dev/null || true; fi; if [ -n "$tmp" ]; then rm -rf -- "$tmp"; fi; }',
     'trap cleanup EXIT',
     "trap 'exit 124' HUP INT TERM",
-    '( sleep 55; kill -TERM "$$" ) &',
+    // A watchdog must not keep Docker's output pipe open after the read exits.
+    // Reap its sleep child on cancellation instead of leaving a timer process behind.
+    `( trap 'exit 0' TERM; sleep 55 & sleeper=$!; trap 'kill "$sleeper" 2>/dev/null || true; wait "$sleeper" 2>/dev/null || true; exit 0' TERM; wait "$sleeper"; kill -TERM "$$" ) </dev/null >/dev/null 2>&1 &`,
     'watchdog_pid="$!"',
     'if [ "$include_revision" -eq 1 ] || { [ "$partial" -eq 0 ] && [ "$include_body" -eq 1 ]; }; then',
     '  tmp=$(mktemp -d)',
     '  snapshot="$tmp/snapshot"',
+    '  perf_begin',
     '  if ! head -c "$((max + 1))" -- "$target" > "$snapshot"; then echo "__ERR__\tread-failed"; exit 6; fi',
+    '  perf_end media_snapshot',
     '  actual_size=$(wc -c < "$snapshot" | tr -d "[:space:]")',
     '  if [ "$actual_size" -gt "$max" ]; then printf "__ERR__\ttoo-large\t%s\n" "$actual_size"; exit 4; fi',
-    '  if [ "$include_revision" -eq 1 ]; then revision=$(sha256sum -- "$snapshot" | awk \'{print $1}\'); fi',
+    '  if [ "$include_revision" -eq 1 ]; then perf_begin; revision=$(sha256sum -- "$snapshot" | awk \'{print $1}\'); perf_end media_hash; fi',
     '  if [ "$include_body" -eq 1 ]; then',
     '    data="$tmp/data"',
+    '    perf_begin',
     '    dd if="$snapshot" iflag=skip_bytes,count_bytes skip="$start" count="$count" status=none > "$data"',
+    '    perf_end media_slice',
     '  fi',
     'elif [ "$partial" -eq 1 ] && [ "$include_body" -eq 1 ]; then',
     '  tmp=$(mktemp -d)',
     '  data="$tmp/data"',
+    '  perf_begin',
     '  dd if="$target" iflag=skip_bytes,count_bytes skip="$start" count="$count" status=none > "$data"',
+    '  perf_end media_slice',
     'fi',
     'if [ "$include_revision" -eq 0 ]; then actual_size=$(wc -c < "$target" | tr -d "[:space:]"); fi',
     'printf "__META__\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "$mime" "$size" "$start" "$count" "$partial" "$revision" "$actual_size"',
-    'if [ "$include_body" -eq 1 ]; then base64 < "$data" | tr -d "\\n"; fi',
+    'if [ "$include_body" -eq 1 ]; then perf_begin; base64 < "$data" | tr -d "\\n"; perf_end media_encode; fi',
   ].join('\n');
+}
+
+/** Only allowlisted numeric script phases may enter HTTP diagnostics. */
+export function containerMediaPhases(stderr: string): Array<[string, number]> {
+  return stderr.split('\n').flatMap((line) => {
+    const match = /^__PERF__\t(media_(?:mime|snapshot|hash|slice|encode))\t(\d{1,12})$/.exec(line);
+    if (!match) return [];
+    const ms = Number(match[2]) / 1000;
+    return ms <= 60_000 ? [[match[1], ms] as [string, number]] : [];
+  });
 }
 
 function safeInteger(value: string): number | null {

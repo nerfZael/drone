@@ -1,3 +1,4 @@
+import { setWorkspaceNavigationContext } from './workspace-navigation-context';
 import { recordUiAction } from '../../ui-diagnostics';
 import {
   collectChatLoadResourceTiming,
@@ -318,6 +319,7 @@ export function beginChatLoadNavigation(input: {
     timeout: null,
   };
   activeSpan = span;
+  setWorkspaceNavigationContext({ navigationId: span.id, ...target });
   span.timeout = setTimeout(() => {
     if (activeSpan !== span) return;
     mark(span, 'timed_out');
@@ -329,6 +331,12 @@ export function beginChatLoadNavigation(input: {
 export function markChatLoadSelectionCommitted(target: ChatLoadTarget): void {
   const span = activeFor(target);
   if (span) mark(span, 'selection_committed');
+}
+
+// React invokes this only in development or a profiling build.
+export function recordChatRenderDuration(durationMs: number): void {
+  if (!activeSpan || !Number.isFinite(durationMs) || durationMs < 0) return;
+  activeSpan.milestones.react_render_ms = (activeSpan.milestones.react_render_ms ?? 0) + durationMs;
 }
 
 export function markChatLoadCacheHit(

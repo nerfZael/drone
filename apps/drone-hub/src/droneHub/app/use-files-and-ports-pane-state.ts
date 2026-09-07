@@ -1,3 +1,5 @@
+import { readDirectoryWithRetry } from '../files/read-directory-with-retry';
+import { useWorkspaceNavigationId } from './workspace-navigation-context';
 import { desktopWorkspaceCommitted, beginDesktopWorkspaceLoad, desktopWorkspaceLoads } from '../files/workspace-load-telemetry';
 import React from 'react';
 import { usePaneReadiness } from '../panes/usePaneReadiness';
@@ -43,7 +45,6 @@ import { sameDroneFsEntries } from '../files/same-drone-fs-entries';
 const FS_LIST_CACHE_MAX_AGE_MS = 5 * 60_000;
 const FS_LIST_POLL_LOADING_MS = 8_000;
 const FS_LIST_POLL_IDLE_MS = 30_000;
-const FS_LIST_REQUEST_TIMEOUT_MS = 12_000;
 
 type FsListCacheEntry = {
   atMs: number;
@@ -65,9 +66,9 @@ function fsListCacheKey(droneIdRaw: string, pathRaw: string): string {
   return `${String(droneIdRaw ?? '').trim()}\u0000${String(pathRaw ?? '').trim() || '/'}`;
 }
 
-function readFsListCache(cacheKey: string): Extract<DroneFsListPayload, { ok: true }> | null {
+function readFsListCache(cacheKey: string, allowStale = false): Extract<DroneFsListPayload, { ok: true }> | null {
   const cached = fsListCache.get(cacheKey);
-  if (!cached || Date.now() - cached.atMs > FS_LIST_CACHE_MAX_AGE_MS) return null;
+  if (!cached || (!allowStale && Date.now() - cached.atMs > FS_LIST_CACHE_MAX_AGE_MS)) return null;
   return cached.payload;
 }
 
@@ -169,6 +170,17 @@ export function useFilesAndPortsPaneState({
     setFsRefreshNonce((n) => n + 1);
   }, []);
 
+  const workspaceNavigationId = useWorkspaceNavigationId(String(currentDrone?.id ?? ''));
+  React.useEffect(() => {
+    const droneId = String(currentDrone?.id ?? '');
+    if (!workspaceNavigationId || !filesEnabled || fsLoading || !fsResp?.ok || fsResp.id !== droneId || fsResp.path !== currentFsPath) return;
+    // A chat switch within the same drone can reuse an already-visible Explorer.
+    // Record readiness without restarting its poller or issuing another read.
+    const id = beginDesktopWorkspaceLoad('directory-load', droneId, currentFsPath);
+    desktopWorkspaceLoads.mark(id, 'cacheHit', 1);
+    desktopWorkspaceLoads.committed(id);
+  }, [workspaceNavigationId]);
+
   React.useEffect(() => {
     if (!filesEnabled) {
       setFsLoading(false);
@@ -183,6 +195,7 @@ export function useFilesAndPortsPaneState({
     }
 
     let mounted = true;
+    const lifetime = new AbortController();
     let timer: ReturnType<typeof setTimeout> | null = null;
     let busy = false;
     let forceAfterBusy = false;
@@ -191,7 +204,7 @@ export function useFilesAndPortsPaneState({
     lastFsRefreshNonceRef.current = fsRefreshNonce;
     const cacheKey = fsListCacheKey(droneId, currentFsPath);
     const diagnosticId = beginDesktopWorkspaceLoad('directory-load', droneId, currentFsPath);
-    const cached = forceInitialLoad ? null : readFsListCache(cacheKey);
+    const cached = readFsListCache(cacheKey, true);
     if (cached) {
       desktopWorkspaceLoads.mark(diagnosticId, 'cacheHit', 1);
       hasLoadedData = true;
@@ -238,17 +251,14 @@ export function useFilesAndPortsPaneState({
       busy = true;
       if (!silent) setFsLoading(true);
       try {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), FS_LIST_REQUEST_TIMEOUT_MS);
-        const data = await requestJson<DroneFsListPayload>(
-          `/api/drones/${encodeURIComponent(droneId)}/fs/list?path=${encodeURIComponent(currentFsPath)}`,
-          { signal: controller.signal },
-        ).catch((e: any) => {
-          if (e?.name === 'AbortError') {
-            throw new Error(`Files request timed out after ${Math.round(FS_LIST_REQUEST_TIMEOUT_MS / 1000)}s.`);
-          }
-          throw e;
-        }).finally(() => clearTimeout(timer));
+        const data = await readDirectoryWithRetry(
+          (signal) => requestJson<DroneFsListPayload>(
+            `/api/drones/${encodeURIComponent(droneId)}/fs/list?path=${encodeURIComponent(currentFsPath)}`,
+            { signal },
+          ),
+          lifetime.signal,
+          (attempt) => desktopWorkspaceLoads.mark(diagnosticId, 'retryCount', attempt),
+        );
         if (!mounted) return;
         if ((data as any)?.ok !== true) {
           throw new Error(String((data as any)?.error ?? 'filesystem request failed'));
@@ -259,7 +269,7 @@ export function useFilesAndPortsPaneState({
         setFsResp((current) => (sameDroneFsListPayload(current, payload) ? current : payload));
         setFsError(null);
       } catch (e: any) {
-        desktopWorkspaceLoads.finish(diagnosticId, 'error');
+        desktopWorkspaceLoads.finish(diagnosticId, e?.name === 'TimeoutError' ? 'timeout' : 'error');
         if (!mounted) return;
         setFsError(e?.message ?? String(e));
       } finally {
@@ -287,6 +297,7 @@ export function useFilesAndPortsPaneState({
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
       mounted = false;
+      lifetime.abort();
       desktopWorkspaceLoads.finish(diagnosticId, 'superseded');
       clearTimer();
       document.removeEventListener('visibilitychange', onVisibilityChange);

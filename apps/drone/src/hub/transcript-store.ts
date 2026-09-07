@@ -2287,6 +2287,7 @@ export class ChatTranscriptRepository {
     indexes: number[];
     includePending: boolean;
     activityMode?: TranscriptActivityReadMode;
+    reconciliationOnly?: boolean;
   }): ChatReadRows {
     return this.database.read((connection) => {
       const indexes = [...new Set(opts.indexes.filter((value) => Number.isSafeInteger(value) && value >= 0))].sort((a, b) => a - b);
@@ -2353,14 +2354,21 @@ export class ChatTranscriptRepository {
           }
         }
       }
-      const pending = opts.includePending ? this.projectPending(connection, opts.droneId, opts.chatName) : [];
+      const pending = opts.includePending ? this.projectPending(connection, opts.droneId, opts.chatName, opts.reconciliationOnly === true) : [];
       const pendingIds = pending.map((item) => String(item.id ?? '').trim()).filter(Boolean);
-      const pendingTurns = pendingIds.length > 0
-        ? (connection.prepare(`SELECT turn_json FROM canonical_chat_turns
+      let pendingTurns: StoredTranscriptTurn[] = [];
+      if (pendingIds.length > 0 && opts.reconciliationOnly) {
+        // Reconciliation needs identity and completion dates, never historical output/activity.
+        pendingTurns = (connection.prepare(`SELECT turn_id AS id, at, prompt_at AS promptAt, completed_at AS completedAt
+            FROM canonical_chat_turns WHERE drone_id = ? AND chat_name = ?
+            AND turn_id IN (${pendingIds.map(() => '?').join(', ')})`)
+          .all(opts.droneId, opts.chatName, ...pendingIds) as Array<{ id: string; at: string; promptAt: string | null; completedAt: string | null }>).map(normalizeTurn);
+      } else if (pendingIds.length > 0) {
+        pendingTurns = (connection.prepare(`SELECT turn_json FROM canonical_chat_turns
             WHERE drone_id = ? AND chat_name = ? AND turn_id IN (${pendingIds.map(() => '?').join(', ')})`)
           .all(opts.droneId, opts.chatName, ...pendingIds) as TurnRow[])
-          .map((row) => normalizeTurn(parseJson(row.turn_json)))
-        : [];
+          .map((row) => normalizeTurn(parseJson(row.turn_json)));
+      }
       return {
         available: true,
         turns: turns.sort((a, b) => a.index - b.index),
@@ -2681,16 +2689,19 @@ export class ChatTranscriptRepository {
       WHERE drone_id = ? AND chat_name = ?`).get(droneId, chatName) as ChatRow | undefined) ?? null;
   }
 
-  private promptRows(connection: HubDatabaseConnection, droneId: string, chatName: string): any[] {
+  private promptRows(connection: HubDatabaseConnection, droneId: string, chatName: string, reconciliationOnly = false): any[] {
     const hasPrompts = connection.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'prompts'").get();
     if (!hasPrompts) return [];
     return connection.prepare(`SELECT prompt_id, created_at, updated_at, state, prompt, payload_json, last_error
       FROM prompts WHERE drone_id = ? AND chat_name = ? AND state != 'cancelled'
+      ${reconciliationOnly ? `AND NOT (state = 'sent' AND EXISTS (
+        SELECT 1 FROM canonical_chat_turns AS turns WHERE turns.drone_id = prompts.drone_id
+          AND turns.chat_name = prompts.chat_name AND turns.turn_id = prompts.prompt_id))` : ''}
       ORDER BY sequence DESC LIMIT 60`).all(droneId, chatName).reverse() as any[];
   }
 
-  private projectPending(connection: HubDatabaseConnection, droneId: string, chatName: string): StoredPendingPrompt[] {
-    return this.promptRows(connection, droneId, chatName).map((row) => ({
+  private projectPending(connection: HubDatabaseConnection, droneId: string, chatName: string, reconciliationOnly = false): StoredPendingPrompt[] {
+    return this.promptRows(connection, droneId, chatName, reconciliationOnly).map((row) => ({
       ...(parseJson(row.payload_json) ?? {}),
       id: row.prompt_id,
       at: row.created_at,
@@ -3588,6 +3599,7 @@ export function readChatVersionFromStore(opts: { droneId: string; chatName: stri
   if (store) return store.readVersion(opts);
   const read = memoryReadChat(opts.droneId, opts.chatName);
   const turns = Array.isArray(read.chat?.turns) ? read.chat.turns : [];
+
   const pending = opts.includePending && Array.isArray(read.chat?.pendingPrompts) ? read.chat.pendingPrompts : [];
   const chat = read.chat ? metadata(read.chat) : null;
   return {
@@ -3623,11 +3635,18 @@ export function readChatRowsFromStore(opts: {
   indexes: number[];
   includePending: boolean;
   activityMode?: TranscriptActivityReadMode;
+  reconciliationOnly?: boolean;
 }): ChatReadRows {
   const store = repository();
   if (store) return store.readRows(opts);
   const read = memoryReadChat(opts.droneId, opts.chatName);
   const turns = Array.isArray(read.chat?.turns) ? read.chat.turns : [];
+  const completedIds = new Set(turns.map((turn: StoredTranscriptTurn) => turn.id));
+  const pending = opts.includePending && Array.isArray(read.chat?.pendingPrompts)
+    ? read.chat.pendingPrompts.filter((prompt: StoredPendingPrompt) =>
+        !opts.reconciliationOnly || prompt.state !== 'sent' || !completedIds.has(prompt.id))
+    : [];
+  const pendingIds = new Set(pending.map((prompt: StoredPendingPrompt) => prompt.id));
   return {
     available: true,
     turns: opts.indexes.flatMap((index) =>
@@ -3635,8 +3654,10 @@ export function readChatRowsFromStore(opts: {
         ? [{ index, turn: projectTurnActivityForRead(turns[index], opts.activityMode ?? 'full') }]
         : [],
     ),
-    pending: opts.includePending && Array.isArray(read.chat?.pendingPrompts) ? read.chat.pendingPrompts : [],
-    pendingTurns: turns,
+    pending,
+    pendingTurns: opts.reconciliationOnly ? turns
+      .filter((turn: StoredTranscriptTurn) => pendingIds.has(turn.id))
+      .map(({ id, at, promptAt, completedAt }: StoredTranscriptTurn) => normalizeTurn({ id, at, promptAt, completedAt })) : turns,
   };
 }
 

@@ -1,10 +1,22 @@
+import { workspaceNavigationContext } from '../app/workspace-navigation-context';
 import { WorkspaceLoadDiagnostics } from '@drone/hub-model';
 import { recordUiAction } from '../../ui-diagnostics';
+import { startChatLoadPerformance, stopChatLoadPerformance } from '../app/chat-load-performance';
+
+const performanceSpans = new Map<string, { started: number; state: ReturnType<typeof startChatLoadPerformance> }>();
 
 export const desktopWorkspaceLoads = new WorkspaceLoadDiagnostics({
   uuid: () => crypto.randomUUID(),
   platform: 'web',
   save: async (record) => {
+    const measured = performanceSpans.get(record.navigationId);
+    performanceSpans.delete(record.navigationId);
+    if (measured) {
+      stopChatLoadPerformance(measured.state, measured.started, performance.now(), () => false);
+      record.milestones.longTasksSupported = measured.state.longTaskStatus === 'supported' ? 1 : 0;
+      record.milestones.longTaskMs = measured.state.longTasks.reduce((sum, task) => sum + task.overlapMs, 0);
+      record.milestones.longTaskCount = measured.state.longTaskCount;
+    }
     await fetch('/api/telemetry/file-load', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify(record), keepalive: true,
@@ -12,12 +24,19 @@ export const desktopWorkspaceLoads = new WorkspaceLoadDiagnostics({
   },
 });
 
-export function beginDesktopWorkspaceLoad(kind: 'file-open' | 'directory-load', droneId: string, path: string) {
+export function beginDesktopWorkspaceLoad(kind: 'file-open' | 'directory-load' | 'media-load', droneId: string, path: string) {
   recordUiAction({ action: kind, droneId, path });
-  return desktopWorkspaceLoads.start(kind, { targetDeviceId: 'desktop', droneId, chatName: 'default', path });
+  const parent = workspaceNavigationContext(droneId);
+  const id = desktopWorkspaceLoads.start(kind, { targetDeviceId: 'desktop', droneId, chatName: parent?.chatName ?? 'default', path, parentNavigationId: parent?.navigationId });
+  if (kind !== 'media-load') {
+    const started = performance.now();
+    performanceSpans.set(id, { started, state: startChatLoadPerformance({ navigationStartedMonoMs: started, isNavigationResource: () => false }) });
+  }
+  if (parent) desktopWorkspaceLoads.mark(id, 'sinceClickMs', parent.offsetMs);
+  return id;
 }
 
-export function desktopWorkspaceCommitted(kind: 'file-open' | 'directory-load', droneId: string, path: string, error = false) {
+export function desktopWorkspaceCommitted(kind: 'file-open' | 'directory-load' | 'media-load', droneId: string, path: string, error = false) {
   const id = desktopWorkspaceLoads.find(kind, { droneId, path });
   if (error) desktopWorkspaceLoads.finish(id, 'error');
   else desktopWorkspaceLoads.committed(id);
