@@ -1066,7 +1066,7 @@ export function SelectedDroneWorkspace({
     : chatUiMode === 'transcript'
       ? selectedChatDockerSnapshotBusy ||
         visiblePendingPromptsWithStartup.some(pendingPromptShowsWorkingState) ||
-        pendingExternalQuestionRequests.length > 0
+        pendingExternalQuestionRequests.some((request) => !request.subscriptionId)
       : showRespondingAsStatusInHeader || canStopResponse;
   const openChatErrorDetails = React.useCallback(() => {
     const message = String(chatInfoError ?? '').trim();

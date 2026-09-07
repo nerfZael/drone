@@ -5,7 +5,3 @@
  */
 export const INTERACTIVE_MCP_TOOL_TIMEOUT_MS = 24 * 60 * 60 * 1_000;
 export const INTERACTIVE_MCP_TOOL_TIMEOUT_SECONDS = INTERACTIVE_MCP_TOOL_TIMEOUT_MS / 1_000;
-
-export function isInteractiveMcpTool(name: string): boolean {
-  return name === 'ask_questions';
-}

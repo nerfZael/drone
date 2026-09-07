@@ -750,6 +750,73 @@ describe('Drone Hub assistant MCP transport', () => {
     });
   });
 
+  test('ask_questions immediately returns the answer subscription for its calling chat', async () => {
+    await withTempDroneDataDir('drone-mcp-async-questions-', async () => {
+      const calls: any[] = [];
+      const response = {
+        requestId: 'questions-a',
+        status: 'pending',
+        subscription: { id: 'subscription-a', status: 'active' },
+      };
+      const client = await createInProcessDroneHubMcpClient({
+        correlationId: 'thread-questions',
+        nativeThreadId: 'thread-questions',
+        principal: {
+          kind: 'chat',
+          tokenId: 'chat:drone-a:default',
+          name: 'Questions',
+          droneId: 'drone-a',
+          chatName: 'default',
+          chatId: 'thread-questions',
+          accessScope: {
+            readMode: 'all',
+            writeMode: 'all',
+            executeMode: 'all',
+            droneIds: ['drone-a'],
+          },
+          selectedDroneRefs: ['drone-a'],
+        },
+        hubServices: {
+          questions: {
+            askAsync: async (input: any) => {
+              calls.push(input);
+              return response;
+            },
+          },
+        } as any,
+      });
+      try {
+        const result = await client.callTool({
+          name: 'ask_questions',
+          arguments: {
+            questions: [
+              {
+                id: 'scope',
+                question: 'Which scope?',
+                choices: [
+                  { id: 'small', label: 'Small' },
+                  { id: 'large', label: 'Large' },
+                ],
+              },
+            ],
+            _blip: { toolCallId: 'call-questions' },
+          },
+        });
+        expect(result.isError).not.toBe(true);
+        expect(result.structuredContent).toEqual(response);
+        expect(calls).toHaveLength(1);
+        expect(calls[0]).toMatchObject({
+          droneId: 'drone-a',
+          chatId: 'thread-questions',
+          nativeThreadId: 'thread-questions',
+          toolCallId: 'call-questions',
+        });
+      } finally {
+        await client.close();
+      }
+    });
+  });
+
   test('uses the shared rename command without a loopback HTTP request', async () => {
     await withTempDroneDataDir('drone-assistant-mcp-rename-', async () => {
       const previousFetch = globalThis.fetch;

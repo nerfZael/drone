@@ -1,6 +1,7 @@
 import { getHubSettingsRepository } from '../../host/hub-settings-repository';
 import {
   DEFAULT_RESOURCE_SUBSCRIPTION_SETTINGS,
+  RESOURCE_SUBSCRIPTION_EVENTS,
   type ResourceSubscriptionSettings,
 } from './resource-subscription-types';
 
@@ -18,6 +19,8 @@ export function normalizeResourceSubscriptionSettings(raw: unknown): ResourceSub
   const defaults = DEFAULT_RESOURCE_SUBSCRIPTION_SETTINGS;
   return {
     enabled: value.enabled !== false,
+    deliveryMode: value.deliveryMode === 'asap' ? 'asap' : 'queue',
+    eventDeliveryModes: normalizeEventDeliveryModes(value.eventDeliveryModes),
     githubPollingIntervalMs: boundedInteger(
       value.githubPollingIntervalMs,
       defaults.githubPollingIntervalMs,
@@ -81,4 +84,17 @@ export async function writeResourceSubscriptionSettings(
     updatedAt: new Date().toISOString(),
   });
   return settings;
+}
+
+function normalizeEventDeliveryModes(
+  raw: unknown,
+): ResourceSubscriptionSettings['eventDeliveryModes'] {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const values = raw as Record<string, unknown>;
+  return Object.fromEntries(
+    RESOURCE_SUBSCRIPTION_EVENTS.flatMap((eventType) => {
+      const mode = values[eventType];
+      return mode === 'queue' || mode === 'asap' ? [[eventType, mode]] : [];
+    }),
+  );
 }

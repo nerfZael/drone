@@ -1,4 +1,5 @@
 import { isSendInNewChatQueueAction } from '@drone/assistant-chat';
+import { compactEventPromptPreview } from './compactEventPromptPreview';
 import { boundedAssistantHistory } from './features/cross-device-assistant/bounded-assistant-history';
 import { fitMeshChatPayload } from './fit-mesh-chat-payload';
 
@@ -88,10 +89,52 @@ function compactResolvedQuestionRequest(request: any): any {
   };
 }
 
-/** Keep active forms intact, but send answer-only summaries for resolved mobile history. */
+/** Bound each mobile page while keeping every pending form reachable. */
+export function compactChatQuestionRequestPage(value: unknown, requestedOffset: unknown = 0) {
+  const requests = Array.isArray(value) ? value : [];
+  const pending = requests.filter((request) => request?.status === 'pending');
+  const limit = 20;
+  const offset = Math.min(
+    Math.max(0, Math.floor(Number(requestedOffset) || 0)),
+    Math.max(0, Math.floor((pending.length - 1) / limit) * limit),
+  );
+  const questionRequests = compactChatQuestionRequests([
+    ...requests.filter((request) => request?.status !== 'pending'),
+    ...pending.slice(offset, offset + limit),
+  ]);
+  return {
+    questionRequests,
+    pendingQuestionRequests: questionRequests.filter((request) => request.status === 'pending'),
+    questionRequestPage: { offset, limit, total: pending.length },
+  };
+}
+
+/** Keep small active forms intact and defer large forms to individual reads. */
 export function compactChatQuestionRequests(value: unknown): any[] {
   const requests = Array.isArray(value) ? value : [];
-  const pending = requests.filter((request) => request?.status === 'pending').slice(-2);
+  let pendingBytes = 0;
+  const pending = requests
+    .filter((request) => request?.status === 'pending')
+    .map((request) => {
+      if (request.questionsDeferred) return request;
+      const bytes = Buffer.byteLength(JSON.stringify(request));
+      if (pendingBytes + bytes <= 24 * 1024) {
+        pendingBytes += bytes;
+        return request;
+      }
+      // Keep every pending request visible, but load large forms individually.
+      return {
+        ...request,
+        questionsDeferred: true,
+        questionCount: request.questions.length,
+        questions: request.questions.slice(0, 1).map((question: any) => ({
+          id: question.id,
+          question: truncateUtf8(question.question, 120),
+          importance: question.importance,
+          choices: [],
+        })),
+      };
+    });
   const resolved: any[] = [];
   let resolvedBytes = 2;
   for (const request of requests
@@ -112,7 +155,8 @@ export function compactChatQuestionRequests(value: unknown): any[] {
 function compactQueuedPrompt(prompt: any) {
   return {
     id: String(prompt?.id ?? '').slice(0, 160),
-    prompt: truncateUtf8(prompt?.prompt, 768),
+    prompt: compactEventPromptPreview(prompt?.prompt, 2_800) ?? truncateUtf8(prompt?.prompt, 768),
+    deliveryMode: prompt?.deliveryMode === 'asap' ? 'asap' : 'queue',
     createdAt: String(prompt?.createdAt ?? ''),
     status: prompt?.status === 'running' || prompt?.status === 'failed' ? prompt.status : 'queued',
     error: prompt?.error ? truncateUtf8(prompt.error, 512) : null,
@@ -208,17 +252,12 @@ export function compactNativeChatReadResponse(input: {
       createdAt: String(approval?.createdAt ?? ''),
       status: 'pending',
     }));
-  const questionRequests = compactChatQuestionRequests(
-    Array.isArray(input.snapshot?.questionRequests)
+  const questionPage = compactChatQuestionRequestPage(
+    (Array.isArray(input.snapshot?.questionRequests)
       ? input.snapshot.questionRequests
-      : input.snapshot?.pendingQuestionRequests,
-  ).filter((request: any) => String(request?.chatId ?? '') === input.nativeChatId);
-  const pendingQuestionRequests = questionRequests
-    .filter(
-      (request: any) =>
-        String(request?.chatId ?? '') === input.nativeChatId && request?.status === 'pending',
-    )
-    .slice(-2);
+      : (input.snapshot?.pendingQuestionRequests ?? [])
+    ).filter((request: any) => String(request?.chatId ?? '') === input.nativeChatId),
+  );
   const streamingMessages = compactStreamingMessages(input.snapshot);
   const pending = (thread?.queuedPrompts ?? []).map((prompt: any) => ({
     ...prompt,
@@ -230,8 +269,11 @@ export function compactNativeChatReadResponse(input: {
     nativeChatId: input.nativeChatId,
     streamingMessages,
     pendingApprovals,
-    pendingQuestionRequests,
-    questionRequests,
+    ...questionPage,
+    // Remote drone reads have already selected the requested page.
+    ...(input.metadata?.questionRequestPage
+      ? { questionRequestPage: input.metadata.questionRequestPage }
+      : {}),
     thread,
     pending,
   };

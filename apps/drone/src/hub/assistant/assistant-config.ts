@@ -486,7 +486,7 @@ const ASSISTANT_TOOL_SUMMARY_DEFINITIONS: AssistantToolSummary[] = [
     name: 'ask_questions',
     label: 'Ask questions',
     category: 'actions',
-    description: 'Pause this chat for structured answers from the user.',
+    description: 'Ask questions asynchronously and receive answers through a subscription.',
   },
 ];
 const DRONE_HUB_MCP_TOOL_NAMES = new Set([

@@ -1679,7 +1679,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     {
       title: 'Ask the user questions',
       description:
-        'Pause this Drone Hub chat and ask the user one or more multiple-choice questions. Preserve question order. Each question may include an optional detailedExplanation with background, constraints, or the problem being decided, plus an optional importance integer from 1 to 100 that defaults to 50; importance never changes order. Mark at most one choice recommended=true per question. A recommended choice is preselected. Drone Hub always offers a custom-answer field and an explicit skip action for every question, so do not add an Other, Custom, None, or Skip choice yourself. The user may accept a choice, enter a custom answer, explicitly skip individual questions, add overall notes, or skip the whole request. If any message is queued for this chat, the request is automatically skipped and the queued message proceeds normally. Prefer a small focused set even though up to 99 questions are supported.',
+        'Ask the user one or more multiple-choice questions asynchronously. Returns immediately with a requestId and a durable one-shot subscription. Continue working while the user considers the questions; they remain answerable after the current run finishes. Submitting or skipping sends a question_request.resolved event through the normal event system to this chat. Delivery follows the configured global or per-event queued/ASAP mode, batching, and rate limits. Preserve question order. Each question may include an optional detailedExplanation with background, constraints, or the problem being decided, plus an optional importance integer from 1 to 100 that defaults to 50; importance never changes order. Mark at most one choice recommended=true per question. A recommended choice is preselected. Drone Hub always offers a custom-answer field and an explicit skip action for every question, so do not add an Other, Custom, None, or Skip choice yourself. The user may accept a choice, enter a custom answer, explicitly skip individual questions, add overall notes, or skip the whole request. Queued messages and stopping the current run do not discard these questions. Prefer a small focused set even though up to 99 questions are supported.',
       inputSchema: {
         questions: z
           .array(
@@ -1711,23 +1711,20 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
           .optional(),
       },
     },
-    async (args, extra) => {
+    async (args) => {
       const conversation = chatPrincipal(context);
       if (!conversation) {
         throw new Error('ask_questions requires a Drone Hub chat connection');
       }
-      const result = await context.hubServices.questions.ask(
-        {
-          droneId: conversation.droneId,
-          chatName: conversation.chatName,
-          chatId: conversation.chatId,
-          ...(context.nativeThreadId ? { nativeThreadId: context.nativeThreadId } : {}),
-          ...(args._blip?.toolCallId ? { toolCallId: args._blip.toolCallId } : {}),
-          toolName: 'drone_hub__ask_questions',
-          questions: args.questions,
-        },
-        extra.signal,
-      );
+      const result = await context.hubServices.questions.askAsync({
+        droneId: conversation.droneId,
+        chatName: conversation.chatName,
+        chatId: conversation.chatId,
+        ...(context.nativeThreadId ? { nativeThreadId: context.nativeThreadId } : {}),
+        ...(args._blip?.toolCallId ? { toolCallId: args._blip.toolCallId } : {}),
+        toolName: 'drone_hub__ask_questions',
+        questions: args.questions,
+      });
       return toolResult(result);
     },
   );
@@ -3356,7 +3353,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     {
       title: 'Subscribe to resource events',
       description:
-        'Subscribe this conversation to events. DroneHub chat IDs support chat.idle and chat.failed. Native DroneHub change-request numbers support change_request.updated, change_request.merged, and change_request.closed. Both require read access to their target drone. GitHub owner/repository supports pull_request.opened, pull_request.comment.created, pull_request.merged, and pull_request.closed. GitHub owner/repository#number supports pull_request.comment.created, pull_request.merged, and pull_request.closed. GitHub resources are validated directly with the Hub GitHub identity and do not need to be registered in DroneHub. Delivery settings and cursors are managed by DroneHub.',
+        'Subscribe this conversation to events. DroneHub chat IDs support chat.idle and chat.failed. Native DroneHub change-request numbers support change_request.updated, change_request.merged, and change_request.closed. Both require read access to their target drone. GitHub owner/repository supports pull_request.opened, pull_request.comment.created, pull_request.merged, and pull_request.closed. GitHub owner/repository#number supports pull_request.comment.created, pull_request.merged, and pull_request.closed. GitHub resources are validated directly with the Hub GitHub identity and do not need to be registered in DroneHub. Delivery uses the global or per-event queued/ASAP setting in DroneHub. Cursors are managed by DroneHub.',
       inputSchema: {
         provider: z.enum(['drone-hub', 'github']),
         resourceType: z.enum(['chat', 'repository', 'pull_request', 'change_request']),
@@ -3390,7 +3387,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     {
       title: 'Subscribe to cron',
       description:
-        'Durably resume this conversation on a recurring five-field cron schedule. The minimum frequency is once per minute. If timeZone is omitted, DroneHub uses the latest timezone reported by the user interface, then the MCP host machine timezone, then UTC. An explicit timeZone always wins. Missed occurrences are coalesced, and delivery can be delayed by batching, queue load, or rate limits. The subscription remains active until cancelled.',
+        'Durably resume this conversation on a recurring five-field cron schedule. The minimum frequency is once per minute. If timeZone is omitted, DroneHub uses the latest timezone reported by the user interface, then the MCP host machine timezone, then UTC. An explicit timeZone always wins. Missed occurrences are coalesced, and delivery can be delayed by batching, queue load, or rate limits. Delivery uses the global or cron-event queued/ASAP setting in DroneHub. The subscription remains active until cancelled.',
       inputSchema: {
         expression: z.string().min(1).max(200),
         timeZone: z

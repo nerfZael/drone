@@ -195,6 +195,8 @@ export type GithubSettingsResponse = {
 
 export type ResourceSubscriptionSettings = {
   enabled: boolean;
+  deliveryMode: 'queue' | 'asap';
+  eventDeliveryModes: Record<string, 'queue' | 'asap'>;
   githubPollingIntervalMs: number;
   batchWindowMs: number;
   maxEventsPerPrompt: number;
@@ -208,6 +210,7 @@ export type ResourceSubscriptionSettings = {
 export type ResourceSubscriptionSettingsResponse = {
   ok: true;
   settings: ResourceSubscriptionSettings;
+  eventTypes: string[];
 };
 
 export type UiPreferencesSettingsResponse = {

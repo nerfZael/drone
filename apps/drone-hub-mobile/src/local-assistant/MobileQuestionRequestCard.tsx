@@ -18,6 +18,8 @@ type Draft =
   | { outcome: 'custom'; text: string }
   | { outcome: 'skipped' };
 
+type FormDraft = { drafts: Record<string, Draft | undefined>; notes: string };
+
 function optionLetter(index: number): string {
   let value = index + 1;
   let label = '';
@@ -29,32 +31,84 @@ function optionLetter(index: number): string {
   return label;
 }
 
-export function MobileQuestionRequestCard({
+export function MobileQuestionRequestCard(
+  props: React.ComponentProps<typeof QuestionRequestForm> & {
+    onLoad?: () => Promise<ChatQuestionRequest>;
+  },
+) {
+  const [loaded, setLoaded] = React.useState<ChatQuestionRequest | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const request = loaded?.id === props.request.id ? loaded : props.request;
+  if (!request.questionsDeferred) return <QuestionRequestForm {...props} request={request} />;
+  return (
+    <Card style={styles.card}>
+      <Text style={{ color: colors.text }}>
+        {request.questions[0]?.question ?? 'Questions waiting for your answers'}
+      </Text>
+      <Text style={{ color: colors.muted }}>
+        {request.questionCount ?? request.questions.length} questions. Open the complete form to
+        answer.
+      </Text>
+      {error ? (
+        <Text accessibilityRole="alert" style={{ color: colors.danger }}>
+          {error}
+        </Text>
+      ) : null}
+      <Button
+        loading={loading}
+        disabled={props.disabled || loading || !props.onLoad}
+        onPress={() => {
+          setLoading(true);
+          setError(null);
+          void props
+            .onLoad?.()
+            .then(setLoaded)
+            .catch((cause) => setError(cause?.message ?? String(cause)))
+            .finally(() => setLoading(false));
+        }}
+      >
+        {loading ? 'Loading…' : 'Open questions'}
+      </Button>
+    </Card>
+  );
+}
+
+function QuestionRequestForm({
   request,
   busy,
   disabled,
   onSubmit,
   onSkip,
+  initialDraft,
+  onDraftChange,
 }: {
   request: ChatQuestionRequest;
   busy?: boolean;
   disabled?: boolean;
   onSubmit(input: { responses: ChatQuestionResponse[]; notes?: string }): void;
   onSkip(notes?: string): void;
+  initialDraft?: FormDraft;
+  onDraftChange?: (draft: FormDraft) => void;
 }) {
   const comfortable = useMobileReadingDensity() === 'comfortable';
-  const [drafts, setDrafts] = React.useState<Record<string, Draft | undefined>>(() =>
-    Object.fromEntries(
-      request.questions.map((question) => {
-        const recommended = question.choices.find((choice) => choice.recommended);
-        return [
-          question.id,
-          recommended ? { outcome: 'choice', choiceId: recommended.id } : undefined,
-        ];
-      }),
-    ),
+  const [drafts, setDrafts] = React.useState<Record<string, Draft | undefined>>(
+    () =>
+      initialDraft?.drafts ??
+      Object.fromEntries(
+        request.questions.map((question) => {
+          const recommended = question.choices.find((choice) => choice.recommended);
+          return [
+            question.id,
+            recommended ? { outcome: 'choice', choiceId: recommended.id } : undefined,
+          ];
+        }),
+      ),
   );
-  const [notes, setNotes] = React.useState('');
+  const [notes, setNotes] = React.useState(initialDraft?.notes ?? '');
+  React.useEffect(() => {
+    onDraftChange?.({ drafts, notes });
+  }, [drafts, notes, onDraftChange]);
   const [activeQuestionIndex, setActiveQuestionIndex] = React.useState(0);
   const viewMode = useMobileQuestionViewMode();
   const singleQuestion = viewMode === 'single';
@@ -77,6 +131,11 @@ export function MobileQuestionRequestCard({
 
   return (
     <Card style={styles.card}>
+      {request.subscriptionId ? (
+        <Text style={{ color: colors.muted, fontSize: 11 }}>
+          You can answer while the agent works or after it finishes.
+        </Text>
+      ) : null}
       {visibleQuestions.map((question) => {
         const index = request.questions.indexOf(question);
         const draft = drafts[question.id];

@@ -896,24 +896,6 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
           assistantService.assertWorkspaceAccessUnchanged(threadId, thread.workspaceAccess);
           let toolName = request.tool.replace(/^drone_hub__/, '');
           let args: any = request.args && typeof request.args === 'object' ? request.args : {};
-          if (toolName === 'ask_questions' && request.phase === 'initial') {
-            const questionRequest = await hubServices.questions.create({
-              droneId: ownerDroneId,
-              chatName: ownerChatName,
-              chatId: threadId,
-              nativeThreadId: threadId,
-              toolCallId: request.callId,
-              toolName: request.tool,
-              questions: args.questions,
-            });
-            if (questionRequest.result) return { status: 'allow' as const };
-            return {
-              status: 'suspend' as const,
-              id: questionRequest.id,
-              reason: 'Waiting for answers from the user.',
-              details: { questionRequest },
-            };
-          }
           if (toolName === 'send_message') {
             toolName = 'message_drone';
             args = { ...args, droneId: args.drone, chatName: args.chat };

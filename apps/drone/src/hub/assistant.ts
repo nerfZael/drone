@@ -1245,7 +1245,7 @@ export class HubAssistantService {
         getChatQuestionRequestService().listPending(
           thread.ownerDroneId ?? '',
           thread.ownerChatName ?? 'default',
-        ).length > 0;
+        ).some((request) => !request.subscriptionId);
       thread.status = failed
         ? 'error'
         : suspended
@@ -1805,7 +1805,7 @@ export class HubAssistantService {
       getChatQuestionRequestService().listPending(
         thread.ownerDroneId ?? '',
         thread.ownerChatName ?? 'default',
-      ).length > 0 ||
+      ).some((request) => !request.subscriptionId) ||
       Array.from(this.approvals.values()).some(
         (approval) => approval.threadId === threadId && approval.status === 'pending',
       )
@@ -1825,7 +1825,7 @@ export class HubAssistantService {
       getChatQuestionRequestService().listPending(
         thread.ownerDroneId ?? '',
         thread.ownerChatName ?? 'default',
-      ).length > 0 ||
+      ).some((request) => !request.subscriptionId) ||
       Array.from(this.approvals.values()).some(
         (approval) => approval.threadId === threadId && approval.status === 'pending',
       )
@@ -2886,11 +2886,9 @@ export class HubAssistantService {
         prompt: this.queuedPromptFromRecord(prepared, false),
       };
     }
-    if (this.queuedPromptsForThread(thread, false).length >= ASSISTANT_QUEUED_PROMPT_LIMIT) {
-      throw new Error(`assistant prompt queue is full (max ${ASSISTANT_QUEUED_PROMPT_LIMIT})`);
-    }
     const queued = await this.requirePromptQueue().enqueue({
       ...identity,
+      maxPendingPrompts: ASSISTANT_QUEUED_PROMPT_LIMIT,
       submissionSource: input.submissionSource,
       prompt: {
         id,
@@ -2941,6 +2939,7 @@ export class HubAssistantService {
       ...identity,
       promptId,
       leaseOwner: `native:${process.pid}`,
+      requireNativePreparation: true,
       leaseMs: 30 * 60_000,
     });
     if (!claimed) return null;

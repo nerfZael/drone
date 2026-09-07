@@ -1,3 +1,4 @@
+import { compactEventPromptPreview } from './compactEventPromptPreview';
 import { DRONE_CONTROL_CAPABILITY, isGranted } from '@drone/device-protocol';
 import {
   filterCompletedPendingPrompts,
@@ -29,7 +30,7 @@ import type { DeviceHttpTransfers } from './device-http-transfers';
 import type { DeviceBrowserSessions } from './device-browser-sessions';
 import type { MeshChatAttachmentStore } from './mesh-chat-attachment-store';
 import { fitMeshChatPayload } from './fit-mesh-chat-payload';
-import { compactChatQuestionRequests, compactNativeChatReadResponse } from './native-chat-response';
+import { compactChatQuestionRequestPage, compactChatQuestionRequests, compactNativeChatReadResponse } from './native-chat-response';
 import { submitNativeChatPrompt } from './native-chat-prompt';
 import type { SidebarCommandService } from '../sidebar-command-service';
 import { createHttpHubServices, type HubServices } from '../application/hub-services';
@@ -220,7 +221,8 @@ function compactPendingPrompts(value: unknown): any[] {
       id: String(prompt?.id ?? '').slice(0, 160),
       at: truncateUtf8(prompt?.at, 128),
       ...(startedAt ? { startedAt: truncateUtf8(startedAt, 128) } : {}),
-      prompt: truncateUtf8(prompt?.prompt, promptLimit),
+      prompt: compactEventPromptPreview(prompt?.prompt, promptLimit) ?? truncateUtf8(prompt?.prompt, promptLimit),
+      deliveryMode: prompt?.deliveryMode === 'asap' ? 'asap' : 'queue',
       state: normalizePendingPromptState(prompt?.state, 'queued'),
       ...(queueInterruption ? { queueInterruption } : {}),
       ...(isSendInNewChatQueueAction(prompt?.action) ? { action: prompt.action } : {}),
@@ -1318,6 +1320,25 @@ export function createDroneControlCapability(
           }),
         });
       }
+      if (operation === 'chat.read' && payload.questionRequestId) {
+        const requestId = requiredText(payload.questionRequestId, 'questionRequestId');
+        const response = await localHubRequest(
+          access,
+          `/api/chat-question-requests/${encodeURIComponent(requestId)}?${new URLSearchParams({ droneId, chatName })}`,
+          { signal: operationSignal },
+        );
+        const request = response?.request;
+        if (!request || request.droneId !== droneId || request.chatName !== chatName) {
+          throw Object.assign(new Error('question request does not belong to this chat'), {
+            code: 'NOT_FOUND',
+          });
+        }
+        return {
+          ok: true,
+          request:
+            request.status === 'pending' ? request : compactChatQuestionRequests([request])[0],
+        };
+      }
       if (operation === 'chat.read') {
         const readHub = (pathname: string, init?: RequestInit) =>
           localHubRequest(access, pathname, { ...init, signal: operationSignal });
@@ -1423,8 +1444,8 @@ export function createDroneControlCapability(
           const subscriptions = contentOnlyRead
             ? []
             : compactChatSubscriptions(result?.subscriptions);
-          const questionRequests = contentOnlyRead
-            ? []
+          const questionPage = contentOnlyRead
+            ? compactChatQuestionRequestPage([])
             : await readHub(
                 `/api/chat-question-requests?${new URLSearchParams({
                   droneId,
@@ -1432,10 +1453,8 @@ export function createDroneControlCapability(
                   includeResolved: 'true',
                   limit: '12',
                 }).toString()}`,
-              ).then((response: any) => compactChatQuestionRequests(response?.requests));
-          const pendingQuestionRequests = questionRequests.filter(
-            (request: any) => request?.status === 'pending',
-          );
+              ).then((response: any) => compactChatQuestionRequestPage(response?.requests, payload.questionRequestOffset));
+          const { questionRequests, pendingQuestionRequests } = questionPage;
           const marked = contentOnlyRead
             ? null
             : await readHub(`${chatPath}/read`, {
@@ -1483,6 +1502,7 @@ export function createDroneControlCapability(
               metadata: {
                 droneId,
                 chatName,
+                questionRequestPage: questionPage.questionRequestPage,
                 agent: result.agent,
                 model:
                   nativeThread != null ? String(nativeThread.model ?? '') : (result.model ?? null),
@@ -1559,8 +1579,7 @@ export function createDroneControlCapability(
             model: result.model ?? null,
             reasoning: result.reasoning ?? null,
             pending,
-            pendingQuestionRequests,
-            questionRequests,
+            ...questionPage,
             readState: marked?.readState ?? result?.readState ?? null,
             agentPermissionMode:
               result.agentPermissionMode === 'read' || result.agentPermissionMode === 'write'
