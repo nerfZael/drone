@@ -40,9 +40,11 @@ export type HubServices = {
   };
   questions: Pick<
     ChatQuestionRequestService,
+    | 'askAsync'
     | 'ask'
     | 'create'
     | 'get'
+    | 'getForChat'
     | 'listForChat'
     | 'listPending'
     | 'reconcileQueuedRequests'
@@ -153,6 +155,11 @@ export function createHttpHubServices(request: HubServiceRequest): HubServices {
       },
     },
     questions: {
+      askAsync: async (input) =>
+        await request<any>('/api/chat-question-requests/ask', {
+          method: 'POST',
+          body: JSON.stringify(input),
+        }).then((response) => response.result),
       ask: async (input: CreateChatQuestionRequestInput, signal?: AbortSignal) => {
         const created = await request<any>('/api/chat-question-requests', {
           method: 'POST',
@@ -181,6 +188,9 @@ export function createHttpHubServices(request: HubServiceRequest): HubServices {
           body: JSON.stringify(input),
         }).then((response) => response.request),
       get: () => {
+        throw new Error('synchronous question request reads are unavailable over HTTP');
+      },
+      getForChat: () => {
         throw new Error('synchronous question request reads are unavailable over HTTP');
       },
       listPending: () => {

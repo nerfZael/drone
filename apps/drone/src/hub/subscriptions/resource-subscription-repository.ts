@@ -1,8 +1,11 @@
+import { PROMPT_QUEUE_MIGRATIONS } from '../../host/prompt-queue-repository';
 import crypto from 'node:crypto';
+import { resourceSubscriptionDeliveryMode } from './resource-subscription-delivery';
 
 import {
   applyHubDatabaseMigrations,
   type HubDatabase,
+  type HubDatabaseConnection,
   type HubDatabaseMigration,
 } from '../../host/hub-database';
 import {
@@ -22,6 +25,25 @@ import {
   failPendingResourceSubscriptionDeliveries,
   ResourceSubscriptionLifecycleRepository,
 } from './resource-subscription-lifecycle-repository';
+
+type ResourceSubscriptionUpsertInput = {
+  subscriber: ResourceSubscriptionSubscriber;
+  provider: ResourceSubscriptionProvider;
+  resourceType: ResourceSubscriptionType;
+  resourceId: string;
+  resourceConfig?: Record<string, unknown>;
+  events: ResourceSubscriptionEventType[];
+  intent: string;
+  cursor?: Record<string, unknown>;
+  nextEventAt?: string | null;
+  initialPollCursor?: {
+    provider: ResourceSubscriptionProvider;
+    resourceType: ResourceSubscriptionType;
+    resourceId: string;
+    cursor: Record<string, unknown>;
+  };
+  maxActive: number;
+};
 
 export type ResourceSubscriptionBatchItem = {
   deliveryId: string;
@@ -243,6 +265,10 @@ export class ResourceSubscriptionRepository {
   private readonly lifecycleRepository: ResourceSubscriptionLifecycleRepository;
 
   constructor(private readonly database: HubDatabase) {
+    // Batch recovery and run accounting use durable prompt submission receipts.
+    this.database.read((connection) =>
+      applyHubDatabaseMigrations(connection, PROMPT_QUEUE_MIGRATIONS, 'prompts'),
+    );
     this.database.read((connection) =>
       applyHubDatabaseMigrations(
         connection,
@@ -392,55 +418,48 @@ export class ResourceSubscriptionRepository {
     });
   }
 
-  async upsert(input: {
-    subscriber: ResourceSubscriptionSubscriber;
-    provider: ResourceSubscriptionProvider;
-    resourceType: ResourceSubscriptionType;
-    resourceId: string;
-    resourceConfig?: Record<string, unknown>;
-    events: ResourceSubscriptionEventType[];
-    intent: string;
-    cursor?: Record<string, unknown>;
-    nextEventAt?: string | null;
-    initialPollCursor?: {
-      provider: ResourceSubscriptionProvider;
-      resourceType: ResourceSubscriptionType;
-      resourceId: string;
-      cursor: Record<string, unknown>;
-    };
-    maxActive: number;
-  }): Promise<{ created: boolean; subscription: ResourceSubscription }> {
+  async upsert(
+    input: ResourceSubscriptionUpsertInput,
+  ): Promise<{ created: boolean; subscription: ResourceSubscription }> {
+    return await this.database.writeTransaction('upsert resource subscription', (connection) =>
+      this.upsertInTransaction(connection, input),
+    );
+  }
+
+  upsertInTransaction(
+    connection: HubDatabaseConnection,
+    input: ResourceSubscriptionUpsertInput,
+  ): { created: boolean; subscription: ResourceSubscription } {
     const now = new Date().toISOString();
-    return await this.database.writeTransaction('upsert resource subscription', (connection) => {
-      const current = connection
-        .prepare(
-          `
+    const current = connection
+      .prepare(
+        `
           SELECT * FROM resource_subscriptions
           WHERE subscriber_chat_id = ? AND provider = ? AND resource_type = ? AND resource_id = ?
         `,
-        )
-        .get(input.subscriber.chatId, input.provider, input.resourceType, input.resourceId) as
-        | SubscriptionRow
-        | undefined;
-      if (!current || (current.status !== 'active' && current.status !== 'paused')) {
-        const count = connection
-          .prepare(
-            `
+      )
+      .get(input.subscriber.chatId, input.provider, input.resourceType, input.resourceId) as
+      | SubscriptionRow
+      | undefined;
+    if (!current || (current.status !== 'active' && current.status !== 'paused')) {
+      const count = connection
+        .prepare(
+          `
             SELECT COUNT(*) AS count FROM resource_subscriptions
             WHERE subscriber_chat_id = ? AND status IN ('active', 'paused')
           `,
-          )
-          .get(input.subscriber.chatId) as { count: number };
-        if (Number(count.count) >= input.maxActive) {
-          throw new Error(`active subscription limit reached (max ${input.maxActive})`);
-        }
+        )
+        .get(input.subscriber.chatId) as { count: number };
+      if (Number(count.count) >= input.maxActive) {
+        throw new Error(`active subscription limit reached (max ${input.maxActive})`);
       }
-      const id = current?.id ?? crypto.randomUUID();
-      const createdAt = current?.created_at ?? now;
-      const resetPollCursor = input.initialPollCursor
-        ? !connection
-            .prepare(
-              `
+    }
+    const id = current?.id ?? crypto.randomUUID();
+    const createdAt = current?.created_at ?? now;
+    const resetPollCursor = input.initialPollCursor
+      ? !connection
+          .prepare(
+            `
               SELECT 1 FROM resource_subscriptions
               WHERE status = 'active' AND provider = 'github'
                 AND (
@@ -452,17 +471,17 @@ export class ResourceSubscriptionRepository {
                 )
               LIMIT 1
             `,
-            )
-            .get(input.initialPollCursor.resourceId, input.initialPollCursor.resourceId)
-        : false;
-      const nextStatus = current?.status === 'paused' ? 'paused' : 'active';
-      const pauseReasons =
-        current?.status === 'paused'
-          ? parseResourceSubscriptionPauseReasons(current.pause_reasons_json)
-          : [];
-      connection
-        .prepare(
-          `
+          )
+          .get(input.initialPollCursor.resourceId, input.initialPollCursor.resourceId)
+      : false;
+    const nextStatus = current?.status === 'paused' ? 'paused' : 'active';
+    const pauseReasons =
+      current?.status === 'paused'
+        ? parseResourceSubscriptionPauseReasons(current.pause_reasons_json)
+        : [];
+    connection
+      .prepare(
+        `
           INSERT INTO resource_subscriptions (
             id, subscriber_chat_id, subscriber_drone_id, subscriber_chat_name,
             provider, resource_type, resource_id, resource_config_json, events_json,
@@ -489,30 +508,30 @@ export class ResourceSubscriptionRepository {
             completed_at = NULL,
             last_error = NULL
         `,
-        )
-        .run(
-          id,
-          input.subscriber.chatId,
-          input.subscriber.droneId,
-          input.subscriber.chatName,
-          input.provider,
-          input.resourceType,
-          input.resourceId,
-          JSON.stringify(input.resourceConfig ?? {}),
-          JSON.stringify(input.events),
-          input.intent,
-          nextStatus,
-          JSON.stringify(pauseReasons),
-          JSON.stringify(input.cursor ?? parseObject(current?.cursor_json)),
-          input.nextEventAt ?? null,
-          createdAt,
-          now,
-        );
-      if (input.initialPollCursor) {
-        connection
-          .prepare(
-            resetPollCursor
-              ? `
+      )
+      .run(
+        id,
+        input.subscriber.chatId,
+        input.subscriber.droneId,
+        input.subscriber.chatName,
+        input.provider,
+        input.resourceType,
+        input.resourceId,
+        JSON.stringify(input.resourceConfig ?? {}),
+        JSON.stringify(input.events),
+        input.intent,
+        nextStatus,
+        JSON.stringify(pauseReasons),
+        JSON.stringify(input.cursor ?? parseObject(current?.cursor_json)),
+        input.nextEventAt ?? null,
+        createdAt,
+        now,
+      );
+    if (input.initialPollCursor) {
+      connection
+        .prepare(
+          resetPollCursor
+            ? `
             INSERT INTO resource_poll_cursors (
               provider, resource_type, resource_id, cursor_json, updated_at, last_error
             ) VALUES (?, ?, ?, ?, ?, NULL)
@@ -520,25 +539,24 @@ export class ResourceSubscriptionRepository {
             DO UPDATE SET cursor_json = excluded.cursor_json,
               updated_at = excluded.updated_at, last_error = NULL
           `
-              : `
+            : `
             INSERT OR IGNORE INTO resource_poll_cursors (
               provider, resource_type, resource_id, cursor_json, updated_at, last_error
             ) VALUES (?, ?, ?, ?, ?, NULL)
           `,
-          )
-          .run(
-            input.initialPollCursor.provider,
-            input.initialPollCursor.resourceType,
-            input.initialPollCursor.resourceId,
-            JSON.stringify(input.initialPollCursor.cursor),
-            now,
-          );
-      }
-      const stored = connection
-        .prepare('SELECT * FROM resource_subscriptions WHERE id = ?')
-        .get(id) as SubscriptionRow;
-      return { created: !current, subscription: subscriptionFromRow(stored)! };
-    });
+        )
+        .run(
+          input.initialPollCursor.provider,
+          input.initialPollCursor.resourceType,
+          input.initialPollCursor.resourceId,
+          JSON.stringify(input.initialPollCursor.cursor),
+          now,
+        );
+    }
+    const stored = connection
+      .prepare('SELECT * FROM resource_subscriptions WHERE id = ?')
+      .get(id) as SubscriptionRow;
+    return { created: !current, subscription: subscriptionFromRow(stored)! };
   }
 
   async update(input: {
@@ -731,39 +749,44 @@ export class ResourceSubscriptionRepository {
   }
 
   async appendEvent(event: ResourceEvent): Promise<boolean> {
+    return await this.database.writeTransaction('append resource event', (connection) =>
+      this.appendEventInTransaction(connection, event),
+    );
+  }
+
+  appendEventInTransaction(connection: HubDatabaseConnection, event: ResourceEvent): boolean {
     if (event.resourceType === 'cron') {
       throw new Error('cron events must be appended with appendCronOccurrence');
     }
     const now = new Date().toISOString();
-    return await this.database.writeTransaction('append resource event', (connection) => {
-      const inserted = connection
-        .prepare(
-          `
+    const inserted = connection
+      .prepare(
+        `
           INSERT OR IGNORE INTO resource_events (
             id, provider_event_id, provider, resource_type, resource_id,
             parent_resource_id, event_type, occurred_at, summary,
             provider_content_json, created_at
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
-        )
-        .run(
-          event.id,
-          event.providerEventId,
-          event.provider,
-          event.resourceType,
-          event.resourceId,
-          event.parentResourceId,
-          event.eventType,
-          event.occurredAt,
-          event.summary,
-          JSON.stringify(event.providerContent),
-          now,
-        );
-      if (Number(inserted.changes ?? 0) !== 1) return false;
+      )
+      .run(
+        event.id,
+        event.providerEventId,
+        event.provider,
+        event.resourceType,
+        event.resourceId,
+        event.parentResourceId,
+        event.eventType,
+        event.occurredAt,
+        event.summary,
+        JSON.stringify(event.providerContent),
+        now,
+      );
+    if (Number(inserted.changes ?? 0) !== 1) return false;
 
-      const subscriptions = connection
-        .prepare(
-          `
+    const subscriptions = connection
+      .prepare(
+        `
           SELECT * FROM resource_subscriptions
           WHERE status = 'active' AND provider = ?
             AND (delivery_after IS NULL OR ? >= delivery_after)
@@ -772,40 +795,39 @@ export class ResourceSubscriptionRepository {
               OR (resource_type = 'repository' AND resource_id = ?)
             )
         `,
-        )
-        .all(
-          event.provider,
-          event.occurredAt,
-          event.resourceType,
-          event.resourceId,
-          event.parentResourceId ?? '',
-        ) as SubscriptionRow[];
-      const insertDelivery = connection.prepare(`
+      )
+      .all(
+        event.provider,
+        event.occurredAt,
+        event.resourceType,
+        event.resourceId,
+        event.parentResourceId ?? '',
+      ) as SubscriptionRow[];
+    const insertDelivery = connection.prepare(`
         INSERT OR IGNORE INTO subscription_deliveries (
           id, subscription_id, event_id, state, available_at, attempt_count,
           next_attempt_at, batch_id, delivered_at, last_error, created_at, updated_at
         ) VALUES (?, ?, ?, 'pending', ?, 0, ?, NULL, NULL, NULL, ?, ?)
       `);
-      for (const row of subscriptions) {
-        if (!parseEvents(row.events_json).includes(event.eventType)) continue;
-        if (isChangeRequestEventAtOrBeforeBaseline(row, event)) continue;
-        insertDelivery.run(crypto.randomUUID(), row.id, event.id, now, now, now, now);
-      }
+    for (const row of subscriptions) {
+      if (!parseEvents(row.events_json).includes(event.eventType)) continue;
+      if (isChangeRequestEventAtOrBeforeBaseline(row, event)) continue;
+      insertDelivery.run(crypto.randomUUID(), row.id, event.id, now, now, now, now);
+    }
 
-      if (isTerminalResourceSubscriptionEvent(event)) {
-        connection
-          .prepare(
-            `
+    if (isTerminalResourceSubscriptionEvent(event)) {
+      connection
+        .prepare(
+          `
             UPDATE resource_subscriptions
             SET status = 'completed', pause_reasons_json = '[]', completed_at = ?, updated_at = ?
             WHERE provider = ? AND resource_type = ?
               AND resource_id = ? AND status IN ('active', 'paused')
           `,
-          )
-          .run(now, now, event.provider, event.resourceType, event.resourceId);
-      }
-      return true;
-    });
+        )
+        .run(now, now, event.provider, event.resourceType, event.resourceId);
+    }
+    return true;
   }
 
   async appendCronOccurrence(event: ResourceEvent, nextEventAt: string): Promise<number> {
@@ -926,8 +948,11 @@ export class ResourceSubscriptionRepository {
           FROM subscription_batches b
           JOIN prompts p
             ON p.drone_id = b.subscriber_drone_id
-           AND p.chat_name = b.subscriber_chat_name
-           AND p.prompt_id = b.prompt_id
+           AND (p.prompt_id = b.prompt_id OR p.prompt_id = (
+             SELECT canonical_prompt_id FROM prompt_submission_receipts r
+             WHERE r.drone_id = b.subscriber_drone_id
+               AND r.idempotency_key = 'subscription-batch:' || b.id
+           ))
           WHERE b.state = 'processing'
         )
       `,
@@ -942,8 +967,11 @@ export class ResourceSubscriptionRepository {
         WHERE state = 'processing' AND EXISTS (
           SELECT 1 FROM prompts p
           WHERE p.drone_id = subscription_batches.subscriber_drone_id
-            AND p.chat_name = subscription_batches.subscriber_chat_name
-            AND p.prompt_id = subscription_batches.prompt_id
+            AND (p.prompt_id = subscription_batches.prompt_id OR p.prompt_id = (
+              SELECT canonical_prompt_id FROM prompt_submission_receipts r
+              WHERE r.drone_id = subscription_batches.subscriber_drone_id
+                AND r.idempotency_key = 'subscription-batch:' || subscription_batches.id
+            ))
         )
       `,
           )
@@ -1093,23 +1121,46 @@ export class ResourceSubscriptionRepository {
           JOIN resource_subscriptions s ON s.id = d.subscription_id
           WHERE d.state = 'pending' AND d.available_at <= ? AND d.next_attempt_at <= ?
             AND s.status IN ('active', 'completed')
-            AND (
-              SELECT COUNT(*) FROM subscription_batches b
+            AND ((
+              SELECT COUNT(DISTINCT COALESCE((
+                SELECT canonical_prompt_id FROM prompt_submission_receipts r
+                WHERE r.drone_id = b.subscriber_drone_id
+                  AND r.idempotency_key = 'subscription-batch:' || b.id
+              ), b.prompt_id)) FROM subscription_batches b
               WHERE b.subscriber_chat_id = s.subscriber_chat_id
                 AND b.state = 'delivered' AND b.created_at >= ?
-            ) < ?
+            ) < ? OR EXISTS (
+              SELECT 1 FROM prompts p
+              WHERE p.drone_id = s.subscriber_drone_id AND p.chat_name = s.subscriber_chat_name
+                AND p.state = 'queued' AND p.attempt_count = 0
+                AND json_type(p.payload_json, '$.eventBundle') = 'object'
+                AND COALESCE(json_extract(p.payload_json, '$.eventBundle.sealed'), 0) = 0
+                AND json_array_length(p.payload_json, '$.eventBundle.events') <
+                  MIN(COALESCE(json_extract(p.payload_json, '$.eventBundle.maxEvents'), 100), ?)
+                AND COALESCE(json_extract(p.payload_json, '$.deliveryMode'), 'queue') = COALESCE(
+                  (SELECT value FROM json_each(?) WHERE key = (SELECT event_type FROM resource_events WHERE id = d.event_id)), ?
+                )
+            ))
           GROUP BY s.subscriber_chat_id, s.subscriber_drone_id, s.subscriber_chat_name
           ORDER BY oldest_delivery_at
           LIMIT 20
         `,
         )
-        .all(cutoff, nowIso, hourAgo, settings.maxAutomatedRunsPerConversationPerHour) as Array<{
+        .all(
+          cutoff,
+          nowIso,
+          hourAgo,
+          settings.maxAutomatedRunsPerConversationPerHour,
+          settings.maxEventsPerPrompt,
+          JSON.stringify(settings.eventDeliveryModes),
+          settings.deliveryMode,
+        ) as Array<{
         subscriber_chat_id: string;
         subscriber_drone_id: string;
         subscriber_chat_name: string;
       }>;
       for (const subscriber of subscribers) {
-        const rows = connection
+        const candidates = connection
           .prepare(
             `
             SELECT
@@ -1139,7 +1190,11 @@ export class ResourceSubscriptionRepository {
             JOIN resource_events e ON e.id = d.event_id
             WHERE d.state = 'pending' AND d.available_at <= ? AND d.next_attempt_at <= ?
               AND s.subscriber_chat_id = ? AND s.status IN ('active', 'completed')
-            ORDER BY e.occurred_at, d.created_at
+            ORDER BY
+              CASE WHEN COALESCE(
+                (SELECT value FROM json_each(?) WHERE key = e.event_type), ?
+              ) = 'asap' THEN 0 ELSE 1 END,
+              e.occurred_at, d.created_at
             LIMIT ?
           `,
           )
@@ -1147,9 +1202,16 @@ export class ResourceSubscriptionRepository {
             cutoff,
             nowIso,
             subscriber.subscriber_chat_id,
+            JSON.stringify(settings.eventDeliveryModes),
+            settings.deliveryMode,
             settings.maxEventsPerPrompt,
           ) as DeliveryJoinRow[];
-        if (rows.length === 0) continue;
+        if (candidates.length === 0) continue;
+        // A queued override must never be promoted by sharing a prompt with ASAP events.
+        const deliveryMode = resourceSubscriptionDeliveryMode(settings, candidates[0]!.event_type);
+        const rows = candidates.filter(
+          (row) => resourceSubscriptionDeliveryMode(settings, row.event_type) === deliveryMode,
+        );
         const batchId = crypto.randomUUID();
         const promptId = `subscription-${batchId}`;
         const deliveryIds = rows.map((row) => row.delivery_id);
@@ -1242,6 +1304,26 @@ export class ResourceSubscriptionRepository {
     });
   }
 
+  async deferRateLimitedBatch(batchId: string): Promise<void> {
+    const now = new Date().toISOString();
+    const retryAt = new Date(Date.now() + 60_000).toISOString();
+    await this.database.writeTransaction('defer rate limited subscription batch', (connection) => {
+      connection
+        .prepare(
+          `UPDATE subscription_deliveries
+        SET state = 'pending', batch_id = NULL, next_attempt_at = ?, updated_at = ?
+        WHERE batch_id = ? AND state = 'processing'`,
+        )
+        .run(retryAt, now, batchId);
+      connection
+        .prepare(
+          `UPDATE subscription_batches SET state = 'failed', updated_at = ?,
+        last_error = 'Waiting for the hourly event run budget' WHERE id = ? AND state = 'processing'`,
+        )
+        .run(now, batchId);
+    });
+  }
+
   async failBatch(batchId: string, errorRaw: string, retryLimit: number): Promise<void> {
     const now = new Date();
     const error = cleanString(errorRaw, 'subscription delivery failed').slice(0, 1_000);
@@ -1253,8 +1335,11 @@ export class ResourceSubscriptionRepository {
           FROM subscription_batches b
           JOIN prompts p
             ON p.drone_id = b.subscriber_drone_id
-           AND p.chat_name = b.subscriber_chat_name
-           AND p.prompt_id = b.prompt_id
+           AND (p.prompt_id = b.prompt_id OR p.prompt_id = (
+             SELECT canonical_prompt_id FROM prompt_submission_receipts r
+             WHERE r.drone_id = b.subscriber_drone_id
+               AND r.idempotency_key = 'subscription-batch:' || b.id
+           ))
           WHERE b.id = ?
         `,
         )

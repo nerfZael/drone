@@ -1,6 +1,7 @@
 import { APP_HEADER_HEIGHT } from '../layout';
 import { throwIfAborted } from '@drone/device-protocol';
 import React from 'react';
+import { Button, Card } from '../components/Ui';
 import {
   beginMobileChatLoad,
   finishMobileChatLoad,
@@ -526,6 +527,18 @@ export function DronesScreen({
   const [pendingApprovals, setPendingApprovals] = React.useState<MobileAssistantApproval[]>([]);
   const [approvalBusyId, setApprovalBusyId] = React.useState('');
   const [questionRequests, setQuestionRequests] = React.useState<ChatQuestionRequest[]>([]);
+  const [questionRequestPage, setQuestionRequestPage] = React.useState({
+    offset: 0,
+    limit: 20,
+    total: 0,
+  });
+  const questionRequestOffsetRef = React.useRef(0);
+  const questionDraftsRef = React.useRef(
+    new Map<
+      string,
+      NonNullable<React.ComponentProps<typeof MobileQuestionRequestCard>['initialDraft']>
+    >(),
+  );
   const [questionBusyId, setQuestionBusyId] = React.useState('');
   const [resolvedCodexApprovalIds, setResolvedCodexApprovalIds] = React.useState<Set<string>>(
     () => new Set(),
@@ -665,6 +678,9 @@ export function DronesScreen({
     setNativeThread(null);
     setPendingApprovals([]);
     setQuestionRequests([]);
+    setQuestionRequestPage({ offset: 0, limit: 20, total: 0 });
+    questionRequestOffsetRef.current = 0;
+    questionDraftsRef.current.clear();
     setPendingPrompts([]);
     setAccessOpen(false);
     setAccessDirty(false);
@@ -1104,6 +1120,7 @@ export function DronesScreen({
         return;
       }
       const requestVersion = ++chatReadVersion.current;
+      const questionRequestOffset = questionRequestOffsetRef.current;
       markMobileChatLoad(loadTarget, 'coordinatorStarted');
       try {
         const result = await requestDroneControl(
@@ -1112,6 +1129,7 @@ export function DronesScreen({
           {
             droneId,
             chatName: nextChat,
+            questionRequestOffset,
           },
           signal,
         );
@@ -1121,6 +1139,7 @@ export function DronesScreen({
           targetIdRef.current !== destinationId ||
           selectedRef.current?.id !== droneId ||
           chatNameRef.current !== nextChat ||
+          questionRequestOffsetRef.current !== questionRequestOffset ||
           chatReadVersion.current !== requestVersion
         )
           return;
@@ -1214,6 +1233,9 @@ export function DronesScreen({
           ? result.pendingQuestionRequests
           : [],
     );
+    const questionPage = result?.questionRequestPage ?? { offset: 0, limit: 20, total: 0 };
+    setQuestionRequestPage(questionPage);
+    questionRequestOffsetRef.current = questionPage.offset;
     const nextTurns = Array.isArray(result?.turns) ? result.turns : [];
     setTurns(nextTurns);
     const page = result?.historyKind === 'messages' ? nativeHistory.page : result?.page;
@@ -3198,6 +3220,37 @@ export function DronesScreen({
       .finally(() => setApprovalBusyId((current) => (current === approval.id ? '' : current)));
   };
 
+  const loadQuestionRequest = async (
+    request: ChatQuestionRequest,
+  ): Promise<ChatQuestionRequest> => {
+    if (!selected) throw new Error('Select a chat first.');
+    const destinationId = targetId;
+    const droneId = selected.id;
+    const activeChat = chatName;
+    const response: any = await requestDroneControl(destinationId, 'chat.read', {
+      droneId,
+      chatName: activeChat,
+      questionRequestId: request.id,
+    });
+    if (!response?.request) throw new Error('Unable to load the question form.');
+    if (
+      targetIdRef.current !== destinationId ||
+      selectedRef.current?.id !== droneId ||
+      chatNameRef.current !== activeChat
+    )
+      throw new Error('The selected chat changed.');
+    setQuestionRequests((current) =>
+      current.map((item) => (item.id === request.id ? response.request : item)),
+    );
+    return response.request;
+  };
+
+  const changeQuestionPage = (offset: number) => {
+    if (!selected || !targetReachable) return;
+    questionRequestOffsetRef.current = offset;
+    void readChat(selected.id, chatName).catch(() => {});
+  };
+
   const resolveQuestionRequest = (
     request: ChatQuestionRequest,
     resolution:
@@ -3727,6 +3780,11 @@ export function DronesScreen({
                               request.status === 'pending' ? (
                                 <MobileQuestionRequestCard
                                   request={request}
+                                  initialDraft={questionDraftsRef.current.get(request.id)}
+                                  onDraftChange={(draft) =>
+                                    questionDraftsRef.current.set(request.id, draft)
+                                  }
+                                  onLoad={() => loadQuestionRequest(request)}
                                   busy={questionBusyId === request.id}
                                   disabled={!targetReachable}
                                   onSubmit={({ responses, notes }) =>
@@ -3769,6 +3827,52 @@ export function DronesScreen({
                             }
                           />
                         </RenderErrorBoundary>
+                        {questionRequestPage.total > questionRequestPage.limit ? (
+                          <Card>
+                            <Text style={styles.emptyDroneBody}>
+                              Question forms {questionRequestPage.offset + 1}–
+                              {Math.min(
+                                questionRequestPage.total,
+                                questionRequestPage.offset + questionRequestPage.limit,
+                              )}{' '}
+                              of {questionRequestPage.total}
+                            </Text>
+                            <Button
+                              disabled={
+                                !targetReachable ||
+                                chatLoading ||
+                                !!questionBusyId ||
+                                questionRequestPage.offset === 0
+                              }
+                              onPress={() =>
+                                changeQuestionPage(
+                                  Math.max(
+                                    0,
+                                    questionRequestPage.offset - questionRequestPage.limit,
+                                  ),
+                                )
+                              }
+                            >
+                              Previous questions
+                            </Button>
+                            <Button
+                              disabled={
+                                !targetReachable ||
+                                chatLoading ||
+                                !!questionBusyId ||
+                                questionRequestPage.offset + questionRequestPage.limit >=
+                                  questionRequestPage.total
+                              }
+                              onPress={() =>
+                                changeQuestionPage(
+                                  questionRequestPage.offset + questionRequestPage.limit,
+                                )
+                              }
+                            >
+                              Next questions
+                            </Button>
+                          </Card>
+                        ) : null}
                         {pendingApprovals.map((approval) => (
                           <AssistantApprovalCard
                             key={approval.id}

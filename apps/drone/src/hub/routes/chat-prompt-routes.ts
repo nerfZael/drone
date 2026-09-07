@@ -940,6 +940,7 @@ export function createChatPromptRouteHandler(
             chat: chatName,
             promptId,
             cancelled: result.status === 'cancelled',
+            retained: result.retained === true,
             alreadySubmitted: result.status === 'already-submitted',
             pendingState: result.pendingState ?? null,
           });

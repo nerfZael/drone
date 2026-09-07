@@ -8,7 +8,6 @@ import {
   mcpBridgeCallOptions,
   startMcpHttpStdioBridge,
 } from '../src/mcp-http-stdio-bridge';
-import { INTERACTIVE_MCP_TOOL_TIMEOUT_MS } from '../src/hub/mcp-interactive-timeout';
 
 class MemoryTransport implements Transport {
   peer: MemoryTransport | null = null;
@@ -36,12 +35,10 @@ function memoryTransportPair(): [MemoryTransport, MemoryTransport] {
 }
 
 describe('managed chat MCP bridge', () => {
-  test('allows interactive questions to wait beyond the MCP SDK default', () => {
+  test('uses the normal MCP timeout for asynchronous questions', () => {
     const controller = new AbortController();
     expect(mcpBridgeCallOptions('ask_questions', controller.signal)).toEqual({
       signal: controller.signal,
-      timeout: INTERACTIVE_MCP_TOOL_TIMEOUT_MS,
-      maxTotalTimeout: INTERACTIVE_MCP_TOOL_TIMEOUT_MS,
     });
     expect(mcpBridgeCallOptions('list_drones', controller.signal)).toEqual({
       signal: controller.signal,

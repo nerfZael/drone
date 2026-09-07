@@ -253,7 +253,7 @@ export function useRemoteDroneHub(targetDeviceId: string, routeAvailable: boolea
     selectedDrone?.busyChats.includes(selectedChat) ||
       pendingCount > 0 ||
       pendingApprovals.length > 0 ||
-      pendingQuestionRequests.length > 0,
+      pendingQuestionRequests.some((request) => !request.subscriptionId),
   );
 
   runDronesLoadRef.current = async (requestTargetId, quiet) => {

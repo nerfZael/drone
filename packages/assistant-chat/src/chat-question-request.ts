@@ -51,8 +51,13 @@ export type ChatQuestionRequest = {
   chatId: string;
   nativeThreadId?: string;
   toolCallId?: string;
+  /** Answers are delivered through this subscription without suspending the agent. */
+  subscriptionId?: string;
   toolName: string;
   questions: ChatQuestion[];
+  /** Mobile preview; fetch the complete form before accepting answers. */
+  questionsDeferred?: boolean;
+  questionCount?: number;
   createdAt: string;
   updatedAt: string;
   status: 'pending' | 'submitted' | 'skipped';

@@ -47,6 +47,10 @@ const RESOURCE_SUBSCRIPTION_CAPABILITIES: Partial<
     supportedEvents: CHANGE_REQUEST_SUBSCRIPTION_EVENTS,
     terminalEvents: CHANGE_REQUEST_TERMINAL_EVENTS,
   },
+  'drone-hub/question_request': {
+    supportedEvents: ['question_request.resolved'],
+    terminalEvents: ['question_request.resolved'],
+  },
   'drone-hub/cron': {
     supportedEvents: CRON_EVENTS,
     terminalEvents: [],

@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   agentRunFailurePresentation,
+  parseEventNotificationPrompt,
   isStoppedRunError,
   normalizeAgentRunActivity,
   normalizePromptQueueInterruption,
@@ -26,10 +27,7 @@ import { StoppedRunNotice } from './StoppedRunNotice';
 import { AgentRunFailureNotice } from './AgentRunFailureNotice';
 import { AgentRunActivityView } from '../assistant/AgentRunActivityView';
 import { CreateNewChatNowButton, QueuedNewChatLabel } from './QueuedNewChatAction';
-import {
-  isSubscriptionEventPrompt,
-  SubscriptionEventMessage,
-} from './SubscriptionEventBadge';
+import { isSubscriptionEventPrompt, SubscriptionEventMessage } from './SubscriptionEventBadge';
 
 export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   item,
@@ -108,10 +106,18 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   const isInterrupted = isFailed && !isStopped && !actionPresentation && failure.recoverable;
   const badgeLabel = isFailed && !isStopped ? (isInterrupted ? 'Interrupted' : 'Failed') : null;
   const creatingNewChat =
-    Boolean(actionPresentation) &&
-    (createNewChatBusy || actionPresentation?.state === 'running');
+    Boolean(actionPresentation) && (createNewChatBusy || actionPresentation?.state === 'running');
+  const notification = isSubscriptionEvent ? parseEventNotificationPrompt(item.prompt) : null;
+  const bundleHasHuman = notification?.userMessage !== undefined;
+  const cancelLabel = bundleHasHuman
+    ? 'Remove message; keep events'
+    : actionPresentation
+      ? 'Cancel queued new chat'
+      : 'Cancel queued prompt';
   const canCancelQueued =
-    Boolean(onCancelQueued) && (actionPresentation?.canCancel ?? item.state === 'queued');
+    Boolean(onCancelQueued) &&
+    (!notification || bundleHasHuman) &&
+    (actionPresentation?.canCancel ?? item.state === 'queued');
   const showAgentPendingBubble = !actionPresentation && !(item.state === 'queued' && !isFailed);
   const agentCopyText = isFailed ? stripAnsi(item.error || 'failed to send') : 'Working…';
   const queuedFooter =
@@ -167,10 +173,10 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
               onClick={() => void onCancelQueued?.(item.id)}
               disabled={cancelBusy || createNewChatBusy}
               className="inline-flex min-h-5 items-center rounded px-1 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted)] transition-colors hover:bg-[var(--red-subtle)] hover:text-[var(--red)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--red)] disabled:cursor-not-allowed disabled:text-[var(--muted-dim)]"
-              aria-label={actionPresentation ? 'Cancel queued new chat' : 'Cancel queued prompt'}
-              title={actionPresentation ? 'Cancel queued new chat' : 'Cancel queued prompt'}
+              aria-label={cancelLabel}
+              title={cancelLabel}
             >
-              {cancelBusy ? 'Canceling…' : 'Cancel'}
+              {cancelBusy ? 'Removing…' : bundleHasHuman ? 'Remove message' : 'Cancel'}
             </button>
           ) : null}
         </div>
@@ -197,7 +203,30 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
       className={`animate-fade-in ${isFailed && !isStopped && !isInterrupted ? 'opacity-90' : ''}`}
     >
       {isSubscriptionEvent ? (
-        <SubscriptionEventMessage prompt={item.prompt} at={item.at} />
+        <SubscriptionEventMessage
+          prompt={item.prompt}
+          at={item.at}
+          footer={
+            <>
+              {queuedFooter}
+              {cancelError ? (
+                <div role="alert" className="mt-1 text-[var(--red)]">
+                  {cancelError}
+                </div>
+              ) : null}
+            </>
+          }
+          attachmentContent={
+            attachments.length > 0 ? (
+              <ImageAttachmentChips
+                attachments={attachments}
+                droneId={droneId}
+                droneHomePath={droneHomePath}
+                onOpenFileReference={onOpenFileReference}
+              />
+            ) : undefined
+          }
+        />
       ) : (
         <UserChatMessage
           at={item.at}

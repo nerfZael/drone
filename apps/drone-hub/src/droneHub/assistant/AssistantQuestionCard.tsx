@@ -102,6 +102,11 @@ export function AssistantQuestionCard({
       aria-busy={busy || undefined}
       data-assistant-question-card="true"
     >
+      {request.subscriptionId ? (
+        <p className="mb-3 text-[var(--text-11)] text-[var(--fg-muted)]">
+          You can answer while the agent works or after it finishes.
+        </p>
+      ) : null}
       <div className="space-y-3">
         {visibleQuestions.map((question) => {
           const questionIndex = request.questions.indexOf(question);
