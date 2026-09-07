@@ -12,6 +12,7 @@ import type { DeviceMeshStore } from './device-mesh-store';
 import { localHubRequest, type LocalHubAccess } from './local-hub-request';
 
 const SESSION_MS = 30 * 60_000;
+const TARGET_RECHECK_MS = 2000;
 const PREFIX = '/api/device-mesh/v2/browser/';
 type Session = {
   id: string;
@@ -23,6 +24,11 @@ type Session = {
   expires: number;
   sockets: Set<Duplex>;
   pending: number;
+  targetCheckedAt: number;
+  targetCheck?: Promise<void>;
+  mappingChecks: number;
+  mappingCacheHits: number;
+  mappingMs: number;
 };
 
 class TargetLookupUnavailable extends Error {
@@ -45,7 +51,13 @@ export class DeviceBrowserSessions {
   private readonly wss = new WebSocketServer({
     noServer: true,
     maxPayload: 64 * 1024,
-    perMessageDeflate: false,
+    perMessageDeflate: {
+      serverNoContextTakeover: true,
+      clientNoContextTakeover: true,
+      threshold: 1024,
+      concurrencyLimit: 4,
+      zlibDeflateOptions: { level: 1 },
+    },
   });
   private readonly unsubscribe: () => void;
   private readonly timer: ReturnType<typeof setInterval>;
@@ -67,7 +79,7 @@ export class DeviceBrowserSessions {
     });
     this.timer = setInterval(() => {
       void this.checkSessions(true);
-    }, 15_000);
+    }, TARGET_RECHECK_MS);
     this.timer.unref?.();
   }
 
@@ -83,7 +95,7 @@ export class DeviceBrowserSessions {
   }
 
   private targets(droneId: string, signal?: AbortSignal) {
-    // Coalesce a page's concurrent resource checks, but never cache a completed mapping.
+    // Coalesce concurrent fresh reads; session validation controls the reuse window.
     // Cancellable opens keep independent reads so an older open cannot hold up its replacement.
     if (signal) return this.readTargets(droneId, signal);
     const pending = this.targetReads.get(droneId);
@@ -206,6 +218,10 @@ export class DeviceBrowserSessions {
       expires,
       sockets: new Set(),
       pending: 0,
+      targetCheckedAt: Date.now(),
+      mappingChecks: 0,
+      mappingCacheHits: 0,
+      mappingMs: 0,
     });
     return {
       sessionId: id,
@@ -217,6 +233,7 @@ export class DeviceBrowserSessions {
   }
 
   async upgrade(request: http.IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
+    const upgradeStarted = performance.now();
     socket.on('error', () => socket.destroy());
     const deadline = setTimeout(() => socket.destroy(), 10_000);
     deadline.unref?.();
@@ -244,10 +261,7 @@ export class DeviceBrowserSessions {
       session.pending++;
       reserved = true;
       await this.authorized(session.source);
-      if ((await this.resolve(session.droneId, session.port)) !== session.hostPort) {
-        this.remove(session);
-        throw new Error('Port mapping changed');
-      }
+      await this.validateTarget(session);
       await this.authorized(session.source);
       if (
         this.sessions.get(session.id) !== session ||
@@ -256,6 +270,7 @@ export class DeviceBrowserSessions {
       )
         throw new Error('Session closed');
       const current = session;
+      const admittedAt = performance.now();
       this.wss.handleUpgrade(request, socket, head, (ws) => {
         ws.on('message', (_data, binary) => {
           if (!binary) ws.terminate();
@@ -266,24 +281,67 @@ export class DeviceBrowserSessions {
         ws.once('close', () => stream.destroy());
         const upstream = net.connect({ host: '127.0.0.1', port: current.hostPort });
         current.sockets.add(stream);
+        const upgradeMs = Math.round(performance.now() - upgradeStarted);
+        let failure: string | null = null;
+        let receivedBytes = 0;
+        let sentBytes = 0;
+        const wire = socket as net.Socket;
+        const wireRead = wire.bytesRead;
+        const wireWritten = wire.bytesWritten;
+        let connectMs: number | null = null;
+        const upstreamStarted = performance.now();
+        stream.on('data', (chunk: Buffer) => {
+          receivedBytes += chunk.length;
+        });
+        upstream.on('data', (chunk: Buffer) => {
+          sentBytes += chunk.length;
+        });
         const expiry = setTimeout(
           () => stream.destroy(),
           Math.max(1, current.expires - Date.now()),
         );
         expiry.unref?.();
-        const connectTimeout = setTimeout(
-          () => upstream.destroy(new Error('Service unavailable')),
-          8000,
-        );
+        const connectTimeout = setTimeout(() => {
+          failure = 'upstream_connect_timeout';
+          upstream.destroy(new Error('Service unavailable'));
+        }, 8000);
         connectTimeout.unref?.();
-        upstream.once('connect', () => clearTimeout(connectTimeout));
-        stream.on('error', () => upstream.destroy());
-        upstream.on('error', () => stream.destroy());
+        upstream.once('connect', () => {
+          connectMs = performance.now() - upstreamStarted;
+          clearTimeout(connectTimeout);
+        });
+        stream.on('error', () => {
+          failure ??= 'tunnel_error';
+          upstream.destroy();
+        });
+        upstream.on('error', () => {
+          failure ??= 'upstream_error';
+          stream.destroy();
+        });
         stream.once('close', () => {
           clearTimeout(expiry);
           clearTimeout(connectTimeout);
           current.sockets.delete(stream);
           upstream.destroy();
+          console.info(
+            '[browser-tunnel]',
+            JSON.stringify({
+              sessionId: current.id,
+              upgradeMs,
+              failure,
+              durationMs: Math.round(performance.now() - admittedAt),
+              upstreamConnectMs: connectMs === null ? null : Math.round(connectMs),
+              compression: ws.extensions.includes('permessage-deflate'),
+              receivedBytes,
+              sentBytes,
+              // WebSocket framing bytes after the handshake, before outer TLS/Tailscale.
+              wireReceivedBytes: Number.isFinite(wireRead) ? wire.bytesRead - wireRead : null,
+              wireSentBytes: Number.isFinite(wireWritten) ? wire.bytesWritten - wireWritten : null,
+              mappingChecks: current.mappingChecks,
+              mappingCacheHits: current.mappingCacheHits,
+              mappingMs: Math.round(current.mappingMs),
+            }),
+          );
         });
         upstream.once('close', () => {
           if (!upstream.readableEnded) stream.destroy();
@@ -301,6 +359,34 @@ export class DeviceBrowserSessions {
     }
   }
 
+  private async validateTarget(session: Session, force = false): Promise<void> {
+    // Reuse only a recent successful check, including across sequential asset requests.
+    // A failed refresh immediately invalidates it; never fall back to stale mappings.
+    if (session.targetCheck) return session.targetCheck;
+    if (!force && Date.now() - session.targetCheckedAt < TARGET_RECHECK_MS) {
+      session.mappingCacheHits++;
+      return;
+    }
+    const started = performance.now();
+    session.mappingChecks++;
+    session.targetCheckedAt = 0;
+    const check = (async () => {
+      try {
+        if ((await this.resolve(session.droneId, session.port)) !== session.hostPort)
+          throw new Error('Port mapping changed');
+        session.targetCheckedAt = Date.now();
+      } catch (error) {
+        if (!(error instanceof TargetLookupUnavailable)) this.remove(session);
+        throw error;
+      } finally {
+        session.mappingMs += performance.now() - started;
+        session.targetCheck = undefined;
+      }
+    })();
+    session.targetCheck = check;
+    return check;
+  }
+
   private hash(value: string) {
     return crypto.createHash('sha256').update(value).digest();
   }
@@ -316,11 +402,7 @@ export class DeviceBrowserSessions {
         try {
           if (session.expires <= Date.now()) throw new Error('Expired');
           await this.authorized(session.source);
-          if (
-            checkTargets &&
-            (await this.resolve(session.droneId, session.port)) !== session.hostPort
-          )
-            throw new Error('Target changed');
+          if (checkTargets) await this.validateTarget(session, true);
         } catch (error) {
           // New streams still require a fresh successful mapping and authorization.
           // Preserve existing streams during temporary local API failures; expiry,

@@ -18,6 +18,11 @@ class DroneBrowserModule : Module() {
         mapOf("sessionId" to sessionId, "origin" to next.origin, "url" to next.bootstrapUrl)
       }
     }
+    AsyncFunction("diagnostics") { sessionId: String ->
+      synchronized(this@DroneBrowserModule) {
+        gateway?.takeIf { it.sessionId == sessionId }?.diagnostics()
+      }
+    }
     AsyncFunction("stop") { sessionId: String ->
       synchronized(this@DroneBrowserModule) {
         if (gateway?.sessionId == sessionId) { gateway?.close(); gateway = null }

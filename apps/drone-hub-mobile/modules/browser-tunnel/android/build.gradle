@@ -28,6 +28,7 @@ dependencies {
 tasks.register('browserGatewaySmoke', JavaExec) {
   dependsOn 'compileDebugUnitTestKotlin'
   mainClass = 'expo.modules.dronebrowser.BrowserGatewaySmokeKt'
+  systemProperty 'browser.testServer', file('src/test/browser-tunnel-server.cjs').absolutePath
   classpath = files(layout.buildDirectory.dir('tmp/kotlin-classes/debugUnitTest'), layout.buildDirectory.dir('tmp/kotlin-classes/debug'))
   classpath += configurations.browserGatewaySmokeRuntime
 }

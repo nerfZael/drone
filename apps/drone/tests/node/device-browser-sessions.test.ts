@@ -115,12 +115,17 @@ async function fixture(runtime: 'host' | 'container' = 'container') {
       { droneId: 'drone', port },
       'phone',
     ) as Promise<DroneBrowserSession>;
-  const connect = (session: DroneBrowserSession, token = session.token, origin?: string) => {
+  const connect = (
+    session: DroneBrowserSession,
+    token = session.token,
+    origin?: string,
+    compression = false,
+  ) => {
     const ws = new WebSocket(
       `ws://127.0.0.1:${ingressPort}/api/device-mesh/v2/browser/${session.sessionId}`,
       {
         headers: { authorization: `Bearer ${token}`, ...(origin ? { origin } : {}) },
-        perMessageDeflate: false,
+        perMessageDeflate: compression,
       },
     );
     cleanups.push(() => ws.terminate());
@@ -128,6 +133,9 @@ async function fixture(runtime: 'host' | 'container' = 'container') {
   };
   return {
     sessions,
+    expireMapping: (session: DroneBrowserSession) => {
+      (sessions as any).sessions.get(session.sessionId).targetCheckedAt = Date.now() - 2001;
+    },
     lookupCount: () => lookups,
     failLookups: (status: number) => {
       lookupStatus = status;
@@ -253,6 +261,7 @@ test('bad credentials, web origins, remapped ports and closed sessions cannot co
     assert.match(error.message, /403/);
   }
   f.remap();
+  await (f.sessions as any).checkSessions(true);
   assert.match((await once(f.connect(session), 'error'))[0].message, /403/);
   const next = await f.open();
   await f.sessions.invoke(
@@ -327,6 +336,7 @@ test(
     const f = await fixture();
     const session = await f.open();
     for (let batch = 0; batch < 8; batch++) {
+      f.expireMapping(session);
       const held = f.holdNextRead();
       const before = f.lookupCount();
       const sockets = Array.from({ length: 12 }, () => f.connect(session));
@@ -353,6 +363,7 @@ test(
       );
     }
     f.remap();
+    await (f.sessions as any).checkSessions(true);
     assert.match((await once(f.connect(session), 'error'))[0].message, /403/);
   },
 );
@@ -384,3 +395,77 @@ test('temporary target lookup failures preserve sessions without admitting unche
   await closed;
   assert.match((await once(f.connect(session), 'error'))[0].message, /403/);
 });
+
+test('sequential assets reuse a validated mapping until its refresh deadline', async () => {
+  const f = await fixture();
+  const session = await f.open();
+  const before = f.lookupCount();
+  for (let i = 0; i < 6; i++) {
+    const ws = f.connect(session);
+    await once(ws, 'open');
+    ws.close();
+    await once(ws, 'close');
+  }
+  assert.equal(f.lookupCount(), before);
+  f.expireMapping(session);
+  const ws = f.connect(session);
+  await once(ws, 'open');
+  assert.equal(f.lookupCount(), before + 1);
+});
+
+test(
+  'one compressed tunnel carries sequential keep-alive HTTP requests',
+  { timeout: 10000 },
+  async () => {
+    const f = await fixture();
+    const session = await f.open();
+    const ws = f.connect(session, session.token, undefined, true);
+    await once(ws, 'open');
+    assert.equal(ws.extensions, 'permessage-deflate');
+    const stream = createWebSocketStream(ws);
+    const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+    // The transport is a Duplex, not a TCP Socket; OS keepalive/ref hooks do not apply.
+    agent.keepSocketAlive = () => true;
+    agent.reuseSocket = () => {};
+    let connections = 0;
+    agent.createConnection = () => {
+      connections++;
+      return stream as any;
+    };
+    cleanups.push(() => agent.destroy());
+    const wire = (ws as any)._socket;
+    const before = wire.bytesRead;
+    for (let i = 0; i < 3; i++) {
+      const response = await new Promise<string>((resolve, reject) => {
+        const body = 'compressible-browser-data-'.repeat(10000);
+        const req = http.request(
+          {
+            host: 'localhost',
+            path: `/asset-${i}`,
+            method: 'POST',
+            agent,
+            headers: { 'content-length': Buffer.byteLength(body) },
+          },
+          (res) => {
+            const chunks: Buffer[] = [];
+            res.on('data', (chunk) => chunks.push(chunk));
+            res.on('end', () => resolve(Buffer.concat(chunks).toString()));
+            res.on('error', reject);
+          },
+        );
+        req.on('error', reject);
+        req.flushHeaders();
+        for (let offset = 0; offset < body.length; offset += 16384)
+          req.write(body.slice(offset, offset + 16384));
+        req.end();
+      });
+      assert.equal(JSON.parse(response).path, `/asset-${i}`);
+      assert.equal(JSON.parse(response).body.length, 260000);
+    }
+    assert.equal(connections, 1);
+    assert.ok(
+      wire.bytesRead - before < 100000,
+      'compressible payload should use substantially fewer wire bytes',
+    );
+  },
+);
