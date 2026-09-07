@@ -1,8 +1,17 @@
+import { assertEventRunBudget } from './event-run-budget';
 import { applyHubDatabaseMigrations, getHubDatabase } from './hub-database';
 import type { HubDatabase, HubDatabaseConnection, HubDatabaseMigration } from './hub-database';
+import {
+  mergePromptEventBundle,
+  removeBundleHumanMessage,
+  renderPromptEventBundle,
+  type PromptEventBundle,
+} from './prompt-event-bundle';
 import { compactActivityJsonSql } from './activity-read-projection';
 import {
   normalizePromptQueueInterruption,
+  parseEventNotificationPrompt,
+  EVENT_NOTIFICATION_ROOT,
   type AgentRunActivity,
   type ChatQueueAction,
   type PromptQueueInterruption,
@@ -42,6 +51,7 @@ export type PromptQueueItem = {
   messageId?: string;
   cwd?: string | null;
   attachments?: unknown;
+  eventBundle?: PromptEventBundle;
   nativePrompt?: {
     text: string;
     images: Array<{ type: 'image'; data: string; mimeType: string }>;
@@ -268,6 +278,30 @@ export const PROMPT_QUEUE_MIGRATIONS: readonly HubDatabaseMigration[] = [
       `);
     },
   },
+  {
+    version: 7,
+    name: 'durable receipts for merged prompt submissions',
+    migrate(connection) {
+      connection.exec(`
+        CREATE TABLE prompt_submission_receipts (
+          drone_id TEXT NOT NULL,
+          chat_name TEXT NOT NULL,
+          prompt_id TEXT NOT NULL,
+          idempotency_key TEXT NOT NULL,
+          canonical_prompt_id TEXT NOT NULL,
+          PRIMARY KEY (drone_id, chat_name, prompt_id),
+          UNIQUE (drone_id, chat_name, idempotency_key),
+          FOREIGN KEY (drone_id, chat_name, canonical_prompt_id)
+            REFERENCES prompts(drone_id, chat_name, prompt_id)
+            ON UPDATE CASCADE ON DELETE CASCADE
+        );
+        CREATE INDEX idx_prompt_receipts_canonical
+          ON prompt_submission_receipts(drone_id, chat_name, canonical_prompt_id);
+        INSERT INTO prompt_submission_receipts
+          SELECT drone_id, chat_name, prompt_id, idempotency_key, prompt_id FROM prompts;
+      `);
+    },
+  },
 ];
 
 type PromptRow = {
@@ -469,20 +503,41 @@ export class PromptQueueRepository {
     );
   }
 
+  private resolvePromptId(opts: { droneId: string; chatName: string; promptId: string }): string {
+    return this.database.read((connection) => {
+      const receipt = connection
+        .prepare(
+          `SELECT canonical_prompt_id FROM prompt_submission_receipts
+        WHERE drone_id = ? AND chat_name = ? AND prompt_id = ?`,
+        )
+        .get(opts.droneId, opts.chatName, opts.promptId) as
+        | { canonical_prompt_id: string }
+        | undefined;
+      return receipt?.canonical_prompt_id ?? opts.promptId;
+    });
+  }
+
   async enqueue(opts: {
     droneId: string;
     chatName: string;
     prompt: PromptQueueItem;
     idempotencyKey?: string;
     submissionSource?: PromptSubmissionSource;
+    maxPendingPrompts?: number;
+    eventRunLimit?: { subscriberChatId: string; maxRuns: number };
     now?: string;
   }): Promise<{
+    // True when a new submission was accepted, including a merge into an existing row.
     inserted: boolean;
     prompt: PromptQueueRecord;
     interruptedPromptId?: string;
   }> {
     const now = normalizeIso(opts.now, new Date().toISOString());
     const prompt = normalizeItem(opts.prompt, now);
+    // Only the subscription service can create an event bundle. Never infer one
+    // from human-authored XML or other prompt text.
+    if (opts.submissionSource !== 'subscription') delete prompt.eventBundle;
+    if (prompt.eventBundle) prompt.prompt = renderPromptEventBundle(prompt.eventBundle);
     const idempotencyKey = String(opts.idempotencyKey ?? prompt.id).trim();
     if (!idempotencyKey) throw new Error('Prompt idempotency key cannot be empty');
     const result = await this.database.writeTransaction('enqueue prompt', (connection) => {
@@ -494,6 +549,37 @@ export class PromptQueueRepository {
         .get(opts.droneId);
       if (deletedDrone)
         throw new Error(`cannot enqueue prompt for permanently deleted drone: ${opts.droneId}`);
+      const existing = connection
+        .prepare(
+          `
+        SELECT p.* FROM prompts p WHERE p.drone_id = ? AND p.chat_name = ?
+        AND (p.prompt_id = ? OR p.idempotency_key = ? OR p.prompt_id IN (
+          SELECT canonical_prompt_id FROM prompt_submission_receipts
+          WHERE drone_id = ? AND chat_name = ? AND (prompt_id = ? OR idempotency_key = ?)
+        )) ORDER BY p.sequence LIMIT 1
+      `,
+        )
+        .get(
+          opts.droneId,
+          opts.chatName,
+          prompt.id,
+          idempotencyKey,
+          opts.droneId,
+          opts.chatName,
+          prompt.id,
+          idempotencyKey,
+        ) as PromptRow | undefined;
+      const existingRecord = recordFromRow(existing);
+      if (existingRecord) {
+        const existingPause = rowForPause(connection, opts.droneId, opts.chatName);
+        return {
+          inserted: false,
+          prompt: existingRecord,
+          ...(existingPause?.recoveryPromptId === existingRecord.id
+            ? { interruptedPromptId: existingPause.interruptedPromptId }
+            : {}),
+        };
+      }
       const pause =
         opts.submissionSource === 'human'
           ? rowForPause(connection, opts.droneId, opts.chatName)
@@ -502,6 +588,97 @@ export class PromptQueueRepository {
       const promptToStore: PromptQueueItem = recoversInterruption
         ? { ...prompt, state: 'queued' }
         : prompt;
+      if (
+        !recoversInterruption &&
+        prompt.state === 'queued' &&
+        !prompt.action &&
+        (opts.submissionSource === 'human' ||
+          (opts.submissionSource === 'subscription' && prompt.eventBundle))
+      ) {
+        const candidates = connection
+          .prepare(
+            `
+          SELECT * FROM prompts p
+          WHERE drone_id = ? AND chat_name = ? AND state = 'queued' AND attempt_count = 0
+            AND json_type(payload_json, '$.eventBundle') = 'object'
+            AND COALESCE(json_extract(payload_json, '$.eventBundle.sealed'), 0) = 0
+            AND COALESCE(json_extract(payload_json, '$.deliveryMode'), 'queue') = ?
+            AND json_type(payload_json, '$.action') IS NULL
+            ${
+              opts.submissionSource === 'human'
+                ? `AND NOT EXISTS (
+              SELECT 1 FROM prompts later WHERE later.drone_id = p.drone_id
+                AND later.chat_name = p.chat_name AND later.sequence > p.sequence
+                AND later.state IN ('queued', 'sending')
+                AND (json_type(later.payload_json, '$.eventBundle') IS NULL
+                  OR json_type(later.payload_json, '$.eventBundle.humanMessage') = 'object')
+            )`
+                : ''
+            }
+            AND NOT EXISTS (
+              SELECT 1 FROM prompts barrier WHERE barrier.drone_id = p.drone_id
+                AND barrier.chat_name = p.chat_name AND barrier.sequence > p.sequence
+                AND barrier.state IN ('queued', 'sending')
+                AND json_type(barrier.payload_json, '$.action') = 'object'
+            )
+          ORDER BY sequence
+        `,
+          )
+          .all(opts.droneId, opts.chatName, prompt.deliveryMode ?? 'queue') as PromptRow[];
+        for (const candidate of candidates) {
+          const current = recordFromRow(candidate)!;
+          const merged = mergePromptEventBundle(
+            current,
+            prompt,
+            opts.submissionSource as 'human' | 'subscription',
+          );
+          if (!merged) continue;
+          merged.updatedAt = now;
+          connection
+            .prepare(
+              `UPDATE prompts SET prompt = ?, payload_json = ?, updated_at = ?
+            WHERE drone_id = ? AND chat_name = ? AND prompt_id = ?`,
+            )
+            .run(
+              merged.prompt,
+              JSON.stringify(merged),
+              now,
+              opts.droneId,
+              opts.chatName,
+              current.id,
+            );
+          writeSubmissionReceipt(
+            connection,
+            opts.droneId,
+            opts.chatName,
+            prompt.id,
+            idempotencyKey,
+            current.id,
+          );
+          return {
+            inserted: true,
+            prompt: rowForPrompt(connection, opts.droneId, opts.chatName, current.id)!,
+          };
+        }
+      }
+      if (opts.eventRunLimit && prompt.eventBundle) {
+        assertEventRunBudget(
+          connection,
+          opts.eventRunLimit.subscriberChatId,
+          opts.eventRunLimit.maxRuns,
+          now,
+        );
+      }
+      if (opts.maxPendingPrompts !== undefined) {
+        const pending = connection
+          .prepare(
+            `SELECT COUNT(*) AS count FROM prompts
+          WHERE drone_id = ? AND chat_name = ? AND state IN ('queued', 'sending', 'failed')`,
+          )
+          .get(opts.droneId, opts.chatName) as { count: number };
+        if (pending.count >= opts.maxPendingPrompts)
+          throw new Error(`prompt queue is full (max ${opts.maxPendingPrompts})`);
+      }
       const info = connection
         .prepare(
           `
@@ -539,6 +716,14 @@ export class PromptQueueRepository {
       const record = recordFromRow(stored);
       if (!record) throw new Error(`Failed to persist prompt ${prompt.id}`);
       const inserted = Number(info.changes ?? 0) === 1;
+      writeSubmissionReceipt(
+        connection,
+        opts.droneId,
+        opts.chatName,
+        prompt.id,
+        idempotencyKey,
+        record.id,
+      );
       if (inserted && recoversInterruption && pause) {
         const interrupted = rowForPrompt(
           connection,
@@ -722,6 +907,7 @@ export class PromptQueueRepository {
     limit?: number;
     excludeCompletedSent?: boolean;
   }): PromptQueueRecord[] {
+    opts = { ...opts, promptId: this.resolvePromptId(opts) };
     const limit = Math.max(1, Math.min(500, Math.floor(opts.limit ?? 100)));
     return this.database.read((connection) => {
       const rows = connection
@@ -796,6 +982,7 @@ export class PromptQueueRepository {
   }
 
   get(opts: { droneId: string; chatName: string; promptId: string }): PromptQueueRecord | null {
+    opts = { ...opts, promptId: this.resolvePromptId(opts) };
     return this.database.read((connection) =>
       rowForPrompt(connection, opts.droneId, opts.chatName, opts.promptId),
     );
@@ -808,10 +995,15 @@ export class PromptQueueRepository {
           .prepare(
             `SELECT chat_name
              FROM prompts
-             WHERE drone_id = ? AND prompt_id = ? AND state != 'cancelled'
+             WHERE drone_id = ? AND state != 'cancelled' AND (prompt_id = ? OR prompt_id IN (
+               SELECT canonical_prompt_id FROM prompt_submission_receipts
+               WHERE drone_id = ? AND prompt_id = ?
+             ))
              ORDER BY sequence`,
           )
-          .all(opts.droneId, opts.promptId) as Array<{ chat_name: string }>
+          .all(opts.droneId, opts.promptId, opts.droneId, opts.promptId) as Array<{
+          chat_name: string;
+        }>
       ).map((row) => row.chat_name),
     );
   }
@@ -879,9 +1071,11 @@ export class PromptQueueRepository {
     chatName: string;
     promptId: string;
     leaseOwner: string;
+    requireNativePreparation?: boolean;
     leaseMs?: number;
     now?: string;
   }): Promise<PromptQueueRecord | null> {
+    opts = { ...opts, promptId: this.resolvePromptId(opts) };
     const now = normalizeIso(opts.now, new Date().toISOString());
     const leaseOwner = String(opts.leaseOwner ?? '').trim();
     if (!leaseOwner) throw new Error('Prompt lease owner cannot be empty');
@@ -895,6 +1089,8 @@ export class PromptQueueRepository {
           `
             UPDATE prompts
             SET state = 'sending',
+                payload_json = CASE WHEN json_type(payload_json, '$.eventBundle') = 'object'
+                  THEN json_set(payload_json, '$.eventBundle.sealed', json('true')) ELSE payload_json END,
                 attempt_count = attempt_count + 1,
                 updated_at = ?,
                 lease_owner = ?,
@@ -902,6 +1098,14 @@ export class PromptQueueRepository {
                 last_error = NULL
             WHERE drone_id = ? AND chat_name = ? AND prompt_id = ?
               AND state = 'queued'
+               ${
+                 opts.requireNativePreparation
+                   ? `AND (
+                 COALESCE(json_array_length(payload_json, '$.attachments'), 0) = 0
+                 OR json_type(payload_json, '$.nativePrompt') = 'object'
+               )`
+                   : ''
+               }
               AND next_attempt_at <= ?
               AND ${PAUSE_ALLOWS_PROMPT_SQL}
               AND (NOT ${PROMPT_IS_RECOVERY_SQL} OR ${CHAT_HAS_NO_SENDING_PROMPT_SQL})
@@ -965,9 +1169,11 @@ export class PromptQueueRepository {
     chatName: string;
     promptId: string;
     leaseOwner: string;
+    requireNativePreparation?: boolean;
     leaseMs?: number;
     now?: string;
   }): Promise<PromptQueueRecord | null> {
+    opts = { ...opts, promptId: this.resolvePromptId(opts) };
     const now = normalizeIso(opts.now, new Date().toISOString());
     const leaseOwner = String(opts.leaseOwner ?? '').trim();
     if (!leaseOwner) throw new Error('Prompt lease owner cannot be empty');
@@ -978,6 +1184,8 @@ export class PromptQueueRepository {
           .prepare(
             `UPDATE prompts
              SET state = 'sending',
+                payload_json = CASE WHEN json_type(payload_json, '$.eventBundle') = 'object'
+                  THEN json_set(payload_json, '$.eventBundle.sealed', json('true')) ELSE payload_json END,
                  attempt_count = attempt_count + 1,
                  updated_at = ?,
                  lease_owner = ?,
@@ -985,6 +1193,14 @@ export class PromptQueueRepository {
                  last_error = NULL
              WHERE drone_id = ? AND chat_name = ? AND prompt_id = ?
                AND state = 'queued'
+               ${
+                 opts.requireNativePreparation
+                   ? `AND (
+                 COALESCE(json_array_length(payload_json, '$.attachments'), 0) = 0
+                 OR json_type(payload_json, '$.nativePrompt') = 'object'
+               )`
+                   : ''
+               }
                AND ${PAUSE_ALLOWS_PROMPT_SQL}
                AND (NOT ${PROMPT_IS_RECOVERY_SQL} OR ${CHAT_HAS_NO_SENDING_PROMPT_SQL})
              RETURNING *`,
@@ -1002,7 +1218,29 @@ export class PromptQueueRepository {
     promptId: string;
     nativePrompt: NonNullable<PromptQueueItem['nativePrompt']>;
   }): Promise<PromptQueueRecord | null> {
+    opts = { ...opts, promptId: this.resolvePromptId(opts) };
     return await this.database.writeTransaction('prepare native prompt', (connection) => {
+      const current = rowForPrompt(connection, opts.droneId, opts.chatName, opts.promptId);
+      let nativePrompt = opts.nativePrompt;
+      if (current?.eventBundle) {
+        const input = nativePrompt.text;
+        const notification = parseEventNotificationPrompt(input);
+        const human = current.eventBundle.humanMessage;
+        const humanText = human?.removed ? undefined : human?.text;
+        if (notification) {
+          // A human message (and possibly images) changed while preparation ran.
+          if (notification.userMessage !== humanText) return current;
+          const endTag = `</${EVENT_NOTIFICATION_ROOT}>`;
+          const end = input.indexOf(endTag);
+          if (end < 0) return current;
+          nativePrompt = {
+            ...nativePrompt,
+            text: current.prompt + input.slice(end + endTag.length),
+          };
+        } else if (humanText !== undefined && input.startsWith(humanText)) {
+          nativePrompt = { ...nativePrompt, text: current.prompt + input.slice(humanText.length) };
+        } else return current;
+      }
       // Preserve the original message and attachment references for the transcript.
       // Preparation is idempotent and cannot alter an already claimed delivery.
       connection
@@ -1014,7 +1252,7 @@ export class PromptQueueRepository {
           AND state = 'queued' AND json_type(payload_json, '$.nativePrompt') IS NULL
       `,
         )
-        .run(JSON.stringify(opts.nativePrompt), opts.droneId, opts.chatName, opts.promptId);
+        .run(JSON.stringify(nativePrompt), opts.droneId, opts.chatName, opts.promptId);
       return rowForPrompt(connection, opts.droneId, opts.chatName, opts.promptId);
     });
   }
@@ -1044,6 +1282,7 @@ export class PromptQueueRepository {
     now?: string;
     expectedStates?: readonly PromptQueueState[];
   }): Promise<boolean> {
+    opts = { ...opts, promptId: this.resolvePromptId(opts) };
     const now = normalizeIso(opts.patch.updatedAt ?? opts.now, new Date().toISOString());
     return await this.database.writeTransaction('update prompt', (connection) => {
       const current = rowForPrompt(connection, opts.droneId, opts.chatName, opts.promptId);
@@ -1100,6 +1339,7 @@ export class PromptQueueRepository {
     maxDelayMs?: number;
     now?: string;
   }): Promise<{ disposition: 'retry' | 'terminal' | 'not-claimed'; nextAttemptAt?: string }> {
+    opts = { ...opts, promptId: this.resolvePromptId(opts) };
     const now = normalizeIso(opts.now, new Date().toISOString());
     const maxAttempts = Math.max(1, Math.floor(opts.maxAttempts ?? 5));
     const baseDelayMs = Math.max(1, Math.floor(opts.baseDelayMs ?? 2_000));
@@ -1175,6 +1415,7 @@ export class PromptQueueRepository {
     leaseOwner?: string;
     now?: string;
   }): Promise<boolean> {
+    opts = { ...opts, promptId: this.resolvePromptId(opts) };
     const now = normalizeIso(opts.now, new Date().toISOString());
     return await this.database.writeTransaction('release prompt claim', (connection) => {
       const current = rowForPrompt(connection, opts.droneId, opts.chatName, opts.promptId);
@@ -1252,6 +1493,7 @@ export class PromptQueueRepository {
     promptId: string;
     now?: string;
   }): Promise<boolean> {
+    opts = { ...opts, promptId: this.resolvePromptId(opts) };
     const now = normalizeIso(opts.now, new Date().toISOString());
     return await this.database.writeTransaction('pause interrupted prompt queue', (connection) => {
       const interrupted = rowForPrompt(connection, opts.droneId, opts.chatName, opts.promptId);
@@ -1332,6 +1574,7 @@ export class PromptQueueRepository {
   }): Promise<{
     status: 'skipped' | 'not-found' | 'not-blocked';
   }> {
+    opts = { ...opts, promptId: this.resolvePromptId(opts) };
     const now = normalizeIso(opts.now, new Date().toISOString());
     return await this.database.writeTransaction('resolve interrupted prompt', (connection) => {
       const pause = rowForPause(connection, opts.droneId, opts.chatName);
@@ -1405,13 +1648,50 @@ export class PromptQueueRepository {
     droneId: string;
     chatName: string;
     promptId: string;
-  }): Promise<{ cancelled: boolean; state: PromptQueueState | null }> {
+    entireBundle?: boolean;
+  }): Promise<{ cancelled: boolean; state: PromptQueueState | null; retained?: boolean }> {
+    opts = { ...opts, promptId: this.resolvePromptId(opts) };
     return await this.database.writeTransaction('cancel queued prompt', (connection) => {
       const current = rowForPrompt(connection, opts.droneId, opts.chatName, opts.promptId);
       if (!current) return { cancelled: false, state: null };
       if (current.state !== 'queued' && current.state !== 'failed')
         return { cancelled: false, state: current.state };
+      if (
+        !opts.entireBundle &&
+        current.state === 'queued' &&
+        current.eventBundle?.sealed &&
+        current.eventBundle.humanMessage
+      )
+        return { cancelled: false, state: current.state };
       const cancelledAt = new Date().toISOString();
+      const remaining =
+        !opts.entireBundle && current.state === 'queued' && current.attemptCount === 0
+          ? removeBundleHumanMessage(current)
+          : null;
+      if (remaining) {
+        remaining.updatedAt = cancelledAt;
+        connection
+          .prepare(
+            `UPDATE prompts SET prompt = ?, payload_json = ?, updated_at = ?
+          WHERE drone_id = ? AND chat_name = ? AND prompt_id = ?`,
+          )
+          .run(
+            remaining.prompt,
+            JSON.stringify(remaining),
+            cancelledAt,
+            opts.droneId,
+            opts.chatName,
+            current.id,
+          );
+        return { cancelled: true, state: current.state, retained: true };
+      }
+      if (
+        !opts.entireBundle &&
+        current.state === 'queued' &&
+        current.eventBundle?.humanMessage?.removed
+      )
+        return { cancelled: true, state: current.state, retained: true };
+
       const info = connection
         .prepare(
           `UPDATE prompts
@@ -1525,4 +1805,20 @@ export function getPromptQueueRepository(): PromptQueueRepository | null {
 export function resetPromptQueueRepositoryForTests(): void {
   cachedRepository = null;
   promptQueuedListeners.clear();
+}
+
+function writeSubmissionReceipt(
+  connection: HubDatabaseConnection,
+  droneId: string,
+  chatName: string,
+  promptId: string,
+  idempotencyKey: string,
+  canonicalPromptId: string,
+): void {
+  connection
+    .prepare(
+      `INSERT OR IGNORE INTO prompt_submission_receipts
+    (drone_id, chat_name, prompt_id, idempotency_key, canonical_prompt_id) VALUES (?, ?, ?, ?, ?)`,
+    )
+    .run(droneId, chatName, promptId, idempotencyKey, canonicalPromptId);
 }

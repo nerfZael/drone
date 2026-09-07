@@ -14,6 +14,7 @@ const {
   startDesktopStaticUiServer,
 } = require('./hub-electron-static-server.cjs');
 const { zoomActionForInput } = require('./hub-electron-zoom.cjs');
+const { DIAGNOSTICS_CHANNEL, createDesktopDiagnostics, observeWindowDiagnostics, cleanText } = require('./hub-electron-diagnostics.cjs');
 
 const APP_NAME = 'Drone Hub';
 const NAVIGATION_ZOOM_CHANNEL = 'drone-hub:navigation-zoom';
@@ -54,6 +55,27 @@ if (process.platform === 'win32') {
   app.setAppUserModelId('com.drone.hub');
 }
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
+const diagnostics = createDesktopDiagnostics({
+  logPath: path.join(app.getPath('userData'), 'logs', 'desktop.jsonl'),
+});
+
+if (hasSingleInstanceLock) {
+  diagnostics.write('desktop-startup', {}, 'info');
+  process.on('uncaughtExceptionMonitor', (error, origin) => {
+    diagnostics.write('main-process-error', { origin, message: cleanText(error.message), stack: cleanText(error.stack, 12000) });
+  });
+  process.on('warning', (warning) => diagnostics.write('main-process-warning', {
+    message: cleanText(warning.message), stack: cleanText(warning.stack, 12000),
+  }, 'warn'));
+  process.on('exit', (code) => diagnostics.write('desktop-exit', { code }, code ? 'error' : 'info'));
+  app.on('child-process-gone', (_event, details) => diagnostics.write('child-process-gone', details));
+}
+
+ipcMain.on(DIAGNOSTICS_CHANNEL, (event, record) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents ||
+      event.senderFrame !== mainWindow.webContents.mainFrame) return;
+  diagnostics.renderer(record);
+});
 
 function resolveCliPath() {
   const explicit = String(process.env.DRONE_HUB_CLI_PATH || '').trim();
@@ -374,6 +396,7 @@ function createWindow() {
     },
   });
 
+  observeWindowDiagnostics(mainWindow, diagnostics);
   mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(loadingHtml())}`);
   mainWindow.webContents.setZoomFactor(1);
   mainWindow.webContents.on('did-finish-load', () => {
@@ -400,6 +423,7 @@ function createWindow() {
 }
 
 function showError(error) {
+  diagnostics.write('desktop-startup-error', { message: cleanText(error?.message ?? error), stack: cleanText(error?.stack, 12000) });
   restartInProgress = false;
   const message = error && error.message ? error.message : String(error || 'Unknown error');
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -537,6 +561,7 @@ function startHub() {
     let uiUrl;
     try {
       ({ payload, uiUrl } = parseDetachedHubStartOutput(stdout));
+      diagnostics.setHubLogPath(payload.state?.logPath || payload.logPath);
     } catch {
       return false;
     }
@@ -558,6 +583,10 @@ function startHub() {
         const apiHost = String(payload.state?.apiHost || '').trim();
         const apiPort = Number(payload.state?.apiPort);
         if (!staticDir) throw new Error('The production Drone Hub UI bundle is missing. Run `bun run --filter drone-hub build`.');
+        try {
+          const version = JSON.parse(fs.readFileSync(path.join(staticDir, 'version.json'), 'utf8'));
+          diagnostics.setUiBuild({ buildId: version.buildId, buildTime: version.buildTime });
+        } catch { /* The renderer also reports its compiled build id. */ }
         if (!tokenPath || !fs.existsSync(tokenPath)) throw new Error('The running Hub API token could not be found.');
         if (!apiHost || !Number.isInteger(apiPort) || apiPort <= 0) throw new Error('The running Hub API address is invalid.');
         desktopStaticUiServer = await startDesktopStaticUiServer({

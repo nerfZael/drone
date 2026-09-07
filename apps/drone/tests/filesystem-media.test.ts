@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   mkdirSync,
   readdirSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -228,6 +229,23 @@ describe('filesystem media ranges', () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  test('the media watchdog does not inherit the response output descriptor', () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'drone-watchdog-fd-'));
+    const filePath = path.join(root, 'tiny.txt');
+    const descriptorPath = path.join(root, 'descriptor');
+    writeFileSync(filePath, 'tiny');
+    try {
+      const script = buildContainerMediaRangeScript({
+        targetPath: filePath, maxBytes: 100, requestedRange: { kind: 'full' }, includeRevision: false,
+      });
+      // Delay the foreground read so the watchdog gets scheduled before cleanup.
+      const probe = `sleep() { readlink /proc/$BASHPID/fd/1 > '${descriptorPath}'; command sleep "$@"; };\n` +
+        'head() { command sleep 0.1; command head "$@"; };\n' + script;
+      execFileSync('bash', ['-c', probe], { timeout: 2000, stdio: ['ignore', 'pipe', 'pipe'] });
+      expect(readFileSync(descriptorPath, 'utf8').trim()).toBe('/dev/null');
+    } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
   test('container range failures clean bounded snapshot files', () => {

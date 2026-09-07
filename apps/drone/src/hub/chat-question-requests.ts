@@ -14,6 +14,12 @@ import {
   type HubDatabaseConnection,
   type HubDatabaseMigration,
 } from '../host/hub-database';
+import { ResourceSubscriptionRepository } from './subscriptions/resource-subscription-repository';
+import {
+  createQuestionRequestSubscription,
+  questionRequestResolvedEvent,
+  type QuestionRequestSubscriptionResult,
+} from './subscriptions/question-request-subscription';
 import { subscribePromptQueued } from '../host/prompt-queue-repository';
 
 const MAX_QUESTIONS = 99;
@@ -54,6 +60,28 @@ const MIGRATIONS: readonly HubDatabaseMigration[] = [
       `);
     },
   },
+  {
+    version: 2,
+    name: 'asynchronous question subscriptions',
+    migrate(connection) {
+      connection.exec(`
+        ALTER TABLE chat_question_requests ADD COLUMN subscription_id TEXT;
+        DROP INDEX idx_chat_question_requests_one_pending;
+        CREATE UNIQUE INDEX idx_chat_question_requests_one_pending
+          ON chat_question_requests (drone_id, chat_name)
+          WHERE status = 'pending' AND subscription_id IS NULL;
+      `);
+    },
+  },
+  {
+    version: 3,
+    name: 'question history by stable chat identity',
+    migrate(connection) {
+      connection.exec(
+        'CREATE INDEX idx_chat_question_requests_chat_id ON chat_question_requests (chat_id, created_at)',
+      );
+    },
+  },
 ];
 
 type Row = {
@@ -63,6 +91,7 @@ type Row = {
   chat_id: string;
   native_thread_id: string | null;
   tool_call_id: string | null;
+  subscription_id: string | null;
   tool_name: string;
   questions_json: string;
   status: ChatQuestionRequest['status'];
@@ -198,6 +227,7 @@ function requestFromRow(row: Row): ChatQuestionRequest {
     chatId: row.chat_id,
     ...(row.native_thread_id ? { nativeThreadId: row.native_thread_id } : {}),
     ...(row.tool_call_id ? { toolCallId: row.tool_call_id } : {}),
+    ...(row.subscription_id ? { subscriptionId: row.subscription_id } : {}),
     toolName: row.tool_name,
     questions: JSON.parse(row.questions_json),
     createdAt: row.created_at,
@@ -298,7 +328,8 @@ export class ChatQuestionRequestService {
           ? request.nativeThreadId === nativeThreadId && request.toolCallId === toolCallId
           : request.droneId === droneId &&
             request.chatName === chatName &&
-            request.status === 'pending',
+            request.status === 'pending' &&
+            !request.subscriptionId,
       );
       if (existing) return existing;
       const request: ChatQuestionRequest = {
@@ -369,6 +400,26 @@ export class ChatQuestionRequestService {
     });
   }
 
+  async askAsync(
+    input: CreateChatQuestionRequestInput,
+  ): Promise<QuestionRequestSubscriptionResult> {
+    if (!this.database) throw new Error('asynchronous questions require the Hub database');
+    const now = new Date().toISOString();
+    return await createQuestionRequestSubscription(this.database, {
+      id: `questions_${crypto.randomUUID()}`,
+      droneId: text(input.droneId, 200, 'droneId'),
+      chatName: text(input.chatName, 200, 'chatName'),
+      chatId: text(input.chatId, 200, 'chatId'),
+      nativeThreadId: optionalText(input.nativeThreadId, 200, 'nativeThreadId'),
+      toolCallId: optionalText(input.toolCallId, 240, 'toolCallId'),
+      toolName: optionalText(input.toolName, 160, 'toolName') ?? 'ask_questions',
+      questions: normalizeChatQuestions(input.questions),
+      createdAt: now,
+      updatedAt: now,
+      status: 'pending',
+    });
+  }
+
   async ask(
     input: CreateChatQuestionRequestInput,
     signal?: AbortSignal,
@@ -396,41 +447,66 @@ export class ChatQuestionRequestService {
           request.status === 'pending',
       );
     }
-    return this.database.read((connection) =>
-      (
+    return this.database.read((connection) => {
+      const chatId = questionChatId(connection, droneId, chatName);
+      const scope = chatId === null ? 'drone_id = ? AND chat_name = ?' : 'chat_id = ?';
+      const params = chatId === null ? [droneId, chatName] : [chatId];
+      return (
         connection
           .prepare(
             `SELECT * FROM chat_question_requests
-             WHERE drone_id = ? AND chat_name = ? AND status = 'pending'
+             WHERE ${scope} AND status = 'pending'
              ORDER BY created_at`,
           )
-          .all(droneId, chatName) as Row[]
-      ).map(requestFromRow),
-    );
+          .all(...params) as Row[]
+      ).map((row) => ({ ...requestFromRow(row), droneId, chatName }));
+    });
   }
 
   listForChat(droneId: string, chatName: string, limit = 100): ChatQuestionRequest[] {
     const safeLimit = Math.max(1, Math.min(500, Math.trunc(limit) || 100));
     if (!this.database) {
-      return [...this.memory.values()]
+      const requests = [...this.memory.values()]
         .filter((request) => request.droneId === droneId && request.chatName === chatName)
-        .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-        .slice(-safeLimit);
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      return requests.filter(
+        (request, index) => request.status === 'pending' || index >= requests.length - safeLimit,
+      );
     }
-    return this.database.read((connection) =>
-      (
+    return this.database.read((connection) => {
+      const chatId = questionChatId(connection, droneId, chatName);
+      const scope = chatId === null ? 'drone_id = ? AND chat_name = ?' : 'chat_id = ?';
+      const params = chatId === null ? [droneId, chatName] : [chatId];
+      return (
         connection
           .prepare(
-            `SELECT * FROM (
-               SELECT rowid AS request_rowid, * FROM chat_question_requests
-               WHERE drone_id = ? AND chat_name = ?
-               ORDER BY created_at DESC, rowid DESC
-               LIMIT ?
-             ) ORDER BY created_at, request_rowid`,
+            `SELECT * FROM chat_question_requests
+             WHERE ${scope} AND (
+               status = 'pending' OR id IN (
+                 SELECT id FROM chat_question_requests
+                 WHERE ${scope}
+                 ORDER BY created_at DESC, rowid DESC LIMIT ?
+               )
+             ) ORDER BY created_at, rowid`,
           )
-          .all(droneId, chatName, safeLimit) as Row[]
-      ).map(requestFromRow),
+          .all(...params, ...params, safeLimit) as Row[]
+      ).map((row) => ({ ...requestFromRow(row), droneId, chatName }));
+    });
+  }
+
+  getForChat(requestId: string, droneId: string, chatName: string): ChatQuestionRequest | null {
+    const request = this.get(requestId);
+    if (!request) return null;
+    if (!this.database)
+      return request.droneId === droneId && request.chatName === chatName ? request : null;
+    const chatId = this.database.read((connection) =>
+      questionChatId(connection, droneId, chatName),
     );
+    const matches =
+      chatId === null
+        ? request.droneId === droneId && request.chatName === chatName
+        : request.chatId === chatId;
+    return matches ? { ...request, droneId, chatName } : null;
   }
 
   async submit(
@@ -459,6 +535,9 @@ export class ChatQuestionRequestService {
     const request = this.get(requestId);
     if (!request) throw new Error(`unknown question request: ${requestId}`);
     if (request.result) return request.result;
+    if (request.subscriptionId && reason !== 'user_skipped') {
+      throw new Error('asynchronous questions can only be skipped by the user');
+    }
     const normalizedNotes = optionalText(notes, 8_000, 'notes');
     return await this.finish(request, {
       status: 'skipped',
@@ -475,6 +554,7 @@ export class ChatQuestionRequestService {
   ): Promise<ChatQuestionRequestResult[]> {
     const results: ChatQuestionRequestResult[] = [];
     for (const request of this.listPending(droneId, chatName)) {
+      if (request.subscriptionId) continue;
       results.push(await this.skip(request.id, reason));
     }
     return results;
@@ -491,7 +571,7 @@ export class ChatQuestionRequestService {
         connection
           .prepare(
             `SELECT requests.* FROM chat_question_requests AS requests
-             WHERE requests.status = 'pending'
+             WHERE requests.status = 'pending' AND requests.subscription_id IS NULL
                AND EXISTS (
                  SELECT 1 FROM prompts
                  WHERE prompts.drone_id = requests.drone_id
@@ -542,7 +622,7 @@ export class ChatQuestionRequestService {
         : (connection
             .prepare(
               `SELECT * FROM chat_question_requests
-             WHERE drone_id = ? AND chat_name = ? AND status = 'pending'
+             WHERE drone_id = ? AND chat_name = ? AND status = 'pending' AND subscription_id IS NULL
              ORDER BY created_at LIMIT 1`,
             )
             .get(input.droneId, input.chatName) as Row | undefined);
@@ -568,7 +648,7 @@ export class ChatQuestionRequestService {
     request: ChatQuestionRequest,
     result: ChatQuestionRequestResult,
   ): Promise<ChatQuestionRequestResult> {
-    if (request.nativeThreadId) {
+    if (request.nativeThreadId && !request.subscriptionId) {
       if (!this.nativeResolver) {
         throw new Error('native question resolver is unavailable');
       }
@@ -583,20 +663,38 @@ export class ChatQuestionRequestService {
         updatedAt: now,
       });
     } else {
-      await this.database.writeTransaction('resolve chat question request', (connection) => {
-        connection
-          .prepare(
-            `UPDATE chat_question_requests
+      const subscriptions = request.subscriptionId
+        ? new ResourceSubscriptionRepository(this.database)
+        : null;
+      result = await this.database.writeTransaction(
+        'resolve chat question request',
+        (connection) => {
+          const updated = connection
+            .prepare(
+              `UPDATE chat_question_requests
              SET status = ?, result_json = ?, updated_at = ?
              WHERE id = ? AND status = 'pending'`,
-          )
-          .run(
-            result.status === 'submitted' ? 'submitted' : 'skipped',
-            JSON.stringify(result),
-            now,
-            request.id,
+            )
+            .run(
+              result.status === 'submitted' ? 'submitted' : 'skipped',
+              JSON.stringify(result),
+              now,
+              request.id,
+            );
+          if (!updated.changes) {
+            const stored = connection
+              .prepare('SELECT * FROM chat_question_requests WHERE id = ?')
+              .get(request.id) as Row | undefined;
+            if (!stored?.result_json) throw new Error(`unknown question request: ${request.id}`);
+            return JSON.parse(stored.result_json) as ChatQuestionRequestResult;
+          }
+          subscriptions?.appendEventInTransaction(
+            connection,
+            questionRequestResolvedEvent(request, result, now),
           );
-      });
+          return result;
+        },
+      );
     }
     for (const resolve of this.waiters.get(request.id) ?? []) resolve(result);
     this.waiters.delete(request.id);
@@ -676,4 +774,13 @@ export function resetChatQuestionRequestServiceForTests(): void {
   cached?.close();
   cached = null;
   cachedDatabase = null;
+}
+
+// Canonical identity survives rename/restore and separates chats that reuse a name.
+// The name fallback supports the legacy in-memory and isolated database callers.
+function questionChatId(connection: HubDatabaseConnection, droneId: string, chatName: string): string | null {
+  if (!connection.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'canonical_chats'").get()) return null;
+  const row = connection.prepare(`SELECT json_extract(metadata_json, '$.id') AS id
+    FROM canonical_chats WHERE drone_id = ? AND chat_name = ?`).get(droneId, chatName) as { id: string } | undefined;
+  return row?.id ?? '';
 }

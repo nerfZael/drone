@@ -15,9 +15,11 @@ import { colors, radii } from '../theme';
 export function MobileEventNotification({
   notification,
   onLongPress,
+  footer,
 }: {
   notification: EventNotificationDisplay;
   onLongPress?: () => void;
+  footer?: React.ComponentProps<typeof View>['children'];
 }) {
   const [expanded, setExpanded] = React.useState(false);
   const { title, subtitle } = eventNotificationCollapsedSummary(notification);
@@ -25,8 +27,17 @@ export function MobileEventNotification({
   return (
     <View style={styles.group}>
       <View style={styles.label}>
-        <Text style={styles.labelText}>Event notification</Text>
+        <Text style={styles.labelText}>
+          {notification.userMessage !== undefined
+            ? `1 message + ${notification.eventCount ?? notification.events.length} event${(notification.eventCount ?? notification.events.length) === 1 ? '' : 's'}`
+            : 'Event notification'}
+        </Text>
       </View>
+      {notification.userMessage !== undefined ? (
+        <Text selectable style={styles.userMessage}>
+          {notification.userMessage}
+        </Text>
+      ) : null}
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`${title}. ${subtitle}`}
@@ -56,6 +67,15 @@ export function MobileEventNotification({
         </View>
         {expanded ? (
           <View style={styles.details}>
+            {notification.eventCount !== undefined && notification.eventCount <= notification.events.length ? (
+              <Text style={styles.subtitle}>Event preview. Full details are available on the host.</Text>
+            ) : null}
+            {(notification.eventCount ?? 0) > notification.events.length ? (
+              <Text style={styles.subtitle}>
+                Showing {notification.events.length} of {notification.eventCount} events. Full
+                details are available on the host.
+              </Text>
+            ) : null}
             {notification.events.map((event, index) => {
               const fields = eventNotificationDataFields(event.providerContentText);
               return (
@@ -87,11 +107,20 @@ export function MobileEventNotification({
           </View>
         ) : null}
       </Pressable>
+      {footer}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  userMessage: {
+    width: '100%',
+    color: colors.userBubbleText,
+    fontSize: 15,
+    lineHeight: 22,
+    padding: 12,
+    backgroundColor: colors.userBubble,
+  },
   group: {
     width: '90%',
     maxWidth: 560,

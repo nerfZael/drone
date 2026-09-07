@@ -163,6 +163,7 @@ export async function dvmExec(
     containerAlreadyReady?: boolean;
     maxOutputBytes?: number;
     signal?: AbortSignal;
+    onTiming?: (phase: string, durationMs: number) => void;
   },
 ): Promise<RunResult> {
   return await dvm.exec(container, cmd, args, {
@@ -170,6 +171,7 @@ export async function dvmExec(
     containerAlreadyReady: opts?.containerAlreadyReady,
     maxOutputBytes: opts?.maxOutputBytes,
     signal: opts?.signal,
+    ...(opts?.onTiming ? { onTiming: opts.onTiming } : {}),
   });
 }
 

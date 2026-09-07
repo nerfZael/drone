@@ -2,6 +2,7 @@ import { APP_HEADER_HEIGHT } from '../layout';
 import { resolveWorkspacePreviewLink } from '@drone/hub-model';
 import type { MobileFileReference } from '../local-assistant/file-reference';
 import React from 'react';
+import { mobileWorkspaceLoads } from '../diagnostics/mobile-workspace-load';
 import type { DroneControlOperation } from '@drone/device-protocol';
 import {
   ActivityIndicator,
@@ -117,9 +118,15 @@ function PreviewVideo({ uri, active }: { uri: string; active: boolean }) {
   );
 }
 
-function PreviewImage({ uri, active }: { uri: string; active: boolean }) {
+function PreviewImage({ uri, active, diagnosticId }: { uri: string; active: boolean; diagnosticId?: string }) {
   const [state, setState] = React.useState<'loading' | 'ready' | 'error'>('loading');
   React.useEffect(() => setState('loading'), [uri]);
+  React.useEffect(() => {
+    if (state === 'ready') {
+      mobileWorkspaceLoads.mark(diagnosticId, 'imageDecoded');
+      mobileWorkspaceLoads.committed(diagnosticId);
+    } else if (state === 'error') mobileWorkspaceLoads.finish(diagnosticId, 'error');
+  }, [diagnosticId, state]);
   return (
     <ZoomableImageStage resetKey={uri} active={active} enabled={state === 'ready'}>
       <Image
@@ -239,6 +246,7 @@ function TextPreview({
 }
 
 export function FilePreviewModal({
+  loadDiagnosticId,
   embedded = false,
   visible,
   preview,
@@ -265,6 +273,7 @@ export function FilePreviewModal({
   onRetry,
   onPreviewPathsChanged,
 }: {
+  loadDiagnosticId?: string;
   embedded?: boolean;
   visible: boolean;
   preview: MobileFilePreview | null;
@@ -807,7 +816,7 @@ export function FilePreviewModal({
                 />
               </ZoomableImageStage>
             ) : preview?.kind === 'image' && preview.uri ? (
-              <PreviewImage uri={preview.uri} active={visible} />
+              <PreviewImage key={preview.uri} uri={preview.uri} active={visible} diagnosticId={loadDiagnosticId} />
             ) : preview?.kind === 'video' && preview.uri ? (
               <PreviewVideo uri={preview.uri} active={visible} />
             ) : preview ? (

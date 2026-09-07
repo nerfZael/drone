@@ -1,4 +1,6 @@
+import { EventRunLimitError } from '../../host/event-run-budget';
 import crypto from 'node:crypto';
+import { resourceSubscriptionDeliveryMode } from './resource-subscription-delivery';
 import { renderEventNotificationPrompt } from '@drone/assistant-chat';
 
 import { ManagedLoop } from '../../background/managed-loop';
@@ -195,6 +197,12 @@ export class ResourceSubscriptionService {
     location?: ChatResourceLocation,
     resolvedChangeRequest?: ChangeRequestSubscriptionTarget,
   ): ResourceSubscription {
+    if (subscription.provider === 'drone-hub' && subscription.resourceType === 'question_request') {
+      return {
+        ...subscription,
+        resourceLabel: String(subscription.resourceConfig.label ?? 'Questions'),
+      };
+    }
     if (subscription.provider === 'drone-hub' && subscription.resourceType === 'change_request') {
       const request = resolvedChangeRequest ?? this.resolveChangeRequest(subscription.resourceId);
       return request
@@ -468,7 +476,11 @@ export class ResourceSubscriptionService {
   private async resetResumeCursors(subscriptions: ResourceSubscription[]): Promise<void> {
     for (const subscription of subscriptions) {
       if (subscription.provider === 'github') continue;
-      if (subscription.resourceType === 'change_request') continue;
+      if (
+        subscription.resourceType === 'change_request' ||
+        subscription.resourceType === 'question_request'
+      )
+        continue;
       if (subscription.resourceType === 'cron') {
         const config = cronSubscriptionConfig(subscription.resourceConfig);
         const schedule = normalizeCronSubscription(config.expression, config.timeZone);
@@ -740,11 +752,22 @@ export class ResourceSubscriptionService {
         chatName: currentSubscriber.chatName,
         submissionSource: 'subscription',
         idempotencyKey: `subscription-batch:${batch.id}`,
+        eventRunLimit: {
+          subscriberChatId: currentSubscriber.chatId,
+          maxRuns: settings.maxAutomatedRunsPerConversationPerHour,
+        },
         prompt: {
           id: batch.promptId,
+          eventBundle: {
+            events: subscriptionPromptEvents(deliverableBatch),
+            maxEvents: settings.maxEventsPerPrompt,
+          },
           at: new Date().toISOString(),
           prompt,
-          deliveryMode: 'queue',
+          deliveryMode: resourceSubscriptionDeliveryMode(
+            settings,
+            deliverableItems[0]!.event.eventType,
+          ),
           state: 'queued',
         },
       });
@@ -756,6 +779,10 @@ export class ResourceSubscriptionService {
         eventCount: deliverableItems.length,
       });
     } catch (error) {
+      if (error instanceof EventRunLimitError) {
+        await this.deps.repository.deferRateLimitedBatch(batch.id);
+        return;
+      }
       await this.deps.repository.failBatch(
         batch.id,
         errorMessage(error),
@@ -994,17 +1021,23 @@ function chatEvent(
 
 export function renderSubscriptionPrompt(batch: ResourceSubscriptionBatch): string {
   return renderEventNotificationPrompt({
-    events: batch.items.map((item) => ({
-      provider: item.event.provider,
-      resourceType: item.event.resourceType,
-      resourceId: item.event.resourceId,
-      eventType: item.event.eventType,
-      occurredAt: item.event.occurredAt,
-      intent: item.subscription.intent,
-      summary: item.event.summary,
-      providerContent: item.event.providerContent,
-    })),
+    events: subscriptionPromptEvents(batch),
   });
+}
+
+function subscriptionPromptEvents(batch: ResourceSubscriptionBatch) {
+  return batch.items.map((item) => ({
+    deliveryId: item.deliveryId,
+    providerContentBudget: Math.max(1_000, Math.floor(60_000 / batch.items.length)),
+    provider: item.event.provider,
+    resourceType: item.event.resourceType,
+    resourceId: item.event.resourceId,
+    eventType: item.event.eventType,
+    occurredAt: item.event.occurredAt,
+    intent: item.subscription.intent,
+    summary: item.event.summary,
+    providerContent: item.event.providerContent,
+  }));
 }
 
 function validIso(raw: unknown, fallback: string): string {

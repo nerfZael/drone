@@ -3,7 +3,13 @@ import { eventNotificationEventLabel } from './event-notification.js';
 export type PresentedChatResourceSubscription = {
   id: string;
   provider: 'drone-hub' | 'github';
-  resourceType: 'chat' | 'repository' | 'pull_request' | 'change_request' | 'cron';
+  resourceType:
+    | 'chat'
+    | 'repository'
+    | 'pull_request'
+    | 'change_request'
+    | 'cron'
+    | 'question_request';
   resourceId: string;
   resourceLabel: string;
   resourceDroneId?: string;
@@ -70,6 +76,9 @@ export function presentedChatSubscriptionResourceLabel(
     'resourceType' | 'resourceId' | 'resourceLabel' | 'resourceConfig'
   >,
 ): string {
+  if (subscription.resourceType === 'question_request') {
+    return `Questions · ${subscription.resourceLabel || 'Awaiting answers'}`;
+  }
   if (subscription.resourceType === 'cron') {
     return `Schedule · ${presentedChatSubscriptionScheduleLabel(subscription)}`;
   }
@@ -97,7 +106,8 @@ export function presentedChatSubscriptionSummary(
       ? presentedChatSubscriptionScheduleLabel(subscription)
       : subscription.resourceType === 'chat'
         ? subscription.resourceLabel || subscription.resourceId
-        : subscription.resourceType === 'change_request'
+        : subscription.resourceType === 'change_request' ||
+            subscription.resourceType === 'question_request'
           ? subscription.resourceLabel || `#${subscription.resourceId}`
           : subscription.resourceId;
   return [events, resource].filter(Boolean).join(' · ');
@@ -166,7 +176,8 @@ function presentedResourceType(raw: unknown): PresentedChatResourceSubscription[
     value === 'repository' ||
     value === 'pull_request' ||
     value === 'change_request' ||
-    value === 'cron'
+    value === 'cron' ||
+    value === 'question_request'
   ) {
     return value;
   }

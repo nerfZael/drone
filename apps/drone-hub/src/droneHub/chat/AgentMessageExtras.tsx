@@ -1,3 +1,4 @@
+import { TrackedChatImage } from './TrackedChatImage';
 import React from 'react';
 import type { AgentRunFileChanges } from '@blip/protocol';
 import { normalizeAgentSkillUses, type AgentSkillUse } from '@drone/assistant-chat';
@@ -137,7 +138,8 @@ export function AgentMessageExtras({
                         Failed to load image.
                       </div>
                     ) : (
-                      <img
+                      <TrackedChatImage
+                        droneId={droneId}
                         src={media.src}
                         alt={media.label}
                         loading="lazy"

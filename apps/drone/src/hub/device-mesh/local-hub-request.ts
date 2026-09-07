@@ -1,6 +1,7 @@
 export type LocalHubAccess = {
   baseUrl(): string;
   apiToken: string;
+  parentRequestId?: string;
 };
 
 export async function localHubRequest(
@@ -13,6 +14,7 @@ export async function localHubRequest(
     headers: {
       authorization: `Bearer ${access.apiToken}`,
       'content-type': 'application/json',
+      ...(access.parentRequestId ? { 'x-drone-parent-request-id': access.parentRequestId } : {}),
       ...(init?.headers ?? {}),
     },
   });
@@ -40,6 +42,7 @@ export async function localHubBoundedJsonRequest(
     headers: {
       authorization: `Bearer ${access.apiToken}`,
       'content-type': 'application/json',
+      ...(access.parentRequestId ? { 'x-drone-parent-request-id': access.parentRequestId } : {}),
     },
     signal: options.signal,
   });
@@ -75,7 +78,10 @@ export async function localHubBinaryRequest(
     throw Object.assign(new Error('invalid Hub media byte limit'), { code: 'RESOURCE_LIMIT' });
   }
   const response = await fetch(new URL(pathname, access.baseUrl()), {
-    headers: { authorization: `Bearer ${access.apiToken}` },
+    headers: {
+      authorization: `Bearer ${access.apiToken}`,
+      ...(access.parentRequestId ? { 'x-drone-parent-request-id': access.parentRequestId } : {}),
+    },
     signal: options.signal,
   });
   if (!response.ok) {

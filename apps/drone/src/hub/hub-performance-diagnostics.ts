@@ -4,7 +4,21 @@ import { performance, PerformanceObserver } from 'node:perf_hooks';
 
 type Log = (level: 'info' | 'warn', message: string, meta: Record<string, unknown>) => void;
 const ms = (value: number) => Math.round(Math.max(0, value) * 10) / 10;
-const requests = new WeakMap<IncomingMessage, { started: number; routeMs?: number }>();
+type RequestTiming = { started: number; routeMs?: number; phases: Record<string, number> };
+const requests = new WeakMap<IncomingMessage, RequestTiming>();
+
+export function recordHubRequestPhase(req: IncomingMessage, name: string, durationMs: number): void {
+  const timing = requests.get(req);
+  if (!timing || !/^[a-z][a-z0-9_]{0,47}$/.test(name) || !Number.isFinite(durationMs) || durationMs < 0) return;
+  if (!(name in timing.phases) && Object.keys(timing.phases).length >= 24) return;
+  timing.phases[name] = ms((timing.phases[name] ?? 0) + durationMs);
+}
+
+export async function measureHubRequestPhase<T>(req: IncomingMessage, name: string, run: () => Promise<T>): Promise<T> {
+  const started = performance.now();
+  try { return await run(); }
+  finally { recordHubRequestPhase(req, name, performance.now() - started); }
+}
 const retainedResponses = new WeakSet<ServerResponse>();
 export function retainHubRequestTiming(response: ServerResponse): void {
   retainedResponses.add(response);
@@ -23,12 +37,15 @@ export function observeHubHttpRequest(req: IncomingMessage, res: ServerResponse,
   const pathname = (req.url ?? '/').split('?')[0];
   if (!pathname.startsWith('/api/')) return;
   const started = performance.now();
-  const timing = { started } as { started: number; routeMs?: number };
+  const timing: RequestTiming = { started, phases: Object.create(null) };
   requests.set(req, timing);
   const startedAt = new Date().toISOString();
   const requestId = randomUUID();
+  const parentRaw = req.headers?.['x-drone-parent-request-id'];
+  const parentRequestId = typeof parentRaw === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(parentRaw) ? parentRaw : undefined;
   const chatRead =
     req.method === 'GET' && /^\/api\/drones\/[^/]+\/chats\/[^/]+(?:\/[^/]+)?$/.test(pathname);
+  const fileRead = req.method === 'GET' && /^\/api\/drones\/[^/]+\/fs\/(?:list|file|media|chunk|text-chunk|thumb)$/.test(pathname);
   let headersMs: number | undefined;
   let streaming = false;
   let reported = false;
@@ -54,6 +71,7 @@ export function observeHubHttpRequest(req: IncomingMessage, res: ServerResponse,
       const extra = [
         `hub_entry_to_headers;dur=${headersMs}`,
         ...(timing.routeMs === undefined ? [] : [`hub_entry_to_route;dur=${timing.routeMs}`]),
+        ...Object.entries(timing.phases).map(([name, duration]) => `${name};dur=${duration}`),
       ].join(', ');
       if (Array.isArray(headers)) {
         args[index] = [...headers];
@@ -90,9 +108,11 @@ export function observeHubHttpRequest(req: IncomingMessage, res: ServerResponse,
     const durationMs = ms(performance.now() - started);
     // Stream lifetime isn't request latency. Always retain chat reads, including
     // fast handlers whose browser may have waited before request entry.
-    if (streaming || (!chatRead && !retainedResponses.has(res) && durationMs < 250)) return;
+    if (streaming || (!chatRead && !fileRead && !retainedResponses.has(res) && durationMs < 250)) return;
     log(durationMs >= 250 ? 'warn' : 'info', 'hub HTTP request timing', {
       requestId,
+      ...(parentRequestId ? { parentRequestId } : {}),
+      ...(Object.keys(timing.phases).length ? { phases: timing.phases } : {}),
       startedAt,
       method: req.method,
       pathname: pathname.slice(0, 512),

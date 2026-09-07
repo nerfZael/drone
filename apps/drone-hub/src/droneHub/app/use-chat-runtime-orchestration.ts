@@ -468,12 +468,12 @@ export function useChatRuntimeOrchestration({
       }
 
       try {
-        const data = await requestJson<{ ok: true; cancelled: boolean; alreadySubmitted: boolean }>(
+        const data = await requestJson<{ ok: true; cancelled: boolean; retained?: boolean; alreadySubmitted: boolean }>(
           `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(chatName)}/pending/${encodeURIComponent(id)}`,
           { method: 'DELETE' },
         );
         if (data.cancelled) {
-          setOptimisticPendingPrompts((prev) => prev.filter((p) => p.id !== id));
+          if (!data.retained) setOptimisticPendingPrompts((prev) => prev.filter((p) => p.id !== id));
         } else if (data.alreadySubmitted) {
           setCancelPendingPromptErrorById((prev) => ({
             ...prev,

@@ -2826,3 +2826,19 @@ describe('device mesh drone summaries', () => {
     }
   });
 });
+
+test('loads a full question form on demand and rejects requests belonging to another chat', async () => {
+  const originalFetch = globalThis.fetch;
+  const capability = createDroneControlCapability({ baseUrl: () => 'http://127.0.0.1:7777', apiToken: 'test' });
+  let owner = 'review';
+  globalThis.fetch = (async (input) => {
+    expect(new URL(String(input)).pathname).toBe('/api/chat-question-requests/question-a');
+    return Response.json({ ok: true, request: { id: 'question-a', droneId: 'drone-a', chatName: owner, status: 'pending', questions: [{ id: 'q', question: 'Scope?', choices: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] }] } });
+  }) as typeof fetch;
+  try {
+    const result: any = await capability.invoke('chat.read', { droneId: 'drone-a', chatName: 'review', questionRequestId: 'question-a' }, { sourceDevice: { id: 'phone' } } as any);
+    expect(result.request.questions[0].choices).toHaveLength(2);
+    owner = 'other';
+    await expect(capability.invoke('chat.read', { droneId: 'drone-a', chatName: 'review', questionRequestId: 'question-a' }, { sourceDevice: { id: 'phone' } } as any)).rejects.toThrow('does not belong to this chat');
+  } finally { globalThis.fetch = originalFetch; }
+});

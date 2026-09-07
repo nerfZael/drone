@@ -4,10 +4,12 @@ import fs from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { markHubChatRouteEntry, measureHubRequestPhase, recordHubRequestPhase } from './hub-performance-diagnostics';
 
 import { browserCacheControlForFileRevision, buildContainerFsListScript } from './filesystem-media';
 import {
   buildContainerMediaRangeScript,
+  containerMediaPhases,
   parseRequestedByteRange,
   readHostMediaRange,
   type ResolvedByteRange,
@@ -310,6 +312,38 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
     return writeFileSseFrame(res, `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   };
   return async ({ req, res, url: u, method, parts }) => {
+    const traced = method === 'GET' && parts[3] === 'fs' && parts[4] !== 'file-events';
+    if (traced) markHubChatRouteEntry(req);
+    const measure = <T,>(name: string, run: () => Promise<T>) =>
+      traced ? measureHubRequestPhase(req, name, run) : run();
+    const resolveDroneOrRespond: typeof deps.resolveDroneOrRespond = (...args: any[]) =>
+      measure('fs_resolve_drone', () => deps.resolveDroneOrRespond(...args));
+    const withReadonlyDroneContainer: typeof deps.withReadonlyDroneContainer = async (options: any, run: (context: any) => Promise<any>) => {
+      const started = performance.now();
+      return deps.withReadonlyDroneContainer(options, async (context: any) => {
+        if (traced) recordHubRequestPhase(req, 'fs_resolve_container', performance.now() - started);
+        return run(context);
+      });
+    };
+    const dvmExec: typeof deps.dvmExec = (container: string, command: string, args: string[], options?: Parameters<typeof import('../host/dvm').dvmExec>[3]) =>
+      measure('fs_container_exec', () => deps.dvmExec(container, command, args, {
+        ...options,
+        // The canonical container context already supplies an exact Docker name.
+        // Avoid listing every container again just to obtain an exec handle.
+        containerAlreadyReady: true,
+        ...(traced ? { onTiming: (name: string, duration: number) => recordHubRequestPhase(req, name, duration) } : {}),
+      }));
+    const listHostFsDirectory: typeof deps.listHostFsDirectory = (...args: any[]) =>
+      measure('fs_host_list', () => deps.listHostFsDirectory(...args));
+    const readHostFileBytes: typeof deps.readHostFileBytes = (...args: any[]) =>
+      measure('fs_host_read', () => deps.readHostFileBytes(...args));
+    const hostMimeType: typeof deps.hostMimeType = (...args: any[]) =>
+      measure('fs_host_mime', () => deps.hostMimeType(...args));
+    const parseContainerFsListOutput: typeof deps.parseContainerFsListOutput = (...args: any[]) => {
+      const started = performance.now();
+      try { return deps.parseContainerFsListOutput(...args); }
+      finally { if (traced) recordHubRequestPhase(req, 'fs_parse_list', performance.now() - started); }
+    };
     const handled = await (async (): Promise<false | void> => {
       // GET /api/drones/:id/ports
       // Exposes *all* host->container port mappings (like `dvm ports <container>`).
@@ -337,7 +371,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
         if (runtime === 'host') {
           try {
             const parsed = await listHostFsDirectory(targetPath);
-            const entries = await addHostGitIgnoreMetadata(parsed.resolvedPath, parsed.entries);
+            const entries = await measure('fs_git_ignore', () => addHostGitIgnoreMetadata(parsed.resolvedPath, parsed.entries));
             json(res, 200, {
               ok: true,
               id: droneId,
@@ -1886,6 +1920,8 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
               });
             },
           );
+          for (const [name, duration] of containerMediaPhases(String(r.stderr ?? '')))
+            recordHubRequestPhase(req, name, duration);
           const stdout = String(r.stdout ?? '');
           const out = `${stdout}\n${String(r.stderr ?? '')}`;
           if (r.code !== 0) {

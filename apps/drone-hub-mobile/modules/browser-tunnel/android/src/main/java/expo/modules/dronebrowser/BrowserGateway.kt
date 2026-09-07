@@ -12,6 +12,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -20,7 +21,7 @@ import okhttp3.WebSocketListener
 import okio.ByteString
 import okio.ByteString.Companion.toByteString
 
-/** One HTTP request per local connection (or one upgraded WebSocket). Bodies stay streamed.
+/** One reusable HTTP/1 tunnel per authenticated local connection (or upgraded WebSocket). Bodies stay streamed.
  * A distinct loopback IP isolates cookies between sessions. A bootstrap cookie authenticates
  * ALL local resource requests; neither this cookie nor the Hub bearer reaches the web app.
  */
@@ -30,6 +31,9 @@ internal class BrowserGateway(
   private val webSockets: WebSocket.Factory? = null,
   private val targetPort: Int = authority.substringAfter(':').toInt(),
 ) {
+  private val metrics = BrowserMetrics()
+  fun diagnostics(): Map<String, Any> = metrics.snapshot() + mapOf("activeConnections" to sockets.size, "activeTunnels" to tunnels.size)
+
   private val cookieName = "__drone_browser_session"
   private val secret = randomHex(32)
   private val bootstrap = "/__drone_browser_bootstrap/${randomHex(32)}"
@@ -86,137 +90,168 @@ internal class BrowserGateway(
 
   private fun serve(socket: Socket) {
     socket.soTimeout = 30_000
-    val input = socket.getInputStream()
-    val lines = readHeader(input).split("\r\n")
-    val request = lines.first().split(' ')
-    require(request.size == 3 && request[2] == "HTTP/1.1")
-    require(request[0] in listOf("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"))
-    require(request[1].startsWith('/') && !request[1].startsWith("//"))
-    val headers = parseHeaders(lines.drop(1))
-    require(headers["host"] == origin.removePrefix("http://"))
-    val requestOrigin = headers["origin"]
-    require(requestOrigin == null || requestOrigin == origin)
-    require(headers["sec-fetch-site"] != "cross-site")
+    val input = socket.getInputStream().buffered(16 * 1024)
     val output = socket.getOutputStream()
-    if (request[0] == "GET" && request[1] == bootstrap && !bootstrapped) {
-      synchronized(this) { require(!bootstrapped); bootstrapped = true }
-      output.write(("HTTP/1.1 302 Found\r\nLocation: $initialPath\r\nSet-Cookie: $cookieName=$secret; HttpOnly; SameSite=Strict; Path=/\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").toByteArray())
-      output.flush()
-      return
-    }
-    val cookies = headers["cookie"].orEmpty().split(';').map { it.trim() }
-    if (!cookies.contains("$cookieName=$secret")) {
-      output.write("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray()); return
-    }
-    val upgraded = headers["upgrade"]?.equals("websocket", true) == true
-    require(headers["upgrade"] == null || upgraded)
-    val length = headers["content-length"]?.toLong()?.also { require(it in 0..(512L * 1024 * 1024)) }
-    val chunked = headers["transfer-encoding"] != null
-    require(!chunked || (headers["transfer-encoding"]?.lowercase() == "chunked" && length == null))
-    require(headers["expect"] == null)
-    val rewritten = StringBuilder("${lines.first()}\r\n")
-    for ((name, value) in headers) {
-      when (name) {
-        "host" -> rewritten.append("Host: $authority\r\n")
-        "origin" -> rewritten.append("Origin: http://$authority\r\n")
-        "referer" -> rewritten.append("Referer: ${value.replace(origin, "http://$authority")}\r\n")
-        "cookie" -> {
-          val appCookies = cookies.filter { it.substringBefore('=') != cookieName }.joinToString("; ")
-          if (appCookies.isNotEmpty()) rewritten.append("Cookie: $appCookies\r\n")
-        }
-        "connection" -> if (upgraded) rewritten.append("Connection: Upgrade\r\n")
-        "proxy-authorization", "proxy-connection" -> {}
-        else -> rewritten.append("$name: $value\r\n")
-      }
-    }
-    if (!upgraded) rewritten.append("Connection: close\r\n")
-    rewritten.append("\r\n")
-    val opened = CountDownLatch(1)
-    val finished = CountDownLatch(1)
+    val active = AtomicReference<BrowserResponse?>(null)
     val failed = AtomicBoolean(false)
-    val responseHeader = ByteArrayOutputStream()
-    var headerComplete = false
-    var headerEnding = 0
-    val tunnel = (webSockets ?: client).newWebSocket(Request.Builder().url(tunnelUrl).header("Authorization", "Bearer $token").build(), object : WebSocketListener() {
-      override fun onOpen(webSocket: WebSocket, response: Response) { opened.countDown() }
-      override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-        try {
-          val data = bytes.toByteArray()
-          var offset = 0
-          while (!headerComplete && offset < data.size) {
-            val value = data[offset++].toInt() and 255
-            responseHeader.write(value)
-            require(responseHeader.size() <= 65536)
-            headerEnding = when { headerEnding == 0 && value == 13 -> 1; headerEnding == 1 && value == 10 -> 2; headerEnding == 2 && value == 13 -> 3; headerEnding == 3 && value == 10 -> 4; value == 13 -> 1; else -> 0 }
-            if (headerEnding == 4) {
-              val text = responseHeader.toString("ISO-8859-1")
-              val status = text.substringBefore("\r\n").split(' ').getOrNull(1)?.toIntOrNull() ?: 0
-              if (status in 100..199 && status != 101) { responseHeader.reset(); headerEnding = 0; continue }
-              output.write(rewriteResponse(text, status == 101).toByteArray(Charsets.ISO_8859_1))
-              headerComplete = true
-            }
-          }
-          if (offset < data.size) output.write(data, offset, data.size - offset)
-          output.flush()
-        } catch (_: Exception) { failed.set(true); webSocket.cancel(); finished.countDown(); try { socket.close() } catch (_: Exception) {} }
-      }
-      override fun onMessage(webSocket: WebSocket, text: String) { failed.set(true); webSocket.cancel(); finished.countDown() }
-      override fun onClosing(webSocket: WebSocket, code: Int, reason: String) { webSocket.close(code, null); finished.countDown(); try { socket.close() } catch (_: Exception) {} }
-      override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { finished.countDown(); try { socket.close() } catch (_: Exception) {} }
-      override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) { failed.set(true); opened.countDown(); finished.countDown(); try { socket.close() } catch (_: Exception) {} }
-    })
-    synchronized(this) { if (closed) tunnel.cancel() else tunnels.add(tunnel) }
+    val stopping = AtomicBoolean(false)
+    var tunnel: WebSocket? = null
+    var requestCount = 0
+    fun failTransport() {
+      if (failed.compareAndSet(false, true)) metrics.add("transportFailures")
+      active.get()?.finished?.countDown()
+      try { socket.close() } catch (_: Exception) {}
+    }
     try {
-      require(!closed && opened.await(12, TimeUnit.SECONDS) && !failed.get() && !closed)
-      fun send(bytes: ByteArray, count: Int = bytes.size) {
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
-        while (tunnel.queueSize() > 128 * 1024 && !closed && !failed.get()) {
-          require(System.nanoTime() < deadline); Thread.sleep(5)
+      while (!closed && !socket.isClosed) {
+        // Reading the next request concurrently with response delivery also detects an
+        // aborted navigation immediately, including an upstream that never responds.
+        val lines = readHeader(input).split("\r\n")
+        val previous = active.get()
+        if (previous != null) {
+          require(previous.finished.await(30, TimeUnit.SECONDS) && previous.complete && !failed.get())
         }
-        require(!closed && !failed.get() && tunnel.send(bytes.toByteString(0, count)))
-      }
-      send(rewritten.toString().toByteArray(Charsets.ISO_8859_1))
-      val buffer = ByteArray(16 * 1024)
-      fun copy(count: Long) {
-        var remaining = count
-        while (remaining > 0) {
-          val read = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
-          require(read > 0); send(buffer, read); remaining -= read
+        val request = lines.first().split(' ')
+        require(request.size == 3 && request[2] == "HTTP/1.1")
+        require(request[0] in listOf("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"))
+        require(request[1].startsWith('/') && !request[1].startsWith("//"))
+        val headers = parseHeaders(lines.drop(1))
+        // Validate every request, including subsequent requests on a reused connection.
+        require(headers["host"] == origin.removePrefix("http://"))
+        require(headers["origin"] == null || headers["origin"] == origin)
+        require(headers["sec-fetch-site"] != "cross-site")
+        if (request[0] == "GET" && request[1] == bootstrap && !bootstrapped) {
+          synchronized(this) { require(!bootstrapped); bootstrapped = true }
+          output.write(("HTTP/1.1 302 Found\r\nLocation: $initialPath\r\nSet-Cookie: $cookieName=$secret; HttpOnly; SameSite=Strict; Path=/\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").toByteArray())
+          output.flush(); return
         }
-      }
-      if (chunked) {
-        var total = 0L
-        while (true) {
-          val line = readLine(input)
-          val size = line.substringBefore(';').toLong(16)
-          require(size >= 0 && size <= 512L * 1024 * 1024 - total)
-          total += size; send((line + "\r\n").toByteArray())
-          if (size == 0L) {
-            // Forward bounded trailers, ending with the empty line.
-            var trailerBytes = 0
-            do { val trailer = readLine(input); trailerBytes += trailer.length + 2; require(trailerBytes <= 16384); send((trailer + "\r\n").toByteArray()); if (trailer.isEmpty()) break } while (true)
-            break
+        val cookies = headers["cookie"].orEmpty().split(';').map { it.trim() }
+        if (!cookies.contains("$cookieName=$secret")) {
+          output.write("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray()); return
+        }
+        val upgraded = headers["upgrade"]?.equals("websocket", true) == true
+        require(headers["upgrade"] == null || upgraded)
+        val connection = headers["connection"].orEmpty().lowercase().split(',').map { it.trim() }
+        require(!upgraded || "upgrade" in connection)
+        val length = headers["content-length"]?.also { require(it.matches(Regex("[0-9]+"))) }?.toLong()?.also { require(it in 0..(512L * 1024 * 1024)) }
+        val chunked = headers["transfer-encoding"] != null
+        require(!chunked || (headers["transfer-encoding"]?.lowercase() == "chunked" && length == null))
+        require(headers["expect"] == null)
+        val rewritten = StringBuilder("${lines.first()}\r\n")
+        for ((name, value) in headers) {
+          when (name) {
+            "host" -> rewritten.append("Host: $authority\r\n")
+            "origin" -> rewritten.append("Origin: http://$authority\r\n")
+            "referer" -> rewritten.append("Referer: ${value.replace(origin, "http://$authority")}\r\n")
+            "cookie" -> {
+              val appCookies = cookies.filter { it.substringBefore('=') != cookieName }.joinToString("; ")
+              if (appCookies.isNotEmpty()) rewritten.append("Cookie: $appCookies\r\n")
+            }
+            "connection", "keep-alive", "proxy-authorization", "proxy-connection" -> {}
+            else -> rewritten.append("$name: $value\r\n")
           }
-          copy(size)
-          require(input.read() == 13 && input.read() == 10); send(byteArrayOf(13, 10))
         }
-      } else if (length != null) copy(length)
-      if (upgraded) {
-        socket.soTimeout = 0
-        while (!closed && !failed.get() && finished.count > 0) {
-          val read = input.read(buffer); if (read < 0) break; send(buffer, read)
+        rewritten.append("Connection: ${if (upgraded) "Upgrade" else if ("close" in connection) "close" else "keep-alive"}\r\n\r\n")
+        val started = System.nanoTime()
+        metrics.add("requests")
+        if (requestCount++ > 0) metrics.add("reusedRequests")
+        val response = BrowserResponse(request[0], upgraded, "close" in connection, output, ::rewriteResponse,
+          { metrics.add("firstByteCount"); metrics.add("firstByteMs", metrics.elapsed(started)) },
+          { reusable, status ->
+            metrics.add("completedRequests"); metrics.add("requestMs", metrics.elapsed(started))
+            if (status >= 400) metrics.add("httpErrors")
+            if (!reusable) try { socket.close() } catch (_: Exception) {}
+          })
+        active.set(response)
+        if (tunnel == null) {
+          val opened = CountDownLatch(1)
+          val connecting = System.nanoTime()
+          metrics.add("tunnelsCreated")
+          tunnel = (webSockets ?: client).newWebSocket(Request.Builder().url(tunnelUrl).header("Authorization", "Bearer $token").build(), object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, handshake: Response) {
+              metrics.add("tunnelsOpened"); metrics.add("tunnelConnectMs", metrics.elapsed(connecting))
+              if (handshake.header("Sec-WebSocket-Extensions").orEmpty().contains("permessage-deflate")) metrics.add("compressedTunnels")
+              opened.countDown()
+            }
+            override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+              try { metrics.add("receivedBytes", bytes.size.toLong()); checkNotNull(active.get()).accept(bytes.toByteArray()) }
+              catch (_: Exception) { failTransport(); webSocket.cancel() }
+            }
+            override fun onMessage(webSocket: WebSocket, text: String) { failTransport(); webSocket.cancel() }
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+              if (active.get()?.end() == false) failTransport()
+              webSocket.close(code, null)
+              try { socket.close() } catch (_: Exception) {}
+            }
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+              active.get()?.finished?.countDown()
+              try { socket.close() } catch (_: Exception) {}
+            }
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+              if (!stopping.get() && !closed && active.get()?.complete != true) failTransport()
+              else try { socket.close() } catch (_: Exception) {}
+              opened.countDown()
+            }
+          })
+          synchronized(this) { if (closed) tunnel.cancel() else tunnels.add(tunnel) }
+          require(!closed && opened.await(12, TimeUnit.SECONDS) && !failed.get() && !closed)
         }
-      } else {
-        // Monitor the WebView connection while the transport reader writes the response.
-        // An aborted fetch/navigation must release its tunnel even if upstream stays silent.
-        // We deliberately do not forward another pipelined request on this connection.
+        val transport = tunnel
+        fun send(bytes: ByteArray, count: Int = bytes.size) {
+          val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
+          while (transport.queueSize() > 128 * 1024 && !closed && !failed.get()) {
+            require(System.nanoTime() < deadline); Thread.sleep(5)
+          }
+          require(!closed && !failed.get() && transport.send(bytes.toByteString(0, count)))
+          metrics.add("sentBytes", count.toLong())
+        }
+        send(rewritten.toString().toByteArray(Charsets.ISO_8859_1))
+        val buffer = ByteArray(16 * 1024)
+        fun copy(count: Long) {
+          var remaining = count
+          while (remaining > 0) {
+            val read = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+            require(read > 0); send(buffer, read); remaining -= read
+          }
+        }
+        if (chunked) {
+          var total = 0L
+          while (true) {
+            val line = readLine(input)
+            val sizeText = line.substringBefore(';')
+            require(sizeText.matches(Regex("[0-9a-fA-F]+")))
+            val size = sizeText.toLong(16)
+            require(size >= 0 && size <= 512L * 1024 * 1024 - total)
+            total += size; send((line + "\r\n").toByteArray())
+            if (size == 0L) {
+              var trailerBytes = 0
+              while (true) {
+                val trailer = readLine(input); trailerBytes += trailer.length + 2; require(trailerBytes <= 16384)
+                send((trailer + "\r\n").toByteArray()); if (trailer.isEmpty()) break
+              }
+              break
+            }
+            copy(size)
+            require(input.read() == 13 && input.read() == 10); send(byteArrayOf(13, 10))
+          }
+        } else if (length != null) copy(length)
         socket.soTimeout = 0
-        if (!socket.isClosed) input.read()
+        if (upgraded) {
+          while (!closed && !failed.get() && !socket.isClosed) {
+            val read = input.read(buffer); if (read < 0) break; send(buffer, read)
+          }
+          return
+        }
       }
-    } finally { tunnels.remove(tunnel); tunnel.cancel() }
+    } finally {
+      stopping.set(true)
+      val response = active.get()
+      if (response != null && !response.complete) metrics.add("incompleteRequests")
+      tunnel?.let { tunnels.remove(it); it.cancel() }
+    }
   }
 
-  private fun rewriteResponse(header: String, upgraded: Boolean): String {
+  private fun rewriteResponse(header: String, upgraded: Boolean, reusable: Boolean): String {
     val lines = header.split("\r\n")
     val result = StringBuilder(lines.first() + "\r\n")
     var permissionsPolicy = ""
@@ -250,7 +285,7 @@ internal class BrowserGateway(
     // Preserve other upstream restrictions while denying capture in preview documents.
     result.append("Permissions-Policy: ${denyCapture(permissionsPolicy, false)}\r\n")
     result.append("Feature-Policy: ${denyCapture(featurePolicy, true)}\r\n")
-    if (!upgraded) result.append("Connection: close\r\n")
+    if (!upgraded) result.append("Connection: ${if (reusable) "keep-alive" else "close"}\r\n")
     return result.append("\r\n").toString()
   }
 

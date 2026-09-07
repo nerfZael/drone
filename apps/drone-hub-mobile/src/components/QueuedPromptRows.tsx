@@ -132,7 +132,47 @@ export function QueuedPromptRows({
       {prompts.map((prompt) => {
         const eventNotification = parseEventNotificationPrompt(prompt.prompt);
         if (eventNotification) {
-          return <MobileEventNotification key={prompt.id} notification={eventNotification} />;
+          return (
+            <MobileEventNotification
+              key={prompt.id}
+              notification={eventNotification}
+              footer={
+                <View style={styles.meta}>
+                  <Text style={styles.badge}>
+                    {prompt.status === 'queued'
+                      ? prompt.deliveryMode === 'asap'
+                        ? 'ASAP'
+                        : 'Queued'
+                      : prompt.status === 'pending'
+                        ? 'Working'
+                        : prompt.status}
+                  </Text>
+                  {prompt.attachmentCount || prompt.imageCount ? (
+                    <Text style={styles.imageCount}>
+                      {prompt.attachmentCount || prompt.imageCount} attachments
+                    </Text>
+                  ) : null}
+                  {eventNotification.userMessage !== undefined &&
+                  prompt.status === 'queued' &&
+                  prompt.cancelable &&
+                  onCancel ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Remove message; keep events"
+                      disabled={cancellingId === prompt.id}
+                      onPress={() => onCancel(prompt.id)}
+                      style={styles.cancelTextButton}
+                    >
+                      <Text style={styles.cancelText}>
+                        {cancellingId === prompt.id ? 'Removing…' : 'Remove message'}
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                  {prompt.error ? <Text style={styles.error}>{prompt.error}</Text> : null}
+                </View>
+              }
+            />
+          );
         }
         const attachmentCount = Math.max(
           0,

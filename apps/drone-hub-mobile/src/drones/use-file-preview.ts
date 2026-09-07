@@ -2,6 +2,7 @@ import {
   normalizeWorkspaceLinkPath,
   workspaceExplorerLocation,
   workspaceLinkIsDirectory,
+  readWorkspaceFileFirst,
 } from '@drone/hub-model';
 import { throwIfAborted } from '@drone/device-protocol';
 import React from 'react';
@@ -29,6 +30,7 @@ import { MobileLastViewedFiles } from './mobile-last-viewed-files';
 import { MobileChatReadCoordinator } from './mobile-chat-read-coordinator';
 import { canReuseMobileMediaPreview } from './reuse-media-preview';
 import { mobilePreviewErrorMode } from './mobile-preview-error-state';
+import { mobileWorkspaceLoads } from '../diagnostics/mobile-workspace-load';
 
 type PreviewRequest = {
   targetId: string;
@@ -105,6 +107,11 @@ export function useFilePreview({
   const [refreshError, setRefreshError] = React.useState<string | null>(null);
   const previewFileRef = React.useRef<File | null>(null);
   const previewRef = React.useRef<MobileFilePreview | null>(null);
+  const diagnosticRef = React.useRef<string | undefined>(undefined);
+  React.useEffect(() => {
+    if (directoryReveal || (preview && (preview.kind !== 'image' || preview.mime === 'image/svg+xml')))
+      mobileWorkspaceLoads.committed(diagnosticRef.current);
+  }, [preview, request, directoryReveal]);
   const previewCacheRef = React.useRef<BoundedSwrCache<CachedFilePreview> | null>(null);
   if (!previewCacheRef.current) {
     previewCacheRef.current = new BoundedSwrCache({
@@ -136,6 +143,8 @@ export function useFilePreview({
       setRefreshError(null);
       setSaveError(null);
       setLoading(false);
+      mobileWorkspaceLoads.finish(diagnosticRef.current, 'superseded');
+      diagnosticRef.current = undefined;
       setSaving(false);
       clearActivePreview();
     },
@@ -153,6 +162,8 @@ export function useFilePreview({
 
   const commitPreview = React.useCallback(
     (nextRequest: PreviewRequest, next: CachedFilePreview) => {
+      mobileWorkspaceLoads.mark(diagnosticRef.current, 'dataApplied');
+      mobileWorkspaceLoads.mark(diagnosticRef.current, 'fileBytes', next.preview.size);
       const key = mobileFileCacheKey(nextRequest);
       const current = previewCacheRef.current!.get(key);
       const retained =
@@ -176,6 +187,7 @@ export function useFilePreview({
       options?: { background?: boolean; transferRestarted?: boolean },
     ) => {
       const version = ++loadVersion.current;
+      const diagnosticId = diagnosticRef.current;
       const background = options?.background === true && previewRef.current != null;
       if (!background) setLoading(true);
       if (!background) setError(null);
@@ -185,32 +197,8 @@ export function useFilePreview({
         clearActivePreview();
       }
       try {
-        if (!background) {
-          let directory = false;
-          try {
-            directory = await workspaceLinkIsDirectory(nextRequest.path, (parent) =>
-              requestDroneControl(
-                nextRequest.targetId,
-                'files.list',
-                {
-                  droneId: nextRequest.droneId,
-                  chatName: nextRequest.chatName,
-                  path: parent,
-                },
-                signal,
-              ),
-            );
-          } catch {
-            // The preview request below reports missing paths or access errors.
-          }
-          if (signal.aborted || version !== loadVersion.current) return;
-          if (directory) {
-            setDirectoryReveal({ path: nextRequest.path, sequence: version });
-            return;
-          }
-          setDirectoryReveal(null);
-        }
-        let firstResult: any = await requestDroneControl(
+        mobileWorkspaceLoads.mark(diagnosticId, 'readStarted');
+        const first = await readWorkspaceFileFirst(() => requestDroneControl(
           nextRequest.targetId,
           'file.preview',
           {
@@ -220,8 +208,23 @@ export function useFilePreview({
             contentOffset: 0,
           },
           signal,
-        );
+        ), async () => {
+          if (background || signal.aborted || version !== loadVersion.current) return false;
+          mobileWorkspaceLoads.mark(diagnosticId, 'directoryFallbackStarted');
+          return workspaceLinkIsDirectory(nextRequest.path, (parent) => requestDroneControl(
+            nextRequest.targetId, 'files.list',
+            { droneId: nextRequest.droneId, chatName: nextRequest.chatName, path: parent }, signal,
+          ));
+        });
+        mobileWorkspaceLoads.mark(diagnosticId, 'readResolved');
         if (signal.aborted || version !== loadVersion.current) return;
+        if (first.directory) {
+          setDirectoryReveal({ path: nextRequest.path, sequence: version });
+          mobileWorkspaceLoads.mark(diagnosticId, 'directoryLink', 1);
+          return;
+        }
+        setDirectoryReveal(null);
+        let firstResult: any = first.result;
         if (firstResult?.content) {
           const content = firstResult.content;
           if (signal.aborted || version !== loadVersion.current) return;
@@ -317,6 +320,7 @@ export function useFilePreview({
             const transfer = firstResult?.transfer;
             if (!transfer?.url || !transfer?.token)
               throw new Error('The device did not authorize an HTTP download');
+            mobileWorkspaceLoads.mark(diagnosticId, 'mediaTransferStarted');
             const response = await streamingFetch(transfer.url, {
               headers: { authorization: 'Bearer ' + transfer.token },
               signal,
@@ -342,6 +346,7 @@ export function useFilePreview({
             }
             if (offset !== totalBytes) throw new Error('The HTTP download was incomplete');
             offset = totalBytes;
+            mobileWorkspaceLoads.mark(diagnosticId, 'mediaTransferFinished');
             firstResult = null;
           }
         } catch (mediaError) {
@@ -400,7 +405,10 @@ export function useFilePreview({
           },
         });
       } catch (nextError: any) {
-        if (signal.aborted) return;
+        if (signal.aborted) {
+          mobileWorkspaceLoads.finish(diagnosticId, 'superseded');
+          return;
+        }
         if (
           version === loadVersion.current &&
           !options?.transferRestarted &&
@@ -410,6 +418,8 @@ export function useFilePreview({
           return;
         }
         if (version === loadVersion.current) {
+          if (background) mobileWorkspaceLoads.mark(diagnosticId, 'refreshFailed', 1);
+          else mobileWorkspaceLoads.finish(diagnosticId, 'error');
           const message = nextError?.message ?? String(nextError);
           const displayMessage = /not granted|not permitted|access|denied/i.test(message)
             ? `${message}. Enable “drone-control: file.preview” for this phone in Devices if needed.`
@@ -456,6 +466,9 @@ export function useFilePreview({
         ),
         line: reference.line,
       };
+      diagnosticRef.current = mobileWorkspaceLoads.start('file-open', {
+        targetDeviceId: targetId, droneId: selectedDrone.id, chatName, path: nextRequest.path,
+      });
       lastViewedFilesRef.current.remember(nextRequest, { ...reference, path: nextRequest.path });
       setWorkspaceContext({
         targetId: nextRequest.targetId,
@@ -470,6 +483,7 @@ export function useFilePreview({
       setSaveError(null);
       const cached = previewCacheRef.current!.get(mobileFileCacheKey(nextRequest));
       if (cached) {
+        mobileWorkspaceLoads.mark(diagnosticRef.current, 'cacheHit', 1);
         previewFileRef.current = cached.file;
         previewRef.current = cached.preview;
         setPreview(cached.preview);
@@ -478,6 +492,7 @@ export function useFilePreview({
         setRefreshError(null);
         void load(nextRequest, { background: true });
       } else {
+        mobileWorkspaceLoads.mark(diagnosticRef.current, 'cacheHit', 0);
         void load(nextRequest);
       }
     },
@@ -638,6 +653,7 @@ export function useFilePreview({
     return directoryReveal ?? { path: selectedPath, sequence: 0, kind: 'file' as const };
   }, [requestIsCurrent, request, directoryReveal, selectedPath]);
   return {
+    loadDiagnosticId: diagnosticRef.current,
     visible: workspaceIsCurrent,
     directoryReveal: requestIsCurrent ? directoryReveal : null,
     preview: requestIsCurrent ? preview : null,

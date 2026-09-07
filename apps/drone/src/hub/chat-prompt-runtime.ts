@@ -1578,7 +1578,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     // Clear queued work before interrupting the active turn, so its completion
     // cannot dispatch a follow-up. Include any prompt claimed during this race.
     for (const id of queuedIds) {
-      const cancelled = await cancelQueuedPendingPrompt({ droneId, chatName, promptId: id });
+      const cancelled = await cancelQueuedPendingPrompt({ droneId, chatName, promptId: id, entireBundle: true });
       if (cancelled.status === 'cancelled') clearedPromptIds.push(id);
       else if (
         cancelled.status === 'already-submitted' &&
@@ -2420,13 +2420,13 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       }
 
       const prior = pendingList.slice(0, queuedIndex);
-      // Keep manual follow-ups cancellable until the earlier response reaches the transcript.
-      // Codex App Server is the exception: ASAP is a same-turn `turn/steer`, so every
-      // queued steering input should be offered while the active turn can still accept it.
-      const codexAsapCanSteer =
-        p?.deliveryMode === 'asap' && agent.kind === 'builtin' && agent.id === 'codex';
+      // Native agents and Codex can accept ASAP input during an active response.
+      // Other agents retain their normal safe delivery point.
+      const asapCanSteer =
+        p?.deliveryMode === 'asap' &&
+        (agent.kind === 'native' || (agent.kind === 'builtin' && agent.id === 'codex'));
       const defer =
-        !codexAsapCanSteer &&
+        !asapCanSteer &&
         hasBlockingPendingPrompt(prior, turns, p?.deliveryMode === 'asap' ? 'asap' : 'queue');
       if (defer) {
         // Completion events are an optimization, not the only wake-up edge.
@@ -2537,6 +2537,9 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         continue;
       }
 
+      const claimedPending = readPendingPrompt({ droneId, chatName, id });
+      if (!claimedPending) continue;
+
       const provisioningHandoff = provisionedPromptHandoffs.take({
         droneId,
         chatName,
@@ -2564,9 +2567,9 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
             id,
             droneId,
             chatName,
-            prompt,
-            attachmentRefs: normalizeChatImageAttachmentRefs(p?.attachments),
-            cwd,
+            prompt: claimedPending.prompt,
+            attachmentRefs: normalizeChatImageAttachmentRefs(claimedPending.attachments),
+            cwd: claimedPending.cwd ?? null,
             waitForDaemonMs: undefined,
             deliveryMode: p?.deliveryMode === 'asap' ? 'asap' : 'queue',
             signal: opts.signal,
@@ -2987,6 +2990,41 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
             storageRoot: attachmentsStorageRoot,
           });
 
+    // Publish the prompt only after its files exist. A waiting event bundle can
+    // otherwise be claimed while the human attachment copy is still in progress.
+    if (
+      providedAttachmentRefs.length === 0 &&
+      rawAttachments.length > 0 &&
+      attachmentsForPending.length > 0
+    ) {
+      const attachmentsDir = buildChatAttachmentsDirectory({
+        cwd,
+        chatName,
+        promptId: id,
+        storageRoot: attachmentsStorageRoot,
+      });
+      try {
+        if (runtime === 'host') {
+          await copyChatAttachmentsToHost({
+            hostDir: attachmentsDir,
+            attachments: rawAttachments,
+          });
+        } else {
+          const containerName =
+            String((d as any)?.containerName ?? (d as any)?.name ?? droneId).trim() || droneId;
+          await copyChatAttachmentsToContainer({
+            containerName,
+            containerDir: attachmentsDir,
+            attachments: rawAttachments,
+          });
+        }
+        opts.mark?.('attachments');
+      } catch (e: any) {
+        const errText = e?.message ?? String(e);
+        throw new Error(`failed staging attachments: ${errText}`);
+      }
+    }
+
     const persistedPrompt = await pushPendingPrompt({
       droneId,
       chatName,
@@ -3008,50 +3046,12 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     const recoveringInterruptedPrompt = Boolean(persistedPrompt?.interruptedPromptId);
 
     if (defer || opts.deliveryMode === 'background' || recoveringInterruptedPrompt) {
-      if (
-        providedAttachmentRefs.length === 0 &&
-        rawAttachments.length > 0 &&
-        attachmentsForPending.length > 0
-      ) {
-        const attachmentsDir = buildChatAttachmentsDirectory({
-          cwd,
-          chatName,
-          promptId: id,
-          storageRoot: attachmentsStorageRoot,
-        });
-        try {
-          if (runtime === 'host') {
-            await copyChatAttachmentsToHost({
-              hostDir: attachmentsDir,
-              attachments: rawAttachments,
-            });
-          } else {
-            const containerName =
-              String((d as any)?.containerName ?? (d as any)?.name ?? droneId).trim() || droneId;
-            await copyChatAttachmentsToContainer({
-              containerName,
-              containerDir: attachmentsDir,
-              attachments: rawAttachments,
-            });
-          }
-          opts.mark?.('attachments');
-        } catch (e: any) {
-          const errText = e?.message ?? String(e);
-          await updatePendingPrompt({
-            droneId,
-            chatName,
-            id,
-            patch: { state: 'failed', error: `failed staging queued attachments: ${errText}` },
-          });
-          throw new Error(`failed staging queued attachments: ${errText}`);
-        }
-      }
       // Persisted as queued; the background pump will claim it when the chat is deliverable.
       if (opts.schedulePump !== false) {
         enqueuePendingPromptPump(droneId, chatName);
         opts.mark?.('queuePump');
       }
-      return { id, pendingState: 'queued' };
+      return { id: persistedPrompt?.prompt.id ?? id, pendingState: 'queued' };
     }
 
     if (inferChatAgent(chat, d).kind === 'builtin') {
@@ -3080,7 +3080,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           droneId,
           chatName,
           prompt: opts.prompt,
-          attachments: rawAttachments,
+          attachments: attachmentsForPending.length > 0 ? [] : rawAttachments,
           attachmentRefs: attachmentsForPending,
           cwd: opts.cwd ?? null,
           waitForDaemonMs: opts.waitForDaemonMs,
@@ -3333,10 +3333,11 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           deliveryMode: opts.deliveryMode,
           submissionSource: opts.submissionSource,
         });
+        const queued = getPromptQueueRepository()?.get({ droneId, chatName, promptId: fallbackId });
         return {
           kind: 'enqueued',
-          id: fallbackId,
-          pendingState: 'sending',
+          id: queued?.id ?? fallbackId,
+          pendingState: queued?.state === 'queued' ? 'queued' : 'sending',
         };
       }
       const acceptance = chatPromptAcceptancePlan(opts.deliveryMode);

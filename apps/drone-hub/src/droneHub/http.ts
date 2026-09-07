@@ -2,6 +2,7 @@ import {
   observeChatLoadRequest,
   responseTextBytes,
 } from './app/chat-load-telemetry';
+import { observeDesktopFilesystemRequest } from './files/workspace-load-telemetry';
 
 function buildUnexpectedHtmlError(url: string): string {
   const path = String(url ?? '').trim();
@@ -52,7 +53,7 @@ async function requestJsonResponse<T>(
   allowNotModified: boolean,
 ): Promise<JsonResponse<T>> {
   const headers = new Headers(init?.headers);
-  const observation = observeChatLoadRequest(url);
+  const observation = observeDesktopFilesystemRequest(url) ?? observeChatLoadRequest(url);
   let r: Response;
   let text = '';
   let parseMs = 0;

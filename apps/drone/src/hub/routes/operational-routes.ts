@@ -8,12 +8,14 @@ import { errorMessage, readRawBody } from '../hub-http';
 import type { HubRouter } from '../hub-router';
 import type { CompanionTelemetryService } from '../companion/companion-telemetry';
 import { mobileChatLoadStore } from '../mobile-chat-load-store';
+import { normalizeMobileChatLoad } from '@drone/device-protocol';
 
 type ServiceFunction = (...args: any[]) => any;
 const GROQ_SPEECH_TIMEOUT_MS = 30_000;
 const GROQ_SPEECH_QUEUE_MAX_JOBS = 100;
 const CHAT_LOAD_MILESTONES = new Set([
   'click',
+  'react_render_ms',
   'selection_committed',
   'cached_config_available',
   'cached_content_available',
@@ -411,6 +413,13 @@ export function registerOperationalRoutes(
       'chat load timing',
       serializeChatLoadTelemetryForLog(telemetry),
     );
+    json(202, { ok: true });
+  });
+
+  apiRouter.post('/api/telemetry/file-load', async ({ readJson, json }) => {
+    const record = normalizeMobileChatLoad(await readJson());
+    if (!record?.kind) { json(400, { ok: false, error: 'invalid file load telemetry' }); return; }
+    hubLog(record.status === 'completed' ? 'info' : 'warn', 'workspace file load timing', { ...record, requests: record.requests.map((request) => ({ ...request, timings: JSON.stringify(request.timings) })) });
     json(202, { ok: true });
   });
 

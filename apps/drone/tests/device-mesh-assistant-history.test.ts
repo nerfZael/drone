@@ -1,8 +1,11 @@
+import { compactEventPromptPreview } from '../src/hub/device-mesh/compactEventPromptPreview';
+import { parseEventNotificationPrompt, renderEventNotificationPrompt } from '@drone/assistant-chat';
 import { describe, expect, test } from 'bun:test';
 import { MESH_CHAT_PAYLOAD_BYTES } from '@drone/device-protocol';
 import { boundedAssistantHistory } from '../src/hub/device-mesh/features/cross-device-assistant/bounded-assistant-history';
 import {
   compactChatQuestionRequests,
+  compactChatQuestionRequestPage,
   compactNativeChatReadResponse,
 } from '../src/hub/device-mesh/native-chat-response';
 
@@ -266,4 +269,124 @@ describe('mesh assistant history', () => {
     expect(message.details.files.some((file: any) => file.status === 'failed')).toBe(true);
     expect(Buffer.byteLength(JSON.stringify(history))).toBeLessThanOrEqual(180 * 1024);
   });
+});
+
+test('mesh queue previews preserve bundled user text, total event count, and delivery mode', () => {
+  const prompt = renderEventNotificationPrompt({
+    userMessage: 'Please review these changes.',
+    events: Array.from({ length: 100 }, (_, i) => ({
+      provider: 'github',
+      resourceType: 'pull_request',
+      resourceId: `org/repo#${i}`,
+      eventType: 'pull_request.merged',
+      summary: `Merged PR ${i}`,
+      providerContent: { body: 'x'.repeat(8_000) },
+    })),
+  });
+  const result = compactNativeChatReadResponse({
+    nativeChatId: 'native',
+    snapshot: {
+      threads: [
+        {
+          id: 'native',
+          queuedPrompts: [{ id: 'bundle', prompt, status: 'queued', deliveryMode: 'asap' }],
+        },
+      ],
+    },
+    history: { entries: [] },
+  });
+  const queued = result.thread!.queuedPrompts[0]!;
+  const notification = parseEventNotificationPrompt(queued.prompt)!;
+  expect(notification.userMessage).toBe('Please review these changes.');
+  expect(notification.eventCount).toBe(100);
+  expect(notification.events).toHaveLength(3);
+  expect(queued.deliveryMode).toBe('asap');
+  expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThan(MESH_CHAT_PAYLOAD_BYTES);
+});
+
+test('small queue previews retain complete markup, human presence, and the event count', () => {
+  const prompt = renderEventNotificationPrompt({
+    userMessage: 'Do X',
+    events: [
+      {
+        provider: 'github',
+        resourceType: 'pull_request',
+        resourceId: 'org/repo#1',
+        eventType: 'pull_request.merged',
+        summary: 'Merged',
+      },
+    ],
+  });
+  const preview = compactEventPromptPreview(prompt, 160)!;
+  const parsed = parseEventNotificationPrompt(preview)!;
+  expect(Buffer.byteLength(preview)).toBeLessThanOrEqual(160);
+  expect(parsed.userMessage).toBe('Do X');
+  expect(parsed.eventCount).toBe(1);
+});
+
+test('all pending question requests remain discoverable and large forms are deferred', () => {
+  const requests = Array.from({ length: 8 }, (_, i) => ({
+    id: `request-${i}`,
+    chatId: 'native',
+    droneId: 'drone-a',
+    chatName: 'default',
+    status: 'pending',
+    toolName: 'ask_questions',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    questions: [
+      {
+        id: 'q',
+        question: 'Choose a scope',
+        importance: 50,
+        detailedExplanation: 'x'.repeat(16_000),
+        choices: [
+          { id: 'a', label: 'A' },
+          { id: 'b', label: 'B' },
+        ],
+      },
+    ],
+  }));
+  const result = compactNativeChatReadResponse({
+    nativeChatId: 'native',
+    snapshot: { threads: [{ id: 'native' }], questionRequests: requests },
+    history: { entries: [] },
+  });
+  expect(result.questionRequests).toHaveLength(8);
+  expect(result.pendingQuestionRequests).toHaveLength(8);
+  expect(result.questionRequests.some((request) => request.questionsDeferred)).toBe(true);
+  expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThan(MESH_CHAT_PAYLOAD_BYTES);
+});
+
+test('a maximum-sized pending question backlog is reachable through bounded pages', () => {
+  const requests = Array.from({ length: 500 }, (_, index) => ({
+    id: `request-${index}`,
+    chatId: 'native',
+    droneId: 'drone-a',
+    chatName: 'default',
+    status: 'pending',
+    toolName: 'ask_questions',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    questions: [
+      { id: 'q', question: 'Choose', detailedExplanation: 'x'.repeat(16_000), choices: [] },
+    ],
+  }));
+  const seen = new Set<string>();
+  for (let offset = 0; offset < requests.length; offset += 20) {
+    const page = compactChatQuestionRequestPage(requests, offset);
+    const result = compactNativeChatReadResponse({
+      nativeChatId: 'native',
+      snapshot: { threads: [{ id: 'native' }], ...page },
+      metadata: { questionRequestPage: page.questionRequestPage },
+      history: { entries: [] },
+    });
+    expect(result.questionRequestPage).toEqual({ offset, limit: 20, total: 500 });
+    expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThan(MESH_CHAT_PAYLOAD_BYTES);
+    for (const request of result.pendingQuestionRequests) seen.add(request.id);
+  }
+  expect(seen.size).toBe(500);
+  expect(compactChatQuestionRequestPage(requests.slice(0, 3), 480).questionRequestPage.offset).toBe(
+    0,
+  );
 });

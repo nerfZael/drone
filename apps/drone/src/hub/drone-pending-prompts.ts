@@ -69,6 +69,7 @@ export type CancelQueuedPendingPromptStatus = 'cancelled' | 'already-submitted' 
 export type CancelQueuedPendingPromptResult = {
   status: CancelQueuedPendingPromptStatus;
   pendingState?: PendingPromptState | null;
+  retained?: boolean;
 };
 
 export type RetryPendingPromptResult = {
@@ -885,6 +886,7 @@ export function createDronePendingPromptStore(deps: {
     droneId: string;
     chatName: string;
     promptId: string;
+    entireBundle?: boolean;
   }): Promise<CancelQueuedPendingPromptResult> {
     const droneId = normalizeDroneIdentity(opts.droneId);
     const chatName = deps.normalizeChatName(opts.chatName);
@@ -893,10 +895,10 @@ export function createDronePendingPromptStore(deps: {
 
     const queue = promptQueueForActiveDrone();
     if (queue) {
-      const cancelled = await queue.cancelQueued({ droneId, chatName, promptId });
+      const cancelled = await queue.cancelQueued({ droneId, chatName, promptId, entireBundle: opts.entireBundle });
       if (cancelled.cancelled) {
         notifyPendingPromptChanged(droneId, chatName);
-        return { status: 'cancelled', pendingState: 'queued' };
+        return { status: 'cancelled', pendingState: 'queued', retained: cancelled.retained };
       }
       if (cancelled.state === 'cancelled') return { status: 'not-found', pendingState: null };
       if (cancelled.state) {

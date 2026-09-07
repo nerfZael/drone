@@ -1,6 +1,8 @@
 export type MobileChatLoadRecord = {
   version: 1;
+  kind?: 'file-open' | 'directory-load' | 'media-load';
   navigationId: string;
+  parentNavigationId?: string;
   targetDeviceId: string;
   droneId: string;
   chatName: string;
@@ -30,10 +32,11 @@ export function normalizeMobileChatLoad(raw: unknown): MobileChatLoadRecord | nu
       Object.entries(v && typeof v === 'object' ? v : {})
         .slice(0, 32)
         .filter(([key, val]) => /^[a-zA-Z][a-zA-Z0-9_.]{0,47}$/.test(key) &&
-          (key === 'responseBytes' ? typeof val === 'number' && Number.isSafeInteger(val) && val >= 0 && val <= 100_000_000 : duration(val))),
+          (['responseBytes', 'fileBytes', 'entryCount'].includes(key) ? typeof val === 'number' && Number.isSafeInteger(val) && val >= 0 && val <= 100_000_000 : duration(val))),
     );
   if (
     !value ||
+    (value.kind !== undefined && value.kind !== 'file-open' && value.kind !== 'directory-load' && value.kind !== 'media-load') ||
     value.version !== 1 ||
     !text(value.navigationId) ||
     !text(value.targetDeviceId) ||
@@ -48,7 +51,9 @@ export function normalizeMobileChatLoad(raw: unknown): MobileChatLoadRecord | nu
     return null;
   return {
     version: 1,
+    ...(value.kind ? { kind: value.kind } : {}),
     navigationId: value.navigationId,
+    ...(text(value.parentNavigationId) ? { parentNavigationId: value.parentNavigationId } : {}),
     targetDeviceId: value.targetDeviceId,
     droneId: value.droneId,
     chatName: value.chatName,
@@ -62,7 +67,7 @@ export function normalizeMobileChatLoad(raw: unknown): MobileChatLoadRecord | nu
       .flatMap((r) =>
         r &&
         text(r.requestId) &&
-        ['chat.read', 'chats.list'].includes(r.operation) &&
+        (value.kind ? ['file.preview', 'files.list', 'fs.file', 'fs.list', 'fs.media'] : ['chat.read', 'chats.list']).includes(r.operation) &&
         ['completed', 'error', 'aborted'].includes(r.outcome)
           ? [
               {

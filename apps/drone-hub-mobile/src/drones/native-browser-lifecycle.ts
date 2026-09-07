@@ -11,6 +11,7 @@ export type BrowserNative = {
     targetPort: number,
   ): Promise<NativeBrowserGateway>;
   stop(sessionId: string): Promise<void>;
+  diagnostics?(sessionId: string): Promise<Record<string, number> | null>;
 };
 
 // Expo async calls and React screen lifetimes can overlap. Serialize native ownership

@@ -393,15 +393,22 @@ export class DockerClient {
       containerAlreadyReady?: boolean;
       maxOutputBytes?: number;
       signal?: AbortSignal;
+      onTiming?: (phase: string, durationMs: number) => void;
     }
   ): Promise<ExecCommandResult> {
+    const mark = (phase: string, started: number) => {
+      try { options?.onTiming?.(phase, performance.now() - started); } catch { /* Observers cannot break exec. */ }
+    };
+    const lookupStarted = performance.now();
     const container = options?.containerAlreadyReady
       ? this.docker.getContainer(name)
       : await this.getContainer(name);
+    mark('docker_lookup', lookupStarted);
     if (!container) {
       throw new Error(`Container ${name} not found`);
     }
 
+    const createStarted = performance.now();
     const exec = await container.exec({
       Cmd: command,
       AttachStdout: true,
@@ -412,6 +419,7 @@ export class DockerClient {
       // can break downstream logic (e.g. embedding a detected path into another command).
       Tty: false,
     });
+    mark('docker_create_exec', createStarted);
 
     return new Promise((resolve) => {
       let stdoutText = '';
@@ -464,7 +472,9 @@ export class DockerClient {
         }, timeoutMs);
       }
 
+      const startStarted = performance.now();
       exec.start({ hijack: true, stdin: false }, (err: Error | null, stream?: NodeJS.ReadWriteStream) => {
+        mark('docker_start_stream', startStarted);
         if (done) {
           try {
             (stream as any)?.destroy?.();
@@ -483,6 +493,7 @@ export class DockerClient {
           return;
         }
         streamRef = stream;
+        const streamStarted = performance.now();
 
         const stdout = new PassThrough();
         const stderr = new PassThrough();
@@ -514,8 +525,11 @@ export class DockerClient {
 
         stream.on('end', async () => {
           if (done) return;
+          mark('docker_stream', streamStarted);
           try {
+            const inspectStarted = performance.now();
             const info = await exec.inspect();
+            mark('docker_inspect_exec', inspectStarted);
             const code = info.ExitCode;
             finish({ code: typeof code === 'number' ? code : 1, stdout: stdoutText, stderr: stderrText });
           } catch (inspectErr: any) {

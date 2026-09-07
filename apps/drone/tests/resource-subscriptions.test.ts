@@ -9,6 +9,7 @@ import {
   pollGithubRepository,
   validateGithubSubscriptionResource,
 } from '../src/hub/subscriptions/github-subscription-poller';
+import { resourceSubscriptionDeliveryMode } from '../src/hub/subscriptions/resource-subscription-delivery';
 import { normalizeResourceSubscriptionSettings } from '../src/hub/subscriptions/resource-subscription-settings';
 import { createResourceSubscriptionDeliveryAuthorizer } from '../src/hub/subscriptions/create-resource-subscription-delivery-authorizer';
 import {
@@ -761,6 +762,8 @@ describe('resource subscription settings', () => {
   test('uses the agreed defaults', () => {
     expect(normalizeResourceSubscriptionSettings(null)).toEqual({
       enabled: true,
+      deliveryMode: 'queue',
+      eventDeliveryModes: {},
       githubPollingIntervalMs: 60_000,
       batchWindowMs: 15_000,
       maxEventsPerPrompt: 30,
@@ -770,6 +773,33 @@ describe('resource subscription settings', () => {
       terminalEventRetentionDays: 30,
       deliveryRetentionDays: 30,
     });
+  });
+
+  test('inherits global delivery and preserves explicit overrides in both directions', () => {
+    const settings = normalizeResourceSubscriptionSettings({
+      deliveryMode: 'asap',
+      eventDeliveryModes: {
+        'cron.triggered': 'queue',
+        'question_request.resolved': 'asap',
+        'chat.idle': 'inherit',
+        unknown: 'queue',
+      },
+    });
+    expect(settings.eventDeliveryModes).toEqual({
+      'cron.triggered': 'queue',
+      'question_request.resolved': 'asap',
+    });
+    expect(resourceSubscriptionDeliveryMode(settings, 'chat.idle')).toBe('asap');
+    expect(resourceSubscriptionDeliveryMode(settings, 'cron.triggered')).toBe('queue');
+    expect(
+      resourceSubscriptionDeliveryMode(
+        { ...settings, deliveryMode: 'queue' },
+        'question_request.resolved',
+      ),
+    ).toBe('asap');
+    expect(
+      normalizeResourceSubscriptionSettings({ deliveryMode: 'invalid', eventDeliveryModes: [] }),
+    ).toMatchObject({ deliveryMode: 'queue', eventDeliveryModes: {} });
   });
 
   test('keeps configured values inside operational bounds', () => {

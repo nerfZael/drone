@@ -9,11 +9,6 @@ import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
-import {
-  INTERACTIVE_MCP_TOOL_TIMEOUT_MS,
-  isInteractiveMcpTool,
-} from './hub/mcp-interactive-timeout';
-
 const MCP_URL_ENV = 'DRONE_HUB_MCP_URL';
 const MCP_TOKEN_ENV = 'DRONE_HUB_MCP_TOKEN';
 
@@ -22,14 +17,9 @@ type ManagedMcpConnection = {
   token: string;
 };
 
-export function mcpBridgeCallOptions(name: string, signal?: AbortSignal): RequestOptions {
-  return isInteractiveMcpTool(name)
-    ? {
-        signal,
-        timeout: INTERACTIVE_MCP_TOOL_TIMEOUT_MS,
-        maxTotalTimeout: INTERACTIVE_MCP_TOOL_TIMEOUT_MS,
-      }
-    : { signal };
+export function mcpBridgeCallOptions(_name: string, signal?: AbortSignal): RequestOptions {
+  // Question tools return subscriptions and use the same timeout as other tools.
+  return { signal };
 }
 
 export function managedMcpConnectionFromEnvironment(

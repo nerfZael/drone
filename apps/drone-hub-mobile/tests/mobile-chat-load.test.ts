@@ -128,3 +128,20 @@ test('normalization rejects malformed records and strips payloads and unsafe tim
   expect(JSON.stringify(normalized)).not.toContain('secret');
   expect(JSON.stringify(normalized)).not.toContain('spoof');
 });
+
+test('workspace records survive normalization and durable buffering without content or paths', async () => {
+  const storage = new Map<string, string>();
+  const adapter = { getItem: async (key: string) => storage.get(key) ?? null, setItem: async (key: string, value: string) => { storage.set(key, value); } };
+  const buffer = new ChatLoadBuffer(adapter);
+  for (const kind of ['file-open', 'directory-load'] as const) {
+    const normalized = normalizeMobileChatLoad({ ...record(kind), kind, path: '/secret', content: 'secret',
+      milestones: { fileBytes: 8_000_000, entryCount: 5000 },
+      requests: [{ requestId: 'request', operation: kind === 'file-open' ? 'file.preview' : 'files.list', outcome: 'completed', timings: { fetchMs: 20 }, payload: 'secret' }] })!;
+    expect(normalized.kind).toBe(kind);
+    expect(normalized.requests).toHaveLength(1);
+    expect(normalized.milestones.fileBytes).toBe(8_000_000);
+    expect(JSON.stringify(normalized)).not.toContain('secret');
+    await buffer.append(normalized);
+  }
+  expect((await new ChatLoadBuffer(adapter).list()).map((entry) => entry.record.kind)).toEqual(['file-open', 'directory-load']);
+});

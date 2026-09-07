@@ -1,5 +1,6 @@
 import React from 'react';
 import { ChatLoadingState } from './ChatLoadingState';
+import { recordChatRenderDuration } from '../app/chat-load-telemetry';
 
 export type ChatTranscriptFrameProps = {
   loading: boolean;
@@ -22,6 +23,7 @@ export const ChatTranscriptFrame = React.forwardRef<HTMLDivElement, ChatTranscri
   ref,
 ) {
   return (
+    <React.Profiler id="transcript" onRender={(_id, _phase, duration) => recordChatRenderDuration(duration)}>
     <div ref={ref} className="h-full min-h-0 min-w-0 overflow-auto">
       {loading ? (
         <ChatLoadingState message={loadingMessage} />
@@ -33,5 +35,6 @@ export const ChatTranscriptFrame = React.forwardRef<HTMLDivElement, ChatTranscri
         emptyState
       )}
     </div>
+    </React.Profiler>
   );
 });

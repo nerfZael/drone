@@ -399,6 +399,7 @@ export class DvmApi {
       containerAlreadyReady?: boolean;
       maxOutputBytes?: number;
       signal?: AbortSignal;
+      onTiming?: (phase: string, durationMs: number) => void;
     },
   ): Promise<DvmRunResult> {
     try {
@@ -407,6 +408,7 @@ export class DvmApi {
         containerAlreadyReady: options?.containerAlreadyReady,
         maxOutputBytes: options?.maxOutputBytes,
         signal: options?.signal,
+        ...(options?.onTiming ? { onTiming: options.onTiming } : {}),
       });
     } catch (error: any) {
       return { code: 1, stdout: '', stderr: error?.message ?? String(error) };

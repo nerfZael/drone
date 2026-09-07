@@ -25,6 +25,12 @@ import Lock from 'lucide-react-native/icons/lock';
 import RotateCw from 'lucide-react-native/icons/rotate-cw';
 import Unplug from 'lucide-react-native/icons/unplug';
 import X from 'lucide-react-native/icons/x';
+import Gauge from 'lucide-react-native/icons/gauge';
+import * as Clipboard from 'expo-clipboard';
+import {
+  BROWSER_LOAD_DIAGNOSTICS_SCRIPT,
+  parseBrowserLoadDiagnostics,
+} from './browser-load-diagnostics';
 import type {
   DroneBrowserSession,
   DroneBrowserTargets,
@@ -134,11 +140,43 @@ export function RemoteDroneBrowser({
     },
     [targetName, phoneName],
   );
+  const session = React.useRef<DroneBrowserSession | null>(null);
   const [back, setBack] = React.useState(false);
   const [forward, setForward] = React.useState(false);
+  const [diagnosticsOpen, setDiagnosticsOpen] = React.useState(false);
+  const [diagnostics, setDiagnostics] = React.useState<Record<string, number> | null>(null);
+  const sessionSetupMs = React.useRef(0);
+  const targetLookupMs = React.useRef(0);
+  const setupMetrics = React.useRef<Record<string, number>>({});
+  const pageMetrics = React.useRef<Record<string, number>>({});
+  const pageStarted = React.useRef<number | null>(null);
+  const pageLoadMs = React.useRef<number | null>(null);
+  const readDiagnostics = React.useCallback(async () => {
+    const id = session.current?.sessionId;
+    if (!id || !native?.diagnostics) return;
+    const snapshot = await native.diagnostics(id).catch(() => null);
+    if (session.current?.sessionId !== id || !snapshot) return;
+    const value = {
+      ...snapshot,
+      ...pageMetrics.current,
+      ...setupMetrics.current,
+      targetLookupMs: targetLookupMs.current,
+      sessionSetupMs: sessionSetupMs.current,
+      ...(pageLoadMs.current === null ? {} : { pageLoadMs: pageLoadMs.current }),
+    };
+    setDiagnostics(value);
+    return value;
+  }, [native]);
+  React.useEffect(() => {
+    if (!diagnosticsOpen) return;
+    void readDiagnostics();
+    const timer = setInterval(() => {
+      void readDiagnostics();
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [diagnosticsOpen, readDiagnostics]);
   const [loading, setLoading] = React.useState(false);
   const generation = React.useRef(0);
-  const session = React.useRef<DroneBrowserSession | null>(null);
   const opening = React.useRef<AbortController | null>(null);
   const requestRef = React.useRef(request);
   requestRef.current = request;
@@ -186,8 +224,14 @@ export function RemoteDroneBrowser({
     setGateway(null);
     setBusy(true);
     setError(null);
+    const lookupStarted = performance.now();
     void Promise.all([
-      requestRef.current(deviceId, 'browser.targets', { droneId }, controller.signal),
+      requestRef
+        .current(deviceId, 'browser.targets', { droneId }, controller.signal)
+        .then((value) => {
+          if (active) targetLookupMs.current = Math.round(performance.now() - lookupStarted);
+          return value;
+        }),
       AsyncStorage.getItem(key).catch(() => null),
     ])
       .then(([value, saved]) => {
@@ -267,10 +311,17 @@ export function RemoteDroneBrowser({
     setBusy(true);
     setBack(false);
     setForward(false);
+    const setupStarted = performance.now();
+    setDiagnostics(null);
+    pageLoadMs.current = null;
+    pageStarted.current = null;
+    pageMetrics.current = {};
     let created: DroneBrowserSession | null = null;
     try {
       await release(old);
       if (generation.current !== version) return;
+      const hubStarted = performance.now();
+      const previousCloseMs = Math.round(hubStarted - setupStarted);
       created = await requestRef.current(
         deviceId,
         'browser.open',
@@ -281,6 +332,8 @@ export function RemoteDroneBrowser({
         await release(created);
         return;
       }
+      const nativeStarted = performance.now();
+      const hubOpenMs = Math.round(nativeStarted - hubStarted);
       session.current = created;
       const local = await startNativeBrowser(
         native,
@@ -293,6 +346,12 @@ export function RemoteDroneBrowser({
         await release(created);
         return;
       }
+      setupMetrics.current = {
+        previousCloseMs,
+        hubOpenMs,
+        nativeStartMs: Math.round(performance.now() - nativeStarted),
+      };
+      sessionSetupMs.current = Math.round(performance.now() - setupStarted);
       setGateway(local);
       void AsyncStorage.setItem(
         key,
@@ -548,8 +607,36 @@ export function RemoteDroneBrowser({
                   fail('This link leaves the selected service. Enter its port to open it.');
                 return allowed;
               }}
-              onLoadStart={() => setLoading(true)}
-              onLoadEnd={() => setLoading(false)}
+              onLoadStart={() => {
+                pageMetrics.current = {};
+                pageStarted.current = performance.now();
+                pageLoadMs.current = null;
+                setLoading(true);
+              }}
+              onLoadEnd={() => {
+                if (pageStarted.current !== null)
+                  pageLoadMs.current = Math.round(performance.now() - pageStarted.current);
+                setLoading(false);
+                webView.current?.injectJavaScript(BROWSER_LOAD_DIAGNOSTICS_SCRIPT);
+                void readDiagnostics().then((value) => {
+                  if (value)
+                    console.info(
+                      '[browser-load]',
+                      JSON.stringify({ sessionId: gateway.sessionId, ...value }),
+                    );
+                });
+              }}
+              onMessage={(event) => {
+                if (!allowBrowserNavigation(event.nativeEvent.url, gateway.origin)) return;
+                const value = parseBrowserLoadDiagnostics(event.nativeEvent.data);
+                if (!value) return;
+                pageMetrics.current = value;
+                void readDiagnostics();
+                console.info(
+                  '[browser-page]',
+                  JSON.stringify({ sessionId: gateway.sessionId, ...value }),
+                );
+              }}
               onNavigationStateChange={(state) => {
                 setBack(state.canGoBack);
                 setForward(state.canGoForward);
@@ -615,6 +702,11 @@ export function RemoteDroneBrowser({
               onPress={() => webView.current?.goForward()}
             />
             <View style={styles.navSpacer} />
+            <IconButton
+              icon={Gauge}
+              label="Browser diagnostics"
+              onPress={() => setDiagnosticsOpen(true)}
+            />
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Switch port"
@@ -633,6 +725,60 @@ export function RemoteDroneBrowser({
             </Pressable>
           </View>
         ) : null}
+        <Modal
+          visible={diagnosticsOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setDiagnosticsOpen(false)}
+        >
+          <View style={styles.diagnosticsBackdrop}>
+            <View style={styles.diagnosticsPanel}>
+              <View style={styles.pickerHeading}>
+                <Text style={styles.pickerTitle}>Browser diagnostics</Text>
+                <IconButton
+                  icon={X}
+                  label="Close diagnostics"
+                  onPress={() => setDiagnosticsOpen(false)}
+                />
+              </View>
+              <Text style={styles.emptyText}>
+                Transport totals cover this session; page timings cover the latest navigation.
+                Timings overlap across parallel requests. Bytes are before tunnel compression; wire
+                totals are in the hub’s browser-tunnel logs. Page resource totals may omit
+                cross-origin or older entries.
+              </Text>
+              <ScrollView style={styles.diagnosticsRows}>
+                {diagnostics ? (
+                  Object.entries(diagnostics).map(([name, value]) => (
+                    <Text selectable key={name} style={styles.diagnosticsRow}>
+                      {name}: {value}
+                    </Text>
+                  ))
+                ) : (
+                  <Text style={styles.emptyText}>
+                    Diagnostics require an active session and an updated Android app.
+                  </Text>
+                )}
+              </ScrollView>
+              <Pressable
+                accessibilityRole="button"
+                style={styles.primaryButton}
+                disabled={!diagnostics}
+                onPress={() => {
+                  void Clipboard.setStringAsync(
+                    JSON.stringify(
+                      { sessionId: session.current?.sessionId, ...diagnostics },
+                      null,
+                      2,
+                    ),
+                  );
+                }}
+              >
+                <Text style={styles.primaryButtonText}>Copy diagnostics</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
         <ConfirmDialog
           visible={accessDialog !== null}
           title={accessDialog?.title ?? ''}
@@ -652,6 +798,16 @@ export function RemoteDroneBrowser({
 }
 
 const styles = StyleSheet.create({
+  diagnosticsBackdrop: { flex: 1, backgroundColor: '#0009', justifyContent: 'center', padding: 20 },
+  diagnosticsPanel: {
+    backgroundColor: colors.background,
+    borderRadius: 12,
+    padding: 16,
+    gap: 12,
+    maxHeight: '85%',
+  },
+  diagnosticsRows: { flexGrow: 0 },
+  diagnosticsRow: { color: colors.text, fontSize: 13, paddingVertical: 3 },
   screen: { flex: 1, backgroundColor: colors.background },
   header: {
     height: APP_HEADER_HEIGHT,

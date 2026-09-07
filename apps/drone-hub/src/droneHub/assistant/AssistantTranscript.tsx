@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   nativeAgentFailurePresentation,
+  parseEventNotificationPrompt,
   resolveChatQueueActionPresentation,
   type PromptQueueInterruptionResolution,
 } from '@drone/assistant-chat';
@@ -16,6 +17,7 @@ import { ChatMessageFrame } from '../chat/ChatMessageFrame';
 import { CreateNewChatNowButton, QueuedNewChatLabel } from '../chat/QueuedNewChatAction';
 import { ImageAttachmentChips, normalizeImageAttachmentRefs } from '../chat/ImageAttachmentChips';
 import { collectInlineAgentMedia } from '../chat/inline-agent-media';
+import { SubscriptionEventMessage } from '../chat/SubscriptionEventBadge';
 import { UserChatMessage } from '../chat/UserChatMessage';
 import { AgentRunFailureNotice } from '../chat/AgentRunFailureNotice';
 import {
@@ -173,7 +175,11 @@ export function AssistantQueuedPromptRow({
   const running = prompt.status === 'running';
   const showCreatingNewChat =
     Boolean(actionPresentation) && (creatingNewChat || actionPresentation?.state === 'running');
-  const canRemovePrompt = actionPresentation ? actionPresentation.canCancel || failed : !running;
+  const notification = parseEventNotificationPrompt(prompt.prompt);
+  const bundleHasHuman = notification?.userMessage !== undefined;
+  const canRemovePrompt =
+    (!notification || bundleHasHuman) &&
+    (actionPresentation ? actionPresentation.canCancel || failed : !running);
   const showPromptHeader = !actionPresentation || prompt.imageCount > 0 || canRemovePrompt;
   const statusLabel = failed
     ? 'Failed'
@@ -220,14 +226,18 @@ export function AssistantQueuedPromptRow({
                         ? 'Dismiss failed prompt'
                         : actionPresentation
                           ? 'Cancel queued new chat'
-                          : 'Cancel queued prompt'
+                          : bundleHasHuman
+                            ? 'Remove message; keep events'
+                            : 'Cancel queued prompt'
                     }
                     title={
                       failed
                         ? 'Dismiss failed prompt'
                         : actionPresentation
                           ? 'Cancel queued new chat'
-                          : 'Cancel queued prompt'
+                          : bundleHasHuman
+                            ? 'Remove message; keep events'
+                            : 'Cancel queued prompt'
                     }
                   >
                     {cancelling ? '…' : '×'}
@@ -235,7 +245,9 @@ export function AssistantQueuedPromptRow({
                 ) : null}
               </div>
             ) : null}
-            {prompt.prompt ? (
+            {notification ? (
+              <SubscriptionEventMessage prompt={prompt.prompt} at={prompt.createdAt} />
+            ) : prompt.prompt ? (
               <div className="whitespace-pre-wrap break-words text-[var(--text-12)] leading-relaxed text-[var(--fg-secondary)]">
                 {prompt.prompt}
               </div>

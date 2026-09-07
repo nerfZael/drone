@@ -1,4 +1,5 @@
 import React from 'react';
+import { desktopWorkspaceLoads, beginDesktopWorkspaceLoad } from '../files/workspace-load-telemetry';
 import type { DroneFsReadPayload, DroneFsSearchPayload, DroneFsWritePayload, DroneSummary } from '../types';
 import type { requestJson as requestJsonFn } from '../http';
 import {
@@ -261,6 +262,12 @@ export function useFileEditorState({
     [activeTabId, tabs],
   );
   tabsRef.current = tabs;
+  React.useEffect(() => {
+    if (!activeTab?.loaded) return;
+    const id = desktopWorkspaceLoads.find('file-open', { droneId: activeTab.droneId, path: activeTab.path });
+    desktopWorkspaceLoads.mark(id, 'dataCommitted');
+    if (activeTab.error) desktopWorkspaceLoads.finish(id, 'error');
+  }, [activeTab]);
 
   React.useEffect(() => {
     activeTabIdRef.current = activeTab?.tabId ?? null;
@@ -511,6 +518,8 @@ export function useFileEditorState({
     const droneId = String(activeTab.droneId ?? '').trim();
     const filePath = String(activeTab.path ?? '');
     if (!droneId || !filePath) return;
+    if (!desktopWorkspaceLoads.find('file-open', { droneId, path: filePath }))
+      beginDesktopWorkspaceLoad('file-open', droneId, filePath);
     const seq = requestSeqRef.current + 1;
     requestSeqRef.current = seq;
 
@@ -547,6 +556,10 @@ export function useFileEditorState({
     void read
       .then((data) => {
         if (cancelled || requestSeqRef.current !== seq) return;
+        const diagnosticId = desktopWorkspaceLoads.find('file-open', { droneId, path: filePath });
+        desktopWorkspaceLoads.mark(diagnosticId, 'dataApplied');
+        desktopWorkspaceLoads.mark(diagnosticId, 'fileBytes', Number(data.size) || 0);
+        desktopWorkspaceLoads.retarget(diagnosticId, data.path);
         const nextLoadedState = readPayloadToTabState(data);
         updateTabs((prevTabs) =>
           prevTabs.map((tab) =>
@@ -618,6 +631,7 @@ export function useFileEditorState({
         void readDesktopFile(requestJson, droneId, fallbackPath)
           .then((data) => {
             if (cancelled || requestSeqRef.current !== seq) return;
+            desktopWorkspaceLoads.retarget(desktopWorkspaceLoads.find('file-open', { droneId, path: filePath }), data.path);
             const nextLoadedState = readPayloadToTabState(data);
             updateTabs((prevTabs) =>
               prevTabs.map((tab) => {

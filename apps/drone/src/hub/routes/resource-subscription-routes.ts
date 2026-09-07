@@ -1,3 +1,4 @@
+import { RESOURCE_SUBSCRIPTION_EVENTS } from '../subscriptions/resource-subscription-types';
 import { errorMessage } from '../hub-http';
 import type { HubRouter } from '../hub-router';
 import type { ResourceSubscriptionService } from '../subscriptions/resource-subscription-service';
@@ -16,7 +17,11 @@ export function registerResourceSubscriptionRoutes(
     return null;
   };
   apiRouter.get('/api/resource-subscriptions/settings', async ({ json }) => {
-    json(200, { ok: true, settings: await readResourceSubscriptionSettings() });
+    json(200, {
+      ok: true,
+      settings: await readResourceSubscriptionSettings(),
+      eventTypes: RESOURCE_SUBSCRIPTION_EVENTS,
+    });
   });
 
   apiRouter.get('/api/resource-subscriptions/chat-resource/:resourceId', ({ params, json }) => {
@@ -34,7 +39,7 @@ export function registerResourceSubscriptionRoutes(
     try {
       const body = await readJson<any>();
       const settings = await writeResourceSubscriptionSettings(body?.settings ?? body);
-      json(200, { ok: true, settings });
+      json(200, { ok: true, settings, eventTypes: RESOURCE_SUBSCRIPTION_EVENTS });
     } catch (error) {
       json(400, { ok: false, error: errorMessage(error) });
     }
