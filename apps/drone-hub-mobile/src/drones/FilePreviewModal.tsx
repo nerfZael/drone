@@ -117,11 +117,11 @@ function PreviewVideo({ uri, active }: { uri: string; active: boolean }) {
   );
 }
 
-function PreviewImage({ uri }: { uri: string }) {
+function PreviewImage({ uri, active }: { uri: string; active: boolean }) {
   const [state, setState] = React.useState<'loading' | 'ready' | 'error'>('loading');
   React.useEffect(() => setState('loading'), [uri]);
   return (
-    <ZoomableImageStage resetKey={uri} enabled={state === 'ready'}>
+    <ZoomableImageStage resetKey={uri} active={active} enabled={state === 'ready'}>
       <Image
         accessible={false}
         source={{ uri }}
@@ -351,7 +351,8 @@ export function FilePreviewModal({
         explorerUpperTravel.value,
       );
     })
-    .onEnd((event) => {
+    .onEnd((event, success) => {
+      if (!success) return;
       const position = mobileExplorerSnapPosition(
         explorerProgress.value,
         event.velocityY,
@@ -368,7 +369,8 @@ export function FilePreviewModal({
       if (!explorerGestureActive.value) return;
       explorerGestureActive.value = false;
       if (success) return;
-      explorerProgress.value = withSpring(explorerDragTarget.value, EXPLORER_SPRING);
+      explorerTarget.value = explorerDragTarget.value;
+      explorerProgress.value = withSpring(explorerTarget.value, EXPLORER_SPRING);
       runOnJS(finishExplorerDrag)(explorerDragTarget.value);
     });
   const [wordWrap, setWordWrap] = React.useState(true);
@@ -791,7 +793,10 @@ export function FilePreviewModal({
                 wordWrap={wordWrap}
               />
             ) : preview?.kind === 'image' && preview.mime === 'image/svg+xml' && preview.content ? (
-              <ZoomableImageStage resetKey={`${preview.path}:${preview.content.length}`}>
+              <ZoomableImageStage
+                resetKey={`${preview.path}:${preview.content.length}`}
+                active={visible}
+              >
                 <SvgXml
                   xml={preview.content}
                   width="100%"
@@ -802,7 +807,7 @@ export function FilePreviewModal({
                 />
               </ZoomableImageStage>
             ) : preview?.kind === 'image' && preview.uri ? (
-              <PreviewImage uri={preview.uri} />
+              <PreviewImage uri={preview.uri} active={visible} />
             ) : preview?.kind === 'video' && preview.uri ? (
               <PreviewVideo uri={preview.uri} active={visible} />
             ) : preview ? (

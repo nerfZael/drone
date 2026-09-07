@@ -1,22 +1,33 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { BackHandler, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, {
+  runOnJS,
+  useAnimatedReaction,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { colors } from '../theme';
 import { clampImagePreviewOffset, clampImagePreviewScale } from './image-preview-zoom';
+import { ChatFilesGestureContext } from './ChatFilesCarousel';
 
 const DOUBLE_TAP_SCALE = 2.5;
 
 export function ZoomableImageStage({
   resetKey,
   enabled = true,
+  active = true,
   children,
 }: {
   resetKey: string;
   enabled?: boolean;
+  active?: boolean;
   children: React.ComponentProps<typeof View>['children'];
 }) {
   const [showHint, setShowHint] = React.useState(false);
+  const [zoomed, setZoomed] = React.useState(false);
+  const pageGesture = React.useContext(ChatFilesGestureContext);
   const scale = useSharedValue(1);
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
@@ -32,9 +43,26 @@ export function ZoomableImageStage({
     translateY.value = 0;
   }, [scale, translateX, translateY]);
 
+  useAnimatedReaction(
+    () => scale.value > 1.01,
+    (nextZoomed, previousZoomed) => {
+      if (nextZoomed !== previousZoomed) runOnJS(setZoomed)(nextZoomed);
+    },
+  );
+
+  React.useEffect(() => {
+    if (!active || !enabled || !zoomed) return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (scale.value <= 1.01) return false;
+      resetZoom();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [active, enabled, resetZoom, scale, zoomed]);
+
   React.useEffect(() => {
     resetZoom();
-    if (!enabled) {
+    if (!enabled || !active) {
       setShowHint(false);
       return;
     }
@@ -42,10 +70,10 @@ export function ZoomableImageStage({
     setShowHint(true);
     const timer = setTimeout(() => setShowHint(false), 2800);
     return () => clearTimeout(timer);
-  }, [enabled, resetKey, resetZoom]);
+  }, [active, enabled, resetKey, resetZoom]);
 
   const pinchGesture = Gesture.Pinch()
-    .enabled(enabled)
+    .enabled(enabled && active)
     .onStart(() => {
       startScale.value = scale.value;
       startTranslateX.value = translateX.value;
@@ -70,8 +98,14 @@ export function ZoomableImageStage({
     });
 
   const panGesture = Gesture.Pan()
-    .enabled(enabled)
+    .enabled(enabled && active)
     .maxPointers(1)
+    .minDistance(1)
+    .onTouchesDown((_event, manager) => {
+      // Ignoring onUpdate is too late: an active pan already owns the touch.
+      // Fail before recognition so a fitted image allows the page's back swipe.
+      if (scale.value <= 1.01) manager.fail();
+    })
     .onStart(() => {
       startTranslateX.value = translateX.value;
       startTranslateY.value = translateY.value;
@@ -90,8 +124,12 @@ export function ZoomableImageStage({
       );
     });
 
+  // While zoomed, image panning must win even if the page's horizontal threshold
+  // is crossed in the same native touch event.
+  if (pageGesture) panGesture.blocksExternalGesture(pageGesture);
+
   const doubleTapGesture = Gesture.Tap()
-    .enabled(enabled)
+    .enabled(enabled && active)
     .numberOfTaps(2)
     .maxDuration(260)
     .onEnd((event, success) => {

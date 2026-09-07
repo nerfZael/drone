@@ -7,6 +7,11 @@ type TranscriptScrollSnapshot = {
   scrollHeight: number;
   pinned: boolean;
 };
+type TranscriptScrollMetrics = Pick<HTMLDivElement, 'scrollTop' | 'scrollHeight' | 'clientHeight'>;
+
+function transcriptScrollMetrics(node: HTMLDivElement): TranscriptScrollMetrics {
+  return { scrollTop: node.scrollTop, scrollHeight: node.scrollHeight, clientHeight: node.clientHeight };
+}
 
 const transcriptScrollByContext = new Map<string, TranscriptScrollSnapshot>();
 
@@ -76,6 +81,8 @@ export function usePinnedTranscriptScroll({
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
   const pinnedRef = React.useRef(true);
   const preservingPrependRef = React.useRef(false);
+  const lastScrollMetricsRef = React.useRef<TranscriptScrollMetrics | null>(null);
+  const scrollGenerationRef = React.useRef(0);
   const [scrollNode, setScrollNode] = React.useState<HTMLDivElement | null>(null);
   const [contentNode, setContentNode] = React.useState<HTMLDivElement | null>(null);
 
@@ -91,6 +98,7 @@ export function usePinnedTranscriptScroll({
   const updatePinned = React.useCallback(
     (node: HTMLDivElement | null = scrollRef.current) => {
       if (!node) return;
+      lastScrollMetricsRef.current = transcriptScrollMetrics(node);
       pinnedRef.current = isTranscriptPinned({
         scrollHeight: node.scrollHeight,
         scrollTop: node.scrollTop,
@@ -105,9 +113,11 @@ export function usePinnedTranscriptScroll({
     (options: { force?: boolean; retries?: number } = {}) => {
       const { force = false, retries = 4 } = options;
       if (force) pinnedRef.current = true;
+      const generation = scrollGenerationRef.current;
       let triesRemaining = retries;
       const attempt = () => {
         requestAnimationFrame(() => {
+          if (generation !== scrollGenerationRef.current) return;
           const node = scrollRef.current;
           if (!node) {
             if (triesRemaining > 0) {
@@ -135,6 +145,7 @@ export function usePinnedTranscriptScroll({
   const preserveScrollOnPrepend = React.useCallback(
     async <T,>(load: () => Promise<T>): Promise<T> => {
       const node = scrollRef.current;
+      const generation = scrollGenerationRef.current;
       const previousScrollHeight = node?.scrollHeight ?? 0;
       const previousScrollTop = node?.scrollTop ?? 0;
       preservingPrependRef.current = true;
@@ -142,10 +153,11 @@ export function usePinnedTranscriptScroll({
       try {
         result = await load();
       } catch (error) {
-        preservingPrependRef.current = false;
+        if (generation === scrollGenerationRef.current) preservingPrependRef.current = false;
         throw error;
       }
       requestAnimationFrame(() => {
+        if (generation !== scrollGenerationRef.current) return;
         const current = scrollRef.current;
         if (current) {
           current.scrollTop = computePrependedTranscriptScrollTop({
@@ -164,7 +176,9 @@ export function usePinnedTranscriptScroll({
   );
 
   React.useLayoutEffect(() => {
+    preservingPrependRef.current = false;
     if (!enabled || !scrollNode) return;
+    lastScrollMetricsRef.current = transcriptScrollMetrics(scrollNode);
     let restoreFrame: number | null = null;
     const saved = transcriptScrollByContext.get(contextKey);
     if (!saved) {
@@ -188,6 +202,8 @@ export function usePinnedTranscriptScroll({
       });
     }
     return () => {
+      // Queued follow/prepend work belongs to this chat and this scroll surface.
+      scrollGenerationRef.current += 1;
       if (restoreFrame != null) window.cancelAnimationFrame(restoreFrame);
       if (scrollNode.scrollHeight <= 0) return;
       transcriptScrollByContext.set(contextKey, {
@@ -213,7 +229,23 @@ export function usePinnedTranscriptScroll({
 
   React.useEffect(() => {
     if (!enabled || !scrollNode) return;
-    const onScroll = () => updatePinned(scrollNode);
+    const onScroll = () => {
+      const previous = lastScrollMetricsRef.current;
+      const current = transcriptScrollMetrics(scrollNode);
+      // A delayed event from our own scroll (or browser scroll anchoring) can
+      // arrive after more messages/images have increased the bottom gap. Only
+      // upward movement should detach an already-pinned chat. A shrinking scroll
+      // range can also move scrollTop upwards by clamping it, without user input.
+      const rangeShrank = previous && (
+        previous.scrollHeight > current.scrollHeight ||
+        previous.clientHeight < current.clientHeight
+      );
+      if (!pinnedRef.current || !previous || (!rangeShrank && current.scrollTop < previous.scrollTop)) {
+        updatePinned(scrollNode);
+      } else {
+        lastScrollMetricsRef.current = current;
+      }
+    };
     scrollNode.addEventListener('scroll', onScroll, { passive: true });
     return () => scrollNode.removeEventListener('scroll', onScroll);
   }, [contextKey, enabled, scrollNode, updatePinned]);

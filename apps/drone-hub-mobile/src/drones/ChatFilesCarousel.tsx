@@ -19,6 +19,10 @@ import { mobileChatFilesProgress, mobileChatFilesSnapOpen } from './mobile-chat-
 
 const PAGE_SPRING = { stiffness: 700, damping: 52, mass: 1, overshootClamping: true };
 
+export const ChatFilesGestureContext = React.createContext<ReturnType<typeof Gesture.Pan> | null>(
+  null,
+);
+
 export function ChatFilesCarousel({
   open,
   enabled,
@@ -90,7 +94,10 @@ export function ChatFilesCarousel({
         .onUpdate((event) => {
           progress.value = mobileChatFilesProgress(start.value, event.translationX, width);
         })
-        .onEnd((event) => {
+        .onEnd((event, success) => {
+          // RNGH also calls onEnd for cancellation, before onFinalize. Publishing a
+          // destination here would leave target out of sync with the restored page.
+          if (!success) return;
           const nextOpen = mobileChatFilesSnapOpen(progress.value, event.velocityX);
           target.value = nextOpen ? 1 : 0;
           progress.value = withSpring(target.value, {
@@ -103,7 +110,8 @@ export function ChatFilesCarousel({
           if (!gestureActive.value) return;
           gestureActive.value = false;
           if (success) return;
-          progress.value = withSpring(startTarget.value, PAGE_SPRING);
+          target.value = startTarget.value;
+          progress.value = withSpring(target.value, PAGE_SPRING);
           runOnJS(finishDrag)(startTarget.value === 1);
         }),
     [
@@ -124,35 +132,37 @@ export function ChatFilesCarousel({
   }));
 
   return (
-    <GestureDetector gesture={gesture}>
-      <View
-        collapsable={false}
-        style={styles.viewport}
-        onLayout={(event) => {
-          const nextWidth = event.nativeEvent.layout.width;
-          if (nextWidth > 0) setWidth(nextWidth);
-        }}
-      >
-        <Animated.View style={[styles.strip, { width: width * 2 }, stripStyle]}>
-          <View
-            style={[styles.page, { width }]}
-            pointerEvents={open ? 'none' : 'auto'}
-            accessibilityElementsHidden={open}
-            importantForAccessibility={open ? 'no-hide-descendants' : 'auto'}
-          >
-            {children}
-          </View>
-          <View
-            style={[styles.page, { width }]}
-            pointerEvents={open ? 'auto' : 'none'}
-            accessibilityElementsHidden={!open}
-            importantForAccessibility={open ? 'auto' : 'no-hide-descendants'}
-          >
-            {renderFiles(enabled && (open || dragging))}
-          </View>
-        </Animated.View>
-      </View>
-    </GestureDetector>
+    <ChatFilesGestureContext.Provider value={gesture}>
+      <GestureDetector gesture={gesture}>
+        <View
+          collapsable={false}
+          style={styles.viewport}
+          onLayout={(event) => {
+            const nextWidth = event.nativeEvent.layout.width;
+            if (nextWidth > 0) setWidth(nextWidth);
+          }}
+        >
+          <Animated.View style={[styles.strip, { width: width * 2 }, stripStyle]}>
+            <View
+              style={[styles.page, { width }]}
+              pointerEvents={open ? 'none' : 'auto'}
+              accessibilityElementsHidden={open}
+              importantForAccessibility={open ? 'no-hide-descendants' : 'auto'}
+            >
+              {children}
+            </View>
+            <View
+              style={[styles.page, { width }]}
+              pointerEvents={open ? 'auto' : 'none'}
+              accessibilityElementsHidden={!open}
+              importantForAccessibility={open ? 'auto' : 'no-hide-descendants'}
+            >
+              {renderFiles(enabled && (open || dragging))}
+            </View>
+          </Animated.View>
+        </View>
+      </GestureDetector>
+    </ChatFilesGestureContext.Provider>
   );
 }
 
