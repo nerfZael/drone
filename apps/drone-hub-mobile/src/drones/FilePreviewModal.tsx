@@ -256,6 +256,8 @@ export function FilePreviewModal({
   workspaceName,
   selectedPath,
   directoryReveal,
+  explorerReveal,
+  outsideWorkspace = false,
   requestDroneControl,
   onOpenPath,
   onSave,
@@ -280,6 +282,8 @@ export function FilePreviewModal({
   workspaceName: string;
   selectedPath: string;
   directoryReveal?: { path: string; sequence: number } | null;
+  explorerReveal?: { path: string; sequence: number; kind?: 'file' | 'directory' } | null;
+  outsideWorkspace?: boolean;
   requestDroneControl: (
     destinationId: string,
     operation: DroneControlOperation,
@@ -297,8 +301,8 @@ export function FilePreviewModal({
   );
   const explorerExpanded = explorerPosition > 0;
   React.useEffect(() => {
-    if (directoryReveal) setExplorerPosition((current) => Math.max(1, current));
-  }, [directoryReveal]);
+    if (explorerReveal ?? directoryReveal) setExplorerPosition((current) => Math.max(1, current));
+  }, [directoryReveal, explorerReveal]);
   const [explorerDragging, setExplorerDragging] = React.useState(false);
   const explorerProgress = useSharedValue(embedded ? 1 : 0);
   const explorerTarget = useSharedValue(embedded ? 1 : 0);
@@ -860,6 +864,11 @@ export function FilePreviewModal({
               <GestureDetector gesture={explorerGesture}>
                 <View collapsable={false} style={styles.explorerHandle}>
                   <View pointerEvents="none" style={styles.explorerGrabber} />
+                  {outsideWorkspace ? (
+                    <Text numberOfLines={2} style={styles.explorerWorkspace}>
+                      Outside workspace · {rootPath}
+                    </Text>
+                  ) : null}
                   <View style={styles.explorerHandleRow}>
                     <Pressable
                       accessibilityRole="button"
@@ -891,7 +900,7 @@ export function FilePreviewModal({
             droneId={droneId}
             chatName={chatName}
             rootPath={rootPath}
-            reveal={directoryReveal}
+            reveal={explorerReveal ?? directoryReveal}
             selectedPath={selectedPath}
             requestDroneControl={requestDroneControl}
             onOpenFile={openExplorerPath}

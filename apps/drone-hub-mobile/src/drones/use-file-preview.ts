@@ -1,6 +1,6 @@
 import {
   normalizeWorkspaceLinkPath,
-  workspaceLinkParent,
+  workspaceExplorerLocation,
   workspaceLinkIsDirectory,
 } from '@drone/hub-model';
 import { throwIfAborted } from '@drone/device-protocol';
@@ -629,13 +629,14 @@ export function useFilePreview({
 
   const workspaceRoot =
     selectedDrone && !phoneTarget ? mobileDroneWorkspaceRoot(selectedDrone) : '';
-  const revealPath = requestIsCurrent ? directoryReveal?.path : undefined;
-  const explorerRoot =
-    revealPath !== undefined &&
-    (revealPath === workspaceRoot ||
-      (workspaceRoot && workspaceRoot !== '/' && !revealPath.startsWith(`${workspaceRoot}/`)))
-      ? workspaceLinkParent(revealPath)
-      : workspaceRoot;
+  const selectedPath = requestIsCurrent ? (preview?.path ?? request?.path ?? '') : '';
+  const explorerLocation = selectedPath
+    ? workspaceExplorerLocation(workspaceRoot, selectedPath)
+    : { root: workspaceRoot, outside: false };
+  const explorerReveal = React.useMemo(() => {
+    if (!requestIsCurrent || !request) return null;
+    return directoryReveal ?? { path: selectedPath, sequence: 0, kind: 'file' as const };
+  }, [requestIsCurrent, request, directoryReveal, selectedPath]);
   return {
     visible: workspaceIsCurrent,
     directoryReveal: requestIsCurrent ? directoryReveal : null,
@@ -650,7 +651,9 @@ export function useFilePreview({
     refreshError: requestIsCurrent ? refreshError : null,
     saving: requestIsCurrent && saving,
     saveError: requestIsCurrent ? saveError : null,
-    rootPath: explorerRoot,
+    rootPath: explorerLocation.root,
+    outsideWorkspace: explorerLocation.outside,
+    explorerReveal,
     selectedPath: requestIsCurrent ? (preview?.path ?? request?.path ?? '') : '',
     open,
     openExplorer,

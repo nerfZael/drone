@@ -191,7 +191,7 @@ type RightPanelTabContentProps = {
   onCloseTerminalSession: (droneId: string, paneKey: 'top' | 'bottom' | 'single', sessionId: string) => void;
   uiDroneName: (nameRaw: string) => string;
   currentFsPath: string;
-  explorerReveal?: { path: string; sequence: number } | null;
+  explorerReveal?: { path: string; sequence: number; kind?: 'file' | 'directory' } | null;
   fsEntries: DroneFsEntry[];
   fsLoading: boolean;
   fsError: string | null;

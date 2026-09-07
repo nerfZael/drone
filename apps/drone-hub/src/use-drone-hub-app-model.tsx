@@ -1,6 +1,6 @@
 import { prepareWorkspaceFileOpen } from './droneHub/files/prepare-workspace-file-open';
 import { readDesktopFile } from './droneHub/files/read-desktop-file';
-import { normalizeWorkspaceLinkPath, workspaceLinkIsDirectory, workspaceLinkParent } from '@drone/hub-model';
+import { workspaceExplorerLocation, normalizeWorkspaceLinkPath, workspaceLinkIsDirectory, workspaceLinkParent } from '@drone/hub-model';
 import React from 'react';
 import { createSidebarCommandQueue } from '@drone/hub-model/sidebar';
 import {
@@ -3570,21 +3570,23 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const focusEditorPane = React.useCallback(() => {
     requestRightPanelTab('editor');
   }, [requestRightPanelTab]);
-  const resetFileExplorerToRoot = React.useCallback(() => {
-    setCurrentFsPath(defaultFsPathForCurrentDrone);
-  }, [defaultFsPathForCurrentDrone, setCurrentFsPath]);
   const pathNavigationVersion = React.useRef(0);
+  const [explorerReveal, setExplorerReveal] = React.useState<{ path: string; sequence: number; kind?: 'file' | 'directory' } | null>(null);
+  const revealFileInExplorer = React.useCallback((path: string) => {
+    setCurrentFsPath(workspaceExplorerLocation(defaultFsPathForCurrentDrone, path).root);
+    setExplorerReveal({ path, sequence: ++pathNavigationVersion.current, kind: 'file' });
+  }, [defaultFsPathForCurrentDrone, setCurrentFsPath]);
   const [pendingFileOpen, setPendingFileOpen] = React.useState<{ droneId: string; path: string } | null>(null);
   const activateOpenedEditorFileTab = React.useCallback(
     (tabId: string) => {
       pathNavigationVersion.current += 1;
       setPendingFileOpen(null);
-      resetFileExplorerToRoot();
+      const tab = openedEditorFileTabs.find((entry) => entry.tabId === tabId);
+      if (tab) revealFileInExplorer(tab.path);
       setActiveOpenedFileTab(tabId);
     },
-    [resetFileExplorerToRoot, setActiveOpenedFileTab],
+    [openedEditorFileTabs, revealFileInExplorer, setActiveOpenedFileTab],
   );
-  const [explorerReveal, setExplorerReveal] = React.useState<{ path: string; sequence: number } | null>(null);
   React.useEffect(() => {
     pathNavigationVersion.current += 1;
     setExplorerReveal(null);
@@ -3607,8 +3609,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         fsEntries.some((entry) => entry.kind === 'file' && normalizeWorkspaceLinkPath(entry.path) === resolvedPath);
       if (knownFile) {
         setPendingFileOpen(null);
-        setExplorerReveal(null);
-        resetFileExplorerToRoot();
+        revealFileInExplorer(resolvedPath);
         openEditorFile({ ...next, path: resolvedPath, name });
         return;
       }
@@ -3628,13 +3629,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             ? root : workspaceLinkParent(resolvedPath));
           setExplorerReveal({ path: resolvedPath, sequence: version });
         } else {
-          setExplorerReveal(null);
-          resetFileExplorerToRoot();
+          revealFileInExplorer(resolvedPath);
           openEditorFile({ ...next, path: resolvedPath, name, initialRead });
         }
       })();
     },
-    [currentDrone, defaultFsPathForCurrentDrone, focusEditorPane, fsEntries, openedEditorFileTabs, openEditorFile, resetFileExplorerToRoot, setCurrentFsPath],
+    [currentDrone, defaultFsPathForCurrentDrone, focusEditorPane, fsEntries, openedEditorFileTabs, openEditorFile, revealFileInExplorer, setCurrentFsPath],
   );
 
   const openFileDictationTarget = React.useCallback(
@@ -3693,12 +3693,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         resolvedPath;
       pathNavigationVersion.current += 1;
       setPendingFileOpen(null);
-      resetFileExplorerToRoot();
+      revealFileInExplorer(resolvedPath);
       openEditorFile({ ...next, path: resolvedPath, name });
       focusEditorPane();
       return true;
     },
-    [currentDrone, focusEditorPane, openEditorFile, resetFileExplorerToRoot],
+    [currentDrone, focusEditorPane, openEditorFile, revealFileInExplorer],
   );
 
   const openQuickOpenFromShortcut = React.useCallback(() => {
@@ -3714,10 +3714,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       if (!resolvedPath) return;
       pathNavigationVersion.current += 1;
       setPendingFileOpen(null);
-      resetFileExplorerToRoot();
+      revealFileInExplorer(resolvedPath);
       focusEditorPane();
     },
-    [currentDrone, focusEditorPane, resetFileExplorerToRoot],
+    [currentDrone, focusEditorPane, revealFileInExplorer],
   );
 
   const goBackEditorLocationFromShortcut = React.useCallback(() => {

@@ -1,4 +1,4 @@
-import { workspaceLinkParent } from '@drone/hub-model';
+import { workspaceExplorerRevealDirectories } from '@drone/hub-model';
 import React from 'react';
 import {
   ActivityIndicator,
@@ -146,7 +146,7 @@ export function MobileFileExplorer({
   chatName: string;
   rootPath: string;
   selectedPath: string;
-  reveal?: { path: string; sequence: number } | null;
+  reveal?: { path: string; sequence: number; kind?: 'file' | 'directory' } | null;
   requestDroneControl: RequestDroneControl;
   onOpenFile(path: string): void;
   onPathsChanged(paths: readonly string[]): void;
@@ -362,16 +362,9 @@ export function MobileFileExplorer({
 
   React.useEffect(() => {
     if (!active || !reveal) return;
-    const paths: string[] = [];
-    let path = reveal.path;
-    while (path !== rootPath) {
-      paths.push(path);
-      const parent = workspaceLinkParent(path);
-      if (parent === path) break;
-      path = parent;
-    }
+    const paths = workspaceExplorerRevealDirectories(rootPath, reveal.path, reveal.kind ?? 'directory');
     setExpanded((current) => new Set([...current, ...paths]));
-    for (const directory of paths.reverse()) void loadDirectory(directory);
+    for (const directory of paths) void loadDirectory(directory);
   }, [active, reveal, rootPath, loadDirectory]);
 
   const toggleDirectory = (path: string) => {

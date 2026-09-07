@@ -3443,6 +3443,8 @@ export function DronesScreen({
             rootPath={filePreview.rootPath}
             workspaceName={selected?.name ?? ''}
             directoryReveal={filePreview.directoryReveal}
+            explorerReveal={filePreview.explorerReveal}
+            outsideWorkspace={filePreview.outsideWorkspace}
             selectedPath={filePreview.selectedPath}
             requestDroneControl={requestDroneControl}
             onOpenPath={(path, line) => filePreview.open({ raw: path, path, line: line ?? null, column: null })}

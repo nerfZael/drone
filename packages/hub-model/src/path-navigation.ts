@@ -37,3 +37,26 @@ export function resolveWorkspacePreviewLink(baseFile: string, target: string): s
   const parent = workspaceLinkParent(baseFile);
   return normalizeWorkspaceLinkPath(`${parent ? `${parent}/` : ''}${target}`);
 }
+
+/** Choose an explorer root that contains the target, preserving the workspace when possible. */
+export function workspaceExplorerLocation(workspace: string, target: string): { root: string; outside: boolean } {
+  const root = normalizeWorkspaceLinkPath(workspace);
+  const path = normalizeWorkspaceLinkPath(target);
+  const inside = !root || path === root || (root === '/' ? path.startsWith('/') : path.startsWith(`${root}/`));
+  return { root: inside && path !== root ? root : workspaceLinkParent(path), outside: !inside };
+}
+
+/** Directories to load and expand, excluding the file itself and the already loaded root. */
+export function workspaceExplorerRevealDirectories(root: string, path: string, kind: 'file' | 'directory'): string[] {
+  const normalizedRoot = normalizeWorkspaceLinkPath(root);
+  const directories: string[] = [];
+  let current = kind === 'file' ? workspaceLinkParent(path) : normalizeWorkspaceLinkPath(path);
+  while (current !== normalizedRoot) {
+    if (normalizedRoot && workspaceExplorerLocation(normalizedRoot, current).outside) break;
+    directories.push(current);
+    const parent = workspaceLinkParent(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return directories.reverse();
+}

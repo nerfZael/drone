@@ -152,7 +152,7 @@ function newToolPanelWidth(api: DockviewApi, referencePanelId: string): number {
   return DEFAULT_NEW_TOOL_PANEL_WIDTH;
 }
 
-function rebalanceGridGroupWidths(api: DockviewApi): void {
+export function rebalanceGridGroupWidths(api: DockviewApi): void {
   const groups = api.groups.filter((group) => {
     if (group.api.location.type !== 'grid') return false;
     const width = Math.round(Number(group.width ?? 0));
@@ -162,10 +162,27 @@ function rebalanceGridGroupWidths(api: DockviewApi): void {
   const workspaceWidth = Math.round(Number(api.width ?? 0));
   if (workspaceWidth <= 0 || groups.length <= 1) return;
 
-  const targetWidth = Math.max(1, Math.floor(workspaceWidth / groups.length));
-  for (const group of groups) {
+  // The standalone explorer is a sidebar, not another full-width tool pane.
+  // Capture its width before resizing siblings, since Dockview redistributes space.
+  const explorer = groups.find((group) =>
+    group.panels.length === 1 && group.panels[0].id === EXPLORER_PANEL_ID,
+  );
+  const explorerWidth = explorer ? explorer.width : 0;
+  const toolGroups = groups.filter((group) => group !== explorer);
+  const targetWidth = Math.max(1, Math.floor((workspaceWidth - explorerWidth) / toolGroups.length));
+  for (const group of toolGroups) {
     const height = Math.max(1, Math.round(Number(group.height ?? 0)));
     group.api.setSize({ width: targetWidth, height });
+  }
+  if (explorer) explorer.api.setSize({ width: explorerWidth });
+}
+
+export function sizeWorkspaceOpenedFromChat(api: DockviewApi): void {
+  api.getPanel(CHAT_PANEL_ID)?.api.group.api.setSize({ width: Math.round(api.width / 3) });
+  const explorerGroup = api.getPanel(EXPLORER_PANEL_ID)?.api.group;
+  if (explorerGroup?.panels.length === 1 && explorerGroup.api.location.type === 'grid') {
+    // Apply this last so sizing the chat cannot expand the new explorer again.
+    explorerGroup.api.setSize({ width: readWorkspaceExplorerWidth() });
   }
 }
 
@@ -579,7 +596,7 @@ export function DockableDroneWorkspace({
     }
     updateWorkspacePanelState();
     if (addedPanel && wasChatOnly) {
-      api.getPanel(CHAT_PANEL_ID)?.api.group.api.setSize({ width: Math.round(api.width / 3) });
+      sizeWorkspaceOpenedFromChat(api);
       persistCurrentLayout();
     } else if (addedPanel) {
       rebalanceWorkspaceGridGroups();

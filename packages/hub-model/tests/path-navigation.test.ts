@@ -1,6 +1,8 @@
 import { expect, test } from 'bun:test';
 import {
   workspaceLinkIsDirectory,
+  workspaceExplorerLocation,
+  workspaceExplorerRevealDirectories,
   workspaceLinkParent,
   resolveWorkspacePreviewLink,
 } from '../src/path-navigation';
@@ -38,4 +40,25 @@ test('does not interpret a failed lookup as a directory', async () => {
       throw new Error('denied');
     }),
   ).rejects.toThrow('denied');
+});
+
+test('reveals nested files within the workspace without loading the file as a directory', () => {
+  expect(workspaceExplorerLocation('/work/repo/', '/work/repo/src/ui/App.tsx')).toEqual({ root: '/work/repo', outside: false });
+  expect(workspaceExplorerRevealDirectories('/work/repo', '/work/repo/src/ui/App.tsx', 'file')).toEqual(['/work/repo/src', '/work/repo/src/ui']);
+  expect(workspaceExplorerRevealDirectories('/work/repo', '/work/repo/README.md', 'file')).toEqual([]);
+  expect(workspaceExplorerRevealDirectories('/work/repo', '/work/repo/src/ui', 'directory')).toEqual(['/work/repo/src', '/work/repo/src/ui']);
+});
+
+test('external files navigate to their parent and distinguish sibling path prefixes', () => {
+  expect(workspaceExplorerLocation('/work/repo', '/work/repository/docs/readme.md')).toEqual({ root: '/work/repository/docs', outside: true });
+  expect(workspaceExplorerLocation('/work/repo', '/work/other.txt')).toEqual({ root: '/work', outside: true });
+  expect(workspaceExplorerLocation('/', '/etc/hosts')).toEqual({ root: '/', outside: false });
+  expect(workspaceExplorerLocation('/work/repo', '/work/repo')).toEqual({ root: '/work', outside: false });
+});
+
+test('reveals phone-relative files and normalizes parent segments', () => {
+  expect(workspaceExplorerLocation('', 'docs/readme.md')).toEqual({ root: '', outside: false });
+  expect(workspaceExplorerRevealDirectories('', 'docs/nested/readme.md', 'file')).toEqual(['docs', 'docs/nested']);
+  expect(workspaceExplorerLocation('/work/repo', '/work/repo/../other/file')).toEqual({ root: '/work/other', outside: true });
+  expect(workspaceExplorerRevealDirectories('/work/repo', '/other/file', 'file')).toEqual([]);
 });

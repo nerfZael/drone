@@ -45,6 +45,8 @@ const {
 } = await import('../src/droneHub/whiteboard/whiteboard-events');
 const {
   resetWorkspaceToChat,
+  rebalanceGridGroupWidths,
+  sizeWorkspaceOpenedFromChat,
   ensureWorkspaceToolPanel,
   migrateEditorChangesPanels,
   refreshWorkspacePanelTitles,
@@ -188,6 +190,78 @@ describe('per-drone workspace state', () => {
     };
     ensureWorkspaceToolPanel(api as any, 'terminal', 'single');
     expect(added[0].initialWidth).toBe(1200);
+  });
+
+  function sizingWorkspace(panelIds: string[][], widths: number[]) {
+    const calls: Array<{ ids: string[]; width: number }> = [];
+    const groups = panelIds.map((ids, index) => ({
+      panels: ids.map((id) => ({ id })),
+      width: widths[index],
+      height: 900,
+      api: {
+        location: { type: 'grid' },
+        setSize: ({ width }: { width: number }) => {
+          calls.push({ ids, width });
+          // Model sibling redistribution: subsequent resizes must still use
+          // the explorer width captured before the first setSize call.
+          groups.forEach((group) => { group.width = 600; });
+        },
+      },
+    }));
+    const api = {
+      width: 1800,
+      groups,
+      getPanel: (id: string) => {
+        const group = groups.find((entry) => entry.panels.some((panel) => panel.id === id));
+        return group ? { api: { group } } : undefined;
+      },
+    };
+    return { api: api as any, calls, groups };
+  }
+
+  test('opening files from chat sizes the explorer after the chat column', () => {
+    writeWorkspaceExplorerWidth(280);
+    const { api, calls } = sizingWorkspace(
+      [['agent-chat'], ['tool:editor'], ['file-explorer']], [600, 600, 600],
+    );
+    sizeWorkspaceOpenedFromChat(api);
+    expect(calls).toEqual([
+      { ids: ['agent-chat'], width: 600 },
+      { ids: ['file-explorer'], width: 280 },
+    ]);
+  });
+
+  test('adding or closing tools preserves the explorer width while balancing main panes', () => {
+    const { api, calls } = sizingWorkspace(
+      [['agent-chat'], ['tool:editor'], ['file-explorer']], [780, 780, 240],
+    );
+    rebalanceGridGroupWidths(api);
+    expect(calls).toEqual([
+      { ids: ['agent-chat'], width: 780 },
+      { ids: ['tool:editor'], width: 780 },
+      { ids: ['file-explorer'], width: 240 },
+    ]);
+  });
+
+  test('preserves a manually resized explorer and ignores floating groups', () => {
+    const { api, calls, groups } = sizingWorkspace(
+      [['agent-chat'], ['tool:editor'], ['file-explorer'], ['tool:terminal']], [600, 600, 360, 500],
+    );
+    groups[3].api.location.type = 'floating';
+    rebalanceGridGroupWidths(api);
+    expect(calls).toEqual([
+      { ids: ['agent-chat'], width: 720 },
+      { ids: ['tool:editor'], width: 720 },
+      { ids: ['file-explorer'], width: 360 },
+    ]);
+  });
+
+  test('an explorer tab sharing a group with a tool does not narrow that tool', () => {
+    const { api, calls } = sizingWorkspace(
+      [['agent-chat'], ['tool:editor', 'file-explorer']], [900, 900],
+    );
+    rebalanceGridGroupWidths(api);
+    expect(calls.map((call) => call.width)).toEqual([900, 900]);
   });
 
   test('opens editor and explorer as separate panels and reuses their positions', () => {

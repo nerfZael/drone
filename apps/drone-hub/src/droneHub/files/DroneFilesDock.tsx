@@ -1,3 +1,4 @@
+import { workspaceExplorerLocation, workspaceExplorerRevealDirectories } from '@drone/hub-model';
 import React from 'react';
 import {
   UiCenteredLoadingState,
@@ -188,7 +189,7 @@ export function DroneFilesDock({
   onCloseOpenedFilesForPaths?: (paths: string[]) => void;
   onRemapOpenedFilesForPathChange?: (sourcePath: string, targetPath: string) => void;
   openedFile: DroneOpenedFileState;
-  reveal?: { path: string; sequence: number } | null;
+  reveal?: { path: string; sequence: number; kind?: 'file' | 'directory' } | null;
   readOnly?: boolean;
   zoom?: number;
 }) {
@@ -483,7 +484,7 @@ export function DroneFilesDock({
     appliedRevealRef.current = key;
     setSelectedPaths(new Set([reveal.path]));
     selectionAnchorRef.current = reveal.path;
-    const directories = [...fileAncestorDirectoryPaths(normalizedPath, reveal.path), reveal.path];
+    const directories = workspaceExplorerRevealDirectories(normalizedPath, reveal.path, reveal.kind ?? 'directory');
     setExpandedDirs((previous) => {
       const next = { ...previous };
       for (const directory of directories) next[directory] = true;
@@ -494,13 +495,14 @@ export function DroneFilesDock({
 
   React.useEffect(() => {
     if (!reveal || scrolledRevealRef.current === reveal) return;
-    const row = Array.from(explorerRef.current?.querySelectorAll<HTMLElement>('[data-file-explorer-directory]') ?? [])
-      .find((element) => element.dataset.fileExplorerDirectory === reveal.path);
+    const row = Array.from(explorerRef.current?.querySelectorAll<HTMLElement>('[data-file-explorer-path]') ?? [])
+      .find((element) => element.dataset.fileExplorerPath === reveal.path);
     if (row) {
       row.querySelector<HTMLElement>('[role="treeitem"]')?.scrollIntoView({ block: 'nearest' });
+      setSelectedPaths(new Set([reveal.path]));
       scrolledRevealRef.current = reveal;
     }
-  }, [reveal, explorerTree]);
+  }, [reveal, explorerTree, expandedDirs]);
 
   const toggleDirectory = React.useCallback(
     (dirPath: string) => {
@@ -1098,6 +1100,7 @@ export function DroneFilesDock({
             key={`dir:${node.path}`}
             role="none"
             data-file-explorer-directory={node.path}
+            data-file-explorer-path={node.path}
             className="flex flex-col"
           >
             <div className="relative w-full">
@@ -1193,7 +1196,7 @@ export function DroneFilesDock({
       const openable = entry.kind === 'file';
       const renaming = inlineNameMode === 'rename' && selectedOne?.path === entry.path;
       return (
-        <div key={`file:${entry.path}`} role="none" className="relative w-full">
+        <div key={`file:${entry.path}`} data-file-explorer-path={entry.path} role="none" className="relative w-full">
           {renaming ? (
             <div
               role="treeitem"
@@ -1300,6 +1303,11 @@ export function DroneFilesDock({
       onDrop={readOnly ? undefined : onPanelDrop}
       onKeyDown={handleExplorerKeyDown}
     >
+      {workspaceExplorerLocation(_homePath, normalizedPath).outside ? (
+        <UiPanelStatusStrip tone="info">
+          <span title={normalizedPath}>Outside workspace · {normalizedPath}</span>
+        </UiPanelStatusStrip>
+      ) : null}
       {uploadStatus ? (
         <UiPanelStatusStrip tone="info">{uploadStatus}</UiPanelStatusStrip>
       ) : null}
