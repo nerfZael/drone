@@ -6,7 +6,8 @@ import { execSync } from 'node:child_process';
 
 const apiPort = String(process.env.DRONE_HUB_API_PORT ?? '').trim();
 const apiToken = String(process.env.DRONE_HUB_API_TOKEN ?? '').trim();
-const sourcemapEnabled = String(process.env.DRONE_HUB_SOURCEMAP ?? '').trim() === '1';
+const sourcemapSetting = String(process.env.DRONE_HUB_SOURCEMAP ?? '').trim();
+const sourcemapEnabled = sourcemapSetting === '0' ? false : sourcemapSetting === '1' ? true : 'hidden';
 const buildTime = new Date().toISOString();
 
 function detectBuildId(): string {

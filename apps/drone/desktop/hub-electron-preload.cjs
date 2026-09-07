@@ -62,6 +62,9 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 contextBridge.exposeInMainWorld('droneHubDesktop', {
+  reportDiagnostic(record) {
+    ipcRenderer.send('drone-hub:diagnostic', record);
+  },
   retryStartup() {
     ipcRenderer.send(STARTUP_RETRY_CHANNEL);
   },

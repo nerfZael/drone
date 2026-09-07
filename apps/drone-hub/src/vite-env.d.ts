@@ -15,6 +15,7 @@ interface Window {
     readonly directApiToken?: string;
   };
   readonly droneHubDesktop?: {
+    reportDiagnostic?(record: Record<string, unknown>): void;
     onNavigationZoom(callback: (payload: { action?: unknown }) => void): () => void;
   };
 }

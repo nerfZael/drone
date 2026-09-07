@@ -1,4 +1,5 @@
 import { WorkspaceLoadDiagnostics } from '@drone/hub-model';
+import { recordUiAction } from '../../ui-diagnostics';
 
 export const desktopWorkspaceLoads = new WorkspaceLoadDiagnostics({
   uuid: () => crypto.randomUUID(),
@@ -12,6 +13,7 @@ export const desktopWorkspaceLoads = new WorkspaceLoadDiagnostics({
 });
 
 export function beginDesktopWorkspaceLoad(kind: 'file-open' | 'directory-load', droneId: string, path: string) {
+  recordUiAction({ action: kind, droneId, path });
   return desktopWorkspaceLoads.start(kind, { targetDeviceId: 'desktop', droneId, chatName: 'default', path });
 }
 

@@ -48,11 +48,48 @@ The default `drone hub` API port is also `8787`. Pass `--api-port 0` only if you
 bun run --filter drone-hub build
 ```
 
-Production builds do not emit sourcemaps by default. For a debug build with sourcemaps:
+Production builds retain hidden sourcemaps beside their JavaScript bundles so a
+logged stack trace can be mapped back to that exact build. Keep the matching
+`dist` assets and `version.json` when investigating an incident. Use
+`DRONE_HUB_SOURCEMAP=0` to omit maps, or enable browser-discoverable maps with:
 
 ```bash
 DRONE_HUB_SOURCEMAP=1 bun run --filter drone-hub build
 ```
+
+## Desktop error diagnostics
+
+The Electron app writes JSON lines to `logs/desktop.jsonl` inside its user-data
+directory (Linux: `~/.config/Drone Hub/logs/desktop.jsonl`). It retains the current
+file and two rotated files, rotating at 5 MiB. Error records are also appended to
+the connected Hub's `hub.log`; the desktop log works independently of the Hub.
+
+Records include uncaught UI errors, unhandled promise rejections, React component
+stacks, startup/asset/preload failures, console errors, renderer/GPU process exits,
+and unresponsive windows. Each record has a timestamp, desktop session ID,
+runtime versions, and the UI build ID when available. Error records include the
+last 30 navigation actions, including chat IDs and file-link paths/line numbers.
+Actions are written when they happen, so they remain available after a renderer
+crash. Main-process uncaught exceptions are logged without suppressing termination.
+
+Only selected action metadata is collected; chat messages, editor contents,
+request bodies, and application-store snapshots are not captured. URL query
+strings and bearer tokens are redacted. Errors and actions have separate rate
+limits to bound log storms. Error messages and stacks can still contain values
+supplied by the code that threw them. Logs stay on the local machine.
+
+React failures show a reload screen with an error reference matching the log.
+Startup import failures also show a reload screen. Browser-only sessions retain
+console diagnostics; persistent disk capture is provided by the Electron bridge.
+
+Validate the complete preload/renderer/logging path with:
+
+```bash
+node apps/drone/scripts/smoke-desktop-diagnostics.cjs
+```
+
+This opens hidden, isolated test windows and deliberately triggers JavaScript,
+React, and renderer-process failures. It requires a graphical session (or Xvfb).
 
 ## Bundle size checks
 

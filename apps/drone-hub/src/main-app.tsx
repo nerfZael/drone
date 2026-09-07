@@ -1,4 +1,5 @@
 import React from 'react';
+import { UiErrorBoundary } from './UiErrorBoundary';
 import { createRoot } from 'react-dom/client';
 import { QueryClientProvider } from '@tanstack/react-query';
 import DroneHubApp from './DroneHubApp';
@@ -21,8 +22,10 @@ if (!container) throw new Error('Root container not found');
 const root = createRoot(container);
 root.render(
   <React.StrictMode>
-    <QueryClientProvider client={droneHubQueryClient}>
-      <DroneHubApp />
-    </QueryClientProvider>
+    <UiErrorBoundary>
+      <QueryClientProvider client={droneHubQueryClient}>
+        <DroneHubApp />
+      </QueryClientProvider>
+    </UiErrorBoundary>
   </React.StrictMode>
 );

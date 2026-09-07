@@ -1,3 +1,4 @@
+import { recordUiAction } from '../../ui-diagnostics';
 import {
   collectChatLoadResourceTiming,
   correlateResourceEntry,
@@ -283,6 +284,7 @@ export function beginChatLoadNavigation(input: {
 }): string | null {
   const target = cleanTarget(input.target);
   if (!target.droneId) return null;
+  recordUiAction({ action: 'chat-navigation', droneId: target.droneId, chatName: target.chatName });
   if (activeSpan) report(activeSpan, 'superseded');
   const startedMonoMs = monotonicNow();
   const span: ChatLoadSpan = {

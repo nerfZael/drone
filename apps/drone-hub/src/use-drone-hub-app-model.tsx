@@ -1,3 +1,4 @@
+import { recordUiAction } from './ui-diagnostics';
 import { beginDesktopWorkspaceLoad, desktopWorkspaceLoads } from './droneHub/files/workspace-load-telemetry';
 import { prepareWorkspaceFileOpen } from './droneHub/files/prepare-workspace-file-open';
 import { readDesktopFile } from './droneHub/files/read-desktop-file';
@@ -3774,6 +3775,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
 
   const openMarkdownFileReference = React.useCallback(
     (ref: MarkdownFileReference) => {
+      recordUiAction({ action: 'chat-file-link', droneId: currentDrone?.id, path: ref.path, line: ref.line, column: ref.column });
       const containerPath = resolveDroneFileOpenPath(currentDrone, ref.path);
       if (!containerPath) return;
       const name = containerPath.split('/').filter(Boolean).pop() || containerPath;
