@@ -20,6 +20,10 @@ const {
 const {
   resetTranscriptStoreForTests,
   upsertChatInStore,
+  upsertTranscriptTurnInStore,
+  readChatPromptDispatchStateFromStore,
+  readTranscriptTurnIdentitiesFromStore,
+  readTranscriptTurnsByIdsFromStore,
 } = require('../../dist/hub/transcript-store.js');
 const { loadRegistryRawSnapshot, saveRegistry } = require('../../dist/host/registry.js');
 
@@ -715,6 +719,29 @@ test('dispatch windows retain an older new-chat barrier beyond the UI history li
       .map((item) => item.id),
     ['active', 'new-chat'],
   );
+});
+
+test('dispatch checks omit completed payloads while preserving active blockers and stored history', async () => {
+  const queue = repository('dispatch-identities');
+  const at = '2026-07-10T09:00:00.000Z';
+  const chat = { droneId: 'alpha', chatName: 'default' };
+  await upsertChatInStore({ ...chat, chatEntry: { createdAt: at } });
+  const output = 'large historical tool output '.repeat(80_000);
+  for (const id of ['completed', 'active', 'next']) {
+    await queue.enqueue({ ...chat, prompt: { ...prompt(id, at), ...(id === 'completed' ? { savedOutput: output } : {}) } });
+    if (id !== 'next') await queue.update({ ...chat, promptId: id, patch: { state: 'sent' } });
+  }
+  await upsertTranscriptTurnInStore({ ...chat, turn: { id: 'completed', at, prompt: 'completed', ok: true, output } });
+
+  const state = readChatPromptDispatchStateFromStore(chat);
+  assert.deepEqual(state.pending, [
+    { id: 'completed', state: 'sent' }, { id: 'active', state: 'sent' }, { id: 'next', state: 'queued' },
+  ]);
+  assert.deepEqual(state.pendingTurns, [{ id: 'completed' }]);
+  assert.deepEqual(readTranscriptTurnIdentitiesFromStore({ ...chat, turnIds: ['completed', 'active', 'completed'] }), [{ id: 'completed' }]);
+  assert.deepEqual(queue.listThrough({ ...chat, promptId: 'next', excludeCompletedSent: true }).map((row) => row.id), ['active', 'next']);
+  assert.equal(queue.listThrough({ ...chat, promptId: 'next' })[0].savedOutput, output);
+  assert.equal(readTranscriptTurnsByIdsFromStore({ ...chat, turnIds: ['completed'] })[0].output, output);
 });
 
 test('ASAP prompts are selected before older queued prompts', async () => {

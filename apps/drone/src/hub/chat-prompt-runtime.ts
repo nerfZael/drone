@@ -7,6 +7,7 @@ import {
   isSendInNewChatQueueAction,
 } from '@drone/assistant-chat';
 import { resolvePromptChatName } from './prompt-chat-identity';
+import { readTranscriptTurnIdentitiesFromStore } from './transcript-store';
 
 import type { AgentPlan } from '@drone/assistant-chat';
 import { DroneApiRequestError } from '../host/api';
@@ -1434,7 +1435,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     nowIso,
     onPendingPromptChanged: ({ droneId, chatName }: any) =>
       notifyDroneChatWrite?.(droneId, chatName),
-    readTranscriptTurnsByIdsFromStore,
+    readTranscriptTurnsByIdsFromStore: readTranscriptTurnIdentitiesFromStore,
     startupPromptToPendingPrompt,
   });
 
@@ -2323,7 +2324,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       const { d, chat } =
         previewDrone && previewChat
           ? { d: previewDrone, chat: previewChat }
-          : await getChatEntry({ droneId, chatName });
+          : await getChatEntry({ droneId, chatName, dispatchStateOnly: true });
       chatEntryId = String(chat?.id ?? '');
       if (isDraftChatEntry(chat)) return;
       const agent = inferChatAgent(chat, d);

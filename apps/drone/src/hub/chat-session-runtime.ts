@@ -15,6 +15,7 @@ import type { PendingPrompt } from './drone-pending-prompts';
 import type { DroneRuntime } from '../host/runtime';
 import type { ResolvedOrPendingDrone } from './drone-lifecycle-service';
 import { normalizeSilentCompletion } from '../host/silent-completion';
+import { readChatPromptDispatchStateFromStore } from './transcript-store';
 
 type TranscriptTurn = any;
 
@@ -601,14 +602,14 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     }
   }
 
-  async function getChatEntry(opts: { droneId: string; chatName: string }) {
+  async function getChatEntry(opts: { droneId: string; chatName: string; dispatchStateOnly?: boolean }) {
     if (!(globalThis as any).Bun) {
       const droneId = normalizeDroneIdentity(opts.droneId);
       const resolved = droneId ? await resolveCanonicalDroneOrPendingForReadRef(droneId) : null;
       if (resolved?.kind !== 'real') throw new Error(`unknown drone: ${opts.droneId}`);
       const chat = projectPromptRuntimeChatEntry({
         metadata: readChatMetadataFromStore({ droneId, chatName: opts.chatName }),
-        rows: readChatRowsFromStore({
+        rows: opts.dispatchStateOnly ? readChatPromptDispatchStateFromStore({ droneId, chatName: opts.chatName }) : readChatRowsFromStore({
           droneId,
           chatName: opts.chatName,
           indexes: [],

@@ -720,6 +720,7 @@ export class PromptQueueRepository {
     chatName: string;
     promptId: string;
     limit?: number;
+    excludeCompletedSent?: boolean;
   }): PromptQueueRecord[] {
     const limit = Math.max(1, Math.min(500, Math.floor(opts.limit ?? 100)));
     return this.database.read((connection) => {
@@ -728,6 +729,11 @@ export class PromptQueueRepository {
           `SELECT * FROM (
              SELECT * FROM prompts
              WHERE drone_id = ? AND chat_name = ? AND state != 'cancelled'
+               ${opts.excludeCompletedSent ? `AND NOT (state = 'sent' AND EXISTS (
+                 SELECT 1 FROM canonical_chat_turns AS turns
+                 WHERE turns.drone_id = prompts.drone_id AND turns.chat_name = prompts.chat_name
+                   AND turns.turn_id = prompts.prompt_id
+               ))` : ''}
                AND sequence <= COALESCE(
                  (
                    SELECT sequence FROM prompts

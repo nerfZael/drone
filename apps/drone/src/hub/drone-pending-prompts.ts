@@ -432,6 +432,7 @@ export function createDronePendingPromptStore(deps: {
       chatName,
       promptId: candidate.id,
       limit: 100,
+      excludeCompletedSent: true,
     }) as PendingPrompt[];
     const turns = deps.readTranscriptTurnsByIdsFromStore({
       droneId,

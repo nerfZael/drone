@@ -2170,16 +2170,22 @@ export class ChatTranscriptRepository {
           turns.push({ index: Number(selectedRow.turn_index), turn });
         }
       };
-      const contiguousRange = indexes.length > 400 ? contiguousIndexRange(indexes) : null;
+      const contiguousRange = contiguousIndexRange(indexes);
       if (contiguousRange) {
         const selectedRows = connection
-          .prepare(`SELECT ${selectedJson} AS turn_json
+          .prepare(`WITH page AS (
+            SELECT turns.drone_id, turns.chat_name, turns.turn_id
             FROM canonical_chat_turns AS turns
             ${projectionJoin}
             WHERE turns.drone_id = ? AND turns.chat_name = ?
             ORDER BY COALESCE(turns.prompt_at, turns.at), turns.completed_at,
               turns.ordinal, turns.turn_id
-            LIMIT ? OFFSET ?`)
+            LIMIT ? OFFSET ?
+          ) SELECT ${selectedJson} AS turn_json FROM page
+            JOIN canonical_chat_turns AS turns USING (drone_id, chat_name, turn_id)
+            ${projectionJoin}
+            ORDER BY COALESCE(turns.prompt_at, turns.at), turns.completed_at,
+              turns.ordinal, turns.turn_id`)
           .all(
             opts.droneId,
             opts.chatName,
@@ -2199,12 +2205,14 @@ export class ChatTranscriptRepository {
             SELECT ROW_NUMBER() OVER (
               ORDER BY COALESCE(turns.prompt_at, turns.at), turns.completed_at,
                 turns.ordinal, turns.turn_id
-            ) - 1 AS turn_index, ${selectedJson} AS turn_json
+            ) - 1 AS turn_index, turns.drone_id, turns.chat_name, turns.turn_id
             FROM canonical_chat_turns AS turns
             ${projectionJoin}
             WHERE turns.drone_id = ? AND turns.chat_name = ?
           )
-          SELECT turn_index, turn_json FROM ordered
+          SELECT turn_index, ${selectedJson} AS turn_json FROM ordered
+          JOIN canonical_chat_turns AS turns USING (drone_id, chat_name, turn_id)
+          ${projectionJoin}
           WHERE turn_index IN (${placeholders}) ORDER BY turn_index`)
           .all(opts.droneId, opts.chatName, ...batch) as Array<{
             turn_index: number;
@@ -2248,6 +2256,31 @@ export class ChatTranscriptRepository {
     });
   }
 
+  readPromptDispatchState(opts: { droneId: string; chatName: string }) {
+    return this.database.read((connection) => {
+      // Queue retries need identities and states, never historical activity or output.
+      const pending = connection.prepare(`SELECT prompt_id AS id, state FROM prompts
+        WHERE drone_id = ? AND chat_name = ? AND state != 'cancelled'
+        ORDER BY sequence DESC LIMIT 60`).all(opts.droneId, opts.chatName).reverse() as Array<{ id: string; state: string }>;
+      const pendingTurns = this.readTurnIdentities({ ...opts, turnIds: pending.map((row) => row.id) });
+      return { available: true, pending, pendingTurns };
+    });
+  }
+
+  readTurnIdentities(opts: { droneId: string; chatName: string; turnIds: string[] }): Array<{ id: string }> {
+    const ids = [...new Set(opts.turnIds.map((id) => id.trim()).filter(Boolean))];
+    return this.database.read((connection) => {
+      const result: Array<{ id: string }> = [];
+      for (let offset = 0; offset < ids.length; offset += 400) {
+        const batch = ids.slice(offset, offset + 400);
+        result.push(...connection.prepare(`SELECT turn_id AS id FROM canonical_chat_turns
+          WHERE drone_id = ? AND chat_name = ? AND turn_id IN (${batch.map(() => '?').join(', ')})`)
+          .all(opts.droneId, opts.chatName, ...batch) as Array<{ id: string }>);
+      }
+      return result;
+    });
+  }
+
   readRows(opts: {
     droneId: string;
     chatName: string;
@@ -2274,15 +2307,21 @@ export class ChatTranscriptRepository {
             turn: projectTurnActivityForRead(normalizeTurn(parseJson(row.turn_json)), activityMode),
           })));
         };
-        const contiguousRange = indexes.length > 400 ? contiguousIndexRange(indexes) : null;
+        const contiguousRange = contiguousIndexRange(indexes);
         if (contiguousRange) {
-          const rows = connection.prepare(`SELECT ${selectedJson} AS turn_json
+          const rows = connection.prepare(`WITH page AS (
+            SELECT turns.drone_id, turns.chat_name, turns.turn_id
             FROM canonical_chat_turns AS turns
             ${projectionJoin}
             WHERE turns.drone_id = ? AND turns.chat_name = ?
             ORDER BY COALESCE(turns.prompt_at, turns.at), turns.completed_at,
               turns.ordinal, turns.turn_id
-            LIMIT ? OFFSET ?`)
+            LIMIT ? OFFSET ?
+          ) SELECT ${selectedJson} AS turn_json FROM page
+            JOIN canonical_chat_turns AS turns USING (drone_id, chat_name, turn_id)
+            ${projectionJoin}
+            ORDER BY COALESCE(turns.prompt_at, turns.at), turns.completed_at,
+              turns.ordinal, turns.turn_id`)
             .all(
               opts.droneId,
               opts.chatName,
@@ -2301,11 +2340,14 @@ export class ChatTranscriptRepository {
               SELECT ROW_NUMBER() OVER (
                 ORDER BY COALESCE(turns.prompt_at, turns.at), turns.completed_at,
                   turns.ordinal, turns.turn_id
-              ) - 1 AS turn_index, ${selectedJson} AS turn_json
+              ) - 1 AS turn_index, turns.drone_id, turns.chat_name, turns.turn_id
               FROM canonical_chat_turns AS turns
               ${projectionJoin}
               WHERE turns.drone_id = ? AND turns.chat_name = ?
-            ) SELECT turn_index, turn_json FROM ordered WHERE turn_index IN (${placeholders}) ORDER BY turn_index`)
+            ) SELECT turn_index, ${selectedJson} AS turn_json FROM ordered
+              JOIN canonical_chat_turns AS turns USING (drone_id, chat_name, turn_id)
+              ${projectionJoin}
+              WHERE turn_index IN (${placeholders}) ORDER BY turn_index`)
               .all(opts.droneId, opts.chatName, ...batch) as Array<{ turn_index: number; turn_json: string }>;
             appendRows(rows);
           }
@@ -3557,6 +3599,22 @@ export function readChatVersionFromStore(opts: { droneId: string; chatName: stri
     transcriptSourceHash: transcriptTurnsSourceHash(turns),
     pendingVersion: opts.includePending ? chatEntrySourceHash(pending) : '',
   };
+}
+
+export function readChatPromptDispatchStateFromStore(opts: { droneId: string; chatName: string }) {
+  const store = repository();
+  if (store) return store.readPromptDispatchState(opts);
+  const read = memoryReadChat(opts.droneId, opts.chatName);
+  const pending = (read.chat?.pendingPrompts ?? []).map((p: StoredPendingPrompt) => ({ id: p.id, state: p.state }));
+  return { available: true, pending, pendingTurns: readTranscriptTurnIdentitiesFromStore({ ...opts, turnIds: pending.map((p: { id: string }) => p.id) }) };
+}
+
+export function readTranscriptTurnIdentitiesFromStore(opts: { droneId: string; chatName: string; turnIds: string[] }): Array<{ id: string }> {
+  const store = repository();
+  if (store) return store.readTurnIdentities(opts);
+  const turns = memoryTurnMap(opts.droneId, opts.chatName);
+  return [...new Set(opts.turnIds.map((id) => id.trim()).filter(Boolean))]
+    .flatMap((id) => turns.has(id) ? [{ id }] : []);
 }
 
 export function readChatRowsFromStore(opts: {

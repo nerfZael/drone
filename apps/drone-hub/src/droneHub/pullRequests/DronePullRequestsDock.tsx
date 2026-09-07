@@ -168,6 +168,7 @@ export function DronePullRequestsDock({
     }
 
     let mounted = true;
+    let loadInFlight = false;
     let timer: ReturnType<typeof setInterval> | null = null;
     const forceInitialLoad = refreshNonce !== lastRefreshNonceRef.current;
     lastRefreshNonceRef.current = refreshNonce;
@@ -189,7 +190,7 @@ export function DronePullRequestsDock({
     }
 
     const load = async (silent: boolean, force = false) => {
-      if (!mounted) return;
+      if (!mounted || loadInFlight) return;
       if (!force) {
         const fresh = freshPullRequestListCache(repoCacheKey);
         if (fresh) {
@@ -202,6 +203,7 @@ export function DronePullRequestsDock({
           return;
         }
       }
+      loadInFlight = true;
       if (!silent) setListLoading(true);
       try {
         const data = await requestJson<Extract<RepoPullRequestsPayload, { ok: true }>>(
@@ -227,18 +229,24 @@ export function DronePullRequestsDock({
           setListErrorDiagnostics(normalizePullRequestListDiagnostics(e?.data?.diagnostics));
         }
       } finally {
+        loadInFlight = false;
         if (mounted && !silent) setListLoading(false);
       }
     };
 
     void load(Boolean(cached) && !forceInitialLoad, Boolean(cached) || forceInitialLoad);
     timer = setInterval(() => {
-      void load(true);
+      if (!document.hidden) void load(true);
     }, PR_LIST_POLL_INTERVAL_MS);
+    const onVisibilityChange = () => {
+      if (!document.hidden) void load(true);
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
 
     return () => {
       mounted = false;
       if (timer) clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, [disabled, droneId, refreshNonce, repoAttached, repoCacheKey, startup.markReady, startup.suppressErrors]);
 
