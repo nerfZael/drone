@@ -318,6 +318,67 @@ describe('Companion contracts', () => {
     expect(connection.closes).toBe(0);
   });
 
+  test.each([false, true])('keeps footer metrics per request when a follow-up is queued: %s', async (queued) => {
+    const connection = clientTransport();
+    let now = 0;
+    const controller = new CompanionClientController({ createId: () => 'run', now: () => now });
+    const submit = (messageId: string) => controller.submitPrompt({
+      prompt: messageId,
+      messageId,
+      createTransport: () => connection.transport,
+      executeTool: () => ({ ok: true }),
+    });
+    await submit('first');
+    connection.message({
+      type: 'activity', messageId: 'first',
+      event: { type: 'tool_call_started', callId: 'first-tool', tool: 'list_drones', args: {} },
+    });
+    now = 2_000;
+    if (!queued) {
+      connection.message({ type: 'reply', messageId: 'first', reply: 'First reply' });
+      connection.message({ type: 'status', messageId: 'first', status: 'completed' });
+      expect(controller.getSnapshot()).toMatchObject({ startedAt: 0, endedAt: 2_000 });
+    }
+
+    now = 10_000_000;
+    await submit('second');
+    const second = controller.getSnapshot();
+    expect(second).toMatchObject({
+      status: 'working', transcript: 'second', reply: '',
+      startedAt: now, endedAt: null, activity: [],
+    });
+    // Old completion/activity must not stop the new timer or inflate its count.
+    connection.message({
+      type: 'activity', messageId: 'first',
+      event: { type: 'tool_call_completed', callId: 'first-tool', result: {} },
+    });
+    connection.message({ type: 'reply', messageId: 'first', reply: 'Late first reply' });
+    connection.message({ type: 'status', messageId: 'first', status: 'completed' });
+    expect(controller.getSnapshot()).toEqual(second);
+
+    // Browser tools for the earlier request still need replies so the server can drain its queue.
+    connection.message({
+      type: 'tool_call', messageId: 'first', generation: 1,
+      callId: 'browser', tool: 'get_app_context', args: {},
+    });
+    await Promise.resolve();
+    expect(connection.toolResults).toHaveLength(1);
+    connection.message({
+      type: 'activity', messageId: 'second',
+      event: { type: 'tool_call_started', callId: 'second-tool', tool: 'list_drones', args: {} },
+    });
+    now += 3_000;
+    connection.message({ type: 'reply', messageId: 'second', reply: 'Second reply' });
+    connection.message({ type: 'status', messageId: 'second', status: 'completed' });
+    const finished = controller.getSnapshot();
+    expect(finished.endedAt! - finished.startedAt!).toBe(3_000);
+    expect(finished.activity.map((item) => item.callId)).toEqual(['second-tool']);
+    expect(finished.reply).toBe('Second reply');
+    expect(connection.opens).toBe(1);
+    now += 60_000;
+    expect(controller.getSnapshot().endedAt).toBe(finished.endedAt);
+  });
+
   test('invalidates late run events when the client closes', async () => {
     const connection = clientTransport();
     const ids = ['run-2', 'message-2'];

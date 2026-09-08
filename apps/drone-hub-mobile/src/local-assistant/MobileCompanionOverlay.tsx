@@ -165,7 +165,7 @@ export function MobileCompanionOverlay() {
   const active = status === 'working';
   const voiceBusy = status === 'starting' || status === 'transcribing';
   const recording = status === 'recording';
-  const elapsed = companion.startedAt
+  const elapsed = companion.startedAt != null
     ? Math.max(0, (companion.endedAt ?? Date.now()) - companion.startedAt)
     : 0;
   const showActivity = active || companion.activity.length > 0;

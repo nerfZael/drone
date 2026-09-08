@@ -73,6 +73,7 @@ type ActiveSession = {
   executeTool: CompanionBrowserToolExecutor;
   ready: Promise<CompanionClientConnectionTelemetry | undefined>;
   sentMessages: number;
+  latestMessageId: string | null;
 };
 
 const INITIAL_STATE: CompanionClientState = {
@@ -146,12 +147,15 @@ export class CompanionClientController {
     const session = this.activeSession ?? this.createSession(input);
     session.executeTool = input.executeTool;
     const messageId = input.messageId || this.options.createId();
+    session.latestMessageId = messageId;
     this.update({
       status: 'working',
       error: '',
+      reply: '',
       transcript: prompt,
-      startedAt: this.state.startedAt ?? this.now(),
+      startedAt: this.now(),
       endedAt: null,
+      activity: [],
     });
 
     try {
@@ -223,6 +227,7 @@ export class CompanionClientController {
       executeTool: input.executeTool,
       ready: Promise.resolve(undefined),
       sentMessages: 0,
+      latestMessageId: null,
     };
     this.activeSession = session;
     session.ready = Promise.resolve().then(() =>
@@ -237,6 +242,13 @@ export class CompanionClientController {
 
   private handleMessage(session: ActiveSession, message: CompanionServerMessage): void {
     if (!this.isActive(session) || (message.runId && message.runId !== session.runId)) return;
+    // A queued follow-up owns the visible footer. Earlier requests must still finish their
+    // browser tool calls, and session-wide failures must still terminate the session.
+    if (
+      message.messageId && message.messageId !== session.latestMessageId &&
+      (message.type === 'activity' || message.type === 'reply' ||
+        (message.type === 'status' && message.status === 'completed'))
+    ) return;
     if (message.type === 'tool_call') {
       void this.executeTool(session, message);
     } else if (message.type === 'activity') {

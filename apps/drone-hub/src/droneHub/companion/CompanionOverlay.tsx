@@ -131,7 +131,7 @@ export function CompanionOverlay() {
   }, [companion?.proposalHistory.length]);
   if (!companion || (companion.status === 'idle' && !panelOpen)) return null;
   const active = companion.status === 'working';
-  const duration = companion.startedAt
+  const duration = companion.startedAt != null
     ? Math.max(0, (companion.endedAt ?? Date.now()) - companion.startedAt)
     : 0;
   const activityGroups = groupCompanionToolActivity(companion.activity);

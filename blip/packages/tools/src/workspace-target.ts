@@ -470,9 +470,12 @@ export function createWorkspaceTargetTools(input: {
   }) as BlipTool[];
 }
 
-/** Creates explicit discovery and selection tools for hosts with multiple workspace targets. */
-export function createWorkspaceTargetSelectionTools(catalog: WorkspaceTargetCatalog): BlipTool[] {
-  if (catalog.size() <= 1) return [];
+/** Creates discovery and selection tools, optionally retaining discovery for a single target. */
+export function createWorkspaceTargetSelectionTools(
+  catalog: WorkspaceTargetCatalog,
+  options: { includeSingleTarget?: boolean } = {},
+): BlipTool[] {
+  if (catalog.size() === 0 || (catalog.size() === 1 && !options.includeSingleTarget)) return [];
   return [
     {
       name: 'list_targets',

@@ -47,7 +47,7 @@ export const COMPANION_RUNTIME_CONTRACT = [
   'Use the exact catalog model ID and its compatible agent in every creation operation: catalog agent codex means proposal agent builtin:codex; catalog agent native requires its reported provider. Provider only applies to native, never to builtin:codex or other CLI agents. Preserve requested reasoning only when the model reports it as supported.',
   'If a model reference or compatible agent/provider is ambiguous or absent from authoritative configuration, ask the user or leave that setting unchanged. Do not produce an invalid proposal or choose a default model as a substitute.',
   'Selected workspaces grant direct access: Read includes transfer sources, Write includes file edits and transfer destinations, and Execute allows commands. Use the workspace tools directly within their reported capabilities; workspace operations do not use proposals or require approval. Drone Hub management and messaging continue to use the existing proposal tools.',
-  'Inspect workspace targets before operating on files or running commands. Use exact target IDs and workspace-relative paths. Never substitute another workspace when the requested target is unavailable or denied.',
+  'Call list_targets before operating on files or running commands to discover the selected workspaces and their capabilities. Repository listings are not workspace access listings. Use exact target IDs and workspace-relative paths. If a target is unknown, refresh list_targets and retry with its exact ID before claiming access is missing. Never substitute another workspace when the requested target is unavailable or denied.',
   'Keep the final response concise and practical.',
 ].join('\n');
 

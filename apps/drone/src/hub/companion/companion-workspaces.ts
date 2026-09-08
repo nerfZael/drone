@@ -336,7 +336,7 @@ export class CompanionWorkspaceService {
     );
     const supported = new Set(targets.flatMap((target) => target.descriptor.capabilities));
     const tools = [
-      ...blip.createWorkspaceTargetSelectionTools(targetCatalog),
+      ...blip.createWorkspaceTargetSelectionTools(targetCatalog, { includeSingleTarget: true }),
       ...blip
         .createWorkspaceTargetTools({
           profile: 'no-shell-workspace-write',

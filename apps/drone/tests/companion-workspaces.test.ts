@@ -11,7 +11,7 @@ import { HubAssistantService } from '../src/hub/assistant';
 import { buildHostWorkspaces } from '../src/hub/assistant/host-workspaces';
 import { withTempDroneDataDir } from './test-helpers';
 
-function fixture() {
+function fixture(hostWorkspaces = buildHostWorkspaces([], [])) {
   let saved: ChatWorkspaceAccess = { targets: [], defaultTargetId: null };
   const calls: Array<{ id: string; tool: string }> = [];
   const drones = ['a', 'b'].map((id) => ({
@@ -36,7 +36,7 @@ function fixture() {
   };
   const service = new CompanionWorkspaceService(
     {
-      workspaceInventory: async () => ({ drones, hostWorkspaces: [] }),
+      workspaceInventory: async () => ({ drones, hostWorkspaces }),
       executeAuthorizedWorkspaceTool: async (id, call, authorize) => {
         await authorize();
         calls.push({ id, tool: call.tool });
@@ -109,6 +109,33 @@ describe('Companion workspace access', () => {
     ).rejects.toThrow('unavailable');
     const remote = await service.catalog('server');
     expect(remote.workspaces).toContainEqual(shared);
+  });
+
+  test('discovers a single read-only workspace and uses its exact target ID', async () => {
+    const { service, calls } = fixture(buildHostWorkspaces([], ['/tmp/StorySpark']));
+    const catalog = await service.catalog();
+    const target = {
+      ...catalog.workspaces.find((item) => item.kind === 'host')!,
+      write: false,
+      execute: false,
+    };
+    await service.save({ targets: [target], defaultTargetId: target.id }, catalog.revision);
+    const tools = await service.tools('test', () => {});
+    const listed = await call(tools, 'list_targets', {});
+    expect(listed.details).toMatchObject({
+      activeTargetId: target.id,
+      targets: [{ id: target.id, label: target.name }],
+    });
+    const discovered = (listed.details as any).targets[0];
+    expect(discovered.capabilities).toContain('files.read');
+    expect(discovered.capabilities).not.toContain('files.write');
+    expect(tools.some((tool) => tool.name === 'bash')).toBe(false);
+    await call(tools, 'list_files', { target: discovered.id });
+    await call(tools, 'read_file', { target: discovered.id, path: 'README.md' });
+    expect(calls).toEqual([
+      { id: target.id, tool: 'list_files' },
+      { id: target.id, tool: 'read_file' },
+    ]);
   });
 
   test('exposes only supported tools and checks Write/Execute on the actual target', async () => {

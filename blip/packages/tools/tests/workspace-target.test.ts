@@ -640,7 +640,7 @@ describe('Workspace targets', () => {
     expect(catalog.active()).toMatchObject({ id: 'b' });
   });
 
-  test('omits selection and target parameters for a single bound target', () => {
+  test('omits selection and target parameters for a single bound target', async () => {
     const target: WorkspaceTarget = {
       descriptor: {
         id: 'only',
@@ -656,6 +656,19 @@ describe('Workspace targets', () => {
     const catalog = new WorkspaceTargetCatalog([target]);
     const tools = createWorkspaceTargetTools({ profile: 'read-only', catalog });
     expect(createWorkspaceTargetSelectionTools(catalog)).toEqual([]);
+    const discoverable = createWorkspaceTargetSelectionTools(catalog, {
+      includeSingleTarget: true,
+    });
+    const listed = await findTool(
+      discoverable as ReturnType<typeof createWorkspaceTargetTools>,
+      'list_targets',
+    ).execute('list', {} as never);
+    expect(listed.details).toMatchObject({ activeTargetId: 'only', targets: [{ id: 'only' }] });
+    expect(
+      createWorkspaceTargetSelectionTools(new WorkspaceTargetCatalog([]), {
+        includeSingleTarget: true,
+      }),
+    ).toEqual([]);
     expect(exposesTargetParameter(findTool(tools, 'read_file'))).toBe(false);
     expect(() =>
       validateToolArguments(
