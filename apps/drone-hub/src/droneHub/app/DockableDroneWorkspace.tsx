@@ -1,5 +1,6 @@
 import React from 'react';
 import { placeSideChat } from './side-chat-placement';
+import { prepareSideChatPanel } from './prepareSideChatPanel';
 import { FOCUS_SIDE_CHAT_EVENT } from './side-chat-events';
 import type { WorkspaceSideChat } from './use-workspace-side-chats';
 import { EditorPaneContext } from './editor-pane-context';
@@ -543,7 +544,11 @@ export function DockableDroneWorkspace({
     }
     for (const chat of sideChats) {
       const id = `${SIDE_CHAT_PANEL_PREFIX}${chat.name}`;
-      if (api.getPanel(id)) continue;
+      const existing = api.getPanel(id);
+      if (existing) {
+        prepareSideChatPanel(existing);
+        continue;
+      }
       const rootRect = root.getBoundingClientRect();
       const groups = api.groups.filter((group) => group.panels.some((panel) => panel.id === CHAT_PANEL_ID || panel.id.startsWith(SIDE_CHAT_PANEL_PREFIX)));
       const occupied = groups.map((group) => {
@@ -551,10 +556,11 @@ export function DockableDroneWorkspace({
         return { x: rect.x - rootRect.x, y: rect.y - rootRect.y, width: rect.width, height: rect.height };
       });
       const bounds = placeSideChat({ width: api.width, height: api.height }, occupied, api.panels.filter((panel) => panel.id.startsWith(SIDE_CHAT_PANEL_PREFIX)).length);
-      api.addPanel({ id, component: 'sideChat', title: chat.name, params: { chatName: chat.name },
+      const panel = api.addPanel({ id, component: 'sideChat', title: chat.name, params: { chatName: chat.name },
         minimumWidth: Math.min(320, api.width), minimumHeight: Math.min(220, api.height),
         floating: bounds, inactive: true,
       });
+      prepareSideChatPanel(panel);
     }
   }, [currentDrone.id, sideChats, readyVersion]);
 
