@@ -1447,12 +1447,7 @@ export class HubAssistantService {
     return callback as NonNullable<AssistantToolCallbacks[K]>;
   }
 
-  private async applyDronePatch(threadId: string, params: any): Promise<AssistantApplyPatchResult> {
-    const droneId = await this.requireWorkspaceInScope(
-      String(params?.droneId ?? ''),
-      'write',
-      threadId,
-    );
+  private async applyDronePatch(droneId: string, params: any, authorize: () => Promise<void>): Promise<AssistantApplyPatchResult> {
     const operations = Array.isArray(params?.operations) ? params.operations : [];
     if (operations.length === 0) throw new Error('patch has no operations');
     const applyHunks = params?.applyHunks;
@@ -1588,6 +1583,7 @@ export class HubAssistantService {
       });
     }
 
+    await authorize();
     const movedSources = new Set<string>();
     if (batchFiles) {
       const mutations: Parameters<typeof batchFiles>[0]['operations'] = [];
@@ -2205,17 +2201,21 @@ export class HubAssistantService {
     return this.filterDronesForScope(await this.tools.listDrones(), threadId);
   }
 
-  async workspaceAccessState(threadId: string) {
+  async workspaceInventory() {
     await this.ensureLoaded();
     const drones = await this.tools.listDrones();
     const hostWorkspaces = this.tools.listHostWorkspaces
       ? await this.tools.listHostWorkspaces()
       : buildHostWorkspaces(drones, []);
+    return { drones, hostWorkspaces };
+  }
+
+  async workspaceAccessState(threadId: string) {
+    const inventory = await this.workspaceInventory();
     const thread = this.getThread(threadId);
     return {
       thread: sanitizeThread(thread),
-      drones,
-      hostWorkspaces,
+      ...inventory,
       revision: this.workspaceAccessRevision(thread),
     };
   }
@@ -2538,6 +2538,27 @@ export class HubAssistantService {
       !this.workspaceIsEnabled(threadId, droneId.startsWith('host:') ? droneId : `drone:${droneId}`)
     )
       throw new Error('This workspace is not selected for the chat.');
+    return this.executeAuthorizedWorkspaceTool(droneId, call, async () => {
+      await this.requireWorkspaceInScope(droneId, permission, threadId);
+      if (this.getThread(threadId).workspaceAccess &&
+          !this.workspaceIsEnabled(threadId, droneId.startsWith('host:') ? droneId : `drone:${droneId}`)) {
+        throw new Error('This workspace is not selected for the chat.');
+      }
+    }, patchEngine);
+  }
+
+  /** Shared executor; callers must supply a live authorization check for the resolved target. */
+  async executeAuthorizedWorkspaceTool(
+    droneId: string,
+    call: { tool: string; args: Record<string, unknown>; signal?: AbortSignal },
+    authorize: () => Promise<void>,
+    patchEngine?: {
+      parse: (patch: string) => any[];
+      applyHunks: (content: string, hunks: any[], filePath: string) => string;
+    },
+  ): Promise<any> {
+    call.signal?.throwIfAborted();
+    await authorize();
     const params: any = call.args ?? {};
     if (call.tool === 'transfer_stat') {
       const result = await this.requireFileCallback('statDronePath')({
@@ -2746,11 +2767,11 @@ export class HubAssistantService {
     }
     if (call.tool === 'apply_patch') {
       if (!patchEngine) throw new Error('patch engine unavailable');
-      const result = await this.applyDronePatch(threadId, {
+      const result = await this.applyDronePatch(droneId, {
         droneId,
         operations: patchEngine.parse(String(params.patch ?? '')),
         applyHunks: patchEngine.applyHunks,
-      });
+      }, authorize);
       return {
         content: [
           {

@@ -16,6 +16,60 @@ export function registerResourceSubscriptionRoutes(
     json(503, { ok: false, error: 'resource subscriptions require the Hub database' });
     return null;
   };
+  apiRouter.get('/api/custom-events', ({ url, json }) => {
+    try {
+      const current = availableService(json);
+      if (!current) return;
+      json(200, {
+        ok: true,
+        ...current.listCustomEvents({
+          query: url.searchParams.get('query') ?? undefined,
+          after: url.searchParams.get('after') ?? undefined,
+          limit: url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : undefined,
+        }),
+      });
+    } catch (error) {
+      json(400, { ok: false, error: errorMessage(error) });
+    }
+  });
+
+  apiRouter.post('/api/custom-events', async ({ readJson, json }) => {
+    try {
+      const current = availableService(json);
+      if (!current) return;
+      const body = await readJson<any>();
+      const result = await current.emitCustomEvent({
+        source: body?.source,
+        name: body?.name,
+        description: body?.description,
+        data: body?.data,
+        idempotencyKey: body?.idempotencyKey,
+      });
+      json(result.emitted ? 201 : 200, { ok: true, ...result });
+    } catch (error) {
+      json(400, { ok: false, error: errorMessage(error) });
+    }
+  });
+
+  apiRouter.post('/api/resource-subscriptions/custom', async ({ readJson, json }) => {
+    try {
+      const current = availableService(json);
+      if (!current) return;
+      const body = await readJson<any>();
+      const result = await current.subscribeToCustomEvents({
+        subscriber: body?.subscriber,
+        name: body?.name,
+        description: body?.description,
+        intent: body?.intent,
+        sourceDroneId: body?.sourceDroneId,
+        sourceChatId: body?.sourceChatId,
+      });
+      json(result.created ? 201 : 200, { ok: true, ...result });
+    } catch (error) {
+      json(400, { ok: false, error: errorMessage(error) });
+    }
+  });
+
   apiRouter.get('/api/resource-subscriptions/settings', async ({ json }) => {
     json(200, {
       ok: true,

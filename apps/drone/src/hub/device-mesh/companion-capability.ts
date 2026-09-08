@@ -3,6 +3,7 @@ import { validateCompanionRunInput } from '@drone/assistant-chat';
 import { COMPANION_CAPABILITY } from '@drone/device-protocol';
 
 import { CompanionRunSession } from '../companion/companion-run-session';
+import type { CompanionWorkspaceService } from '../companion/companion-workspaces';
 import type { CompanionRuntime } from '../companion/companion-runtime';
 import type { CapabilityHandler } from './device-mesh-types';
 
@@ -36,6 +37,7 @@ function requiredText(value: unknown, label: string): string {
 export function createCompanionCapability(
   runtime: CompanionRuntime,
   broadcast: BroadcastEvent,
+  workspaces?: Pick<CompanionWorkspaceService, 'catalog' | 'save'>,
 ): CapabilityHandler {
   const sessionsByDeviceId = new Map<string, CompanionMeshSession>();
 
@@ -66,6 +68,15 @@ export function createCompanionCapability(
     async invoke(operation, rawPayload, context) {
       const payload = object(rawPayload);
       const sourceDeviceId = context.sourceDevice.id;
+
+      if (operation === 'workspaces.list' || operation === 'workspaces.update') {
+        if (!workspaces) throw new Error('Companion workspace settings are unavailable on this Hub.');
+        // The mesh router authorizes these operations independently from run.start.
+        if (operation === 'workspaces.list') {
+          return workspaces.catalog(typeof payload.deviceId === 'string' ? payload.deviceId : undefined);
+        }
+        return workspaces.save(payload.access, requiredText(payload.revision, 'revision'));
+      }
 
       if (operation === 'run.cancel') {
         const clientRunId = requiredText(payload.runId, 'runId');

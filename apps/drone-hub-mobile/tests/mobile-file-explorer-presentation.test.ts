@@ -27,8 +27,7 @@ describe('mobile file explorer presentation', () => {
     expect(source).toContain("backgroundColor: 'rgba(127, 132, 156, 0.28)'");
     expect(source).toContain('onLongPress={() => {');
     expect(source).toContain("beginAction('rename', actionMenuEntry)");
-    expect(source).toContain("beginAction('create-file', actionMenuEntry ?? null)");
-    expect(source).toContain("beginAction('create-directory', actionMenuEntry ?? null)");
+    expect(source).toContain("beginAction('create', actionMenuEntry ?? null)");
     expect(source).toContain("requestDroneControl(targetId, 'file.action'");
     expect(source).toContain('style={styles.inlineNameInput}');
   });
@@ -43,7 +42,7 @@ describe('mobile file explorer presentation', () => {
       source.indexOf('const saveDraft'),
     );
 
-    expect(openPathBody).toContain('onOpenPath(path)');
+    expect(openPathBody).toContain('onOpenPath(path, line)');
     expect(openPathBody).not.toContain('setExplorerExpanded(false)');
     expect(source).toContain('const [wordWrap, setWordWrap] = React.useState(true)');
     expect(source).toContain('wordWrap ? (');

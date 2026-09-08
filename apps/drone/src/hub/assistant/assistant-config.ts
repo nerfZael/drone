@@ -27,7 +27,7 @@ export const DEFAULT_THREAD_TITLE = 'New thread';
 export const ASSISTANT_SYSTEM_PROMPT_RUNTIME_APPENDIX =
   'Current existing-drone access scope is appended at run time. It limits operations that target existing drones; enabled global creation tools are governed separately.';
 export const ASSISTANT_CHAT_IDLE_PROMPT_LINE =
-  'When you start asynchronous work and need the result later, use subscribe_to_resource_events for chat idle, failure, native change-request, or GitHub pull-request events. Use subscribe_to_cron for recurring time-based work. These tools return immediately; end your turn when there is nothing else to do, and the system will resume this conversation when subscribed events arrive.';
+  'When you start asynchronous work and need the result later, use subscribe_to_resource_events for chat idle, failure, native change-request, or GitHub pull-request events. Use subscribe_to_cron for recurring time-based work. Use list_custom_events to discover custom event names, subscribe_to_custom_events to react to them, and emit_custom_event to publish structured updates for other subscribed agents. These tools return immediately; end your turn when there is nothing else to do, and the system will resume this conversation when subscribed events arrive.';
 export const ASSISTANT_MULTI_TARGET_PROMPT_LINE =
   'Use list_targets to discover the workspaces enabled for this chat, including its optional private Artifacts workspace. Use set_target to choose the default workspace before a sequence of file operations, or pass target explicitly on an individual workspace tool. When two or more workspaces are available, use transfer_files to copy a file or folder directly between them.';
 export const ASSISTANT_SINGLE_TARGET_PROMPT_LINE =
@@ -57,7 +57,7 @@ export const ASSISTANT_SYSTEM_PROMPT_DEFAULT = [
   'Chat timelines contain user messages and agent messages. Queued or pending user messages appear in the same timeline with a non-completed status.',
   ASSISTANT_CHAT_IDLE_PROMPT_LINE,
   'Do not load more chat pages than needed. Start with the latest page.',
-  "Creating or cloning drones, creating chats, creating repository-scoped groups, opening chats, highlighting drones, and reordering the sidebar do not require approval. create_group requires the owning repoPath, except for the empty repoPath scope used by drones without a repository. create_drone and clone_drone create independent container drones by default and automatically grant this chat read, write, and execute access. Pass parent only when the user explicitly wants a child drone; the parent must be in read scope. clone_drone also requires read access to its source. Creating or managing chats and chat groups requires write access to the target drone; managed chat creation is unavailable on host-runtime targets. create_chat inherits the target repo's last-used agent, model, reasoning, permission, and approval settings unless explicitly overridden. For create_chat, agent=\"codex\" means the Codex CLI agent and must omit provider; agent=\"native\" means the Drone Hub Built-in agent and may use provider=\"openai\", \"codex\", \"gemini\", or \"openrouter\". Renaming drones, changing drone groups, sending a user message to a drone, and running bash in a drone require user approval; explain briefly what you intend to do.",
+  'Creating or cloning drones, creating chats, creating repository-scoped groups, opening chats, highlighting drones, and reordering the sidebar do not require approval. create_group requires the owning repoPath, except for the empty repoPath scope used by drones without a repository. create_drone and clone_drone create independent container drones by default and automatically grant this chat read, write, and execute access. Pass parent only when the user explicitly wants a child drone; the parent must be in read scope. clone_drone also requires read access to its source. Creating or managing chats and chat groups requires write access to the target drone; managed chat creation is unavailable on host-runtime targets. create_chat inherits the target repo\'s last-used agent, model, reasoning, permission, and approval settings unless explicitly overridden. For create_chat, agent="codex" means the Codex CLI agent and must omit provider; agent="native" means the Drone Hub Built-in agent and may use provider="openai", "codex", "gemini", or "openrouter". Renaming drones, changing drone groups, sending a user message to a drone, and running bash in a drone require user approval; explain briefly what you intend to do.',
   'File write tools require write access to the target drone and should be used carefully for concrete code or content edits.',
   'If an approval-gated write tool returns successfully, the user already approved that action. Do not ask for the same approval again.',
   'When creating a drone, omit fields you want inherited from the current open drone. Omit parent unless the user explicitly asks for a child relationship. Runtime is always container. Only set repoBranchSource=remote when the user asked for a remote branch and you have a remoteBranch value.',
@@ -276,6 +276,24 @@ const ASSISTANT_TOOL_SUMMARY_DEFINITIONS: AssistantToolSummary[] = [
     category: 'chats',
     description:
       'Resume this conversation when selected DroneHub chat, change-request, or GitHub events occur.',
+  },
+  {
+    name: 'list_custom_events',
+    label: 'List custom events',
+    category: 'chats',
+    description: 'Search shared custom event names and descriptions.',
+  },
+  {
+    name: 'subscribe_to_custom_events',
+    label: 'Subscribe to custom events',
+    category: 'chats',
+    description: 'Resume this conversation when another agent emits a named custom event.',
+  },
+  {
+    name: 'emit_custom_event',
+    label: 'Emit custom event',
+    category: 'chats',
+    description: 'Publish a custom event with structured data to subscribed conversations.',
   },
   {
     name: 'subscribe_to_cron',
@@ -535,6 +553,9 @@ const DRONE_HUB_MCP_TOOL_NAMES = new Set([
   'ask_questions',
   'subscribe_to_resource_events',
   'subscribe_to_cron',
+  'list_custom_events',
+  'subscribe_to_custom_events',
+  'emit_custom_event',
   'list_resource_subscriptions',
   'get_resource_subscription',
   'update_resource_subscription',
@@ -589,6 +610,8 @@ export const ASSISTANT_READ_ONLY_DENIED_TOOL_NAMES = new Set([
   'set_drone_groups',
   'message_drone',
   'send_message',
+  'emit_custom_event',
+  'subscribe_to_custom_events',
   'create_workflow',
   'update_workflow',
   'delete_workflow',

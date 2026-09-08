@@ -1,6 +1,6 @@
 import { mcpChatAccessAllowsDrone, normalizeMcpChatAccessScope } from '../mcp-chat-access';
 import type { ChatResourceLocation } from './resource-subscription-repository';
-import type { ResourceSubscription } from './resource-subscription-types';
+import type { ResourceSubscription, ResourceEvent } from './resource-subscription-types';
 import type { ChangeRequestSubscriptionTarget } from './change-request-subscription-events';
 
 export function createResourceSubscriptionDeliveryAuthorizer(deps: {
@@ -11,6 +11,7 @@ export function createResourceSubscriptionDeliveryAuthorizer(deps: {
   return async (
     subscription: ResourceSubscription,
     subscriber: ChatResourceLocation,
+    event?: ResourceEvent,
   ): Promise<boolean> => {
     const registry = await deps.loadRegistry();
     const subscriberChat = registry?.drones?.[subscriber.droneId]?.chats?.[subscriber.chatName];
@@ -34,6 +35,10 @@ export function createResourceSubscriptionDeliveryAuthorizer(deps: {
       );
     };
 
+    if (subscription.provider === 'drone-hub' && subscription.resourceType === 'custom_event') {
+      const source = event?.providerContent.source as { droneId?: string } | undefined;
+      return Boolean(source?.droneId && canReadDrone(registry?.drones?.[source.droneId]));
+    }
     if (subscription.provider === 'drone-hub' && subscription.resourceType === 'chat') {
       const target = deps.resolveChatResource(subscription.resourceId);
       return Boolean(target && canReadDrone(registry?.drones?.[target.droneId]));

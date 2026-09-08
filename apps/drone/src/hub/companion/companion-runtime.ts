@@ -29,6 +29,7 @@ import {
   type CompanionTelemetryTransport,
 } from './companion-telemetry';
 
+import type { CompanionWorkspaceService } from './companion-workspaces';
 import { CompanionProposalModels } from './companion-proposal-models';
 
 const MAX_BROWSER_TEXT_CHARS = 1_000_000;
@@ -42,6 +43,7 @@ export type CompanionBrowserCall = (
 type RunContext = {
   runId: string;
   settings: CompanionSettings;
+  workspaceRevision: string;
   callBrowser: CompanionBrowserCall;
   snapshots: Map<string, BrowserTextSnapshot>;
   proposalModels: CompanionProposalModels;
@@ -60,6 +62,7 @@ type RuntimeDependencies = {
   hubServices: HubServices;
   buildDroneSummaries(registry: any): AssistantDroneSummary[];
   telemetry?: CompanionTelemetryService;
+  workspaces?: CompanionWorkspaceService;
 };
 
 function result(data: Record<string, unknown>, text?: string) {
@@ -166,8 +169,9 @@ export class CompanionRuntime {
       const settings = telemetry
         ? await telemetry.measure('settingsMs', () => readCompanionSettings())
         : await readCompanionSettings();
+      const workspaceRevision = await this.deps.workspaces?.revision() ?? '';
       const settingsChanged = Boolean(
-        existingContext && !companionSettingsEqual(existingContext.settings, settings),
+        existingContext && (!companionSettingsEqual(existingContext.settings, settings) || existingContext.workspaceRevision !== workspaceRevision),
       );
       telemetry?.setModel(settings);
       if (this.cancelledRunIds.has(runId)) throw new Error('Companion run cancelled');
@@ -184,6 +188,7 @@ export class CompanionRuntime {
         if (settingsChanged) {
           this.host.invalidateThread(threadId);
           existingContext.settings = settings;
+          existingContext.workspaceRevision = workspaceRevision;
         }
         existingContext.callBrowser = this.instrumentBrowserCall(input.callBrowser, telemetry);
         existingContext.snapshots.clear();
@@ -191,6 +196,7 @@ export class CompanionRuntime {
         this.contexts.set(threadId, {
           runId,
           settings,
+          workspaceRevision,
           callBrowser: this.instrumentBrowserCall(input.callBrowser, telemetry),
           snapshots: new Map(),
           proposalModels: new CompanionProposalModels(),
@@ -291,6 +297,11 @@ export class CompanionRuntime {
         )
       : this.deps.buildDroneSummaries(registry);
     const refs = [...new Set(drones.flatMap((drone) => [drone.id, drone.name]).filter(Boolean))];
+    const workspaceTools = await this.deps.workspaces?.tools(context.runId, () => {
+      if (this.closing || this.cancelledRunIds.has(context.runId) || !this.activeRunIds.has(context.runId)) {
+        throw Object.assign(new Error('Companion run cancelled'), { code: 'ABORT_ERR' });
+      }
+    }) ?? [];
     const createMcpClient = () =>
       createInProcessDroneHubMcpClient({
         correlationId: threadId,
@@ -342,9 +353,12 @@ export class CompanionRuntime {
         context.settings.systemPrompt,
         COMPANION_RUNTIME_CONTRACT,
       ].filter(Boolean).join('\n\n'),
-      tools: telemetry
-        ? await telemetry.measure('handle.customToolsMs', () => this.customTools(context, drones))
-        : await this.customTools(context, drones),
+      tools: [
+        ...(telemetry
+          ? await telemetry.measure('handle.customToolsMs', () => this.customTools(context, drones))
+          : await this.customTools(context, drones)),
+        ...workspaceTools,
+      ],
       toolProviders: [filteredMcpProvider],
       getApiKey: resolveBlipProviderApiKey,
       dispose: () => mcpClient.close(),

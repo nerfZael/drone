@@ -1,4 +1,5 @@
 import React from 'react';
+import { toggleCompanionWorkspace } from '@drone/assistant-chat';
 import type {
   ChatWorkspaceAccess,
   ChatWorkspaceCatalog,
@@ -27,8 +28,7 @@ const AUTO_COLLAPSE_CATEGORY_SIZE = 6;
 const REFRESH_DEBOUNCE_MS = 400;
 const SAVE_DEBOUNCE_MS = 300;
 
-function catalogUrl(threadId: string, deviceId?: string): string {
-  const base = `/api/assistant/threads/${encodeURIComponent(threadId)}/workspaces`;
+function catalogUrl(base: string, deviceId?: string): string {
   return deviceId ? `${base}?deviceId=${encodeURIComponent(deviceId)}` : base;
 }
 
@@ -42,12 +42,20 @@ export function AssistantWorkspacePicker({
   threadId,
   disabled = false,
   onSelectionChange,
+  catalogEndpoint,
+  readRequired = false,
+  onBusyChange,
 }: {
   requestJson: RequestJson;
   threadId: string;
   disabled?: boolean;
   onSelectionChange?: (selectedCount: number) => void;
+  catalogEndpoint?: string;
+  readRequired?: boolean;
+  onBusyChange?: (busy: boolean) => void;
 }) {
+  const endpoint =
+    catalogEndpoint ?? `/api/assistant/threads/${encodeURIComponent(threadId)}/workspaces`;
   const [catalog, setCatalog] = React.useState<ChatWorkspaceCatalog | null>(null);
   const [draft, setDraft] = React.useState<ChatWorkspaceAccess | null>(null);
   const [collapsed, setCollapsed] = React.useState<Set<string>>(new Set());
@@ -74,6 +82,9 @@ export function AssistantWorkspacePicker({
     draft &&
     workspaceAccessSignature(catalog.access) !== workspaceAccessSignature(draft),
   );
+  React.useEffect(() => {
+    onBusyChange?.(dirty || saving);
+  }, [dirty, saving, onBusyChange]);
   const dirtyRef = React.useRef(dirty);
   dirtyRef.current = dirty;
   const locked = disabled || initialLoading;
@@ -97,7 +108,7 @@ export function AssistantWorkspacePicker({
     async (deviceId: string) => {
       setLoading((current) => new Set(current).add(deviceId));
       try {
-        const result = await requestJson<ChatWorkspaceCatalog>(catalogUrl(threadId, deviceId));
+        const result = await requestJson<ChatWorkspaceCatalog>(catalogUrl(endpoint, deviceId));
         if (!alive.current) return;
         setCatalog((current) =>
           current
@@ -139,7 +150,7 @@ export function AssistantWorkspacePicker({
           });
       }
     },
-    [requestJson, threadId],
+    [requestJson, endpoint],
   );
 
   /**
@@ -152,7 +163,7 @@ export function AssistantWorkspacePicker({
       if (mode === 'manual') setRefreshing(true);
       if (mode !== 'silent') setError(null);
       try {
-        const result = await requestJson<ChatWorkspaceCatalog>(catalogUrl(threadId));
+        const result = await requestJson<ChatWorkspaceCatalog>(catalogUrl(endpoint));
         if (!alive.current) return;
         const previouslyLoaded =
           mode === 'initial' ? new Set<string>() : new Set(loadedRef.current);
@@ -192,7 +203,7 @@ export function AssistantWorkspacePicker({
         }
       }
     },
-    [loadDevice, requestJson, threadId],
+    [loadDevice, requestJson, endpoint],
   );
 
   React.useEffect(() => {
@@ -250,7 +261,7 @@ export function AssistantWorkspacePicker({
     setError(null);
     const sent = workspaceAccessSignature(current);
     try {
-      const result = await requestJson<ChatWorkspaceCatalog>(catalogUrl(threadId), {
+      const result = await requestJson<ChatWorkspaceCatalog>(catalogUrl(endpoint), {
         method: 'POST',
         body: JSON.stringify({ access: current, revision: base.revision }),
       });
@@ -275,18 +286,26 @@ export function AssistantWorkspacePicker({
         void flushSave();
       }
     }
-  }, [reload, requestJson, threadId]);
+  }, [reload, requestJson, endpoint]);
 
   const updateDraft = React.useCallback(
     (change: (current: ChatWorkspaceAccess) => ChatWorkspaceAccess) => {
-      setDraft((current) => (current ? change(current) : current));
+      setDraft((current) => {
+        if (!current) return current;
+        const next = change(current);
+        if (!readRequired) return next;
+        return {
+          targets: next.targets.map((target) => ({ ...target, read: true })),
+          defaultTargetId: next.defaultTargetId ?? next.targets[0]?.id ?? null,
+        };
+      });
       if (saveTimerRef.current != null) window.clearTimeout(saveTimerRef.current);
       saveTimerRef.current = window.setTimeout(() => {
         saveTimerRef.current = null;
         void flushSave();
       }, SAVE_DEBOUNCE_MS);
     },
-    [flushSave],
+    [flushSave, readRequired],
   );
 
   const options = new Map<string, ChatWorkspaceOption>();
@@ -405,7 +424,7 @@ export function AssistantWorkspacePicker({
                     <div className="px-3 py-1.5 text-[var(--text-10)] text-[var(--muted)]">
                       {search
                         ? 'No matching workspaces.'
-                        : 'Nothing shared with this chat. Share folders with this Hub in the other device’s settings.'}
+                        : 'Nothing shared with this Hub. Share folders in the other device’s settings.'}
                     </div>
                   ) : null}
                   {WORKSPACE_CATEGORIES.map((category) => {
@@ -420,7 +439,7 @@ export function AssistantWorkspacePicker({
                       entries.length > AUTO_COLLAPSE_CATEGORY_SIZE &&
                       selectedInCategory === 0;
                     const categoryOpen =
-                      Boolean(search) || categoryToggles.has(categoryKey) !== collapsedByDefault;
+                      Boolean(search) || categoryToggles.has(categoryKey) === collapsedByDefault;
                     return (
                       <div key={category}>
                         <button
@@ -456,14 +475,17 @@ export function AssistantWorkspacePicker({
                               const selectable =
                                 !locked &&
                                 (Boolean(target) ||
-                                  (available && (option.read || option.write || option.execute)));
+                                  (available &&
+                                    (readRequired
+                                      ? option.read
+                                      : option.read || option.write || option.execute)));
                               return (
                                 <div
                                   key={option.id}
-                                  className={`flex items-center gap-2 pl-3 pr-2 ${target ? 'bg-[var(--surface-softest)]' : ''}`}
+                                  className={`flex ${readRequired ? 'flex-col items-stretch min-[600px]:flex-row min-[600px]:items-center' : 'items-center'} gap-2 pl-3 pr-2 ${target ? 'bg-[var(--surface-softest)]' : ''}`}
                                 >
                                   <label
-                                    className={`flex min-h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 py-1 ${selectable || target ? '' : 'cursor-default opacity-45'}`}
+                                    className={`flex ${readRequired ? 'min-h-11 min-[600px]:min-h-8' : 'min-h-8'} min-w-0 flex-1 cursor-pointer items-center gap-2 py-1 ${selectable || target ? '' : 'cursor-default opacity-45'}`}
                                   >
                                     <input
                                       type="checkbox"
@@ -471,7 +493,11 @@ export function AssistantWorkspacePicker({
                                       checked={Boolean(target)}
                                       disabled={!selectable}
                                       onChange={() =>
-                                        updateDraft((current) => toggleWorkspace(current, option))
+                                        updateDraft((current) =>
+                                          readRequired
+                                            ? toggleCompanionWorkspace(current, option)
+                                            : toggleWorkspace(current, option),
+                                        )
                                       }
                                       className="h-3.5 w-3.5 flex-shrink-0 accent-[var(--accent)]"
                                     />
@@ -485,12 +511,17 @@ export function AssistantWorkspacePicker({
                                     </span>
                                   </label>
                                   {target ? (
-                                    <div className="flex flex-shrink-0 items-center gap-1">
+                                    <div
+                                      className={`flex flex-shrink-0 items-center gap-1 ${readRequired ? 'ml-6 mb-2 flex-wrap min-[600px]:m-0' : ''}`}
+                                    >
                                       {PERMISSIONS.map((permission) => {
                                         const on = target[permission.key];
                                         const offered = available && option[permission.key];
                                         if (!on && !offered) return null;
-                                        const chipLocked = locked || (!on && !offered);
+                                        const chipLocked =
+                                          locked ||
+                                          (!on && !offered) ||
+                                          (readRequired && permission.key === 'read');
                                         return (
                                           <button
                                             key={permission.key}
@@ -513,13 +544,13 @@ export function AssistantWorkspacePicker({
                                                 };
                                               })
                                             }
-                                            className={`h-5 w-5 rounded text-[var(--text-8)] font-[var(--weight-semibold)] disabled:opacity-40 ${
+                                            className={`${readRequired ? 'h-11 px-3 min-[600px]:h-5 min-[600px]:px-1.5' : 'h-5 w-5'} rounded text-[var(--text-8)] font-[var(--weight-semibold)] ${readRequired && permission.key === 'read' ? '' : 'disabled:opacity-40'} ${
                                               on
                                                 ? 'bg-[var(--accent)] text-[var(--on-accent,#11111b)]'
                                                 : 'bg-[var(--surface-strong)] text-[var(--muted)] hover:bg-[var(--hover)]'
                                             }`}
                                           >
-                                            {permission.label}
+                                            {readRequired ? permission.name : permission.label}
                                           </button>
                                         );
                                       })}
@@ -536,7 +567,7 @@ export function AssistantWorkspacePicker({
                                             defaultTargetId: option.id,
                                           }))
                                         }
-                                        className={`flex h-5 w-5 items-center justify-center rounded ${
+                                        className={`flex ${readRequired ? 'h-11 w-11 min-[600px]:h-5 min-[600px]:w-5' : 'h-5 w-5'} items-center justify-center rounded ${
                                           isDefault
                                             ? 'text-[var(--yellow)]'
                                             : 'text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--fg)]'

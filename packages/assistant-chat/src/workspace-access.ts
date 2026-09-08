@@ -109,3 +109,21 @@ export function validateChatWorkspaceSelection(
     }),
   };
 }
+
+/** Companion selection always grants Read; additional capabilities remain explicit opt-ins. */
+export function toggleCompanionWorkspace(
+  access: ChatWorkspaceAccess,
+  option: ChatWorkspaceOption,
+): ChatWorkspaceAccess {
+  const selected = access.targets.some((target) => target.id === option.id);
+  if (!selected && !option.read) throw new Error('This workspace does not offer Read access.');
+  const targets = selected
+    ? access.targets.filter((target) => target.id !== option.id)
+    : [...access.targets, { ...option, read: true, write: false, execute: false }];
+  return {
+    targets,
+    defaultTargetId: targets.some((target) => target.id === access.defaultTargetId)
+      ? access.defaultTargetId
+      : targets[0]?.id ?? null,
+  };
+}

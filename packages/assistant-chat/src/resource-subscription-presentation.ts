@@ -9,7 +9,8 @@ export type PresentedChatResourceSubscription = {
     | 'pull_request'
     | 'change_request'
     | 'cron'
-    | 'question_request';
+    | 'question_request'
+    | 'custom_event';
   resourceId: string;
   resourceLabel: string;
   resourceDroneId?: string;
@@ -76,6 +77,9 @@ export function presentedChatSubscriptionResourceLabel(
     'resourceType' | 'resourceId' | 'resourceLabel' | 'resourceConfig'
   >,
 ): string {
+  if (subscription.resourceType === 'custom_event') {
+    return `Custom event · ${subscription.resourceId}`;
+  }
   if (subscription.resourceType === 'question_request') {
     return `Questions · ${subscription.resourceLabel || 'Awaiting answers'}`;
   }
@@ -177,7 +181,8 @@ function presentedResourceType(raw: unknown): PresentedChatResourceSubscription[
     value === 'pull_request' ||
     value === 'change_request' ||
     value === 'cron' ||
-    value === 'question_request'
+    value === 'question_request' ||
+    value === 'custom_event'
   ) {
     return value;
   }

@@ -304,6 +304,7 @@ import { DroneRegistryBroadcaster, type DroneRegistrySnapshot } from './drone-re
 import { createTerminalWebSocketServer } from './terminal-websocket-server';
 import { createTerminalWebSocketUpgradeHandler } from './terminal-websocket-upgrade';
 import { CompanionRuntime } from './companion/companion-runtime';
+import { CompanionWorkspaceService } from './companion/companion-workspaces';
 import { registerCompanionRoutes } from './companion/companion-routes';
 import { createCompanionWebSocketServer } from './companion/companion-websocket-server';
 import { CompanionTelemetryService } from './companion/companion-telemetry';
@@ -4331,14 +4332,16 @@ async function startDroneHubApiServerWithLifecycle(
     database: getHubDatabase(),
     log: hubLog,
   });
+  const companionWorkspaces = new CompanionWorkspaceService(assistantService, deviceMesh);
   const companionRuntime = new CompanionRuntime({
+    workspaces: companionWorkspaces,
     hubServices: hubApplication,
     buildDroneSummaries: buildAssistantDroneSummariesFromRegistry,
     telemetry: companionTelemetry,
   });
   const companionWss = createCompanionWebSocketServer(companionRuntime);
   deviceMesh.registerCapability(
-    createCompanionCapability(companionRuntime, deviceMesh.broadcastCapabilityEvent),
+    createCompanionCapability(companionRuntime, deviceMesh.broadcastCapabilityEvent, companionWorkspaces),
   );
   registerBackgroundResource('Companion runtime', () => companionRuntime.close());
   registerBackgroundResource('device mesh assistant changes', async () => {
@@ -5557,7 +5560,7 @@ async function startDroneHubApiServerWithLifecycle(
   }
 
   const apiRouter = new HubRouter(json, readJsonBody);
-  registerCompanionRoutes(apiRouter, companionTelemetry);
+  registerCompanionRoutes(apiRouter, companionTelemetry, companionWorkspaces);
   registerDesktopEventRoutes(apiRouter, {
     assistantService,
     droneChatBroadcaster,

@@ -267,3 +267,19 @@ Every completed or failed message also writes a structured `Companion message ti
 - **Decided:** Companion takes the backtick default shortcut. Existing users with the old default voice-to-clipboard binding are migrated to Companion and voice-to-clipboard becomes unbound; custom bindings are preserved.
 
 Companion appears above the numpad-plus Dictation recorder when both panels are open. `read_recorder` reads the open scratchpad and its revision; `apply_recorder_patch` applies an undoable strict patch to that same revision. Closing the recorder or changing its text invalidates earlier reads. Recorder patches do not send text and are blocked while a send is being finalized.
+
+
+## Workspace access
+
+The desktop Companion header has a Workspaces button next to the system prompt editor. It opens the shared workspace picker above the overlay, grouped by device and by repositories, folders, host drones, and container drones. Host drones sharing one directory use one entry. Other devices expose the workspaces they share with this Hub. Unavailable targets remain explicit; tools never silently fall back to a different workspace.
+
+Companion starts with no selected filesystem workspaces. Selections persist in the profile's `companion.workspace-access` settings record, separately from model and prompt settings. Selecting a workspace grants Read (including transfer sources). Write independently permits file edits and transfer destinations. Execute independently permits commands, including the existing local command tool for host folders. Commands run with the runtime's authority and may modify files even when the file-tool Write permission is disabled. A selected workspace cannot have Read disabled; remove the selection instead.
+
+These workspace tools execute directly and do not use proposals or approval prompts. Existing browser tools and Drone Hub proposals retain their behavior, including session-only proposal auto-approval. The runtime reuses Blip's workspace tool schemas, selection tools, patch engine, transfer engine, and local/remote adapters, plus the built-in assistant's filesystem executor.
+
+Tool visibility follows the union of selected workspace capabilities. Every actual target operation and transfer adapter call checks current grants. Changes invalidate cached workspace calls, and the next Companion message rebuilds the tool catalog while preserving the conversation. Revoking access prevents subsequent operations; it does not undo completed effects or erase already-read conversation content. Remote devices additionally enforce their own sharing grants.
+
+
+The native mobile Companion overlay also has a Workspaces button. It opens a full-screen editor with safe-area spacing, search, device/category grouping, and separate 44-point Write/Execute controls. Save applies the workspace selection to the connected Hub; closing with unsaved changes requires explicit discard. Saving blocks dismissal. The destination Hub is pinned when the editor opens.
+
+Mobile workspace configuration uses the independently permissioned Companion `workspaces.list` and `workspaces.update` mesh operations. Existing grants for `run.start`, `run.cancel`, and `tool.result` continue to allow normal Companion use without automatically granting settings access. Older Hubs or phones lacking the settings grants get an explanatory message. Desktop and mobile share the same saved workspace record and server validation.

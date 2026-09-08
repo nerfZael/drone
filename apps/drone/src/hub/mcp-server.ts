@@ -3347,6 +3347,79 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     },
   );
 
+  server.registerTool(
+    'list_custom_events',
+    {
+      title: 'List custom events',
+      description:
+        'Discover shared Hub custom event names and descriptions. Search matches words in names and descriptions, tolerating case and separators; it does not equate synonyms. Catalog entries are created by subscribing or emitting, even before the first emission. Names and descriptions are Hub-wide metadata; event payloads are only delivered to subscribers with read access to the source drone. Use nextCursor as after to paginate.',
+      inputSchema: {
+        query: z.string().max(200).optional(),
+        after: z.string().max(128).optional(),
+        limit: z.number().int().min(1).max(100).optional(),
+      },
+    },
+    async (args) => {
+      subscriptionSubscriber(context);
+      const params = new URLSearchParams();
+      if (args.query !== undefined) params.set('query', args.query);
+      if (args.after !== undefined) params.set('after', args.after);
+      if (args.limit !== undefined) params.set('limit', String(args.limit));
+      return toolResult(await requestJson(`/api/custom-events?${params}`, { method: 'GET' }));
+    },
+  );
+
+  server.registerTool(
+    'subscribe_to_custom_events',
+    {
+      title: 'Subscribe to custom events',
+      description:
+        'Durably resume this conversation when a named custom event is emitted. Names normalize to lowercase snake_case (Production Deployed, production-deployed, and productionDeployed all become production_deployed). Creates a catalog entry if needed. Only future emissions are delivered; there is no replay. Optional source drone/chat IDs restrict publishers; read access to each source drone is checked at delivery. Repeating this call replaces the intent and source filters for this conversation/name. The first nonempty description becomes shared catalog metadata. Delivery uses the global or custom.emitted queued/ASAP setting, batching, retries, and run limits. Manage the subscription with the existing list_resource_subscriptions, get_resource_subscription, update_resource_subscription, and cancel_resource_subscription tools.',
+      inputSchema: {
+        name: z.string().min(1).max(512),
+        description: z.string().max(2_000).optional(),
+        intent: z.string().max(2_000).optional(),
+        sourceDroneId: z.string().min(1).max(200).optional(),
+        sourceChatId: z.string().min(1).max(200).optional(),
+      },
+    },
+    async (args) => {
+      const subscriber = subscriptionSubscriber(context);
+      if (args.sourceDroneId)
+        authorizeDroneHubMcpTool(context, 'read_chat', { drone: args.sourceDroneId });
+      if (args.sourceChatId) await authorizeChatSubscriptionResource(context, args.sourceChatId);
+      const response = await requestJson('/api/resource-subscriptions/custom', {
+        method: 'POST',
+        body: JSON.stringify({ ...args, subscriber }),
+      });
+      return toolResult({ ...response, subscription: mcpSubscription(response?.subscription) });
+    },
+  );
+
+  server.registerTool(
+    'emit_custom_event',
+    {
+      title: 'Emit custom event',
+      description:
+        'Publish a named custom event with JSON data (at most 16000 bytes). Names normalize identically to subscribe_to_custom_events. Creates a catalog entry if needed; the first nonempty description becomes shared Hub metadata. DroneHub supplies the authenticated source chat, event ID, and timestamp. Subscribers receive data through the durable event system, subject to source read access. Returns after recording and scheduling delivery, not after subscriber work completes. An optional idempotencyKey deduplicates retries for this emitting conversation and normalized name while the event is retained; reusing it with different data fails. Limited to 1000 new emissions per conversation per hour.',
+      inputSchema: {
+        name: z.string().min(1).max(512),
+        description: z.string().max(2_000).optional(),
+        data: z.record(z.string(), z.unknown()).optional(),
+        idempotencyKey: z.string().min(1).max(200).optional(),
+      },
+    },
+    async (args) => {
+      const source = subscriptionSubscriber(context);
+      return toolResult(
+        await requestJson('/api/custom-events', {
+          method: 'POST',
+          body: JSON.stringify({ ...args, source }),
+        }),
+      );
+    },
+  );
+
   const resourceEventSchema = z.enum(MCP_RESOURCE_SUBSCRIPTION_EVENTS);
   server.registerTool(
     'subscribe_to_resource_events',
@@ -3461,7 +3534,10 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
         'Change the events or intent for a resource subscription owned by this conversation.',
       inputSchema: {
         subscriptionId: z.string(),
-        events: z.array(resourceEventSchema).min(1).optional(),
+        events: z
+          .array(z.enum([...MCP_RESOURCE_SUBSCRIPTION_EVENTS, 'custom.emitted']))
+          .min(1)
+          .optional(),
         intent: z.string().optional(),
       },
     },
@@ -3654,6 +3730,7 @@ const READ_ONLY_MCP_TOOLS = new Set([
   'capture_whiteboard',
   'list_chats',
   'get_chat_tree',
+  'list_custom_events',
   'list_resource_subscriptions',
   'get_resource_subscription',
   'read_chat',

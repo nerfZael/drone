@@ -10,6 +10,7 @@ export const RESOURCE_SUBSCRIPTION_EVENTS = [
   'change_request.closed',
   'cron.triggered',
   'question_request.resolved',
+  'custom.emitted',
 ] as const;
 
 export type ResourceSubscriptionEventType = (typeof RESOURCE_SUBSCRIPTION_EVENTS)[number];
@@ -20,7 +21,8 @@ export type ResourceSubscriptionType =
   | 'pull_request'
   | 'change_request'
   | 'cron'
-  | 'question_request';
+  | 'question_request'
+  | 'custom_event';
 export type ResourceSubscriptionStatus = 'active' | 'completed' | 'cancelled' | 'paused';
 export const RESOURCE_SUBSCRIPTION_PAUSE_REASONS = [
   'subscriber_chat_archived',

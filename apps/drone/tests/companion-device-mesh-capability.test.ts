@@ -242,3 +242,30 @@ describe('Companion device mesh capability', () => {
     await capability.invoke('run.cancel', { runId: 'conversation-1' }, context());
   });
 });
+
+test('mobile workspace operations use the same catalog and revision-checked save as desktop', async () => {
+  const calls: unknown[] = [];
+  const catalog = { revision: 'current', access: { targets: [], defaultTargetId: null }, defaults: { targets: [], defaultTargetId: null }, workspaces: [], devices: [] };
+  const capability = createCompanionCapability({} as any, async () => {}, {
+    catalog: async (deviceId) => { calls.push(['list', deviceId]); return catalog; },
+    save: async (access, revision) => {
+      calls.push(['save', access, revision]);
+      if (revision !== 'current') throw new Error('Workspace access changed elsewhere');
+      return catalog;
+    },
+  });
+  expect(capability.descriptor.operations).toContain('workspaces.list');
+  expect(capability.descriptor.operations).toContain('workspaces.update');
+  expect(await capability.invoke('workspaces.list', { deviceId: 'remote' }, context())).toEqual(catalog);
+  expect(await capability.invoke('workspaces.update', { access: catalog.access, revision: 'current' }, context())).toEqual(catalog);
+  await expect(capability.invoke('workspaces.update', { access: catalog.access, revision: 'stale' }, context())).rejects.toThrow('changed elsewhere');
+  await expect(capability.invoke('workspaces.update', { access: catalog.access }, context())).rejects.toThrow('revision');
+  expect(calls.slice(0, 2)).toEqual([['list', 'remote'], ['save', catalog.access, 'current']]);
+});
+
+test('existing Companion run grants do not authorize workspace settings', async () => {
+  const { COMPANION_CAPABILITY, COMPANION_RUN_OPERATIONS, COMPANION_WORKSPACE_OPERATIONS, isGranted } = await import('@drone/device-protocol');
+  const grants = [{ capability: COMPANION_CAPABILITY.id, version: 1, operations: [...COMPANION_RUN_OPERATIONS] }];
+  expect(COMPANION_RUN_OPERATIONS.every((operation) => isGranted(grants, 'companion', 1, operation))).toBe(true);
+  expect(COMPANION_WORKSPACE_OPERATIONS.some((operation) => isGranted(grants, 'companion', 1, operation))).toBe(false);
+});

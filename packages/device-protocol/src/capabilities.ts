@@ -97,10 +97,13 @@ export const PROVIDER_CREDENTIALS_CAPABILITY: CapabilityDescriptor = {
   ],
 };
 
+export const COMPANION_RUN_OPERATIONS = ['run.start', 'run.cancel', 'tool.result'] as const;
+export const COMPANION_WORKSPACE_OPERATIONS = ['workspaces.list', 'workspaces.update'] as const;
+
 export const COMPANION_CAPABILITY: CapabilityDescriptor = {
   id: 'companion',
   version: 1,
-  operations: ['run.start', 'run.cancel', 'tool.result'],
+  operations: [...COMPANION_RUN_OPERATIONS, ...COMPANION_WORKSPACE_OPERATIONS],
 };
 
 export function isGranted(

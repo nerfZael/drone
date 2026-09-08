@@ -9,6 +9,7 @@ import { formatWorkingDuration } from '../chat/WorkingElapsedStatus';
 import { ChatMessageBody } from '../chat/ChatMessageBody';
 import { formatChatVoiceDuration } from '../chat/use-chat-voice-recorder';
 import { useCompanion } from './CompanionContext';
+import { CompanionWorkspacePicker } from './CompanionWorkspacePicker';
 import { CompanionPromptEditor } from './CompanionPromptEditor';
 import { CompanionProposalCard } from './CompanionProposalCard';
 import { CompanionProposalHistory } from './CompanionProposalHistory';
@@ -108,8 +109,10 @@ export function CompanionOverlay() {
   const workspace = useCompanionWorkspace();
   const [expanded, setExpanded] = React.useState(false);
   const [transcriptExpanded, setTranscriptExpanded] = React.useState(false);
+  const [workspacePickerOpen, setWorkspacePickerOpen] = React.useState(false);
   const [promptEditorOpen, setPromptEditorOpen] = React.useState(false);
   const [historyOpen, setHistoryOpen] = React.useState(false);
+  const panelOpen = promptEditorOpen || workspacePickerOpen;
   const [, tick] = React.useState(0);
   React.useEffect(() => {
     if (companion?.status !== 'working') return;
@@ -126,7 +129,7 @@ export function CompanionOverlay() {
   React.useEffect(() => {
     if (companion?.proposalHistory.length === 0) setHistoryOpen(false);
   }, [companion?.proposalHistory.length]);
-  if (!companion || (companion.status === 'idle' && !promptEditorOpen)) return null;
+  if (!companion || (companion.status === 'idle' && !panelOpen)) return null;
   const active = companion.status === 'working';
   const duration = companion.startedAt
     ? Math.max(0, (companion.endedAt ?? Date.now()) - companion.startedAt)
@@ -142,11 +145,11 @@ export function CompanionOverlay() {
   const latestProposalExecutionFailed = latestProposalExecution?.ok === false;
   return (
     <div style={recorderHeight > 0 ? {
-      zIndex: promptEditorOpen ? 100 : 80,
+      zIndex: panelOpen ? 100 : 80,
       bottom: recorderHeight + 32,
       maxHeight: `calc(100dvh - ${recorderHeight + 48}px)`,
       overflowY: 'auto',
-    } : { zIndex: promptEditorOpen ? 100 : 80 }} className="fixed bottom-4 right-4 z-[80] flex max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] flex-col items-end gap-3 min-[860px]:w-auto min-[860px]:flex-row">
+    } : { zIndex: panelOpen ? 100 : 80 }} className="fixed bottom-4 right-4 z-[80] flex max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] flex-col items-end gap-3 min-[860px]:w-auto min-[860px]:flex-row">
       {historyOpen ? (
         <CompanionProposalHistory
           entries={companion.proposalHistory}
@@ -173,7 +176,8 @@ export function CompanionOverlay() {
           onDiscard={companion.discardProposal}
         />
       ) : null}
-      <div className={`flex min-h-0 w-full flex-col gap-3 ${promptEditorOpen ? 'min-[860px]:w-[34rem]' : 'min-[860px]:w-[28rem]'}`}>
+      <div className={`flex min-h-0 w-full flex-col gap-3 ${panelOpen ? 'min-[860px]:w-[34rem]' : 'min-[860px]:w-[28rem]'}`}>
+      {workspacePickerOpen ? <CompanionWorkspacePicker onClose={() => setWorkspacePickerOpen(false)} /> : null}
       {promptEditorOpen ? <CompanionPromptEditor onClose={() => setPromptEditorOpen(false)} /> : null}
       <aside
         className="flex max-h-[calc(100vh-2rem)] w-full flex-col overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--panel)] shadow-2xl min-[860px]:w-[28rem] min-[860px]:self-end"
@@ -310,6 +314,16 @@ export function CompanionOverlay() {
                 </span>
               ) : null}
             </span>
+          </CompanionHeaderButton>
+          <CompanionHeaderButton
+            label="Companion workspaces"
+            expanded={workspacePickerOpen}
+            controls="companion-workspace-picker"
+            onClick={() => setWorkspacePickerOpen(true)}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10H3Z" />
+            </svg>
           </CompanionHeaderButton>
           <CompanionHeaderButton
             label="Edit Companion system prompt"

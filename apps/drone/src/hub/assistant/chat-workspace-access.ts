@@ -30,51 +30,11 @@ export function createChatWorkspaceAccessService(
       mesh.legacyWorkspaceAccessTargets(threadId),
     ]);
     const { thread } = state;
-    const droneOptions: ChatWorkspaceOption[] = state.drones.map((drone) => ({
-      id: `drone:${drone.id}`,
-      kind: 'drone',
-      droneId: drone.id,
-      deviceId: directory.self.id,
-      deviceName: directory.self.name,
-      name: drone.name || drone.id,
-      path: drone.repoPath,
-      runtime: drone.runtime,
-      status: drone.status,
-      read: true,
-      write: true,
-      execute: drone.runtime === 'container',
-    }));
-    const hostOptions: ChatWorkspaceOption[] = state.hostWorkspaces.map(
-      ({ droneName, ...workspace }) => {
-        // A drone's private workspace lists as the drone itself. Shared folders
-        // name the host drones working in them so the picker can show who is there.
-        const hostDrones = droneName
-          ? []
-          : state.drones
-              .filter(
-                (drone) =>
-                  drone.runtime === 'host' &&
-                  hostWorkspaceId(hostWorkspaceRoot(drone)) === workspace.id,
-              )
-              .map((drone) => drone.name || drone.id);
-        return {
-          ...workspace,
-          kind: 'host',
-          deviceId: directory.self.id,
-          deviceName: directory.self.name,
-          ...(droneName ? { runtime: 'host' } : {}),
-          ...(hostDrones.length > 0
-            ? {
-                status: `Host drone${hostDrones.length === 1 ? '' : 's'}: ${hostDrones.join(', ')}`,
-              }
-            : {}),
-          read: true,
-          write: true,
-          execute: false,
-        };
-      },
-    );
-    const local = [...hostOptions, ...droneOptions.filter((target) => target.runtime !== 'host')];
+    const {
+      workspaces: local,
+      droneOptions,
+      hostOptions,
+    } = localWorkspaceOptions(state, directory.self);
     // Old selections referred to drones even when several shared exactly the same host folder.
     // Merge their permissions, and preserve the default's underlying directory.
     const normalize = (access: ChatWorkspaceAccess): ChatWorkspaceAccess => {
@@ -197,4 +157,64 @@ export function createChatWorkspaceAccessService(
     };
   }
   return { catalog, save };
+}
+
+/** Canonical local folders and container workspaces, shared by chat and Companion pickers. */
+export function localWorkspaceOptions(
+  state: Awaited<ReturnType<HubAssistantService['workspaceInventory']>>,
+  device: { id: string; name: string },
+): {
+  workspaces: ChatWorkspaceOption[];
+  droneOptions: ChatWorkspaceOption[];
+  hostOptions: ChatWorkspaceOption[];
+} {
+  const droneOptions: ChatWorkspaceOption[] = state.drones.map((drone) => ({
+    id: `drone:${drone.id}`,
+    kind: 'drone',
+    droneId: drone.id,
+    deviceId: device.id,
+    deviceName: device.name,
+    name: drone.name || drone.id,
+    path: drone.repoPath,
+    runtime: drone.runtime,
+    status: drone.status,
+    read: true,
+    write: true,
+    execute: drone.runtime === 'container',
+  }));
+  const hostOptions: ChatWorkspaceOption[] = state.hostWorkspaces.map(
+    ({ droneName, ...workspace }) => {
+      // A drone's private workspace lists as the drone itself. Shared folders
+      // name the host drones working in them so the picker can show who is there.
+      const hostDrones = droneName
+        ? []
+        : state.drones
+            .filter(
+              (drone) =>
+                drone.runtime === 'host' &&
+                hostWorkspaceId(hostWorkspaceRoot(drone)) === workspace.id,
+            )
+            .map((drone) => drone.name || drone.id);
+      return {
+        ...workspace,
+        kind: 'host',
+        deviceId: device.id,
+        deviceName: device.name,
+        ...(droneName ? { runtime: 'host' } : {}),
+        ...(hostDrones.length > 0
+          ? {
+              status: `Host drone${hostDrones.length === 1 ? '' : 's'}: ${hostDrones.join(', ')}`,
+            }
+          : {}),
+        read: true,
+        write: true,
+        execute: false,
+      };
+    },
+  );
+  return {
+    workspaces: [...hostOptions, ...droneOptions.filter((target) => target.runtime !== 'host')],
+    droneOptions,
+    hostOptions,
+  };
 }

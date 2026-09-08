@@ -242,6 +242,7 @@ export function eventNotificationResourceTypeLabel(resourceTypeRaw: unknown): st
   if (resourceType === 'chat') return 'Chat';
   if (resourceType === 'cron') return 'Schedule';
   if (resourceType === 'question_request') return 'Questions';
+  if (resourceType === 'custom_event') return 'Custom event';
   return resourceType.replace(/_/g, ' ') || 'Resource';
 }
 
@@ -259,6 +260,7 @@ export function eventNotificationEventLabel(eventTypeRaw: unknown): string {
     'change_request.closed': 'Change request closed',
     'cron.triggered': 'Scheduled run',
     'question_request.resolved': 'Question responses',
+    'custom.emitted': 'Custom event emitted',
   };
   return (
     labels[eventType] ||

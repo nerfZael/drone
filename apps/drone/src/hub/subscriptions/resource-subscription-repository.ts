@@ -1,3 +1,8 @@
+import {
+  customEventMatchesSource,
+  customEventSearchText,
+  type CustomEventInfo,
+} from './custom-events';
 import { PROMPT_QUEUE_MIGRATIONS } from '../../host/prompt-queue-repository';
 import crypto from 'node:crypto';
 import { resourceSubscriptionDeliveryMode } from './resource-subscription-delivery';
@@ -198,6 +203,24 @@ export const RESOURCE_SUBSCRIPTION_MIGRATIONS: readonly HubDatabaseMigration[] =
           ON resource_subscriptions (next_event_at, id)
           WHERE status = 'active' AND provider = 'drone-hub'
             AND resource_type = 'cron' AND next_event_at IS NOT NULL;
+      `);
+    },
+  },
+  {
+    version: 4,
+    name: 'custom event catalog',
+    migrate(connection) {
+      connection.exec(`
+        CREATE TABLE custom_event_catalog (
+          name TEXT NOT NULL PRIMARY KEY,
+          description TEXT NOT NULL,
+          search_text TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          last_emitted_at TEXT
+        );
+        CREATE INDEX idx_custom_events_source_time
+          ON resource_events (json_extract(provider_content_json, '$.source.chatId'), created_at)
+          WHERE resource_type = 'custom_event' AND provider = 'drone-hub';
       `);
     },
   },
@@ -415,6 +438,107 @@ export class ResourceSubscriptionRepository {
         )
         .all(now.toISOString()) as SubscriptionRow[];
       return rows.map(subscriptionFromRow).filter(isPresent);
+    });
+  }
+
+  listCustomEvents(input: { query?: string; after?: string; limit: number }): CustomEventInfo[] {
+    const words = customEventSearchText(input.query ?? '')
+      .split(' ')
+      .filter(Boolean);
+    return this.database.read((connection) => {
+      const rows = connection
+        .prepare(
+          `
+        SELECT * FROM custom_event_catalog
+        WHERE name > ? ${words.map(() => 'AND instr(search_text, ?) > 0').join(' ')}
+        ORDER BY name LIMIT ?
+      `,
+        )
+        .all(input.after ?? '', ...words, input.limit) as Array<{
+        name: string;
+        description: string;
+        created_at: string;
+        last_emitted_at: string | null;
+      }>;
+      return rows.map((row) => ({
+        name: row.name,
+        description: row.description,
+        createdAt: row.created_at,
+        lastEmittedAt: row.last_emitted_at,
+      }));
+    });
+  }
+
+  private registerCustomEvent(
+    connection: HubDatabaseConnection,
+    name: string,
+    description: string,
+  ): void {
+    // Names/descriptions are shared Hub catalog metadata. The first nonempty description wins.
+    connection
+      .prepare(
+        `
+      INSERT INTO custom_event_catalog (name, description, search_text, created_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT (name) DO UPDATE SET description = CASE
+        WHEN custom_event_catalog.description = '' THEN excluded.description
+        ELSE custom_event_catalog.description END,
+        search_text = CASE WHEN custom_event_catalog.description = '' THEN excluded.search_text
+        ELSE custom_event_catalog.search_text END
+    `,
+      )
+      .run(
+        name,
+        description,
+        customEventSearchText(`${name} ${description}`),
+        new Date().toISOString(),
+      );
+  }
+
+  async subscribeCustomEvent(input: ResourceSubscriptionUpsertInput, description: string) {
+    return await this.database.writeTransaction('subscribe to custom event', (connection) => {
+      const result = this.upsertInTransaction(connection, input);
+      this.registerCustomEvent(connection, input.resourceId, description);
+      return result;
+    });
+  }
+
+  async emitCustomEvent(
+    event: ResourceEvent,
+    description: string,
+  ): Promise<{ emitted: boolean; event: ResourceEvent }> {
+    return await this.database.writeTransaction('emit custom event', (connection) => {
+      const existing = connection
+        .prepare('SELECT * FROM resource_events WHERE provider_event_id = ?')
+        .get(event.providerEventId) as EventRow | undefined;
+      if (existing) {
+        const previous = eventFromRow(existing);
+        if (
+          JSON.stringify(previous.providerContent.data) !==
+          JSON.stringify(event.providerContent.data)
+        ) {
+          throw new Error('idempotencyKey was already used with different custom event data');
+        }
+        return { emitted: false, event: previous };
+      }
+      const source = event.providerContent.source as ResourceSubscriptionSubscriber;
+      const count = connection
+        .prepare(
+          `
+        SELECT COUNT(*) AS count FROM resource_events
+        WHERE resource_type = 'custom_event' AND provider = 'drone-hub'
+          AND json_extract(provider_content_json, '$.source.chatId') = ? AND created_at >= ?
+      `,
+        )
+        .get(source.chatId, new Date(Date.now() - 60 * 60_000).toISOString()) as { count: number };
+      if (count.count >= 1000)
+        throw new Error('custom event emission limit reached (1000 per conversation per hour)');
+      this.registerCustomEvent(connection, event.resourceId, description);
+      this.appendEventInTransaction(connection, event);
+      connection
+        .prepare('UPDATE custom_event_catalog SET last_emitted_at = ? WHERE name = ?')
+        .run(event.occurredAt, event.resourceId);
+      return { emitted: true, event };
     });
   }
 
@@ -812,6 +936,11 @@ export class ResourceSubscriptionRepository {
     for (const row of subscriptions) {
       if (!parseEvents(row.events_json).includes(event.eventType)) continue;
       if (isChangeRequestEventAtOrBeforeBaseline(row, event)) continue;
+      if (
+        event.resourceType === 'custom_event' &&
+        !customEventMatchesSource(parseObject(row.resource_config_json), event)
+      )
+        continue;
       insertDelivery.run(crypto.randomUUID(), row.id, event.id, now, now, now, now);
     }
 

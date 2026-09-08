@@ -29,6 +29,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import ArrowUp from 'lucide-react-native/icons/arrow-up';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
+import Folder from 'lucide-react-native/icons/folder';
 import Mic from 'lucide-react-native/icons/mic';
 import Square from 'lucide-react-native/icons/square';
 import X from 'lucide-react-native/icons/x';
@@ -38,6 +39,7 @@ import { ThemedTextInput } from '../components/ThemedTextInput';
 import { colors } from '../theme';
 import { NativeMarkdown } from './NativeMarkdown';
 import { formatMobileVoiceDuration } from './mobile-voice-transcription-model';
+import { MobileCompanionWorkspaceModal } from './MobileCompanionWorkspaceModal';
 import { useMobileCompanion } from './MobileCompanionContext';
 
 type CompanionStatus = ReturnType<typeof useMobileCompanion>['status'];
@@ -67,6 +69,7 @@ export function MobileCompanionOverlay() {
   const companion = useMobileCompanion();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
+  const [workspaceDeviceId, setWorkspaceDeviceId] = React.useState<string | null>(null);
   const [draft, setDraft] = React.useState('');
   const [submitError, setSubmitError] = React.useState('');
   const [submitting, setSubmitting] = React.useState(false);
@@ -156,7 +159,7 @@ export function MobileCompanionOverlay() {
     transform: [{ translateY: translateY.value }],
   }));
 
-  if (!visible) return null;
+  if (!visible && !workspaceDeviceId) return null;
 
   const status = companion.status;
   const active = status === 'working';
@@ -207,6 +210,7 @@ export function MobileCompanionOverlay() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={styles.layer}
     >
+      {workspaceDeviceId ? <MobileCompanionWorkspaceModal deviceId={workspaceDeviceId} onClose={() => setWorkspaceDeviceId(null)} /> : null}
       <Animated.View
         onLayout={(event) => {
           sheetHeight.value = event.nativeEvent.layout.height;
@@ -229,6 +233,16 @@ export function MobileCompanionOverlay() {
               >
                 {statusLabel(status, companion.durationMillis, elapsed)}
               </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Companion workspaces"
+                accessibilityState={{ disabled: !companion.workspaceDeviceId }}
+                disabled={!companion.workspaceDeviceId}
+                onPress={() => { Keyboard.dismiss(); setWorkspaceDeviceId(companion.workspaceDeviceId); }}
+                style={({ pressed }) => [styles.workspaceButton, pressed && styles.ghostPressed]}
+              >
+                <Folder color={colors.muted} size={19} strokeWidth={2} />
+              </Pressable>
               {active ? <ActivityIndicator color={colors.accent} size="small" /> : null}
               <Pressable
                 accessibilityRole="button"
@@ -642,6 +656,7 @@ const styles = StyleSheet.create({
   title: { color: colors.text, fontSize: 13, fontWeight: '700' },
   status: { minWidth: 0, flex: 1, color: colors.muted, fontSize: 11 },
   statusError: { color: colors.danger },
+  workspaceButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 8 },
   closeButton: {
     width: 34,
     height: 34,

@@ -155,9 +155,7 @@ describe('chat resource subscription presentation', () => {
     expect(chatSubscriptionSummary([onlyDefaultChat!])).toBe(
       'Chat idle, Chat failed · Release helper',
     );
-    expect(chatSubscriptionResourceLabel(namedChat!)).toBe(
-      'Chat · Release helper / review',
-    );
+    expect(chatSubscriptionResourceLabel(namedChat!)).toBe('Chat · Release helper / review');
     expect(
       chatSubscriptionDisplayIntent(
         'Targets: 48ae4ad8-6dfe-4e5d-946a-4cd9c973293a/default, cecb8d75-60e3-412a-b16f-5f5a10a461cf/review',
@@ -278,4 +276,23 @@ describe('chat resource subscription presentation', () => {
     expect(chatHtml).toContain('aria-label="Open chat 02 Character Models in drone Workstream 2"');
     expect(chatHtml).toContain('aria-label="Open drone Workstream 2"');
   });
+});
+
+test('custom subscriptions retain their type and display the event name', () => {
+  const subscriptions = normalizeChatResourceSubscriptions([
+    {
+      id: 'custom-subscription',
+      provider: 'drone-hub',
+      resourceType: 'custom_event',
+      resourceId: 'production_deployed',
+      events: ['custom.emitted'],
+      intent: 'Audit the release',
+      status: 'active',
+    },
+  ]);
+  expect(subscriptions[0]!.resourceType).toBe('custom_event');
+  expect(chatSubscriptionResourceLabel(subscriptions[0]!)).toBe(
+    'Custom event · production_deployed',
+  );
+  expect(chatSubscriptionSummary(subscriptions)).toBe('Custom event emitted · production_deployed');
 });

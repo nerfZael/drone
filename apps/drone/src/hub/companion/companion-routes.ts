@@ -1,3 +1,4 @@
+import type { CompanionWorkspaceService } from './companion-workspaces';
 import type { HubRouter } from '../hub-router';
 import { companionSettingsResponse, writeCompanionSettings } from './companion-config';
 import type { CompanionTelemetryService } from './companion-telemetry';
@@ -5,7 +6,20 @@ import type { CompanionTelemetryService } from './companion-telemetry';
 export function registerCompanionRoutes(
   router: HubRouter,
   telemetry?: CompanionTelemetryService,
+  workspaces?: CompanionWorkspaceService,
 ): void {
+  if (workspaces) {
+    router.get('/api/companion/workspaces', async ({ url, json, fail }) => {
+      try { json(200, await workspaces.catalog(url.searchParams.get('deviceId') || undefined)); }
+      catch (error) { fail(400, error instanceof Error ? error.message : String(error)); }
+    });
+    router.post('/api/companion/workspaces', async ({ readJson, json, fail }) => {
+      try {
+        const body = await readJson<{ access: unknown; revision: string }>();
+        json(200, await workspaces.save(body.access, body.revision));
+      } catch (error) { fail(400, error instanceof Error ? error.message : String(error)); }
+    });
+  }
   router.get('/api/settings/companion', async ({ json }) => {
     json(200, await companionSettingsResponse());
   });

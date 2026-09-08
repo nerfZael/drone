@@ -256,3 +256,27 @@ test('bundles keep user instructions separate and escape user/provider XML', () 
   expect(notification.events).toHaveLength(1);
   expect(eventNotificationCopyText(notification)).toContain(userMessage);
 });
+
+test('presents custom events with their canonical names and preserves structured source data', () => {
+  const prompt = renderEventNotificationPrompt({
+    events: [
+      {
+        provider: 'drone-hub',
+        resourceType: 'custom_event',
+        resourceId: 'production_deployed',
+        eventType: 'custom.emitted',
+        summary: 'Custom event production_deployed was emitted.',
+        providerContent: { source: { chatId: 'deploy-chat' }, data: { deploymentId: 'deploy-1' } },
+      },
+    ],
+  });
+  const parsed = parseEventNotificationPrompt(prompt)!;
+  expect(eventNotificationCollapsedSummary(parsed)).toEqual({
+    title: 'Custom event emitted',
+    subtitle: 'Custom event · production_deployed',
+  });
+  expect(JSON.parse(parsed.events[0]!.providerContentText)).toEqual({
+    source: { chatId: 'deploy-chat' },
+    data: { deploymentId: 'deploy-1' },
+  });
+});

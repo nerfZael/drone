@@ -1,4 +1,5 @@
 import React from 'react';
+import { toggleCompanionWorkspace } from '@drone/assistant-chat';
 import {
   ActivityIndicator,
   Pressable,
@@ -31,6 +32,9 @@ export type WorkspaceAccessEditorProps = {
   load(deviceId?: string, signal?: AbortSignal): Promise<ChatWorkspaceCatalog>;
   save(access: ChatWorkspaceAccess, revision: string): Promise<unknown>;
   disabled?: boolean;
+  readRequired?: boolean;
+  description?: string;
+  onSavingChange?(saving: boolean): void;
   /** Device running the chat; its drone list changes refresh the local workspaces. */
   hubDeviceId?: string;
   onRequestClose(): void;
@@ -84,6 +88,10 @@ export function WorkspaceAccessEditor(props: WorkspaceAccessEditorProps) {
   const dirtyRef = React.useRef(dirty);
   dirtyRef.current = dirty;
   const disabled = props.disabled || saving || initialLoading;
+
+  React.useEffect(() => {
+    callbacks.current.onSavingChange?.(saving);
+  }, [saving]);
 
   React.useEffect(() => {
     callbacks.current.onDirtyChange(dirty);
@@ -252,6 +260,7 @@ export function WorkspaceAccessEditor(props: WorkspaceAccessEditorProps) {
 
   async function apply() {
     if (!draft || !catalog || disabled) return;
+    callbacks.current.onSavingChange?.(true);
     setSaving(true);
     setError(null);
     try {
@@ -263,9 +272,17 @@ export function WorkspaceAccessEditor(props: WorkspaceAccessEditorProps) {
     } catch (saveError: any) {
       if (alive.current) setError(saveError?.message ?? String(saveError));
     } finally {
-      if (alive.current) setSaving(false);
+      if (alive.current) {
+        setSaving(false);
+        callbacks.current.onSavingChange?.(false);
+      }
     }
   }
+
+  const toggleSelection = (current: ChatWorkspaceAccess, option: ChatWorkspaceOption) =>
+    props.readRequired
+      ? toggleCompanionWorkspace(current, option)
+      : toggleWorkspace(current, option);
 
   const options = new Map<string, ChatWorkspaceOption>();
   for (const target of draft?.targets ?? []) options.set(target.id, target);
@@ -308,6 +325,7 @@ export function WorkspaceAccessEditor(props: WorkspaceAccessEditorProps) {
           />
         }
       >
+        {props.description ? <Text style={styles.description}>{props.description}</Text> : null}
         {initialLoading && !catalog ? (
           <ActivityIndicator color={colors.accent} style={styles.spinner} />
         ) : null}
@@ -385,7 +403,7 @@ export function WorkspaceAccessEditor(props: WorkspaceAccessEditorProps) {
                       entries.length > AUTO_COLLAPSE_CATEGORY_SIZE &&
                       selectedInCategory === 0;
                     const categoryOpen =
-                      Boolean(search) || categoryToggles.has(categoryKey) !== collapsedByDefault;
+                      Boolean(search) || categoryToggles.has(categoryKey) === collapsedByDefault;
                     return (
                       <View key={category}>
                         <Pressable
@@ -399,7 +417,11 @@ export function WorkspaceAccessEditor(props: WorkspaceAccessEditorProps) {
                               return next;
                             })
                           }
-                          style={({ pressed }) => [styles.categoryRow, pressed && styles.pressed]}
+                          style={({ pressed }) => [
+                            styles.categoryRow,
+                            props.readRequired && { minHeight: 44 },
+                            pressed && styles.pressed,
+                          ]}
                         >
                           <Text style={styles.category}>
                             {category} · {entries.length}
@@ -421,9 +443,15 @@ export function WorkspaceAccessEditor(props: WorkspaceAccessEditorProps) {
                               const selectable =
                                 !disabled &&
                                 (Boolean(target) ||
-                                  (available && (option.read || option.write || option.execute)));
+                                  (available &&
+                                    (props.readRequired
+                                      ? option.read
+                                      : option.read || option.write || option.execute)));
                               return (
-                                <View key={option.id} style={styles.row}>
+                                <View
+                                  key={option.id}
+                                  style={[styles.row, props.readRequired && styles.companionRow]}
+                                >
                                   <Pressable
                                     accessibilityRole="checkbox"
                                     accessibilityLabel={`${option.name}, ${optionMeta(option)}`}
@@ -434,7 +462,7 @@ export function WorkspaceAccessEditor(props: WorkspaceAccessEditorProps) {
                                     disabled={!selectable}
                                     onPress={() =>
                                       setDraft((current) =>
-                                        current ? toggleWorkspace(current, option) : current,
+                                        current ? toggleSelection(current, option) : current,
                                       )
                                     }
                                     style={({ pressed }) => [
@@ -458,12 +486,20 @@ export function WorkspaceAccessEditor(props: WorkspaceAccessEditorProps) {
                                     </View>
                                   </Pressable>
                                   {target ? (
-                                    <View style={styles.permissions}>
+                                    <View
+                                      style={[
+                                        styles.permissions,
+                                        props.readRequired && styles.companionPermissions,
+                                      ]}
+                                    >
                                       {PERMISSIONS.map((permission) => {
                                         const on = target[permission.key];
                                         const offered = available && option[permission.key];
                                         if (!on && !offered) return null;
-                                        const locked = disabled || (!on && !offered);
+                                        const locked =
+                                          disabled ||
+                                          (!on && !offered) ||
+                                          (props.readRequired && permission.key === 'read');
                                         return (
                                           <Pressable
                                             key={permission.key}
@@ -477,7 +513,7 @@ export function WorkspaceAccessEditor(props: WorkspaceAccessEditorProps) {
                                                 if (!current) return current;
                                                 const next = { ...target, [permission.key]: !on };
                                                 if (!next.read && !next.write && !next.execute)
-                                                  return toggleWorkspace(current, option);
+                                                  return toggleSelection(current, option);
                                                 return {
                                                   ...current,
                                                   targets: current.targets.map((item) =>
@@ -488,15 +524,22 @@ export function WorkspaceAccessEditor(props: WorkspaceAccessEditorProps) {
                                             }
                                             style={({ pressed }) => [
                                               styles.chip,
+                                              props.readRequired && styles.companionChip,
                                               on && styles.chipOn,
-                                              locked && styles.chipLocked,
+                                              locked &&
+                                                !(
+                                                  props.readRequired && permission.key === 'read'
+                                                ) &&
+                                                styles.chipLocked,
                                               pressed && styles.pressed,
                                             ]}
                                           >
                                             <Text
                                               style={[styles.chipText, on && styles.chipTextOn]}
                                             >
-                                              {permission.label}
+                                              {props.readRequired
+                                                ? permission.name
+                                                : permission.label}
                                             </Text>
                                           </Pressable>
                                         );
@@ -516,6 +559,7 @@ export function WorkspaceAccessEditor(props: WorkspaceAccessEditorProps) {
                                         }
                                         style={({ pressed }) => [
                                           styles.star,
+                                          props.readRequired && styles.companionStar,
                                           pressed && !isDefault && styles.pressed,
                                         ]}
                                       >
@@ -542,7 +586,9 @@ export function WorkspaceAccessEditor(props: WorkspaceAccessEditorProps) {
         })}
         {catalog && selectedCount === 0 ? (
           <Text style={styles.notice}>
-            No workspace selected. Private chat artifacts keep their existing setting.
+            {props.readRequired
+              ? 'No workspace selected.'
+              : 'No workspace selected. Private chat artifacts keep their existing setting.'}
           </Text>
         ) : null}
       </ScrollView>
@@ -562,7 +608,7 @@ export function WorkspaceAccessEditor(props: WorkspaceAccessEditorProps) {
           loading={saving}
           onPress={() => void apply()}
         >
-          Apply
+          {props.readRequired ? 'Save' : 'Apply'}
         </Button>
       </View>
     </View>
@@ -619,6 +665,17 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
     textTransform: 'uppercase',
   },
+  description: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    color: colors.muted,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  companionRow: { flexDirection: 'column', alignItems: 'stretch', paddingBottom: 8 },
+  companionPermissions: { paddingLeft: 28, gap: 8, flexWrap: 'wrap' },
+  companionChip: { width: undefined, minWidth: 60, minHeight: 44, paddingHorizontal: 12 },
+  companionStar: { width: 44, height: 44 },
   row: { flexDirection: 'row', alignItems: 'center', paddingLeft: 16, paddingRight: 10 },
   rowMain: {
     minWidth: 0,

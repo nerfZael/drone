@@ -730,7 +730,7 @@ describe('mobile sidebar presentation', () => {
     expect(shellSource).toContain("workspaceVisible={!pairingVisible && tab === 'drones'}");
     expect(workspaceTargetSource).toContain('pane: !workspaceVisible');
     expect(workspaceTargetSource).toContain('workspaceVisible && openFile.visible');
-    expect(dronesSource).toContain('visible={workspaceVisible && filePreview.visible}');
+    expect(dronesSource).toContain('visible={active && workspaceVisible}');
     expect(providerSource).toContain('!activeTarget.reachable');
     expect(providerSource).toContain('!hasOperations');
     expect(providerSource).toContain('!hasGrant');

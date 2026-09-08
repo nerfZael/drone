@@ -1,3 +1,12 @@
+import {
+  normalizeCustomEventName,
+  customEventDescription,
+  customEventSourceFilter,
+  customEventData,
+  createCustomEvent,
+  customEventMatchesSource,
+  type CustomEventSourceFilter,
+} from './custom-events';
 import { EventRunLimitError } from '../../host/event-run-budget';
 import crypto from 'node:crypto';
 import { resourceSubscriptionDeliveryMode } from './resource-subscription-delivery';
@@ -64,6 +73,7 @@ export type ResourceSubscriptionServiceDependencies = {
   authorizeDelivery?: (
     subscription: ResourceSubscription,
     subscriber: ChatResourceLocation,
+    event?: ResourceEvent,
   ) => Promise<boolean>;
   wakePromptQueue: (droneId: string, chatName: string) => void;
   resolveChangeRequest?: (requestNumber: number) => ChangeRequestSubscriptionTarget | null;
@@ -197,6 +207,9 @@ export class ResourceSubscriptionService {
     location?: ChatResourceLocation,
     resolvedChangeRequest?: ChangeRequestSubscriptionTarget,
   ): ResourceSubscription {
+    if (subscription.provider === 'drone-hub' && subscription.resourceType === 'custom_event') {
+      return { ...subscription, resourceLabel: subscription.resourceId };
+    }
     if (subscription.provider === 'drone-hub' && subscription.resourceType === 'question_request') {
       return {
         ...subscription,
@@ -313,6 +326,112 @@ export class ResourceSubscriptionService {
       maxActive: settings.maxActiveSubscriptionsPerConversation,
     });
     return { ...result, subscription: this.withResourceLabel(result.subscription) };
+  }
+
+  listCustomEvents(input: { query?: string; after?: string; limit?: number }) {
+    if (
+      input.query !== undefined &&
+      (typeof input.query !== 'string' || input.query.length > 200)
+    ) {
+      throw new Error('query must be a string of at most 200 characters');
+    }
+    if (
+      input.after !== undefined &&
+      (typeof input.after !== 'string' || input.after.length > 128)
+    ) {
+      throw new Error('after must be a catalog name');
+    }
+    const limit = input.limit ?? 50;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100)
+      throw new Error('limit must be between 1 and 100');
+    const events = this.deps.repository.listCustomEvents({ ...input, limit: limit + 1 });
+    return {
+      events: events.slice(0, limit),
+      nextCursor: events.length > limit ? events[limit - 1]!.name : null,
+    };
+  }
+
+  async subscribeToCustomEvents(
+    input: CustomEventSourceFilter & {
+      subscriber: ResourceSubscriptionSubscriber;
+      name: string;
+      description?: string;
+      intent?: string;
+    },
+  ) {
+    const subscriber = this.requireCustomEventConversation(input.subscriber);
+    const name = normalizeCustomEventName(input.name);
+    const description = customEventDescription(input.description);
+    const filter = customEventSourceFilter(input);
+    if (filter.sourceChatId) {
+      const source = this.deps.repository.resolveChatResource(filter.sourceChatId);
+      if (!source) throw new Error('unknown source chat');
+      if (filter.sourceDroneId && filter.sourceDroneId !== source.droneId) {
+        throw new Error('source chat does not belong to source drone');
+      }
+    }
+    const settings = await this.settings();
+    const result = await this.deps.repository.subscribeCustomEvent(
+      {
+        subscriber,
+        provider: 'drone-hub',
+        resourceType: 'custom_event',
+        resourceId: name,
+        resourceConfig: filter,
+        events: ['custom.emitted'],
+        intent: String(input.intent ?? '')
+          .trim()
+          .slice(0, 2_000),
+        maxActive: settings.maxActiveSubscriptionsPerConversation,
+      },
+      description,
+    );
+    return { ...result, name, subscription: this.withResourceLabel(result.subscription) };
+  }
+
+  async emitCustomEvent(input: {
+    source: ResourceSubscriptionSubscriber;
+    name: string;
+    description?: string;
+    data?: Record<string, unknown>;
+    idempotencyKey?: string;
+  }) {
+    const source = this.requireCustomEventConversation(input.source);
+    const name = normalizeCustomEventName(input.name);
+    const description = customEventDescription(input.description);
+    const data = customEventData(input.data);
+    const result = await this.deps.repository.emitCustomEvent(
+      createCustomEvent({
+        name,
+        source,
+        data,
+        idempotencyKey: input.idempotencyKey,
+      }),
+      description,
+    );
+    return {
+      emitted: result.emitted,
+      name,
+      eventId: result.event.id,
+      occurredAt: result.event.occurredAt,
+    };
+  }
+
+  private requireCustomEventConversation(
+    input: ResourceSubscriptionSubscriber,
+  ): ResourceSubscriptionSubscriber {
+    if (!input || typeof input !== 'object')
+      throw new Error('custom events require a DroneHub conversation identity');
+    const subscriber = normalizeSubscriber(input);
+    const location = this.deps.repository.resolveChatResource(subscriber.chatId);
+    if (
+      !location ||
+      location.droneId !== subscriber.droneId ||
+      location.chatName !== subscriber.chatName
+    ) {
+      throw new Error('custom events require an existing DroneHub conversation identity');
+    }
+    return subscriber;
   }
 
   async publishChangeRequest(event: ChangeRequestDomainEvent): Promise<void> {
@@ -478,7 +597,8 @@ export class ResourceSubscriptionService {
       if (subscription.provider === 'github') continue;
       if (
         subscription.resourceType === 'change_request' ||
-        subscription.resourceType === 'question_request'
+        subscription.resourceType === 'question_request' ||
+        subscription.resourceType === 'custom_event'
       )
         continue;
       if (subscription.resourceType === 'cron') {
@@ -675,15 +795,17 @@ export class ResourceSubscriptionService {
           continue;
         }
         try {
-          if (!authorizationResults.has(current.id)) {
+          const authorizationKey =
+            current.resourceType === 'custom_event' ? `${current.id}:${item.event.id}` : current.id;
+          if (!authorizationResults.has(authorizationKey)) {
             authorizationResults.set(
-              current.id,
+              authorizationKey,
               this.deps.authorizeDelivery
-                ? this.deps.authorizeDelivery(current, currentSubscriber)
+                ? this.deps.authorizeDelivery(current, currentSubscriber, item.event)
                 : Promise.resolve(true),
             );
           }
-          const authorized = await authorizationResults.get(current.id)!;
+          const authorized = await authorizationResults.get(authorizationKey)!;
           if (!authorized) {
             rejected.push({
               deliveryId: item.deliveryId,
@@ -709,7 +831,11 @@ export class ResourceSubscriptionService {
           });
           continue;
         }
-        if (!refreshed.events.includes(item.event.eventType)) {
+        if (
+          !refreshed.events.includes(item.event.eventType) ||
+          (refreshed.resourceType === 'custom_event' &&
+            !customEventMatchesSource(refreshed.resourceConfig, item.event))
+        ) {
           rejected.push({
             deliveryId: item.deliveryId,
             error: 'event is no longer selected by the subscription',

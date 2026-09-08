@@ -1,6 +1,6 @@
 import React from 'react';
 import * as Crypto from 'expo-crypto';
-import { COMPANION_CAPABILITY, isGranted } from '@drone/device-protocol';
+import { COMPANION_CAPABILITY, COMPANION_RUN_OPERATIONS, isGranted } from '@drone/device-protocol';
 import {
   COMPANION_PROPOSAL_FORMAT,
   COMPANION_PROPOSAL_PATH,
@@ -66,6 +66,7 @@ type MobileCompanionContextValue = {
   proposalDefaultRepoPath: string | null;
   proposalExecuting: boolean;
   available: boolean;
+  workspaceDeviceId: string;
   unavailableReason: string;
   toggle(): Promise<void>;
   /** Send already-transcribed text to Companion as if it had just been spoken. */
@@ -139,12 +140,12 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       )
     : undefined;
   const selfDevice = mesh.devices.find((device) => device.id === mesh.identity?.id);
-  const hasOperations = COMPANION_CAPABILITY.operations.every((operation) =>
+  const hasOperations = COMPANION_RUN_OPERATIONS.every((operation) =>
     targetCapability?.operations.includes(operation),
   );
   const hasGrant = Boolean(
     selfDevice &&
-    COMPANION_CAPABILITY.operations.every((operation) =>
+    COMPANION_RUN_OPERATIONS.every((operation) =>
       isGranted(
         selfDevice.grants,
         COMPANION_CAPABILITY.id,
@@ -514,6 +515,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       proposalDefaultRepoPath,
       proposalExecuting,
       available,
+      workspaceDeviceId: activeTargetDeviceIdRef.current || target?.targetDeviceId || '',
       unavailableReason,
       toggle,
       submitText,
@@ -524,6 +526,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       registerEditorTarget,
     }),
     [
+      target?.targetDeviceId,
       available,
       close,
       discardProposal,
