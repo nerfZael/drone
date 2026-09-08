@@ -1165,6 +1165,80 @@ describe('agent chat surface adapters', () => {
     expect(html).not.toContain('data-agent-thinking');
   });
 
+  test('active tool runs render commentary and reasoning inside the expanded details', () => {
+    const html = renderToStaticMarkup(
+      <ToolRunActivity
+        items={[
+          {
+            type: 'message',
+            key: 'progress',
+            sourceMessageIndex: 1,
+            message: {
+              role: 'assistant',
+              content: [
+                { type: 'text', text: 'Checking the worker section.' },
+                { type: 'thinking', thinking: 'Inspect the helper next.' },
+              ],
+            },
+          },
+          {
+            type: 'tool',
+            key: 'tool',
+            call: { id: 'call', name: 'read_file', args: {} },
+            result: { role: 'toolResult', toolCallId: 'call', content: 'Done' },
+          },
+        ]}
+        active
+      />,
+    );
+
+    expect(html).toContain('Working for');
+    expect(html).toContain('1 tool call');
+    expect(html).toContain('Checking the worker section.');
+    expect(html).toContain('Inspect the helper next.');
+  });
+
+  test('active tool runs present terminal connection resets as recoverable failures', () => {
+    const html = renderToStaticMarkup(
+      <ToolRunActivity
+        items={[
+          {
+            type: 'tool',
+            key: 'tool',
+            call: { id: 'call', name: 'read_file', args: {} },
+            result: { role: 'toolResult', toolCallId: 'call', content: 'Done' },
+          },
+          {
+            type: 'message',
+            key: 'failure',
+            sourceMessageIndex: 2,
+            message: {
+              role: 'assistant',
+              content: [],
+              stopReason: 'error',
+              errorMessage: 'read ECONNRESET',
+              diagnostics: [
+                {
+                  type: 'provider_transport_failure',
+                  timestamp: Date.now(),
+                  error: { message: 'read ECONNRESET', code: 'ECONNRESET' },
+                  details: { attempts: 4 },
+                },
+              ],
+            },
+          },
+        ]}
+        active
+      />,
+    );
+
+    expect(html).toContain('data-native-agent-failure="true"');
+    expect(html).toContain('Connection interrupted');
+    expect(html).toContain('Completed tool results were saved');
+    expect(html).toContain('Technical details');
+    expect(html).not.toContain('data-agent-thinking');
+  });
+
   test('active runs show thinking after their visible tools have settled', () => {
     const settledHtml = renderToStaticMarkup(
       <ToolRunActivity

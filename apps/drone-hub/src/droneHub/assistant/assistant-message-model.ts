@@ -60,6 +60,12 @@ export type AssistantRequestRun = {
   fileSummaryItemIndex: number;
 };
 
+export type AssistantRequestRunActivityPartition = {
+  activityItems: AssistantRenderItem[];
+  activityItemIndexes: number[];
+  finalResponseItemIndex: number;
+};
+
 function assistantMessageRunDurationMs(message: AssistantMessage): number | undefined {
   const details = message.details;
   if (!details || typeof details !== 'object' || Array.isArray(details)) return undefined;
@@ -138,6 +144,51 @@ export function assistantRequestRuns(items: AssistantRenderItem[]): AssistantReq
     userItemIndex = endItemIndex;
   }
   return runs;
+}
+
+/**
+ * Keep in-progress commentary, reasoning, and tools inside one request-level activity disclosure.
+ * Once the request settles, its last visible assistant response remains in the transcript as the
+ * answer while all earlier assistant messages remain part of the collapsible run history.
+ */
+export function partitionAssistantRequestRunActivity(
+  items: AssistantRenderItem[],
+  run: AssistantRequestRun,
+  active: boolean,
+): AssistantRequestRunActivityPartition {
+  let finalResponseItemIndex = -1;
+  if (!active) {
+    for (let index = run.endItemIndex; index > run.userItemIndex; index -= 1) {
+      const item = items[index];
+      if (
+        item?.type === 'message' &&
+        item.message.role === 'assistant' &&
+        (messageVisibleText(item.message).trim() ||
+          messageImageParts(item.message).length > 0 ||
+          item.message.errorMessage)
+      ) {
+        finalResponseItemIndex = index;
+        break;
+      }
+    }
+  }
+
+  const activityItems: AssistantRenderItem[] = [];
+  const activityItemIndexes: number[] = [];
+  for (let index = run.userItemIndex + 1; index <= run.endItemIndex; index += 1) {
+    const item = items[index];
+    if (
+      !item ||
+      index === finalResponseItemIndex ||
+      item.type === 'runSummary' ||
+      item.type === 'compaction'
+    ) {
+      continue;
+    }
+    activityItems.push(item);
+    activityItemIndexes.push(index);
+  }
+  return { activityItems, activityItemIndexes, finalResponseItemIndex };
 }
 
 export function assistantTranscriptHasErrorMessage(

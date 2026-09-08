@@ -96,6 +96,7 @@ import {
   messageText,
   messageVisibleText,
   normalizeAssistantWaitTargets,
+  partitionAssistantRequestRunActivity,
   renderItemsFromMessages,
   summarizeWaitTargets,
   toolActivityTitle,
@@ -2105,20 +2106,24 @@ export function AssistantDock({
     }
     if (lastRunSummaryItemIndex >= 0) break;
   }
+  const requestRunPresentations = requestRuns.map((run) => {
+    const active = running && run.userItemIndex === latestUserItemIndex;
+    return {
+      run,
+      active,
+      partition: partitionAssistantRequestRunActivity(visibleItems, run, active),
+    };
+  });
   const requestRunByFirstToolItemIndex = new Map(
-    requestRuns
-      .filter((run) => run.firstToolItemIndex >= 0)
-      .map((run) => [run.firstToolItemIndex, run] as const),
+    requestRunPresentations
+      .filter(({ run }) => run.firstToolItemIndex >= 0)
+      .map((presentation) => [presentation.run.firstToolItemIndex, presentation] as const),
   );
-  const requestRunToolItemIndexes = new Set(
-    requestRuns.flatMap((run) => {
-      const indexes: number[] = [];
-      for (let index = run.userItemIndex + 1; index <= run.endItemIndex; index += 1) {
-        const candidate = visibleItems[index];
-        if (candidate?.type === 'tool' || candidate?.type === 'toolGroup') indexes.push(index);
-      }
-      return indexes;
-    }),
+  const requestRunFirstToolItemIndexes = new Set(requestRunByFirstToolItemIndex.keys());
+  const requestRunActivityItemIndexes = new Set(
+    requestRunPresentations.flatMap(({ run, partition }) =>
+      run.firstToolItemIndex >= 0 ? partition.activityItemIndexes : [],
+    ),
   );
   const visibleRunSummaryItemIndexes = new Set(
     requestRuns.map((run) => run.fileSummaryItemIndex).filter((index) => index >= 0),
@@ -2126,6 +2131,12 @@ export function AssistantDock({
 
   for (let itemIndex = 0; itemIndex < visibleItems.length; itemIndex += 1) {
     const item = visibleItems[itemIndex]!;
+    if (
+      requestRunActivityItemIndexes.has(itemIndex) &&
+      !requestRunFirstToolItemIndexes.has(itemIndex)
+    ) {
+      continue;
+    }
     if (item.type === 'compaction') {
       nativeTranscriptItems.push({
         key: item.key,
@@ -2239,9 +2250,9 @@ export function AssistantDock({
       continue;
     }
 
-    if (!requestRunToolItemIndexes.has(itemIndex)) continue;
-    const requestRun = requestRunByFirstToolItemIndex.get(itemIndex);
-    if (!requestRun) continue;
+    const requestRunPresentation = requestRunByFirstToolItemIndex.get(itemIndex);
+    if (!requestRunPresentation) continue;
+    const { run: requestRun, active: runActive, partition } = requestRunPresentation;
     const runItems = requestRun.toolItems;
     const runStartIndex = requestRun.firstToolItemIndex;
     const userItem = visibleItems[requestRun.userItemIndex];
@@ -2268,7 +2279,6 @@ export function AssistantDock({
         : callStartedAt.length > 0
           ? Math.max(...callStartedAt)
           : undefined);
-    const runActive = running && requestRun.userItemIndex === latestUserItemIndex;
     const runAwaitingApproval =
       requestRun.userItemIndex === latestUserItemIndex && activePendingApprovals.length > 0;
     const runKey = `tool-run:${userItem?.key ?? runStartIndex}`;
@@ -2278,7 +2288,7 @@ export function AssistantDock({
       content: (
         <ToolRunActivity
           key={runKey}
-          items={runItems}
+          items={partition.activityItems}
           active={runActive}
           startedAt={startedAt}
           endedAt={endedAt}
@@ -2390,6 +2400,7 @@ export function AssistantDock({
     });
   }
   const transcriptError = error ?? blipSession.runError ?? blipSession.historyError;
+  const transcriptErrorIsRunFailure = !error && Boolean(blipSession.runError);
   const transcriptErrorAlreadyRendered = assistantTranscriptHasErrorMessage(
     visibleMessages,
     transcriptError,
@@ -2398,7 +2409,23 @@ export function AssistantDock({
     nativeTranscriptItems.push({
       key: 'native-transcript-error',
       kind: 'status',
-      content: (
+      content: transcriptErrorIsRunFailure ? (
+        <NativeAgentFailureCard
+          message={{
+            role: 'assistant',
+            content: [],
+            errorMessage: transcriptError,
+            stopReason: 'error',
+            provider: activeThread?.provider,
+            model: activeThread?.model,
+          }}
+          hasSavedToolResults={Boolean(
+            requestRuns
+              .find((run) => run.userItemIndex === latestUserItemIndex)
+              ?.toolItems.some((item) => Boolean(item.result)),
+          )}
+        />
+      ) : (
         <div className="mx-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-11)] text-[var(--red)]">
           {transcriptError}
         </div>

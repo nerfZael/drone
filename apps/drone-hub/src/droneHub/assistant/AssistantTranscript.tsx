@@ -44,6 +44,7 @@ import {
   toolItemName,
   toolLabel,
   type AssistantMessageDroneSummary,
+  type AssistantRenderItem,
   type AssistantToolCall,
   type AssistantToolRenderItem,
   type AssistantWaitTargetLabel,
@@ -1285,6 +1286,33 @@ function AgentThinkingActivityRow() {
 
 export const AUTO_EXPANDED_TOOL_CALL_LIMIT = 5;
 
+function limitToolRunActivityItems(
+  items: AssistantRenderItem[],
+  limit = AUTO_EXPANDED_TOOL_CALL_LIMIT,
+): AssistantRenderItem[] {
+  let remainingTools = Math.max(0, Math.floor(limit));
+  const visible: AssistantRenderItem[] = [];
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index]!;
+    if (item.type === 'tool') {
+      if (remainingTools > 0) {
+        visible.push(item);
+        remainingTools -= 1;
+      }
+      continue;
+    }
+    if (item.type === 'toolGroup') {
+      if (remainingTools <= 0) continue;
+      const groupItems = item.items.slice(-remainingTools);
+      remainingTools -= groupItems.length;
+      visible.push({ ...item, items: groupItems });
+      continue;
+    }
+    visible.push(item);
+  }
+  return visible.reverse();
+}
+
 export function ToolRunActivity({
   items,
   active,
@@ -1295,7 +1323,7 @@ export function ToolRunActivity({
   awaitingApproval = false,
   approvalStartedAt,
 }: {
-  items: AssistantToolRenderItem[];
+  items: AssistantRenderItem[];
   active: boolean;
   startedAt?: number;
   endedAt?: number;
@@ -1368,11 +1396,27 @@ export function ToolRunActivity({
     (!active || awaitingApproval) && Number.isFinite(completedDurationMs)
       ? Math.max(0, Number(completedDurationMs))
       : measuredDurationMs;
-  const callLabel = `${items.length} tool ${items.length === 1 ? 'call' : 'calls'}`;
+  const toolItems = items.flatMap((item) =>
+    item.type === 'tool' ? [item] : item.type === 'toolGroup' ? item.items : [],
+  );
+  const lastActivityItem = items[items.length - 1];
+  const activityEndedWithAssistantOutput = Boolean(
+    lastActivityItem?.type === 'message' &&
+      lastActivityItem.message.role === 'assistant' &&
+      (assistantVisibleText(lastActivityItem.message).trim() ||
+        messageImageParts(lastActivityItem.message).length > 0 ||
+        lastActivityItem.message.errorMessage),
+  );
+  const callLabel = `${toolItems.length} tool ${toolItems.length === 1 ? 'call' : 'calls'}`;
   const visibleItems =
-    expansionMode === 'auto' ? items.slice(-AUTO_EXPANDED_TOOL_CALL_LIMIT) : items;
+    expansionMode === 'auto' ? limitToolRunActivityItems(items) : items;
   const groupedItems = compactRepeatedToolItems(visibleItems);
-  const showThinkingActivity = active && !awaitingApproval && items.every(toolActivityIsSettled);
+  const showThinkingActivity =
+    active &&
+    !awaitingApproval &&
+    toolItems.length > 0 &&
+    toolItems.every(toolActivityIsSettled) &&
+    !activityEndedWithAssistantOutput;
 
   return (
     <div>
@@ -1396,7 +1440,24 @@ export function ToolRunActivity({
       {expanded ? (
         <div className="dh-agent-activity-scrollbar mt-1 max-h-72 space-y-1 overflow-y-auto overscroll-contain">
           {groupedItems.map((item) =>
-            item.type === 'toolGroup' ? (
+            item.type === 'message' ? (
+              item.message.role === 'assistant' && item.message.errorMessage ? (
+                <NativeAgentFailureCard
+                  key={item.key}
+                  message={item.message}
+                  hasSavedToolResults={toolItems.some((tool) => Boolean(tool.result))}
+                />
+              ) : (
+                <div className="px-3" key={item.key}>
+                  <AssistantMessageRow
+                    message={item.message}
+                    showToolCalls={false}
+                    showReasoning
+                    autoExpandMessage
+                  />
+                </div>
+              )
+            ) : item.type === 'toolGroup' ? (
               <RepeatedToolActivityRow
                 key={item.key}
                 items={item.items}

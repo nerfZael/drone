@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   assistantRequestRuns,
   directAssistantRunTiming,
+  partitionAssistantRequestRunActivity,
   renderItemsFromMessages,
 } from '../src/droneHub/assistant/assistant-message-model';
 
@@ -151,5 +152,59 @@ describe('native assistant run timing', () => {
         durationMs: 1_500,
       },
     ]);
+  });
+
+  test('keeps active commentary and reasoning inside its tool run', () => {
+    const items = renderItemsFromMessages([
+      { role: 'user', content: 'Implement it', timestamp: 1_000 },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: 'Inspect the implementation.' },
+          { type: 'text', text: 'I am checking the current behavior.' },
+          { type: 'toolCall', id: 'call-1', name: 'read_file', arguments: {} },
+        ],
+        timestamp: 2_000,
+      },
+      { role: 'toolResult', toolCallId: 'call-1', content: 'Done', timestamp: 3_000 },
+      {
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: 'Apply the fix next.' }],
+        timestamp: 4_000,
+      },
+    ]);
+    const [run] = assistantRequestRuns(items);
+    if (!run) throw new Error('Expected a request run');
+
+    const partition = partitionAssistantRequestRunActivity(items, run, true);
+
+    expect(partition.activityItems.map((item) => item.type)).toEqual([
+      'message',
+      'tool',
+      'message',
+    ]);
+    expect(partition.activityItemIndexes).toEqual([1, 2, 3]);
+    expect(partition.finalResponseItemIndex).toBe(-1);
+  });
+
+  test('keeps the completed final answer outside its tool run', () => {
+    const items = renderItemsFromMessages([
+      { role: 'user', content: 'Implement it', timestamp: 1_000 },
+      { role: 'assistant', content: 'I am checking it.', timestamp: 2_000 },
+      {
+        role: 'assistant',
+        content: [{ type: 'toolCall', id: 'call-1', name: 'read_file', arguments: {} }],
+        timestamp: 3_000,
+      },
+      { role: 'toolResult', toolCallId: 'call-1', content: 'Done', timestamp: 4_000 },
+      { role: 'assistant', content: 'Finished.', timestamp: 5_000 },
+    ]);
+    const [run] = assistantRequestRuns(items);
+    if (!run) throw new Error('Expected a request run');
+
+    const partition = partitionAssistantRequestRunActivity(items, run, false);
+
+    expect(partition.activityItems.map((item) => item.type)).toEqual(['message', 'tool']);
+    expect(partition.finalResponseItemIndex).toBe(3);
   });
 });
