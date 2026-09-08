@@ -1,5 +1,6 @@
 import React from 'react';
-import { ChatComposerEditor } from '../chat/ChatComposerEditor';
+import { useRecorderCompanion } from './RecorderCompanionContext';
+import { ChatComposerEditor, type ChatComposerEditorHandle } from '../chat/ChatComposerEditor';
 import { formatChatVoiceDuration } from '../chat/use-chat-voice-recorder';
 import { useCompanion } from '../companion/CompanionContext';
 import { useIdleMonacoEditorPreload } from '../files/monaco-editor-loader';
@@ -28,6 +29,30 @@ export function GlobalDictationOverlay(props: GlobalDictationOverlayProps) {
     [companion],
   );
   const dictation = useGlobalDictation({ ...props, sendToCompanion });
+  const recorder = useRecorderCompanion();
+  const editorRef = React.useRef<ChatComposerEditorHandle | null>(null);
+  const overlayRef = React.useRef<HTMLElement | null>(null);
+  const companionOpen = Boolean(companion && companion.status !== 'idle');
+  React.useLayoutEffect(() => {
+    if (!recorder) return;
+    const target = {
+      read: dictation.readRecorder,
+      apply: (targetId: string, revision: string, content: string) =>
+        dictation.applyRecorder(targetId, revision, content,
+          (next) => editorRef.current?.applyCompanionEdit(next) ?? false),
+    };
+    recorder.target.current = target;
+    return () => { if (recorder.target.current === target) recorder.target.current = null; };
+  }, [recorder?.target, dictation.readRecorder, dictation.applyRecorder]);
+  React.useLayoutEffect(() => {
+    if (!recorder || !dictation.open || !overlayRef.current) return;
+    const element = overlayRef.current;
+    const measure = () => recorder.setHeight(element.getBoundingClientRect().height);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => { observer.disconnect(); recorder.setHeight(0); };
+  }, [dictation.open, recorder?.setHeight]);
   if (!dictation.open) return null;
 
   const recordingActive =
@@ -53,6 +78,8 @@ export function GlobalDictationOverlay(props: GlobalDictationOverlayProps) {
 
   return (
     <aside
+      ref={overlayRef}
+      style={companionOpen ? { maxHeight: 'calc((100dvh - 3rem) / 2)', overflowY: 'auto' } : undefined}
       className="fixed bottom-4 right-4 z-[90] flex max-h-[calc(100vh-2rem)] w-[min(34rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--panel)] shadow-2xl"
       aria-label="Dictation scratchpad"
       data-global-dictation-overlay="true"
@@ -129,6 +156,7 @@ export function GlobalDictationOverlay(props: GlobalDictationOverlayProps) {
         ) : null}
 
         <ChatComposerEditor
+          ref={editorRef}
           value={dictation.text}
           disabled={dictation.networkSending}
           initialSelection={dictation.selection}

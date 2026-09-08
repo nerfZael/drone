@@ -1,3 +1,4 @@
+import { useRecorderCompanion } from '../dictation/RecorderCompanionContext';
 import React from 'react';
 import {
   companionToolActivityLabel,
@@ -100,6 +101,8 @@ function CompanionHeaderButton({
 }
 
 export function CompanionOverlay() {
+  const recorder = useRecorderCompanion();
+  const recorderHeight = recorder?.height ?? 0;
   const companion = useCompanion();
   const workspace = useCompanionWorkspace();
   const [expanded, setExpanded] = React.useState(false);
@@ -136,7 +139,11 @@ export function CompanionOverlay() {
   ]?.execution;
   const latestProposalExecutionFailed = latestProposalExecution?.ok === false;
   return (
-    <div className="fixed bottom-4 right-4 z-[80] flex max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] flex-col items-end gap-3 min-[860px]:w-auto min-[860px]:flex-row">
+    <div style={recorderHeight > 0 ? {
+      bottom: recorderHeight + 32,
+      maxHeight: `calc(100dvh - ${recorderHeight + 48}px)`,
+      overflowY: 'auto',
+    } : undefined} className="fixed bottom-4 right-4 z-[80] flex max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] flex-col items-end gap-3 min-[860px]:w-auto min-[860px]:flex-row">
       {historyOpen ? (
         <CompanionProposalHistory
           entries={companion.proposalHistory}

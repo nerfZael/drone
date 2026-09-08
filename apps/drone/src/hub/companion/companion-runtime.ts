@@ -29,6 +29,8 @@ import {
   type CompanionTelemetryTransport,
 } from './companion-telemetry';
 
+import { CompanionProposalModels } from './companion-proposal-models';
+
 const MAX_BROWSER_TEXT_CHARS = 1_000_000;
 
 export type CompanionBrowserCall = (
@@ -42,10 +44,11 @@ type RunContext = {
   settings: CompanionSettings;
   callBrowser: CompanionBrowserCall;
   snapshots: Map<string, BrowserTextSnapshot>;
+  proposalModels: CompanionProposalModels;
 };
 
 type BrowserTextSnapshot = {
-  kind: 'composer' | 'editor' | 'proposal';
+  kind: 'composer' | 'editor' | 'proposal' | 'recorder';
   targetId: string;
   path: string;
   content: string;
@@ -190,6 +193,7 @@ export class CompanionRuntime {
           settings,
           callBrowser: this.instrumentBrowserCall(input.callBrowser, telemetry),
           snapshots: new Map(),
+          proposalModels: new CompanionProposalModels(),
         });
       }
       if (coldStart || settingsChanged) {
@@ -319,7 +323,15 @@ export class CompanionRuntime {
       async load(blipContext) {
         return (await mcpProvider.load(blipContext))
           .map((tool) => ({ ...tool, name: tool.name.replace(/^drone_hub__/, '') }))
-          .filter((tool) => mcpNames.has(tool.name as CompanionToolName) && enabled.has(tool.name as CompanionToolName));
+          .filter((tool) => mcpNames.has(tool.name as CompanionToolName) && enabled.has(tool.name as CompanionToolName))
+          .map((tool) => tool.name !== 'list_agent_models' ? tool : {
+            ...tool,
+            execute: async (...args: Parameters<typeof tool.execute>) => {
+              const response = await tool.execute(...args);
+              context.proposalModels.remember(response.details);
+              return response;
+            },
+          });
       },
     };
     return {
@@ -404,6 +416,7 @@ export class CompanionRuntime {
 
     for (const [name, kind] of [
       ['read_active_composer', 'composer'],
+      ['read_recorder', 'recorder'],
       ['read_open_file', 'editor'],
       ['read_companion_proposal', 'proposal'],
     ] as const) {
@@ -420,6 +433,7 @@ export class CompanionRuntime {
 
     for (const [name, kind] of [
       ['apply_composer_patch', 'composer'],
+      ['apply_recorder_patch', 'recorder'],
       ['apply_editor_patch', 'editor'],
       ['apply_companion_proposal_patch', 'proposal'],
     ] as const) {
@@ -454,6 +468,7 @@ export class CompanionRuntime {
           const nextLf = applyPatchHunks(snapshot.content.replace(/\r\n/g, '\n'), operation.hunks, snapshot.path);
           const nextContent = crlf ? nextLf.replace(/\n/g, '\r\n') : nextLf;
           if (nextContent.length > MAX_BROWSER_TEXT_CHARS) throw new Error('PATCH_RESULT_TOO_LARGE');
+          if (kind === 'proposal') context.proposalModels.validate(nextContent);
           const value = await context.callBrowser(name, {
             targetId,
             baseRevision,

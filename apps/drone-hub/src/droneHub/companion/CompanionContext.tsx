@@ -1,4 +1,5 @@
 import React from 'react';
+import { useRecorderCompanion } from '../dictation/RecorderCompanionContext';
 import {
   COMPANION_PROPOSAL_FORMAT,
   COMPANION_PROPOSAL_PATH,
@@ -80,6 +81,7 @@ function newId(): string {
 
 export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const workspace = useCompanionWorkspace();
+  const recorder = useRecorderCompanion();
   const controllerRef = React.useRef<CompanionClientController | null>(null);
   if (!controllerRef.current) {
     controllerRef.current = new CompanionClientController({ createId: newId });
@@ -271,7 +273,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
           completedAt: Date.now(),
           autoApproved,
         }]);
-        if (autoApproved) {
+        if (completedExecution!.ok) {
           proposalRevisionRef.current += 1;
           proposalRef.current = null;
           proposalExecutionRef.current = null;
@@ -318,6 +320,13 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
 
   const executeBrowserTool = React.useCallback(
     async (tool: CompanionBrowserToolName, args: Record<string, unknown>) => {
+      if (tool === 'read_recorder' || tool === 'apply_recorder_patch') {
+        const target = recorder?.target.current;
+        if (!target) throw new Error('NO_OPEN_RECORDER');
+        return tool === 'read_recorder' ? target.read() : target.apply(
+          String(args.targetId ?? ''), String(args.baseRevision ?? ''), String(args.content ?? ''),
+        );
+      }
       if (tool === 'read_companion_proposal') return readProposal();
       if (tool === 'apply_companion_proposal_patch') {
         return applyProposal(
@@ -337,7 +346,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       }
       return await executeCompanionBrowserTool(workspace, tool, args);
     },
-    [applyProposal, readProposal, workspace],
+    [applyProposal, readProposal, workspace, recorder],
   );
 
   const run = React.useCallback(

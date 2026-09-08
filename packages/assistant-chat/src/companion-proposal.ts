@@ -181,6 +181,7 @@ export const COMPANION_PROPOSAL_FORMAT = [
   '  create_chat also accepts optional agent, provider, model, reasoning, agentPermissionMode, and approvalPolicy overrides. copyFromChat copies configuration only.',
   '- clone_chat: { id, type, droneId, sourceChat, chatName, draft? } (clones history and configuration)',
   'Agent overrides use "native", "builtin:cursor", "builtin:codex", "builtin:claude", "builtin:opencode", "builtin:pi", "builtin:blip", or an existing "custom:<id>" agent. Custom agents are unavailable on mobile and host runtime targets.',
+  'For both create_drone and create_chat, resolve friendly model names through list_agent_models before proposing overrides. Use the exact supported model ID with its compatible agent (catalog codex becomes builtin:codex) and, for native only, provider. Never guess IDs; ask the user or leave settings unchanged when unresolved or ambiguous.',
   'Provider is openai, codex, gemini, or openrouter and only applies to the native agent. agentPermissionMode is read, write, or execute. approvalPolicy is ask, auto, or none. Unsupported agent combinations fail validation during Apply.',
   '- delete_chat: { id, type, droneId, chatName } (the default chat cannot be deleted)',
   '- rename_chat: { id, type, droneId, chatName, newName } (the default chat cannot be renamed)',

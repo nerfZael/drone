@@ -56,6 +56,8 @@ export function useGlobalDictation(options: GlobalDictationControllerOptions) {
   const [networkSending, setNetworkSending] = React.useState(false);
   const [destinationLabel, setDestinationLabel] = React.useState('');
   const [selection, setSelection] = React.useState<ChatComposerSelection>({ start: 0, end: 0 });
+  const instanceId = React.useId();
+  const revisionRef = React.useRef(0);
   const openRef = React.useRef(open);
   const textRef = React.useRef(text);
   const persistenceTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -70,6 +72,7 @@ export function useGlobalDictation(options: GlobalDictationControllerOptions) {
   sendToCompanionRef.current = options.sendToCompanion;
 
   const setOpen = React.useCallback((next: boolean) => {
+    if (openRef.current !== next) revisionRef.current += 1;
     openRef.current = next;
     setOpenState(next);
   }, []);
@@ -78,6 +81,7 @@ export function useGlobalDictation(options: GlobalDictationControllerOptions) {
     const resolved = normalizeGlobalDictationText(
       typeof next === 'function' ? next(textRef.current) : next,
     );
+    if (textRef.current !== resolved) revisionRef.current += 1;
     textRef.current = resolved;
     setTextState(resolved);
   }, []);
@@ -371,6 +375,31 @@ export function useGlobalDictation(options: GlobalDictationControllerOptions) {
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true });
   }, [cancelRecording, close, requestSend, toggleRecording]);
 
+  const readRecorder = React.useCallback(() => {
+    if (!openRef.current) throw new Error('NO_OPEN_RECORDER');
+    return {
+      targetId: `recorder:${instanceId}`,
+      path: 'recorder.txt',
+      content: textRef.current,
+      revision: String(revisionRef.current),
+      mode: finalizingRef.current ? 'read-only' as const : 'edit' as const,
+    };
+  }, [instanceId]);
+
+  const applyRecorder = React.useCallback((
+    targetId: string, baseRevision: string, content: string,
+    edit: (content: string) => boolean,
+  ) => {
+    const snapshot = readRecorder();
+    if (targetId !== snapshot.targetId) throw new Error('STALE_RECORDER_TARGET');
+    if (baseRevision !== snapshot.revision) throw new Error('STALE_RECORDER_REVISION');
+    if (finalizingRef.current) throw new Error('RECORDER_NOT_EDITABLE');
+    if (normalizeGlobalDictationText(content) !== content) throw new Error('RECORDER_TEXT_TOO_LARGE');
+    if (!edit(content)) throw new Error('RECORDER_EDITOR_NOT_READY');
+    setText(content);
+    return { ok: true as const, revision: String(revisionRef.current) };
+  }, [readRecorder, setText]);
+
   const queuedClips = clipsRef.current;
   const pendingCount = queuedClips.filter((clip) => clip.status === 'pending').length;
   const failedClips: FailedDictationClip[] = queuedClips
@@ -380,6 +409,8 @@ export function useGlobalDictation(options: GlobalDictationControllerOptions) {
   return {
     open,
     text,
+    readRecorder,
+    applyRecorder,
     error,
     notice,
     pendingCount,

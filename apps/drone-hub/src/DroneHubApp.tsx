@@ -1,4 +1,5 @@
 import React from 'react';
+import { RecorderCompanionProvider } from './droneHub/dictation/RecorderCompanionContext';
 import { FrontendUpdatePrompt } from './FrontendUpdatePrompt';
 import { GuidedOnboarding } from './onboarding/GuidedOnboarding';
 import { DroneSidebar } from './droneHub/app/DroneSidebar';
@@ -94,11 +95,13 @@ export default function DroneHubApp() {
         <ActiveComposerProvider>
           <CompanionWorkspaceProvider>
             <ContinuousDictationProvider>
+              <RecorderCompanionProvider>
               <CompanionProvider>
                 <FileDictationProvider>
                   <DroneHubAppContent />
                 </FileDictationProvider>
               </CompanionProvider>
+              </RecorderCompanionProvider>
             </ContinuousDictationProvider>
           </CompanionWorkspaceProvider>
         </ActiveComposerProvider>

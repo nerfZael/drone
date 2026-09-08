@@ -3,6 +3,8 @@ export const COMPANION_MAX_RUN_ID_CHARS = 128;
 
 export const COMPANION_BROWSER_TOOL_NAMES = [
   'get_app_context',
+  'read_recorder',
+  'apply_recorder_patch',
   'read_active_composer',
   'apply_composer_patch',
   'read_open_file',
