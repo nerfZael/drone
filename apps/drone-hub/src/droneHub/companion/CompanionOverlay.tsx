@@ -288,9 +288,7 @@ export function CompanionOverlay() {
           </CompanionHeaderButton>
           <CompanionHeaderButton
             label={companion.proposalHistory.length > 0
-              ? `Show execution history (${companion.proposalHistory.length})${
-                  latestProposalExecutionFailed ? '; latest execution failed' : ''
-                }`
+              ? `Show execution history${latestProposalExecutionFailed ? '; latest execution failed' : ''}`
               : 'No proposals executed this session'}
             disabled={companion.proposalHistory.length === 0}
             tone={historyOpen ? 'accent' : latestProposalExecutionFailed ? 'danger' : 'neutral'}
@@ -298,18 +296,11 @@ export function CompanionOverlay() {
             controls="companion-proposal-history"
             onClick={() => setHistoryOpen((open) => !open)}
           >
-            <span className="relative inline-flex">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
-                <path d="M3 3v5h5" />
-                <path d="M12 7v5l3 2" />
-              </svg>
-              {companion.proposalHistory.length > 0 ? (
-                <span className="absolute -right-2 -top-2 min-w-3.5 rounded-full bg-[var(--accent)] px-0.5 text-center text-[8px] font-[var(--weight-bold)] leading-3.5 text-[var(--accent-fg)]">
-                  {Math.min(companion.proposalHistory.length, 99)}
-                </span>
-              ) : null}
-            </span>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+              <path d="M3 3v5h5" />
+              <path d="M12 7v5l3 2" />
+            </svg>
           </CompanionHeaderButton>
           <CompanionHeaderButton
             label="Edit Companion system prompt"

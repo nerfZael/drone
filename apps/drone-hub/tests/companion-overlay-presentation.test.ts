@@ -25,6 +25,8 @@ describe('Companion overlay presentation', () => {
     expect(source).toContain('expanded={historyOpen}');
     expect(source).toContain('<CompanionProposalHistory');
     expect(source).toContain('Show execution history');
+    expect(source).not.toContain('Show execution history (');
+    expect(source).not.toContain('Math.min(companion.proposalHistory.length');
     expect(source).toContain('double-tap Caps Lock to toggle');
   });
 });
