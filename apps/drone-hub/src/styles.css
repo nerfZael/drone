@@ -2999,6 +2999,33 @@ select:disabled optgroup {
   font-family: var(--display);
 }
 
+/* Dockview moves floating windows via the empty title-bar area, not the tab.
+ * Its fullwidth single-tab mode otherwise shrinks that drag target to zero. */
+.dh-dockable-workspace .dv-resize-container:has([data-side-chat-name]) .dv-tabs-and-actions-container .dv-scrollable {
+  flex-grow: 0;
+  max-width: calc(100% - 48px);
+}
+
+.dh-dockable-workspace .dv-resize-container:has([data-side-chat-name]) .dv-tabs-and-actions-container .dv-void-container {
+  flex: 1 0 48px;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+}
+
+.dh-dockable-workspace .dv-resize-container:has([data-side-chat-name]) .dv-void-container::before {
+  content: '';
+  width: 12px;
+  height: 8px;
+  color: var(--muted);
+  background: radial-gradient(circle, currentColor 1px, transparent 1px) 0 0 / 4px 4px;
+  pointer-events: none;
+}
+
+.dh-dockable-workspace .dv-resize-container:has([data-side-chat-name]) .dv-void-container:active {
+  cursor: grabbing;
+}
+
 .dh-dockable-workspace--single-panel .dv-tabs-and-actions-container {
   display: none;
 }
