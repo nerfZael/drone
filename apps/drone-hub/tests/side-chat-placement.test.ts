@@ -6,7 +6,7 @@ test('places compact side chats beside existing chats when space is available', 
   const main = { x: 0, y: 0, width: 500, height: 900 };
   const first = placeSideChat(workspace, [main], 0);
   expect(first.width).toBe(320);
-  expect(first.height).toBe(225);
+  expect(first.height).toBe(450);
   expect(first.x).toBeGreaterThanOrEqual(500);
   const second = placeSideChat(workspace, [main, first], 1);
   expect(
@@ -14,6 +14,14 @@ test('places compact side chats beside existing chats when space is available', 
       second.x + second.width <= first.x ||
       second.y >= first.y + first.height,
   ).toBe(true);
+});
+
+test('doubles the former initial height, capped only by the workspace', () => {
+  for (const height of [500, 700, 900, 1200, 1600]) {
+    const previousHeight = Math.max(220, Math.round(height / 4));
+    expect(placeSideChat({ width: 1200, height }, [], 0).height).toBe(previousHeight * 2);
+  }
+  expect(placeSideChat({ width: 900, height: 400 }, [], 0).height).toBe(400);
 });
 
 test('offsets overlapping windows when the main chat fills the workspace', () => {
