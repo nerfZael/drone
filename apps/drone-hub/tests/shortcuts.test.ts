@@ -12,6 +12,17 @@ import {
 } from '../src/droneHub/app/shortcuts';
 
 describe('shortcut defaults', () => {
+  test('assigns R to side chats and migrates default clear to Shift+R without taking custom shortcuts', () => {
+    const defaults = cloneDefaultShortcutBindings();
+    expect(defaults.createSideChat?.key).toBe('r');
+    expect(defaults.createSideChat?.shift).toBe(false);
+    const old = { ...defaults, clearChatComposer: { ...defaults.createSideChat } } as Record<string, unknown>;
+    delete old.createSideChat;
+    expect(migrateChatComposerShortcuts(old)).toMatchObject({ createSideChat: defaults.createSideChat, clearChatComposer: defaults.clearChatComposer });
+    old.clearChatComposer = { ...defaults.createSideChat, key: 'k' };
+    old.openHome = defaults.createSideChat;
+    expect(migrateChatComposerShortcuts(old)).toMatchObject({ createSideChat: null, clearChatComposer: { key: 'k' }, openHome: defaults.createSideChat });
+  });
   test('uses 1/2/3/4 for root drone, grouped drone, draft chat, and chat clone', () => {
     const defaults = cloneDefaultShortcutBindings();
     expect(defaults.createDraftDrone).toEqual({
@@ -122,7 +133,7 @@ describe('shortcut defaults', () => {
       ctrl: false,
       meta: false,
       alt: false,
-      shift: false,
+      shift: true,
     });
     expect(defaults.toggleContinuousDictation).toEqual({
       key: 't',

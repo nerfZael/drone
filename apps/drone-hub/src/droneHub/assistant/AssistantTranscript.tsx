@@ -12,7 +12,7 @@ import {
 } from '../chat/AgentMessageExtras';
 import type { MarkdownTextMentionLink } from '../chat/MarkdownMessage';
 import { ChatMessageBody } from '../chat/ChatMessageBody';
-import { ChatMessageCopyAction } from '../chat/ChatMessageCopyAction';
+import { ChatMessageActions } from '../chat/ChatMessageActions';
 import { ChatMessageFrame } from '../chat/ChatMessageFrame';
 import { CreateNewChatNowButton, QueuedNewChatLabel } from '../chat/QueuedNewChatAction';
 import { ImageAttachmentChips, normalizeImageAttachmentRefs } from '../chat/ImageAttachmentChips';
@@ -1482,6 +1482,7 @@ export function ToolRunActivity({
 
 export function AssistantMessageRow({
   message,
+  forkCheckpointId,
   messageExtras,
   droneMentionLinks,
   onOpenDroneMention,
@@ -1490,6 +1491,7 @@ export function AssistantMessageRow({
   autoExpandMessage = false,
 }: {
   message: AssistantMessage;
+  forkCheckpointId?: string;
   messageExtras?: Omit<AgentMessageExtrasProps, 'text'>;
   droneMentionLinks?: MarkdownTextMentionLink[];
   onOpenDroneMention?: (mention: MarkdownTextMentionLink) => void;
@@ -1618,7 +1620,7 @@ export function AssistantMessageRow({
       plainAssistant
       hoverActions={
         visibleText ? (
-          <ChatMessageCopyAction text={visibleText} position="hover-rail" />
+          <ChatMessageActions text={visibleText} checkpointId={forkCheckpointId} />
         ) : undefined
       }
     >

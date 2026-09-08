@@ -563,6 +563,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
           }
           // Record transcript turn (success).
           turns.push({
+            ...(job.codexAppServer?.turnId ? { codexTurnId: job.codexAppServer.turnId } : {}),
             at: promptAt,
             promptAt,
             startedAt,
@@ -632,6 +633,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             prompt: String(p?.prompt ?? ''),
             ...(turnModel ? { model: turnModel } : {}),
             ...(turnReasoning ? { reasoning: turnReasoning } : {}),
+            ...(parsed.providerCheckpoint ? { providerCheckpoint: parsed.providerCheckpoint } : {}),
             ...(parsed.agentPlan ? { agentPlan: parsed.agentPlan } : {}),
             ...(parsed.activity ? { activity: parsed.activity } : {}),
             ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
@@ -804,6 +806,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
               changed = true;
             }
             turns.push({
+              ...(job.codexAppServer?.turnId ? { codexTurnId: job.codexAppServer.turnId } : {}),
               at: promptAt,
               promptAt,
               startedAt,
@@ -857,6 +860,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
               prompt: String(p?.prompt ?? ''),
               ...(turnModel ? { model: turnModel } : {}),
               ...(turnReasoning ? { reasoning: turnReasoning } : {}),
+              ...(parsed.providerCheckpoint ? { providerCheckpoint: parsed.providerCheckpoint } : {}),
               ...(parsed.agentPlan ? { agentPlan: parsed.agentPlan } : {}),
               ...(parsed.activity ? { activity: parsed.activity } : {}),
               ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),

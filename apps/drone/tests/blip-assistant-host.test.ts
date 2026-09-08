@@ -568,6 +568,67 @@ describe('Blip assistant host', () => {
     });
   });
 
+  test('forks a saved completed checkpoint while a later tool call is running', async () => {
+    await withTempDroneDataDir('blip-side-chat-', async () => {
+      const faux = registerFauxProvider({ api: 'faux', provider: 'faux', tokensPerSecond: 0 });
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      faux.setResponses([
+        fauxAssistantMessage('checkpoint answer'),
+        fauxAssistantMessage([{ type: 'text', text: 'working on the next prompt' }, fauxToolCall('wait', {})]),
+        fauxAssistantMessage('later answer'),
+      ]);
+      const host = new BlipAssistantHost(async () => ({
+        provider: 'faux', model: faux.getModel().id, thinkingLevel: 'off', systemPrompt: 'Test',
+        tools: [{ name: 'wait', label: 'wait', description: 'wait', parameters: Type.Object({}), execute: async () => {
+          entered.resolve();
+          await release.promise;
+          return { content: [{ type: 'text' as const, text: 'released' }], details: {} };
+        } }],
+      }));
+      let running: Promise<void> | undefined;
+      try {
+        await host.promptThread('source', 'first');
+        const checkpoint = await host.captureThreadCheckpoint('source');
+        running = host.promptThread('source', 'second');
+        await entered.promise;
+        expect(host.isThreadRunning('source')).toBe(true);
+        expect(await host.captureThreadCheckpoint('source')).toBe(checkpoint);
+        await host.cloneThread('source', 'side', checkpoint);
+        const side = await host.historyPage('side');
+        expect(side.entries.map((entry) => entry.message.role)).toEqual(['user', 'assistant']);
+        expect(side.entries.at(-1)?.id).toBe(checkpoint);
+        release.resolve();
+        await running;
+        expect((await host.historyPage('side')).entries).toEqual(side.entries);
+        expect((await host.historyPage('source')).entries.length).toBeGreaterThan(side.entries.length);
+      } finally {
+        release.resolve();
+        await running;
+        faux.unregister();
+      }
+    });
+  });
+
+  test('does not accept an empty assistant message as an explicit fork checkpoint', async () => {
+    await withTempDroneDataDir('blip-empty-checkpoint-', async () => {
+      const faux = registerFauxProvider({ api: 'faux', provider: 'faux', tokensPerSecond: 0 });
+      faux.setResponses([fauxAssistantMessage('   ')]);
+      const host = new BlipAssistantHost(async () => ({
+        provider: 'faux', model: faux.getModel().id, thinkingLevel: 'off', systemPrompt: 'Test', tools: [],
+      }));
+      try {
+        await host.promptThread('source', 'first');
+        const source = await host.historyPage('source');
+        const checkpoint = source.entries.at(-1)!;
+        expect(checkpoint.message.role).toBe('assistant');
+        await expect(host.cloneThread('source', 'side', checkpoint.id)).rejects.toThrow('completed assistant checkpoint');
+      } finally {
+        faux.unregister();
+      }
+    });
+  });
+
   test('serializes concurrent first prompts onto one thread session', async () => {
     await withTempDroneDataDir('blip-assistant-concurrent-', async () => {
       const faux = registerFauxProvider({ api: 'faux', provider: 'faux', tokensPerSecond: 0 });

@@ -449,6 +449,8 @@ export async function codexPromptEnqueue(
     imagePaths?: string[];
     existingThreadId?: string;
     forkThreadId?: string;
+    forkLastTurnId?: string;
+    forkLastMessageId?: string;
     deliveryMode?: 'queue' | 'asap';
     approvalPolicy?: 'untrusted' | 'on-request' | 'never';
     approvalsReviewer?: 'user' | 'auto_review';

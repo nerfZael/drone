@@ -19,6 +19,8 @@ export type CodexPromptSpec = {
   imagePaths?: string[];
   existingThreadId?: string;
   forkThreadId?: string;
+  forkLastTurnId?: string;
+  forkLastMessageId?: string;
   threadId?: string;
   turnId?: string;
   runId?: string;
@@ -653,11 +655,33 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
       }
     }
     if (spec.forkThreadId) {
+      let lastTurnId = spec.forkLastTurnId;
+      if (!lastTurnId && spec.forkLastMessageId) {
+        const source = await session.connection.call('thread/read', { threadId: spec.forkThreadId, includeTurns: true });
+        const matches = (source?.thread?.turns ?? []).filter((turn: any) =>
+          turn.status === 'completed' && turn.items?.some((item: any) =>
+            item.type === 'userMessage' && item.clientId === spec.forkLastMessageId,
+          ),
+        );
+        if (matches.length !== 1) throw new Error('Codex could not resolve the saved completed checkpoint. No live history was copied.');
+        lastTurnId = matches[0].id;
+      }
       const forked = await session.connection.call('thread/fork', {
         threadId: spec.forkThreadId,
+        ...(lastTurnId ? { lastTurnId } : {}),
       });
       const threadId = String(forked?.thread?.id ?? '').trim();
       if (!threadId) throw new Error('Codex App Server did not return a forked thread id');
+      if (lastTurnId) {
+        // Older servers may ignore unknown request fields. Never start a prompt
+        // until the fork itself proves it honored the saved boundary.
+        const snapshot = await session.connection.call('thread/read', { threadId, includeTurns: true });
+        const turns = snapshot?.thread?.turns ?? [];
+        if (turns.at(-1)?.id !== lastTurnId || turns.at(-1)?.status !== 'completed') {
+          await session.connection.call('thread/archive', { threadId }).catch(() => undefined);
+          throw new Error('This Codex version did not preserve the requested checkpoint. Update Codex to use side chats.');
+        }
+      }
       session.threadId = threadId;
       session.threadReady = true;
       return threadId;

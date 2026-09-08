@@ -31,6 +31,20 @@ function composer(
 }
 
 describe('ActiveComposerRegistry', () => {
+  test('side chats never become fallback targets, even when the main composer is disabled', () => {
+    const registry = new ActiveComposerRegistry();
+    const main = { eligible: false, readable: true };
+    registry.register(composer('main', main));
+    registry.register({ ...composer('side', { eligible: true }), requiresExplicitFocus: true });
+    expect(registry.ensureTargetId()).toBeNull();
+    registry.focus('side');
+    expect(registry.ensureTargetId()).toBe('side');
+    registry.focus('main');
+    expect(registry.ensureTargetId()).toBeNull();
+    expect(registry.readActiveComposer().targetId).toBe('main');
+    main.eligible = true;
+    expect(registry.ensureTargetId()).toBe('main');
+  });
   test('tracks focus and keeps transcript routing on the captured target', () => {
     const registry = new ActiveComposerRegistry();
     const firstState = { eligible: true, content: '' };

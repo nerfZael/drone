@@ -45,6 +45,12 @@ export type DroneSummary = {
   statusChecking?: boolean;
   chats: string[];
   workflowChats?: string[];
+  sideChats?: Array<{
+    name: string;
+    sourceChatName: string;
+    checkpointId: string;
+    agent: { kind: string; id?: string };
+  }>;
   unreadChats?: string[];
   chatReadStates?: Record<
     string,

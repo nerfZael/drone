@@ -7,6 +7,9 @@ export type ChatForkOrigin = {
   sourceChatName: string;
   sourceSessionId: string;
   state: 'pending';
+  lastTurnId?: string;
+  // Claude/OpenCode: native assistant message ID. Codex: Hub prompt ID fallback.
+  lastMessageId?: string;
 };
 
 export function createChatForkOrigin(
@@ -15,7 +18,7 @@ export function createChatForkOrigin(
   agentId: BuiltinTranscriptAgentId,
 ): ChatForkOrigin | null {
   if (agentId === 'cursor') return null;
-  const sourceSessionId = readBuiltinTranscriptSessionId(sourceChat, agentId);
+  const sourceSessionId = readBuiltinTranscriptSessionId(sourceChat, agentId) || pendingChatForkSourceSessionId(sourceChat, agentId);
   if (!sourceSessionId) return null;
   return {
     version: 1,
@@ -23,6 +26,10 @@ export function createChatForkOrigin(
     sourceChatName: String(sourceChatNameRaw ?? '').trim() || 'default',
     sourceSessionId,
     state: 'pending',
+    ...(!readBuiltinTranscriptSessionId(sourceChat, agentId) && sourceChat.chatForkOrigin?.lastTurnId
+      ? { lastTurnId: sourceChat.chatForkOrigin.lastTurnId } : {}),
+    ...(!readBuiltinTranscriptSessionId(sourceChat, agentId) && sourceChat.chatForkOrigin?.lastMessageId
+      ? { lastMessageId: sourceChat.chatForkOrigin.lastMessageId } : {}),
   };
 }
 

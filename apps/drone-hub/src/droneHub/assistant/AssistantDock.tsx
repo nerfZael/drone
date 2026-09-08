@@ -1,4 +1,5 @@
 import React from 'react';
+import { latestNativeCheckpointId } from '../app/side-chat-checkpoint-model';
 import { useDndMonitor, useDroppable } from '@dnd-kit/core';
 import {
   normalizeChangeRequestPermissions,
@@ -286,6 +287,8 @@ export type AssistantMessageFeatures = {
 };
 
 export function AssistantDock({
+  autoFocus = false,
+  focusTargetId = 'assistant-chat',
   nativeChat,
   messageFeatures,
   onHistoryChange,
@@ -301,6 +304,8 @@ export function AssistantDock({
   composerLeadingControls,
   composerTrailingControls,
 }: {
+  autoFocus?: boolean;
+  focusTargetId?: string;
   nativeChat: NativeChatBinding;
   messageFeatures: AssistantMessageFeatures;
   onHistoryChange?: (hasHistory: boolean) => void;
@@ -1214,10 +1219,10 @@ export function AssistantDock({
     });
     window.requestAnimationFrame(() =>
       document
-        .querySelector<HTMLTextAreaElement>('[data-chat-input-focus-id="assistant-chat"]')
+        .querySelector<HTMLTextAreaElement>(`[data-chat-input-focus-id="${CSS.escape(focusTargetId)}"]`)
         ?.focus(),
     );
-  }, []);
+  }, [focusTargetId]);
 
   const removeReferencedDrone = React.useCallback((droneIdRaw: string) => {
     const droneId = String(droneIdRaw ?? '').trim();
@@ -1319,9 +1324,9 @@ export function AssistantDock({
     if (running || !refocusInputWhenIdleRef.current) return;
     refocusInputWhenIdleRef.current = false;
     document
-      .querySelector<HTMLTextAreaElement>('[data-chat-input-focus-id="assistant-chat"]')
+      .querySelector<HTMLTextAreaElement>(`[data-chat-input-focus-id="${CSS.escape(focusTargetId)}"]`)
       ?.focus();
-  }, [running]);
+  }, [running, focusTargetId]);
 
   const updateThread = React.useCallback(
     async (
@@ -2212,6 +2217,7 @@ export function AssistantDock({
         content: ({ isLatestActivity }) => (
           <AssistantMessageRow
             message={item.message}
+            forkCheckpointId={nativeChat ? latestNativeCheckpointId([item.message]) : undefined}
             autoExpandMessage={isLatestActivity}
             messageExtras={{
               messageId: `${activeThreadId}:${item.key}`,
@@ -2434,7 +2440,7 @@ export function AssistantDock({
   }
 
   return (
-    <div data-assistant-dock-root="true" className="flex h-full min-h-0">
+    <div data-assistant-dock-root="true" data-side-chat-checkpoint-id={latestNativeCheckpointId(visibleMessages)} className="flex h-full min-h-0">
       <div className="relative flex min-w-0 flex-1 flex-col outline-none">
         {droneHubPermissionsOpen && activeThread ? (
           <div className="absolute inset-0 z-20 overflow-y-auto bg-[var(--panel-alt)]">
@@ -2573,7 +2579,8 @@ export function AssistantDock({
               resetKey={activeThreadId || nativeChatName}
               draftPersistenceKey={nativeComposerDraftKey}
               droneName="assistant"
-              focusTargetId="assistant-chat"
+              focusTargetId={focusTargetId}
+              autoFocus={autoFocus}
               promptError={attachmentError}
               waiting={running}
               disabled={!activeThread || scopeSyncBusy}

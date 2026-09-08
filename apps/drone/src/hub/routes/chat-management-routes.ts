@@ -12,6 +12,7 @@ import { readJsonBody, sendJson as json } from '../hub-http';
 import { normalizeMcpChatAccessScope } from '../mcp-chat-access';
 import { parseRequestSchema } from '../request-schema';
 import { isWorkflowChatEntry } from '../workflows/workflow-chat-metadata';
+import { isSideChatEntry } from '../side-chat-checkpoint';
 import type { LegacyRouteDependencyContract, LegacyRouteHandler } from './legacy-route';
 
 type ChatManagementRouteDependencyName =
@@ -307,6 +308,8 @@ export function createChatManagementRouteHandler(
             creationMode,
             ...(copyFrom ? { sourceChatName: copyFrom } : {}),
             draft: createAsDraft,
+            sideChat: body?.sideChat === true,
+            checkpointId: body?.checkpointId,
           });
 
           json(res, 201, {
@@ -317,13 +320,15 @@ export function createChatManagementRouteHandler(
             chatId: String((created.chat as any)?.id ?? '').trim() || null,
             draft: createAsDraft,
             chats: created.chats,
+            sideChatOrigin: created.chat?.sideChatOrigin,
+            agent: inferChatAgent(created.chat, resolved.drone),
           });
           return;
         } catch (e: any) {
           const msg = e?.message ?? String(e);
           const code = /unknown drone|unknown chat/i.test(msg)
             ? 404
-            : /already exists|stop this chat|not supported/i.test(msg)
+            : /already exists|stop this chat|not supported|checkpoint|completed assistant|currently supported/i.test(msg)
               ? 409
               : /missing |requires a source|cannot specify a source|unsupported chat creation mode/i.test(msg)
                 ? 400
@@ -331,6 +336,29 @@ export function createChatManagementRouteHandler(
           json(res, code, { ok: false, error: msg });
           return;
         }
+      }
+
+      // Reveal the existing side chat; its identity and conversation stay unchanged.
+      if (method === 'POST' && parts.length === 6 && parts[0] === 'api' && parts[1] === 'drones' && parts[3] === 'chats' && parts[5] === 'keep') {
+        const resolved = await resolveDroneOrRespond(res, decodeURIComponent(parts[2]));
+        if (!resolved) return;
+        const chatName = normalizeChatName(decodeURIComponent(parts[4]));
+        try {
+          await updateChatInStore({
+            droneId: resolved.id, chatName,
+            update: (current: any) => {
+              if (!isSideChatEntry(current)) throw new Error('This is not a side chat');
+              const entry = { ...current, updatedAt: nowIso() };
+              delete entry.visibility;
+              return entry;
+            },
+          });
+          await projectCanonicalChatToRegistry(resolved.id, chatName);
+          json(res, 200, { ok: true });
+        } catch (error: any) {
+          json(res, 409, { ok: false, error: error?.message ?? String(error) });
+        }
+        return;
       }
 
       // POST /api/drones/:id/chats/:chat/rename
@@ -693,7 +721,7 @@ export function createChatManagementRouteHandler(
           const chats = allChats.filter((chatName: string) => {
             const stored = readChatFromStore({ droneId, chatName });
             storedChats.set(chatName, stored);
-            return !isWorkflowChatEntry(stored?.chat);
+            return !isWorkflowChatEntry(stored?.chat) && !isSideChatEntry(stored?.chat);
           });
           const readStates = listChatReadStatesFromStore({ droneId });
           const chatDetails = chats.map((chatName: string) => {

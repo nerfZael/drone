@@ -10,12 +10,12 @@ import {
 
 describe('Companion settings', () => {
   test('offers OpenAI, Codex, Gemini, and OpenRouter including Gemini 3.5 Flash-Lite', () => {
-    expect([...new Set(HUB_AGENT_MODEL_OPTIONS.map((option) => option.provider))]).toEqual([
+    expect(new Set(HUB_AGENT_MODEL_OPTIONS.map((option) => option.provider))).toEqual(new Set([
       'openai',
       'codex',
       'openrouter',
       'gemini',
-    ]);
+    ]));
     expect(
       HUB_AGENT_MODEL_OPTIONS.filter((option) => option.id === 'gemini-3.5-flash-lite').map(
         (option) => option.thinkingLevel,

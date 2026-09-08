@@ -5,6 +5,7 @@ export type ShortcutActionId =
   | 'createDraftDroneInCurrentGroup'
   | 'createDroneChat'
   | 'cloneDroneChat'
+  | 'createSideChat'
   | 'toggleSelectedDronePinned'
   | 'moveSelectedDroneToTop'
   | 'toggleSelectedDronesToDo'
@@ -79,6 +80,11 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     id: 'cloneDroneChat',
     label: 'Clone current chat',
     description: 'Clones the selected drone\'s current chat and opens the clone.',
+  },
+  {
+    id: 'createSideChat',
+    label: 'Open side chat',
+    description: 'Opens a floating branch at the current chat’s last completed assistant answer, even while it is running.',
   },
   {
     id: 'toggleSelectedDronePinned',
@@ -220,6 +226,7 @@ const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   createDraftDroneInCurrentGroup: { key: '2', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   createDroneChat: { key: '3', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   cloneDroneChat: { key: '4', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  createSideChat: { key: 'r', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleSelectedDronePinned: null,
   moveSelectedDroneToTop: null,
   toggleSelectedDronesToDo: null,
@@ -229,7 +236,7 @@ const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   toggleChatVoiceRecording: { key: 'q', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleChatVoiceRecordingPause: { key: 'w', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   discardChatVoiceRecording: { key: 'e', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  clearChatComposer: { key: 'r', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  clearChatComposer: { key: 'r', mod: false, ctrl: false, meta: false, alt: false, shift: true },
   toggleContinuousDictation: { key: 't', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleFileDictation: { key: 'd', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleCompanion: { key: '`', mod: false, ctrl: false, meta: false, alt: false, shift: false },
@@ -389,6 +396,16 @@ export function migrateChatComposerShortcuts(value: unknown): unknown {
       next.toggleRightPanelWidth = null;
     }
   }
+  if (!Object.prototype.hasOwnProperty.call(raw, 'createSideChat')) {
+    if (isSameShortcutBinding(next.clearChatComposer, unmodified('r'))) {
+      const shifted = { ...unmodified('r'), shift: true };
+      const occupied = Object.entries(next).some(([key, binding]) => key !== 'clearChatComposer' && isSameShortcutBinding(binding, shifted));
+      next.clearChatComposer = occupied ? null : shifted;
+    }
+    const occupied = Object.values(next).some((binding) => isSameShortcutBinding(binding, unmodified('r')));
+    next.createSideChat = occupied ? null : unmodified('r');
+    changed = true;
+  }
   return changed ? next : value;
 }
 
@@ -417,6 +434,7 @@ export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
     createDraftDroneInCurrentGroup: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createDraftDroneInCurrentGroup),
     createDroneChat: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createDroneChat),
     cloneDroneChat: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.cloneDroneChat),
+    createSideChat: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createSideChat),
     toggleSelectedDronePinned: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleSelectedDronePinned),
     moveSelectedDroneToTop: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.moveSelectedDroneToTop),
     toggleSelectedDronesToDo: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleSelectedDronesToDo),

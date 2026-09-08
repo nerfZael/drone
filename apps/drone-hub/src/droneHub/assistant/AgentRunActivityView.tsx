@@ -40,6 +40,7 @@ function ActivityChevron({ open }: { open: boolean }) {
 
 export function AgentRunActivityView({
   activity,
+  forkCheckpointId,
   active = false,
   startedAt,
   endedAt,
@@ -52,6 +53,7 @@ export function AgentRunActivityView({
   interstitialContent,
 }: {
   activity?: AgentRunActivity;
+  forkCheckpointId?: string;
   active?: boolean;
   startedAt?: string | number | null;
   endedAt?: string | number | null;
@@ -220,6 +222,7 @@ export function AgentRunActivityView({
         <div className="mt-1 px-3">
           <AssistantMessageRow
             message={finalAssistantItem.message}
+            forkCheckpointId={forkCheckpointId}
             messageExtras={finalMessageExtras}
             showToolCalls={false}
             showReasoning={false}

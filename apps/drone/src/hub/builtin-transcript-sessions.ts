@@ -7,6 +7,10 @@ import {
 } from '@drone/assistant-chat';
 import type { BuiltinTranscriptAgentId } from './pendingPromptEnqueue';
 import { BuiltinAgentActivityCollector, normalizeAgentRunActivity } from './builtin-agent-activity';
+import {
+  normalizeProviderMessageCheckpoint,
+  type ProviderMessageCheckpoint,
+} from './provider-message-checkpoint';
 
 export { readBuiltinTranscriptSessionId } from './builtin-transcript-session-metadata';
 
@@ -92,6 +96,7 @@ type CodexJsonlParseResult = {
   skillsUsed?: AgentSkillUse[];
 };
 type StructuredAgentJsonlParseResult = {
+  providerCheckpoint?: ProviderMessageCheckpoint;
   sessionId: string | null;
   message: string | null;
   activity?: AgentRunActivity;
@@ -593,6 +598,7 @@ function createStructuredAgentJsonlParser(
   source: Extract<AgentPlan['source'], 'cursor' | 'claude' | 'opencode'>,
 ): { pushLine: (line: string) => void; result: () => StructuredAgentJsonlParseResult } {
   let sessionId: string | null = null;
+  let providerCheckpoint: ProviderMessageCheckpoint | undefined;
   let message: string | null = null;
   let model: string | null = null;
   let reasoning: string | null = null;
@@ -660,12 +666,16 @@ function createStructuredAgentJsonlParser(
         return;
       }
       if (!obj || typeof obj !== 'object') return;
-      sessionId = optionalString(obj.session_id ?? obj.sessionId ?? obj.sessionID) ?? sessionId;
-      model = extractModelId(obj) ?? model;
-      reasoning = extractReasoningEffort(obj) ?? reasoning;
+      // Keep nested activity, but never use a subagent's UUID chain as the main checkpoint.
+      const isSubagent = source === 'claude' && Boolean(obj.parent_tool_use_id);
+      if (!isSubagent) {
+        sessionId = optionalString(obj.session_id ?? obj.sessionId ?? obj.sessionID) ?? sessionId;
+        model = extractModelId(obj) ?? model;
+        reasoning = extractReasoningEffort(obj) ?? reasoning;
+      }
 
       const eventType = String(obj.type ?? '').trim();
-      if (eventType === 'error' || eventType === 'session.error') {
+      if (!isSubagent && (eventType === 'error' || eventType === 'session.error')) {
         terminalStatus = 'failed';
         error =
           optionalString(obj.error?.data?.message) ??
@@ -674,7 +684,7 @@ function createStructuredAgentJsonlParser(
           optionalString(obj.error) ??
           error;
       }
-      if (eventType === 'result') {
+      if (eventType === 'result' && !isSubagent) {
         const failed =
           obj.is_error === true ||
           String(obj.subtype ?? '')
@@ -690,7 +700,7 @@ function createStructuredAgentJsonlParser(
       }
       const isToolEvent =
         eventType === 'tool_call' || eventType === 'tool_use' || eventType === 'assistant';
-      if (isToolEvent) {
+      if (isToolEvent && !isSubagent) {
         const todos = findTodoList(obj.tool_call ?? obj.part ?? obj.message?.content ?? obj);
         if (todos) agentPlan = normalizeAgentPlan(todos, source, new Date().toISOString());
       }
@@ -703,7 +713,14 @@ function createStructuredAgentJsonlParser(
             .filter((item: any) => item?.type === 'text')
             .map((item: any) => String(item.text ?? ''))
             .join('\n');
-          considerText(text);
+          if (!isSubagent) considerText(text);
+          if (text.trim() && !isSubagent) {
+            providerCheckpoint = normalizeProviderMessageCheckpoint({
+              agentId: source,
+              sessionId,
+              messageId: obj.uuid,
+            });
+          }
           for (let index = 0; index < content.length; index += 1) {
             const block = content[index];
             const blockId = `${messageId}:${index}`;
@@ -732,7 +749,7 @@ function createStructuredAgentJsonlParser(
             });
           }
         }
-        if (eventType === 'result') {
+        if (eventType === 'result' && !isSubagent) {
           considerText(obj.result);
           recordAssistant({ id: 'claude-result', text: obj.result });
         }
@@ -744,6 +761,13 @@ function createStructuredAgentJsonlParser(
         const partType = String(part.type ?? eventType).trim();
         if (eventType === 'text' || partType === 'text') {
           considerText(part.text);
+          if (String(part.text ?? '').trim()) {
+            providerCheckpoint = normalizeProviderMessageCheckpoint({
+              agentId: source,
+              sessionId,
+              messageId: part.messageID,
+            });
+          }
           recordAssistant({ id: partId, text: part.text });
         }
         if (eventType === 'reasoning' || partType === 'reasoning') {
@@ -833,6 +857,7 @@ function createStructuredAgentJsonlParser(
       return {
         sessionId,
         message,
+        ...(providerCheckpoint ? { providerCheckpoint } : {}),
         ...(agentActivity ? { activity: agentActivity } : {}),
         ...(model ? { model } : {}),
         ...(reasoning ? { reasoning } : {}),
@@ -1299,6 +1324,7 @@ export async function parseBlipJsonlLines(
 export type BuiltinPromptJobTranscript =
   | {
       kind: 'cursor' | 'claude' | 'opencode';
+      providerCheckpoint?: ProviderMessageCheckpoint;
       message: string | null;
       sessionId: string | null;
       activity?: AgentRunActivity;
@@ -1422,6 +1448,7 @@ export function parseBuiltinPromptJobTranscript(
       kind,
       message: parsed.message,
       sessionId: parsed.sessionId,
+      ...(parsed.providerCheckpoint ? { providerCheckpoint: parsed.providerCheckpoint } : {}),
       ...(parsed.activity ? { activity: parsed.activity } : {}),
       ...(parsed.model ? { model: parsed.model } : {}),
       ...(parsed.reasoning ? { reasoning: parsed.reasoning } : {}),
@@ -1475,6 +1502,7 @@ export async function parseBuiltinPromptJobTranscriptLines(
       kind,
       message: parsed.message,
       sessionId: parsed.sessionId,
+      ...(parsed.providerCheckpoint ? { providerCheckpoint: parsed.providerCheckpoint } : {}),
       ...(parsed.activity ? { activity: parsed.activity } : {}),
       ...(parsed.model ? { model: parsed.model } : {}),
       ...(parsed.reasoning ? { reasoning: parsed.reasoning } : {}),
@@ -1588,6 +1616,7 @@ export function parseStructuredAgentJobTranscript(
       transcript.agentPlan?.updatedAt,
     );
     const activity = normalizeAgentRunActivity(transcript.activity);
+    const providerCheckpoint = normalizeProviderMessageCheckpoint(transcript.providerCheckpoint);
     const model = optionalString(transcript.model);
     const reasoning = optionalString(transcript.reasoning);
     const error = optionalString(transcript.error);
@@ -1598,6 +1627,7 @@ export function parseStructuredAgentJobTranscript(
     return {
       sessionId: optionalString(transcript.sessionId),
       message: optionalString(transcript.message),
+      ...(providerCheckpoint?.agentId === kind ? { providerCheckpoint } : {}),
       ...(activity ? { activity } : {}),
       ...(model ? { model } : {}),
       ...(reasoning ? { reasoning } : {}),
