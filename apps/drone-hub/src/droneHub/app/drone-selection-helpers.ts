@@ -18,6 +18,11 @@ export function retainValidSelectedDroneIds(
   return uniqueOrderedDroneIds([...selectedDroneIds]).filter((id) => validDroneIds.has(id));
 }
 
+/** Includes hidden side chats without adding them to the sidebar's chat list. */
+export function selectableDroneChats(drone: DroneSummary | null): string[] {
+  return [...normalizedDroneChats(drone), ...(drone?.workflowChats ?? []), ...(drone?.sideChats ?? []).map((chat) => chat.name)];
+}
+
 export function resolveSelectedChatForDrone(args: {
   droneId: string;
   droneById?: Record<string, DroneSummary>;
@@ -30,7 +35,7 @@ export function resolveSelectedChatForDrone(args: {
     args.droneById?.[droneId] ??
     args.drones?.find((candidate) => String(candidate?.id ?? '').trim() === droneId) ??
     null;
-  const chats = normalizedDroneChats(drone);
+  const chats = selectableDroneChats(drone);
   const remembered = String(args.lastSelectedChatByDrone[droneId] ?? '').trim();
   if (remembered && chats.includes(remembered)) return remembered;
   if (chats.includes('default')) return 'default';

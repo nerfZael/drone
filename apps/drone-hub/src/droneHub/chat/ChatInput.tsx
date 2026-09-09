@@ -1494,8 +1494,8 @@ export function ChatInput({
               }}
               rows={1}
               placeholder="Ask the agent"
-              className={`min-w-[11.25rem] max-h-[8.25rem] flex-1 resize-none border-0 bg-transparent text-[var(--chat-text-size)] leading-[1.375rem] text-[var(--chat-composer-fg)] caret-[var(--cursor)] placeholder:text-[var(--chat-composer-placeholder)] focus:outline-none ${
-                composerExpanded ? 'min-h-[2.75rem] px-0 pb-0 pt-3' : 'min-h-[3.125rem] px-3.5 pb-3 pt-[.9375rem]'
+              className={`min-w-0 max-h-[8.25rem] flex-1 resize-none border-0 bg-transparent text-[var(--chat-text-size)] leading-[1.375rem] text-[var(--chat-composer-fg)] caret-[var(--cursor)] placeholder:text-[var(--chat-composer-placeholder)] focus:outline-none ${
+                composerExpanded ? 'min-h-[2.75rem] px-0 pb-0 pt-3' : 'min-h-[3.125rem] overflow-hidden text-ellipsis whitespace-nowrap px-3.5 pb-3 pt-[.9375rem]'
               }`}
               disabled={composerLocked || voiceRecordingActive}
               autoFocus={Boolean(autoFocus)}

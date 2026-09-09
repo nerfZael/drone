@@ -5,11 +5,12 @@ export function placeSideChat(
   workspace: { width: number; height: number },
   occupied: WorkspaceRect[],
   count: number,
+  preferredSize?: { width: number; height: number },
 ): WorkspaceRect {
-  const width = Math.min(320, Math.max(1, workspace.width));
+  const width = Math.min(preferredSize?.width ?? 320, Math.max(1, workspace.width));
   const height = Math.min(
     Math.max(1, workspace.height),
-    Math.max(440, 2 * Math.round(workspace.height / 4)),
+    preferredSize?.height ?? Math.max(440, 2 * Math.round(workspace.height / 4)),
   );
   const maxX = Math.max(0, workspace.width - width);
   const maxY = Math.max(0, workspace.height - height);

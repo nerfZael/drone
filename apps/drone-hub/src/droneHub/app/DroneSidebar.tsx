@@ -1,3 +1,4 @@
+import { DetachedChatIndicator, detachChatMenuItem } from './DetachedChatIndicator';
 import React from 'react';
 import type { SidebarMoveCommandResult } from '@drone/device-protocol';
 import { createPortal } from 'react-dom';
@@ -546,7 +547,7 @@ function ReadOnlySidebarGroups({
                                     : 'text-[var(--sidebar-subitem-fg)]'
                                 }`}
                                 style={{ paddingLeft: 4 }}
-                                label={<span className={sidebarChatLabelClass}>{chatName}</span>}
+                                label={<><span className={sidebarChatLabelClass}>{chatName}</span><DetachedChatIndicator droneId={drone.id} chatName={chatName} /></>}
                                 status={
                                   <span
                                     className={sidebarChatStateClass}
@@ -815,6 +816,7 @@ function StaticReadOnlySidebarTree({
                     />
                   </span>
                   <span className={sidebarChatLabelClass}>{chatName}</span>
+                                      <DetachedChatIndicator droneId={drone.id} chatName={chatName} />
                 </button>
               );
             })}
@@ -3184,6 +3186,7 @@ export function DroneSidebar({
                                         )}
                                       </span>
                                       <span className={sidebarChatLabelClass}>{chatName}</span>
+                                      <DetachedChatIndicator droneId={drone.id} chatName={chatName} />
                                       {drone.draftChats?.[chatName] === true ? (
                                         <span className="ml-auto flex-shrink-0 text-[var(--text-8)] font-[var(--weight-semibold)] uppercase text-[var(--accent)]">
                                           Draft
@@ -3665,6 +3668,7 @@ export function DroneSidebar({
           y={pinnedChatContextMenu.y}
           label={`Actions for ${pinnedChatContextMenu.chatName}`}
           items={[
+            detachChatMenuItem(pinnedChatContextMenu.droneId, pinnedChatContextMenu.chatName),
             {
               id: 'mute',
               label: mutedChatIdSet.has(

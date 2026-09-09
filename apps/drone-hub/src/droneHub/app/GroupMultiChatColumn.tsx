@@ -1,3 +1,4 @@
+import type { MarkdownFileReference } from '../chat/MarkdownMessage';
 import React from 'react';
 import { latestExternalCheckpointId } from './side-chat-checkpoint-model';
 import { filterCompletedPendingPrompts } from '@drone/assistant-chat';
@@ -83,6 +84,9 @@ const INITIAL_TRANSCRIPT_TAIL_TURNS = 50;
 
 export type GroupMultiChatColumnProps = {
   compact?: boolean;
+  onOpenFileReference?: (ref: MarkdownFileReference) => void;
+  onPublish?: () => Promise<boolean>;
+  publishing?: boolean;
   drone: DroneSummary;
   droneLabel?: string;
   preferredChat: string;
@@ -102,6 +106,9 @@ export type GroupMultiChatColumnProps = {
 
 export function GroupMultiChatColumn({
   compact = false,
+  onOpenFileReference,
+  onPublish,
+  publishing,
   drone,
   droneLabel,
   preferredChat,
@@ -1191,6 +1198,7 @@ export function GroupMultiChatColumn({
               const followUps = timelineUserFollowUps(group.followUps, {
                 droneId: drone.id,
                 droneHomePath: droneHome,
+                onOpenFileReference,
               });
               const latest = index === timelineGroups.length - 1;
               if (entry.kind === 'turn') {
@@ -1208,6 +1216,7 @@ export function GroupMultiChatColumn({
                     messageId={messageId}
                     droneId={drone.id}
                     droneHomePath={droneHome}
+                    onOpenFileReference={onOpenFileReference}
                     showRoleIcons={false}
                     loadActivity={loadTranscriptActivity}
                   />
@@ -1223,6 +1232,7 @@ export function GroupMultiChatColumn({
                   initiallyExpandFileChanges={index === latestFileChangesGroupIndex && latest}
                   droneId={drone.id}
                   droneHomePath={droneHome}
+                  onOpenFileReference={onOpenFileReference}
                   showRoleIcons={false}
                   onCancelQueued={cancelPendingPrompt}
                   cancelBusy={Boolean(cancellingPendingPromptById[item.id])}
@@ -1258,7 +1268,7 @@ export function GroupMultiChatColumn({
         draftPersistenceKey={draftKey}
         droneName={drone.name}
         promptError={promptError}
-        waiting={waitingForAgent}
+        waiting={onPublish ? false : waitingForAgent}
         disabled={isDroneStartingOrSeeding(drone.hubPhase)}
         autoFocus={false}
         modeHint=""
@@ -1271,7 +1281,9 @@ export function GroupMultiChatColumn({
           />
         }
         composerControls={composerControls}
-        onStop={canStopResponse ? stopResponse : undefined}
+        onStop={!onPublish && canStopResponse ? stopResponse : undefined}
+        onPublish={onPublish}
+        publishing={publishing}
         stopping={stoppingResponse}
         onSend={sendPrompt}
         onSendInNewChat={onSendPromptInNewChat}

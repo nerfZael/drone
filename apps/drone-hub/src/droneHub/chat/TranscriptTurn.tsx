@@ -503,6 +503,7 @@ export const TranscriptTurn = React.memo(
               hasSavedProgress={Boolean(activity?.messages.length || item.fileChanges)}
             />
             <ChangedFilesCard
+              droneId={droneId}
               fileChanges={item.fileChanges}
               initiallyExpanded={initiallyExpandFileChanges}
             />

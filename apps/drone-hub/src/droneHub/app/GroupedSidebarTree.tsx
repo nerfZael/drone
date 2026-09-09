@@ -1,3 +1,4 @@
+import { DetachedChatIndicator, detachChatMenuItem } from './DetachedChatIndicator';
 import React from 'react';
 import { useDndMonitor, useDraggable, useDroppable, type DragEndEvent, type DragMoveEvent, type DragOverEvent, type DragStartEvent } from '@dnd-kit/core';
 import { isUngroupedGroupName } from '../../domain';
@@ -848,6 +849,7 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
             )}
           </span>
           <span className={sidebarChatLabelClass}>{chatName}</span>
+          <DetachedChatIndicator droneId={drone.id} chatName={chatName} />
           {draft ? (
             <span className="flex-shrink-0 rounded border border-[var(--accent-muted)] px-1 py-0.5 text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--accent)]">
               Draft
@@ -861,6 +863,7 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
           y={contextMenuPosition.y}
           label={`Actions for ${chatName}`}
           items={[
+            detachChatMenuItem(drone.id, chatName),
             {
               id: 'mute-chat',
               label: directlyMuted ? 'Unmute chat' : 'Mute chat',
@@ -1000,6 +1003,7 @@ const GroupedSidebarChatRowStatic = React.memo(function GroupedSidebarChatRowSta
             )}
           </span>
           <span className={sidebarChatLabelClass}>{chatName}</span>
+          <DetachedChatIndicator droneId={drone.id} chatName={chatName} />
         </button>
       </div>
     </div>

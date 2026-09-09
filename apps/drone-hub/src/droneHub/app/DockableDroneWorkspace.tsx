@@ -1,4 +1,5 @@
 import React from 'react';
+import { measureSideChatBounds, readSideChatWorkspaceState, restoreSideChatBounds, saveSideChatWorkspaceState } from './side-chat-workspace-state';
 import { placeSideChat } from './side-chat-placement';
 import { prepareSideChatPanel } from './prepareSideChatPanel';
 import { FOCUS_SIDE_CHAT_EVENT } from './side-chat-events';
@@ -47,6 +48,9 @@ type DockableDroneWorkspaceProps = {
   openRequestNonce: number;
   chatContent: React.ReactNode;
   sideChats?: WorkspaceSideChat[];
+  mainChatName?: string;
+  sideChatReturnRequest?: { droneId: string; chatName: string } | null;
+  mainChatControls?: React.ReactNode;
   renderSideChat?: (chat: WorkspaceSideChat) => React.ReactNode;
   onCloseSideChat?: (chatName: string) => void;
   sideChatStatus?: React.ReactNode;
@@ -351,12 +355,12 @@ export function resetWorkspaceToChat(api: DockviewApi): void {
 }
 
 function ChatPanel({ containerApi }: IDockviewPanelProps) {
-  const content = React.useContext(DockableDroneWorkspaceContext).chatContent;
+  const { chatContent: content, mainChatControls } = React.useContext(DockableDroneWorkspaceContext);
   React.useEffect(() => {
     const panel = containerApi.getPanel(CHAT_PANEL_ID);
     if (panel) panel.api.setTitle('Agent Chat');
   }, [containerApi]);
-  return <UiPanel flush className="h-full" data-main-workspace-chat="true">{content}</UiPanel>;
+  return <UiPanel flush className="h-full" data-main-workspace-chat="true">{mainChatControls}{content}</UiPanel>;
 }
 
 function SideChatPanel({ params }: IDockviewPanelProps<{ chatName: string }>) {
@@ -433,6 +437,7 @@ function WorkspaceWatermark() {
 
 const DockableDroneWorkspaceContext = React.createContext<{
   chatContent: React.ReactNode;
+  mainChatControls?: React.ReactNode;
   sideChats: WorkspaceSideChat[];
   renderSideChat?: (chat: WorkspaceSideChat) => React.ReactNode;
   onCloseSideChat?: (chatName: string) => void;
@@ -454,6 +459,9 @@ export function DockableDroneWorkspace({
   openRequestNonce,
   chatContent,
   sideChats = [],
+  mainChatName = '',
+  sideChatReturnRequest,
+  mainChatControls,
   renderSideChat,
   onCloseSideChat,
   sideChatStatus,
@@ -507,6 +515,7 @@ export function DockableDroneWorkspace({
   const contextValue = React.useMemo(
     () => ({
       chatContent,
+      mainChatControls,
       sideChats,
       renderSideChat,
       onCloseSideChat,
@@ -514,7 +523,7 @@ export function DockableDroneWorkspace({
       previewTab,
       onPreviewHostChanged: markPreviewHostChanged,
     }),
-    [chatContent, sideChats, renderSideChat, onCloseSideChat, markPreviewHostChanged, previewTab, renderToolPane],
+    [chatContent, mainChatControls, sideChats, renderSideChat, onCloseSideChat, markPreviewHostChanged, previewTab, renderToolPane],
   );
   const components = React.useMemo(() => ({ chat: ChatPanel, tool: ToolPanel, sideChat: SideChatPanel }), []);
 
@@ -538,11 +547,18 @@ export function DockableDroneWorkspace({
     const api = apiRef.current;
     const root = workspaceElementRef.current;
     if (!api || !root) return;
-    const wanted = new Set(sideChats.map((chat) => `${SIDE_CHAT_PANEL_PREFIX}${chat.name}`));
+    const floatingChats = sideChats.filter((chat) => chat.name !== mainChatName);
+    const wanted = new Set(floatingChats.map((chat) => `${SIDE_CHAT_PANEL_PREFIX}${chat.name}`));
     for (const panel of api.panels) {
-      if (panel.id.startsWith(SIDE_CHAT_PANEL_PREFIX) && !wanted.has(panel.id)) api.removePanel(panel);
+      if (!panel.id.startsWith(SIDE_CHAT_PANEL_PREFIX) || wanted.has(panel.id)) continue;
+      if (panel.id === `${SIDE_CHAT_PANEL_PREFIX}${mainChatName}`) {
+        saveSideChatWorkspaceState(currentDrone.id, { floatingBounds: {
+          [mainChatName]: measureSideChatBounds(panel.group.element, root),
+        } });
+      }
+      api.removePanel(panel);
     }
-    for (const chat of sideChats) {
+    for (const chat of floatingChats) {
       const id = `${SIDE_CHAT_PANEL_PREFIX}${chat.name}`;
       const existing = api.getPanel(id);
       if (existing) {
@@ -551,18 +567,49 @@ export function DockableDroneWorkspace({
       }
       const rootRect = root.getBoundingClientRect();
       const groups = api.groups.filter((group) => group.panels.some((panel) => panel.id === CHAT_PANEL_ID || panel.id.startsWith(SIDE_CHAT_PANEL_PREFIX)));
-      const occupied = groups.map((group) => {
-        const rect = group.element.getBoundingClientRect();
+      const detachedGroups = [...(root.closest('[data-drone-workspace-root]')?.querySelectorAll('[data-detached-chat-key]') ?? [])]
+        .map((element) => element.closest('.dv-groupview')).filter((element): element is Element => Boolean(element));
+      const occupied = [...groups.map((group) => group.element), ...detachedGroups].filter((element) => element.closest('.dv-resize-container')).map((element) => {
+        const rect = element.getBoundingClientRect();
         return { x: rect.x - rootRect.x, y: rect.y - rootRect.y, width: rect.width, height: rect.height };
       });
-      const bounds = placeSideChat({ width: api.width, height: api.height }, occupied, api.panels.filter((panel) => panel.id.startsWith(SIDE_CHAT_PANEL_PREFIX)).length);
+      const savedBounds = readSideChatWorkspaceState(currentDrone.id).floatingBounds[chat.name];
+      const bounds = savedBounds
+        ? restoreSideChatBounds(savedBounds, api)
+        : placeSideChat({ width: api.width, height: api.height }, occupied, api.panels.filter((panel) => panel.id.startsWith(SIDE_CHAT_PANEL_PREFIX)).length);
       const panel = api.addPanel({ id, component: 'sideChat', title: chat.name, params: { chatName: chat.name },
         minimumWidth: Math.min(320, api.width), minimumHeight: Math.min(220, api.height),
         floating: bounds, inactive: true,
       });
       prepareSideChatPanel(panel);
     }
-  }, [currentDrone.id, sideChats, readyVersion]);
+  }, [currentDrone.id, sideChats, mainChatName, readyVersion]);
+
+  const previousMainChatRef = React.useRef({ chatName: mainChatName, returnRequest: sideChatReturnRequest });
+  React.useEffect(() => {
+    const { chatName: previous, returnRequest: previousReturnRequest } = previousMainChatRef.current;
+    previousMainChatRef.current = { chatName: mainChatName, returnRequest: sideChatReturnRequest };
+    if (previous === mainChatName) return;
+    const api = apiRef.current;
+    if (!api) return;
+    const promoted = sideChats.some((chat) => chat.name === mainChatName);
+    const returned = sideChats.some((chat) => chat.name === previous);
+    if (!promoted && !returned) return;
+    // Only the explicit return action focuses the restored floating chat.
+    // Selecting a regular chat in the sidebar must focus that new main chat.
+    const focusReturned = returned && !promoted && sideChatReturnRequest !== previousReturnRequest
+      && sideChatReturnRequest?.droneId === currentDrone.id && sideChatReturnRequest.chatName === previous;
+    const panel = api.getPanel(focusReturned ? `${SIDE_CHAT_PANEL_PREFIX}${previous}` : CHAT_PANEL_ID);
+    panel?.api.setActive();
+    const frame = requestAnimationFrame(() => {
+      const scope = !focusReturned
+        ? workspaceElementRef.current?.querySelector<HTMLElement>('[data-main-workspace-chat]')
+        : [...(workspaceElementRef.current?.querySelectorAll<HTMLElement>('[data-side-chat-name]') ?? [])]
+            .find((element) => element.dataset.sideChatName === previous && element.querySelector('[data-active-composer-id]'));
+      scope?.querySelector<HTMLElement>('textarea, [contenteditable="true"]')?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [currentDrone.id, mainChatName, sideChats, sideChatReturnRequest]);
 
   React.useEffect(() => {
     if (!useMobileLayout) return;

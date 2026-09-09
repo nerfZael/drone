@@ -1,3 +1,4 @@
+import { dispatchAssistantOpenDroneTarget } from '../assistant/open-drone-chat-event';
 import { profileStorageKey } from '../../profile-storage';
 import type { AgentRunFileChanges } from '@blip/protocol';
 
@@ -26,7 +27,15 @@ export type ChangesOpenAgentRunDetail = {
   droneId?: string;
 };
 
+export function agentRunChangesDroneId(fileChanges: AgentRunFileChanges, selection: AgentRunChangesSelection, chatDroneId?: string): string | undefined {
+  return fileChanges.workspaces.find((workspace) => workspace.targetId === selection.workspaceTargetId)?.droneId || chatDroneId;
+}
+
 let pendingAgentRunChanges: ChangesOpenAgentRunDetail | null = null;
+
+export function hasRequestedAgentRunChanges(droneId: string): boolean {
+  return Boolean(pendingAgentRunChanges && (!pendingAgentRunChanges.droneId || pendingAgentRunChanges.droneId === droneId));
+}
 
 export function consumeRequestedAgentRunChanges(
   droneIdRaw: string,
@@ -43,7 +52,8 @@ export function requestAgentRunChanges(detail: ChangesOpenAgentRunDetail): void 
   pendingAgentRunChanges = detail;
   if (typeof window === 'undefined') return;
   try {
-    window.dispatchEvent(new CustomEvent(CHANGES_OPEN_AGENT_RUN_EVENT));
+    if (detail.droneId) dispatchAssistantOpenDroneTarget({ droneId: detail.droneId });
+    window.dispatchEvent(new CustomEvent(CHANGES_OPEN_AGENT_RUN_EVENT, { detail }));
   } catch {
     // ignore
   }

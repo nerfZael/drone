@@ -2,9 +2,9 @@ import React from 'react';
 import { isWorkflowChildDrone } from '../workflows/workflow-drone-visibility';
 import type { StartupSeedState } from './app-types';
 import { isStartupSeedFresh } from './app-config';
-import { normalizedDroneChats } from './chat-node-helpers';
 import {
   resolveDroneCardSelection,
+  selectableDroneChats,
   resolveSelectedChatForDrone,
   retainValidSelectedDroneIds,
   shouldKeepPendingSelectedChat,
@@ -151,10 +151,7 @@ export function useDroneSelectionState({
     const chatName = String(selectedChat ?? '').trim() || 'default';
     if (!droneId) return;
     const drone = droneById[droneId] ?? null;
-    const chats = [
-      ...normalizedDroneChats(drone, { includeDefaultWhenEmpty: true }),
-      ...(drone?.workflowChats ?? []),
-    ];
+    const chats = selectableDroneChats(drone);
     if (chatName !== 'default' && !chats.includes(chatName)) {
       if (pendingSelectedChatByDroneRef.current[droneId]?.chatName !== chatName) {
         pendingSelectedChatByDroneRef.current[droneId] = {
@@ -283,13 +280,14 @@ export function useDroneSelectionState({
       manualEmptySelectionRef.current = droneIds.length === 0;
       setSelectedDroneIds((prev) => (sameStringArray(prev, droneIds) ? prev : droneIds));
       setSelectedDrone(activeDroneId);
-      if (activeDroneId && activeDroneId !== selectedDrone) setSelectedChat('default');
+      if (activeDroneId && activeDroneId !== selectedDrone) setSelectedChat(resolveChatForDrone(activeDroneId));
     },
     [
       preferredSelectedDroneHoldUntilRef,
       preferredSelectedDroneRef,
       selectedDrone,
       selectionAnchorRef,
+      resolveChatForDrone,
       setSelectedChat,
       setSelectedDrone,
       setSelectedDroneIds,
@@ -412,7 +410,7 @@ export function useDroneSelectionState({
     if (!dronesReady) return;
     if (!selectedDrone) return;
     const d = droneById[selectedDrone] ?? null;
-    const chats = [...(d?.chats ?? []), ...(d?.workflowChats ?? [])];
+    const chats = selectableDroneChats(d);
     if (selectedChat && chats.includes(selectedChat)) return;
     const fallbackChat = chats.includes('default') ? 'default' : chats[0] ?? 'default';
     const pendingSelection = pendingSelectedChatByDroneRef.current[selectedDrone];

@@ -12,7 +12,7 @@ import {
 } from '@drone/assistant-chat';
 
 import { IconChevron } from '../icons';
-import { requestAgentRunChanges, type AgentRunChangesSelection } from '../changes/navigation';
+import { requestAgentRunChanges, agentRunChangesDroneId, type AgentRunChangesSelection } from '../changes/navigation';
 import { AgentRunChangedFilesTree } from './AgentRunChangedFilesTree';
 import { agentRunDiffError, loadAgentRunDiffFiles } from './agent-run-diffs';
 
@@ -176,10 +176,12 @@ function WorkspaceFiles({
 
 export function ChangedFilesCard({
   fileChanges,
+  droneId,
   className = '',
   initiallyExpanded = false,
 }: {
   fileChanges?: AgentRunFileChanges | null;
+  droneId?: string;
   className?: string;
   initiallyExpanded?: boolean;
 }) {
@@ -213,7 +215,7 @@ export function ChangedFilesCard({
     requestAgentRunChanges({
       fileChanges,
       initialSelection: next,
-      ...(firstWorkspace?.droneId ? { droneId: firstWorkspace.droneId } : {}),
+      droneId: agentRunChangesDroneId(fileChanges, next, droneId),
     });
   };
 

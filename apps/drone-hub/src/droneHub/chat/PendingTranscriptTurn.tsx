@@ -291,6 +291,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
         <>
           <StoppedRunNotice reason={item.error} at={item.updatedAt ?? item.at} />
           <ChangedFilesCard
+            droneId={droneId}
             fileChanges={item.fileChanges}
             initiallyExpanded={initiallyExpandFileChanges}
           />
@@ -311,6 +312,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
             interruptionError={interruptionError}
           />
           <ChangedFilesCard
+            droneId={droneId}
             fileChanges={item.fileChanges}
             initiallyExpanded={initiallyExpandFileChanges}
           />
@@ -369,6 +371,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
             </>
           )}
           <ChangedFilesCard
+            droneId={droneId}
             fileChanges={item.fileChanges}
             initiallyExpanded={initiallyExpandFileChanges}
           />

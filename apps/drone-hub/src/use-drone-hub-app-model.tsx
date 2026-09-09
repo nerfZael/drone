@@ -1,9 +1,12 @@
+import { useDetachedChatStore } from './droneHub/app/detached-chat-store';
 import { recordUiAction } from './ui-diagnostics';
 import { beginDesktopWorkspaceLoad, desktopWorkspaceLoads } from './droneHub/files/workspace-load-telemetry';
 import { prepareWorkspaceFileOpen } from './droneHub/files/prepare-workspace-file-open';
 import { readDesktopFile } from './droneHub/files/read-desktop-file';
 import { workspaceExplorerLocation, normalizeWorkspaceLinkPath, workspaceLinkIsDirectory, workspaceLinkParent } from '@drone/hub-model';
 import React from 'react';
+import { CHAT_OPEN_FILE_EVENT, consumeChatFileOpen } from './droneHub/app/chat-file-navigation';
+import { renameSideChatWorkspaceChat } from './droneHub/app/side-chat-workspace-state';
 import { createSidebarCommandQueue } from '@drone/hub-model/sidebar';
 import {
   executeCompanionProposal,
@@ -1986,6 +1989,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         if (matchingDrones.length !== 1) return;
         droneId = matchingDrones[0]!.id;
       }
+      const ownerRepoPath = String(droneByIdRef.current[droneId]?.repoPath ?? '').trim();
+      if (activeRepoPath && ownerRepoPath !== activeRepoPath) setActiveRepoPath(ownerRepoPath);
       expandGroupsForDroneIds([droneId]);
       const chatName = String(detail?.chatName ?? '').trim();
       if (chatName) selectDroneChat(droneId, chatName);
@@ -1994,7 +1999,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     window.addEventListener(ASSISTANT_OPEN_DRONE_CHAT_EVENT, handleAssistantOpenDroneChat);
     return () =>
       window.removeEventListener(ASSISTANT_OPEN_DRONE_CHAT_EVENT, handleAssistantOpenDroneChat);
-  }, [expandGroupsForDroneIds, selectDroneCard, selectDroneChat]);
+  }, [activeRepoPath, setActiveRepoPath, expandGroupsForDroneIds, selectDroneCard, selectDroneChat]);
   React.useEffect(() => {
     if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') return;
     let closed = false;
@@ -3266,6 +3271,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             deleteChatRuntimeCache(
               chatRuntimeCacheKey(operation.droneId, operation.chatName),
             );
+            useDetachedChatStore.getState().forgetChat(operation.droneId, operation.chatName);
             return { droneId: operation.droneId, chatName: operation.chatName };
           },
           renameChat: async (operation) => {
@@ -3282,6 +3288,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
               operation.chatName,
               operation.newName,
             );
+            useDetachedChatStore.getState().rename(operation.droneId, operation.chatName, operation.newName);
+            renameSideChatWorkspaceChat(operation.droneId, operation.chatName, operation.newName);
             return {
               droneId: operation.droneId,
               oldName: operation.chatName,
@@ -3788,6 +3796,19 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [currentDrone, openFileInFilesPane],
   );
+  // Consume navigation requests here, after this model's editor restoration
+  // and path-navigation reset effects. Child workspace effects run too early
+  // and their file reads would be invalidated by the parent reset.
+  React.useEffect(() => {
+    if (!currentDrone) return;
+    const openFile = () => {
+      const request = consumeChatFileOpen(currentDrone.id);
+      if (request) openMarkdownFileReference(request.ref);
+    };
+    openFile();
+    window.addEventListener(CHAT_OPEN_FILE_EVENT, openFile);
+    return () => window.removeEventListener(CHAT_OPEN_FILE_EVENT, openFile);
+  }, [currentDrone?.id, openMarkdownFileReference]);
   const resolveCurrentDroneRepoFilePath = React.useCallback(
     (repoRelativePathRaw: string): string | null => {
       const relativePath = String(repoRelativePathRaw ?? '')
@@ -4122,6 +4143,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           },
         );
         renameChatRuntimeCache(droneId, chatName, newName);
+        useDetachedChatStore.getState().rename(droneId, chatName, newName);
+        renameSideChatWorkspaceChat(droneId, chatName, newName);
         setSidebarChatOrderByDrone((prev) => {
           const currentOrder = prev[droneId];
           if (!currentOrder || !currentOrder.includes(chatName)) return prev;
@@ -4202,6 +4225,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
               },
             );
             renameChatRuntimeCache(droneId, chatName, candidate);
+            useDetachedChatStore.getState().rename(droneId, chatName, candidate);
+            renameSideChatWorkspaceChat(droneId, chatName, candidate);
             const oldCanvasNodeId = createCanvasChatNodeId(droneId, chatName);
             const newCanvasNodeId = createCanvasChatNodeId(droneId, candidate);
             if (oldCanvasNodeId && newCanvasNodeId) {
@@ -4347,6 +4372,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
               { method: 'DELETE' },
             );
             deleteChatRuntimeCache(chatRuntimeCacheKey(droneId, chatName));
+            useDetachedChatStore.getState().forgetChat(droneId, chatName);
           } catch {
             // Preserve the configuration error; rollback is best-effort.
           }
@@ -5105,6 +5131,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           { method: 'DELETE' },
         );
         deleteChatRuntimeCache(chatRuntimeCacheKey(droneId, chatName));
+        useDetachedChatStore.getState().forgetChat(droneId, chatName);
         setSidebarChatOrderByDrone((prev) => {
           const currentOrder = prev[droneId];
           if (!currentOrder || !currentOrder.includes(chatName)) return prev;
@@ -5640,6 +5667,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   });
 
   const workspaceContentProps: DroneHubWorkspaceContentProps = useDroneHubWorkspaceContentProps({
+    detachedChatAgent: currentDrone && effectiveChatInfo
+      ? { droneId: currentDrone.id, chatName: selectedChat || 'default', agent: effectiveChatInfo.agent }
+      : null,
     appView,
     llmSettingsState,
     deleteActionSettingsState,

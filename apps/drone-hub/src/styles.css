@@ -3593,3 +3593,14 @@ select:disabled optgroup {
     transform: translateX(320%);
   }
 }
+
+/* Detached chats share the workspace without intercepting input between windows. */
+.dh-detached-chats .dv-dockview,
+.dh-detached-chats .dv-grid-view,
+.dh-detached-chats .dv-watermark-container {
+  background: transparent;
+  pointer-events: none;
+}
+.dh-detached-chats .dv-resize-container {
+  pointer-events: auto;
+}

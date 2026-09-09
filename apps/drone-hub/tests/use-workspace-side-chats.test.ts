@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
-import { OPEN_SIDE_CHAT_EVENT } from '../src/droneHub/app/side-chat-events';
+import { OPEN_SIDE_CHAT_EVENT, type OpenSideChatDetail } from '../src/droneHub/app/side-chat-events';
 
 test('returning to a drone does not revive a previous visit’s request or clear a newer operation', async () => {
   const harness = sideChatHarness();
@@ -54,13 +54,28 @@ test('a delete confirmation cannot submit after navigating away, and stays visib
   }
 });
 
+test('a detached answer fork starts once the owning drone mounts, and only once', () => {
+  const harness = sideChatHarness({ droneId: 'A', target: { sourceChatName: 'review', checkpointId: 'answer' } });
+  try {
+    harness.render('B');
+    expect(harness.requests).toHaveLength(0);
+    harness.render('A');
+    expect(harness.requests).toHaveLength(1);
+    harness.render('A');
+    expect(harness.requests).toHaveLength(1);
+    expect(harness.render('A').busy).toBe('create');
+  } finally {
+    harness.unmount();
+  }
+});
+
 async function settle() {
   for (let i = 0; i < 6; i++) await Promise.resolve();
 }
 
 // Like the transcript-scroll tests, run the real hook with controlled effects
 // and deferred I/O, without replacing React globally for other test files.
-function sideChatHarness() {
+function sideChatHarness(pendingNavigation: OpenSideChatDetail | null = null) {
   let cursor = 0;
   let dirty = false;
   let writes = 0;
@@ -120,7 +135,15 @@ function sideChatHarness() {
     (name: string) => {
       if (name === 'react') return React;
       if (name === '../../ui/AppConfirmDialog') return { useAppConfirmDialog: () => confirm };
-      if (name === './side-chat-events') return { OPEN_SIDE_CHAT_EVENT };
+      if (name === './side-chat-events') return {
+        OPEN_SIDE_CHAT_EVENT,
+        consumePendingSideChat: (droneId: string) => {
+          if (pendingNavigation?.droneId !== droneId) return null;
+          const request = pendingNavigation;
+          pendingNavigation = null;
+          return request;
+        },
+      };
       if (name === '../http')
         return {
           requestJson: () => {

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   resolveDroneDeleteTargetIds,
+  selectableDroneChats,
   resolveDroneCardSelection,
   resolveSelectedChatForDrone,
   retainValidSelectedDroneIds,
@@ -32,6 +33,20 @@ describe('resolveSelectedChatForDrone', () => {
     });
 
     expect(selected).toBe('chat-2');
+  });
+
+  test('restores a promoted side chat without putting it in the sidebar', () => {
+    const drone = makeDrone('drone-a', ['default', 'review']);
+    drone.sideChats = [{ name: 'side-1', sourceChatName: 'review', checkpointId: 'checkpoint', agent: { kind: 'native' } }];
+    expect(resolveSelectedChatForDrone({
+      droneId: drone.id, drones: [drone], lastSelectedChatByDrone: { [drone.id]: 'side-1' },
+    })).toBe('side-1');
+    expect(selectableDroneChats(drone)).toContain('side-1');
+    expect(drone.chats).toEqual(['default', 'review']);
+    drone.sideChats = [];
+    expect(resolveSelectedChatForDrone({
+      droneId: drone.id, drones: [drone], lastSelectedChatByDrone: { [drone.id]: 'side-1' },
+    })).toBe('default');
   });
 
   test('falls back to default when the remembered chat no longer exists', () => {

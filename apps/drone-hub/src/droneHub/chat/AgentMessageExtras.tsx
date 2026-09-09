@@ -188,6 +188,8 @@ export function AgentMessageExtras({
       ) : null}
 
       <ChangedFilesCard
+
+        droneId={droneId}
         fileChanges={fileChanges}
         initiallyExpanded={initiallyExpandFileChanges}
       />

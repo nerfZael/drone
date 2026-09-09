@@ -2,7 +2,7 @@ import React from 'react';
 import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
 import { requestJson } from '../http';
 import type { DroneSummary } from '../types';
-import { OPEN_SIDE_CHAT_EVENT, type OpenSideChatDetail } from './side-chat-events';
+import { OPEN_SIDE_CHAT_EVENT, consumePendingSideChat, type OpenSideChatDetail } from './side-chat-events';
 
 export type WorkspaceSideChat = NonNullable<DroneSummary['sideChats']>[number];
 
@@ -120,6 +120,8 @@ export function useWorkspaceSideChats(drone: DroneSummary, mainChatName: string)
         });
     };
     window.addEventListener(OPEN_SIDE_CHAT_EVENT, onOpen);
+    const pending = consumePendingSideChat(drone.id);
+    if (pending) onOpen(new CustomEvent(OPEN_SIDE_CHAT_EVENT, { detail: pending, cancelable: true }));
     return () => window.removeEventListener(OPEN_SIDE_CHAT_EVENT, onOpen);
   }, [drone.id, mainChatName, sideChats, workspace]);
 

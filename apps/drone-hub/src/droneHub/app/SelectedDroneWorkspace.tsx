@@ -1,3 +1,6 @@
+import { detachedChatKey, DETACHED_CHAT_FOCUS_EVENT, useDetachedChatStore } from './detached-chat-store';
+import { SideChatControls } from './SideChatControls';
+import { readSideChatWorkspaceState, saveSideChatWorkspaceState } from './side-chat-workspace-state';
 import React from 'react';
 import { useWorkspaceSideChats } from './use-workspace-side-chats';
 import { WorkspaceSideChatContent } from './WorkspaceSideChatContent';
@@ -80,7 +83,7 @@ import {
 } from './chat-selection-model';
 import type { RepoOpErrorMeta } from './helpers';
 import type { DroneDeleteMode } from './settings-types';
-import { CHANGES_OPEN_AGENT_RUN_EVENT, requestChangesPullRequest } from '../changes/navigation';
+import { CHANGES_OPEN_AGENT_RUN_EVENT, hasRequestedAgentRunChanges, requestChangesPullRequest } from '../changes/navigation';
 import {
   OPEN_CHANGE_REQUEST_EVENT,
   type OpenChangeRequestDetail,
@@ -689,6 +692,11 @@ export function SelectedDroneWorkspace({
       }),
     [activeChatName, currentDrone.id],
   );
+  const detachedMainKey = detachedChatKey(currentDrone.id, activeChatName);
+  const mainChatDetached = useDetachedChatStore((state) => Boolean(state.chats[detachedMainKey]?.open));
+  React.useEffect(() => {
+    if (mainChatDetached) window.dispatchEvent(new CustomEvent(DETACHED_CHAT_FOCUS_EVENT, { detail: { key: detachedMainKey } }));
+  }, [mainChatDetached, detachedMainKey]);
   const selectedChatIsDraft = currentDrone.draftChats?.[activeChatName] === true;
   const currentDroneIsDraft = currentDrone.draft === true || currentDrone.hubPhase === 'draft';
   const currentChatIsDraft = currentDroneIsDraft || selectedChatIsDraft;
@@ -1032,6 +1040,24 @@ export function SelectedDroneWorkspace({
   });
   const nativeChatActive = currentAgentKey === 'native' && !currentChatIsDraft;
   const sideChatWorkspace = useWorkspaceSideChats(currentDrone, activeChatName);
+  const [sideChatReturnRequest, setSideChatReturnRequest] = React.useState<{ droneId: string; chatName: string } | null>(null);
+  const mainSideChat = sideChatWorkspace.sideChats.find((chat) => chat.name === activeChatName);
+  const openSideChatAsMain = (chatName: string) => {
+    if (!mainSideChat) {
+      saveSideChatWorkspaceState(currentDrone.id, { previousMainChat: activeChatName });
+    }
+    setSelectedChat(chatName);
+  };
+  const returnMainToFloating = () => {
+    setSideChatReturnRequest({ droneId: currentDrone.id, chatName: activeChatName });
+    const previous = readSideChatWorkspaceState(currentDrone.id).previousMainChat;
+    const regularChats = [...currentDrone.chats, ...(currentDrone.workflowChats ?? [])];
+    setSelectedChat(regularChats.includes(previous) ? previous : resolveChatNameForDrone(currentDrone, ''));
+  };
+  const openSideChatSource = (chat: typeof mainSideChat) => {
+    if (chat && !focusSideChat(currentDrone.id, chat.sourceChatName)) setSelectedChat(chat.sourceChatName);
+  };
+
   const chatConfigResolution = chatConfigResolutionState({
     currentChatIsDraft,
     hasChats,
@@ -1203,10 +1229,14 @@ export function SelectedDroneWorkspace({
     requestRightPanelTab('prs');
   }, [requestRightPanelTab]);
   React.useEffect(() => {
-    const openAgentRunChanges = () => requestRightPanelTab('changes');
+    const openAgentRunChanges = (event?: Event) => {
+      const droneId = (event as CustomEvent | undefined)?.detail?.droneId;
+      if (!droneId || droneId === currentDrone.id) requestRightPanelTab('changes');
+    };
+    if (hasRequestedAgentRunChanges(currentDrone.id)) openAgentRunChanges();
     window.addEventListener(CHANGES_OPEN_AGENT_RUN_EVENT, openAgentRunChanges);
     return () => window.removeEventListener(CHANGES_OPEN_AGENT_RUN_EVENT, openAgentRunChanges);
-  }, [requestRightPanelTab]);
+  }, [currentDrone.id, requestRightPanelTab]);
   React.useEffect(() => {
     const openChangeRequest = (event: Event) => {
       const detail = (event as CustomEvent<OpenChangeRequestDetail>).detail;
@@ -2391,6 +2421,18 @@ export function SelectedDroneWorkspace({
 
       <DockableDroneWorkspace
         sideChats={sideChatWorkspace.sideChats}
+        mainChatName={activeChatName}
+        sideChatReturnRequest={sideChatReturnRequest}
+        mainChatControls={mainSideChat ? (
+          <SideChatControls
+            chat={mainSideChat}
+            busy={Boolean(sideChatWorkspace.busy)}
+            main
+            onKeep={() => void sideChatWorkspace.finish(mainSideChat.name, true)}
+            onOpenSource={() => openSideChatSource(mainSideChat)}
+            onMove={returnMainToFloating}
+          />
+        ) : null}
         onCloseSideChat={(name) => void sideChatWorkspace.finish(name, false)}
         sideChatStatus={sideChatWorkspace.status ? (
           <div role="status" className="flex items-center gap-2 border-b border-[var(--border)] bg-[var(--panel)] px-3 py-2 text-[var(--text-12)] text-[var(--fg-secondary)]">
@@ -2405,9 +2447,8 @@ export function SelectedDroneWorkspace({
             drone={currentDrone}
             busy={Boolean(sideChatWorkspace.busy)}
             onKeep={() => void sideChatWorkspace.finish(chat.name, true)}
-            onOpenSource={() => {
-              if (!focusSideChat(currentDrone.id, chat.sourceChatName)) setSelectedChat(chat.sourceChatName);
-            }}
+            onOpenSource={() => openSideChatSource(chat)}
+            onOpenAsMain={() => openSideChatAsMain(chat.name)}
             onSendPromptInNewChat={(payload, context) => onSendPromptInNewChat(payload, context, chat.name)}
             onCreateQueuedNewChatNow={(id) => onCreateQueuedNewChatNow(id, { droneId: currentDrone.id, chatName: chat.name })}
             onCreateNewChatAutoFocusHandled={onCreateNewChatAutoFocusHandled}
@@ -2427,7 +2468,13 @@ export function SelectedDroneWorkspace({
         onPreviewHostChange={onPersistentPreviewHostChange}
         onBeforeWorkspaceMouseDown={captureWorkspaceChatScroll}
         onAfterToolPanelRemove={restoreWorkspaceChatScroll}
-        chatContent={
+        chatContent={mainChatDetached ? (
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 p-4 text-[var(--muted)]">
+            <span>This chat is open in a detached window.</span>
+            <button className="text-[var(--accent)] hover:underline" onClick={() => useDetachedChatStore.getState().detach(currentDrone.id, activeChatName)}>Focus detached chat</button>
+            <button className="text-[var(--accent)] hover:underline" onClick={() => useDetachedChatStore.getState().attach(detachedMainKey)}>Return chat to workspace</button>
+          </div>
+        ) : (
           <SideChatForkContext.Provider value={{
             droneId: currentDrone.id,
             chatName: activeChatName,
@@ -2756,7 +2803,7 @@ export function SelectedDroneWorkspace({
             </ChatSurface>
           </div>
           </SideChatForkContext.Provider>
-        }
+        )}
       />
     </>
   );

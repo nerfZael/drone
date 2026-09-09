@@ -528,6 +528,16 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
   } = args;
 
   return {
+    detachedChatWindowsProps: {
+      drones,
+      activeChatAgent: args.detachedChatAgent,
+      onAutoRenameChatFromFirstPrompt: handleAutoRenameChatFromFirstPrompt,
+      onSendPromptInNewChat: sendPromptInNewDroneChat,
+      onCreateQueuedNewChatNow: createQueuedNewChatNow,
+      onCreateNewChatAutoFocusHandled: consumeNewChatActionAutoFocus,
+      promotingNewChatActionById,
+      promoteNewChatActionErrorById,
+    },
     appView,
     setupWelcomeProps: setupStatusState.setupStatus?.shouldShowWelcome
       ? {

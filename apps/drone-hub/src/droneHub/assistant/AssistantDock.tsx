@@ -2164,6 +2164,7 @@ export function AssistantDock({
         latestActivityEligible: false,
         content: (
           <ChangedFilesCard
+            droneId={nativeDroneId}
             fileChanges={item.fileChanges}
             initiallyExpanded={itemIndex === lastRunSummaryItemIndex}
           />

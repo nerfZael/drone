@@ -1,3 +1,4 @@
+import { DetachedChatWindows, type DetachedChatWindowsProps } from './DetachedChatWindows';
 import React from 'react';
 import { NoDroneSelectedState } from './NoDroneSelectedState';
 import type { SettingsView as SettingsViewComponent } from './SettingsView';
@@ -24,6 +25,7 @@ const SettingsView = React.lazy(async () => {
 
 export type DroneHubWorkspaceContentProps = {
   appView: AppView;
+  detachedChatWindowsProps: Omit<DetachedChatWindowsProps, 'visible' | 'currentDroneId'>;
   setupWelcomeProps: React.ComponentProps<typeof SetupWelcomeViewComponent> | null;
   settingsViewProps: React.ComponentProps<typeof SettingsViewComponent>;
   draftChatWorkspaceProps: React.ComponentProps<typeof DraftChatWorkspaceComponent> | null;
@@ -53,6 +55,7 @@ function WorkspaceViewFallback() {
 
 export function DroneHubWorkspaceContent({
   appView,
+  detachedChatWindowsProps,
   setupWelcomeProps,
   settingsViewProps,
   draftChatWorkspaceProps,
@@ -91,6 +94,9 @@ export function DroneHubWorkspaceContent({
   return (
     <div data-drone-workspace-root="1" className="relative flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden bg-[var(--workspace)]">
       <React.Suspense fallback={<WorkspaceViewFallback />}>{workspaceContent}</React.Suspense>
+      <DetachedChatWindows {...detachedChatWindowsProps}
+        currentDroneId={selectedDroneWorkspaceProps?.currentDrone.id ?? null}
+        visible={appView === 'workspace' && !setupWelcomeProps && !draftChatWorkspaceProps && !groupMultiChatWorkspaceProps && Boolean(selectedDroneWorkspaceProps)} />
       <div className="absolute inset-0 z-20 pointer-events-none overflow-hidden">
         <div
           className={`absolute overflow-hidden ${previewHostState.previewVisible ? 'pointer-events-auto' : 'pointer-events-none'}`}

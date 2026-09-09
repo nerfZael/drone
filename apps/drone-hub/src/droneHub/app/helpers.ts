@@ -92,6 +92,7 @@ export function compareDronesByNewestFirst(a: DroneSummary, b: DroneSummary): nu
 export function resolveChatNameForDrone(drone: DroneSummary, preferredChat: string): string {
   const chats = Array.isArray(drone.chats) ? drone.chats : [];
   if (preferredChat && drone.sideChats?.some((chat) => chat.name === preferredChat)) return preferredChat;
+  if (preferredChat && drone.workflowChats?.includes(preferredChat)) return preferredChat;
   if (preferredChat && chats.includes(preferredChat)) return preferredChat;
   if (chats.includes('default')) return 'default';
   return chats[0] || 'default';

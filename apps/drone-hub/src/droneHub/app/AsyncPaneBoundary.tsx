@@ -32,6 +32,7 @@ type AsyncPaneBoundaryProps<T extends React.ComponentType<any>> = {
 };
 
 export function AsyncPaneBoundary<T extends React.ComponentType<any>>({
+  tab,
   label,
   load,
   timeoutMs = DEFAULT_PANE_MODULE_TIMEOUT_MS,
@@ -40,11 +41,16 @@ export function AsyncPaneBoundary<T extends React.ComponentType<any>>({
   children,
 }: AsyncPaneBoundaryProps<T>) {
   const [retryKey, setRetryKey] = React.useState(0);
-  const [state, setState] = React.useState<AsyncPaneLoadState>({ status: 'loading' });
+  const request = React.useMemo(() => ({ load }), [tab, label, load, retryKey, timeoutMs]);
+  const [result, setResult] = React.useState<{
+    request: typeof request;
+    state: AsyncPaneLoadState;
+  } | null>(null);
 
   React.useEffect(() => {
     let cancelled = false;
     let settled = false;
+    const setState = (state: AsyncPaneLoadState) => setResult({ request, state });
     setState({ status: 'loading' });
 
     const timeout = window.setTimeout(() => {
@@ -52,7 +58,7 @@ export function AsyncPaneBoundary<T extends React.ComponentType<any>>({
       setState({ status: 'timeout', message: paneModuleTimeoutMessage(label) });
     }, Math.max(1, Math.floor(timeoutMs)));
 
-    void load()
+    void Promise.resolve().then(load)
       .then((component) => {
         settled = true;
         window.clearTimeout(timeout);
@@ -68,8 +74,12 @@ export function AsyncPaneBoundary<T extends React.ComponentType<any>>({
       cancelled = true;
       window.clearTimeout(timeout);
     };
-  }, [label, load, retryKey, timeoutMs]);
+  }, [label, load, request, timeoutMs]);
 
+  // Editor and Changes reuse the same panel. Its render callback already has
+  // the new pane's props before the loading effect runs; never pass that
+  // callback a component (or error) belonging to the previous request.
+  const state: AsyncPaneLoadState = result?.request === request ? result.state : { status: 'loading' };
   if (state.status === 'ready') return <>{children(state.component as T)}</>;
   if (state.status === 'error' || state.status === 'timeout') {
     return <>{errorFallback(state.message, () => setRetryKey((value) => value + 1))}</>;

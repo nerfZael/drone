@@ -1,3 +1,4 @@
+import { selectableDroneChats } from './drone-selection-helpers';
 import React from 'react';
 import { filterCompletedPendingPrompts } from '@drone/assistant-chat';
 import type { ChatAgentConfig, ChatInfo } from '../../domain';
@@ -362,12 +363,11 @@ export function useChatRuntimeOrchestration({
   const hasSelectedDroneSummary = selectedDroneSummary !== null;
   const selectedDroneHubPhase = selectedDroneSummary?.hubPhase ?? null;
   const selectedDroneChatsKey = React.useMemo(() => {
-    if (!Array.isArray(selectedDroneSummary?.chats)) return '';
-    return selectedDroneSummary.chats
+    return selectableDroneChats(selectedDroneSummary)
       .map((chat) => String(chat ?? '').trim())
       .filter(Boolean)
       .join('\u0000');
-  }, [selectedDroneSummary?.chats]);
+  }, [selectedDroneSummary?.chats, selectedDroneSummary?.sideChats, selectedDroneSummary?.workflowChats]);
   const selectedDroneHasSelectedChat = React.useMemo(() => {
     const chat = String(selectedChat ?? '').trim();
     if (!chat || !selectedDroneChatsKey) return false;

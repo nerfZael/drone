@@ -1,5 +1,6 @@
 import React from 'react';
 import { markCurrentChatComposerEditorModeTarget } from './chat-composer-editor-mode-shortcut';
+import { routeComposerFocus } from './composer-focus-routing';
 import type { CompanionTextSnapshot } from '@drone/assistant-chat';
 
 export type ActiveComposer = {
@@ -41,6 +42,7 @@ const ActiveComposerContext = React.createContext<ActiveComposerContextValue | n
 export class ActiveComposerRegistry {
   private readonly composers = new Map<string, ActiveComposer>();
   private activeId: string | null = null;
+  private focusScope: (() => string | null | undefined) | null = null;
   private readonly listeners = new Set<() => void>();
 
   readonly subscribe = (listener: () => void): (() => void) => {
@@ -61,15 +63,34 @@ export class ActiveComposerRegistry {
   }
 
   focus(id: string): void {
+    this.focusScope = null;
     if (this.composers.has(id)) this.setActiveId(id);
   }
 
+  // null means the selected window is loading; undefined means it was closed
+  // or hidden. Only the latter should fall back to the main chat.
+  focusWithin(resolve: () => string | null | undefined): void {
+    this.focusScope = resolve;
+    this.ensureTargetId();
+  }
+
   focusDefault(): void {
+    this.focusScope = null;
     this.setActiveId(null);
     this.ensureTargetId();
   }
 
   ensureTargetId(): string | null {
+    if (this.focusScope) {
+      const scopedId = this.focusScope();
+      if (scopedId !== undefined) {
+        const scoped = scopedId ? this.composers.get(scopedId) : null;
+        this.setActiveId(scoped?.isEligible() ? scoped.id : null);
+        return this.activeId;
+      }
+      this.focusScope = null;
+      this.setActiveId(null);
+    }
     const current = this.activeId ? this.composers.get(this.activeId) : null;
     if (current?.isEligible()) return current.id;
     const next = [...this.composers.values()].find((composer) => !composer.requiresExplicitFocus && composer.isEligible())?.id ?? null;
@@ -123,6 +144,16 @@ export class ActiveComposerRegistry {
   }
 
   private resolveReadable(): ActiveComposer {
+    if (this.focusScope) {
+      const scopedId = this.focusScope();
+      if (scopedId !== undefined) {
+        const scoped = scopedId ? this.composers.get(scopedId) : null;
+        if (scoped?.readSnapshot && (scoped.isReadable?.() ?? scoped.isEligible())) return scoped;
+        throw new Error('NO_ACTIVE_COMPOSER');
+      }
+      this.focusScope = null;
+      this.setActiveId(null);
+    }
     const current = this.activeId ? this.composers.get(this.activeId) : null;
     if (current?.readSnapshot && (current.isReadable?.() ?? current.isEligible())) return current;
     const candidates = [...this.composers.values()].filter(
@@ -165,19 +196,7 @@ export function ActiveComposerProvider({ children }: { children: React.ReactNode
   React.useEffect(() => {
     const routeFocus = (event: Event) => {
       const target = event.target instanceof Element ? event.target : null;
-      const side = target?.closest<HTMLElement>('[data-side-chat-name]');
-      const hadActiveSide = Boolean(document.querySelector('[data-side-chat-active]'));
-      document.querySelectorAll('[data-side-chat-active]').forEach((element) => element.removeAttribute('data-side-chat-active'));
-      if (side) side.setAttribute('data-side-chat-active', 'true');
-      if (!side && !hadActiveSide) return;
-      const scope = side
-        ? [...document.querySelectorAll<HTMLElement>('[data-side-chat-name]')].find((element) =>
-          element.dataset.sideChatName === side.dataset.sideChatName && element.querySelector('[data-active-composer-id]'))
-        : document.querySelector('[data-main-workspace-chat]');
-      const composer = scope?.querySelector<HTMLElement>('[data-active-composer-id]');
-      if (composer?.dataset.activeComposerId) registry.focus(composer.dataset.activeComposerId);
-      else if (!side) registry.focusDefault();
-      markCurrentChatComposerEditorModeTarget(composer?.dataset.editorModeTargetId ?? '');
+      if (target) routeComposerFocus(target, registry, markCurrentChatComposerEditorModeTarget);
     };
     document.addEventListener('pointerdown', routeFocus, true);
     document.addEventListener('focusin', routeFocus, true);
