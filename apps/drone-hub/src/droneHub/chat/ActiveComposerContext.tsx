@@ -2,6 +2,7 @@ import React from 'react';
 import { markCurrentChatComposerEditorModeTarget } from './chat-composer-editor-mode-shortcut';
 import { routeComposerFocus } from './composer-focus-routing';
 import type { CompanionTextSnapshot } from '@drone/assistant-chat';
+import type { ChatVoiceRecordingStatus } from './use-chat-voice-recorder';
 
 export type ActiveComposer = {
   id: string;
@@ -13,6 +14,7 @@ export type ActiveComposer = {
   applyContent?(baseRevision: string, content: string): { ok: true; revision: string };
   sendMessage?(): boolean;
   toggleVoiceRecording?(): boolean;
+  voiceRecordingStatus?(): ChatVoiceRecordingStatus;
   toggleVoiceRecordingPause?(): boolean;
   discardVoiceRecording?(): boolean;
   clearComposer?(): boolean;
@@ -132,11 +134,11 @@ export class ActiveComposerRegistry {
   }
 
   toggleVoiceRecordingPause(): boolean {
-    return this.runActiveAction('toggleVoiceRecordingPause');
+    return this.runRecordingAction('toggleVoiceRecordingPause');
   }
 
   discardVoiceRecording(): boolean {
-    return this.runActiveAction('discardVoiceRecording');
+    return this.runRecordingAction('discardVoiceRecording');
   }
 
   clearComposer(): boolean {
@@ -164,8 +166,19 @@ export class ActiveComposerRegistry {
     return composer;
   }
 
+  private runRecordingAction(action: 'toggleVoiceRecordingPause' | 'discardVoiceRecording'): boolean {
+    const composers = [...this.composers.values()];
+    const recording = composers.find((composer) => {
+      const status = composer.voiceRecordingStatus?.();
+      return status === 'starting' || status === 'recording' || status === 'paused';
+    }) ?? composers.find((composer) => composer.voiceRecordingStatus?.() === 'transcribing');
+    // Recording ownership survives focus changes and hidden windows. The
+    // recorder itself decides which operations its current state permits.
+    return recording?.[action]?.() ?? false;
+  }
+
   private runActiveAction(
-    action: 'sendMessage' | 'toggleVoiceRecording' | 'toggleVoiceRecordingPause' | 'discardVoiceRecording' | 'clearComposer',
+    action: 'sendMessage' | 'toggleVoiceRecording' | 'clearComposer',
   ): boolean {
     const targetId = this.ensureTargetId();
     const composer = targetId ? this.composers.get(targetId) : null;

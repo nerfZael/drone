@@ -103,6 +103,7 @@ describe('ActiveComposerRegistry', () => {
     });
     registry.register({
       ...composer('second', { eligible: true }),
+      voiceRecordingStatus: () => 'recording',
       sendMessage: () => {
         actions.push('second:send');
         return true;
@@ -138,5 +139,51 @@ describe('ActiveComposerRegistry', () => {
       'second:discard',
       'second:clear',
     ]);
+  });
+
+  test('Q and S follow focus while W and E follow the recording even when its chat is hidden', () => {
+    const registry = new ActiveComposerRegistry();
+    const actions: string[] = [];
+    const state = { eligible: true };
+    let status: 'idle' | 'recording' | 'paused' = 'idle';
+    registry.register({
+      ...composer('recording-chat', state),
+      voiceRecordingStatus: () => status,
+      toggleVoiceRecording: () => { status = 'recording'; actions.push('recording-chat:q'); return true; },
+      toggleVoiceRecordingPause: () => { status = status === 'paused' ? 'recording' : 'paused'; actions.push('recording-chat:w'); return true; },
+      discardVoiceRecording: () => { status = 'idle'; actions.push('recording-chat:e'); return true; },
+    });
+    registry.register({
+      ...composer('focused-chat', { eligible: true }),
+      sendMessage: () => { actions.push('focused-chat:s'); return true; },
+      toggleVoiceRecording: () => { actions.push('focused-chat:q'); return true; },
+    });
+    registry.focus('recording-chat');
+    registry.toggleVoiceRecording();
+    registry.focus('focused-chat');
+    state.eligible = false;
+    expect(registry.toggleVoiceRecordingPause()).toBe(true);
+    expect(status).toBe('paused');
+    expect(registry.toggleVoiceRecordingPause()).toBe(true);
+    expect(status).toBe('recording');
+    registry.sendMessage();
+    registry.discardVoiceRecording();
+    expect(registry.toggleVoiceRecordingPause()).toBe(false);
+    expect(registry.discardVoiceRecording()).toBe(false);
+    registry.toggleVoiceRecording();
+    expect(registry.getSnapshot()).toBe('focused-chat');
+    expect(actions).toEqual(['recording-chat:q', 'recording-chat:w', 'recording-chat:w', 'focused-chat:s', 'recording-chat:e', 'focused-chat:q']);
+  });
+
+  test('prefers a live recording over another chat still transcribing and forgets unmounted owners', () => {
+    const registry = new ActiveComposerRegistry();
+    const actions: string[] = [];
+    registry.register({ ...composer('old', { eligible: true }), voiceRecordingStatus: () => 'transcribing', discardVoiceRecording: () => { actions.push('old'); return true; } });
+    const unregister = registry.register({ ...composer('live', { eligible: false }), voiceRecordingStatus: () => 'recording', discardVoiceRecording: () => { actions.push('live'); return true; } });
+    registry.focus('old');
+    registry.discardVoiceRecording();
+    unregister();
+    registry.discardVoiceRecording();
+    expect(actions).toEqual(['live', 'old']);
   });
 });

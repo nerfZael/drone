@@ -263,6 +263,7 @@ export function ChatInput({
   });
   const sendMessageShortcutRef = React.useRef<() => boolean>(() => false);
   const toggleVoiceRecordingShortcutRef = React.useRef<() => boolean>(() => false);
+  const voiceRecordingStatusRef = React.useRef<ReturnType<typeof useChatVoiceRecorder>['status']>('idle');
   const toggleVoiceRecordingPauseShortcutRef = React.useRef<() => boolean>(() => false);
   const discardVoiceRecordingShortcutRef = React.useRef<() => boolean>(() => false);
   const clearComposerShortcutRef = React.useRef<() => boolean>(() => false);
@@ -343,6 +344,7 @@ export function ChatInput({
       applyContent: (baseRevision, content) => applyCompanionComposerRef.current(baseRevision, content),
       sendMessage: () => sendMessageShortcutRef.current(),
       toggleVoiceRecording: () => toggleVoiceRecordingShortcutRef.current(),
+      voiceRecordingStatus: () => voiceRecordingStatusRef.current,
       toggleVoiceRecordingPause: () => toggleVoiceRecordingPauseShortcutRef.current(),
       discardVoiceRecording: () => discardVoiceRecordingShortcutRef.current(),
       clearComposer: () => clearComposerShortcutRef.current(),
@@ -525,6 +527,7 @@ export function ChatInput({
   }, [draft, resetKey, resizeTextarea]);
 
   const voiceRecordingActive = voiceRecordingStatus !== 'idle';
+  voiceRecordingStatusRef.current = voiceRecordingStatus;
   const continuousVoiceActive = continuousVoice.status !== 'idle';
   const showStopAction = chatResponseStopVisible({
     waiting,
@@ -1166,7 +1169,7 @@ export function ChatInput({
           </div>
         )}
         {composerTopAction ? (
-          <div className="mb-1 flex min-h-7 items-center justify-start">
+          <div className="mb-1 flex min-h-7 items-center justify-start empty:hidden">
             {composerTopAction}
           </div>
         ) : null}

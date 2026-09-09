@@ -2423,6 +2423,7 @@ export function SelectedDroneWorkspace({
         sideChats={sideChatWorkspace.sideChats}
         mainChatName={activeChatName}
         sideChatReturnRequest={sideChatReturnRequest}
+        sideChatFocusRequest={sideChatWorkspace.focusRequest}
         mainChatControls={mainSideChat ? (
           <SideChatControls
             chat={mainSideChat}

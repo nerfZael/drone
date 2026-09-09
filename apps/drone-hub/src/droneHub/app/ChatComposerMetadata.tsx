@@ -216,23 +216,28 @@ export function DroneChatComposerMetadata({
   chatId,
   initialSubscriptions,
   branch,
+  showWorkspaceInfo = true,
 }: {
   runtime: DroneRuntime;
   chatId?: string | null;
   initialSubscriptions?: unknown;
   branch?: string | null;
+  showWorkspaceInfo?: boolean;
 }) {
   const subscriptions = useChatResourceSubscriptions(chatId, initialSubscriptions);
+  if (!showWorkspaceInfo && subscriptions.length === 0) return null;
 
   return (
     <div className="flex min-w-0 w-full items-center justify-between gap-3 px-2">
       <div className="flex min-w-0 flex-1 items-center gap-2">
-        <div className="shrink-0">
-          <DroneRuntimeIndicator runtime={runtime} />
-        </div>
+        {showWorkspaceInfo ? (
+          <div className="shrink-0">
+            <DroneRuntimeIndicator runtime={runtime} />
+          </div>
+        ) : null}
         <ChatSubscriptionIndicator subscriptions={subscriptions} />
       </div>
-      <DroneBranchIndicator branch={branch} />
+      {showWorkspaceInfo ? <DroneBranchIndicator branch={branch} /> : null}
     </div>
   );
 }

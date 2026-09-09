@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { ActiveComposerRegistry } from '../src/droneHub/chat/ActiveComposerContext';
 import { routeComposerFocus } from '../src/droneHub/chat/composer-focus-routing';
+import { toggleFocusedSideChatMain } from '../src/droneHub/app/side-chat-main-shortcut';
 
 // Minimal DOM tree for the selectors used by focus routing. The important
 // distinction is that Dockview's focused container PARENTS the side chat root.
@@ -8,6 +9,10 @@ class FocusNode {
   children: FocusNode[] = [];
   parent: FocusNode | null = null;
   ownerDocument!: FocusNode;
+  disabled = false;
+  visible = true;
+  click = () => {};
+  getClientRects() { return this.visible ? [{}] : []; }
   constructor(private attrs: Record<string, string> = {}) {}
   get dataset() {
     return Object.fromEntries(Object.entries(this.attrs).filter(([key]) => key.startsWith('data-')).map(
@@ -49,15 +54,22 @@ function fixture(ids = ['side-a', 'side-b']) {
   doc.ownerDocument = doc;
   const registry = new ActiveComposerRegistry();
   const actions: string[] = [];
+  let recordingId: string | null = null;
   let editorTarget = '';
   function register(id: string, side = false) {
-    const action = (name: string) => () => { actions.push(`${id}:${name}`); return true; };
+    const action = (name: string) => () => {
+      if (name === 'q') recordingId = id;
+      if (name === 'e') recordingId = null;
+      actions.push(`${id}:${name}`);
+      return true;
+    };
     return registry.register({
       id,
       requiresExplicitFocus: side,
       isEligible: () => true,
       appendTranscript() {},
       toggleVoiceRecording: action('q'),
+      voiceRecordingStatus: () => recordingId === id ? 'recording' : 'idle',
       toggleVoiceRecordingPause: action('w'),
       discardVoiceRecording: action('e'),
       sendMessage: action('s'),
@@ -84,7 +96,7 @@ function fixture(ids = ['side-a', 'side-b']) {
   const second = side(ids[1]!);
   const outside = doc.append();
   return {
-    registry, actions, main, first, second, outside, register,
+    doc, registry, actions, main, first, second, outside, register,
     focus(node: FocusNode) { routeComposerFocus(node as unknown as Element, registry, (id) => { editorTarget = id; }); },
     editorTarget: () => editorTarget,
     shortcuts() {
@@ -182,6 +194,40 @@ describe('floating chat shortcut focus', () => {
     h.shortcuts();
     expect(h.actions).toEqual(['main:q', 'main:w', 'main:e', 'main:s']);
   });
+});
+
+test('D promotes the focused fork from its tab and returns a promoted main through the same toolbar action', () => {
+  const h = fixture();
+  const moved: string[] = [];
+  const first = h.first.root.append({ 'data-side-chat-move': 'side-a' });
+  first.click = () => { moved.push('promote-a'); };
+  const second = h.second.root.append({ 'data-side-chat-move': 'side-b' });
+  second.click = () => { moved.push('promote-b'); };
+  h.focus(h.first.tab);
+  expect(toggleFocusedSideChatMain(h.doc as unknown as Document)).toBe(true);
+  h.focus(h.second.transcript);
+  expect(toggleFocusedSideChatMain(h.doc as unknown as Document)).toBe(true);
+  const main = h.main.append({ 'data-side-chat-move': 'side-a' });
+  main.click = () => { moved.push('return-a'); };
+  h.focus(h.main);
+  expect(toggleFocusedSideChatMain(h.doc as unknown as Document)).toBe(true);
+  expect(moved).toEqual(['promote-a', 'promote-b', 'return-a']);
+});
+
+test('D ignores ordinary, busy, hidden, and detached chats without moving a different main fork', () => {
+  const h = fixture();
+  const doc = h.doc as unknown as Document;
+  expect(toggleFocusedSideChatMain(doc)).toBe(false);
+  const main = h.main.append({ 'data-side-chat-move': 'promoted' });
+  main.click = () => { throw new Error('Must not move the main chat'); };
+  h.focus(h.first.tab); // A detached-style scope has no promotion control.
+  expect(toggleFocusedSideChatMain(doc)).toBe(false);
+  const button = h.first.root.append({ 'data-side-chat-move': 'side-a' });
+  button.disabled = true;
+  expect(toggleFocusedSideChatMain(doc)).toBe(false);
+  button.disabled = false;
+  button.visible = false;
+  expect(toggleFocusedSideChatMain(doc)).toBe(false);
 });
 
 test('detached chats with the same name route shortcuts by drone and chat identity', () => {

@@ -1,5 +1,6 @@
 import React from 'react';
 import { requestSideChat } from './side-chat-events';
+import { toggleFocusedSideChatMain } from './side-chat-main-shortcut';
 import type { DroneSummary, PendingPrompt, TranscriptItem } from '../types';
 import type { DraftChatState, DroneErrorModalState, StartupSeedState } from './app-types';
 import type { RightPanelTab } from './app-config';
@@ -395,6 +396,7 @@ export function useDroneHubLifecycleEffects({
         return true;
       },
       createSideChat: () => currentDrone ? requestSideChat(currentDrone.id) : false,
+      toggleSideChatMain: () => toggleFocusedSideChatMain(),
       toggleSelectedDronePinned: () => toggleSelectedDronePinnedFromShortcut(),
       moveSelectedDroneToTop: () => moveSelectedDroneToTopFromShortcut(),
       toggleSelectedDronesToDo: () => toggleSelectedDronesToDoFromShortcut(),
@@ -533,6 +535,12 @@ export function useDroneHubLifecycleEffects({
         return;
       }
       if (modalOpen) return;
+      if (matched?.id === 'toggleChatVoiceRecordingPause' || matched?.id === 'discardChatVoiceRecording') {
+        if (!runShortcutAction(matched.id, e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       if (matched?.id === 'toggleCompanion') {
         if (!runCompanionShortcut()) return;
         e.preventDefault();

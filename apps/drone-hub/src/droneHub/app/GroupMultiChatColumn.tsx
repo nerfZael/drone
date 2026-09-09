@@ -84,6 +84,7 @@ const INITIAL_TRANSCRIPT_TAIL_TURNS = 50;
 
 export type GroupMultiChatColumnProps = {
   compact?: boolean;
+  showWorkspaceInfo?: boolean;
   onOpenFileReference?: (ref: MarkdownFileReference) => void;
   onPublish?: () => Promise<boolean>;
   publishing?: boolean;
@@ -106,6 +107,7 @@ export type GroupMultiChatColumnProps = {
 
 export function GroupMultiChatColumn({
   compact = false,
+  showWorkspaceInfo = true,
   onOpenFileReference,
   onPublish,
   publishing,
@@ -1274,6 +1276,7 @@ export function GroupMultiChatColumn({
         modeHint=""
         composerTopAction={
           <DroneChatComposerMetadata
+            showWorkspaceInfo={showWorkspaceInfo}
             runtime={hostRuntime ? 'host' : 'container'}
             chatId={chatId}
             initialSubscriptions={chatSubscriptions}

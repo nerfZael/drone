@@ -16,6 +16,7 @@ test('returning to a drone does not revive a previous visit’s request or clear
     });
     await settle();
     expect(harness.render('A').sideChats).toHaveLength(0);
+    expect(harness.render('A').focusRequest).toBeNull();
     expect(harness.render('A').busy).toBe('create');
     harness.requests[1].resolve({
       sideChatOrigin: { sourceChatName: 'main', checkpointId: 'new' },
@@ -23,6 +24,11 @@ test('returning to a drone does not revive a previous visit’s request or clear
     await settle();
     expect(harness.render('A').sideChats).toMatchObject([{ checkpointId: 'new' }]);
     expect(harness.render('A').busy).toBeNull();
+    const result = harness.render('A');
+    expect(result.focusRequest).toEqual({ droneId: 'A', chatName: result.sideChats[0].name });
+    expect(harness.render('A').focusRequest).toBe(result.focusRequest);
+    expect(harness.render('B').focusRequest).toBeNull();
+    expect(harness.render('A').focusRequest).toBeNull();
   } finally {
     harness.unmount();
   }

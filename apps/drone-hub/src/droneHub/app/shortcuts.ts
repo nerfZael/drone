@@ -6,6 +6,7 @@ export type ShortcutActionId =
   | 'createDroneChat'
   | 'cloneDroneChat'
   | 'createSideChat'
+  | 'toggleSideChatMain'
   | 'toggleSelectedDronePinned'
   | 'moveSelectedDroneToTop'
   | 'toggleSelectedDronesToDo'
@@ -87,6 +88,11 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     description: 'Opens a floating branch at the current chat’s last completed assistant answer, even while it is running.',
   },
   {
+    id: 'toggleSideChatMain',
+    label: 'Move fork between main and floating chat',
+    description: 'Opens the focused fork as the main chat, or returns it to its floating window.',
+  },
+  {
     id: 'toggleSelectedDronePinned',
     label: 'Pin selected drones',
     description: 'Pins all selected drones, or unpins them when they are already all pinned.',
@@ -124,12 +130,12 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   {
     id: 'toggleChatVoiceRecordingPause',
     label: 'Pause voice recording',
-    description: 'Pauses or resumes the active chat composer voice recording.',
+    description: 'Pauses or resumes the chat that is recording, regardless of focus.',
   },
   {
     id: 'discardChatVoiceRecording',
     label: 'Discard voice recording',
-    description: 'Cancels and discards the active chat composer voice recording.',
+    description: 'Cancels and discards the chat recording, regardless of focus.',
   },
   {
     id: 'clearChatComposer',
@@ -227,6 +233,7 @@ const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   createDroneChat: { key: '3', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   cloneDroneChat: { key: '4', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   createSideChat: { key: 'r', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  toggleSideChatMain: { key: 'd', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleSelectedDronePinned: null,
   moveSelectedDroneToTop: null,
   toggleSelectedDronesToDo: null,
@@ -238,7 +245,7 @@ const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   discardChatVoiceRecording: { key: 'e', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   clearChatComposer: { key: 'r', mod: false, ctrl: false, meta: false, alt: false, shift: true },
   toggleContinuousDictation: { key: 't', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  toggleFileDictation: { key: 'd', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  toggleFileDictation: { key: 'd', mod: false, ctrl: false, meta: false, alt: false, shift: true },
   toggleCompanion: { key: '`', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   applyCompanionProposal: { key: 'capslock', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleVoiceClipboardRecording: null,
@@ -406,6 +413,16 @@ export function migrateChatComposerShortcuts(value: unknown): unknown {
     next.createSideChat = occupied ? null : unmodified('r');
     changed = true;
   }
+  if (!Object.prototype.hasOwnProperty.call(raw, 'toggleSideChatMain')) {
+    if (isSameShortcutBinding(next.toggleFileDictation, unmodified('d'))) {
+      const shifted = { ...unmodified('d'), shift: true };
+      const occupied = Object.entries(next).some(([key, binding]) => key !== 'toggleFileDictation' && isSameShortcutBinding(binding, shifted));
+      next.toggleFileDictation = occupied ? null : shifted;
+    }
+    const occupied = Object.values(next).some((binding) => isSameShortcutBinding(binding, unmodified('d')));
+    next.toggleSideChatMain = occupied ? null : unmodified('d');
+    changed = true;
+  }
   return changed ? next : value;
 }
 
@@ -435,6 +452,7 @@ export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
     createDroneChat: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createDroneChat),
     cloneDroneChat: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.cloneDroneChat),
     createSideChat: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createSideChat),
+    toggleSideChatMain: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleSideChatMain),
     toggleSelectedDronePinned: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleSelectedDronePinned),
     moveSelectedDroneToTop: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.moveSelectedDroneToTop),
     toggleSelectedDronesToDo: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleSelectedDronesToDo),

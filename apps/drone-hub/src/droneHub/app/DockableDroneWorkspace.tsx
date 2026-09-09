@@ -3,6 +3,7 @@ import { IconTrash } from './icons';
 import { measureSideChatBounds, readSideChatWorkspaceState, restoreSideChatBounds, saveSideChatWorkspaceState } from './side-chat-workspace-state';
 import { placeSideChat } from './side-chat-placement';
 import { prepareSideChatPanel } from './prepareSideChatPanel';
+import { focusChatWindow } from './focus-chat-window';
 import { FOCUS_SIDE_CHAT_EVENT } from './side-chat-events';
 import type { WorkspaceSideChat } from './use-workspace-side-chats';
 import { EditorPaneContext } from './editor-pane-context';
@@ -52,6 +53,7 @@ type DockableDroneWorkspaceProps = {
   sideChats?: WorkspaceSideChat[];
   mainChatName?: string;
   sideChatReturnRequest?: { droneId: string; chatName: string } | null;
+  sideChatFocusRequest?: { droneId: string; chatName: string } | null;
   mainChatControls?: React.ReactNode;
   renderSideChat?: (chat: WorkspaceSideChat) => React.ReactNode;
   onCloseSideChat?: (chatName: string) => void;
@@ -473,6 +475,7 @@ export function DockableDroneWorkspace({
   sideChats = [],
   mainChatName = '',
   sideChatReturnRequest,
+  sideChatFocusRequest,
   mainChatControls,
   renderSideChat,
   onCloseSideChat,
@@ -539,21 +542,31 @@ export function DockableDroneWorkspace({
   );
   const components = React.useMemo(() => ({ chat: ChatPanel, tool: ToolPanel, sideChat: SideChatPanel }), []);
 
+  const cancelPendingChatFocusRef = React.useRef<(() => void) | null>(null);
+  const focusFloatingChat = React.useCallback((chatName: string) => {
+    const panel = apiRef.current?.getPanel(`${SIDE_CHAT_PANEL_PREFIX}${chatName}`);
+    const root = workspaceElementRef.current;
+    if (!panel || !root) return false;
+    cancelPendingChatFocusRef.current?.();
+    panel.api.setActive();
+    cancelPendingChatFocusRef.current = focusChatWindow(root,
+      () => [...root.querySelectorAll<HTMLElement>('[data-side-chat-name]')]
+        .find((element) => element.dataset.sideChatName === chatName && !element.closest('.dv-tabs-container')),
+      () => apiRef.current?.getPanel(panel.id) === panel,
+    );
+    return true;
+  }, []);
+  React.useEffect(() => () => cancelPendingChatFocusRef.current?.(), [currentDrone.id]);
+
   React.useEffect(() => {
     const focus = (event: Event) => {
       const detail = (event as CustomEvent).detail;
       if (detail?.droneId !== currentDrone.id) return;
-      const panel = apiRef.current?.getPanel(`${SIDE_CHAT_PANEL_PREFIX}${detail.chatName}`);
-      if (!panel) return;
-      event.preventDefault();
-      panel.api.setActive();
-      const content = [...(workspaceElementRef.current?.querySelectorAll<HTMLElement>('[data-side-chat-name]') ?? [])]
-        .find((element) => element.dataset.sideChatName === detail.chatName && element.querySelector('[data-active-composer-id]'));
-      content?.querySelector<HTMLElement>('textarea, [contenteditable="true"]')?.focus();
+      if (focusFloatingChat(detail.chatName)) event.preventDefault();
     };
     window.addEventListener(FOCUS_SIDE_CHAT_EVENT, focus);
     return () => window.removeEventListener(FOCUS_SIDE_CHAT_EVENT, focus);
-  }, [currentDrone.id]);
+  }, [currentDrone.id, focusFloatingChat]);
 
   React.useEffect(() => {
     const api = apiRef.current;
@@ -596,6 +609,13 @@ export function DockableDroneWorkspace({
       prepareSideChatPanel(panel);
     }
   }, [currentDrone.id, sideChats, mainChatName, readyVersion]);
+
+  const handledFocusRequestRef = React.useRef<typeof sideChatFocusRequest>(null);
+  React.useEffect(() => {
+    if (!sideChatFocusRequest || sideChatFocusRequest.droneId !== currentDrone.id ||
+      handledFocusRequestRef.current === sideChatFocusRequest) return;
+    if (focusFloatingChat(sideChatFocusRequest.chatName)) handledFocusRequestRef.current = sideChatFocusRequest;
+  }, [currentDrone.id, sideChatFocusRequest, sideChats, readyVersion, focusFloatingChat]);
 
   const previousMainChatRef = React.useRef({ chatName: mainChatName, returnRequest: sideChatReturnRequest });
   React.useEffect(() => {

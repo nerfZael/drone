@@ -67,6 +67,7 @@ export function WorkspaceSideChatContent({
             <GroupMultiChatColumn
               {...actions}
               compact
+              showWorkspaceInfo={false}
               onOpenFileReference={messageFeatures.onOpenFileReference}
               drone={{ ...drone, sideChats: [...(drone.sideChats ?? []), chat] }}
               preferredChat={chat.name}

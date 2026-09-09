@@ -12,6 +12,18 @@ import {
 } from '../src/droneHub/app/shortcuts';
 
 describe('shortcut defaults', () => {
+  test('assigns D to fork promotion and moves default file dictation to Shift+D without taking custom bindings', () => {
+    const defaults = cloneDefaultShortcutBindings();
+    expect(defaults.toggleSideChatMain?.key).toBe('d');
+    expect(defaults.toggleSideChatMain?.shift).toBe(false);
+    const old = { ...defaults, toggleFileDictation: { ...defaults.toggleSideChatMain } } as Record<string, unknown>;
+    delete old.toggleSideChatMain;
+    expect(migrateChatComposerShortcuts(old)).toMatchObject({ toggleSideChatMain: defaults.toggleSideChatMain, toggleFileDictation: defaults.toggleFileDictation });
+    old.toggleFileDictation = { ...defaults.toggleSideChatMain, key: 'k' };
+    old.openHome = defaults.toggleSideChatMain;
+    expect(migrateChatComposerShortcuts(old)).toMatchObject({ toggleSideChatMain: null, toggleFileDictation: { key: 'k' }, openHome: defaults.toggleSideChatMain });
+    expect(migrateChatComposerShortcuts(defaults)).toBe(defaults);
+  });
   test('assigns R to side chats and migrates default clear to Shift+R without taking custom shortcuts', () => {
     const defaults = cloneDefaultShortcutBindings();
     expect(defaults.createSideChat?.key).toBe('r');
@@ -149,7 +161,7 @@ describe('shortcut defaults', () => {
       ctrl: false,
       meta: false,
       alt: false,
-      shift: false,
+      shift: true,
     });
     expect(defaults.openPullRequestsTab).toBeNull();
     expect(defaults.openTerminalTab).toBeNull();

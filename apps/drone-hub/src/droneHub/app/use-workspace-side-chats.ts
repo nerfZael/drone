@@ -15,6 +15,7 @@ export function useWorkspaceSideChats(drone: DroneSummary, mainChatName: string)
   }>({ droneId: drone.id, added: [], removed: [] });
   const [status, setStatus] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
+  const [focusRequest, setFocusRequest] = React.useState<{ droneId: string; chatName: string } | null>(null);
   const busyRef = React.useRef(false);
   // Identity, not just drone ID: an A → B → A navigation must not revive
   // requests from the first visit to A or let them clear a newer busy state.
@@ -24,6 +25,7 @@ export function useWorkspaceSideChats(drone: DroneSummary, mainChatName: string)
     setLocal({ droneId: drone.id, added: [], removed: [] });
     setStatus(null);
     setBusy(null);
+    setFocusRequest(null);
     busyRef.current = false;
     return () => {
       workspace.active = false;
@@ -108,6 +110,7 @@ export function useWorkspaceSideChats(drone: DroneSummary, mainChatName: string)
             removed: previous.droneId === drone.id ? previous.removed : [],
           }));
           setStatus(null);
+          setFocusRequest({ droneId: drone.id, chatName: name });
         })
         .catch((error) => {
           if (workspace.active) setStatus(error instanceof Error ? error.message : String(error));
@@ -168,5 +171,5 @@ export function useWorkspaceSideChats(drone: DroneSummary, mainChatName: string)
     [confirm, drone.id, workspace],
   );
 
-  return { sideChats, status, busy, dismissStatus: () => setStatus(null), finish };
+  return { sideChats, status, busy, focusRequest, dismissStatus: () => setStatus(null), finish };
 }

@@ -13,6 +13,7 @@ import { detachedChatKey, DETACHED_CHAT_BEFORE_ATTACH_EVENT, DETACHED_CHAT_FOCUS
 import { placeDetachedChat } from './detached-chat-placement';
 import { measureSideChatBounds } from './side-chat-workspace-state';
 import { prepareSideChatPanel } from './prepareSideChatPanel';
+import { focusChatWindow } from './focus-chat-window';
 import { requestChatFileOpen } from './chat-file-navigation';
 import { IconDetachedChat } from './DetachedChatIndicator';
 
@@ -192,32 +193,17 @@ export function DetachedChatWindows(props: DetachedChatWindowsProps) {
     cancelPendingFocusRef.current?.();
     const root = rootRef.current;
     if (!root) return;
-    // Dockview renders panel content through a React portal after addPanel.
-    // Focus its scope even while metadata loads, so shortcuts wait for this
-    // window's composer instead of continuing to target the previous chat.
-    let frame: number | null = null;
-    const cancel = () => {
-      if (frame !== null) cancelAnimationFrame(frame);
-      observer.disconnect();
-    };
-    const tryFocus = () => {
-      frame = null;
-      if (!visibleRef.current || !useDetachedChatStore.getState().chats[key]?.open) { cancel(); return; }
-      const scope = [...root.querySelectorAll<HTMLElement>('[data-detached-chat-key]')].find((node) => node.dataset.detachedChatKey === key);
-      if (!scope) return;
-      (scope.querySelector<HTMLElement>('textarea, [contenteditable="true"]') ?? scope).focus();
-      cancel();
-    };
-    const observer = new MutationObserver(() => {
-      if (frame === null) frame = requestAnimationFrame(tryFocus);
-    });
-    observer.observe(root, { childList: true, subtree: true });
-    frame = requestAnimationFrame(tryFocus);
-    cancelPendingFocusRef.current = cancel;
+    cancelPendingFocusRef.current = focusChatWindow(root,
+      () => [...root.querySelectorAll<HTMLElement>('[data-detached-chat-key]')].find((node) => node.dataset.detachedChatKey === key),
+      () => visibleRef.current && Boolean(useDetachedChatStore.getState().chats[key]?.open),
+    );
   }, []);
   React.useEffect(() => () => {
     cancelPendingFocusRef.current?.();
   }, []);
+  React.useEffect(() => {
+    if (!props.visible) cancelPendingFocusRef.current?.();
+  }, [props.visible]);
 
   React.useEffect(() => {
     const api = apiRef.current;
