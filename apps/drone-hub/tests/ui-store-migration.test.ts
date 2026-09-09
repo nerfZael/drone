@@ -892,7 +892,8 @@ describe('drone hub ui store migration', () => {
         alt: false,
         shift: true,
       },
-      createSideChat: {
+      createSideChat: null,
+      openQuickActions: {
         key: 'r',
         mod: false,
         ctrl: false,

@@ -2,6 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import { shouldDispatchEditableShortcutAction } from '../src/droneHub/app/lifecycle-effect-helpers';
 
 describe('editable shortcut dispatch', () => {
+  test('typing R never opens quick actions in an input', () => {
+    expect(shouldDispatchEditableShortcutAction({ matchedActionId: 'openQuickActions', matchedShortcutKey: 'r', targetInPrimaryChatInput: true, targetInCanvasMessageInput: true, targetInAssistantChatInput: true })).toBe(false);
+  });
   test('allows create-draft shortcut from primary chat input', () => {
     const out = shouldDispatchEditableShortcutAction({
       matchedActionId: 'createDraftDrone',

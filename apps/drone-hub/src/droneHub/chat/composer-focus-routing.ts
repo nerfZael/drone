@@ -23,6 +23,8 @@ export function routeComposerFocus(
   registry: ComposerFocusRegistry,
   markEditorTarget: (id: string) => void,
 ): void {
+  // Quick actions operate on the chat that was active before the menu opened.
+  if (target.closest('[data-quick-action-menu]')) return;
   const doc = target.ownerDocument;
   const side = sideChatScopeForFocus(target);
   const hadActiveSide = Boolean(doc.querySelector('[data-side-chat-active]'));

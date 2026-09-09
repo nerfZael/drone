@@ -250,6 +250,7 @@ const DRONE_DELETE_CONCURRENCY = 4;
 const OPTIMISTIC_DRONE_RENAME_TIMEOUT_MS = 15_000;
 
 export type DroneHubAppModel = {
+  quickActionDialogProps: import('./droneHub/app/QuickActionDialog').QuickActionDialogProps;
   sidebarProps: DroneSidebarProps;
   overlaysProps: DroneHubOverlaysProps;
   workspaceContentProps: DroneHubWorkspaceContentProps;
@@ -5024,7 +5025,18 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     }
     return true;
   }, [currentDrone?.id, drones, selectedDrone, selectedDroneIds, sidebarDrones]);
-  useDroneHubLifecycleEffects({
+  const quickActionDialogProps = useDroneHubLifecycleEffects({
+    quickActionUnavailable: {
+      ...(!currentDrone || selectedGroupMultiChat ? Object.fromEntries([
+        'createDroneChat', 'cloneDroneChat', 'createSideChat', 'openTerminalTab',
+        'openPullRequestsTab', 'openFilesTab', 'openCanvasTab', 'openChangesTab',
+      ].map((id) => [id, 'Select a drone chat'])) : {}),
+      ...(selectedGroupMultiChat || !selectedDrone || !currentDrone
+        ? { createDraftDroneInCurrentGroup: 'Select a drone or group' } : {}),
+      ...(!currentDrone && selectedDroneIds.length === 0 ? Object.fromEntries([
+        'toggleSelectedDronePinned', 'moveSelectedDroneToTop', 'toggleSelectedDronesToDo', 'markSelectedDronesUnread',
+      ].map((id) => [id, 'Select a drone'])) : {}),
+    },
     terminalMenuRef,
     terminalMenuOpen,
     setTerminalMenuOpen,
@@ -5882,6 +5894,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   });
 
   return {
+    quickActionDialogProps,
     sidebarProps,
     overlaysProps,
     workspaceContentProps,

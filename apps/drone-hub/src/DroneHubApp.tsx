@@ -1,4 +1,5 @@
 import React from 'react';
+import { QuickActionDialog } from './droneHub/app/QuickActionDialog';
 import { RecorderCompanionProvider } from './droneHub/dictation/RecorderCompanionContext';
 import { FrontendUpdatePrompt } from './FrontendUpdatePrompt';
 import { GuidedOnboarding } from './onboarding/GuidedOnboarding';
@@ -24,7 +25,7 @@ import { NavigationSizeController } from './droneHub/app/NavigationSizeControlle
 import { GlobalDictationOverlay } from './droneHub/dictation/GlobalDictationOverlay';
 
 function LocalDroneHubAppContent() {
-  const { sidebarProps, overlaysProps, workspaceContentProps, globalDictationProps } =
+  const { sidebarProps, overlaysProps, workspaceContentProps, globalDictationProps, quickActionDialogProps } =
     useDroneHubAppModel();
   const sidebarDockSide = useDroneHubUiStore((s) => s.sidebarDockSide);
   const sidebarCollapsed = useDroneHubUiStore((s) => s.sidebarCollapsed);
@@ -60,6 +61,7 @@ function LocalDroneHubAppContent() {
           </>
         )}
         <DroneHubOverlays {...overlaysProps} />
+        <QuickActionDialog {...quickActionDialogProps} />
         <GlobalDictationOverlay {...globalDictationProps} />
         <GuidedOnboarding />
         <FrontendUpdatePrompt />

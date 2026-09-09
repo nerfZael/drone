@@ -355,6 +355,7 @@ export function useGlobalDictation(options: GlobalDictationControllerOptions) {
 
   React.useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (document.querySelector('[data-quick-action-menu]')) return;
       if (event.defaultPrevented || event.repeat || event.isComposing) return;
       const action = globalDictationShortcutAction(event);
       if (!action) return;

@@ -1,4 +1,6 @@
 import React from 'react';
+import { flushSync } from 'react-dom';
+import { createQuickActionController, type QuickActionUnavailable } from './quick-action-menu';
 import { requestSideChat } from './side-chat-events';
 import { toggleFocusedSideChatMain } from './side-chat-main-shortcut';
 import type { DroneSummary, PendingPrompt, TranscriptItem } from '../types';
@@ -6,7 +8,7 @@ import type { DraftChatState, DroneErrorModalState, StartupSeedState } from './a
 import type { RightPanelTab } from './app-config';
 import { isStartupSeedFresh } from './app-config';
 import type { ShortcutActionId, ShortcutBindingMap } from './shortcuts';
-import { SHORTCUT_DEFINITIONS, isShortcutMatch } from './shortcuts';
+import { SHORTCUT_DEFINITIONS, isShortcutMatch, formatShortcutBinding } from './shortcuts';
 import { isDroneStartingOrSeeding } from './helpers';
 import {
   shouldDispatchEditableShortcutAction,
@@ -46,6 +48,7 @@ type LlmSettingsLike =
   | undefined;
 
 type UseDroneHubLifecycleEffectsArgs = {
+  quickActionUnavailable: QuickActionUnavailable;
   terminalMenuRef: React.RefObject<HTMLDivElement | null>;
   terminalMenuOpen: boolean;
   setTerminalMenuOpen: Setter<boolean>;
@@ -108,6 +111,7 @@ type UseDroneHubLifecycleEffectsArgs = {
 };
 
 export function useDroneHubLifecycleEffects({
+  quickActionUnavailable,
   terminalMenuRef,
   terminalMenuOpen,
   setTerminalMenuOpen,
@@ -168,6 +172,13 @@ export function useDroneHubLifecycleEffects({
   onDeleteSelectedDroneFromInputShortcut,
   onMarkSelectedDronesUnreadShortcut,
 }: UseDroneHubLifecycleEffectsArgs) {
+  const quickActionHandlerRef = React.useRef<(action: ShortcutActionId) => void>(() => {});
+  const quickActionUnavailableRef = React.useRef(quickActionUnavailable);
+  quickActionUnavailableRef.current = quickActionUnavailable;
+  const [quickActions] = React.useState(() => createQuickActionController(
+    (action) => quickActionHandlerRef.current(action),
+    (update) => flushSync(update),
+  ));
   const companion = useCompanion();
   const toggleCompanionRecording = companion?.toggle;
   const closeCompanion = companion?.close;
@@ -370,7 +381,25 @@ export function useDroneHubLifecycleEffects({
 
     const isSidebarHovered = (): boolean => Boolean(document.querySelector('[data-drone-sidebar-root]:hover'));
 
-    const shortcutActionHandlers: Record<ShortcutActionId, (event: KeyboardEvent) => boolean> = {
+    const shortcutActionHandlers: Record<ShortcutActionId, () => boolean> = {
+      openQuickActions: () => {
+        if (document.querySelector('[role="dialog"][aria-modal="true"]')) return false;
+        const unavailable = { ...quickActionUnavailableRef.current };
+        const activeSide = document.querySelector<HTMLElement>('[data-side-chat-active]');
+        const sideScopes = [...document.querySelectorAll<HTMLElement>('[data-side-chat-name]')];
+        const scope = activeSide
+          ? sideScopes.find((element) => element.dataset.sideChatName === activeSide.dataset.sideChatName && element.querySelector('[data-side-chat-checkpoint-id], [data-side-chat-move]'))
+          : document.querySelector<HTMLElement>('[data-main-workspace-chat]');
+        if (!scope?.querySelector<HTMLElement>('[data-side-chat-checkpoint-id]')?.dataset.sideChatCheckpointId) {
+          unavailable.createSideChat = 'Needs a completed assistant answer';
+        }
+        const move = scope?.querySelector<HTMLButtonElement>('[data-side-chat-move]');
+        if (!move || move.disabled || move.getClientRects().length === 0) {
+          unavailable.toggleSideChatMain = 'Select an available fork';
+        }
+        quickActions.open(unavailable);
+        return true;
+      },
       openHome: () => {
         openHome();
         return true;
@@ -475,8 +504,9 @@ export function useDroneHubLifecycleEffects({
       },
     };
 
-    const runShortcutAction = (actionId: ShortcutActionId, event: KeyboardEvent): boolean =>
-      shortcutActionHandlers[actionId](event);
+    quickActionHandlerRef.current = (actionId) => { shortcutActionHandlers[actionId](); };
+    const runShortcutAction = (actionId: ShortcutActionId, _event: KeyboardEvent): boolean =>
+      shortcutActionHandlers[actionId]();
 
     const isEditableTarget = (target: EventTarget | null): boolean => {
       if (!(target instanceof HTMLElement)) return false;
@@ -515,6 +545,13 @@ export function useDroneHubLifecycleEffects({
     };
 
     const onChatComposerEditorShortcutCapture = (e: KeyboardEvent) => {
+      if (quickActions.getSnapshot()) {
+        if (quickActions.handleKey(e)) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+        }
+        return;
+      }
       if (e.defaultPrevented || e.repeat || e.isComposing) return;
       const captureRoot =
         e.target instanceof HTMLElement ? e.target.closest('[data-shortcut-capture="true"]') : null;
@@ -554,7 +591,7 @@ export function useDroneHubLifecycleEffects({
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.defaultPrevented) return;
+      if (e.defaultPrevented || e.isComposing || quickActions.getSnapshot()) return;
       if (
         isAppShortcutBoundaryTarget(e.target) ||
         isAppShortcutBoundaryTarget(document.activeElement)
@@ -578,6 +615,7 @@ export function useDroneHubLifecycleEffects({
       }
       if (e.repeat) return;
       const matched = SHORTCUT_DEFINITIONS.find((def) => isShortcutMatch(shortcutBindings[def.id], e)) ?? null;
+      if (matched?.id === 'openQuickActions' && (modalOpen || isEditableTarget(document.activeElement))) return;
       if (isEditableTarget(e.target)) {
         const allowEditableShortcut = shouldDispatchEditableShortcutAction({
           matchedActionId: matched?.id ?? null,
@@ -621,6 +659,7 @@ export function useDroneHubLifecycleEffects({
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [
+    quickActions,
     currentDrone,
     runCompanionShortcut,
     applyCompanionProposal,
@@ -823,4 +862,6 @@ export function useDroneHubLifecycleEffects({
     selectedDrone,
     setDraftChat,
   ]);
+
+  return { controller: quickActions, triggerLabel: formatShortcutBinding(shortcutBindings.openQuickActions) };
 }

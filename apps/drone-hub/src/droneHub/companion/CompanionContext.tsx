@@ -291,6 +291,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
 
   React.useLayoutEffect(() => {
     const cancelOnEscape = (event: KeyboardEvent) => {
+      if (document.querySelector('[data-quick-action-menu]')) return;
       if (
         !shouldCancelCompanionRecordingWithEscape({
           key: event.key,

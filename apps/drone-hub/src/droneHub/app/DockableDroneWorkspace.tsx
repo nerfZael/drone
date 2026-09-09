@@ -502,7 +502,11 @@ export function DockableDroneWorkspace({
   const lastReportedPreviewHostRef = React.useRef<PreviewHostState | null>(null);
   const lastVisibleToolTabsRef = React.useRef<string>('');
   const isMobileViewport = useMobileViewport();
-  const useMobileLayout = isMobileViewport && sideChats.length === 0;
+  const [hasOpenedSideChats, setHasOpenedSideChats] = React.useState(sideChats.length > 0);
+  if (sideChats.length > 0 && !hasOpenedSideChats) setHasOpenedSideChats(true);
+  // Once floating chats need Dockview, keep it for this workspace's lifetime.
+  // Switching back when the last float closes would remount the main chat and tools.
+  const useMobileLayout = isMobileViewport && !hasOpenedSideChats;
   const [mobileActivePanel, setMobileActivePanel] = React.useState<'chat' | 'tool'>('chat');
   const [mobileToolPaneOpen, setMobileToolPaneOpen] = React.useState(false);
   const markPreviewHostChanged = React.useCallback(() => {

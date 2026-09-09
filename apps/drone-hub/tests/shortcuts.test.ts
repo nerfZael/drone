@@ -24,16 +24,16 @@ describe('shortcut defaults', () => {
     expect(migrateChatComposerShortcuts(old)).toMatchObject({ toggleSideChatMain: null, toggleFileDictation: { key: 'k' }, openHome: defaults.toggleSideChatMain });
     expect(migrateChatComposerShortcuts(defaults)).toBe(defaults);
   });
-  test('assigns R to side chats and migrates default clear to Shift+R without taking custom shortcuts', () => {
+  test('retains the historical fork migration without taking custom shortcuts', () => {
     const defaults = cloneDefaultShortcutBindings();
-    expect(defaults.createSideChat?.key).toBe('r');
-    expect(defaults.createSideChat?.shift).toBe(false);
-    const old = { ...defaults, clearChatComposer: { ...defaults.createSideChat } } as Record<string, unknown>;
+    const r = { key: 'r', mod: false, ctrl: false, meta: false, alt: false, shift: false };
+    const old = { ...defaults, clearChatComposer: r } as Record<string, unknown>;
     delete old.createSideChat;
-    expect(migrateChatComposerShortcuts(old)).toMatchObject({ createSideChat: defaults.createSideChat, clearChatComposer: defaults.clearChatComposer });
-    old.clearChatComposer = { ...defaults.createSideChat, key: 'k' };
-    old.openHome = defaults.createSideChat;
-    expect(migrateChatComposerShortcuts(old)).toMatchObject({ createSideChat: null, clearChatComposer: { key: 'k' }, openHome: defaults.createSideChat });
+    delete old.openQuickActions;
+    expect(migrateChatComposerShortcuts(old)).toMatchObject({ createSideChat: r, clearChatComposer: defaults.clearChatComposer });
+    old.clearChatComposer = { ...r, key: 'k' };
+    old.openHome = r;
+    expect(migrateChatComposerShortcuts(old)).toMatchObject({ createSideChat: null, clearChatComposer: { key: 'k' }, openHome: r });
   });
   test('uses 1/2/3/4 for root drone, grouped drone, draft chat, and chat clone', () => {
     const defaults = cloneDefaultShortcutBindings();

@@ -109,6 +109,15 @@ function fixture(ids = ['side-a', 'side-b']) {
 }
 
 describe('floating chat shortcut focus', () => {
+  test('quick action focus preserves the selected floating chat and composer', () => {
+    const h = fixture();
+    h.focus(h.first.tab);
+    const menu = h.doc.append({ 'data-quick-action-menu': 'true' });
+    h.focus(menu.append());
+    h.shortcuts();
+    expect(h.actions).toEqual(['side-a:q', 'side-a:w', 'side-a:e', 'side-a:s']);
+    expect(h.first.tab.dataset.sideChatActive).toBe('true');
+  });
   test('waits for the selected window to load instead of sending to the previous chat', () => {
     const h = fixture();
     h.focus(h.second.tab);

@@ -1,4 +1,5 @@
 export type ShortcutActionId =
+  | 'openQuickActions'
   | 'openHome'
   | 'createDraftDrone'
   | 'createDraftGroup'
@@ -52,6 +53,11 @@ export type ShortcutDefinition = {
 };
 
 export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
+  {
+    id: 'openQuickActions',
+    label: 'Open quick actions',
+    description: 'Opens the keyboard action grid. Choose an action or enter a submenu.',
+  },
   {
     id: 'openHome',
     label: 'Open home',
@@ -226,13 +232,14 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
 ];
 
 const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
+  openQuickActions: { key: 'r', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openHome: { key: 'v', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   createDraftDrone: { key: '1', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   createDraftGroup: null,
   createDraftDroneInCurrentGroup: { key: '2', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   createDroneChat: { key: '3', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   cloneDroneChat: { key: '4', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  createSideChat: { key: 'r', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  createSideChat: null,
   toggleSideChatMain: { key: 'd', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleSelectedDronePinned: null,
   moveSelectedDroneToTop: null,
@@ -250,14 +257,14 @@ const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   applyCompanionProposal: { key: 'capslock', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleVoiceClipboardRecording: null,
   markSelectedDronesUnread: { key: 'z', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  toggleSidebarCollapsed: { key: 'a', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  toggleSidebarCollapsed: { key: 'd', mod: false, ctrl: true, meta: false, alt: false, shift: false },
   toggleRightPanelWidth: null,
   openHoveredGroupMultiChat: { key: 'g', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openPullRequestsTab: null,
   openChangesTab: { key: 'c', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openCanvasTab: { key: 'x', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openBrowserTab: { key: 'b', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  openFilesTab: { key: 'f', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  openFilesTab: null,
   openQuickOpen: { key: 'p', mod: true, ctrl: false, meta: false, alt: false, shift: false },
   openTerminalTab: null,
 };
@@ -426,6 +433,29 @@ export function migrateChatComposerShortcuts(value: unknown): unknown {
   return changed ? next : value;
 }
 
+/** Migrate once, preserving explicit unbindings and unrelated custom shortcuts. */
+export function migrateQuickActionShortcuts(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const raw = value as Record<string, unknown>;
+  if (Object.prototype.hasOwnProperty.call(raw, 'openQuickActions')) return value;
+  const next = { ...raw };
+  const plain = (key: string): ShortcutBinding => ({ key, mod: false, ctrl: false, meta: false, alt: false, shift: false });
+  if (isSameShortcutBinding(next.createSideChat, plain('r'))) next.createSideChat = null;
+  if (isSameShortcutBinding(next.openFilesTab, plain('f'))) next.openFilesTab = null;
+  const sidebar = { ...plain('d'), ctrl: true };
+  if (isSameShortcutBinding(next.toggleSidebarCollapsed, plain('a'))) {
+    // Ctrl+D is reserved for the sidebar; move a former recording binding off it.
+    for (const id of ['toggleFileDictation', 'toggleContinuousDictation', 'toggleVoiceClipboardRecording', 'toggleChatVoiceRecording'] as const) {
+      if (isSameShortcutBinding(next[id], sidebar)) next[id] = null;
+    }
+    const occupied = Object.entries(next).some(([id, binding]) => id !== 'toggleSidebarCollapsed' && isSameShortcutBinding(binding, sidebar));
+    next.toggleSidebarCollapsed = occupied ? null : sidebar;
+  }
+  next.openQuickActions = Object.values(next).some((binding) => isSameShortcutBinding(binding, plain('r')))
+    ? null : plain('r');
+  return next;
+}
+
 function isSameShortcutBinding(value: unknown, expected: ShortcutBinding): boolean {
   const binding = sanitizeShortcutBinding(value, null);
   return Boolean(
@@ -445,6 +475,7 @@ function cloneShortcutBinding(binding: ShortcutBinding | null): ShortcutBinding 
 
 export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
   return {
+    openQuickActions: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openQuickActions),
     openHome: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openHome),
     createDraftDrone: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createDraftDrone),
     createDraftGroup: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createDraftGroup),

@@ -9,6 +9,7 @@ import {
 import {
   cloneDefaultShortcutBindings,
   migrateChatComposerShortcuts,
+  migrateQuickActionShortcuts,
   migrateCompanionShortcut,
   migrateFormerPullRequestsShortcut,
   sanitizeSingleShortcutBinding,
@@ -889,7 +890,7 @@ function migrateLegacyShortcutBindings(value: unknown): unknown {
     };
     changed = true;
   }
-  return migrateChatComposerShortcuts(migrateCompanionShortcut(changed ? next : value));
+  return migrateQuickActionShortcuts(migrateChatComposerShortcuts(migrateCompanionShortcut(changed ? next : value)));
 }
 
 let pendingChatInputDraftsPersist: Record<string, string> | null = null;
