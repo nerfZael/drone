@@ -382,9 +382,17 @@ function failureStatus(
   return { tone: 'danger', label: 'Apply failed' };
 }
 
-const STATUS_PILL_CLASS: Record<'warning' | 'danger', string> = {
+const STATUS_PILL_CLASS: Record<'success' | 'warning' | 'danger', string> = {
+  success: 'border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)]',
   warning: 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)] text-[var(--yellow)]',
   danger: 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]',
+};
+
+export type CompanionProposalHistoryDetails = {
+  startedAt: number;
+  completedAt: number;
+  autoApproved: boolean;
+  onBack(): void;
 };
 
 export function CompanionProposalCard({
@@ -399,6 +407,7 @@ export function CompanionProposalCard({
   resolveCreationDefaults,
   onExecute,
   onDiscard,
+  historyDetails,
 }: {
   proposal: CompanionProposal;
   defaultRepoPath: string;
@@ -410,11 +419,12 @@ export function CompanionProposalCard({
   resolveDroneName?(droneId: string): string | null;
   /** Saved new-drone preferences for a repository, used to show inherited values. */
   resolveCreationDefaults?(repoPath: string): DesktopNewDronePreferences | null;
-  onExecute(): void;
-  onDiscard(): void;
+  onExecute?(): void;
+  onDiscard?(): void;
+  historyDetails?: CompanionProposalHistoryDetails;
 }) {
   const [expandedOperationIds, setExpandedOperationIds] = React.useState<Set<string>>(
-    () => new Set(),
+    () => new Set(historyDetails ? proposal.operations.map((operation) => operation.id) : []),
   );
   const operationResult = React.useMemo(
     () => new Map((execution?.operations ?? executionProgress?.operations ?? []).map((item) => [item.id, item])),
@@ -426,8 +436,10 @@ export function CompanionProposalCard({
   const completedCount = execution?.operations.filter((item) => item.status === 'completed').length ?? 0;
   const applyDisabled =
     executing || companionBusy || proposal.operations.length === 0 || execution !== null;
-  const status = failureStatus(execution, completedCount);
-  const [descriptionOpen, setDescriptionOpen] = React.useState(false);
+  const status = historyDetails && execution?.ok
+    ? { tone: 'success' as const, label: 'Applied' }
+    : failureStatus(execution, completedCount);
+  const [descriptionOpen, setDescriptionOpen] = React.useState(Boolean(historyDetails));
   /** 1-based step number of the create/clone operation an `$id` drone reference points at. */
   const stepIndexByOperationId = React.useMemo(
     () => new Map(proposal.operations.map((operation, index) => [operation.id, index + 1])),
@@ -480,8 +492,9 @@ export function CompanionProposalCard({
   return (
     <Tooltip.Provider delayDuration={250} skipDelayDuration={100}>
       <aside
+        id={historyDetails ? 'companion-proposal-history' : undefined}
         className="flex max-h-[min(36rem,calc(100vh-2rem))] w-full shrink-0 flex-col overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--panel)] shadow-2xl min-[860px]:w-[22rem] min-[1100px]:w-[26rem]"
-        aria-label="Companion proposal"
+        aria-label={historyDetails ? 'Companion proposal execution details' : 'Companion proposal'}
       >
       <div className="dh-agent-activity-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-3">
         {proposal.operations.length === 0 ? (
@@ -502,9 +515,14 @@ export function CompanionProposalCard({
                   )
                 : null;
               const details: CompanionProposalOperationDetail[] = isCreateDrone && createSettings
-                ? creationDetailRowsFromSettings(operation, defaultRepoPath, createSettings)
+                ? [
+                    ...creationDetailRowsFromSettings(operation, defaultRepoPath, createSettings),
+                    ...(historyDetails ? [{ label: 'Initial prompt', value: operation.prompt }] : []),
+                  ]
                 : isMessage
-                  ? []
+                  ? historyDetails
+                    ? companionProposalOperationDetails(operation, defaultRepoPath)
+                    : []
                   : companionProposalOperationDetails(operation, defaultRepoPath);
               const createLocation = isCreateDrone
                 ? proposalLocation(operation, defaultRepoPath)
@@ -661,7 +679,31 @@ export function CompanionProposalCard({
                         ))}
                       </dl>
                     ) : null}
-                    {outcome && outcome.status !== 'completed' ? (
+                    {outcome && historyDetails ? (
+                      <div className="mt-1.5 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-2.5 py-2 text-[11px]">
+                        <div className={outcome.status === 'completed'
+                          ? 'font-[var(--weight-medium)] text-[var(--green)]'
+                          : outcome.status === 'failed'
+                            ? 'font-[var(--weight-medium)] text-[var(--red)]'
+                            : 'text-[var(--muted-dim)]'}>
+                          {outcome.status === 'completed'
+                            ? 'Succeeded'
+                            : outcome.status === 'skipped'
+                              ? 'Not run'
+                              : `Failed${outcome.error ? `: ${outcome.error}` : ''}`}
+                        </div>
+                        {outcome.result ? (
+                          <div className="mt-1.5">
+                            <div className="text-[10px] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]">
+                              Outcome details
+                            </div>
+                            <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-[10px] text-[var(--fg-secondary)]">
+                              {JSON.stringify(outcome.result, null, 2)}
+                            </pre>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : outcome && outcome.status !== 'completed' ? (
                       <div className={`mt-1.5 text-[11px] ${outcome.status === 'failed' ? 'text-[var(--red)]' : 'text-[var(--muted-dim)]'}`}>
                         {outcome.status === 'skipped' ? 'Not run' : outcome.error || 'Failed'}
                       </div>
@@ -708,33 +750,60 @@ export function CompanionProposalCard({
             {statusPill}
           </div>
           <div className="flex shrink-0 items-center gap-2">
-        <button
-          type="button"
-          onClick={onDiscard}
-          disabled={executing}
-          className="rounded-md px-3 py-1.5 text-xs text-[var(--muted)] hover:bg-[var(--panel-hover)] hover:text-[var(--fg)] disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Discard
-        </button>
-        <button
-          type="button"
-          onClick={onExecute}
-          disabled={applyDisabled}
-          className="inline-flex min-h-8 items-center rounded-md border border-[var(--accent)] bg-[var(--accent)] px-4 py-1.5 text-xs font-[var(--weight-bold)] text-[var(--accent-fg)] shadow-sm transition-[filter,opacity] hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-border)] disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {executing
-            ? 'Applying…'
-            : execution?.ok
-              ? 'Applied'
-              : execution
-                ? 'Discard to retry'
-                : 'Apply proposal'}
-        </button>
+            {historyDetails ? (
+              <button
+                type="button"
+                onClick={historyDetails.onBack}
+                className="rounded-md px-3 py-1.5 text-xs text-[var(--muted)] hover:bg-[var(--panel-hover)] hover:text-[var(--fg)]"
+              >
+                Back to history
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={onDiscard}
+                  disabled={executing}
+                  className="rounded-md px-3 py-1.5 text-xs text-[var(--muted)] hover:bg-[var(--panel-hover)] hover:text-[var(--fg)] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Discard
+                </button>
+                <button
+                  type="button"
+                  onClick={onExecute}
+                  disabled={applyDisabled}
+                  className="inline-flex min-h-8 items-center rounded-md border border-[var(--accent)] bg-[var(--accent)] px-4 py-1.5 text-xs font-[var(--weight-bold)] text-[var(--accent-fg)] shadow-sm transition-[filter,opacity] hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-border)] disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {executing
+                    ? 'Applying…'
+                    : execution?.ok
+                      ? 'Applied'
+                      : execution
+                        ? 'Discard to retry'
+                        : 'Apply proposal'}
+                </button>
+              </>
+            )}
           </div>
         </div>
         {proposal.summary && descriptionOpen ? (
           <div id="proposal-description" className="mt-1.5 text-xs leading-relaxed text-[var(--muted)]">
             {proposal.summary}
+          </div>
+        ) : null}
+        {historyDetails ? (
+          <div className="mt-1.5 flex flex-wrap gap-x-2 text-[10px] text-[var(--muted-dim)]">
+            <span>{historyDetails.autoApproved ? 'Auto-approved' : 'Approved manually'}</span>
+            <span aria-hidden="true">·</span>
+            <span>{Math.max(0, historyDetails.completedAt - historyDetails.startedAt)} ms</span>
+            <span aria-hidden="true">·</span>
+            <time dateTime={new Date(historyDetails.completedAt).toISOString()}>
+              Completed {new Date(historyDetails.completedAt).toLocaleTimeString([], {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+              })}
+            </time>
           </div>
         ) : null}
       </div>

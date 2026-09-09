@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { CompanionProposalHistory } from '../src/droneHub/companion/CompanionProposalHistory';
 
 describe('Companion proposal history', () => {
-  test('renders every executed operation with auto-approve and failure outcomes', () => {
+  test('renders completed proposals as openable history entries without a count', () => {
     const html = renderToStaticMarkup(
       <CompanionProposalHistory
         entries={[
@@ -58,12 +58,11 @@ describe('Companion proposal history', () => {
     );
 
     expect(html).toContain('Execution history');
-    expect(html).toContain('1 proposal this session');
+    expect(html).toContain('Completed proposals from this session');
+    expect(html).not.toContain('1 proposal this session');
     expect(html).toContain('Partially applied');
     expect(html).toContain('Auto');
-    expect(html).toContain('Create drone “Reviewer”');
-    expect(html).toContain('Queue message to Reviewer / default');
-    expect(html).toContain('Chat is unavailable');
-    expect(html).toContain('drone-created');
+    expect(html).toContain('Open execution details for Create reviewer');
+    expect(html).not.toContain('Chat is unavailable');
   });
 });
