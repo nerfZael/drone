@@ -316,4 +316,84 @@ describe('Companion proposal card', () => {
     expect(appliedHtml).toContain('Refactoring opportunities review');
     expect(appliedHtml).toContain('Security code review');
   });
+
+  test('renders an executed history proposal as a read-only, fully expanded detail view', () => {
+    const html = renderToStaticMarkup(
+      <CompanionProposalCard
+        proposal={{
+          version: 1,
+          title: 'Create reviewer',
+          summary: 'Create a reviewer and send its first task.',
+          operations: [
+            {
+              id: 'create',
+              type: 'create_drone',
+              name: 'Reviewer',
+              prompt: 'Review the entire branch.',
+              runtime: 'host',
+              group: 'Quality',
+            },
+            {
+              id: 'message',
+              type: 'send_message',
+              droneId: '$create',
+              chatName: 'review',
+              message: 'Run the focused tests.',
+              delivery: 'queue',
+            },
+          ],
+        }}
+        defaultRepoPath="/workspace/repo"
+        execution={{
+          ok: false,
+          operations: [
+            {
+              id: 'create',
+              type: 'create_drone',
+              status: 'completed',
+              result: { droneId: 'drone-created', droneName: 'Reviewer' },
+            },
+            {
+              id: 'message',
+              type: 'send_message',
+              status: 'failed',
+              error: 'Chat is unavailable',
+            },
+          ],
+        }}
+        executing={false}
+        companionStatus="completed"
+        historyDetails={{
+          startedAt: 1_000,
+          completedAt: 2_000,
+          autoApproved: true,
+          onBack: () => undefined,
+        }}
+      />,
+    );
+
+    expect(html).toContain('Companion proposal execution details');
+    expect(html).toContain('Partially applied');
+    expect(html).toContain('Create a reviewer and send its first task.');
+    expect(html).toContain('Create drone');
+    expect(html).toContain('Reviewer');
+    expect(html).toContain('>Repository<');
+    expect(html).toContain('/workspace/repo');
+    expect(html).toContain('>Runtime<');
+    expect(html).toContain('>Host<');
+    expect(html).toContain('>Initial prompt<');
+    expect(html).toContain('Review the entire branch.');
+    expect(html).toContain('>Message<');
+    expect(html).toContain('Run the focused tests.');
+    expect(html).toContain('Succeeded');
+    expect(html).toContain('Outcome details');
+    expect(html).toContain('drone-created');
+    expect(html).toContain('Failed: Chat is unavailable');
+    expect(html).toContain('Auto-approved');
+    expect(html).toContain('1000 ms');
+    expect(html).toContain('Back to history');
+    expect(html).not.toContain('Apply proposal');
+    expect(html).not.toContain('Discard');
+    expect(html).toContain('aria-expanded="true"');
+  });
 });
