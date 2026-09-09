@@ -171,12 +171,12 @@ export function NewDroneTargetControls({
       effectiveBranchSource === 'remote' &&
       remoteBranch &&
       !remoteBranchValid ? (
-        <div className="basis-full text-[var(--text-10)] text-[var(--yellow)]">
+        <div className="basis-full text-10 text-[var(--yellow)]">
           This saved branch is unavailable. Choose another.
         </div>
       ) : null}
       {branchesError ? (
-        <div className="basis-full whitespace-pre-wrap text-[var(--text-10)] text-[var(--red)]">
+        <div className="basis-full whitespace-pre-wrap text-10 text-[var(--red)]">
           {branchesError}
         </div>
       ) : null}

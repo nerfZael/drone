@@ -456,10 +456,10 @@ export function GuidedOnboarding({ steps = GUIDED_ONBOARDING_STEPS }: { steps?: 
         <div className="rounded-[var(--radius-xlarge)] border border-[var(--border)] bg-[var(--panel-alt)] shadow-[0_16px_80px_var(--shadow-color)] overflow-hidden">
           <div className="px-4 py-3 border-b border-[var(--border-subtle)] flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-[var(--text-9)] font-[var(--weight-semibold)] tracking-[0.16em] uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+              <div className="text-9 font-[var(--weight-semibold)] tracking-[0.16em] uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
                 Guided onboarding
               </div>
-              <div id={stepLabelId} className="mt-1 text-[var(--text-13)] font-[var(--weight-semibold)] text-[var(--fg-strong)]" style={{ fontFamily: 'var(--display)' }}>
+              <div id={stepLabelId} className="mt-1 text-13 font-[var(--weight-semibold)] text-[var(--fg-strong)]" style={{ fontFamily: 'var(--display)' }}>
                 {step.title}
               </div>
             </div>
@@ -474,10 +474,10 @@ export function GuidedOnboarding({ steps = GUIDED_ONBOARDING_STEPS }: { steps?: 
             </button>
           </div>
 
-          <div id={stepBodyId} className="px-4 py-3 text-[var(--text-12)] text-[var(--fg-secondary)] leading-5">
+          <div id={stepBodyId} className="px-4 py-3 text-12 text-[var(--fg-secondary)] leading-5">
             {step.body}
             {pos.mode === 'centered' ? (
-              <div className="mt-2 text-[var(--text-10)] text-[var(--muted-dim)]">
+              <div className="mt-2 text-10 text-[var(--muted-dim)]">
                 This control isn’t visible right now. Try selecting a drone or opening the right panel to follow along.
               </div>
             ) : null}
@@ -487,7 +487,7 @@ export function GuidedOnboarding({ steps = GUIDED_ONBOARDING_STEPS }: { steps?: 
             <button
               type="button"
               onClick={skipAll}
-              className="h-8 px-2.5 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-colors"
+              className="h-8 px-2.5 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-10 font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-colors"
               style={{ fontFamily: 'var(--display)' }}
               title="Dismiss all tips"
             >
@@ -498,7 +498,7 @@ export function GuidedOnboarding({ steps = GUIDED_ONBOARDING_STEPS }: { steps?: 
               type="button"
               onClick={goBack}
               disabled={stepIndex <= 0}
-              className={`h-8 px-3 rounded-[var(--radius-medium)] border text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
+              className={`h-8 px-3 rounded-[var(--radius-medium)] border text-10 font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
                 stepIndex <= 0
                   ? 'opacity-40 cursor-not-allowed border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)]'
                   : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
@@ -511,7 +511,7 @@ export function GuidedOnboarding({ steps = GUIDED_ONBOARDING_STEPS }: { steps?: 
             <button
               type="button"
               onClick={goNext}
-              className="h-8 px-3 rounded-[var(--radius-medium)] border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--accent)] hover:brightness-110 transition-all"
+              className="h-8 px-3 rounded-[var(--radius-medium)] border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-10 font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--accent)] hover:brightness-110 transition-all"
               style={{ fontFamily: 'var(--display)' }}
               title={isLast ? 'Done (→)' : 'Next (→)'}
             >
@@ -519,7 +519,7 @@ export function GuidedOnboarding({ steps = GUIDED_ONBOARDING_STEPS }: { steps?: 
             </button>
           </div>
 
-          <div className="px-4 pb-3 text-[var(--text-10)] text-[var(--muted-dim)] flex items-center justify-between gap-2">
+          <div className="px-4 pb-3 text-10 text-[var(--muted-dim)] flex items-center justify-between gap-2">
             <span>
               Step {stepNumber} / {steps.length}
             </span>

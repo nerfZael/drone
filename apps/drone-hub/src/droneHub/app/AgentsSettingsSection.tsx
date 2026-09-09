@@ -91,12 +91,12 @@ export function AgentsSettingsSection({ agents }: { agents: UseAgentsSettingsRes
   return (
     <div className="flex flex-col gap-4">
       {agentsSettingsError ? (
-        <div className="whitespace-pre-wrap rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--red)]">
+        <div className="whitespace-pre-wrap rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-12 text-[var(--red)]">
           {agentsSettingsError}
         </div>
       ) : null}
       {agentsSettingsNotice ? (
-        <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--green)]">
+        <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-12 text-[var(--green)]">
           {agentsSettingsNotice}
         </div>
       ) : null}
@@ -104,19 +104,19 @@ export function AgentsSettingsSection({ agents }: { agents: UseAgentsSettingsRes
       <div className="dh-settings-section">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Default AGENTS.md</div>
-            <div className="text-[var(--text-12)] text-[var(--muted)] mt-1">
+            <div className="text-10 font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Default AGENTS.md</div>
+            <div className="text-12 text-[var(--muted)] mt-1">
               Repo-attached container drones copy this into the repo root as `AGENTS.md`. Leave it blank to keep current behavior and inject nothing.
             </div>
             {agentsSettings?.agents.updatedAt ? (
-              <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-2">Updated {new Date(agentsSettings.agents.updatedAt).toLocaleString()}</div>
+              <div className="text-11 text-[var(--muted-dim)] mt-2">Updated {new Date(agentsSettings.agents.updatedAt).toLocaleString()}</div>
             ) : null}
           </div>
           <button
             type="button"
             onClick={() => void saveAgentsSettings()}
             disabled={savingAgentsSettings || agentsSettingsLoading}
-            className={`h-9 rounded border px-4 text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase ${
+            className={`h-9 rounded border px-4 text-10 font-[var(--weight-semibold)] tracking-wide uppercase ${
               savingAgentsSettings || agentsSettingsLoading
                 ? 'cursor-not-allowed border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--muted-dim)]'
                 : 'border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)] hover:brightness-110'
@@ -128,7 +128,7 @@ export function AgentsSettingsSection({ agents }: { agents: UseAgentsSettingsRes
         </div>
 
         {agentsSettingsLoading && !agentsSettings ? (
-          <div className="py-4 text-[var(--text-11)] text-[var(--muted-dim)]">
+          <div className="py-4 text-11 text-[var(--muted-dim)]">
             Loading AGENTS.md settings…
           </div>
         ) : null}
@@ -138,11 +138,11 @@ export function AgentsSettingsSection({ agents }: { agents: UseAgentsSettingsRes
           onChange={(event) => setAgentsContentDraft(event.target.value)}
           disabled={savingAgentsSettings}
           spellCheck={false}
-          className="min-h-[320px] w-full rounded border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 py-3 font-mono text-[var(--text-12)] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
+          className="min-h-[320px] w-full rounded border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 py-3 font-mono text-12 text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
           placeholder={'# Repo agent instructions\n\nDescribe project-specific expectations, commands, and guardrails.'}
         />
 
-        <div className="border-l-2 border-[var(--border-subtle)] py-1 pl-3 text-[var(--text-11)] text-[var(--muted-dim)]">
+        <div className="border-l-2 border-[var(--border-subtle)] py-1 pl-3 text-11 text-[var(--muted-dim)]">
           Per-repo overrides live in the Repository modal, where each repo can inherit this default, replace it, or disable injection.
         </div>
       </div>
@@ -150,10 +150,10 @@ export function AgentsSettingsSection({ agents }: { agents: UseAgentsSettingsRes
       <div className="dh-settings-section">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
+            <div className="text-10 font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
               Saved AGENTS.md files
             </div>
-            <div className="mt-1 text-[var(--text-12)] text-[var(--muted)]">
+            <div className="mt-1 text-12 text-[var(--muted)]">
               Keep named instruction files here, then select one while creating a repo-attached
               container drone. Each file is limited to 2 MiB.
             </div>
@@ -162,7 +162,7 @@ export function AgentsSettingsSection({ agents }: { agents: UseAgentsSettingsRes
             type="button"
             onClick={handleBeginFile}
             disabled={libraryBusy}
-            className="h-9 shrink-0 rounded border border-[var(--border)] bg-[var(--surface-soft)] px-4 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-50"
+            className="h-9 shrink-0 rounded border border-[var(--border)] bg-[var(--surface-soft)] px-4 text-10 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-50"
             style={{ fontFamily: 'var(--display)' }}
           >
             New file
@@ -208,14 +208,14 @@ export function AgentsSettingsSection({ agents }: { agents: UseAgentsSettingsRes
               event.target.value = '';
             }}
           />
-          <div className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
+          <div className="text-11 font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
             {importingAgentsFiles
               ? 'Importing AGENTS.md files…'
               : draggingFiles
                 ? 'Drop files to import'
                 : 'Drop Markdown or text files here'}
           </div>
-          <div className="mt-1 text-[var(--text-10)] text-[var(--muted-dim)]">
+          <div className="mt-1 text-10 text-[var(--muted-dim)]">
             Or click to choose one or more .md, .markdown, or .txt files from your desktop.
           </div>
         </div>
@@ -238,10 +238,10 @@ export function AgentsSettingsSection({ agents }: { agents: UseAgentsSettingsRes
                           : 'text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
                       } disabled:cursor-not-allowed disabled:opacity-50`}
                     >
-                      <span className="block truncate text-[var(--text-12)] font-[var(--weight-semibold)]">
+                      <span className="block truncate text-12 font-[var(--weight-semibold)]">
                         {file.name}
                       </span>
-                      <span className="mt-0.5 block text-[var(--text-10)] text-[var(--muted-dim)]">
+                      <span className="mt-0.5 block text-10 text-[var(--muted-dim)]">
                         {file.sizeBytes === 0
                           ? '0 bytes'
                           : `${Math.ceil(file.sizeBytes / 1024).toLocaleString()} KiB`}
@@ -251,7 +251,7 @@ export function AgentsSettingsSection({ agents }: { agents: UseAgentsSettingsRes
                 })}
               </div>
             ) : (
-              <div className="px-2 py-3 text-[var(--text-11)] text-[var(--muted-dim)]">
+              <div className="px-2 py-3 text-11 text-[var(--muted-dim)]">
                 No saved files yet.
               </div>
             )}
@@ -259,14 +259,14 @@ export function AgentsSettingsSection({ agents }: { agents: UseAgentsSettingsRes
 
           <div className="pt-3 lg:pl-3 lg:pt-0">
             {agentsFileLoading ? (
-              <div className="text-[var(--text-11)] text-[var(--muted-dim)]">
+              <div className="text-11 text-[var(--muted-dim)]">
                 Loading AGENTS.md file…
               </div>
             ) : editorOpen ? (
               <div className="flex h-full flex-col gap-3">
                 <div className="flex items-end gap-2">
                   <label className="min-w-0 flex-1">
-                    <span className="mb-1 block text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
+                    <span className="mb-1 block text-10 font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
                       Name
                     </span>
                     <input
@@ -274,7 +274,7 @@ export function AgentsSettingsSection({ agents }: { agents: UseAgentsSettingsRes
                       onChange={(event) => setAgentsFileDraftName(event.target.value)}
                       disabled={libraryBusy}
                       maxLength={80}
-                      className="h-9 w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[var(--text-12)] text-[var(--fg)] focus:border-[var(--accent-muted)] focus:outline-none disabled:opacity-50"
+                      className="h-9 w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-12 text-[var(--fg)] focus:border-[var(--accent-muted)] focus:outline-none disabled:opacity-50"
                       placeholder="Backend work"
                     />
                   </label>
@@ -282,7 +282,7 @@ export function AgentsSettingsSection({ agents }: { agents: UseAgentsSettingsRes
                     type="button"
                     onClick={handleCloseFile}
                     disabled={libraryBusy}
-                    className="h-9 rounded border border-[var(--border-subtle)] px-3 text-[var(--text-10)] uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] disabled:opacity-50"
+                    className="h-9 rounded border border-[var(--border-subtle)] px-3 text-10 uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] disabled:opacity-50"
                   >
                     Close
                   </button>
@@ -293,7 +293,7 @@ export function AgentsSettingsSection({ agents }: { agents: UseAgentsSettingsRes
                   disabled={libraryBusy}
                   spellCheck={false}
                   aria-label="Saved AGENTS.md content"
-                  className="min-h-[260px] flex-1 resize-y rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 font-mono text-[var(--text-12)] text-[var(--fg)] focus:border-[var(--accent-muted)] focus:outline-none disabled:opacity-50"
+                  className="min-h-[260px] flex-1 resize-y rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 font-mono text-12 text-[var(--fg)] focus:border-[var(--accent-muted)] focus:outline-none disabled:opacity-50"
                   placeholder="# Instructions for this kind of drone"
                 />
                 <div className="flex items-center justify-between gap-3">
@@ -303,7 +303,7 @@ export function AgentsSettingsSection({ agents }: { agents: UseAgentsSettingsRes
                         type="button"
                         onClick={handleDeleteFile}
                         disabled={libraryBusy}
-                        className="h-9 rounded border border-[var(--red-border)] px-3 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--red)] hover:bg-[var(--red-subtle)] disabled:opacity-50"
+                        className="h-9 rounded border border-[var(--red-border)] px-3 text-10 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--red)] hover:bg-[var(--red-subtle)] disabled:opacity-50"
                       >
                         {deletingAgentsFile ? 'Deleting…' : 'Delete'}
                       </button>
@@ -313,14 +313,14 @@ export function AgentsSettingsSection({ agents }: { agents: UseAgentsSettingsRes
                     type="button"
                     onClick={() => void saveAgentsFile()}
                     disabled={libraryBusy || !agentsFileDraftName.trim()}
-                    className="h-9 rounded border border-[var(--accent)] bg-[var(--accent)] px-4 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--accent-fg)] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="h-9 rounded border border-[var(--accent)] bg-[var(--accent)] px-4 text-10 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--accent-fg)] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {savingAgentsFile ? 'Saving…' : creatingAgentsFile ? 'Add file' : 'Save file'}
                   </button>
                 </div>
               </div>
             ) : (
-              <div className="flex h-full min-h-[330px] items-center justify-center px-6 text-center text-[var(--text-12)] text-[var(--muted-dim)]">
+              <div className="flex h-full min-h-[330px] items-center justify-center px-6 text-center text-12 text-[var(--muted-dim)]">
                 Select a saved file to edit it, or create a new one.
               </div>
             )}

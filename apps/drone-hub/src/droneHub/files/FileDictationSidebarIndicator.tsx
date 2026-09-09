@@ -52,7 +52,7 @@ export function FileDictationSidebarIndicator() {
         <FileDictationIcon active />
         <div className="min-w-0 flex-1">
           <div
-            className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--red)]"
+            className="text-10 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--red)]"
             style={{ fontFamily: 'var(--display)' }}
           >
             File dictation
@@ -60,14 +60,14 @@ export function FileDictationSidebarIndicator() {
           <button
             type="button"
             onClick={dictation.openTarget}
-            className="block max-w-full truncate text-left text-[var(--text-11)] text-[var(--fg-secondary)] hover:text-[var(--fg)] hover:underline"
+            className="block max-w-full truncate text-left text-11 text-[var(--fg-secondary)] hover:text-[var(--fg)] hover:underline"
             title={`${target.droneName} / ${target.path}`}
           >
             {destination}
           </button>
         </div>
       </div>
-      <div className="mt-1.5 flex items-center justify-between gap-2 text-[var(--text-10)] text-[var(--muted)]">
+      <div className="mt-1.5 flex items-center justify-between gap-2 text-10 text-[var(--muted)]">
         <span className="min-w-0 truncate" title={dictation.error || status}>
           {dictation.error || status}
         </span>

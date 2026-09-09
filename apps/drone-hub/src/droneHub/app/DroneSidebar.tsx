@@ -270,7 +270,7 @@ function PinnedChatTreeEntries({
             ...current,
             [collapseKey]: !collapsed,
           }))}
-          className="flex min-h-7 min-w-0 items-center gap-1 rounded px-1 text-left text-[var(--text-11)] text-[var(--sidebar-subitem-fg)] hover:bg-[var(--surface-hover)]"
+          className="flex min-h-7 min-w-0 items-center gap-1 rounded px-1 text-left text-11 text-[var(--sidebar-subitem-fg)] hover:bg-[var(--surface-hover)]"
           aria-expanded={!collapsed}
           aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${folder.label} group${muted ? ', muted' : ''}`}
         >
@@ -2728,7 +2728,7 @@ export function DroneSidebar({
               aria-label="Loading projects and drones"
               className="px-3 py-3 flex flex-col gap-3"
             >
-              <span className="text-[var(--text-10)] text-[var(--sidebar-meta-fg)]">
+              <span className="text-10 text-[var(--sidebar-meta-fg)]">
                 Loading projects and drones…
               </span>
               {[1, 2, 3].map((i) => (
@@ -2745,7 +2745,7 @@ export function DroneSidebar({
             !dronesError && (
               <div className="px-3 py-10 text-center">
                 <div
-                  className="text-[var(--muted-dim)] text-[var(--text-11)] tracking-wide uppercase"
+                  className="text-[var(--muted-dim)] text-11 tracking-wide uppercase"
                   style={{ fontFamily: 'var(--display)' }}
                 >
                   {selectedRepoHasNoDrones
@@ -2758,14 +2758,14 @@ export function DroneSidebar({
                 </div>
                 {activeRepoPath ? (
                   <div
-                    className="text-[var(--muted-dim)] text-[var(--text-10)] mt-2 font-mono truncate"
+                    className="text-[var(--muted-dim)] text-10 mt-2 font-mono truncate"
                     title={activeRepoPath}
                   >
                     {activeRepoPath}
                   </div>
                 ) : null}
                 {recentFilterHidAllDrones && !selectedRepoHasNoDrones ? (
-                  <div className="mt-2 text-[var(--text-10)] text-[var(--muted-dim)]">
+                  <div className="mt-2 text-10 text-[var(--muted-dim)]">
                     Turn off Recent drones only to show older drones.
                   </div>
                 ) : null}
@@ -2779,7 +2779,7 @@ export function DroneSidebar({
                         <button
                           type="button"
                           onClick={openDraftDroneFromSidebarSelection}
-                          className="inline-flex h-[30px] w-full items-center gap-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 text-[var(--text-11)] text-[var(--muted)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]"
+                          className="inline-flex h-[30px] w-full items-center gap-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 text-11 text-[var(--muted)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]"
                           title="Create new drone"
                           aria-label="Create new drone"
                         >
@@ -2799,9 +2799,9 @@ export function DroneSidebar({
                 !selectedRepoHasNoDrones &&
                 !sidebarCapabilities.headerActions &&
                 sidebarCapabilities.createDrones ? (
-                  <div className="mt-4 text-[var(--text-10)] text-[var(--muted-dim)]">
+                  <div className="mt-4 text-10 text-[var(--muted-dim)]">
                     Or run{' '}
-                    <code className="rounded border border-[var(--accent-border)] bg-[var(--accent-subtle)] px-1.5 py-0.5 text-[var(--text-10)] text-[var(--code-fg)]">
+                    <code className="rounded border border-[var(--accent-border)] bg-[var(--accent-subtle)] px-1.5 py-0.5 text-10 text-[var(--code-fg)]">
                       drone create &lt;name&gt;
                     </code>{' '}
                     in your terminal.
@@ -2817,7 +2817,7 @@ export function DroneSidebar({
             !dronesError && (
               <div className="px-3 py-10 text-center">
                 <div
-                  className="text-[var(--muted-dim)] text-[var(--text-11)] tracking-wide uppercase"
+                  className="text-[var(--muted-dim)] text-11 tracking-wide uppercase"
                   style={{ fontFamily: 'var(--display)' }}
                 >
                   {recentFilterHidRepoDrones
@@ -2825,12 +2825,12 @@ export function DroneSidebar({
                     : 'No drones for selected repo'}
                 </div>
                 {recentFilterHidRepoDrones ? (
-                  <div className="mt-2 text-[var(--text-10)] text-[var(--muted-dim)]">
+                  <div className="mt-2 text-10 text-[var(--muted-dim)]">
                     Recent drones only is on.
                   </div>
                 ) : null}
                 <div
-                  className="text-[var(--muted-dim)] text-[var(--text-10)] mt-2 font-mono truncate"
+                  className="text-[var(--muted-dim)] text-10 mt-2 font-mono truncate"
                   title={activeRepoPath}
                 >
                   {activeRepoPath}
@@ -2897,7 +2897,7 @@ export function DroneSidebar({
                     aria-expanded={!pinnedSidebarCollapsed}
                   >
                     <IconPin className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)] opacity-72" />
-                    <span className="min-w-0 flex-1 truncate text-[length:var(--text-10-5)] font-normal text-[color:var(--muted-dim)] [font-family:var(--sidebar-font)]">
+                    <span className="min-w-0 flex-1 truncate text-10-5 font-normal text-[color:var(--muted-dim)] [font-family:var(--sidebar-font)]">
                       Pinned
                     </span>
                   </button>
@@ -3188,7 +3188,7 @@ export function DroneSidebar({
                                       <span className={sidebarChatLabelClass}>{chatName}</span>
                                       <DetachedChatIndicator droneId={drone.id} chatName={chatName} />
                                       {drone.draftChats?.[chatName] === true ? (
-                                        <span className="ml-auto flex-shrink-0 text-[var(--text-8)] font-[var(--weight-semibold)] uppercase text-[var(--accent)]">
+                                        <span className="ml-auto flex-shrink-0 text-8 font-[var(--weight-semibold)] uppercase text-[var(--accent)]">
                                           Draft
                                         </span>
                                       ) : null}
@@ -3231,11 +3231,11 @@ export function DroneSidebar({
                     <IconChevronLeft className="h-4 w-4" />
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[var(--type-ui)] font-[var(--weight-strong)] text-[var(--fg)]">
+                    <span className="block truncate text-ui font-[var(--weight-strong)] text-[var(--fg)]">
                       {activeRepositoryNavigationItem.label}
                     </span>
                   </span>
-                  <span className="inline-flex flex-shrink-0 items-center gap-1.5 text-[var(--type-caption)] leading-none tabular-nums">
+                  <span className="inline-flex flex-shrink-0 items-center gap-1.5 text-caption leading-none tabular-nums">
                     {activeRepositoryNavigationItem.stateSummary.approval > 0 ? (
                       <SidebarRepositoryStateCount
                         count={activeRepositoryNavigationItem.stateSummary.approval}
@@ -3324,7 +3324,7 @@ export function DroneSidebar({
                             )}
                           </span>
                           <span className="min-w-0 flex-1">
-                            <span className={`block truncate text-[var(--text-13)] group-hover/repository-row:text-[var(--fg)] ${
+                            <span className={`block truncate text-13 group-hover/repository-row:text-[var(--fg)] ${
                               containsSelectedDrone
                                 ? 'font-semibold text-[var(--fg)]'
                                 : isUngrouped
@@ -3334,7 +3334,7 @@ export function DroneSidebar({
                               {item.label}
                             </span>
                             <span
-                              className="mt-0.5 block truncate text-[var(--type-caption)] font-normal text-[var(--sidebar-meta-fg)] opacity-70"
+                              className="mt-0.5 block truncate text-caption font-normal text-[var(--sidebar-meta-fg)] opacity-70"
                               title={item.repoPath || 'Drones without a repository'}
                             >
                               {item.repoPath || 'Drones without a repository'}
@@ -3342,7 +3342,7 @@ export function DroneSidebar({
                           </span>
                         </button>
                         <div className="relative mr-0.5 h-7 w-7 flex-shrink-0">
-                          <span className="pointer-events-none absolute inset-0 inline-flex items-center justify-end gap-1.5 whitespace-nowrap pr-2 text-[var(--type-caption)] leading-none tabular-nums transition-opacity duration-150 group-hover/repository-row:opacity-0 group-focus-within/repository-row:opacity-0">
+                          <span className="pointer-events-none absolute inset-0 inline-flex items-center justify-end gap-1.5 whitespace-nowrap pr-2 text-caption leading-none tabular-nums transition-opacity duration-150 group-hover/repository-row:opacity-0 group-focus-within/repository-row:opacity-0">
                             {item.stateSummary.approval > 0 ? (
                               <SidebarRepositoryStateCount
                                 count={item.stateSummary.approval}
@@ -3549,7 +3549,7 @@ export function DroneSidebar({
                     showExternalMoveTargets && (
                       <div
                         ref={setUngroupedDropNodeRef}
-                        className={`rounded-[var(--radius-medium)] border border-dashed px-3 py-2 text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
+                        className={`rounded-[var(--radius-medium)] border border-dashed px-3 py-2 text-10 font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
                           dragOverUngrouped
                             ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                             : 'border-[var(--border-subtle)] text-[var(--muted-dim)]'

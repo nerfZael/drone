@@ -2900,7 +2900,7 @@ function LiveDroneChangesDock({
               icon={<ReviewBackIcon />}
               onClick={onReviewBack}
             />
-            <span className="truncate text-[var(--text-10)] text-[var(--muted)]">
+            <span className="truncate text-10 text-[var(--muted)]">
               Loading pull request{pullRequestNumber ? ` #${pullRequestNumber}` : ''}…
             </span>
           </div>
@@ -3015,7 +3015,7 @@ function LiveDroneChangesDock({
             <span className="truncate text-[16px] font-[var(--weight-bold)] text-[var(--fg)]">
               {activePullRequestTitleRaw || 'Untitled pull request'}
             </span>
-            <span className="shrink-0 font-mono text-[var(--text-10)] font-[var(--weight-normal)] text-[var(--muted-dim)]">
+            <span className="shrink-0 font-mono text-10 font-[var(--weight-normal)] text-[var(--muted-dim)]">
               #{activePullRequestNumber}
             </span>
           </div>
@@ -3046,7 +3046,7 @@ function LiveDroneChangesDock({
             </UiToolbarButton>
             {activePullRequestStatus ? (
               <span
-                className={`inline-flex h-5 items-center rounded-full px-1.5 text-[var(--text-9)] font-[var(--weight-semibold)] ${activePullRequestStatus.className}`}
+                className={`inline-flex h-5 items-center rounded-full px-1.5 text-9 font-[var(--weight-semibold)] ${activePullRequestStatus.className}`}
                 title={activePullRequestStatus.title}
               >
                 {activePullRequestStatus.label}
@@ -3238,16 +3238,16 @@ function LiveDroneChangesDock({
                     >
                       <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/70 flex items-center gap-2">
                         <span
-                          className={`inline-flex items-center justify-center min-w-[32px] h-5 rounded border px-1.5 text-[var(--text-9)] font-[var(--weight-semibold)] ${badgeTone(entry)}`}
+                          className={`inline-flex items-center justify-center min-w-[32px] h-5 rounded border px-1.5 text-9 font-[var(--weight-semibold)] ${badgeTone(entry)}`}
                           title={statusBadgeTitle(entry, dataMode)}
                         >
                           {changesEntryStatusLabel(entry)}
                         </span>
-                        <span className="text-[var(--text-11)] text-[var(--fg-secondary)] font-mono truncate flex-1" title={entry.path}>
+                        <span className="text-11 text-[var(--fg-secondary)] font-mono truncate flex-1" title={entry.path}>
                           {fileNameForChangesPath(entry.path)}
                         </span>
                         {renderFileQuickActions(entry, false, true, k)}
-                        <span className="text-[var(--text-9)] uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+                        <span className="text-9 uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
                           {k}{fallback ? ' (fallback)' : ''}
                         </span>
                       </div>
@@ -3281,12 +3281,12 @@ function LiveDroneChangesDock({
                   >
                     <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/70 flex items-center gap-2">
                       <span
-                        className={`inline-flex items-center justify-center min-w-[32px] h-5 rounded border px-1.5 text-[var(--text-9)] font-[var(--weight-semibold)] ${badgeTone(entry)}`}
+                        className={`inline-flex items-center justify-center min-w-[32px] h-5 rounded border px-1.5 text-9 font-[var(--weight-semibold)] ${badgeTone(entry)}`}
                         title={statusBadgeTitle(entry, dataMode)}
                       >
                         {changesEntryStatusLabel(entry)}
                       </span>
-                      <span className="text-[var(--text-11)] text-[var(--fg-secondary)] font-mono truncate flex-1" title={entry.path}>
+                      <span className="text-11 text-[var(--fg-secondary)] font-mono truncate flex-1" title={entry.path}>
                         {fileNameForChangesPath(entry.path)}
                       </span>
                       {renderFileQuickActions(entry)}
@@ -3310,7 +3310,7 @@ function LiveDroneChangesDock({
                             }
                           }
                         }}
-                        className="h-6 px-2 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+                        className="h-6 px-2 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-9 font-[var(--weight-semibold)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
                         title={open ? 'Hide diff' : 'Show diff'}
                       >
                         {open ? 'Hide' : 'Show'}
@@ -3337,7 +3337,7 @@ function LiveDroneChangesDock({
         <div ref={splitLayoutRef} className="flex-1 min-h-0 overflow-hidden flex">
           <div className="flex-1 min-w-0 min-h-0 overflow-auto bg-[var(--chat-background)]">
             <div className="dh-utility-panel-chrome sticky top-0 z-10 px-2.5 py-1.5 border-b border-[var(--border-subtle)] flex items-center justify-between gap-2">
-              <div className="min-w-0 text-[var(--text-10)] text-[var(--muted)] font-mono truncate">
+              <div className="min-w-0 text-10 text-[var(--muted)] font-mono truncate">
                 <span title={selectedEntry?.path}>
                   {selectedEntry ? fileNameForChangesPath(selectedEntry.path) : 'No file selected'}
                 </span>
@@ -3364,7 +3364,7 @@ function LiveDroneChangesDock({
                     />
                   ) : null
                 ) : (
-                  <div className="text-[var(--text-9)] text-[var(--muted-dim)] font-mono whitespace-nowrap">
+                  <div className="text-9 text-[var(--muted-dim)] font-mono whitespace-nowrap">
                     {dataMode === 'pull-request'
                       ? `${reviewOverride ? 'CR' : 'PR'} #${activePullRequestChanges?.pullRequest.number ?? pullRequestNumber ?? '-'} ${shortSha(pullBase)}..${shortSha(pullHead)}`
                       : `${shortSha(pullBase)}..${shortSha(pullHead)}`}
@@ -3375,7 +3375,7 @@ function LiveDroneChangesDock({
 
             {dataMode === 'working-tree' ? (
               !selectedEntry || !splitShownKind ? (
-                <div className="px-3 py-3 text-[var(--text-11)] text-[var(--muted)]">Select a changed file to inspect its diff.</div>
+                <div className="px-3 py-3 text-11 text-[var(--muted)]">Select a changed file to inspect its diff.</div>
               ) : (
                 <DiffBlock
                   state={diffByKey[workingDiffStateKey(selectedEntry.path, splitShownKind)]}
@@ -3388,7 +3388,7 @@ function LiveDroneChangesDock({
                 />
               )
             ) : !selectedEntry ? (
-              <div className="px-3 py-3 text-[var(--text-11)] text-[var(--muted)]">Select a changed file to inspect its diff.</div>
+              <div className="px-3 py-3 text-11 text-[var(--muted)]">Select a changed file to inspect its diff.</div>
             ) : (
               <DiffBlock
                 state={
@@ -3454,7 +3454,7 @@ function LiveDroneChangesDock({
             />
             <div role="tree" className="flex-1 min-h-0 overflow-auto py-1">
               {workingTreeActionError ? (
-                <div className="mx-2 mb-1 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-2 py-1.5 text-[var(--text-10)] text-[var(--red)]">
+                <div className="mx-2 mb-1 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-2 py-1.5 text-10 text-[var(--red)]">
                   {workingTreeActionError}
                 </div>
               ) : null}
@@ -3466,7 +3466,7 @@ function LiveDroneChangesDock({
                         type="button"
                         onClick={() => setStagedSectionOpen((open) => !open)}
                         aria-expanded={stagedSectionOpen}
-                        className="flex h-7 w-full items-center gap-1 px-2 text-left text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+                        className="flex h-7 w-full items-center gap-1 px-2 text-left text-11 font-[var(--weight-semibold)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
                       >
                         <IconChevron down={stagedSectionOpen} size={11} />
                         <span className="min-w-0 flex-1 truncate">Staged Changes</span>
@@ -3483,7 +3483,7 @@ function LiveDroneChangesDock({
                         type="button"
                         onClick={() => setUnstagedSectionOpen((open) => !open)}
                         aria-expanded={unstagedSectionOpen}
-                        className="flex h-7 w-full items-center gap-1 px-2 text-left text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+                        className="flex h-7 w-full items-center gap-1 px-2 text-left text-11 font-[var(--weight-semibold)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
                       >
                         <IconChevron down={unstagedSectionOpen} size={11} />
                         <span className="min-w-0 flex-1 truncate">Changes</span>

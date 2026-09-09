@@ -61,9 +61,7 @@ export function buildNewDroneBranchPickerEntries({
       value: HOST_BRANCH_VALUE,
       label: (
         <span className="flex min-w-0 items-center justify-between gap-3">
-          <span className="truncate font-mono text-[var(--text-11)] text-[var(--fg)]">
-            {hostLabel}
-          </span>
+          <span className="truncate font-mono text-11 text-[var(--fg)]">{hostLabel}</span>
           {branchKindPill('Host', 'host')}
         </span>
       ),
@@ -78,9 +76,7 @@ export function buildNewDroneBranchPickerEntries({
       value: remoteBranchValue(entry.name),
       label: (
         <span className="flex min-w-0 items-center justify-between gap-3">
-          <span className="truncate font-mono text-[var(--text-11)] text-[var(--fg)]">
-            {entry.name}
-          </span>
+          <span className="truncate font-mono text-11 text-[var(--fg)]">{entry.name}</span>
           {branchKindPill('Remote', 'remote')}
         </span>
       ),

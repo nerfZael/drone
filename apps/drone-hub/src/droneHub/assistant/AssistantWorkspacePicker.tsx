@@ -318,12 +318,12 @@ export function AssistantWorkspacePicker({
       <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-1.5">
         <input
           aria-label="Search workspaces"
-          className="h-6 min-w-0 flex-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[var(--text-10)] text-[var(--fg)] outline-none placeholder:text-[var(--muted-dim)] focus:border-[var(--accent-muted)]"
+          className="h-6 min-w-0 flex-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-10 text-[var(--fg)] outline-none placeholder:text-[var(--muted-dim)] focus:border-[var(--accent-muted)]"
           placeholder="Search workspaces"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
-        <span className="text-[var(--text-9)] text-[var(--muted-dim)]">
+        <span className="text-9 text-[var(--muted-dim)]">
           {saving ? 'Saving…' : needsDefault ? 'Star a default' : ''}
         </span>
         <button
@@ -351,14 +351,14 @@ export function AssistantWorkspacePicker({
       </div>
 
       {error ? (
-        <div className="border-b border-[var(--border-subtle)] px-3 py-1.5 text-[var(--text-10)] text-[var(--red)]">
+        <div className="border-b border-[var(--border-subtle)] px-3 py-1.5 text-10 text-[var(--red)]">
           {error}
         </div>
       ) : null}
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {initialLoading && !catalog ? (
-          <div className="flex items-center gap-2 px-3 py-4 text-[var(--text-10)] text-[var(--muted)]">
+          <div className="flex items-center gap-2 px-3 py-4 text-10 text-[var(--muted)]">
             <IconSpinner className="h-3 w-3 animate-spin" />
             Loading workspaces…
           </div>
@@ -394,14 +394,14 @@ export function AssistantWorkspacePicker({
                 className="flex h-8 w-full items-center gap-2 px-3 text-left hover:bg-[var(--hover)]"
               >
                 <IconChevron down={open} className="text-[var(--muted)]" />
-                <span className="min-w-0 flex-1 truncate text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg)]">
+                <span className="min-w-0 flex-1 truncate text-11 font-[var(--weight-semibold)] text-[var(--fg)]">
                   {device.name}
                 </span>
                 {isLoading ? (
                   <IconSpinner className="h-3 w-3 animate-spin text-[var(--muted)]" />
                 ) : null}
                 {selected.length > 0 ? (
-                  <span className="text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--accent)]">
+                  <span className="text-9 font-[var(--weight-semibold)] text-[var(--accent)]">
                     {selected.length} selected
                   </span>
                 ) : null}
@@ -409,19 +409,19 @@ export function AssistantWorkspacePicker({
               {open ? (
                 <div className="pb-1">
                   {device.error ? (
-                    <div className="flex items-center gap-2 px-3 py-1.5 text-[var(--text-10)] text-[var(--muted)]">
+                    <div className="flex items-center gap-2 px-3 py-1.5 text-10 text-[var(--muted)]">
                       <span className="min-w-0 flex-1">{device.error}</span>
                       <button
                         type="button"
                         onClick={() => void loadDevice(device.id)}
-                        className="text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--accent)]"
+                        className="text-9 font-[var(--weight-semibold)] text-[var(--accent)]"
                       >
                         Retry
                       </button>
                     </div>
                   ) : null}
                   {isLoaded && rows.length === 0 && !device.error ? (
-                    <div className="px-3 py-1.5 text-[var(--text-10)] text-[var(--muted)]">
+                    <div className="px-3 py-1.5 text-10 text-[var(--muted)]">
                       {search
                         ? 'No matching workspaces.'
                         : 'Nothing shared with this Hub. Share folders in the other device’s settings.'}
@@ -455,7 +455,7 @@ export function AssistantWorkspacePicker({
                           }
                           className="flex h-6 w-full items-center gap-1.5 px-3 text-left hover:bg-[var(--hover)]"
                         >
-                          <span className="min-w-0 flex-1 truncate text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]">
+                          <span className="min-w-0 flex-1 truncate text-8 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]">
                             {category} · {entries.length}
                             {selectedInCategory > 0 ? ` · ${selectedInCategory} selected` : ''}
                           </span>
@@ -502,10 +502,10 @@ export function AssistantWorkspacePicker({
                                       className="h-3.5 w-3.5 flex-shrink-0 accent-[var(--accent)]"
                                     />
                                     <span className="min-w-0">
-                                      <span className="block truncate text-[var(--text-11)] font-medium text-[var(--fg-secondary)]">
+                                      <span className="block truncate text-11 font-medium text-[var(--fg-secondary)]">
                                         {option.name}
                                       </span>
-                                      <span className="block truncate text-[var(--text-9)] text-[var(--muted-dim)]">
+                                      <span className="block truncate text-9 text-[var(--muted-dim)]">
                                         {available ? workspaceOptionMeta(option) : 'Unavailable'}
                                       </span>
                                     </span>
@@ -544,7 +544,7 @@ export function AssistantWorkspacePicker({
                                                 };
                                               })
                                             }
-                                            className={`${readRequired ? 'h-11 px-3 min-[600px]:h-5 min-[600px]:px-1.5' : 'h-5 w-5'} rounded text-[var(--text-8)] font-[var(--weight-semibold)] ${readRequired && permission.key === 'read' ? '' : 'disabled:opacity-40'} ${
+                                            className={`${readRequired ? 'h-11 px-3 min-[600px]:h-5 min-[600px]:px-1.5' : 'h-5 w-5'} rounded text-8 font-[var(--weight-semibold)] ${readRequired && permission.key === 'read' ? '' : 'disabled:opacity-40'} ${
                                               on
                                                 ? 'bg-[var(--accent)] text-[var(--on-accent,#11111b)]'
                                                 : 'bg-[var(--surface-strong)] text-[var(--muted)] hover:bg-[var(--hover)]'
@@ -603,9 +603,7 @@ export function AssistantWorkspacePicker({
           );
         })}
         {catalog && selectedCount === 0 && !initialLoading ? (
-          <div className="px-3 py-2 text-[var(--text-10)] text-[var(--muted-dim)]">
-            No workspace selected.
-          </div>
+          <div className="px-3 py-2 text-10 text-[var(--muted-dim)]">No workspace selected.</div>
         ) : null}
       </div>
     </div>

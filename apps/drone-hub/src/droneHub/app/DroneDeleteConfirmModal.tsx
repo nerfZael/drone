@@ -73,11 +73,11 @@ export function DroneDeleteConfirmModal({
             <div className="min-w-0">
               <h2 id="delete-drone-confirm-title" className="flex flex-wrap items-baseline gap-x-2 text-[20px] font-[var(--weight-semibold)] leading-tight text-[var(--fg-strong)]">
                 <span>{verb}</span>
-                <span className="text-[var(--text-12)] font-[var(--weight-medium)] text-[var(--muted)]">
+                <span className="text-12 font-[var(--weight-medium)] text-[var(--muted)]">
                   {count} drone{count === 1 ? '' : 's'}
                 </span>
               </h2>
-              <p id="delete-drone-confirm-description" className="mt-1.5 text-[var(--text-12)] leading-5 text-[var(--muted)]">
+              <p id="delete-drone-confirm-description" className="mt-1.5 text-12 leading-5 text-[var(--muted)]">
                 {archive
                   ? 'This removes the selected drones from the active list now. You can restore them from Settings > Archive before they auto-delete.'
                   : 'This removes the selected drone containers and removes them from your registry.'}
@@ -96,17 +96,17 @@ export function DroneDeleteConfirmModal({
                   index === 0 ? '' : 'border-t border-[var(--border-subtle)]'
                 }`}
               >
-                <span className="min-w-0 flex-1 truncate text-[var(--text-13)] font-[var(--weight-medium)] text-[var(--fg)]">
+                <span className="min-w-0 flex-1 truncate text-13 font-[var(--weight-medium)] text-[var(--fg)]">
                   {drone.label}
                 </span>
-                <span className={`flex-shrink-0 text-[var(--text-11)] ${archive ? 'text-[var(--muted-dim)]' : 'text-[var(--red)]'}`}>
+                <span className={`flex-shrink-0 text-11 ${archive ? 'text-[var(--muted-dim)]' : 'text-[var(--red)]'}`}>
                   {archive ? 'Archive' : 'Delete'}
                 </span>
               </div>
             ))}
           </div>
           {error ? (
-            <div className="mt-3 rounded-[var(--radius-large)] border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-12)] leading-5 text-[var(--red)]">
+            <div className="mt-3 rounded-[var(--radius-large)] border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-12 leading-5 text-[var(--red)]">
               {error}
             </div>
           ) : null}
@@ -117,7 +117,7 @@ export function DroneDeleteConfirmModal({
             type="button"
             onClick={onCancel}
             disabled={busy}
-            className={`h-9 rounded px-3 text-[var(--text-11)] font-[var(--weight-semibold)] uppercase tracking-[0.12em] transition-all ${
+            className={`h-9 rounded px-3 text-11 font-[var(--weight-semibold)] uppercase tracking-[0.12em] transition-all ${
               busy
                 ? 'cursor-not-allowed border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] opacity-40'
                 : 'border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:border-[var(--border)] hover:text-[var(--fg)]'
@@ -131,7 +131,7 @@ export function DroneDeleteConfirmModal({
             type="submit"
             disabled={busy || count === 0}
             aria-keyshortcuts="Enter"
-            className={`inline-flex h-9 items-center justify-center gap-2 rounded px-3 text-[var(--text-11)] font-[var(--weight-semibold)] uppercase tracking-[0.12em] transition-all ${
+            className={`inline-flex h-9 items-center justify-center gap-2 rounded px-3 text-11 font-[var(--weight-semibold)] uppercase tracking-[0.12em] transition-all ${
               busy || count === 0
                 ? 'cursor-not-allowed border border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] opacity-45'
                 : 'border border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] hover:border-[var(--red)] hover:bg-[var(--danger-panel)]'

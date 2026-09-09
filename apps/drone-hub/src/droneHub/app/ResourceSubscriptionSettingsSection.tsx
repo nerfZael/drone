@@ -28,17 +28,17 @@ export function ResourceSubscriptionSettingsSection({ subscriptions }: Props) {
         </div>
       </div>
       {error ? (
-        <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--red)]">
+        <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-12 text-[var(--red)]">
           {error}
         </div>
       ) : null}
       {notice ? (
-        <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--green)]">
+        <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-12 text-[var(--green)]">
           {notice}
         </div>
       ) : null}
       {loading && !draft ? (
-        <div className="text-[var(--text-12)] text-[var(--muted-dim)]">
+        <div className="text-12 text-[var(--muted-dim)]">
           Loading subscription settings…
         </div>
       ) : (
@@ -137,9 +137,9 @@ export function ResourceSubscriptionSettingsSection({ subscriptions }: Props) {
                       current ? { ...current, [key]: event.target.value } : current,
                     )
                   }
-                  className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[var(--text-13)] text-[var(--fg)] transition-colors focus:border-[var(--accent-muted)] focus:outline-none disabled:opacity-40"
+                  className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-13 text-[var(--fg)] transition-colors focus:border-[var(--accent-muted)] focus:outline-none disabled:opacity-40"
                 />
-                <span className="text-[var(--text-10)] text-[var(--muted-dim)]">
+                <span className="text-10 text-[var(--muted-dim)]">
                   {unit} · {min.toLocaleString()}–{max.toLocaleString()}
                 </span>
               </label>

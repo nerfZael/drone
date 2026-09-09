@@ -119,10 +119,10 @@ describe('sidebar presentation', () => {
     expect(compact.chatRow).toContain('h-6');
     expect(normal.chatRow).toContain('h-[25px]');
     expect(comfortable.chatRow).toContain('h-7');
-    expect(compact.chatRow).toContain('text-[var(--sidebar-item-compact-size)]');
-    expect(normal.chatRow).toContain('text-[var(--sidebar-item-size)]');
-    expect(comfortable.chatRow).toContain('text-[var(--sidebar-item-comfortable-size)]');
-    expect(normal.folderLabel).toContain('text-[var(--sidebar-item-size)]');
+    expect(compact.chatRow).toContain('text-sidebar-item-compact');
+    expect(normal.chatRow).toContain('text-sidebar-item');
+    expect(comfortable.chatRow).toContain('text-sidebar-item-comfortable');
+    expect(normal.folderLabel).toContain('text-sidebar-item');
     expect(compact.chatRow).toContain('pl-1 pr-1.5');
     expect(normal.chatRow).toContain('pl-1 pr-1.5');
     expect(comfortable.chatRow).toContain('pl-1 pr-2');
@@ -394,7 +394,7 @@ describe('sidebar presentation', () => {
     expect(sidebarSource).toContain('inline-flex h-5 w-5 flex-shrink-0 items-center justify-center');
     expect(sidebarSource).not.toContain('inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-[5px] border');
     expect(sidebarSource).toContain('mx-1.5 h-px bg-[var(--border-subtle)]');
-    expect(sidebarSource).toContain('text-[var(--type-caption)] leading-none tabular-nums');
+    expect(sidebarSource).toContain('text-caption leading-none tabular-nums');
     expect(sidebarSource).toContain('text-[var(--sidebar-meta-fg)] opacity-70');
     expect(sidebarSource).toContain("containsSelectedDrone ? 'dh-sidebar-row-selected' : ''");
     expect(sidebarSource).toContain(

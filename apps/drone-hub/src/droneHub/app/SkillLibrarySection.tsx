@@ -105,24 +105,24 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
       {(skillsError || skillsNotice) && (
         <div className="flex flex-col gap-2">
           {skillsError && (
-            <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--red)] flex items-center justify-between gap-3">
+            <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-12 text-[var(--red)] flex items-center justify-between gap-3">
               <span>{skillsError}</span>
               <button
                 type="button"
                 onClick={clearSkillsError}
-                className="text-[var(--text-10)] uppercase tracking-wide opacity-80 hover:opacity-100"
+                className="text-10 uppercase tracking-wide opacity-80 hover:opacity-100"
               >
                 Dismiss
               </button>
             </div>
           )}
           {skillsNotice && (
-            <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--green)] flex items-center justify-between gap-3">
+            <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-12 text-[var(--green)] flex items-center justify-between gap-3">
               <span>{skillsNotice}</span>
               <button
                 type="button"
                 onClick={clearSkillsNotice}
-                className="text-[var(--text-10)] uppercase tracking-wide opacity-80 hover:opacity-100"
+                className="text-10 uppercase tracking-wide opacity-80 hover:opacity-100"
               >
                 Dismiss
               </button>
@@ -228,13 +228,13 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
               <SettingsDetail className="flex flex-col gap-5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="min-w-0">
-                    <div className="text-[var(--text-13)] font-[var(--weight-semibold)] text-[var(--fg)] truncate">
+                    <div className="text-13 font-[var(--weight-semibold)] text-[var(--fg)] truncate">
                       {draft.id ? draft.name || 'Untitled skill' : 'New skill draft'}
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <div
-                      className={`text-[var(--text-10)] uppercase tracking-[0.08em] ${draftDirty ? 'text-[var(--accent)]' : 'text-[var(--muted-dim)]'}`}
+                      className={`text-10 uppercase tracking-[0.08em] ${draftDirty ? 'text-[var(--accent)]' : 'text-[var(--muted-dim)]'}`}
                     >
                       {draftDirty ? 'Unsaved changes' : 'Saved'}
                     </div>
@@ -457,7 +457,7 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
                         className={inputClassName()}
                         placeholder="Agent"
                       />
-                      <label className="inline-flex items-center gap-2 text-[var(--text-11)] text-[var(--muted)]">
+                      <label className="inline-flex items-center gap-2 text-11 text-[var(--muted)]">
                         <input
                           type="checkbox"
                           checked={draft.claudeUserInvocable}
@@ -467,7 +467,7 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
                         />
                         User invocable
                       </label>
-                      <label className="inline-flex items-center gap-2 text-[var(--text-11)] text-[var(--muted)]">
+                      <label className="inline-flex items-center gap-2 text-11 text-[var(--muted)]">
                         <input
                           type="checkbox"
                           checked={draft.claudeDisableModelInvocation}
@@ -488,7 +488,7 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
 
                   <div className="flex flex-col gap-3 xl:pl-4">
                     <div className="dh-type-label">Cursor + advanced</div>
-                    <label className="inline-flex items-center gap-2 text-[var(--text-11)] text-[var(--muted)]">
+                    <label className="inline-flex items-center gap-2 text-11 text-[var(--muted)]">
                       <input
                         type="checkbox"
                         checked={draft.cursorDisableModelInvocation}

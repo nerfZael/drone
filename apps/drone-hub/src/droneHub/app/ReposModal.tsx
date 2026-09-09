@@ -207,7 +207,7 @@ export function ReposModal({
         <div className="grid grid-cols-[320px_minmax(0,1fr)] min-h-[620px] max-h-[80vh]">
           <div className="border-r border-[var(--border)] overflow-y-auto">
             {reposError ? (
-              <div className="m-4 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] p-2 text-[var(--text-11)] text-[var(--red)]">
+              <div className="m-4 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] p-2 text-11 text-[var(--red)]">
                 Failed to load repos: {reposError}
               </div>
             ) : null}
@@ -237,8 +237,8 @@ export function ReposModal({
                     }`}
                   >
                     <div className="min-w-0">
-                      <div className="text-[var(--text-12)] text-[var(--fg-secondary)] truncate">{base}</div>
-                      <div className="text-[var(--text-10)] text-[var(--muted-dim)] truncate font-mono mt-0.5" title={repoPath || 'Shared scope for drones without a repository'}>
+                      <div className="text-12 text-[var(--fg-secondary)] truncate">{base}</div>
+                      <div className="text-10 text-[var(--muted-dim)] truncate font-mono mt-0.5" title={repoPath || 'Shared scope for drones without a repository'}>
                         {repoPath || 'Shared scope for drones without a repository'}
                       </div>
                     </div>
@@ -251,7 +251,7 @@ export function ReposModal({
                             event.stopPropagation();
                             onToggleActiveRepoPath(filtered ? '' : repoPath);
                           }}
-                          className={`h-7 rounded border px-2 text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase ${
+                          className={`h-7 rounded border px-2 text-9 font-[var(--weight-semibold)] tracking-wide uppercase ${
                             filtered
                               ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                               : 'border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)]'
@@ -302,7 +302,7 @@ export function ReposModal({
                 );
               })}
               {!reposLoading && repos.length === 0 ? (
-                <div className="rounded border border-dashed border-[var(--border-subtle)] px-3 py-4 text-[var(--text-11)] text-[var(--muted-dim)]">
+                <div className="rounded border border-dashed border-[var(--border-subtle)] px-3 py-4 text-11 text-[var(--muted-dim)]">
                   No registered repos yet. The `No Repository` scope still works for unrepoed drones.
                 </div>
               ) : null}
@@ -312,11 +312,11 @@ export function ReposModal({
           <div className="overflow-y-auto px-5 py-4 flex flex-col gap-4">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
+                <div className="text-10 font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
                   Scope
                 </div>
                 <div className="text-[18px] text-[var(--fg-secondary)] truncate">{repoCardLabel(currentRepoPath)}</div>
-                <div className="text-[var(--text-11)] text-[var(--muted-dim)] font-mono truncate" title={currentRepoPath || 'No Repository'}>
+                <div className="text-11 text-[var(--muted-dim)] font-mono truncate" title={currentRepoPath || 'No Repository'}>
                   {currentRepoPath || 'No Repository'}
                 </div>
               </div>
@@ -324,7 +324,7 @@ export function ReposModal({
                 type="button"
                 onClick={() => void save()}
                 disabled={saving || Boolean(validationError)}
-                className={`h-9 rounded border px-4 text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase ${
+                className={`h-9 rounded border px-4 text-10 font-[var(--weight-semibold)] tracking-wide uppercase ${
                   saving || validationError
                     ? 'cursor-not-allowed border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--muted-dim)]'
                     : 'border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)] hover:brightness-110'
@@ -336,17 +336,17 @@ export function ReposModal({
             </div>
 
             {configLoading ? (
-              <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-3 py-3 text-[var(--text-11)] text-[var(--muted-dim)]">
+              <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-3 py-3 text-11 text-[var(--muted-dim)]">
                 Loading repository environment…
               </div>
             ) : null}
             {configError ? (
-              <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-11)] text-[var(--red)]">
+              <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-11 text-[var(--red)]">
                 {configError}
               </div>
             ) : null}
             {notice ? (
-              <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-3 py-2 text-[var(--text-11)] text-[var(--muted)]">
+              <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-3 py-2 text-11 text-[var(--muted)]">
                 {notice}
               </div>
             ) : null}
@@ -354,14 +354,14 @@ export function ReposModal({
             <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-4 flex flex-col gap-3">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
+                  <div className="text-10 font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
                     Default Environment
                   </div>
-                  <div className="text-[var(--text-11)] text-[var(--muted-dim)]">
+                  <div className="text-11 text-[var(--muted-dim)]">
                     These variables are available to drones in this repository scope.
                   </div>
                 </div>
-                <label className="inline-flex items-center gap-2 text-[var(--text-11)] text-[var(--fg-secondary)]">
+                <label className="inline-flex items-center gap-2 text-11 text-[var(--fg-secondary)]">
                   <input
                     type="checkbox"
                     checked={autoApply}
@@ -393,7 +393,7 @@ export function ReposModal({
                 onImportFile={importFromFile}
                 disabled={saving}
                 placeholder={'API_KEY=secret\nDEBUG=true'}
-                textareaClassName="min-h-[130px] rounded border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 py-2 font-mono text-[var(--text-11)] text-[var(--fg)] focus:outline-none"
+                textareaClassName="min-h-[130px] rounded border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 py-2 font-mono text-11 text-[var(--fg)] focus:outline-none"
               />
             </div>
 
@@ -401,14 +401,14 @@ export function ReposModal({
               <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-4 flex flex-col gap-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <div className="text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
+                    <div className="text-10 font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
                       AGENTS.md Override
                     </div>
-                    <div className="text-[var(--text-11)] text-[var(--muted-dim)]">
+                    <div className="text-11 text-[var(--muted-dim)]">
                       Choose whether this repo inherits the Hub default, replaces it, or disables injection entirely.
                     </div>
                   </div>
-                  <div className="text-[var(--text-10)] text-[var(--muted-dim)]">
+                  <div className="text-10 text-[var(--muted-dim)]">
                     {repoAgentsMode === 'override'
                       ? 'Custom override'
                       : repoAgentsMode === 'disabled'
@@ -430,7 +430,7 @@ export function ReposModal({
                         type="button"
                         onClick={() => setRepoAgentsMode(option.id)}
                         disabled={saving}
-                        className={`h-9 rounded border px-3 text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase ${
+                        className={`h-9 rounded border px-3 text-10 font-[var(--weight-semibold)] tracking-wide uppercase ${
                           active
                             ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                             : 'border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--muted)] hover:bg-[var(--hover)]'
@@ -448,7 +448,7 @@ export function ReposModal({
                   onChange={(event) => setRepoAgentsContent(event.target.value)}
                   disabled={saving || repoAgentsMode !== 'override'}
                   spellCheck={false}
-                  className={`min-h-[220px] rounded border px-3 py-3 font-mono text-[var(--text-11)] focus:outline-none ${
+                  className={`min-h-[220px] rounded border px-3 py-3 font-mono text-11 focus:outline-none ${
                     saving || repoAgentsMode !== 'override'
                       ? 'border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--muted-dim)]'
                       : 'border-[var(--border-subtle)] bg-[var(--panel-raised)] text-[var(--fg)] focus:border-[var(--accent-muted)]'
@@ -456,12 +456,12 @@ export function ReposModal({
                   placeholder={'# Repo-specific instructions\n\nOverride the Hub default for this repository only.'}
                 />
 
-                <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-3 py-2 text-[var(--text-11)] text-[var(--muted-dim)]">
+                <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-3 py-2 text-11 text-[var(--muted-dim)]">
                   Repo-attached container drones copy the effective content into the repo root as `AGENTS.md`.
                 </div>
               </div>
             ) : (
-              <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-4 text-[var(--text-11)] text-[var(--muted-dim)]">
+              <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-4 text-11 text-[var(--muted-dim)]">
                 `AGENTS.md` injection only applies to repo-attached drones. The shared no-repository scope keeps environment variables only.
               </div>
             )}
@@ -469,10 +469,10 @@ export function ReposModal({
             {selectedGithubUrl ? (
               <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-4 flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
+                  <div className="text-10 font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
                     Remote
                   </div>
-                  <a href={selectedGithubUrl} target="_blank" rel="noreferrer" className="text-[var(--text-11)] text-[var(--link)] hover:text-[var(--link-hover)] truncate transition-colors" title={selectedGithubUrl}>
+                  <a href={selectedGithubUrl} target="_blank" rel="noreferrer" className="text-11 text-[var(--link)] hover:text-[var(--link-hover)] truncate transition-colors" title={selectedGithubUrl}>
                     {selectedGithubUrl}
                   </a>
                 </div>

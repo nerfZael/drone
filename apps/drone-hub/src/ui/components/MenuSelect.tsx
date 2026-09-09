@@ -329,7 +329,7 @@ export function UiMenuSelect(props: UiMenuSelectProps) {
                 }}
                 placeholder={searchPlaceholder}
                 className={cn(
-                  'dh-field-control w-full h-[var(--control-height-compact)] rounded border border-[var(--field-border)] bg-[var(--field-bg)] px-2 text-[length:var(--text-11)] text-[var(--field-fg)] placeholder:text-[var(--field-placeholder)]',
+                  'dh-field-control w-full h-[var(--control-height-compact)] rounded border border-[var(--field-border)] bg-[var(--field-bg)] px-2 text-11 text-[var(--field-fg)] placeholder:text-[var(--field-placeholder)]',
                   searchInputClassName,
                 )}
               />

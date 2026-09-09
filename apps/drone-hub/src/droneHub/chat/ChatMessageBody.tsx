@@ -185,7 +185,7 @@ export function ChatMessageBody({
         />
       ) : null}
       {!hasText && normalizedError ? (
-        <div className="text-[var(--text-12)] text-[var(--red)]">{normalizedError}</div>
+        <div className="text-12 text-[var(--red)]">{normalizedError}</div>
       ) : null}
       {images.length > 0 ? (
         <div className="flex flex-wrap gap-2">

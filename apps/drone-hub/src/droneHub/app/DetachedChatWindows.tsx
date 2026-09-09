@@ -112,7 +112,7 @@ function DetachedPanel({ params }: IDockviewPanelProps<{ chatKey: string }>) {
       className="flex h-full min-h-0 min-w-0 flex-col bg-[var(--chat-background)]">
       <button type="button" onClick={() => dispatchAssistantOpenDroneChat(chat.droneId, chat.chatName)}
         title={`Open ${drone?.name ?? chat.droneId} / ${chat.chatName}`}
-        className={`flex shrink-0 items-center gap-2 border-b px-2 py-1 text-left text-[var(--text-11)] ${foreign ? 'border-[var(--info)] bg-[var(--info-subtle)] text-[var(--info)]' : 'border-[var(--border)] text-[var(--muted)]'}`}>
+        className={`flex shrink-0 items-center gap-2 border-b px-2 py-1 text-left text-11 ${foreign ? 'border-[var(--info)] bg-[var(--info-subtle)] text-[var(--info)]' : 'border-[var(--border)] text-[var(--muted)]'}`}>
         <IconDetachedChat /><span className="min-w-0 flex-1 truncate">{drone?.name ?? 'Unavailable drone'} · {chat.chatName}</span>
         {foreign && <span className="shrink-0">Other drone ↗</span>}
       </button>

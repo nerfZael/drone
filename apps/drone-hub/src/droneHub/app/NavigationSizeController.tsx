@@ -100,7 +100,7 @@ export function NavigationSizeController() {
     <div
       role="status"
       aria-live="polite"
-      className="pointer-events-none fixed bottom-5 left-1/2 z-[60] -translate-x-1/2 rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--panel-alt)] px-3 py-1.5 text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-secondary)] shadow-[0_12px_36px_var(--shadow-color)] animate-slide-up"
+      className="pointer-events-none fixed bottom-5 left-1/2 z-[60] -translate-x-1/2 rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--panel-alt)] px-3 py-1.5 text-11 font-[var(--weight-semibold)] text-[var(--fg-secondary)] shadow-[0_12px_36px_var(--shadow-color)] animate-slide-up"
     >
       {toast}
     </div>

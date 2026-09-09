@@ -267,7 +267,7 @@ function ActiveDragPreview({ data }: { data: DroneHubDragData }) {
       <div className="pointer-events-none w-[240px] rounded-[var(--radius-medium)] border border-[var(--accent-muted)] bg-[var(--panel-overlay)] px-2 py-1.5 shadow-[0_18px_44px_var(--shadow-color)]">
         <div className="flex min-w-0 items-center gap-1.5">
           <IconFolder className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)] opacity-80" />
-          <span className="min-w-0 flex-1 truncate text-[var(--text-11)] font-medium text-[var(--fg-secondary)]">
+          <span className="min-w-0 flex-1 truncate text-11 font-medium text-[var(--fg-secondary)]">
             {data.label}
           </span>
         </div>
@@ -277,7 +277,7 @@ function ActiveDragPreview({ data }: { data: DroneHubDragData }) {
   if (data.type === 'sidebar-chat') {
     return (
       <div className="pointer-events-none w-[240px] rounded-[var(--radius-medium)] border border-[var(--accent-muted)] bg-[var(--panel-overlay)] px-2 py-1.5 shadow-[0_18px_44px_var(--shadow-color)]">
-        <div className="flex items-center gap-1.5 text-[var(--text-11)] text-[var(--fg-secondary)]">
+        <div className="flex items-center gap-1.5 text-11 text-[var(--fg-secondary)]">
           <span className="inline-flex h-3 w-3 flex-shrink-0 items-center justify-center">
             <span className="h-1.5 w-1.5 rounded-full border border-[var(--muted-dim)] opacity-70" />
           </span>
@@ -319,8 +319,8 @@ function ActiveDragPreview({ data }: { data: DroneHubDragData }) {
   const preview = dragPreviewLabel(data);
   return (
     <div className="pointer-events-none rounded-[var(--radius-medium)] border border-[var(--accent-muted)] bg-[var(--panel-overlay)] px-3 py-2 shadow-[0_18px_44px_var(--shadow-color)]">
-      <div className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg)]">{preview.title}</div>
-      <div className="text-[var(--text-10)] text-[var(--muted-dim)]">{preview.detail}</div>
+      <div className="text-11 font-[var(--weight-semibold)] text-[var(--fg)]">{preview.title}</div>
+      <div className="text-10 text-[var(--muted-dim)]">{preview.detail}</div>
     </div>
   );
 }

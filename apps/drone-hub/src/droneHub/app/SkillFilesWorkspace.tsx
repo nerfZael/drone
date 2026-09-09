@@ -370,7 +370,7 @@ export function SkillFilesWorkspace({ skillLibrary }: { skillLibrary: UseSkillLi
           selectedFile ? (
             <div className="flex h-full min-h-0 flex-col">
               <div className="flex h-8 shrink-0 items-center justify-between gap-3 border-b border-[var(--border-subtle)] px-3">
-                <span className="min-w-0 truncate font-mono text-[var(--text-11)] text-[var(--fg-secondary)]">
+                <span className="min-w-0 truncate font-mono text-11 text-[var(--fg-secondary)]">
                   {activeSlug}/{selectedFile.path}
                 </span>
                 <span
@@ -398,7 +398,7 @@ export function SkillFilesWorkspace({ skillLibrary }: { skillLibrary: UseSkillLi
               </div>
             </div>
           ) : (
-            <div className="flex h-full items-center justify-center px-5 text-center text-[var(--text-12)] text-[var(--muted)]">
+            <div className="flex h-full items-center justify-center px-5 text-center text-12 text-[var(--muted)]">
               Select a file to edit it. Folders are represented by their contained files.
             </div>
           )

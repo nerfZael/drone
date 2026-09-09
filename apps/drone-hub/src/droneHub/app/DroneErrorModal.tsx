@@ -24,7 +24,7 @@ export function DroneErrorModal({ droneErrorModal, clearingDroneError, onClose, 
             <div className="font-[var(--weight-semibold)] text-sm text-[var(--fg-strong)] tracking-wide uppercase truncate" style={{ fontFamily: 'var(--display)' }}>
               Drone error
             </div>
-            <div className="text-[var(--text-10)] text-[var(--muted)] mt-1 truncate font-mono" title={droneErrorModal.droneName}>
+            <div className="text-10 text-[var(--muted)] mt-1 truncate font-mono" title={droneErrorModal.droneName}>
               {droneErrorModal.droneName}
             </div>
           </div>
@@ -41,18 +41,18 @@ export function DroneErrorModal({ droneErrorModal, clearingDroneError, onClose, 
         <div className="px-5 py-4">
           {droneErrorModal.conflict.isConflict && (
             <div className="mb-3 p-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)]">
-              <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--red)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+              <div className="text-10 font-[var(--weight-semibold)] text-[var(--red)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
                 Repo conflict detected
               </div>
               {droneErrorModal.conflict.patchName && (
-                <div className="mt-1 text-[var(--text-11)] text-[var(--muted)] font-mono truncate" title={droneErrorModal.conflict.patchName}>
+                <div className="mt-1 text-11 text-[var(--muted)] font-mono truncate" title={droneErrorModal.conflict.patchName}>
                   patch: {droneErrorModal.conflict.patchName}
                 </div>
               )}
               {droneErrorModal.conflict.files.length > 0 && (
                 <div className="mt-2">
-                  <div className="text-[var(--text-10)] text-[var(--muted-dim)] mb-1">Files</div>
-                  <div className="max-h-20 overflow-y-auto rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] p-2 font-mono text-[var(--text-10)] text-[var(--fg-secondary)]">
+                  <div className="text-10 text-[var(--muted-dim)] mb-1">Files</div>
+                  <div className="max-h-20 overflow-y-auto rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] p-2 font-mono text-10 text-[var(--fg-secondary)]">
                     {droneErrorModal.conflict.files.map((file) => (
                       <div key={file} className="truncate" title={file}>
                         {file}
@@ -61,19 +61,19 @@ export function DroneErrorModal({ droneErrorModal, clearingDroneError, onClose, 
                   </div>
                 </div>
               )}
-              <div className="mt-2 text-[var(--text-10)] text-[var(--muted-dim)] leading-relaxed">
+              <div className="mt-2 text-10 text-[var(--muted-dim)] leading-relaxed">
                 Conflict markers: <span className="font-mono text-[var(--fg-secondary)]">&lt;&lt;&lt;&lt;&lt;&lt;&lt; ours</span> is the current branch in the target
                 repo, and <span className="font-mono text-[var(--fg-secondary)]">&gt;&gt;&gt;&gt;&gt;&gt;&gt; theirs</span> is the incoming branch being merged.
               </div>
             </div>
           )}
-          <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase mb-2" style={{ fontFamily: 'var(--display)' }}>
+          <div className="text-10 font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase mb-2" style={{ fontFamily: 'var(--display)' }}>
             Full message
           </div>
           <textarea
             readOnly
             value={droneErrorModal.message}
-            className="w-full min-h-[220px] max-h-[55vh] rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-3 py-2 text-[var(--text-12)] leading-relaxed text-[var(--fg-secondary)] font-mono resize-y focus:outline-none"
+            className="w-full min-h-[220px] max-h-[55vh] rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-3 py-2 text-12 leading-relaxed text-[var(--fg-secondary)] font-mono resize-y focus:outline-none"
           />
         </div>
         <div className="px-5 py-4 border-t border-[var(--border)] bg-[var(--surface-inset-faint)] flex items-center justify-between gap-2">
@@ -81,7 +81,7 @@ export function DroneErrorModal({ droneErrorModal, clearingDroneError, onClose, 
             type="button"
             onClick={() => onClearDroneHubError(droneErrorModal.droneId)}
             disabled={clearingDroneError}
-            className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
+            className={`h-9 px-3 rounded text-11 font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
               clearingDroneError
                 ? 'opacity-50 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                 : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -95,7 +95,7 @@ export function DroneErrorModal({ droneErrorModal, clearingDroneError, onClose, 
             <button
               type="button"
               onClick={() => void copyText(droneErrorModal.message)}
-              className="h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] transition-all inline-flex items-center gap-1.5"
+              className="h-9 px-3 rounded text-11 font-[var(--weight-semibold)] tracking-wide uppercase border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] transition-all inline-flex items-center gap-1.5"
               style={{ fontFamily: 'var(--display)' }}
             >
               <IconCopy className="opacity-70" />
@@ -104,7 +104,7 @@ export function DroneErrorModal({ droneErrorModal, clearingDroneError, onClose, 
             <button
               type="button"
               onClick={onClose}
-              className="h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] transition-all"
+              className="h-9 px-3 rounded text-11 font-[var(--weight-semibold)] tracking-wide uppercase border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] transition-all"
               style={{ fontFamily: 'var(--display)' }}
             >
               Close

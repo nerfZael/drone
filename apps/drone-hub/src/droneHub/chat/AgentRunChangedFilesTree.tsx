@@ -56,7 +56,7 @@ function DiffStats({
   return (
     <span
       className={`ml-auto flex shrink-0 gap-1.5 font-mono tabular-nums transition-opacity group-hover/change-row:opacity-100 group-focus-visible/change-row:opacity-100 ${
-        appearance === 'panel' ? 'text-[var(--text-8)] opacity-70' : 'text-[var(--text-9)] opacity-75'
+        appearance === 'panel' ? 'text-8 opacity-70' : 'text-9 opacity-75'
       }`}
     >
       {additions > 0 ? (
@@ -138,7 +138,7 @@ export function AgentRunChangedFilesTree({
               className="shrink-0 text-[var(--muted-dim)] transition-colors group-hover/change-row:text-[var(--accent)] group-focus-visible/change-row:text-[var(--accent)]"
               size={panelAppearance ? 12 : 11}
             />
-            <span className={`min-w-0 truncate ${panelAppearance ? 'text-[var(--text-12)]' : 'font-mono text-[var(--text-10)]'}`}>
+            <span className={`min-w-0 truncate ${panelAppearance ? 'text-12' : 'font-mono text-10'}`}>
               {node.name}
             </span>
             {!open ? (
@@ -180,7 +180,7 @@ export function AgentRunChangedFilesTree({
       >
         {!panelAppearance ? (
           <span
-            className={`w-3 shrink-0 text-center font-mono text-[var(--text-9)] font-[var(--weight-bold)] ${statusTextClass(node.entry)}`}
+            className={`w-3 shrink-0 text-center font-mono text-9 font-[var(--weight-bold)] ${statusTextClass(node.entry)}`}
           >
             {agentRunFileStatusLabel(node.entry)}
           </span>
@@ -194,13 +194,13 @@ export function AgentRunChangedFilesTree({
           }`}
           size={13}
         />
-        <span className={`min-w-0 flex-1 truncate ${panelAppearance ? 'text-[var(--text-12)]' : 'font-mono text-[var(--text-10)]'}`}>
+        <span className={`min-w-0 flex-1 truncate ${panelAppearance ? 'text-12' : 'font-mono text-10'}`}>
           {node.name}
         </span>
         {node.entry.binary ? (
           <span
             className={`shrink-0 text-[var(--muted-dim)] ${
-              panelAppearance ? 'text-[var(--text-8)] uppercase tracking-wide' : 'text-[var(--text-9)]'
+              panelAppearance ? 'text-8 uppercase tracking-wide' : 'text-9'
             }`}
           >
             binary
@@ -214,7 +214,7 @@ export function AgentRunChangedFilesTree({
         )}
         {panelAppearance ? (
           <span
-            className={`inline-flex h-[15px] min-w-5 shrink-0 items-center justify-center rounded-[3px] border px-1 font-mono text-[var(--text-8)] font-[var(--weight-bold)] ${statusBadgeClass(node.entry)}`}
+            className={`inline-flex h-[15px] min-w-5 shrink-0 items-center justify-center rounded-[3px] border px-1 font-mono text-8 font-[var(--weight-bold)] ${statusBadgeClass(node.entry)}`}
             title={node.entry.status}
           >
             {agentRunFileStatusLabel(node.entry)}
@@ -231,7 +231,7 @@ export function AgentRunChangedFilesTree({
         <button
           type="button"
           onClick={() => setVisibleRowLimit((current) => current + (initialVisibleRows ?? 200))}
-          className="w-full rounded-[var(--radius-small)] px-2 py-1.5 text-left text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--accent)] transition-colors hover:text-[var(--fg)] focus-visible:text-[var(--fg)] focus-visible:outline-none"
+          className="w-full rounded-[var(--radius-small)] px-2 py-1.5 text-left text-10 font-[var(--weight-semibold)] text-[var(--accent)] transition-colors hover:text-[var(--fg)] focus-visible:text-[var(--fg)] focus-visible:outline-none"
         >
           Show {initialVisibleRows ?? 200} more rows
         </button>

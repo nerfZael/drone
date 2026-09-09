@@ -32,10 +32,10 @@ export function RequestOverview({
           {normalizedDescription ? (
             <MarkdownMessage
               text={normalizedDescription}
-              className="dh-markdown text-[var(--text-11)]"
+              className="dh-markdown text-11"
             />
           ) : (
-            <p className="text-[var(--text-11)] italic text-[var(--muted)]">
+            <p className="text-11 italic text-[var(--muted)]">
               No description was provided.
             </p>
           )}
@@ -45,11 +45,11 @@ export function RequestOverview({
           <dl className="divide-y divide-[var(--border-subtle)]">
             {facts.map((fact) => (
               <div key={fact.label} className="py-2.5 first:pt-0 last:pb-0">
-                <dt className="text-[var(--text-9)] text-[var(--muted-dim)]">
+                <dt className="text-9 text-[var(--muted-dim)]">
                   {fact.label}
                 </dt>
                 <dd
-                  className={`mt-0.5 break-words text-[var(--text-11)] text-[var(--fg-secondary)] ${fact.mono ? 'font-mono text-[var(--text-10)]' : ''}`}
+                  className={`mt-0.5 break-words text-11 text-[var(--fg-secondary)] ${fact.mono ? 'font-mono text-10' : ''}`}
                   title={fact.value}
                 >
                   {fact.value || '—'}

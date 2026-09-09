@@ -301,7 +301,7 @@ export const ChatComposerEditor = React.forwardRef<
         }
       }}
       data-editor-zoom-surface="chat-composer-editor"
-      className="h-full w-full resize-none border-0 bg-[var(--chat-composer-input)] p-3 font-mono text-[var(--chat-text-size)] leading-5 text-[var(--chat-composer-fg)] caret-[var(--cursor)] outline-none"
+      className="h-full w-full resize-none border-0 bg-[var(--chat-composer-input)] p-3 font-mono text-chat leading-5 text-[var(--chat-composer-fg)] caret-[var(--cursor)] outline-none"
       style={{
         fontSize: `${editorZoomedPixels(12, editorZoomLevel)}px`,
         lineHeight: `${editorZoomedPixels(20, editorZoomLevel)}px`,

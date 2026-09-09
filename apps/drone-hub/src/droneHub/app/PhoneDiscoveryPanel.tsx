@@ -44,9 +44,9 @@ export function PhoneDiscoveryPanel({
   };
   const button = 'rounded border border-[var(--border)] px-3 py-2 disabled:opacity-50';
   return (
-    <section className="rounded-lg border border-[var(--border-subtle)] p-4 space-y-3 text-[var(--text-11)]">
+    <section className="rounded-lg border border-[var(--border-subtle)] p-4 space-y-3 text-11">
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-[var(--text-12)] font-medium">Phones</h3>
+        <h3 className="text-12 font-medium">Phones</h3>
         <button
           className={button}
           disabled={busy}

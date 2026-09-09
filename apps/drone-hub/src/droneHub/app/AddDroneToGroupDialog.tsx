@@ -201,7 +201,7 @@ export function AddDroneToGroupDialog({
             )}
             <div className="min-w-0 flex-1">
               <div
-                className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.14em] text-[var(--muted-dim)]"
+                className="text-10 font-[var(--weight-semibold)] uppercase tracking-[0.14em] text-[var(--muted-dim)]"
                 style={{ fontFamily: 'var(--display)' }}
               >
                 Organize drone
@@ -209,7 +209,7 @@ export function AddDroneToGroupDialog({
               <h2 id="add-drone-to-group-title" className="mt-1 text-[18px] font-[var(--weight-semibold)] text-[var(--fg-strong)]">
                 {mode === 'new' ? 'Create a new group' : mode === 'existing' ? 'Choose a group' : 'Add to group'}
               </h2>
-              <p id="add-drone-to-group-description" className="mt-1 truncate text-[var(--text-12)] text-[var(--muted)]" title={target.droneName}>
+              <p id="add-drone-to-group-description" className="mt-1 truncate text-12 text-[var(--muted)]" title={target.droneName}>
                 Move <span className="font-[var(--weight-semibold)] text-[var(--fg-secondary)]">{target.droneName}</span> into a group.
               </p>
             </div>
@@ -237,8 +237,8 @@ export function AddDroneToGroupDialog({
                 <span className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-medium)] border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]">
                   <IconPlus className="h-4 w-4" />
                 </span>
-                <span className="mt-3 block text-[var(--text-13)] font-[var(--weight-semibold)] text-[var(--fg)]">New group</span>
-                <span className="mt-1 block text-[var(--text-11)] leading-4 text-[var(--muted)]">Name a new group and add the drone.</span>
+                <span className="mt-3 block text-13 font-[var(--weight-semibold)] text-[var(--fg)]">New group</span>
+                <span className="mt-1 block text-11 leading-4 text-[var(--muted)]">Name a new group and add the drone.</span>
               </button>
               <button
                 type="button"
@@ -249,8 +249,8 @@ export function AddDroneToGroupDialog({
                 <span className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-medium)] border border-[var(--info-border)] bg-[var(--info-subtle)] text-[var(--info)]">
                   <IconFolder className="h-4 w-4" />
                 </span>
-                <span className="mt-3 block text-[var(--text-13)] font-[var(--weight-semibold)] text-[var(--fg)]">Existing group</span>
-                <span className="mt-1 block text-[var(--text-11)] leading-4 text-[var(--muted)]">
+                <span className="mt-3 block text-13 font-[var(--weight-semibold)] text-[var(--fg)]">Existing group</span>
+                <span className="mt-1 block text-11 leading-4 text-[var(--muted)]">
                   {options.length > 0 ? `Search or choose from ${options.length}.` : 'No other groups yet.'}
                 </span>
               </button>
@@ -262,7 +262,7 @@ export function AddDroneToGroupDialog({
                 if (!busy) void createAndMove();
               }}
             >
-              <label htmlFor="new-drone-group-name" className="text-[var(--text-11)] font-[var(--weight-semibold)] uppercase tracking-[0.11em] text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
+              <label htmlFor="new-drone-group-name" className="text-11 font-[var(--weight-semibold)] uppercase tracking-[0.11em] text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
                 Group name
               </label>
               <input
@@ -276,14 +276,14 @@ export function AddDroneToGroupDialog({
                 maxLength={80}
                 disabled={busy}
                 placeholder="e.g. Platform or Client work"
-                className="dh-field-control mt-2 h-10 w-full rounded-[var(--radius-medium)] border border-[var(--field-border)] bg-[var(--field-bg)] px-3 text-[var(--text-13)] text-[var(--field-fg)] transition-colors placeholder:text-[var(--field-placeholder)] disabled:opacity-60"
+                className="dh-field-control mt-2 h-10 w-full rounded-[var(--radius-medium)] border border-[var(--field-border)] bg-[var(--field-bg)] px-3 text-13 text-[var(--field-fg)] transition-colors placeholder:text-[var(--field-placeholder)] disabled:opacity-60"
               />
-              <div className="mt-2 text-[var(--text-10)] text-[var(--muted-dim)]">Use “/” to create a nested group path.</div>
+              <div className="mt-2 text-10 text-[var(--muted-dim)]">Use “/” to create a nested group path.</div>
               <div className="mt-5 flex items-center justify-end gap-2">
-                <button type="button" onClick={goBack} disabled={busy} className="h-9 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] px-3 text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--fg-secondary)] transition-colors hover:bg-[var(--hover)] disabled:opacity-45">
+                <button type="button" onClick={goBack} disabled={busy} className="h-9 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] px-3 text-12 font-[var(--weight-semibold)] text-[var(--fg-secondary)] transition-colors hover:bg-[var(--hover)] disabled:opacity-45">
                   Back
                 </button>
-                <button type="submit" disabled={busy || !groupName.trim()} className="inline-flex h-9 items-center gap-2 rounded-[var(--radius-medium)] border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-3 text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--accent)] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-45">
+                <button type="submit" disabled={busy || !groupName.trim()} className="inline-flex h-9 items-center gap-2 rounded-[var(--radius-medium)] border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-3 text-12 font-[var(--weight-semibold)] text-[var(--accent)] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-45">
                   {busy ? <IconSpinner className="h-3.5 w-3.5" /> : <IconPlus className="h-3.5 w-3.5" />}
                   {busy ? 'Creating…' : 'Create and add'}
                 </button>
@@ -304,7 +304,7 @@ export function AddDroneToGroupDialog({
                   }}
                   disabled={busy}
                   placeholder="Search groups"
-                  className="dh-field-control h-10 w-full rounded-[var(--radius-medium)] border border-[var(--field-border)] bg-[var(--field-bg)] pl-9 pr-3 text-[var(--text-13)] text-[var(--field-fg)] transition-colors placeholder:text-[var(--field-placeholder)] disabled:opacity-60"
+                  className="dh-field-control h-10 w-full rounded-[var(--radius-medium)] border border-[var(--field-border)] bg-[var(--field-bg)] pl-9 pr-3 text-13 text-[var(--field-fg)] transition-colors placeholder:text-[var(--field-placeholder)] disabled:opacity-60"
                 />
               </div>
               <div className="mt-3 overflow-hidden rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)]">
@@ -315,21 +315,21 @@ export function AddDroneToGroupDialog({
                       type="button"
                       onClick={() => void moveToExisting(group)}
                       disabled={busy}
-                      className={`flex h-10 w-full items-center gap-2.5 px-3 text-left text-[var(--text-12)] text-[var(--fg-secondary)] transition-colors hover:bg-[var(--hover)] disabled:cursor-wait disabled:opacity-60 ${index > 0 ? 'border-t border-[var(--border-subtle)]' : ''}`}
+                      className={`flex h-10 w-full items-center gap-2.5 px-3 text-left text-12 text-[var(--fg-secondary)] transition-colors hover:bg-[var(--hover)] disabled:cursor-wait disabled:opacity-60 ${index > 0 ? 'border-t border-[var(--border-subtle)]' : ''}`}
                     >
                       {pendingGroup === group ? <IconSpinner className="h-3.5 w-3.5 flex-shrink-0 text-[var(--accent)]" /> : <IconFolder className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted)]" />}
                       <span className="min-w-0 flex-1 truncate" title={group}>{group}</span>
-                      {pendingGroup === group ? <span className="text-[var(--text-10)] text-[var(--muted)]">Adding…</span> : null}
+                      {pendingGroup === group ? <span className="text-10 text-[var(--muted)]">Adding…</span> : null}
                     </button>
                   ))
                 ) : (
-                  <div className="px-3 py-6 text-center text-[var(--text-12)] text-[var(--muted)]">
+                  <div className="px-3 py-6 text-center text-12 text-[var(--muted)]">
                     No groups match “{query.trim()}”.
                   </div>
                 )}
               </div>
               {filteredGroups.hiddenCount > 0 ? (
-                <div className="mt-2 text-[var(--text-10)] text-[var(--muted-dim)]">
+                <div className="mt-2 text-10 text-[var(--muted-dim)]">
                   {filteredGroups.hiddenCount} more {filteredGroups.hiddenCount === 1 ? 'group' : 'groups'} — search to narrow the list.
                 </div>
               ) : null}
@@ -337,7 +337,7 @@ export function AddDroneToGroupDialog({
           )}
 
           {error ? (
-            <div className="mt-4 rounded-[var(--radius-medium)] border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-11)] leading-5 text-[var(--red)]" role="alert">
+            <div className="mt-4 rounded-[var(--radius-medium)] border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-11 leading-5 text-[var(--red)]" role="alert">
               {error}
               {mode === 'new' && /already exists/i.test(error) ? (
                 <button type="button" onClick={() => chooseMode('existing')} className="ml-1 font-[var(--weight-semibold)] underline underline-offset-2">

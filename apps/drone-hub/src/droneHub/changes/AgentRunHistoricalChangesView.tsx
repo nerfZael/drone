@@ -271,19 +271,19 @@ export function AgentRunHistoricalChangesView({
       <header className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--border-subtle)] px-2.5 py-1.5">
         <div className="flex min-w-0 items-center gap-2">
           <span
-            className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.12em] text-[var(--muted-dim)]"
+            className="text-10 font-[var(--weight-semibold)] uppercase tracking-[0.12em] text-[var(--muted-dim)]"
             style={{ fontFamily: 'var(--display)' }}
           >
             Changes
           </span>
-          <span className="h-6 rounded-[var(--radius-medium)] border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide leading-6 text-[var(--accent)]">
+          <span className="h-6 rounded-[var(--radius-medium)] border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 text-9 font-[var(--weight-semibold)] uppercase tracking-wide leading-6 text-[var(--accent)]">
             Agent run
           </span>
-          <span className="font-mono text-[var(--text-9)] tabular-nums text-[var(--muted)]">
+          <span className="font-mono text-9 tabular-nums text-[var(--muted)]">
             {fileChanges.counts.changed} files
           </span>
           <span
-            className="font-mono text-[var(--text-9)] font-[var(--weight-semibold)] tabular-nums text-[var(--accent)]"
+            className="font-mono text-9 font-[var(--weight-semibold)] tabular-nums text-[var(--accent)]"
             title="Net line change"
             aria-label={`${agentRunNetLineChangeLabel(lineChanges.net)} net lines`}
           >
@@ -292,13 +292,13 @@ export function AgentRunHistoricalChangesView({
           <span className="text-[var(--muted-dim)]" aria-hidden="true">
             │
           </span>
-          <span className="font-mono text-[var(--text-9)] tabular-nums text-[var(--green)]" title="Lines added">
+          <span className="font-mono text-9 tabular-nums text-[var(--green)]" title="Lines added">
             +{lineChanges.added}
           </span>
-          <span className="font-mono text-[var(--text-9)] tabular-nums text-[var(--yellow)]" title="Lines modified">
+          <span className="font-mono text-9 tabular-nums text-[var(--yellow)]" title="Lines modified">
             ~{lineChanges.modified}
           </span>
-          <span className="font-mono text-[var(--text-9)] tabular-nums text-[var(--red)]" title="Lines deleted">
+          <span className="font-mono text-9 tabular-nums text-[var(--red)]" title="Lines deleted">
             -{lineChanges.deleted}
           </span>
         </div>
@@ -338,7 +338,7 @@ export function AgentRunHistoricalChangesView({
             <div className="min-w-0">
               <div className="sticky top-0 z-10 flex h-8 items-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/95 px-2.5 backdrop-blur">
                 <span
-                  className="min-w-0 flex-1 truncate font-mono text-[var(--text-10)] text-[var(--fg-secondary)]"
+                  className="min-w-0 flex-1 truncate font-mono text-10 text-[var(--fg-secondary)]"
                   title={
                     selectedEntry.originalPath
                       ? `${selectedEntry.originalPath} → ${selectedEntry.path}`
@@ -351,7 +351,7 @@ export function AgentRunHistoricalChangesView({
                   <button
                     type="button"
                     onClick={() => setDiffRetryNonce((value) => value + 1)}
-                    className="rounded border border-[var(--red-border)] px-2 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--red)] hover:bg-[var(--red-subtle)]"
+                    className="rounded border border-[var(--red-border)] px-2 py-0.5 text-9 font-[var(--weight-semibold)] text-[var(--red)] hover:bg-[var(--red-subtle)]"
                   >
                     Retry
                   </button>
@@ -364,7 +364,7 @@ export function AgentRunHistoricalChangesView({
               />
             </div>
           ) : (
-            <div className="flex h-full min-h-64 items-center justify-center px-6 text-center text-[var(--text-11)] text-[var(--muted)]">
+            <div className="flex h-full min-h-64 items-center justify-center px-6 text-center text-11 text-[var(--muted)]">
               No changed file is available for this run.
             </div>
           )}
@@ -373,7 +373,7 @@ export function AgentRunHistoricalChangesView({
         <aside className="flex min-h-0 w-[min(260px,36%)] min-w-[190px] shrink-0 flex-col overflow-hidden border-l border-[var(--border-subtle)] bg-[var(--chat-background)]">
           <div className="flex h-8 shrink-0 items-center justify-between gap-2 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/80 px-2">
             <span className="dh-changes-toolbar-label">Files</span>
-            <span className="font-mono text-[var(--text-8)] tabular-nums text-[var(--muted-dim)]">
+            <span className="font-mono text-8 tabular-nums text-[var(--muted-dim)]">
               {fileChanges.counts.changed}
             </span>
           </div>
@@ -385,7 +385,7 @@ export function AgentRunHistoricalChangesView({
                 <div key={workspace.targetId} className="mb-2 last:mb-0">
                   {fileChanges.workspaces.length > 1 ||
                   workspace.targetId.startsWith('artifacts:') ? (
-                    <div className="flex items-center justify-between gap-2 px-2 pb-1.5 pt-1 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
+                    <div className="flex items-center justify-between gap-2 px-2 pb-1.5 pt-1 text-9 font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
                       <span className="truncate">{workspace.label}</span>
                       <span className="font-mono tabular-nums">{workspace.counts.changed}</span>
                     </div>
@@ -416,12 +416,12 @@ export function AgentRunHistoricalChangesView({
                     }
                   />
                   {metadata?.status === 'loading' ? (
-                    <div className="px-2 py-2 text-[var(--text-9)] text-[var(--muted-dim)]">
+                    <div className="px-2 py-2 text-9 text-[var(--muted-dim)]">
                       Loading complete file list…
                     </div>
                   ) : null}
                   {metadata?.status === 'error' ? (
-                    <div className="flex items-center justify-between gap-2 px-2 py-2 text-[var(--text-9)] text-[var(--red)]">
+                    <div className="flex items-center justify-between gap-2 px-2 py-2 text-9 text-[var(--red)]">
                       <span className="min-w-0 truncate">{metadata.message}</span>
                       <button
                         type="button"
@@ -433,7 +433,7 @@ export function AgentRunHistoricalChangesView({
                     </div>
                   ) : null}
                   {metadata?.status === 'loaded' && metadata.metadataTruncated ? (
-                    <div className="px-2 py-2 text-[var(--text-9)] text-[var(--muted-dim)]">
+                    <div className="px-2 py-2 text-9 text-[var(--muted-dim)]">
                       Stored list limited to 5,000 files.
                     </div>
                   ) : null}

@@ -99,7 +99,7 @@ function ApiKeySettingsCard({
           name={name}
           spellCheck={false}
           style={({ WebkitTextSecurity: showKey ? 'none' : 'disc' } as React.CSSProperties)}
-          className="h-9 min-w-0 flex-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 font-mono text-[var(--type-ui)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] transition-colors focus:border-[var(--accent-muted)] focus:outline-none"
+          className="h-9 min-w-0 flex-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 font-mono text-ui text-[var(--fg)] placeholder:text-[var(--muted-dim)] transition-colors focus:border-[var(--accent-muted)] focus:outline-none"
           placeholder={placeholder}
           disabled={busy}
         />
@@ -258,24 +258,24 @@ export function GeneralSettingsTab({
   return (
     <>
       {github.githubSettingsError && (
-        <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--red)]">
+        <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-12 text-[var(--red)]">
           {github.githubSettingsError}
         </div>
       )}
       {llmSettingsError && (
-        <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--red)]">
+        <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-12 text-[var(--red)]">
           {llmSettingsError}
         </div>
       )}
       {llmSettingsNotice && (
-        <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--green)]">
+        <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-12 text-[var(--green)]">
           {llmSettingsNotice}
         </div>
       )}
 
       <div className="dh-settings-section">
         {github.githubSettingsLoading && !github.githubSettings ? (
-          <div className="text-[var(--text-12)] text-[var(--muted-dim)]">Loading GitHub status…</div>
+          <div className="text-12 text-[var(--muted-dim)]">Loading GitHub status…</div>
         ) : (
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-1">
@@ -288,20 +288,20 @@ export function GeneralSettingsTab({
                 <div className="mt-2 dh-type-control text-[var(--fg-secondary)]">
                   {githubStatus?.pullRequestTransport === 'github-api' ? 'GitHub API' : 'Unknown'}
                 </div>
-                <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">List, inspect, merge, and close pull requests without shelling out to container `gh`.</div>
+                <div className="text-11 text-[var(--muted-dim)] mt-1">List, inspect, merge, and close pull requests without shelling out to container `gh`.</div>
               </div>
               <div className="dh-settings-row px-3 py-3">
                 <div className="dh-type-label">Effective auth</div>
                 <div className="mt-2 dh-type-control text-[var(--fg-secondary)]">{githubAuthLabel}</div>
-                <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">{githubStatus?.authDetail ?? 'Loading GitHub auth status…'}</div>
+                <div className="text-11 text-[var(--muted-dim)] mt-1">{githubStatus?.authDetail ?? 'Loading GitHub auth status…'}</div>
               </div>
               <div className="dh-settings-row px-3 py-3">
                 <div className="dh-type-label">Host gh CLI</div>
                 <div className="mt-2 dh-type-control text-[var(--fg-secondary)]">{githubCliLabel}</div>
-                <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">
+                <div className="text-11 text-[var(--muted-dim)] mt-1">
                   {githubStatus?.ghCliVersion ?? (githubStatus?.ghCliInstalled ? 'Version unavailable' : 'Install gh if you want Hub to reuse host GitHub login state.')}
                 </div>
-                {githubStatus?.ghCliPath ? <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1 break-all">{githubStatus.ghCliPath}</div> : null}
+                {githubStatus?.ghCliPath ? <div className="text-11 text-[var(--muted-dim)] mt-1 break-all">{githubStatus.ghCliPath}</div> : null}
               </div>
             </div>
           </div>
@@ -312,7 +312,7 @@ export function GeneralSettingsTab({
 
       <div className="dh-settings-section">
         {llmSettingsLoading && !llmSettings ? (
-          <div className="text-[var(--text-12)] text-[var(--muted-dim)]">Loading settings…</div>
+          <div className="text-12 text-[var(--muted-dim)]">Loading settings…</div>
         ) : (
           <div className="grid grid-cols-1 xl:grid-cols-6 gap-3">
             <div className="dh-settings-row px-3 py-3">
@@ -320,7 +320,7 @@ export function GeneralSettingsTab({
               <div className="mt-2 dh-type-control text-[var(--fg-secondary)]">
                 {llmProviderLabel(llmSettings?.provider.selected)}
               </div>
-              <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">
+              <div className="text-11 text-[var(--muted-dim)] mt-1">
                 {llmSettings?.provider.source === 'settings'
                   ? 'Selected in settings'
                   : llmSettings?.provider.source === 'environment'
@@ -333,7 +333,7 @@ export function GeneralSettingsTab({
               <div className="mt-2 dh-type-control text-[var(--fg-secondary)]">
                 {llmSettings?.openai.hasKey ? llmSettings.openai.keyHint ?? 'Configured' : 'Not configured'}
               </div>
-              <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">
+              <div className="text-11 text-[var(--muted-dim)] mt-1">
                 {llmSettings?.openai.updatedAt ? `Updated ${new Date(llmSettings.openai.updatedAt).toLocaleString()}` : 'Stored only when set in Hub'}
               </div>
             </div>
@@ -342,7 +342,7 @@ export function GeneralSettingsTab({
               <div className="mt-2 dh-type-control text-[var(--fg-secondary)]">
                 {llmSettings?.gemini.hasKey ? llmSettings.gemini.keyHint ?? 'Configured' : 'Not configured'}
               </div>
-              <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">
+              <div className="text-11 text-[var(--muted-dim)] mt-1">
                 {llmSettings?.gemini.updatedAt ? `Updated ${new Date(llmSettings.gemini.updatedAt).toLocaleString()}` : 'Stored only when set in Hub'}
               </div>
             </div>
@@ -351,7 +351,7 @@ export function GeneralSettingsTab({
               <div className="mt-2 dh-type-control text-[var(--fg-secondary)]">
                 {llmSettings?.codex.hasKey ? llmSettings.codex.keyHint ?? 'Configured' : 'Not configured'}
               </div>
-              <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">
+              <div className="text-11 text-[var(--muted-dim)] mt-1">
                 {llmSettings?.codex.updatedAt ? `Refreshed ${new Date(llmSettings.codex.updatedAt).toLocaleString()}` : 'Uses local Codex CLI auth'}
               </div>
             </div>
@@ -360,7 +360,7 @@ export function GeneralSettingsTab({
               <div className="mt-2 dh-type-control text-[var(--fg-secondary)]">
                 {llmSettings?.openrouter.hasKey ? llmSettings.openrouter.keyHint ?? 'Configured' : 'Not configured'}
               </div>
-              <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">
+              <div className="text-11 text-[var(--muted-dim)] mt-1">
                 {llmSettings?.openrouter.updatedAt ? `Updated ${new Date(llmSettings.openrouter.updatedAt).toLocaleString()}` : 'Stored only when set in Hub'}
               </div>
             </div>
@@ -369,7 +369,7 @@ export function GeneralSettingsTab({
               <div className="mt-2 dh-type-control text-[var(--fg-secondary)]">
                 {llmSettings?.groq.hasKey ? llmSettings.groq.keyHint ?? 'Configured' : 'Not configured'}
               </div>
-              <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">
+              <div className="text-11 text-[var(--muted-dim)] mt-1">
                 {llmSettings?.groq.updatedAt ? `Updated ${new Date(llmSettings.groq.updatedAt).toLocaleString()}` : 'Required for transcription and speech'}
               </div>
             </div>
@@ -448,7 +448,7 @@ export function GeneralSettingsTab({
             Save defaults
           </UiButton>
         </div>
-        <div className="mt-2 text-[var(--text-11)] leading-relaxed text-[var(--muted-dim)]">
+        <div className="mt-2 text-11 leading-relaxed text-[var(--muted-dim)]">
           New Built-in chats use this provider, model, and reasoning. Existing chats keep their own selection.
         </div>
       </div>
@@ -607,12 +607,12 @@ export function GeneralSettingsTab({
           </div>
         </div>
         {voiceInput.error ? (
-          <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--red)]">
+          <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-12 text-[var(--red)]">
             {voiceInput.error}
           </div>
         ) : null}
         {voiceInput.notice ? (
-          <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--green)]">
+          <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-12 text-[var(--green)]">
             {voiceInput.notice}
           </div>
         ) : null}
@@ -707,7 +707,7 @@ export function GeneralSettingsTab({
               }
               placeholder="Auto (or en, hr-HR, …)"
               spellCheck={false}
-              className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[var(--type-ui)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:border-[var(--accent-muted)] focus:outline-none"
+              className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-ui text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:border-[var(--accent-muted)] focus:outline-none"
             />
           </label>
           <UiSwitch
@@ -739,17 +739,17 @@ export function GeneralSettingsTab({
           </div>
         </div>
         {speechSettingsError ? (
-          <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--red)]">
+          <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-12 text-[var(--red)]">
             {speechSettingsError}
           </div>
         ) : null}
         {speechSettingsNotice ? (
-          <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--green)]">
+          <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-12 text-[var(--green)]">
             {speechSettingsNotice}
           </div>
         ) : null}
         {speechSettingsLoading && !speechSettings ? (
-          <div className="text-[var(--text-12)] text-[var(--muted-dim)]">Loading speech settings…</div>
+          <div className="text-12 text-[var(--muted-dim)]">Loading speech settings…</div>
         ) : (
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <div className="flex flex-col gap-4">
@@ -821,20 +821,20 @@ export function GeneralSettingsTab({
             Configure the max size for a single uploaded file. Oversized uploads show an error and point users back to this setting.
           </div>
           {filesystemSettingsError && (
-            <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--red)]">
+            <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-12 text-[var(--red)]">
               {filesystemSettingsError}
             </div>
           )}
           {filesystemSettingsNotice && (
-            <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--green)]">
+            <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-12 text-[var(--green)]">
               {filesystemSettingsNotice}
             </div>
           )}
           {filesystemSettingsLoading && !filesystemSettings ? (
-            <div className="text-[var(--text-12)] text-[var(--muted-dim)]">Loading filesystem settings…</div>
+            <div className="text-12 text-[var(--muted-dim)]">Loading filesystem settings…</div>
           ) : (
             <>
-              <div className="text-[var(--text-11)] text-[var(--muted-dim)]">
+              <div className="text-11 text-[var(--muted-dim)]">
                 Current limit:{' '}
                 <span className="text-[var(--fg-secondary)]">
                   {filesystemSettings ? `${bytesToNearestMiB(filesystemSettings.filesystem.uploadMaxBytes).toLocaleString()} MiB` : '-'}
@@ -849,7 +849,7 @@ export function GeneralSettingsTab({
                     onChange={(e) => setUploadMaxMiBDraft(e.target.value.replace(/[^\d]/g, ''))}
                     inputMode="numeric"
                     pattern="[0-9]*"
-                    className="h-9 w-40 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[var(--text-13)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors"
+                    className="h-9 w-40 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-13 text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors"
                     placeholder={String(filesystemDefaultMiB)}
                     disabled={filesystemSettingsLoading || savingFilesystemSettings}
                   />
@@ -869,7 +869,7 @@ export function GeneralSettingsTab({
                   Save upload limit
                 </UiButton>
               </div>
-              <div className="text-[var(--text-10)] text-[var(--muted-dim)]">
+              <div className="text-10 text-[var(--muted-dim)]">
                 Allowed range: {filesystemMinMiB.toLocaleString()} to {filesystemMaxMiB.toLocaleString()} MiB.
               </div>
             </>

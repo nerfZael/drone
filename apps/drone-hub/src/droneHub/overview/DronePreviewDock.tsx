@@ -193,13 +193,13 @@ export function DronePreviewDock({
         meta={
           selectedPort ? (
             <span
-              className="font-mono text-[length:var(--text-9)] text-[var(--muted-dim)]"
+              className="font-mono text-9 text-[var(--muted-dim)]"
               title={`Browser container:${selectedPort.containerPort}`}
             >
               :{selectedPort.containerPort}
             </span>
           ) : (
-            <span className="text-[length:var(--text-9)] text-[var(--muted-dim)]">
+            <span className="text-9 text-[var(--muted-dim)]">
               {usingCustomUrl
                 ? 'custom URL'
                 : showStartupPlaceholder
@@ -257,7 +257,7 @@ export function DronePreviewDock({
                 href={selectedOpenUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="whitespace-nowrap font-mono text-[length:var(--text-9)] text-[var(--link)] transition-colors hover:text-[var(--link-hover)]"
+                className="whitespace-nowrap font-mono text-9 text-[var(--link)] transition-colors hover:text-[var(--link-hover)]"
                 title={`Open ${selectedOpenUrl} in a new tab`}
               >
                 Open tab →
@@ -397,7 +397,7 @@ export function DronePreviewDock({
                     href={selectedOpenUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-[length:var(--text-10)] font-[var(--weight-semibold)] text-[var(--link)] hover:text-[var(--link-hover)]"
+                    className="text-10 font-[var(--weight-semibold)] text-[var(--link)] hover:text-[var(--link-hover)]"
                   >
                     Open in a new tab →
                   </a>

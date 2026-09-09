@@ -124,7 +124,7 @@ function PreviewDroneRow({
         </span>
         <div className="flex min-w-0 flex-1 flex-col justify-center gap-[3px]">
           <span
-            className={`min-w-0 truncate leading-tight text-[var(--sidebar-drone-size)] ${sidebarItemTypeClass(selected)}`}
+            className={`min-w-0 truncate leading-tight text-sidebar-drone ${sidebarItemTypeClass(selected)}`}
           >
             {name}
           </span>
@@ -380,12 +380,12 @@ function ChangesPattern() {
         <div className="min-w-0 flex-1 bg-[var(--surface-inset-faint)] p-2">
           <div className="mb-2 flex items-center gap-2 rounded border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-2 py-1.5">
             <UiStatusChip tone="warning">M</UiStatusChip>
-            <span className="min-w-0 flex-1 truncate font-mono text-[length:var(--text-10)] text-[var(--fg-secondary)]">
+            <span className="min-w-0 flex-1 truncate font-mono text-10 text-[var(--fg-secondary)]">
               ComponentLibraryPreview.tsx
             </span>
             <UiToolbarButton size="xsmall" tone="success">Stage</UiToolbarButton>
           </div>
-          <div className="overflow-hidden rounded border border-[var(--border-subtle)] bg-[var(--panel)] font-mono text-[length:var(--text-9)]">
+          <div className="overflow-hidden rounded border border-[var(--border-subtle)] bg-[var(--panel)] font-mono text-9">
             <div className="bg-[var(--red-subtle)] px-2 py-1 text-[var(--red)]">− bespoke panel control</div>
             <div className="bg-[var(--green-subtle)] px-2 py-1 text-[var(--green)]">+ shared toolbar primitive</div>
             <div className="px-2 py-1 text-[var(--muted-dim)]">  keyboard and focus behavior included</div>
@@ -403,7 +403,7 @@ function ChangesPattern() {
           onReset={() => setExplorerWidth(150)}
         />
         <div className="shrink-0 bg-[var(--panel)] p-1.5" style={{ width: explorerWidth }}>
-          <div className="mb-1 flex items-center justify-between px-1 text-[length:var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]">
+          <div className="mb-1 flex items-center justify-between px-1 text-8 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]">
             <span>Files</span>
             <UiCountBadge>3</UiCountBadge>
           </div>
@@ -427,7 +427,7 @@ function BrowserPattern() {
       <UiPanelHeader
         title="Browser"
         density="compact"
-        meta={<span className="font-mono text-[length:var(--text-9)] text-[var(--muted-dim)]">:3000</span>}
+        meta={<span className="font-mono text-9 text-[var(--muted-dim)]">:3000</span>}
         actions={
           <>
             <UiToolbarIconButton
@@ -476,8 +476,8 @@ function BrowserPattern() {
         ) : (
           <div className="flex h-full flex-col items-center justify-center bg-[linear-gradient(135deg,var(--accent-subtle),var(--surface-inset-faint))] px-5 text-center">
             <div className="rounded-[var(--radius-large)] border border-[var(--accent-border)] bg-[var(--panel-overlay)] px-4 py-3 shadow-[0_12px_30px_var(--shadow-color)]">
-              <div className="text-[length:var(--text-12)] font-[var(--weight-semibold)] text-[var(--fg-strong)]">Component library</div>
-              <div className="mt-1 font-mono text-[length:var(--text-9)] text-[var(--muted)]">{url}</div>
+              <div className="text-12 font-[var(--weight-semibold)] text-[var(--fg-strong)]">Component library</div>
+              <div className="mt-1 font-mono text-9 text-[var(--muted)]">{url}</div>
             </div>
           </div>
         )}
@@ -501,15 +501,15 @@ function CanvasPattern() {
               Last msgs
             </UiToolbarButton>
             <UiToolbarButton size="xsmall">Reset</UiToolbarButton>
-            <span className="w-10 text-right font-mono text-[length:var(--text-9)] text-[var(--muted-dim)]">86%</span>
+            <span className="w-10 text-right font-mono text-9 text-[var(--muted-dim)]">86%</span>
           </>
         }
       />
       <UiPanelToolbar aria-label="Canvas creation defaults">
-        <span className="text-[length:var(--text-8)] font-[var(--weight-semibold)] uppercase text-[var(--muted-dim)]">Agent</span>
+        <span className="text-8 font-[var(--weight-semibold)] uppercase text-[var(--muted-dim)]">Agent</span>
         <UiToolbarButton>Codex</UiToolbarButton>
         <UiToolbarDivider />
-        <span className="text-[length:var(--text-8)] font-[var(--weight-semibold)] uppercase text-[var(--muted-dim)]">Model</span>
+        <span className="text-8 font-[var(--weight-semibold)] uppercase text-[var(--muted-dim)]">Model</span>
         <UiToolbarInput defaultValue="gpt-5" aria-label="Canvas model" className="w-24" />
       </UiPanelToolbar>
       <UiPanelBody
@@ -520,15 +520,15 @@ function CanvasPattern() {
         }}
       >
         <div className="absolute left-5 top-8 w-44 rounded-[var(--radius-large)] border border-[var(--accent-muted)] bg-[var(--panel-overlay)] p-2.5 shadow-[0_10px_24px_var(--shadow-color)]">
-          {showMessages ? <div className="mb-1 truncate text-[length:var(--text-8)] text-[var(--muted-dim)]">Catalog audit complete.</div> : null}
+          {showMessages ? <div className="mb-1 truncate text-8 text-[var(--muted-dim)]">Catalog audit complete.</div> : null}
           <div className="flex items-center gap-2">
             <UiStatusDot tone="success" />
-            <span className="truncate text-[length:var(--text-10)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">workspace-scout</span>
+            <span className="truncate text-10 font-[var(--weight-semibold)] text-[var(--fg-secondary)]">workspace-scout</span>
           </div>
         </div>
         <div className="absolute bottom-12 right-8 w-40 rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] p-2.5 shadow-[0_10px_24px_var(--shadow-color)]">
           <UiStatusChip tone="accent">Draft</UiStatusChip>
-          <div className="mt-1 truncate text-[length:var(--text-10)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">New drone</div>
+          <div className="mt-1 truncate text-10 font-[var(--weight-semibold)] text-[var(--fg-secondary)]">New drone</div>
         </div>
         <svg className="pointer-events-none absolute inset-0 h-full w-full text-[var(--accent-muted)]" aria-hidden="true">
           <path d="M178 66 C240 66 260 180 330 180" fill="none" stroke="currentColor" strokeWidth="1.2" strokeDasharray="4 4" />
@@ -569,7 +569,7 @@ function WorkflowsPattern() {
         }
       />
       <UiPanelToolbar aria-label="Workflow runs">
-        <span className="text-[length:var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]">Runs</span>
+        <span className="text-8 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]">Runs</span>
         <UiCountBadge>03</UiCountBadge>
         <UiToolbarButton tone="success" pressed leadingIcon={<UiStatusDot tone="success" />}>Complete · 10:42</UiToolbarButton>
         <UiToolbarButton tone="warning" leadingIcon={<UiStatusDot tone="warning" />}>Approval · 10:47</UiToolbarButton>
@@ -578,14 +578,14 @@ function WorkflowsPattern() {
         <div className="grid gap-2 sm:grid-cols-2">
           <div className="rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-[length:var(--text-10)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">Review changes</span>
+              <span className="text-10 font-[var(--weight-semibold)] text-[var(--fg-secondary)]">Review changes</span>
               <UiStatusChip tone="success" dot>Done</UiStatusChip>
             </div>
-            <div className="mt-2 text-[length:var(--text-9)] text-[var(--muted)]">2 agents · 4 invocations</div>
+            <div className="mt-2 text-9 text-[var(--muted)]">2 agents · 4 invocations</div>
           </div>
           <div className="rounded-[var(--radius-large)] border border-[var(--yellow-border)] bg-[var(--yellow-subtle)] p-3">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-[length:var(--text-10)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">Publish release</span>
+              <span className="text-10 font-[var(--weight-semibold)] text-[var(--fg-secondary)]">Publish release</span>
               <UiStatusChip tone="warning" dot>Approval</UiStatusChip>
             </div>
             <div className="mt-2 flex items-center gap-1">

@@ -24,19 +24,19 @@ export const CliPendingPromptStrip = React.memo(function CliPendingPromptStrip({
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2 min-w-0">
                 <span
-                  className="inline-flex items-center gap-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1.5 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
+                  className="inline-flex items-center gap-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1.5 py-0.5 text-9 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
                   style={{ fontFamily: 'var(--display)' }}
                 >
                   {pendingStatusLabel(item.state)}
                   <TypingDots color="var(--accent)" />
                 </span>
-                <span className="truncate text-[var(--text-12)] text-[var(--fg-secondary)]">
+                <span className="truncate text-12 text-[var(--fg-secondary)]">
                   {String(item.prompt ?? '').trim() || '[pending prompt]'}
                 </span>
               </div>
               <RelativeTimeText
                 at={item.at}
-                className="flex-shrink-0 text-[var(--text-9)] leading-none text-[var(--muted-dim)] font-mono"
+                className="flex-shrink-0 text-9 leading-none text-[var(--muted-dim)] font-mono"
                 title={new Date(item.at).toLocaleString()}
               />
             </div>

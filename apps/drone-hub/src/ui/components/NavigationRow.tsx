@@ -119,7 +119,7 @@ export const UiNavigationRow = React.forwardRef<HTMLButtonElement, UiNavigationR
               {status ? <span className="shrink-0">{status}</span> : null}
             </span>
             {description ? (
-              <span className="block truncate dh-type-supporting !text-[var(--text-11)]">
+              <span className="block truncate dh-type-supporting !text-11">
                 {description}
               </span>
             ) : null}

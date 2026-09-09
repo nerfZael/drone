@@ -82,7 +82,7 @@ export function DroneTerminalTabsBar({
           );
         })}
         {sessions.length === 0 ? (
-          <div className="px-2 py-1 text-[var(--text-10)] uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+          <div className="px-2 py-1 text-10 uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
             No terminals
           </div>
         ) : null}

@@ -374,7 +374,7 @@ export function DroneWorkflowsDock({ droneId, disabled, onOpenChat }: Props) {
           />
           <UiPanelToolbar aria-label="Workflow runs" className="min-h-11 px-3 py-1.5">
             <span
-              className="flex-none text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-[0.12em] text-[var(--muted)]"
+              className="flex-none text-8 font-[var(--weight-semibold)] uppercase tracking-[0.12em] text-[var(--muted)]"
               style={{ fontFamily: 'var(--display)' }}
             >
               Runs
@@ -383,7 +383,7 @@ export function DroneWorkflowsDock({ droneId, disabled, onOpenChat }: Props) {
               {String(selectedWorkflowRuns.length).padStart(2, '0')}
             </UiCountBadge>
             {selectedWorkflowRuns.length === 0 ? (
-              <span className="text-[var(--text-9)] text-[var(--muted-dim)]">
+              <span className="text-9 text-[var(--muted-dim)]">
                 No execution history
               </span>
             ) : (
@@ -465,7 +465,7 @@ export function DroneWorkflowsDock({ droneId, disabled, onOpenChat }: Props) {
             meta={<UiCountBadge>{workflows.length}</UiCountBadge>}
           />
           <div className="mx-auto w-full max-w-6xl px-5 py-4">
-            <div className="grid grid-cols-[minmax(0,1fr)_72px_150px] gap-4 border-b border-[var(--border)] px-3 pb-2 text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-[0.12em] text-[var(--muted-dim)] max-[680px]:grid-cols-[minmax(0,1fr)_80px]">
+            <div className="grid grid-cols-[minmax(0,1fr)_72px_150px] gap-4 border-b border-[var(--border)] px-3 pb-2 text-8 font-[var(--weight-semibold)] uppercase tracking-[0.12em] text-[var(--muted-dim)] max-[680px]:grid-cols-[minmax(0,1fr)_80px]">
               <span>Workflow</span>
               <span>Version</span>
               <span className="max-[680px]:hidden">Latest run</span>
@@ -486,16 +486,16 @@ export function DroneWorkflowsDock({ droneId, disabled, onOpenChat }: Props) {
                     className="grid w-full grid-cols-[minmax(0,1fr)_72px_150px] items-center gap-4 px-3 py-3 text-left hover:bg-[var(--surface-softest)] focus-visible:bg-[var(--surface-softest)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)] max-[680px]:grid-cols-[minmax(0,1fr)_80px]"
                   >
                     <span className="min-w-0">
-                      <span className="block truncate text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg)]">
+                      <span className="block truncate text-11 font-[var(--weight-semibold)] text-[var(--fg)]">
                         {workflow.name}
                       </span>
                       {workflow.description ? (
-                        <span className="mt-0.5 block truncate text-[var(--text-9)] text-[var(--muted)]">
+                        <span className="mt-0.5 block truncate text-9 text-[var(--muted)]">
                           {workflow.description}
                         </span>
                       ) : null}
                     </span>
-                    <span className="font-mono text-[var(--text-9)] text-[var(--muted)]">
+                    <span className="font-mono text-9 text-[var(--muted)]">
                       v{workflow.version}
                     </span>
                     <span className="flex min-w-0 items-center gap-2 max-[680px]:hidden">
@@ -509,7 +509,7 @@ export function DroneWorkflowsDock({ droneId, disabled, onOpenChat }: Props) {
                           </span>
                         </>
                       ) : (
-                        <span className="text-[var(--text-9)] text-[var(--muted-dim)]">Not run</span>
+                        <span className="text-9 text-[var(--muted-dim)]">Not run</span>
                       )}
                     </span>
                   </button>
@@ -555,7 +555,7 @@ export function DroneWorkflowsDock({ droneId, disabled, onOpenChat }: Props) {
         }
       >
         <label className="block">
-          <span className="mb-2 block text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
+          <span className="mb-2 block text-9 font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
             Input (JSON)
           </span>
           <UiTextarea
@@ -568,11 +568,11 @@ export function DroneWorkflowsDock({ droneId, disabled, onOpenChat }: Props) {
             spellCheck={false}
             aria-label="Workflow input JSON"
             aria-invalid={Boolean(runInputError)}
-            className="font-mono text-[var(--text-10)]"
+            className="font-mono text-10"
           />
         </label>
         {runInputError ? (
-          <p role="alert" className="mt-2 text-[var(--text-9)] text-[var(--red)]">
+          <p role="alert" className="mt-2 text-9 text-[var(--red)]">
             {runInputError}
           </p>
         ) : null}

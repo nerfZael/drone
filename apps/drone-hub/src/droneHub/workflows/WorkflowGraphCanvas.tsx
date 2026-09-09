@@ -137,7 +137,7 @@ function WorkflowEdge({
       {data.label && data.labelX != null && data.labelY != null ? (
         <EdgeLabelRenderer>
           <span
-            className="pointer-events-none absolute rounded border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-1.5 py-0.5 text-[var(--text-8)] uppercase tracking-[0.08em] text-[var(--muted)]"
+            className="pointer-events-none absolute rounded border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-1.5 py-0.5 text-8 uppercase tracking-[0.08em] text-[var(--muted)]"
             style={{
               transform: `translate(-50%, -50%) translate(${data.labelX}px, ${data.labelY}px)`,
               fontFamily: 'var(--display)',

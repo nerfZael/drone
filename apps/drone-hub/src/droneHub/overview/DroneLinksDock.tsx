@@ -25,7 +25,7 @@ export function DroneLinksContent({
   portsError,
 }: DroneLinksContentProps) {
   return (
-    <div className="px-3 py-2 text-[var(--text-11)]">
+    <div className="px-3 py-2 text-11">
       {portsError ? (
         <UiPaneState
           kind="error"
@@ -50,7 +50,7 @@ export function DroneLinksContent({
             const isReachable = reachability === 'up';
             return (
               <div key={`${p.containerPort}:${p.hostPort}`} className="flex items-center justify-between gap-3">
-                <span className="inline-flex flex-shrink-0 items-center gap-1.5 font-mono text-[var(--text-10)] tabular-nums text-[var(--muted-dim)]" title="container → host">
+                <span className="inline-flex flex-shrink-0 items-center gap-1.5 font-mono text-10 tabular-nums text-[var(--muted-dim)]" title="container → host">
                   <UiStatusDot
                     tone={
                       reachability === 'up'
@@ -71,12 +71,12 @@ export function DroneLinksContent({
                   />
                   {p.containerPort}→{p.hostPort}
                 </span>
-                <div className="flex min-w-0 items-center gap-1.5 font-mono text-[var(--text-10)]">
+                <div className="flex min-w-0 items-center gap-1.5 font-mono text-10">
                   <a
                     href={routedUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="min-w-0 truncate font-mono text-[var(--text-10)] tabular-nums text-[var(--link)] transition-colors hover:text-[var(--link-hover)]"
+                    className="min-w-0 truncate font-mono text-10 tabular-nums text-[var(--link)] transition-colors hover:text-[var(--link-hover)]"
                     title={`Open container:${p.containerPort} via ${routedUrl}`}
                   >
                     :{p.containerPort}
@@ -90,14 +90,14 @@ export function DroneLinksContent({
 
       <div className="mt-2 flex flex-col gap-1.5 border-t border-[var(--border-subtle)] pt-2">
         <div className="flex items-center justify-between gap-3">
-          <span className="text-[var(--text-10)] uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>Agent</span>
-          <span className="min-w-0 truncate text-[var(--text-11)] text-[var(--muted)]" title={agentLabel}>
+          <span className="text-10 uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>Agent</span>
+          <span className="min-w-0 truncate text-11 text-[var(--muted)]" title={agentLabel}>
             {agentLabel}
           </span>
         </div>
         <div className="flex items-center justify-between gap-3">
-          <span className="text-[var(--text-10)] uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>Chat</span>
-          <span className="min-w-0 truncate font-mono text-[var(--text-11)] text-[var(--muted)]" title={chatName}>
+          <span className="text-10 uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>Chat</span>
+          <span className="min-w-0 truncate font-mono text-11 text-[var(--muted)]" title={chatName}>
             {chatName}
           </span>
         </div>

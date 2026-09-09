@@ -95,15 +95,7 @@ function QuestionRequestForm({
   const [drafts, setDrafts] = React.useState<Record<string, Draft | undefined>>(
     () =>
       initialDraft?.drafts ??
-      Object.fromEntries(
-        request.questions.map((question) => {
-          const recommended = question.choices.find((choice) => choice.recommended);
-          return [
-            question.id,
-            recommended ? { outcome: 'choice', choiceId: recommended.id } : undefined,
-          ];
-        }),
-      ),
+      Object.fromEntries(request.questions.map((question) => [question.id, undefined])),
   );
   const [notes, setNotes] = React.useState(initialDraft?.notes ?? '');
   React.useEffect(() => {

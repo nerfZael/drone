@@ -98,7 +98,7 @@ function WorkspaceFiles({
 
   if (attributionUnavailable) {
     return (
-      <div className="px-2 py-1.5 text-[var(--text-10)] text-[var(--yellow)]">
+      <div className="px-2 py-1.5 text-10 text-[var(--yellow)]">
         Exact attribution is unavailable for this workspace.
       </div>
     );
@@ -106,14 +106,14 @@ function WorkspaceFiles({
 
   if (status === 'loading' && visibleEntries.length === 0) {
     return (
-      <div className="px-2 py-2 text-[var(--text-10)] text-[var(--muted-dim)]">
+      <div className="px-2 py-2 text-10 text-[var(--muted-dim)]">
         Loading changed files…
       </div>
     );
   }
   if (status === 'error' && visibleEntries.length === 0) {
     return (
-      <div className="flex items-center justify-between gap-2 px-2 py-2 text-[var(--text-10)] text-[var(--red)]">
+      <div className="flex items-center justify-between gap-2 px-2 py-2 text-10 text-[var(--red)]">
         <span className="min-w-0 truncate">{error}</span>
         <button
           type="button"
@@ -144,13 +144,13 @@ function WorkspaceFiles({
           type="button"
           disabled={status === 'loading'}
           onClick={loadMore}
-          className="mt-1 w-full rounded-[var(--radius-small)] px-2 py-1.5 text-left text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--accent)] hover:bg-[var(--hover)] disabled:text-[var(--muted-dim)]"
+          className="mt-1 w-full rounded-[var(--radius-small)] px-2 py-1.5 text-left text-10 font-[var(--weight-semibold)] text-[var(--accent)] hover:bg-[var(--hover)] disabled:text-[var(--muted-dim)]"
         >
           {status === 'loading' ? 'Loading…' : `Show ${CARD_PAGE_SIZE} more`}
         </button>
       ) : null}
       {status === 'error' && visibleEntries.length > 0 ? (
-        <div className="flex items-center justify-between gap-2 px-2 py-1.5 text-[var(--text-10)] text-[var(--red)]">
+        <div className="flex items-center justify-between gap-2 px-2 py-1.5 text-10 text-[var(--red)]">
           <span>{error}</span>
           <button
             type="button"
@@ -162,11 +162,11 @@ function WorkspaceFiles({
         </div>
       ) : null}
       {'metadataTruncated' in workspace && workspace.metadataTruncated ? (
-        <div className="px-2 py-1.5 text-[var(--text-10)] text-[var(--muted-dim)]">
+        <div className="px-2 py-1.5 text-10 text-[var(--muted-dim)]">
           The stored list is limited to 5,000 files.
         </div>
       ) : 'truncated' in workspace && workspace.truncated ? (
-        <div className="px-2 py-1.5 text-[var(--text-10)] text-[var(--muted-dim)]">
+        <div className="px-2 py-1.5 text-10 text-[var(--muted-dim)]">
           This older run contains a partial file list.
         </div>
       ) : null}
@@ -241,14 +241,14 @@ export function ChangedFilesCard({
               expanded ? 'pb-0.5' : 'pb-1'
             }`}
           >
-            <span className="min-w-0 truncate text-[var(--text-10-5)] font-[var(--weight-semibold)] text-[var(--muted)] transition-colors group-hover/changed-files-header:text-[var(--fg)] group-focus-visible/changed-files-header:text-[var(--fg)]">
+            <span className="min-w-0 truncate text-10-5 font-[var(--weight-semibold)] text-[var(--muted)] transition-colors group-hover/changed-files-header:text-[var(--fg)] group-focus-visible/changed-files-header:text-[var(--fg)]">
               Changed files{' '}
               <span className="text-[var(--muted-dim)] transition-colors group-hover/changed-files-header:text-[var(--muted)] group-focus-visible/changed-files-header:text-[var(--muted)]">
                 {attributionUnavailable ? '(unavailable)' : `(${fileChanges.counts.changed})`}
               </span>
             </span>
             {!attributionUnavailable ? (
-              <span className="flex shrink-0 items-center gap-1.5 font-mono text-[var(--text-10)] tabular-nums opacity-80 transition-opacity group-hover/changed-files-header:opacity-100 group-focus-visible/changed-files-header:opacity-100">
+              <span className="flex shrink-0 items-center gap-1.5 font-mono text-10 tabular-nums opacity-80 transition-opacity group-hover/changed-files-header:opacity-100 group-focus-visible/changed-files-header:opacity-100">
                 <span className="text-[var(--green)]" title="Lines added">
                   +{lineChanges.added}
                 </span>
@@ -272,7 +272,7 @@ export function ChangedFilesCard({
             ) : null}
             {attributionNormalized ? (
               <span
-                className="shrink-0 rounded-full bg-[var(--accent-subtle)] px-1.5 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--accent)]"
+                className="shrink-0 rounded-full bg-[var(--accent-subtle)] px-1.5 py-0.5 text-9 font-[var(--weight-semibold)] text-[var(--accent)]"
                 title="Base branch movement was excluded from this summary"
               >
                 Base normalized
@@ -280,7 +280,7 @@ export function ChangedFilesCard({
             ) : null}
             {attributionPartial ? (
               <span
-                className="shrink-0 rounded-full bg-[var(--yellow-subtle)] px-1.5 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--yellow)]"
+                className="shrink-0 rounded-full bg-[var(--yellow-subtle)] px-1.5 py-0.5 text-9 font-[var(--weight-semibold)] text-[var(--yellow)]"
                 title="Some workspaces could not be attributed exactly"
               >
                 Partial
@@ -300,7 +300,7 @@ export function ChangedFilesCard({
           data-changed-files-view-diff="true"
           onClick={() => openPanel()}
           disabled={!canOpenPanel}
-          className="mr-2 shrink-0 self-center rounded-[var(--radius-small)] px-1 py-1 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--link)] underline-offset-2 transition-colors hover:text-[var(--link-hover)] hover:underline focus-visible:text-[var(--link-hover)] focus-visible:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)] disabled:cursor-default disabled:text-[var(--muted-dim)] disabled:no-underline"
+          className="mr-2 shrink-0 self-center rounded-[var(--radius-small)] px-1 py-1 text-10 font-[var(--weight-semibold)] text-[var(--link)] underline-offset-2 transition-colors hover:text-[var(--link-hover)] hover:underline focus-visible:text-[var(--link-hover)] focus-visible:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)] disabled:cursor-default disabled:text-[var(--muted-dim)] disabled:no-underline"
           aria-label="View agent run diff in the Changes panel"
           title="View diff in Changes"
         >
@@ -308,13 +308,13 @@ export function ChangedFilesCard({
         </button>
       </div>
       {attributionUnavailable ? (
-        <div className="px-3 pb-2 text-[var(--text-10)] text-[var(--yellow)]">
+        <div className="px-3 pb-2 text-10 text-[var(--yellow)]">
           The base branch changed during this run, and the starting changes could not be replayed
           safely. Exact changed-file attribution is unavailable.
         </div>
       ) : null}
       {attributionPartial ? (
-        <div className="px-3 pb-2 text-[var(--text-10)] text-[var(--yellow)]">
+        <div className="px-3 pb-2 text-10 text-[var(--yellow)]">
           Some workspaces could not be attributed exactly. Totals include only attributed
           workspaces.
         </div>
@@ -324,7 +324,7 @@ export function ChangedFilesCard({
           {fileChanges.workspaces.map((workspace) => (
             <div key={workspace.targetId}>
               {workspaceCount > 1 || workspace.targetId.startsWith('artifacts:') ? (
-                <div className="flex items-center justify-between gap-2 px-2 pb-1 pt-1.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
+                <div className="flex items-center justify-between gap-2 px-2 pb-1 pt-1.5 text-9 font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
                   <span className="truncate">{workspace.label}</span>
                   <span className="font-mono tabular-nums">{workspace.counts.changed}</span>
                 </div>

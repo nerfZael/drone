@@ -67,19 +67,19 @@ function AccessModeRow({
     <div className="grid gap-4 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_minmax(16rem,20rem)] sm:items-center">
       <div className="flex min-w-0 items-start gap-3">
         <div
-          className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--radius-medium)] border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--accent)]"
+          className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--radius-medium)] border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-11 font-[var(--weight-semibold)] text-[var(--accent)]"
           style={{ fontFamily: 'var(--display)' }}
         >
           {shortLabel}
         </div>
         <div className="min-w-0 flex-1">
           <div
-            className="text-[var(--text-13)] font-[var(--weight-semibold)] text-[var(--fg)]"
+            className="text-13 font-[var(--weight-semibold)] text-[var(--fg)]"
             style={{ fontFamily: 'var(--display)' }}
           >
             {label}
           </div>
-          <div className="mt-1 text-[var(--text-11)] leading-5 text-[var(--muted)]">
+          <div className="mt-1 text-11 leading-5 text-[var(--muted)]">
             {description}
           </div>
         </div>
@@ -106,7 +106,7 @@ function AccessModeRow({
               if (event.detail === 0) onKeyboardSelect(kind, value);
             }}
             className={cn(
-              'h-10 touch-none select-none rounded-[calc(var(--radius-medium)-3px)] px-3 text-[var(--text-11)] font-[var(--weight-semibold)] transition-[background-color,color,box-shadow] disabled:cursor-not-allowed disabled:opacity-50',
+              'h-10 touch-none select-none rounded-[calc(var(--radius-medium)-3px)] px-3 text-11 font-[var(--weight-semibold)] transition-[background-color,color,box-shadow] disabled:cursor-not-allowed disabled:opacity-50',
               mode === value
                 ? 'bg-[var(--accent-subtle)] text-[var(--accent)] shadow-[inset_0_0_0_1px_var(--accent-muted),0_1px_4px_var(--shadow-color)]'
                 : 'text-[var(--muted)] hover:text-[var(--fg-secondary)]',
@@ -136,10 +136,10 @@ function FeaturePermissionRow({
   return (
     <div className="flex items-center gap-4 px-4 py-4">
       <div className="min-w-0 flex-1">
-        <div className="text-[var(--text-13)] font-[var(--weight-semibold)] text-[var(--fg)]">
+        <div className="text-13 font-[var(--weight-semibold)] text-[var(--fg)]">
           {label}
         </div>
-        <div className="mt-1 text-[var(--text-11)] leading-5 text-[var(--muted)]">
+        <div className="mt-1 text-11 leading-5 text-[var(--muted)]">
           {description}
         </div>
       </div>
@@ -293,7 +293,7 @@ export function DroneHubPermissionsView({
           <button
             type="button"
             onClick={onBack}
-            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2.5 text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--muted)] transition-colors hover:text-[var(--fg)]"
+            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2.5 text-11 font-[var(--weight-semibold)] text-[var(--muted)] transition-colors hover:text-[var(--fg)]"
             title="Back to chat"
             aria-label="Back to chat"
           >
@@ -302,18 +302,18 @@ export function DroneHubPermissionsView({
           </button>
           <div className="min-w-0 flex-1">
             <div
-              className="truncate text-[var(--text-13)] font-[var(--weight-semibold)] text-[var(--fg)]"
+              className="truncate text-13 font-[var(--weight-semibold)] text-[var(--fg)]"
               style={{ fontFamily: 'var(--display)' }}
             >
               DroneHub permissions
             </div>
-            <div className="truncate text-[var(--text-10)] text-[var(--muted-dim)]">
+            <div className="truncate text-10 text-[var(--muted-dim)]">
               {chatLabel}
             </div>
           </div>
           <div
             className={cn(
-              'rounded-full border px-2 py-1 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide',
+              'rounded-full border px-2 py-1 text-9 font-[var(--weight-semibold)] uppercase tracking-wide',
               available
                 ? 'border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)]'
                 : 'border-[var(--border-subtle)] bg-[var(--surface-inset-faint)] text-[var(--muted-dim)]',
@@ -337,7 +337,7 @@ export function DroneHubPermissionsView({
             >
               Existing drone access
             </h2>
-            <p className="mt-1 max-w-2xl text-[var(--text-12)] leading-5 text-[var(--muted)]">
+            <p className="mt-1 max-w-2xl text-12 leading-5 text-[var(--muted)]">
               Choose which existing drones this chat can read from, change, or run actions on
               through the DroneHub MCP server. Changes are saved automatically for this chat.
             </p>
@@ -345,7 +345,7 @@ export function DroneHubPermissionsView({
         </div>
 
         {!available && !loading ? (
-          <div className="mt-5 rounded-[var(--radius-large)] border border-[var(--border)] bg-[var(--surface-inset-faint)] px-4 py-3 text-[var(--text-11)] leading-5 text-[var(--muted)]">
+          <div className="mt-5 rounded-[var(--radius-large)] border border-[var(--border)] bg-[var(--surface-inset-faint)] px-4 py-3 text-11 leading-5 text-[var(--muted)]">
             {unavailableMessage || 'DroneHub MCP access is not enabled for this chat.'}
           </div>
         ) : null}
@@ -353,12 +353,12 @@ export function DroneHubPermissionsView({
         <div className="mt-6">
           <div className="mb-2 flex items-center justify-between gap-3 px-1">
             <div
-              className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.12em] text-[var(--muted-dim)]"
+              className="text-10 font-[var(--weight-semibold)] uppercase tracking-[0.12em] text-[var(--muted-dim)]"
               style={{ fontFamily: 'var(--display)' }}
             >
               Permission scope
             </div>
-            <div className="text-right text-[var(--text-10)] text-[var(--muted-dim)]">
+            <div className="text-right text-10 text-[var(--muted-dim)]">
               Click an option, or hold and drag across options to paint.
             </div>
           </div>
@@ -397,7 +397,7 @@ export function DroneHubPermissionsView({
         </div>
 
         <div className="mt-6">
-          <div className="mb-2 px-1 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.12em] text-[var(--muted-dim)]">
+          <div className="mb-2 px-1 text-10 font-[var(--weight-semibold)] uppercase tracking-[0.12em] text-[var(--muted-dim)]">
             Change requests
           </div>
           <div className="divide-y divide-[var(--border-subtle)] overflow-hidden rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--surface-softest)]">
@@ -422,16 +422,16 @@ export function DroneHubPermissionsView({
           <div className="flex items-end justify-between gap-3">
             <div>
               <h3
-                className="text-[var(--text-13)] font-[var(--weight-semibold)] text-[var(--fg)]"
+                className="text-13 font-[var(--weight-semibold)] text-[var(--fg)]"
                 style={{ fontFamily: 'var(--display)' }}
               >
                 Selected drones
               </h3>
-              <p className="mt-1 text-[var(--text-11)] text-[var(--muted)]">
+              <p className="mt-1 text-11 text-[var(--muted)]">
                 These drones are used by every permission set to “Selected drones”.
               </p>
             </div>
-            <span className="flex-shrink-0 font-mono text-[var(--text-10)] text-[var(--muted-dim)]">
+            <span className="flex-shrink-0 font-mono text-10 text-[var(--muted-dim)]">
               {selectedDrones.length} selected
             </span>
           </div>
@@ -452,7 +452,7 @@ export function DroneHubPermissionsView({
                 {selectedDrones.map((drone) => (
                   <span
                     key={drone.id}
-                    className="inline-flex max-w-full items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--panel-raised)] py-1 pl-2.5 pr-1.5 text-[var(--text-11)] text-[var(--fg-secondary)]"
+                    className="inline-flex max-w-full items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--panel-raised)] py-1 pl-2.5 pr-1.5 text-11 text-[var(--fg-secondary)]"
                   >
                     <span className="max-w-56 truncate">{drone.label}</span>
                     {drone.removable !== false ? (
@@ -473,17 +473,17 @@ export function DroneHubPermissionsView({
             ) : (
               <div className="flex min-h-20 items-center justify-center text-center">
                 <div>
-                  <div className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
+                  <div className="text-11 font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
                     Drop drones here
                   </div>
-                  <div className="mt-1 text-[var(--text-10)] text-[var(--muted-dim)]">
+                  <div className="mt-1 text-10 text-[var(--muted-dim)]">
                     Drag drones from the sidebar to add them to this chat.
                   </div>
                 </div>
               </div>
             )}
             {selectedDrones.length > 0 ? (
-              <div className="mt-3 text-[var(--text-10)] text-[var(--muted-dim)]">
+              <div className="mt-3 text-10 text-[var(--muted-dim)]">
                 {dropActive
                   ? 'Release to add drones.'
                   : 'Drop more drones anywhere in this area to add them.'}
@@ -491,7 +491,7 @@ export function DroneHubPermissionsView({
             ) : null}
           </div>
           {!selectedModeActive ? (
-            <p className="mt-2 text-[var(--text-10)] text-[var(--muted-dim)]">
+            <p className="mt-2 text-10 text-[var(--muted-dim)]">
               “All drones” is active for every permission, so this selection is not currently
               used.
             </p>
@@ -499,19 +499,19 @@ export function DroneHubPermissionsView({
         </div>
 
         {error ? (
-          <div className="mt-5 rounded-[var(--radius-medium)] border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-11)] text-[var(--red)]">
+          <div className="mt-5 rounded-[var(--radius-medium)] border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-11 text-[var(--red)]">
             {error}
           </div>
         ) : null}
 
         <div className="mt-6 rounded-[var(--radius-large)] border border-[var(--accent-muted)] bg-[var(--accent-subtle)] p-4">
           <div
-            className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg)]"
+            className="text-11 font-[var(--weight-semibold)] text-[var(--fg)]"
             style={{ fontFamily: 'var(--display)' }}
           >
             Creating drones and chats
           </div>
-          <div className="mt-1 text-[var(--text-11)] leading-5 text-[var(--muted)]">
+          <div className="mt-1 text-11 leading-5 text-[var(--muted)]">
             Creating or cloning a drone makes it independent by default and automatically grants
             this chat read, write, and execute access. A parent can be chosen explicitly and must
             be in Read scope. Cloning also requires Read access to the source drone. Managed chats
@@ -519,7 +519,7 @@ export function DroneHubPermissionsView({
           </div>
         </div>
 
-        <div className="mt-6 rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--surface-inset-faint)] p-4 text-[var(--text-11)] leading-5 text-[var(--muted)]">
+        <div className="mt-6 rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--surface-inset-faint)] p-4 text-11 leading-5 text-[var(--muted)]">
           These permissions apply only to this managed chat. Agents launched manually in a
           terminal do not receive its DroneHub credential.
         </div>

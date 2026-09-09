@@ -94,7 +94,7 @@ export function UiPaneState({
         <div
           className={cn(
             'mt-1 max-w-[44ch] dh-type-supporting !text-[var(--muted)]',
-            compact && '!text-[var(--text-11)]',
+            compact && '!text-11',
           )}
         >
           {description}

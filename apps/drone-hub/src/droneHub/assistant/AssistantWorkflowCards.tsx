@@ -177,9 +177,7 @@ export function ApprovalCard({
         </div>
       </div>
       {warning ? (
-        <div className="mt-2 text-[var(--text-10)] leading-relaxed text-[var(--yellow)]">
-          {warning}
-        </div>
+        <div className="mt-2 text-10 leading-relaxed text-[var(--yellow)]">{warning}</div>
       ) : null}
       {summary.rows.length > 0 ? (
         <dl className="dh-approval-metadata">

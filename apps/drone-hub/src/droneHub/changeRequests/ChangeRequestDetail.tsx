@@ -346,7 +346,7 @@ export function ChangeRequestDetail({
             <span className="truncate text-[16px] font-[var(--weight-bold)] text-[var(--fg)] group-hover:text-[var(--accent)]">
               {request.title || 'Untitled change request'}
             </span>
-            <span className="shrink-0 font-mono text-[var(--text-10)] font-[var(--weight-normal)] text-[var(--muted-dim)]">
+            <span className="shrink-0 font-mono text-10 font-[var(--weight-normal)] text-[var(--muted-dim)]">
               #{request.number}
             </span>
           </span>
@@ -357,7 +357,7 @@ export function ChangeRequestDetail({
               aria-label="Change request revision"
               value={selectedRevisionNumber}
               onChange={(event) => setSelectedRevisionNumber(Number(event.target.value))}
-              className="h-6 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-1 text-[var(--text-9)] text-[var(--muted)] focus:border-[var(--accent-muted)] focus:outline-none"
+              className="h-6 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-1 text-9 text-[var(--muted)] focus:border-[var(--accent-muted)] focus:outline-none"
             >
               {revisions.map((revision) => (
                 <option key={revision.number} value={revision.number}>
@@ -411,7 +411,7 @@ export function ChangeRequestDetail({
             </>
           ) : null}
           <span
-            className={`inline-flex h-5 items-center rounded-full border px-1.5 text-[var(--text-9)] font-[var(--weight-semibold)] ${changeRequestStatusClasses(request)}`}
+            className={`inline-flex h-5 items-center rounded-full border px-1.5 text-9 font-[var(--weight-semibold)] ${changeRequestStatusClasses(request)}`}
           >
             {changeRequestStatusLabel(request)}
           </span>
@@ -440,13 +440,13 @@ export function ChangeRequestDetail({
 
       {editing ? (
         <div className="grid gap-2 border-t border-[var(--border-subtle)] px-2 py-2 md:grid-cols-2">
-          <label className="min-w-0 text-[var(--text-9)] text-[var(--muted-dim)]">
+          <label className="min-w-0 text-9 text-[var(--muted-dim)]">
             Title
             <input
               autoFocus
               value={draftTitle}
               onChange={(event) => setDraftTitle(event.target.value)}
-              className="mt-1 h-8 w-full rounded-[var(--radius-medium)] border border-[var(--field-border)] bg-[var(--field-bg)] px-2.5 text-[var(--text-11)] text-[var(--field-fg)] focus:border-[var(--accent-muted)] focus:outline-none"
+              className="mt-1 h-8 w-full rounded-[var(--radius-medium)] border border-[var(--field-border)] bg-[var(--field-bg)] px-2.5 text-11 text-[var(--field-fg)] focus:border-[var(--accent-muted)] focus:outline-none"
             />
           </label>
           <DestinationBranchPicker
@@ -455,13 +455,13 @@ export function ChangeRequestDetail({
             loading={branchesLoading}
             onChange={setDraftDestination}
           />
-          <label className="min-w-0 text-[var(--text-9)] text-[var(--muted-dim)] md:col-span-2">
+          <label className="min-w-0 text-9 text-[var(--muted-dim)] md:col-span-2">
             Description
             <textarea
               value={draftDescription}
               onChange={(event) => setDraftDescription(event.target.value)}
               rows={2}
-              className="mt-1 w-full resize-y rounded-[var(--radius-medium)] border border-[var(--field-border)] bg-[var(--field-bg)] px-2.5 py-2 text-[var(--text-11)] text-[var(--field-fg)] focus:border-[var(--accent-muted)] focus:outline-none"
+              className="mt-1 w-full resize-y rounded-[var(--radius-medium)] border border-[var(--field-border)] bg-[var(--field-bg)] px-2.5 py-2 text-11 text-[var(--field-fg)] focus:border-[var(--accent-muted)] focus:outline-none"
             />
           </label>
           <div className="flex justify-end gap-1 md:col-span-2">
@@ -483,7 +483,7 @@ export function ChangeRequestDetail({
       ) : null}
 
       {showHistory ? (
-        <div className="border-t border-[var(--border-subtle)] px-2 py-2 text-[var(--text-10)]">
+        <div className="border-t border-[var(--border-subtle)] px-2 py-2 text-10">
           <div className="flex flex-wrap gap-1">
             {revisions.map((revision) => (
               <button
@@ -592,7 +592,7 @@ export function ChangeRequestDetail({
         />
         <div className="ml-auto flex h-8 shrink-0 items-center gap-1.5 pr-1.5">
           <span
-            className="max-w-56 truncate px-1 font-mono text-[var(--text-9)] text-[var(--muted-dim)]"
+            className="max-w-56 truncate px-1 font-mono text-9 text-[var(--muted-dim)]"
             title={`${request.baseBranch} → ${request.destinationBranch}`}
           >
             {request.baseBranch} → {request.destinationBranch}
@@ -738,7 +738,7 @@ function DestinationBranchPicker({
   }, [open]);
 
   return (
-    <div ref={rootRef} className="relative min-w-0 text-[var(--text-9)] text-[var(--muted-dim)]">
+    <div ref={rootRef} className="relative min-w-0 text-9 text-[var(--muted-dim)]">
       <span>Destination branch</span>
       <input
         aria-label="Destination branch"
@@ -756,7 +756,7 @@ function DestinationBranchPicker({
           if (event.key === 'Escape') setOpen(false);
         }}
         placeholder={loading ? 'Loading branches…' : 'Search or create a branch'}
-        className="mt-1 h-8 w-full rounded-[var(--radius-medium)] border border-[var(--field-border)] bg-[var(--field-bg)] px-2.5 font-mono text-[var(--text-10)] text-[var(--field-fg)] focus:border-[var(--accent-muted)] focus:outline-none"
+        className="mt-1 h-8 w-full rounded-[var(--radius-medium)] border border-[var(--field-border)] bg-[var(--field-bg)] px-2.5 font-mono text-10 text-[var(--field-fg)] focus:border-[var(--accent-muted)] focus:outline-none"
       />
       {open ? (
         <div
@@ -774,7 +774,7 @@ function DestinationBranchPicker({
                 onChange(option);
                 setOpen(false);
               }}
-              className="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left font-mono text-[var(--text-10)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+              className="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left font-mono text-10 text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
             >
               <span className="truncate">{option}</span>
               {option === normalized ? (
@@ -788,23 +788,21 @@ function DestinationBranchPicker({
               role="option"
               aria-selected="false"
               onClick={() => setOpen(false)}
-              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[var(--text-10)] text-[var(--accent)] hover:bg-[var(--accent-subtle)]"
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-10 text-[var(--accent)] hover:bg-[var(--accent-subtle)]"
             >
-              <span className="text-[var(--text-13)]">+</span>
+              <span className="text-13">+</span>
               <span className="min-w-0 truncate">
                 Create <span className="font-mono">{normalized}</span>
               </span>
             </button>
           ) : null}
           {!loading && visibleOptions.length === 0 && (!normalized || exists) ? (
-            <div className="px-2 py-2 text-[var(--text-10)] text-[var(--muted)]">
-              No branches found.
-            </div>
+            <div className="px-2 py-2 text-10 text-[var(--muted)]">No branches found.</div>
           ) : null}
         </div>
       ) : null}
       {normalized ? (
-        <span className="mt-1 block text-[var(--text-9)] text-[var(--muted-dim)]">
+        <span className="mt-1 block text-9 text-[var(--muted-dim)]">
           {exists ? 'Existing branch' : 'A new branch will be created when merged'}
         </span>
       ) : null}

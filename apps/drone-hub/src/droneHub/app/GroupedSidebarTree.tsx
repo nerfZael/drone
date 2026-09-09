@@ -851,7 +851,7 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
           <span className={sidebarChatLabelClass}>{chatName}</span>
           <DetachedChatIndicator droneId={drone.id} chatName={chatName} />
           {draft ? (
-            <span className="flex-shrink-0 rounded border border-[var(--accent-muted)] px-1 py-0.5 text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--accent)]">
+            <span className="flex-shrink-0 rounded border border-[var(--accent-muted)] px-1 py-0.5 text-8 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--accent)]">
               Draft
             </span>
           ) : null}
@@ -1284,7 +1284,7 @@ const GroupedSidebarChatFolderRow = React.memo(function GroupedSidebarChatFolder
           </button>
         )}
       </div>
-      {chatTreeEditor?.error && editing ? <div className="pl-8 text-[var(--text-9)] text-[var(--red)]">{chatTreeEditor.error}</div> : null}
+      {chatTreeEditor?.error && editing ? <div className="pl-8 text-9 text-[var(--red)]">{chatTreeEditor.error}</div> : null}
       {!collapsed ? (
         <div
           ref={chatTreeDropDisabled ? undefined : setBodyDropNodeRef}
@@ -1380,10 +1380,10 @@ function GroupedSidebarChatGroupEditor({ droneId, parentPath, depth }: { droneId
             if (event.key === 'Enter') { event.preventDefault(); submit(); }
           }}
           placeholder="Group name"
-          className="min-w-0 flex-1 border-0 bg-transparent p-0 font-mono text-[var(--text-11)] outline-none"
+          className="min-w-0 flex-1 border-0 bg-transparent p-0 font-mono text-11 outline-none"
         />
       </div>
-      {chatTreeEditor.error ? <span className="text-[var(--text-9)] text-[var(--red)]">{chatTreeEditor.error}</span> : null}
+      {chatTreeEditor.error ? <span className="text-9 text-[var(--red)]">{chatTreeEditor.error}</span> : null}
     </div>
   );
 }
@@ -1766,7 +1766,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
                     }
                   }}
                   placeholder="Chat name"
-                  className="min-w-0 flex-1 rounded border border-[var(--accent-muted)] bg-[var(--panel-overlay-soft)] px-2 py-1 font-mono text-[var(--text-11)] text-[var(--fg)] focus:border-[var(--accent)] focus:outline-none"
+                  className="min-w-0 flex-1 rounded border border-[var(--accent-muted)] bg-[var(--panel-overlay-soft)] px-2 py-1 font-mono text-11 text-[var(--fg)] focus:border-[var(--accent)] focus:outline-none"
                 />
                 {chatEditor?.pending ? <IconSpinner className="opacity-90 text-[var(--accent)]" /> : null}
               </div>
@@ -1775,7 +1775,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => onChatEditorCreateAsDraftChange(chatEditor?.createAsDraft !== true)}
                 disabled={chatEditor?.pending}
-                className="flex items-center gap-1.5 px-1 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)] disabled:opacity-50"
+                className="flex items-center gap-1.5 px-1 text-10 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)] disabled:opacity-50"
               >
                 <span
                   className={`h-3 w-3 rounded-sm border ${
@@ -1786,7 +1786,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
                 />
                 Draft
               </button>
-              {chatEditor?.error ? <div className="px-1 text-[var(--text-10)] text-[var(--red)]">{chatEditor.error}</div> : null}
+              {chatEditor?.error ? <div className="px-1 text-10 text-[var(--red)]">{chatEditor.error}</div> : null}
             </div>
           ) : null}
           {chatTreeEditor?.mode === 'create' && chatTreeEditor.droneId === drone.id && !chatTreeEditor.parentPath ? (
@@ -1856,12 +1856,12 @@ function GroupedSidebarGroupDraftRow() {
           maxLength={64}
           placeholder={folderEditor.parentPath ? 'Subfolder name' : 'Folder name'}
           aria-label="New group name"
-          className="min-w-0 flex-1 appearance-none rounded-none border-0 bg-transparent p-0 text-[var(--text-11)] text-[var(--fg)] shadow-none outline-none ring-0 placeholder:text-[var(--muted-dim)] focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+          className="min-w-0 flex-1 appearance-none rounded-none border-0 bg-transparent p-0 text-11 text-[var(--fg)] shadow-none outline-none ring-0 placeholder:text-[var(--muted-dim)] focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
           style={{ border: 0, outline: 'none', boxShadow: 'none' }}
         />
       </div>
       {folderEditor.error ? (
-        <div className="px-1 text-[var(--text-10)] text-[var(--red)]">{folderEditor.error}</div>
+        <div className="px-1 text-10 text-[var(--red)]">{folderEditor.error}</div>
       ) : null}
     </div>
   );

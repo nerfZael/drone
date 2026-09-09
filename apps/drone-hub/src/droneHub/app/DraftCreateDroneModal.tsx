@@ -55,7 +55,7 @@ export function DraftCreateDroneModal({
               <div className="font-[var(--weight-semibold)] text-sm text-[var(--fg-strong)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
                 Name this drone
               </div>
-              <div className="text-[var(--text-10)] text-[var(--muted)] mt-0.5">
+              <div className="text-10 text-[var(--muted)] mt-0.5">
                 Press Enter to create and continue.
               </div>
             </div>
@@ -74,25 +74,25 @@ export function DraftCreateDroneModal({
           </div>
           <div className="px-5 py-4">
             {draftCreateError && (
-              <div className="mb-3 p-2 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--text-11)] text-[var(--red)] whitespace-pre-wrap">
+              <div className="mb-3 p-2 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] text-11 text-[var(--red)] whitespace-pre-wrap">
                 {draftCreateError}
               </div>
             )}
             <div className="flex flex-col gap-3">
               <label className="flex flex-col gap-1">
-                <span className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--muted)]">Drone name (dash-case)</span>
+                <span className="text-11 font-[var(--weight-semibold)] text-[var(--muted)]">Drone name (dash-case)</span>
                 <input
                   ref={draftCreateNameRef}
                   autoFocus
                   value={draftCreateName}
                   onChange={(e) => onDraftCreateNameChange(e.target.value)}
-                  className="h-9 rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 text-[var(--text-13)] font-mono text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none"
+                  className="h-9 rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 text-13 font-mono text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none"
                   placeholder="e.g. auth-bugfix"
                   disabled={draftCreating}
                 />
                 {draftNameSuggesting && (
                   <span
-                    className="inline-flex items-center gap-2 self-start rounded-[var(--radius-medium)] border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 py-1 text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--accent)]"
+                    className="inline-flex items-center gap-2 self-start rounded-[var(--radius-medium)] border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 py-1 text-10 font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--accent)]"
                     style={{ fontFamily: 'var(--display)' }}
                   >
                     <IconSpinner className="w-3.5 h-3.5 text-[var(--accent)]" />
@@ -100,7 +100,7 @@ export function DraftCreateDroneModal({
                   </span>
                 )}
                 {!draftNameSuggesting && draftSuggestedName && (
-                  <div className="flex items-center justify-between gap-2 text-[var(--text-10)]">
+                  <div className="flex items-center justify-between gap-2 text-10">
                     <span className="text-[var(--muted-dim)] truncate" title={draftSuggestedName}>
                       Suggested: <span className="font-mono text-[var(--fg-secondary)]">{draftSuggestedName}</span>
                     </span>
@@ -120,17 +120,17 @@ export function DraftCreateDroneModal({
                   </div>
                 )}
                 {!draftNameSuggesting && draftNameSuggestionError && (
-                  <span className="text-[var(--text-10)] text-[var(--muted-dim)]" title={draftNameSuggestionError}>
+                  <span className="text-10 text-[var(--muted-dim)]" title={draftNameSuggestionError}>
                     Name suggestion unavailable.
                   </span>
                 )}
               </label>
               <label className="flex flex-col gap-1">
-                <span className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--muted)]">Group (optional)</span>
+                <span className="text-11 font-[var(--weight-semibold)] text-[var(--muted)]">Group (optional)</span>
                 <input
                   value={draftCreateGroup}
                   onChange={(e) => onDraftCreateGroupChange(e.target.value)}
-                  className="h-9 rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 text-[var(--text-13)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none"
+                  className="h-9 rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 text-13 text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none"
                   placeholder="e.g. auth, backend, infra"
                   disabled={draftCreating}
                 />
@@ -142,7 +142,7 @@ export function DraftCreateDroneModal({
               type="button"
               onClick={onRequestClose}
               disabled={draftCreating}
-              className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
+              className={`h-9 px-3 rounded text-11 font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                 draftCreating
                   ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                   : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -154,7 +154,7 @@ export function DraftCreateDroneModal({
             <button
               type="submit"
               disabled={draftCreating || !draftCreateName.trim()}
-              className={`h-9 px-4 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
+              className={`h-9 px-4 rounded text-11 font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                 draftCreating || !draftCreateName.trim()
                   ? 'opacity-50 cursor-not-allowed bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
                   : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'

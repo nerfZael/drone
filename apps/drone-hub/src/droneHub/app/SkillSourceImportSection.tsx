@@ -164,12 +164,12 @@ export function SkillSourceImportSection({
             <>
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-[var(--text-13)] font-[var(--weight-semibold)] text-[var(--fg)] truncate">{sourceSkillPreview.candidate.name}</div>
+                  <div className="text-13 font-[var(--weight-semibold)] text-[var(--fg)] truncate">{sourceSkillPreview.candidate.name}</div>
                   <div className="mt-1 break-all font-mono dh-type-supporting">{sourceSkillPreview.candidate.path}</div>
                   <div className="mt-2 dh-type-supporting">{sourceSkillPreview.candidate.description}</div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <div className={`px-2 py-1 rounded border text-[var(--text-10)] uppercase tracking-[0.08em] ${importStatusClassName(sourceSkillPreview.candidate.importStatus)}`}>
+                  <div className={`px-2 py-1 rounded border text-10 uppercase tracking-[0.08em] ${importStatusClassName(sourceSkillPreview.candidate.importStatus)}`}>
                     {sourceSkillPreview.candidate.importStatus === 'importable_with_loss'
                       ? 'Lossy'
                       : sourceSkillPreview.candidate.importStatus === 'not_importable'
@@ -241,8 +241,8 @@ export function SkillSourceImportSection({
                               : 'border-transparent hover:bg-[var(--hover)]'
                           }`}
                         >
-                          <div className="text-[var(--text-11)] text-[var(--fg-secondary)] font-mono break-all">{file.path}</div>
-                          <div className="text-[var(--text-10)] text-[var(--muted-dim)] mt-1 uppercase tracking-[0.08em]">{file.kind}</div>
+                          <div className="text-11 text-[var(--fg-secondary)] font-mono break-all">{file.path}</div>
+                          <div className="text-10 text-[var(--muted-dim)] mt-1 uppercase tracking-[0.08em]">{file.kind}</div>
                         </button>
                       );
                     })}
@@ -252,7 +252,7 @@ export function SkillSourceImportSection({
                 <SettingsDetail className="flex flex-col gap-2">
                   <div className="flex items-center justify-between gap-2">
                     <div className="dh-type-label">Selected file</div>
-                    <div className="text-[var(--text-10)] text-[var(--muted-dim)] font-mono break-all">{selectedSourcePreviewFile?.path ?? 'None'}</div>
+                    <div className="text-10 text-[var(--muted-dim)] font-mono break-all">{selectedSourcePreviewFile?.path ?? 'None'}</div>
                   </div>
                   <textarea
                     readOnly

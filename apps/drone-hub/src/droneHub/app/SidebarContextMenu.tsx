@@ -121,7 +121,7 @@ export function SidebarContextMenu({
             </span>
             <span className="min-w-0 flex-1 truncate">{item.label}</span>
             {item.shortcut ? (
-              <span className="ml-4 shrink-0 font-mono text-[length:var(--text-11)] text-[var(--muted-dim)] opacity-75">
+              <span className="ml-4 shrink-0 font-mono text-11 text-[var(--muted-dim)] opacity-75">
                 {item.shortcut}
               </span>
             ) : null}

@@ -98,20 +98,20 @@ export function ExternalAgentModelsSettingsSection({
       {error ? (
         <div
           role="alert"
-          className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--red)]"
+          className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-12 text-[var(--red)]"
         >
           {error}
         </div>
       ) : null}
 
       {!result ? (
-        <div className="text-[var(--text-11)] text-[var(--muted-dim)]">
+        <div className="text-11 text-[var(--muted-dim)]">
           Cursor Agent, Codex, Claude Code, OpenCode, Pi, and Blip are checked. Agents that are not
           available to the Drone Hub process are skipped.
         </div>
       ) : (
         <div className="flex flex-col gap-3" aria-live="polite">
-          <div className="text-[var(--text-11)] text-[var(--muted)]">
+          <div className="text-11 text-[var(--muted)]">
             Updated {updatedCount} {updatedCount === 1 ? 'catalog' : 'catalogs'}
             {failedCount > 0
               ? `; ${failedCount} catalogs could not be refreshed (cached models are kept when available)`
@@ -120,7 +120,7 @@ export function ExternalAgentModelsSettingsSection({
           </div>
 
           {installedCatalogs.length === 0 ? (
-            <div className="dh-settings-row px-3 py-3 text-[var(--text-12)] text-[var(--muted)]">
+            <div className="dh-settings-row px-3 py-3 text-12 text-[var(--muted)]">
               No supported external agents were found on this computer.
             </div>
           ) : (
@@ -131,18 +131,18 @@ export function ExternalAgentModelsSettingsSection({
                     <div className="dh-type-label">
                       {AGENT_LABELS[catalog.agent] ?? catalog.agent}
                     </div>
-                    <div className="shrink-0 text-[var(--text-11)] text-[var(--fg-secondary)]">
+                    <div className="shrink-0 text-11 text-[var(--fg-secondary)]">
                       {catalog.models.length > 0
                         ? `${catalog.models.length} ${catalog.models.length === 1 ? 'model' : 'models'}`
                         : 'No models'}
                     </div>
                   </div>
                   {catalog.error ? (
-                    <div className="mt-1 text-[var(--text-11)] text-[var(--red)]">
+                    <div className="mt-1 text-11 text-[var(--red)]">
                       {catalog.error}
                     </div>
                   ) : catalog.discoveredAt ? (
-                    <div className="mt-1 text-[var(--text-11)] text-[var(--muted-dim)]">
+                    <div className="mt-1 text-11 text-[var(--muted-dim)]">
                       {catalog.source === 'live' && !catalog.stale ? 'Discovered' : 'Cached'} {new Date(catalog.discoveredAt).toLocaleString()}
                     </div>
                   ) : null}

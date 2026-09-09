@@ -114,7 +114,7 @@ export function OpenedDroneFileTabs({
                 if (!fromTabId || fromTabId === tab.tabId) return;
                 onReorderTabs(fromTabId, tab.tabId);
               }}
-              className={`group/tab relative flex h-9 min-w-[120px] max-w-[200px] items-center gap-0 overflow-hidden border-r border-[var(--border-subtle)] text-[var(--type-ui)] transition-colors ${
+              className={`group/tab relative flex h-9 min-w-[120px] max-w-[200px] items-center gap-0 overflow-hidden border-r border-[var(--border-subtle)] text-ui transition-colors ${
                 active
                   ? 'bg-[var(--panel)] text-[var(--fg)] shadow-[inset_0_2px_0_var(--accent)]'
                   : 'bg-transparent text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'

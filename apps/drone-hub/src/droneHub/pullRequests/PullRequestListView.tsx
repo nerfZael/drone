@@ -115,7 +115,7 @@ export function PullRequestListView({
       onFilterChange={() => {}}
       toolbarTrailing={
         <div className="flex shrink-0 items-center gap-1.5">
-          <div className="flex items-center gap-1 text-[var(--text-9)] text-[var(--muted-dim)]">
+          <div className="flex items-center gap-1 text-9 text-[var(--muted-dim)]">
             <span className="hidden uppercase tracking-wide sm:inline">Merge</span>
             <UiActionMenu
               label="Default merge method"

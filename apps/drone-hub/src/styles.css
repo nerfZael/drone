@@ -84,6 +84,8 @@
   --accent-subtle: rgba(177, 156, 255, .12);
   --accent-border: rgba(177, 156, 255, .34);
   --accent-fg: #0c0f14;
+  /* Alias for components that name the on-accent text color by its contrast role. */
+  --accent-contrast: var(--accent-fg);
 
   /* ── User accent: cool blue-gray ── */
   --user: #aab6c8;
@@ -139,6 +141,8 @@
   --danger-panel: rgba(30, 12, 14, .95);
   --warning-panel: rgba(18, 14, 8, .96);
   --hover: rgba(255, 255, 255, .05);
+  --panel-hover: var(--hover);
+  --surface-hover: var(--hover);
   --selected: rgba(177, 156, 255, .10);
   --selection-highlight: rgba(177, 156, 255, .22);
   --focus-ring: rgba(177, 156, 255, .82);
@@ -229,8 +233,12 @@
   --weight-semibold: var(--weight-emphasis);
   --weight-bold: var(--weight-strong);
   --weight-strong: 600;
+  --weight-regular: var(--weight-ui);
+  --weight-normal: var(--weight-ui);
+  --weight-medium: var(--weight-emphasis);
   --control-height: 36px;
   --control-height-compact: 32px;
+  --radius-small: 4px;
   --radius-medium: 6px;
   --radius-large: 8px;
   --radius-xlarge: 12px;

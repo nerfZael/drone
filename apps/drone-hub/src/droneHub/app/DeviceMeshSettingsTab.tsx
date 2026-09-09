@@ -54,7 +54,7 @@ function PermissionGrid({
         .filter((capability) => capability.id !== 'device-core' && capability.id !== 'workspace')
         .map((capability) => (
           <div key={capability.id} className="border-l border-[var(--border-subtle)] py-1 pl-3">
-            <div className="font-mono text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--accent)]">
+            <div className="font-mono text-11 font-[var(--weight-semibold)] text-[var(--accent)]">
               {capability.id}@{capability.version}
             </div>
             <div className="mt-2 grid gap-1.5">
@@ -63,7 +63,7 @@ function PermissionGrid({
                 return (
                   <label
                     key={key}
-                    className="flex items-center gap-2 text-[var(--text-12)] text-[var(--fg-secondary)]"
+                    className="flex items-center gap-2 text-12 text-[var(--fg-secondary)]"
                   >
                     <input
                       type="checkbox"
@@ -127,49 +127,47 @@ export function DeviceCard({
             <span
               className={`h-2 w-2 rounded-full ${connected || isSelf ? 'bg-[var(--green)] shadow-[var(--glow-green)]' : 'bg-[var(--muted-dim)]'}`}
             />
-            <h3 className="text-[var(--text-14)] font-[var(--weight-semibold)] text-[var(--fg)]">
+            <h3 className="text-14 font-[var(--weight-semibold)] text-[var(--fg)]">
               {device.name}
             </h3>
             {isSelf ? (
-              <span className="rounded bg-[var(--accent-subtle)] px-1.5 py-0.5 text-[var(--text-9)] font-[var(--weight-bold)] uppercase tracking-wider text-[var(--accent)]">
+              <span className="rounded bg-[var(--accent-subtle)] px-1.5 py-0.5 text-9 font-[var(--weight-bold)] uppercase tracking-wider text-[var(--accent)]">
                 This device
               </span>
             ) : null}
           </div>
-          <div className="mt-1 text-[var(--text-10)] text-[var(--muted-dim)]">
-            {device.platform}
-          </div>
+          <div className="mt-1 text-10 text-[var(--muted-dim)]">{device.platform}</div>
         </div>
-        <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wider text-[var(--muted)]">
+        <div className="text-10 font-[var(--weight-semibold)] uppercase tracking-wider text-[var(--muted)]">
           {connected || isSelf ? 'Reachable' : (connectionError ?? 'Offline')}
         </div>
       </div>
 
       <details className="mt-3">
-        <summary className="cursor-pointer text-[var(--text-11)] text-[var(--muted)]">
+        <summary className="cursor-pointer text-11 text-[var(--muted)]">
           {isSelf ? 'Edit this device' : 'Permissions & settings'}
         </summary>
         <div className={`mt-4 grid gap-3 ${isSelf ? '' : 'sm:grid-cols-2'}`}>
           <label className="grid gap-1">
-            <span className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wider text-[var(--muted-dim)]">
+            <span className="text-10 font-[var(--weight-semibold)] uppercase tracking-wider text-[var(--muted-dim)]">
               Device name
             </span>
             <input
               value={name}
               onChange={(event) => setName(event.target.value)}
-              className="rounded border border-[var(--border)] bg-[var(--panel)] px-3 py-2 text-[var(--text-12)] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
+              className="rounded border border-[var(--border)] bg-[var(--panel)] px-3 py-2 text-12 text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
             />
           </label>
           {!isSelf ? (
             <label className="grid gap-1">
-              <span className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wider text-[var(--muted-dim)]">
+              <span className="text-10 font-[var(--weight-semibold)] uppercase tracking-wider text-[var(--muted-dim)]">
                 Public endpoint
               </span>
               <input
                 value={endpoint}
                 onChange={(event) => setEndpoint(event.target.value)}
                 placeholder="https://hub.example.com"
-                className="rounded border border-[var(--border)] bg-[var(--panel)] px-3 py-2 font-mono text-[var(--text-12)] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
+                className="rounded border border-[var(--border)] bg-[var(--panel)] px-3 py-2 font-mono text-12 text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
               />
             </label>
           ) : null}
@@ -179,14 +177,14 @@ export function DeviceCard({
           <div className="mt-4 border-t border-[var(--border-subtle)] pt-4">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
-                <div className="text-[var(--text-11)] font-[var(--weight-semibold)] uppercase tracking-wider text-[var(--fg-secondary)]">
+                <div className="text-11 font-[var(--weight-semibold)] uppercase tracking-wider text-[var(--fg-secondary)]">
                   Allowed on this Hub
                 </div>
-                <div className="mt-0.5 text-[var(--text-11)] text-[var(--muted)]">
+                <div className="mt-0.5 text-11 text-[var(--muted)]">
                   Unselected operations are denied. Discovery is always available to members.
                 </div>
               </div>
-              <label className="flex items-center gap-2 text-[var(--text-11)] text-[var(--muted)]">
+              <label className="flex items-center gap-2 text-11 text-[var(--muted)]">
                 <input
                   type="checkbox"
                   checked={administrator}
@@ -216,7 +214,7 @@ export function DeviceCard({
               if (!isSelf) update.endpoints = endpoint.trim() ? [endpoint.trim()] : [];
               onSave(update);
             }}
-            className="rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-3 py-2 text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg)] hover:bg-[var(--selected)] disabled:opacity-50"
+            className="rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-3 py-2 text-11 font-[var(--weight-semibold)] text-[var(--fg)] hover:bg-[var(--selected)] disabled:opacity-50"
           >
             {busy ? 'Saving…' : 'Save device'}
           </button>
@@ -225,7 +223,7 @@ export function DeviceCard({
               type="button"
               disabled={busy}
               onClick={onRevoke}
-              className="rounded border border-[var(--red-border)] px-3 py-2 text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--red)] hover:bg-[var(--red-subtle)] disabled:opacity-50"
+              className="rounded border border-[var(--red-border)] px-3 py-2 text-11 font-[var(--weight-semibold)] text-[var(--red)] hover:bg-[var(--red-subtle)] disabled:opacity-50"
             >
               Revoke
             </button>
@@ -335,7 +333,7 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
 
   if (mesh.loading && !mesh.status) {
     return (
-      <div className="flex min-h-48 items-center justify-center gap-2 text-[var(--text-12)] text-[var(--muted)]">
+      <div className="flex min-h-48 items-center justify-center gap-2 text-12 text-[var(--muted)]">
         <IconSpinner className="h-4 w-4" /> Loading device network…
       </div>
     );
@@ -350,7 +348,7 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
         {!!mesh.status?.pending.length && activeSection !== 'network' && (
           <button
             onClick={() => setActiveSection('network')}
-            className="rounded-lg bg-[var(--accent-subtle)] border border-[var(--accent-muted)] px-4 py-2 text-[var(--text-12)] font-medium text-[var(--fg)]"
+            className="rounded-lg bg-[var(--accent-subtle)] border border-[var(--accent-muted)] px-4 py-2 text-12 font-medium text-[var(--fg)]"
           >
             {mesh.status.pending.length} pairing request(s)
           </button>
@@ -374,7 +372,7 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
             type="button"
             aria-current={activeSection === id ? 'page' : undefined}
             onClick={() => setActiveSection(id)}
-            className={`border-b-2 px-0.5 pb-2 text-[var(--text-11)] font-[var(--weight-semibold)] transition-colors ${
+            className={`border-b-2 px-0.5 pb-2 text-11 font-[var(--weight-semibold)] transition-colors ${
               activeSection === id
                 ? 'border-[var(--accent)] text-[var(--fg)]'
                 : 'border-transparent text-[var(--muted)] hover:text-[var(--fg-secondary)]'
@@ -386,7 +384,7 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
       </nav>
 
       {visibleMeshError ? (
-        <div className="border-l-2 border-[var(--red)] px-3 py-1 text-[var(--text-12)] text-[var(--red)]">
+        <div className="border-l-2 border-[var(--red)] px-3 py-1 text-12 text-[var(--red)]">
           {visibleMeshError}
         </div>
       ) : null}
@@ -402,17 +400,15 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
               className="rounded-lg border border-[var(--border-subtle)] p-4 mt-4"
               onToggle={(event) => setShowInvitation(event.currentTarget.open)}
             >
-              <summary className="cursor-pointer text-[var(--text-12)] font-medium">
-                Use a QR code
-              </summary>
+              <summary className="cursor-pointer text-12 font-medium">Use a QR code</summary>
               {showInvitation && (
                 <>
                   {!advertisedEndpoint ? (
-                    <span className="text-[var(--text-10)] text-[var(--muted)]">
+                    <span className="text-10 text-[var(--muted)]">
                       Enable Tailscale access first.
                     </span>
                   ) : !mesh.invitation ? (
-                    <span className="flex items-center gap-2 text-[var(--text-10)] text-[var(--muted)]">
+                    <span className="flex items-center gap-2 text-10 text-[var(--muted)]">
                       <IconSpinner className="h-3.5 w-3.5" /> Preparing a secure pairing code…
                     </span>
                   ) : null}
@@ -423,15 +419,15 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
                         dangerouslySetInnerHTML={{ __html: mesh.invitation.qrSvg }}
                       />
                       <div>
-                        <div className="text-[var(--text-13)] font-[var(--weight-semibold)] text-[var(--fg)]">
+                        <div className="text-13 font-[var(--weight-semibold)] text-[var(--fg)]">
                           Scan from the phone’s Add device screen
                           {mesh.invitationBusy ? (
-                            <span className="ml-2 text-[var(--text-10)] font-normal text-[var(--muted)]">
+                            <span className="ml-2 text-10 font-normal text-[var(--muted)]">
                               Refreshing…
                             </span>
                           ) : null}
                         </div>
-                        <p className="mt-1 text-[var(--text-12)] text-[var(--muted)]">
+                        <p className="mt-1 text-12 text-[var(--muted)]">
                           Expires at {new Date(mesh.invitation.expiresAt).toLocaleTimeString()}. New
                           devices need your approval.
                         </p>
@@ -444,12 +440,12 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
                               ),
                             )
                           }
-                          className="mt-2 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wider text-[var(--accent)]"
+                          className="mt-2 text-10 font-[var(--weight-semibold)] uppercase tracking-wider text-[var(--accent)]"
                         >
                           Copy pairing code
                         </button>
                         {copyNotice && (
-                          <p role="status" className="text-[var(--text-11)] text-[var(--muted)]">
+                          <p role="status" className="text-11 text-[var(--muted)]">
                             {copyNotice}
                           </p>
                         )}
@@ -460,12 +456,10 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
               )}
             </details>
             <details className="rounded-lg border border-[var(--border-subtle)] p-4 mt-2">
-              <summary className="cursor-pointer text-[var(--text-12)] font-medium">
-                Enter a pairing code
-              </summary>
+              <summary className="cursor-pointer text-12 font-medium">Enter a pairing code</summary>
               <div className="grid gap-3 border-t border-[var(--border-subtle)] py-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
                 <label className="grid gap-1">
-                  <span className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wider text-[var(--muted-dim)]">
+                  <span className="text-10 font-[var(--weight-semibold)] uppercase tracking-wider text-[var(--muted-dim)]">
                     Pairing code
                   </span>
                   <textarea
@@ -473,14 +467,14 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
                     onChange={(event) => setJoinCode(event.target.value)}
                     rows={3}
                     placeholder="Paste a code from the other Hub"
-                    className="resize-y rounded border border-[var(--border)] bg-[var(--panel)] px-3 py-2 font-mono text-[var(--text-11)] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
+                    className="resize-y rounded border border-[var(--border)] bg-[var(--panel)] px-3 py-2 font-mono text-11 text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
                   />
                 </label>
                 <button
                   type="button"
                   disabled={mesh.busyId === 'join' || !joinCode.trim()}
                   onClick={() => void mesh.join(joinCode)}
-                  className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-4 text-[var(--text-11)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--fg)] hover:bg-[var(--hover)] disabled:opacity-50"
+                  className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-4 text-11 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--fg)] hover:bg-[var(--hover)] disabled:opacity-50"
                 >
                   {mesh.busyId === 'join' ? 'Waiting for approval…' : 'Request to join'}
                 </button>
@@ -488,9 +482,9 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
             </details>
           </section>
 
-          <details className="order-2 text-[var(--text-11)] text-[var(--muted)]">
+          <details className="order-2 text-11 text-[var(--muted)]">
             <summary className="cursor-pointer">Security & network details</summary>
-            <p className="mt-1 max-w-3xl text-[var(--text-11)] leading-relaxed text-[var(--muted)]">
+            <p className="mt-1 max-w-3xl text-11 leading-relaxed text-[var(--muted)]">
               Device signatures protect identity and destination permissions. A bridge Hub can still
               read ordinary payloads it forwards because this milestone uses TLS between devices.
               Provider credential transfers are separately encrypted for the receiving device.
@@ -512,29 +506,27 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
               >
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
-                    <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wider text-[var(--yellow)]">
+                    <div className="text-10 font-[var(--weight-semibold)] uppercase tracking-wider text-[var(--yellow)]">
                       {existing ? 'Connection recovery' : 'Approval requested'}
                     </div>
                     <h3 className="mt-1 text-[15px] font-[var(--weight-semibold)] text-[var(--fg)]">
                       {pending.device.name}
                     </h3>
-                    <div className="text-[var(--text-10)] text-[var(--muted-dim)]">
-                      {pending.device.platform}
-                    </div>
+                    <div className="text-10 text-[var(--muted-dim)]">{pending.device.platform}</div>
                   </div>
-                  <div className="text-[var(--text-11)] text-[var(--muted)]">
+                  <div className="text-11 text-[var(--muted)]">
                     {existing ? 'Existing permissions are preserved' : 'Default: deny all controls'}
                   </div>
                 </div>
                 {existing ? (
-                  <p className="mt-4 text-[var(--text-11)] leading-relaxed text-[var(--muted)]">
+                  <p className="mt-4 text-11 leading-relaxed text-[var(--muted)]">
                     This request only repairs connectivity. Change this device's permissions later
                     from Trusted devices.
                   </p>
                 ) : (
                   <>
                     <details className="mt-4">
-                      <summary className="cursor-pointer text-[var(--text-12)]">
+                      <summary className="cursor-pointer text-12">
                         Permissions · {selected.size} selected
                         {administrator ? ' · Administrator' : ''}
                       </summary>
@@ -547,7 +539,7 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
                           }
                         />
                       </div>
-                      <label className="mt-3 flex items-center gap-2 text-[var(--text-11)] text-[var(--muted)]">
+                      <label className="mt-3 flex items-center gap-2 text-11 text-[var(--muted)]">
                         <input
                           type="checkbox"
                           checked={administrator}
@@ -575,7 +567,7 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
                         administrator,
                       )
                     }
-                    className="rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-3 py-2 text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg)] disabled:opacity-50"
+                    className="rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-3 py-2 text-11 font-[var(--weight-semibold)] text-[var(--fg)] disabled:opacity-50"
                   >
                     Approve device
                   </button>
@@ -583,7 +575,7 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
                     type="button"
                     disabled={mesh.busyId === pending.id}
                     onClick={() => void mesh.reject(pending.id)}
-                    className="rounded border border-[var(--border-subtle)] px-3 py-2 text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--muted)] disabled:opacity-50"
+                    className="rounded border border-[var(--border-subtle)] px-3 py-2 text-11 font-[var(--weight-semibold)] text-[var(--muted)] disabled:opacity-50"
                   >
                     Reject
                   </button>
@@ -598,11 +590,11 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
         <section>
           <div className="mb-3 flex items-end justify-between gap-3">
             <div>
-              <p className="text-[var(--text-11)] text-[var(--muted)]">
+              <p className="text-11 text-[var(--muted)]">
                 {mesh.status?.devices.filter((device) => !device.revokedAt).length ?? 0} devices
               </p>
             </div>
-            <div className="text-[var(--text-10)] uppercase tracking-wider text-[var(--muted-dim)]">
+            <div className="text-10 uppercase tracking-wider text-[var(--muted-dim)]">
               Live status
             </div>
           </div>

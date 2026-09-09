@@ -53,7 +53,7 @@ export function ChatMessageFrame({
           {at ? (
             <RelativeTimeText
               at={at}
-              className="pointer-events-none whitespace-nowrap text-[var(--type-caption)] leading-none tabular-nums text-[var(--chat-user-message-time)]"
+              className="pointer-events-none whitespace-nowrap text-caption leading-none tabular-nums text-[var(--chat-user-message-time)]"
               title={new Date(at).toLocaleString()}
             />
           ) : null}
@@ -69,7 +69,7 @@ export function ChatMessageFrame({
           {at ? (
             <RelativeTimeText
               at={at}
-              className="pointer-events-none whitespace-nowrap text-[var(--type-caption)] leading-none tabular-nums text-[var(--chat-message-time)]"
+              className="pointer-events-none whitespace-nowrap text-caption leading-none tabular-nums text-[var(--chat-message-time)]"
               title={new Date(at).toLocaleString()}
             />
           ) : null}
@@ -82,7 +82,7 @@ export function ChatMessageFrame({
         >
           {showRoleLabel ? (
             <span
-              className="pb-1 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--user-muted)]"
+              className="pb-1 text-10 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--user-muted)]"
               style={{ fontFamily: 'var(--display)' }}
             >
               {label}
@@ -97,7 +97,7 @@ export function ChatMessageFrame({
         >
           {!user && showRoleLabel ? (
             <span
-              className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--accent)]"
+              className="text-10 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--accent)]"
               style={{ fontFamily: 'var(--display)' }}
             >
               {label}
@@ -107,7 +107,7 @@ export function ChatMessageFrame({
             {user ? headerEnd : null}
             {user && showRoleLabel ? (
               <span
-                className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--user-muted)]"
+                className="text-10 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--user-muted)]"
                 style={{ fontFamily: 'var(--display)' }}
               >
                 {label}

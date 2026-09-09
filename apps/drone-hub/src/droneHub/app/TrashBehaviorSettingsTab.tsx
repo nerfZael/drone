@@ -41,22 +41,22 @@ export function TrashBehaviorSettingsTab({ deleteAction }: TrashBehaviorSettings
 
   return (
     <div className="dh-settings-section">
-      <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+      <div className="text-10 font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
         Trash behavior
       </div>
-      <div className="text-[var(--text-11)] text-[var(--muted-dim)] leading-relaxed">
+      <div className="text-11 text-[var(--muted-dim)] leading-relaxed">
         Choose whether the trash button permanently deletes drones and chats now or archives them first.
       </div>
-      <div className="text-[var(--text-11)] text-[var(--muted-dim)]">
+      <div className="text-11 text-[var(--muted-dim)]">
         Active mode: <span className="text-[var(--fg-secondary)]">{activeDeleteMode === 'archive' ? 'Archive' : 'Permanent delete'}</span>
       </div>
       {deleteSettingsError && (
-        <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--red)]">
+        <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-12 text-[var(--red)]">
           {deleteSettingsError}
         </div>
       )}
       {deleteSettingsNotice && (
-        <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--green)]">
+        <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-12 text-[var(--green)]">
           {deleteSettingsNotice}
         </div>
       )}
@@ -66,7 +66,7 @@ export function TrashBehaviorSettingsTab({ deleteAction }: TrashBehaviorSettings
           type="button"
           onClick={() => setDeleteModeDraft('permanent')}
           disabled={savingDeleteSettings || deleteSettingsLoading}
-          className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
+          className={`h-9 px-3 rounded text-11 font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
             deleteModeDraft === 'permanent'
               ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
               : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -79,7 +79,7 @@ export function TrashBehaviorSettingsTab({ deleteAction }: TrashBehaviorSettings
           type="button"
           onClick={() => setDeleteModeDraft('archive')}
           disabled={savingDeleteSettings || deleteSettingsLoading}
-          className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
+          className={`h-9 px-3 rounded text-11 font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
             deleteModeDraft === 'archive'
               ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
               : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -93,13 +93,13 @@ export function TrashBehaviorSettingsTab({ deleteAction }: TrashBehaviorSettings
       {deleteModeDraft === 'archive' && (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
           <div className="dh-settings-subsection">
-            <div className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-[var(--weight-semibold)]">Archived runtime</div>
-            <div className="text-[var(--text-11)] text-[var(--muted-dim)]">Choose whether archived drones keep running until their retention window expires.</div>
+            <div className="text-10 uppercase tracking-[0.08em] text-[var(--muted-dim)] font-[var(--weight-semibold)]">Archived runtime</div>
+            <div className="text-11 text-[var(--muted-dim)]">Choose whether archived drones keep running until their retention window expires.</div>
             <select
               value={archiveRuntimePolicyDraft}
               onChange={(e) => setArchiveRuntimePolicyDraft(e.target.value as 'keep-running' | 'stop')}
               disabled={savingDeleteSettings || deleteSettingsLoading}
-              className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 text-[var(--text-12)] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
+              className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 text-12 text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
             >
               {ARCHIVE_RUNTIME_POLICY_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -110,13 +110,13 @@ export function TrashBehaviorSettingsTab({ deleteAction }: TrashBehaviorSettings
           </div>
 
           <div className="dh-settings-subsection">
-            <div className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-[var(--weight-semibold)]">Retention window</div>
-            <div className="text-[var(--text-11)] text-[var(--muted-dim)]">Auto-delete archived drones and chats after the selected amount of time.</div>
+            <div className="text-10 uppercase tracking-[0.08em] text-[var(--muted-dim)] font-[var(--weight-semibold)]">Retention window</div>
+            <div className="text-11 text-[var(--muted-dim)]">Auto-delete archived drones and chats after the selected amount of time.</div>
             <select
               value={archiveRetentionDraft}
               onChange={(e) => setArchiveRetentionDraft(e.target.value as '1h' | '8h' | '1d' | '1w')}
               disabled={savingDeleteSettings || deleteSettingsLoading}
-              className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 text-[var(--text-12)] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
+              className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 text-12 text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
             >
               {ARCHIVE_RETENTION_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -133,7 +133,7 @@ export function TrashBehaviorSettingsTab({ deleteAction }: TrashBehaviorSettings
           type="button"
           onClick={() => void saveDeleteSettings()}
           disabled={!deleteSettingsDirty || savingDeleteSettings || deleteSettingsLoading}
-          className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
+          className={`h-9 px-3 rounded text-11 font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
             !deleteSettingsDirty || savingDeleteSettings || deleteSettingsLoading
               ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
               : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'

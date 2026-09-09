@@ -273,7 +273,7 @@ export const UiFileInput = React.forwardRef<HTMLInputElement, UiFileInputProps>(
       type="file"
       disabled={disabled}
       className={cn(
-        'dh-field-control block h-[var(--control-height)] w-full cursor-pointer rounded-[var(--radius-medium)] border border-[var(--field-border)] bg-[var(--field-bg)] dh-type-control-compact text-[var(--muted)] transition-[border-color,box-shadow] file:mr-3 file:h-full file:cursor-pointer file:border-0 file:border-r file:border-solid file:border-[var(--border-subtle)] file:bg-[var(--surface-softest)] file:px-3 file:text-[length:var(--text-12)] file:font-normal file:text-[var(--fg-secondary)] hover:border-[var(--border)] hover:file:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40 disabled:file:cursor-not-allowed',
+        'dh-field-control block h-[var(--control-height)] w-full cursor-pointer rounded-[var(--radius-medium)] border border-[var(--field-border)] bg-[var(--field-bg)] dh-type-control-compact text-[var(--muted)] transition-[border-color,box-shadow] file:mr-3 file:h-full file:cursor-pointer file:border-0 file:border-r file:border-solid file:border-[var(--border-subtle)] file:bg-[var(--surface-softest)] file:px-3 file:text-12 file:font-normal file:text-[var(--fg-secondary)] hover:border-[var(--border)] hover:file:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40 disabled:file:cursor-not-allowed',
         className,
       )}
       {...props}

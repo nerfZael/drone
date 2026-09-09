@@ -75,7 +75,7 @@ export function ChatComposerMenu({
                 setOpen(false);
                 action.onSelect();
               }}
-              className={`flex w-full items-center gap-2 px-3 py-2 text-left text-[var(--text-11)] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+              className={`flex w-full items-center gap-2 px-3 py-2 text-left text-11 transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                 action.active
                   ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
                   : 'text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
@@ -85,7 +85,7 @@ export function ChatComposerMenu({
                 {action.icon}
               </span>
               <span className="min-w-0 flex-1 truncate">{action.label}</span>
-              {action.badge ? <span className="flex-shrink-0 text-[var(--text-9)] text-[var(--muted-dim)]">{action.badge}</span> : null}
+              {action.badge ? <span className="flex-shrink-0 text-9 text-[var(--muted-dim)]">{action.badge}</span> : null}
               {action.active ? <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--accent)]" /> : null}
             </button>
           ))}

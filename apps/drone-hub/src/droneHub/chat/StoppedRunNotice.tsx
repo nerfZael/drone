@@ -17,19 +17,19 @@ export function StoppedRunNotice({ reason, at }: { reason?: string; at?: string 
       </span>
       <span className="min-w-0 flex-1">
         <span
-          className="block text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--yellow)]"
+          className="block text-10 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--yellow)]"
           style={{ fontFamily: 'var(--display)' }}
         >
           Run stopped
         </span>
-        <span className="mt-0.5 block text-[var(--text-10-5)] leading-[1.4] text-[var(--muted)]">
+        <span className="mt-0.5 block text-10-5 leading-[1.4] text-[var(--muted)]">
           {stoppedRunDetail(reason)}
         </span>
       </span>
       {at ? (
         <RelativeTimeText
           at={at}
-          className="flex-none font-mono text-[var(--text-9)] text-[var(--muted-dim)]"
+          className="flex-none font-mono text-9 text-[var(--muted-dim)]"
           title={new Date(at).toLocaleString()}
         />
       ) : null}

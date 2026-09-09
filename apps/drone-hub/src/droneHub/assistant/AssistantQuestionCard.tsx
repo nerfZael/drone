@@ -24,18 +24,45 @@ function optionLetter(index: number): string {
 }
 
 function initialResponses(request: ChatQuestionRequest): Record<string, DraftResponse | undefined> {
-  return Object.fromEntries(
-    request.questions.map((question) => {
-      const recommended = question.choices.find((choice) => choice.recommended);
-      return [
-        question.id,
-        recommended
-          ? ({ outcome: 'choice', choiceId: recommended.id } satisfies DraftResponse)
-          : undefined,
-      ];
-    }),
+  return Object.fromEntries(request.questions.map((question) => [question.id, undefined]));
+}
+
+function IconCheck({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
+      <path d="M3.5 8.5l3 3 6-7" />
+    </svg>
   );
 }
+
+const optionRowClass = (selected: boolean, dimmed: boolean) =>
+  `group flex cursor-pointer items-start gap-3 rounded-[var(--radius-medium)] border px-3 py-2.5 transition-colors focus-within:ring-2 focus-within:ring-[var(--focus-ring)] focus-within:ring-offset-0 ${
+    selected
+      ? 'border-[var(--accent-border)] bg-[color-mix(in_srgb,var(--accent)_15%,transparent)]'
+      : 'border-[var(--border-subtle)] bg-[var(--surface-inset)] hover:border-[var(--border)] hover:bg-[var(--surface-strong)]'
+  } ${dimmed ? 'opacity-60 hover:opacity-100' : ''}`;
+
+const optionLetterClass = (selected: boolean) =>
+  `inline-flex h-6 min-w-6 shrink-0 items-center justify-center rounded-[var(--radius-medium)] px-1 text-10 font-[var(--weight-strong)] leading-none transition-colors ${
+    selected
+      ? 'bg-[var(--accent)] text-[var(--accent-fg)]'
+      : 'bg-[var(--surface-strong)] text-[var(--fg-secondary)] group-hover:text-[var(--fg-strong)]'
+  }`;
+
+const headerButtonClass =
+  'inline-flex h-7 shrink-0 items-center rounded-[var(--radius-medium)] px-2 text-10 font-[var(--weight-semibold)] text-[var(--fg-secondary)] transition-colors hover:bg-[var(--surface-strong)] hover:text-[var(--fg-strong)] disabled:cursor-not-allowed disabled:opacity-40';
+
+const headerIconButtonClass =
+  'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-medium)] text-[var(--fg-secondary)] transition-colors hover:bg-[var(--surface-strong)] hover:text-[var(--fg-strong)] disabled:cursor-not-allowed disabled:opacity-30';
 
 export function AssistantQuestionCard({
   request,
@@ -56,9 +83,10 @@ export function AssistantQuestionCard({
   const [notes, setNotes] = React.useState('');
   const [activeQuestionIndex, setActiveQuestionIndex] = React.useState(0);
   const viewMode = useAssistantQuestionViewMode();
-  const singleQuestion = viewMode === 'single';
-  const locked = busy || disabled;
   const questionCount = request.questions.length;
+  const multiQuestion = questionCount > 1;
+  const singleQuestion = multiQuestion && viewMode === 'single';
+  const locked = busy || disabled;
   const visibleQuestions = singleQuestion
     ? request.questions.slice(activeQuestionIndex, activeQuestionIndex + 1)
     : request.questions;
@@ -69,10 +97,11 @@ export function AssistantQuestionCard({
     if (!singleQuestion || activeQuestionIndex >= questionCount - 1) return;
     setActiveQuestionIndex((current) => Math.min(questionCount - 1, current + 1));
   };
-  const complete = request.questions.every((question) => {
+  const unanswered = request.questions.filter((question) => {
     const response = responses[question.id];
-    return response != null && (response.outcome !== 'custom' || response.text.trim().length > 0);
-  });
+    return response == null || (response.outcome === 'custom' && response.text.trim().length === 0);
+  }).length;
+  const complete = unanswered === 0;
   const submit = () => {
     if (!complete || locked) return;
     onSubmit({
@@ -93,61 +122,90 @@ export function AssistantQuestionCard({
       ...(notes.trim() ? { notes: notes.trim() } : {}),
     });
   };
+  const submitLabel = questionCount === 1 ? 'Submit answer' : `Submit all ${questionCount} answers`;
+  const submitHint = complete
+    ? undefined
+    : unanswered === 1
+      ? 'Answer or skip the remaining question first'
+      : `Answer or skip the remaining ${unanswered} questions first`;
 
   return (
     <section
-      className="relative min-w-0 max-w-[var(--chat-interactive-max)] rounded-[var(--radius-large)] border border-[var(--chat-card-border)] bg-[var(--chat-card-bg)] px-3 py-3 text-[var(--fg-secondary)]"
+      className="relative min-w-0 max-w-[var(--chat-interactive-max)] rounded-[var(--radius-large)] border border-[var(--chat-card-border)] bg-[var(--chat-card-bg)] px-4 py-3.5 text-[var(--fg-secondary)]"
       role="region"
       aria-label="Questions from the agent"
       aria-busy={busy || undefined}
       data-assistant-question-card="true"
     >
-      {request.subscriptionId ? (
-        <p className="mb-3 text-[var(--text-11)] text-[var(--fg-muted)]">
-          You can answer while the agent works or after it finishes.
-        </p>
-      ) : null}
-      <div className="space-y-3">
+      <div className={singleQuestion ? '' : 'space-y-5'}>
         {visibleQuestions.map((question) => {
           const questionIndex = request.questions.indexOf(question);
           const response = responses[question.id];
+          const skipped = response?.outcome === 'skipped';
           const titleId = `${request.id}-${question.id}-title`;
+          const showViewToggle = multiQuestion && (singleQuestion || questionIndex === 0);
           return (
             <fieldset
               key={question.id}
               disabled={locked}
               aria-labelledby={titleId}
-              className="min-w-0 space-y-2"
+              className="min-w-0 space-y-2.5"
             >
               <legend className="sr-only">{question.question}</legend>
-              <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-4 gap-y-2">
-                <div className="flex min-w-[min(100%,28rem)] flex-1 flex-wrap items-center gap-2">
-                  <div
-                    id={titleId}
-                    className="min-w-0 text-[var(--chat-question-size)] font-[var(--weight-strong)] leading-snug text-[var(--fg-strong)]"
+              <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-4 gap-y-1.5">
+                <div
+                  id={titleId}
+                  className="min-w-[min(100%,20rem)] flex-1 text-chat-question font-[var(--weight-strong)] leading-snug text-[var(--fg-strong)]"
+                >
+                  {singleQuestion || !multiQuestion
+                    ? question.question
+                    : `${questionIndex + 1}. ${question.question}`}
+                  <span
+                    className="ml-2 inline-flex h-5 translate-y-[-1px] items-center rounded-full border border-[var(--accent-border)] bg-[var(--accent-subtle)] px-1.5 align-middle text-9 font-[var(--weight-semibold)] leading-none text-[var(--accent)]"
+                    title={`Importance ${question.importance} of 100, as rated by the agent`}
                   >
-                    {singleQuestion
-                      ? question.question
-                      : `${questionIndex + 1}. ${question.question}`}
-                  </div>
-                  <span className="shrink-0 rounded bg-[var(--surface-strong)] px-1.5 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
-                    Importance {question.importance}/100
+                    {question.importance}/100
                   </span>
                 </div>
-                {singleQuestion || questionIndex === 0 ? (
-                  <div className="flex shrink-0 items-center gap-1 text-[var(--text-10)] text-[var(--fg-secondary)]">
+                {multiQuestion ? (
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    {skipped ? (
+                      <span className="inline-flex h-7 items-center rounded-[var(--radius-medium)] border border-[var(--yellow-border)] bg-[var(--yellow-subtle)] px-2 text-10 font-[var(--weight-semibold)] text-[var(--yellow)]">
+                        Skipped
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        aria-label="Skip this question"
+                        title="Skip this question"
+                        onClick={() => {
+                          setResponses((current) => ({
+                            ...current,
+                            [question.id]: { outcome: 'skipped' },
+                          }));
+                          advanceQuestion();
+                        }}
+                        className={headerButtonClass}
+                      >
+                        Skip
+                      </button>
+                    )}
                     {singleQuestion ? (
                       <>
+                        <span
+                          aria-hidden="true"
+                          className="mx-1 h-4 w-px bg-[var(--border-subtle)]"
+                        />
                         <button
                           type="button"
                           disabled={locked || activeQuestionIndex === 0}
                           onClick={() => goToQuestion(activeQuestionIndex - 1)}
                           aria-label="Previous question"
-                          className="inline-flex h-7 w-7 items-center justify-center rounded text-[var(--fg-secondary)] hover:bg-[var(--surface-strong)] hover:text-[var(--fg-strong)] disabled:opacity-30"
+                          className={headerIconButtonClass}
                         >
                           <IconChevronLeft className="h-3.5 w-3.5" />
                         </button>
-                        <span className="min-w-10 text-center tabular-nums">
+                        <span className="min-w-10 text-center text-10 tabular-nums text-[var(--fg-secondary)]">
                           {activeQuestionIndex + 1} of {questionCount}
                         </span>
                         <button
@@ -155,47 +213,40 @@ export function AssistantQuestionCard({
                           disabled={locked || activeQuestionIndex >= questionCount - 1}
                           onClick={() => goToQuestion(activeQuestionIndex + 1)}
                           aria-label="Next question"
-                          className="inline-flex h-7 w-7 items-center justify-center rounded text-[var(--fg-secondary)] hover:bg-[var(--surface-strong)] hover:text-[var(--fg-strong)] disabled:opacity-30"
+                          className={headerIconButtonClass}
                         >
                           <IconChevronRight className="h-3.5 w-3.5" />
                         </button>
                       </>
                     ) : null}
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={singleQuestion}
-                      onClick={() => setAssistantQuestionViewMode(singleQuestion ? 'all' : 'single')}
-                      className="ml-1 shrink-0 rounded px-2 py-1 text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--fg-secondary)] transition-colors hover:bg-[var(--surface-strong)] hover:text-[var(--fg-strong)]"
-                    >
-                      {singleQuestion ? 'Show all' : 'One at a time'}
-                    </button>
+                    {showViewToggle ? (
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={singleQuestion}
+                        onClick={() =>
+                          setAssistantQuestionViewMode(singleQuestion ? 'all' : 'single')
+                        }
+                        className={`${headerButtonClass} ml-0.5`}
+                      >
+                        {singleQuestion ? 'Show all' : 'One at a time'}
+                      </button>
+                    ) : null}
                   </div>
                 ) : null}
               </div>
               {question.detailedExplanation ? (
                 <MarkdownMessage
                   text={question.detailedExplanation}
-                  className="!text-[var(--text-11)] !leading-relaxed text-[var(--fg-secondary)]"
+                  className="!text-11 !leading-relaxed text-[var(--fg-secondary)]"
                 />
               ) : null}
-              <div className={`${singleQuestion ? 'space-y-0' : 'space-y-1.5'} pt-0.5`}>
+              <div className="space-y-1.5 pt-0.5">
                 {question.choices.map((choice, choiceIndex) => {
                   const selected =
                     response?.outcome === 'choice' && response.choiceId === choice.id;
                   return (
-                    <label
-                      key={choice.id}
-                      className={`flex cursor-pointer items-start gap-2.5 px-2.5 py-2 transition-colors ${
-                        singleQuestion
-                          ? selected
-                            ? 'rounded-[var(--radius-medium)] border border-transparent bg-[var(--chat-card-selected)]'
-                            : 'rounded-none border-0 border-b border-[var(--border-subtle)] bg-transparent hover:bg-[var(--surface-strong)]'
-                          : selected
-                            ? 'rounded-[var(--radius-medium)] border border-[var(--accent)] bg-[var(--chat-card-selected)]'
-                            : 'rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--surface-inset)] hover:border-[var(--accent-muted)]'
-                      }`}
-                    >
+                    <label key={choice.id} className={optionRowClass(selected, skipped)}>
                       <input
                         type="radio"
                         name={`${request.id}:${question.id}`}
@@ -210,113 +261,81 @@ export function AssistantQuestionCard({
                         }}
                         className="sr-only"
                       />
-                      <span
-                        className={`inline-flex h-7 min-w-7 shrink-0 items-center justify-center rounded-[var(--radius-medium)] text-[var(--text-10)] font-[var(--weight-semibold)] ${
-                          selected
-                            ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
-                            : 'bg-[var(--surface-strong)] text-[var(--fg-secondary)]'
-                        }`}
-                      >
+                      <span className={optionLetterClass(selected)}>
                         {optionLetter(choiceIndex)}
                       </span>
-                      <span className="min-w-0 flex-1 text-[var(--text-12)]">
-                        <span className="font-[var(--weight-semibold)] text-[var(--fg-strong)]">
+                      <span className="min-w-0 flex-1 text-12 leading-snug">
+                        <span className="font-[var(--weight-emphasis)] text-[var(--fg-strong)]">
                           {choice.label}
                         </span>
                         {choice.recommended ? (
-                          <span className="ml-2 rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-1.5 py-0.5 text-[var(--text-8)] font-[var(--weight-bold)] uppercase text-[var(--accent)]">
+                          <span className="ml-2 inline-block translate-y-[-1px] rounded border border-[var(--accent-border)] bg-[var(--accent-subtle)] px-1.5 py-0.5 text-8 font-[var(--weight-strong)] uppercase leading-none tracking-wide text-[var(--accent)]">
                             Recommended
                           </span>
                         ) : null}
                         {choice.description ? (
-                          <span className="mt-0.5 block text-[var(--text-11)] leading-snug text-[var(--fg-secondary)]">
+                          <span className="mt-1 block text-11 leading-snug text-[var(--fg-secondary)]">
                             {choice.description}
                           </span>
                         ) : null}
                       </span>
-                      {singleQuestion && selected ? (
-                        <IconChevronRight className="mt-1 h-3.5 w-3.5 shrink-0 text-[var(--muted)]" />
-                      ) : null}
+                      <IconCheck
+                        className={`mt-1 h-3.5 w-3.5 shrink-0 text-[var(--accent)] transition-opacity ${
+                          selected ? 'opacity-100' : 'opacity-0'
+                        }`}
+                      />
                     </label>
                   );
                 })}
-                <label
-                  className={`block px-2.5 py-2 transition-colors ${
-                    singleQuestion
-                      ? response?.outcome === 'custom'
-                        ? 'rounded-[var(--radius-medium)] border border-transparent bg-[var(--chat-card-selected)]'
-                        : 'rounded-none border-0 border-b border-[var(--border-subtle)] bg-transparent hover:bg-[var(--surface-strong)]'
-                      : response?.outcome === 'custom'
-                        ? 'rounded-[var(--radius-medium)] border border-[var(--accent)] bg-[var(--chat-card-selected)]'
-                        : 'rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--surface-inset)] hover:border-[var(--accent-muted)]'
-                  }`}
-                >
-                  <span className="flex items-center gap-2.5">
-                    <input
-                      type="radio"
-                      name={`${request.id}:${question.id}`}
-                      checked={response?.outcome === 'custom'}
-                      onChange={() =>
-                        setResponses((current) => ({
-                          ...current,
-                          [question.id]: { outcome: 'custom', text: '' },
-                        }))
-                      }
-                      className="sr-only"
-                    />
-                    <span
-                      className={`inline-flex h-7 min-w-7 items-center justify-center rounded-[var(--radius-medium)] text-[var(--text-10)] font-[var(--weight-semibold)] ${
-                        response?.outcome === 'custom'
-                          ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
-                          : 'bg-[var(--surface-strong)] text-[var(--fg-secondary)]'
-                      }`}
-                    >
-                      {optionLetter(question.choices.length)}
-                    </span>
-                    <span className="text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--fg-strong)]">
+                <label className={optionRowClass(response?.outcome === 'custom', skipped)}>
+                  <input
+                    type="radio"
+                    name={`${request.id}:${question.id}`}
+                    checked={response?.outcome === 'custom'}
+                    onChange={() =>
+                      setResponses((current) => ({
+                        ...current,
+                        [question.id]: { outcome: 'custom', text: '' },
+                      }))
+                    }
+                    className="sr-only"
+                  />
+                  <span className={optionLetterClass(response?.outcome === 'custom')}>
+                    {optionLetter(question.choices.length)}
+                  </span>
+                  <span className="min-w-0 flex-1 text-12 leading-snug">
+                    <span className="font-[var(--weight-emphasis)] text-[var(--fg-strong)]">
                       Something else
                     </span>
+                    {response?.outcome === 'custom' ? (
+                      <textarea
+                        autoFocus
+                        maxLength={4_000}
+                        value={response.text}
+                        onChange={(event) =>
+                          setResponses((current) => ({
+                            ...current,
+                            [question.id]: { outcome: 'custom', text: event.target.value },
+                          }))
+                        }
+                        rows={2}
+                        placeholder="Type your answer"
+                        className="mt-2 block w-full resize-y rounded-[var(--radius-medium)] border border-[var(--field-border)] bg-[var(--field-bg)] px-2.5 py-1.5 text-11 font-normal leading-snug text-[var(--field-fg)] outline-none placeholder:text-[var(--field-placeholder)] focus:border-[var(--field-focus-border)]"
+                      />
+                    ) : null}
                   </span>
-                  {response?.outcome === 'custom' ? (
-                    <textarea
-                      autoFocus
-                      maxLength={4_000}
-                      value={response.text}
-                      onChange={(event) =>
-                        setResponses((current) => ({
-                          ...current,
-                          [question.id]: { outcome: 'custom', text: event.target.value },
-                        }))
-                      }
-                      rows={2}
-                      placeholder="Type your answer"
-                      className="mt-2 w-full resize-y rounded border border-[var(--border)] bg-[var(--panel)] px-2 py-1.5 text-[var(--text-11)] text-[var(--fg)] outline-none focus:border-[var(--accent)]"
-                    />
-                  ) : null}
+                  <IconCheck
+                    className={`mt-1 h-3.5 w-3.5 shrink-0 text-[var(--accent)] transition-opacity ${
+                      response?.outcome === 'custom' ? 'opacity-100' : 'opacity-0'
+                    }`}
+                  />
                 </label>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setResponses((current) => ({
-                      ...current,
-                      [question.id]: { outcome: 'skipped' },
-                    }));
-                    advanceQuestion();
-                  }}
-                  className={`${singleQuestion ? 'ml-auto block' : ''} rounded px-2 py-0.5 text-[var(--text-10)] transition-colors ${
-                    response?.outcome === 'skipped'
-                      ? 'bg-[var(--surface-inset-strong)] font-[var(--weight-semibold)] text-[var(--fg-strong)]'
-                      : 'text-[var(--fg-secondary)] hover:bg-[var(--surface-strong)] hover:text-[var(--fg-strong)]'
-                  }`}
-                >
-                  {response?.outcome === 'skipped' ? 'Question skipped' : 'Skip this question'}
-                </button>
               </div>
             </fieldset>
           );
         })}
       </div>
-      <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2 border-t border-[var(--border-subtle)] pt-2">
+      <div className="mt-3.5 flex min-w-0 flex-wrap items-center gap-2 border-t border-[var(--border-subtle)] pt-3">
         <label className="min-w-[14rem] flex-1">
           <span className="sr-only">Additional notes</span>
           <textarea
@@ -326,14 +345,14 @@ export function AssistantQuestionCard({
             onChange={(event) => setNotes(event.target.value)}
             rows={1}
             placeholder="Add optional notes for the agent…"
-            className="block min-h-9 w-full resize-y rounded border border-[var(--border)] bg-[var(--surface-inset)] px-3 py-2 text-[var(--text-10)] font-normal leading-tight text-[var(--fg)] outline-none placeholder:text-[var(--muted)] focus:border-[var(--accent)]"
+            className="block min-h-9 w-full resize-y rounded-[var(--radius-medium)] border border-[var(--field-border)] bg-[var(--field-bg)] px-3 py-2 text-11 font-normal leading-tight text-[var(--field-fg)] outline-none placeholder:text-[var(--field-placeholder)] focus:border-[var(--field-focus-border)] disabled:opacity-50"
           />
         </label>
         <button
           type="button"
           disabled={locked}
           onClick={() => onSkip(notes.trim() || undefined)}
-          className="shrink-0 rounded border border-[var(--border)] bg-[var(--surface-inset)] px-3 py-2 text-[var(--text-10)] text-[var(--fg-secondary)] hover:border-[var(--accent-muted)] hover:text-[var(--fg-strong)] disabled:opacity-50"
+          className="inline-flex h-9 shrink-0 items-center rounded-[var(--radius-medium)] border border-[var(--border)] bg-transparent px-3 text-11 font-[var(--weight-semibold)] text-[var(--fg-secondary)] transition-colors hover:bg-[var(--surface-strong)] hover:text-[var(--fg-strong)] disabled:cursor-not-allowed disabled:opacity-40"
         >
           Skip questionnaire
         </button>
@@ -341,18 +360,14 @@ export function AssistantQuestionCard({
           type="button"
           disabled={locked || !complete}
           onClick={submit}
-          className="shrink-0 rounded bg-[var(--accent)] px-3 py-2 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--accent-contrast)] hover:brightness-110 disabled:opacity-50"
+          title={submitHint}
+          className="inline-flex h-9 shrink-0 items-center rounded-[var(--radius-medium)] border border-transparent bg-[var(--accent)] px-3.5 text-11 font-[var(--weight-strong)] text-[var(--accent-fg)] transition-[filter,background-color,color,border-color] hover:brightness-110 disabled:cursor-not-allowed disabled:border-[var(--accent-border)] disabled:bg-[var(--accent-subtle)] disabled:text-[var(--accent)] disabled:opacity-70 disabled:hover:brightness-100"
         >
-          {questionCount === 1 ? 'Submit answer' : `Submit all ${questionCount} answers`}
+          {submitLabel}
         </button>
       </div>
-      {!complete ? (
-        <div className="mt-1.5 text-[var(--text-9)] text-[var(--yellow)]">
-          Answer or skip each question to submit.
-        </div>
-      ) : null}
       {error ? (
-        <div role="alert" className="mt-2 text-[var(--text-9)] text-[var(--red)]">
+        <div role="alert" className="mt-2 text-10 text-[var(--red)]">
           {error}
         </div>
       ) : null}

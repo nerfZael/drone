@@ -57,7 +57,7 @@ function areEnvMapsEqual(a: Record<string, string>, b: Record<string, string>): 
 function AppliedSourceBadge({ source }: { source: 'repo' | 'drone' }) {
   return (
     <span
-      className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase ${
+      className={`inline-flex items-center rounded border px-1.5 py-0.5 text-9 font-[var(--weight-semibold)] tracking-wide uppercase ${
         source === 'repo'
           ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
           : 'border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--fg-secondary)]'
@@ -254,7 +254,7 @@ export function DroneEnvDock({
       {saveNotice ? (
         <UiPanelStatusStrip tone="success">{saveNotice}</UiPanelStatusStrip>
       ) : null}
-      <UiPanelBody scroll className="flex flex-col gap-3 px-3 py-3 text-[var(--text-11)]">
+      <UiPanelBody scroll className="flex flex-col gap-3 px-3 py-3 text-11">
         {loading ? (
           <UiPaneState kind="loading" title="Loading environment…" compact />
         ) : null}
@@ -263,14 +263,14 @@ export function DroneEnvDock({
             <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3 flex flex-col gap-2">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
+                  <div className="text-10 font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
                     Repository Scope
                   </div>
-                  <div className="text-[var(--text-12)] text-[var(--fg-secondary)] truncate" title={data.repoPath || data.repoLabel}>
+                  <div className="text-12 text-[var(--fg-secondary)] truncate" title={data.repoPath || data.repoLabel}>
                     {data.repoLabel}
                   </div>
                   {data.repoPath ? (
-                    <div className="text-[var(--text-10)] text-[var(--muted-dim)] font-mono truncate" title={data.repoPath}>
+                    <div className="text-10 text-[var(--muted-dim)] font-mono truncate" title={data.repoPath}>
                       {data.repoPath}
                     </div>
                   ) : null}
@@ -282,13 +282,13 @@ export function DroneEnvDock({
                   disabled={saving}
                 />
               </div>
-              <div className="text-[var(--text-10)] text-[var(--muted-dim)]">
+              <div className="text-10 text-[var(--muted-dim)]">
                 Repo defaults for new container drones are {data.autoApplyToNewContainerDrones ? 'enabled' : 'disabled'}.
               </div>
             </div>
 
             <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3 flex flex-col gap-2">
-              <div className="text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
+              <div className="text-10 font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
                 Applied Variables
               </div>
               {appliedEntries.length === 0 ? (
@@ -298,8 +298,8 @@ export function DroneEnvDock({
                   {appliedEntries.map((entry) => (
                     <div key={`applied-${entry.source}-${entry.key}`} className="grid grid-cols-[auto_minmax(0,180px)_minmax(0,1fr)] gap-2 items-center">
                       <AppliedSourceBadge source={entry.source} />
-                      <span className="font-mono text-[var(--text-11)] text-[var(--fg-secondary)] truncate">{entry.key}</span>
-                      <span className="font-mono text-[var(--text-11)] text-[var(--muted-dim)] truncate" title={entry.value}>
+                      <span className="font-mono text-11 text-[var(--fg-secondary)] truncate">{entry.key}</span>
+                      <span className="font-mono text-11 text-[var(--muted-dim)] truncate" title={entry.value}>
                         {entry.value}
                       </span>
                     </div>
@@ -310,7 +310,7 @@ export function DroneEnvDock({
 
             {repoEntries.length > 0 ? (
               <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3 flex flex-col gap-2">
-                <div className="text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
+                <div className="text-10 font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
                   Repository Variables
                 </div>
                 {activeRepoEntries.length === 0 ? (
@@ -318,8 +318,8 @@ export function DroneEnvDock({
                 ) : (
                   activeRepoEntries.map((entry) => (
                     <div key={`repo-${entry.key}`} className="grid grid-cols-[minmax(0,180px)_minmax(0,1fr)_auto] gap-2 items-center">
-                      <span className="font-mono text-[var(--text-11)] text-[var(--fg-secondary)] truncate">{entry.key}</span>
-                      <span className="font-mono text-[var(--text-11)] text-[var(--muted-dim)] truncate" title={entry.value}>
+                      <span className="font-mono text-11 text-[var(--fg-secondary)] truncate">{entry.key}</span>
+                      <span className="font-mono text-11 text-[var(--muted-dim)] truncate" title={entry.value}>
                         {entry.value}
                       </span>
                       <UiToolbarButton
@@ -333,13 +333,13 @@ export function DroneEnvDock({
                 )}
                 {excludedRepoEntries.length > 0 ? (
                   <div className="pt-2 border-t border-[var(--border-subtle)] flex flex-col gap-2">
-                    <div className="text-[var(--text-10)] text-[var(--muted-dim)] uppercase tracking-wide" style={{ fontFamily: 'var(--display)' }}>
+                    <div className="text-10 text-[var(--muted-dim)] uppercase tracking-wide" style={{ fontFamily: 'var(--display)' }}>
                       Excluded From This Drone
                     </div>
                     {excludedRepoEntries.map((entry) => (
                       <div key={`excluded-${entry.key}`} className="grid grid-cols-[minmax(0,180px)_minmax(0,1fr)_auto] gap-2 items-center opacity-80">
-                        <span className="font-mono text-[var(--text-11)] text-[var(--fg-secondary)] truncate">{entry.key}</span>
-                        <span className="font-mono text-[var(--text-11)] text-[var(--muted-dim)] truncate" title={entry.value}>
+                        <span className="font-mono text-11 text-[var(--fg-secondary)] truncate">{entry.key}</span>
+                        <span className="font-mono text-11 text-[var(--muted-dim)] truncate" title={entry.value}>
                           {entry.value}
                         </span>
                         <UiToolbarButton
@@ -356,7 +356,7 @@ export function DroneEnvDock({
             ) : null}
 
             <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3 flex flex-col gap-3">
-              <div className="text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
+              <div className="text-10 font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
                 Custom Variables
               </div>
               <EnvEditorRows

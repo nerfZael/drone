@@ -59,14 +59,14 @@ export function AgentRunFailureNotice({
         </span>
         <span className="min-w-0 flex-1">
           <span
-            className={`block text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide ${
+            className={`block text-10 font-[var(--weight-semibold)] uppercase tracking-wide ${
               recoverable ? 'text-[var(--yellow)]' : 'text-[var(--red)]'
             }`}
             style={{ fontFamily: 'var(--display)' }}
           >
             {failure.title}
           </span>
-          <span className="mt-0.5 block text-[var(--text-10-5)] leading-[1.45] text-[var(--muted)]">
+          <span className="mt-0.5 block text-10-5 leading-[1.45] text-[var(--muted)]">
             {failure.summary}{' '}
             {recoverable ? (
               queueInterruptionState === 'blocked' ? (
@@ -96,7 +96,7 @@ export function AgentRunFailureNotice({
         {at ? (
           <RelativeTimeText
             at={at}
-            className="flex-none font-mono text-[var(--text-9)] text-[var(--muted-dim)]"
+            className="flex-none font-mono text-9 text-[var(--muted-dim)]"
             title={new Date(at).toLocaleString()}
           />
         ) : null}
@@ -107,7 +107,7 @@ export function AgentRunFailureNotice({
             type="button"
             disabled={resolvingInterruption}
             onClick={() => void onResolveInterruption('skip')}
-            className="inline-flex min-h-7 items-center rounded-[var(--radius-small)] border border-[var(--border)] px-2.5 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted)] hover:bg-[var(--panel-overlay)] hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex min-h-7 items-center rounded-[var(--radius-small)] border border-[var(--border)] px-2.5 text-10 font-[var(--weight-semibold)] text-[var(--muted)] hover:bg-[var(--panel-overlay)] hover:text-[var(--fg)] disabled:cursor-not-allowed disabled:opacity-50"
             title="Do not continue this response; allow later queued prompts to run"
           >
             {resolvingInterruption ? 'Working…' : 'Skip and run queued'}
@@ -115,16 +115,16 @@ export function AgentRunFailureNotice({
         </div>
       ) : null}
       {interruptionError ? (
-        <div role="alert" className="ml-9 mt-2 text-[var(--text-10)] text-[var(--red)]">
+        <div role="alert" className="ml-9 mt-2 text-10 text-[var(--red)]">
           {stripAnsi(interruptionError)}
         </div>
       ) : null}
       {recoverable ? (
-        <details className="ml-9 mt-2 text-[var(--text-10)] text-[var(--muted-dim)]">
+        <details className="ml-9 mt-2 text-10 text-[var(--muted-dim)]">
           <summary className="w-fit cursor-pointer select-none hover:text-[var(--muted)]">
             Technical details
           </summary>
-          <pre className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--panel-overlay)] px-2 py-1.5 font-mono text-[var(--text-9)] leading-relaxed">
+          <pre className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--panel-overlay)] px-2 py-1.5 font-mono text-9 leading-relaxed">
             {failure.technicalMessage}
           </pre>
         </details>

@@ -88,20 +88,20 @@ function RemoteSidebar({
               <div className="dh-type-control-compact text-[var(--sidebar-fg)]">
                 Device offline
               </div>
-              <div className="mt-1 text-[var(--text-9)] leading-relaxed text-[var(--sidebar-meta-fg)]">
+              <div className="mt-1 text-9 leading-relaxed text-[var(--sidebar-meta-fg)]">
                 Drones will appear when it reconnects.
               </div>
             </div>
           </div>
         ) : null}
         {model.loadingDrones && model.drones.length === 0 ? (
-          <div className="flex items-center gap-2 px-2 py-4 text-[var(--text-10)] text-[var(--muted)]">
+          <div className="flex items-center gap-2 px-2 py-4 text-10 text-[var(--muted)]">
             <IconSpinner className="h-3.5 w-3.5 animate-spin" /> Loading drones…
           </div>
         ) : null}
         {model.listError && model.drones.length === 0 ? (
           <div className="rounded-[var(--radius-medium)] border border-[var(--red-border)] bg-[var(--red-subtle)] p-3">
-            <div className="text-[var(--text-10)] text-[var(--red)]">{model.listError}</div>
+            <div className="text-10 text-[var(--red)]">{model.listError}</div>
             <button
               type="button"
               className="mt-2 dh-type-control-compact text-[var(--accent)] hover:underline"
@@ -115,7 +115,7 @@ function RemoteSidebar({
         !model.loadingDrones &&
         !model.listError &&
         model.drones.length === 0 ? (
-          <div className="px-2 py-6 text-center text-[var(--text-10)] text-[var(--muted)]">
+          <div className="px-2 py-6 text-center text-10 text-[var(--muted)]">
             This device has no drones yet.
           </div>
         ) : null}
@@ -135,7 +135,7 @@ function RemoteSidebar({
                     <div key={drone.id}>
                       <button
                         type="button"
-                        className={`relative flex h-8 w-full items-center gap-2 rounded-[var(--radius-medium)] px-2 text-left text-[var(--text-11)] transition-colors hover:bg-[var(--hover)] ${
+                        className={`relative flex h-8 w-full items-center gap-2 rounded-[var(--radius-medium)] px-2 text-left text-11 transition-colors hover:bg-[var(--hover)] ${
                           selected
                             ? 'bg-[var(--sidebar-row-selected-bg)] text-[var(--sidebar-fg-active)]'
                             : 'text-[var(--sidebar-fg)]'
@@ -153,7 +153,7 @@ function RemoteSidebar({
                         />
                         <span className="min-w-0 flex-1 truncate">{drone.name}</span>
                         {drone.runtime === 'host' ? (
-                          <span className="text-[var(--text-9)] uppercase text-[var(--muted-dim)]">
+                          <span className="text-9 uppercase text-[var(--muted-dim)]">
                             host
                           </span>
                         ) : null}
@@ -167,7 +167,7 @@ function RemoteSidebar({
                               <button
                                 key={chat}
                                 type="button"
-                                className={`flex h-[26px] w-full items-center gap-2 rounded-[var(--radius-small)] px-2 text-left text-[var(--text-10)] transition-colors hover:bg-[var(--hover)] ${
+                                className={`flex h-[26px] w-full items-center gap-2 rounded-[var(--radius-small)] px-2 text-left text-10 transition-colors hover:bg-[var(--hover)] ${
                                   active ? 'text-[var(--accent)]' : 'text-[var(--sidebar-subitem-fg)]'
                                 }`}
                                 onClick={() => model.selectChat(drone.id, chat)}
@@ -192,7 +192,7 @@ function RemoteSidebar({
       </div>
 
       <div className="flex h-10 flex-shrink-0 items-center justify-between border-t border-[var(--border)] px-2">
-        <span className="flex min-w-0 items-center gap-2 truncate px-1 text-[var(--text-9)] text-[var(--muted-dim)]">
+        <span className="flex min-w-0 items-center gap-2 truncate px-1 text-9 text-[var(--muted-dim)]">
           <DeviceConnectionIndicator online={routeAvailable} />
           {connectionLabel}
         </span>
@@ -253,7 +253,7 @@ function RemoteMain({
           <div className="truncate dh-type-heading text-[var(--fg)]">
             {model.selectedDrone?.name ?? selectedDevice?.name ?? 'Remote Drone Hub'}
           </div>
-          <div className="truncate text-[var(--text-9)] text-[var(--muted)]">
+          <div className="truncate text-9 text-[var(--muted)]">
             {model.selectedDrone
               ? `${selectedDevice?.name ?? 'Remote device'} · ${model.selectedChat || 'No chat selected'}`
               : !routeAvailable
@@ -293,7 +293,7 @@ function RemoteMain({
       </header>
 
       {!routeAvailable && model.selectedDrone ? (
-        <div className="flex items-center justify-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--surface-softest)] px-4 py-2 text-center text-[var(--text-10)] text-[var(--muted)]">
+        <div className="flex items-center justify-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--surface-softest)] px-4 py-2 text-center text-10 text-[var(--muted)]">
           <DeviceConnectionIndicator online={false} />
           Device offline · This chat is still readable, but sending is paused until it reconnects.
         </div>
@@ -322,7 +322,7 @@ function RemoteMain({
                 >
                   {deviceStatusLoading ? 'Checking…' : 'Retry connection'}
                 </button>
-                <span className="flex items-center gap-2 text-[var(--text-9)] text-[var(--muted-dim)]">
+                <span className="flex items-center gap-2 text-9 text-[var(--muted-dim)]">
                   <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--muted-dim)]" />
                   Checking automatically
                 </span>
@@ -394,14 +394,14 @@ function RemoteMain({
           <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
             <div className="mx-auto flex min-h-full w-full max-w-[var(--chat-prose-max)] flex-col px-5 py-6">
               {model.loadingChat && model.messages.length === 0 ? (
-                <div className="flex flex-1 items-center justify-center gap-2 text-[var(--text-11)] text-[var(--muted)]">
+                <div className="flex flex-1 items-center justify-center gap-2 text-11 text-[var(--muted)]">
                   <IconSpinner className="h-4 w-4 animate-spin" /> Loading chat…
                 </div>
               ) : model.messages.length === 0 &&
                 model.pendingApprovals.length === 0 &&
                 model.pendingQuestionRequests.length === 0 &&
                 model.pendingCount === 0 ? (
-                <div className="flex flex-1 items-center justify-center text-center text-[var(--text-11)] text-[var(--muted)]">
+                <div className="flex flex-1 items-center justify-center text-center text-11 text-[var(--muted)]">
                   Send a prompt to start this remote chat.
                 </div>
               ) : (
@@ -454,7 +454,7 @@ function RemoteMain({
                     />
                   ))}
                   {model.pendingCount > 0 ? (
-                    <div className="flex items-center gap-2 py-2 text-[var(--text-10)] text-[var(--muted)]">
+                    <div className="flex items-center gap-2 py-2 text-10 text-[var(--muted)]">
                       <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--yellow)]" />
                       {model.pendingCount === 1
                         ? 'A prompt is queued on the remote device.'

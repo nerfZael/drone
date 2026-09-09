@@ -125,7 +125,7 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
       <div className="dh-settings-section">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+            <div className="text-10 font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
               Drone Hub MCP access
             </div>
           </div>
@@ -136,7 +136,7 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
 
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_auto] gap-2">
           <label className="flex flex-col gap-1">
-            <span className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">New host token name</span>
+            <span className="text-10 uppercase tracking-[0.08em] text-[var(--muted-dim)]">New host token name</span>
             <input value={mcpHostTokenName} onChange={(e) => setMcpHostTokenName(e.target.value)} className={inputClassName()} placeholder="host codex" />
           </label>
           <div className="flex items-end">
@@ -149,27 +149,27 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
         {mcpTokenRevealValue && (
           <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] p-3 flex flex-col gap-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--green)]" style={{ fontFamily: 'var(--display)' }}>
+              <div className="text-10 uppercase tracking-[0.08em] text-[var(--green)]" style={{ fontFamily: 'var(--display)' }}>
                 New token value
               </div>
-              <button type="button" onClick={clearMcpTokenRevealValue} className="text-[var(--text-10)] uppercase tracking-wide text-[var(--green)] opacity-80 hover:opacity-100">
+              <button type="button" onClick={clearMcpTokenRevealValue} className="text-10 uppercase tracking-wide text-[var(--green)] opacity-80 hover:opacity-100">
                 Hide
               </button>
             </div>
-            <textarea readOnly value={mcpTokenRevealValue} className={`${textareaClassName()} min-h-[70px] font-mono text-[var(--text-11)]`} />
+            <textarea readOnly value={mcpTokenRevealValue} className={`${textareaClassName()} min-h-[70px] font-mono text-11`} />
           </div>
         )}
 
         <div className="overflow-x-auto">
           {mcpAccessTokens.length === 0 ? (
-            <div className="px-3 py-4 text-[var(--text-11)] text-[var(--muted-dim)]">
+            <div className="px-3 py-4 text-11 text-[var(--muted-dim)]">
               No MCP access tokens yet.
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[980px] border-collapse text-left">
                 <thead className="bg-[var(--surface-soft)] border-b border-[var(--border-subtle)]">
-                  <tr className="text-[var(--text-9)] uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+                  <tr className="text-9 uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
                     <th className="px-3 py-2 font-[var(--weight-semibold)]">Name</th>
                     <th className="px-3 py-2 font-[var(--weight-semibold)]">Kind</th>
                     <th className="px-3 py-2 font-[var(--weight-semibold)]">Token</th>
@@ -185,15 +185,15 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
                     const revoked = Boolean(token.revokedAt);
                     return (
                       <tr key={token.id} className={`border-b border-[var(--border-subtle)] last:border-b-0 ${revoked ? 'bg-[var(--red-subtle)]' : 'hover:bg-[var(--surface-soft)]'}`}>
-                        <td className="px-3 py-2 text-[var(--text-12)] text-[var(--fg-secondary)] font-[var(--weight-semibold)] max-w-[220px] truncate">{token.name}</td>
+                        <td className="px-3 py-2 text-12 text-[var(--fg-secondary)] font-[var(--weight-semibold)] max-w-[220px] truncate">{token.name}</td>
                         <td className="px-3 py-2">
-                          <span className={`text-[var(--text-9)] uppercase ${token.kind === 'drone' ? 'text-[var(--accent)]' : 'text-[var(--green)]'}`}>{token.kind}</span>
+                          <span className={`text-9 uppercase ${token.kind === 'drone' ? 'text-[var(--accent)]' : 'text-[var(--green)]'}`}>{token.kind}</span>
                         </td>
-                        <td className="px-3 py-2 text-[var(--text-10)] text-[var(--muted-dim)] font-mono max-w-[220px] truncate">{token.tokenPreview}</td>
-                        <td className="px-3 py-2 text-[var(--text-10)] text-[var(--muted-dim)] font-mono max-w-[180px] truncate">{token.droneId || '-'}</td>
-                        <td className="px-3 py-2 text-[var(--text-10)] text-[var(--muted-dim)] whitespace-nowrap">{formatTokenDate(token.createdAt)}</td>
-                        <td className="px-3 py-2 text-[var(--text-10)] text-[var(--muted-dim)] whitespace-nowrap">{formatTokenDate(token.lastUsedAt)}</td>
-                        <td className={`px-3 py-2 text-[var(--text-9)] uppercase ${revoked ? 'text-[var(--red)]' : 'text-[var(--green)]'}`}>{revoked ? 'Revoked' : 'Active'}</td>
+                        <td className="px-3 py-2 text-10 text-[var(--muted-dim)] font-mono max-w-[220px] truncate">{token.tokenPreview}</td>
+                        <td className="px-3 py-2 text-10 text-[var(--muted-dim)] font-mono max-w-[180px] truncate">{token.droneId || '-'}</td>
+                        <td className="px-3 py-2 text-10 text-[var(--muted-dim)] whitespace-nowrap">{formatTokenDate(token.createdAt)}</td>
+                        <td className="px-3 py-2 text-10 text-[var(--muted-dim)] whitespace-nowrap">{formatTokenDate(token.lastUsedAt)}</td>
+                        <td className={`px-3 py-2 text-9 uppercase ${revoked ? 'text-[var(--red)]' : 'text-[var(--green)]'}`}>{revoked ? 'Revoked' : 'Active'}</td>
                         <td className="px-3 py-2">
                           <div className="flex items-center justify-end gap-2">
                             {token.kind === 'host' && (
@@ -214,7 +214,7 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
             </div>
           )}
         </div>
-        <div className="flex flex-wrap items-center justify-between gap-2 text-[var(--text-10)] text-[var(--muted-dim)]">
+        <div className="flex flex-wrap items-center justify-between gap-2 text-10 text-[var(--muted-dim)]">
           <div>
             Active identities: {activeTokens.length} | Showing {tokenRangeStart}-{tokenRangeEnd} of {mcpAccessTokens.length}
           </div>
@@ -227,7 +227,7 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
                   setTokenPageSize(Number(e.target.value) || 10);
                   setTokenPage(0);
                 }}
-                className={`${inputClassName()} h-7 py-0 text-[var(--text-10)]`}
+                className={`${inputClassName()} h-7 py-0 text-10`}
               >
                 <option value={10}>10</option>
                 <option value={25}>25</option>
@@ -247,7 +247,7 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+          <div className="text-10 font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
             Global MCP servers
           </div>
         </div>
@@ -270,17 +270,17 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
       {(mcpServersError || mcpServersNotice) && (
         <div className="flex flex-col gap-2">
           {mcpServersError && (
-            <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--red)] flex items-center justify-between gap-3">
+            <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-12 text-[var(--red)] flex items-center justify-between gap-3">
               <span>{mcpServersError}</span>
-              <button type="button" onClick={clearMcpServersError} className="text-[var(--text-10)] uppercase tracking-wide opacity-80 hover:opacity-100">
+              <button type="button" onClick={clearMcpServersError} className="text-10 uppercase tracking-wide opacity-80 hover:opacity-100">
                 Dismiss
               </button>
             </div>
           )}
           {mcpServersNotice && (
-            <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--green)] flex items-center justify-between gap-3">
+            <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-12 text-[var(--green)] flex items-center justify-between gap-3">
               <span>{mcpServersNotice}</span>
-              <button type="button" onClick={clearMcpServersNotice} className="text-[var(--text-10)] uppercase tracking-wide opacity-80 hover:opacity-100">
+              <button type="button" onClick={clearMcpServersNotice} className="text-10 uppercase tracking-wide opacity-80 hover:opacity-100">
                 Dismiss
               </button>
             </div>
@@ -291,14 +291,14 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
       <div className="grid min-w-0 grid-cols-1 xl:grid-cols-[240px_minmax(0,1fr)]">
         <div className="min-w-0 border-b border-[var(--border-subtle)] pb-3 xl:border-b-0 xl:border-r xl:pb-0 xl:pr-3">
           <div className="flex items-center justify-between gap-2 px-1">
-            <div className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+            <div className="text-10 uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
               Servers
             </div>
-            <div className="text-[var(--text-10)] text-[var(--muted-dim)]">{mcpServers.length}</div>
+            <div className="text-10 text-[var(--muted-dim)]">{mcpServers.length}</div>
           </div>
           <div className="flex flex-col gap-1 max-h-[70vh] overflow-y-auto pr-1">
             {mcpServers.length === 0 ? (
-              <div className="px-2 py-6 text-center text-[var(--text-11)] text-[var(--muted-dim)]">
+              <div className="px-2 py-6 text-center text-11 text-[var(--muted-dim)]">
                 No global MCP servers yet.
               </div>
             ) : (
@@ -316,12 +316,12 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <div className="text-[var(--text-12)] text-[var(--fg-secondary)] font-medium truncate">{server.name}</div>
-                      <div className={`text-[var(--text-9)] uppercase ${server.enabled ? 'text-[var(--green)]' : 'text-[var(--muted-dim)]'}`}>
+                      <div className="text-12 text-[var(--fg-secondary)] font-medium truncate">{server.name}</div>
+                      <div className={`text-9 uppercase ${server.enabled ? 'text-[var(--green)]' : 'text-[var(--muted-dim)]'}`}>
                         {server.enabled ? 'On' : 'Off'}
                       </div>
                     </div>
-                    <div className="text-[var(--text-10)] text-[var(--muted-dim)] font-mono mt-1 truncate">{server.transport}</div>
+                    <div className="text-10 text-[var(--muted-dim)] font-mono mt-1 truncate">{server.transport}</div>
                   </button>
                 );
               })
@@ -332,10 +332,10 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
         <div className="flex min-w-0 flex-col gap-4 pt-4 xl:pl-4 xl:pt-0">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="min-w-0">
-              <div className="text-[var(--text-13)] font-[var(--weight-semibold)] text-[var(--fg)] truncate">{mcpDraft.id ? mcpDraft.name || 'Untitled MCP server' : 'New MCP server draft'}</div>
+              <div className="text-13 font-[var(--weight-semibold)] text-[var(--fg)] truncate">{mcpDraft.id ? mcpDraft.name || 'Untitled MCP server' : 'New MCP server draft'}</div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <div className={`text-[var(--text-10)] uppercase tracking-[0.08em] ${mcpDraftDirty ? 'text-[var(--accent)]' : 'text-[var(--muted-dim)]'}`}>
+              <div className={`text-10 uppercase tracking-[0.08em] ${mcpDraftDirty ? 'text-[var(--accent)]' : 'text-[var(--muted-dim)]'}`}>
                 {mcpDraftDirty ? 'Unsaved changes' : 'Saved'}
               </div>
               <button type="button" onClick={resetMcpDraft} disabled={!mcpDraftDirty || busy} className={buttonClassName('secondary', !mcpDraftDirty || busy)} style={{ fontFamily: 'var(--display)' }}>
@@ -349,18 +349,18 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <label className="flex flex-col gap-1">
-              <span className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Name</span>
+              <span className="text-10 uppercase tracking-[0.08em] text-[var(--muted-dim)]">Name</span>
               <input value={mcpDraft.name} onChange={(e) => updateMcpDraftField('name', e.target.value)} className={`${inputClassName()} font-mono`} placeholder="github" />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Transport</span>
+              <span className="text-10 uppercase tracking-[0.08em] text-[var(--muted-dim)]">Transport</span>
               <select value={mcpDraft.transport} onChange={(e) => updateMcpDraftField('transport', e.target.value === 'http' ? 'http' : 'stdio')} className={inputClassName()}>
                 <option value="stdio">stdio command</option>
                 <option value="http">HTTP URL</option>
               </select>
             </label>
             <label className="md:col-span-2 flex flex-col gap-1">
-              <span className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Description</span>
+              <span className="text-10 uppercase tracking-[0.08em] text-[var(--muted-dim)]">Description</span>
               <input value={mcpDraft.description} onChange={(e) => updateMcpDraftField('description', e.target.value)} className={inputClassName()} placeholder="Short note for humans." />
             </label>
           </div>
@@ -368,28 +368,28 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
           {mcpDraft.transport === 'stdio' ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <label className="flex flex-col gap-1">
-                <span className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Command</span>
+                <span className="text-10 uppercase tracking-[0.08em] text-[var(--muted-dim)]">Command</span>
                 <input value={mcpDraft.command} onChange={(e) => updateMcpDraftField('command', e.target.value)} className={`${inputClassName()} font-mono`} placeholder="npx" />
               </label>
               <label className="flex flex-col gap-1">
-                <span className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Args</span>
+                <span className="text-10 uppercase tracking-[0.08em] text-[var(--muted-dim)]">Args</span>
                 <textarea value={mcpDraft.argsText} onChange={(e) => updateMcpDraftField('argsText', e.target.value)} className={`${textareaClassName()} min-h-[90px]`} placeholder={'-y\n@modelcontextprotocol/server-filesystem\n/work/repo'} />
               </label>
             </div>
           ) : (
             <label className="flex flex-col gap-1">
-              <span className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">URL</span>
+              <span className="text-10 uppercase tracking-[0.08em] text-[var(--muted-dim)]">URL</span>
               <input value={mcpDraft.url} onChange={(e) => updateMcpDraftField('url', e.target.value)} className={`${inputClassName()} font-mono`} placeholder="https://example.com/mcp" />
             </label>
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <label className="flex flex-col gap-1">
-              <span className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Environment JSON</span>
+              <span className="text-10 uppercase tracking-[0.08em] text-[var(--muted-dim)]">Environment JSON</span>
               <textarea value={mcpDraft.envJson} onChange={(e) => updateMcpDraftField('envJson', e.target.value)} className={`${textareaClassName()} min-h-[110px]`} placeholder={'{\n  "GITHUB_TOKEN": "{env:GITHUB_TOKEN}"\n}'} />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Headers JSON</span>
+              <span className="text-10 uppercase tracking-[0.08em] text-[var(--muted-dim)]">Headers JSON</span>
               <textarea value={mcpDraft.headersJson} onChange={(e) => updateMcpDraftField('headersJson', e.target.value)} disabled={mcpDraft.transport !== 'http'} className={`${textareaClassName()} min-h-[110px] ${mcpDraft.transport !== 'http' ? 'opacity-40 cursor-not-allowed' : ''}`} placeholder={'{\n  "Authorization": "Bearer {env:GITHUB_TOKEN}"\n}'} />
             </label>
           </div>
@@ -398,16 +398,16 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div>
                 <div className="flex items-center gap-2">
-                  <div className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
+                  <div className="text-10 uppercase tracking-[0.08em] text-[var(--muted-dim)]">
                     Advertised tools
                   </div>
                   {selectedMcpServer && !mcpServerToolsLoading && !mcpServerToolsError ? (
-                    <div className="text-[var(--text-10)] tabular-nums text-[var(--muted-dim)]">
+                    <div className="text-10 tabular-nums text-[var(--muted-dim)]">
                       {mcpServerTools.length}
                     </div>
                   ) : null}
                 </div>
-                <div className="mt-1 text-[var(--text-11)] text-[var(--muted-dim)]">
+                <div className="mt-1 text-11 text-[var(--muted-dim)]">
                   Tools reported by this server through the MCP protocol.
                 </div>
               </div>
@@ -426,19 +426,19 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
             </div>
 
             {!selectedMcpServer ? (
-              <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-4 text-[var(--text-11)] text-[var(--muted-dim)]">
+              <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-4 text-11 text-[var(--muted-dim)]">
                 Save this server before loading its tools.
               </div>
             ) : mcpServerToolsError ? (
-              <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-11)] text-[var(--red)]">
+              <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-11 text-[var(--red)]">
                 {mcpServerToolsError}
               </div>
             ) : mcpServerToolsLoading ? (
-              <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-4 text-[var(--text-11)] text-[var(--muted-dim)]">
+              <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-4 text-11 text-[var(--muted-dim)]">
                 Asking {selectedMcpServer.name} for its tool catalog...
               </div>
             ) : mcpServerTools.length === 0 ? (
-              <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-4 text-[var(--text-11)] text-[var(--muted-dim)]">
+              <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-4 text-11 text-[var(--muted-dim)]">
                 This server did not advertise any tools.
               </div>
             ) : (
@@ -449,17 +449,17 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
                     className="border-b border-[var(--border-subtle)] px-3 py-2 last:border-b-0"
                   >
                     <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                      <div className="font-mono text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
+                      <div className="font-mono text-11 font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
                         {tool.name}
                       </div>
                       {tool.title && tool.title !== tool.name ? (
-                        <div className="text-[var(--text-10)] text-[var(--muted)]">
+                        <div className="text-10 text-[var(--muted)]">
                           {tool.title}
                         </div>
                       ) : null}
                     </div>
                     {tool.description ? (
-                      <div className="mt-1 text-[var(--text-10)] leading-snug text-[var(--muted-dim)]">
+                      <div className="mt-1 text-10 leading-snug text-[var(--muted-dim)]">
                         {tool.description}
                       </div>
                     ) : null}
@@ -468,7 +468,7 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
               </div>
             )}
             {selectedMcpServer && mcpDraftDirty ? (
-              <div className="text-[var(--text-10)] text-[var(--accent)]">
+              <div className="text-10 text-[var(--accent)]">
                 This catalog reflects the saved connection. Save your edits to reload it.
               </div>
             ) : null}
@@ -477,8 +477,8 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
           <div className="dh-settings-subsection">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <div className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Agents</div>
-                <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">
+                <div className="text-10 uppercase tracking-[0.08em] text-[var(--muted-dim)]">Agents</div>
+                <div className="text-11 text-[var(--muted-dim)] mt-1">
                   Pick which built-in agent configs receive this server.
                 </div>
               </div>
@@ -494,7 +494,7 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
                     key={agent.id}
                     type="button"
                     onClick={() => toggleMcpDraftAgent(agent.id)}
-                    className={`h-9 rounded border px-3 text-[var(--text-11)] font-[var(--weight-semibold)] transition-colors ${
+                    className={`h-9 rounded border px-3 text-11 font-[var(--weight-semibold)] transition-colors ${
                       selected
                         ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                         : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:bg-[var(--hover)]'

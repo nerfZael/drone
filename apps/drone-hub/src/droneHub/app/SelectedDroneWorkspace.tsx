@@ -1717,7 +1717,7 @@ export function SelectedDroneWorkspace({
                 <>
                   {sessionError && !loadingSession && (
                     <span
-                      className="text-[var(--text-11)] text-[var(--red)] flex items-center gap-1"
+                      className="text-11 text-[var(--red)] flex items-center gap-1"
                       title={sessionError}
                     >
                       <span className="w-1.5 h-1.5 rounded-full bg-[var(--red)]" />
@@ -1729,7 +1729,7 @@ export function SelectedDroneWorkspace({
                 <>
                   {transcriptError && !loadingTranscript && (
                     <span
-                      className="text-[var(--text-11)] text-[var(--red)] flex items-center gap-1"
+                      className="text-11 text-[var(--red)] flex items-center gap-1"
                       title={transcriptError}
                     >
                       <span className="w-1.5 h-1.5 rounded-full bg-[var(--red)]" />
@@ -1742,7 +1742,7 @@ export function SelectedDroneWorkspace({
                 <button
                   type="button"
                   onClick={openChatErrorDetails}
-                  className="text-[var(--text-11)] text-[var(--red)] inline-flex items-center gap-1 hover:underline focus:outline-none"
+                  className="text-11 text-[var(--red)] inline-flex items-center gap-1 hover:underline focus:outline-none"
                   title={chatInfoError}
                 >
                   <span className="w-1.5 h-1.5 rounded-full bg-[var(--red)]" />
@@ -1752,7 +1752,7 @@ export function SelectedDroneWorkspace({
               {repoOpError && (
                 <button
                   type="button"
-                  className="text-[var(--text-11)] text-[var(--red)] inline-flex items-center gap-1 hover:underline focus:outline-none"
+                  className="text-11 text-[var(--red)] inline-flex items-center gap-1 hover:underline focus:outline-none"
                   title={repoOpError}
                   onClick={() => openDroneErrorModal(currentDrone, repoOpError, repoOpErrorMeta)}
                 >
@@ -1762,7 +1762,7 @@ export function SelectedDroneWorkspace({
               )}
               {transcriptExportToast ? (
                 <span
-                  className="hidden md:inline-flex items-center gap-1.5 px-2 py-1 rounded text-[var(--text-10)] border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]"
+                  className="hidden md:inline-flex items-center gap-1.5 px-2 py-1 rounded text-10 border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]"
                   style={{ fontFamily: 'var(--display)' }}
                 >
                   {transcriptExportToast}
@@ -1770,7 +1770,7 @@ export function SelectedDroneWorkspace({
               ) : null}
               {launchHint?.kind === 'copied' && (
                 <span
-                  className="hidden md:inline-flex items-center gap-1.5 px-2 py-1 rounded text-[var(--text-10)] border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] font-mono"
+                  className="hidden md:inline-flex items-center gap-1.5 px-2 py-1 rounded text-10 border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] font-mono"
                   title={
                     launchHint.launcher
                       ? `Launched: ${launchHint.launcher}`
@@ -1821,7 +1821,7 @@ export function SelectedDroneWorkspace({
                     <div>
                       {localActiveForCurrentDrone ? (
                         <>
-                          <div className="px-3 py-2 text-[var(--text-10)] text-[var(--muted)]">
+                          <div className="px-3 py-2 text-10 text-[var(--muted)]">
                             <div className="text-[var(--fg-secondary)]">
                               Using this drone locally
                             </div>
@@ -1892,7 +1892,7 @@ export function SelectedDroneWorkspace({
                             <span>Return</span>
                           </button>
                           <div className={contextMenuSeparatorClass} />
-                          <div className="px-3 pb-1 pt-2 text-[var(--text-10)] uppercase tracking-wide text-[var(--muted)]">
+                          <div className="px-3 pb-1 pt-2 text-10 uppercase tracking-wide text-[var(--muted)]">
                             Auto-updates
                           </div>
                           {LOCAL_AUTO_UPDATE_OPTIONS.map(({ mode, label }) => (
@@ -1911,7 +1911,7 @@ export function SelectedDroneWorkspace({
                       ) : (
                         <>
                           {localActiveForAnotherDrone ? (
-                            <div className="px-3 py-2 text-[var(--text-10)] text-[var(--muted)]">
+                            <div className="px-3 py-2 text-10 text-[var(--muted)]">
                               Switches local use from {localSession?.droneName || 'the other drone'}
                               .
                             </div>
@@ -2240,7 +2240,7 @@ export function SelectedDroneWorkspace({
                                 setTerminalMenuOpen(false);
                                 setHeaderOverflowOpen(false);
                               }}
-                              className={`w-full text-left pl-6 pr-3 py-1.5 text-[var(--text-11)] transition-colors ${
+                              className={`w-full text-left pl-6 pr-3 py-1.5 text-11 transition-colors ${
                                 active
                                   ? 'bg-[var(--accent-subtle)] text-[var(--accent)] font-[var(--weight-semibold)]'
                                   : 'text-[var(--muted)] hover:bg-[var(--hover)]'
@@ -2289,7 +2289,7 @@ export function SelectedDroneWorkspace({
                       >
                         {!hostRuntime ? (
                           <div
-                            className="flex items-center justify-between gap-4 px-3 py-1.5 text-[var(--text-11)] text-[var(--muted)]"
+                            className="flex items-center justify-between gap-4 px-3 py-1.5 text-11 text-[var(--muted)]"
                             title={dockerSizeTitle}
                           >
                             <span>Docker usage</span>
@@ -2336,7 +2336,7 @@ export function SelectedDroneWorkspace({
                             }
                           />
                         ) : null}
-                        <div className="flex items-center justify-between gap-4 px-3 py-1.5 text-[var(--text-11)]">
+                        <div className="flex items-center justify-between gap-4 px-3 py-1.5 text-11">
                           <span className="text-[var(--muted)]">Chat</span>
                           <span className="min-w-0 truncate font-mono text-[var(--fg-secondary)]">
                             {activeChatName}
@@ -2436,7 +2436,7 @@ export function SelectedDroneWorkspace({
         ) : null}
         onCloseSideChat={(name) => void sideChatWorkspace.finish(name, false)}
         sideChatStatus={sideChatWorkspace.status ? (
-          <div role="status" className="flex items-center gap-2 border-b border-[var(--border)] bg-[var(--panel)] px-3 py-2 text-[var(--text-12)] text-[var(--fg-secondary)]">
+          <div role="status" className="flex items-center gap-2 border-b border-[var(--border)] bg-[var(--panel)] px-3 py-2 text-12 text-[var(--fg-secondary)]">
             <span className="flex-1">{sideChatWorkspace.status}</span>
             <button onClick={sideChatWorkspace.dismissStatus} aria-label="Dismiss side chat status">×</button>
           </div>
@@ -2508,12 +2508,12 @@ export function SelectedDroneWorkspace({
                 >
                   <div className="max-w-[420px]">
                     <div
-                      className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.14em]"
+                      className="text-10 font-[var(--weight-semibold)] uppercase tracking-[0.14em]"
                       style={{ fontFamily: 'var(--display)' }}
                     >
                       Drone Drop Actions
                     </div>
-                    <div className="mt-2 text-[var(--text-13)] leading-5">{fleetDropHintText}</div>
+                    <div className="mt-2 text-13 leading-5">{fleetDropHintText}</div>
                   </div>
                 </div>
               </div>
@@ -2667,7 +2667,7 @@ export function SelectedDroneWorkspace({
                     {isDroneStartingOrSeeding(currentDrone.hubPhase) &&
                       String(startupSeedForCurrentDrone?.prompt ?? '').trim() && (
                         <div className="max-w-[1170px] mx-auto px-6 pt-2">
-                          <div className="rounded-[var(--radius-medium)] border border-[var(--user-bubble-border)] bg-[var(--user-bubble)] px-3 py-2 text-[var(--text-12)] text-[var(--user-bubble-fg)] whitespace-pre-wrap">
+                          <div className="rounded-[var(--radius-medium)] border border-[var(--user-bubble-border)] bg-[var(--user-bubble)] px-3 py-2 text-12 text-[var(--user-bubble-fg)] whitespace-pre-wrap">
                             {String(startupSeedForCurrentDrone?.prompt ?? '').trim()}
                           </div>
                         </div>
@@ -2704,7 +2704,7 @@ export function SelectedDroneWorkspace({
                             el.scrollTop = el.scrollHeight;
                             updatePinned(el);
                           }}
-                          className="pointer-events-auto inline-flex items-center gap-2 px-3 py-1.5 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border border-[var(--accent-muted)] bg-[var(--panel-raised)] text-[var(--accent)] hover:shadow-[var(--glow-accent)] shadow-[0_8px_24px_var(--shadow-color)] transition-all"
+                          className="pointer-events-auto inline-flex items-center gap-2 px-3 py-1.5 rounded text-10 font-[var(--weight-semibold)] tracking-wide uppercase border border-[var(--accent-muted)] bg-[var(--panel-raised)] text-[var(--accent)] hover:shadow-[var(--glow-accent)] shadow-[0_8px_24px_var(--shadow-color)] transition-all"
                           style={{ fontFamily: 'var(--display)' }}
                           title="Scroll to bottom"
                         >
@@ -2790,12 +2790,12 @@ export function SelectedDroneWorkspace({
                     className="block max-w-[360px] text-left rounded border border-[var(--red-border)] bg-[var(--danger-panel)] px-3 py-2 shadow-[0_10px_26px_var(--shadow-color)] cursor-pointer"
                   >
                     <div
-                      className="text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--red)]"
+                      className="text-10 font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--red)]"
                       style={{ fontFamily: 'var(--display)' }}
                     >
                       Open file failed
                     </div>
-                    <div className="mt-1 text-[var(--text-11)] text-[var(--fg-secondary)] break-words">
+                    <div className="mt-1 text-11 text-[var(--fg-secondary)] break-words">
                       {fileOpenToast.message}
                     </div>
                   </button>

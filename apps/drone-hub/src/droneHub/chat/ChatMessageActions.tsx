@@ -45,7 +45,7 @@ export function ChatMessageActions({
       {error ? (
         <div
           role="alert"
-          className="absolute right-0 top-full z-30 mt-1 w-64 rounded border border-[var(--border)] bg-[var(--panel)] p-2 text-[var(--text-11)] text-[var(--red)]"
+          className="absolute right-0 top-full z-30 mt-1 w-64 rounded border border-[var(--border)] bg-[var(--panel)] p-2 text-11 text-[var(--red)]"
         >
           {error}
         </div>

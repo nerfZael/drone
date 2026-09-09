@@ -319,7 +319,7 @@ export const TranscriptTurn = React.memo(
               toggleLabel="run details"
             />
             {activityLoadError ? (
-              <div className="px-3 pb-1 text-[var(--text-10)] text-[var(--red)]">
+              <div className="px-3 pb-1 text-10 text-[var(--red)]">
                 {activityLoadError}
               </div>
             ) : null}

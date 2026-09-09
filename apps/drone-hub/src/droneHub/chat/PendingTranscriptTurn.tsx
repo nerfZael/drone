@@ -139,7 +139,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
                 ? 'Will run before queued follow-ups'
                 : 'Waiting to send'
           }
-          className="inline-flex items-center gap-1.5 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--user-muted)]"
+          className="inline-flex items-center gap-1.5 text-10 font-[var(--weight-semibold)] text-[var(--user-muted)]"
         >
           <svg className="h-3 w-3" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.35" />
@@ -172,7 +172,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
               type="button"
               onClick={() => void onCancelQueued?.(item.id)}
               disabled={cancelBusy || createNewChatBusy}
-              className="inline-flex min-h-5 items-center rounded px-1 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted)] transition-colors hover:bg-[var(--red-subtle)] hover:text-[var(--red)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--red)] disabled:cursor-not-allowed disabled:text-[var(--muted-dim)]"
+              className="inline-flex min-h-5 items-center rounded px-1 text-10 font-[var(--weight-semibold)] text-[var(--muted)] transition-colors hover:bg-[var(--red-subtle)] hover:text-[var(--red)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--red)] disabled:cursor-not-allowed disabled:text-[var(--muted-dim)]"
               aria-label={cancelLabel}
               title={cancelLabel}
             >
@@ -186,7 +186,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
     <QueuedNewChatLabel failed={actionPresentation.state === 'failed'} />
   ) : badgeLabel ? (
     <span
-      className={`rounded border px-1.5 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide ${
+      className={`rounded border px-1.5 py-0.5 text-9 font-[var(--weight-semibold)] uppercase tracking-wide ${
         isInterrupted
           ? 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)] text-[var(--yellow)]'
           : 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]'
@@ -253,12 +253,12 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
               />
               {queuedFooter}
               {actionPresentation?.state === 'failed' && item.error ? (
-                <div className="mt-2 whitespace-pre-wrap text-[var(--text-10)] text-[var(--red)]">
+                <div className="mt-2 whitespace-pre-wrap text-10 text-[var(--red)]">
                   {stripAnsi(item.error)}
                 </div>
               ) : null}
               {createNewChatError ? (
-                <div className="mt-2 text-[var(--text-10)] text-[var(--red)]">
+                <div className="mt-2 text-10 text-[var(--red)]">
                   {stripAnsi(createNewChatError)}
                 </div>
               ) : null}
@@ -337,7 +337,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
           hoverActions={<ChatMessageCopyAction text={agentCopyText} position="hover-rail" />}
         >
           {isFailed ? (
-            <div className="whitespace-pre-wrap text-[var(--text-12-5)] leading-[1.6] text-[var(--red)]">
+            <div className="whitespace-pre-wrap text-12-5 leading-[1.6] text-[var(--red)]">
               {stripAnsi(item.error || 'failed to send')}
             </div>
           ) : (
@@ -349,10 +349,10 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
                 />
               ) : null}
               {observability ? (
-                <div className="mt-2 border-t border-[var(--border-subtle)] pt-2 text-[var(--text-10-5)] leading-[1.45] text-[var(--yellow)]">
+                <div className="mt-2 border-t border-[var(--border-subtle)] pt-2 text-10-5 leading-[1.45] text-[var(--yellow)]">
                   <div>{observability.message}</div>
                   {observability.lastCheckedAt ? (
-                    <div className="mt-0.5 font-mono text-[var(--text-9)] text-[var(--muted-dim)]">
+                    <div className="mt-0.5 font-mono text-9 text-[var(--muted-dim)]">
                       Last checked <RelativeTimeText at={observability.lastCheckedAt} />
                     </div>
                   ) : null}
@@ -364,7 +364,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
                 showTopDivider={false}
               />
               {cancelError ? (
-                <div className="mt-2 whitespace-pre-wrap text-[var(--text-10)] text-[var(--red)]">
+                <div className="mt-2 whitespace-pre-wrap text-10 text-[var(--red)]">
                   {stripAnsi(cancelError)}
                 </div>
               ) : null}
@@ -377,7 +377,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
           />
         </ChatMessageFrame>
       ) : cancelError ? (
-        <div className="mt-2 whitespace-pre-wrap text-right text-[var(--text-10)] text-[var(--red)]">
+        <div className="mt-2 whitespace-pre-wrap text-right text-10 text-[var(--red)]">
           {stripAnsi(cancelError)}
         </div>
       ) : null}

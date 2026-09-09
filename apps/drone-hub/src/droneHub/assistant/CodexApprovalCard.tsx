@@ -89,17 +89,15 @@ export function CodexApprovalCard({
         </div>
       </div>
 
-      {error ? <div className="mt-2 text-[var(--text-10)] text-[var(--red)]">{error}</div> : null}
+      {error ? <div className="mt-2 text-10 text-[var(--red)]">{error}</div> : null}
       {approval.detailsTruncated ? (
-        <div className="mt-2 text-[var(--text-10)] text-[var(--yellow)]">
+        <div className="mt-2 text-10 text-[var(--yellow)]">
           Some request details are unavailable. Deny this request and retry from the originating
           device if you need to approve it.
         </div>
       ) : null}
       {approval.reason ? (
-        <div className="mt-2 text-[var(--text-10)] leading-relaxed text-[var(--muted)]">
-          {approval.reason}
-        </div>
+        <div className="mt-2 text-10 leading-relaxed text-[var(--muted)]">{approval.reason}</div>
       ) : null}
       {approval.cwd || approval.grantRoot ? (
         <dl className="dh-approval-metadata">

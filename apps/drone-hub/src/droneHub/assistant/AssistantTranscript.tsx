@@ -85,7 +85,7 @@ export function NativeAgentFailureCard({
 
   return (
     <div
-      className={`mx-3 rounded border px-3 py-2.5 text-[var(--text-11)] ${
+      className={`mx-3 rounded border px-3 py-2.5 text-11 ${
         failure.recoverable
           ? 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)]'
           : 'border-[var(--red-border)] bg-[var(--red-subtle)]'
@@ -112,7 +112,7 @@ export function NativeAgentFailureCard({
           <summary className="cursor-pointer select-none hover:text-[var(--fg-secondary)]">
             Technical details
           </summary>
-          <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[var(--text-10)]">
+          <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-10">
             <dt className="text-[var(--muted-dim)]">Error</dt>
             <dd className="break-all">{failure.technicalMessage}</dd>
             {failure.code ? (
@@ -203,7 +203,7 @@ export function AssistantQueuedPromptRow({
           >
             {showPromptHeader ? (
               <div
-                className="mb-1 flex items-center gap-2 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide"
+                className="mb-1 flex items-center gap-2 text-9 font-[var(--weight-semibold)] uppercase tracking-wide"
                 style={{ fontFamily: 'var(--display)' }}
               >
                 {!actionPresentation ? (
@@ -221,7 +221,7 @@ export function AssistantQueuedPromptRow({
                     type="button"
                     onClick={onCancel}
                     disabled={cancelling || creatingNewChat}
-                    className="ml-auto rounded px-1 py-0.5 text-[var(--text-9)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-40"
+                    className="ml-auto rounded px-1 py-0.5 text-9 text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-40"
                     aria-label={
                       failed
                         ? 'Dismiss failed prompt'
@@ -249,7 +249,7 @@ export function AssistantQueuedPromptRow({
             {notification ? (
               <SubscriptionEventMessage prompt={prompt.prompt} at={prompt.createdAt} />
             ) : prompt.prompt ? (
-              <div className="whitespace-pre-wrap break-words text-[var(--text-12)] leading-relaxed text-[var(--fg-secondary)]">
+              <div className="whitespace-pre-wrap break-words text-12 leading-relaxed text-[var(--fg-secondary)]">
                 {prompt.prompt}
               </div>
             ) : null}
@@ -263,7 +263,7 @@ export function AssistantQueuedPromptRow({
                 onResolveInterruption={onResolveInterruption}
               />
             ) : failed && prompt.error ? (
-              <div className="mt-1.5 text-[var(--text-10)] text-[var(--red)]">{prompt.error}</div>
+              <div className="mt-1.5 text-10 text-[var(--red)]">{prompt.error}</div>
             ) : null}
             {actionPresentation?.canExecuteNow && !creatingNewChat ? (
               <div className="mt-2 flex items-center gap-2 border-t border-[var(--border-subtle)] pt-2">
@@ -276,13 +276,13 @@ export function AssistantQueuedPromptRow({
                     busy={creatingNewChat}
                   />
                 ) : null}
-                <span className="text-[var(--text-10)] text-[var(--muted-dim)]">
+                <span className="text-10 text-[var(--muted-dim)]">
                   {actionPresentation.queuedDescription}
                 </span>
               </div>
             ) : null}
             {createNewChatError ? (
-              <div className="mt-1.5 text-[var(--text-10)] text-[var(--red)]">
+              <div className="mt-1.5 text-10 text-[var(--red)]">
                 {createNewChatError}
               </div>
             ) : null}
@@ -314,7 +314,7 @@ function ToolDisclosure({
         type="button"
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
-        className="group flex w-full items-center gap-2 py-1.5 text-left text-[var(--text-12)] text-[var(--muted)] hover:text-[var(--fg-secondary)]"
+        className="group flex w-full items-center gap-2 py-1.5 text-left text-12 text-[var(--muted)] hover:text-[var(--fg-secondary)]"
       >
         {status ? (
           <span
@@ -485,25 +485,25 @@ export function ReasoningBlock({ text }: { text: string }) {
         className="flex w-full min-w-0 items-center gap-2 px-2.5 py-1.5 text-left hover:bg-[var(--surface-strong)]"
       >
         <span
-          className="flex-shrink-0 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
+          className="flex-shrink-0 text-10 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
           style={{ fontFamily: 'var(--display)' }}
         >
           Reasoning
         </span>
-        <span className="ml-auto flex-shrink-0 text-[var(--text-10)] text-[var(--muted)]">
+        <span className="ml-auto flex-shrink-0 text-10 text-[var(--muted)]">
           {open ? 'Hide' : 'Show'}
         </span>
       </button>
       {trimmed ? (
         open ? (
           <div className="border-t border-[var(--border-subtle)] px-2.5 py-2">
-            <div className="max-h-[min(70vh,28rem)] overflow-auto whitespace-pre-wrap break-words text-[var(--text-11)] leading-relaxed text-[var(--muted)]">
+            <div className="max-h-[min(70vh,28rem)] overflow-auto whitespace-pre-wrap break-words text-11 leading-relaxed text-[var(--muted)]">
               {trimmed}
             </div>
           </div>
         ) : (
           <div className="border-t border-[var(--border-subtle)] px-2.5 pb-2 pt-1">
-            <div className="line-clamp-3 whitespace-pre-wrap break-words text-[var(--text-11)] leading-relaxed text-[var(--muted-dim)]">
+            <div className="line-clamp-3 whitespace-pre-wrap break-words text-11 leading-relaxed text-[var(--muted-dim)]">
               {trimmed}
             </div>
           </div>
@@ -604,7 +604,7 @@ function ToolDetailsButton({ open, onClick }: { open: boolean; onClick: () => vo
       type="button"
       onClick={onClick}
       aria-expanded={open}
-      className="ml-auto inline-flex flex-shrink-0 items-center gap-1 text-[var(--text-10)] text-[var(--muted-dim)] hover:text-[var(--fg-secondary)]"
+      className="ml-auto inline-flex flex-shrink-0 items-center gap-1 text-10 text-[var(--muted-dim)] hover:text-[var(--fg-secondary)]"
     >
       {open ? 'Hide details' : 'Show details'}
       <ToolRunChevron open={open} />
@@ -651,13 +651,13 @@ function ToolScalarValue({ value }: { value: unknown }) {
   if (value == null) return <ToolPlaceholderValue>None</ToolPlaceholderValue>;
   if (typeof value === 'boolean') {
     return (
-      <span className="inline-flex rounded bg-[var(--surface-strong)] px-1.5 py-0.5 font-mono text-[var(--text-9)] text-[var(--muted)]">
+      <span className="inline-flex rounded bg-[var(--surface-strong)] px-1.5 py-0.5 font-mono text-9 text-[var(--muted)]">
         {toolScalarText(value)}
       </span>
     );
   }
   return (
-    <span className="whitespace-pre-wrap break-words font-mono text-[var(--text-10)] leading-relaxed text-[var(--fg-secondary)]">
+    <span className="whitespace-pre-wrap break-words font-mono text-10 leading-relaxed text-[var(--fg-secondary)]">
       {String(value)}
     </span>
   );
@@ -692,7 +692,7 @@ function ToolStructuredValue({
       const visibleItems = value.slice(0, TOOL_STRUCTURED_MAX_ITEMS);
       const hiddenCount = value.length - visibleItems.length;
       return (
-        <span className="whitespace-pre-wrap break-words font-mono text-[var(--text-10)] leading-relaxed text-[var(--fg-secondary)]">
+        <span className="whitespace-pre-wrap break-words font-mono text-10 leading-relaxed text-[var(--fg-secondary)]">
           {visibleItems.map(toolScalarText).join(', ')}
           {hiddenCount > 0 ? `, +${hiddenCount} more` : ''}
         </span>
@@ -704,7 +704,7 @@ function ToolStructuredValue({
       <div className="grid gap-1.5">
         {visibleItems.map((item, index) => (
           <div key={index} className="grid min-w-0 grid-cols-[1.5rem_minmax(0,1fr)] gap-2">
-            <span className="pt-0.5 text-right font-mono text-[var(--text-9)] text-[var(--muted-dim)]">
+            <span className="pt-0.5 text-right font-mono text-9 text-[var(--muted-dim)]">
               {index + 1}
             </span>
             <ToolStructuredValue value={item} depth={depth + 1} ancestors={nextAncestors} />
@@ -724,7 +724,7 @@ function ToolStructuredValue({
     <dl className="grid gap-1.5">
       {visibleEntries.map(([key, item]) => (
         <div key={key} className="grid min-w-0 grid-cols-[minmax(5.5rem,28%)_minmax(0,1fr)] gap-3">
-          <dt className="pt-0.5 text-[var(--text-10)] text-[var(--muted-dim)]">
+          <dt className="pt-0.5 text-10 text-[var(--muted-dim)]">
             {humanizeToolField(key)}
           </dt>
           <dd className="min-w-0">
@@ -733,7 +733,7 @@ function ToolStructuredValue({
         </div>
       ))}
       {hiddenCount > 0 ? (
-        <div className="text-[var(--text-10)]">
+        <div className="text-10">
           <ToolPlaceholderValue>+{hiddenCount} more fields</ToolPlaceholderValue>
         </div>
       ) : null}
@@ -760,7 +760,7 @@ export function ToolPayloadDetails({
     <div className="grid gap-3 py-1">
       {call ? (
         <div>
-          <div className="text-[var(--text-11)] font-medium text-[var(--muted)]">Arguments</div>
+          <div className="text-11 font-medium text-[var(--muted)]">Arguments</div>
           <div
             className="mt-1 max-h-40 overflow-auto rounded bg-[var(--surface-inset-faint)] px-2.5 py-2"
             data-tool-structured-value="arguments"
@@ -771,7 +771,7 @@ export function ToolPayloadDetails({
       ) : null}
       {result ? (
         <div>
-          <div className="text-[var(--text-11)] font-medium text-[var(--muted)]">Result</div>
+          <div className="text-11 font-medium text-[var(--muted)]">Result</div>
           {resultText ? (
             structuredResult !== undefined ? (
               <div
@@ -781,18 +781,18 @@ export function ToolPayloadDetails({
                 <ToolStructuredValue value={structuredResult} />
               </div>
             ) : (
-              <pre className="mt-1 max-h-32 overflow-auto rounded bg-[var(--surface-inset-faint)] px-2 py-1.5 whitespace-pre-wrap break-words text-[var(--text-11)] leading-relaxed text-[var(--fg-secondary)]">
+              <pre className="mt-1 max-h-32 overflow-auto rounded bg-[var(--surface-inset-faint)] px-2 py-1.5 whitespace-pre-wrap break-words text-11 leading-relaxed text-[var(--fg-secondary)]">
                 {resultText}
               </pre>
             )
           ) : (
-            <div className="mt-1 text-[var(--text-11)] text-[var(--muted-dim)]">
+            <div className="mt-1 text-11 text-[var(--muted-dim)]">
               No result payload.
             </div>
           )}
         </div>
       ) : (
-        <div className="text-[var(--text-11)] text-[var(--muted-dim)]">{pendingLabel}</div>
+        <div className="text-11 text-[var(--muted-dim)]">{pendingLabel}</div>
       )}
     </div>
   );
@@ -861,14 +861,14 @@ function TransferActivityRow({
           <ToolStatusIndicator result={toolActivityStatusResult(activityItem)} />
           <div className="min-w-0 flex-1">
             <div className="flex items-center justify-between gap-2">
-              <div className="truncate text-[var(--text-12)] font-medium text-[var(--muted)]">
+              <div className="truncate text-12 font-medium text-[var(--muted)]">
                 Transfer files
               </div>
-              <div className="tabular-nums text-[var(--text-10)] text-[var(--muted)]">
+              <div className="tabular-nums text-10 text-[var(--muted)]">
                 {amountLabel}
               </div>
             </div>
-            <div className="mt-0.5 truncate text-[var(--text-11)] text-[var(--fg-secondary)]">
+            <div className="mt-0.5 truncate text-11 text-[var(--fg-secondary)]">
               {sourceLabel} <span className="text-[var(--muted-dim)]">→</span> {destinationLabel}
             </div>
           </div>
@@ -885,7 +885,7 @@ function TransferActivityRow({
             style={{ width: `${percent}%` }}
           />
         </div>
-        <div className="ml-5 mt-1.5 flex items-center justify-between text-[var(--text-10)] text-[var(--muted-dim)]">
+        <div className="ml-5 mt-1.5 flex items-center justify-between text-10 text-[var(--muted-dim)]">
           <span>{progressLabel}</span>
           <span>
             {progress?.retries
@@ -894,13 +894,13 @@ function TransferActivityRow({
           </span>
         </div>
         {failed && progress?.failure?.error ? (
-          <div className="ml-5 mt-1.5 text-[var(--text-10)] text-[var(--red)]">
+          <div className="ml-5 mt-1.5 text-10 text-[var(--red)]">
             {progress.failure.error}
             {progress.failure.cleanupError ? ` Cleanup: ${progress.failure.cleanupError}` : ''}
           </div>
         ) : null}
         {failed && progress?.resumeToken ? (
-          <div className="ml-5 mt-1 text-[var(--text-10)] text-[var(--muted-dim)]">
+          <div className="ml-5 mt-1 text-10 text-[var(--muted-dim)]">
             The assistant can resume after {progress.completedFiles ?? 0} committed files.
           </div>
         ) : null}
@@ -917,7 +917,7 @@ function TransferActivityRow({
                     : 0;
               return (
                 <div key={`${file.destinationPath}-${index}`} className="py-0.5">
-                  <div className="flex min-w-0 items-center gap-2 text-[var(--text-10)]">
+                  <div className="flex min-w-0 items-center gap-2 text-10">
                     <span className="min-w-0 flex-1 truncate text-[var(--fg-secondary)]">
                       {file.sourcePath}
                     </span>
@@ -938,7 +938,7 @@ function TransferActivityRow({
                     />
                   </div>
                   {file.error && (file.status === 'retrying' || file.status === 'failed') ? (
-                    <div className="mt-1 truncate text-[var(--text-9)] text-[var(--muted-dim)]">
+                    <div className="mt-1 truncate text-9 text-[var(--muted-dim)]">
                       {file.error}
                     </div>
                   ) : null}
@@ -1001,17 +1001,17 @@ export function RepeatedToolActivityRow({
             }
           />
         )}
-        <span className="min-w-0 truncate text-[var(--text-12)] font-medium text-[var(--muted)] group-hover:text-[var(--fg-secondary)]">
+        <span className="min-w-0 truncate text-12 font-medium text-[var(--muted)] group-hover:text-[var(--fg-secondary)]">
           {label}
         </span>
-        <span className="flex-shrink-0 text-[var(--text-10)] tabular-nums text-[var(--muted-dim)]">
+        <span className="flex-shrink-0 text-10 tabular-nums text-[var(--muted-dim)]">
           ×{items.length}
         </span>
         <span className="flex-shrink-0 text-[var(--muted-dim)]">
           <ToolRunChevron open={detailsOpen} />
         </span>
         {statusText ? (
-          <span className="hidden flex-shrink-0 text-[var(--text-10)] text-[var(--muted-dim)] sm:inline">
+          <span className="hidden flex-shrink-0 text-10 text-[var(--muted-dim)] sm:inline">
             {statusText}
           </span>
         ) : null}
@@ -1026,7 +1026,7 @@ export function RepeatedToolActivityRow({
                     result={toolActivityStatusResult(item)}
                     blocked={blocked && !toolActivityIsSettled(item)}
                   />
-                  <div className="min-w-0 flex-1 truncate text-[var(--text-11)] font-medium text-[var(--muted)]">
+                  <div className="min-w-0 flex-1 truncate text-11 font-medium text-[var(--muted)]">
                     {label} #{index + 1}
                   </div>
                 </div>
@@ -1064,7 +1064,7 @@ export function MessageDroneActivityRow({
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <ToolStatusIndicator result={result} blocked={blocked} />
-            <div className="text-[var(--text-12)] font-medium text-[var(--muted)]">
+            <div className="text-12 font-medium text-[var(--muted)]">
               Send user message
             </div>
             <ToolDetailsButton
@@ -1072,7 +1072,7 @@ export function MessageDroneActivityRow({
               onClick={() => setDetailsOpen((value) => !value)}
             />
           </div>
-          <div className="ml-5 mt-0.5 flex min-w-0 flex-wrap items-center gap-1.5 text-[var(--text-11)]">
+          <div className="ml-5 mt-0.5 flex min-w-0 flex-wrap items-center gap-1.5 text-11">
             <span className="truncate text-[var(--fg-secondary)]">
               to {summary.droneLabel || 'target drone'}
             </span>
@@ -1086,11 +1086,11 @@ export function MessageDroneActivityRow({
             ) : null}
           </div>
           {preview ? (
-            <div className="ml-5 mt-1.5 line-clamp-3 text-[var(--text-12)] leading-5 text-[var(--fg-secondary)]">
+            <div className="ml-5 mt-1.5 line-clamp-3 text-12 leading-5 text-[var(--fg-secondary)]">
               “{preview}”
             </div>
           ) : (
-            <div className="mt-2 text-[var(--text-11)] text-[var(--muted-dim)]">
+            <div className="mt-2 text-11 text-[var(--muted-dim)]">
               No message preview available.
             </div>
           )}
@@ -1124,13 +1124,13 @@ export function ChatsIdleActivityRow({
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <ToolStatusIndicator result={result} />
-            <div className="text-[var(--text-12)] font-medium text-[var(--muted)]">{label}</div>
+            <div className="text-12 font-medium text-[var(--muted)]">{label}</div>
             <ToolDetailsButton
               open={detailsOpen}
               onClick={() => setDetailsOpen((value) => !value)}
             />
           </div>
-          <div className="ml-5 mt-0.5 text-[var(--text-11)] text-[var(--fg-secondary)]">
+          <div className="ml-5 mt-0.5 text-11 text-[var(--fg-secondary)]">
             {targetSummary || 'Resolving target drones'}
           </div>
         </div>
@@ -1140,7 +1140,7 @@ export function ChatsIdleActivityRow({
           targets.map((target) => (
             <div
               key={target.key}
-              className="flex min-h-6 min-w-0 items-center gap-2 text-[var(--text-11)]"
+              className="flex min-h-6 min-w-0 items-center gap-2 text-11"
             >
               <span
                 className="h-1 w-1 flex-shrink-0 rounded-full bg-[var(--muted-dim)]"
@@ -1150,14 +1150,14 @@ export function ChatsIdleActivityRow({
                 {target.droneLabel}
               </div>
               {target.chatName && target.chatName !== 'default' ? (
-                <div className="max-w-[42%] truncate text-[var(--text-10)] text-[var(--muted)]">
+                <div className="max-w-[42%] truncate text-10 text-[var(--muted)]">
                   {target.chatName}
                 </div>
               ) : null}
             </div>
           ))
         ) : (
-          <div className="py-1 text-[var(--text-11)] text-[var(--muted-dim)]">
+          <div className="py-1 text-11 text-[var(--muted-dim)]">
             Waiting for result...
           </div>
         )}
@@ -1271,7 +1271,7 @@ function ToolRunChevron({ open }: { open: boolean }) {
 function AgentThinkingActivityRow() {
   return (
     <div
-      className="mx-3 flex min-h-7 items-center gap-2 py-1.5 text-[var(--text-12)] text-[var(--muted)]"
+      className="mx-3 flex min-h-7 items-center gap-2 py-1.5 text-12 text-[var(--muted)]"
       data-agent-thinking
       role="status"
       aria-live="polite"
@@ -1626,13 +1626,13 @@ export function AssistantMessageRow({
     >
       {body}
       {!body && message.errorMessage ? (
-        <div className="text-[var(--text-12)] text-[var(--red)]">{message.errorMessage}</div>
+        <div className="text-12 text-[var(--red)]">{message.errorMessage}</div>
       ) : null}
       {calls.length > 0 ? (
         <div className="mt-2 space-y-1.5">
           {calls.map((call) => (
             <ToolDisclosure key={call.id} title={toolLabel(call.name)}>
-              <pre className="max-h-24 overflow-auto whitespace-pre-wrap break-words text-[var(--text-10)] text-[var(--muted-dim)]">
+              <pre className="max-h-24 overflow-auto whitespace-pre-wrap break-words text-10 text-[var(--muted-dim)]">
                 {JSON.stringify(call.args, null, 2)}
               </pre>
             </ToolDisclosure>

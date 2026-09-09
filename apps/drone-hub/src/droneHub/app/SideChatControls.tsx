@@ -18,7 +18,7 @@ export function SideChatControls({ chat, busy, main = false, onKeep, onOpenSourc
   const moveTitle = `${main ? 'Return to the previous floating position and restore the previous main chat.' : 'Open as main chat. Sidebar membership stays unchanged.'}${moveBinding ? ` (${formatShortcutBinding(moveBinding)})` : ''}`;
   return (
     <div role="toolbar" aria-label="Side chat controls" className="flex shrink-0 items-center justify-end gap-1 border-b border-[var(--border)] px-2 py-0.5">
-      {main && <span className="mr-auto min-w-0 truncate text-[var(--text-11)] text-[var(--muted)]">{chat.name}</span>}
+      {main && <span className="mr-auto min-w-0 truncate text-11 text-[var(--muted)]">{chat.name}</span>}
       <button type="button" className={buttonClass} onClick={onOpenSource} aria-label={`Open source chat: ${chat.sourceChatName}`} title={`Branched from ${chat.sourceChatName}. Click to open the source chat.`}>
         <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="5" r="2" /><circle cx="6" cy="19" r="2" /><circle cx="18" cy="5" r="2" /><path d="M6 7v10M18 7a10 10 0 0 1-12 9" /></svg>
       </button>

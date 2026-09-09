@@ -24,7 +24,7 @@ export function ScopeModeControl({
   return (
     <div className="flex items-center gap-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-0.5">
       <div
-        className="px-1 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
+        className="px-1 text-9 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
         style={{ fontFamily: 'var(--display)' }}
       >
         {label}
@@ -32,7 +32,7 @@ export function ScopeModeControl({
       <button
         type="button"
         onClick={() => onChange('all')}
-        className={`h-5 rounded px-1.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide ${
+        className={`h-5 rounded px-1.5 text-9 font-[var(--weight-semibold)] uppercase tracking-wide ${
           mode === 'all'
             ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
             : 'text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -44,7 +44,7 @@ export function ScopeModeControl({
       <button
         type="button"
         onClick={() => onChange('selected')}
-        className={`h-5 rounded px-1.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide ${
+        className={`h-5 rounded px-1.5 text-9 font-[var(--weight-semibold)] uppercase tracking-wide ${
           mode === 'selected'
             ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
             : 'text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -112,8 +112,8 @@ export function AssistantToolsPanel({
       <label key={tool.name} className={`flex cursor-pointer items-start gap-2 rounded border border-[var(--border-subtle)] px-2 py-1.5 transition-colors ${checked ? 'bg-[var(--surface-strong)]' : 'bg-[var(--surface-softest)] hover:bg-[var(--hover)]'}`}>
         <input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onToggleTool(tool.name, event.target.checked)} className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 accent-[var(--accent)]" />
         <span className="min-w-0">
-          <span className="block truncate text-[var(--text-11)] font-medium text-[var(--fg-secondary)]">{tool.label}</span>
-          <span className="mt-0.5 block text-[var(--text-10)] leading-snug text-[var(--muted-dim)]">{tool.description}</span>
+          <span className="block truncate text-11 font-medium text-[var(--fg-secondary)]">{tool.label}</span>
+          <span className="mt-0.5 block text-10 leading-snug text-[var(--muted-dim)]">{tool.description}</span>
         </span>
       </label>
     );
@@ -127,18 +127,18 @@ export function AssistantToolsPanel({
         <div className="flex min-w-0 items-center gap-2">
           <IconWrench className="h-3.5 w-3.5 text-[var(--muted)]" />
           <div
-            className="text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--fg)]"
+            className="text-12 font-[var(--weight-semibold)] text-[var(--fg)]"
             style={{ fontFamily: 'var(--display)' }}
           >
             {variant === 'settings' ? 'Default tools' : 'Tools'}
           </div>
         </div>
-        <div className="text-[var(--text-10)] tabular-nums text-[var(--muted-dim)]">{enabledTools.length} / {tools.length}</div>
+        <div className="text-10 tabular-nums text-[var(--muted-dim)]">{enabledTools.length} / {tools.length}</div>
       </div>
       <div className="flex items-center border-b border-[var(--border-subtle)] px-3 py-1.5">
         <div className="inline-flex overflow-hidden rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)]" role="group" aria-label="Set all tools">
-          <button type="button" onClick={onEnableAll} disabled={disabled || enabledTools.length === tools.length} className="h-5 px-2 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-35" title="Enable every tool">All</button>
-          <button type="button" onClick={onDisableAll} disabled={disabled || enabledTools.length === 0} className="h-5 border-l border-[var(--border-subtle)] px-2 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-35" title="Disable every tool">None</button>
+          <button type="button" onClick={onEnableAll} disabled={disabled || enabledTools.length === tools.length} className="h-5 px-2 text-9 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-35" title="Enable every tool">All</button>
+          <button type="button" onClick={onDisableAll} disabled={disabled || enabledTools.length === 0} className="h-5 border-l border-[var(--border-subtle)] px-2 text-9 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-35" title="Disable every tool">None</button>
         </div>
       </div>
       <div className={variant === 'popover' ? 'max-h-[min(520px,calc(100vh-190px))] overflow-y-auto p-2' : 'p-2'}>
@@ -149,11 +149,11 @@ export function AssistantToolsPanel({
           return (
             <section key={groupId} className="mb-3 last:mb-0">
               <div className="mb-1 flex items-center gap-1 px-1">
-                <div className="text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>{group.label}</div>
-                <div className="text-[var(--text-9)] text-[var(--muted-dim)]">{enabledCount} / {group.tools.length}</div>
+                <div className="text-9 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>{group.label}</div>
+                <div className="text-9 text-[var(--muted-dim)]">{enabledCount} / {group.tools.length}</div>
                 <div className="ml-auto inline-flex overflow-hidden rounded border border-[var(--border-subtle)]">
-                  <button type="button" onClick={() => onToggleTools(groupToolNames, true)} disabled={disabled || enabledCount === group.tools.length} className="h-5 px-1.5 text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-35" title={`Enable all ${group.label} tools`}>All</button>
-                  <button type="button" onClick={() => onToggleTools(groupToolNames, false)} disabled={disabled || enabledCount === 0} className="h-5 border-l border-[var(--border-subtle)] px-1.5 text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-35" title={`Disable all ${group.label} tools`}>None</button>
+                  <button type="button" onClick={() => onToggleTools(groupToolNames, true)} disabled={disabled || enabledCount === group.tools.length} className="h-5 px-1.5 text-8 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-35" title={`Enable all ${group.label} tools`}>All</button>
+                  <button type="button" onClick={() => onToggleTools(groupToolNames, false)} disabled={disabled || enabledCount === 0} className="h-5 border-l border-[var(--border-subtle)] px-1.5 text-8 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-35" title={`Disable all ${group.label} tools`}>None</button>
                 </div>
               </div>
               <div className="space-y-1">{group.tools.map(renderTool)}</div>
@@ -204,9 +204,9 @@ export function AssistantWorkspacesPanel({
       <div className="flex items-center justify-between gap-2 border-b border-[var(--border)] px-3 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <IconFolder className="h-3.5 w-3.5 text-[var(--muted)]" />
-          <div className="text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--fg-strong)]" style={{ fontFamily: 'var(--display)' }}>Workspaces</div>
+          <div className="text-12 font-[var(--weight-semibold)] text-[var(--fg-strong)]" style={{ fontFamily: 'var(--display)' }}>Workspaces</div>
         </div>
-        <div className="text-[var(--text-10)] tabular-nums text-[var(--muted-dim)]">{selectedCount} selected</div>
+        <div className="text-10 tabular-nums text-[var(--muted-dim)]">{selectedCount} selected</div>
       </div>
       {threadId ? (
         <AssistantWorkspacePicker
@@ -217,17 +217,17 @@ export function AssistantWorkspacesPanel({
           onSelectionChange={setSelectedCount}
         />
       ) : (
-        <div className="px-3 py-4 text-[var(--text-10)] text-[var(--muted-dim)]">Start a chat to choose its workspaces.</div>
+        <div className="px-3 py-4 text-10 text-[var(--muted-dim)]">Start a chat to choose its workspaces.</div>
       )}
       {artifacts ? (
         <label className="flex cursor-pointer items-center gap-2 border-t border-[var(--border-subtle)] px-3 py-2 hover:bg-[var(--hover)]">
           <input type="checkbox" checked={artifactsEnabled} disabled={disabled} onChange={(event) => onToggleWorkspace(artifacts.id, event.target.checked)} className="h-3.5 w-3.5 flex-shrink-0 accent-[var(--accent)]" />
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-2">
-              <span className="block truncate text-[var(--text-11)] font-medium text-[var(--fg-secondary)]">{artifacts.label}</span>
-              <span className="text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]">Private</span>
+              <span className="block truncate text-11 font-medium text-[var(--fg-secondary)]">{artifacts.label}</span>
+              <span className="text-8 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]">Private</span>
             </span>
-            <span className="mt-0.5 block text-[var(--text-10)] leading-snug text-[var(--muted-dim)]">{artifacts.description}</span>
+            <span className="mt-0.5 block text-10 leading-snug text-[var(--muted-dim)]">{artifacts.description}</span>
           </span>
         </label>
       ) : null}
@@ -287,14 +287,14 @@ function AssistantPromptDiffView({ oldText, newText }: { oldText: string; newTex
     <div className="mt-3 overflow-hidden rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)]">
       <div className="flex items-center justify-between gap-2 border-b border-[var(--border-subtle)] px-3 py-2">
         <div
-          className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)]"
+          className="text-10 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)]"
           style={{ fontFamily: 'var(--display)' }}
         >
           Promotion diff
         </div>
-        <div className="text-[var(--text-10)] text-[var(--muted-dim)]">Global to chat draft</div>
+        <div className="text-10 text-[var(--muted-dim)]">Global to chat draft</div>
       </div>
-      <div className="max-h-[260px] overflow-auto font-mono text-[var(--text-11)] leading-relaxed">
+      <div className="max-h-[260px] overflow-auto font-mono text-11 leading-relaxed">
         {!changed ? (
           <div className="px-3 py-3 text-[var(--muted-dim)]">No differences.</div>
         ) : (
@@ -400,19 +400,19 @@ export function AssistantSystemPromptModal({
         <div className="flex flex-shrink-0 items-center justify-between border-b border-[var(--border)] px-4 py-3">
           <div className="min-w-0">
             <div
-              className="text-[var(--text-13)] font-[var(--weight-semibold)] text-[var(--fg)]"
+              className="text-13 font-[var(--weight-semibold)] text-[var(--fg)]"
               style={{ fontFamily: 'var(--display)' }}
             >
               Built-in agent system prompts
             </div>
-            <div className="mt-1 text-[var(--text-11)] text-[var(--muted-dim)]">
+            <div className="mt-1 text-11 text-[var(--muted-dim)]">
               Chat changes affect only the current chat. Global changes apply to new chats.
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="h-8 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+            className="h-8 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 text-10 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
             style={{ fontFamily: 'var(--display)' }}
           >
             Close
@@ -427,7 +427,7 @@ export function AssistantSystemPromptModal({
                 type="button"
                 onClick={() => onModeChange(item)}
                 aria-pressed={mode === item}
-                className={`text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide ${
+                className={`text-10 font-[var(--weight-semibold)] uppercase tracking-wide ${
                   mode === item
                     ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
                     : 'text-[var(--muted)] hover:bg-[var(--surface-soft)] hover:text-[var(--fg-secondary)]'
@@ -439,17 +439,17 @@ export function AssistantSystemPromptModal({
             ))}
           </div>
           {error ? (
-            <div className="mb-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-11)] text-[var(--red)]">
+            <div className="mb-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-11 text-[var(--red)]">
               {error}
             </div>
           ) : null}
           {notice ? (
-            <div className="mb-3 rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[var(--text-11)] text-[var(--green)]">
+            <div className="mb-3 rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-11 text-[var(--green)]">
               {notice}
             </div>
           ) : null}
           <label className="flex min-h-0 flex-col gap-2">
-            <span className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
+            <span className="text-10 font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
               Prompt
             </span>
             <textarea
@@ -462,19 +462,19 @@ export function AssistantSystemPromptModal({
               disabled={loading || saving || threadSaving || promoting}
               maxLength={maxChars}
               rows={20}
-              className="min-h-[360px] resize-y rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-2 font-mono text-[var(--text-12)] leading-relaxed text-[var(--fg)] placeholder:text-[var(--muted-dim)] transition-colors focus:border-[var(--accent-muted)] focus:outline-none disabled:opacity-50"
+              className="min-h-[360px] resize-y rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-2 font-mono text-12 leading-relaxed text-[var(--fg)] placeholder:text-[var(--muted-dim)] transition-colors focus:border-[var(--accent-muted)] focus:outline-none disabled:opacity-50"
               placeholder={
                 loading ? 'Loading system prompt...' : 'Enter the Built-in agent system prompt'
               }
             />
           </label>
-          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[var(--text-10)] text-[var(--muted-dim)]">
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-10 text-[var(--muted-dim)]">
             <span>Source: {activeSource}</span>
             <span>
               {activeDraft.length.toLocaleString()} / {maxChars.toLocaleString()}
             </span>
           </div>
-          <div className="mt-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-2 text-[var(--text-11)] leading-relaxed text-[var(--muted-dim)]">
+          <div className="mt-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-2 text-11 leading-relaxed text-[var(--muted-dim)]">
             {(mode === 'thread'
               ? threadSettings?.threadSystemPrompt.runtimeAppendix
               : activeGlobalSettings?.runtimeAppendix) ??
@@ -492,7 +492,7 @@ export function AssistantSystemPromptModal({
                 type="button"
                 onClick={() => setDiffOpen((value) => !value)}
                 disabled={loading}
-                className="mr-auto h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 text-[var(--text-11)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:cursor-not-allowed disabled:opacity-45"
+                className="mr-auto h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 text-11 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:cursor-not-allowed disabled:opacity-45"
                 style={{ fontFamily: 'var(--display)' }}
               >
                 {diffOpen ? 'Hide diff' : 'Show diff'}
@@ -501,7 +501,7 @@ export function AssistantSystemPromptModal({
                 type="button"
                 onClick={onUseGlobalForThread}
                 disabled={loading || threadSaving || promoting}
-                className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 text-[var(--text-11)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:cursor-not-allowed disabled:opacity-45"
+                className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 text-11 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:cursor-not-allowed disabled:opacity-45"
                 style={{ fontFamily: 'var(--display)' }}
               >
                 Use global
@@ -510,7 +510,7 @@ export function AssistantSystemPromptModal({
                 type="button"
                 onClick={onPromoteThread}
                 disabled={loading || threadSaving || promoting || !threadDraft.trim()}
-                className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 text-[var(--text-11)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:cursor-not-allowed disabled:opacity-45"
+                className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 text-11 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:cursor-not-allowed disabled:opacity-45"
                 style={{ fontFamily: 'var(--display)' }}
               >
                 {promoting ? 'Promoting...' : 'Promote to global'}
@@ -519,7 +519,7 @@ export function AssistantSystemPromptModal({
                 type="button"
                 onClick={onSaveThread}
                 disabled={threadSaveDisabled}
-                className={`h-9 rounded border px-3 text-[var(--text-11)] font-[var(--weight-semibold)] uppercase tracking-wide ${
+                className={`h-9 rounded border px-3 text-11 font-[var(--weight-semibold)] uppercase tracking-wide ${
                   threadSaveDisabled
                     ? 'cursor-not-allowed border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] opacity-45'
                     : 'border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)] hover:brightness-110'
@@ -535,7 +535,7 @@ export function AssistantSystemPromptModal({
                 type="button"
                 onClick={onUseDefaultForGlobal}
                 disabled={loading || saving || promoting}
-                className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 text-[var(--text-11)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:cursor-not-allowed disabled:opacity-45"
+                className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 text-11 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:cursor-not-allowed disabled:opacity-45"
                 style={{ fontFamily: 'var(--display)' }}
               >
                 Use default
@@ -544,7 +544,7 @@ export function AssistantSystemPromptModal({
                 type="button"
                 onClick={onSaveGlobal}
                 disabled={globalSaveDisabled}
-                className={`h-9 rounded border px-3 text-[var(--text-11)] font-[var(--weight-semibold)] uppercase tracking-wide ${
+                className={`h-9 rounded border px-3 text-11 font-[var(--weight-semibold)] uppercase tracking-wide ${
                   globalSaveDisabled
                     ? 'cursor-not-allowed border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] opacity-45'
                     : 'border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)] hover:brightness-110'

@@ -286,7 +286,7 @@ function latestInvocation(invocations: WorkflowInvocation[]): WorkflowInvocation
 function NodeStatusBadge({ summary }: { summary: NodeExecutionSummary }) {
   return (
     <span
-      className="inline-flex h-5 items-center gap-1.5 rounded-full border px-2 text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-[0.08em]"
+      className="inline-flex h-5 items-center gap-1.5 rounded-full border px-2 text-8 font-[var(--weight-semibold)] uppercase tracking-[0.08em]"
       style={{
         color: executionStatusColor(summary.status),
         borderColor: `color-mix(in srgb, ${executionStatusColor(summary.status)} 45%, transparent)`,
@@ -372,7 +372,7 @@ function WorkflowGraphCard({
               {nodeTypeGlyph(node.type)}
             </span>
             <span
-              className="min-w-0 truncate text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-[0.14em]"
+              className="min-w-0 truncate text-8 font-[var(--weight-semibold)] uppercase tracking-[0.14em]"
               style={{ color: typeColor, fontFamily: 'var(--display)' }}
             >
               {node.eyebrow}
@@ -382,17 +382,17 @@ function WorkflowGraphCard({
                 <NodeStatusBadge summary={summary} />
               </span>
             ) : (
-              <span className="ml-auto max-w-[112px] flex-none truncate font-mono text-[var(--text-8)] text-[var(--muted-dim)]">
+              <span className="ml-auto max-w-[112px] flex-none truncate font-mono text-8 text-[var(--muted-dim)]">
                 {node.sourceId}
               </span>
             )}
           </span>
-          <span className="mt-1.5 line-clamp-2 min-h-[30px] text-[var(--text-12)] font-[var(--weight-semibold)] leading-[1.25] text-[var(--fg-strong)]">
+          <span className="mt-1.5 line-clamp-2 min-h-[30px] text-12 font-[var(--weight-semibold)] leading-[1.25] text-[var(--fg-strong)]">
             {node.label}
           </span>
           {node.type === 'call' ? (
             <>
-              <span className="mt-1 flex min-w-0 items-center gap-1.5 text-[var(--text-9)]">
+              <span className="mt-1 flex min-w-0 items-center gap-1.5 text-9">
                 <span className="max-w-[100px] flex-none truncate rounded bg-[var(--accent-subtle)] px-1.5 py-0.5 text-[var(--accent)]">
                   {node.agentId}
                 </span>
@@ -421,16 +421,16 @@ function WorkflowGraphCard({
                 ) : null}
               </span>
               {showDetails ? (
-                <span className="mt-1 line-clamp-2 text-[var(--text-9)] leading-[1.35] text-[var(--muted-dim)]">
+                <span className="mt-1 line-clamp-2 text-9 leading-[1.35] text-[var(--muted-dim)]">
                   {node.prompt}
                 </span>
               ) : null}
             </>
           ) : (
-            <span className="mt-1.5 flex items-center gap-2 text-[var(--text-9)] text-[var(--muted)]">
+            <span className="mt-1.5 flex items-center gap-2 text-9 text-[var(--muted)]">
               <span>{node.detail}</span>
               {mode === 'run' && summary.invocations.length > 0 ? (
-                <span className="ml-auto font-mono text-[var(--text-8)] text-[var(--muted-dim)]">
+                <span className="ml-auto font-mono text-8 text-[var(--muted-dim)]">
                   {summary.invocations.filter((item) => item.status === 'completed').length}/
                   {summary.invocations.length}
                 </span>
@@ -458,7 +458,7 @@ function InspectorSection({
   return (
     <section className="border-b border-[var(--border-subtle)] px-3 py-3">
       <div
-        className="mb-2 text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-[0.14em] text-[var(--muted-dim)]"
+        className="mb-2 text-8 font-[var(--weight-semibold)] uppercase tracking-[0.14em] text-[var(--muted-dim)]"
         style={{ fontFamily: 'var(--display)' }}
       >
         {label}
@@ -517,13 +517,13 @@ function WorkflowNodeInspector({
           {nodeTypeGlyph(node.type)}
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-[var(--text-8)] uppercase tracking-[0.14em] text-[var(--muted-dim)]">
+          <span className="block text-8 uppercase tracking-[0.14em] text-[var(--muted-dim)]">
             {node.eyebrow}
           </span>
-          <span className="mt-0.5 block text-[var(--text-12)] font-[var(--weight-semibold)] leading-tight text-[var(--fg-strong)]">
+          <span className="mt-0.5 block text-12 font-[var(--weight-semibold)] leading-tight text-[var(--fg-strong)]">
             {node.label}
           </span>
-          <span className="mt-1 block truncate font-mono text-[var(--text-8)] text-[var(--muted)]">
+          <span className="mt-1 block truncate font-mono text-8 text-[var(--muted)]">
             {node.sourceId}
           </span>
         </span>
@@ -531,7 +531,7 @@ function WorkflowNodeInspector({
           type="button"
           onClick={onClose}
           aria-label="Close node inspector"
-          className="flex h-7 w-7 flex-none items-center justify-center rounded text-[var(--text-14)] text-[var(--muted)] hover:bg-[var(--surface-softest)] hover:text-[var(--fg)]"
+          className="flex h-7 w-7 flex-none items-center justify-center rounded text-14 text-[var(--muted)] hover:bg-[var(--surface-softest)] hover:text-[var(--fg)]"
         >
           ×
         </button>
@@ -542,7 +542,7 @@ function WorkflowNodeInspector({
             key={item.id}
             type="button"
             onClick={() => onTabChange(item.id)}
-            className={`relative h-9 truncate px-1 text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] ${
+            className={`relative h-9 truncate px-1 text-8 font-[var(--weight-semibold)] uppercase tracking-[0.08em] ${
               tab === item.id ? 'text-[var(--fg)]' : 'text-[var(--muted-dim)] hover:text-[var(--muted)]'
             }`}
           >
@@ -564,7 +564,7 @@ function WorkflowNodeInspector({
               <InspectorSection label="Execution">
                 <div className="flex items-center gap-2">
                   <NodeStatusBadge summary={summary} />
-                  <span className="ml-auto font-mono text-[var(--text-9)] text-[var(--muted)]">
+                  <span className="ml-auto font-mono text-9 text-[var(--muted)]">
                     {summary.invocations.length} invocation
                     {summary.invocations.length === 1 ? '' : 's'}
                   </span>
@@ -572,31 +572,31 @@ function WorkflowNodeInspector({
                 {newest ? (
                   <div className="mt-2 grid grid-cols-2 gap-2 rounded-lg bg-[var(--surface-inset)] p-2.5">
                     <span>
-                      <span className="block text-[var(--text-8)] uppercase text-[var(--muted-dim)]">
+                      <span className="block text-8 uppercase text-[var(--muted-dim)]">
                         Started
                       </span>
-                      <span className="mt-0.5 block text-[var(--text-10)] text-[var(--fg)]">
+                      <span className="mt-0.5 block text-10 text-[var(--fg)]">
                         {formatTimestamp(newest.startedAt)}
                       </span>
                     </span>
                     <span>
-                      <span className="block text-[var(--text-8)] uppercase text-[var(--muted-dim)]">
+                      <span className="block text-8 uppercase text-[var(--muted-dim)]">
                         Duration
                       </span>
-                      <span className="mt-0.5 block text-[var(--text-10)] text-[var(--fg)]">
+                      <span className="mt-0.5 block text-10 text-[var(--fg)]">
                         {formatDuration(newest.startedAt, newest.finishedAt)}
                       </span>
                     </span>
                   </div>
                 ) : (
-                  <p className="mt-2 text-[var(--text-10)] leading-relaxed text-[var(--muted)]">
+                  <p className="mt-2 text-10 leading-relaxed text-[var(--muted)]">
                     This step has not been reached in the selected run.
                   </p>
                 )}
               </InspectorSection>
             ) : null}
             <InspectorSection label="Step">
-              <div className="space-y-2 text-[var(--text-10)]">
+              <div className="space-y-2 text-10">
                 <div className="flex gap-3">
                   <span className="w-14 flex-none text-[var(--muted-dim)]">Phase</span>
                   <span className="text-[var(--fg)]">{node.phaseId}</span>
@@ -633,7 +633,7 @@ function WorkflowNodeInspector({
                   {node.permissions.map((permission) => (
                     <span
                       key={permission}
-                      className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-1 font-mono text-[var(--text-8)] text-[var(--muted)]"
+                      className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-1 font-mono text-8 text-[var(--muted)]"
                     >
                       {permission}
                     </span>
@@ -647,13 +647,13 @@ function WorkflowNodeInspector({
           <>
             {node.prompt ? (
               <InspectorSection label="Prompt">
-                <div className="whitespace-pre-wrap text-[var(--text-10)] leading-relaxed text-[var(--fg)]">
+                <div className="whitespace-pre-wrap text-10 leading-relaxed text-[var(--fg)]">
                   {node.prompt}
                 </div>
               </InspectorSection>
             ) : null}
             <InspectorSection label="Run input">
-              <pre className="max-h-[360px] overflow-auto whitespace-pre-wrap rounded-lg bg-[var(--surface-inset)] p-2.5 font-mono text-[var(--text-9)] leading-relaxed text-[var(--fg)]">
+              <pre className="max-h-[360px] overflow-auto whitespace-pre-wrap rounded-lg bg-[var(--surface-inset)] p-2.5 font-mono text-9 leading-relaxed text-[var(--fg)]">
                 {run ? jsonText(run.input) : 'Select a run to inspect its resolved input.'}
               </pre>
             </InspectorSection>
@@ -671,13 +671,13 @@ function WorkflowNodeInspector({
                       open={summary.invocations.length === 1}
                       className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-softest)]"
                     >
-                      <summary className="cursor-pointer px-2.5 py-2 text-[var(--text-9)] text-[var(--fg)]">
+                      <summary className="cursor-pointer px-2.5 py-2 text-9 text-[var(--fg)]">
                         <span className="font-mono text-[var(--muted)]">
                           #{invocation.ordinal}
                         </span>{' '}
                         {executionStatusLabel(invocation.status)}
                       </summary>
-                      <pre className="max-h-[300px] overflow-auto whitespace-pre-wrap border-t border-[var(--border-subtle)] bg-[var(--surface-inset)] p-2.5 font-mono text-[var(--text-9)] leading-relaxed text-[var(--fg)]">
+                      <pre className="max-h-[300px] overflow-auto whitespace-pre-wrap border-t border-[var(--border-subtle)] bg-[var(--surface-inset)] p-2.5 font-mono text-9 leading-relaxed text-[var(--fg)]">
                         {invocation.error ??
                           invocation.textResult ??
                           jsonText(invocation.structuredResult)}
@@ -686,11 +686,11 @@ function WorkflowNodeInspector({
                   ))}
               </div>
             ) : run?.output !== null && run?.output !== undefined ? (
-              <pre className="max-h-[420px] overflow-auto whitespace-pre-wrap rounded-lg bg-[var(--surface-inset)] p-2.5 font-mono text-[var(--text-9)] leading-relaxed text-[var(--fg)]">
+              <pre className="max-h-[420px] overflow-auto whitespace-pre-wrap rounded-lg bg-[var(--surface-inset)] p-2.5 font-mono text-9 leading-relaxed text-[var(--fg)]">
                 {jsonText(run.output)}
               </pre>
             ) : (
-              <p className="text-[var(--text-10)] leading-relaxed text-[var(--muted)]">
+              <p className="text-10 leading-relaxed text-[var(--muted)]">
                 No output has been recorded for this step.
               </p>
             )}
@@ -718,10 +718,10 @@ function WorkflowNodeInspector({
                         ◌
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--fg)]">
+                        <span className="block truncate text-10 font-[var(--weight-semibold)] text-[var(--fg)]">
                           {invocation.lastChatName}
                         </span>
-                        <span className="mt-0.5 block text-[var(--text-8)] text-[var(--muted-dim)]">
+                        <span className="mt-0.5 block text-8 text-[var(--muted-dim)]">
                           Invocation #{invocation.ordinal} · {invocation.status}
                         </span>
                       </span>
@@ -730,7 +730,7 @@ function WorkflowNodeInspector({
                   ))}
               </div>
             ) : (
-              <p className="text-[var(--text-10)] leading-relaxed text-[var(--muted)]">
+              <p className="text-10 leading-relaxed text-[var(--muted)]">
                 No chat is attached to this step in the selected run.
               </p>
             )}
@@ -760,7 +760,7 @@ function WorkflowAgentsInspector({
     return (
       <aside className="flex w-[310px] flex-none flex-col border-l border-[var(--border)] bg-[var(--panel-alt)] shadow-[-18px_0_42px_var(--shadow-color)]">
         <div className="flex h-11 flex-none items-center border-b border-[var(--border)] px-3">
-          <span className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-strong)]">
+          <span className="text-11 font-[var(--weight-semibold)] text-[var(--fg-strong)]">
             Agents
           </span>
         </div>
@@ -777,10 +777,10 @@ function WorkflowAgentsInspector({
                   className="flex w-full items-center px-3 py-3 text-left hover:bg-[var(--surface-softest)] focus-visible:bg-[var(--surface-softest)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]"
                 >
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate font-mono text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--fg)]">
+                    <span className="block truncate font-mono text-10 font-[var(--weight-semibold)] text-[var(--fg)]">
                       {agentId}
                     </span>
-                    <span className="mt-0.5 block truncate text-[var(--text-8)] text-[var(--muted-dim)]">
+                    <span className="mt-0.5 block truncate text-8 text-[var(--muted-dim)]">
                       {candidate.runner.agent.id} ·{' '}
                       {candidate.runner.kind === 'drone' ? 'child drone' : 'chat'} ·{' '}
                       {callCount} call{callCount === 1 ? '' : 's'}
@@ -811,7 +811,7 @@ function WorkflowAgentsInspector({
           ‹
         </button>
         <span className="min-w-0 flex-1">
-          <span className="block truncate font-mono text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-strong)]">
+          <span className="block truncate font-mono text-11 font-[var(--weight-semibold)] text-[var(--fg-strong)]">
             {selectedAgentId}
           </span>
         </span>
@@ -819,19 +819,19 @@ function WorkflowAgentsInspector({
       <div className="min-h-0 flex-1 overflow-y-auto">
         <InspectorSection label="Agent">
           <div className="flex items-center gap-2">
-            <span className="flex h-9 w-9 flex-none items-center justify-center rounded-lg border border-[var(--accent-border)] bg-[var(--accent-subtle)] font-mono text-[var(--text-10)] text-[var(--accent)]">
+            <span className="flex h-9 w-9 flex-none items-center justify-center rounded-lg border border-[var(--accent-border)] bg-[var(--accent-subtle)] font-mono text-10 text-[var(--accent)]">
               {selectedAgentId.slice(0, 2).toUpperCase()}
             </span>
             <span className="min-w-0">
-              <span className="block truncate font-mono text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--fg-strong)]">
+              <span className="block truncate font-mono text-12 font-[var(--weight-semibold)] text-[var(--fg-strong)]">
                 {selectedAgentId}
               </span>
-              <span className="mt-0.5 block text-[var(--text-9)] text-[var(--muted)]">
+              <span className="mt-0.5 block text-9 text-[var(--muted)]">
                 {builtinAgent} · {runnerLabel}
               </span>
             </span>
           </div>
-          <div className="mt-3 space-y-2 rounded-lg bg-[var(--surface-inset)] p-2.5 text-[var(--text-9)]">
+          <div className="mt-3 space-y-2 rounded-lg bg-[var(--surface-inset)] p-2.5 text-9">
             <div className="flex gap-3">
               <span className="w-16 flex-none text-[var(--muted-dim)]">Runner</span>
               <span className="text-[var(--fg)]">{runnerLabel}</span>
@@ -849,7 +849,7 @@ function WorkflowAgentsInspector({
           </div>
         </InspectorSection>
         <InspectorSection label="Instructions">
-          <div className="whitespace-pre-wrap text-[var(--text-10)] leading-relaxed text-[var(--fg)]">
+          <div className="whitespace-pre-wrap text-10 leading-relaxed text-[var(--fg)]">
             {agent.instructions || (
               <span className="italic text-[var(--muted-dim)]">No agent instructions.</span>
             )}
@@ -861,14 +861,14 @@ function WorkflowAgentsInspector({
               {agent.permissions.map((permission) => (
                 <span
                   key={permission}
-                  className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-1 font-mono text-[var(--text-8)] text-[var(--muted)]"
+                  className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-1 font-mono text-8 text-[var(--muted)]"
                 >
                   {permission}
                 </span>
               ))}
             </div>
           ) : (
-            <span className="text-[var(--text-10)] text-[var(--muted-dim)]">
+            <span className="text-10 text-[var(--muted-dim)]">
               No permissions requested.
             </span>
           )}
@@ -885,17 +885,17 @@ function WorkflowAgentsInspector({
                 >
                   <span className="flex items-start gap-2">
                     <span className="min-w-0 flex-1">
-                      <span className="block text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--fg)]">
+                      <span className="block text-10 font-[var(--weight-semibold)] text-[var(--fg)]">
                         {call.label}
                       </span>
-                      <span className="mt-0.5 block font-mono text-[var(--text-8)] text-[var(--muted-dim)]">
+                      <span className="mt-0.5 block font-mono text-8 text-[var(--muted-dim)]">
                         {call.phaseId} / {call.sourceId}
                       </span>
                     </span>
                     <span className="text-[var(--accent)]">↗</span>
                   </span>
                   {call.prompt ? (
-                    <span className="mt-2 line-clamp-3 block text-[var(--text-9)] leading-relaxed text-[var(--muted)]">
+                    <span className="mt-2 line-clamp-3 block text-9 leading-relaxed text-[var(--muted)]">
                       {call.prompt}
                     </span>
                   ) : null}
@@ -903,7 +903,7 @@ function WorkflowAgentsInspector({
               ))}
             </div>
           ) : (
-            <span className="text-[var(--text-10)] text-[var(--muted-dim)]">
+            <span className="text-10 text-[var(--muted-dim)]">
               This agent is not referenced by a call node.
             </span>
           )}
@@ -947,14 +947,14 @@ function WorkflowRunConversationsInspector({
           ◌
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-[var(--text-8)] uppercase tracking-[0.14em] text-[var(--muted-dim)]">
+          <span className="block text-8 uppercase tracking-[0.14em] text-[var(--muted-dim)]">
             Run conversations
           </span>
-          <span className="mt-0.5 block text-[var(--text-12)] font-[var(--weight-semibold)] leading-tight text-[var(--fg-strong)]">
+          <span className="mt-0.5 block text-12 font-[var(--weight-semibold)] leading-tight text-[var(--fg-strong)]">
             {chatCount} chat{chatCount === 1 ? '' : 's'} across {groups.length} agent
             {groups.length === 1 ? '' : 's'}
           </span>
-          <span className="mt-1 block truncate font-mono text-[var(--text-8)] text-[var(--muted)]">
+          <span className="mt-1 block truncate font-mono text-8 text-[var(--muted)]">
             #{run.id.length > 10 ? run.id.slice(-6) : run.id}
           </span>
         </span>
@@ -962,7 +962,7 @@ function WorkflowRunConversationsInspector({
           type="button"
           onClick={onClose}
           aria-label="Close run conversations"
-          className="flex h-7 w-7 flex-none items-center justify-center rounded text-[var(--text-14)] text-[var(--muted)] hover:bg-[var(--surface-softest)] hover:text-[var(--fg)]"
+          className="flex h-7 w-7 flex-none items-center justify-center rounded text-14 text-[var(--muted)] hover:bg-[var(--surface-softest)] hover:text-[var(--fg)]"
         >
           ×
         </button>
@@ -1006,15 +1006,15 @@ function WorkflowRunConversationsInspector({
                     ) : null}
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate font-mono text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--fg)]">
+                    <span className="block truncate font-mono text-10 font-[var(--weight-semibold)] text-[var(--fg)]">
                       {group.agentId}
                     </span>
-                    <span className="mt-0.5 block truncate text-[var(--text-8)] text-[var(--muted-dim)]">
+                    <span className="mt-0.5 block truncate text-8 text-[var(--muted-dim)]">
                       {agent.runner.agent.id} ·{' '}
                       {agent.runner.kind === 'drone' ? 'child drone' : 'chat'}
                     </span>
                   </span>
-                  <span className="flex-none rounded-full bg-[var(--surface-strong)] px-2 py-0.5 font-mono text-[var(--text-8)] text-[var(--muted)]">
+                  <span className="flex-none rounded-full bg-[var(--surface-strong)] px-2 py-0.5 font-mono text-8 text-[var(--muted)]">
                     {groupChats} chat{groupChats === 1 ? '' : 's'}
                   </span>
                 </div>
@@ -1036,10 +1036,10 @@ function WorkflowRunConversationsInspector({
                               />
                             </span>
                             <span className="min-w-0 flex-1">
-                              <span className="block text-[var(--text-10)] font-[var(--weight-semibold)] leading-tight text-[var(--fg)]">
+                              <span className="block text-10 font-[var(--weight-semibold)] leading-tight text-[var(--fg)]">
                                 {call?.label || invocation.nodeId}
                               </span>
-                              <span className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[var(--text-8)]">
+                              <span className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-8">
                                 <span className="font-mono text-[var(--muted-dim)]">
                                   #{invocation.ordinal}
                                 </span>
@@ -1054,11 +1054,11 @@ function WorkflowRunConversationsInspector({
                                 </span>
                               </span>
                               {invocation.lastChatName ? (
-                                <span className="mt-1.5 block truncate text-[var(--text-9)] text-[var(--muted)]">
+                                <span className="mt-1.5 block truncate text-9 text-[var(--muted)]">
                                   {invocation.lastChatName}
                                 </span>
                               ) : (
-                                <span className="mt-1.5 block text-[var(--text-8)] italic text-[var(--muted-dim)]">
+                                <span className="mt-1.5 block text-8 italic text-[var(--muted-dim)]">
                                   No chat available yet
                                 </span>
                               )}
@@ -1069,7 +1069,7 @@ function WorkflowRunConversationsInspector({
                               <button
                                 type="button"
                                 onClick={() => onSelectNode(call.key)}
-                                className="h-6 rounded px-2 text-[var(--text-8)] uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--surface-strong)] hover:text-[var(--fg)]"
+                                className="h-6 rounded px-2 text-8 uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--surface-strong)] hover:text-[var(--fg)]"
                               >
                                 Inspect
                               </button>
@@ -1083,7 +1083,7 @@ function WorkflowRunConversationsInspector({
                                     invocation.lastChatName!,
                                   )
                                 }
-                                className="h-6 rounded border border-[var(--accent-border)] bg-[var(--accent-subtle)] px-2 text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--accent)] hover:border-[var(--accent-muted)]"
+                                className="h-6 rounded border border-[var(--accent-border)] bg-[var(--accent-subtle)] px-2 text-8 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--accent)] hover:border-[var(--accent-muted)]"
                               >
                                 Open chat ↗
                               </button>
@@ -1101,10 +1101,10 @@ function WorkflowRunConversationsInspector({
                     >
                       <span className="h-1.5 w-1.5 flex-none rounded-full bg-[var(--muted-dim)]" />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[var(--text-9)] text-[var(--fg-secondary)]">
+                        <span className="block truncate text-9 text-[var(--fg-secondary)]">
                           {call.label}
                         </span>
-                        <span className="mt-0.5 block font-mono text-[var(--text-8)] text-[var(--muted-dim)]">
+                        <span className="mt-0.5 block font-mono text-8 text-[var(--muted-dim)]">
                           Not reached
                         </span>
                       </span>
@@ -1112,7 +1112,7 @@ function WorkflowRunConversationsInspector({
                     </button>
                   ))}
                   {group.invocations.length === 0 && unreachedCalls.length === 0 ? (
-                    <div className="px-2.5 py-3 text-[var(--text-9)] italic text-[var(--muted-dim)]">
+                    <div className="px-2.5 py-3 text-9 italic text-[var(--muted-dim)]">
                       Not used by this workflow.
                     </div>
                   ) : null}
@@ -1312,17 +1312,17 @@ export function WorkflowDefinitionView({
             >
               <div className="flex h-[38px] min-w-0 items-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--panel-overlay-soft)] px-3">
                 <span
-                  className="flex-none whitespace-nowrap text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-[0.14em] text-[var(--canvas-related)]"
+                  className="flex-none whitespace-nowrap text-8 font-[var(--weight-semibold)] uppercase tracking-[0.14em] text-[var(--canvas-related)]"
                   style={{ fontFamily: 'var(--display)' }}
                 >
                   {String(region.index + 1).padStart(2, '0')}
                 </span>
-                <span className="min-w-0 truncate text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--fg)]">
+                <span className="min-w-0 truncate text-10 font-[var(--weight-semibold)] text-[var(--fg)]">
                   {region.label}
                 </span>
                 {mode === 'run' ? (
                   <span
-                    className="ml-auto flex h-5 flex-none items-center gap-1.5 rounded-full px-2 text-[var(--text-8)] uppercase tracking-wide"
+                    className="ml-auto flex h-5 flex-none items-center gap-1.5 rounded-full px-2 text-8 uppercase tracking-wide"
                     style={{
                       color: executionStatusColor(summary.status),
                       background: `color-mix(in srgb, ${executionStatusColor(summary.status)} 9%, transparent)`,
@@ -1340,7 +1340,7 @@ export function WorkflowDefinitionView({
                     ) : null}
                   </span>
                 ) : (
-                  <span className="ml-auto flex-none whitespace-nowrap font-mono text-[var(--text-8)] text-[var(--muted-dim)]">
+                  <span className="ml-auto flex-none whitespace-nowrap font-mono text-8 text-[var(--muted-dim)]">
                     {region.nodeCount} nodes
                   </span>
                 )}
@@ -1517,7 +1517,7 @@ export function WorkflowDefinitionView({
               setMode('definition');
               setRunConversationsOpen(false);
             }}
-            className={`h-6 rounded-md px-2.5 text-[var(--text-9)] font-[var(--weight-semibold)] ${
+            className={`h-6 rounded-md px-2.5 text-9 font-[var(--weight-semibold)] ${
               mode === 'definition'
                 ? 'bg-[var(--panel-raised)] text-[var(--fg)] shadow-sm'
                 : 'text-[var(--muted)] hover:text-[var(--fg)]'
@@ -1534,7 +1534,7 @@ export function WorkflowDefinitionView({
               setRunConversationsOpen(false);
             }}
             disabled={!run}
-            className={`flex h-6 items-center gap-1.5 rounded-md px-2.5 text-[var(--text-9)] font-[var(--weight-semibold)] ${
+            className={`flex h-6 items-center gap-1.5 rounded-md px-2.5 text-9 font-[var(--weight-semibold)] ${
               mode === 'run'
                 ? 'bg-[var(--panel-raised)] text-[var(--fg)] shadow-sm'
                 : 'text-[var(--muted)] hover:text-[var(--fg)]'
@@ -1559,16 +1559,16 @@ export function WorkflowDefinitionView({
         {mode === 'run' && run ? (
           <>
             <span className="h-4 w-px bg-[var(--border-subtle)]" />
-            <span className="font-mono text-[var(--text-8)] text-[var(--muted-dim)]">
+            <span className="font-mono text-8 text-[var(--muted-dim)]">
               #{run.id.length > 10 ? run.id.slice(-6) : run.id}
             </span>
-            <span className="capitalize text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--fg)]">
+            <span className="capitalize text-9 font-[var(--weight-semibold)] text-[var(--fg)]">
               {workflowStatusLabel(run.status)}
             </span>
-            <span className="font-mono text-[var(--text-8)] text-[var(--muted-dim)]">
+            <span className="font-mono text-8 text-[var(--muted-dim)]">
               {formatDuration(run.startedAt, run.finishedAt)}
             </span>
-            <span className="hidden text-[var(--text-8)] text-[var(--muted)] min-[900px]:inline">
+            <span className="hidden text-8 text-[var(--muted)] min-[900px]:inline">
               <strong className="font-[var(--weight-semibold)] text-[var(--green)]">
                 {completedInvocations}
               </strong>{' '}
@@ -1596,7 +1596,7 @@ export function WorkflowDefinitionView({
             </span>
           </>
         ) : (
-          <span className="text-[var(--text-8)] text-[var(--muted-dim)]">
+          <span className="text-8 text-[var(--muted-dim)]">
             {workflow.definition.phases.length} phases · {layout.nodes.length} nodes
           </span>
         )}
@@ -1613,7 +1613,7 @@ export function WorkflowDefinitionView({
               setRunConversationsOpen(false);
               setSelectedAgentId('');
             }}
-            className={`flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] ${
+            className={`flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-8 font-[var(--weight-semibold)] uppercase tracking-[0.08em] ${
               selectedAgentId !== null
                 ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                 : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:border-[var(--border)] hover:text-[var(--fg)]'
@@ -1632,7 +1632,7 @@ export function WorkflowDefinitionView({
               setSelectedNodeKey(null);
               setRunConversationsOpen((current) => !current);
             }}
-            className={`flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] ${
+            className={`flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-8 font-[var(--weight-semibold)] uppercase tracking-[0.08em] ${
               runConversationsOpen
                 ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                 : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:border-[var(--border)] hover:text-[var(--fg)]'
@@ -1646,7 +1646,7 @@ export function WorkflowDefinitionView({
         ) : null}
         <div className="ml-auto flex items-center gap-1.5">
           <label className="relative hidden h-7 items-center min-[760px]:flex">
-            <span className="pointer-events-none absolute left-2 text-[var(--text-10)] text-[var(--muted-dim)]">
+            <span className="pointer-events-none absolute left-2 text-10 text-[var(--muted-dim)]">
               ⌕
             </span>
             <input
@@ -1654,14 +1654,14 @@ export function WorkflowDefinitionView({
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Find step"
               aria-label="Find a workflow step"
-              className="h-7 w-28 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-inset)] pl-6 pr-2 text-[var(--text-9)] text-[var(--fg)] outline-none placeholder:text-[var(--muted-dim)] focus:w-40 focus:border-[var(--accent-muted)]"
+              className="h-7 w-28 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-inset)] pl-6 pr-2 text-9 text-[var(--fg)] outline-none placeholder:text-[var(--muted-dim)] focus:w-40 focus:border-[var(--accent-muted)]"
             />
           </label>
           <button
             type="button"
             aria-pressed={showDetails}
             onClick={() => setShowDetails((current) => !current)}
-            className={`hidden h-7 rounded-lg border px-2 text-[var(--text-8)] uppercase tracking-wide min-[680px]:block ${
+            className={`hidden h-7 rounded-lg border px-2 text-8 uppercase tracking-wide min-[680px]:block ${
               showDetails
                 ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                 : 'border-[var(--border-subtle)] text-[var(--muted)]'
@@ -1678,14 +1678,14 @@ export function WorkflowDefinitionView({
               zoomBy(-SCALE_STEP);
             }}
             disabled={scale <= MIN_SCALE}
-            className="flex h-7 w-7 items-center justify-center rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-12)] text-[var(--muted)] hover:border-[var(--border)] hover:text-[var(--fg)] disabled:opacity-35"
+            className="flex h-7 w-7 items-center justify-center rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-12 text-[var(--muted)] hover:border-[var(--border)] hover:text-[var(--fg)] disabled:opacity-35"
             aria-label="Zoom workflow out"
           >
             −
           </button>
           <span
             aria-label={`Workflow zoom ${Math.round(scale * 100)} percent`}
-            className="flex h-7 min-w-[46px] items-center justify-center px-1.5 font-mono text-[var(--text-8)] text-[var(--muted)]"
+            className="flex h-7 min-w-[46px] items-center justify-center px-1.5 font-mono text-8 text-[var(--muted)]"
           >
             {Math.round(scale * 100)}%
           </span>
@@ -1695,7 +1695,7 @@ export function WorkflowDefinitionView({
               viewportInteractedRef.current = true;
               fitGraph();
             }}
-            className="h-7 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[var(--text-8)] font-[var(--weight-semibold)] text-[var(--muted)] hover:border-[var(--border)] hover:text-[var(--fg)]"
+            className="h-7 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-8 font-[var(--weight-semibold)] text-[var(--muted)] hover:border-[var(--border)] hover:text-[var(--fg)]"
             title="Reset the workflow graph position and zoom"
           >
             Reset view
@@ -1707,7 +1707,7 @@ export function WorkflowDefinitionView({
               zoomBy(SCALE_STEP);
             }}
             disabled={scale >= MAX_SCALE}
-            className="flex h-7 w-7 items-center justify-center rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-12)] text-[var(--muted)] hover:border-[var(--border)] hover:text-[var(--fg)] disabled:opacity-35"
+            className="flex h-7 w-7 items-center justify-center rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-12 text-[var(--muted)] hover:border-[var(--border)] hover:text-[var(--fg)] disabled:opacity-35"
             aria-label="Zoom workflow in"
           >
             +
@@ -1739,7 +1739,7 @@ export function WorkflowDefinitionView({
             }}
             onMove={(_event, viewport) => setScale(viewport.zoom)}
           />
-          <div className="pointer-events-none absolute bottom-2.5 left-2.5 flex items-center gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-2.5 py-1.5 text-[var(--text-8)] text-[var(--muted-dim)] shadow-[0_8px_24px_var(--shadow-color)] backdrop-blur">
+          <div className="pointer-events-none absolute bottom-2.5 left-2.5 flex items-center gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-2.5 py-1.5 text-8 text-[var(--muted-dim)] shadow-[0_8px_24px_var(--shadow-color)] backdrop-blur">
             {mode === 'run' ? (
               <>
                 {(['completed', 'running', 'queued', 'failed'] as NodeExecutionStatus[]).map(

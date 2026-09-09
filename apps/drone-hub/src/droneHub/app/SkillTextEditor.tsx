@@ -44,7 +44,7 @@ function PlainSkillEditor({
           onSave();
         }
       }}
-      className="h-full w-full resize-none border-0 bg-[var(--panel-alt)] p-3 font-mono text-[var(--text-12)] leading-5 text-[var(--fg-secondary)] outline-none"
+      className="h-full w-full resize-none border-0 bg-[var(--panel-alt)] p-3 font-mono text-12 leading-5 text-[var(--fg-secondary)] outline-none"
       style={{
         fontSize: `${editorZoomedPixels(12, editorZoomLevel)}px`,
         lineHeight: `${editorZoomedPixels(20, editorZoomLevel)}px`,

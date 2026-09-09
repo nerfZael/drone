@@ -723,10 +723,10 @@ export const DroneCard = React.memo(function DroneCard({
   const densityClasses = sidebarDensityClasses(density);
   const titleDensityClass =
     density === 'compact'
-      ? 'text-[var(--sidebar-drone-compact-size)]'
+      ? 'text-sidebar-drone-compact'
       : density === 'comfortable'
-        ? 'text-[var(--sidebar-drone-comfortable-size)]'
-        : 'text-[var(--sidebar-drone-size)]';
+        ? 'text-sidebar-drone-comfortable'
+        : 'text-sidebar-drone';
   const stopCardSelection = (e: React.SyntheticEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1142,7 +1142,7 @@ export const DroneCard = React.memo(function DroneCard({
         <DetachedChatIndicator droneId={drone.id} />
         {isDraftDrone ? (
           <span
-            className="inline-flex flex-shrink-0 items-center rounded-[3px] bg-[var(--accent-subtle)] px-1 py-0.5 text-[var(--text-8)] font-[var(--weight-semibold)] normal-case leading-none tracking-[0.02em] text-[var(--accent)]"
+            className="inline-flex flex-shrink-0 items-center rounded-[3px] bg-[var(--accent-subtle)] px-1 py-0.5 text-8 font-[var(--weight-semibold)] normal-case leading-none tracking-[0.02em] text-[var(--accent)]"
             style={{ fontFamily: 'var(--display)' }}
             title="Draft drone · queued messages run after publishing"
             aria-label="Draft drone"
@@ -1159,7 +1159,7 @@ export const DroneCard = React.memo(function DroneCard({
             className={`flex-shrink-0 truncate border leading-none uppercase ${
               pinned
                 ? 'max-w-[4.75rem] rounded-[2px] border-[var(--border)] bg-[var(--surface-inset)] px-0.5 py-px text-[.4375rem] font-[var(--weight-medium)] tracking-[0.01em] text-[var(--fg-secondary)]'
-                : 'rounded border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1 py-0.5 text-[var(--text-8)] font-[var(--weight-semibold)] tracking-wide text-[var(--muted-dim)]'
+                : 'rounded border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1 py-0.5 text-8 font-[var(--weight-semibold)] tracking-wide text-[var(--muted-dim)]'
             }`}
             title={statusHint}
           >

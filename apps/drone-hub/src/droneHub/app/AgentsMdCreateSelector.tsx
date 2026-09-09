@@ -59,7 +59,7 @@ export function AgentsMdCreateSelector({
   return (
     <section className={className}>
       <label className="block">
-        <span className="mb-1 block text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
+        <span className="mb-1 block text-10 font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
           AGENTS.md
         </span>
         <select
@@ -67,7 +67,7 @@ export function AgentsMdCreateSelector({
           onChange={(event) => handleSelectionChange(event.target.value)}
           disabled={controlsDisabled}
           aria-label="AGENTS.md source"
-          className="h-9 w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[var(--text-11)] text-[var(--fg-secondary)] focus:border-[var(--accent-muted)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+          className="h-9 w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-11 text-[var(--fg-secondary)] focus:border-[var(--accent-muted)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
         >
           <option value="inherit">Use repository/default instructions</option>
           {files.length > 0 ? (
@@ -86,7 +86,7 @@ export function AgentsMdCreateSelector({
         </select>
       </label>
 
-      <p className="mt-1.5 text-[var(--text-10)] text-[var(--muted-dim)]">
+      <p className="mt-1.5 text-10 text-[var(--muted-dim)]">
         {runtime !== 'container'
           ? 'AGENTS.md selection is available for container drones only; host drones use the repository’s existing file.'
           : error
@@ -105,7 +105,7 @@ export function AgentsMdCreateSelector({
           value={customOverride}
           onChange={(event) => onCustomOverrideChange(event.target.value)}
           disabled={disabled}
-          className="mt-2 min-h-[8rem] w-full resize-y rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-2 font-mono text-[var(--text-11)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:border-[var(--accent-muted)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+          className="mt-2 min-h-[8rem] w-full resize-y rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-2 font-mono text-11 text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:border-[var(--accent-muted)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
           placeholder={`# Instructions for ${scopeLabel}`}
           aria-label="AGENTS.md override content"
           spellCheck={false}

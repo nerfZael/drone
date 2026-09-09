@@ -12,7 +12,7 @@ export function QueuedNewChatLabel({
 }) {
   return (
     <span
-      className={`inline-flex min-h-6 items-center rounded-t-[var(--radius-medium)] border border-b-0 px-2.5 text-[var(--text-10)] font-[var(--weight-semibold)] ${
+      className={`inline-flex min-h-6 items-center rounded-t-[var(--radius-medium)] border border-b-0 px-2.5 text-10 font-[var(--weight-semibold)] ${
         failed
           ? 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]'
           : surface === 'neutral'
@@ -85,7 +85,7 @@ export function CreateNewChatNowButton({
       }}
       disabled={disabled}
       aria-keyshortcuts="Enter Escape"
-      className="inline-flex min-h-7 items-center rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--surface-strong)] px-2.5 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--fg-secondary)] shadow-sm transition-[background-color,border-color,color,box-shadow] hover:border-[var(--accent-muted)] hover:bg-[var(--hover)] hover:text-[var(--fg)] focus:border-[var(--accent-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-subtle)] disabled:cursor-not-allowed disabled:opacity-50"
+      className="inline-flex min-h-7 items-center rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--surface-strong)] px-2.5 text-10 font-[var(--weight-semibold)] text-[var(--fg-secondary)] shadow-sm transition-[background-color,border-color,color,box-shadow] hover:border-[var(--accent-muted)] hover:bg-[var(--hover)] hover:text-[var(--fg)] focus:border-[var(--accent-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-subtle)] disabled:cursor-not-allowed disabled:opacity-50"
     >
       {busy ? 'Creating…' : 'Create now'}
     </button>

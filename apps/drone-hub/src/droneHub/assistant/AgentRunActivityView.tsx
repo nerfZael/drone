@@ -155,7 +155,7 @@ export function AgentRunActivityView({
         >
           {showPreRunDuration ? (
             <div
-              className={`px-3 py-1 text-[var(--text-10)] text-[var(--muted-dim)] ${
+              className={`px-3 py-1 text-10 text-[var(--muted-dim)] ${
                 hasActivityDetails && hasPlan ? 'col-span-2' : ''
               }`}
             >
@@ -167,7 +167,7 @@ export function AgentRunActivityView({
             <div className="dh-agent-activity-scrollbar max-h-72 min-w-0 overflow-y-auto overscroll-contain border-l border-[var(--border-subtle)] px-3">
               <div className="space-y-1">
                 {displayActivity?.truncated ? (
-                  <div className="py-1 text-[var(--text-10)] text-[var(--muted-dim)]">
+                  <div className="py-1 text-10 text-[var(--muted-dim)]">
                     Earlier or oversized activity details were trimmed.
                   </div>
                 ) : null}

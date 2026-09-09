@@ -94,7 +94,7 @@ export function UiTabs<T extends string>({
           >
             {option.icon ? <span className="shrink-0" aria-hidden="true">{option.icon}</span> : null}
             <span className="truncate">{option.label}</span>
-            {option.badge != null ? <UiBadge tone={option.badgeTone ?? 'neutral'} className="h-4 px-1.5 !text-[length:var(--text-10)]">{option.badge}</UiBadge> : null}
+            {option.badge != null ? <UiBadge tone={option.badgeTone ?? 'neutral'} className="h-4 px-1.5 !text-10">{option.badge}</UiBadge> : null}
           </button>
         );
       })}

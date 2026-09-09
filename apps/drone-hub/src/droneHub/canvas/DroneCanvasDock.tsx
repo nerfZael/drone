@@ -280,7 +280,7 @@ function renderNodeIndicator(state: DroneCanvasIndicatorState | null): React.Rea
       const label = state.hubPhase === 'seeding' ? 'Seeding' : 'Starting';
       return (
         <span
-          className="inline-flex items-center rounded-[4px] border border-[var(--yellow-border)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--yellow)] shadow-[0_4px_10px_var(--shadow-color)]"
+          className="inline-flex items-center rounded-[4px] border border-[var(--yellow-border)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-8 font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--yellow)] shadow-[0_4px_10px_var(--shadow-color)]"
           style={{ fontFamily: 'var(--display)' }}
           title={String(state.hubMessage ?? label)}
         >
@@ -298,7 +298,7 @@ function renderNodeIndicator(state: DroneCanvasIndicatorState | null): React.Rea
   if (state.statusChecking) {
     return (
       <span
-        className="inline-flex items-center rounded-[4px] border border-[var(--yellow-border)] bg-[var(--warning-panel)] px-1.5 py-[1px] text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--yellow)] shadow-[0_4px_10px_var(--shadow-color)]"
+        className="inline-flex items-center rounded-[4px] border border-[var(--yellow-border)] bg-[var(--warning-panel)] px-1.5 py-[1px] text-8 font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--yellow)] shadow-[0_4px_10px_var(--shadow-color)]"
         style={{ fontFamily: 'var(--display)' }}
         title={String(state.statusError ?? 'Checking status')}
       >
@@ -311,7 +311,7 @@ function renderNodeIndicator(state: DroneCanvasIndicatorState | null): React.Rea
     const label = state.hubPhase === 'error' ? 'Error' : 'Offline';
     return (
       <span
-        className="inline-flex items-center rounded-[4px] border border-[var(--red-border)] bg-[var(--danger-panel)] px-1.5 py-[1px] text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--red)] shadow-[0_4px_10px_var(--shadow-color)]"
+        className="inline-flex items-center rounded-[4px] border border-[var(--red-border)] bg-[var(--danger-panel)] px-1.5 py-[1px] text-8 font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--red)] shadow-[0_4px_10px_var(--shadow-color)]"
         style={{ fontFamily: 'var(--display)' }}
         title={String(state.hubMessage ?? state.statusError ?? label)}
       >
@@ -2031,7 +2031,7 @@ export function DroneCanvasDock({
             <UiToolbarButton onClick={resetViewport} title="Reset canvas view">
               Reset
             </UiToolbarButton>
-            <span className="w-[48px] text-right text-[var(--text-10)] font-mono text-[var(--muted-dim)]" title="Current zoom">
+            <span className="w-[48px] text-right text-10 font-mono text-[var(--muted-dim)]" title="Current zoom">
               {Math.round(scale * 100)}%
             </span>
           </div>
@@ -2042,7 +2042,7 @@ export function DroneCanvasDock({
             className="flex-wrap overflow-visible px-3 py-2"
           >
             <div className="flex items-center gap-1.5">
-              <span className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+              <span className="text-10 font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
                 Agent
               </span>
               <UiMenuSelect
@@ -2065,7 +2065,7 @@ export function DroneCanvasDock({
             </div>
             {spawnAgentConfig.kind === 'builtin' ? (
               <div className="flex items-center gap-1.5">
-                <span className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+                <span className="text-10 font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
                   Model
                 </span>
                 <UiMenuSelect
@@ -2104,7 +2104,7 @@ export function DroneCanvasDock({
               </div>
             ) : null}
             <div className="flex items-center gap-1.5">
-              <span className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+              <span className="text-10 font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
                 Repo
               </span>
               <UiMenuSelect
@@ -2118,11 +2118,11 @@ export function DroneCanvasDock({
                 menuClassName="max-h-[220px] overflow-y-auto"
                 title={normalizedCreateRepoPath || 'No repo'}
                 triggerLabel={normalizedCreateRepoPath ? repoPathLabel(normalizedCreateRepoPath) : 'No repo'}
-                triggerLabelClassName={normalizedCreateRepoPath ? 'font-mono text-[var(--text-11)]' : undefined}
+                triggerLabelClassName={normalizedCreateRepoPath ? 'font-mono text-11' : undefined}
               />
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+              <span className="text-10 font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
                 Group
               </span>
               <UiToolbarInput
@@ -2333,25 +2333,25 @@ export function DroneCanvasDock({
                 ) : null}
                 {showCanvasLastMessagePreviews && lastAgentSnippet ? (
                   <span
-                    className="pointer-events-none absolute left-0 bottom-full mb-[18px] z-[1] inline-flex max-w-[280px] rounded-[4px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-2 py-1 text-[var(--text-10)] leading-[1.35] text-[var(--muted)] shadow-[0_6px_14px_var(--shadow-color)]"
+                    className="pointer-events-none absolute left-0 bottom-full mb-[18px] z-[1] inline-flex max-w-[280px] rounded-[4px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-2 py-1 text-10 leading-[1.35] text-[var(--muted)] shadow-[0_6px_14px_var(--shadow-color)]"
                     title={lastAgentSnippet}
                   >
                     <span className="line-clamp-2 break-words whitespace-pre-wrap">{lastAgentSnippet}</span>
                   </span>
                 ) : null}
                 {draftNode ? (
-                  <span className="pointer-events-none absolute -top-2 left-2 z-[2] inline-flex items-center rounded-[4px] border border-[var(--user-border)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted)]">
+                  <span className="pointer-events-none absolute -top-2 left-2 z-[2] inline-flex items-center rounded-[4px] border border-[var(--user-border)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-8 font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted)]">
                     Draft
                   </span>
                 ) : null}
                 {repoLabel ? (
-                  <span className="pointer-events-none absolute left-2 top-full mt-[1px] inline-flex max-w-[260px] rounded-[4px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-[var(--text-9)] font-mono text-[var(--muted-dim)] shadow-[0_6px_14px_var(--shadow-color)]">
+                  <span className="pointer-events-none absolute left-2 top-full mt-[1px] inline-flex max-w-[260px] rounded-[4px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-9 font-mono text-[var(--muted-dim)] shadow-[0_6px_14px_var(--shadow-color)]">
                     {repoLabel}
                   </span>
                 ) : null}
                 {repoBranch ? (
                   <span
-                    className="pointer-events-none absolute right-2 top-full mt-[1px] inline-flex max-w-[180px] rounded-[4px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-[var(--text-9)] font-mono text-[var(--muted-dim)] shadow-[0_6px_14px_var(--shadow-color)]"
+                    className="pointer-events-none absolute right-2 top-full mt-[1px] inline-flex max-w-[180px] rounded-[4px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-9 font-mono text-[var(--muted-dim)] shadow-[0_6px_14px_var(--shadow-color)]"
                     title={repoBranch}
                   >
                     {repoBranch}
@@ -2394,29 +2394,29 @@ export function DroneCanvasDock({
                           cancelInlineRename();
                         }
                       }}
-                      className="h-8 w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[var(--text-12-5)] font-[var(--weight-semibold)] text-[var(--fg-secondary)] focus:outline-none focus:border-[var(--accent-muted)]"
+                      className="h-8 w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-12-5 font-[var(--weight-semibold)] text-[var(--fg-secondary)] focus:outline-none focus:border-[var(--accent-muted)]"
                     />
                   ) : assignmentHoverTarget ? (
                     <span className="block">
-                      <span className="block truncate text-[var(--text-12-5)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
+                      <span className="block truncate text-12-5 font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
                         Release to choose action
                       </span>
-                      <span className="block truncate text-[var(--text-10)] text-[var(--muted-dim)]">
+                      <span className="block truncate text-10 text-[var(--muted-dim)]">
                         {assignmentHoverTargetCount} drone{assignmentHoverTargetCount === 1 ? '' : 's'} dropped into this chat
                       </span>
                     </span>
                   ) : (
                     <span className={`flex min-w-0 items-center ${droneNode ? 'gap-2' : ''}`}>
                       {droneNode ? (
-                        <span className="flex-shrink-0 rounded-[4px] border border-[var(--canvas-chat-owner-muted)] bg-[var(--canvas-chat-owner-subtle)] px-1.5 py-[1px] text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-[0.1em] text-[var(--canvas-chat-owner)]">
+                        <span className="flex-shrink-0 rounded-[4px] border border-[var(--canvas-chat-owner-muted)] bg-[var(--canvas-chat-owner-subtle)] px-1.5 py-[1px] text-8 font-[var(--weight-semibold)] uppercase tracking-[0.1em] text-[var(--canvas-chat-owner)]">
                           Drone
                         </span>
                       ) : null}
-                      <span className="min-w-0 flex-1 truncate text-[var(--text-12-5)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
+                      <span className="min-w-0 flex-1 truncate text-12-5 font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
                         {droneNode ? canvasDroneLabel : chatRef?.chatName ?? node.label}
                       </span>
                       {droneNode && canvasDroneId ? (
-                        <span className="flex-shrink-0 text-[var(--text-9)] font-mono uppercase text-[var(--muted-dim)]">
+                        <span className="flex-shrink-0 text-9 font-mono uppercase text-[var(--muted-dim)]">
                           {droneById[canvasDroneId]?.runtime === 'host' ? 'Host' : 'Container'}
                         </span>
                       ) : null}

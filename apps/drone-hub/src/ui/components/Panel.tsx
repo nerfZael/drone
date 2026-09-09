@@ -155,7 +155,7 @@ export function UiPanelStatusStrip({
     <div
       role={tone === 'danger' ? 'alert' : 'status'}
       className={cn(
-        'flex min-h-7 shrink-0 items-center gap-2 border-b px-2.5 py-1 text-[length:var(--text-9)]',
+        'flex min-h-7 shrink-0 items-center gap-2 border-b px-2.5 py-1 text-9',
         statusToneClassName[tone],
         className,
       )}

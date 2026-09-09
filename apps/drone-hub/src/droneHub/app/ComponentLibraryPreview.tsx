@@ -104,7 +104,7 @@ function PreviewCell({
   return (
     <div className={`min-w-0 rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] p-3 ${className ?? ''}`}>
       <div
-        className="mb-3 text-[length:var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]"
+        className="mb-3 text-9 font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]"
         style={{ fontFamily: 'var(--display)' }}
       >
         {label}
@@ -199,7 +199,7 @@ export function ComponentLibraryPreview() {
             >
               One visual language for every Drone Hub surface.
             </h2>
-            <p className="mt-2 max-w-[68ch] text-[length:var(--text-12)] leading-relaxed text-[var(--muted)]">
+            <p className="mt-2 max-w-[68ch] text-12 leading-relaxed text-[var(--muted)]">
               These primitives use semantic theme tokens, expose consistent states, and are ready to replace bespoke controls incrementally.
             </p>
           </div>
@@ -223,10 +223,10 @@ export function ComponentLibraryPreview() {
               const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
               document.getElementById(id)?.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' });
             }}
-            className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[var(--radius-medium)] px-2.5 text-[length:var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+            className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[var(--radius-medium)] px-2.5 text-10 font-[var(--weight-semibold)] text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
             style={{ fontFamily: 'var(--display)' }}
           >
-            <span className="font-mono text-[length:var(--text-8)] text-[var(--muted-dim)]">{String(index + 1).padStart(2, '0')}</span>
+            <span className="font-mono text-8 text-[var(--muted-dim)]">{String(index + 1).padStart(2, '0')}</span>
             {label}
           </button>
         ))}
@@ -246,8 +246,8 @@ export function ComponentLibraryPreview() {
                 <div key={token.variable} className="overflow-hidden rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset)]">
                   <div className="h-12 border-b border-[var(--border-subtle)]" style={{ background: `var(${token.variable})` }} />
                   <div className="px-2 py-2">
-                    <div className="text-[length:var(--text-10)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">{token.label}</div>
-                    <code className="text-[length:var(--text-9)] text-[var(--muted-dim)]">{token.variable}</code>
+                    <div className="text-10 font-[var(--weight-semibold)] text-[var(--fg-secondary)]">{token.label}</div>
+                    <code className="text-9 text-[var(--muted-dim)]">{token.variable}</code>
                   </div>
                 </div>
               ))}
@@ -275,8 +275,8 @@ export function ComponentLibraryPreview() {
                       {theme.swatches.map((swatch) => <span key={swatch} className="h-7 w-2.5" style={{ background: swatch }} />)}
                     </span>
                     <span className="min-w-0">
-                      <span className="block text-[length:var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">{theme.label}</span>
-                      <span className="block truncate text-[length:var(--text-9)] text-[var(--muted-dim)]">{active ? 'Active theme' : 'Click to preview'}</span>
+                      <span className="block text-11 font-[var(--weight-semibold)] text-[var(--fg-secondary)]">{theme.label}</span>
+                      <span className="block truncate text-9 text-[var(--muted-dim)]">{active ? 'Active theme' : 'Click to preview'}</span>
                     </span>
                   </button>
                 );
@@ -297,7 +297,7 @@ export function ComponentLibraryPreview() {
             </div>
             <div>
               <div className="dh-type-eyebrow">Code · JetBrains Mono</div>
-              <code className="mt-2 block text-[length:var(--text-12)] text-[var(--accent)]">drone.run({`{ agent: "codex" }`})</code>
+              <code className="mt-2 block text-12 text-[var(--accent)]">drone.run({`{ agent: "codex" }`})</code>
             </div>
           </div>
         </UiCard>
@@ -310,13 +310,13 @@ export function ComponentLibraryPreview() {
           <div className="mt-4 grid gap-2 md:grid-cols-2">
             <div className="rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-2.5">
               <div className="dh-type-label dh-tone-primary">Primary</div>
-              <div className="mt-1 text-[var(--chat-question-size)] font-[var(--weight-semibold)] leading-relaxed dh-tone-primary">
+              <div className="mt-1 text-chat-question font-[var(--weight-semibold)] leading-relaxed dh-tone-primary">
                 Questions, selected titles, and decisive labels.
               </div>
             </div>
             <div className="rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-2.5">
               <div className="dh-type-label dh-tone-secondary">Secondary</div>
-              <div className="mt-1 text-[var(--chat-text-size)] leading-relaxed dh-tone-secondary">
+              <div className="mt-1 text-chat leading-relaxed dh-tone-secondary">
                 Long-form prose, option descriptions, and ordinary navigation.
               </div>
             </div>
@@ -530,7 +530,7 @@ export function ComponentLibraryPreview() {
               id={`component-preview-${activePanel}-panel`}
               aria-labelledby={`component-preview-${activePanel}-tab`}
               tabIndex={0}
-              className="mt-3 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] p-3 text-[length:var(--text-11)] text-[var(--muted)]"
+              className="mt-3 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] p-3 text-11 text-[var(--muted)]"
             >
               Showing the <span className="font-[var(--weight-semibold)] text-[var(--fg-secondary)]">{activePanel}</span> panel.
             </div>
@@ -546,7 +546,7 @@ export function ComponentLibraryPreview() {
               <UiTooltip content="Create a fresh drone in this repository">
                 <UiButton variant="primary" size="small" leadingIcon={<PlusIcon />}>New drone</UiButton>
               </UiTooltip>
-              <span className="text-[length:var(--text-10)] text-[var(--muted-dim)]">Shortcut</span>
+              <span className="text-10 text-[var(--muted-dim)]">Shortcut</span>
               <UiKbd>⌘</UiKbd>
               <UiKbd>N</UiKbd>
               <UiButton size="small" onClick={() => setDialogOpen(true)}>Open dialog</UiButton>
@@ -664,11 +664,11 @@ export function ComponentLibraryPreview() {
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <div className="truncate text-[length:var(--text-13)] font-[var(--weight-semibold)] text-[var(--fg-strong)]">{name || 'Untitled agent'}</div>
+                <div className="truncate text-13 font-[var(--weight-semibold)] text-[var(--fg-strong)]">{name || 'Untitled agent'}</div>
                 <UiBadge tone="success" dot>Running</UiBadge>
                 <UiBadge tone="neutral">{agent}</UiBadge>
               </div>
-              <p className="mt-1 truncate text-[length:var(--text-11)] text-[var(--muted)]">{prompt || 'No startup prompt'}</p>
+              <p className="mt-1 truncate text-11 text-[var(--muted)]">{prompt || 'No startup prompt'}</p>
             </div>
             <div className="flex shrink-0 items-center gap-2">
               <UiIconButton label="Copy drone ID" icon={<CopyIcon />} variant="ghost" />
@@ -685,14 +685,14 @@ export function ComponentLibraryPreview() {
         description="Import primitives from src/ui. Feature components should compose these before introducing new visual APIs."
       >
         <UiCard padding="none" className="overflow-hidden">
-          <div className="grid grid-cols-[minmax(8rem,0.45fr)_minmax(0,1fr)] border-b border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-2 text-[length:var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
+          <div className="grid grid-cols-[minmax(8rem,0.45fr)_minmax(0,1fr)] border-b border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-2 text-9 font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
             <span>Component</span>
             <span>Purpose</span>
           </div>
           {componentInventory.map(([component, purpose], index) => (
             <div
               key={component}
-              className={`grid grid-cols-[minmax(8rem,0.45fr)_minmax(0,1fr)] gap-3 px-3 py-2.5 text-[length:var(--text-11)] ${
+              className={`grid grid-cols-[minmax(8rem,0.45fr)_minmax(0,1fr)] gap-3 px-3 py-2.5 text-11 ${
                 index < componentInventory.length - 1 ? 'border-b border-[var(--border-subtle)]' : ''
               }`}
             >

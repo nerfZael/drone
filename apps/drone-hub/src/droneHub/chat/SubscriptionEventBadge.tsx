@@ -17,7 +17,7 @@ import { UserChatMessage } from './UserChatMessage';
 export function SubscriptionEventBadge({ label = 'Event notification' }: { label?: string } = {}) {
   return (
     <span
-      className="inline-flex min-h-6 items-center rounded-t-[var(--radius-medium)] border border-b-0 border-[color-mix(in_srgb,var(--accent)_24%,var(--user-bubble-border))] bg-[color-mix(in_srgb,var(--accent)_11%,var(--user-bubble))] px-2.5 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]"
+      className="inline-flex min-h-6 items-center rounded-t-[var(--radius-medium)] border border-b-0 border-[color-mix(in_srgb,var(--accent)_24%,var(--user-bubble-border))] bg-[color-mix(in_srgb,var(--accent)_11%,var(--user-bubble))] px-2.5 text-10 font-[var(--weight-semibold)] text-[var(--fg-secondary)]"
       style={{ fontFamily: 'var(--display)' }}
     >
       {label}
@@ -79,7 +79,7 @@ export function EventNotificationBody({ notification }: { notification: EventNot
           {chatTarget ? (
             <>
               <span
-                className="flex min-w-0 items-baseline text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--user-bubble-fg)]"
+                className="flex min-w-0 items-baseline text-12 font-[var(--weight-semibold)] text-[var(--user-bubble-fg)]"
                 title={title}
               >
                 <span className="shrink-0">{eventLabel}:&nbsp;</span>
@@ -94,7 +94,7 @@ export function EventNotificationBody({ notification }: { notification: EventNot
                 </button>
               </span>
               <span
-                className="mt-0.5 flex min-w-0 items-baseline text-[var(--text-10)] text-[var(--user-muted)]"
+                className="mt-0.5 flex min-w-0 items-baseline text-10 text-[var(--user-muted)]"
                 title={subtitle}
               >
                 <span className="shrink-0">Drone:&nbsp;</span>
@@ -112,13 +112,13 @@ export function EventNotificationBody({ notification }: { notification: EventNot
           ) : (
             <>
               <span
-                className="block truncate text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--user-bubble-fg)]"
+                className="block truncate text-12 font-[var(--weight-semibold)] text-[var(--user-bubble-fg)]"
                 title={title}
               >
                 {title}
               </span>
               <span
-                className="mt-0.5 block truncate text-[var(--text-10)] text-[var(--user-muted)]"
+                className="mt-0.5 block truncate text-10 text-[var(--user-muted)]"
                 title={subtitle}
               >
                 {subtitle}
@@ -151,24 +151,24 @@ export function EventNotificationBody({ notification }: { notification: EventNot
                 className="py-3 [&+&]:border-t [&+&]:border-[var(--user-bubble-border)]"
               >
                 <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                  <span className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--user-bubble-fg)]">
+                  <span className="text-11 font-[var(--weight-semibold)] text-[var(--user-bubble-fg)]">
                     {eventNotificationEventLabel(event.eventType)}
                   </span>
-                  <span className="text-[var(--text-10)] text-[var(--user-muted)]">
+                  <span className="text-10 text-[var(--user-muted)]">
                     {eventNotificationResourceLabel(event)}
                   </span>
                 </div>
                 {event.summary ? (
-                  <div className="mt-1.5 text-[var(--text-11)] leading-4 text-[var(--user-bubble-fg)]">
+                  <div className="mt-1.5 text-11 leading-4 text-[var(--user-bubble-fg)]">
                     {event.summary}
                   </div>
                 ) : null}
                 {fields.length > 0 ? (
                   <div className="mt-2.5">
-                    <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--user-muted)]">
+                    <div className="text-10 font-[var(--weight-semibold)] text-[var(--user-muted)]">
                       Event data
                     </div>
-                    <dl className="mt-2 grid max-h-64 grid-cols-[minmax(6.5rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-1.5 overflow-auto text-[var(--text-10)] leading-4">
+                    <dl className="mt-2 grid max-h-64 grid-cols-[minmax(6.5rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-1.5 overflow-auto text-10 leading-4">
                       {fields.map((field, fieldIndex) => (
                         <React.Fragment key={`${field.label}:${fieldIndex}`}>
                           <dt className="text-[var(--user-muted)]">{field.label}</dt>

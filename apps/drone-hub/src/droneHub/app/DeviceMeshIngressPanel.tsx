@@ -25,10 +25,8 @@ type DiscoveryState =
   | { phase: 'scanning' }
   | { phase: 'done'; count: number }
   | { phase: 'failed'; message: string };
-const button =
-  'rounded border border-[var(--border)] px-3 py-2 text-[var(--text-11)] disabled:opacity-50';
-const input =
-  'rounded border border-[var(--border)] bg-[var(--panel)] px-3 py-2 text-[var(--text-12)]';
+const button = 'rounded border border-[var(--border)] px-3 py-2 text-11 disabled:opacity-50';
+const input = 'rounded border border-[var(--border)] bg-[var(--panel)] px-3 py-2 text-12';
 
 export function DeviceMeshIngressPanel({
   requestJson,
@@ -124,7 +122,7 @@ export function DeviceMeshIngressPanel({
   return (
     <div className="grid gap-3 py-2 text-[var(--fg)]">
       <div className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border-subtle)] px-4 py-3">
-        <span className="text-[var(--text-12)]">
+        <span className="text-12">
           {status?.publicEndpoint && status.running ? 'Ready to pair' : 'Set up private access'}
         </span>
         {!(status?.publicEndpoint && status.running) && (
@@ -137,13 +135,11 @@ export function DeviceMeshIngressPanel({
           </button>
         )}
       </div>
-      <p className="text-[var(--text-12)] text-[var(--muted)]">
-        Open Devices → Add device on the other device.
-      </p>
+      <p className="text-12 text-[var(--muted)]">Open Devices → Add device on the other device.</p>
       <div className="grid gap-3 md:grid-cols-2">
         <section className="rounded-lg border border-[var(--border-subtle)] p-4 space-y-3">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="text-[var(--text-12)] font-medium">Computers</h3>
+            <h3 className="text-12 font-medium">Computers</h3>
             <button
               className={button}
               disabled={busy || discovery.phase === 'scanning'}
@@ -206,9 +202,9 @@ export function DeviceMeshIngressPanel({
         <PhoneDiscoveryPanel requestJson={requestJson} />
       </div>
       <details>
-        <summary className="cursor-pointer text-[var(--text-11)]">Connection settings</summary>
+        <summary className="cursor-pointer text-11">Connection settings</summary>
         <div className="mt-2 grid gap-2">
-          <p className="text-[var(--text-11)] text-[var(--muted)]">
+          <p className="text-11 text-[var(--muted)]">
             {status?.tailscale?.connected
               ? status.tailscale.dnsName
               : (status?.tailscale?.error ?? 'Tailscale is not connected.')}
@@ -269,7 +265,7 @@ export function DeviceMeshIngressPanel({
           </button>
         </div>
       </details>
-      {notice && <p className="text-[var(--text-11)]">{notice}</p>}
+      {notice && <p className="text-11">{notice}</p>}
       {setupError && (
         <TailscaleSetupAlert
           error={setupError}
@@ -297,7 +293,7 @@ export function DroneHubDiscoveryStatus({ state }: { state: DiscoveryState }) {
           ? 'No computers found. Check Tailscale access on the other Hub.'
           : `Found ${state.count} DroneHub${state.count === 1 ? '' : 's'}.`;
   return (
-    <p role="status" aria-live="polite" className="text-[var(--text-11)] text-[var(--muted)]">
+    <p role="status" aria-live="polite" className="text-11 text-[var(--muted)]">
       {message}
     </p>
   );
@@ -333,9 +329,7 @@ export function TailscaleSetupAlert({
       {error.details && (
         <details>
           <summary>Technical details</summary>
-          <pre className="whitespace-pre-wrap break-words text-[var(--text-11)]">
-            {error.details}
-          </pre>
+          <pre className="whitespace-pre-wrap break-words text-11">{error.details}</pre>
         </details>
       )}
     </div>

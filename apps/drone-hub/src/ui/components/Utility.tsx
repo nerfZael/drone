@@ -5,7 +5,7 @@ export function UiKbd({ className, children, ...props }: React.HTMLAttributes<HT
   return (
     <kbd
       className={cn(
-        'inline-flex min-w-[1.5rem] items-center justify-center rounded-[4px] border border-[var(--border)] bg-[linear-gradient(180deg,var(--surface-strong),var(--surface-inset))] px-1.5 py-0.5 font-mono text-[length:var(--text-11)] font-medium leading-none text-[var(--fg-secondary)] shadow-[var(--edge-highlight),0_1.5px_0_var(--border),0_2px_3px_-1px_var(--shadow-color)]',
+        'inline-flex min-w-[1.5rem] items-center justify-center rounded-[4px] border border-[var(--border)] bg-[linear-gradient(180deg,var(--surface-strong),var(--surface-inset))] px-1.5 py-0.5 font-mono text-11 font-medium leading-none text-[var(--fg-secondary)] shadow-[var(--edge-highlight),0_1.5px_0_var(--border),0_2px_3px_-1px_var(--shadow-color)]',
         className,
       )}
       {...props}

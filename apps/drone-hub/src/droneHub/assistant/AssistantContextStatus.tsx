@@ -38,7 +38,7 @@ export function AssistantCompactionRow({
   return (
     <div
       data-assistant-compaction="true"
-      className="flex items-center justify-center gap-2 py-1 text-[var(--text-10)] text-[var(--muted-dim)]"
+      className="flex items-center justify-center gap-2 py-1 text-10 text-[var(--muted-dim)]"
       title={title}
     >
       <span className="h-px min-w-4 flex-1 bg-[var(--border-subtle)]" aria-hidden="true" />
@@ -60,7 +60,7 @@ export function AssistantCompactionWorkingRow() {
   return (
     <div
       data-assistant-compaction-working="true"
-      className="flex items-center justify-center gap-2 py-1 text-[var(--text-10)] font-medium text-[var(--accent)]"
+      className="flex items-center justify-center gap-2 py-1 text-10 font-medium text-[var(--accent)]"
       role="status"
       aria-live="polite"
     >

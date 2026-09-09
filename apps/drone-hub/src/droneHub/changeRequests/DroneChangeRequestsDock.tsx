@@ -108,12 +108,12 @@ export function DroneChangeRequestsDock({
         signals: (
           <>
             {request.conflicted ? (
-              <span className="text-[var(--text-9)] text-[var(--red)]">Conflicts</span>
+              <span className="text-9 text-[var(--red)]">Conflicts</span>
             ) : request.stale ? (
-              <span className="text-[var(--text-9)] text-[var(--muted-dim)]">Out of date</span>
+              <span className="text-9 text-[var(--muted-dim)]">Out of date</span>
             ) : null}
             {!request.destinationExists && request.status === 'open' ? (
-              <span className="text-[var(--text-9)] text-[var(--accent)]">New branch</span>
+              <span className="text-9 text-[var(--accent)]">New branch</span>
             ) : null}
           </>
         ),
@@ -255,7 +255,7 @@ export function DroneChangeRequestsDock({
     <UiPanel flush surface="alternate" className="h-full w-full">
       {showCreate ? (
         <div className="shrink-0 border-b border-[var(--border-subtle)] px-3 py-3">
-          <div className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg)]">
+          <div className="text-11 font-[var(--weight-semibold)] text-[var(--fg)]">
             Capture committed changes
           </div>
           <div className="mt-2 grid gap-2 md:grid-cols-2">
@@ -264,13 +264,13 @@ export function DroneChangeRequestsDock({
               value={createTitle}
               onChange={(event) => setCreateTitle(event.target.value)}
               placeholder="Title"
-              className="h-8 w-full rounded-[var(--radius-medium)] border border-transparent bg-[var(--surface-inset)] px-2.5 text-[var(--text-11)] text-[var(--fg)] focus:border-[var(--accent-muted)] focus:outline-none"
+              className="h-8 w-full rounded-[var(--radius-medium)] border border-transparent bg-[var(--surface-inset)] px-2.5 text-11 text-[var(--fg)] focus:border-[var(--accent-muted)] focus:outline-none"
             />
             <input
               value={createDestination}
               onChange={(event) => setCreateDestination(event.target.value)}
               placeholder="Destination branch (optional)"
-              className="h-8 w-full rounded-[var(--radius-medium)] border border-transparent bg-[var(--surface-inset)] px-2.5 font-mono text-[var(--text-10)] text-[var(--fg)] focus:border-[var(--accent-muted)] focus:outline-none"
+              className="h-8 w-full rounded-[var(--radius-medium)] border border-transparent bg-[var(--surface-inset)] px-2.5 font-mono text-10 text-[var(--fg)] focus:border-[var(--accent-muted)] focus:outline-none"
             />
           </div>
           <textarea
@@ -278,7 +278,7 @@ export function DroneChangeRequestsDock({
             onChange={(event) => setCreateDescription(event.target.value)}
             placeholder="Description (optional)"
             rows={2}
-            className="mt-2 w-full resize-y rounded-[var(--radius-medium)] border border-transparent bg-[var(--surface-inset)] p-2.5 text-[var(--text-11)] text-[var(--fg)] focus:border-[var(--accent-muted)] focus:outline-none"
+            className="mt-2 w-full resize-y rounded-[var(--radius-medium)] border border-transparent bg-[var(--surface-inset)] p-2.5 text-11 text-[var(--fg)] focus:border-[var(--accent-muted)] focus:outline-none"
           />
           <div className="mt-2 flex items-center gap-1.5">
             <UiButton
@@ -292,7 +292,7 @@ export function DroneChangeRequestsDock({
             <UiButton size="small" variant="ghost" disabled={creating} onClick={() => setShowCreate(false)}>
               Cancel
             </UiButton>
-            <span className="ml-1 text-[var(--text-9)] text-[var(--muted-dim)]">
+            <span className="ml-1 text-9 text-[var(--muted-dim)]">
               Uses chat {chatName}. Commit source changes first.
             </span>
           </div>

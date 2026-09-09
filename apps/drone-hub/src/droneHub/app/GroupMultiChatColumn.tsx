@@ -1018,7 +1018,7 @@ export function GroupMultiChatColumn({
               <button
                 type="button"
                 onClick={onOpenDrone}
-                className="min-w-0 flex-1 block text-left text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--fg-secondary)] hover:text-[var(--accent)] transition-colors truncate"
+                className="min-w-0 flex-1 block text-left text-12 font-[var(--weight-semibold)] text-[var(--fg-secondary)] hover:text-[var(--accent)] transition-colors truncate"
                 style={{ fontFamily: 'var(--display)' }}
                 title={`Open ${shownName}`}
               >
@@ -1061,7 +1061,7 @@ export function GroupMultiChatColumn({
               </button>
             </div>
           </div>
-          <div className="text-[var(--text-10)] text-[var(--muted-dim)] font-mono mt-0.5">
+          <div className="text-10 text-[var(--muted-dim)] font-mono mt-0.5">
             chat: {chatName}
           </div>
           <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
@@ -1071,7 +1071,7 @@ export function GroupMultiChatColumn({
                 void openSshTerminal();
               }}
               disabled={disabledByProvisioning || Boolean(quickActionBusy)}
-              className={`inline-flex items-center h-5 px-1.5 rounded border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
+              className={`inline-flex items-center h-5 px-1.5 rounded border text-9 font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
                 disabledByProvisioning || Boolean(quickActionBusy)
                   ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                   : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
@@ -1087,7 +1087,7 @@ export function GroupMultiChatColumn({
                 void openBrowserTab();
               }}
               disabled={disabledByProvisioning || !quickOpenTabUrl}
-              className={`inline-flex items-center h-5 px-1.5 rounded border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
+              className={`inline-flex items-center h-5 px-1.5 rounded border text-9 font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
                 disabledByProvisioning || !quickOpenTabUrl
                   ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                   : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)]'
@@ -1109,7 +1109,7 @@ export function GroupMultiChatColumn({
                     void pullRepoChanges();
                   }}
                   disabled={disabledByProvisioning || Boolean(quickActionBusy)}
-                  className={`inline-flex items-center h-5 px-1.5 rounded border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
+                  className={`inline-flex items-center h-5 px-1.5 rounded border text-9 font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
                     disabledByProvisioning || Boolean(quickActionBusy)
                       ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                       : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
@@ -1133,7 +1133,7 @@ export function GroupMultiChatColumn({
                     void pushRepoChanges();
                   }}
                   disabled={disabledByProvisioning || Boolean(quickActionBusy)}
-                  className={`inline-flex items-center h-5 px-1.5 rounded border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
+                  className={`inline-flex items-center h-5 px-1.5 rounded border text-9 font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
                     disabledByProvisioning || Boolean(quickActionBusy)
                       ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                       : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
@@ -1156,7 +1156,7 @@ export function GroupMultiChatColumn({
           </div>
           {quickActionError ? (
             <div
-              className="mt-1 text-[var(--text-10)] text-[var(--red)] truncate"
+              className="mt-1 text-10 text-[var(--red)] truncate"
               title={quickActionError}
             >
               {quickActionError}
@@ -1168,19 +1168,19 @@ export function GroupMultiChatColumn({
         {loading && !transcripts ? (
           <ChatLoadingState />
         ) : error ? (
-          <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-11)] text-[var(--red)]">
+          <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-11 text-[var(--red)]">
             {error}
           </div>
         ) : (transcripts && transcripts.length > 0) || visiblePendingPrompts.length > 0 ? (
           <div ref={bindColumnContentRef} className="space-y-5">
             {olderLoading ? (
-              <div className="text-center text-[var(--text-10)] text-[var(--muted)]" role="status">
+              <div className="text-center text-10 text-[var(--muted)]" role="status">
                 Loading older messages…
               </div>
             ) : olderError ? (
               <button
                 type="button"
-                className="block w-full text-center text-[var(--text-10)] text-[var(--red)] hover:underline"
+                className="block w-full text-center text-10 text-[var(--red)] hover:underline"
                 onClick={() => loadOlderHistoryRef.current()}
                 title={olderError}
               >
@@ -1189,7 +1189,7 @@ export function GroupMultiChatColumn({
             ) : hasOlder ? (
               <button
                 type="button"
-                className="block w-full text-center text-[var(--text-10)] text-[var(--muted)] hover:text-[var(--fg-secondary)]"
+                className="block w-full text-center text-10 text-[var(--muted)] hover:text-[var(--fg-secondary)]"
                 onClick={() => loadOlderHistoryRef.current()}
               >
                 Load older messages

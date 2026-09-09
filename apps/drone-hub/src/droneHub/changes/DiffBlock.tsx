@@ -180,7 +180,7 @@ function GapActionButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="inline-flex h-[18px] items-center justify-center rounded-[3px] border border-transparent bg-transparent px-1.5 text-[var(--text-8)] font-[var(--weight-semibold)] tracking-wide text-[var(--muted)] transition-colors hover:border-[var(--border)] hover:bg-[var(--surface-strong)] hover:text-[var(--fg-secondary)] disabled:cursor-wait disabled:opacity-40"
+      className="inline-flex h-[18px] items-center justify-center rounded-[3px] border border-transparent bg-transparent px-1.5 text-8 font-[var(--weight-semibold)] tracking-wide text-[var(--muted)] transition-colors hover:border-[var(--border)] hover:bg-[var(--surface-strong)] hover:text-[var(--fg-secondary)] disabled:cursor-wait disabled:opacity-40"
       title={title}
     >
       {label}
@@ -201,9 +201,9 @@ function GapRow({
 }) {
   const hiddenLineLabel = hiddenLines === null ? 'Hidden lines' : `${hiddenLines} hidden line${hiddenLines === 1 ? '' : 's'}`;
   return (
-    <div className="w-full flex items-center justify-between gap-2 px-2 py-0.5 text-[var(--text-9)] text-[var(--muted)]">
+    <div className="w-full flex items-center justify-between gap-2 px-2 py-0.5 text-9 text-[var(--muted)]">
       <div className="flex items-center gap-2 min-w-0">
-        <span className="inline-flex items-center justify-center w-4 h-4 text-[var(--text-10)] leading-none text-[var(--muted-dim)]">
+        <span className="inline-flex items-center justify-center w-4 h-4 text-10 leading-none text-[var(--muted-dim)]">
           +
         </span>
         <span className="truncate text-[var(--muted-dim)]">{loading ? 'Expanding...' : hiddenLineLabel}</span>
@@ -428,11 +428,11 @@ export function DiffBlock({
   );
 
   if (!state || state.status === 'loading') {
-    return <div className="px-3 py-3 text-[var(--text-11)] text-[var(--muted)]">Loading diff...</div>;
+    return <div className="px-3 py-3 text-11 text-[var(--muted)]">Loading diff...</div>;
   }
 
   if (state.status === 'error') {
-    return <div className="px-3 py-3 text-[var(--text-11)] text-[var(--red)]">{state.error}</div>;
+    return <div className="px-3 py-3 text-11 text-[var(--red)]">{state.error}</div>;
   }
 
   if (!state.text) {
@@ -446,29 +446,29 @@ export function DiffBlock({
             : state.noTextReason === 'unavailable'
               ? 'No textual diff: GitHub did not provide a patch for this file.'
               : 'No diff output for this selection. The file may be empty, non-text, or no longer present.';
-    return <div className="px-3 py-3 text-[var(--text-11)] text-[var(--muted)]">{emptyMessage}</div>;
+    return <div className="px-3 py-3 text-11 text-[var(--muted)]">{emptyMessage}</div>;
   }
 
   const binaryDiffPattern = /(^|\n)(Binary files .* differ|GIT binary patch)(\n|$)/;
   if (state.isBinary || binaryDiffPattern.test(rawText)) {
     return (
       <div>
-        <div className="px-3 py-2 text-[var(--text-10)] text-[var(--muted)] border-b border-[var(--border-subtle)]">
+        <div className="px-3 py-2 text-10 text-[var(--muted)] border-b border-[var(--border-subtle)]">
           Binary file diff.
         </div>
-        <pre className="m-0 p-3 text-[var(--text-11)] leading-5 text-[var(--fg-secondary)] whitespace-pre-wrap break-words">{rawText}</pre>
+        <pre className="m-0 p-3 text-11 leading-5 text-[var(--fg-secondary)] whitespace-pre-wrap break-words">{rawText}</pre>
       </div>
     );
   }
 
   if (parsed.length === 0 || !hasRenderableHunks) {
-    return <pre className="m-0 p-3 text-[var(--text-11)] leading-5 text-[var(--fg-secondary)] whitespace-pre-wrap break-words">{rawText}</pre>;
+    return <pre className="m-0 p-3 text-11 leading-5 text-[var(--fg-secondary)] whitespace-pre-wrap break-words">{rawText}</pre>;
   }
 
   return (
     <div className="rdv-wrapper">
       {expansionError ? (
-        <div className="m-2 px-2 py-1 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--text-10)] text-[var(--red)]">
+        <div className="m-2 px-2 py-1 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] text-10 text-[var(--red)]">
           {expansionError}
         </div>
       ) : null}
@@ -519,7 +519,7 @@ export function DiffBlock({
         );
       })}
       {state.truncated ? (
-        <div className="m-2 px-2 py-1 rounded border border-[var(--yellow)]/30 bg-[var(--yellow-subtle)] text-[var(--text-10)] text-[var(--yellow)]">
+        <div className="m-2 px-2 py-1 rounded border border-[var(--yellow)]/30 bg-[var(--yellow-subtle)] text-10 text-[var(--yellow)]">
           Diff output is truncated.
         </div>
       ) : null}

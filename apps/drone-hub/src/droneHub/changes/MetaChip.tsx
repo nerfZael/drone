@@ -13,7 +13,7 @@ export function MetaChip({
 }) {
   return (
     <span
-      className={`dh-changes-meta inline-flex items-center gap-1 text-[var(--text-10)] ${
+      className={`dh-changes-meta inline-flex items-center gap-1 text-10 ${
         mono ? 'font-mono' : ''
       }`}
       title={title}

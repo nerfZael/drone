@@ -156,10 +156,10 @@ export function ChatSubscriptionIndicator({
           className="absolute bottom-full left-0 z-50 mb-2 w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-[var(--radius-large)] border border-[var(--border)] bg-[var(--panel-alt)] shadow-[0_18px_55px_var(--shadow-color)]"
         >
           <div className="border-b border-[var(--border-subtle)] px-3 py-2.5">
-            <div className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg)]">
+            <div className="text-11 font-[var(--weight-semibold)] text-[var(--fg)]">
               Chat subscriptions
             </div>
-            <div className="mt-0.5 text-[var(--text-10)] text-[var(--muted-dim)]">
+            <div className="mt-0.5 text-10 text-[var(--muted-dim)]">
               This chat is watching {subscriptions.length} resource
               {subscriptions.length === 1 ? '' : 's'}.
             </div>
@@ -176,28 +176,28 @@ export function ChatSubscriptionIndicator({
                   key={subscription.id}
                   className="rounded-[var(--radius-medium)] px-2.5 py-2 hover:bg-[var(--surface-soft)]"
                 >
-                  <div className="truncate text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
+                  <div className="truncate text-11 font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
                     {chatSubscriptionResourceLabel(subscription)}
                   </div>
                   {subscription.resourceType === 'cron' &&
                   subscription.resourceConfig?.expression ? (
-                    <div className="mt-1 truncate font-mono text-[var(--text-10)] text-[var(--muted-dim)]">
+                    <div className="mt-1 truncate font-mono text-10 text-[var(--muted-dim)]">
                       Cron · {subscription.resourceConfig.expression}
                     </div>
                   ) : null}
-                  <div className="mt-1 text-[var(--text-10)] text-[var(--muted-dim)]">
+                  <div className="mt-1 text-10 text-[var(--muted-dim)]">
                     {subscription.events.map(chatSubscriptionEventLabel).join(', ')}
                   </div>
                   {nextRun ? (
                     <time
                       dateTime={subscription.nextEventAt ?? undefined}
-                      className="mt-1 block text-[var(--text-10)] text-[var(--muted-dim)]"
+                      className="mt-1 block text-10 text-[var(--muted-dim)]"
                     >
                       {nextRun}
                     </time>
                   ) : null}
                   {displayIntent ? (
-                    <div className="mt-1.5 whitespace-pre-wrap text-[var(--text-10)] leading-4 text-[var(--muted)]">
+                    <div className="mt-1.5 whitespace-pre-wrap text-10 leading-4 text-[var(--muted)]">
                       {displayIntent}
                     </div>
                   ) : null}

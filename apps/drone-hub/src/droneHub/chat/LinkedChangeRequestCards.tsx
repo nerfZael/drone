@@ -155,7 +155,7 @@ function LinkedChangeRequestCard({
             data-change-request-state="merged"
             aria-live="polite"
             aria-label={`Change request state: ${displayedStatus}`}
-            className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[var(--accent-subtle)] px-2 py-1 text-[var(--text-9)] font-[var(--weight-semibold)] leading-none text-[var(--accent)]"
+            className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[var(--accent-subtle)] px-2 py-1 text-9 font-[var(--weight-semibold)] leading-none text-[var(--accent)]"
           >
             <MergedChangeRequestIcon />
             {displayedStatus}
@@ -164,7 +164,7 @@ function LinkedChangeRequestCard({
           <span
             aria-live="polite"
             aria-label={`Change request state: ${displayedStatus}`}
-            className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-1 text-[var(--text-9)] font-[var(--weight-semibold)] leading-none ${changeRequestStatePillClassName(status)}`}
+            className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-1 text-9 font-[var(--weight-semibold)] leading-none ${changeRequestStatePillClassName(status)}`}
           >
             <span
               aria-hidden="true"
@@ -173,14 +173,14 @@ function LinkedChangeRequestCard({
             {displayedStatus}
           </span>
         ) : (
-          <span className="inline-flex shrink-0 rounded-full bg-[var(--surface-strong)] px-2 py-1 text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--muted)]">
+          <span className="inline-flex shrink-0 rounded-full bg-[var(--surface-strong)] px-2 py-1 text-9 font-[var(--weight-semibold)] text-[var(--muted)]">
             Unavailable
           </span>
         )}
-        <span className="shrink-0 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)]">
+        <span className="shrink-0 text-10 font-[var(--weight-semibold)] text-[var(--muted-dim)]">
           CR
         </span>
-        <span className="shrink-0 font-mono text-[var(--text-10)] text-[var(--muted)]">
+        <span className="shrink-0 font-mono text-10 text-[var(--muted)]">
           #{requestNumber}
         </span>
         <button
@@ -190,7 +190,7 @@ function LinkedChangeRequestCard({
             event.stopPropagation();
             openRequest();
           }}
-          className="min-w-0 shrink truncate text-left text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg)] hover:text-[var(--link-hover)] hover:underline"
+          className="min-w-0 shrink truncate text-left text-11 font-[var(--weight-semibold)] text-[var(--fg)] hover:text-[var(--link-hover)] hover:underline"
           title={`Open ${title}`}
         >
           {title}
@@ -209,7 +209,7 @@ function LinkedChangeRequestCard({
               type="button"
               onClick={() => void close()}
               disabled={disabled || Boolean(busy)}
-              className="inline-flex h-6 min-w-[46px] items-center justify-center rounded bg-[var(--surface-strong)] px-2 text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--fg-secondary)] hover:bg-[var(--red-subtle)] hover:text-[var(--red)] disabled:cursor-not-allowed disabled:opacity-45"
+              className="inline-flex h-6 min-w-[46px] items-center justify-center rounded bg-[var(--surface-strong)] px-2 text-9 font-[var(--weight-semibold)] text-[var(--fg-secondary)] hover:bg-[var(--red-subtle)] hover:text-[var(--red)] disabled:cursor-not-allowed disabled:opacity-45"
             >
               {busy === 'close' ? 'Closing…' : 'Close'}
             </button>
@@ -217,7 +217,7 @@ function LinkedChangeRequestCard({
               type="button"
               onClick={() => void merge()}
               disabled={disabled || request.conflicted || Boolean(busy)}
-              className="inline-flex h-6 min-w-[50px] items-center justify-center rounded bg-[var(--green-subtle)] px-2 text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--green)] hover:brightness-125 disabled:cursor-not-allowed disabled:opacity-45"
+              className="inline-flex h-6 min-w-[50px] items-center justify-center rounded bg-[var(--green-subtle)] px-2 text-9 font-[var(--weight-semibold)] text-[var(--green)] hover:brightness-125 disabled:cursor-not-allowed disabled:opacity-45"
               title={
                 request.conflicted
                   ? 'Resolve conflicts before merging'
@@ -230,7 +230,7 @@ function LinkedChangeRequestCard({
         ) : null}
       </summary>
       {expanded ? (
-        <div className="min-w-0 px-3 pb-2.5 pt-0.5 text-[var(--text-10)] text-[var(--muted-dim)]">
+        <div className="min-w-0 px-3 pb-2.5 pt-0.5 text-10 text-[var(--muted-dim)]">
           {request ? (
             <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
               <span className="font-mono">
@@ -249,7 +249,7 @@ function LinkedChangeRequestCard({
           {error ? (
             <div
               role="alert"
-              className="mt-2 border-t border-[var(--red-border)] pt-2 text-[var(--text-9)] text-[var(--red)]"
+              className="mt-2 border-t border-[var(--red-border)] pt-2 text-9 text-[var(--red)]"
             >
               Status unavailable: {error}
             </div>

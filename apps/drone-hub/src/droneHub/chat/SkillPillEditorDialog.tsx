@@ -275,7 +275,7 @@ export function SkillPillEditorDialog({
         ) : (
           <>
             <div className="flex h-9 shrink-0 items-center justify-between gap-3 border-b border-[var(--border-subtle)] px-3">
-              <span className="min-w-0 truncate font-mono text-[var(--text-11)] text-[var(--fg-secondary)]">
+              <span className="min-w-0 truncate font-mono text-11 text-[var(--fg-secondary)]">
                 {creatingNew ? 'new-skill/SKILL.md' : skill ? `${skill.slug}/SKILL.md` : 'SKILL.md'}
               </span>
               {editorKey ? (
@@ -305,7 +305,7 @@ export function SkillPillEditorDialog({
                 />
               </div>
             ) : (
-              <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-[var(--text-12)] text-[var(--muted)]">
+              <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-12 text-[var(--muted)]">
                 Select a skill or add a new one.
               </div>
             )}

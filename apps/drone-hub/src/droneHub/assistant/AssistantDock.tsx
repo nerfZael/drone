@@ -2076,7 +2076,7 @@ export function AssistantDock({
       kind: 'status',
       content: (
         <div
-          className="text-center text-[var(--text-11)] text-[var(--muted)]"
+          className="text-center text-11 text-[var(--muted)]"
           role="status"
           aria-live="polite"
         >
@@ -2442,7 +2442,7 @@ export function AssistantDock({
           )}
         />
       ) : (
-        <div className="mx-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-11)] text-[var(--red)]">
+        <div className="mx-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-11 text-[var(--red)]">
           {transcriptError}
         </div>
       ),
@@ -2499,7 +2499,7 @@ export function AssistantDock({
                     <IconSettings className="h-4 w-4 text-[var(--muted)]" />
                     Settings
                   </div>
-                  <div className="mt-1 text-[var(--text-11)] text-[var(--muted-dim)]">
+                  <div className="mt-1 text-11 text-[var(--muted-dim)]">
                     Defaults apply to newly created chats. Existing chats keep their current
                     configuration.
                   </div>

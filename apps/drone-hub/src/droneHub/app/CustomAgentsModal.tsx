@@ -56,7 +56,7 @@ export function CustomAgentsModal({
 
           {customAgents.length > 0 && (
             <div className="mb-4">
-              <div className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--muted)] mb-2">Saved</div>
+              <div className="text-11 font-[var(--weight-semibold)] text-[var(--muted)] mb-2">Saved</div>
               <div className="flex flex-col gap-2">
                 {customAgents.map((a) => (
                   <div
@@ -64,8 +64,8 @@ export function CustomAgentsModal({
                     className="flex items-center justify-between gap-3 rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-alt)] px-3 py-2"
                   >
                     <div className="min-w-0">
-                      <div className="text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--fg-secondary)] truncate">{a.label}</div>
-                      <div className="text-[var(--text-11)] text-[var(--muted-dim)] truncate font-mono" title={a.command}>
+                      <div className="text-12 font-[var(--weight-semibold)] text-[var(--fg-secondary)] truncate">{a.label}</div>
+                      <div className="text-11 text-[var(--muted-dim)] truncate font-mono" title={a.command}>
                         {a.command}
                       </div>
                     </div>
@@ -86,24 +86,24 @@ export function CustomAgentsModal({
 
           <div className="grid grid-cols-1 gap-3">
             <label className="flex flex-col gap-1">
-              <span className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--muted)]">Name</span>
+              <span className="text-11 font-[var(--weight-semibold)] text-[var(--muted)]">Name</span>
               <input
                 value={newCustomAgentLabel}
                 onChange={(e) => onNewCustomAgentLabelChange(e.target.value)}
-                className="dh-field-control h-9 rounded-[var(--radius-large)] border border-[var(--field-border)] bg-[var(--field-bg)] px-3 text-[var(--text-13)] text-[var(--field-fg)] placeholder:text-[var(--field-placeholder)]"
+                className="dh-field-control h-9 rounded-[var(--radius-large)] border border-[var(--field-border)] bg-[var(--field-bg)] px-3 text-13 text-[var(--field-fg)] placeholder:text-[var(--field-placeholder)]"
                 placeholder="e.g. My Agent CLI"
               />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--muted)]">Command (runs inside tmux in the drone)</span>
+              <span className="text-11 font-[var(--weight-semibold)] text-[var(--muted)]">Command (runs inside tmux in the drone)</span>
               <input
                 value={newCustomAgentCommand}
                 onChange={(e) => onNewCustomAgentCommandChange(e.target.value)}
-                className="dh-field-control h-9 rounded-[var(--radius-large)] border border-[var(--field-border)] bg-[var(--field-bg)] px-3 text-[var(--text-13)] text-[var(--field-fg)] placeholder:text-[var(--field-placeholder)] font-mono"
+                className="dh-field-control h-9 rounded-[var(--radius-large)] border border-[var(--field-border)] bg-[var(--field-bg)] px-3 text-13 text-[var(--field-fg)] placeholder:text-[var(--field-placeholder)] font-mono"
                 placeholder="e.g. agent --approve-mcps  (or: codex)"
               />
             </label>
-            <div className="text-[var(--text-10)] text-[var(--muted-dim)]">
+            <div className="text-10 text-[var(--muted-dim)]">
               Custom agents always use CLI mode (full tmux output). Built-in Cursor, Codex, Claude Code, OpenCode, Pi, and Blip use transcript mode by default.
             </div>
           </div>
@@ -113,7 +113,7 @@ export function CustomAgentsModal({
           <button
             type="button"
             onClick={onRequestClose}
-            className="h-9 px-3 rounded-[var(--radius-large)] text-[var(--text-12)] font-[var(--weight-semibold)] border transition-colors bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+            className="h-9 px-3 rounded-[var(--radius-large)] text-12 font-[var(--weight-semibold)] border transition-colors bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
           >
             Close
           </button>
@@ -121,7 +121,7 @@ export function CustomAgentsModal({
             type="button"
             onClick={onAddCustomAgent}
             disabled={!canAdd}
-            className={`h-9 px-4 rounded-[var(--radius-large)] text-[var(--text-12)] font-[var(--weight-semibold)] border transition-colors ${
+            className={`h-9 px-4 rounded-[var(--radius-large)] text-12 font-[var(--weight-semibold)] border transition-colors ${
               !canAdd
                 ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
                 : 'bg-[var(--accent)] border-[var(--accent-muted)] text-[var(--accent-fg)] hover:brightness-110'

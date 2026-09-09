@@ -28,10 +28,10 @@ export function NoDroneSelectedState({
             <IconDrone className="h-5 w-5" />
           </div>
           <div>
-            <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[.2em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+            <div className="text-10 font-[var(--weight-semibold)] uppercase tracking-[.2em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
               Drone Hub
             </div>
-            <div className="mt-0.5 text-[var(--text-12)] text-[var(--muted)]">
+            <div className="mt-0.5 text-12 text-[var(--muted)]">
               {dronesLoading ? 'Loading workspaces…' : hasDrones ? 'Ready when you are' : 'No workspaces yet'}
             </div>
           </div>
@@ -40,10 +40,10 @@ export function NoDroneSelectedState({
         <h1 id="launch-state-title" className="max-w-[620px] text-[30px] font-[var(--weight-semibold)] leading-[1.08] tracking-[-.035em] text-[var(--fg-strong)] md:text-[42px]" style={{ fontFamily: 'var(--display)' }}>
           {title}
         </h1>
-        <p className="mt-4 max-w-[540px] text-[var(--text-14)] leading-6 text-[var(--muted)] md:text-[15px]">{description}</p>
+        <p className="mt-4 max-w-[540px] text-14 leading-6 text-[var(--muted)] md:text-[15px]">{description}</p>
 
         {dronesError ? (
-          <div className="mt-5 rounded-[var(--radius-xlarge)] border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2.5 text-[var(--text-12)] text-[var(--red)]" role="alert">
+          <div className="mt-5 rounded-[var(--radius-xlarge)] border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2.5 text-12 text-[var(--red)]" role="alert">
             {dronesError}
           </div>
         ) : null}
@@ -60,7 +60,7 @@ export function NoDroneSelectedState({
         </div>
 
         {hasDrones ? (
-          <p className="mt-6 text-[var(--text-11)] text-[var(--muted-dim)]">Tip: select any drone in the sidebar to return to its latest chat.</p>
+          <p className="mt-6 text-11 text-[var(--muted-dim)]">Tip: select any drone in the sidebar to return to its latest chat.</p>
         ) : null}
       </section>
     </main>
@@ -96,9 +96,9 @@ function LaunchAction({
         {icon}
       </span>
       <span className="min-w-0">
-        <span className="block text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[.18em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>{eyebrow}</span>
-        <span className="mt-1 block text-[var(--text-13)] font-[var(--weight-semibold)] text-[var(--fg)]">{title}</span>
-        <span className="mt-1 block text-[var(--text-12)] leading-5 text-[var(--muted)]">{description}</span>
+        <span className="block text-9 font-[var(--weight-semibold)] uppercase tracking-[.18em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>{eyebrow}</span>
+        <span className="mt-1 block text-13 font-[var(--weight-semibold)] text-[var(--fg)]">{title}</span>
+        <span className="mt-1 block text-12 leading-5 text-[var(--muted)]">{description}</span>
       </span>
     </button>
   );

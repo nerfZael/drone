@@ -134,7 +134,7 @@ export function UnifiedRequestList({
         />
         <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
           {selectedNumbers.size > 0 ? (
-            <span className="whitespace-nowrap text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
+            <span className="whitespace-nowrap text-10 font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
               {selectedNumbers.size} selected
             </span>
           ) : (
@@ -144,7 +144,7 @@ export function UnifiedRequestList({
                 type="button"
                 onClick={() => onFilterChange(filter.value)}
                 className={cn(
-                  'inline-flex h-7 shrink-0 items-center gap-1 rounded-[var(--radius-medium)] px-2 text-[var(--text-10)] transition-colors',
+                  'inline-flex h-7 shrink-0 items-center gap-1 rounded-[var(--radius-medium)] px-2 text-10 transition-colors',
                   activeFilter === filter.value
                     ? 'bg-[var(--surface-strong)] font-[var(--weight-semibold)] text-[var(--fg)]'
                     : 'text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]',
@@ -194,7 +194,7 @@ export function UnifiedRequestList({
                   {item.title}
                 </button>
               </div>
-              <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[var(--text-9)] text-[var(--muted-dim)]">
+              <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-9 text-[var(--muted-dim)]">
                 <span
                   className="font-mono tabular-nums text-[var(--muted-dim)]"
                   title={`Request #${item.number}`}
@@ -238,7 +238,7 @@ export function UnifiedRequestList({
                   <time
                     dateTime={item.updatedAt}
                     title={exactRequestTime(item.updatedAt)}
-                    className="whitespace-nowrap font-mono text-[var(--text-9)] tabular-nums text-[var(--muted-dim)]"
+                    className="whitespace-nowrap font-mono text-9 tabular-nums text-[var(--muted-dim)]"
                   >
                     {relativeRequestTime(item.updatedAt)}
                   </time>
@@ -249,10 +249,10 @@ export function UnifiedRequestList({
         ))}
         {items.length === 0 ? (
           <div className="px-4 py-12 text-center">
-            <div className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
+            <div className="text-11 font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
               {emptyTitle}
             </div>
-            <div className="mt-1 text-[var(--text-10)] text-[var(--muted)]">
+            <div className="mt-1 text-10 text-[var(--muted)]">
               {emptyDescription}
             </div>
           </div>

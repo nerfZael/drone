@@ -45,7 +45,7 @@ export function MetaChip({
 }) {
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1.5 py-[1px] text-[var(--text-10)] ${
+      className={`inline-flex items-center gap-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1.5 py-[1px] text-10 ${
         mono ? 'font-mono' : ''
       }`}
       title={title}
@@ -91,7 +91,7 @@ export function PullRequestStatusBadgeStrip({
           key={`pr-badge-${pullRequest.number}-${badge.key}`}
           className={
             appearance === 'plain'
-              ? `inline-flex items-center gap-1 whitespace-nowrap text-[var(--text-9)] leading-none ${
+              ? `inline-flex items-center gap-1 whitespace-nowrap text-9 leading-none ${
                   badge.tone === 'danger'
                     ? 'text-[var(--red)]'
                     : badge.tone === 'success'
@@ -100,8 +100,8 @@ export function PullRequestStatusBadgeStrip({
                 }`
               : `inline-flex items-center rounded border py-[1px] ${
                   compact
-                    ? 'px-1 text-[var(--text-9)] leading-none'
-                    : 'px-1.5 text-[var(--text-10)]'
+                    ? 'px-1 text-9 leading-none'
+                    : 'px-1.5 text-10'
                 } ${pullRequestBadgeClassNames[badge.tone]}`
           }
           title={badge.label}

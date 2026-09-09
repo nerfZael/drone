@@ -16,13 +16,13 @@ import {
 } from './change-request-api';
 
 const secondaryButtonClassName =
-  'inline-flex h-8 items-center rounded-[var(--radius-medium)] border border-[var(--border)] px-3 text-[var(--text-10)] font-[var(--weight-bold)] text-[var(--fg-secondary)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg)] disabled:cursor-not-allowed disabled:opacity-40';
+  'inline-flex h-8 items-center rounded-[var(--radius-medium)] border border-[var(--border)] px-3 text-10 font-[var(--weight-bold)] text-[var(--fg-secondary)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg)] disabled:cursor-not-allowed disabled:opacity-40';
 const ghostButtonClassName =
-  'inline-flex h-8 items-center rounded-[var(--radius-medium)] px-2.5 text-[var(--text-10)] text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:cursor-not-allowed disabled:opacity-40';
+  'inline-flex h-8 items-center rounded-[var(--radius-medium)] px-2.5 text-10 text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:cursor-not-allowed disabled:opacity-40';
 const primaryButtonClassName =
-  'inline-flex h-8 items-center rounded-[var(--radius-medium)] border border-[var(--accent)] bg-[var(--accent)] px-3 text-[var(--text-10)] font-[var(--weight-bold)] text-[var(--accent-fg)] transition-[filter,opacity] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40';
+  'inline-flex h-8 items-center rounded-[var(--radius-medium)] border border-[var(--accent)] bg-[var(--accent)] px-3 text-10 font-[var(--weight-bold)] text-[var(--accent-fg)] transition-[filter,opacity] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40';
 const dangerButtonClassName =
-  'inline-flex h-8 items-center rounded-[var(--radius-medium)] px-2.5 text-[var(--text-10)] text-[var(--red)] transition-colors hover:bg-[var(--red-subtle)] disabled:cursor-not-allowed disabled:opacity-40';
+  'inline-flex h-8 items-center rounded-[var(--radius-medium)] px-2.5 text-10 text-[var(--red)] transition-colors hover:bg-[var(--red-subtle)] disabled:cursor-not-allowed disabled:opacity-40';
 
 export function ChangeRequestGithubMirrorPanel({
   requestNumber,
@@ -53,10 +53,10 @@ export function ChangeRequestGithubMirrorPanel({
           <GithubMark />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="text-[var(--text-11)] font-[var(--weight-bold)] text-[var(--fg)]">
+          <div className="text-11 font-[var(--weight-bold)] text-[var(--fg)]">
             GitHub mirror
           </div>
-          <div className="text-[var(--text-9)] text-[var(--muted-dim)]">
+          <div className="text-9 text-[var(--muted-dim)]">
             {mirror
               ? 'This change request is published as a GitHub pull request.'
               : 'Publish this change request through the host GitHub account.'}
@@ -107,7 +107,7 @@ export function ChangeRequestGithubMirrorPanel({
             </button>
           </div>
         ) : (
-          <div className="mt-2.5 border-t border-[var(--border-subtle)] pt-2.5 text-[var(--text-10)] text-[var(--muted)]">
+          <div className="mt-2.5 border-t border-[var(--border-subtle)] pt-2.5 text-10 text-[var(--muted)]">
             Only open native change requests can be published.
           </div>
         )
@@ -151,7 +151,7 @@ function PublishedMirror({
 
   return (
     <>
-      <div className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-[var(--border-subtle)] pt-2.5 text-[var(--text-10)]">
+      <div className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-[var(--border-subtle)] pt-2.5 text-10">
         {mirror.htmlUrl ? (
           <a
             href={mirror.htmlUrl}
@@ -180,13 +180,13 @@ function PublishedMirror({
       </div>
 
       {mirror.lastError ? (
-        <div className="mt-2.5 border-l-2 border-[var(--red)] px-2.5 py-1 text-[var(--text-10)] text-[var(--red)]">
+        <div className="mt-2.5 border-l-2 border-[var(--red)] px-2.5 py-1 text-10 text-[var(--red)]">
           {mirror.lastError}
         </div>
       ) : null}
 
       <div className="mt-2.5 flex flex-wrap items-center gap-2 border-t border-[var(--border-subtle)] pt-2.5">
-        <label className="flex h-8 items-center gap-2 px-1 text-[var(--text-10)] text-[var(--fg-secondary)]">
+        <label className="flex h-8 items-center gap-2 px-1 text-10 text-[var(--fg-secondary)]">
           <input
             type="checkbox"
             checked={mirror.autoUpdate}
@@ -287,13 +287,13 @@ function MergeMethodSelect({
   onChange: (method: GithubMirrorMergeMethod) => void;
 }) {
   return (
-    <label className="flex h-8 items-center gap-2 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset-faint)] pl-2.5 text-[var(--text-9)] text-[var(--muted-dim)]">
+    <label className="flex h-8 items-center gap-2 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset-faint)] pl-2.5 text-9 text-[var(--muted-dim)]">
       <span className="whitespace-nowrap">Merge with</span>
       <select
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value as GithubMirrorMergeMethod)}
-        className="h-full min-w-24 rounded-r-[var(--radius-medium)] border-0 border-l border-[var(--border-subtle)] bg-transparent px-2 text-[var(--text-10)] text-[var(--fg)] outline-none disabled:opacity-40"
+        className="h-full min-w-24 rounded-r-[var(--radius-medium)] border-0 border-l border-[var(--border-subtle)] bg-transparent px-2 text-10 text-[var(--fg)] outline-none disabled:opacity-40"
       >
         <option value="squash">Squash</option>
         <option value="merge">Merge commit</option>
@@ -311,7 +311,7 @@ function MirrorState({ state }: { state: ChangeRequestGithubMirrorView['state'] 
         ? 'bg-[var(--red-subtle)] text-[var(--red)]'
         : 'bg-[var(--green-subtle)] text-[var(--green)]';
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[var(--text-9)] font-[var(--weight-bold)] ${className}`}>
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-9 font-[var(--weight-bold)] ${className}`}>
       <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-current opacity-80" />
       {state ? `${state.charAt(0).toUpperCase()}${state.slice(1)}` : state}
     </span>

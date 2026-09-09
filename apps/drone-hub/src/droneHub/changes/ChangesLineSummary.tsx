@@ -25,7 +25,7 @@ export function ChangesFileCountPill({
 }) {
   return (
     <span
-      className={`inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full border px-1.5 font-mono text-[var(--text-9)] font-[var(--weight-semibold)] leading-none tabular-nums ${fileCountPillToneClass[tone]}`}
+      className={`inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full border px-1.5 font-mono text-9 font-[var(--weight-semibold)] leading-none tabular-nums ${fileCountPillToneClass[tone]}`}
     >
       {count}
     </span>
@@ -42,7 +42,7 @@ export function ChangesLineSummary({ counts }: { counts: ChangesLineSummaryCount
     >
       <span className="sr-only">Changed files</span>
       <ChangesFileCountPill count={counts.changed} />
-      <span className="flex items-center gap-1 font-mono text-[var(--text-9)] tabular-nums">
+      <span className="flex items-center gap-1 font-mono text-9 tabular-nums">
         <span className="text-[var(--green)]" title="Lines added">+{lineChanges.added}</span>
         <span className="text-[var(--yellow)]" title="Lines modified">~{lineChanges.modified}</span>
         <span className="text-[var(--red)]" title="Lines deleted">-{lineChanges.deleted}</span>

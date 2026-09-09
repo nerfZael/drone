@@ -50,18 +50,18 @@ export function AgentRunSummaryLine({
   const content = (
     <>
       <span
-        className={`text-[var(--type-ui)] font-[var(--weight-emphasis)] ${
+        className={`text-ui font-[var(--weight-emphasis)] ${
           tone === 'approval' ? 'text-[var(--yellow)]' : ''
         }`}
         style={{ fontFamily: 'var(--display)' }}
       >
         {summaryLabel}
       </span>
-      {detail ? <span className="text-[var(--type-compact)] text-[var(--muted-dim)]">{detail}</span> : null}
+      {detail ? <span className="text-compact text-[var(--muted-dim)]">{detail}</span> : null}
       {at ? (
         <RelativeTimeText
           at={at}
-          className="ml-auto text-[var(--type-caption)] leading-none tabular-nums text-[var(--chat-message-time)] opacity-0 transition-opacity group-hover/turn:opacity-100 group-focus-within/turn:opacity-100"
+          className="ml-auto text-caption leading-none tabular-nums text-[var(--chat-message-time)] opacity-0 transition-opacity group-hover/turn:opacity-100 group-focus-within/turn:opacity-100"
           title={new Date(at).toLocaleString()}
         />
       ) : null}

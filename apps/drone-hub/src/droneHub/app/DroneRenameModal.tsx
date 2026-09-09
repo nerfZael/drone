@@ -69,7 +69,7 @@ export function DroneRenameModal({
             </div>
             <div className="min-w-0">
               <div
-                className="text-[var(--text-11)] font-[var(--weight-semibold)] uppercase tracking-[0.16em] text-[var(--muted-dim)]"
+                className="text-11 font-[var(--weight-semibold)] uppercase tracking-[0.16em] text-[var(--muted-dim)]"
                 style={{ fontFamily: 'var(--display)' }}
               >
                 Drone details
@@ -82,7 +82,7 @@ export function DroneRenameModal({
               </h2>
               <p
                 id="rename-drone-description"
-                className="mt-2 text-[var(--text-13)] leading-6 text-[var(--muted)]"
+                className="mt-2 text-13 leading-6 text-[var(--muted)]"
               >
                 Choose the name shown throughout Drone Hub.
               </p>
@@ -93,7 +93,7 @@ export function DroneRenameModal({
         <div className="px-6 py-5">
           <label
             htmlFor="rename-drone-name"
-            className="text-[var(--text-11)] font-[var(--weight-semibold)] uppercase tracking-[0.12em] text-[var(--muted)]"
+            className="text-11 font-[var(--weight-semibold)] uppercase tracking-[0.12em] text-[var(--muted)]"
             style={{ fontFamily: 'var(--display)' }}
           >
             Drone name
@@ -110,11 +110,11 @@ export function DroneRenameModal({
               setName(event.target.value);
               onNameChange?.();
             }}
-            className="dh-field-control mt-2 h-10 w-full rounded border border-[var(--field-border)] bg-[var(--field-bg)] px-3 text-[var(--text-13)] text-[var(--field-fg)] transition-colors placeholder:text-[var(--field-placeholder)] disabled:cursor-not-allowed disabled:opacity-60"
+            className="dh-field-control mt-2 h-10 w-full rounded border border-[var(--field-border)] bg-[var(--field-bg)] px-3 text-13 text-[var(--field-fg)] transition-colors placeholder:text-[var(--field-placeholder)] disabled:cursor-not-allowed disabled:opacity-60"
           />
           <div
             id="rename-drone-hint"
-            className="mt-2 flex items-center justify-between gap-3 text-[var(--text-11)] text-[var(--muted-dim)]"
+            className="mt-2 flex items-center justify-between gap-3 text-11 text-[var(--muted-dim)]"
           >
             <span className="min-w-0 truncate font-mono" title={drone.id}>
               {drone.id}
@@ -124,7 +124,7 @@ export function DroneRenameModal({
           {error ? (
             <div
               id="rename-drone-error"
-              className="mt-3 rounded-[var(--radius-medium)] border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-12)] leading-5 text-[var(--red)]"
+              className="mt-3 rounded-[var(--radius-medium)] border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-12 leading-5 text-[var(--red)]"
             >
               {error}
             </div>
@@ -136,7 +136,7 @@ export function DroneRenameModal({
             type="button"
             onClick={onCancel}
             disabled={busy}
-            className={`h-9 rounded px-3 text-[var(--text-11)] font-[var(--weight-semibold)] uppercase tracking-[0.12em] transition-all ${
+            className={`h-9 rounded px-3 text-11 font-[var(--weight-semibold)] uppercase tracking-[0.12em] transition-all ${
               busy
                 ? 'cursor-not-allowed border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] opacity-40'
                 : 'border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:border-[var(--border)] hover:text-[var(--fg)]'
@@ -149,7 +149,7 @@ export function DroneRenameModal({
             type="submit"
             disabled={!canSubmit}
             title={validationError ?? undefined}
-            className={`inline-flex h-9 items-center justify-center gap-2 rounded px-3 text-[var(--text-11)] font-[var(--weight-semibold)] uppercase tracking-[0.12em] transition-all ${
+            className={`inline-flex h-9 items-center justify-center gap-2 rounded px-3 text-11 font-[var(--weight-semibold)] uppercase tracking-[0.12em] transition-all ${
               canSubmit
                 ? 'border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:border-[var(--accent)] hover:bg-[var(--hover)]'
                 : 'cursor-not-allowed border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] opacity-45'

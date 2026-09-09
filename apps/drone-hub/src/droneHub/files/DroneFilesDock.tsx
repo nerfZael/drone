@@ -1167,9 +1167,9 @@ export function DroneFilesDock({
                   <span className={`min-w-0 flex-1 truncate ${ignored ? 'text-[var(--muted-dim)] opacity-60' : ''}`}>
                     {node.name}
                   </span>
-                  {childError ? <span className="px-1 text-[var(--type-caption)] text-[var(--red)]">Error</span> : null}
+                  {childError ? <span className="px-1 text-caption text-[var(--red)]">Error</span> : null}
                   {childLoading ? (
-                    <span className="inline-flex items-center gap-1 px-1 text-[var(--type-caption)] text-[var(--accent)]">
+                    <span className="inline-flex items-center gap-1 px-1 text-caption text-[var(--accent)]">
                       <InlineSpinner />
                       Loading
                     </span>
@@ -1186,18 +1186,18 @@ export function DroneFilesDock({
               >
                 {creatingInside ? renderInlineCreateRow() : null}
                 {childError ? (
-                  <div className="my-0.5 px-2 py-1 text-[var(--text-10)] text-[var(--red)]">
+                  <div className="my-0.5 px-2 py-1 text-10 text-[var(--red)]">
                     {childError}
                   </div>
                 ) : null}
                 {childLoading && !childLoaded ? (
-                  <div className="my-0.5 px-2 py-1 text-[var(--text-10)] text-[var(--muted)]">
+                  <div className="my-0.5 px-2 py-1 text-10 text-[var(--muted)]">
                     Loading directory...
                   </div>
                 ) : null}
                 {childLoaded && node.children && node.children.length > 0 ? renderExplorer(node.children) : null}
                 {childLoaded && !creatingInside && (!node.children || node.children.length === 0) ? (
-                  <div className="my-0.5 px-2 py-1 text-[var(--text-10)] text-[var(--muted)]">
+                  <div className="my-0.5 px-2 py-1 text-10 text-[var(--muted)]">
                     Directory is empty.
                   </div>
                 ) : null}
@@ -1448,9 +1448,9 @@ export function DroneFilesDock({
       {dragActive ? (
         <div className="pointer-events-none absolute inset-0 z-30 px-3 py-3">
           <div className="w-full h-full rounded-[var(--radius-medium)] border-2 border-dashed border-[var(--accent-muted)] bg-[var(--panel-overlay-soft)] flex items-center justify-center text-center px-4">
-            <div className="text-[var(--text-12)] text-[var(--fg-secondary)]">
+            <div className="text-12 text-[var(--fg-secondary)]">
               Drop files to upload into
-              <div className="mt-1 font-mono text-[var(--text-11)] text-[var(--accent)] break-all">{normalizedPath}</div>
+              <div className="mt-1 font-mono text-11 text-[var(--accent)] break-all">{normalizedPath}</div>
             </div>
           </div>
         </div>

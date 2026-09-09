@@ -52,11 +52,11 @@ export function HubTransientToasts({
         >
           <div className="flex items-start gap-3">
             <div className="min-w-0 flex-1">
-              <div className={`text-[var(--text-10)] font-[var(--weight-semibold)] mb-1 tracking-wide uppercase ${nameSuggestToastLabelClass}`} style={{ fontFamily: 'var(--display)' }}>
+              <div className={`text-10 font-[var(--weight-semibold)] mb-1 tracking-wide uppercase ${nameSuggestToastLabelClass}`} style={{ fontFamily: 'var(--display)' }}>
                 {nameSuggestToast.title ?? (nameSuggestToastTone === 'success' ? 'Action completed' : 'Action failed')}
               </div>
               {nameSuggestToast.voiceActive ? <VoiceLevelBars level={voiceLevel} /> : null}
-              <div className="text-[var(--text-11)] text-[var(--muted)] whitespace-pre-wrap">{nameSuggestToast.message}</div>
+              <div className="text-11 text-[var(--muted)] whitespace-pre-wrap">{nameSuggestToast.message}</div>
             </div>
             <button
               type="button"
@@ -109,12 +109,12 @@ export function RepoApplyProgressToast({
         </div>
         <div className="min-w-0 flex-1">
           <div
-            className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--info)]"
+            className="text-10 font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--info)]"
             style={{ fontFamily: 'var(--display)' }}
           >
             Applying changes to host
           </div>
-          <div className="mt-0.5 truncate text-[var(--text-11)] text-[var(--muted)]">
+          <div className="mt-0.5 truncate text-11 text-[var(--muted)]">
             Syncing from {applyLabel}. You can keep chatting.
           </div>
         </div>

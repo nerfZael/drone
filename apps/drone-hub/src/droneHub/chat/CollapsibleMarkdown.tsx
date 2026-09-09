@@ -243,7 +243,7 @@ export function CollapsibleMarkdown({
           type="button"
           onClick={() => setCollapsed((v) => !v)}
           aria-expanded={!collapsed}
-          className="mt-2 inline-flex min-h-7 items-center gap-1 rounded-[var(--radius-small)] border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-2 text-[var(--text-11)] font-medium text-[var(--muted)] transition-colors hover:border-[var(--accent-muted)] hover:bg-[var(--surface-strong)] hover:text-[var(--fg)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)]"
+          className="mt-2 inline-flex min-h-7 items-center gap-1 rounded-[var(--radius-small)] border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-2 text-11 font-medium text-[var(--muted)] transition-colors hover:border-[var(--accent-muted)] hover:bg-[var(--surface-strong)] hover:text-[var(--fg)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)]"
         >
           <IconChevron down={!collapsed} />
           {collapsed ? 'Show more' : 'Collapse'}

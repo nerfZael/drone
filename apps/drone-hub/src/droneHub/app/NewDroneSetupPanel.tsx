@@ -87,9 +87,7 @@ export function NewDroneSetupPanel({
             menuClassName="max-h-[240px] overflow-y-auto"
             title={chatHeaderRepoPath || 'No repository'}
             triggerLabel={repositoryLabel || 'No repository'}
-            triggerLabelClassName={
-              chatHeaderRepoPath ? 'font-mono text-[var(--text-11)]' : undefined
-            }
+            triggerLabelClassName={chatHeaderRepoPath ? 'font-mono text-11' : undefined}
             triggerClassName={`${INLINE_TRIGGER_CLASS} min-w-[6.5rem] max-w-[12rem]`}
           />
 
@@ -99,7 +97,7 @@ export function NewDroneSetupPanel({
             aria-controls={advancedPanelId}
             onClick={() => setAdvancedOpen((open) => !open)}
             disabled={controlsLocked}
-            className={`inline-flex h-8 items-center gap-1.5 rounded-[var(--chat-composer-control-radius)] px-2 text-[var(--text-10)] font-medium transition-colors hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40 ${
+            className={`inline-flex h-8 items-center gap-1.5 rounded-[var(--chat-composer-control-radius)] px-2 text-10 font-medium transition-colors hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40 ${
               advancedOpen
                 ? 'bg-[var(--surface-soft)] text-[var(--fg-secondary)]'
                 : 'text-[var(--chat-composer-placeholder)] hover:text-[var(--chat-composer-control-fg)]'

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && bun scripts/check-css-output.ts",
     "desktop": "bun run build && bun run --filter drone build && node ../drone/dist/cli.js hub app --static-ui-dir dist",
     "build:size": "node scripts/build-size.cjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",

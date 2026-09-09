@@ -91,7 +91,7 @@ export function DesktopDevicePicker({
                       {device.name}
                     </span>
                     {local ? (
-                      <span className="mt-px block truncate text-[var(--type-micro)] font-normal text-[var(--sidebar-meta-fg)]">
+                      <span className="mt-px block truncate text-micro font-normal text-[var(--sidebar-meta-fg)]">
                         This device
                       </span>
                     ) : null}
@@ -103,13 +103,13 @@ export function DesktopDevicePicker({
               );
             })}
             {!loading && devices.length === 0 ? (
-              <div className="px-3 py-4 text-[var(--text-10)] text-[var(--muted)]">
+              <div className="px-3 py-4 text-10 text-[var(--muted)]">
                 No other devices are available.
               </div>
             ) : null}
           </div>
           {error ? (
-            <div className="border-t border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-9)] text-[var(--red)]">
+            <div className="border-t border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-9 text-[var(--red)]">
               Device status could not be refreshed.
             </div>
           ) : null}

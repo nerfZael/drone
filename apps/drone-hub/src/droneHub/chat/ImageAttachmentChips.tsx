@@ -148,7 +148,7 @@ export function ImageAttachmentChips({
         return (
           <div
             key={key}
-            className="inline-flex max-w-full items-center gap-1.5 rounded border border-[var(--user-border)] bg-[var(--surface-soft)] px-2 py-1 text-[var(--text-10)]"
+            className="inline-flex max-w-full items-center gap-1.5 rounded border border-[var(--user-border)] bg-[var(--surface-soft)] px-2 py-1 text-10"
           >
             {showThumb ? (
               <img
@@ -166,7 +166,7 @@ export function ImageAttachmentChips({
               />
             ) : (
               <span
-                className="inline-flex h-6 items-center rounded border border-[var(--border-subtle)] px-1.5 text-[var(--text-9)] uppercase tracking-wide text-[var(--muted-dim)]"
+                className="inline-flex h-6 items-center rounded border border-[var(--border-subtle)] px-1.5 text-9 uppercase tracking-wide text-[var(--muted-dim)]"
                 style={{ fontFamily: 'var(--display)' }}
               >
                 {typeLabel}
@@ -177,7 +177,7 @@ export function ImageAttachmentChips({
             {fileRef && onOpenFileReference ? (
               <button
                 type="button"
-                className="inline-flex items-center rounded border border-[var(--border-subtle)] px-1 text-[var(--text-9)] uppercase tracking-wide text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]"
+                className="inline-flex items-center rounded border border-[var(--border-subtle)] px-1 text-9 uppercase tracking-wide text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]"
                 style={{ fontFamily: 'var(--display)' }}
                 onClick={() => onOpenFileReference(fileRef)}
                 title={fileLabel ? `Open ${fileLabel}` : 'Open attachment'}

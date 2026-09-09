@@ -89,7 +89,7 @@ export function UiCountBadge({
   return (
     <span
       className={cn(
-        'inline-flex min-w-4 items-center justify-center rounded-full bg-[var(--surface-strong)] px-1 font-mono text-[length:var(--text-11)] tabular-nums text-[var(--muted)]',
+        'inline-flex min-w-4 items-center justify-center rounded-full bg-[var(--surface-strong)] px-1 font-mono text-11 tabular-nums text-[var(--muted)]',
         className,
       )}
       {...props}

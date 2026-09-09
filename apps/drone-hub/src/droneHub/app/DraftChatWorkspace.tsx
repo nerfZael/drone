@@ -294,7 +294,7 @@ export function DraftChatWorkspace({
             </span>
             {draftChat.prompt && draftChat.prompt.state !== 'failed' ? (
               <span
-                className="inline-flex items-center gap-1.5 text-[var(--text-10)] font-[var(--weight-medium)] text-[var(--muted-dim)]"
+                className="inline-flex items-center gap-1.5 text-10 font-[var(--weight-medium)] text-[var(--muted-dim)]"
                 aria-label={`${startupLabel} drone`}
               >
                 <span className="h-1.5 w-1.5 rounded-full bg-[var(--yellow)] animate-pulse" />
@@ -302,7 +302,7 @@ export function DraftChatWorkspace({
               </span>
             ) : null}
             {draftCreateParentDroneLabel ? (
-              <span className="rounded-full border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-2 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.12em] text-[var(--muted-dim)]">
+              <span className="rounded-full border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-2 py-0.5 text-9 font-[var(--weight-semibold)] uppercase tracking-[0.12em] text-[var(--muted-dim)]">
                 Child of {draftCreateParentDroneLabel}
               </span>
             ) : null}
@@ -311,7 +311,7 @@ export function DraftChatWorkspace({
             <button
               type="button"
               onClick={onCancel}
-              className="inline-flex items-center justify-center h-7 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-all text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase"
+              className="inline-flex items-center justify-center h-7 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-all text-10 font-[var(--weight-semibold)] tracking-wide uppercase"
               style={{ fontFamily: 'var(--display)' }}
             >
               Cancel

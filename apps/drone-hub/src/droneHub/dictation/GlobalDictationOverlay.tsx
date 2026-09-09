@@ -95,7 +95,7 @@ export function GlobalDictationOverlay(props: GlobalDictationOverlayProps) {
             <span className="shrink-0 text-sm font-[var(--weight-semibold)] text-[var(--fg)]">
               Dictation
             </span>
-            <span className="truncate text-[var(--text-10)] text-[var(--muted)]" aria-live="polite">
+            <span className="truncate text-10 text-[var(--muted)]" aria-live="polite">
               {status}
             </span>
             {recordingActive ? (
@@ -152,7 +152,7 @@ export function GlobalDictationOverlay(props: GlobalDictationOverlayProps) {
       <div className="min-h-0 overflow-y-auto">
         {dictation.error || dictation.notice ? (
           <div
-            className={`border-b border-[var(--border-subtle)] px-3 py-2 text-[var(--text-10)] ${dictation.error ? 'text-[var(--red)]' : 'text-[var(--muted)]'}`}
+            className={`border-b border-[var(--border-subtle)] px-3 py-2 text-10 ${dictation.error ? 'text-[var(--red)]' : 'text-[var(--muted)]'}`}
             role="status"
           >
             {dictation.error || dictation.notice}
@@ -176,7 +176,7 @@ export function GlobalDictationOverlay(props: GlobalDictationOverlayProps) {
             {dictation.failedClips.map((clip) => (
               <div
                 key={clip.id}
-                className="flex items-center gap-2 rounded-md border border-[var(--red-border)] bg-[var(--red-subtle)] px-2 py-1.5 text-[var(--text-10)]"
+                className="flex items-center gap-2 rounded-md border border-[var(--red-border)] bg-[var(--red-subtle)] px-2 py-1.5 text-10"
               >
                 <span className="min-w-0 flex-1 truncate text-[var(--red)]" title={clip.error}>
                   Transcription failed: {clip.error}
@@ -208,7 +208,7 @@ export function GlobalDictationOverlay(props: GlobalDictationOverlayProps) {
           type="button"
           onClick={() => void dictation.toggleRecording()}
           disabled={dictation.finalizing}
-          className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[var(--text-10)] font-[var(--weight-semibold)] transition-opacity hover:opacity-75 disabled:opacity-40 ${recordingActive ? 'border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)]' : 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]'}`}
+          className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-10 font-[var(--weight-semibold)] transition-opacity hover:opacity-75 disabled:opacity-40 ${recordingActive ? 'border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)]' : 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]'}`}
         >
           {recordingActive ? 'Stop + transcribe' : 'Record'}
           <kbd className="font-mono text-[9px] opacity-70">+</kbd>
@@ -219,7 +219,7 @@ export function GlobalDictationOverlay(props: GlobalDictationOverlayProps) {
               type="button"
               onClick={() => dictation.toggleRecordingPause()}
               disabled={dictation.recordingStatus === 'starting' || dictation.finalizing}
-              className="inline-flex h-8 items-center rounded-md border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-2.5 text-[var(--text-10)] text-[var(--muted)] hover:text-[var(--fg)] disabled:opacity-40"
+              className="inline-flex h-8 items-center rounded-md border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-2.5 text-10 text-[var(--muted)] hover:text-[var(--fg)] disabled:opacity-40"
             >
               {dictation.recordingStatus === 'paused' ? 'Resume' : 'Pause'}
             </button>
@@ -227,7 +227,7 @@ export function GlobalDictationOverlay(props: GlobalDictationOverlayProps) {
               type="button"
               onClick={() => void dictation.cancelRecording()}
               disabled={dictation.finalizing}
-              className="inline-flex h-8 items-center gap-1 rounded-md border border-[var(--red-border)] bg-[var(--red-subtle)] px-2.5 text-[var(--text-10)] text-[var(--red)] hover:opacity-75 disabled:opacity-40"
+              className="inline-flex h-8 items-center gap-1 rounded-md border border-[var(--red-border)] bg-[var(--red-subtle)] px-2.5 text-10 text-[var(--red)] hover:opacity-75 disabled:opacity-40"
             >
               Discard <kbd className="font-mono text-[9px] opacity-70">−</kbd>
             </button>

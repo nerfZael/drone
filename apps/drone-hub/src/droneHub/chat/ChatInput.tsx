@@ -1164,7 +1164,7 @@ export function ChatInput({
     >
       <div className="mx-auto max-w-[73.125rem]">
         {(promptError || attachmentError) && (
-          <div className="mb-2 text-[var(--text-11)] text-[var(--red)] px-1" title={promptError || attachmentError || undefined}>
+          <div className="mb-2 text-11 text-[var(--red)] px-1" title={promptError || attachmentError || undefined}>
             {promptError || attachmentError}
           </div>
         )}
@@ -1201,7 +1201,7 @@ export function ChatInput({
           <ChatComposerContext config={composerContext} />
           {attachmentsOn && attachments.length > 0 && (
             <div className="px-3 pt-3">
-              <div className="text-[var(--type-caption)] text-[var(--muted-dim)]">
+              <div className="text-caption text-[var(--muted-dim)]">
                 {attachments.length} attachment{attachments.length === 1 ? '' : 's'} attached
                 {imageAttachmentCount > 0 ? ` • ${imageAttachmentCount} image${imageAttachmentCount === 1 ? '' : 's'}` : ''}
                 {textAttachmentCount > 0 ? ` • ${textAttachmentCount} text attachment${textAttachmentCount === 1 ? '' : 's'}` : ''}
@@ -1219,19 +1219,19 @@ export function ChatInput({
                     ) : (
                       <div className="min-h-[3.5rem] w-[11.25rem] rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-1.5">
                         <div
-                          className="text-[var(--text-9)] uppercase tracking-wide text-[var(--muted-dim)]"
+                          className="text-9 uppercase tracking-wide text-[var(--muted-dim)]"
                         >
                           {a.kind === 'text' ? 'Text attachment' : 'File attachment'}
                         </div>
-                        <div className="mt-1 truncate text-[var(--text-10)] text-[var(--fg-secondary)]">{a.name}</div>
-                        <div className="mt-0.5 text-[var(--text-9)] text-[var(--muted-dim)]">{formatBytes(a.size)}</div>
+                        <div className="mt-1 truncate text-10 text-[var(--fg-secondary)]">{a.name}</div>
+                        <div className="mt-0.5 text-9 text-[var(--muted-dim)]">{formatBytes(a.size)}</div>
                       </div>
                     )}
                     <button
                       type="button"
                       onClick={() => removeAttachment(a.id)}
                       disabled={attachmentControlsLocked}
-                      className={`absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full border text-[var(--text-10)] font-[var(--weight-bold)] flex items-center justify-center transition-all ${
+                      className={`absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full border text-10 font-[var(--weight-bold)] flex items-center justify-center transition-all ${
                         attachmentControlsLocked
                           ? 'opacity-40 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                           : 'bg-[var(--panel-raised)] border-[var(--border)] text-[var(--muted)] hover:text-[var(--red)] hover:border-[var(--red)]'
@@ -1292,7 +1292,7 @@ export function ChatInput({
                     aria-hidden="true"
                   />
                   <span className="truncate text-[var(--accent)]" aria-live="polite">{voiceRecordingLabel}</span>
-                  <span className="flex-shrink-0 text-[var(--type-compact)] font-normal tabular-nums tracking-normal text-[var(--chat-composer-fg)]" aria-label={`${voiceRecordingDuration} elapsed`}>
+                  <span className="flex-shrink-0 text-compact font-normal tabular-nums tracking-normal text-[var(--chat-composer-fg)]" aria-label={`${voiceRecordingDuration} elapsed`}>
                     {voiceRecordingDuration}
                   </span>
                 </div>
@@ -1497,7 +1497,7 @@ export function ChatInput({
               }}
               rows={1}
               placeholder="Ask the agent"
-              className={`min-w-0 max-h-[8.25rem] flex-1 resize-none border-0 bg-transparent text-[var(--chat-text-size)] leading-[1.375rem] text-[var(--chat-composer-fg)] caret-[var(--cursor)] placeholder:text-[var(--chat-composer-placeholder)] focus:outline-none ${
+              className={`min-w-0 max-h-[8.25rem] flex-1 resize-none border-0 bg-transparent text-chat leading-[1.375rem] text-[var(--chat-composer-fg)] caret-[var(--cursor)] placeholder:text-[var(--chat-composer-placeholder)] focus:outline-none ${
                 composerExpanded ? 'min-h-[2.75rem] px-0 pb-0 pt-3' : 'min-h-[3.125rem] overflow-hidden text-ellipsis whitespace-nowrap px-3.5 pb-3 pt-[.9375rem]'
               }`}
               disabled={composerLocked || voiceRecordingActive}
@@ -1572,7 +1572,7 @@ export function ChatInput({
                 aria-hidden="true"
               />
               <span className="text-[var(--accent)]" aria-live="polite">{voiceRecordingLabel}</span>
-              <span className="text-[var(--type-compact)] font-normal tabular-nums tracking-normal text-[var(--chat-composer-fg)]" aria-label={`${voiceRecordingDuration} elapsed`}>
+              <span className="text-compact font-normal tabular-nums tracking-normal text-[var(--chat-composer-fg)]" aria-label={`${voiceRecordingDuration} elapsed`}>
                 {voiceRecordingDuration}
               </span>
             </div>
@@ -1596,7 +1596,7 @@ export function ChatInput({
                 {continuousVoiceLabel}
               </span>
               <span
-                className="text-[var(--type-compact)] font-normal tabular-nums tracking-normal text-[var(--chat-composer-fg)]"
+                className="text-compact font-normal tabular-nums tracking-normal text-[var(--chat-composer-fg)]"
                 aria-label={`${continuousVoiceDuration} elapsed`}
               >
                 {continuousVoiceDuration}
@@ -1693,7 +1693,7 @@ export function ChatInput({
                   void onPublish();
                 }}
                 disabled={Boolean(disabled) || publishing}
-                className={`inline-flex h-8 items-center justify-center rounded-[var(--chat-composer-control-radius)] border px-3 text-[var(--type-caption)] font-medium transition-opacity ${
+                className={`inline-flex h-8 items-center justify-center rounded-[var(--chat-composer-control-radius)] border px-3 text-caption font-medium transition-opacity ${
                   Boolean(disabled) || publishing
                     ? 'cursor-not-allowed border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)] opacity-40'
                     : 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:opacity-70'
@@ -1831,7 +1831,7 @@ export function ChatInput({
                 data-chat-composer-stop-action="true"
                 onClick={() => void onStop?.()}
                 disabled={stopping}
-                className="inline-flex h-8 items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 text-[var(--type-caption)] font-medium text-[var(--red)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-8 items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 text-caption font-medium text-[var(--red)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-50"
                 title={stopping ? 'Stopping response' : 'Stop response'}
                 aria-label={stopping ? 'Stopping response' : 'Stop response'}
               >
@@ -1890,7 +1890,7 @@ export function ChatInput({
           ) : null}
           {hasModeHint && (
             <div
-              className="px-4 pb-2 text-[var(--text-10)] text-[var(--muted-dim)] tracking-wide uppercase"
+              className="px-4 pb-2 text-10 text-[var(--muted-dim)] tracking-wide uppercase"
             >
               {modeHint}
             </div>

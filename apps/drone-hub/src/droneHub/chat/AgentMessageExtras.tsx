@@ -134,7 +134,7 @@ export function AgentMessageExtras({
                     title={`Open ${media.label} from message link`}
                   >
                     {failedMediaById[media.id] ? (
-                      <div className="flex min-h-[120px] items-center justify-center px-3 text-center text-[var(--text-11)] text-[var(--muted)]">
+                      <div className="flex min-h-[120px] items-center justify-center px-3 text-center text-11 text-[var(--muted)]">
                         Failed to load image.
                       </div>
                     ) : (
@@ -154,7 +154,7 @@ export function AgentMessageExtras({
                     )}
                   </button>
                 ) : failedMediaById[media.id] ? (
-                  <div className="flex min-h-[120px] items-center justify-center px-3 text-center text-[var(--text-11)] text-[var(--muted)]">
+                  <div className="flex min-h-[120px] items-center justify-center px-3 text-center text-11 text-[var(--muted)]">
                     Failed to load video.
                   </div>
                 ) : (
@@ -231,7 +231,7 @@ export function AgentMessageExtras({
               onPointerEnter={() => void prefetchSkillPillEditorData()}
               onFocus={() => void prefetchSkillPillEditorData()}
               onClick={() => setEditingSkillName(skill.name)}
-              className="inline-flex max-w-full items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-0.5 font-mono text-[var(--text-10)] text-[var(--muted)] transition-colors hover:border-[var(--accent-muted)] hover:bg-[var(--surface-inset-strong)] hover:text-[var(--accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+              className="inline-flex max-w-full items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-0.5 font-mono text-10 text-[var(--muted)] transition-colors hover:border-[var(--accent-muted)] hover:bg-[var(--surface-inset-strong)] hover:text-[var(--accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
             >
               <span className="truncate">{skill.name}</span>
             </button>

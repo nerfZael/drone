@@ -25,12 +25,12 @@ export function AssistantQuestionResultCard({ request }: { request: ChatQuestion
 
   return (
     <section
-      className="min-w-0 max-w-[var(--chat-interactive-max)] rounded-[var(--radius-large)] border border-[var(--chat-card-border)] bg-[var(--chat-card-bg)] px-4 py-3 text-[var(--text-11)]"
+      className="min-w-0 max-w-[var(--chat-interactive-max)] rounded-[var(--radius-large)] border border-[var(--chat-card-border)] bg-[var(--chat-card-bg)] px-4 py-3 text-11"
       role="region"
       aria-label={result.status === 'submitted' ? 'Submitted answers' : 'Skipped questions'}
       data-assistant-question-result="true"
     >
-      <div className="mb-2 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
+      <div className="mb-2 text-10 font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
         {result.status === 'submitted' ? 'Answers submitted' : skippedReason(request)}
       </div>
       {responses ? (
