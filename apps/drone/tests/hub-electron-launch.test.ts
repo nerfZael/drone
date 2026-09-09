@@ -6,6 +6,7 @@ const {
   electronNodeChildEnv,
   formatDetachedHubStartOutput,
   parseDetachedHubStartOutput,
+  resolveHubApiAddress,
 }: {
   detachedHubStartArgs(
     cliPath: string,
@@ -15,9 +16,32 @@ const {
   electronNodeChildEnv(env?: Record<string, string>): Record<string, string>;
   formatDetachedHubStartOutput(payload: any): string;
   parseDetachedHubStartOutput(raw: string): { payload: any; uiUrl: string };
+  resolveHubApiAddress(payload: any): { apiHost: string; apiPort: number };
 } = require('../desktop/hub-electron-launch.cjs');
 
 describe('Drone Hub Electron background launch', () => {
+  test('resolves the API address for fresh and existing daemons', () => {
+    const fresh = parseDetachedHubStartOutput(JSON.stringify({
+      ok: true, pid: 42, apiUrl: 'http://127.0.0.1:43871', uiUrl: 'http://127.0.0.1:5174',
+    }));
+    const existing = parseDetachedHubStartOutput(JSON.stringify({
+      ok: true, alreadyRunning: true, state: { apiHost: '127.0.0.1', apiPort: 43871, uiPort: 5174 },
+    }));
+    for (const result of [fresh, existing]) {
+      expect(resolveHubApiAddress(result.payload)).toEqual({ apiHost: '127.0.0.1', apiPort: 43871 });
+    }
+    expect(resolveHubApiAddress({ apiUrl: 'http://localhost' })).toEqual({ apiHost: 'localhost', apiPort: 80 });
+    expect(resolveHubApiAddress({ apiUrl: 'http://[::1]:43871' })).toEqual({ apiHost: '::1', apiPort: 43871 });
+  });
+
+  test('rejects unusable API addresses', () => {
+    for (const payload of [{}, { apiUrl: 'invalid' }, { apiUrl: 'https://localhost:8787' },
+      { apiUrl: 'http://localhost:0' }, { state: { apiHost: 'localhost', apiPort: 65536 } },
+      { state: { apiHost: '', apiPort: 8787 } }]) {
+      expect(() => resolveHubApiAddress(payload)).toThrow('The running Hub API address is invalid.');
+    }
+  });
+
   test('starts the Hub as a detached daemon instead of a window-owned process', () => {
     const args = detachedHubStartArgs(
       '/app/cli.js',

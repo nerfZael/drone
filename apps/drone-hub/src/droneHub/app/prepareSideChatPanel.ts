@@ -8,5 +8,5 @@ export function prepareSideChatPanel(panel: IDockviewPanel): void {
     panel.group.model.openPanel(panel, { skipSetGroupActive: true });
   }
   const handle = panel.group.element.querySelector<HTMLElement>('.dv-void-container');
-  handle?.setAttribute('title', 'Drag to move the floating window. Drag the tab to dock it.');
+  handle?.setAttribute('title', 'Drag to move the floating window. Shift-drag to dock it.');
 }

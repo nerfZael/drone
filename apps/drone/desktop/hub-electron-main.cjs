@@ -7,6 +7,7 @@ const {
   electronNodeChildEnv,
   formatDetachedHubStartOutput,
   parseDetachedHubStartOutput,
+  resolveHubApiAddress,
 } = require('./hub-electron-launch.cjs');
 const {
   resolveDesktopStaticUiDir,
@@ -580,15 +581,13 @@ function startHub() {
         // Use the same persistent desktop origin for fresh and existing daemons.
         const staticDir = resolveDesktopStaticUiDir(__dirname, process.env.DRONE_HUB_STATIC_UI_DIR);
         const tokenPath = resolveHubApiTokenPath(payload);
-        const apiHost = String(payload.state?.apiHost || '').trim();
-        const apiPort = Number(payload.state?.apiPort);
+        const { apiHost, apiPort } = resolveHubApiAddress(payload);
         if (!staticDir) throw new Error('The production Drone Hub UI bundle is missing. Run `bun run --filter drone-hub build`.');
         try {
           const version = JSON.parse(fs.readFileSync(path.join(staticDir, 'version.json'), 'utf8'));
           diagnostics.setUiBuild({ buildId: version.buildId, buildTime: version.buildTime });
         } catch { /* The renderer also reports its compiled build id. */ }
         if (!tokenPath || !fs.existsSync(tokenPath)) throw new Error('The running Hub API token could not be found.');
-        if (!apiHost || !Number.isInteger(apiPort) || apiPort <= 0) throw new Error('The running Hub API address is invalid.');
         desktopStaticUiServer = await startDesktopStaticUiServer({
           staticDir,
           apiHost,

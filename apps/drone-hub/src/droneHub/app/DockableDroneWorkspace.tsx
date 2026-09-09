@@ -1,4 +1,5 @@
 import React from 'react';
+import { IconTrash } from './icons';
 import { measureSideChatBounds, readSideChatWorkspaceState, restoreSideChatBounds, saveSideChatWorkspaceState } from './side-chat-workspace-state';
 import { placeSideChat } from './side-chat-placement';
 import { prepareSideChatPanel } from './prepareSideChatPanel';
@@ -12,6 +13,7 @@ import {
   type DockviewApi,
   type DockviewReadyEvent,
   type IDockviewPanelHeaderProps,
+  type IDockviewHeaderActionsProps,
   type IDockviewPanelProps,
   type SerializedDockview,
 } from 'dockview';
@@ -416,11 +418,21 @@ function WorkspaceTab(props: IDockviewPanelHeaderProps) {
     <DockviewDefaultTab
       {...props}
       data-side-chat-name={props.api.id.startsWith(SIDE_CHAT_PANEL_PREFIX) ? props.api.id.slice(SIDE_CHAT_PANEL_PREFIX.length) : undefined}
-      hideClose={!closeable}
+      hideClose={!closeable || props.api.id.startsWith(SIDE_CHAT_PANEL_PREFIX)}
       closeActionOverride={closeable ? closePanel : undefined}
       onPointerDown={handlePointerDown}
     />
   );
+}
+
+function WorkspaceHeaderActions({ activePanel }: IDockviewHeaderActionsProps) {
+  const ctx = React.useContext(DockableDroneWorkspaceContext);
+  if (!activePanel?.id.startsWith(SIDE_CHAT_PANEL_PREFIX)) return null;
+  return <button type="button" className="dh-chat-window-action" title="Delete forked chat" aria-label="Delete forked chat"
+    onPointerDown={(event) => event.stopPropagation()}
+    onClick={() => ctx.onCloseSideChat?.(activePanel.id.slice(SIDE_CHAT_PANEL_PREFIX.length))}>
+    <IconTrash />
+  </button>;
 }
 
 function WorkspaceWatermark() {
@@ -949,6 +961,7 @@ export function DockableDroneWorkspace({
             className="dockview-theme-dark dh-dockview"
             components={components}
             defaultTabComponent={WorkspaceTab}
+            rightHeaderActionsComponent={WorkspaceHeaderActions}
             watermarkComponent={WorkspaceWatermark}
             onReady={handleReady}
             singleTabMode="fullwidth"

@@ -1,6 +1,6 @@
 import { SideChatForkContext } from '../chat/SideChatForkContext';
 import React from 'react';
-import { DockviewReact, DockviewDefaultTab, type DockviewApi, type IDockviewPanelProps, type IDockviewPanelHeaderProps } from 'dockview';
+import { DockviewReact, DockviewDefaultTab, type DockviewApi, type IDockviewPanelProps, type IDockviewPanelHeaderProps, type IDockviewHeaderActionsProps } from 'dockview';
 import 'dockview/dist/styles/dockview.css';
 import type { DroneSummary } from '../types';
 import { ChatSurface, adaptNativeAgentChatSurface } from '../chat';
@@ -124,7 +124,15 @@ function DetachedPanel({ params }: IDockviewPanelProps<{ chatKey: string }>) {
 
 function DetachedTab(props: IDockviewPanelHeaderProps) {
   return <DockviewDefaultTab {...props} data-side-chat-name={props.api.id}
-    closeActionOverride={() => useDetachedChatStore.getState().attach(props.api.id)} />;
+    hideClose />;
+}
+function DetachedHeaderActions({ activePanel }: IDockviewHeaderActionsProps) {
+  if (!activePanel) return null;
+  return <button type="button" className="dh-chat-window-action" title="Return chat to workspace" aria-label="Return chat to workspace"
+    onPointerDown={(event) => event.stopPropagation()}
+    onClick={() => useDetachedChatStore.getState().attach(activePanel.id)}>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+  </button>;
 }
 const components = { detached: DetachedPanel };
 const noWatermark = () => null;
@@ -251,7 +259,7 @@ export function DetachedChatWindows(props: DetachedChatWindowsProps) {
     <WindowContext.Provider value={props}>
       <div ref={rootRef} aria-hidden={!props.visible} className="dh-dockable-workspace dh-detached-chats absolute inset-0 z-30 pointer-events-none"
         style={{ ...hostBounds, visibility: props.visible ? 'visible' : 'hidden' }}>
-        <DockviewReact className="dockview-theme-dark dh-dockview h-full" components={components} defaultTabComponent={DetachedTab}
+        <DockviewReact className="dockview-theme-dark dh-dockview h-full" components={components} defaultTabComponent={DetachedTab} rightHeaderActionsComponent={DetachedHeaderActions}
           watermarkComponent={noWatermark} disableDnd floatingGroupBounds="boundedWithinViewport"
           onReady={({ api }) => { apiRef.current = api; setReady((n) => n + 1); }} />
       </div>

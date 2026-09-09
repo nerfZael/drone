@@ -2999,31 +2999,55 @@ select:disabled optgroup {
   font-family: var(--display);
 }
 
-/* Dockview moves floating windows via the empty title-bar area, not the tab.
- * Its fullwidth single-tab mode otherwise shrinks that drag target to zero. */
-.dh-dockable-workspace .dv-resize-container:has([data-side-chat-name]) .dv-tabs-and-actions-container .dv-scrollable {
-  flex-grow: 0;
-  max-width: calc(100% - 48px);
+/* A single floating chat uses the entire title bar to move the window. */
+.dh-dockable-workspace .dv-resize-container:has([data-side-chat-name]) .dv-tabs-and-actions-container {
+  position: relative;
 }
 
-.dh-dockable-workspace .dv-resize-container:has([data-side-chat-name]) .dv-tabs-and-actions-container .dv-void-container {
-  flex: 1 0 48px;
-  align-items: center;
-  justify-content: center;
+.dh-dockable-workspace .dv-resize-container:has([data-side-chat-name]) .dv-tabs-and-actions-container .dv-scrollable {
+  flex-grow: 0;
+  max-width: calc(100% - 32px);
+}
+
+.dh-dockable-workspace .dv-resize-container:has([data-side-chat-name]) .dv-void-container {
+  flex: 1;
   cursor: grab;
 }
 
-.dh-dockable-workspace .dv-resize-container:has([data-side-chat-name]) .dv-void-container::before {
-  content: '';
-  width: 12px;
-  height: 8px;
-  color: var(--muted);
-  background: radial-gradient(circle, currentColor 1px, transparent 1px) 0 0 / 4px 4px;
+.dh-dockable-workspace .dv-resize-container:has([data-side-chat-name]) .dv-tabs-and-actions-container.dv-single-tab .dv-scrollable {
   pointer-events: none;
+}
+
+.dh-dockable-workspace .dv-resize-container:has([data-side-chat-name]) .dv-tabs-and-actions-container.dv-single-tab .dv-void-container {
+  position: absolute;
+  inset: 0 32px 0 0;
+  z-index: 1;
 }
 
 .dh-dockable-workspace .dv-resize-container:has([data-side-chat-name]) .dv-void-container:active {
   cursor: grabbing;
+}
+
+.dh-dockable-workspace .dv-resize-container:has([data-side-chat-name]) .dv-right-actions-container {
+  margin-left: auto;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 2;
+}
+
+.dh-chat-window-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 100%;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.dh-chat-window-action:hover {
+  color: var(--fg-secondary);
+  background: var(--hover);
 }
 
 .dh-dockable-workspace--single-panel .dv-tabs-and-actions-container {
@@ -3595,6 +3619,7 @@ select:disabled optgroup {
 }
 
 /* Detached chats share the workspace without intercepting input between windows. */
+.dh-detached-chats,
 .dh-detached-chats .dv-dockview,
 .dh-detached-chats .dv-grid-view,
 .dh-detached-chats .dv-watermark-container {

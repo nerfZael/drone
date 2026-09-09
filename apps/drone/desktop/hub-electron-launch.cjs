@@ -60,6 +60,25 @@ function parseDetachedHubStartOutput(raw) {
   return { payload, uiUrl: `http://127.0.0.1:${uiPort}` };
 }
 
+function resolveHubApiAddress(payload) {
+  let apiHost = String(payload?.state?.apiHost || '').trim();
+  let apiPort = Number(payload?.state?.apiPort);
+  if (!payload?.state) {
+    try {
+      const url = new URL(payload?.apiUrl);
+      if (url.protocol !== 'http:' || url.username || url.password) throw new Error('Invalid API URL');
+      apiHost = url.hostname.replace(/^\[|\]$/g, '');
+      apiPort = Number(url.port || 80);
+    } catch {
+      throw new Error('The running Hub API address is invalid.');
+    }
+  }
+  if (!apiHost || !Number.isInteger(apiPort) || apiPort <= 0 || apiPort > 65535) {
+    throw new Error('The running Hub API address is invalid.');
+  }
+  return { apiHost, apiPort };
+}
+
 function formatDetachedHubStartOutput(payload) {
   const state = payload && typeof payload.state === 'object' ? payload.state : null;
   const pid = Number(payload?.pid ?? state?.pid);
@@ -76,4 +95,5 @@ module.exports = {
   electronNodeChildEnv,
   formatDetachedHubStartOutput,
   parseDetachedHubStartOutput,
+  resolveHubApiAddress,
 };
