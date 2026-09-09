@@ -1010,8 +1010,14 @@ class BlipSession implements BlipSessionHandle {
         turnId: active.turnId,
         kind: active.kind,
       });
+      const contextMessages = active.cancelRequested ? [] : await this.options.promptContext?.({
+        ...this.context(),
+        prompt: message,
+        turnId: active.turnId,
+        kind: active.kind,
+      }) ?? [];
       if (active.cancelRequested) active.cancelled = true;
-      else await this.agent.prompt(message);
+      else await this.agent.prompt([message, ...contextMessages]);
     } catch (error) {
       if (active.cancelRequested || (error instanceof Error && error.name === 'AbortError')) {
         active.cancelled = true;

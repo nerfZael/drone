@@ -155,7 +155,12 @@ export function convertMessages<T extends GoogleApiType>(model: Model<T>, contex
 						});
 					}
 				} else if (block.type === "toolCall") {
-					const thoughtSignature = resolveThoughtSignature(isSameProviderAndModel, block.thoughtSignature);
+					// Deterministic host calls have no model-generated signature. Google documents
+					// this literal marker for inserting such calls; it must not be base64 encoded.
+					// https://ai.google.dev/gemini-api/docs/generate-content/thought-signatures#faqs
+					const thoughtSignature = block.synthetic && (getGeminiMajorVersion(model.id) ?? 0) >= 3
+						? "skip_thought_signature_validator"
+						: resolveThoughtSignature(isSameProviderAndModel, block.thoughtSignature);
 					const part: Part = {
 						functionCall: {
 							name: block.name,

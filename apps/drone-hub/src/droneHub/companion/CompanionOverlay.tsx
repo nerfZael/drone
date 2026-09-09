@@ -11,6 +11,7 @@ import { formatChatVoiceDuration } from '../chat/use-chat-voice-recorder';
 import { useCompanion } from './CompanionContext';
 import { CompanionWorkspacePicker } from './CompanionWorkspacePicker';
 import { CompanionPromptEditor } from './CompanionPromptEditor';
+import { CompanionInstructionsEditor } from './CompanionInstructionsEditor';
 import { CompanionProposalCard } from './CompanionProposalCard';
 import { CompanionProposalHistory } from './CompanionProposalHistory';
 import { useCompanionWorkspace } from './CompanionWorkspaceContext';
@@ -111,8 +112,9 @@ export function CompanionOverlay() {
   const [transcriptExpanded, setTranscriptExpanded] = React.useState(false);
   const [workspacePickerOpen, setWorkspacePickerOpen] = React.useState(false);
   const [promptEditorOpen, setPromptEditorOpen] = React.useState(false);
+  const [instructionsEditorOpen, setInstructionsEditorOpen] = React.useState(false);
   const [historyOpen, setHistoryOpen] = React.useState(false);
-  const panelOpen = promptEditorOpen || workspacePickerOpen;
+  const panelOpen = promptEditorOpen || workspacePickerOpen || instructionsEditorOpen;
   const [, tick] = React.useState(0);
   React.useEffect(() => {
     if (companion?.status !== 'working') return;
@@ -179,6 +181,7 @@ export function CompanionOverlay() {
       <div className={`flex min-h-0 w-full flex-col gap-3 ${panelOpen ? 'min-[860px]:w-[34rem]' : 'min-[860px]:w-[28rem]'}`}>
       {workspacePickerOpen ? <CompanionWorkspacePicker onClose={() => setWorkspacePickerOpen(false)} /> : null}
       {promptEditorOpen ? <CompanionPromptEditor onClose={() => setPromptEditorOpen(false)} /> : null}
+      {instructionsEditorOpen ? <CompanionInstructionsEditor onClose={() => setInstructionsEditorOpen(false)} /> : null}
       <aside
         className="flex max-h-[calc(100vh-2rem)] w-full flex-col overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--panel)] shadow-2xl min-[860px]:w-[28rem] min-[860px]:self-end"
         aria-label="Companion"
@@ -324,6 +327,16 @@ export function CompanionOverlay() {
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="m16 3 5 5-12 12-6 1 1-6Z" /><path d="m14 5 5 5" />
+            </svg>
+          </CompanionHeaderButton>
+          <CompanionHeaderButton
+            label="Edit Companion instructions"
+            expanded={instructionsEditorOpen}
+            controls="companion-instructions-editor"
+            onClick={() => setInstructionsEditorOpen(true)}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M4 3h12l4 4v14H4Z" /><path d="M14 3v6h6M8 13h8M8 17h5" />
             </svg>
           </CompanionHeaderButton>
           <button

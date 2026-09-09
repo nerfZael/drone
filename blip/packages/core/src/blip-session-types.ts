@@ -106,6 +106,8 @@ export interface CreateBlipSessionOptions {
   compactionSettings?: CompactionSettings;
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
   beforePrompt?: (context: BlipPromptLifecycleContext) => Promise<void> | void;
+  /** Host-provided context persisted immediately after the user message, before the first model call. */
+  promptContext?: (context: BlipPromptLifecycleContext) => Promise<AgentMessage[]> | AgentMessage[];
   afterPrompt?: (
     context: BlipPromptLifecycleContext,
   ) => Promise<BlipPromptLifecycleResult | void> | BlipPromptLifecycleResult | void;

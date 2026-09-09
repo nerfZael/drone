@@ -31,6 +31,7 @@ import {
 
 import type { CompanionWorkspaceService } from './companion-workspaces';
 import { CompanionProposalModels } from './companion-proposal-models';
+import { CompanionSkills } from './companion-skills';
 
 const MAX_BROWSER_TEXT_CHARS = 1_000_000;
 
@@ -47,6 +48,7 @@ type RunContext = {
   callBrowser: CompanionBrowserCall;
   snapshots: Map<string, BrowserTextSnapshot>;
   proposalModels: CompanionProposalModels;
+  skills: CompanionSkills;
 };
 
 type BrowserTextSnapshot = {
@@ -200,6 +202,11 @@ export class CompanionRuntime {
           callBrowser: this.instrumentBrowserCall(input.callBrowser, telemetry),
           snapshots: new Map(),
           proposalModels: new CompanionProposalModels(),
+          skills: new CompanionSkills(() => {
+            if (this.closing || this.cancelledRunIds.has(runId) || !this.activeRunIds.has(runId)) {
+              throw Object.assign(new Error('Companion run cancelled'), { code: 'ABORT_ERR' });
+            }
+          }),
         });
       }
       if (coldStart || settingsChanged) {
@@ -359,7 +366,9 @@ export class CompanionRuntime {
           : await this.customTools(context, drones)),
         ...workspaceTools,
       ],
-      toolProviders: [filteredMcpProvider],
+      toolProviders: [filteredMcpProvider, context.skills],
+      promptContext: (lifecycle: Parameters<CompanionSkills['promptContext']>[0]) => context.skills.promptContext(lifecycle),
+      transformContext: (messages: Parameters<CompanionSkills['transformContext']>[0]) => context.skills.transformContext(messages),
       getApiKey: resolveBlipProviderApiKey,
       dispose: () => mcpClient.close(),
     };

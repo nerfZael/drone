@@ -18,6 +18,8 @@ The CLI system prompt currently includes:
 
 Compaction summaries are not injected into the system prompt. They are added to model-visible message history as a synthetic user message with the prefix `Summary of earlier conversation:`.
 
+Embedded hosts can provide `promptContext` to supply additional messages immediately after an incoming user message and before the first model call. Blip persists those messages through the same agent event path as the user message. For example, Drone Companion supplies an already-executed skill read as an assistant tool call and matching tool result. Hosts own the decision to supply this context once per conversation; `transformContext` can restore required context after compaction without changing the stored transcript.
+
 ## Repository Instructions
 
 The Blip CLI currently reads only the workspace-root `AGENTS.md`. Other Blip hosts own their prompt
@@ -44,6 +46,6 @@ The workflow prompt asks the model to batch independent read/search/list/bash ca
 
 - Nested `AGENTS.md` discovery is not implemented.
 - Global user instructions are not loaded by Blip.
-- Skill loading is represented in session metadata but not implemented as prompt assembly.
+- The core and CLI do not discover skills automatically. Embedded hosts can implement skills using tool providers, prompt sections, and prompt context; Drone Companion supplies its built-in instructions skill this way.
 - Tool prompts are not generated from a formal prompt registry.
 - There is no prompt-debug command that prints the final assembled prompt.

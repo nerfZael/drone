@@ -25,6 +25,30 @@ function userText(message: AgentMessage | undefined): string {
 }
 
 describe('Embedded Blip session', () => {
+  test('cancelling while host prompt context loads does not submit or persist a partial prompt', async () => {
+    const workspace = await tempWorkspace();
+    const faux = registerFauxProvider({ api: 'faux-prompt-context-cancel', provider: 'faux-prompt-context-cancel', tokensPerSecond: 0 });
+    const repository = new SessionStore(workspace);
+    let started!: () => void;
+    let release!: () => void;
+    const loading = new Promise<void>((resolve) => { started = resolve; });
+    const loaded = new Promise<void>((resolve) => { release = resolve; });
+    const session = await createBlipSession({
+      workspaceRoot: workspace, model: faux.getModel(), permissionMode: 'workspace-write',
+      toolProfile: 'no-shell-workspace-write', sessionRepository: repository,
+      promptContext: async () => { started(); await loaded; return []; },
+    });
+    try {
+      const running = session.prompt('Cancelled prompt');
+      await loading;
+      session.abort();
+      release();
+      await running;
+      expect(faux.state.callCount).toBe(0);
+      expect(await repository.readMessages(session.state)).toEqual([]);
+    } finally { release(); session.close(); faux.unregister(); }
+  });
+
   test('stays alive across prompts, preserves images, and can delete its session', async () => {
     const workspace = await tempWorkspace();
     const faux = registerFauxProvider({

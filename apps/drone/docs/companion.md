@@ -10,6 +10,18 @@
 
 Companion is a voice-first assistant opened with a keyboard shortcut on desktop or a sidebar microphone on mobile. It transcribes a short request, runs a small Blip agent with Drone Hub tools, and shows the answer in a desktop corner overlay or at the top of the mobile app.
 
+### Persistent instructions
+
+The desktop Companion header includes **Edit Companion instructions**, beside the system-prompt editor. Instructions start empty and use the same editor with Save and Discard. They are stored independently as the versioned Hub setting `companion.instructions`, with a 50,000-character limit. Clearing the text is a valid save. Closing a conversation does not erase instructions.
+
+Companion exposes the built-in `companion-instructions` skill through `read_skill` and `apply_instructions_patch`. These tools are available independently of the optional Hub/browser tool selection. The skill's name and description are managed by the app; its text is editable by the user and Companion. The system prompt and user directions determine when Companion should update it. Instructions are behavioral guidance subject to the system prompt and runtime rules.
+
+Before the first model request, the runtime reads the skill and persists a matching assistant tool call and tool result immediately after the first user message. This supplies the content and revision without a model round trip, including when the document is empty. Follow-ups and settings-driven session-handle rebuilds do not repeat the initial read. After compaction, the latest read or successfully patched snapshot is restored in model context when absent, without rewriting historical results. Manual edits become available through a fresh `read_skill` call or at the start of the next conversation.
+
+Agent patches use one Update File operation for the virtual path `companion-instructions.md` and save immediately. Both agent patches and desktop saves require the revision they read. A stale write fails; the agent must reread, and the editor preserves the unsaved draft while offering to load the latest version.
+
+The instructions API is `GET`/`PUT /api/companion/instructions`; PUT accepts `{ content, revision }` and returns HTTP 409 for stale revisions. Mobile Companion uses the same Hub runtime, so it reads and updates the selected Hub's instructions without a mobile editor. Instructions are scoped to that Hub and are not synchronized between separate Hubs.
+
 The agent should perform UI work through real tools, not describe or return actions after it finishes. Text changes should use Blip's patch-envelope format through target-specific composer and editor tools. A dedicated Settings tab should configure its system prompt, enabled tools, provider, model, and reasoning. Reuse the existing Blip host and connect its browser-facing tools to the initiating Drone Hub client over a small authenticated WebSocket RPC channel.
 
 ## Background and Scope

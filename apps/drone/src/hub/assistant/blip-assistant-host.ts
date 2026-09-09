@@ -25,6 +25,8 @@ export type BlipAssistantThreadConfiguration = {
   tools: AgentTool<any>[];
   onResponse?: CreateBlipSessionOptions['onResponse'];
   beforePrompt?: CreateBlipSessionOptions['beforePrompt'];
+  promptContext?: CreateBlipSessionOptions['promptContext'];
+  transformContext?: CreateBlipSessionOptions['transformContext'];
   afterPrompt?: CreateBlipSessionOptions['afterPrompt'];
   toolProviders?: BlipToolProvider[];
   permissionPreflight?: BlipToolPreflight;
@@ -540,6 +542,8 @@ export class BlipAssistantHost {
         reasoning: config.thinkingLevel,
         onResponse: config.onResponse,
         beforePrompt: config.beforePrompt,
+        promptContext: config.promptContext,
+        transformContext: config.transformContext,
         afterPrompt: config.afterPrompt,
         tools: config.tools,
         toolProviders: config.toolProviders,

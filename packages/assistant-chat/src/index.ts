@@ -11,6 +11,7 @@ export * from './chat-queue-actions.js';
 export * from './chat-question-request.js';
 export * from './companion-client.js';
 export * from './companion.js';
+export * from './companion-instructions.js';
 export * from './companion-proposal.js';
 export * from './continuous-voice.js';
 export * from './continuous-voice-session.js';
