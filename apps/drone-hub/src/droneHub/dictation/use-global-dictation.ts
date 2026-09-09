@@ -43,6 +43,7 @@ type GlobalDictationControllerOptions = {
   resolveTarget(destination: GlobalDictationDroneDestination): GlobalDictationTargetResult;
   send(target: GlobalDictationTarget, text: string): Promise<GlobalDictationSendResult>;
   sendToCompanion(text: string): Promise<GlobalDictationSendResult>;
+  prepareCompanionSend?(): (text: string) => Promise<GlobalDictationSendResult>;
 };
 
 export function useGlobalDictation(options: GlobalDictationControllerOptions) {
@@ -67,6 +68,8 @@ export function useGlobalDictation(options: GlobalDictationControllerOptions) {
   const resolveTargetRef = React.useRef(options.resolveTarget);
   const sendRef = React.useRef(options.send);
   const sendToCompanionRef = React.useRef(options.sendToCompanion);
+  const prepareCompanionSendRef = React.useRef(options.prepareCompanionSend);
+  prepareCompanionSendRef.current = options.prepareCompanionSend;
   resolveTargetRef.current = options.resolveTarget;
   sendRef.current = options.send;
   sendToCompanionRef.current = options.sendToCompanion;
@@ -313,6 +316,10 @@ export function useGlobalDictation(options: GlobalDictationControllerOptions) {
       setOpen(true);
       setError('');
       try {
+        // Capture before awaiting audio/transcription, with errors handled like send errors.
+        const sendToCompanion = destination === 'companion'
+          ? prepareCompanionSendRef.current?.() ?? sendToCompanionRef.current
+          : null;
         const status = getRecordingStatus();
         if (status === 'starting' || status === 'recording' || status === 'paused') {
           await stopAndTranscribe();
@@ -329,7 +336,7 @@ export function useGlobalDictation(options: GlobalDictationControllerOptions) {
 
         setNetworkSending(true);
         const result = destination === 'companion'
-          ? await sendToCompanionRef.current(prompt)
+          ? await sendToCompanion!(prompt)
           : target
             ? await sendRef.current(target, prompt)
             : { ok: false as const, error: 'The dictation destination is invalid.' };

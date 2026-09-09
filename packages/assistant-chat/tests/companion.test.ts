@@ -356,13 +356,14 @@ describe('Companion contracts', () => {
     connection.message({ type: 'status', messageId: 'first', status: 'completed' });
     expect(controller.getSnapshot()).toEqual(second);
 
-    // Browser tools for the earlier request still need replies so the server can drain its queue.
+    // A late tool for a completed request gets an error instead of the new message context.
     connection.message({
       type: 'tool_call', messageId: 'first', generation: 1,
       callId: 'browser', tool: 'get_app_context', args: {},
     });
     await Promise.resolve();
     expect(connection.toolResults).toHaveLength(1);
+    expect(connection.toolResults[0]).toMatchObject({ ok: false, error: 'COMPANION_MESSAGE_CONTEXT_UNAVAILABLE' });
     connection.message({
       type: 'activity', messageId: 'second',
       event: { type: 'tool_call_started', callId: 'second-tool', tool: 'list_drones', args: {} },
@@ -429,4 +430,33 @@ describe('Companion contracts', () => {
     expect(connection.cancelled).toEqual(['run-3']);
     expect(connection.closes).toBe(1);
   });
+});
+
+test('queued messages use their own tool executor and reject expired or ambiguous contexts', async () => {
+  const connection = clientTransport();
+  const controller = new CompanionClientController({ createId: () => 'session' });
+  for (const messageId of ['a', 'b']) {
+    await controller.submitPrompt({
+      messageId, prompt: 'same repo', createTransport: () => connection.transport,
+      executeTool: () => ({ repo: messageId }),
+    });
+  }
+  const call = async (callId: string, messageId?: string) => {
+    connection.message({
+      type: 'tool_call', messageId, generation: 1, callId, tool: 'get_app_context', args: {},
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    return connection.toolResults.at(-1);
+  };
+  expect(await call('first', 'a')).toMatchObject({ ok: true, result: { repo: 'a' } });
+  expect(await call('second', 'b')).toMatchObject({ ok: true, result: { repo: 'b' } });
+  expect(await call('ambiguous')).toMatchObject({ ok: false, error: 'COMPANION_MESSAGE_CONTEXT_UNAVAILABLE' });
+  connection.message({ type: 'status', messageId: 'a', status: 'completed' });
+  expect(await call('expired', 'a')).toMatchObject({ ok: false, error: 'COMPANION_MESSAGE_CONTEXT_UNAVAILABLE' });
+  expect(await call('remaining', 'b')).toMatchObject({ ok: true, result: { repo: 'b' } });
+  await controller.close();
+  const count = connection.toolResults.length;
+  await call('closed', 'b');
+  expect(connection.toolResults).toHaveLength(count);
 });

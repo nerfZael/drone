@@ -70,7 +70,7 @@ type ActiveSession = {
   runId: string;
   generation: number;
   transport: CompanionClientTransport;
-  executeTool: CompanionBrowserToolExecutor;
+  messageExecutors: Map<string, CompanionBrowserToolExecutor>;
   ready: Promise<CompanionClientConnectionTelemetry | undefined>;
   sentMessages: number;
   latestMessageId: string | null;
@@ -145,8 +145,8 @@ export class CompanionClientController {
     if (!prompt) return;
 
     const session = this.activeSession ?? this.createSession(input);
-    session.executeTool = input.executeTool;
     const messageId = input.messageId || this.options.createId();
+    session.messageExecutors.set(messageId, input.executeTool);
     session.latestMessageId = messageId;
     this.update({
       status: 'working',
@@ -190,6 +190,7 @@ export class CompanionClientController {
     const session = this.activeSession;
     this.activeSession = null;
     if (session) {
+      session.messageExecutors.clear();
       try {
         await session.transport.cancel(session.runId);
       } catch {
@@ -205,6 +206,7 @@ export class CompanionClientController {
     const session = this.activeSession;
     this.activeSession = null;
     if (session) {
+      session.messageExecutors.clear();
       try {
         await session.transport.cancel(session.runId);
       } catch {
@@ -217,14 +219,13 @@ export class CompanionClientController {
 
   private createSession(input: {
     createTransport(): CompanionClientTransport;
-    executeTool: CompanionBrowserToolExecutor;
   }): ActiveSession {
     const transport = input.createTransport();
     const session: ActiveSession = {
       runId: this.options.createId(),
       generation: ++this.generation,
       transport,
-      executeTool: input.executeTool,
+      messageExecutors: new Map(),
       ready: Promise.resolve(undefined),
       sentMessages: 0,
       latestMessageId: null,
@@ -242,6 +243,10 @@ export class CompanionClientController {
 
   private handleMessage(session: ActiveSession, message: CompanionServerMessage): void {
     if (!this.isActive(session) || (message.runId && message.runId !== session.runId)) return;
+    if (message.type === 'status' && message.status === 'completed') {
+      const messageId = message.messageId ?? session.latestMessageId;
+      if (messageId) session.messageExecutors.delete(messageId);
+    }
     // A queued follow-up owns the visible footer. Earlier requests must still finish their
     // browser tool calls, and session-wide failures must still terminate the session.
     if (
@@ -264,9 +269,14 @@ export class CompanionClientController {
     }
   }
 
-  private async executeTool(session: ActiveSession, request: CompanionBrowserToolRequest) {
+  private async executeTool(session: ActiveSession, request: CompanionBrowserToolRequest & { messageId?: string }) {
     try {
-      const result = await session.executeTool(request.tool, request.args ?? {});
+      // Older transports may omit correlation only when one message is outstanding.
+      const messageId = request.messageId ?? (session.messageExecutors.size === 1
+        ? session.messageExecutors.keys().next().value : undefined);
+      const execute = messageId ? session.messageExecutors.get(messageId) : undefined;
+      if (!execute) throw new Error('COMPANION_MESSAGE_CONTEXT_UNAVAILABLE');
+      const result = await execute(request.tool, request.args ?? {});
       await this.sendToolResult(session, request, { ok: true, result });
     } catch (error) {
       await this.sendToolResult(session, request, {
@@ -297,6 +307,7 @@ export class CompanionClientController {
   private handleDisconnect(session: ActiveSession, message: string): void {
     if (!this.isActive(session)) return;
     this.activeSession = null;
+    session.messageExecutors.clear();
     void closeTransport(session.transport);
     if (this.state.status === 'completed' || this.state.status === 'idle') return;
     this.update({ status: 'error', error: message, endedAt: this.now() });
@@ -310,6 +321,7 @@ export class CompanionClientController {
   ): void {
     if (!this.isActive(session)) return;
     this.activeSession = null;
+    session.messageExecutors.clear();
     this.update({ status, error, endedAt: this.now() });
     if (cancel) {
       void Promise.resolve(session.transport.cancel(session.runId))

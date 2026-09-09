@@ -27,6 +27,12 @@ type ActiveComposerContextValue = {
   ensureTargetId(): string | null;
   appendTranscript(targetId: string, text: string): boolean;
   readActiveComposer(): CompanionTextSnapshot;
+  readComposer(targetId: string): CompanionTextSnapshot;
+  applyCapturedComposer(
+    targetId: string,
+    baseRevision: string,
+    content: string,
+  ): { ok: true; revision: string };
   applyComposer(
     targetId: string,
     baseRevision: string,
@@ -123,6 +129,29 @@ export class ActiveComposerRegistry {
     if (active.id !== targetId) throw new Error('STALE_COMPOSER_TARGET');
     if (!active.applyContent) throw new Error('COMPOSER_NOT_AVAILABLE');
     return active.applyContent(baseRevision, content);
+  }
+
+  readComposer(targetId: string): CompanionTextSnapshot {
+    return this.resolveCaptured(targetId).readSnapshot!();
+  }
+
+  applyCapturedComposer(
+    targetId: string,
+    baseRevision: string,
+    content: string,
+  ): { ok: true; revision: string } {
+    const composer = this.resolveCaptured(targetId);
+    if (!composer.applyContent) throw new Error('COMPOSER_NOT_AVAILABLE');
+    return composer.applyContent(baseRevision, content);
+  }
+
+  private resolveCaptured(targetId: string): ActiveComposer {
+    const composer = this.composers.get(targetId);
+    if (!composer?.readSnapshot || !(composer.isReadable?.() ?? composer.isEligible()) ||
+      composer.readSnapshot().targetId !== targetId) {
+      throw new Error('STALE_COMPOSER_TARGET');
+    }
+    return composer;
   }
 
   toggleVoiceRecording(): boolean {
@@ -224,6 +253,11 @@ export function ActiveComposerProvider({ children }: { children: React.ReactNode
     [registry],
   );
   const readActiveComposer = React.useCallback(() => registry.readActiveComposer(), [registry]);
+  const readComposer = React.useCallback((id: string) => registry.readComposer(id), [registry]);
+  const applyCapturedComposer = React.useCallback(
+    (id: string, revision: string, content: string) => registry.applyCapturedComposer(id, revision, content),
+    [registry],
+  );
   const applyComposer = React.useCallback(
     (targetId: string, baseRevision: string, content: string) =>
       registry.applyComposer(targetId, baseRevision, content),
@@ -248,6 +282,8 @@ export function ActiveComposerProvider({ children }: { children: React.ReactNode
       ensureTargetId,
       appendTranscript,
       readActiveComposer,
+      readComposer,
+      applyCapturedComposer,
       applyComposer,
       sendMessage,
       toggleVoiceRecording,
@@ -264,6 +300,8 @@ export function ActiveComposerProvider({ children }: { children: React.ReactNode
       ensureTargetId,
       focusComposer,
       readActiveComposer,
+      readComposer,
+      applyCapturedComposer,
       registerComposer,
       sendMessage,
       toggleVoiceRecording,

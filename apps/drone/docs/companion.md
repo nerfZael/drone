@@ -28,6 +28,10 @@ The agent should perform UI work through real tools, not describe or return acti
 
 The existing built-in agent belongs to a drone chat. Companion belongs to the whole app and should understand the current drone, chat, composer, and editor file without the user repeating that context.
 
+On desktop, each Companion recording captures the repository, drone, chat, selection, pane, and file context when recording starts, before microphone startup. Pause/resume, navigation, transcription, and queued follow-ups do not replace that recording's context. Each new recording captures a fresh context. Text submissions capture at Send; the Dictation scratchpad's Companion destination captures as soon as the destination button/shortcut is pressed, before awaiting outstanding transcriptions.
+
+`get_app_context` returns the message's captured selection. Composer and editor tools remain bound to the captured target IDs, read current contents/revisions of those targets, and fail if the original target is no longer available. New proposals inherit their default repository from the originating message rather than the current UI selection; an existing proposal keeps its original default when revised. Tool executors are correlated by message ID so queued requests cannot overwrite one another's context. Captures are discarded on completion, cancellation, or close. Navigation tools still act on the UI, and workspace access grants remain current.
+
 ```text
 shortcut -> record -> transcribe -> one Blip run
          -> server tools and browser UI tools -> tool results back to Blip

@@ -1,5 +1,6 @@
 import React from 'react';
 import type {
+  CompanionBrowserWorkspace,
   CompanionProposal,
   CompanionProposalExecution,
   CompanionProposalExecutionContext,
@@ -36,7 +37,12 @@ export type CompanionWorkspaceTarget = {
   ): Promise<Record<string, unknown>> | Record<string, unknown>;
 };
 
+export type CapturedCompanionWorkspace = Omit<CompanionBrowserWorkspace, 'getAppContext'> & {
+  getAppContext(): Record<string, unknown>;
+};
+
 type CompanionWorkspaceContextValue = {
+  capture(): CapturedCompanionWorkspace;
   registerWorkspaceTarget(target: CompanionWorkspaceTarget): () => void;
   registerEditor(target: CompanionTextTarget): () => void;
   focusEditor(id: string): void;
@@ -121,6 +127,50 @@ export function CompanionWorkspaceProvider({ children }: { children: React.React
 
   const value = React.useMemo<CompanionWorkspaceContextValue>(
     () => ({
+      capture: () => {
+        // Missing workspace context must not prevent recording or unrelated tools.
+        // Preserve its absence for this message instead of consulting a later selection.
+        const workspaceTarget = workspaceTargetRef.current;
+        const appContext = workspaceTarget ? structuredClone(workspaceTarget.getAppContext()) : null;
+        let composerId: string | null = null;
+        let editorId: string | null = null;
+        try {
+          composerId = activeComposer.readActiveComposer().targetId;
+        } catch {
+          // No composer at capture; do not fall back to one opened later.
+        }
+        try {
+          editorId = resolveEditor().id;
+        } catch {
+          // No editor at capture.
+        }
+        const capturedEditor = () => {
+          const target = editorId ? editorTargetsRef.current.get(editorId) : null;
+          if (!target?.isEligible()) throw new Error('STALE_EDITOR_TARGET');
+          return target;
+        };
+        return {
+          getAppContext: () => {
+            if (!appContext) throw new Error('NO_ACTIVE_WORKSPACE');
+            return structuredClone(appContext);
+          },
+          readActiveComposer: () => {
+            if (!composerId) throw new Error('NO_ACTIVE_COMPOSER');
+            return activeComposer.readComposer(composerId);
+          },
+          applyComposer: (id, revision, content) => {
+            if (!composerId || id !== composerId) throw new Error('STALE_COMPOSER_TARGET');
+            return activeComposer.applyCapturedComposer(id, revision, content);
+          },
+          readOpenFile: () => capturedEditor().read(),
+          applyEditor: (id, revision, content) => {
+            if (id !== editorId) throw new Error('STALE_EDITOR_TARGET');
+            return capturedEditor().apply(revision, content);
+          },
+          openDroneChat: async (args) => await resolveWorkspaceTarget().openDroneChat(args),
+          highlightDrones: async (args) => await resolveWorkspaceTarget().highlightDrones(args),
+        };
+      },
       registerWorkspaceTarget,
       registerEditor,
       focusEditor,
@@ -142,6 +192,8 @@ export function CompanionWorkspaceProvider({ children }: { children: React.React
       applyEditor,
       activeComposer.applyComposer,
       activeComposer.readActiveComposer,
+      activeComposer.readComposer,
+      activeComposer.applyCapturedComposer,
       focusEditor,
       registerEditor,
       registerWorkspaceTarget,

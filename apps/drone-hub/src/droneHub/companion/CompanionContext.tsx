@@ -26,7 +26,7 @@ import {
   shouldCancelCompanionRecordingWithEscape,
 } from './companion-shortcut';
 import { createCompanionWebSocketTransport } from './companion-websocket-transport';
-import { useCompanionWorkspace } from './CompanionWorkspaceContext';
+import { useCompanionWorkspace, type CapturedCompanionWorkspace } from './CompanionWorkspaceContext';
 
 export type CompanionProposalHistoryEntry = {
   id: string;
@@ -60,6 +60,7 @@ type CompanionContextValue = {
   autoApprove: boolean;
   proposalHistory: CompanionProposalHistoryEntry[];
   submitText(prompt: string): Promise<CompanionTextSubmitResult>;
+  prepareTextSubmission(): (prompt: string) => Promise<CompanionTextSubmitResult>;
   toggle(): Promise<void>;
   stop(): void;
   toggleRecordingPause(): void;
@@ -110,6 +111,9 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const proposalRevisionRef = React.useRef(0);
   const proposalExecutionGenerationRef = React.useRef(0);
   const voiceSubmissionGenerationRef = React.useRef(0);
+  const recordingWorkspaceRef = React.useRef<{ workspace: CapturedCompanionWorkspace | null } | null>(null);
+  const textSubmissionGenerationRef = React.useRef(0);
+  const captureWorkspace = React.useCallback(() => workspace?.capture() ?? null, [workspace]);
 
   const onVoiceError = React.useCallback(
     (message: string) => controller.reportVoiceError(message),
@@ -119,11 +123,12 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const voiceStatusRef = React.useRef(voice.status);
   const discardVoiceRecordingRef = React.useRef(voice.discardRecording);
   voiceStatusRef.current = voice.status;
-  discardVoiceRecordingRef.current = voice.discardRecording;
 
   const close = React.useCallback(async () => {
     if (proposalExecutingRef.current) return;
     voiceSubmissionGenerationRef.current += 1;
+    textSubmissionGenerationRef.current += 1;
+    recordingWorkspaceRef.current = null;
     await controller.close();
     await voice.discardRecording();
     proposalRevisionRef.current += 1;
@@ -144,6 +149,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
 
   const stop = React.useCallback(() => {
     if (controller.getSnapshot().status !== 'working') return;
+    textSubmissionGenerationRef.current += 1;
     void controller.cancel();
   }, [controller]);
 
@@ -153,9 +159,11 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
 
   const discardRecording = React.useCallback(async () => {
     voiceSubmissionGenerationRef.current += 1;
+    recordingWorkspaceRef.current = null;
     await voice.discardRecording();
     controller.resetIfNoSession();
   }, [controller, voice.discardRecording]);
+  discardVoiceRecordingRef.current = discardRecording;
 
   const readProposal = React.useCallback(() => ({
     targetId: COMPANION_PROPOSAL_TARGET_ID,
@@ -170,6 +178,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     targetId: string,
     baseRevision: string,
     content: string,
+    capturedWorkspace: CapturedCompanionWorkspace | null,
   ) => {
     if (proposalExecutingRef.current) throw new Error('PROPOSAL_EXECUTION_IN_PROGRESS');
     if (proposalExecutionRef.current) throw new Error('PROPOSAL_ALREADY_EXECUTED');
@@ -179,7 +188,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     }
     const next = parseCompanionProposalText(content);
     if (!proposalRef.current) {
-      const appContext = workspace?.getAppContext();
+      const appContext = capturedWorkspace?.getAppContext();
       const defaultRepoPath = typeof appContext?.activeRepoPath === 'string'
         ? appContext.activeRepoPath
         : '';
@@ -197,7 +206,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       revision: String(proposalRevisionRef.current),
       operationCount: next.operations.length,
     };
-  }, [workspace]);
+  }, []);
 
   const discardProposal = React.useCallback(() => {
     if (proposalExecutingRef.current) return;
@@ -320,7 +329,11 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   );
 
   const executeBrowserTool = React.useCallback(
-    async (tool: CompanionBrowserToolName, args: Record<string, unknown>) => {
+    async (
+      capturedWorkspace: CapturedCompanionWorkspace | null,
+      tool: CompanionBrowserToolName,
+      args: Record<string, unknown>,
+    ) => {
       if (tool === 'read_recorder' || tool === 'apply_recorder_patch') {
         const target = recorder?.target.current;
         if (!target) throw new Error('NO_OPEN_RECORDER');
@@ -334,9 +347,10 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
           String(args.targetId ?? ''),
           String(args.baseRevision ?? ''),
           String(args.content ?? ''),
+          capturedWorkspace,
         );
       }
-      if (!workspace) {
+      if (!capturedWorkspace) {
         if (tool === 'read_active_composer' || tool === 'apply_composer_patch') {
           throw new Error('NO_ACTIVE_COMPOSER');
         }
@@ -345,20 +359,25 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         }
         throw new Error('NO_ACTIVE_WORKSPACE');
       }
-      return await executeCompanionBrowserTool(workspace, tool, args);
+      return await executeCompanionBrowserTool(capturedWorkspace, tool, args);
     },
-    [applyProposal, readProposal, workspace, recorder],
+    [applyProposal, readProposal, recorder],
   );
 
   const run = React.useCallback(
-    async (prompt: string, telemetry?: CompanionClientTelemetry, requestedMessageId?: string) => {
+    async (
+      prompt: string,
+      capturedWorkspace: CapturedCompanionWorkspace | null,
+      telemetry?: CompanionClientTelemetry,
+      requestedMessageId?: string,
+    ) => {
       await controller.submitPrompt({
         prompt,
         telemetry,
         messageId: requestedMessageId,
         createTransport: () =>
           createCompanionWebSocketTransport(buildDirectApiWebSocketUrl('/api/companion/stream')),
-        executeTool: executeBrowserTool,
+        executeTool: (tool, args) => executeBrowserTool(capturedWorkspace, tool, args),
       });
     },
     [controller, executeBrowserTool],
@@ -367,6 +386,10 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const toggle = React.useCallback(async () => {
     if (voice.status === 'starting' || voice.status === 'transcribing') return;
     if (voice.status === 'recording' || voice.status === 'paused') {
+      const recording = recordingWorkspaceRef.current;
+      if (!recording) return;
+      const capturedWorkspace = recording.workspace;
+      recordingWorkspaceRef.current = null;
       const token = controller.getToken();
       const voiceSubmissionGeneration = voiceSubmissionGenerationRef.current;
       const messageId = newId();
@@ -379,20 +402,26 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         voiceSubmissionGenerationRef.current !== voiceSubmissionGeneration
       ) return;
       if (controller.getSnapshot().status === 'error') return;
-      await run(text, { version: 1, transcriptionMs, audioDurationMs }, messageId);
+      await run(text, capturedWorkspace, { version: 1, transcriptionMs, audioDurationMs }, messageId);
       return;
     }
+    if (recordingWorkspaceRef.current) return;
+    const capturedWorkspace = captureWorkspace();
     const status = controller.getSnapshot().status;
     if (status === 'cancelled' || status === 'error') await close();
+    const recording = { workspace: capturedWorkspace };
+    recordingWorkspaceRef.current = recording;
     const started = await voice.startRecording();
+    if (recordingWorkspaceRef.current !== recording) return;
+    if (!started) recordingWorkspaceRef.current = null;
     if (!started && controller.getSnapshot().status !== 'error') controller.resetIfNoSession();
-  }, [close, controller, run, voice]);
+  }, [captureWorkspace, close, controller, run, voice]);
 
   const submitText = React.useCallback(
-    async (prompt: string): Promise<CompanionTextSubmitResult> => {
+    async (prompt: string, capturedWorkspace = captureWorkspace()): Promise<CompanionTextSubmitResult> => {
       const text = String(prompt ?? '').trim();
       if (!text) return { ok: false, error: 'There is no dictated text to send.' };
-      if (voice.status !== 'idle') {
+      if (voiceStatusRef.current !== 'idle') {
         return { ok: false, error: 'Companion is already handling a voice recording.' };
       }
       const status = controller.getSnapshot().status;
@@ -402,18 +431,31 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       if (status === 'cancelled' || status === 'error') {
         await close();
       }
-      await run(text);
+      await run(text, capturedWorkspace);
       const next = controller.getSnapshot();
       if (next.status === 'error') {
         return { ok: false, error: next.error || 'Companion could not start.' };
       }
       return { ok: true };
     },
-    [close, controller, run, voice.status],
+    [captureWorkspace, close, controller, run],
   );
+
+  const prepareTextSubmission = React.useCallback(() => {
+    const capturedWorkspace = captureWorkspace();
+    const generation = textSubmissionGenerationRef.current;
+    return (prompt: string): Promise<CompanionTextSubmitResult> => {
+      if (textSubmissionGenerationRef.current !== generation) {
+        return Promise.resolve({ ok: false, error: 'Companion was closed or stopped. Send again to start a new request.' });
+      }
+      return submitText(prompt, capturedWorkspace);
+    };
+  }, [captureWorkspace, submitText]);
 
   React.useEffect(
     () => () => {
+      textSubmissionGenerationRef.current += 1;
+      recordingWorkspaceRef.current = null;
       void controller.close();
       void voice.discardRecording();
     },
@@ -458,6 +500,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       autoApprove,
       proposalHistory,
       submitText,
+      prepareTextSubmission,
       toggle,
       stop,
       toggleRecordingPause,
@@ -484,6 +527,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       state,
       stop,
       submitText,
+      prepareTextSubmission,
       toggle,
       toggleRecordingPause,
       toggleAutoApprove,

@@ -28,7 +28,11 @@ export function GlobalDictationOverlay(props: GlobalDictationOverlayProps) {
     },
     [companion],
   );
-  const dictation = useGlobalDictation({ ...props, sendToCompanion });
+  const dictation = useGlobalDictation({
+    ...props,
+    sendToCompanion,
+    prepareCompanionSend: companion?.prepareTextSubmission,
+  });
   const recorder = useRecorderCompanion();
   const editorRef = React.useRef<ChatComposerEditorHandle | null>(null);
   const overlayRef = React.useRef<HTMLElement | null>(null);
