@@ -206,6 +206,11 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
         <SubscriptionEventMessage
           prompt={item.prompt}
           at={item.at}
+          followUps={followUps}
+          autoExpand={autoExpandPrompt}
+          showRoleIcons={showRoleIcons}
+          onOpenFileReference={onOpenFileReference}
+          onOpenLink={onOpenLink}
           footer={
             <>
               {queuedFooter}

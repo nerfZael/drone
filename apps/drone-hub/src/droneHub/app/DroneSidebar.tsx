@@ -2171,9 +2171,32 @@ export function DroneSidebar({
   );
   const openGroupDraftBeforeDrone = React.useCallback(
     (drone: DroneSummary): void => {
+      if (isRepoGroupingMode && sidebarCapabilities.actions) {
+        const tree = getRenderedSidebarNodeTree();
+        let anchor = tree?.nodesById[sidebarDroneNodeId(drone.id)];
+        let parent = anchor ? tree?.nodesById[anchor.parentId] : null;
+        while (parent?.kind === 'drone') {
+          anchor = parent;
+          parent = tree?.nodesById[parent.parentId];
+        }
+        if (!anchor || parent?.kind !== 'folder') return;
+        openFolderCreate(parent.groupPath || null, {
+          anchorPath: parent.groupPath || parent.path,
+          beforeNodeId: anchor.id,
+          repoGroupPath: parent.repoGroupPath,
+          initialValue: allocateUntitledDisplayName(
+            (tree?.childIdsByParent[parent.id] ?? [])
+              .map((id) => tree?.nodesById[id])
+              .flatMap((node) => node?.kind === 'folder' ? [node.label] : []),
+          ),
+          dismissOnBlur: true,
+        });
+        setSidebarCollapsed(false);
+        return;
+      }
       openGroupDraftAtNode(sidebarDroneNodeId(drone.id));
     },
-    [openGroupDraftAtNode],
+    [getRenderedSidebarNodeTree, isRepoGroupingMode, openFolderCreate, openGroupDraftAtNode, setSidebarCollapsed, sidebarCapabilities.actions],
   );
   React.useEffect(() => {
     const onRequest = (event: Event) => {

@@ -1,4 +1,4 @@
-import { isEventNotificationPrompt, type ChatQuestionRequest } from '@drone/assistant-chat';
+import type { ChatQuestionRequest } from '@drone/assistant-chat';
 import type { PendingPrompt, TranscriptItem } from '../types';
 import { parseIsoMs } from './selected-drone-workspace-utils';
 
@@ -105,7 +105,6 @@ function isAsapFollowUpCandidate(candidate: ChatTimelineItem): boolean {
 
 function isSameTurnAsapFollowUp(candidate: ChatTimelineItem, primary: ChatTimelineItem): boolean {
   if (!isAsapFollowUpCandidate(candidate)) return false;
-  if (isEventNotificationPrompt(primary.item.prompt)) return false;
   if (isActivePending(primary)) return true;
   if (primary.kind !== 'turn' || primary.item.userOnly === true) return false;
 

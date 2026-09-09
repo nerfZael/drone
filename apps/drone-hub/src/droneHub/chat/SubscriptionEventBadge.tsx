@@ -47,7 +47,7 @@ function NotificationIcon() {
   );
 }
 
-function EventNotificationBody({ notification }: { notification: EventNotificationDisplay }) {
+export function EventNotificationBody({ notification }: { notification: EventNotificationDisplay }) {
   const [expanded, setExpanded] = React.useState(false);
   const { title, subtitle } = eventNotificationCollapsedSummary(notification);
   const first = notification.events.length === 1 ? notification.events[0]! : null;
@@ -194,16 +194,21 @@ export function SubscriptionEventMessage({
   at,
   footer,
   attachmentContent,
+  ...messageProps
 }: {
   prompt: unknown;
   at?: string;
   footer?: React.ReactNode;
   attachmentContent?: React.ReactNode;
-}) {
+} & Pick<
+  React.ComponentProps<typeof UserChatMessage>,
+  'followUps' | 'autoExpand' | 'showRoleIcons' | 'onOpenFileReference' | 'onOpenLink'
+>) {
   const notification = React.useMemo(() => parseEventNotificationPrompt(prompt), [prompt]);
   if (!notification) return null;
   return (
     <UserChatMessage
+      {...messageProps}
       at={at}
       copyText={eventNotificationCopyText(notification)}
       text={notification.userMessage}

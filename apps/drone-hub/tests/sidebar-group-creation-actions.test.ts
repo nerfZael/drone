@@ -13,7 +13,7 @@ describe('sidebar group creation actions', () => {
     expect(source).toContain('props.folderEditor.parentPath === null');
   });
 
-  test('offers a non-moving New group action on drone menus', () => {
+  test('offers a non-moving Create group action on drone menus', () => {
     const cardSource = readFileSync(
       new URL('../src/droneHub/overview/DroneCard.tsx', import.meta.url),
       'utf8',
@@ -23,10 +23,11 @@ describe('sidebar group creation actions', () => {
       'utf8',
     );
 
-    expect(cardSource).toContain("label: 'New group'");
+    expect(cardSource).toContain("label: 'Create group'");
+    expect(cardSource).toContain("label: 'Create chat group'");
     expect(cardSource).toContain('onSelect: () => onCreateGroup?.()');
     expect(treeSource).toContain(
-      'onCreateGroup={actionsEnabled && !repositoryRootView ? () => onCreateGroupBeforeDrone(drone) : undefined}',
+      'onCreateGroup={actionsEnabled ? () => onCreateGroupBeforeDrone(drone) : undefined}',
     );
   });
 

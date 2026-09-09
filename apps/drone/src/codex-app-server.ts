@@ -196,13 +196,13 @@ export class CodexAppServerConnection {
     this.write({ method, params });
   }
 
-  async request(method: string, params: any): Promise<any> {
+  async request(method: string, params: any, timeoutMs = 30_000): Promise<any> {
     const id = this.nextRequestId++;
     const result = new Promise<any>((resolve, reject) => {
       const timeout = setTimeout(() => {
         if (!this.pending.delete(id)) return;
         reject(new Error(`Codex App Server request timed out: ${method}`));
-      }, 30_000);
+      }, timeoutMs);
       timeout.unref?.();
       this.pending.set(id, { resolve, reject, timeout });
     });
@@ -217,9 +217,9 @@ export class CodexAppServerConnection {
     return await result;
   }
 
-  async call(method: string, params: any): Promise<any> {
+  async call(method: string, params: any, timeoutMs?: number): Promise<any> {
     await this.ready();
-    return await this.request(method, params);
+    return await this.request(method, params, timeoutMs);
   }
 
   stop(): void {

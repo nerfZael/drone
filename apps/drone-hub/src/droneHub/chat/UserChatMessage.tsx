@@ -10,6 +10,7 @@ export type UserChatMessageFollowUp = {
   contentKey?: string;
   at?: string;
   text?: string;
+  copyText?: string;
   images?: ChatMessageImage[];
   attachmentContent?: React.ReactNode;
 };
@@ -53,11 +54,12 @@ export function UserChatMessage({
   textMentionLinks?: MarkdownTextMentionLink[];
   onOpenTextMention?: (mention: MarkdownTextMentionLink) => void;
 }) {
-  const resolvedCopyText =
-    copyText ??
-    [text, ...followUps.map((followUp) => `ASAP:\n${followUp.text ?? ''}`)]
-      .filter(Boolean)
-      .join('\n\n');
+  const resolvedCopyText = [
+    copyText ?? text,
+    ...followUps.map((followUp) => `ASAP:\n${followUp.copyText ?? followUp.text ?? ''}`),
+  ]
+    .filter(Boolean)
+    .join('\n\n');
   return (
     <ChatMessageFrame
       role="user"

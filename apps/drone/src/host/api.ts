@@ -445,6 +445,7 @@ export async function codexPromptEnqueue(
     id: string;
     sessionKey: string;
     launchScript: string;
+    requireDroneHubMcp?: boolean;
     prompt: string;
     imagePaths?: string[];
     existingThreadId?: string;

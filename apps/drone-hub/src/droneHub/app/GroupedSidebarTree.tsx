@@ -1639,7 +1639,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
                   }
                 : undefined
             }
-            onCreateChatGroup={actionsEnabled && chats.length > 1 ? () => createChatGroup(drone.id) : undefined}
+            onCreateChatGroup={actionsEnabled ? () => createChatGroup(drone.id) : undefined}
             onCloneChat={
               actionsEnabled && hasOnlyDefaultChat
                 ? () => void onCloneDroneChat(drone.id, 'default')
@@ -1647,7 +1647,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
             }
             onClone={actionsEnabled ? () => onCloneDrone(drone) : undefined}
             onAddToGroup={actionsEnabled && !repositoryRootView ? () => onAddDroneToGroup(drone) : undefined}
-            onCreateGroup={actionsEnabled && !repositoryRootView ? () => onCreateGroupBeforeDrone(drone) : undefined}
+            onCreateGroup={actionsEnabled ? () => onCreateGroupBeforeDrone(drone) : undefined}
             onRename={actionsEnabled ? (newName) => onRenameDrone(drone.id, newName) : undefined}
             inlineRenameRequestKey={
               inlineRenameDroneRequest?.droneId === drone.id

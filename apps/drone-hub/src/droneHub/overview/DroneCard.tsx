@@ -818,7 +818,7 @@ export const DroneCard = React.memo(function DroneCard({
   if (canCreateChatGroup) {
     actionMenuItems.push({
       id: 'create-chat-group',
-      label: 'Create group',
+      label: 'Create chat group',
       icon: <IconPlus className="h-3.5 w-3.5 text-[var(--accent)]" />,
       disabled: Boolean(createChatDisabled),
       onSelect: () => onCreateChatGroup?.(),
@@ -850,7 +850,7 @@ export const DroneCard = React.memo(function DroneCard({
   if (canCreateGroup) {
     actionMenuItems.push({
       id: 'new-group',
-      label: 'New group',
+      label: 'Create group',
       shortcut: shortcutBindings.createDraftGroup
         ? formatShortcutBinding(shortcutBindings.createDraftGroup)
         : undefined,

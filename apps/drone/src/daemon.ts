@@ -1819,6 +1819,7 @@ async function main() {
           sessionKey,
           launchScript,
           prompt,
+          ...(body?.requireDroneHubMcp === true ? { requireDroneHubMcp: true } : {}),
           ...(Array.isArray(body?.imagePaths)
             ? {
                 imagePaths: body.imagePaths

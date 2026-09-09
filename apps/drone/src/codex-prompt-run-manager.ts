@@ -15,6 +15,7 @@ export type CodexPromptState = 'queued' | 'running' | 'done' | 'failed' | 'cance
 export type CodexPromptSpec = {
   sessionKey: string;
   launchScript: string;
+  requireDroneHubMcp?: boolean;
   prompt: string;
   imagePaths?: string[];
   existingThreadId?: string;
@@ -147,6 +148,7 @@ type CodexRunSession = {
   connection: CodexAppServerConnection;
   threadId: string | null;
   threadReady: boolean;
+  verifiedMcpThreadId: string | null;
   activeTurnId: string | null;
   observedTurnIds: Set<string>;
   activeRun: CodexPromptRun | null;
@@ -399,6 +401,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
       connection,
       threadId: spec.threadId ?? spec.existingThreadId ?? null,
       threadReady: false,
+      verifiedMcpThreadId: null,
       activeTurnId: null,
       observedTurnIds: new Set(),
       activeRun: null,
@@ -527,6 +530,16 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     session: CodexRunSession,
     notification: CodexAppServerNotification,
   ): Promise<void> {
+    // Invalidate immediately: notifications can arrive while startup is waiting
+    // inside the serialized session operation.
+    if (
+      notification.method === 'mcpServer/startupStatus/updated' &&
+      notification.params?.name === 'drone-hub' &&
+      notification.params?.status !== 'ready' &&
+      (!notification.params?.threadId || notification.params.threadId === session.threadId)
+    ) {
+      session.verifiedMcpThreadId = null;
+    }
     await this.serialize(session, async () => {
       session.lastUsedAt = Date.now();
       const notificationThreadId = String(
@@ -700,6 +713,58 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     return threadId;
   }
 
+  private async ensureDroneHubMcp(
+    session: CodexRunSession,
+    spec: CodexPromptSpec,
+    threadId: string,
+  ): Promise<void> {
+    if (!spec.requireDroneHubMcp || session.verifiedMcpThreadId === threadId) return;
+    session.verifiedMcpThreadId = null;
+    const deadline = Date.now() + 10_000;
+    const cursors = new Set<string>();
+    let cursor: string | undefined;
+    try {
+      while (true) {
+        const remainingMs = deadline - Date.now();
+        if (remainingMs <= 0) throw new Error('tool discovery timed out');
+        const page = await session.connection.call(
+          'mcpServerStatus/list',
+          { threadId, detail: 'toolsAndAuthOnly', ...(cursor ? { cursor } : {}) },
+          remainingMs,
+        );
+        const server = page?.data?.find((entry: any) => entry.name === 'drone-hub');
+        if (server) {
+          if (server.runtimeStatus === 'starting' || server.runtimeStatus === 'notStarted') {
+            await new Promise((resolve) =>
+              setTimeout(resolve, Math.min(100, Math.max(0, deadline - Date.now()))),
+            );
+            cursor = undefined;
+            cursors.clear();
+            continue;
+          }
+          if (server.runtimeStatus && server.runtimeStatus !== 'connected') {
+            throw new Error(`connection status is ${server.runtimeStatus}`);
+          }
+          if (!server.tools || Object.keys(server.tools).length === 0) {
+            throw new Error(
+              'Codex discovered no Drone Hub tools; check the managed connection settings',
+            );
+          }
+          session.verifiedMcpThreadId = threadId;
+          return;
+        }
+        cursor = page?.nextCursor || undefined;
+        if (cursor && cursors.has(cursor)) throw new Error('tool discovery returned a repeated page');
+        if (cursor) cursors.add(cursor);
+        else throw new Error('the Drone Hub server is missing from Codex’s tool inventory');
+      }
+    } catch (error) {
+      throw new Error(
+        `Drone Hub tools are unavailable: ${errorMessage(error)}. Check the connection and retry the prompt.`,
+      );
+    }
+  }
+
   private async startRun(session: CodexRunSession, messageId: string): Promise<void> {
     const message = await this.options.loadMessage(messageId);
     if (!message || message.state !== 'queued') {
@@ -723,6 +788,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     session.startingRun = run;
     try {
       let threadId = await this.ensureThread(session, message.codexAppServer);
+      await this.ensureDroneHubMcp(session, message.codexAppServer, threadId);
       const sandboxPolicy = sandboxPolicyForMode(message.codexAppServer.sandbox);
       run = await this.options.mutate(() =>
         this.options.appendRunEvents(run, [{ type: 'thread.started', thread_id: threadId }]),
@@ -755,6 +821,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
         session.activeTurnId = null;
         session.observedTurnIds.clear();
         threadId = await this.ensureThread(session, message.codexAppServer);
+        await this.ensureDroneHubMcp(session, message.codexAppServer, threadId);
         run = await this.options.mutate(() =>
           this.options.appendRunEvents(run, [{ type: 'thread.started', thread_id: threadId }]),
         );
@@ -783,6 +850,13 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
           .catch(() => undefined);
       }
     } catch (error) {
+      if (message.codexAppServer.requireDroneHubMcp && !session.verifiedMcpThreadId) {
+        // A retry must start a new connection with the current credentials,
+        // rather than retaining a process whose MCP startup already failed.
+        await this.failSession(session, asError(error));
+        session.connection.stop();
+        return;
+      }
       session.startingRun = null;
       session.cancelRequestedMessageIds.delete(message.id);
       await this.failRunAndMessages(run, asError(error));

@@ -1858,10 +1858,12 @@ function createMcpProjectionFeature() {
     };
   }
 
-  async function isManagedChatMcpAvailable(): Promise<boolean> {
+  async function isManagedChatMcpAvailable(agentId?: string): Promise<boolean> {
     if (!config?.signingSecret) return false;
     return (await listMcpServers()).some(
-      (server) => isDroneHubMcpServer(server) && server.enabled !== false,
+      (server) =>
+        isDroneHubMcpServer(server) && server.enabled !== false &&
+        (!agentId || server.agents.some((agent) => agent === agentId)),
     );
   }
 
@@ -1901,10 +1903,15 @@ function createMcpProjectionFeature() {
     droneId: string;
     chatName: string;
     chat: any;
+    agentId?: string;
   }): Promise<Record<string, string>> {
-    if (!config || !(await isManagedChatMcpAvailable())) return {};
+    if (!config || !(await isManagedChatMcpAvailable(input.agentId))) return {};
     const chatId = String(input.chat?.id ?? '').trim();
-    if (!chatId) return {};
+    if (!chatId) {
+      throw new Error(
+        'Drone Hub tools could not be configured: the managed chat is missing its ID. Retry after reopening the chat.',
+      );
+    }
     return {
       DRONE_HUB_MCP_URL: input.runtime === 'container' ? config.containerUrl : config.hostUrl,
       DRONE_HUB_MCP_TOKEN: createChatMcpAccessToken({

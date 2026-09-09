@@ -896,6 +896,10 @@ readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line
     send({ method: 'thread/started', params: { thread: { id: 'thread-approval' } } });
     return;
   }
+  if (message.method === 'mcpServerStatus/list') {
+    send({ id: message.id, result: { data: [{ name: 'drone-hub', runtimeStatus: 'connected', tools: { list_drones: { name: 'list_drones' } } }], nextCursor: null } });
+    return;
+  }
   if (message.method === 'turn/start') {
     send({ id: message.id, result: { turn: { id: 'turn-approval', status: 'inProgress', items: [] } } });
     send({ method: 'turn/started', params: { threadId: 'thread-approval', turn: { id: 'turn-approval', status: 'inProgress', items: [] } } });
@@ -944,6 +948,7 @@ readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line
         id,
         sessionKey: `approval-session-${port}`,
         launchScript: `exec ${process.execPath} ${fakeServerPath} ${messagesPath}`,
+        requireDroneHubMcp: true,
         prompt: 'Run the tests.',
         approvalPolicy: 'untrusted',
         approvalsReviewer: 'user',
@@ -999,6 +1004,7 @@ readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line
       id: 'approval-request-1',
       result: { decision: 'acceptForSession' },
     });
+    expect(messages.filter((message) => message.method === 'mcpServerStatus/list')).toHaveLength(1);
   }, 25_000);
 
   test('completes a run when an implicit continuation uses a different turn id', async () => {

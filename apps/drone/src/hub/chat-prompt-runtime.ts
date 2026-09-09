@@ -549,6 +549,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     waitForDaemonMs?: number;
     sessionKey: string;
     launchScript: string;
+    requireDroneHubMcp?: boolean;
     prompt: string;
     imagePaths?: string[];
     existingThreadId?: string;
@@ -616,6 +617,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       id: opts.id,
       sessionKey: opts.sessionKey,
       launchScript: opts.launchScript,
+      ...(opts.requireDroneHubMcp ? { requireDroneHubMcp: true } : {}),
       prompt: opts.prompt,
       ...(opts.imagePaths?.length ? { imagePaths: opts.imagePaths } : {}),
       ...(opts.existingThreadId ? { existingThreadId: opts.existingThreadId } : {}),
@@ -839,6 +841,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
             droneId,
             chatName: normalizedChat,
             chat,
+            ...(agent.kind === 'builtin' && agent.id === 'codex' ? { agentId: 'codex' } : {}),
           }),
       );
       const managedChatMcpEnvLines = buildEnvExportLines(managedChatMcpEnv);
@@ -979,6 +982,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         const forkThreadId = pendingChatForkSourceSessionId(chat, 'codex');
         const existingThreadId = forkThreadId ? '' : readBuiltinTranscriptSessionId(chat, 'codex');
         const stableChatId = String((chat as any)?.id ?? '').trim() || normalizedChat;
+        const requireDroneHubMcp = Boolean(managedChatMcpEnv.DRONE_HUB_MCP_URL);
         const launchScript = [
           'set -euo pipefail',
           ...buildContainerManagedEnvLines(d),
@@ -986,7 +990,9 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           ...managedChatMcpEnvLines,
           `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
           cdCommand,
-          'exec codex app-server',
+          requireDroneHubMcp
+            ? "exec codex app-server -c 'mcp_servers.drone-hub.required=true' -c 'mcp_servers.drone-hub.startup_timeout_sec=10'"
+            : 'exec codex app-server',
         ].join('\n');
         await enqueueCodexTranscriptPrompt({
           id: promptId,
@@ -994,6 +1000,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           waitForDaemonMs: opts.waitForDaemonMs,
           sessionKey: `${normalizedChat}:${stableChatId}`,
           launchScript,
+          requireDroneHubMcp,
           prompt: promptWithHistory,
           imagePaths: attachmentsForPrompt
             .filter((attachment: any) => String(attachment?.mime ?? '').startsWith('image/'))

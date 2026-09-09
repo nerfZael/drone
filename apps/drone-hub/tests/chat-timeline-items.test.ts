@@ -262,7 +262,7 @@ describe('chat timeline items', () => {
     expect(presentation?.activity).toBe(steer.activity);
   });
 
-  test('does not hide steering messages inside specialized subscription-event bubbles', () => {
+  test('groups steering messages into completed event-started runs', () => {
     const event = {
       ...turn(1, '2026-01-01T10:00:00.000Z'),
       prompt: '[event notification] repository changed',
@@ -274,6 +274,8 @@ describe('chat timeline items', () => {
       deliveryMode: 'asap' as const,
     };
 
-    expect(groupChatTimelineItems(buildChatTimelineItems([event, steering], []))).toHaveLength(2);
+    const groups = groupChatTimelineItems(buildChatTimelineItems([event, steering], []));
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.followUps.map((entry) => entry.item)).toEqual([steering]);
   });
 });

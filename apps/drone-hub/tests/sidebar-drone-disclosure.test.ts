@@ -61,7 +61,7 @@ describe('multi-chat drone disclosure', () => {
     expect(chatRows).not.toContain('pointer-events-none absolute inset-y-0 right-0');
   });
 
-  test('offers normal groups only for drones with multiple chats', () => {
+  test('offers group creation on drone menus regardless of chat count', () => {
     const treeSource = readFileSync(
       new URL('../src/droneHub/app/GroupedSidebarTree.tsx', import.meta.url),
       'utf8',
@@ -76,9 +76,9 @@ describe('multi-chat drone disclosure', () => {
     );
 
     expect(cardSource).toContain("label: 'Create group'");
-    expect(cardSource).not.toContain("label: 'Create chat group'");
+    expect(cardSource).toContain("label: 'Create chat group'");
     expect(treeSource).toContain(
-      'onCreateChatGroup={actionsEnabled && chats.length > 1 ? () => createChatGroup(drone.id) : undefined}',
+      'onCreateChatGroup={actionsEnabled ? () => createChatGroup(drone.id) : undefined}',
     );
     expect(treeSource).toContain('const canCreateChatGroups = normalizedDroneChats(drone).length > 1;');
     expect(groupRows).toContain('<IconChevron');

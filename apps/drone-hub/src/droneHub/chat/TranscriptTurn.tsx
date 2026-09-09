@@ -60,6 +60,7 @@ function sameFollowUps(a: UserChatMessageFollowUp[], b: UserChatMessageFollowUp[
       left.contentKey === right.contentKey &&
       left.at === right.at &&
       left.text === right.text &&
+      left.copyText === right.copyText &&
       (left.images?.length ?? 0) === (right.images?.length ?? 0) &&
       (left.images ?? []).every((image, imageIndex) => {
         const rightImage = right.images?.[imageIndex];
@@ -247,7 +248,22 @@ export const TranscriptTurn = React.memo(
     return (
       <div className="group/turn animate-fade-in">
         {isSubscriptionEvent ? (
-          <SubscriptionEventMessage prompt={item.prompt} at={promptIso} />
+          <SubscriptionEventMessage
+            prompt={item.prompt}
+            at={promptIso}
+            followUps={followUps}
+            showRoleIcons={showRoleIcons}
+            onOpenFileReference={onOpenFileReference}
+            onOpenLink={onOpenLink}
+            attachmentContent={
+              <ImageAttachmentChips
+                attachments={attachments}
+                droneId={droneId}
+                droneHomePath={droneHomePath}
+                onOpenFileReference={onOpenFileReference}
+              />
+            }
+          />
         ) : (
           <UserChatMessage
             at={promptIso}
