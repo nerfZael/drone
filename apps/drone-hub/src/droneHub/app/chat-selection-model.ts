@@ -3,10 +3,11 @@ import type { ChatInfo } from '../../domain';
 export function chatNamesForConfigSelection(input: {
   chats?: readonly string[] | null;
   workflowChats?: readonly string[] | null;
+  sideChats?: readonly { name: string }[] | null;
 }): string[] {
   return Array.from(
     new Set(
-      [...(input.chats ?? []), ...(input.workflowChats ?? [])]
+      [...(input.chats ?? []), ...(input.workflowChats ?? []), ...(input.sideChats ?? []).map((chat) => chat.name)]
         .map((chatName) => String(chatName ?? '').trim())
         .filter(Boolean),
     ),

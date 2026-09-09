@@ -56,8 +56,9 @@ export function useChatConfigState({
     return chatNamesForConfigSelection({
       chats: selectedDroneSummary?.chats,
       workflowChats: selectedDroneSummary?.workflowChats,
+      sideChats: selectedDroneSummary?.sideChats,
     }).join('\u0000');
-  }, [selectedDroneSummary?.chats, selectedDroneSummary?.workflowChats]);
+  }, [selectedDroneSummary?.chats, selectedDroneSummary?.workflowChats, selectedDroneSummary?.sideChats]);
   const selectedChatListed =
     !selectedDroneHasChatList || selectedDroneChatsKey.split('\u0000').includes(selectedChat);
   // Draft chats already have durable, configurable chat entries. Their metadata
