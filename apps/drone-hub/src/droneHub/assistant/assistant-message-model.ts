@@ -66,6 +66,34 @@ export type AssistantRequestRunActivityPartition = {
   finalResponseItemIndex: number;
 };
 
+/** Only a finished answer can replace the previous answer's automatic expansion. */
+export function latestCompletedAssistantMessageIndex(
+  items: AssistantRenderItem[],
+  activeUserItemIndex?: number,
+): number {
+  const activityItemIndexes = new Set(
+    assistantRequestRuns(items).flatMap((run) =>
+      run.firstToolItemIndex < 0
+        ? []
+        : partitionAssistantRequestRunActivity(items, run, run.userItemIndex === activeUserItemIndex)
+            .activityItemIndexes,
+    ),
+  );
+  const endIndex = activeUserItemIndex === undefined ? items.length - 1 : activeUserItemIndex - 1;
+  for (let index = endIndex; index >= 0; index -= 1) {
+    const item = items[index];
+    if (
+      item?.type === 'message' &&
+      !activityItemIndexes.has(index) &&
+      item.message.role === 'assistant' &&
+      !item.message.errorMessage &&
+      toolCalls(item.message).length === 0 &&
+      (messageVisibleText(item.message).trim() || messageImageParts(item.message).length > 0)
+    ) return index;
+  }
+  return -1;
+}
+
 function assistantMessageRunDurationMs(message: AssistantMessage): number | undefined {
   const details = message.details;
   if (!details || typeof details !== 'object' || Array.isArray(details)) return undefined;

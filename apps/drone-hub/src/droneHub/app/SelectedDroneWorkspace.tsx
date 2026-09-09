@@ -123,6 +123,7 @@ import {
   buildChatTimelineItems,
   groupedPendingPresentationItem,
   groupChatTimelineItems,
+  latestCompletedAgentTurnGroupIndex,
   mergeChatTranscriptTimeline,
 } from './chat-timeline-items';
 import { timelineUserFollowUps } from './chat-timeline-follow-ups';
@@ -1505,6 +1506,7 @@ export function SelectedDroneWorkspace({
     />
   ) : null;
 
+  const latestCompletedAgentGroupIndex = latestCompletedAgentTurnGroupIndex(externalTimelineGroups);
   let latestFileChangesGroupIndex = -1;
   for (let index = externalTimelineGroups.length - 1; index >= 0; index -= 1) {
     const group = externalTimelineGroups[index];
@@ -1595,7 +1597,7 @@ export function SelectedDroneWorkspace({
         content: ({ isLatestActivity }) => (
           <TranscriptTurn
             item={turn}
-            autoExpandAgentMessage={isLatestActivity}
+            autoExpandAgentMessage={groupIndex === latestCompletedAgentGroupIndex}
             followUps={followUps}
             initiallyExpandFileChanges={
               isLatestActivity && groupIndex === latestFileChangesGroupIndex

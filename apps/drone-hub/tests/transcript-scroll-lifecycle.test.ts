@@ -125,6 +125,7 @@ function scrollHarness() {
     },
     resize: () => [...observers].forEach((callback) => callback()),
     changeChat: (contextKey: string) => render({ ...props, contextKey }),
+    updateContent: () => render({ ...props, contentVersion: props.contentVersion + 1 }),
     hook: () => hook,
   };
 }
@@ -247,5 +248,68 @@ describe('desktop transcript scroll lifecycle', () => {
     h.resize();
     h.frame();
     expect(h.surface.scrollTop).toBe(1_000);
+  });
+});
+
+
+describe('shared normal and floating chat scrolling', () => {
+  test('sending brings the optimistic message into view and resumes following', () => {
+    const h = scrollHarness();
+    h.frame();
+    h.surface.scrollTop = 200;
+    h.surface.scrollEvent();
+    h.surface.scrollHeight += 200;
+    h.hook().scrollToBottom({ force: true });
+    h.updateContent();
+    h.frame();
+    expect(h.surface.scrollTop).toBe(900);
+    h.surface.scrollHeight += 100;
+    h.resize();
+    h.frame();
+    expect(h.surface.scrollTop).toBe(1_000);
+  });
+
+  test('a new message cannot pull a reader down, even with a follow frame queued', () => {
+    const h = scrollHarness();
+    h.frame();
+    h.surface.scrollHeight += 200;
+    h.updateContent();
+    h.surface.scrollTop = 200;
+    h.surface.scrollEvent();
+    h.frame();
+    expect(h.surface.scrollTop).toBe(200);
+  });
+
+  test('floating window resizing follows only while pinned', () => {
+    const h = scrollHarness();
+    h.frame();
+    h.surface.clientHeight = 300;
+    h.resize();
+    h.frame();
+    expect(h.surface.scrollTop).toBe(900);
+    h.surface.scrollTop = 200;
+    h.surface.scrollEvent();
+    h.surface.clientHeight = 250;
+    h.resize();
+    h.frame();
+    expect(h.surface.scrollTop).toBe(200);
+  });
+
+  test('loading older history retains the visible messages and stays detached', async () => {
+    const h = scrollHarness();
+    h.frame();
+    h.surface.scrollTop = 100;
+    h.surface.scrollEvent();
+    await h.hook().preserveScrollOnPrepend(async () => {
+      h.surface.scrollHeight += 600;
+      h.updateContent();
+      h.resize();
+    });
+    h.frame();
+    expect(h.surface.scrollTop).toBe(700);
+    h.surface.scrollHeight += 200;
+    h.resize();
+    h.frame();
+    expect(h.surface.scrollTop).toBe(700);
   });
 });

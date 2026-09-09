@@ -11,6 +11,7 @@ import {
   EmptyState,
   PendingTranscriptTurn,
   TranscriptTurn,
+  usePinnedTranscriptScroll,
 } from '../chat';
 import { requestJson } from '../http';
 import { StatusBadge } from '../overview';
@@ -65,13 +66,12 @@ import {
   buildChatTimelineItems,
   groupedPendingPresentationItem,
   groupChatTimelineItems,
+  latestCompletedAgentTurnGroupIndex,
 } from './chat-timeline-items';
 import { timelineUserFollowUps } from './chat-timeline-follow-ups';
 import {
   createGroupChatOlderLoadCoordinator,
-  groupChatScrollTopAfterPrepend,
   groupChatTailHasOlder,
-  type GroupChatScrollAnchor,
 } from './group-chat-history';
 
 const DirtyDroneApplyModal = React.lazy(async () => {
@@ -177,10 +177,22 @@ export function GroupMultiChatColumn({
   const [dirtyDroneApplyModal, setDirtyDroneApplyModal] =
     React.useState<DirtyDroneApplyModalState | null>(null);
   const [droneHubPermissionsOpen, setDroneHubPermissionsOpen] = React.useState(false);
-  const columnScrollRef = React.useRef<HTMLDivElement | null>(null);
+  const transcriptContentVersion = React.useMemo(
+    () => [transcripts, optimisticPendingPrompts, initialPendingResp],
+    [transcripts, optimisticPendingPrompts, initialPendingResp],
+  );
+  const {
+    bindScrollRef: bindColumnScrollRef,
+    bindContentRef: bindColumnContentRef,
+    scrollRef: columnScrollRef,
+    scrollToBottom: scrollColumnToBottom,
+    preserveScrollOnPrepend,
+  } = usePinnedTranscriptScroll({
+    contextKey: `${drone.id}:${chatName}:column`,
+    contentVersion: transcriptContentVersion,
+  });
   const transcriptEtagRef = React.useRef<string | null>(null);
   const transcriptsRef = React.useRef<TranscriptItem[] | null>(transcripts);
-  const olderScrollAnchorRef = React.useRef<GroupChatScrollAnchor | null>(null);
   const loadOlderHistoryRef = React.useRef<() => void>(() => {});
   transcriptsRef.current = transcripts;
   const draftKey = React.useMemo(
@@ -239,12 +251,6 @@ export function GroupMultiChatColumn({
     ],
   };
 
-  const scrollColumnToBottom = React.useCallback(() => {
-    const el = columnScrollRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, []);
-
   React.useEffect(() => {
     let mounted = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -289,12 +295,10 @@ export function GroupMultiChatColumn({
       setHasOlder(false);
       const current = transcriptsRef.current;
       if (!sameTranscriptItems(current, data.transcripts)) {
-        const node = columnScrollRef.current;
-        olderScrollAnchorRef.current = node
-          ? { scrollHeight: node.scrollHeight, scrollTop: node.scrollTop }
-          : null;
-        transcriptsRef.current = data.transcripts;
-        setTranscripts(data.transcripts);
+        await preserveScrollOnPrepend(async () => {
+          transcriptsRef.current = data.transcripts;
+          setTranscripts(data.transcripts);
+        });
       }
       setError(null);
     };
@@ -472,7 +476,7 @@ export function GroupMultiChatColumn({
       clearTimer();
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [chatCacheKey, chatName, drone.hubPhase, drone.id]);
+  }, [chatCacheKey, chatName, drone.hubPhase, drone.id, preserveScrollOnPrepend]);
 
   const olderHistoryTriggerArmedRef = React.useRef(true);
   React.useEffect(() => {
@@ -507,7 +511,9 @@ export function GroupMultiChatColumn({
     },
     chatEventsConnected ? 60_000 : 1000,
     [chatCacheKey, chatName, drone.hubPhase, drone.id, chatEventsConnected, chatEventsNonce],
-    { enabled: pendingPollEnabled },
+    // Live event refreshes must not unmount the run and reset its disclosure.
+    // The response's chatCacheKey below prevents showing another chat's data.
+    { enabled: pendingPollEnabled, keepPreviousData: true },
   );
 
   const pendingPrompts = React.useMemo(() => {
@@ -636,28 +642,6 @@ export function GroupMultiChatColumn({
     });
   }, [lastResponseAtMs, onRuntimeStateChange, waitingForAgent, waitingSinceMs]);
 
-  React.useEffect(() => {
-    if (loading) return;
-    const anchor = olderScrollAnchorRef.current;
-    olderScrollAnchorRef.current = null;
-    const id = requestAnimationFrame(() => {
-      const node = columnScrollRef.current;
-      if (anchor && node) {
-        node.scrollTop = groupChatScrollTopAfterPrepend(anchor, node.scrollHeight);
-        return;
-      }
-      scrollColumnToBottom();
-    });
-    return () => cancelAnimationFrame(id);
-  }, [
-    chatName,
-    columnWidthPx,
-    loading,
-    scrollColumnToBottom,
-    transcripts?.length,
-    visiblePendingPrompts.length,
-  ]);
-
   const sendPrompt = React.useCallback(
     async (payload: ChatSendPayload, context: ChatSendContext): Promise<boolean> => {
       const prompt = String(payload?.prompt ?? '').trim();
@@ -685,6 +669,7 @@ export function GroupMultiChatColumn({
       if (optimisticItem) {
         setOptimisticPendingPrompts((prev) => appendOptimisticPendingPrompt(prev, optimisticItem));
       }
+      scrollColumnToBottom({ force: true });
       try {
         const data = await sendDroneChatPrompt(requestJson, {
           promptId: optimisticId,
@@ -710,7 +695,6 @@ export function GroupMultiChatColumn({
               })
             : prev,
         );
-        requestAnimationFrame(() => scrollColumnToBottom());
         return true;
       } catch (err: any) {
         const message = err?.message ?? String(err);
@@ -972,6 +956,7 @@ export function GroupMultiChatColumn({
     if (!ok) setQuickActionError('No preview URL available yet.');
   }, [disabledByProvisioning, drone]);
 
+  const latestCompletedAgentGroupIndex = latestCompletedAgentTurnGroupIndex(timelineGroups);
   let latestFileChangesGroupIndex = -1;
   for (let index = timelineGroups.length - 1; index >= 0; index -= 1) {
     const group = timelineGroups[index];
@@ -1170,7 +1155,7 @@ export function GroupMultiChatColumn({
           ) : null}
         </div>
       </div>
-      <div ref={columnScrollRef} className="flex-1 min-h-0 overflow-auto px-3 py-3">
+      <div ref={bindColumnScrollRef} className="flex-1 min-h-0 overflow-auto px-3 py-3">
         {loading && !transcripts ? (
           <ChatLoadingState />
         ) : error ? (
@@ -1178,7 +1163,7 @@ export function GroupMultiChatColumn({
             {error}
           </div>
         ) : (transcripts && transcripts.length > 0) || visiblePendingPrompts.length > 0 ? (
-          <div className="space-y-5">
+          <div ref={bindColumnContentRef} className="space-y-5">
             {olderLoading ? (
               <div className="text-center text-[var(--text-10)] text-[var(--muted)]" role="status">
                 Loading older messages…
@@ -1216,7 +1201,7 @@ export function GroupMultiChatColumn({
                     key={messageId}
                     item={item}
                     followUps={followUps}
-                    autoExpandAgentMessage={latest}
+                    autoExpandAgentMessage={index === latestCompletedAgentGroupIndex}
                     initiallyExpandFileChanges={
                       index === latestFileChangesGroupIndex && latest
                     }

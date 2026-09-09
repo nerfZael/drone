@@ -1,4 +1,4 @@
-import type { ChatQuestionRequest } from '@drone/assistant-chat';
+import { agentRunActivityHasResponse, type ChatQuestionRequest } from '@drone/assistant-chat';
 import type { PendingPrompt, TranscriptItem } from '../types';
 import { parseIsoMs } from './selected-drone-workspace-utils';
 
@@ -10,6 +10,16 @@ export type ChatTimelineGroup = {
   primary: ChatTimelineItem;
   followUps: ChatTimelineItem[];
 };
+
+/** A pending run or user-only steering message does not supersede the last answer. */
+export function latestCompletedAgentTurnGroupIndex(groups: readonly ChatTimelineGroup[]): number {
+  for (let index = groups.length - 1; index >= 0; index -= 1) {
+    const entry = groups[index]!.primary;
+    if (entry.kind !== 'turn' || entry.item.userOnly || entry.item.silentCompletion) continue;
+    if (entry.item.output.trim() || agentRunActivityHasResponse(entry.item.activity)) return index;
+  }
+  return -1;
+}
 
 export type ChatTranscriptTimelineEntry =
   | { kind: 'group'; group: ChatTimelineGroup; groupIndex: number }

@@ -91,6 +91,7 @@ import {
   directAssistantRunTiming,
   isChatIdleToolName,
   lastAssistantContentBlock,
+  latestCompletedAssistantMessageIndex,
   latestThinkingText,
   messageDroneDetails,
   messageImageParts,
@@ -676,6 +677,10 @@ export function AssistantDock({
         index > latestUserItemIndex && (item.type === 'tool' || item.type === 'toolGroup'),
     );
   }, [latestUserItemIndex, visibleItems]);
+  const latestCompletedAgentMessageIndex = React.useMemo(
+    () => latestCompletedAssistantMessageIndex(visibleItems, running ? latestUserItemIndex : undefined),
+    [latestUserItemIndex, running, visibleItems],
+  );
   const latestUserStartedAt = React.useMemo(() => {
     const latestUser = visibleItems[latestUserItemIndex];
     return latestUser?.type === 'message'
@@ -2218,7 +2223,11 @@ export function AssistantDock({
           <AssistantMessageRow
             message={item.message}
             forkCheckpointId={nativeChat ? latestNativeCheckpointId([item.message]) : undefined}
-            autoExpandMessage={isLatestActivity}
+            autoExpandMessage={
+              item.message.role === 'assistant'
+                ? itemIndex === latestCompletedAgentMessageIndex || (running && isLatestActivity)
+                : isLatestActivity
+            }
             messageExtras={{
               messageId: `${activeThreadId}:${item.key}`,
               linkedPullRequestContext: messageFeatures.linkedPullRequestContext,

@@ -13,12 +13,13 @@ export function usePoll<T>(
   fn: (signal: AbortSignal) => Promise<T>,
   intervalMs: number,
   deps: React.DependencyList = [],
-  opts?: { enabled?: boolean; isEqual?: (prev: T, next: T) => boolean },
+  opts?: { enabled?: boolean; isEqual?: (prev: T, next: T) => boolean; keepPreviousData?: boolean },
 ) {
   const [value, setValue] = React.useState<T | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
   const enabled = opts?.enabled ?? true;
+  const keepPreviousData = opts?.keepPreviousData ?? false;
 
   React.useEffect(() => {
     if (!enabled) {
@@ -30,7 +31,7 @@ export function usePoll<T>(
     let timer: ReturnType<typeof setTimeout> | null = null;
     let busy = false;
 
-    setValue(null);
+    if (!keepPreviousData) setValue(null);
     setError(null);
     setLoading(true);
 
@@ -83,7 +84,7 @@ export function usePoll<T>(
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, ...deps]);
+  }, [enabled, keepPreviousData, ...deps]);
 
   return { value, error, loading };
 }
