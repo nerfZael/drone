@@ -10,6 +10,10 @@ export class CodexUsageTracker {
     const thread = String(p.threadId ?? p.thread?.id ?? '');
     const turn = String(p.turnId ?? p.turn?.id ?? '');
     if (notification.method === 'turn/started') this.turns.set(thread, turn);
+    if (notification.method === 'thread/compacted' ||
+      notification.method === 'item/completed' && p.item?.type === 'contextCompaction') {
+      return [{ type: 'usage.coverage', sessionId: thread, turnId: turn, partialReason: 'compaction-unverified' }];
+    }
     if (notification.method !== 'thread/tokenUsage/updated' || !p.tokenUsage?.total) return [];
     const current = p.tokenUsage.total;
     const previous = this.totals.get(thread);
@@ -26,6 +30,6 @@ export class CodexUsageTracker {
     if (!Object.values(usage).some((value) => value > 0)) return [];
     return [{ type: 'usage.delta', sessionId: thread, turnId: turn,
       eventId: crypto.createHash('sha256').update(JSON.stringify([thread, turn, current])).digest('hex'),
-      model: model ?? 'unknown', provider: 'openai-codex', complete: Boolean(previous), usage }];
+      model: model ?? 'unknown', provider: 'openai-codex', complete: Boolean(previous), partialReason: previous ? undefined : 'missing-baseline', usage }];
   }
 }

@@ -3,6 +3,7 @@ import type { TokenCounts, UsageObservation } from '@drone/assistant-chat';
 /** Rebuilding this accumulator from a durable log produces the same observation IDs. */
 export class AgentUsageAccumulator {
   private observations = new Map<string, UsageObservation>();
+  private codexCoverage = new Map<string, string>();
   private model = 'unknown';
   private sessionId = '';
   private finalModels = new Set<string>();
@@ -23,6 +24,31 @@ export class AgentUsageAccumulator {
       }
       return;
     }
+    if (this.agent === 'codex' && event.sessionId && event.turnId) {
+      const key = JSON.stringify([event.sessionId, event.turnId]);
+      const matches = (o: UsageObservation) => o.sessionId === event.sessionId && o.turnId === event.turnId;
+      if (event.type === 'usage.coverage' && typeof event.partialReason === 'string') {
+        this.codexCoverage.set(key, event.partialReason);
+        for (const o of this.observations.values()) if (matches(o)) {
+          o.complete = false; o.partialReason = event.partialReason;
+        }
+        return;
+      }
+      if (event.type === 'usage.snapshot' && Array.isArray(event.observations) && event.observations.length) {
+        const incoming: UsageObservation[] = event.observations;
+        const existing = [...this.observations.values()].filter(matches);
+        const fields = ['input', 'output', 'cacheRead', 'cacheWrite', 'reasoning'] as const;
+        if (!incoming.every((o) => matches(o) && o.complete && typeof o.id === 'string' &&
+          fields.every((f) => number(o[f]) !== null)) ||
+          new Set(incoming.map((o) => o.id)).size !== incoming.length ||
+          this.codexCoverage.get(key) === 'compaction-unverified' && !incoming.some((o) => o.purpose === 'compaction') ||
+          !fields.every((f) => incoming.reduce((sum, o) => sum + o[f]!, 0) >= existing.reduce((sum, o) => sum + (o[f] ?? 0), 0))) return;
+        for (const o of existing) this.observations.delete(o.id);
+        this.codexCoverage.delete(key);
+        for (const o of incoming) this.put(o);
+        return;
+      }
+    }
     this.sessionId = event.session_id ?? event.sessionID ?? event.thread_id ?? this.sessionId;
     if (!event.parent_tool_use_id) this.model = event.model ?? event.message?.model ?? this.model;
     if (event.type === 'usage.delta' || event.type === 'usage_observed') {
@@ -32,7 +58,8 @@ export class AgentUsageAccumulator {
       this.put({
         id: event.eventId, model: event.model ?? this.model,
         provider: event.provider ?? (codex ? 'openai-codex' : 'unknown'),
-        sessionId: event.sessionId ?? this.sessionId, purpose: event.purpose,
+        sessionId: event.sessionId ?? this.sessionId, turnId: event.turnId, purpose: event.purpose,
+        partialReason: event.partialReason,
         scope: 'request', complete: event.complete !== false,
         ...counts(raw, codex ? 'codex' : 'native'),
         ...(number(raw.cost?.total) ? { reportedCost: raw.cost.total } : {}), raw,
@@ -102,6 +129,8 @@ export class AgentUsageAccumulator {
       reportedCost: number(item.reportedCost) ?? undefined,
     };
     if (!hasCounts(normalized)) return;
+    const reason = this.codexCoverage.get(JSON.stringify([item.sessionId, item.turnId]));
+    if (this.agent === 'codex' && reason) { normalized.complete = false; normalized.partialReason = reason; }
     this.observations.set(item.id, normalized);
   }
 }

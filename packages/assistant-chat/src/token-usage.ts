@@ -12,6 +12,8 @@ export type UsageObservation = TokenCounts & {
   model: string;
   provider: string;
   sessionId?: string;
+  turnId?: string;
+  partialReason?: string;
   purpose?: string;
   scope: 'request' | 'thread' | 'tree';
   complete: boolean;
@@ -37,6 +39,7 @@ export type UsageTotals = TokenCounts & {
   executions: number;
   missing: number;
   partial: number;
+  partialReasons?: string[];
   running: number;
   interrupted: number;
   recovering: number;

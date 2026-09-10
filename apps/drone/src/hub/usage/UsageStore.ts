@@ -122,6 +122,7 @@ export class UsageStore {
     if (filter.to) { conditions.push('e.started_at<?'); values.push(filter.to); }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const query = (group?: string) => this.db.prepare(`SELECT ${group ? `${group} AS key,` : ''}
+      json_group_array(DISTINCT CASE WHEN o.complete=0 THEN json_extract(o.data_json,'$.partialReason') END) AS reasons_json,
       COUNT(DISTINCT e.id) AS executions,
       COUNT(DISTINCT CASE WHEN o.id IS NULL THEN e.id END) AS missing,
       COUNT(DISTINCT CASE WHEN e.status IN ('interrupted','recovering') OR o.id IS NOT NULL AND (o.complete=0 OR o.input IS NULL OR o.output IS NULL OR o.cache_read IS NULL OR o.cache_write IS NULL) THEN e.id END) AS partial,
@@ -134,7 +135,10 @@ export class UsageStore {
       SUM(o.estimated_cost) AS estimatedCost, SUM(o.reported_cost) AS reportedCost,
       COUNT(CASE WHEN o.id IS NOT NULL AND o.estimated_cost IS NULL THEN 1 END) AS unpriced
       FROM executions e LEFT JOIN observations o ON o.execution_id=e.id ${where}
-      ${group ? `GROUP BY ${group} ORDER BY total DESC LIMIT 1000` : ''}`).all(...values) as Array<UsageTotals & { key: string }>;
+      ${group ? `GROUP BY ${group} ORDER BY total DESC LIMIT 1000` : ''}`).all(...values).map((row: any) => {
+        const { reasons_json, ...totals } = row;
+        return { ...totals, partialReasons: JSON.parse(reasons_json).filter((reason: unknown) => typeof reason === 'string') };
+      }) as Array<UsageTotals & { key: string }>;
     const groups = query(columns[filter.groupBy ?? 'agent']).map((row) => ({ ...row, key: row.key ?? 'unknown', label: row.key ?? 'Unattributed' }));
     if (filter.groupBy === 'chat') {
       const labels = new Map((this.db.prepare('SELECT chat_id, chat_name FROM executions ORDER BY updated_at').all() as any[]).map((r) => [r.chat_id, r.chat_name]));

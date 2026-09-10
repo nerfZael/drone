@@ -1,6 +1,6 @@
 import React from 'react';
 import { useUsageData } from './useUsageData';
-import { usageCost, usageNumber } from './usage-format';
+import { usageCost, usageNumber, usagePartialReason } from './usage-format';
 
 export function ChatUsageSummary({ droneId, chatName }: { droneId: string; chatName: string }) {
   const { data, error, refresh } = useUsageData(`/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/usage`);
@@ -25,7 +25,8 @@ export function ChatUsageSummary({ droneId, chatName }: { droneId: string; chatN
       {totals.interrupted > 0 ? <p>{totals.interrupted} executions were interrupted by a Hub restart. Recorded tokens are retained; final usage may be missing.</p> : null}
       {totals.recovering > 0 ? <p>Reconnecting to the daemon for {totals.recovering} executions. Their last recorded totals are shown.</p> : null}
       {totals.missing > 0 ? <p>{totals.missing} executions have no usage report.</p> : null}
-      {totals.partial > 0 ? <p>{totals.partial} executions have incomplete coverage, including potentially unreported internal agents.</p> : null}
+      {totals.partial > 0 ? <p>{totals.partial} executions have incomplete coverage.</p> : null}
+      {totals.partialReasons?.map((reason) => <p key={reason}>{usagePartialReason(reason)}</p>)}
       {totals.unpriced > 0 ? <p>{totals.unpriced} usage records are not priced.</p> : null}
       <p>Recorded since {new Date(data!.trackingSince).toLocaleString()}. Copied history is excluded. Includes hidden work when the agent reports it.</p>
     </div> : null}

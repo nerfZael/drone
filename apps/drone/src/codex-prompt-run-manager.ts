@@ -1,3 +1,4 @@
+import { readCodexRolloutUsage } from './CodexRolloutUsage';
 import { CodexUsageTracker } from './CodexUsageTracker';
 import crypto from 'node:crypto';
 
@@ -58,6 +59,8 @@ export type CodexPromptRun = {
   finishedAt?: string;
   threadId?: string;
   turnId?: string;
+  rolloutPath?: string;
+  usageModel?: string;
   stdoutPath: string;
   stderrPath: string;
   transcript?: unknown;
@@ -146,6 +149,7 @@ type CodexPromptRunManagerOptions<TMessage extends CodexPromptMessage> = {
 
 type CodexRunSession = {
   usageTracker: CodexUsageTracker;
+  rolloutPath?: string;
   model?: string;
   key: string;
   connection: CodexAppServerConnection;
@@ -298,7 +302,8 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
   }
 
   async failInterrupted(message: TMessage, reason: string, alreadyMutating = false): Promise<void> {
-    const run = await this.runForMessage(message);
+    const savedRun = await this.runForMessage(message);
+    const run = savedRun ? await this.reconcileUsage(savedRun, alreadyMutating) : null;
     if (run) {
       const recoveredTerminal = terminalRunResultFromDurableProjection(run);
       if (isTerminal(run.state) || recoveredTerminal) {
@@ -660,6 +665,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
         const parentThreadId = String(resumed?.thread?.parentThreadId ?? '').trim();
         if (!parentThreadId) {
           session.threadId = String(resumed?.thread?.id ?? session.threadId);
+          session.rolloutPath = resumed.thread?.path ?? undefined;
           session.threadReady = true;
           session.model = spec.model ?? resumed.model ?? session.model;
           return session.threadId;
@@ -704,6 +710,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
         }
       }
       session.threadId = threadId;
+      session.rolloutPath = forked.thread?.path ?? undefined;
       session.threadReady = true;
       session.model = spec.model ?? forked.model ?? session.model;
       return threadId;
@@ -718,6 +725,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     const threadId = String(started?.thread?.id ?? '').trim();
     if (!threadId) throw new Error('Codex App Server did not return a thread id');
     session.threadId = threadId;
+    session.rolloutPath = started.thread?.path ?? undefined;
     session.threadReady = true;
     session.model = spec.model ?? started.model ?? session.model;
     return threadId;
@@ -842,7 +850,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
       if (!turnId) throw new Error('Codex App Server did not return a turn id');
       session.activeTurnId = turnId;
       session.observedTurnIds.add(turnId);
-      run = { ...run, threadId, turnId, updatedAt: this.now() };
+      run = { ...run, threadId, turnId, rolloutPath: session.rolloutPath, usageModel: message.codexAppServer.model ?? session.model, updatedAt: this.now() };
       await this.options.mutate(async () => {
         await this.options.saveRun(run);
         const current = await this.options.loadMessage(message.id);
@@ -961,6 +969,16 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     };
   }
 
+  private async reconcileUsage(run: CodexPromptRun, alreadyMutating = false): Promise<CodexPromptRun> {
+    if (!run.rolloutPath || !run.threadId || !run.turnId) return run;
+    const observations = await readCodexRolloutUsage(run.rolloutPath, run.threadId, run.turnId, run.usageModel);
+    if (!observations) return run;
+    const append = () => this.options.appendRunEvents(run, [{
+      type: 'usage.snapshot', sessionId: run.threadId, turnId: run.turnId, observations,
+    }]);
+    return await (alreadyMutating ? append() : this.options.mutate(append));
+  }
+
   private async completeTurn(
     session: CodexRunSession,
     notification: CodexAppServerNotification,
@@ -986,8 +1004,9 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     const status = String(turn?.status ?? 'completed');
     const finishedAt = this.now();
     const runState = terminalState(status);
+    const reconciled = await this.reconcileUsage(run);
     const completedRun: CodexPromptRun = {
-      ...run,
+      ...reconciled,
       state: runState,
       finishedAt,
       updatedAt: finishedAt,
@@ -1055,7 +1074,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     const runs = [session.activeRun, session.startingRun].filter((run): run is CodexPromptRun =>
       Boolean(run),
     );
-    for (const run of runs) await this.failRunAndMessages(run, error);
+    for (const run of runs) await this.failRunAndMessages(await this.reconcileUsage(run), error);
     const finishedAt = this.now();
     await this.options.mutate(async () => {
       for (const id of session.queuedMessageIds) {
