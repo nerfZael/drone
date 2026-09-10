@@ -15,7 +15,9 @@ export function codexModelRoute(selection?: string): { provider: 'openrouter' | 
 export function codexProviderLaunchScript(script: string, selection?: string): string {
   if (codexModelRoute(selection).provider !== 'openrouter') return script;
   // Only fixed, non-secret configuration is appended to the managed launch command.
-  return script + ` -c 'model_provider="${CODEX_OPENROUTER_PROVIDER}"'` +
+  // OpenRouter handles Codex's built-in web search through its server-tools
+  // adapter, which can stall or return provider 429s even for simple greetings.
+  return script + ` -c 'web_search="disabled"'` + ` -c 'model_provider="${CODEX_OPENROUTER_PROVIDER}"'` +
     ` -c 'model_providers.${CODEX_OPENROUTER_PROVIDER}={name="OpenRouter",base_url="https://openrouter.ai/api/v1",wire_api="responses",auth={command="printenv",args=["DRONE_CODEX_OPENROUTER_API_KEY"]}}'`;
 }
 
