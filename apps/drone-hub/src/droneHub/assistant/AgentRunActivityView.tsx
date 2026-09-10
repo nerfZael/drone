@@ -137,7 +137,7 @@ export function AgentRunActivityView({
 
   return (
     <div ref={rootRef} data-agent-run-activity={displayActivity?.source}>
-      <div className="px-3">
+      <div>
         <AgentRunSummaryLine
           active={active}
           durationMs={durationMs}
@@ -223,7 +223,7 @@ export function AgentRunActivityView({
       ) : null}
       {interstitialContent}
       {finalAssistantItem ? (
-        <div className="mt-1 px-3">
+        <div className="mt-1">
           <AssistantMessageRow
             message={finalAssistantItem.message}
             forkCheckpointId={forkCheckpointId}

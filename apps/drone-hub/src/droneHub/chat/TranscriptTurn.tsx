@@ -350,7 +350,7 @@ export const TranscriptTurn = React.memo(
         ) : null}
 
         {!activity && activitySummary ? (
-          <div className="px-3">
+          <div>
             <AgentRunSummaryLine
               active={false}
               durationMs={completedRunDurationMs ?? 0}
@@ -371,7 +371,7 @@ export const TranscriptTurn = React.memo(
               toggleLabel="run details"
             />
             {activityLoadError ? (
-              <div className="px-3 pb-1 text-10 text-[var(--red)]">
+              <div className="pb-1 text-10 text-[var(--red)]">
                 {activityLoadError}
               </div>
             ) : null}

@@ -238,7 +238,7 @@ describe('completed external transcript presentation', () => {
     expect(html).not.toContain('Show plan');
     expect(html).not.toContain('Inspect the file</span>');
     expect(html).not.toContain('data-tool-status="pending"');
-    expect(html).toContain('class="mt-1 px-3"');
+    expect(html).toContain('class="mt-1"');
     expect(html.match(/The file is ready\./g)).toHaveLength(1);
   });
 
