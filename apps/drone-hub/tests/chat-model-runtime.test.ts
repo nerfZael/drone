@@ -176,3 +176,30 @@ describe('chat model runtime', () => {
     expect(formatModelDisplayLabel('gpt Test Preview')).toBe('GPT Test Preview');
   });
 });
+
+test('Codex picker keeps OpenRouter routes distinct and clears unsupported reasoning', () => {
+  const updates: any[] = [];
+  const opts = {
+    hasChats: true, modelControlEnabled: true, currentAgentKey: 'builtin:codex',
+    models: [
+      { id: 'vendor/model', label: 'Model', reasoningLevels: ['high'], defaultReasoningLevel: 'high' },
+      { id: 'openrouter:vendor/model', label: 'Model · OpenRouter', reasoningLevels: [], defaultReasoningLevel: '' },
+    ],
+    currentModel: 'vendor/model', currentReasoning: 'high', modelDisabled: false,
+    loading: false, error: null, stale: false, transcripts: [], onUpdate: (settings: any) => updates.push(settings),
+  };
+  const config = buildExternalAgentComposerControls(opts);
+  const picker = config?.controls.find((control) => control.kind === 'model-picker');
+  if (!picker || picker.kind !== 'model-picker') throw new Error('model picker missing');
+  expect(picker.options.map((option) => option.id)).toContain('openrouter:vendor/model');
+  expect(picker.options.map((option) => option.id)).toContain('vendor/model');
+  expect(picker.searchable).toBe(true);
+  picker.onSelect({ provider: 'external', id: 'openrouter:vendor/model' }, 'model');
+  expect(updates).toEqual([{ model: 'openrouter:vendor/model', reasoning: null }]);
+  const switched = buildExternalAgentComposerControls({ ...opts, currentModel: 'openrouter:vendor/model', currentReasoning: null });
+  const switchedPicker = switched?.controls.find((control) => control.kind === 'model-picker');
+  expect(switchedPicker?.showReasoning).toBe(false);
+  if (!switchedPicker || switchedPicker.kind !== 'model-picker') throw new Error('model picker missing');
+  switchedPicker.onSelect({ provider: 'external', id: 'vendor/model' }, 'model');
+  expect(updates.at(-1)).toEqual({ model: 'vendor/model', reasoning: 'high' });
+});

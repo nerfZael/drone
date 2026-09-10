@@ -1,3 +1,4 @@
+import { codexModelRoute } from '../codex-model-routing';
 import { getUsageJournal, type ExternalUsageWatch } from './usage/UsageJournal';
 import { UsageRecoveryService } from './usage/UsageRecoveryService';
 import { openCodeUsagePromptScript } from './usage/openCodeUsagePromptScript';
@@ -619,10 +620,16 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         hostPort,
       });
     }
+    const openrouterApiKey = codexModelRoute(opts.model).provider === 'openrouter'
+      ? (await resolveEffectiveProviderApiKeySettings('openrouter')).apiKey : undefined;
+    if (codexModelRoute(opts.model).provider === 'openrouter' && !openrouterApiKey) {
+      throw new Error('Configure an OpenRouter API key in Hub settings before using this model.');
+    }
     const payload = {
       id: opts.id,
       sessionKey: opts.sessionKey,
       launchScript: opts.launchScript,
+      ...(openrouterApiKey ? { openrouterApiKey } : {}),
       ...(opts.requireDroneHubMcp ? { requireDroneHubMcp: true } : {}),
       prompt: opts.prompt,
       ...(opts.imagePaths?.length ? { imagePaths: opts.imagePaths } : {}),

@@ -458,6 +458,7 @@ export async function codexPromptEnqueue(
     approvalsReviewer?: 'user' | 'auto_review';
     sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access';
     model?: string;
+    openrouterApiKey?: string;
     effort?: string;
   },
   options?: { signal?: AbortSignal },
@@ -465,7 +466,7 @@ export async function codexPromptEnqueue(
   return (await req(
     client,
     'POST',
-    '/v1/codex/enqueue',
+    payload.model?.startsWith('openrouter:') ? '/v1/codex/enqueue-provider' : '/v1/codex/enqueue',
     payload,
     options,
   )) as CodexPromptEnqueueResponse;

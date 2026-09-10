@@ -23,6 +23,7 @@ export const CODEX_APP_SERVER_REQUEST_RESOLVED = Symbol('codex-app-server-reques
 export type CodexAppServerConnectionOptions = {
   launchScript: string;
   cwd?: string;
+  environment?: () => Promise<NodeJS.ProcessEnv>;
   onRequest?: (request: CodexAppServerRequest) => any | Promise<any>;
   onNotification?: (notification: CodexAppServerNotification) => void | Promise<void>;
   onStderr?: (text: string) => void | Promise<void>;
@@ -69,9 +70,10 @@ export class CodexAppServerConnection {
   private async start(): Promise<void> {
     const launchScript = String(this.options.launchScript ?? '').trim();
     if (!launchScript) throw new Error('missing Codex App Server launch script');
+    const environment = await this.options.environment?.();
     const child = spawn('bash', ['-lc', launchScript], {
       ...(this.options.cwd ? { cwd: this.options.cwd } : {}),
-      env: process.env,
+      env: { ...process.env, ...environment },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     this.child = child;
@@ -220,6 +222,16 @@ export class CodexAppServerConnection {
   async call(method: string, params: any, timeoutMs?: number): Promise<any> {
     await this.ready();
     return await this.request(method, params, timeoutMs);
+  }
+
+  async close(): Promise<void> {
+    const child = this.child;
+    if (!child || this.exited) return;
+    await new Promise<void>((resolve) => {
+      const timeout = setTimeout(() => child.kill('SIGKILL'), 5_000);
+      child.once('exit', () => { clearTimeout(timeout); resolve(); });
+      child.kill('SIGTERM');
+    });
   }
 
   stop(): void {

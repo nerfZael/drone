@@ -1,3 +1,4 @@
+import { getCodexOpenRouterCatalog } from './codex-openrouter-catalog';
 import { registerUsageRoutes } from './routes/usage-routes';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
@@ -4098,12 +4099,20 @@ async function startDroneHubApiServerWithLifecycle(
     runtime?: DroneRuntime;
     agentId: BuiltinAgentId;
     forceRefresh?: boolean;
-  }) =>
-    agentModelCatalogService.get({
+  }) => {
+    const standard = agentModelCatalogService.get({
       agentId: input.agentId,
       target: sharedAgentCatalogTarget(input),
       forceRefresh: input.forceRefresh,
     });
+    if (input.agentId !== 'codex') return standard;
+    return Promise.all([standard, getCodexOpenRouterCatalog(input.forceRefresh)]).then(([catalog, openrouter]) => ({
+      ...catalog,
+      models: [...catalog.models, ...openrouter.models],
+      ...('stale' in openrouter && openrouter.stale ? { stale: true } : {}),
+      ...('error' in openrouter ? { error: [catalog.error, openrouter.error].filter(Boolean).join(' ') } : {}),
+    }));
+  };
   const host = opts.host ?? '127.0.0.1';
   const containerMcpHost = String(opts.containerMcpHost ?? '').trim();
   const containerMcpPort = Number(opts.containerMcpPort ?? NaN);
