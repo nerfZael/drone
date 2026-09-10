@@ -1,3 +1,4 @@
+import { captureLegacyTerminalSnapshot } from './terminal-legacy-snapshot';
 import { registerUsageRoutes } from './routes/usage-routes';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
@@ -261,7 +262,6 @@ import {
   updateHostRef,
 } from './repoOps';
 import { ShortLivedSingleFlightCache } from './repo-changes-scan-cache';
-import { rejectWebSocketUpgrade } from './hub-auth';
 import {
   bashQuote,
   encodeRemotePath,
@@ -303,7 +303,10 @@ import {
 import { DroneChatBroadcaster } from './drone-chat-broadcaster';
 import { DroneRegistryBroadcaster, type DroneRegistrySnapshot } from './drone-registry-broadcaster';
 import { createTerminalWebSocketServer } from './terminal-websocket-server';
-import { createTerminalWebSocketUpgradeHandler } from './terminal-websocket-upgrade';
+import {
+  createTerminalWebSocketUpgradeHandler,
+  resolveDroneOrRejectUpgrade,
+} from './terminal-websocket-upgrade';
 import { CompanionRuntime } from './companion/companion-runtime';
 import { CompanionWorkspaceService } from './companion/companion-workspaces';
 import { registerCompanionRoutes } from './companion/companion-routes';
@@ -1107,7 +1110,7 @@ async function resolveDroneContainerContext(opts: {
 }
 
 async function withLockedDroneContainer<T>(
-  opts: { requestedDroneName: string; droneEntry: any },
+  opts: { requestedDroneName: string; droneEntry: any; onTiming?: (phase: string, started: number) => void },
   fn: (ctx: DroneContainerContext) => Promise<T>,
 ): Promise<T> {
   const requestedDroneName = String(opts.requestedDroneName ?? '').trim();
@@ -1117,8 +1120,14 @@ async function withLockedDroneContainer<T>(
     ? `drone:${seedId}`
     : `drone-name:${String(seedEntry?.containerName ?? seedEntry?.name ?? requestedDroneName)}`;
 
+  const started = opts.onTiming ? performance.now() : 0;
   return await withDroneOpLock(lockKey, async () => {
-    return await fn(await resolveDroneContainerContext(opts));
+    opts.onTiming?.('container-lock-wait', started);
+    const resolving = opts.onTiming ? performance.now() : 0;
+    let context: DroneContainerContext;
+    try { context = await resolveDroneContainerContext(opts); }
+    finally { opts.onTiming?.('container-context', resolving); }
+    return await fn(context);
   });
 }
 
@@ -1329,20 +1338,6 @@ function droneEnvironmentPayload(
     repoUpdatedAt: env.repo.updatedAt,
     autoApplyToNewContainerDrones: env.repo.autoApplyToNewContainerDrones,
   };
-}
-
-async function resolveDroneOrRejectUpgrade(
-  socket: any,
-  droneRef: string,
-): Promise<ResolvedDrone | null> {
-  return resolveDroneFromRegistryRef(droneRef, {
-    onStillStarting: () => {
-      rejectWebSocketUpgrade(socket, 409, 'Conflict');
-    },
-    onUnknown: () => {
-      rejectWebSocketUpgrade(socket, 404, 'Not Found');
-    },
-  });
 }
 
 function fleetError(message: string, status: number = 400): Error & { status?: number } {
@@ -3446,13 +3441,13 @@ async function fileExists(p: string): Promise<boolean> {
   }
 }
 
-async function waitForFile(p: string, timeoutMs: number): Promise<boolean> {
+async function waitForFile(p: string, timeoutMs: number, cancelled = () => false): Promise<boolean> {
   const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
+  while (!cancelled() && Date.now() - start < timeoutMs) {
     if (await fileExists(p)) return true;
     await new Promise((r) => setTimeout(r, 50));
   }
-  return await fileExists(p);
+  return !cancelled() && await fileExists(p);
 }
 
 function appleScriptQuote(s: string): string {
@@ -3556,9 +3551,12 @@ async function spawnTerminalWithBash(
 
       const result = await new Promise<{ ok: true } | { ok: false; error: string }>((resolve) => {
         let settled = false;
+        let graceTimer: ReturnType<typeof setTimeout> | undefined;
         const done = (v: { ok: true } | { ok: false; error: string }) => {
           if (settled) return;
           settled = true;
+          clearTimeout(graceTimer);
+          if (v.ok) child.unref();
           resolve(v);
         };
 
@@ -3574,10 +3572,15 @@ async function spawnTerminalWithBash(
         });
 
         child.once('spawn', () => {
+          // A confirmed wrapper launch can complete immediately; keep the
+          // grace period only for launchers without a marker yet.
+          if (markerPath) void waitForFile(markerPath, 800, () => settled).then((started) => {
+            if (started) done({ ok: true });
+          });
           // Some terminal emulators will spawn then immediately exit non-zero if they can't
           // connect to the GUI session (DBus/DISPLAY/etc). Give it a brief window to fail,
           // otherwise treat as success and detach.
-          setTimeout(() => {
+          graceTimer = setTimeout(() => {
             if (exited) {
               if (exitCode != null && exitCode !== 0) {
                 done({
@@ -4281,6 +4284,10 @@ async function startDroneHubApiServerWithLifecycle(
 
   const wss = createTerminalWebSocketServer({
     isStaleSessionError: isStaleDockerExecErrorMessage,
+    captureLegacySnapshot: (context) => captureLegacyTerminalSnapshot(context, (command, args) =>
+      context.runtime === 'host'
+        ? runHostCommand(command, args, { timeoutMs: 2500 })
+        : dvmExec(context.containerName!, command, args, { timeoutMs: 2500 })),
   });
 
   const callLocalHubApi = async (
@@ -6234,7 +6241,6 @@ async function startDroneHubApiServerWithLifecycle(
     ensureHubSessionRunning,
     isSafeTmuxSessionName,
     isStaleDockerExecErrorMessage,
-    loadRegistry,
     normalizeChatName,
     normalizeDroneIdentity,
     normalizeDroneUiCwdForRuntime,
@@ -6244,7 +6250,7 @@ async function startDroneHubApiServerWithLifecycle(
     resolveChatTmuxCommand,
     resolveContainerManagedEnvVars,
     resolveDroneDaemonClientForEntry,
-    resolveDroneEnvironmentConfig,
+    resolveCanonicalDroneEnvironmentConfig,
     resolveDroneOrRespond,
     resolveHostTerminalShellCommand,
     resolveHubAgentCommand,

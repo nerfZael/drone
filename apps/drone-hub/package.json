@@ -14,7 +14,8 @@
     "lint": "bun run typecheck",
     "preview": "vite preview",
     "smoke": "node scripts/smoke-cli.cjs",
-    "smoke:resize": "node scripts/smoke-workspace-resize.cjs"
+    "smoke:resize": "node scripts/smoke-workspace-resize.cjs",
+    "smoke:terminal": "node scripts/smoke-terminal.cjs"
   },
   "dependencies": {
     "@blip/protocol": "workspace:*",

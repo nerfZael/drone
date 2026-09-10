@@ -1,5 +1,15 @@
+import { terminalStartupTiming } from './terminal-startup-timing';
 import crypto from 'node:crypto';
 import os from 'node:os';
+import { terminalEnsure, type DroneClient } from '../host/api';
+
+function storedTerminalClient(drone: any): { client: DroneClient } | null {
+  const port = Number(drone?.hostPort);
+  const token = String(drone?.token ?? '').trim();
+  return Number.isInteger(port) && port > 0 && port <= 65535 && token
+    ? { client: { baseUrl: `http://127.0.0.1:${port}`, token } }
+    : null;
+}
 
 import { bashQuote, shellQuoteIfNeeded } from './hub-format';
 import { readJsonBody, sendJson as json } from './hub-http';
@@ -46,7 +56,6 @@ function createTerminalRouteHandler(deps: TerminalRouteDependencies): LegacyRout
     ensureHubSessionRunning,
     isSafeTmuxSessionName,
     isStaleDockerExecErrorMessage,
-    loadRegistry,
     normalizeChatName,
     normalizeDroneIdentity,
     normalizeDroneUiCwdForRuntime,
@@ -56,7 +65,7 @@ function createTerminalRouteHandler(deps: TerminalRouteDependencies): LegacyRout
     resolveChatTmuxCommand,
     resolveContainerManagedEnvVars,
     resolveDroneDaemonClientForEntry,
-    resolveDroneEnvironmentConfig,
+    resolveCanonicalDroneEnvironmentConfig,
     resolveDroneOrRespond,
     resolveHostTerminalShellCommand,
     resolveHubAgentCommand,
@@ -82,12 +91,15 @@ function createTerminalRouteHandler(deps: TerminalRouteDependencies): LegacyRout
         parts[3] === 'terminal' &&
         parts[4] === 'open'
       ) {
+        const openStarted = performance.now();
         const droneRef = decodeURIComponent(parts[2]);
         const resolved = await resolveDroneOrRespond(res, droneRef);
         if (!resolved) return;
         const droneId = resolved.id;
         const d = resolved.drone;
         const runtime = droneRuntime(d);
+        const timing = terminalStartupTiming(res, runtime, openStarted);
+        timing.add('resolve-drone', openStarted);
         const droneName = String(d?.name ?? droneRef).trim() || droneRef;
 
         const modeRaw = String(u.searchParams.get('mode') ?? 'shell')
@@ -98,8 +110,10 @@ function createTerminalRouteHandler(deps: TerminalRouteDependencies): LegacyRout
         const requestedSessionName = String(u.searchParams.get('session') ?? '').trim();
         const createNewShell = u.searchParams.get('create') === '1';
         const cwd = normalizeDroneUiCwdForRuntime(d, u.searchParams.get('cwd') ?? null);
-        const regAny: any = await loadRegistry();
-        const managedEnv = resolveDroneEnvironmentConfig(regAny, d).resolvedVars;
+        const environment: any = await timing.measure('load-environment', () =>
+          resolveCanonicalDroneEnvironmentConfig(d),
+        );
+        const managedEnv = environment.resolvedVars;
         const runtimeEnv = resolveContainerManagedEnvVars(d, managedEnv);
         const managedEnvLines = buildEnvExportLines(managedEnv);
 
@@ -150,9 +164,66 @@ function createTerminalRouteHandler(deps: TerminalRouteDependencies): LegacyRout
           } else {
             shellSessionName = createNewShell ? createHubShellSessionName() : hubShellSessionName();
           }
+          // Host daemons share a tmux server. The legacy default name cannot
+          // identify a particular drone, including when prewarming its shell.
+          if (runtime === 'host' && shellSessionName === hubShellSessionName()) {
+            const identity = crypto.createHash('sha256').update(droneId).digest('hex').slice(0, 24);
+            shellSessionName = hubShellSessionName(`host-${identity}`);
+          }
         }
 
+        let legacyDaemon = false;
         try {
+          // Ready shells use the daemon directly. Container lifecycle recovery
+          // below remains available when the daemon is stopped or predates this API.
+          const fastDaemon = storedTerminalClient(d);
+          if (mode === 'shell' && fastDaemon) {
+            const shell =
+              runtime === 'host'
+                ? resolveHostTerminalShellCommand(process.env)
+                : resolveHubTerminalShellCommand();
+            const env = runtime === 'host' ? managedEnv : runtimeEnv;
+            const script = [
+              'set -e',
+              'export TERM=xterm-256color',
+              'export COLORTERM=truecolor',
+              ...buildEnvExportLines(env),
+              `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
+              `cd ${bashQuote(cwd)} 2>/dev/null || cd /`,
+              shell,
+            ].join('\n');
+            try {
+              const result = await timing.measure('terminal-ensure', () =>
+                terminalEnsure(fastDaemon.client, {
+                  session: shellSessionName,
+                  cmd: 'bash',
+                  args: ['-lc', script],
+                  cwd,
+                  env,
+                }),
+              );
+              timing.route('daemon');
+              json(res, 200, {
+                ok: true,
+                id: droneId,
+                name: droneName,
+                mode,
+                chat: null,
+                cwd,
+                sessionName: shellSessionName,
+                reused: result.reused,
+                diagnostics: timing.result(result.diagnostics),
+                transport: result.transport,
+              });
+              return;
+            } catch (error: any) {
+              // Never retry a rejected creation as a different operation. Only
+              // unavailable/old daemons need the established recovery path.
+              if (Number(error?.statusCode) && Number(error.statusCode) !== 404) throw error;
+              legacyDaemon = Number(error?.statusCode) === 404;
+              timing.fallback(legacyDaemon ? 'daemon-unsupported' : 'daemon-unavailable');
+            }
+          }
           if (shouldAwaitTerminalSkillSync(mode)) {
             await syncSkillLibraryForDrone({ droneId, droneEntry: d });
             await syncMcpServersForDrone({ droneId, droneEntry: d });
@@ -161,7 +232,9 @@ function createTerminalRouteHandler(deps: TerminalRouteDependencies): LegacyRout
             await syncRepoAgentsInstructionsForDrone({ droneId, droneEntry: d });
           }
           if (runtime === 'host') {
-            const daemon = await resolveDroneDaemonClientForEntry(d);
+            const daemon: any = await timing.measure('resolve-daemon', () =>
+              resolveDroneDaemonClientForEntry(d),
+            );
             if (!daemon) {
               json(res, 409, {
                 ok: false,
@@ -171,7 +244,9 @@ function createTerminalRouteHandler(deps: TerminalRouteDependencies): LegacyRout
               });
               return;
             }
-            await waitForDroneDaemonReady(daemon.client, defaultDaemonReadyTimeoutMs());
+            await timing.measure('daemon-ready', () =>
+              waitForDroneDaemonReady(daemon.client, defaultDaemonReadyTimeoutMs()),
+            );
             const sessionName = mode === 'agent' ? hubChatSessionName(chatName) : shellSessionName;
             if (mode === 'agent') await ensureChatEntry({ droneId, chatName });
             const agentCmd =
@@ -180,21 +255,25 @@ function createTerminalRouteHandler(deps: TerminalRouteDependencies): LegacyRout
                 : resolveHostTerminalShellCommand(process.env);
             const launchScript = [
               'set -euo pipefail',
+              'export TERM=xterm-256color',
+              'export COLORTERM=truecolor',
               ...managedEnvLines,
               `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
               `cd ${bashQuote(cwd)} 2>/dev/null || cd /`,
               `exec ${agentCmd}`,
             ].join('\n');
             try {
-              await procStart(daemon.client, {
-                session: sessionName,
-                cmd: 'bash',
-                args: ['-lc', launchScript],
-                cwd,
-                env: managedEnv,
-                force: false,
-                terminal: true,
-              });
+              await timing.measure('start-session', () =>
+                procStart(daemon.client, {
+                  session: sessionName,
+                  cmd: 'bash',
+                  args: ['-lc', launchScript],
+                  cwd,
+                  env: managedEnv,
+                  force: false,
+                  terminal: true,
+                }),
+              );
             } catch (e: any) {
               const msg = String(e?.message ?? e ?? '')
                 .trim()
@@ -213,13 +292,17 @@ function createTerminalRouteHandler(deps: TerminalRouteDependencies): LegacyRout
               chat: mode === 'agent' ? chatName : null,
               cwd,
               sessionName,
+              diagnostics: timing.result(),
+              ...(legacyDaemon ? { transport: 'legacy' } : {}),
             });
             return;
           }
 
+          const lockStarted = performance.now();
           await withLockedDroneContainer(
-            { requestedDroneName: droneName, droneEntry: d },
+            { requestedDroneName: droneName, droneEntry: d, onTiming: timing.add },
             async ({ containerName, droneEntry, droneId: lockedId }: any) => {
+              timing.add('container-lock-and-readiness', lockStarted);
               const idForOps =
                 normalizeDroneIdentity(lockedId) ||
                 normalizeDroneIdentity((droneEntry as any)?.id) ||
@@ -250,18 +333,21 @@ function createTerminalRouteHandler(deps: TerminalRouteDependencies): LegacyRout
                   chat: chatName,
                   cwd,
                   sessionName,
+                  ...(legacyDaemon ? { transport: 'legacy' } : {}),
                 });
                 return;
               }
 
               const sessionName = shellSessionName;
-              await ensureHubSessionRunning({
-                containerName,
-                sessionName,
-                command: resolveHubTerminalShellCommand(),
-                cwd,
-                envVars: runtimeEnv,
-              });
+              await timing.measure('ensure-container-session', () =>
+                ensureHubSessionRunning({
+                  containerName,
+                  sessionName,
+                  command: resolveHubTerminalShellCommand(),
+                  cwd,
+                  envVars: { TERM: 'xterm-256color', COLORTERM: 'truecolor', ...runtimeEnv },
+                }),
+              );
               json(res, 200, {
                 ok: true,
                 id: idForOps,
@@ -270,6 +356,8 @@ function createTerminalRouteHandler(deps: TerminalRouteDependencies): LegacyRout
                 chat: null,
                 cwd,
                 sessionName,
+                diagnostics: timing.result(),
+                ...(legacyDaemon ? { transport: 'legacy' } : {}),
               });
             },
           );
@@ -278,6 +366,7 @@ function createTerminalRouteHandler(deps: TerminalRouteDependencies): LegacyRout
           json(res, 500, {
             ok: false,
             error: e?.message ?? String(e),
+            diagnostics: timing.result(),
             id: droneId,
             name: droneName,
             mode,
@@ -315,8 +404,9 @@ function createTerminalRouteHandler(deps: TerminalRouteDependencies): LegacyRout
         const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
 
         try {
-          if (runtime === 'host') {
-            const daemon = await resolveDroneDaemonClientForEntry(drone);
+          if (runtime === 'host' || storedTerminalClient(drone)) {
+            const daemon =
+              storedTerminalClient(drone) ?? (await resolveDroneDaemonClientForEntry(drone));
             if (!daemon) {
               json(res, 409, {
                 ok: false,
@@ -327,7 +417,6 @@ function createTerminalRouteHandler(deps: TerminalRouteDependencies): LegacyRout
               });
               return;
             }
-            await waitForDroneDaemonReady(daemon.client, defaultDaemonReadyTimeoutMs());
             await procStop(daemon.client, { session: sessionName });
             json(res, 200, { ok: true, id: droneId, name: droneName, sessionName });
             return;
@@ -416,8 +505,9 @@ function createTerminalRouteHandler(deps: TerminalRouteDependencies): LegacyRout
         );
 
         try {
-          if (runtime === 'host') {
-            const daemon = await resolveDroneDaemonClientForEntry(drone);
+          if (runtime === 'host' || storedTerminalClient(drone)) {
+            const daemon =
+              storedTerminalClient(drone) ?? (await resolveDroneDaemonClientForEntry(drone));
             if (!daemon) {
               json(res, 409, {
                 ok: false,
@@ -428,7 +518,6 @@ function createTerminalRouteHandler(deps: TerminalRouteDependencies): LegacyRout
               });
               return;
             }
-            await waitForDroneDaemonReady(daemon.client, defaultDaemonReadyTimeoutMs());
             const out = await droneTerminalOutput(daemon.client, {
               session: sessionName,
               view,
@@ -559,8 +648,9 @@ function createTerminalRouteHandler(deps: TerminalRouteDependencies): LegacyRout
         }
 
         try {
-          if (runtime === 'host') {
-            const daemon = await resolveDroneDaemonClientForEntry(drone);
+          if (runtime === 'host' || storedTerminalClient(drone)) {
+            const daemon =
+              storedTerminalClient(drone) ?? (await resolveDroneDaemonClientForEntry(drone));
             if (!daemon) {
               json(res, 409, {
                 ok: false,
@@ -571,7 +661,6 @@ function createTerminalRouteHandler(deps: TerminalRouteDependencies): LegacyRout
               });
               return;
             }
-            await waitForDroneDaemonReady(daemon.client, defaultDaemonReadyTimeoutMs());
             await droneTerminalInput(daemon.client, { session: sessionName, data });
           } else {
             await withLockedDroneContainer(
@@ -643,9 +732,11 @@ function createTerminalRouteHandler(deps: TerminalRouteDependencies): LegacyRout
         if (mode === 'agent') {
           await ensureChatEntry({ droneId, chatName });
         }
-        await syncSkillLibraryForDrone({ droneId, droneEntry: drone });
-        await syncMcpServersForDrone({ droneId, droneEntry: drone });
-        await syncRepoAgentsInstructionsForDrone({ droneId, droneEntry: drone });
+        if (mode === 'agent') {
+          await syncSkillLibraryForDrone({ droneId, droneEntry: drone });
+          await syncMcpServersForDrone({ droneId, droneEntry: drone });
+          await syncRepoAgentsInstructionsForDrone({ droneId, droneEntry: drone });
+        }
 
         // CLI-agnostic "continuation": keep one tmux session per chat.
         // This avoids relying on any CLI-specific resume flag.
@@ -739,11 +830,12 @@ function createTerminalRouteHandler(deps: TerminalRouteDependencies): LegacyRout
                 ',xterm-256color:RGB,screen-256color:RGB,xterm-kitty:RGB',
               ],
             ];
-            for (const tmuxArgs of tmuxTuneCommands) {
-              // Best-effort: ignore tuning failures and continue.
-              // eslint-disable-next-line no-await-in-loop
-              await dvmExec(containerName, 'tmux', tmuxArgs);
-            }
+            await dvmExec(containerName, 'bash', [
+              '-c',
+              tmuxTuneCommands
+                .map((args) => `tmux ${args.map(bashQuote).join(' ')} || true`)
+                .join('\n'),
+            ]);
           } catch (e: any) {
             agentPrepError = e?.message ?? String(e);
           }

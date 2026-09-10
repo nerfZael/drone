@@ -5,8 +5,22 @@ import { WebSocket, type WebSocketServer } from 'ws';
 
 import { isHubApiAuthorizedForWebSocket, rejectWebSocketUpgrade } from './hub-auth';
 import { normalizeOrigin } from './hub-http';
+import { resolveCanonicalDroneOrPendingForReadRef } from './drone-lifecycle-service';
 import { isHubWebTerminalSessionName } from './terminal-open';
 import type { TerminalWebSocketContext } from './terminal-websocket-server';
+
+// Resolve only this drone's lifecycle record; the full registry projection also
+// hydrates unrelated chat history and can dominate connection startup.
+export async function resolveDroneOrRejectUpgrade(
+  socket: Duplex,
+  droneRef: string,
+): Promise<{ id: string; drone: any } | null> {
+  const resolved = await resolveCanonicalDroneOrPendingForReadRef(droneRef);
+  if (resolved?.kind === 'real') return { id: resolved.id, drone: resolved.drone };
+  if (resolved?.kind === 'pending') rejectWebSocketUpgrade(socket, 409, 'Conflict');
+  else rejectWebSocketUpgrade(socket, 404, 'Not Found');
+  return null;
+}
 
 export function createTerminalWebSocketUpgradeHandler(opts: {
   apiToken: string;
@@ -20,6 +34,7 @@ export function createTerminalWebSocketUpgradeHandler(opts: {
   resolveHostPort: (containerName: string, containerPort: number) => Promise<number | null>;
 }): (req: http.IncomingMessage, socket: Duplex, head: Buffer) => Promise<void> {
   return async (req, socket, head) => {
+    const started = performance.now();
     try {
       const originRaw = typeof req.headers.origin === 'string' ? req.headers.origin : '';
       if (originRaw) {
@@ -89,12 +104,27 @@ export function createTerminalWebSocketUpgradeHandler(opts: {
 
       const context: TerminalWebSocketContext = {
         droneName: resolved.id,
+        runtime: drone.runtime === 'host' ? 'host' : 'container',
+        containerName,
         sessionName,
         client: { baseUrl: `http://127.0.0.1:${hostPort}`, token },
         since: opts.parseSince(url.searchParams.get('since')),
+        generation: url.searchParams.get('generation') ?? undefined,
+        protocol: Number(url.searchParams.get('protocol')) || undefined,
+        transport: url.searchParams.get('transport') ?? undefined,
+        cols: Number(url.searchParams.get('cols')) || undefined,
+        rows: Number(url.searchParams.get('rows')) || undefined,
         maxBytes: opts.parseMaxBytes(url.searchParams.get('maxBytes')),
       };
       opts.webSocketServer.handleUpgrade(req, socket, head, (webSocket: WebSocket) => {
+        if (context.protocol === 2)
+          webSocket.send(
+            JSON.stringify({
+              type: 'diagnostic',
+              phase: 'hub-upgrade-resolution',
+              ms: performance.now() - started,
+            }),
+          );
         opts.webSocketServer.emit('connection', webSocket, req, context);
       });
     } catch {

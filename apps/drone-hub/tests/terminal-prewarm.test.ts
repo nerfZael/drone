@@ -39,14 +39,14 @@ describe('terminal prewarm helpers', () => {
     ).toBe(true);
   });
 
-  test('does not prewarm host runtime drones', () => {
+  test('prewarms ready host runtime drones', () => {
     expect(
       shouldPrewarmShellTerminal({
         drone: makeDrone({ runtime: 'host' }),
         cwd: '/work/repo',
         visibleToolTabs: ['preview'],
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   test('does not prewarm while the drone is still provisioning', () => {

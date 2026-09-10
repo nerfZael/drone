@@ -1,9 +1,5 @@
 import React from 'react';
-import {
-  UiPanelToolbar,
-  UiToolbarButton,
-  UiToolbarGroup,
-} from '../../ui/components';
+import { UiPanelToolbar, UiToolbarButton, UiToolbarGroup } from '../../ui/components';
 import type { TerminalPaneSession } from './terminal-tabs-state';
 
 export function DroneTerminalTabsBar({
@@ -58,7 +54,11 @@ export function DroneTerminalTabsBar({
                 onClick={() => onActivateSession(session.id)}
                 disabled={busy}
                 className="min-w-0 max-w-[160px] rounded-none !bg-transparent px-2 !text-current"
-                title={session.sessionName ? `${session.title} (${session.sessionName})` : `${session.title} (${session.cwd})`}
+                title={
+                  session.sessionName
+                    ? `${session.title} (${session.sessionName})`
+                    : `${session.title} (${session.cwd})`
+                }
               >
                 {session.title}
               </UiToolbarButton>
@@ -74,7 +74,16 @@ export function DroneTerminalTabsBar({
                 }`}
                 title={busy ? 'Closing terminal…' : 'Kill terminal session and close tab'}
               >
-                <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  aria-hidden="true"
+                >
                   <path d="M4 4l8 8M12 4 4 12" />
                 </svg>
               </button>
@@ -82,7 +91,10 @@ export function DroneTerminalTabsBar({
           );
         })}
         {sessions.length === 0 ? (
-          <div className="px-2 py-1 text-10 uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+          <div
+            className="px-2 py-1 text-10 uppercase tracking-wide text-[var(--muted-dim)]"
+            style={{ fontFamily: 'var(--display)' }}
+          >
             No terminals
           </div>
         ) : null}
@@ -94,7 +106,16 @@ export function DroneTerminalTabsBar({
           className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--radius-small)] text-[var(--accent)] transition-colors hover:bg-[var(--accent-subtle)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-40"
           title="Open a new terminal tab"
         >
-          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            aria-hidden="true"
+          >
             <path d="M8 3v10M3 8h10" />
           </svg>
         </button>

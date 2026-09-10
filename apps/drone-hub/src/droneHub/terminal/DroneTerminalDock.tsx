@@ -1,13 +1,6 @@
+import { beginTerminalOpen, markTerminalModuleReady } from './terminal-performance';
 import React from 'react';
-import {
-  UiPaneState,
-  UiPanel,
-  UiPanelBody,
-  UiPanelStatusStrip,
-} from '../../ui/components';
-import { FitAddon } from '@xterm/addon-fit';
-import { WebLinksAddon } from '@xterm/addon-web-links';
-import { Terminal } from '@xterm/xterm';
+import { UiPaneState, UiPanel, UiPanelBody, UiPanelStatusStrip } from '../../ui/components';
 import '@xterm/xterm/css/xterm.css';
 import { formatDroneRuntimeError } from '../app/chat-startup-errors';
 import { requestJson } from '../http';
@@ -17,93 +10,19 @@ import { DroneTerminalTabsBar } from './DroneTerminalTabsBar';
 import type { TerminalPaneSessionsState } from './terminal-tabs-state';
 import { desktopThemeDefinition } from '../../theme';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
+import {
+  acquireTerminalView,
+  cachedTerminalConnection,
+  evictTerminalView,
+  invalidateDroneTerminals,
+  terminalViewKey,
+} from './terminal-view-cache';
+import { terminalOpenRequests } from './terminal-open-request';
+import type { TerminalConnectionState } from './terminal-connection';
 
-const TERMINAL_INITIAL_TAIL_LINES = 40;
-const TERMINAL_MAX_BYTES = 200_000;
-const TERMINAL_INPUT_FLUSH_MS = 22;
-const TERMINAL_INPUT_CHUNK_MAX = 16_384;
-const TERMINAL_INPUT_BURST_FLUSH_BYTES = 768;
-const TERMINAL_WS_RECONNECT_BASE_MS = 250;
-const TERMINAL_WS_RECONNECT_MAX_MS = 2200;
-const TERMINAL_POLL_FAST_MS = 120;
-const TERMINAL_POLL_IDLE_MS = 600;
-const TERMINAL_POLL_UNFOCUSED_MS = 900;
-const TERMINAL_POLL_OFFSCREEN_MS = 1500;
-const TERMINAL_POLL_HIDDEN_MS = 2500;
-const TERMINAL_IDLE_AFTER_MS = 5000;
-const TERMINAL_EMPTY_BACKOFF_MAX_MS = 2000;
-const TERMINAL_ERROR_BACKOFF_MAX_MS = 6000;
+markTerminalModuleReady();
 
-type OpenTerminalResponse = {
-  ok: true;
-  id: string;
-  name: string;
-  mode: 'shell' | 'agent';
-  chat: string | null;
-  cwd: string;
-  sessionName: string;
-};
-
-type ReadTerminalOutputResponse = {
-  ok: true;
-  id: string;
-  name: string;
-  sessionName: string;
-  offsetBytes: number;
-  text: string;
-};
-
-type TerminalStreamServerMessage =
-  | { type: 'ready'; offsetBytes?: number }
-  | { type: 'output'; offsetBytes?: number; text?: string }
-  | { type: 'error'; error?: string; code?: string }
-  | { type: 'pong' };
-
-type CloseTerminalResponse = {
-  ok: true;
-  id: string;
-  name: string;
-  sessionName: string;
-};
-
-function normalizeTerminalCwdInput(raw: string): string {
-  return String(raw ?? '').trim();
-}
-
-function sanitizeTerminalReplayText(rawText: string): string {
-  const raw = String(rawText ?? '');
-  if (!raw) return '';
-  const filtered = raw
-    .split('\n')
-    .filter((line) => !/^\[dvm session [^\]]+\] started .+$/.test(line.trim()))
-    .join('\n');
-  return filtered.replace(/^\n+/, '');
-}
-
-function isStaleTerminalSessionError(error: unknown): boolean {
-  const anyError = error as any;
-  const code = String(anyError?.data?.code ?? anyError?.code ?? '').trim();
-  if (code === 'STALE_TERMINAL_SESSION') return true;
-  const msg = String(anyError?.message ?? anyError?.error ?? error ?? '').trim();
-  return /terminal session was interrupted/i.test(msg) || /no such exec/i.test(msg) || /no such exec instance/i.test(msg);
-}
-
-export function DroneTerminalDock({
-  droneId,
-  droneName,
-  chatName,
-  defaultCwd,
-  paneKey,
-  sessionsState,
-  onEnsureSessions,
-  onCreateSession,
-  onActivateSession,
-  onResolveSessionName,
-  onCloseSession,
-  disabled,
-  hubPhase,
-  hubMessage,
-}: {
+export type DroneTerminalDockProps = {
   droneId: string;
   droneName: string;
   chatName: string;
@@ -112,62 +31,58 @@ export function DroneTerminalDock({
   sessionsState: TerminalPaneSessionsState;
   onEnsureSessions: (droneId: string, paneKey: 'single' | 'top' | 'bottom', cwd: string) => void;
   onCreateSession: (droneId: string, paneKey: 'single' | 'top' | 'bottom', cwd: string) => void;
-  onActivateSession: (droneId: string, paneKey: 'single' | 'top' | 'bottom', sessionId: string) => void;
+  onActivateSession: (
+    droneId: string,
+    paneKey: 'single' | 'top' | 'bottom',
+    sessionId: string,
+  ) => void;
   onResolveSessionName: (
     droneId: string,
     paneKey: 'single' | 'top' | 'bottom',
     sessionId: string,
     sessionName: string,
   ) => void;
-  onCloseSession: (droneId: string, paneKey: 'single' | 'top' | 'bottom', sessionId: string) => void;
+  onCloseSession: (
+    droneId: string,
+    paneKey: 'single' | 'top' | 'bottom',
+    sessionId: string,
+  ) => void;
   disabled: boolean;
   hubPhase?: 'draft' | 'creating' | 'starting' | 'seeding' | 'error' | null;
   hubMessage?: string | null;
-}) {
+};
+
+export function DroneTerminalDock(props: DroneTerminalDockProps) {
+  const {
+    droneId,
+    defaultCwd,
+    paneKey,
+    sessionsState,
+    disabled,
+    hubPhase,
+    hubMessage,
+    onEnsureSessions,
+    onCreateSession,
+    onActivateSession,
+    onCloseSession,
+  } = props;
   const themeId = useDroneHubUiStore((state) => state.themeId);
-  const normalizedCwd = React.useMemo(() => normalizeTerminalCwdInput(defaultCwd), [defaultCwd]);
-  const activeSession = React.useMemo(
-    () => sessionsState.sessions.find((session) => session.id === sessionsState.activeSessionId) ?? null,
-    [sessionsState.activeSessionId, sessionsState.sessions],
+  const host = React.useRef<HTMLDivElement | null>(null);
+  const view = React.useRef<ReturnType<typeof acquireTerminalView> | null>(null);
+  const latest = React.useRef(props);
+  latest.current = props;
+  const activeSession = sessionsState.sessions.find(
+    (session) => session.id === sessionsState.activeSessionId,
   );
-  const activeSessionId = String(activeSession?.id ?? '').trim();
-  const activeSessionCwd = React.useMemo(
-    () => normalizeTerminalCwdInput(activeSession?.cwd ?? normalizedCwd),
-    [activeSession?.cwd, normalizedCwd],
-  );
-  const shouldOpenDefaultShellSession = Boolean(
-    activeSession &&
-      !activeSession.sessionName &&
-      activeSessionId === 'terminal-1' &&
-      sessionsState.sessions.length === 1,
-  );
-  const [sessionName, setSessionName] = React.useState<string>('');
-  const [error, setError] = React.useState<string | null>(null);
-  const [streamMode, setStreamMode] = React.useState<'ws' | 'poll'>(() =>
-    typeof window !== 'undefined' && typeof window.WebSocket !== 'undefined' ? 'ws' : 'poll',
-  );
+  const activeId = activeSession?.id ?? '';
+  const cwd = String(activeSession?.cwd ?? defaultCwd).trim();
+  const key = terminalViewKey(droneId, paneKey, activeId);
+  const [connectionState, setConnectionState] = React.useState<{
+    key: string;
+    value: TerminalConnectionState;
+  } | null>(null);
+  const [closeError, setCloseError] = React.useState<string | null>(null);
   const [closingSessionId, setClosingSessionId] = React.useState<string | null>(null);
-  const [terminalReopenNonce, setTerminalReopenNonce] = React.useState(0);
-
-  const terminalHostRef = React.useRef<HTMLDivElement | null>(null);
-  const terminalRef = React.useRef<Terminal | null>(null);
-  const fitAddonRef = React.useRef<FitAddon | null>(null);
-  const outputOffsetRef = React.useRef<number | null>(null);
-  const activeTargetRef = React.useRef<{ droneId: string; sessionName: string } | null>(null);
-  const inputBufferRef = React.useRef<string>('');
-  const inputFlushTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const flushingInputRef = React.useRef<boolean>(false);
-  const pollNowRef = React.useRef<(() => void) | null>(null);
-  const postInputPollTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastActivityAtRef = React.useRef<number>(Date.now());
-  const emptyStreakRef = React.useRef<number>(0);
-  const errorStreakRef = React.useRef<number>(0);
-  const inViewportRef = React.useRef<boolean>(true);
-  const computePollIntervalMsRef = React.useRef<() => number>(() => TERMINAL_POLL_IDLE_MS);
-  const dockRootRef = React.useRef<HTMLDivElement | null>(null);
-  const wsRef = React.useRef<WebSocket | null>(null);
-  const wsReconnectTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-
   const startup = usePaneReadiness({
     hubPhase,
     resetKey: `${droneId}\u0000terminal`,
@@ -175,695 +90,148 @@ export function DroneTerminalDock({
   });
 
   React.useEffect(() => {
-    if (!droneId || disabled) return;
-    if (sessionsState.initialized) return;
-    onEnsureSessions(droneId, paneKey, normalizedCwd);
-  }, [disabled, droneId, normalizedCwd, onEnsureSessions, paneKey, sessionsState.initialized]);
+    if (droneId && !disabled && !sessionsState.initialized)
+      onEnsureSessions(droneId, paneKey, String(defaultCwd).trim());
+  }, [droneId, disabled, sessionsState.initialized, defaultCwd, paneKey, onEnsureSessions]);
 
-  function isImmediateInput(data: string): boolean {
-    return /[\r\n\t\u0003\u0004\u001b]/.test(data);
-  }
-
-  function buildTerminalStreamWsUrl(drone: string, session: string, since?: number): string {
-    const proto = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const base = typeof window !== 'undefined' ? window.location.host : 'localhost';
-    const u = new URL(`${proto}//${base}/api/drones/${encodeURIComponent(drone)}/terminal/${encodeURIComponent(session)}/stream`);
-    if (typeof since === 'number' && Number.isFinite(since) && since >= 0) {
-      u.searchParams.set('since', String(Math.floor(since)));
-      u.searchParams.set('maxBytes', String(TERMINAL_MAX_BYTES));
-    }
-    return u.toString();
-  }
-
-  const applyServerOutput = React.useCallback((nextText: string) => {
-    const sanitizedText = sanitizeTerminalReplayText(nextText);
-    if (!sanitizedText) {
-      emptyStreakRef.current = Math.min(50, emptyStreakRef.current + 1);
+  React.useLayoutEffect(() => {
+    if (disabled) {
+      invalidateDroneTerminals(droneId);
       return;
     }
-    terminalRef.current?.write(sanitizedText);
-    lastActivityAtRef.current = Date.now();
-    emptyStreakRef.current = 0;
-  }, []);
-
-  const requestTerminalReopen = React.useCallback((errorLike: unknown): boolean => {
-    if (!isStaleTerminalSessionError(errorLike)) return false;
-    inputBufferRef.current = '';
-    outputOffsetRef.current = null;
-    activeTargetRef.current = null;
-    emptyStreakRef.current = 0;
-    errorStreakRef.current = 0;
-    setError('Reopening terminal after container restart...');
-    setSessionName('');
-    setStreamMode(typeof window !== 'undefined' && typeof window.WebSocket !== 'undefined' ? 'ws' : 'poll');
-    setTerminalReopenNonce((n) => n + 1);
-    return true;
-  }, []);
-
-  const flushInputBuffer = React.useCallback(async () => {
-    const target = activeTargetRef.current;
-    if (!target) return;
-    const ws = wsRef.current;
-    const wsOpen = Boolean(ws && ws.readyState === WebSocket.OPEN);
-    if (!wsOpen && flushingInputRef.current) return;
-    const chunk = inputBufferRef.current.slice(0, TERMINAL_INPUT_CHUNK_MAX);
-    if (!chunk) return;
-
-    inputBufferRef.current = inputBufferRef.current.slice(chunk.length);
-    if (wsOpen && ws) {
-      try {
-        ws.send(JSON.stringify({ type: 'input', data: chunk }));
-        lastActivityAtRef.current = Date.now();
-        emptyStreakRef.current = 0;
-        errorStreakRef.current = 0;
-        setError(null);
-      } catch (e: any) {
-        setError(formatDroneRuntimeError(e));
-      } finally {
-        if (inputBufferRef.current) void flushInputBuffer();
-      }
-      return;
-    }
-
-    if (flushingInputRef.current) return;
-    flushingInputRef.current = true;
-    try {
-      await requestJson(
-        `/api/drones/${encodeURIComponent(target.droneId)}/terminal/${encodeURIComponent(target.sessionName)}/input`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ data: chunk }),
-        },
-      );
-      lastActivityAtRef.current = Date.now();
-      emptyStreakRef.current = 0;
-      errorStreakRef.current = 0;
-      setError(null);
-      pollNowRef.current?.();
-      if (postInputPollTimerRef.current != null) {
-        clearTimeout(postInputPollTimerRef.current);
-        postInputPollTimerRef.current = null;
-      }
-      postInputPollTimerRef.current = setTimeout(() => {
-        postInputPollTimerRef.current = null;
-        pollNowRef.current?.();
-      }, 80);
-    } catch (e: any) {
-      if (requestTerminalReopen(e)) return;
-      setError(formatDroneRuntimeError(e));
-    } finally {
-      flushingInputRef.current = false;
-      if (inputBufferRef.current) {
-        void flushInputBuffer();
-      }
-    }
-  }, [requestTerminalReopen]);
-
-  const scheduleFlushInput = React.useCallback(() => {
-    if (inputFlushTimerRef.current != null) return;
-    inputFlushTimerRef.current = setTimeout(() => {
-      inputFlushTimerRef.current = null;
-      void flushInputBuffer();
-    }, TERMINAL_INPUT_FLUSH_MS);
-  }, [flushInputBuffer]);
-
-  const queueInput = React.useCallback(
-    (data: string) => {
-      if (!data) return;
-      if (!activeTargetRef.current) return;
-
-      inputBufferRef.current += data;
-      if (inputBufferRef.current.length > 128 * 1024) {
-        inputBufferRef.current = inputBufferRef.current.slice(-128 * 1024);
-      }
-      if (isImmediateInput(data) || inputBufferRef.current.length >= TERMINAL_INPUT_BURST_FLUSH_BYTES) {
-        if (inputFlushTimerRef.current != null) {
-          clearTimeout(inputFlushTimerRef.current);
-          inputFlushTimerRef.current = null;
-        }
-        void flushInputBuffer();
-        return;
-      }
-      scheduleFlushInput();
-    },
-    [flushInputBuffer, scheduleFlushInput],
-  );
-
-  React.useEffect(() => {
-    const host = terminalHostRef.current;
-    if (!host) return;
-
-    const terminal = new Terminal({
-      cursorBlink: true,
-      convertEol: false,
-      fontSize: 12,
-      fontFamily: "'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-      theme: desktopThemeDefinition(themeId).terminal,
-      allowProposedApi: false,
-      scrollback: 15_000,
+    if (!activeId || !host.current) return;
+    const current = latest.current;
+    const session = current.sessionsState.sessions.find((entry) => entry.id === activeId)!;
+    const sessionName =
+      session.sessionName ||
+      (activeId === 'terminal-1' ? 'drone-hub-shell' : `drone-hub-shell-${crypto.randomUUID()}`);
+    const acquired = acquireTerminalView(
+      key,
+      host.current,
+      { droneId, cwd, sessionName },
+      desktopThemeDefinition(themeId).terminal,
+    );
+    view.current = acquired;
+    const unsubscribe = acquired.connection.subscribe((state) => {
+      setConnectionState({ key, value: state });
+      if (state.sessionName)
+        latest.current.onResolveSessionName(droneId, paneKey, activeId, state.sessionName);
     });
-    const fitAddon = new FitAddon();
-    terminal.loadAddon(fitAddon);
-    terminal.loadAddon(new WebLinksAddon());
-    terminal.open(host);
-    fitAddon.fit();
-
-    const onData = terminal.onData((data) => {
-      queueInput(data);
+    let frame: number | null = null;
+    const observer = new ResizeObserver(() => {
+      if (frame != null) return;
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        acquired.fit.fit();
+      });
     });
-
-    const resizeObserver = new ResizeObserver(() => {
-      try {
-        fitAddon.fit();
-      } catch {
-        // ignore
-      }
-    });
-    resizeObserver.observe(host);
-
-    terminalRef.current = terminal;
-    fitAddonRef.current = fitAddon;
-
+    observer.observe(host.current);
     return () => {
-      onData.dispose();
-      resizeObserver.disconnect();
-      terminalRef.current = null;
-      fitAddonRef.current = null;
-      terminal.dispose();
+      if (frame != null) cancelAnimationFrame(frame);
+      observer.disconnect();
+      unsubscribe();
+      acquired.release();
+      view.current = null;
     };
-  }, [queueInput]);
+    // Session-name resolution, chat changes and renames are metadata updates;
+    // they must not restart a terminal or clear input queued during its open.
+  }, [key, droneId, paneKey, activeId, cwd, disabled]);
 
   React.useEffect(() => {
-    const terminal = terminalRef.current;
-    if (!terminal) return;
-    terminal.options.theme = desktopThemeDefinition(themeId).terminal;
+    if (view.current)
+      view.current.terminal.options.theme = desktopThemeDefinition(themeId).terminal;
   }, [themeId]);
 
-  React.useEffect(() => {
-    if (!droneName || disabled || !activeSessionId || !activeSession) {
-      if (wsReconnectTimerRef.current != null) {
-        clearTimeout(wsReconnectTimerRef.current);
-        wsReconnectTimerRef.current = null;
-      }
-      if (wsRef.current) {
-        try {
-          wsRef.current.close();
-        } catch {
-          // ignore
-        }
-        wsRef.current = null;
-      }
-      setSessionName('');
-      setError(null);
-      setStreamMode(typeof window !== 'undefined' && typeof window.WebSocket !== 'undefined' ? 'ws' : 'poll');
-      outputOffsetRef.current = null;
-      activeTargetRef.current = null;
-      emptyStreakRef.current = 0;
-      errorStreakRef.current = 0;
-      const term = terminalRef.current;
-      if (term) {
-        term.reset();
-        term.clear();
-      }
-      return;
-    }
-
-    let cancelled = false;
-    if (wsReconnectTimerRef.current != null) {
-      clearTimeout(wsReconnectTimerRef.current);
-      wsReconnectTimerRef.current = null;
-    }
-    if (wsRef.current) {
-      try {
-        wsRef.current.close();
-      } catch {
-        // ignore
-      }
-      wsRef.current = null;
-    }
-    setStreamMode(typeof window !== 'undefined' && typeof window.WebSocket !== 'undefined' ? 'ws' : 'poll');
-    setSessionName('');
-    setError(null);
-    outputOffsetRef.current = null;
-    activeTargetRef.current = null;
-    inputBufferRef.current = '';
-    emptyStreakRef.current = 0;
-    errorStreakRef.current = 0;
-    if (inputFlushTimerRef.current != null) {
-      clearTimeout(inputFlushTimerRef.current);
-      inputFlushTimerRef.current = null;
-    }
-    if (postInputPollTimerRef.current != null) {
-      clearTimeout(postInputPollTimerRef.current);
-      postInputPollTimerRef.current = null;
-    }
-
-    const termAtStart = terminalRef.current;
-    if (termAtStart) {
-      termAtStart.reset();
-      termAtStart.clear();
-    }
-
-    const open = async () => {
-      const qs = new URLSearchParams();
-      qs.set('mode', 'shell');
-      qs.set('chat', chatName || 'default');
-      qs.set('cwd', activeSessionCwd);
-      if (activeSession.sessionName) {
-        qs.set('session', activeSession.sessionName);
-      } else if (!shouldOpenDefaultShellSession) {
-        qs.set('create', '1');
-      } else {
-        // The first tab keeps the legacy/default shell session so prewarm can still pay off.
-      }
-      const data = await requestJson<OpenTerminalResponse>(`/api/drones/${encodeURIComponent(droneId)}/terminal/open?${qs.toString()}`, {
-        method: 'POST',
-      });
-      if (cancelled) return;
-
-      const nextSession = String(data?.sessionName ?? '').trim();
-      if (!nextSession) throw new Error('terminal session did not return a session name');
-
-      onResolveSessionName(droneId, paneKey, activeSessionId, nextSession);
-      setSessionName(nextSession);
-      outputOffsetRef.current = null;
-      inputBufferRef.current = '';
-      activeTargetRef.current = { droneId, sessionName: nextSession };
-      lastActivityAtRef.current = Date.now();
-      emptyStreakRef.current = 0;
-      errorStreakRef.current = 0;
-
-      const term = terminalRef.current;
-      if (term) {
-        term.reset();
-        term.clear();
-        term.focus();
-      }
-      try {
-        fitAddonRef.current?.fit();
-      } catch {
-        // ignore
-      }
-    };
-
-    void open()
-      .catch((e: any) => {
-        if (cancelled) return;
-        if (requestTerminalReopen(e)) return;
-        setSessionName('');
-        activeTargetRef.current = null;
-        setError(formatDroneRuntimeError(e));
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    activeSessionCwd,
-    activeSessionId,
-    chatName,
-    disabled,
-    droneId,
-    droneName,
-    onResolveSessionName,
-    paneKey,
-    queueInput,
-    requestTerminalReopen,
-    shouldOpenDefaultShellSession,
-    terminalReopenNonce,
-  ]);
-
-  React.useEffect(() => {
-    const el = dockRootRef.current;
-    if (!el || typeof IntersectionObserver === 'undefined') return;
-    const obs = new IntersectionObserver(
-      (entries) => {
-        const e = entries[0];
-        const visible = Boolean(e && (e.isIntersecting || e.intersectionRatio > 0));
-        inViewportRef.current = visible;
-      },
-      { root: null, threshold: [0, 0.05, 0.1] },
-    );
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, []);
-
-  React.useEffect(() => {
-    if (!droneName || !sessionName || disabled || streamMode !== 'ws') return;
-    if (typeof window === 'undefined' || typeof window.WebSocket === 'undefined') {
-      setStreamMode('poll');
-      return;
-    }
-
-    let mounted = true;
-    let attempts = 0;
-    let wsClosedByUs = false;
-
-    const clearReconnectTimer = () => {
-      if (wsReconnectTimerRef.current != null) {
-        clearTimeout(wsReconnectTimerRef.current);
-        wsReconnectTimerRef.current = null;
-      }
-    };
-
-    const bootstrapInitialOutput = async () => {
-      if (outputOffsetRef.current != null) return;
-      const qs = new URLSearchParams();
-      qs.set('tail', String(TERMINAL_INITIAL_TAIL_LINES));
-      const data = await requestJson<ReadTerminalOutputResponse>(
-        `/api/drones/${encodeURIComponent(droneId)}/terminal/${encodeURIComponent(sessionName)}/output?${qs.toString()}`,
-      );
-      if (!mounted) return;
-      const nextOffset = Number(data?.offsetBytes);
-      const nextText = typeof data?.text === 'string' ? data.text : '';
-      if (Number.isFinite(nextOffset) && nextOffset >= 0) {
-        outputOffsetRef.current = nextOffset;
-      }
-      applyServerOutput(nextText);
-    };
-
-    const connect = (since?: number) => {
-      if (!mounted) return;
-      clearReconnectTimer();
-      if (wsRef.current) {
-        try {
-          wsRef.current.close();
-        } catch {
-          // ignore
-        }
-        wsRef.current = null;
-      }
-
-      let opened = false;
-      const ws = new WebSocket(buildTerminalStreamWsUrl(droneId, sessionName, since));
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        opened = true;
-        attempts = 0;
-        setError(null);
-        errorStreakRef.current = 0;
-      };
-
-      ws.onmessage = (ev) => {
-        if (!mounted) return;
-        const raw = typeof ev.data === 'string' ? ev.data : '';
-        if (!raw) return;
-
-        let msg: TerminalStreamServerMessage | null = null;
-        try {
-          msg = JSON.parse(raw) as TerminalStreamServerMessage;
-        } catch {
-          return;
-        }
-        if (!msg) return;
-
-        if (msg.type === 'error') {
-          if (requestTerminalReopen({ code: msg.code, error: msg.error, message: msg.error })) return;
-          setError(formatDroneRuntimeError(msg.error ?? 'terminal stream error'));
-          errorStreakRef.current = Math.min(20, errorStreakRef.current + 1);
-          return;
-        }
-        if (msg.type === 'ready') {
-          const off = Number(msg.offsetBytes);
-          if (Number.isFinite(off) && off >= 0) outputOffsetRef.current = off;
-          return;
-        }
-        if (msg.type === 'output') {
-          setError(null);
-          errorStreakRef.current = 0;
-          const off = Number(msg.offsetBytes);
-          if (Number.isFinite(off) && off >= 0) outputOffsetRef.current = off;
-          applyServerOutput(typeof msg.text === 'string' ? msg.text : '');
-        }
-      };
-
-      ws.onclose = () => {
-        if (wsRef.current === ws) wsRef.current = null;
-        if (!mounted || wsClosedByUs) return;
-
-        attempts += 1;
-        if (attempts > 5) {
-          setStreamMode('poll');
-          return;
-        }
-        if (!opened && attempts >= 2) {
-          setStreamMode('poll');
-          return;
-        }
-
-        const delay = Math.min(TERMINAL_WS_RECONNECT_MAX_MS, TERMINAL_WS_RECONNECT_BASE_MS * Math.pow(2, attempts - 1));
-        wsReconnectTimerRef.current = setTimeout(() => {
-          wsReconnectTimerRef.current = null;
-          if (!mounted) return;
-          const nextSince = outputOffsetRef.current == null ? undefined : outputOffsetRef.current;
-          connect(nextSince);
-        }, Math.floor(delay));
-      };
-
-      ws.onerror = () => {
-        // onclose handles retries/fallback.
-      };
-    };
-
-    void bootstrapInitialOutput()
-      .then(() => {
-        if (!mounted) return;
-        const initialSince = outputOffsetRef.current == null ? undefined : outputOffsetRef.current;
-        connect(initialSince);
-      })
-      .catch((e: any) => {
-        if (!mounted) return;
-        if (requestTerminalReopen(e)) return;
-        setError(formatDroneRuntimeError(e));
-        setStreamMode('poll');
-      });
-
-    return () => {
-      mounted = false;
-      wsClosedByUs = true;
-      clearReconnectTimer();
-      if (wsRef.current) {
-        try {
-          wsRef.current.close();
-        } catch {
-          // ignore
-        }
-        wsRef.current = null;
-      }
-    };
-  }, [droneId, sessionName, disabled, streamMode, queueInput, applyServerOutput, requestTerminalReopen]);
-
-  React.useEffect(() => {
-    if (!droneName || !sessionName || disabled || streamMode !== 'poll') return;
-    let mounted = true;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    let busy = false;
-
-    const computeIntervalMs = () => {
-      const now = Date.now();
-      const last = lastActivityAtRef.current || now;
-      const idle = now - last > TERMINAL_IDLE_AFTER_MS;
-      const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
-      const focused = typeof document !== 'undefined' ? document.hasFocus() : true;
-      const inViewport = inViewportRef.current;
-
-      const base = hidden
-        ? TERMINAL_POLL_HIDDEN_MS
-        : !inViewport
-          ? TERMINAL_POLL_OFFSCREEN_MS
-          : !focused
-            ? TERMINAL_POLL_UNFOCUSED_MS
-            : idle
-              ? TERMINAL_POLL_IDLE_MS
-              : TERMINAL_POLL_FAST_MS;
-
-      let delay = base;
-      const emptyStreak = emptyStreakRef.current;
-      if (idle && emptyStreak >= 3) {
-        const extra = Math.min(TERMINAL_EMPTY_BACKOFF_MAX_MS, base * Math.pow(1.6, Math.min(8, emptyStreak - 2)));
-        delay = Math.max(delay, Math.floor(extra));
-      }
-
-      const errStreak = errorStreakRef.current;
-      if (errStreak > 0) {
-        const extra = Math.min(TERMINAL_ERROR_BACKOFF_MAX_MS, base * Math.pow(2, Math.min(6, errStreak)));
-        delay = Math.max(delay, Math.floor(extra));
-      }
-
-      return delay;
-    };
-    computePollIntervalMsRef.current = computeIntervalMs;
-
-    const poll = async () => {
-      if (busy) return;
-      busy = true;
-      try {
-        const qs = new URLSearchParams();
-        if (outputOffsetRef.current == null) {
-          qs.set('tail', String(TERMINAL_INITIAL_TAIL_LINES));
-        } else {
-          qs.set('since', String(outputOffsetRef.current));
-          qs.set('maxBytes', String(TERMINAL_MAX_BYTES));
-        }
-        const data = await requestJson<ReadTerminalOutputResponse>(
-          `/api/drones/${encodeURIComponent(droneId)}/terminal/${encodeURIComponent(sessionName)}/output?${qs.toString()}`,
+  const close = async (sessionId: string) => {
+    if (closingSessionId) return;
+    const session = sessionsState.sessions.find((entry) => entry.id === sessionId);
+    if (!session) return;
+    const closingKey = terminalViewKey(droneId, paneKey, sessionId);
+    setClosingSessionId(sessionId);
+    try {
+      const connection = cachedTerminalConnection(closingKey);
+      if (connection) await connection.closeSession();
+      else if (session.sessionName) {
+        await requestJson(
+          `/api/drones/${encodeURIComponent(droneId)}/terminal/${encodeURIComponent(session.sessionName)}`,
+          { method: 'DELETE' },
         );
-        if (!mounted) return;
-        setError(null);
-        errorStreakRef.current = 0;
-        const nextOffset = Number(data?.offsetBytes);
-        const nextText = typeof data?.text === 'string' ? data.text : '';
-        if (Number.isFinite(nextOffset) && nextOffset >= 0) {
-          outputOffsetRef.current = nextOffset;
-        }
-        applyServerOutput(nextText);
-      } catch (e: any) {
-        if (!mounted) return;
-        if (requestTerminalReopen(e)) return;
-        setError(formatDroneRuntimeError(e));
-        errorStreakRef.current = Math.min(20, errorStreakRef.current + 1);
-      } finally {
-        busy = false;
+        terminalOpenRequests.invalidate({
+          droneId,
+          cwd: session.cwd,
+          sessionName: session.sessionName,
+        });
       }
-    };
-
-    pollNowRef.current = () => {
-      void poll();
-    };
-
-    const loop = async () => {
-      if (!mounted) return;
-      await poll();
-      if (!mounted) return;
-      const nextDelay = computePollIntervalMsRef.current?.() ?? TERMINAL_POLL_IDLE_MS;
-      timer = setTimeout(() => {
-        void loop();
-      }, Math.max(80, Math.floor(nextDelay)));
-    };
-
-    void loop();
-
-    return () => {
-      mounted = false;
-      pollNowRef.current = null;
-      if (timer != null) clearTimeout(timer);
-      if (postInputPollTimerRef.current != null) {
-        clearTimeout(postInputPollTimerRef.current);
-        postInputPollTimerRef.current = null;
-      }
-    };
-  }, [droneId, sessionName, disabled, streamMode, applyServerOutput, queueInput, requestTerminalReopen]);
-
-  React.useEffect(() => {
-    return () => {
-      if (inputFlushTimerRef.current != null) clearTimeout(inputFlushTimerRef.current);
-      if (postInputPollTimerRef.current != null) clearTimeout(postInputPollTimerRef.current);
-      if (wsReconnectTimerRef.current != null) clearTimeout(wsReconnectTimerRef.current);
-      if (wsRef.current) {
-        try {
-          wsRef.current.close();
-        } catch {
-          // ignore
-        }
-        wsRef.current = null;
-      }
-    };
-  }, []);
-
-  const handleCreateSession = React.useCallback(() => {
-    setError(null);
-    onCreateSession(droneId, paneKey, normalizedCwd);
-  }, [droneId, normalizedCwd, onCreateSession, paneKey]);
-
-  const handleActivateSession = React.useCallback(
-    (sessionId: string) => {
-      if (!sessionId || sessionId === closingSessionId) return;
-      setError(null);
-      onActivateSession(droneId, paneKey, sessionId);
-    },
-    [closingSessionId, droneId, onActivateSession, paneKey],
-  );
-
-  const handleCloseSession = React.useCallback(
-    async (sessionId: string) => {
-      const session = sessionsState.sessions.find((entry) => entry.id === sessionId) ?? null;
-      if (!session || closingSessionId) return;
-      setClosingSessionId(sessionId);
-      try {
-        if (session.sessionName) {
-          await requestJson<CloseTerminalResponse>(
-            `/api/drones/${encodeURIComponent(droneId)}/terminal/${encodeURIComponent(session.sessionName)}`,
-            { method: 'DELETE' },
-          );
-        }
+      evictTerminalView(closingKey);
+      onCloseSession(droneId, paneKey, sessionId);
+      setCloseError(null);
+    } catch (error: any) {
+      if (Number(error?.status) === 404) {
+        evictTerminalView(closingKey);
         onCloseSession(droneId, paneKey, sessionId);
-        setError(null);
-      } catch (e: any) {
-        const status = Number((e as any)?.status);
-        if (status === 404) {
-          onCloseSession(droneId, paneKey, sessionId);
-          setError(null);
-        } else {
-          setError(formatDroneRuntimeError(e));
-        }
-      } finally {
-        setClosingSessionId((current) => (current === sessionId ? null : current));
-      }
-    },
-    [closingSessionId, droneId, onCloseSession, paneKey, sessionsState.sessions],
-  );
+      } else setCloseError(formatDroneRuntimeError(error));
+    } finally {
+      setClosingSessionId(null);
+    }
+  };
 
+  const state = connectionState?.key === key ? connectionState.value : null;
+  const error = closeError || state?.error;
   return (
-    <UiPanel
-      ref={dockRootRef}
-      flush
-      surface="alternate"
-      className="relative h-full w-full"
-    >
+    <UiPanel flush surface="alternate" className="relative h-full w-full">
       {error && (
-        <UiPanelStatusStrip tone="danger">{error}</UiPanelStatusStrip>
+        <UiPanelStatusStrip tone="danger">
+          {error}{' '}
+          <button className="ml-2 underline" onClick={() => view.current?.connection.retry()}>
+            Reconnect
+          </button>
+        </UiPanelStatusStrip>
       )}
-
       <DroneTerminalTabsBar
         sessions={sessionsState.sessions}
         activeSessionId={activeSession?.id ?? null}
         closingSessionId={closingSessionId}
         disabled={disabled}
-        onActivateSession={handleActivateSession}
-        onCloseSession={(sessionId) => {
-          void handleCloseSession(sessionId);
+        onActivateSession={(id) => {
+          setCloseError(null);
+          beginTerminalOpen();
+          onActivateSession(droneId, paneKey, id);
         }}
-        onCreateSession={handleCreateSession}
+        onCloseSession={(id) => {
+          void close(id);
+        }}
+        onCreateSession={() => {
+          setCloseError(null);
+          beginTerminalOpen();
+          onCreateSession(droneId, paneKey, String(defaultCwd).trim());
+        }}
       />
-
       <UiPanelBody className="relative bg-[var(--bg)] pt-1 pl-1">
-        {!disabled && sessionsState.initialized && sessionsState.sessions.length === 0 ? (
-          <DroneTerminalEmptyState onCreateSession={handleCreateSession} />
-        ) : null}
+        {!disabled && sessionsState.initialized && sessionsState.sessions.length === 0 && (
+          <DroneTerminalEmptyState
+            onCreateSession={() => onCreateSession(droneId, paneKey, String(defaultCwd).trim())}
+          />
+        )}
         {disabled && (
           <UiPaneState
             kind={startup.timedOut ? 'warning' : 'loading'}
             title={provisioningLabel(hubPhase)}
-            description={[
-              startup.timedOut
-                ? 'Still waiting for the terminal to become available.'
-                : 'Connecting terminal…',
-              String(hubMessage ?? '').trim(),
-              startup.timedOut
-                ? 'If this persists, check the drone status details in the sidebar.'
-                : '',
-            ].filter(Boolean).join(' ')}
+            description={String(hubMessage ?? '').trim() || 'Connecting terminal…'}
             className="absolute inset-0 z-10 bg-[var(--surface-inset-strong)]/80 backdrop-blur"
           />
         )}
+        {!disabled && activeId && (!state || state.connecting) && !error && (
+          <div
+            className="absolute right-3 top-1 text-xs text-[var(--muted)] pointer-events-none"
+            role="status"
+          >
+            Connecting terminal…
+          </div>
+        )}
         <div
-          ref={terminalHostRef}
+          ref={host}
           className="w-full h-full min-h-0 overflow-hidden"
-          onClick={() => {
-            terminalRef.current?.focus();
-          }}
+          onClick={() => view.current?.terminal.focus()}
         />
       </UiPanelBody>
     </UiPanel>

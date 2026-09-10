@@ -1,3 +1,4 @@
+import { prewarmShellTerminal } from './droneHub/terminal/terminal-open-request';
 import { useDetachedChatStore } from './droneHub/app/detached-chat-store';
 import { recordUiAction } from './ui-diagnostics';
 import { beginDesktopWorkspaceLoad, desktopWorkspaceLoads } from './droneHub/files/workspace-load-telemetry';
@@ -2687,16 +2688,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     const timer = window.setTimeout(() => {
       if (cancelled) return;
       shellTerminalPrewarmInFlightRef.current.add(key);
-      const qs = new URLSearchParams();
-      qs.set('mode', 'shell');
-      qs.set('chat', String(selectedChat ?? '').trim() || 'default');
-      qs.set('cwd', cwd);
-      void requestJson(
-        `/api/drones/${encodeURIComponent(droneId)}/terminal/open?${qs.toString()}`,
-        {
-          method: 'POST',
-        },
-      )
+      void prewarmShellTerminal(droneId, cwd)
         .then(() => {
           if (!cancelled) shellTerminalPrewarmReadyRef.current.add(key);
         })

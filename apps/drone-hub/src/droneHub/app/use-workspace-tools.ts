@@ -1,3 +1,4 @@
+import { beginTerminalOpen } from '../terminal/terminal-performance';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { useShallow } from 'zustand/react/shallow';
@@ -44,11 +45,16 @@ const useWorkspaceToolsStore = create<WorkspaceToolsState>()(
       rightPanelTab: 'editor',
       rightPanelOpenRequestSeq: 0,
       visibleToolTabsByDrone: {},
-      requestRightPanelTab: (tab) =>
+      requestRightPanelTab: (tab) => {
+        if (tab === 'terminal') {
+          beginTerminalOpen();
+          void import('../terminal/DroneTerminalDock').catch(() => {});
+        }
         set((state) => ({
           rightPanelTab: parseRightPanelTab(tab, state.rightPanelTab),
           rightPanelOpenRequestSeq: state.rightPanelOpenRequestSeq + 1,
-        })),
+        }));
+      },
       setRightPanelTab: (next) =>
         set((state) => {
           const rightPanelTab = parseRightPanelTab(
@@ -80,10 +86,7 @@ const useWorkspaceToolsStore = create<WorkspaceToolsState>()(
         const persisted = (persistedState as Partial<PersistedWorkspaceToolsState>) ?? {};
         return {
           ...currentState,
-          rightPanelTab: parseRightPanelTab(
-            persisted.rightPanelTab,
-            currentState.rightPanelTab,
-          ),
+          rightPanelTab: parseRightPanelTab(persisted.rightPanelTab, currentState.rightPanelTab),
         };
       },
     },

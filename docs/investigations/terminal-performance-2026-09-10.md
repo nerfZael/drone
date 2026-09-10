@@ -2,7 +2,7 @@ Terminal startup and interaction performance — 2026-09-10
 
 The largest opportunities are removing repeated startup work and replacing per-input tmux processes and polled logs with a persistent terminal connection. Both host and container drones use the expensive daemon input path once their WebSocket is connected. Container startup and HTTP fallback add Docker work and contention with unrelated drone operations.
 
-This is an investigation and implementation proposal, not a shipped optimization. Source inspected at `dc9b2ae768`; measurements used Node 20.19.2, tmux 3.4 and Docker Engine 29.3.0 on the development host. No browser click-to-prompt, key-to-paint, production percentile, or stopped-container startup measurements were collected. The probes below isolate individual costs; their medians must not be presented as end-to-end timings.
+The findings below record the initial investigation. The subsequent implementation and validation are recorded at the end; the changes have not been deployed to running Hub/daemon processes. Source inspected at `dc9b2ae768`; measurements used Node 20.19.2, tmux 3.4 and Docker Engine 29.3.0 on the development host. No browser click-to-prompt, key-to-paint, production percentile, or stopped-container startup measurements were collected. The probes below isolate individual costs; their medians must not be presented as end-to-end timings.
 
 **What was measured and reproduced**
 
@@ -68,3 +68,93 @@ The `/open-terminal` route awaits skill, MCP and repository-instruction synchron
 4. Compare DOM/WebGL, scrollback cost, hidden-tab resource use and paste/output stress. Choose based on traces rather than making renderer replacement a prerequisite for the earlier wins.
 
 Suggested targets for an already-running local drone, to validate rather than promise: cached tab switch within one or two display frames; warm click-to-usable terminal below 100 ms p95; ordinary key-to-visible-echo below 30 ms p95. Measure stopped-container boot separately. Track p50/p95/p99 for both runtimes, with cold module load, new shell, reused shell, tab switch, reconnect, concurrent repository operations, idle fleet load and heavy output. Verify early typing, large paste, control keys, TUI redraw, Unicode, resize and reconnect preserve exact behavior. Record renderer processing and frame scheduling separately from actual paint where available.
+
+
+**Implementation completed after the investigation**
+
+The in-app terminal now keeps its connection and xterm instance outside the React component lifecycle. Session metadata updates and chat/drone renames do not reopen it. Recent tabs and panes retain their screen and connection, with at most eight inactive views and a two-minute idle expiration. Startup input is queued for its original session. Prewarm and visible opens share an idempotent request using an explicit session name; ready host drones can prewarm as well. Selecting the terminal tool begins module loading immediately.
+
+Ready host and container shells use `/v1/terminal/ensure` directly, avoiding the broad drone lock, Docker discovery and separate readiness polling. Creation uses a per-session lock. The daemon installs its log pipe before starting the interactive shell, preserving its first prompt. Existing sessions are reused, including when multiple ensure requests arrive concurrently. Unavailable and older daemons retain the established startup/recovery path.
+
+The normal live transport is browser WebSocket → Hub WebSocket proxy → daemon → persistent tmux control client. Input does not wait for the old 22/24 ms timers or start four subprocesses per batch. Output travels as bytes without log-file polling or SSE/JSON conversion. The control client retains up to 2 MiB of replay, identifies its generation, and supplies a screen snapshot with up to 200 history lines when a requested cursor cannot be resumed. It restores cursor, alternate-screen and terminal modes and accepts dimension changes. Browser resize work is coalesced per animation frame; the shared control client receives the most recent viewer resize.
+
+Renderer acknowledgements bound unprocessed live output to 256 KiB per viewer. Oversized/overloaded input is rejected explicitly instead of dropping its beginning. Paste frames are assembled before submission; tmux applies the pane's actual bracketed-paste mode. This matters because older tmux versions do not expose that mode in snapshot format variables. Legacy log reads also preserve UTF-8 boundaries, and initialization no longer consumes and discards a byte at each layer.
+
+The protocol is negotiated explicitly: older UI clients continue to receive JSON. New clients use the legacy bridge immediately when ensure reports an older daemon, avoiding a failed WebSocket probe. Unknown/unavailable endpoints retain the probe and recovery behavior. The full persistent path requires the updated daemon; compatibility mode retains its older output mechanism.
+
+External plain-shell launches skip agent configuration synchronization. Launch-marker detection races the existing grace period, so a confirmed launch can complete without waiting 800 ms. Agent tmux tuning is consolidated into one Docker exec. These launch changes were source/type checked; no real external-terminal appearance-time benchmark was taken.
+
+The existing DOM renderer was retained. Caching, byte-preserving delivery, bounded flow control and resize coalescing are in place; GPU renderer selection is not required to receive those improvements. The rendering probe below is not a DOM/WebGL comparison.
+
+**Validation and measurements of the implementation**
+
+| Check | Observed result | Scope |
+| --- | --- | --- |
+| 20 host Hub-WebSocket → tmux echo samples | Median 0.39 ms, p95 0.93 ms | Isolated local protocol test; excludes browser input/rendering and application computation. |
+| 20 container-local Hub-WebSocket → tmux echo samples | Median 0.19 ms, p95 0.48 ms | Hub and daemon fixtures both ran inside one existing container; excludes host-to-container port forwarding and browser rendering. |
+| 10 warm ensure-session HTTP samples | Median 6.87 ms | Built daemon, isolated data and private tmux server. Not a complete UI open measurement. |
+| Built daemon concurrency | Five concurrent ensures created exactly one session | Reuse, initial prompt logging, capabilities and authenticated WebSocket snapshot passed. |
+| Host and container transport integration | Passed | Unicode, exact byte replay, shared sessions, resize, bracketed/chunked paste, reconnect and acknowledgement-based output flow control. |
+| Rolling-upgrade compatibility | Passed | Older UI uses JSON; modern UI falls back to an older daemon before forwarding queued input; initialization does not perform a consuming one-byte read. |
+| Hidden Electron React/xterm smoke | Passed | One open on initial tab, early input delivery, rename stability, cached tab/pane reuse, Unicode, large paste and bounded scrollback. Uses fake network delays to make lifecycle checks deterministic. |
+| DOM output processing | 20,000 lines in 89.5 ms | Hidden Electron fixture, xterm write callback; excludes physical paint and does not establish an FPS guarantee. |
+
+Reproduce the protocol and daemon tests from `apps/drone` using `node --require ts-node/register --test tests/node/terminal-control.test.ts tests/node/terminal-route-service.test.ts tests/node/terminal-websocket-legacy.test.ts` and, after a build, `node --test tests/node/terminal-daemon.test.cjs`. Run the UI smoke with `bun run smoke:terminal` from `apps/drone-hub`. These tests create disposable tmux sockets, local servers or Electron profiles and clean them up. The container run used a bundled copy of the same transport tests, with private temporary sessions inside the container.
+
+Both application type checks and production builds passed. The final combined Node integration run passed all five tests; under that concurrent test load, host transport echo measured 0.53 ms median / 1.15 ms p95 and warm ensure measured 15.62 ms median. The focused Bun checks passed 32 tests with 172 assertions. The full frontend suite finished with 1,409 passes and two Companion editor failures. Running the unchanged frontend source from HEAD reproduced the same two failures (1,407 passes); those failures are pre-existing suite interactions, and the Companion test file passes independently. The container transport run passed both tests, and the hidden Electron smoke passed. No live Hub or drone daemon was restarted as part of this work.
+
+For actual user opens, inspect `window.__droneTerminalPerformance()` in desktop developer tools. It retains at most 100 timing records, including view creation/restoration, ensure, ready and first output processing. Tool-icon requests start the clock before module loading. `output-after-input` is an observation of the next processed output, not proof of a matching echo. Ensure responses also include `Server-Timing: terminal_ensure`. None of these records contain terminal text or credentials. A real UI click-to-ready/p95 comparison after deployment remains necessary to attribute the original intermittent three-second wait precisely.
+
+**Review follow-up**
+
+The implementation review found and fixed these additional issues:
+
+- Manual reconnects now drain pending renderer writes before choosing a resume cursor. Overlapping retries ignore obsolete opens; late HTTP polls are aborted and cannot overwrite a recovered WebSocket screen or cursor. Closing waits for outstanding session creation, and an already-absent session closes successfully.
+- Host drones now have distinct, stable default shell names because their daemons share the host tmux server. Existing unscoped sessions are left intact; opening a host drone's default terminal selects its own shell. Daemon existence/deletion checks match exact session names, preventing prefix matches against another tab. Persistent attachment resolves the actual pane and supports custom tmux window/pane numbering.
+- Snapshots preserve the normal screen behind a full-screen application, its saved cursor, and an incomplete escape sequence awaiting live continuation. This prevents losing the shell screen when an application exits after reconnect.
+- Legacy input chunking preserves Unicode surrogate pairs. Both transports stop queued input after a failed operation instead of delivering a potentially dangerous command suffix. The daemon ignores malformed null protocol messages and distinguishes input failures from stale sessions.
+- The attachment queue accepts all frames of a 1 MiB paste, including its resize message. Replay storage packs small output notifications into 32 KiB pages, bounding bookkeeping and scans independently of the number of keystrokes.
+
+Post-review validation passed: 26 focused Bun tests, all 10 Node integration tests, all six transport tests inside an existing container, the hidden Electron smoke, and both production builds. The full frontend suite reports 1,413 passes and the same two previously reproduced baseline Companion failures. The built daemon test also runs with custom tmux numbering and verifies that creating or stopping an absent session does not reuse or kill a prefix match. No live services were restarted.
+
+**Startup diagnostics and screenshot follow-up**
+
+A read-only inspection of the container shown in the screenshot found that its running daemon does not advertise `terminal-control-v1`. Its tmux pane was 80 × 24, with the cursor on row 0, while its legacy screen response contained 24 rows of trailing padding. The compatibility viewer wrote that padding without restoring the cursor, explaining why new typing appeared below the prompt. This confirms the rendering failure; it does not retrospectively measure the reported four-second opening delay.
+
+The Hub now captures the screen, ANSI attributes, cursor and terminal modes in one tmux command list when attaching a modern viewer to an older daemon. It also applies the initial viewer dimensions. This works without upgrading the old daemon. If the exact capture is unavailable, text-only fallback trims trailing pane padding rather than leaving the cursor at the bottom. Live output is not trimmed. The capture path adds one local/container execution at attachment and is timed explicitly.
+
+The live shell already had `TERM=xterm-256color` and `COLORTERM=truecolor`; its current prompt contained no ANSI colors. No frontend theme rollback was found. Snapshot capture now preserves emitted colors, including the legacy HTTP capture on updated daemons. Shell creation sets the color-capable environment consistently while preserving configured overrides; existing shell prompt configuration is not rewritten.
+
+Each terminal now has a **Diagnostics** button beside its tabs. **Copy report** exports:
+
+- A trace ID, open-request ID, selected transport, runtime, dimensions and available remote cursor geometry.
+- Module readiness/preloading, view mounting and xterm setup, open-request waiting, WebSocket handshake, stream readiness and snapshot processing.
+- Hub environment lookup, daemon ensure, compatibility fallback reason, container lock wait/context resolution, and shell preparation.
+- Updated-daemon session-lock/probe/create and control attachment/resize/snapshot durations.
+- Sampled input queue waiting and the next processed output after input. This last observation is not proof of a matching echo and excludes physical screen paint.
+
+Timings are durations within their own process, not comparisons of browser/server clocks; nested stages overlap and must not be summed. Shared/prewarmed open requests include their original duration separately from the visible caller's wait. A terminal retains up to 64 startup/reconnect events and 32 sampled input/output events; input/output timings are limited to one sample per phase per second. No commands, terminal contents, tokens or environment values are included. `window.__droneTerminalDiagnostics()` exposes the same reports for cached views; the older flat `window.__droneTerminalPerformance()` now retains up to 300 events. Hub open responses also include `Server-Timing`.
+
+The hidden Electron smoke now renders a real tmux compatibility snapshot in xterm and asserts row 0, the exact prompt column including its trailing space, retained green ANSI text, and subsequent typing on the prompt line. It also opens the diagnostics panel. Tests cover old-daemon timing breakdowns and exclusion of terminal input/output from reports. Both production builds passed. The full frontend rerun finished with 1,414 passes and the two previously established Companion failures. A separate elapsed-time assertion failed under concurrent build load; the stale server-rendered clock was reproduced in unchanged source after a six-second delay, and the isolated test and normal suite rerun passed.
+
+The screenshot's daemon was inspected without sending input or restarting it. The new report will identify the stage responsible on the next slow open after the updated Hub/UI is running; the persistent transport still requires an updated daemon.
+
+**Measured slow open: repeated compatibility registry projection**
+
+The supplied trace `fa882b12-ed5e-47f6-b8f8-8628f52e561a` uses the persistent container transport and reaches ready at 3,596.4 ms, with first output processed at 3,600.9 ms. Its two sequential Hub lookup stages account for 3,261.4 ms (about 91%): `load-environment` takes 1,627.8 ms, and `hub-upgrade-resolution` takes 1,633.6 ms. Daemon session preparation takes 21.9 ms, stream attachment/resizing/snapshot takes 8.2 ms, and browser snapshot processing takes 2.1 ms. Nested timing stages must not be added to their parents.
+
+Both Hub call sites loaded the full compatibility registry, which projects unrelated chat state. Terminal opening now resolves environment settings through `resolveCanonicalDroneEnvironmentConfig`; WebSocket upgrade resolves only the selected lifecycle record through `resolveCanonicalDroneOrPendingForReadRef`. These existing readers use canonical storage on Node and retain their established Bun compatibility fallback. No result cache was added: changes to credentials, ports, repository variables and drone overrides remain visible on the next lookup. Existing timing names are preserved for comparison.
+
+The backend production build passed, as did eight environment/lifecycle Bun tests and five Node terminal regression tests. A new test makes any full-registry projection throw while checking host/container lookup by ID and name, 409/404 rejection, repository inheritance/exclusions/overrides, no-repository variables, and immediate visibility of edited credentials and environment settings. Route tests verify that opening uses the asynchronous direct environment reader, and legacy transport tests still pass. Loopback tests ran outside the network sandbox using disposable fixtures.
+
+This removes the two expensive calls identified by the supplied trace; a post-change real desktop click-to-ready measurement has not yet been collected. The remaining roughly 340 ms in that trace is not a measured post-fix startup time. This follow-up changes Hub lookup code and requires the updated Hub process; it does not require another container daemon upgrade. No live service was restarted.
+
+**Automatic backend reporting replaces the diagnostics popup**
+
+The terminal Diagnostics button, popup and clipboard workflow have been removed. The browser now sends bounded timing snapshots to `POST /api/telemetry/terminal`, using the existing authenticated Hub telemetry path. The Hub validates allowed fields at every nesting level and writes each report as complete JSON following the `terminal timing` log marker. JSON is placed in the message rather than a nested console object so long reports retain all phases instead of being abbreviated as `[Object]` or truncated strings.
+
+For future investigations, search the active Hub's `hub.log` for `terminal timing`, then filter by `droneId`, `traceId` or `reportedAt`. The log lives in the active Drone data/profile directory alongside `hub.json`; the Hub state/status includes its `logPath`. The usual detached Hub launch persists stdout/stderr there. Foreground runs emit the same entries to their process logs. Reports include browser startup/render timing, Hub and daemon stages, selected transport, dimensions/cursor geometry, elapsed time, connection/failure flags and sampled input timing. They exclude commands, terminal contents, error-response text, environment values and tokens.
+
+Startup changes coalesce into background uploads, with readiness/output processing and failures expedited to about 250 ms after the event. Input timing samples share a 30-second batch. Idle terminals send no periodic requests. Page hiding and connection disposal flush pending/final reports with keepalive requests. Uploads do not block shell opening, typing or rendering; each request has a five-second timeout, and delivery failures do not surface terminal errors. Reporting is best effort when the Hub/network is unavailable or the process terminates abruptly.
+
+Validation passed: 17 focused frontend tests, 27 backend telemetry/route tests, the UI type check, both production builds, and the hidden Electron smoke. Coverage includes batching, idle behavior, stalled uploads, page hiding/disposal, failed opens, stripping unexpected sensitive fields, invalid/oversized reports, full JSON retention above 10 KB, and automatic uploads with no Diagnostics UI. No live service was restarted; the updated Hub and UI must be loaded to enable automatic reporting.

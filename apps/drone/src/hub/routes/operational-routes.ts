@@ -9,6 +9,7 @@ import type { HubRouter } from '../hub-router';
 import type { CompanionTelemetryService } from '../companion/companion-telemetry';
 import { mobileChatLoadStore } from '../mobile-chat-load-store';
 import { normalizeMobileChatLoad } from '@drone/device-protocol';
+import { normalizeTerminalTelemetry } from '../terminal-telemetry';
 
 type ServiceFunction = (...args: any[]) => any;
 const GROQ_SPEECH_TIMEOUT_MS = 30_000;
@@ -420,6 +421,18 @@ export function registerOperationalRoutes(
     const record = normalizeMobileChatLoad(await readJson());
     if (!record?.kind) { json(400, { ok: false, error: 'invalid file load telemetry' }); return; }
     hubLog(record.status === 'completed' ? 'info' : 'warn', 'workspace file load timing', { ...record, requests: record.requests.map((request) => ({ ...request, timings: JSON.stringify(request.timings) })) });
+    json(202, { ok: true });
+  });
+
+  apiRouter.post('/api/telemetry/terminal', async ({ readJson, json }) => {
+    const report = normalizeTerminalTelemetry(await readJson());
+    if (!report) {
+      json(400, { ok: false, error: 'invalid terminal telemetry' });
+      return;
+    }
+    // The normal object logger truncates nested arrays/strings. Put the bounded
+    // JSON in the message so every timing survives in the persisted Hub log.
+    hubLog(report.failed ? 'warn' : 'info', `terminal timing ${JSON.stringify(report)}`);
     json(202, { ok: true });
   });
 

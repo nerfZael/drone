@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { execFile, spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
@@ -14,6 +14,10 @@ import {
   parseBuiltinPromptJobTranscriptLines,
   type BuiltinPromptJobTranscript,
 } from './hub/builtin-transcript-sessions';
+import { TerminalControls } from './terminal-control';
+import { installTerminalSocket } from './daemon-terminal-socket';
+import { withDroneOpLock } from './hub/drone-op-lock';
+import { readTerminalLogChunk } from './host/terminal-log-reader';
 import { preferredTerminalSessionLogsRoot } from './host/session-logs';
 import { missingHostDependencyMessage } from './host/runtime';
 import {
@@ -1081,9 +1085,9 @@ async function probeSession(session: string): Promise<{
   error?: string;
 }> {
   try {
-    await tmux(['has-session', '-t', session]);
+    await tmux(['has-session', '-t', `=${session}`]);
     try {
-      const pane = await tmux(['display-message', '-p', '-t', `${session}:0.0`, '#{pane_dead}']);
+      const pane = await tmux(['display-message', '-p', '-t', `=${session}:^`, '#{pane_dead}']);
       if (String(pane.stdout ?? '').trim() === '1') {
         // A dead pane can keep the session name reserved (for example when
         // remain-on-exit was enabled externally), so preserve the previous
@@ -1324,14 +1328,14 @@ async function startSession(opts: {
   await tmux([...args, ...cmdArgs]);
   try {
     // Avoid "dead pane still has a session" states for daemon-managed jobs/processes.
-    await tmux(['set-window-option', '-t', `${opts.session}:0`, 'remain-on-exit', 'off']);
+    await tmux(['set-window-option', '-t', `=${opts.session}:^`, 'remain-on-exit', 'off']);
   } catch {
     // ignore (best-effort; older tmux variants may differ)
   }
 }
 
 async function killSession(session: string): Promise<void> {
-  await tmux(['kill-session', '-t', session]);
+  await tmux(['kill-session', '-t', `=${session}`]);
 }
 
 async function sendText(session: string, text: string, enter: boolean): Promise<void> {
@@ -1367,39 +1371,6 @@ async function sendKeys(session: string, keys: string[]): Promise<void> {
   }
 }
 
-async function tmuxLoadBufferFromStdin(bufferName: string, text: string): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn('tmux', ['load-buffer', '-b', bufferName, '-'], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    let stderr = '';
-    child.stderr.on('data', (d) => (stderr += d.toString('utf8')));
-    child.once('error', (err) => reject(wrapTmuxError(err)));
-    child.once('close', (code) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      reject(
-        new Error((stderr || `tmux load-buffer failed with code ${String(code ?? 1)}`).trim()),
-      );
-    });
-    try {
-      child.stdin.end(text, 'utf8');
-    } catch (e: any) {
-      reject(new Error(e?.message ?? String(e)));
-    }
-  });
-}
-
-async function pasteRawText(session: string, text: string): Promise<void> {
-  const payload = String(text ?? '');
-  if (!payload) return;
-  const bufferName = `drone-terminal-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 8)}`;
-  await tmuxLoadBufferFromStdin(bufferName, payload);
-  await tmux(['paste-buffer', '-d', '-b', bufferName, '-t', `${session}:0.0`]);
-}
-
 async function pipePaneToFile(session: string, filePath: string): Promise<void> {
   await tmux(['pipe-pane', '-o', '-t', `${session}:0.0`, `cat >> ${filePath}`]);
 }
@@ -1433,13 +1404,13 @@ async function capturePromptLine(session: string): Promise<string> {
 
 async function captureScreenText(session: string, tailLinesRaw: number): Promise<string> {
   try {
-    const target = `${session}:0.0`;
+    const target = `=${session}:^`;
     const tailLines = Math.max(20, Math.min(5000, Math.floor(tailLinesRaw || 200)));
-    const { stdout } = await tmux(['capture-pane', '-p', '-t', target, '-S', String(-tailLines)]);
+    const { stdout } = await tmux(['capture-pane', '-p', '-e', '-t', target, '-S', String(-tailLines)]);
     return String(stdout ?? '');
   } catch {
     try {
-      const { stdout } = await tmux(['capture-pane', '-p', '-t', `${session}:0.0`]);
+      const { stdout } = await tmux(['capture-pane', '-p', '-e', '-t', `=${session}:^`]);
       return String(stdout ?? '');
     } catch {
       return '';
@@ -1501,34 +1472,7 @@ async function readSessionLogChunk(
   sinceRaw: number,
   maxRaw: number,
 ): Promise<{ chunk: string; nextOffset: number }> {
-  const max = Math.max(1, Math.min(1024 * 1024, Math.floor(maxRaw || 65536)));
-  let fileSize = 0;
-  try {
-    const st = await fs.stat(logPath);
-    fileSize = Number.isFinite(st.size) && st.size > 0 ? Math.floor(st.size) : 0;
-  } catch {
-    fileSize = 0;
-  }
-
-  const since = Number.isFinite(sinceRaw) && sinceRaw >= 0 ? Math.floor(sinceRaw) : 0;
-  const offset = Math.min(since, fileSize);
-  if (fileSize <= 0 || offset >= fileSize) {
-    return { chunk: '', nextOffset: offset };
-  }
-
-  try {
-    const fh = await fs.open(logPath, 'r');
-    try {
-      const buf = Buffer.alloc(max);
-      const { bytesRead } = await fh.read(buf, 0, max, offset);
-      const chunk = buf.subarray(0, bytesRead).toString('utf8');
-      return { chunk, nextOffset: offset + bytesRead };
-    } finally {
-      await fh.close();
-    }
-  } catch {
-    return { chunk: '', nextOffset: offset };
-  }
+  return readTerminalLogChunk(logPath, sinceRaw, maxRaw);
 }
 
 async function main() {
@@ -1777,6 +1721,7 @@ async function main() {
     await fs.writeFile(statePath, JSON.stringify(s, null, 2), 'utf8');
   }
 
+  const terminalControls = new TerminalControls();
   const server = http.createServer(async (req, res) => {
     try {
       const u = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
@@ -2202,6 +2147,40 @@ async function main() {
         return;
       }
 
+      if (method === 'POST' && pathname === '/v1/terminal/ensure') {
+        const body = await readJson(req);
+        const session = String(body?.session ?? '');
+        if (!isSafeSessionName(session)) { json(res, 400, { error: 'invalid session' }); return; }
+        const cmd = String(body?.cmd ?? '');
+        if (!cmd) { json(res, 400, { error: 'missing command' }); return; }
+        const args = Array.isArray(body.args) ? body.args.filter((arg: unknown) => typeof arg === 'string') : [];
+        const cwd = typeof body.cwd === 'string' ? body.cwd : undefined;
+        const env = body.env && typeof body.env === 'object' && !Array.isArray(body.env)
+          ? Object.fromEntries(Object.entries(body.env).filter(([, value]) => typeof value === 'string')) as Record<string, string>
+          : undefined;
+        const started = performance.now();
+        const phases: Array<{ phase: string; ms: number }> = [];
+        const reused = await withDroneOpLock(`terminal:${session}`, async () => {
+          phases.push({ phase: 'session-lock', ms: performance.now() - started });
+          const probeStarted = performance.now();
+          const exists = await sessionExists(session);
+          phases.push({ phase: 'session-probe', ms: performance.now() - probeStarted });
+          if (exists) return true;
+          const createStarted = performance.now();
+          const logPath = await sessionLogPathFor(session);
+          await fs.mkdir(path.dirname(logPath), { recursive: true });
+          await fs.writeFile(logPath, '');
+          // Install logging before the interactive shell runs, including its prompt.
+          const script = `tmux pipe-pane -o -t "$TMUX_PANE" ${bashQuote(`cat >> ${bashQuote(logPath)}`)}; exec "$@"`;
+          await startSession({ session, cmd: 'bash', args: ['-c', script, 'drone-terminal', cmd, ...args], cwd, env });
+          phases.push({ phase: 'session-create', ms: performance.now() - createStarted });
+          return false;
+        });
+        res.setHeader('Server-Timing', `terminal_ensure;dur=${(performance.now() - started).toFixed(1)}`);
+        json(res, 200, { ok: true, session, reused, transport: 'terminal-control-v1', diagnostics: { phases, totalMs: performance.now() - started } });
+        return;
+      }
+
       if (method === 'POST' && pathname === '/v1/process/start') {
         const body = await readJson(req);
         const cmd = String(body?.cmd ?? '');
@@ -2342,12 +2321,8 @@ async function main() {
           json(res, 413, { error: 'input too large' });
           return;
         }
-        const exists = await sessionExists(session);
-        if (!exists) {
-          json(res, 404, { error: `session not found: ${session}` });
-          return;
-        }
-        await pasteRawText(session, data);
+        const handle = await terminalControls.acquire(session);
+        try { await handle.control.input(Buffer.from(data)); } finally { handle.release(); }
         json(res, 202, { ok: true, session, bytes: Buffer.byteLength(data, 'utf8') });
         return;
       }
@@ -2426,12 +2401,8 @@ async function main() {
         const hasSince = u.searchParams.has('since');
         const since = Number(u.searchParams.get('since') ?? '0');
         const logPath = await sessionLogPathFor(session);
-        const initial = await readSessionLogChunk(
-          logPath,
-          hasSince ? since : Number.MAX_SAFE_INTEGER,
-          1,
-        );
-        let offset = initial.nextOffset;
+        const size = await fs.stat(logPath).then((stat) => stat.size).catch(() => 0);
+        let offset = hasSince && Number.isFinite(since) ? Math.max(0, Math.min(Math.floor(since), size)) : size;
 
         res.statusCode = 200;
         res.setHeader('content-type', 'text/event-stream; charset=utf-8');
@@ -2557,9 +2528,12 @@ async function main() {
     }
   });
 
+  const closeTerminalSockets = installTerminalSocket(server, resolvedToken, terminalControls);
   const shutdown = () => {
     if (daemonShuttingDown) return;
     daemonShuttingDown = true;
+    closeTerminalSockets();
+    terminalControls.close();
     clearInterval(codexIdleSweep);
     codexPromptRuns.stop();
     server.close(() => process.exit(0));

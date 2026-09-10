@@ -516,3 +516,7 @@ export async function terminalOutput(
 export async function terminalPrompt(client: DroneClient, payload: { session: string }) {
   return await req(client, 'GET', `/v1/terminal/prompt?session=${encodeURIComponent(payload.session)}`);
 }
+
+export async function terminalEnsure(client: DroneClient, payload: { session: string; cmd: string; args: string[]; cwd: string; env?: Record<string, string> }) {
+  return await req(client, 'POST', '/v1/terminal/ensure', payload, { timeoutMs: 2500 });
+}
