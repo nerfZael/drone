@@ -13,7 +13,8 @@
     "test:coverage": "bun test --coverage tests",
     "lint": "bun run typecheck",
     "preview": "vite preview",
-    "smoke": "node scripts/smoke-cli.cjs"
+    "smoke": "node scripts/smoke-cli.cjs",
+    "smoke:resize": "node scripts/smoke-workspace-resize.cjs"
   },
   "dependencies": {
     "@blip/protocol": "workspace:*",

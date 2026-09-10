@@ -86,6 +86,22 @@ const LEGACY_LAYOUT_STORAGE_KEY = profileStorageKey('droneHub.workspaceLayout.gl
 const PREVIEW_HOST_SELECTOR = '[data-dockview-preview-host="1"]';
 const disposedWorkspaceIds = new Set<string>();
 
+// Dockview treats a new option callback as a configuration change and forces
+// layout, even when only chat content changed. Keep this independent of React
+// renders so background updates cannot interfere with an active resize.
+const workspaceTabContextMenuItems: NonNullable<React.ComponentProps<typeof DockviewReact>['getTabContextMenuItems']> = ({ panel, group }) => {
+  if (panel.id === CHAT_PANEL_ID || panel.id.startsWith(SIDE_CHAT_PANEL_PREFIX)) return [];
+  // Bulk tool-tab actions must not remove chats or bypass their
+  // delete confirmation when a floating chat is docked in the group.
+  const tools = group.panels.filter((item) =>
+    item.id !== CHAT_PANEL_ID && !item.id.startsWith(SIDE_CHAT_PANEL_PREFIX));
+  return [
+    'close',
+    { label: 'Close Others', action: () => tools.filter((item) => item !== panel).forEach((item) => item.api.close()) },
+    { label: 'Close All', action: () => tools.forEach((item) => item.api.close()) },
+  ];
+};
+
 export function workspaceLayoutStorageKey(droneIdRaw: string): string {
   const droneId = String(droneIdRaw ?? '').trim();
   return profileStorageKey(`droneHub.workspaceLayout.drone.${encodeURIComponent(droneId)}`);
@@ -1019,18 +1035,7 @@ export function DockableDroneWorkspace({
             onReady={handleReady}
             singleTabMode="fullwidth"
             floatingGroupBounds="boundedWithinViewport"
-            getTabContextMenuItems={({ panel, group }) => {
-              if (panel.id === CHAT_PANEL_ID || panel.id.startsWith(SIDE_CHAT_PANEL_PREFIX)) return [];
-              // Bulk tool-tab actions must not remove chats or bypass their
-              // delete confirmation when a floating chat is docked in the group.
-              const tools = group.panels.filter((item) =>
-                item.id !== CHAT_PANEL_ID && !item.id.startsWith(SIDE_CHAT_PANEL_PREFIX));
-              return [
-                'close',
-                { label: 'Close Others', action: () => tools.filter((item) => item !== panel).forEach((item) => item.api.close()) },
-                { label: 'Close All', action: () => tools.forEach((item) => item.api.close()) },
-              ];
-            }}
+            getTabContextMenuItems={workspaceTabContextMenuItems}
           />
         </div>
       )}
