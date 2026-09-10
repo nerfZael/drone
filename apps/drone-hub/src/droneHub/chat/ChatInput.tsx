@@ -261,7 +261,7 @@ export function ChatInput({
   const applyCompanionComposerRef = React.useRef<(baseRevision: string, content: string) => { ok: true; revision: string }>(() => {
     throw new Error('COMPOSER_NOT_AVAILABLE');
   });
-  const sendMessageShortcutRef = React.useRef<() => boolean>(() => false);
+  const sendMessageShortcutRef = React.useRef<(deliveryMode?: ChatMessageDeliveryMode) => boolean>(() => false);
   const toggleVoiceRecordingShortcutRef = React.useRef<() => boolean>(() => false);
   const voiceRecordingStatusRef = React.useRef<ReturnType<typeof useChatVoiceRecorder>['status']>('idle');
   const toggleVoiceRecordingPauseShortcutRef = React.useRef<() => boolean>(() => false);
@@ -342,7 +342,7 @@ export function ChatInput({
       appendTranscript: (text) => appendContinuousDictationRef.current(text),
       readSnapshot: () => readCompanionComposerRef.current(),
       applyContent: (baseRevision, content) => applyCompanionComposerRef.current(baseRevision, content),
-      sendMessage: () => sendMessageShortcutRef.current(),
+      sendMessage: (deliveryMode) => sendMessageShortcutRef.current(deliveryMode),
       toggleVoiceRecording: () => toggleVoiceRecordingShortcutRef.current(),
       voiceRecordingStatus: () => voiceRecordingStatusRef.current,
       toggleVoiceRecordingPause: () => toggleVoiceRecordingPauseShortcutRef.current(),
@@ -1137,10 +1137,10 @@ export function ChatInput({
     return true;
   }
 
-  sendMessageShortcutRef.current = () =>
+  sendMessageShortcutRef.current = (deliveryMode = DEFAULT_CHAT_MESSAGE_DELIVERY_MODE) =>
     sendNow({
       trigger: 'keyboard',
-      deliveryMode: DEFAULT_CHAT_MESSAGE_DELIVERY_MODE,
+      deliveryMode,
     });
 
   const sendButtonLabel =

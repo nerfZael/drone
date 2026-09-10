@@ -116,12 +116,12 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   {
     id: 'focusPrimaryChatInput',
     label: 'Focus chat input',
-    description: 'Focuses the primary chat input.',
+    description: 'Focuses the composer in the currently focused chat, including floating chats.',
   },
   {
     id: 'sendActiveChatComposer',
     label: 'Send chat message',
-    description: 'Sends the active chat composer, stopping and transcribing a voice message first when needed.',
+    description: 'Sends the focused chat composer, stopping and transcribing a voice message first when needed. Tab sends ASAP without focusing the composer.',
   },
   {
     id: 'toggleChatComposerEditorMode',
