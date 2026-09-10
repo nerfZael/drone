@@ -4128,7 +4128,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const drone = drones.find((item) => item.id === droneId) ?? null;
       const chats =
         Array.isArray(drone?.chats) && drone!.chats.length > 0 ? drone!.chats : ['default'];
-      if (!chats.includes(chatName))
+      // Forked chats live in floating windows and are listed separately.
+      const sideChats = (drone?.sideChats ?? []).map((chat) => chat.name);
+      if (!chats.includes(chatName) && !sideChats.includes(chatName))
         return { ok: false, error: `Chat "${chatName}" is unavailable.` };
       if (chatName === 'default') return { ok: false, error: 'Default chat cannot be renamed.' };
       if (!newName) return { ok: false, error: 'New chat name is required.' };
@@ -5679,6 +5681,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   });
 
   const workspaceContentProps: DroneHubWorkspaceContentProps = useDroneHubWorkspaceContentProps({
+    renameCanvasChat,
     detachedChatAgent: currentDrone && effectiveChatInfo
       ? { droneId: currentDrone.id, chatName: selectedChat || 'default', agent: effectiveChatInfo.agent }
       : null,

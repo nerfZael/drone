@@ -3012,9 +3012,66 @@ select:disabled optgroup {
   position: relative;
 }
 
+/* The tab yields to the window actions instead of reserving a fixed width for them. */
 .dh-dockable-workspace .dv-resize-container:has([data-side-chat-name]) .dv-tabs-and-actions-container .dv-scrollable {
-  flex-grow: 0;
-  max-width: calc(100% - 32px);
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/*
+ * The chat name is a plain label in the title bar, not a raised tab. The
+ * selector mirrors Dockview's active-tab rule so it outranks it.
+ */
+.dh-dockable-workspace .dv-resize-container:has([data-side-chat-name]) .dv-groupview > .dv-tabs-and-actions-container .dv-tabs-container > .dv-tab,
+.dh-dockable-workspace .dv-resize-container:has([data-side-chat-name]) .dv-groupview.dv-active-group > .dv-tabs-and-actions-container .dv-tabs-container > .dv-tab.dv-active-tab,
+.dh-dockable-workspace .dv-resize-container:has([data-side-chat-name]) .dv-groupview.dv-inactive-group > .dv-tabs-and-actions-container .dv-tabs-container > .dv-tab.dv-active-tab {
+  background: transparent;
+  border-right: 0;
+  box-shadow: none;
+  color: var(--fg-secondary);
+}
+
+.dh-dockable-workspace .dv-resize-container:has([data-side-chat-name]) .dv-tab .dv-default-tab {
+  padding: 0 8px;
+}
+
+.dh-dockable-workspace .dv-resize-container:has([data-side-chat-name]) .dv-tab .dv-default-tab .dv-default-tab-content {
+  margin-right: 0;
+}
+
+/* Inline rename: the tab takes the pointer back from the drag handle. */
+.dh-dockable-workspace .dv-resize-container:has([data-side-chat-name]) .dv-tabs-and-actions-container .dv-scrollable:has([data-chat-tab-editing]) {
+  pointer-events: auto;
+  position: relative;
+  z-index: 2;
+  flex: 1 1 auto;
+}
+
+.dh-dockable-workspace .dv-resize-container:has([data-side-chat-name]) .dv-tab:has([data-chat-tab-editing]) {
+  width: 100%;
+  max-width: none;
+}
+
+.dh-chat-window-rename {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 120px;
+  height: calc(100% - 6px);
+  margin: 0;
+  padding: 0 6px;
+  border: 1px solid var(--accent-border);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--fg);
+  font: inherit;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  outline: none;
+}
+
+.dh-chat-window-rename--error {
+  border-color: var(--red);
 }
 
 .dh-dockable-workspace .dv-resize-container:has([data-side-chat-name]) .dv-void-container {
@@ -3028,7 +3085,7 @@ select:disabled optgroup {
 
 .dh-dockable-workspace .dv-resize-container:has([data-side-chat-name]) .dv-tabs-and-actions-container.dv-single-tab .dv-void-container {
   position: absolute;
-  inset: 0 32px 0 0;
+  inset: 0;
   z-index: 1;
 }
 
@@ -3041,6 +3098,12 @@ select:disabled optgroup {
   flex-shrink: 0;
   position: relative;
   z-index: 2;
+}
+
+.dh-chat-window-actions {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
 }
 
 .dh-chat-window-action {
@@ -3623,6 +3686,89 @@ select:disabled optgroup {
   }
   100% {
     transform: translateX(320%);
+  }
+}
+
+/*
+ * One row under an agent message: the collapse toggle and skill pills share
+ * it. The hover-only actions sit at its top-right corner without taking part
+ * in the flow, so they never claim a line of their own in a narrow window.
+ */
+.dh-chat-message-footer {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .375rem;
+  min-height: 1.75rem;
+  margin-top: .5rem;
+}
+
+.dh-chat-message-footer > [data-agent-message-actions] {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 1;
+}
+
+/* Actions alone reserve no space; they hover over the gap below the message. */
+.dh-chat-message-footer:not(:has(> :not([data-agent-message-actions]))) {
+  min-height: 0;
+  margin-top: 0;
+}
+
+/*
+ * Floating chat windows. Below a comfortable width the composer loses its
+ * card framing and the transcript its wide gutters so the conversation gets
+ * the space; a window dragged wide enough reads like a regular chat again.
+ */
+.dh-floating-chat {
+  container: floating-chat / inline-size;
+}
+
+@container floating-chat (max-width: 560px) {
+  .dh-chat-composer {
+    padding: 0;
+  }
+
+  .dh-chat-composer-box {
+    min-height: 0;
+    border-width: 1px 0 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .dh-chat-composer-row {
+    padding-left: .625rem;
+    padding-right: .625rem;
+  }
+
+  .dh-chat-composer-row--collapsed {
+    min-height: 2.25rem;
+    padding-left: .25rem;
+    padding-right: .25rem;
+  }
+
+  /* The auto-sizing textarea sets the row height; trim its vertical padding. */
+  .dh-chat-composer-row--collapsed textarea {
+    min-height: 2.25rem;
+    padding-top: .4375rem;
+    padding-bottom: .4375rem;
+  }
+
+  .dh-chat-composer-toolbar {
+    min-height: 2.25rem;
+    padding: 0 .25rem .25rem;
+  }
+
+  .dh-chat-composer-row--collapsed [data-chat-composer-collapsed-action="true"] {
+    width: 1.875rem;
+    height: 1.875rem;
+  }
+
+  .dh-chat-transcript {
+    gap: 1.125rem;
+    padding: .875rem .75rem;
   }
 }
 

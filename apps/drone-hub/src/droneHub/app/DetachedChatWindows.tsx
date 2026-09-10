@@ -1,6 +1,6 @@
 import { SideChatForkContext } from '../chat/SideChatForkContext';
 import React from 'react';
-import { DockviewReact, DockviewDefaultTab, type DockviewApi, type IDockviewPanelProps, type IDockviewPanelHeaderProps, type IDockviewHeaderActionsProps } from 'dockview';
+import { DockviewReact, type DockviewApi, type IDockviewPanelProps, type IDockviewPanelHeaderProps, type IDockviewHeaderActionsProps } from 'dockview';
 import 'dockview/dist/styles/dockview.css';
 import type { DroneSummary } from '../types';
 import { ChatSurface, adaptNativeAgentChatSurface } from '../chat';
@@ -16,6 +16,7 @@ import { prepareSideChatPanel } from './prepareSideChatPanel';
 import { focusChatWindow } from './focus-chat-window';
 import { requestChatFileOpen } from './chat-file-navigation';
 import { IconDetachedChat } from './DetachedChatIndicator';
+import { ChatWindowTab } from './ChatWindowTab';
 
 export type DetachedChatWindowsProps = {
   drones: DroneSummary[];
@@ -24,6 +25,7 @@ export type DetachedChatWindowsProps = {
   activeChatAgent?: { droneId: string; chatName: string; agent: { kind: string; id?: string } } | null;
   onSendPromptInNewChat: (drone: DroneSummary, ...args: [...Parameters<GroupMultiChatColumnProps['onSendPromptInNewChat']>, string]) => Promise<boolean>;
   onCreateQueuedNewChatNow: (id: string, source: { droneId: string; chatName: string }) => Promise<void>;
+  onRenameChat?: (droneId: string, chatName: string, newName: string) => Promise<{ ok: boolean; chatName?: string; error?: string | null }>;
 } & Pick<GroupMultiChatColumnProps, 'onCreateNewChatAutoFocusHandled' | 'promotingNewChatActionById' | 'promoteNewChatActionErrorById' | 'onAutoRenameChatFromFirstPrompt'>;
 
 const WindowContext = React.createContext<DetachedChatWindowsProps | null>(null);
@@ -109,7 +111,7 @@ function DetachedPanel({ params }: IDockviewPanelProps<{ chatKey: string }>) {
   const available = drone && [...drone.chats, ...(drone.workflowChats ?? [])].includes(chat.chatName);
   return (
     <div tabIndex={-1} data-side-chat-name={params.chatKey} data-detached-chat-key={params.chatKey} data-chat-drone-id={chat.droneId} data-chat-name={chat.chatName}
-      className="flex h-full min-h-0 min-w-0 flex-col bg-[var(--chat-background)]">
+      className="dh-floating-chat flex h-full min-h-0 min-w-0 flex-col bg-[var(--chat-background)]">
       <button type="button" onClick={() => dispatchAssistantOpenDroneChat(chat.droneId, chat.chatName)}
         title={`Open ${drone?.name ?? chat.droneId} / ${chat.chatName}`}
         className={`flex shrink-0 items-center gap-2 border-b px-2 py-1 text-left text-11 ${foreign ? 'border-[var(--info)] bg-[var(--info-subtle)] text-[var(--info)]' : 'border-[var(--border)] text-[var(--muted)]'}`}>
@@ -124,8 +126,22 @@ function DetachedPanel({ params }: IDockviewPanelProps<{ chatKey: string }>) {
 }
 
 function DetachedTab(props: IDockviewPanelHeaderProps) {
-  return <DockviewDefaultTab {...props} data-side-chat-name={props.api.id}
-    hideClose />;
+  const context = React.useContext(WindowContext)!;
+  const chat = useDetachedChatStore((state) => state.chats[props.api.id]);
+  const onRenameChat = context.onRenameChat;
+  const rename = React.useCallback(async (newName: string) => {
+    if (!chat || !onRenameChat) return { ok: false, error: 'Renaming is unavailable.' };
+    // The renamed chat mounts as a new window; keep it where this one is.
+    const panel = props.containerApi.getPanel(props.api.id);
+    const root = panel?.group.element.closest('.dh-detached-chats');
+    if (panel && root) {
+      const bounds = measureSideChatBounds(panel.group.element, root);
+      if (bounds.width > 0 && bounds.height > 0) useDetachedChatStore.getState().saveBounds(props.api.id, bounds);
+    }
+    return onRenameChat(chat.droneId, chat.chatName, newName);
+  }, [chat, onRenameChat, props.containerApi, props.api.id]);
+  return <ChatWindowTab {...props} data-side-chat-name={props.api.id} chatName={chat?.chatName ?? ''}
+    onRename={chat && onRenameChat && chat.chatName !== 'default' ? rename : undefined} />;
 }
 function DetachedHeaderActions({ activePanel }: IDockviewHeaderActionsProps) {
   if (!activePanel) return null;

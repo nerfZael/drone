@@ -132,10 +132,13 @@ describe('completed external transcript presentation', () => {
     expect(html).toContain('aria-label="Copy message"');
     expect(html).toContain('pointer-events-auto opacity-100');
     expect(html.match(/bottom-full right-0 z-10 mb-1 flex min-h-7/g)).toHaveLength(1);
-    expect(html).toContain('left-0 top-full z-10 mt-1 flex min-h-7 w-full');
+    // Agent message actions share one in-flow footer row instead of an overlay rail.
+    expect(html).not.toContain('left-0 top-full z-10 mt-1 flex min-h-7 w-full');
     expect(html).toContain('justify-end');
     expect(html.match(/aria-label="Copy message"/g)).toHaveLength(2);
-    expect(html).not.toContain('data-agent-message-actions="true"');
+    expect(html.match(/data-agent-message-actions="true"/g)).toHaveLength(1);
+    expect(html).toContain('dh-chat-message-footer');
+    expect(html).toContain('flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100');
     expect(html).toContain('group-hover/turn:opacity-100');
     expect(html).toContain('group-focus-within/turn:opacity-100');
     expect(html).not.toContain('bottom-full left-0');

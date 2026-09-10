@@ -28,7 +28,7 @@ export const ChatTranscriptFrame = React.forwardRef<HTMLDivElement, ChatTranscri
       {loading ? (
         <ChatLoadingState message={loadingMessage} />
       ) : hasContent ? (
-        <div ref={contentRef} className="mx-auto flex max-w-[1170px] flex-col gap-6 px-6 py-5">
+        <div ref={contentRef} className="dh-chat-transcript mx-auto flex max-w-[1170px] flex-col gap-6 px-6 py-5">
           {children}
         </div>
       ) : (

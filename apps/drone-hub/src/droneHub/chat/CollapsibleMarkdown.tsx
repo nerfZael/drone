@@ -112,6 +112,7 @@ export function CollapsibleMarkdown({
   collapseAfterLines = 40,
   toggleOnMessageClick = false,
   autoExpand = false,
+  footer,
 }: {
   text: string;
   className?: string;
@@ -127,6 +128,8 @@ export function CollapsibleMarkdown({
   preserveLeadParagraph?: boolean;
   toggleOnMessageClick?: boolean;
   autoExpand?: boolean;
+  /** Shares the collapse toggle's row so message metadata does not stack. */
+  footer?: React.ReactNode;
 }) {
   const normalizedText = React.useMemo(() => text.replace(/\r\n/g, '\n'), [text]);
   const totalLines = React.useMemo(() => normalizedText.split('\n').length, [normalizedText]);
@@ -238,17 +241,22 @@ export function CollapsibleMarkdown({
           />
         </div>
       )}
-      {isLong && (
-        <button
-          type="button"
-          onClick={() => setCollapsed((v) => !v)}
-          aria-expanded={!collapsed}
-          className="mt-2 inline-flex min-h-7 items-center gap-1 rounded-[var(--radius-small)] border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-2 text-11 font-medium text-[var(--muted)] transition-colors hover:border-[var(--accent-muted)] hover:bg-[var(--surface-strong)] hover:text-[var(--fg)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)]"
-        >
-          <IconChevron down={!collapsed} />
-          {collapsed ? 'Show more' : 'Collapse'}
-        </button>
-      )}
+      {isLong || footer ? (
+        <div className="dh-chat-message-footer">
+          {isLong ? (
+            <button
+              type="button"
+              onClick={() => setCollapsed((v) => !v)}
+              aria-expanded={!collapsed}
+              className="inline-flex min-h-7 items-center gap-1 rounded-[var(--radius-small)] border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-2 text-11 font-medium text-[var(--muted)] transition-colors hover:border-[var(--accent-muted)] hover:bg-[var(--surface-strong)] hover:text-[var(--fg)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)]"
+            >
+              <IconChevron down={!collapsed} />
+              {collapsed ? 'Show more' : 'Collapse'}
+            </button>
+          ) : null}
+          {footer}
+        </div>
+      ) : null}
     </div>
   );
 }

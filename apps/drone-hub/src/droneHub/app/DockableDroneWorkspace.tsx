@@ -1,5 +1,6 @@
 import React from 'react';
 import { IconTrash } from './icons';
+import { ChatWindowTab } from './ChatWindowTab';
 import { measureSideChatBounds, readSideChatWorkspaceState, restoreSideChatBounds, saveSideChatWorkspaceState } from './side-chat-workspace-state';
 import { placeSideChat } from './side-chat-placement';
 import { prepareSideChatPanel } from './prepareSideChatPanel';
@@ -56,7 +57,10 @@ type DockableDroneWorkspaceProps = {
   sideChatFocusRequest?: { droneId: string; chatName: string } | null;
   mainChatControls?: React.ReactNode;
   renderSideChat?: (chat: WorkspaceSideChat) => React.ReactNode;
+  /** Title-bar actions of a floating forked chat, shown next to its delete action. */
+  renderSideChatHeaderActions?: (chat: WorkspaceSideChat) => React.ReactNode;
   onCloseSideChat?: (chatName: string) => void;
+  onRenameSideChat?: (chatName: string, newName: string) => Promise<{ ok: boolean; error?: string | null }>;
   sideChatStatus?: React.ReactNode;
   renderToolPane: (tab: RightPanelTab, paneKey: WorkspacePaneKey) => React.ReactNode;
   previewTab: RightPanelTab;
@@ -403,25 +407,34 @@ function ToolPanel({ api, params }: IDockviewPanelProps<{ tab?: unknown; paneKey
 
 function WorkspaceTab(props: IDockviewPanelHeaderProps) {
   const ctx = React.useContext(DockableDroneWorkspaceContext);
+  const sideChat = props.api.id.startsWith(SIDE_CHAT_PANEL_PREFIX);
   const closeable = props.api.id !== CHAT_PANEL_ID;
-  const closePanel = React.useCallback(() => {
-    if (props.api.id.startsWith(SIDE_CHAT_PANEL_PREFIX)) {
-      ctx.onCloseSideChat?.(props.api.id.slice(SIDE_CHAT_PANEL_PREFIX.length));
-      return;
-    }
-    props.api.close();
-  }, [props.api, ctx.onCloseSideChat]);
   const handlePointerDown = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (!closeable || event.button !== 1) return;
     event.preventDefault();
   }, [closeable]);
+  const onRenameSideChat = ctx.onRenameSideChat;
+  const chatName = sideChat ? props.api.id.slice(SIDE_CHAT_PANEL_PREFIX.length) : '';
+  const rename = React.useCallback(async (newName: string) => {
+    if (!onRenameSideChat) return { ok: false, error: 'Renaming is unavailable.' };
+    // The renamed chat mounts as a new panel; keep it where this one is.
+    const panel = props.containerApi.getPanel(props.api.id);
+    const root = panel?.group.element.closest('.dh-dockable-workspace');
+    if (panel && root && panel.group.element.closest('.dv-resize-container')) {
+      saveSideChatWorkspaceState(ctx.droneId, { floatingBounds: { [chatName]: measureSideChatBounds(panel.group.element, root) } });
+    }
+    return onRenameSideChat(chatName, newName);
+  }, [onRenameSideChat, props.containerApi, props.api.id, chatName, ctx.droneId]);
 
+  if (sideChat) {
+    return <ChatWindowTab {...props} data-side-chat-name={chatName} chatName={chatName}
+      onRename={onRenameSideChat ? rename : undefined} onPointerDown={handlePointerDown} />;
+  }
   return (
     <DockviewDefaultTab
       {...props}
-      data-side-chat-name={props.api.id.startsWith(SIDE_CHAT_PANEL_PREFIX) ? props.api.id.slice(SIDE_CHAT_PANEL_PREFIX.length) : undefined}
-      hideClose={!closeable || props.api.id.startsWith(SIDE_CHAT_PANEL_PREFIX)}
-      closeActionOverride={closeable ? closePanel : undefined}
+      hideClose={!closeable}
+      closeActionOverride={closeable ? () => props.api.close() : undefined}
       onPointerDown={handlePointerDown}
     />
   );
@@ -430,11 +443,16 @@ function WorkspaceTab(props: IDockviewPanelHeaderProps) {
 function WorkspaceHeaderActions({ activePanel }: IDockviewHeaderActionsProps) {
   const ctx = React.useContext(DockableDroneWorkspaceContext);
   if (!activePanel?.id.startsWith(SIDE_CHAT_PANEL_PREFIX)) return null;
-  return <button type="button" className="dh-chat-window-action" title="Delete forked chat" aria-label="Delete forked chat"
-    onPointerDown={(event) => event.stopPropagation()}
-    onClick={() => ctx.onCloseSideChat?.(activePanel.id.slice(SIDE_CHAT_PANEL_PREFIX.length))}>
-    <IconTrash />
-  </button>;
+  const chatName = activePanel.id.slice(SIDE_CHAT_PANEL_PREFIX.length);
+  const chat = ctx.sideChats.find((item) => item.name === chatName);
+  return <div className="dh-chat-window-actions" role="toolbar" aria-label="Side chat controls">
+    {chat ? ctx.renderSideChatHeaderActions?.(chat) : null}
+    <button type="button" className="dh-chat-window-action" title="Delete forked chat" aria-label="Delete forked chat"
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={() => ctx.onCloseSideChat?.(chatName)}>
+      <IconTrash />
+    </button>
+  </div>;
 }
 
 function WorkspaceWatermark() {
@@ -450,15 +468,19 @@ function WorkspaceWatermark() {
 }
 
 const DockableDroneWorkspaceContext = React.createContext<{
+  droneId: string;
   chatContent: React.ReactNode;
   mainChatControls?: React.ReactNode;
   sideChats: WorkspaceSideChat[];
   renderSideChat?: (chat: WorkspaceSideChat) => React.ReactNode;
+  renderSideChatHeaderActions?: (chat: WorkspaceSideChat) => React.ReactNode;
   onCloseSideChat?: (chatName: string) => void;
+  onRenameSideChat?: (chatName: string, newName: string) => Promise<{ ok: boolean; error?: string | null }>;
   renderToolPane: (tab: RightPanelTab, paneKey: WorkspacePaneKey) => React.ReactNode;
   previewTab: RightPanelTab;
   onPreviewHostChanged: () => void;
 }>({
+  droneId: '',
   chatContent: null,
   sideChats: [],
   renderToolPane: () => null,
@@ -478,7 +500,9 @@ export function DockableDroneWorkspace({
   sideChatFocusRequest,
   mainChatControls,
   renderSideChat,
+  renderSideChatHeaderActions,
   onCloseSideChat,
+  onRenameSideChat,
   sideChatStatus,
   renderToolPane,
   previewTab,
@@ -534,15 +558,18 @@ export function DockableDroneWorkspace({
   const contextValue = React.useMemo(
     () => ({
       chatContent,
+      droneId: currentDrone.id,
       mainChatControls,
       sideChats,
       renderSideChat,
+      renderSideChatHeaderActions,
       onCloseSideChat,
+      onRenameSideChat,
       renderToolPane,
       previewTab,
       onPreviewHostChanged: markPreviewHostChanged,
     }),
-    [chatContent, mainChatControls, sideChats, renderSideChat, onCloseSideChat, markPreviewHostChanged, previewTab, renderToolPane],
+    [currentDrone.id, chatContent, mainChatControls, sideChats, renderSideChat, renderSideChatHeaderActions, onCloseSideChat, onRenameSideChat, markPreviewHostChanged, previewTab, renderToolPane],
   );
   const components = React.useMemo(() => ({ chat: ChatPanel, tool: ToolPanel, sideChat: SideChatPanel }), []);
 

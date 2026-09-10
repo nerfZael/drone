@@ -979,7 +979,10 @@ export function GroupMultiChatColumn({
   return (
     <section
       data-side-chat-checkpoint-id={latestExternalCheckpointId(transcripts)}
-      className="relative flex-none h-full rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-alt)] overflow-hidden flex flex-col"
+      className={`relative flex-none h-full overflow-hidden flex flex-col ${
+        // Floating windows are the frame; the column fills them edge to edge.
+        compact ? 'bg-[var(--chat-background)]' : 'rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-alt)]'
+      }`}
       style={compact ? { width: '100%', minWidth: 0 } : { width: columnWidthPx, minWidth: columnWidthPx }}
     >
       {droneHubPermissionsOpen ? (

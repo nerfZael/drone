@@ -534,6 +534,7 @@ type SelectedDroneWorkspaceProps = {
   openedEditorFileOpenFailureMessage: string | null;
   openedEditorFileOpenFailureAt: number | null;
   onOpenMarkdownFileReference: (ref: MarkdownFileReference) => void;
+  onRenameDroneChat: (droneId: string, chatName: string, newName: string) => Promise<{ ok: boolean; chatName?: string; error?: string | null }>;
   rightPanelOpenRequestSeq: number;
   visibleToolTabs: RightPanelTab[];
   onVisibleToolTabsChange: (tabs: RightPanelTab[]) => void;
@@ -657,6 +658,7 @@ export function SelectedDroneWorkspace({
   openedEditorFileOpenFailureMessage,
   openedEditorFileOpenFailureAt,
   onOpenMarkdownFileReference,
+  onRenameDroneChat,
   rightPanelOpenRequestSeq,
   visibleToolTabs,
   onVisibleToolTabsChange,
@@ -2435,6 +2437,16 @@ export function SelectedDroneWorkspace({
           />
         ) : null}
         onCloseSideChat={(name) => void sideChatWorkspace.finish(name, false)}
+        onRenameSideChat={(name, newName) => onRenameDroneChat(currentDrone.id, name, newName)}
+        renderSideChatHeaderActions={(chat) => (
+          <SideChatControls
+            chat={chat}
+            busy={Boolean(sideChatWorkspace.busy)}
+            onKeep={() => void sideChatWorkspace.finish(chat.name, true)}
+            onOpenSource={() => openSideChatSource(chat)}
+            onMove={() => openSideChatAsMain(chat.name)}
+          />
+        )}
         sideChatStatus={sideChatWorkspace.status ? (
           <div role="status" className="flex items-center gap-2 border-b border-[var(--border)] bg-[var(--panel)] px-3 py-2 text-12 text-[var(--fg-secondary)]">
             <span className="flex-1">{sideChatWorkspace.status}</span>
@@ -2447,9 +2459,7 @@ export function SelectedDroneWorkspace({
             chat={chat}
             drone={currentDrone}
             busy={Boolean(sideChatWorkspace.busy)}
-            onKeep={() => void sideChatWorkspace.finish(chat.name, true)}
             onOpenSource={() => openSideChatSource(chat)}
-            onOpenAsMain={() => openSideChatAsMain(chat.name)}
             onSendPromptInNewChat={(payload, context) => onSendPromptInNewChat(payload, context, chat.name)}
             onCreateQueuedNewChatNow={(id) => onCreateQueuedNewChatNow(id, { droneId: currentDrone.id, chatName: chat.name })}
             onCreateNewChatAutoFocusHandled={onCreateNewChatAutoFocusHandled}

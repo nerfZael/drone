@@ -8,6 +8,7 @@ import {
 
 import {
   AgentMessageExtras,
+  AgentMessageFooter,
   type AgentMessageExtrasProps,
 } from '../chat/AgentMessageExtras';
 import type { MarkdownTextMentionLink } from '../chat/MarkdownMessage';
@@ -1547,9 +1548,33 @@ export function AssistantMessageRow({
     );
   }
 
+  const footer =
+    message.role === 'assistant' ? (
+      <AgentMessageFooter
+        text={visibleText}
+        messageId={
+          messageExtras?.messageId ??
+          String(message.id ?? message.createdAt ?? message.timestamp ?? 'assistant-message')
+        }
+        droneId={messageExtras?.droneId}
+        droneHomePath={messageExtras?.droneHomePath}
+        skillsUsed={messageExtras?.skillsUsed}
+        actionEnd={messageExtras?.actionEnd}
+        actions={
+          visibleText ? (
+            <ChatMessageActions text={visibleText} checkpointId={forkCheckpointId} />
+          ) : undefined
+        }
+      />
+    ) : null;
+  let footerPlaced = false;
   let body: React.ReactNode = null;
   if (message.role === 'assistant' && structuredAssistant) {
     const blocks: React.ReactNode[] = [];
+    const lastTextIndex = content.reduce(
+      (last, part, index) => (part?.type === 'text' && String(part.text ?? '').trim() ? index : last),
+      -1,
+    );
     for (let i = 0; i < content.length; i += 1) {
       const part = content[i];
       if (!part || typeof part !== 'object') continue;
@@ -1572,8 +1597,10 @@ export function AssistantMessageRow({
               onOpenLink={messageExtras?.onOpenLink}
               textMentionLinks={droneMentionLinks}
               onOpenTextMention={onOpenDroneMention}
+              footer={i === lastTextIndex ? footer : undefined}
             />,
           );
+          if (i === lastTextIndex) footerPlaced = true;
         }
       }
     }
@@ -1599,8 +1626,10 @@ export function AssistantMessageRow({
           onOpenLink={messageExtras?.onOpenLink}
           textMentionLinks={droneMentionLinks}
           onOpenTextMention={onOpenDroneMention}
+          footer={footer}
         />
       ) : null;
+    footerPlaced = Boolean(body);
   }
 
   if (
@@ -1618,11 +1647,6 @@ export function AssistantMessageRow({
       error={Boolean(message.errorMessage)}
       showRoleLabel={false}
       plainAssistant
-      hoverActions={
-        visibleText ? (
-          <ChatMessageActions text={visibleText} checkpointId={forkCheckpointId} />
-        ) : undefined
-      }
     >
       {body}
       {!body && message.errorMessage ? (
@@ -1647,8 +1671,10 @@ export function AssistantMessageRow({
             messageExtras?.messageId ??
             String(message.id ?? message.createdAt ?? message.timestamp ?? 'assistant-message')
           }
+          omitFooter
         />
       ) : null}
+      {footer && !footerPlaced ? <div className="dh-chat-message-footer mt-2">{footer}</div> : null}
     </ChatMessageFrame>
   );
 }

@@ -485,6 +485,13 @@ export function ChatInput({
   const resizeTextarea = React.useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
+    // An empty composer takes its height from CSS alone, so the compact
+    // floating-window rules apply without a measurement that can go stale.
+    if (!el.value) {
+      el.style.height = '';
+      el.style.overflowY = 'hidden';
+      return;
+    }
     el.style.height = 'auto';
     const next = Math.min(
       CHAT_INPUT_TEXTAREA_MAX_HEIGHT_PX,
@@ -493,6 +500,30 @@ export function ChatInput({
     el.style.height = `${next}px`;
     el.style.overflowY = el.scrollHeight > CHAT_INPUT_TEXTAREA_MAX_HEIGHT_PX ? 'auto' : 'hidden';
   }, []);
+  // Container queries change the textarea's padding with the composer width
+  // (floating chat windows), so the measured height must follow resizes. The
+  // observer runs before those query-dependent styles settle, so measure on
+  // the next frame.
+  React.useEffect(() => {
+    const root = composerRootRef.current;
+    if (!root || typeof ResizeObserver === 'undefined') return;
+    let width = root.clientWidth;
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      if (root.clientWidth === width) return;
+      width = root.clientWidth;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        resizeTextarea();
+      });
+    });
+    observer.observe(root);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, [resizeTextarea]);
 
   React.useEffect(() => {
     if (!controlledDraftEnabled && !persistenceKey) {
@@ -571,6 +602,10 @@ export function ChatInput({
     continuousDictationTargeted ||
     continuousVoiceActive ||
     (voiceRecordingActive && !compactVoiceRecording);
+  // Expanding and collapsing swap the textarea's padding; keep its height in step.
+  React.useEffect(() => {
+    resizeTextarea();
+  }, [composerExpanded, resizeTextarea]);
   const voiceRecordingLabel =
     voiceRecordingStatus === 'starting'
       ? 'Starting…'
@@ -1128,7 +1163,7 @@ export function ChatInput({
       data-editor-mode-target-id={editorModeShortcutTargetId}
       data-onboarding-id="chat.input"
       data-continuous-dictation-target={continuousDictationTargeted ? 'true' : undefined}
-      className="flex-shrink-0 bg-[var(--chat-background)] px-3 pb-3 pt-1.5 [font-family:var(--chat-composer-font)]"
+      className="dh-chat-composer flex-shrink-0 bg-[var(--chat-background)] px-3 pb-3 pt-1.5 [font-family:var(--chat-composer-font)]"
       onPointerDownCapture={() => {
         markCurrentChatComposerEditorModeTarget(editorModeShortcutTargetId);
       }}
@@ -1190,7 +1225,7 @@ export function ChatInput({
             if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return;
             setComposerFocused(false);
           }}
-          className={`relative min-h-[3.25rem] overflow-visible rounded-[var(--chat-composer-radius)] border bg-[var(--chat-composer-surface)] shadow-[var(--chat-composer-shadow)] transition-colors ${
+          className={`dh-chat-composer-box relative min-h-[3.25rem] overflow-visible rounded-[var(--chat-composer-radius)] border bg-[var(--chat-composer-surface)] shadow-[var(--chat-composer-shadow)] transition-colors ${
             dragActive ? 'border-[var(--accent)]' : 'border-[var(--chat-composer-border)]'
           } ${composerExpanded ? 'border-[var(--chat-composer-focus-border)]' : ''} ${
             continuousDictationTargeted
@@ -1262,7 +1297,7 @@ export function ChatInput({
             />
           ) : null}
 
-          <div className={`relative flex ${editorMode ? 'items-stretch' : 'items-center'} ${composerExpanded ? (editorMode ? '' : 'px-4') : 'min-h-[3.125rem] px-[.5625rem]'}`}>
+          <div className={`dh-chat-composer-row relative flex ${editorMode ? 'items-stretch' : 'items-center'} ${composerExpanded ? (editorMode ? '' : 'px-4') : 'dh-chat-composer-row--collapsed min-h-[3.125rem] px-[.5625rem]'}`}>
             {!composerExpanded && compactVoiceRecording && voiceRecordingActive ? (
               <>
                 <button
@@ -1607,7 +1642,7 @@ export function ChatInput({
           {composerExpanded ? (
             <div
               data-chat-composer-toolbar="true"
-              className={`flex min-h-[2.9375rem] flex-wrap items-center gap-[.4375rem] px-[.5625rem] pb-[.5625rem] ${
+              className={`dh-chat-composer-toolbar flex min-h-[2.9375rem] flex-wrap items-center gap-[.4375rem] px-[.5625rem] pb-[.5625rem] ${
                 editorMode ? 'pt-[.4375rem]' : ''
               }`}
             >

@@ -10,7 +10,7 @@ import {
 } from '@drone/assistant-chat';
 import { stripAnsi } from '../../domain';
 import type { TranscriptItem } from '../types';
-import { AgentMessageExtras } from './AgentMessageExtras';
+import { AgentMessageExtras, AgentMessageFooter } from './AgentMessageExtras';
 import type { LinkedPullRequestContext } from './LinkedPullRequestCards';
 import { ChatMessageBody } from './ChatMessageBody';
 import { ChatMessageActions } from './ChatMessageActions';
@@ -245,6 +245,58 @@ export const TranscriptTurn = React.memo(
       dockerSnapshot.status === 'ready' &&
       onRollbackDockerSnapshot,
     );
+    const dockerSnapshotAction =
+        actionsEnabled &&
+        item.ok &&
+        dockerSnapshot &&
+        (dockerSnapshotBusy ||
+          dockerSnapshot.status === 'failed' ||
+          onRollbackDockerSnapshot) ? (
+          <button
+            type="button"
+            onClick={() => {
+              if (canRollbackDockerSnapshot) void onRollbackDockerSnapshot?.(item);
+            }}
+            disabled={!canRollbackDockerSnapshot || dockerSnapshotBusy}
+            className={`inline-flex h-7 w-7 items-center justify-center rounded border transition-opacity ${
+              dockerSnapshotBusy
+                ? 'cursor-wait opacity-100'
+                : 'opacity-0 group-hover:opacity-100'
+            } ${
+              canRollbackDockerSnapshot
+                ? 'border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:bg-[var(--surface-inset-strong)] hover:text-[var(--accent)]'
+                : dockerSnapshot.status === 'failed'
+                  ? 'border-[var(--red-border)] bg-[var(--surface-inset)] text-[var(--red)]'
+                  : 'border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[var(--muted-dim)]'
+            }`}
+            title={
+              dockerSnapshot.status === 'creating'
+                ? 'Creating Docker snapshot'
+                : dockerSnapshot.status === 'restoring'
+                  ? 'Rolling back to this Docker snapshot'
+                  : dockerSnapshot.status === 'failed'
+                    ? `Docker snapshot failed: ${dockerSnapshot.error || 'unknown error'}`
+                    : 'Roll back this drone to this Docker snapshot'
+            }
+            aria-label="Roll back to Docker snapshot"
+          >
+            {dockerSnapshotBusy ? (
+              <IconSpinner className="h-3.5 w-3.5 text-[var(--accent)]" />
+            ) : (
+              <IconSnapshot className="h-3.5 w-3.5 opacity-90" />
+            )}
+          </button>
+        ) : actionsEnabled && item.ok && dockerSnapshotsEnabled ? (
+          <button
+            type="button"
+            disabled
+            className="inline-flex h-7 w-7 cursor-not-allowed items-center justify-center rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[var(--muted-dim)] opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+            title="No Docker snapshot exists for this message. Only messages completed after snapshots were enabled can be rolled back."
+            aria-label="No Docker snapshot for this message"
+          >
+            <IconSnapshot className="h-3.5 w-3.5 opacity-80" />
+          </button>
+        ) : null;
     return (
       <div className="group/turn animate-fade-in">
         {isSubscriptionEvent ? (
@@ -408,11 +460,6 @@ export const TranscriptTurn = React.memo(
             showRoleIcon={showRoleIcons}
             showRoleLabel={showRoleIcons}
             plainAssistant={!showRoleIcons}
-            hoverActions={
-              cleanedAgentMessage ? (
-                <ChatMessageActions text={cleanedAgentMessage} checkpointId={forkCheckpointId} />
-              ) : undefined
-            }
           >
             <ChatMessageBody
               role="assistant"
@@ -424,6 +471,21 @@ export const TranscriptTurn = React.memo(
               renderedInlineMediaHrefs={renderedInlineMediaHrefs}
               onOpenFileReference={onOpenFileReference}
               onOpenLink={onOpenLink}
+              footer={
+                <AgentMessageFooter
+                  text={cleanedAgentMessage}
+                  messageId={messageId}
+                  droneId={droneId}
+                  droneHomePath={droneHomePath}
+                  skillsUsed={item.skillsUsed}
+                  actionEnd={dockerSnapshotAction}
+                  actions={
+                    cleanedAgentMessage ? (
+                      <ChatMessageActions text={cleanedAgentMessage} checkpointId={forkCheckpointId} />
+                    ) : undefined
+                  }
+                />
+              }
             />
             <AgentMessageExtras
               text={cleanedAgentMessage}
@@ -435,63 +497,10 @@ export const TranscriptTurn = React.memo(
               onOpenFileReference={onOpenFileReference}
               onOpenLink={onOpenLink}
               plan={activity ? undefined : item.agentPlan}
-              skillsUsed={item.skillsUsed}
               fileChanges={item.fileChanges}
               initiallyExpandFileChanges={initiallyExpandFileChanges}
               initiallyExpandLinkedPullRequests={autoExpandAgentMessage}
-              actionEnd={
-                actionsEnabled &&
-                item.ok &&
-                dockerSnapshot &&
-                (dockerSnapshotBusy ||
-                  dockerSnapshot.status === 'failed' ||
-                  onRollbackDockerSnapshot) ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (canRollbackDockerSnapshot) void onRollbackDockerSnapshot?.(item);
-                    }}
-                    disabled={!canRollbackDockerSnapshot || dockerSnapshotBusy}
-                    className={`inline-flex h-7 w-7 items-center justify-center rounded border transition-opacity ${
-                      dockerSnapshotBusy
-                        ? 'cursor-wait opacity-100'
-                        : 'opacity-0 group-hover:opacity-100'
-                    } ${
-                      canRollbackDockerSnapshot
-                        ? 'border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:bg-[var(--surface-inset-strong)] hover:text-[var(--accent)]'
-                        : dockerSnapshot.status === 'failed'
-                          ? 'border-[var(--red-border)] bg-[var(--surface-inset)] text-[var(--red)]'
-                          : 'border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[var(--muted-dim)]'
-                    }`}
-                    title={
-                      dockerSnapshot.status === 'creating'
-                        ? 'Creating Docker snapshot'
-                        : dockerSnapshot.status === 'restoring'
-                          ? 'Rolling back to this Docker snapshot'
-                          : dockerSnapshot.status === 'failed'
-                            ? `Docker snapshot failed: ${dockerSnapshot.error || 'unknown error'}`
-                            : 'Roll back this drone to this Docker snapshot'
-                    }
-                    aria-label="Roll back to Docker snapshot"
-                  >
-                    {dockerSnapshotBusy ? (
-                      <IconSpinner className="h-3.5 w-3.5 text-[var(--accent)]" />
-                    ) : (
-                      <IconSnapshot className="h-3.5 w-3.5 opacity-90" />
-                    )}
-                  </button>
-                ) : actionsEnabled && item.ok && dockerSnapshotsEnabled ? (
-                  <button
-                    type="button"
-                    disabled
-                    className="inline-flex h-7 w-7 cursor-not-allowed items-center justify-center rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[var(--muted-dim)] opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
-                    title="No Docker snapshot exists for this message. Only messages completed after snapshots were enabled can be rolled back."
-                    aria-label="No Docker snapshot for this message"
-                  >
-                    <IconSnapshot className="h-3.5 w-3.5 opacity-80" />
-                  </button>
-                ) : null
-              }
+              omitFooter
             />
           </ChatMessageFrame>
         ) : null}

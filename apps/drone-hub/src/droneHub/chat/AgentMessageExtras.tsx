@@ -39,7 +39,105 @@ export type AgentMessageExtrasProps = {
   initiallyExpandFileChanges?: boolean;
   initiallyExpandLinkedPullRequests?: boolean;
   actionEnd?: React.ReactNode;
+  /** The caller renders `AgentMessageFooter` itself (on the collapse toggle's row). */
+  omitFooter?: boolean;
 };
+
+export type AgentMessageFooterProps = Pick<
+  AgentMessageExtrasProps,
+  'text' | 'messageId' | 'droneId' | 'droneHomePath' | 'skillsUsed' | 'actionEnd'
+> & {
+  /** Message-level actions such as copy and fork, revealed on hover. */
+  actions?: React.ReactNode;
+};
+
+/**
+ * Skill pills plus the message's action buttons, laid out as items of one
+ * wrapping row. The actions keep to the row's end and only show on hover.
+ */
+export function AgentMessageFooter({
+  text,
+  messageId,
+  droneId,
+  droneHomePath,
+  skillsUsed,
+  actionEnd,
+  actions,
+}: AgentMessageFooterProps) {
+  const inlineMediaOverride = useDroneHubUiStore(
+    (state) => state.transcriptInlineImageOverrides[messageId],
+  );
+  const setInlineMediaOverride = useDroneHubUiStore(
+    (state) => state.setTranscriptInlineImageOverride,
+  );
+  const inlineMedia = React.useMemo(
+    () => collectInlineAgentMedia(text, droneId, droneHomePath),
+    [droneHomePath, droneId, text],
+  );
+  const [editingSkillName, setEditingSkillName] = React.useState<string | null>(null);
+  const inlineMediaVisible = inlineMediaOverride !== false;
+  const inlineMediaToggle = resolveInlineMediaToggleState(inlineMediaVisible);
+  const normalizedSkillsUsed = normalizeAgentSkillUses(skillsUsed);
+  const hasMessageActions = inlineMedia.length > 0 || Boolean(actionEnd) || Boolean(actions);
+  if (normalizedSkillsUsed.length === 0 && !hasMessageActions) return null;
+  return (
+    <>
+      {normalizedSkillsUsed.length > 0 ? (
+        <div
+          data-agent-skills-used="true"
+          aria-label="Skills used by this agent run"
+          className="contents"
+        >
+          {normalizedSkillsUsed.map((skill) => (
+            <button
+              type="button"
+              key={skill.name.toLowerCase()}
+              title={`Edit ${skill.name} skill`}
+              aria-haspopup="dialog"
+              onPointerEnter={() => void prefetchSkillPillEditorData()}
+              onFocus={() => void prefetchSkillPillEditorData()}
+              onClick={() => setEditingSkillName(skill.name)}
+              className="inline-flex max-w-full items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-0.5 font-mono text-10 text-[var(--muted)] transition-colors hover:border-[var(--accent-muted)] hover:bg-[var(--surface-inset-strong)] hover:text-[var(--accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+            >
+              <span className="truncate">{skill.name}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {editingSkillName ? (
+        <SkillPillEditorDialog
+          skillName={editingSkillName}
+          onClose={() => setEditingSkillName(null)}
+        />
+      ) : null}
+      {hasMessageActions ? (
+        <div
+          data-agent-message-actions="true"
+          className="flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100"
+        >
+          {inlineMedia.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setInlineMediaOverride(messageId, !inlineMediaVisible)}
+              className={`pointer-events-none inline-flex h-7 w-7 items-center justify-center rounded border opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100 ${
+                inlineMediaToggle.active
+                  ? 'border-[var(--accent-muted)] bg-[var(--surface-inset-strong)] text-[var(--accent)]'
+                  : 'border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[var(--muted)]'
+              } hover:border-[var(--accent-muted)] hover:bg-[var(--surface-inset-strong)] hover:text-[var(--accent)]`}
+              title={inlineMediaToggle.label}
+              aria-label={inlineMediaToggle.label}
+              aria-pressed={inlineMediaToggle.active}
+            >
+              <IconImage className="h-3.5 w-3.5 opacity-90" />
+            </button>
+          ) : null}
+          {actionEnd}
+          {actions}
+        </div>
+      ) : null}
+    </>
+  );
+}
 
 export function AgentMessageExtras({
   text,
@@ -56,25 +154,18 @@ export function AgentMessageExtras({
   initiallyExpandFileChanges = false,
   initiallyExpandLinkedPullRequests = false,
   actionEnd,
+  omitFooter = false,
 }: AgentMessageExtrasProps) {
   const inlineMediaOverride = useDroneHubUiStore(
     (state) => state.transcriptInlineImageOverrides[messageId],
-  );
-  const setInlineMediaOverride = useDroneHubUiStore(
-    (state) => state.setTranscriptInlineImageOverride,
   );
   const inlineMedia = React.useMemo(
     () => collectInlineAgentMedia(text, droneId, droneHomePath),
     [droneHomePath, droneId, text],
   );
   const [failedMediaById, setFailedMediaById] = React.useState<Record<string, true>>({});
-  const [editingSkillName, setEditingSkillName] = React.useState<string | null>(null);
   const inlineMediaVisible = inlineMediaOverride !== false;
   const showInlineMedia = inlineMedia.length > 0 && inlineMediaVisible;
-  const inlineMediaToggle = resolveInlineMediaToggleState(inlineMediaVisible);
-  const hasPlan = Boolean(plan?.items.length);
-  const normalizedSkillsUsed = normalizeAgentSkillUses(skillsUsed);
-  const hasMessageActions = inlineMedia.length > 0 || Boolean(actionEnd);
 
   const openInlineMediaTarget = React.useCallback(
     (media: InlineAgentMedia) => {
@@ -93,28 +184,6 @@ export function AgentMessageExtras({
   React.useEffect(() => {
     setFailedMediaById({});
   }, [messageId]);
-
-  const messageActions = (
-    <>
-      {inlineMedia.length > 0 ? (
-        <button
-          type="button"
-          onClick={() => setInlineMediaOverride(messageId, !inlineMediaVisible)}
-          className={`pointer-events-none inline-flex h-7 w-7 items-center justify-center rounded border opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100 ${
-            inlineMediaToggle.active
-              ? 'border-[var(--accent-muted)] bg-[var(--surface-inset-strong)] text-[var(--accent)]'
-              : 'border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[var(--muted)]'
-          } hover:border-[var(--accent-muted)] hover:bg-[var(--surface-inset-strong)] hover:text-[var(--accent)]`}
-          title={inlineMediaToggle.label}
-          aria-label={inlineMediaToggle.label}
-          aria-pressed={inlineMediaToggle.active}
-        >
-          <IconImage className="h-3.5 w-3.5 opacity-90" />
-        </button>
-      ) : null}
-      {actionEnd}
-    </>
-  );
 
   return (
     <>
@@ -211,49 +280,33 @@ export function AgentMessageExtras({
         }
         initiallyExpanded={initiallyExpandLinkedPullRequests}
       />
-      <AgentPlanList
-        plan={plan}
-        headerActions={hasPlan && hasMessageActions ? messageActions : undefined}
-      />
+      <AgentPlanList plan={plan} />
 
-      {normalizedSkillsUsed.length > 0 ? (
-        <div
-          data-agent-skills-used="true"
-          aria-label="Skills used by this agent run"
-          className="mt-2 flex flex-wrap items-center gap-1.5"
-        >
-          {normalizedSkillsUsed.map((skill) => (
-            <button
-              type="button"
-              key={skill.name.toLowerCase()}
-              title={`Edit ${skill.name} skill`}
-              aria-haspopup="dialog"
-              onPointerEnter={() => void prefetchSkillPillEditorData()}
-              onFocus={() => void prefetchSkillPillEditorData()}
-              onClick={() => setEditingSkillName(skill.name)}
-              className="inline-flex max-w-full items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-0.5 font-mono text-10 text-[var(--muted)] transition-colors hover:border-[var(--accent-muted)] hover:bg-[var(--surface-inset-strong)] hover:text-[var(--accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
-            >
-              <span className="truncate">{skill.name}</span>
-            </button>
-          ))}
-        </div>
-      ) : null}
-
-      {editingSkillName ? (
-        <SkillPillEditorDialog
-          skillName={editingSkillName}
-          onClose={() => setEditingSkillName(null)}
+      {!omitFooter ? (
+        <AgentMessageFooterRow
+          text={text}
+          messageId={messageId}
+          droneId={droneId}
+          droneHomePath={droneHomePath}
+          skillsUsed={skillsUsed}
+          actionEnd={actionEnd}
         />
       ) : null}
-
-      {!hasPlan && hasMessageActions ? (
-        <div
-          data-agent-message-actions="true"
-          className="mt-1 flex min-h-7 items-center justify-end gap-1"
-        >
-          {messageActions}
-        </div>
-      ) : null}
     </>
+  );
+}
+
+/** The footer as its own row, for callers without a collapse toggle to share. */
+function AgentMessageFooterRow(props: AgentMessageFooterProps) {
+  const normalizedSkillsUsed = normalizeAgentSkillUses(props.skillsUsed);
+  const inlineMedia = React.useMemo(
+    () => collectInlineAgentMedia(props.text, props.droneId, props.droneHomePath),
+    [props.droneHomePath, props.droneId, props.text],
+  );
+  if (normalizedSkillsUsed.length === 0 && inlineMedia.length === 0 && !props.actionEnd && !props.actions) return null;
+  return (
+    <div className="dh-chat-message-footer mt-2">
+      <AgentMessageFooter {...props} />
+    </div>
   );
 }

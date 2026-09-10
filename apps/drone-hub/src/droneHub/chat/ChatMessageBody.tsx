@@ -136,6 +136,7 @@ export function ChatMessageBody({
   onOpenLink,
   textMentionLinks,
   onOpenTextMention,
+  footer,
 }: {
   role: 'user' | 'assistant';
   text?: string;
@@ -150,6 +151,8 @@ export function ChatMessageBody({
   onOpenLink?: (href: string) => boolean;
   textMentionLinks?: MarkdownTextMentionLink[];
   onOpenTextMention?: (mention: MarkdownTextMentionLink) => void;
+  /** Rendered on the collapse toggle's row, after the message text. */
+  footer?: React.ReactNode;
 }) {
   const rawText = String(text ?? '');
   const renderedText =
@@ -163,7 +166,7 @@ export function ChatMessageBody({
       ? 'dh-markdown--user'
       : `dh-markdown--transcript ${error ? 'dh-markdown--error' : 'dh-markdown--agent'}`;
 
-  if (!hasText && !normalizedError && images.length === 0) return null;
+  if (!hasText && !normalizedError && images.length === 0 && !footer) return null;
 
   return (
     <div className="space-y-2">
@@ -182,6 +185,7 @@ export function ChatMessageBody({
           renderBlockCopyAction={(blockText) => (
             <ChatMessageCopyAction text={blockText} position="block" copyLabel="block" />
           )}
+          footer={footer}
         />
       ) : null}
       {!hasText && normalizedError ? (
@@ -201,6 +205,7 @@ export function ChatMessageBody({
           ))}
         </div>
       ) : null}
+      {!hasText && footer ? <div className="dh-chat-message-footer">{footer}</div> : null}
     </div>
   );
 }

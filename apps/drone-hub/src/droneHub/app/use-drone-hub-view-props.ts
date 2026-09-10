@@ -525,11 +525,13 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     onVisibleToolTabsChange,
     renderRightPanelTabContent,
     renderPersistentPreviewContent,
+    renameCanvasChat,
   } = args;
 
   return {
     detachedChatWindowsProps: {
       drones,
+      onRenameChat: renameCanvasChat,
       activeChatAgent: args.detachedChatAgent,
       onAutoRenameChatFromFirstPrompt: handleAutoRenameChatFromFirstPrompt,
       onSendPromptInNewChat: sendPromptInNewDroneChat,
@@ -774,6 +776,7 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
           openedEditorFileOpenFailureMessage,
           openedEditorFileOpenFailureAt,
           onOpenMarkdownFileReference,
+          onRenameDroneChat: renameCanvasChat,
           rightPanelOpenRequestSeq,
           visibleToolTabs,
           onVisibleToolTabsChange,
