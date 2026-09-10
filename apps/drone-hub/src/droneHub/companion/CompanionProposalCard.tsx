@@ -107,11 +107,14 @@ function proposalLocation(
   operation: CreateDroneOperation,
   defaultRepoPath: string,
 ): { repository: string; groupPath: string } {
-  const repository = (operation.repoPath ?? defaultRepoPath) || 'No repository';
-  const group = operation.group || 'Ungrouped';
+  const repoPath = operation.repoPath ?? defaultRepoPath;
+  const repository = repoPath.split(/[\\/]/).filter(Boolean).pop() || 'No repository';
+  const group = operation.group || '';
   return {
     repository,
-    groupPath: repository === 'No repository' ? group : `${repository} / ${group}`,
+    groupPath: repository === 'No repository'
+      ? group || repository
+      : [repository, group].filter(Boolean).join(' / '),
   };
 }
 
@@ -203,7 +206,7 @@ function creationDetailRowsFromSettings(
   };
   const rows: Array<[string, string | null]> = [
     ['Repository', location.repository],
-    ['Group', operation.group || 'Ungrouped'],
+    ['Group', operation.group || null],
     ['Runtime', show(settings.runtime, runtimeLabel)],
     ['Persist volume', show(settings.persistVolume)],
     ['Branch source', show(settings.branchSource, capitalize)],

@@ -36,8 +36,9 @@ describe('Companion proposal card', () => {
     expect(html).toContain('Send message');
     expect(html).toContain('↑ Step 1');
     expect(html).toContain('Reviewer');
-    expect(html).toContain('/workspace/repo');
-    expect(html).toContain('/workspace/repo / Ungrouped');
+    expect(html).toContain('>repo</span>');
+    expect(html).not.toContain('/workspace/repo');
+    expect(html).not.toContain('Ungrouped');
     expect(html).toContain('Preview full initial message and group path for Reviewer');
     expect(html).toContain('Review.');
     expect(html).toContain('Check tests.');
@@ -378,7 +379,7 @@ describe('Companion proposal card', () => {
     expect(html).toContain('Create drone');
     expect(html).toContain('Reviewer');
     expect(html).toContain('>Repository<');
-    expect(html).toContain('/workspace/repo');
+    expect(html).toContain('>repo</dd>');
     expect(html).toContain('>Runtime<');
     expect(html).toContain('>Host<');
     expect(html).toContain('>Initial prompt<');
