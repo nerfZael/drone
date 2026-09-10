@@ -31,6 +31,45 @@ function composer(
 }
 
 describe('ActiveComposerRegistry', () => {
+  test('ASAP sends follow the focused window and preserve the delivery mode', () => {
+    const registry = new ActiveComposerRegistry();
+    const sends: string[] = [];
+    for (const id of ['main', 'floating']) {
+      registry.register({
+        ...composer(id, { eligible: true }),
+        requiresExplicitFocus: id === 'floating',
+        sendMessage: (mode) => { sends.push(`${id}:${mode}`); return true; },
+      });
+    }
+    registry.focusWithin(() => 'floating');
+    expect(registry.sendMessage('asap')).toBe(true);
+    registry.focusDefault();
+    expect(registry.sendMessage('asap')).toBe(true);
+    expect(sends).toEqual(['floating:asap', 'main:asap']);
+
+    // A loading floating chat must never send another chat's draft.
+    registry.focusWithin(() => null);
+    expect(registry.sendMessage('asap')).toBe(false);
+    expect(sends).toHaveLength(2);
+  });
+
+  test('an empty focused composer does not fall through to another chat', () => {
+    const registry = new ActiveComposerRegistry();
+    let mainSends = 0;
+    registry.register({
+      ...composer('main', { eligible: true }),
+      sendMessage: () => { mainSends++; return true; },
+    });
+    registry.register({
+      ...composer('floating', { eligible: true }),
+      requiresExplicitFocus: true,
+      sendMessage: () => false,
+    });
+    registry.focusWithin(() => 'floating');
+    expect(registry.sendMessage('asap')).toBe(false);
+    expect(mainSends).toBe(0);
+  });
+
   test('side chats never become fallback targets, even when the main composer is disabled', () => {
     const registry = new ActiveComposerRegistry();
     const main = { eligible: false, readable: true };

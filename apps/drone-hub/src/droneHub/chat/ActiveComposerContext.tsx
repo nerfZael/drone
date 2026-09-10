@@ -2,6 +2,7 @@ import React from 'react';
 import { markCurrentChatComposerEditorModeTarget } from './chat-composer-editor-mode-shortcut';
 import { routeComposerFocus } from './composer-focus-routing';
 import type { CompanionTextSnapshot } from '@drone/assistant-chat';
+import type { ChatMessageDeliveryMode } from './chat-send-shortcuts';
 import type { ChatVoiceRecordingStatus } from './use-chat-voice-recorder';
 
 export type ActiveComposer = {
@@ -12,7 +13,7 @@ export type ActiveComposer = {
   appendTranscript(text: string): void;
   readSnapshot?(): CompanionTextSnapshot;
   applyContent?(baseRevision: string, content: string): { ok: true; revision: string };
-  sendMessage?(): boolean;
+  sendMessage?(deliveryMode?: ChatMessageDeliveryMode): boolean;
   toggleVoiceRecording?(): boolean;
   voiceRecordingStatus?(): ChatVoiceRecordingStatus;
   toggleVoiceRecordingPause?(): boolean;
@@ -38,7 +39,7 @@ type ActiveComposerContextValue = {
     baseRevision: string,
     content: string,
   ): { ok: true; revision: string };
-  sendMessage(): boolean;
+  sendMessage(deliveryMode?: ChatMessageDeliveryMode): boolean;
   toggleVoiceRecording(): boolean;
   toggleVoiceRecordingPause(): boolean;
   discardVoiceRecording(): boolean;
@@ -158,8 +159,10 @@ export class ActiveComposerRegistry {
     return this.runActiveAction('toggleVoiceRecording');
   }
 
-  sendMessage(): boolean {
-    return this.runActiveAction('sendMessage');
+  sendMessage(deliveryMode?: ChatMessageDeliveryMode): boolean {
+    const targetId = this.ensureTargetId();
+    const composer = targetId ? this.composers.get(targetId) : null;
+    return composer?.sendMessage?.(deliveryMode) ?? false;
   }
 
   toggleVoiceRecordingPause(): boolean {
@@ -207,7 +210,7 @@ export class ActiveComposerRegistry {
   }
 
   private runActiveAction(
-    action: 'sendMessage' | 'toggleVoiceRecording' | 'clearComposer',
+    action: 'toggleVoiceRecording' | 'clearComposer',
   ): boolean {
     const targetId = this.ensureTargetId();
     const composer = targetId ? this.composers.get(targetId) : null;
@@ -263,7 +266,10 @@ export function ActiveComposerProvider({ children }: { children: React.ReactNode
       registry.applyComposer(targetId, baseRevision, content),
     [registry],
   );
-  const sendMessage = React.useCallback(() => registry.sendMessage(), [registry]);
+  const sendMessage = React.useCallback(
+    (deliveryMode?: ChatMessageDeliveryMode) => registry.sendMessage(deliveryMode),
+    [registry],
+  );
   const toggleVoiceRecording = React.useCallback(() => registry.toggleVoiceRecording(), [registry]);
   const toggleVoiceRecordingPause = React.useCallback(
     () => registry.toggleVoiceRecordingPause(),
