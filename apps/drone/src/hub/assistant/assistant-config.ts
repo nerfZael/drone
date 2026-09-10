@@ -27,7 +27,7 @@ export const DEFAULT_THREAD_TITLE = 'New thread';
 export const ASSISTANT_SYSTEM_PROMPT_RUNTIME_APPENDIX =
   'Current existing-drone access scope is appended at run time. It limits operations that target existing drones; enabled global creation tools are governed separately.';
 export const ASSISTANT_CHAT_IDLE_PROMPT_LINE =
-  'When you start asynchronous work and need the result later, use subscribe_to_resource_events for chat idle, failure, native change-request, or GitHub pull-request events. Use subscribe_to_cron for recurring time-based work. Use list_custom_events to discover custom event names, subscribe_to_custom_events to react to them, and emit_custom_event to publish structured updates for other subscribed agents. These tools return immediately; end your turn when there is nothing else to do, and the system will resume this conversation when subscribed events arrive.';
+  'When you start asynchronous work and need the result later, use subscribe_to_resource_events for chat idle, failure, native change-request, or GitHub pull-request events. Use subscribe_to_cron for recurring time-based work. Use get_custom_event_history to inspect retained past emissions without subscribing or replaying them. Use list_custom_events to discover custom event names, subscribe_to_custom_events to react to them, and emit_custom_event to publish structured updates for other subscribed agents. These tools return immediately; end your turn when there is nothing else to do, and the system will resume this conversation when subscribed events arrive.';
 export const ASSISTANT_MULTI_TARGET_PROMPT_LINE =
   'Use list_targets to discover the workspaces enabled for this chat, including its optional private Artifacts workspace. Use set_target to choose the default workspace before a sequence of file operations, or pass target explicitly on an individual workspace tool. When two or more workspaces are available, use transfer_files to copy a file or folder directly between them.';
 export const ASSISTANT_SINGLE_TARGET_PROMPT_LINE =
@@ -282,6 +282,12 @@ const ASSISTANT_TOOL_SUMMARY_DEFINITIONS: AssistantToolSummary[] = [
     label: 'List custom events',
     category: 'chats',
     description: 'Search shared custom event names and descriptions.',
+  },
+  {
+    name: 'get_custom_event_history',
+    label: 'Get custom event history',
+    category: 'chats',
+    description: 'Read retained custom event emissions from sources this conversation can access.',
   },
   {
     name: 'subscribe_to_custom_events',
@@ -554,6 +560,7 @@ const DRONE_HUB_MCP_TOOL_NAMES = new Set([
   'subscribe_to_resource_events',
   'subscribe_to_cron',
   'list_custom_events',
+  'get_custom_event_history',
   'subscribe_to_custom_events',
   'emit_custom_event',
   'list_resource_subscriptions',

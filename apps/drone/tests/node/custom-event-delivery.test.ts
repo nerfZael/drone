@@ -9,7 +9,10 @@ import { createInProcessDroneHubMcpClient } from '../../src/hub/assistant/in-pro
 import { HubRouter } from '../../src/hub/hub-router';
 import { normalizeMcpChatAccessScope } from '../../src/hub/mcp-chat-access';
 import { registerResourceSubscriptionRoutes } from '../../src/hub/routes/resource-subscription-routes';
-import { createResourceSubscriptionDeliveryAuthorizer } from '../../src/hub/subscriptions/create-resource-subscription-delivery-authorizer';
+import {
+  createResourceSubscriptionDeliveryAuthorizer,
+  createCustomEventHistorySourceReader,
+} from '../../src/hub/subscriptions/create-resource-subscription-delivery-authorizer';
 import { ResourceSubscriptionRepository } from '../../src/hub/subscriptions/resource-subscription-repository';
 import { ResourceSubscriptionService } from '../../src/hub/subscriptions/resource-subscription-service';
 import { DEFAULT_RESOURCE_SUBSCRIPTION_SETTINGS } from '../../src/hub/subscriptions/resource-subscription-types';
@@ -79,6 +82,7 @@ test('MCP custom events flow through HTTP routes and durable delivery with per-p
       },
       readSettings: async () => settings,
       authorizeDelivery: authorize,
+      readCustomEventHistorySourceIds: createCustomEventHistorySourceReader(async () => registry),
       wakePromptQueue: (droneId) => wakes.push(droneId),
       log: () => {},
     });
@@ -120,19 +124,56 @@ test('MCP custom events flow through HTTP routes and durable delivery with per-p
         }),
       );
     }
+    clients.push(
+      await createInProcessDroneHubMcpClient({
+        correlationId: 'history-workspace-test',
+        allowedDroneRefs: [subscriber!.droneId],
+        allowedWriteDroneRefs: [],
+        allowedDroneIds: [subscriber!.droneId],
+        workspaceDroneRefs: { read: [subscriber!.droneId], write: [], execute: [] },
+        principal: {
+          kind: 'chat',
+          tokenId: subscriber!.chatId,
+          name: subscriber!.chatId,
+          ...subscriber!,
+          accessScope: scope,
+          selectedDroneRefs: scope.droneIds,
+        },
+      }),
+    );
     const call = async (clientIndex: number, name: string, args: Record<string, unknown>) => {
       const result = await clients[clientIndex]!.callTool({ name, arguments: args });
       assert.notEqual(result.isError, true, JSON.stringify(result));
       return result.structuredContent as any;
     };
     const tools = await clients[2]!.listTools();
-    for (const name of ['list_custom_events', 'subscribe_to_custom_events', 'emit_custom_event']) {
+    for (const name of [
+      'list_custom_events',
+      'get_custom_event_history',
+      'subscribe_to_custom_events',
+      'emit_custom_event',
+    ]) {
       assert.ok(tools.tools.some((tool) => tool.name === name));
     }
     assert.equal(
       tools.tools.find((tool) => tool.name === 'list_custom_events')!.annotations!.readOnlyHint,
       true,
     );
+    assert.equal(
+      tools.tools.find((tool) => tool.name === 'get_custom_event_history')!.annotations!
+        .readOnlyHint,
+      true,
+    );
+    await call(0, 'emit_custom_event', { name: 'historical release', data: { version: 1 } });
+    const beforeSubscription = await call(2, 'get_custom_event_history', {
+      name: 'historicalRelease',
+    });
+    assert.deepEqual(
+      beforeSubscription.events.map((event: any) => event.data),
+      [{ version: 1 }],
+    );
+    assert.equal((await call(2, 'list_resource_subscriptions', {})).subscriptions.length, 0);
+    assert.equal(queue.listPending(subscriber!).length, 0);
     const subscription = await call(2, 'subscribe_to_custom_events', {
       name: 'Production Deployed',
       intent: 'Audit every deployment',
@@ -169,6 +210,39 @@ test('MCP custom events flow through HTTP routes and durable delivery with per-p
       name: 'production deployed',
       data: { deploymentId: 'private-deploy' },
     });
+    const history = await call(2, 'get_custom_event_history', {
+      name: 'productionDeployed',
+      limit: 1,
+    });
+    assert.deepEqual(
+      history.events.map((event: any) => event.eventId),
+      [emitted.eventId],
+    );
+    assert.equal(history.events[0].source.droneId, source!.droneId);
+    assert.equal(history.nextCursor, null);
+    assert.equal(JSON.stringify(history).includes('private-deploy'), false);
+    assert.equal(
+      (await call(3, 'get_custom_event_history', { name: 'production deployed' })).events.length,
+      0,
+    );
+    const deniedHistoryChat = await clients[2]!.callTool({
+      name: 'get_custom_event_history',
+      arguments: { name: 'production deployed', sourceChatId: deniedSource!.chatId },
+    });
+    assert.equal(deniedHistoryChat.isError, true);
+    const deniedHistory = await clients[2]!.callTool({
+      name: 'get_custom_event_history',
+      arguments: { name: 'production deployed', sourceDroneId: deniedSource!.droneId },
+    });
+    assert.equal(deniedHistory.isError, true);
+    // Persisted access changes take effect even while the MCP client's principal remains unchanged.
+    registry.drones[subscriber!.droneId]!.chats.default.droneHubMcpAccessScope =
+      normalizeMcpChatAccessScope({ readMode: 'selected', droneIds: [] }, subscriber!.droneId);
+    assert.equal(
+      (await call(2, 'get_custom_event_history', { name: 'production deployed' })).events.length,
+      0,
+    );
+    registry.drones[subscriber!.droneId]!.chats.default.droneHubMcpAccessScope = scope;
     await service.tick();
     const prompts = queue.listPending(subscriber!);
     assert.equal(prompts.length, 1);

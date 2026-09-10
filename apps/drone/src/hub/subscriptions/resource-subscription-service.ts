@@ -75,6 +75,7 @@ export type ResourceSubscriptionServiceDependencies = {
     subscriber: ChatResourceLocation,
     event?: ResourceEvent,
   ) => Promise<boolean>;
+  readCustomEventHistorySourceIds?: (reader: ChatResourceLocation) => Promise<string[]>;
   wakePromptQueue: (droneId: string, chatName: string) => void;
   resolveChangeRequest?: (requestNumber: number) => ChangeRequestSubscriptionTarget | null;
   resolveChangeRequests?: (
@@ -348,6 +349,110 @@ export class ResourceSubscriptionService {
     return {
       events: events.slice(0, limit),
       nextCursor: events.length > limit ? events[limit - 1]!.name : null,
+    };
+  }
+
+  async getCustomEventHistory(
+    input: CustomEventSourceFilter & {
+      reader: ResourceSubscriptionSubscriber;
+      name: string;
+      since?: string;
+      until?: string;
+      after?: string;
+      limit?: number;
+      readDroneIds?: string[];
+    },
+  ) {
+    const reader = this.requireCustomEventConversation(input.reader);
+    const name = normalizeCustomEventName(input.name);
+    const filter = customEventSourceFilter(input);
+    const timestamp = (value: unknown, field: string): string | undefined => {
+      if (value === undefined) return undefined;
+      if (
+        typeof value !== 'string' ||
+        value.length > 100 ||
+        !/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(value) ||
+        !Number.isFinite(Date.parse(value))
+      ) {
+        throw new Error(`${field} must be an ISO timestamp with a timezone`);
+      }
+      return new Date(value).toISOString();
+    };
+    const since = timestamp(input.since, 'since');
+    const until = timestamp(input.until, 'until');
+    if (since && until && since > until) throw new Error('since must not be after until');
+    const limit = input.limit ?? 50;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100)
+      throw new Error('limit must be between 1 and 100');
+    let after: { occurredAt: string; eventId: string } | undefined;
+    if (input.after !== undefined) {
+      try {
+        if (typeof input.after !== 'string' || input.after.length > 2048) throw new Error();
+        const cursor = JSON.parse(Buffer.from(input.after, 'base64url').toString('utf8'));
+        if (
+          cursor.name !== name ||
+          cursor.since !== since ||
+          cursor.until !== until ||
+          cursor.sourceDroneId !== filter.sourceDroneId ||
+          cursor.sourceChatId !== filter.sourceChatId ||
+          typeof cursor.eventId !== 'string' ||
+          !cursor.eventId ||
+          cursor.eventId.length > 200
+        )
+          throw new Error();
+        const occurredAt = timestamp(cursor.occurredAt, 'cursor');
+        if (!occurredAt) throw new Error();
+        after = { occurredAt, eventId: cursor.eventId };
+      } catch {
+        throw new Error('after must be a history cursor for the same event and filters');
+      }
+    }
+    if (
+      input.readDroneIds !== undefined &&
+      (!Array.isArray(input.readDroneIds) ||
+        input.readDroneIds.some((id) => typeof id !== 'string' || !id || id.length > 200))
+    ) {
+      throw new Error('readDroneIds must be an array of drone IDs');
+    }
+    let readableDroneIds = (await this.deps.readCustomEventHistorySourceIds?.(reader)) ?? [];
+    if (input.readDroneIds) {
+      const allowed = new Set(input.readDroneIds);
+      readableDroneIds = readableDroneIds.filter((id) => allowed.has(id));
+    }
+    const rows = this.deps.repository.getCustomEventHistory({
+      name,
+      ...filter,
+      since,
+      until,
+      after,
+      readableDroneIds,
+      limit: limit + 1,
+    });
+    const page = rows.slice(0, limit);
+    const last = page[page.length - 1];
+    return {
+      name,
+      events: page.map((event) => ({
+        eventId: event.id,
+        name: event.resourceId,
+        occurredAt: event.occurredAt,
+        source: event.providerContent.source,
+        data: event.providerContent.data,
+      })),
+      nextCursor:
+        rows.length > limit
+          ? Buffer.from(
+              JSON.stringify({
+                name,
+                ...filter,
+                since,
+                until,
+                occurredAt: last.occurredAt,
+                eventId: last.id,
+              }),
+            ).toString('base64url')
+          : null,
+      retentionDays: (await this.settings()).terminalEventRetentionDays,
     };
   }
 

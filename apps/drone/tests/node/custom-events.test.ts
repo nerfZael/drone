@@ -28,6 +28,11 @@ function fixture() {
   });
   const service = new ResourceSubscriptionService({
     repository,
+    readCustomEventHistorySourceIds: async () => [
+      source.droneId,
+      other.droneId,
+      subscriber.droneId,
+    ],
     readChatStatus: async () => {
       throw new Error('custom events must not poll chat state');
     },
@@ -357,6 +362,154 @@ test('emission limit permits idempotent retries and rejects new events atomicall
     assert.equal(retry.eventId, first.eventId);
     assert.equal(retry.emitted, false);
     assert.equal((await service.emitCustomEvent({ source: other, name: 'release' })).emitted, true);
+  } finally {
+    close();
+  }
+});
+
+test('history reads pre-subscription emissions without creating subscriptions or deliveries', async () => {
+  const { service, repository, close } = fixture();
+  try {
+    const first = await service.emitCustomEvent({
+      source,
+      name: 'Release Ready',
+      data: { version: 1 },
+    });
+    const history = await service.getCustomEventHistory({
+      reader: subscriber,
+      name: 'releaseReady',
+    });
+    assert.deepEqual(history.events, [
+      {
+        eventId: first.eventId,
+        name: 'release_ready',
+        occurredAt: first.occurredAt,
+        source,
+        data: { version: 1 },
+      },
+    ]);
+    assert.equal(history.retentionDays, 30);
+    assert.equal(history.nextCursor, null);
+    assert.deepEqual(repository.list(subscriber.chatId), []);
+    assert.equal(await repository.claimBatch(settings), null);
+    await service.subscribeToCustomEvents({ subscriber, name: 'release ready' });
+    assert.equal(await repository.claimBatch(settings), null);
+    assert.equal(
+      (await service.getCustomEventHistory({ reader: subscriber, name: 'release ready' })).events
+        .length,
+      1,
+    );
+    assert.equal(await repository.claimBatch(settings), null);
+    const second = await service.emitCustomEvent({ source, name: 'release ready' });
+    const batch = await repository.claimBatch(settings, new Date(Date.now() + 1000));
+    assert.deepEqual(
+      batch!.items.map((item) => item.event.id),
+      [second.eventId],
+    );
+  } finally {
+    close();
+  }
+});
+
+test('history paginates timestamp ties, filters sources and times, and validates cursors', async () => {
+  const { service, database, close } = fixture();
+  try {
+    const time = '2026-09-01T12:00:00.000Z';
+    const ids: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      ids.push((await service.emitCustomEvent({ source, name: 'release', data: { i } })).eventId);
+    }
+    await service.emitCustomEvent({ source: other, name: 'release' });
+    await service.emitCustomEvent({ source, name: 'unrelated' });
+    database.read((db) => db.prepare('UPDATE resource_events SET occurred_at = ?').run(time));
+    const input = {
+      reader: subscriber,
+      name: 'release',
+      sourceDroneId: source.droneId,
+      sourceChatId: source.chatId,
+      since: time,
+      until: time,
+      limit: 2,
+    };
+    const first = await service.getCustomEventHistory(input);
+    const second = await service.getCustomEventHistory({ ...input, after: first.nextCursor! });
+    assert.deepEqual(
+      [...first.events, ...second.events].map((event) => event.eventId),
+      ids.sort().reverse(),
+    );
+    assert.equal(second.nextCursor, null);
+    assert.equal(
+      (
+        await service.getCustomEventHistory({
+          reader: subscriber,
+          name: 'release',
+          since: '2026-09-01T12:00:01Z',
+        })
+      ).events.length,
+      0,
+    );
+    assert.equal(
+      (
+        await service.getCustomEventHistory({
+          reader: subscriber,
+          name: 'release',
+          until: '2026-09-01T11:59:59Z',
+        })
+      ).events.length,
+      0,
+    );
+    assert.equal(
+      (await service.getCustomEventHistory({ ...input, readDroneIds: [] })).events.length,
+      0,
+    );
+    for (const invalid of [
+      { after: 'broken' },
+      { after: Buffer.from('{}').toString('base64url') },
+      { since: 'yesterday' },
+      { since: '2026-09-01T12:00:00' },
+      { since: '2026-09-02T00:00:00Z' },
+      { limit: 0 },
+      { limit: 101 },
+      { name: 'unrelated', after: first.nextCursor! },
+      { sourceChatId: other.chatId, after: first.nextCursor! },
+    ])
+      await assert.rejects(service.getCustomEventHistory({ ...input, ...invalid }));
+    await assert.rejects(
+      service.getCustomEventHistory({
+        ...input,
+        reader: { ...subscriber, droneId: source.droneId },
+      }),
+      /conversation identity/,
+    );
+    assert.equal(
+      (await service.getCustomEventHistory({ reader: subscriber, name: 'unknown' })).events.length,
+      0,
+    );
+  } finally {
+    close();
+  }
+});
+
+test('history respects retention cleanup while the catalog survives', async () => {
+  const { service, repository, database, close } = fixture();
+  try {
+    await service.emitCustomEvent({ source, name: 'old release' });
+    const old = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString();
+    database.read((db) =>
+      db.prepare('UPDATE resource_events SET created_at = ?, occurred_at = ?').run(old, old),
+    );
+    assert.equal(
+      (await service.getCustomEventHistory({ reader: subscriber, name: 'old release' })).events
+        .length,
+      1,
+    );
+    await repository.cleanup(settings);
+    assert.equal(
+      (await service.getCustomEventHistory({ reader: subscriber, name: 'old release' })).events
+        .length,
+      0,
+    );
+    assert.equal(service.listCustomEvents({}).events.length, 1);
   } finally {
     close();
   }

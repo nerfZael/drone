@@ -336,7 +336,10 @@ import { registerSystemRoutes } from './routes/system-routes';
 import { createTerminalRouteHandler } from './routes/terminal-routes';
 import { registerWhiteboardRoutes } from './routes/whiteboard-routes';
 import { LocalCheckoutService } from './local-checkout-service';
-import { createResourceSubscriptionDeliveryAuthorizer } from './subscriptions/create-resource-subscription-delivery-authorizer';
+import {
+  createResourceSubscriptionDeliveryAuthorizer,
+  createCustomEventHistorySourceReader,
+} from './subscriptions/create-resource-subscription-delivery-authorizer';
 import { ResourceSubscriptionRepository } from './subscriptions/resource-subscription-repository';
 import { ResourceSubscriptionService } from './subscriptions/resource-subscription-service';
 import { registerChangeRequestFeature } from './change-requests/register-change-request-feature';
@@ -5542,6 +5545,8 @@ async function startDroneHubApiServerWithLifecycle(
           getChangeRequestRepository().getByNumber(requestNumber),
         resolveChangeRequests: (requestNumbers) =>
           getChangeRequestRepository().getByNumbers(requestNumbers),
+        readCustomEventHistorySourceIds:
+          createCustomEventHistorySourceReader(loadCanonicalActiveModel),
         authorizeDelivery: createResourceSubscriptionDeliveryAuthorizer({
           resolveChatResource: (resourceId) =>
             resourceSubscriptionRepository.resolveChatResource(resourceId),

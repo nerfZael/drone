@@ -469,6 +469,52 @@ export class ResourceSubscriptionRepository {
     });
   }
 
+  getCustomEventHistory(input: {
+    name: string;
+    readableDroneIds: string[];
+    sourceDroneId?: string;
+    sourceChatId?: string;
+    since?: string;
+    until?: string;
+    after?: { occurredAt: string; eventId: string };
+    limit: number;
+  }): ResourceEvent[] {
+    return this.database.read((connection) => {
+      const rows = connection
+        .prepare(
+          `
+        SELECT * FROM resource_events
+        WHERE provider = 'drone-hub' AND resource_type = 'custom_event'
+          AND resource_id = ?
+          AND json_extract(provider_content_json, '$.source.droneId') IN (SELECT value FROM json_each(?))
+          AND (? IS NULL OR json_extract(provider_content_json, '$.source.droneId') = ?)
+          AND (? IS NULL OR json_extract(provider_content_json, '$.source.chatId') = ?)
+          AND (? IS NULL OR occurred_at >= ?)
+          AND (? IS NULL OR occurred_at <= ?)
+          AND (? IS NULL OR (occurred_at, id) < (?, ?))
+        ORDER BY occurred_at DESC, id DESC LIMIT ?
+      `,
+        )
+        .all(
+          input.name,
+          JSON.stringify(input.readableDroneIds),
+          input.sourceDroneId ?? null,
+          input.sourceDroneId ?? null,
+          input.sourceChatId ?? null,
+          input.sourceChatId ?? null,
+          input.since ?? null,
+          input.since ?? null,
+          input.until ?? null,
+          input.until ?? null,
+          input.after?.occurredAt ?? null,
+          input.after?.occurredAt ?? null,
+          input.after?.eventId ?? null,
+          input.limit,
+        ) as EventRow[];
+      return rows.map(eventFromRow);
+    });
+  }
+
   private registerCustomEvent(
     connection: HubDatabaseConnection,
     name: string,

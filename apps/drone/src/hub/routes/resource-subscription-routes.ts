@@ -33,6 +33,36 @@ export function registerResourceSubscriptionRoutes(
     }
   });
 
+  apiRouter.get('/api/custom-events/history', async ({ url, json }) => {
+    try {
+      const current = availableService(json);
+      if (!current) return;
+      const params = url.searchParams;
+      json(200, {
+        ok: true,
+        ...(await current.getCustomEventHistory({
+          reader: {
+            chatId: params.get('readerChatId') ?? '',
+            droneId: params.get('readerDroneId') ?? '',
+            chatName: params.get('readerChatName') ?? '',
+          },
+          name: params.get('name') ?? '',
+          sourceDroneId: params.get('sourceDroneId') ?? undefined,
+          sourceChatId: params.get('sourceChatId') ?? undefined,
+          since: params.get('since') ?? undefined,
+          until: params.get('until') ?? undefined,
+          after: params.get('after') ?? undefined,
+          limit: params.has('limit') ? Number(params.get('limit')) : undefined,
+          readDroneIds: params.has('readDroneIds')
+            ? JSON.parse(params.get('readDroneIds')!)
+            : undefined,
+        })),
+      });
+    } catch (error) {
+      json(400, { ok: false, error: errorMessage(error) });
+    }
+  });
+
   apiRouter.post('/api/custom-events', async ({ readJson, json }) => {
     try {
       const current = availableService(json);
