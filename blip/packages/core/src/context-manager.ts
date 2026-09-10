@@ -168,6 +168,13 @@ export class BlipContextManager {
         reasoning: this.options.reasoning,
         apiKey,
         streamFn: this.options.streamFn,
+        onUsage: async (response) => {
+          await this.options.emit({
+            ...eventBase(this.options.state.id, this.options.activeTurnId()),
+            type: 'usage_observed', purpose: 'compaction', model: response.model, provider: response.provider,
+            complete: response.stopReason !== 'error' && response.stopReason !== 'aborted', usage: response.usage,
+          });
+        },
         signal: abortController.signal,
       });
       if (!compaction) {
@@ -263,6 +270,13 @@ export class BlipContextManager {
       reasoning: this.options.reasoning,
       apiKey,
       streamFn: this.options.streamFn,
+        onUsage: async (response) => {
+          await this.options.emit({
+            ...eventBase(this.options.state.id, this.options.activeTurnId()),
+            type: 'usage_observed', purpose: 'compaction', model: response.model, provider: response.provider,
+            complete: response.stopReason !== 'error' && response.stopReason !== 'aborted', usage: response.usage,
+          });
+        },
       signal,
     });
   }
@@ -287,6 +301,13 @@ export class BlipContextManager {
       reasoning: this.options.reasoning,
       apiKey: await this.options.getApiKey?.(this.options.model.provider),
       streamFn: this.options.streamFn,
+        onUsage: async (response) => {
+          await this.options.emit({
+            ...eventBase(this.options.state.id, this.options.activeTurnId()),
+            type: 'usage_observed', purpose: 'compaction', model: response.model, provider: response.provider,
+            complete: response.stopReason !== 'error' && response.stopReason !== 'aborted', usage: response.usage,
+          });
+        },
       signal,
     });
     if (signal.aborted) {

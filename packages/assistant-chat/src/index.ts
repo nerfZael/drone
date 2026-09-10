@@ -28,3 +28,4 @@ export * from './resource-subscription-presentation.js';
 export * from './run-stop.js';
 
 export * from './workspace-access.js';
+export * from './token-usage.js';

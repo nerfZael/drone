@@ -1,3 +1,4 @@
+import { recordExternalUsage } from './usage/recordExternalUsage';
 import type { AgentPlan, AgentRunActivity } from '@drone/assistant-chat';
 import { codexPromptOwnsResponse } from './codex-prompt-run';
 import type { PendingPrompt } from './drone-pending-prompts';
@@ -353,6 +354,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
       let job = jobResp?.job ?? null;
       let jobState = String(job?.state ?? '').trim();
       let jobKind = normalizeBuiltinAgentId(job?.kind) ?? agent.id;
+      recordExternalUsage({ job, droneId, chatId: String(entry.id), chatName, repo: d.repoPath, model: pendingModel });
       const appServerThreadId = String(job?.codexAppServer?.threadId ?? '').trim();
       if (jobKind === 'codex' && applyBuiltinSessionId(entry, 'codex', appServerThreadId)) {
         changed = true;

@@ -173,7 +173,7 @@ async function req(
   method: string,
   pathname: string,
   body?: any,
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; timeoutMs?: number },
 ): Promise<any> {
   return await consumeResponse(
     client,
@@ -183,6 +183,7 @@ async function req(
       ...(body == null ? {} : { body: JSON.stringify(body) }),
       contentType: 'application/json',
       signal: options?.signal,
+      timeoutMs: options?.timeoutMs,
     },
     async (response) => {
       const text = await response.text();
@@ -470,8 +471,8 @@ export async function codexPromptEnqueue(
   )) as CodexPromptEnqueueResponse;
 }
 
-export async function promptGet(client: DroneClient, id: string) {
-  return await req(client, 'GET', `/v1/prompts/${encodeURIComponent(id)}`);
+export async function promptGet(client: DroneClient, id: string, options?: { signal?: AbortSignal; timeoutMs?: number }) {
+  return await req(client, 'GET', `/v1/prompts/${encodeURIComponent(id)}`, undefined, options);
 }
 
 export async function promptCancel(client: DroneClient, id: string) {

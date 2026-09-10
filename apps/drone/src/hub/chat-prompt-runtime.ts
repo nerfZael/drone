@@ -1,3 +1,6 @@
+import { getUsageJournal, type ExternalUsageWatch } from './usage/UsageJournal';
+import { UsageRecoveryService } from './usage/UsageRecoveryService';
+import { openCodeUsagePromptScript } from './usage/openCodeUsagePromptScript';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import {
@@ -440,6 +443,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
   });
 
   async function enqueueTranscriptPrompt(opts: {
+    usage: ExternalUsageWatch;
     id?: string;
     drone: any;
     waitForDaemonMs?: number;
@@ -500,6 +504,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         hostPort,
       });
     }
+    getUsageJournal().watch(opts.usage);
     try {
       await measurePromptDeliveryPhase(
         opts.timing,
@@ -544,6 +549,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
   }
 
   async function enqueueCodexTranscriptPrompt(opts: {
+    usage: ExternalUsageWatch;
     id: string;
     drone: any;
     waitForDaemonMs?: number;
@@ -632,6 +638,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       ...(opts.effort ? { effort: opts.effort } : {}),
     };
     const enqueueAtDaemon = async () => {
+      getUsageJournal().watch(opts.usage);
       const result = await droneCodexPromptEnqueue(client, payload, { signal: opts.signal });
       if (opts.deliveryMode === 'asap') {
         const disposition = String(result?.disposition ?? '').trim() || 'unknown';
@@ -877,6 +884,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
                 attachments: attachmentsForPrompt,
               });
         await promptNativeChat({
+          repo: d.repoPath,
           droneId,
           chatName: normalizedChat,
           chatId: String((chat as any)?.id ?? '').trim(),
@@ -947,7 +955,8 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           `agent${modelArg} --resume ${bashQuote(chatId)} -f --approve-mcps --print --output-format stream-json ${bashQuote(promptWithHistory)}`,
         ].join('\n');
         await enqueueTranscriptPrompt({
-          id: opts.id,
+          usage: { droneId, promptId, chatId: String(chat.id), chatName: normalizedChat, repo: d.repoPath, model: chatModel },
+          id: promptId,
           drone: d,
           waitForDaemonMs: opts.waitForDaemonMs,
           kind: 'cursor',
@@ -995,6 +1004,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
             : 'exec codex app-server',
         ].join('\n');
         await enqueueCodexTranscriptPrompt({
+          usage: { droneId, promptId, chatId: String(chat.id), chatName: normalizedChat, repo: d.repoPath, model: chatModel },
           id: promptId,
           drone: d,
           waitForDaemonMs: opts.waitForDaemonMs,
@@ -1070,7 +1080,8 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           `claude --print --dangerously-skip-permissions --output-format stream-json --verbose${modelArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
         ].join('\n');
         await enqueueTranscriptPrompt({
-          id: opts.id,
+          usage: { droneId, promptId, chatId: String(chat.id), chatName: normalizedChat, repo: d.repoPath, model: chatModel },
+          id: promptId,
           drone: d,
           waitForDaemonMs: opts.waitForDaemonMs,
           kind: 'claude',
@@ -1094,20 +1105,12 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         const supportsModel = chatModel
           ? await cliSupportsModelFlag({ runtime, containerName, cwd, bin: 'opencode' })
           : false;
-        const modelArg = chatModel && supportsModel ? ` --model ${bashQuote(chatModel)}` : '';
         const forkSessionId = pendingChatForkSourceSessionId(chat, 'opencode');
         const forkMessageId = forkSessionId ? String(chat.chatForkOrigin?.lastMessageId ?? '') : '';
         const openCodeSessionId = forkSessionId
           ? ''
           : readBuiltinTranscriptSessionId(chat, 'opencode');
         const title = openCodeSessionTitle(droneLabel, normalizedChat);
-        const resumeArg = forkMessageId
-          ? ' --session "$checkpoint_fork_session_id"'
-          : forkSessionId
-            ? ` --session ${bashQuote(forkSessionId)} --fork`
-            : openCodeSessionId
-              ? ` --session ${bashQuote(openCodeSessionId)}`
-              : '';
         const script = [
           'set -euo pipefail',
           ...buildContainerManagedEnvLines(d),
@@ -1118,10 +1121,17 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           ...(forkMessageId
             ? [`checkpoint_fork_session_id=$(node -e ${bashQuote(openCodeCheckpointForkScript(forkSessionId, forkMessageId))})`]
             : []),
-          `opencode run --format json --title ${bashQuote(title)}${modelArg}${resumeArg} ${bashQuote(promptWithHistory)}`,
+          `node -e ${bashQuote(openCodeUsagePromptScript([
+            'run', '--format', 'json', '--title', title,
+            ...(chatModel && supportsModel ? ['--model', chatModel] : []),
+            ...(forkMessageId ? ['--session', '__CHECKPOINT_SESSION__'] : forkSessionId
+              ? ['--session', forkSessionId, '--fork'] : openCodeSessionId ? ['--session', openCodeSessionId] : []),
+            promptWithHistory,
+          ]))}${forkMessageId ? ' "$checkpoint_fork_session_id"' : ''}`,
         ].join('\n');
         await enqueueTranscriptPrompt({
-          id: opts.id,
+          usage: { droneId, promptId, chatId: String(chat.id), chatName: normalizedChat, repo: d.repoPath, model: chatModel },
+          id: promptId,
           drone: d,
           waitForDaemonMs: opts.waitForDaemonMs,
           kind: 'opencode',
@@ -1160,7 +1170,8 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           `pi --mode json${modelArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
         ].join('\n');
         await enqueueTranscriptPrompt({
-          id: opts.id,
+          usage: { droneId, promptId, chatId: String(chat.id), chatName: normalizedChat, repo: d.repoPath, model: chatModel },
+          id: promptId,
           drone: d,
           waitForDaemonMs: opts.waitForDaemonMs,
           kind: 'pi',
@@ -1208,7 +1219,8 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           `${blipCommand} --jsonl ${permissionArgs}${modelArg}${reasoningArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
         ].join('\n');
         await enqueueTranscriptPrompt({
-          id: opts.id,
+          usage: { droneId, promptId, chatId: String(chat.id), chatName: normalizedChat, repo: d.repoPath, model: chatModel },
+          id: promptId,
           drone: d,
           waitForDaemonMs: opts.waitForDaemonMs,
           kind: 'blip',
@@ -1279,6 +1291,20 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     onTerminalPrompt: enqueueReconcileForDaemonPromptEvent,
     onApprovalPending: enqueueReconcileForDaemonPromptEvent,
     sleep: sleepMs,
+  });
+
+  const usageRecovery = new UsageRecoveryService({
+    lookup: async (watch, signal) => {
+      const resolved = await resolveCanonicalDroneOrPendingForReadRef(watch.droneId);
+      if (signal.aborted) throw signal.reason;
+      if (resolved?.kind !== 'real') throw new Error('Usage source drone is unavailable');
+      const daemon = await resolveDroneDaemonClientForEntry(resolved.drone);
+      if (signal.aborted) throw signal.reason;
+      if (!daemon?.client) throw new Error('Usage source daemon is unavailable');
+      const response = await dronePromptGet(daemon.client, watch.promptId, { signal, timeoutMs: 5000 });
+      return response?.job ?? null;
+    },
+    onError: (error) => hubLog('warn', 'usage recovery pending', { error: String(error) }),
   });
 
   function enqueueReconcile(droneId: string, chatName: string): void {
@@ -3328,6 +3354,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
                 attachments: attachmentRefs,
               });
         await promptNativeChat({
+          repo: liveDroneEntry.repoPath,
           droneId,
           chatName,
           chatId: String(chatEntry?.id ?? '').trim(),
@@ -3466,6 +3493,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
 
   async function stopPromptRuntimeBackgroundWork(): Promise<void> {
     await Promise.all([
+      usageRecovery.stop(),
       daemonPromptEventMonitor.close(),
       stopProvisioning(),
       pendingPromptPump.stop(),
@@ -3474,6 +3502,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
   }
 
   function startPromptRuntimeBackgroundWork(): void {
+    usageRecovery.start();
     daemonPromptEventMonitor.start();
     startProvisioning();
     pendingPromptPump.start();

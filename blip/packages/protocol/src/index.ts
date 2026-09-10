@@ -134,6 +134,11 @@ export type AgentRunFileChanges = AgentRunFileChangesV1 | AgentRunFileChangesV2;
 
 export type BlipRuntimeEvent =
   | (BlipRuntimeEventBase & {
+      type: "usage_observed"; model: string; provider: string; purpose: "chat" | "compaction";
+      complete: boolean;
+      usage: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number; reasoning?: number; cost?: { total: number } };
+    })
+  | (BlipRuntimeEventBase & {
       type: "session_started";
       workspaceRoot: string;
       model: string;

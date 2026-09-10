@@ -126,6 +126,8 @@ describe('Embedded Blip session', () => {
       keepRecentTurns: 1,
     });
     expect(events.some((event) => event.type === 'compaction_completed')).toBe(true);
+    expect(events.filter((event) => event.type === 'usage_observed' && event.purpose === 'chat')).toHaveLength(2);
+    expect(events.filter((event) => event.type === 'usage_observed' && event.purpose === 'compaction')).toHaveLength(1);
     await session.delete();
     expect(await repository.exists(secondState.id)).toBe(false);
     faux.unregister();

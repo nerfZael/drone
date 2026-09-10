@@ -1,0 +1,43 @@
+# Token usage
+
+Settings → Usage shows recorded tokens and estimated USD costs, with daily totals and grouping by agent, model, provider, chat, repository and purpose. Each native or managed external chat has an expandable Usage summary. Recording starts when the upgraded Hub first opens its usage database; there is no historical transcript import.
+
+The ledger lives in `usage.sqlite` under the active Drone data directory, separately from chat storage. It contains execution identities, normalized observations and their source usage payloads, chat attribution, and versioned prices. Deleting or archiving chats does not remove their recorded usage. Copying or forking a transcript does not create ledger entries; subsequent executions in the copy do.
+
+## Counting rules
+
+Input means uncached input. Total = input + cache read + cache write + output. Reasoning is a subset of output and is never added a second time. Unsupported or unreported categories are null, not zero. Running, recovering, interrupted, missing, partial and unpriced counts identify gaps in the displayed totals. Grouped execution counts can overlap when a run uses several models or purposes.
+
+- Native: each model response and compaction summary emits a durable usage event. A SQLite outbox beside native transcripts delivers those events idempotently to the ledger. The outbox is not cloned and survives chat deletion. Companion transcripts remain in memory, but their usage is written synchronously to the durable delivery journal. Hub helper generations journal their intent before calling the model and their result before delivery; they appear under auxiliary work.
+- Codex: the App Server adapter records live per-thread cumulative counter deltas, using restored totals as baselines. Repeated notifications and counter resets do not add the historical total. Without a baseline, the last request is retained as partial coverage. Steered prompts sharing a provider run share one ledger execution. Unreported child model identities remain unknown.
+- Claude Code: final per-model tree aggregates replace provisional root message usage, avoiding double counting while including reported child work. Incomplete runs retain recoverable input/cache counts. Root-only fallback usage is marked partial.
+- OpenCode: a local authenticated server runs alongside the CLI. Periodic and final snapshots collect new assistant messages from the root and descendant sessions, including summaries. Copied messages are excluded by creation time. Snapshots and CLI steps are matched by message identity to avoid overlapping counts. If collection fails, available CLI step usage is retained as partial coverage. Each tree read has a 15-second deadline; cancellation also terminates an unresponsive CLI. An older CLI lacking `serve`/`run --attach` support must be upgraded.
+- Cursor: optional result usage is recorded with unknown reasoning and partial coverage, since complete internal-agent accounting is not guaranteed by the CLI output.
+
+New daemon/provider adapters are required for external accounting. An already-running older daemon may omit usage until it is restarted. Forced termination before a provider reports usage can leave missing or partial counts. External events are collected through both normal prompt reconciliation and a separate persisted watch list. Removing a chat or its pending-prompt rows does not remove the watch. On restart, unfinished Hub-owned executions become interrupted; external executions become recovering until the daemon confirms their current state.
+
+## Crash recovery
+
+`usage-delivery.sqlite` stores pending usage deliveries and external prompt watches independently of chat storage and the destination ledger. Both usage databases use SQLite WAL with full synchronous commits. Deliveries are removed only after the ledger commits. A crash between those commits replays the same execution and observation IDs, without adding tokens twice. Late external snapshots cannot replace newer snapshots when the daemon supplies an update timestamp.
+
+The Hub starts recovery with the prompt runtime. Its persisted restart boundary also applies to native events delivered later from the native transcript outbox. Completed and suspended executions are retained. The UI labels interrupted work explicitly and retains its known token counts rather than presenting it as still running or fully accounted for.
+
+External watches are saved before enqueueing at the daemon, including when the enqueue response is lost. They use stable drone, prompt and chat identities and do not contain credentials. The collector reads the existing daemon job and never resubmits a model request. It retries unavailable sources with backoff, polls at bounded concurrency, and cancels HTTP requests during shutdown. A terminal snapshot is saved atomically with removal of its watch; a provisional missing-exit-file failure keeps its watch for late completion recovery.
+
+Recovery cannot invent usage that the provider never reported, recover source logs destroyed before collection, or guarantee writes when all storage is unavailable. Unreachable sources retain their watches, so recovery can continue when they return. Captured deliveries survive chat deletion and temporary ledger failures. This is forward-only recovery for newly watched dispatches, not an import of old spending.
+
+## Prices
+
+An initially empty registry attempts to import the models.dev catalog. Refresh is also available in Settings → Usage. Imports save changed standard rates in one transaction and preserve manual prices. Native catalog rates provide a fallback. OpenAI token prices are also registered under `openai-codex` as API-equivalent estimates. Cursor and unknown model/provider combinations may need an explicit manual price.
+
+Rates are USD per million tokens. Each priced observation references an immutable price version effective when its execution started. Later price edits do not rewrite existing priced observations; a corrected model/provider identity selects the matching price. Missing cache rates remain unknown; an observation that used an unpriced category has no cost estimate. Catalog refresh failure does not prevent token accounting.
+
+These are standard token estimates, not invoices or subscription charges. Context-length tiers, cache TTLs, service tiers, regional rates, tool fees, discounts and subscription allowances are not priced separately. Provider-reported costs are stored separately from registry estimates. The existing registry backup feature covers the Hub registry; backing up this ledger requires SQLite-safe backups of `usage.sqlite`, `usage-delivery.sqlite`, and the native transcript database containing its outbox as well.
+
+## API and verification
+
+- `GET /api/usage`: optional exact `chatId`, `droneId`, `agent`, `provider`, `model`, `repo` filters; inclusive `from`, exclusive `to`; `groupBy=agent|model|provider|chat|repo|purpose`.
+- `GET /api/drones/:droneId/chats/:chatName/usage`: current chat identity's own spend, excluding copied history.
+- `GET /api/usage/prices`, `POST /api/usage/prices`, `POST /api/usage/prices/refresh`: inspect versions, enter a manual price, or refresh the catalog.
+
+Regression tests cover parser normalization, replay, historical exclusion, native outbox recovery, actual transcript forks/deletion, price versioning and overrides, compaction events, and an OpenCode CLI/server fixture with descendants and collection failures. Manual acceptance should send a prompt through each installed agent, clone/fork a chat and send another prompt, inspect Settings → Usage, and verify ledger continuity after a Hub/daemon restart. Crash-specific tests kill a writer process after journaling, replay after a ledger commit without acknowledgement, simulate unavailable storage and daemons, delete an in-memory Companion session before delivery, and verify cancellation during shutdown. No paid provider calls are made by these tests.

@@ -1,3 +1,4 @@
+import { trackHubGeneration } from './usage/trackHubGeneration';
 import {
   parseLlmProvider,
   providerDisplayName,
@@ -101,7 +102,7 @@ async function generateCodexObject(apiKey: string, z: any, input: GenerateObject
   const model = ai.getModel('openai-codex', modelId) ?? ai.getModel('openai-codex', defaultHubLlmModelId('codex'));
   if (!model) throw new Error(`Unknown Codex model: ${modelId}`);
 
-  const response = await ai.streamOpenAICodexResponses(
+  const response = await trackHubGeneration<any>('codex', modelId, () => ai.streamOpenAICodexResponses(
     model,
     {
       systemPrompt: [
@@ -124,7 +125,7 @@ async function generateCodexObject(apiKey: string, z: any, input: GenerateObject
       reasoning: input.reasoning,
       maxRetries: input.maxRetries,
     }),
-  ).result();
+  ).result(), true);
 
   if (response?.stopReason === 'error' || response?.stopReason === 'aborted') {
     throw new Error(
@@ -161,7 +162,7 @@ export async function resolveHubLlmRuntime(opts?: { provider?: LlmProviderId; ap
     return {
       provider,
       z,
-      generateObject: ({ reasoning: _reasoning, ...input }) => generateObject(input),
+      generateObject: ({ reasoning: _reasoning, ...input }) => trackHubGeneration(provider, input.model?.modelId ?? 'unknown', () => generateObject(input)),
       modelFactory: google,
     };
   }
@@ -174,7 +175,7 @@ export async function resolveHubLlmRuntime(opts?: { provider?: LlmProviderId; ap
   return {
     provider,
     z,
-    generateObject: ({ reasoning: _reasoning, ...input }) => generateObject(input),
+    generateObject: ({ reasoning: _reasoning, ...input }) => trackHubGeneration(provider, input.model?.modelId ?? 'unknown', () => generateObject(input)),
     modelFactory: openai,
   };
 }

@@ -1,5 +1,6 @@
 import { PendingEventsCard } from '../chat/PendingEventsCard';
 import { usePendingEvents, questionPendingDeliveryStatus } from '../chat/use-pending-events';
+import { ChatUsageSummary } from '../usage/ChatUsageSummary';
 import React from 'react';
 import { latestNativeCheckpointId } from '../app/side-chat-checkpoint-model';
 import { useDndMonitor, useDroppable } from '@dnd-kit/core';
@@ -2574,6 +2575,7 @@ export function AssistantDock({
               droneReferenceDropActive ? 'ring-1 ring-inset ring-[var(--accent-muted)]' : ''
             }`}
           >
+            <ChatUsageSummary droneId={nativeDroneId} chatName={nativeChatName} />
             <AgentChatTranscript
               scrollRef={bindScrollRef}
               contentRef={bindScrollContentRef}

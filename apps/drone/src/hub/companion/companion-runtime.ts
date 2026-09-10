@@ -119,7 +119,7 @@ export class CompanionRuntime {
   private readonly cancelledRunIds = new Set<string>();
   private readonly telemetryByThreadId = new Map<string, CompanionRunTelemetry>();
   private closing = false;
-  private readonly repository = new HubSessionRepository({ inMemory: true });
+  private readonly repository = new HubSessionRepository({ inMemory: true, trackUsage: true });
   private readonly host: BlipAssistantHost;
 
   constructor(private readonly deps: RuntimeDependencies) {
