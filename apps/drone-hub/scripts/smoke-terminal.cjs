@@ -141,6 +141,14 @@ async function main() {
         await until('window.telemetry.some(report => report.events.some(event => event.phase === "snapshot-processed"))');
         assert(await evaluate('window.telemetry.some(report => report.transport === "persistent" && report.events.some(event => event.phase === "ready"))'));
         assert.equal(await evaluate('JSON.stringify(window.telemetry).includes("early")'), false, 'Telemetry must exclude terminal input');
+        await evaluate('window.sockets[0].onmessage({data:JSON.stringify({type:"stream-state",state:"reconnecting",reason:"idle-timeout"})})');
+        await until('document.body.textContent.includes("Terminal output connection interrupted")');
+        const linesBeforeRecovery = await evaluate('window.terminals[0].buffer.active.length');
+        await evaluate('window.sockets[0].onmessage({data:JSON.stringify({type:"stream-state",state:"connected"})})');
+        await until('!document.body.textContent.includes("Terminal output connection interrupted")');
+        assert.equal(await evaluate('window.terminals[0].buffer.active.length'), linesBeforeRecovery, 'Recovery preserves the rendered terminal');
+        assert.equal(await evaluate('window.opens.length'), 2, 'Output recovery must not recreate the shell');
+        console.log('PASS: reconnecting banner clears on output recovery without reopening or resetting the terminal');
         console.log('PASS: real tmux snapshot restores cursor and ANSI colors; timing reports upload automatically with no diagnostics UI');
         console.log('PASS: early input, one open, rename stability, cached tabs/remount, Unicode, large paste, and heavy output');
         console.log('DOM renderer: 20,000 lines processed in ' + renderMs.toFixed(1) + 'ms (not a paint measurement)');

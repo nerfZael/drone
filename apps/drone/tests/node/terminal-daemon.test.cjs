@@ -8,7 +8,7 @@ const { promisify } = require('node:util');
 const { WebSocket } = require('ws');
 const exec = promisify(execFile);
 
-test('built daemon ensures sessions once, captures the first prompt, and exposes persistent terminal transport', { timeout: 15000 }, async (t) => {
+test('built daemon ensures sessions once, captures the first prompt, and exposes persistent terminal transport', { timeout: 45000 }, async (t) => {
   const dir = await fs.mkdtemp('/tmp/terminal-daemon-test-');
   const bin = path.join(dir, 'bin');
   const data = path.join(dir, 'data');
@@ -75,4 +75,18 @@ test('built daemon ensures sessions once, captures the first prompt, and exposes
     ws.on('message', () => { if (messages.some(m => m.type === 'snapshot')) { clearTimeout(timeout); resolve(); } });
   });
   assert.ok(messages.find(m => m.type === 'ready').generation);
+  const abort = new AbortController();
+  t.after(() => abort.abort());
+  const stream = await fetch(`http://127.0.0.1:${port}/v1/terminal/output/stream?session=test-terminal&since=999999999`, {
+    headers: { authorization: 'Bearer test-token' }, signal: abort.signal,
+  });
+  let frames = '';
+  try {
+    for await (const chunk of stream.body) {
+      frames += Buffer.from(chunk).toString();
+      if (frames.includes(': keepalive\n\n')) break;
+    }
+    assert.match(frames, /: keepalive/, 'An idle terminal must send a heartbeat before fetch times out');
+  } finally { abort.abort(); }
+
 });

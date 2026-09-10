@@ -137,6 +137,8 @@ function connectLegacyTerminal(
         payload?.since ?? payload?.nextOffset ?? payload?.offsetBytes ?? outputOffset,
       );
       if (Number.isFinite(nextOffset) && nextOffset >= 0) outputOffset = Math.floor(nextOffset);
+      outputReconnectAttempt = 0;
+      wsSendJson({ type: 'stream-state', state: 'connected' });
       return;
     }
 
@@ -205,7 +207,6 @@ function connectLegacyTerminal(
           );
         }
 
-        outputReconnectAttempt = 0;
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let sseBuffer = '';
@@ -237,12 +238,18 @@ function connectLegacyTerminal(
 
         if (closed || controller.signal.aborted) return;
         outputReconnectAttempt = Math.min(12, outputReconnectAttempt + 1);
+        wsSendJson({ type: 'stream-state', state: 'reconnecting', reason: 'stream-ended' });
         scheduleOutputReconnect(Math.min(1600, 120 * Math.pow(1.7, outputReconnectAttempt)));
       })
       .catch((error: any) => {
         if (closed || controller.signal.aborted) return;
         outputReconnectAttempt = Math.min(12, outputReconnectAttempt + 1);
-        wsSendJson({ type: 'error', error: error?.message ?? String(error) });
+        const code = String(error?.cause?.code ?? error?.code ?? '');
+        wsSendJson({
+          type: 'stream-state',
+          state: 'reconnecting',
+          reason: code === 'UND_ERR_BODY_TIMEOUT' ? 'idle-timeout' : 'stream-interrupted',
+        });
         scheduleOutputReconnect(Math.min(1800, 140 * Math.pow(1.8, outputReconnectAttempt)));
       });
   };

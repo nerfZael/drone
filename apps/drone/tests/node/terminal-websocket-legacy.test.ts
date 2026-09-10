@@ -177,3 +177,95 @@ test(
     }
   },
 );
+
+test(
+  'legacy output reconnects after idle timeout, abrupt loss and EOF without losing the cursor',
+  { timeout: 10000 },
+  async (t) => {
+    const originalFetch = globalThis.fetch;
+    const cursors: string[] = [];
+    const streams: ReadableStreamDefaultController<Uint8Array>[] = [];
+    let unavailable = false;
+    const encode = (text: string) => new TextEncoder().encode(text);
+    globalThis.fetch = (async (url: any, init: any) => {
+      cursors.push(new URL(String(url)).searchParams.get('since')!);
+      if (unavailable) return new Response(null, { status: 503 });
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            streams.push(controller);
+            controller.enqueue(encode(`event: ready\ndata: {"since":${cursors.at(-1)}}\n\n`));
+            init.signal.addEventListener('abort', () => {
+              try {
+                controller.close();
+              } catch {}
+            });
+          },
+        }),
+        { headers: { 'content-type': 'text/event-stream' } },
+      );
+    }) as typeof fetch;
+    const hub = http.createServer();
+    const wss = createTerminalWebSocketServer({ isStaleSessionError: () => false });
+    hub.on('upgrade', (req, socket, head) =>
+      wss.handleUpgrade(req, socket, head, (ws) =>
+        wss.emit('connection', ws, req, {
+          droneName: 'host-test',
+          runtime: 'host',
+          sessionName: 'test-shell',
+          since: 7,
+          client: { baseUrl: 'http://daemon.test', token: 'test' },
+          maxBytes: 200000,
+        }),
+      ),
+    );
+    t.after(async () => {
+      globalThis.fetch = originalFetch;
+      for (const client of wss.clients) client.terminate();
+      wss.close();
+      await new Promise<void>((resolve) => hub.close(() => resolve()));
+    });
+    await new Promise<void>((resolve) => hub.listen(0, '127.0.0.1', resolve));
+    const ws = new WebSocket(`ws://127.0.0.1:${(hub.address() as any).port}`);
+    const messages: any[] = [];
+    ws.on('message', (raw) => messages.push(JSON.parse(raw.toString())));
+    const waitFor = async (predicate: () => boolean) => {
+      for (let i = 0; i < 500; i++) {
+        if (predicate()) return;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      throw new Error('stream recovery timed out');
+    };
+    await waitFor(() => messages.some((m) => m.state === 'connected'));
+    streams[0].enqueue(encode('event: output\ndata: {"chunk":"abc","nextOffset":10}\n\n'));
+    await waitFor(() => messages.some((m) => m.text === 'abc'));
+    streams[0].error(new TypeError('terminated', { cause: { code: 'UND_ERR_BODY_TIMEOUT' } }));
+    await waitFor(() => messages.filter((m) => m.state === 'connected').length === 2);
+    assert.ok(messages.some((m) => m.state === 'reconnecting' && m.reason === 'idle-timeout'));
+    streams[1].error(new TypeError('terminated', { cause: { code: 'UND_ERR_SOCKET' } }));
+    await waitFor(() => messages.filter((m) => m.state === 'connected').length === 3);
+    streams[2].close();
+    await waitFor(() => messages.filter((m) => m.state === 'connected').length === 4);
+    assert.deepEqual(cursors, ['7', '10', '10', '10']);
+    assert.equal(
+      messages.filter((m) => m.type === 'ready').length,
+      1,
+      'Recovery must not reset the viewer cursor',
+    );
+    assert.equal(messages.filter((m) => m.type === 'error').length, 0);
+    assert.ok(messages.some((m) => m.reason === 'stream-ended'));
+    unavailable = true;
+    streams[3].error(new Error('daemon restarting'));
+    await waitFor(() => cursors.length >= 5);
+    unavailable = false;
+    await waitFor(() => messages.filter((m) => m.state === 'connected').length === 5);
+    assert.equal(cursors.at(-1), '10', 'Unavailable-daemon retries preserve the cursor');
+    streams.at(-1)!.error(new Error('connection lost before viewer closed'));
+    await waitFor(() => messages.at(-1)?.state === 'reconnecting');
+    ws.close();
+    await new Promise((resolve) => ws.once('close', resolve));
+    const closedRequests = cursors.length;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    assert.equal(cursors.length, closedRequests, 'Closing the viewer cancels stream retries');
+  },
+);

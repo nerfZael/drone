@@ -247,3 +247,53 @@ test('failed terminal opens upload timings without including the error response 
   expect(uploaded.events.some((event: any) => event.phase === 'open-request-failed')).toBe(true);
   expect(JSON.stringify(uploaded)).not.toContain('PRIVATE_ERROR_RESPONSE');
 });
+
+test('legacy output recovery clears its banner without resetting the screen or resume cursor', async () => {
+  create();
+  await tick();
+  const socket = Socket.instances[0];
+  socket.receive({ type: 'ready', offsetBytes: 42 });
+  socket.receive({ type: 'stream-state', state: 'reconnecting', reason: 'idle-timeout' });
+  expect(connection!.state.connecting).toBe(true);
+  expect(connection!.state.error).toContain('Reconnecting');
+  connection!.send('x');
+  expect(socket.sent).toHaveLength(0);
+  socket.receive({ type: 'stream-state', state: 'connected' });
+  expect(connection!.state).toMatchObject({ connecting: false, error: null });
+  expect(socket.sent).toEqual([{ type: 'input', data: 'x' }]);
+  expect(writes).not.toContain('[reset]');
+  connection!.retry();
+  await tick();
+  expect(Socket.instances[1].url.searchParams.get('since')).toBe('42');
+});
+
+test('output recovery preserves an unrelated input failure', async () => {
+  create();
+  await tick();
+  const socket = Socket.instances[0];
+  socket.receive({ type: 'ready', offsetBytes: 0 });
+  socket.receive({ type: 'error', error: 'Input delivery failed; check the shell' });
+  socket.receive({ type: 'stream-state', state: 'reconnecting' });
+  socket.receive({ type: 'stream-state', state: 'connected' });
+  expect(connection!.state.error).toBe('Input delivery failed; check the shell');
+});
+
+test('HTTP polling clears successive output errors once polling recovers', async () => {
+  Object.defineProperty(globalThis, 'WebSocket', { configurable: true, value: undefined });
+  let polls = 0;
+  request = async (url) => {
+    if (!url.includes('/output?')) return json({ sessionName: target.sessionName });
+    polls++;
+    if (polls <= 2) throw new Error(`output failure ${polls}`);
+    return json({ text: 'prompt', offsetBytes: 6 });
+  };
+  create();
+  await tick();
+  expect(connection!.state.error).toBe('output failure 1');
+  // Trigger the same poll entry used by the retry timer without waiting four seconds.
+  await (connection as any).poll();
+  expect(connection!.state.error).toBe('output failure 2');
+  await (connection as any).poll();
+  expect(connection!.state.error).toBeNull();
+  expect(writes).toContain('prompt');
+});

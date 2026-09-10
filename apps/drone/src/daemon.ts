@@ -2428,9 +2428,18 @@ async function main() {
         );
 
         let closed = false;
-        req.on('close', () => {
+        // An idle shell produces no log bytes. Keep the HTTP response alive so
+        // fetch's body timeout does not disconnect an otherwise healthy terminal.
+        const keepAlive = setInterval(() => {
+          if (!res.destroyed && !res.writableEnded) res.write(': keepalive\n\n');
+        }, 25_000);
+        keepAlive.unref();
+        const close = () => {
           closed = true;
-        });
+          clearInterval(keepAlive);
+        };
+        req.on('close', close);
+        res.on('close', close);
 
         while (!closed) {
           try {

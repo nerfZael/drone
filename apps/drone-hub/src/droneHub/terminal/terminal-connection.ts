@@ -30,6 +30,7 @@ export class TerminalConnection {
   private disposed = false;
   private closing = false;
   private ready = false;
+  private outputError: string | null = null;
   private generation = '';
   private transport = '';
   private offset: number | undefined;
@@ -246,6 +247,21 @@ export class TerminalConnection {
           ws.send(JSON.stringify({ type: 'resize', cols: this.cols, rows: this.rows }));
         this.measure('ready', this.started, { transport: this.actualTransport });
         void this.flushInput();
+      } else if (message.type === 'stream-state') {
+        if (message.state === 'reconnecting') {
+          this.ready = false;
+          this.setOutputError('Terminal output connection interrupted. Reconnecting…');
+          this.measure('output-stream-reconnecting', performance.now(), {
+            reason: message.reason === 'idle-timeout' ? 'idle-timeout' : 'stream-interrupted',
+          });
+          this.update({ connecting: true });
+        } else if (message.state === 'connected') {
+          this.ready = true;
+          this.clearOutputError();
+          this.update({ connecting: false });
+          this.measure('output-stream-connected', performance.now());
+          void this.flushInput();
+        }
       } else if (message.type === 'snapshot') {
         this.sink.reset();
         const snapshotStarted = performance.now();
@@ -296,6 +312,17 @@ export class TerminalConnection {
       );
     };
     ws.onerror = () => {}; // close owns recovery; never retry unacknowledged input.
+  }
+
+  private setOutputError(error: string) {
+    const replace = !this.state.error || this.state.error === this.outputError;
+    this.outputError = error;
+    if (replace) this.update({ error });
+  }
+
+  private clearOutputError() {
+    if (this.outputError && this.state.error === this.outputError) this.update({ error: null });
+    this.outputError = null;
   }
 
   private write(data: string | Uint8Array, done?: () => void) {
@@ -437,6 +464,7 @@ export class TerminalConnection {
         controller.signal.aborted
       )
         return;
+      this.clearOutputError();
       this.offset = output.offsetBytes;
       if (initial) this.sink.reset();
       if (output.text) {
@@ -455,7 +483,7 @@ export class TerminalConnection {
         lifecycle !== this.lifecycle
       )
         return;
-      this.update({ error: String((error as Error).message ?? error) });
+      this.setOutputError(String((error as Error).message ?? error));
       delay = 2000;
     } finally {
       if (this.pollAbort === controller) {
