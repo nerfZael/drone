@@ -200,7 +200,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
 
   return (
     <div
-      className={`animate-fade-in ${isFailed && !isStopped && !isInterrupted ? 'opacity-90' : ''}`}
+      className={`group/turn animate-fade-in ${isFailed && !isStopped && !isInterrupted ? 'opacity-90' : ''}`}
     >
       {isSubscriptionEvent ? (
         <SubscriptionEventMessage

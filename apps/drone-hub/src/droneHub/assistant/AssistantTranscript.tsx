@@ -191,6 +191,72 @@ export function AssistantQueuedPromptRow({
       : prompt.deliveryMode === 'asap'
         ? 'ASAP'
         : 'Queued';
+  const removeLabel = failed
+    ? 'Dismiss failed prompt'
+    : actionPresentation
+      ? 'Cancel queued new chat'
+      : bundleHasHuman
+        ? 'Remove message; keep events'
+        : 'Cancel queued prompt';
+  if (notification && !actionPresentation) {
+    const showStatus = failed || !running;
+    return (
+      <div className="mx-3">
+        <SubscriptionEventMessage
+          prompt={prompt.prompt}
+          at={prompt.createdAt}
+          footer={
+            <>
+              {showStatus || canRemovePrompt ? (
+                <div className="mt-2 flex items-center justify-between gap-3 border-t border-[var(--user-bubble-border)] pt-2">
+                  {showStatus ? (
+                    <span
+                      role="status"
+                      className={`text-10 font-[var(--weight-semibold)] ${failed ? 'text-[var(--red)]' : 'text-[var(--user-muted)]'}`}
+                    >
+                      {statusLabel}
+                    </span>
+                  ) : (
+                    <span />
+                  )}
+                  {canRemovePrompt ? (
+                    <button
+                      type="button"
+                      onClick={onCancel}
+                      disabled={cancelling || creatingNewChat}
+                      className="inline-flex min-h-5 items-center rounded px-1 text-10 font-[var(--weight-semibold)] text-[var(--user-muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-40"
+                      aria-label={removeLabel}
+                      title={removeLabel}
+                    >
+                      {cancelling
+                        ? 'Removing…'
+                        : failed
+                          ? 'Dismiss'
+                          : bundleHasHuman
+                            ? 'Remove message'
+                            : 'Cancel'}
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+              {failed && prompt.error && prompt.queueInterruption ? (
+                <AgentRunFailureNotice
+                  error={prompt.error}
+                  at={prompt.createdAt}
+                  queueInterruptionState={prompt.queueInterruption.state}
+                  resolvingInterruption={resolvingInterruption}
+                  interruptionError={interruptionError}
+                  onResolveInterruption={onResolveInterruption}
+                />
+              ) : failed && prompt.error ? (
+                <div className="mt-1.5 text-10 text-[var(--red)]">{prompt.error}</div>
+              ) : null}
+            </>
+          }
+        />
+      </div>
+    );
+  }
   return (
     <>
       <div className="mx-3 flex justify-end">
@@ -224,24 +290,8 @@ export function AssistantQueuedPromptRow({
                     onClick={onCancel}
                     disabled={cancelling || creatingNewChat}
                     className="ml-auto rounded px-1 py-0.5 text-9 text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-40"
-                    aria-label={
-                      failed
-                        ? 'Dismiss failed prompt'
-                        : actionPresentation
-                          ? 'Cancel queued new chat'
-                          : bundleHasHuman
-                            ? 'Remove message; keep events'
-                            : 'Cancel queued prompt'
-                    }
-                    title={
-                      failed
-                        ? 'Dismiss failed prompt'
-                        : actionPresentation
-                          ? 'Cancel queued new chat'
-                          : bundleHasHuman
-                            ? 'Remove message; keep events'
-                            : 'Cancel queued prompt'
-                    }
+                    aria-label={removeLabel}
+                    title={removeLabel}
                   >
                     {cancelling ? '…' : '×'}
                   </button>
@@ -284,9 +334,7 @@ export function AssistantQueuedPromptRow({
               </div>
             ) : null}
             {createNewChatError ? (
-              <div className="mt-1.5 text-10 text-[var(--red)]">
-                {createNewChatError}
-              </div>
+              <div className="mt-1.5 text-10 text-[var(--red)]">{createNewChatError}</div>
             ) : null}
           </div>
         </div>
@@ -726,9 +774,7 @@ function ToolStructuredValue({
     <dl className="grid gap-1.5">
       {visibleEntries.map(([key, item]) => (
         <div key={key} className="grid min-w-0 grid-cols-[minmax(5.5rem,28%)_minmax(0,1fr)] gap-3">
-          <dt className="pt-0.5 text-10 text-[var(--muted-dim)]">
-            {humanizeToolField(key)}
-          </dt>
+          <dt className="pt-0.5 text-10 text-[var(--muted-dim)]">{humanizeToolField(key)}</dt>
           <dd className="min-w-0">
             <ToolStructuredValue value={item} depth={depth + 1} ancestors={nextAncestors} />
           </dd>
@@ -788,9 +834,7 @@ export function ToolPayloadDetails({
               </pre>
             )
           ) : (
-            <div className="mt-1 text-11 text-[var(--muted-dim)]">
-              No result payload.
-            </div>
+            <div className="mt-1 text-11 text-[var(--muted-dim)]">No result payload.</div>
           )}
         </div>
       ) : (
@@ -863,12 +907,8 @@ function TransferActivityRow({
           <ToolStatusIndicator result={toolActivityStatusResult(activityItem)} />
           <div className="min-w-0 flex-1">
             <div className="flex items-center justify-between gap-2">
-              <div className="truncate text-12 font-medium text-[var(--muted)]">
-                Transfer files
-              </div>
-              <div className="tabular-nums text-10 text-[var(--muted)]">
-                {amountLabel}
-              </div>
+              <div className="truncate text-12 font-medium text-[var(--muted)]">Transfer files</div>
+              <div className="tabular-nums text-10 text-[var(--muted)]">{amountLabel}</div>
             </div>
             <div className="mt-0.5 truncate text-11 text-[var(--fg-secondary)]">
               {sourceLabel} <span className="text-[var(--muted-dim)]">→</span> {destinationLabel}
@@ -940,9 +980,7 @@ function TransferActivityRow({
                     />
                   </div>
                   {file.error && (file.status === 'retrying' || file.status === 'failed') ? (
-                    <div className="mt-1 truncate text-9 text-[var(--muted-dim)]">
-                      {file.error}
-                    </div>
+                    <div className="mt-1 truncate text-9 text-[var(--muted-dim)]">{file.error}</div>
                   ) : null}
                 </div>
               );
@@ -1066,9 +1104,7 @@ export function MessageDroneActivityRow({
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <ToolStatusIndicator result={result} blocked={blocked} />
-            <div className="text-12 font-medium text-[var(--muted)]">
-              Send user message
-            </div>
+            <div className="text-12 font-medium text-[var(--muted)]">Send user message</div>
             <ToolDetailsButton
               open={detailsOpen}
               onClick={() => setDetailsOpen((value) => !value)}
@@ -1140,10 +1176,7 @@ export function ChatsIdleActivityRow({
       <div className="ml-5 grid gap-1 py-0.5">
         {targets.length > 0 ? (
           targets.map((target) => (
-            <div
-              key={target.key}
-              className="flex min-h-6 min-w-0 items-center gap-2 text-11"
-            >
+            <div key={target.key} className="flex min-h-6 min-w-0 items-center gap-2 text-11">
               <span
                 className="h-1 w-1 flex-shrink-0 rounded-full bg-[var(--muted-dim)]"
                 aria-hidden="true"
@@ -1159,9 +1192,7 @@ export function ChatsIdleActivityRow({
             </div>
           ))
         ) : (
-          <div className="py-1 text-11 text-[var(--muted-dim)]">
-            Waiting for result...
-          </div>
+          <div className="py-1 text-11 text-[var(--muted-dim)]">Waiting for result...</div>
         )}
       </div>
       {detailsOpen ? (
@@ -1406,14 +1437,13 @@ export function ToolRunActivity({
   const lastActivityItem = items[items.length - 1];
   const activityEndedWithAssistantOutput = Boolean(
     lastActivityItem?.type === 'message' &&
-      lastActivityItem.message.role === 'assistant' &&
-      (assistantVisibleText(lastActivityItem.message).trim() ||
-        messageImageParts(lastActivityItem.message).length > 0 ||
-        lastActivityItem.message.errorMessage),
+    lastActivityItem.message.role === 'assistant' &&
+    (assistantVisibleText(lastActivityItem.message).trim() ||
+      messageImageParts(lastActivityItem.message).length > 0 ||
+      lastActivityItem.message.errorMessage),
   );
   const callLabel = `${toolItems.length} tool ${toolItems.length === 1 ? 'call' : 'calls'}`;
-  const visibleItems =
-    expansionMode === 'auto' ? limitToolRunActivityItems(items) : items;
+  const visibleItems = expansionMode === 'auto' ? limitToolRunActivityItems(items) : items;
   const groupedItems = compactRepeatedToolItems(visibleItems);
   const showThinkingActivity =
     active &&
@@ -1509,11 +1539,7 @@ export function AssistantMessageRow({
     message.role === 'assistant' ? assistantVisibleText(message) : messageText(message);
   const renderedInlineMediaHrefs = React.useMemo(
     () =>
-      collectInlineAgentMedia(
-        visibleText,
-        messageExtras?.droneId,
-        messageExtras?.droneHomePath,
-      )
+      collectInlineAgentMedia(visibleText, messageExtras?.droneId, messageExtras?.droneHomePath)
         .map((media) => media.linkHref)
         .filter((href): href is string => Boolean(href)),
     [messageExtras?.droneHomePath, messageExtras?.droneId, visibleText],
@@ -1575,7 +1601,8 @@ export function AssistantMessageRow({
   if (message.role === 'assistant' && structuredAssistant) {
     const blocks: React.ReactNode[] = [];
     const lastTextIndex = content.reduce(
-      (last, part, index) => (part?.type === 'text' && String(part.text ?? '').trim() ? index : last),
+      (last, part, index) =>
+        part?.type === 'text' && String(part.text ?? '').trim() ? index : last,
       -1,
     );
     for (let i = 0; i < content.length; i += 1) {
@@ -1635,12 +1662,7 @@ export function AssistantMessageRow({
     footerPlaced = Boolean(body);
   }
 
-  if (
-    message.role === 'assistant' &&
-    !body &&
-    !message.errorMessage &&
-    calls.length === 0
-  )
+  if (message.role === 'assistant' && !body && !message.errorMessage && calls.length === 0)
     return null;
 
   return (

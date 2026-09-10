@@ -9,6 +9,7 @@ type AgentRunSummaryLineProps = {
   label?: string;
   tone?: 'default' | 'approval';
   at?: string;
+  leading?: React.ReactNode;
   detail?: React.ReactNode;
   trailing?: React.ReactNode;
   expanded?: boolean;
@@ -33,14 +34,16 @@ export function AgentRunSummaryLine({
   label,
   tone = 'default',
   at,
+  leading,
   detail,
   trailing,
   expanded,
   onToggle,
   toggleLabel = 'tool calls',
 }: AgentRunSummaryLineProps) {
-  const normalizedPreRunDurationMs =
-    Number.isFinite(preRunDurationMs) ? Math.max(0, Number(preRunDurationMs)) : 0;
+  const normalizedPreRunDurationMs = Number.isFinite(preRunDurationMs)
+    ? Math.max(0, Number(preRunDurationMs))
+    : 0;
   const showPreRunDuration = normalizedPreRunDurationMs >= 1_000;
   const summaryLabel =
     label ??
@@ -49,6 +52,7 @@ export function AgentRunSummaryLine({
       : `${active ? 'Working' : 'Worked'} for ${formatWorkingDuration(durationMs)}`);
   const content = (
     <>
+      {leading ? <span className="flex flex-none items-center">{leading}</span> : null}
       <span
         className={`text-ui font-[var(--weight-emphasis)] ${
           tone === 'approval' ? 'text-[var(--yellow)]' : ''
@@ -107,11 +111,7 @@ export function WorkingElapsedStatus({
   }, []);
 
   return (
-    <AgentRunSummaryLine
-      active
-      durationMs={now - start}
-      preRunDurationMs={preRunDurationMs}
-    />
+    <AgentRunSummaryLine active durationMs={now - start} preRunDurationMs={preRunDurationMs} />
   );
 }
 
@@ -129,14 +129,7 @@ export function CreatingNewChatStatus() {
             fill="none"
             aria-hidden="true"
           >
-            <circle
-              cx="6"
-              cy="6"
-              r="4.5"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              opacity="0.25"
-            />
+            <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.5" opacity="0.25" />
             <path
               d="M6 1.5a4.5 4.5 0 0 1 4.5 4.5"
               stroke="currentColor"
