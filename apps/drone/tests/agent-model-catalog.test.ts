@@ -187,8 +187,8 @@ describe('agent model catalog', () => {
     expect(containerCalls).toBe(0);
     expect(hostCommands).toHaveLength(1);
     expect(hostCommands[0]).toContain('CODEX_HOME');
-    expect(hostCommands[0]).toContain('/dvm-data/home/.codex/models_cache.json');
-    expect(hostCommands[0]).toContain('stat -c %Y');
+    expect(hostCommands[0]).not.toContain('/dvm-data/home/.codex/models_cache.json');
+    expect(hostCommands[0]).not.toContain('stat -c %Y');
   });
 
   test('does not roll a Codex catalog back to an older host cache snapshot', async () => {

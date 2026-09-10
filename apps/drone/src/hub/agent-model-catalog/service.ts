@@ -20,6 +20,8 @@ const SUCCESS_TTL_MS = 6 * 60 * 60 * 1000;
 const FAILURE_TTL_MS = 5 * 60 * 1000;
 const MAX_STALE_MS = 7 * 24 * 60 * 60 * 1000;
 const CACHE_SCHEMA_VERSION = 5;
+const CODEX_SUCCESS_TTL_MS = 30 * 60 * 1000;
+const CODEX_LIVE_FINGERPRINT = 'host:codex-app-server';
 
 function cacheKey(request: AgentModelCatalogRequest): string {
   return `v${CACHE_SCHEMA_VERSION}:shared:${request.agentId}`;
@@ -59,16 +61,10 @@ export class AgentModelCatalogService {
   async get(request: AgentModelCatalogRequest): Promise<AgentModelCatalogResult> {
     const key = cacheKey(request);
     const cached = this.readCache(key);
-    if (request.agentId === 'codex' && request.forceRefresh && this.runtime.discoverCodexModels) {
-      const snapshot = cached?.models.length ? null : await this.readHostCodexModelCache();
-      const fallback = cached?.models.length ? cached : snapshot ? {
-        key, agentId: request.agentId, runtime: 'host' as const, models: snapshot.models,
-        discoveredAt: snapshot.fetchedAt ?? new Date(0).toISOString(),
-        installationFingerprint: 'host:codex-cache',
-      } : null;
-      return this.refresh(key, request, fallback);
+    if (request.agentId === 'codex' && this.runtime.discoverCodexModels) {
+      return this.getCodexCatalog(key, request, cached);
     }
-    // Codex refreshes this file independently, so check it before applying the Hub cache TTL.
+    // Compatibility for runtimes without app-server discovery.
     const currentCodexSnapshot =
       request.agentId === 'codex' ? await this.readHostCodexModelCache() : null;
     if (currentCodexSnapshot) {
@@ -134,6 +130,48 @@ export class AgentModelCatalogService {
       return resultFromEntry(cached, 'cache', true);
     }
     return this.refresh(key, request, cached);
+  }
+
+  private async getCodexCatalog(
+    key: string,
+    request: AgentModelCatalogRequest,
+    cached: AgentModelCatalogCacheEntry | null,
+  ): Promise<AgentModelCatalogResult> {
+    const now = this.runtime.now?.() ?? Date.now();
+    const failedRefresh = this.failedRefreshes.get(key);
+    if (!request.forceRefresh && failedRefresh && now - failedRefresh.atMs < FAILURE_TTL_MS && cached?.models.length) {
+      return { ...resultFromEntry(cached, 'cache', true), error: failedRefresh.error };
+    }
+
+    const age = cached ? now - Date.parse(cached.discoveredAt) : Infinity;
+    const verified = cached?.installationFingerprint === CODEX_LIVE_FINGERPRINT && cached.models.length > 0;
+    if (!request.forceRefresh && cached && Number.isFinite(age) && age >= 0) {
+      if ((verified && !failedRefresh && age < CODEX_SUCCESS_TTL_MS) || (!cached.models.length && age < FAILURE_TTL_MS)) {
+        return resultFromEntry(cached, cached.models.length ? 'cache' : 'none');
+      }
+      if (verified && age < MAX_STALE_MS) {
+        void this.refresh(key, request, cached).catch(() => undefined);
+        return resultFromEntry(cached, 'cache', true);
+      }
+    }
+
+    // A file timestamp does not prove a live discovery succeeded. In particular,
+    // another CLI process can rewrite the file with a smaller bundled catalog.
+    // Never let that file replace a successful app-server result or reset its TTL.
+    let fallback = cached;
+    if (!fallback?.models.length) {
+      const snapshot = await this.readHostCodexModelCache();
+      // Another caller may have finished discovery while the file was being read.
+      fallback = this.readCache(key) ?? fallback;
+      if (!fallback?.models.length && snapshot) {
+        fallback = {
+          key, agentId: 'codex', runtime: 'host', models: snapshot.models,
+          discoveredAt: snapshot.fetchedAt ?? new Date(0).toISOString(),
+          installationFingerprint: 'host:codex-cache',
+        };
+      }
+    }
+    return this.refresh(key, request, fallback);
   }
 
   private async readHostCodexModelCache(): Promise<{
@@ -211,6 +249,7 @@ export class AgentModelCatalogService {
           atMs: this.runtime.now?.() ?? Date.now(),
           error,
         });
+        await this.remember(fallback);
         return {
           ...resultFromEntry(fallback, 'cache', true),
           error,
@@ -225,6 +264,7 @@ export class AgentModelCatalogService {
           atMs: this.runtime.now?.() ?? Date.now(),
           error: message,
         });
+        await this.remember(fallback);
         return { ...resultFromEntry(fallback, 'cache', true), error: message };
       }
       const entry: AgentModelCatalogCacheEntry = {
@@ -255,7 +295,7 @@ export class AgentModelCatalogService {
     error?: string;
   }> {
     if (request.agentId === 'codex' && this.runtime.discoverCodexModels) {
-      return { models: await this.runtime.discoverCodexModels(), installationFingerprint: 'host:codex-app-server' };
+      return { models: await this.runtime.discoverCodexModels(), installationFingerprint: CODEX_LIVE_FINGERPRINT };
     }
     const adapter = agentModelCatalogAdapter(request.agentId);
     const timeoutMs = this.runtime.timeoutMs();
