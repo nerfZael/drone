@@ -1,4 +1,4 @@
-export type SettingsTabId = 'usage' | 'general' | 'companion' | 'devices' | 'sync' | 'backups' | 'profiles' | 'trash' | 'archive' | 'shortcuts' | 'skills' | 'mcp' | 'agents' | 'components' | 'system';
+export type SettingsTabId = 'custom-events' | 'usage' | 'general' | 'companion' | 'devices' | 'sync' | 'backups' | 'profiles' | 'trash' | 'archive' | 'shortcuts' | 'skills' | 'mcp' | 'agents' | 'components' | 'system';
 
 export const SETTINGS_TABS: Array<{
   id: SettingsTabId;
@@ -85,6 +85,7 @@ export const SETTINGS_TABS: Array<{
     title: 'Component library',
     description: 'Preview the shared visual primitives and their interactive states across every supported theme.',
   },
+  { id: 'custom-events', label: 'Custom events', title: 'Custom events', description: 'Browse retained custom events and their data.' },
   {
     id: 'system',
     label: 'System',

@@ -1,3 +1,4 @@
+import { CustomEventsSettingsTab } from './CustomEventsSettingsTab';
 import { UsageAnalyticsView } from '../usage/UsageAnalyticsView';
 import React from 'react';
 import { UiBadge, UiToolbarButton } from '../../ui/components';
@@ -255,6 +256,7 @@ export function SettingsView({
         </>
       );
     }
+    if (activeTab === 'custom-events') return <CustomEventsSettingsTab requestJson={requestJson} />;
     if (activeTab === 'usage') return <UsageAnalyticsView />;
     if (activeTab === 'components') return <ComponentLibraryPreview />;
     return <SystemLogsSettingsTab hubLogsState={hubLogsState} hubLogsTailLines={hubLogsTailLines} hubLogsMaxBytes={hubLogsMaxBytes} />;
@@ -303,7 +305,7 @@ export function SettingsView({
                   {activeTabMeta.title}
                 </h2>
               </div>
-              {activeTab === 'components' ? (
+              {activeTab === 'custom-events' ? null : activeTab === 'components' ? (
                 <UiBadge tone="success" dot>Live preview</UiBadge>
               ) : (
                 <UiToolbarButton

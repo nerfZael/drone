@@ -34,6 +34,20 @@ export function registerResourceSubscriptionRoutes(
     }
   });
 
+  apiRouter.get('/api/settings/custom-events/history', async ({ url, json }) => {
+    try {
+      const current = availableService(json);
+      if (!current) return;
+      json(200, { ok: true, ...await current.getCustomEventSettingsHistory({
+        name: url.searchParams.get('name') ?? '',
+        after: url.searchParams.get('after') ?? undefined,
+        limit: url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : undefined,
+      }) });
+    } catch (error) {
+      json(400, { ok: false, error: errorMessage(error) });
+    }
+  });
+
   apiRouter.get('/api/custom-events/history', async ({ url, json }) => {
     try {
       const current = availableService(json);

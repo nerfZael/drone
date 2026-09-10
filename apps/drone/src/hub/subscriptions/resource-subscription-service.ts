@@ -397,6 +397,26 @@ export class ResourceSubscriptionService {
     },
   ) {
     const reader = this.requireCustomEventConversation(input.reader);
+    let readableDroneIds = (await this.deps.readCustomEventHistorySourceIds?.(reader)) ?? [];
+    if (input.readDroneIds !== undefined) {
+      if (!Array.isArray(input.readDroneIds) || input.readDroneIds.some((id) => typeof id !== 'string' || !id || id.length > 200)) {
+        throw new Error('readDroneIds must be an array of drone IDs');
+      }
+      const allowed = new Set(input.readDroneIds);
+      readableDroneIds = readableDroneIds.filter((id) => allowed.has(id));
+    }
+    return this.readCustomEventHistory(input, readableDroneIds);
+  }
+
+  // Operator settings view; never expose this through conversation-scoped MCP tools.
+  async getCustomEventSettingsHistory(input: { name: string; after?: string; limit?: number }) {
+    return this.readCustomEventHistory(input, null);
+  }
+
+  private async readCustomEventHistory(
+    input: CustomEventSourceFilter & { name: string; since?: string; until?: string; after?: string; limit?: number },
+    readableDroneIds: string[] | null,
+  ) {
     const name = normalizeCustomEventName(input.name);
     const filter = customEventSourceFilter(input);
     const timestamp = (value: unknown, field: string): string | undefined => {
@@ -439,18 +459,6 @@ export class ResourceSubscriptionService {
       } catch {
         throw new Error('after must be a history cursor for the same event and filters');
       }
-    }
-    if (
-      input.readDroneIds !== undefined &&
-      (!Array.isArray(input.readDroneIds) ||
-        input.readDroneIds.some((id) => typeof id !== 'string' || !id || id.length > 200))
-    ) {
-      throw new Error('readDroneIds must be an array of drone IDs');
-    }
-    let readableDroneIds = (await this.deps.readCustomEventHistorySourceIds?.(reader)) ?? [];
-    if (input.readDroneIds) {
-      const allowed = new Set(input.readDroneIds);
-      readableDroneIds = readableDroneIds.filter((id) => allowed.has(id));
     }
     const rows = this.deps.repository.getCustomEventHistory({
       name,

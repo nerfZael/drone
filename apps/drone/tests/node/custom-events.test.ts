@@ -514,3 +514,22 @@ test('history respects retention cleanup while the catalog survives', async () =
     close();
   }
 });
+
+test('settings history reads retained emissions without a conversation and paginates', async () => {
+  const { service, close } = fixture();
+  try {
+    await service.emitCustomEvent({ source, name: 'release', data: { version: 1 } });
+    await service.emitCustomEvent({ source: other, name: 'release', data: { version: 2 } });
+    const page = await service.getCustomEventSettingsHistory({ name: 'Release', limit: 1 });
+    assert.equal(page.events.length, 1);
+    assert.ok(page.nextCursor);
+    const next = await service.getCustomEventSettingsHistory({ name: 'release', limit: 1, after: page.nextCursor });
+    assert.equal(next.events.length, 1);
+    assert.notEqual(page.events[0].eventId, next.events[0].eventId);
+    assert.equal(next.nextCursor, null);
+    await assert.rejects(service.getCustomEventHistory({ reader: { chatId: '', droneId: '', chatName: '' }, name: 'release' }));
+    await assert.rejects(service.getCustomEventSettingsHistory({ name: 'different', after: page.nextCursor }), /same event/);
+  } finally {
+    close();
+  }
+});

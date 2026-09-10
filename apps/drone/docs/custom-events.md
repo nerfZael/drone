@@ -60,6 +60,12 @@ History includes events emitted before the reader subscribed, during a pause, or
 
 History is retained under the existing subscription cleanup settings, with event retention defaulting to 30 days. `retentionDays` reports the configured setting, not a guarantee of complete historical coverage. Older events can remain while delivery records reference them. Cleaned-up emissions cannot be recovered through this tool, and an empty result does not prove an event never occurred. Catalog entries survive history cleanup.
 
+## Desktop history viewer
+
+Open **Settings → Custom events** in Desktop Drone Hub to browse retained emissions. Search the event catalog by name or description, select an event name, and expand an emission to inspect its fields, timestamp, and source identity. Nested objects and lists are formatted as labeled values. Use **Load older events** for more history and **Refresh** to retrieve new emissions.
+
+The settings viewer shows Hub-wide retained history, including sources that have since been removed. It uses the operator settings endpoint; conversation-scoped history tools continue to enforce the reader's source access. History cleanup still applies, and catalog entries can exist without retained emissions.
+
 ## Delivery and management
 
 Custom events use the existing durable subscription queue, batching, retries, automated-run limits, and global or `custom.emitted` queued/ASAP delivery setting. Several emissions may arrive together in one agent prompt. Emission success means the event was stored and matching deliveries scheduled, not that subscriber work has finished.

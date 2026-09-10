@@ -474,7 +474,7 @@ export class ResourceSubscriptionRepository {
 
   getCustomEventHistory(input: {
     name: string;
-    readableDroneIds: string[];
+    readableDroneIds: string[] | null;
     sourceDroneId?: string;
     sourceChatId?: string;
     since?: string;
@@ -489,7 +489,7 @@ export class ResourceSubscriptionRepository {
         SELECT * FROM resource_events
         WHERE provider = 'drone-hub' AND resource_type = 'custom_event'
           AND resource_id = ?
-          AND json_extract(provider_content_json, '$.source.droneId') IN (SELECT value FROM json_each(?))
+          AND (? IS NULL OR json_extract(provider_content_json, '$.source.droneId') IN (SELECT value FROM json_each(?)))
           AND (? IS NULL OR json_extract(provider_content_json, '$.source.droneId') = ?)
           AND (? IS NULL OR json_extract(provider_content_json, '$.source.chatId') = ?)
           AND (? IS NULL OR occurred_at >= ?)
@@ -500,6 +500,7 @@ export class ResourceSubscriptionRepository {
         )
         .all(
           input.name,
+          input.readableDroneIds === null ? null : JSON.stringify(input.readableDroneIds),
           JSON.stringify(input.readableDroneIds),
           input.sourceDroneId ?? null,
           input.sourceDroneId ?? null,
