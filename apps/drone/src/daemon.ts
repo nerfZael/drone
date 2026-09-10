@@ -1,3 +1,5 @@
+import { CodexProviderCredentials } from './CodexProviderCredentials';
+import { codexModelRoute } from './codex-model-routing';
 import crypto from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { createReadStream } from 'node:fs';
@@ -1571,7 +1573,10 @@ async function main() {
     return await result;
   }
 
+  const codexCredentials = new CodexProviderCredentials(dataDir);
   const codexPromptRuns = new CodexPromptRunManager<CodexPromptJob>({
+    environment: (spec) => codexModelRoute(spec.model).provider === 'openrouter'
+      ? codexCredentials.environment(spec.sessionKey, spec.openrouterCredentialVersion) : Promise.resolve({}),
     loadMessage: async (id) => {
       const job = await loadPromptJob(promptsDir, id);
       return job?.codexAppServer ? (job as CodexPromptJob) : null;
@@ -1802,7 +1807,7 @@ async function main() {
       if (await handleDaemonManagedStateRequest({ req, res, method, pathname, dataDir })) return;
       if (await handleDaemonWorkspaceRequest({ req, res, method, pathname, url: u })) return;
 
-      if (method === 'POST' && pathname === '/v1/codex/enqueue') {
+      if (method === 'POST' && (pathname === '/v1/codex/enqueue' || pathname === '/v1/codex/enqueue-provider')) {
         const body = await readJson(req);
         const id = String(body?.id ?? '').trim();
         const sessionKey = String(body?.sessionKey ?? '').trim();
@@ -1812,10 +1817,20 @@ async function main() {
           json(res, 400, { error: 'id, sessionKey, launchScript, and prompt are required' });
           return;
         }
+        let openrouterCredentialVersion: string | undefined;
+        if (codexModelRoute(body?.model).provider === 'openrouter') {
+          const apiKey = typeof body?.openrouterApiKey === 'string' ? body.openrouterApiKey.trim() : '';
+          if (!apiKey) {
+            json(res, 400, { error: 'Configure an OpenRouter API key in Hub settings.' });
+            return;
+          }
+          openrouterCredentialVersion = await codexCredentials.save(sessionKey, apiKey);
+        }
         const deliveryMode = body?.deliveryMode === 'asap' ? 'asap' : 'queue';
         const createdAt = nowIso();
         const session = promptSessionName(id);
         const spec: CodexPromptSpec = {
+          ...(openrouterCredentialVersion ? { openrouterCredentialVersion } : {}),
           sessionKey,
           launchScript,
           prompt,

@@ -2653,7 +2653,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     {
       title: 'Create drone chat',
       description:
-        'Create and configure a chat for a Drone Hub drone. When settings are omitted, the most recently used settings for that drone repository are inherited. When chat is omitted, an Untitled name is allocated for a draft-style workflow. Use agent="codex" for a Codex CLI chat and omit provider. Use agent="native" for a Drone Hub Built-in chat; only that agent accepts provider="openai", "codex", "gemini", or "openrouter".',
+        'Create and configure a chat for a Drone Hub drone. When settings are omitted, the most recently used settings for that drone repository are inherited. When chat is omitted, an Untitled name is allocated for a draft-style workflow. Use agent="codex" for a Codex CLI chat and omit provider. Codex models include OpenRouter entries; use their exact IDs from list_agent_models. Use agent="native" for a Drone Hub Built-in chat; only that agent accepts provider="openai", "codex", "gemini", or "openrouter".',
       inputSchema: {
         drone: z.string(),
         chat: z.string().optional(),

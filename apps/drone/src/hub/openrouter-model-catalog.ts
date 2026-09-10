@@ -1,3 +1,4 @@
+import { saveCodexOpenRouterCatalog } from './codex-openrouter-catalog';
 import type { Model } from '@mariozechner/pi-ai';
 import { getHubSettingsRepository } from '../host/hub-settings-repository';
 import { HUB_AGENT_MODEL_OPTIONS } from './llm-model-catalog';
@@ -54,7 +55,9 @@ export async function loadOpenRouterCatalog() {
 export async function refreshOpenRouterCatalog(fetcher: typeof fetch = fetch) {
   const response = await fetcher('https://openrouter.ai/api/v1/models', { signal: AbortSignal.timeout(20_000) });
   if (!response.ok) throw new Error(`OpenRouter model refresh failed (${response.status})`);
-  const models = parseOpenRouterModels(await response.json());
+  const data = await response.json();
+  const models = parseOpenRouterModels(data);
+  await saveCodexOpenRouterCatalog(data);
   const catalog = { updatedAt: new Date().toISOString(), models };
   await (await getHubSettingsRepository()).put(KEY, catalog);
   install(catalog);

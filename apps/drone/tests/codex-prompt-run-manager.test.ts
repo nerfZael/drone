@@ -9,12 +9,14 @@ test('forks Codex at an inclusive saved turn, and verifies the fork before accep
   const calls: any[] = [];
   const session: any = { threadId: null, threadReady: false, connection: { call: async (method: string, params: any) => {
     calls.push({ method, params });
-    return method === 'thread/fork' ? { thread: { id: 'new-thread' } } : { thread: { turns: [{ id: 'turn-1', status: 'completed' }] } };
+    if (method === 'config/read') return { config: { model_provider: 'openai', model: 'default-model' } };
+    return method === 'thread/fork' ? { modelProvider: 'openai', thread: { id: 'new-thread' } } : { thread: { turns: [{ id: 'turn-1', status: 'completed' }] } };
   } } };
   const manager = new CodexPromptRunManager<any>({} as any);
   expect(await (manager as any).ensureThread(session, { forkThreadId: 'source', forkLastTurnId: 'turn-1' })).toBe('new-thread');
   expect(calls).toEqual([
-    { method: 'thread/fork', params: { threadId: 'source', lastTurnId: 'turn-1' } },
+    { method: 'config/read', params: { includeLayers: false } },
+    { method: 'thread/fork', params: { threadId: 'source', lastTurnId: 'turn-1', modelProvider: 'openai', model: 'default-model' } },
     { method: 'thread/read', params: { threadId: 'new-thread', includeTurns: true } },
   ]);
 });
@@ -23,27 +25,29 @@ test('resolves an older saved Hub message by clientId, not the latest running tu
   const calls: any[] = [];
   const session: any = { threadId: null, threadReady: false, connection: { call: async (method: string, params: any) => {
     calls.push({ method, params });
-    if (method === 'thread/fork') return { thread: { id: 'new-thread' } };
+    if (method === 'config/read') return { config: { model_provider: 'openai', model: 'default-model' } };
+    if (method === 'thread/fork') return { modelProvider: 'openai', thread: { id: 'new-thread' } };
     return { thread: { turns: params.threadId === 'source'
       ? [{ id: 'turn-1', status: 'completed', items: [{ type: 'userMessage', clientId: 'hub-prompt' }] }, { id: 'turn-2', status: 'inProgress', items: [] }]
       : [{ id: 'turn-1', status: 'completed' }] } };
   } } };
   const manager = new CodexPromptRunManager<any>({} as any);
   await (manager as any).ensureThread(session, { forkThreadId: 'source', forkLastMessageId: 'hub-prompt' });
-  expect(calls[1]).toEqual({ method: 'thread/fork', params: { threadId: 'source', lastTurnId: 'turn-1' } });
+  expect(calls[2]).toEqual({ method: 'thread/fork', params: { threadId: 'source', lastTurnId: 'turn-1', modelProvider: 'openai', model: 'default-model' } });
 });
 
 test('rejects an old server that ignores the boundary without using the resulting live fork', async () => {
   const calls: string[] = [];
   const session: any = { threadId: null, threadReady: false, connection: { call: async (method: string) => {
     calls.push(method);
-    return method === 'thread/fork' ? { thread: { id: 'wrong-fork' } } : { thread: { turns: [{ id: 'later-turn', status: 'inProgress' }] } };
+    if (method === 'config/read') return { config: { model_provider: 'openai', model: 'default-model' } };
+    return method === 'thread/fork' ? { modelProvider: 'openai', thread: { id: 'wrong-fork' } } : { thread: { turns: [{ id: 'later-turn', status: 'inProgress' }] } };
   } } };
   const manager = new CodexPromptRunManager<any>({} as any);
   await expect((manager as any).ensureThread(session, { forkThreadId: 'source', forkLastTurnId: 'turn-1' })).rejects.toThrow('did not preserve');
   expect(session.threadId).toBeNull();
   expect(session.threadReady).toBe(false);
-  expect(calls).toEqual(['thread/fork', 'thread/read', 'thread/archive']);
+  expect(calls).toEqual(['config/read', 'thread/fork', 'thread/read', 'thread/archive']);
 });
 
 test('restart recovery preserves a canceled outcome from the durable transcript', async () => {

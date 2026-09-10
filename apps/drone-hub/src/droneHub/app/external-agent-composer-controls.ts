@@ -54,10 +54,12 @@ export function buildExternalAgentComposerControls(opts: {
   const catalogModelLabel = (modelId: string) =>
     opts.models.find((model) => model.id === modelId)?.label || modelId;
   const displayedModelLabel = formatModelDisplayLabel(catalogModelLabel(displayedModel.label));
-  const reasoningControlEnabled =
-    opts.currentAgentKey === 'builtin:codex' ||
-    opts.currentAgentKey === 'builtin:blip' ||
-    opts.models.some((model) => (model.reasoningLevels?.length ?? 0) > 0);
+  const selectedOpenRouterModel = opts.currentAgentKey === 'builtin:codex' && opts.currentModel?.startsWith('openrouter:');
+  const reasoningControlEnabled = selectedOpenRouterModel
+    ? Boolean(opts.models.find((model) => model.id === opts.currentModel)?.reasoningLevels?.length)
+    : opts.currentAgentKey === 'builtin:codex' ||
+      opts.currentAgentKey === 'builtin:blip' ||
+      opts.models.some((model) => (model.reasoningLevels?.length ?? 0) > 0);
   const autoCatalogModel =
     opts.models.find((model) => model.isCurrent) ??
     opts.models.find((model) => model.isDefault) ??
@@ -105,7 +107,8 @@ export function buildExternalAgentComposerControls(opts: {
         currentThinkingLevel: displayedReasoning ?? undefined,
         options: modelChoices,
         triggerLabel,
-        title: displayedChatModelTitle(displayedModel, displayedReasoning),
+        title: displayedChatModelTitle(displayedModel, displayedReasoning) +
+          (opts.currentAgentKey === 'builtin:codex' ? ' Model changes apply to the next turn in this chat.' : ''),
         disabled: opts.modelDisabled,
         showReasoning: reasoningControlEnabled,
         searchable: true,
@@ -131,9 +134,9 @@ export function buildExternalAgentComposerControls(opts: {
             choice.thinkingLevel;
           opts.onUpdate({
             model: choice.id,
-            ...(reasoningControlEnabled && hasCatalogReasoning
+            ...(hasCatalogReasoning
               ? { reasoning: nextReasoning ?? null }
-              : {}),
+              : choice.id.startsWith('openrouter:') ? { reasoning: null } : {}),
           });
         },
       },
