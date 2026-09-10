@@ -577,6 +577,12 @@ class BlipSession implements BlipSessionHandle {
         role: event.message.role,
       });
       if (event.message.role === 'assistant') {
+        await this.emit({
+          ...eventBase(this.state.id, active.turnId), type: 'usage_observed',
+          model: event.message.model, provider: event.message.provider, purpose: 'chat',
+          complete: event.message.stopReason !== 'error' && event.message.stopReason !== 'aborted',
+          usage: event.message.usage,
+        });
         const reasoning = messageReasoning(event.message);
         if (reasoning.trim()) {
           await this.emit({

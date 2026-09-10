@@ -1,3 +1,5 @@
+import { AgentUsageAccumulator } from './usage/AgentUsageAccumulator';
+import type { UsageObservation } from '@drone/assistant-chat';
 import {
   normalizeAgentPlan,
   normalizeAgentSkillUses,
@@ -85,6 +87,7 @@ function extractReasoningEffort(raw: any): string | null {
 type CodexTerminalEvent = 'turn.completed' | 'response.completed' | 'response.failed' | 'error';
 type CodexTerminalStatus = 'completed' | 'failed' | 'canceled';
 type CodexJsonlParseResult = {
+  usage?: UsageObservation[];
   threadId: string | null;
   message: string | null;
   activity?: AgentRunActivity;
@@ -96,6 +99,7 @@ type CodexJsonlParseResult = {
   skillsUsed?: AgentSkillUse[];
 };
 type StructuredAgentJsonlParseResult = {
+  usage?: UsageObservation[];
   providerCheckpoint?: ProviderMessageCheckpoint;
   sessionId: string | null;
   message: string | null;
@@ -107,6 +111,7 @@ type StructuredAgentJsonlParseResult = {
   error?: string;
 };
 type PiJsonlParseResult = {
+  usage?: UsageObservation[];
   sessionId: string | null;
   message: string | null;
   activity?: AgentRunActivity;
@@ -131,6 +136,7 @@ export type BlipToolCallSummary = {
 };
 
 type BlipJsonlParseResult = {
+  usage?: UsageObservation[];
   sessionId: string | null;
   message: string | null;
   activity?: AgentRunActivity;
@@ -165,6 +171,7 @@ function createCodexJsonlParser(): {
   let agentPlan: AgentPlan | undefined;
   let assistantSequence = 0;
   let lastActivityText = '';
+  const usage = new AgentUsageAccumulator('codex');
   const activity = new BuiltinAgentActivityCollector('codex');
   const skillsUsed = new Map<string, AgentSkillUse>();
   type CommandSkillReadEvidence = { structured: string[]; commandFallback: string[] };
@@ -419,6 +426,7 @@ function createCodexJsonlParser(): {
 
   return {
     pushLine(lineRaw: string) {
+      usage.pushLine(lineRaw);
       const line = String(lineRaw ?? '').trim();
       if (!line) return;
       let obj: any = null;
@@ -515,6 +523,7 @@ function createCodexJsonlParser(): {
       const agentActivity = activity.result();
       const agentSkillsUsed = normalizeAgentSkillUses([...skillsUsed.values()]);
       return {
+        usage: usage.result(),
         threadId,
         message: lastMsg ?? (streamedMsg ? streamedMsg : null),
         ...(agentActivity ? { activity: agentActivity } : {}),
@@ -541,6 +550,7 @@ function codexPromptJobTranscript(
 ): Extract<BuiltinPromptJobTranscript, { kind: 'codex' }> {
   return {
     kind: 'codex',
+    usage: parsed.usage,
     message: parsed.message,
     threadId: parsed.threadId,
     ...(parsed.activity ? { activity: parsed.activity } : {}),
@@ -608,6 +618,7 @@ function createStructuredAgentJsonlParser(
   let error: string | null = null;
   let activitySequence = 0;
   let lastActivityText = '';
+  const usage = new AgentUsageAccumulator(source);
   const activity = new BuiltinAgentActivityCollector(source);
 
   const considerText = (raw: any) => {
@@ -657,6 +668,7 @@ function createStructuredAgentJsonlParser(
 
   return {
     pushLine(lineRaw: string) {
+      usage.pushLine(lineRaw);
       const line = String(lineRaw ?? '').trim();
       if (!line) return;
       let obj: any;
@@ -855,6 +867,7 @@ function createStructuredAgentJsonlParser(
     result() {
       const agentActivity = activity.result();
       return {
+        usage: usage.result(),
         sessionId,
         message,
         ...(providerCheckpoint ? { providerCheckpoint } : {}),
@@ -1062,6 +1075,7 @@ function createBlipJsonlParser(): {
   let assistantSequence = 0;
   let reasoningSequence = 0;
   let streamedReasoning = '';
+  const usage = new AgentUsageAccumulator('native');
   const activity = new BuiltinAgentActivityCollector('blip');
   const eventCounts: Record<string, number> = {};
   const activeToolCalls = new Map<
@@ -1071,6 +1085,7 @@ function createBlipJsonlParser(): {
 
   return {
     pushLine(lineRaw: string) {
+      usage.pushLine(lineRaw);
       const line = String(lineRaw ?? '').trim();
       if (!line) return;
       let obj: any = null;
@@ -1220,6 +1235,7 @@ function createBlipJsonlParser(): {
       const eventCountsOut = Object.keys(eventCounts).length > 0 ? eventCounts : null;
       const agentActivity = activity.result();
       return {
+        usage: usage.result(),
         sessionId,
         message: lastMsg ?? (streamedMsg ? streamedMsg : null),
         ...(agentActivity ? { activity: agentActivity } : {}),
@@ -1324,6 +1340,7 @@ export async function parseBlipJsonlLines(
 export type BuiltinPromptJobTranscript =
   | {
       kind: 'cursor' | 'claude' | 'opencode';
+      usage?: UsageObservation[];
       providerCheckpoint?: ProviderMessageCheckpoint;
       message: string | null;
       sessionId: string | null;
@@ -1339,6 +1356,7 @@ export type BuiltinPromptJobTranscript =
     }
   | {
       kind: 'codex';
+      usage?: UsageObservation[];
       message: string | null;
       threadId: string | null;
       activity?: AgentRunActivity;
@@ -1354,6 +1372,7 @@ export type BuiltinPromptJobTranscript =
     }
   | {
       kind: 'pi';
+      usage?: UsageObservation[];
       message: string | null;
       sessionId: string | null;
       activity?: AgentRunActivity;
@@ -1365,6 +1384,7 @@ export type BuiltinPromptJobTranscript =
     }
   | {
       kind: 'blip';
+      usage?: UsageObservation[];
       message: string | null;
       sessionId: string | null;
       activity?: AgentRunActivity;
@@ -1446,6 +1466,7 @@ export function parseBuiltinPromptJobTranscript(
     const parsed = parseStructuredAgentJsonl(kind, stdout);
     return {
       kind,
+      usage: parsed.usage,
       message: parsed.message,
       sessionId: parsed.sessionId,
       ...(parsed.providerCheckpoint ? { providerCheckpoint: parsed.providerCheckpoint } : {}),
@@ -1462,6 +1483,7 @@ export function parseBuiltinPromptJobTranscript(
     const parsed = parsePiJsonl(stdout);
     return {
       kind: 'pi',
+      usage: parsed.usage,
       message: parsed.message,
       sessionId: parsed.sessionId,
       ...(parsed.activity ? { activity: parsed.activity } : {}),
@@ -1474,6 +1496,7 @@ export function parseBuiltinPromptJobTranscript(
     const parsed = parseBlipJsonl(stdout);
     return {
       kind: 'blip',
+      usage: parsed.usage,
       message: parsed.message,
       sessionId: parsed.sessionId,
       ...(parsed.activity ? { activity: parsed.activity } : {}),
@@ -1500,6 +1523,7 @@ export async function parseBuiltinPromptJobTranscriptLines(
     const parsed = await parseStructuredAgentJsonlLines(kind, lines);
     return {
       kind,
+      usage: parsed.usage,
       message: parsed.message,
       sessionId: parsed.sessionId,
       ...(parsed.providerCheckpoint ? { providerCheckpoint: parsed.providerCheckpoint } : {}),
@@ -1516,6 +1540,7 @@ export async function parseBuiltinPromptJobTranscriptLines(
     const parsed = await parsePiJsonlLines(lines);
     return {
       kind: 'pi',
+      usage: parsed.usage,
       message: parsed.message,
       sessionId: parsed.sessionId,
       ...(parsed.activity ? { activity: parsed.activity } : {}),
@@ -1528,6 +1553,7 @@ export async function parseBuiltinPromptJobTranscriptLines(
     const parsed = await parseBlipJsonlLines(lines);
     return {
       kind: 'blip',
+      usage: parsed.usage,
       message: parsed.message,
       sessionId: parsed.sessionId,
       ...(parsed.activity ? { activity: parsed.activity } : {}),
@@ -1542,6 +1568,7 @@ export async function parseBuiltinPromptJobTranscriptLines(
 }
 
 export function parseCodexJobTranscript(job: any): {
+  usage?: UsageObservation[];
   threadId: string | null;
   message: string | null;
   activity?: AgentRunActivity;
@@ -1584,6 +1611,7 @@ export function parseCodexJobTranscript(job: any): {
       );
       const skillsUsed = normalizeAgentSkillUses(transcript.skillsUsed);
       return {
+        usage: transcript.usage,
         threadId: optionalString(transcript.threadId),
         message: optionalString(transcript.message),
         ...(activity ? { activity } : {}),
@@ -1625,6 +1653,7 @@ export function parseStructuredAgentJobTranscript(
         ? transcript.terminalStatus
         : undefined;
     return {
+      usage: transcript.usage,
       sessionId: optionalString(transcript.sessionId),
       message: optionalString(transcript.message),
       ...(providerCheckpoint?.agentId === kind ? { providerCheckpoint } : {}),
@@ -1640,6 +1669,7 @@ export function parseStructuredAgentJobTranscript(
 }
 
 export function parsePiJobTranscript(job: any): {
+  usage?: UsageObservation[];
   sessionId: string | null;
   message: string | null;
   activity?: AgentRunActivity;
@@ -1657,6 +1687,7 @@ export function parsePiJobTranscript(job: any): {
       const reasoning = optionalString(transcript.reasoning);
       const activity = normalizeAgentRunActivity(transcript.activity);
       return {
+        usage: transcript.usage,
         sessionId: optionalString(transcript.sessionId),
         message: optionalString(transcript.message),
         ...(activity ? { activity } : {}),
@@ -1669,6 +1700,7 @@ export function parsePiJobTranscript(job: any): {
 }
 
 export function parseBlipJobTranscript(job: any): {
+  usage?: UsageObservation[];
   sessionId: string | null;
   message: string | null;
   activity?: AgentRunActivity;
@@ -1703,6 +1735,7 @@ export function parseBlipJobTranscript(job: any): {
           ? terminalEventRaw
           : undefined;
       return {
+        usage: transcript.usage,
         sessionId: optionalString(transcript.sessionId),
         message: optionalString(transcript.message),
         ...(activity ? { activity } : {}),

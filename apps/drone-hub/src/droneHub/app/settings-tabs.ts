@@ -1,4 +1,4 @@
-export type SettingsTabId = 'general' | 'companion' | 'devices' | 'sync' | 'backups' | 'profiles' | 'trash' | 'archive' | 'shortcuts' | 'skills' | 'mcp' | 'agents' | 'components' | 'system';
+export type SettingsTabId = 'usage' | 'general' | 'companion' | 'devices' | 'sync' | 'backups' | 'profiles' | 'trash' | 'archive' | 'shortcuts' | 'skills' | 'mcp' | 'agents' | 'components' | 'system';
 
 export const SETTINGS_TABS: Array<{
   id: SettingsTabId;
@@ -12,6 +12,7 @@ export const SETTINGS_TABS: Array<{
     title: 'General settings',
     description: 'GitHub readiness, LLM providers, filesystem uploads, transcript defaults, and onboarding controls.',
   },
+  { id: 'usage', label: 'Usage', title: 'Usage analytics', description: 'Token consumption, estimated cost, and model prices for new agent executions.' },
   {
     id: 'companion',
     label: 'Companion',

@@ -1,3 +1,4 @@
+import { getUsageStore } from '../usage/UsageStore';
 import crypto from 'node:crypto';
 import type { AgentMessage, AgentTool } from '@mariozechner/pi-agent-core';
 import type {
@@ -530,6 +531,12 @@ export class BlipAssistantHost {
           if (!discovered) throw error;
           model = discovered;
         }
+      }
+      const usageStore = getUsageStore();
+      if (model.cost && Object.values(model.cost).some((rate) => rate > 0) &&
+          !usageStore.prices().some((price) => price.provider === model!.provider && price.model === model!.id)) {
+        usageStore.addPrice({ provider: model.provider, model: model.id, effectiveAt: new Date().toISOString(),
+          ...model.cost, origin: 'bundled', source: 'Bundled native model catalog (standard token estimate)' });
       }
       const sessionId = await this.repository.sessionIdForThread(threadId);
       handle = await runtime.createBlipSession({

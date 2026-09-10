@@ -1,3 +1,4 @@
+import { UsageAnalyticsView } from '../usage/UsageAnalyticsView';
 import React from 'react';
 import { UiBadge, UiToolbarButton } from '../../ui/components';
 import { AgentsSettingsSection } from './AgentsSettingsSection';
@@ -254,6 +255,7 @@ export function SettingsView({
         </>
       );
     }
+    if (activeTab === 'usage') return <UsageAnalyticsView />;
     if (activeTab === 'components') return <ComponentLibraryPreview />;
     return <SystemLogsSettingsTab hubLogsState={hubLogsState} hubLogsTailLines={hubLogsTailLines} hubLogsMaxBytes={hubLogsMaxBytes} />;
   };

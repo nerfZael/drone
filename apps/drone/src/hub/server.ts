@@ -1,3 +1,4 @@
+import { registerUsageRoutes } from './routes/usage-routes';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -4405,6 +4406,7 @@ async function startDroneHubApiServerWithLifecycle(
     await nativeChatLifecycle.deleteMany(nativeChatIds);
   };
   const promptNativeChat = async ({
+    repo,
     droneId,
     chatName,
     chatId,
@@ -4419,6 +4421,7 @@ async function startDroneHubApiServerWithLifecycle(
     prompt,
     attachments,
   }: {
+    repo?: string;
     droneId: string;
     chatName: string;
     chatId: string;
@@ -4437,6 +4440,7 @@ async function startDroneHubApiServerWithLifecycle(
     const activeNativeTurn = blipAssistantHost.isThreadRunning(chatId);
     if (!activeNativeTurn) {
       await nativeChatLifecycle.ensureForPrompt({
+        repo,
         id: chatId,
         droneId,
         chatName,
@@ -5670,6 +5674,7 @@ async function startDroneHubApiServerWithLifecycle(
 
   registerSidebarRoutes(apiRouter, sidebarCommands);
 
+  registerUsageRoutes(apiRouter);
   registerCatalogRoutes(apiRouter, {
     mcpToken,
     upsertDroneHubMcpServerPreset,
