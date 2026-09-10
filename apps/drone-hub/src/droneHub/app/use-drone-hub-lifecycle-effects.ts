@@ -281,11 +281,12 @@ export function useDroneHubLifecycleEffects({
     const focusPrimaryChatInput = (preferMain: boolean = false): boolean => {
       const modalOpen = Boolean(document.querySelector('[role="dialog"][aria-modal="true"]'));
       if (modalOpen) return false;
-      const activeSideName = preferMain ? undefined : document.querySelector<HTMLElement>('[data-side-chat-active]')?.dataset.sideChatName;
-      const sideScope = activeSideName ? [...document.querySelectorAll<HTMLElement>('[data-side-chat-name]')].find((element) =>
-        element.dataset.sideChatName === activeSideName && element.querySelector('[data-active-composer-id]')) : null;
-      const primaryInput = sideScope?.querySelector<HTMLElement>('textarea, [contenteditable="true"]')
-        ?? document.querySelector<HTMLElement>('[data-main-workspace-chat] [data-chat-input-focus-id], [data-chat-input-focus-id="primary-chat"]');
+      const targetId = preferMain ? null : activeComposer.ensureTargetId();
+      const scope = targetId ? [...document.querySelectorAll<HTMLElement>('[data-active-composer-id]')]
+        .find((element) => element.dataset.activeComposerId === targetId) : null;
+      const primaryInput = preferMain
+        ? document.querySelector<HTMLElement>('[data-main-workspace-chat] [data-chat-input-focus-id], [data-chat-input-focus-id="primary-chat"]')
+        : scope?.querySelector<HTMLElement>('textarea, [contenteditable="true"]');
       if (!primaryInput) return false;
       if (primaryInput.getClientRects().length === 0) return false;
       primaryInput.focus();
@@ -634,6 +635,17 @@ export function useDroneHubLifecycleEffects({
       if (captureRoot) {
         const insideCanvasViewport = Boolean(captureRoot.closest('[data-drone-canvas-viewport="1"]'));
         if (!insideCanvasViewport) return;
+      }
+
+      // Match Tab inside the composer: leave normal focus navigation intact
+      // when there is no draft, attachment, or recording to send.
+      if (
+        !modalOpen && e.key === 'Tab' &&
+        !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey &&
+        !isEditableTarget(document.activeElement)
+      ) {
+        if (activeComposer.sendMessage('asap')) e.preventDefault();
+        return;
       }
 
       if (!matched) return;
