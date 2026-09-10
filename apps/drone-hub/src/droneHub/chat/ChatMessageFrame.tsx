@@ -126,7 +126,7 @@ export function ChatMessageFrame({
   );
 
   return user ? (
-    <div className="mb-3 flex justify-end">
+    <div className="dh-chat-user-message mb-3 flex justify-end">
       {bubble}
       {showRoleIcon ? (
         <div className="ml-3 mt-6 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded border border-[var(--user-border)] bg-[var(--user-subtle)]">

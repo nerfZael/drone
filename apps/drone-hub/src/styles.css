@@ -3727,6 +3727,10 @@ select:disabled optgroup {
 }
 
 @container floating-chat (max-width: 560px) {
+  .dh-chat-transcript {
+    --chat-compact: 1;
+  }
+
   .dh-chat-composer {
     padding: 0;
   }
@@ -3767,8 +3771,16 @@ select:disabled optgroup {
   }
 
   .dh-chat-transcript {
-    gap: 1.125rem;
+    gap: .625rem;
     padding: .875rem .75rem;
+  }
+
+  .dh-chat-user-message {
+    margin-bottom: .5rem;
+  }
+
+  .dh-chat-transcript > [data-transcript-item-kind="tool"] {
+    margin-top: -.375rem;
   }
 }
 

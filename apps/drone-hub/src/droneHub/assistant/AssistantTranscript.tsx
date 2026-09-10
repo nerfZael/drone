@@ -1,4 +1,5 @@
 import React from 'react';
+import { useCompactChat } from '../chat/use-compact-chat';
 import {
   nativeAgentFailurePresentation,
   parseEventNotificationPrompt,
@@ -1333,11 +1334,13 @@ export function ToolRunActivity({
   awaitingApproval?: boolean;
   approvalStartedAt?: number;
 }) {
+  const rootRef = React.useRef<HTMLDivElement>(null);
+  const compact = useCompactChat(rootRef, items.length > 0);
   const [expansionMode, setExpansionMode] = React.useState<'auto' | 'manual' | 'collapsed'>(
     active || awaitingApproval ? 'auto' : 'collapsed',
   );
   const userControlledExpansion = React.useRef(false);
-  const expanded = expansionMode !== 'collapsed';
+  const expanded = expansionMode === 'manual' || (expansionMode === 'auto' && !compact);
   const fallbackStart = React.useRef(Date.now()).current;
   const normalizedApprovalStartedAt = Number.isFinite(approvalStartedAt)
     ? Number(approvalStartedAt)
@@ -1420,7 +1423,7 @@ export function ToolRunActivity({
     !activityEndedWithAssistantOutput;
 
   return (
-    <div>
+    <div ref={rootRef}>
       <AgentRunSummaryLine
         active={active}
         durationMs={durationMs}
@@ -1435,7 +1438,7 @@ export function ToolRunActivity({
         expanded={expanded}
         onToggle={() => {
           userControlledExpansion.current = true;
-          setExpansionMode((current) => (current === 'collapsed' ? 'manual' : 'collapsed'));
+          setExpansionMode(expanded ? 'collapsed' : 'manual');
         }}
       />
       {expanded ? (

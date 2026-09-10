@@ -1,4 +1,5 @@
 import React from 'react';
+import { useCompactChat } from '../chat/use-compact-chat';
 import {
   messageVisibleText,
   renderItemsFromMessages,
@@ -109,7 +110,10 @@ export function AgentRunActivityView({
   const parsedStart = activityTimestampMs(startedAt) ?? fallbackStart;
   const parsedEnd = activityTimestampMs(endedAt);
   const [now, setNow] = React.useState(() => Date.now());
-  const [expanded, setExpanded] = React.useState(active || initiallyExpanded);
+  const rootRef = React.useRef<HTMLDivElement>(null);
+  const compact = useCompactChat(rootRef);
+  const [expansionOverride, setExpansionOverride] = React.useState<boolean | null>(null);
+  const expanded = expansionOverride ?? (initiallyExpanded || (active && !compact));
 
   React.useEffect(() => {
     if (!active) return;
@@ -118,7 +122,7 @@ export function AgentRunActivityView({
   }, [active]);
 
   React.useEffect(() => {
-    setExpanded(active || initiallyExpanded);
+    setExpansionOverride(null);
   }, [active, initiallyExpanded]);
 
   const durationMs = Math.max(0, (active ? now : (parsedEnd ?? parsedStart)) - parsedStart);
@@ -132,7 +136,7 @@ export function AgentRunActivityView({
       : undefined;
 
   return (
-    <div data-agent-run-activity={displayActivity?.source}>
+    <div ref={rootRef} data-agent-run-activity={displayActivity?.source}>
       <div className="px-3">
         <AgentRunSummaryLine
           active={active}
@@ -142,7 +146,7 @@ export function AgentRunActivityView({
           detail={detail}
           trailing={hasRunDetails ? <ActivityChevron open={expanded} /> : undefined}
           expanded={expanded}
-          onToggle={hasRunDetails ? () => setExpanded((value) => !value) : undefined}
+          onToggle={hasRunDetails ? () => setExpansionOverride(!expanded) : undefined}
           toggleLabel="run details"
         />
       </div>
