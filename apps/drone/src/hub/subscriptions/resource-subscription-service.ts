@@ -1,3 +1,4 @@
+import { hubChangeEvents } from '../hub-change-events';
 import {
   normalizeCustomEventName,
   customEventDescription,
@@ -143,6 +144,38 @@ export class ResourceSubscriptionService {
         (tick): tick is Promise<void> => tick != null,
       ),
     );
+  }
+
+  async pendingDeliveries(droneId: string, chatName: string) {
+    return this.deps.repository.pendingDeliveries(droneId, chatName, await this.settings());
+  }
+
+  async releasePendingDeliveries(droneId: string, chatName: string, deliveryIds: string[]) {
+    const settings = await this.settings();
+    if (!settings.enabled) throw new Error('Event delivery is paused');
+    const selected = new Set(deliveryIds);
+    const pending = this.deps.repository.pendingDeliveries(droneId, chatName, settings);
+    // Snapshot the requested chat's deliveries: newly arriving events are not included.
+    const remaining = new Set(
+      pending.deliveries.filter((item) => item.canRelease && selected.has(item.id)).map((item) => item.id),
+    );
+    const chatIds = new Set(
+      pending.deliveries.filter((item) => remaining.has(item.id)).map((item) => item.subscriberChatId),
+    );
+    for (const subscriberChatId of chatIds) {
+      while (remaining.size) {
+        const batch = await this.deps.repository.claimBatch(settings, new Date(), {
+          subscriberChatId,
+          deliveryIds: [...remaining],
+          bypassBatchWindow: true,
+        });
+        if (!batch) break;
+        for (const item of batch.items) remaining.delete(item.deliveryId);
+        await this.deliver(batch, settings);
+      }
+    }
+    hubChangeEvents.emitResourceDeliveryChange();
+    return this.pendingDeliveries(droneId, chatName);
   }
 
   list(subscriberChatId: string, includeInactive = false): ResourceSubscription[] {
@@ -1019,6 +1052,8 @@ export class ResourceSubscriptionService {
         errorMessage(error),
         settings.deliveryRetryLimit,
       );
+    } finally {
+      hubChangeEvents.emitResourceDeliveryChange();
     }
   }
 }

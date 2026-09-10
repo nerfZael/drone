@@ -15,7 +15,13 @@ function skippedReason(request: ChatQuestionRequest): string {
   return 'Questions skipped';
 }
 
-export function AssistantQuestionResultCard({ request }: { request: ChatQuestionRequest }) {
+export function AssistantQuestionResultCard({
+  request,
+  deliveryStatus,
+}: {
+  request: ChatQuestionRequest;
+  deliveryStatus?: string;
+}) {
   const result = request.result;
   if (!result) return null;
   const responses =
@@ -31,7 +37,12 @@ export function AssistantQuestionResultCard({ request }: { request: ChatQuestion
       data-assistant-question-result="true"
     >
       <div className="mb-2 text-10 font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
-        {result.status === 'submitted' ? 'Answers submitted' : skippedReason(request)}
+        {result.status === 'submitted'
+          ? deliveryStatus
+            ? 'Answers saved'
+            : 'Answers submitted'
+          : skippedReason(request)}
+        {deliveryStatus ? ` · ${deliveryStatus}` : ''}
       </div>
       {responses ? (
         <dl className="space-y-2.5">

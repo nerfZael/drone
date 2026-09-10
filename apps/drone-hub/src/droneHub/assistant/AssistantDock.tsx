@@ -1,3 +1,5 @@
+import { PendingEventsCard } from '../chat/PendingEventsCard';
+import { usePendingEvents, questionPendingDeliveryStatus } from '../chat/use-pending-events';
 import React from 'react';
 import { latestNativeCheckpointId } from '../app/side-chat-checkpoint-model';
 import { useDndMonitor, useDroppable } from '@dnd-kit/core';
@@ -325,6 +327,7 @@ export function AssistantDock({
   const chatSurfaceAdapter = useAgentChatSurfaceAdapter();
   const nativeDroneId = nativeChat.droneId;
   const nativeChatName = nativeChat.chatName;
+  const pendingEvents = usePendingEvents(nativeDroneId, nativeChatName);
   const nativeComposerDraftKey = chatInputDraftKeyForDroneChat(nativeDroneId, nativeChatName);
   const nativeChatNodeId = createCanvasChatNodeId(nativeDroneId, nativeChatName);
   const setApprovalRequiredByChatNodeId = useDroneHubRuntimeStore(
@@ -487,6 +490,7 @@ export function AssistantDock({
   }, [error, onStartupPromptReconciled, startupPrompt, startupPromptPresentation.reconciled]);
   const hasHistory =
     blipSession.messages.length > 0 ||
+    pendingEvents.deliveries.length > 0 ||
     Boolean(activeThread?.queuedPrompts?.length) ||
     Boolean(snapshot?.questionRequests?.length || snapshot?.pendingQuestionRequests?.length) ||
     startupPromptPresentation.showOptimistic;
@@ -2322,7 +2326,12 @@ export function AssistantDock({
       nativeTranscriptItems.push({
         key: `questions:${request.id}`,
         kind: 'approval',
-        content: <AssistantQuestionResultCard request={request} />,
+        content: (
+          <AssistantQuestionResultCard
+            request={request}
+            deliveryStatus={questionPendingDeliveryStatus(pendingEvents, request.id)}
+          />
+        ),
       });
     }
   }
@@ -2342,7 +2351,12 @@ export function AssistantDock({
     nativeTranscriptItems.splice(nextIndex < 0 ? nativeTranscriptItems.length : nextIndex, 0, {
       key: `questions:${request.id}`,
       kind: 'approval',
-      content: <AssistantQuestionResultCard request={request} />,
+      content: (
+        <AssistantQuestionResultCard
+          request={request}
+          deliveryStatus={questionPendingDeliveryStatus(pendingEvents, request.id)}
+        />
+      ),
     });
   }
   if (blipSession.compactionInProgress) {
@@ -2413,6 +2427,13 @@ export function AssistantDock({
           }
         />
       ),
+    });
+  }
+  if (pendingEvents.deliveries.length || pendingEvents.error) {
+    nativeTranscriptItems.push({
+      key: 'pending-events',
+      kind: 'status',
+      content: <PendingEventsCard state={pendingEvents} />,
     });
   }
   const transcriptError = error ?? blipSession.runError ?? blipSession.historyError;
@@ -2563,6 +2584,8 @@ export function AssistantDock({
               )}
               loadingMessage="Loading conversation…"
               hasContent={Boolean(
+                pendingEvents.deliveries.length > 0 ||
+                pendingEvents.error ||
                 blipSession.hasOlder ||
                 visibleItems.length > 0 ||
                 startupPromptPresentation.showOptimistic ||

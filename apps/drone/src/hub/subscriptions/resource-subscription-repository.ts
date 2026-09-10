@@ -1,3 +1,6 @@
+import { subscriptionRunCapacitySql } from './subscription-run-capacity';
+import { readPendingSubscriptionDeliveries } from './pending-subscription-deliveries';
+import { hubChangeEvents } from '../hub-change-events';
 import {
   customEventMatchesSource,
   customEventSearchText,
@@ -928,6 +931,7 @@ export class ResourceSubscriptionRepository {
     if (event.resourceType === 'cron') {
       throw new Error('cron events must be appended with appendCronOccurrence');
     }
+    queueMicrotask(() => hubChangeEvents.emitResourceDeliveryChange());
     const now = new Date().toISOString();
     const inserted = connection
       .prepare(
@@ -1100,6 +1104,7 @@ export class ResourceSubscriptionRepository {
         }
         advanceSubscription.run(nextEventAt, now, row.id, event.occurredAt);
       }
+      if (deliveryCount) queueMicrotask(() => hubChangeEvents.emitResourceDeliveryChange());
       return deliveryCount;
     });
   }
@@ -1279,12 +1284,26 @@ export class ResourceSubscriptionRepository {
     );
   }
 
+  pendingDeliveries(
+    droneId: string,
+    chatName: string,
+    settings: ResourceSubscriptionSettings,
+    now = new Date(),
+  ) {
+    return readPendingSubscriptionDeliveries(this.database, droneId, chatName, settings, now);
+  }
+
   async claimBatch(
     settings: ResourceSubscriptionSettings,
     now = new Date(),
+    options: { subscriberChatId?: string; deliveryIds?: string[]; bypassBatchWindow?: boolean } = {},
   ): Promise<ResourceSubscriptionBatch | null> {
     const nowIso = now.toISOString();
-    const cutoff = new Date(now.getTime() - settings.batchWindowMs).toISOString();
+    const cutoff = new Date(
+      now.getTime() - (options.bypassBatchWindow ? 0 : settings.batchWindowMs),
+    ).toISOString();
+    const scope = options.subscriberChatId ?? null;
+    const selectedIds = options.deliveryIds ? JSON.stringify(options.deliveryIds) : null;
     const hourAgo = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
     return await this.database.writeTransaction('claim subscription batch', (connection) => {
       const subscribers = connection
@@ -1296,26 +1315,9 @@ export class ResourceSubscriptionRepository {
           JOIN resource_subscriptions s ON s.id = d.subscription_id
           WHERE d.state = 'pending' AND d.available_at <= ? AND d.next_attempt_at <= ?
             AND s.status IN ('active', 'completed')
-            AND ((
-              SELECT COUNT(DISTINCT COALESCE((
-                SELECT canonical_prompt_id FROM prompt_submission_receipts r
-                WHERE r.drone_id = b.subscriber_drone_id
-                  AND r.idempotency_key = 'subscription-batch:' || b.id
-              ), b.prompt_id)) FROM subscription_batches b
-              WHERE b.subscriber_chat_id = s.subscriber_chat_id
-                AND b.state = 'delivered' AND b.created_at >= ?
-            ) < ? OR EXISTS (
-              SELECT 1 FROM prompts p
-              WHERE p.drone_id = s.subscriber_drone_id AND p.chat_name = s.subscriber_chat_name
-                AND p.state = 'queued' AND p.attempt_count = 0
-                AND json_type(p.payload_json, '$.eventBundle') = 'object'
-                AND COALESCE(json_extract(p.payload_json, '$.eventBundle.sealed'), 0) = 0
-                AND json_array_length(p.payload_json, '$.eventBundle.events') <
-                  MIN(COALESCE(json_extract(p.payload_json, '$.eventBundle.maxEvents'), 100), ?)
-                AND COALESCE(json_extract(p.payload_json, '$.deliveryMode'), 'queue') = COALESCE(
-                  (SELECT value FROM json_each(?) WHERE key = (SELECT event_type FROM resource_events WHERE id = d.event_id)), ?
-                )
-            ))
+            AND ${subscriptionRunCapacitySql}
+            AND (? IS NULL OR s.subscriber_chat_id = ?)
+            AND (? IS NULL OR d.id IN (SELECT value FROM json_each(?)))
           GROUP BY s.subscriber_chat_id, s.subscriber_drone_id, s.subscriber_chat_name
           ORDER BY oldest_delivery_at
           LIMIT 20
@@ -1329,6 +1331,10 @@ export class ResourceSubscriptionRepository {
           settings.maxEventsPerPrompt,
           JSON.stringify(settings.eventDeliveryModes),
           settings.deliveryMode,
+          scope,
+          scope,
+          selectedIds,
+          selectedIds,
         ) as Array<{
         subscriber_chat_id: string;
         subscriber_drone_id: string;
@@ -1365,6 +1371,7 @@ export class ResourceSubscriptionRepository {
             JOIN resource_events e ON e.id = d.event_id
             WHERE d.state = 'pending' AND d.available_at <= ? AND d.next_attempt_at <= ?
               AND s.subscriber_chat_id = ? AND s.status IN ('active', 'completed')
+              AND (? IS NULL OR d.id IN (SELECT value FROM json_each(?)))
             ORDER BY
               CASE WHEN COALESCE(
                 (SELECT value FROM json_each(?) WHERE key = e.event_type), ?
@@ -1377,6 +1384,8 @@ export class ResourceSubscriptionRepository {
             cutoff,
             nowIso,
             subscriber.subscriber_chat_id,
+            selectedIds,
+            selectedIds,
             JSON.stringify(settings.eventDeliveryModes),
             settings.deliveryMode,
             settings.maxEventsPerPrompt,
@@ -1416,6 +1425,7 @@ export class ResourceSubscriptionRepository {
           WHERE id = ? AND state = 'pending'
         `);
         for (const id of deliveryIds) mark.run(batchId, nowIso, id);
+        queueMicrotask(() => hubChangeEvents.emitResourceDeliveryChange());
         return {
           id: batchId,
           subscriber: {

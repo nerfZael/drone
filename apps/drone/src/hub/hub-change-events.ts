@@ -5,8 +5,22 @@ type Listener<T> = (change: T) => void;
 const registryListeners = new Set<Listener<void>>();
 const summaryListeners = new Set<Listener<void>>();
 const chatListeners = new Set<Listener<DroneChatChange>>();
+const resourceDeliveryListeners = new Set<Listener<void>>();
 
 export const hubChangeEvents = {
+  emitResourceDeliveryChange(): void {
+    for (const listener of resourceDeliveryListeners) {
+      try {
+        listener();
+      } catch {
+        /* A disconnected UI must not interrupt event delivery. */
+      }
+    }
+  },
+  onResourceDeliveryChange(listener: Listener<void>): () => void {
+    resourceDeliveryListeners.add(listener);
+    return () => resourceDeliveryListeners.delete(listener);
+  },
   emitRegistryWrite(): void {
     for (const listener of registryListeners) listener();
   },

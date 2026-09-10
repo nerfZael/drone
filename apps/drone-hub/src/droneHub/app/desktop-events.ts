@@ -2,6 +2,7 @@ type DesktopEventHandler = (event: MessageEvent) => void;
 type ConnectionHandler = (connected: boolean) => void;
 
 const EVENT_NAMES = [
+  'pending_events_changed',
   'assistant_change',
   'registry_snapshot',
   'registry_delta',

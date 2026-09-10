@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { HubRouter } from '../src/hub/hub-router';
 import { registerDesktopEventRoutes } from '../src/hub/routes/desktop-event-routes';
+import { hubChangeEvents } from '../src/hub/hub-change-events';
 
 describe('desktop event routes', () => {
   test('multiplexes assistant, registry, and chat events onto one SSE response', async () => {
@@ -71,6 +72,7 @@ describe('desktop event routes', () => {
     assistantSubscriber?.({ threadId: 'assistant-1' });
     registrySubscriber?.('delta', { upserts: [{ id: 'drone-b' }] });
     chatSubscriber?.('chat_delta', { chats: [{ droneId: 'drone-a', chatName: 'default' }] });
+    hubChangeEvents.emitResourceDeliveryChange();
 
     expect(writes.map(({ event }) => event)).toEqual([
       'connected',
@@ -79,8 +81,12 @@ describe('desktop event routes', () => {
       'assistant_change',
       'registry_delta',
       'chat_delta',
+      'pending_events_changed',
     ]);
     req.emit('close');
+    const closedCount = writes.length;
+    hubChangeEvents.emitResourceDeliveryChange();
+    expect(writes.length).toBe(closedCount);
     expect(stopped).toEqual(['registry', 'chat']);
     expect(assistantSubscriber).toBeNull();
     expect(registrySubscriber).toBeNull();

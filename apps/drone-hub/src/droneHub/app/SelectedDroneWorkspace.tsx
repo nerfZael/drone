@@ -1,3 +1,5 @@
+import { PendingEventsCard } from '../chat/PendingEventsCard';
+import { usePendingEvents, questionPendingDeliveryStatus } from '../chat/use-pending-events';
 import { detachedChatKey, DETACHED_CHAT_FOCUS_EVENT, useDetachedChatStore } from './detached-chat-store';
 import { SideChatControls } from './SideChatControls';
 import { readSideChatWorkspaceState, saveSideChatWorkspaceState } from './side-chat-workspace-state';
@@ -702,6 +704,11 @@ export function SelectedDroneWorkspace({
   const selectedChatIsDraft = currentDrone.draftChats?.[activeChatName] === true;
   const currentDroneIsDraft = currentDrone.draft === true || currentDrone.hubPhase === 'draft';
   const currentChatIsDraft = currentDroneIsDraft || selectedChatIsDraft;
+  const pendingEvents = usePendingEvents(
+    currentDrone.id,
+    activeChatName,
+    currentAgentKey !== 'native' && !currentChatIsDraft,
+  );
   const [externalQuestionRequests, setExternalQuestionRequests] = React.useState<
     ChatQuestionRequest[]
   >([]);
@@ -1574,7 +1581,10 @@ export function SelectedDroneWorkspace({
               }
             />
           ) : (
-            <AssistantQuestionResultCard request={request} />
+            <AssistantQuestionResultCard
+              request={request}
+              deliveryStatus={questionPendingDeliveryStatus(pendingEvents, request.id)}
+            />
           ),
       });
       continue;
@@ -1647,7 +1657,11 @@ export function SelectedDroneWorkspace({
             interstitialContent={externalQuestionTimelinePlacement.byGroupIndex
               .get(groupIndex)
               ?.map((request) => (
-                <AssistantQuestionResultCard key={request.id} request={request} />
+                <AssistantQuestionResultCard
+                  key={request.id}
+                  request={request}
+                  deliveryStatus={questionPendingDeliveryStatus(pendingEvents, request.id)}
+                />
               ))}
           />
         ),
@@ -1674,6 +1688,13 @@ export function SelectedDroneWorkspace({
         });
       }
     }
+  }
+  if (pendingEvents.deliveries.length || pendingEvents.error) {
+    externalTranscriptItems.push({
+      key: 'pending-events',
+      kind: 'status',
+      content: <PendingEventsCard state={pendingEvents} />,
+    });
   }
   return (
     <>
@@ -2649,6 +2670,8 @@ export function SelectedDroneWorkspace({
                       visiblePendingPromptsWithStartup.length === 0
                     }
                     hasContent={Boolean(
+                      pendingEvents.deliveries.length > 0 ||
+                      pendingEvents.error ||
                       (transcripts && transcripts.length > 0) ||
                       visiblePendingPromptsWithStartup.length > 0 ||
                       externalQuestionRequests.length > 0,

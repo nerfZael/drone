@@ -1,4 +1,5 @@
 import { RESOURCE_SUBSCRIPTION_EVENTS } from '../subscriptions/resource-subscription-types';
+import { hubChangeEvents } from '../hub-change-events';
 import { errorMessage } from '../hub-http';
 import type { HubRouter } from '../hub-router';
 import type { ResourceSubscriptionService } from '../subscriptions/resource-subscription-service';
@@ -100,6 +101,49 @@ export function registerResourceSubscriptionRoutes(
     }
   });
 
+  apiRouter.get('/api/resource-subscriptions/pending', async ({ url, json }) => {
+    const current = availableService(json);
+    if (!current) return;
+    const droneId = String(url.searchParams.get('droneId') ?? '').trim();
+    const chatName = String(url.searchParams.get('chatName') ?? '').trim();
+    if (!droneId || !chatName)
+      return json(400, { ok: false, error: 'droneId and chatName are required' });
+    try {
+      json(200, { ok: true, ...(await current.pendingDeliveries(droneId, chatName)) });
+    } catch (error) {
+      json(400, { ok: false, error: errorMessage(error) });
+    }
+  });
+
+  apiRouter.post('/api/resource-subscriptions/pending/release', async ({ readJson, json }) => {
+    const current = availableService(json);
+    if (!current) return;
+    try {
+      const body = await readJson<any>();
+      const droneId = String(body?.droneId ?? '').trim();
+      const chatName = String(body?.chatName ?? '').trim();
+      if (
+        !droneId ||
+        !chatName ||
+        !Array.isArray(body?.deliveryIds) ||
+        !body.deliveryIds.length ||
+        body.deliveryIds.length > 1_000 ||
+        !body.deliveryIds.every((id: unknown) => typeof id === 'string' && id.length > 0)
+      ) {
+        return json(400, {
+          ok: false,
+          error: 'droneId, chatName and 1–1000 deliveryIds are required',
+        });
+      }
+      json(200, {
+        ok: true,
+        ...(await current.releasePendingDeliveries(droneId, chatName, body.deliveryIds)),
+      });
+    } catch (error) {
+      json(400, { ok: false, error: errorMessage(error) });
+    }
+  });
+
   apiRouter.get('/api/resource-subscriptions/settings', async ({ json }) => {
     json(200, {
       ok: true,
@@ -123,6 +167,7 @@ export function registerResourceSubscriptionRoutes(
     try {
       const body = await readJson<any>();
       const settings = await writeResourceSubscriptionSettings(body?.settings ?? body);
+      hubChangeEvents.emitResourceDeliveryChange();
       json(200, { ok: true, settings, eventTypes: RESOURCE_SUBSCRIPTION_EVENTS });
     } catch (error) {
       json(400, { ok: false, error: errorMessage(error) });

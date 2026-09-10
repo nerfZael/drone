@@ -3,6 +3,7 @@ import type { ServerResponse } from 'node:http';
 import type { DroneChatBroadcaster } from '../drone-chat-broadcaster';
 import type { DroneRegistryBroadcaster } from '../drone-registry-broadcaster';
 import type { HubRouter } from '../hub-router';
+import { hubChangeEvents } from '../hub-change-events';
 
 export type DesktopEventRouteDependencies = {
   assistantService: {
@@ -47,6 +48,9 @@ export function registerDesktopEventRoutes(
     const unsubscribeChat = deps.droneChatBroadcaster.subscribe((event, data) => {
       deps.writeSseEvent(res, desktopChatEventName(event), data);
     });
+    const unsubscribeDeliveries = hubChangeEvents.onResourceDeliveryChange(() => {
+      deps.writeSseEvent(res, 'pending_events_changed', { at: deps.nowIso() });
+    });
 
     deps.droneRegistryBroadcaster.start();
     deps.droneChatBroadcaster.start();
@@ -80,6 +84,7 @@ export function registerDesktopEventRoutes(
       unsubscribeAssistant();
       unsubscribeRegistry();
       unsubscribeChat();
+      unsubscribeDeliveries();
       deps.droneRegistryBroadcaster.stopIfIdle();
       deps.droneChatBroadcaster.stopIfIdle();
     };
