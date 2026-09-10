@@ -28,6 +28,10 @@ test('steered Codex prompts share one usage execution despite different message 
     recordExternalUsage({ ...input, job }, journal, store);
     expect(store.analytics().totals.total).toBe(20);
     expect(store.analytics().totals.running).toBe(0);
+    // Daemon projections retain per-message dates and state; the shared run is authoritative.
+    const run = { state: 'done', startedAt: store.trackingSince, updatedAt: future() };
+    recordExternalUsage({ ...input, job: { ...job, codexAppServer: { runId: 'shared-run', run } } }, journal, store);
+    expect(journal.due(Number.MAX_SAFE_INTEGER)).toHaveLength(0);
   } finally { journal.close(); store.close(); }
 });
 
@@ -62,13 +66,15 @@ test('restart distinguishes interrupted native work from external work awaiting 
 });
 
 test('a real killed writer leaves recoverable usage without replaying the model request', async () => {
-  await withTempDroneDataDir('usage-kill-', async () => {
+  await withTempDroneDataDir('usage-kill-', async (directory) => {
+    const ledgerFile = path.join(directory, 'isolated-ledger.sqlite');
+    const journalFile = path.join(directory, 'isolated-journal.sqlite');
     const storePath = path.resolve('apps/drone/src/hub/usage/UsageStore.ts');
     const journalPath = path.resolve('apps/drone/src/hub/usage/UsageJournal.ts');
-    const script = `import {getUsageStore} from ${JSON.stringify(storePath)};
-      import {getUsageJournal} from ${JSON.stringify(journalPath)};
-      const store = getUsageStore();
-      getUsageJournal().append({execution:{id:'killed',agent:'native',startedAt:store.trackingSince,status:'running'},
+    const script = `import {UsageStore} from ${JSON.stringify(storePath)};
+      import {UsageJournal} from ${JSON.stringify(journalPath)};
+      const store = new UsageStore(${JSON.stringify(ledgerFile)});
+      new UsageJournal(${JSON.stringify(journalFile)}).append({execution:{id:'killed',agent:'native',startedAt:store.trackingSince,status:'running'},
         observations:[${JSON.stringify(observation)}],replace:false});
       process.stdout.write('durable'); setInterval(() => {},1000);`;
     const child = Bun.spawn([process.execPath, '-e', script], { env: { ...process.env }, stdout: 'pipe', stderr: 'pipe' });
@@ -79,15 +85,17 @@ test('a real killed writer leaves recoverable usage without replaying the model 
       reader.releaseLock();
       child.kill('SIGKILL');
       await child.exited;
-      const store = getUsageStore();
+      const store = new UsageStore(ledgerFile);
       store.beginRecovery(future());
-      const journal = getUsageJournal();
-      expect(journal.pendingDeliveries()).toBe(1);
-      journal.drain(store);
-      journal.drain(store);
-      expect(store.analytics().totals.total).toBe(20);
-      expect(store.analytics().totals.interrupted).toBe(1);
-      expect(journal.pendingDeliveries()).toBe(0);
+      const journal = new UsageJournal(journalFile);
+      try {
+        expect(journal.pendingDeliveries()).toBe(1);
+        journal.drain(store);
+        journal.drain(store);
+        expect(store.analytics().totals.total).toBe(20);
+        expect(store.analytics().totals.interrupted).toBe(1);
+        expect(journal.pendingDeliveries()).toBe(0);
+      } finally { journal.close(); store.close(); }
     } finally { child.kill(); await child.exited; }
   });
 });

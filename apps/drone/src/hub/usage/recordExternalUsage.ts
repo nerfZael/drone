@@ -8,7 +8,9 @@ export function recordExternalUsage(input: { job: any; droneId: string; chatId: 
   const watch = { droneId: input.droneId, promptId: String(job.id ?? ''), chatId: input.chatId,
     chatName: input.chatName, repo: input.repo, model: input.model };
   journal.watch(watch);
-  if (job.state === 'queued') return;
+  const run = job.codexAppServer?.run;
+  const state = run?.state ?? job.state;
+  if (state === 'queued') return;
   const transcript = job.transcript ?? parseBuiltinPromptJobTranscript(job.kind, job.stdout ?? '');
   const configured = input.model ?? transcript?.model ?? 'unknown';
   const observations = (transcript?.usage ?? []).map((item: any) => {
@@ -24,10 +26,10 @@ export function recordExternalUsage(input: { job: any; droneId: string; chatId: 
       ? `external:${input.droneId}:${job.codexAppServer.runId}`
       : `external:${input.droneId}:${job.id}:${job.startedAt ?? job.createdAt}`,
     chatId: input.chatId, droneId: input.droneId, chatName: input.chatName, repo: input.repo,
-    agent: job.kind, startedAt: job.startedAt ?? job.createdAt, status: job.state,
-    snapshotAt: job.updatedAt ?? transcript?.parsedAt,
+    agent: job.kind, startedAt: run?.startedAt ?? job.startedAt ?? job.createdAt, status: state,
+    snapshotAt: run?.updatedAt ?? job.updatedAt ?? transcript?.parsedAt,
   }, observations, replace: true };
-  if (['done', 'failed', 'canceled'].includes(job.state) && job.exitStatusSource !== 'missing-exit-file') {
+  if (['done', 'failed', 'canceled'].includes(state) && job.exitStatusSource !== 'missing-exit-file') {
     journal.complete(watch, delivery);
   } else journal.append(delivery);
   try {
