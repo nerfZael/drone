@@ -1,5 +1,5 @@
 import { readCodexRolloutUsage } from './CodexRolloutUsage';
-import { CODEX_OPENROUTER_PROVIDER, assertCodexModelProvider, codexModelRoute, codexProviderLaunchScript } from './codex-model-routing';
+import { CODEX_OPENROUTER_PROVIDER, assertCodexModelProvider, codexModelRoute, codexToolInterfaceContext, codexProviderLaunchScript } from './codex-model-routing';
 import { CodexUsageTracker } from './CodexUsageTracker';
 import crypto from 'node:crypto';
 
@@ -904,6 +904,9 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
           threadId: targetThreadId,
           input: promptInput(message.codexAppServer),
           clientUserMessageId: message.id,
+          // Resume preserves old instructions; application context reaches the
+          // current turn without replacing custom instructions or the user input.
+          additionalContext: codexToolInterfaceContext(message.codexAppServer.model),
           ...(codexModelRoute(message.codexAppServer.model).model
             ? { model: codexModelRoute(message.codexAppServer.model).model } : {}),
           ...(message.codexAppServer.effort ? { effort: message.codexAppServer.effort } : {}),

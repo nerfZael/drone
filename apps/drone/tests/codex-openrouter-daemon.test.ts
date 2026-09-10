@@ -4,6 +4,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { codexPromptEnqueue } from '../src/host/api';
+import { codexToolInterfaceContext } from '../src/codex-model-routing';
 
 test('daemon routes a Codex conversation to OpenRouter and back without persisting the API key in jobs', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-router-daemon-'));
@@ -67,6 +68,14 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
       { threadId: 'saved-thread', modelProvider: 'openai', model: 'default-model' },
     ]);
     const turns = requests.filter((item) => item.method === 'turn/start');
+    expect(turns[1].params.additionalContext).toEqual(codexToolInterfaceContext('openrouter:vendor/model'));
+    expect(turns[1].params.additionalContext.drone_hub_tool_interface.kind).toBe('application');
+    expect(turns[1].params.additionalContext.drone_hub_tool_interface.value).toContain('current tool definitions take precedence');
+    expect(turns[0].params.additionalContext).toBeUndefined();
+    expect(turns[2].params.additionalContext).toBeUndefined();
+    expect(turns[1].params.input).toEqual([{ type: 'text', text: 'Continue' }]);
+    expect(requests.filter((item) => ['thread/start', 'thread/resume'].includes(item.method))
+      .every((item) => item.params.developerInstructions === undefined && item.params.baseInstructions === undefined)).toBe(true);
     expect(turns.map((item) => item.params.model)).toEqual(['default-model', 'vendor/model', 'default-model']);
     expect(turns.map((item) => item.hasCredential)).toEqual([false, true, false]);
   } finally {
