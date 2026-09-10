@@ -16,7 +16,7 @@ describe('assistant question placement', () => {
     expect(source).toContain('toolCalls(message).some((call) => call.id === toolCallId)');
     expect(source).toContain('externalQuestionRequests.length > 0,');
     expect(source).toContain("request.status === 'pending'");
-    expect(source).toContain('<AssistantQuestionResultCard request={request} />');
+    expect(source).toMatch(/<AssistantQuestionResultCard\s+request=\{request\}\s+deliveryStatus=\{questionPendingDeliveryStatus\(pendingEvents, request.id\)\}/);
     expect(source).toContain("chatUiMode === 'cli' &&");
     expect(source).toContain('pendingExternalQuestionRequests.length > 0 ? (');
     expect(source).not.toContain('genericChatActive && externalQuestionRequests.length > 0 ? (');
@@ -30,7 +30,7 @@ describe('assistant question placement', () => {
 
     expect(source).toContain('snapshot?.questionRequests ?? snapshot?.pendingQuestionRequests');
     expect(source).toContain('runToolCallIds.has(request.toolCallId)');
-    expect(source).toContain('<AssistantQuestionResultCard request={request} />');
+    expect(source).toMatch(/<AssistantQuestionResultCard\s+request=\{request\}\s+deliveryStatus=\{questionPendingDeliveryStatus\(pendingEvents, request.id\)\}/);
     expect(source).toContain('nativeTranscriptItems.splice(');
   });
 });

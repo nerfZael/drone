@@ -21,6 +21,11 @@ const settings = {
 
 async function fixture(store = memoryHubDatabase()) {
   const repository = new ResourceSubscriptionRepository(store.database);
+  store.database.read((db) => db.exec(`
+    CREATE TABLE canonical_chats (drone_id TEXT, chat_name TEXT, metadata_json TEXT);
+    INSERT INTO canonical_chats VALUES ('drone-a', 'chat-a', '{"id":"chat-a"}');
+    INSERT INTO canonical_chats VALUES ('drone-a', 'chat-b', '{"id":"chat-b"}');
+  `));
   for (const chatId of ['chat-a', 'chat-b']) {
     await repository.upsert({
       subscriber: { chatId, droneId: 'drone-a', chatName: chatId },
@@ -111,6 +116,23 @@ test('concurrent manual and automatic claims do not duplicate events or mix mode
         .deliveries.filter((item) => item.status === 'batching').length,
       1,
     );
+  } finally {
+    f.close();
+  }
+});
+
+test('pending events follow the immutable conversation identity after rename and name reuse', async () => {
+  const f = await fixture();
+  try {
+    const before = f.repository.pendingDeliveries('drone-a', 'chat-a', settings).deliveries;
+    f.database.read((db) => db.exec(`
+      UPDATE canonical_chats SET chat_name = 'renamed' WHERE chat_name = 'chat-a';
+      INSERT INTO canonical_chats VALUES ('drone-a', 'chat-a', '{"id":"replacement"}');
+    `));
+    const renamed = f.repository.pendingDeliveries('drone-a', 'renamed', settings).deliveries;
+    assert.deepEqual(renamed.map((item) => item.id), before.map((item) => item.id));
+    assert.ok(renamed.every((item) => item.canRelease));
+    assert.deepEqual(f.repository.pendingDeliveries('drone-a', 'chat-a', settings).deliveries, []);
   } finally {
     f.close();
   }
@@ -236,20 +258,14 @@ test('handoff removes processing deliveries as soon as their merged prompt exist
   }
 });
 
-test('release service sends immediately through the normal queue exactly once and preserves overrides', async () => {
+test('release service follows renamed chats and sends exactly once while preserving overrides', async () => {
   const previous = process.env.DRONE_DATA_DIR;
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pending-events-release-'));
   process.env.DRONE_DATA_DIR = directory;
   try {
     const database = requireHubDatabase();
     const f = await fixture({ database, close: () => {} });
-    database.read((db) =>
-      db.exec(`
-      CREATE TABLE canonical_chats (drone_id TEXT, chat_name TEXT, metadata_json TEXT);
-      INSERT INTO canonical_chats VALUES ('drone-a', 'chat-a', '{"id":"chat-a"}');
-      INSERT INTO canonical_chats VALUES ('drone-a', 'chat-b', '{"id":"chat-b"}');
-    `),
-    );
+    database.read((db) => db.exec("UPDATE canonical_chats SET chat_name = 'renamed' WHERE chat_name = 'chat-a'"));
     const wakes: string[] = [];
     const service = new ResourceSubscriptionService({
       repository: f.repository,
@@ -260,26 +276,26 @@ test('release service sends immediately through the normal queue exactly once an
       },
       log: () => {},
     });
-    const ids = (await service.pendingDeliveries('drone-a', 'chat-a')).deliveries.map(
+    const ids = (await service.pendingDeliveries('drone-a', 'renamed')).deliveries.map(
       (item) => item.id,
     );
     const wrongChatIds = (await service.pendingDeliveries('drone-a', 'chat-b')).deliveries.map(
       (item) => item.id,
     );
     await Promise.all([
-      service.releasePendingDeliveries('drone-a', 'chat-a', [...ids, ...wrongChatIds]),
-      service.releasePendingDeliveries('drone-a', 'chat-a', ids),
+      service.releasePendingDeliveries('drone-a', 'renamed', [...ids, ...wrongChatIds]),
+      service.releasePendingDeliveries('drone-a', 'renamed', ids),
     ]);
-    const prompts = getPromptQueueRepository()!.list({ droneId: 'drone-a', chatName: 'chat-a' });
+    const prompts = getPromptQueueRepository()!.list({ droneId: 'drone-a', chatName: 'renamed' });
     assert.equal(prompts.length, 2);
     assert.deepEqual(prompts.map((prompt) => prompt.deliveryMode).sort(), ['asap', 'queue']);
     assert.ok(prompts.every((prompt) => prompt.state === 'queued'));
-    assert.deepEqual(wakes, ['chat-a', 'chat-a']);
-    assert.equal((await service.pendingDeliveries('drone-a', 'chat-a')).deliveries.length, 0);
+    assert.deepEqual(wakes, ['renamed', 'renamed']);
+    assert.equal((await service.pendingDeliveries('drone-a', 'renamed')).deliveries.length, 0);
     assert.equal((await service.pendingDeliveries('drone-a', 'chat-b')).deliveries.length, 2);
-    await service.releasePendingDeliveries('drone-a', 'chat-a', ids);
+    await service.releasePendingDeliveries('drone-a', 'renamed', ids);
     assert.equal(
-      getPromptQueueRepository()!.list({ droneId: 'drone-a', chatName: 'chat-a' }).length,
+      getPromptQueueRepository()!.list({ droneId: 'drone-a', chatName: 'renamed' }).length,
       2,
     );
   } finally {

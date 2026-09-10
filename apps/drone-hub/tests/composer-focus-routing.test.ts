@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { ActiveComposerRegistry } from '../src/droneHub/chat/ActiveComposerContext';
 import { routeComposerFocus } from '../src/droneHub/chat/composer-focus-routing';
-import { toggleFocusedSideChatMain } from '../src/droneHub/app/side-chat-main-shortcut';
+import { focusedSideChatMainControl, toggleFocusedSideChatMain } from '../src/droneHub/app/side-chat-main-shortcut';
 
 // Minimal DOM tree for the selectors used by focus routing. The important
 // distinction is that Dockview's focused container PARENTS the side chat root.
@@ -208,11 +208,12 @@ describe('floating chat shortcut focus', () => {
 test('D promotes the focused fork from its tab and returns a promoted main through the same toolbar action', () => {
   const h = fixture();
   const moved: string[] = [];
-  const first = h.first.root.append({ 'data-side-chat-move': 'side-a' });
+  const first = h.first.tab.parent!.append({ 'data-side-chat-move': 'side-a' });
   first.click = () => { moved.push('promote-a'); };
-  const second = h.second.root.append({ 'data-side-chat-move': 'side-b' });
+  const second = h.second.tab.parent!.append({ 'data-side-chat-move': 'side-b' });
   second.click = () => { moved.push('promote-b'); };
   h.focus(h.first.tab);
+  expect(focusedSideChatMainControl(h.doc as unknown as Document)).toBe(first as unknown as HTMLButtonElement);
   expect(toggleFocusedSideChatMain(h.doc as unknown as Document)).toBe(true);
   h.focus(h.second.transcript);
   expect(toggleFocusedSideChatMain(h.doc as unknown as Document)).toBe(true);

@@ -38,9 +38,10 @@ export function readPendingSubscriptionDeliveries(
       CASE WHEN ${subscriptionRunCapacitySql} THEN 1 ELSE 0 END AS has_capacity
     FROM subscription_deliveries d
     JOIN resource_subscriptions s ON s.id = d.subscription_id
+    JOIN canonical_chats c ON json_extract(c.metadata_json, '$.id') = s.subscriber_chat_id
     JOIN resource_events e ON e.id = d.event_id
     LEFT JOIN subscription_batches b ON b.id = d.batch_id
-    WHERE s.subscriber_drone_id = ? AND s.subscriber_chat_name = ?
+    WHERE c.drone_id = ? AND c.chat_name = ?
       AND s.status IN ('active', 'completed', 'paused')
       AND (d.state IN ('pending', 'processing') OR (d.state = 'failed' AND d.attempt_count >= ?))
       AND NOT EXISTS (

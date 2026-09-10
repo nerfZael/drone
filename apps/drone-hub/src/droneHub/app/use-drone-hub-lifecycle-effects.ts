@@ -2,7 +2,7 @@ import React from 'react';
 import { flushSync } from 'react-dom';
 import { createQuickActionController, type QuickActionUnavailable } from './quick-action-menu';
 import { requestSideChat } from './side-chat-events';
-import { toggleFocusedSideChatMain } from './side-chat-main-shortcut';
+import { focusedSideChatMainControl, toggleFocusedSideChatMain } from './side-chat-main-shortcut';
 import type { DroneSummary, PendingPrompt, TranscriptItem } from '../types';
 import type { DraftChatState, DroneErrorModalState, StartupSeedState } from './app-types';
 import type { RightPanelTab } from './app-config';
@@ -393,8 +393,7 @@ export function useDroneHubLifecycleEffects({
         if (!scope?.querySelector<HTMLElement>('[data-side-chat-checkpoint-id]')?.dataset.sideChatCheckpointId) {
           unavailable.createSideChat = 'Needs a completed assistant answer';
         }
-        const move = scope?.querySelector<HTMLButtonElement>('[data-side-chat-move]');
-        if (!move || move.disabled || move.getClientRects().length === 0) {
+        if (!focusedSideChatMainControl()) {
           unavailable.toggleSideChatMain = 'Select an available fork';
         }
         const sourceChatName = scope?.dataset.chatName ?? activeSide?.dataset.sideChatName ?? selectedChat;
