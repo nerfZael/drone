@@ -24,3 +24,17 @@ export function assertCodexModelProvider(result: any, provider: string): void {
     throw new Error('Codex did not apply the selected provider. Update Codex and retry; the conversation was preserved.');
   }
 }
+
+export function codexToolInterfaceContext(selection?: string): Record<string, { kind: 'application'; value: string }> | undefined {
+  if (codexModelRoute(selection).provider !== 'openrouter') return undefined;
+  // Codex preserves the original model's base instructions on resume. Those can
+  // require code-mode tools that the selected OpenRouter model does not expose.
+  // Keep this conditional on the actual tool inventory so it also remains valid
+  // in retained history after switching back to an OpenAI model.
+  const value = `The model and provider can change between turns in this conversation. Earlier instructions and tool calls may describe a tool interface that is no longer available.
+For tool names, availability, and argument formats, the current tool definitions take precedence over earlier tool-use instructions and examples in the conversation.
+Use functions.exec and its tools.* JavaScript helpers only when exec is exposed in the current tool definitions. Otherwise call the exposed tools directly (for example, exec_command with its JSON arguments); do not wrap calls in JavaScript or invent an exec tool.
+If a call returns "unsupported call", consult the current tool definitions and use the available equivalent. A missing exec wrapper does not mean command execution is unavailable.
+These instructions concern tool invocation only; all existing permissions, approval requirements, and task constraints still apply.`;
+  return { drone_hub_tool_interface: { kind: 'application', value } };
+}
