@@ -1129,6 +1129,10 @@ readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line
     return;
   }
   if (message.method === 'initialized') return;
+  if (message.method === 'config/read') {
+    send({ id: message.id, result: { config: { model_provider: 'openai', model: 'default-model' } } });
+    return;
+  }
   if (message.method === 'thread/resume') {
     const threadId = message.params?.threadId;
     // Real App Server versions can omit parentThreadId here even for a child.

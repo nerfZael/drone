@@ -1,4 +1,5 @@
 import { readCodexRolloutUsage } from './CodexRolloutUsage';
+import { CODEX_OPENROUTER_PROVIDER, assertCodexModelProvider, codexModelRoute, codexProviderLaunchScript } from './codex-model-routing';
 import { CodexUsageTracker } from './CodexUsageTracker';
 import crypto from 'node:crypto';
 
@@ -32,6 +33,7 @@ export type CodexPromptSpec = {
   sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access';
   model?: string;
   effort?: string;
+  openrouterCredentialVersion?: string;
 };
 
 export type CodexPromptMessage = {
@@ -144,10 +146,16 @@ type CodexPromptRunManagerOptions<TMessage extends CodexPromptMessage> = {
   appendRunEvents(run: CodexPromptRun, events: unknown[]): Promise<CodexPromptRun>;
   appendRunStderr(run: CodexPromptRun, text: string): Promise<void>;
   mutate<T>(operation: () => Promise<T>): Promise<T>;
+  environment?: (spec: CodexPromptSpec) => Promise<NodeJS.ProcessEnv>;
   now?: () => string;
 };
 
 type CodexRunSession = {
+  provider?: 'openrouter' | 'default';
+  credentialVersion?: string;
+  selection?: string;
+  effort?: string;
+  switchingProvider?: boolean;
   usageTracker: CodexUsageTracker;
   rolloutPath?: string;
   model?: string;
@@ -184,7 +192,8 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     return await this.serialize(session, async () => {
       session.lastUsedAt = Date.now();
       const steering =
-        message.deliveryMode === 'asap'
+        message.deliveryMode === 'asap' && session.selection === spec.model && session.effort === spec.effort &&
+          session.credentialVersion === spec.openrouterCredentialVersion
           ? await this.steerActiveRun(session, message.id)
           : undefined;
       if (steering?.outcome === 'accepted') {
@@ -390,21 +399,12 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
 
   private createSession(spec: CodexPromptSpec): CodexRunSession {
     let session!: CodexRunSession;
-    const connection = new CodexAppServerConnection({
-      launchScript: spec.launchScript,
-      onRequest: (request) => this.handleServerRequest(session, request),
-      onNotification: (notification) => this.handleNotification(session, notification),
-      onStderr: async (text) => {
-        const run = session.activeRun ?? session.startingRun;
-        if (run) await this.options.appendRunStderr(run, text);
-      },
-      onExit: (error) => {
-        if (!this.shuttingDown && this.sessions.get(session.key) === session) {
-          return this.serialize(session, () => this.failSession(session, error));
-        }
-      },
-    });
+    const connection = this.createConnection(spec, () => session);
     session = {
+      provider: codexModelRoute(spec.model).provider,
+      selection: spec.model,
+      effort: spec.effort,
+      credentialVersion: spec.openrouterCredentialVersion,
       usageTracker: new CodexUsageTracker(),
       model: spec.model,
       key: spec.sessionKey,
@@ -426,6 +426,53 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     };
     this.sessions.set(session.key, session);
     return session;
+  }
+
+  private createConnection(spec: CodexPromptSpec, getSession: () => CodexRunSession): CodexAppServerConnection {
+    const connection: CodexAppServerConnection = new CodexAppServerConnection({
+      launchScript: codexProviderLaunchScript(spec.launchScript, spec.model),
+      environment: () => this.options.environment?.(spec) ?? Promise.resolve({}),
+      onRequest: (request) => {
+        const session = getSession();
+        if (session.connection !== connection) return CODEX_APP_SERVER_REQUEST_RESOLVED;
+        return this.handleServerRequest(session, request);
+      },
+      onNotification: (notification) => {
+        const session = getSession();
+        if (session.connection === connection) return this.handleNotification(session, notification, connection);
+      },
+      onStderr: async (text) => {
+        const session = getSession();
+        if (session.connection !== connection) return;
+        const run = session.activeRun ?? session.startingRun;
+        if (run) await this.options.appendRunStderr(run, text);
+      },
+      onExit: (error) => {
+        const session = getSession();
+        if (!this.shuttingDown && session.connection === connection && this.sessions.get(session.key) === session) {
+          return this.serialize(session, async () => {
+            if (session.connection === connection) await this.failSession(session, error);
+          });
+        }
+      },
+    });
+    return connection;
+  }
+
+  private async switchProvider(session: CodexRunSession, spec: CodexPromptSpec): Promise<void> {
+    const provider = codexModelRoute(spec.model).provider;
+    const resetToAuto = provider === 'default' && session.selection !== undefined && spec.model === undefined;
+    if ((session.provider ?? 'default') === provider && !resetToAuto &&
+        (provider !== 'openrouter' || session.credentialVersion === spec.openrouterCredentialVersion)) return;
+    const previous = session.connection;
+    session.connection = this.createConnection(spec, () => session);
+    session.provider = provider;
+    session.credentialVersion = spec.openrouterCredentialVersion;
+    session.usageTracker = new CodexUsageTracker();
+    session.switchingProvider = true;
+    session.threadReady = false;
+    session.verifiedMcpThreadId = null;
+    await previous.close();
   }
 
   private async handleServerRequest(
@@ -539,6 +586,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
   private async handleNotification(
     session: CodexRunSession,
     notification: CodexAppServerNotification,
+    sourceConnection?: CodexAppServerConnection,
   ): Promise<void> {
     // Invalidate immediately: notifications can arrive while startup is waiting
     // inside the serialized session operation.
@@ -551,6 +599,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
       session.verifiedMcpThreadId = null;
     }
     await this.serialize(session, async () => {
+      if (sourceConnection && session.connection !== sourceConnection) return;
       session.lastUsedAt = Date.now();
       const notificationThreadId = String(
         notification.params?.threadId ?? notification.params?.thread?.id ?? '',
@@ -615,7 +664,11 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
         );
       }
       const currentRun = session.activeRun ?? session.startingRun;
-      const usageEvents = session.usageTracker.observe(notification, belongsToRootThread ? session.model : undefined);
+      const usageEvents = session.usageTracker.observe(
+        notification,
+        belongsToRootThread ? codexModelRoute(session.model).model : undefined,
+        session.provider === 'openrouter' ? 'openrouter' : 'openai-codex',
+      );
       if (
         currentRun &&
         belongsToRootThread &&
@@ -652,6 +705,25 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
 
   private async ensureThread(session: CodexRunSession, spec: CodexPromptSpec): Promise<string> {
     if (session.threadId && session.threadReady) return session.threadId;
+    const route = codexModelRoute(spec.model);
+    let modelProvider: string | undefined;
+    let model = route.model;
+    if (route.provider === 'openrouter') modelProvider = CODEX_OPENROUTER_PROVIDER;
+    else if (session.threadId || spec.forkThreadId || session.switchingProvider || spec.model !== undefined) {
+      // A resumed rollout remembers its old provider. Explicitly restore this
+      // process's configured provider when switching back, including custom defaults.
+      const configuration = await session.connection.call('config/read', { includeLayers: false });
+      modelProvider = configuration?.config?.model_provider ?? 'openai';
+      if (!model) {
+        model = configuration?.config?.model ?? undefined;
+        if (!model) {
+          const catalog = await session.connection.call('model/list', { limit: 100 });
+          const defaultModel = catalog?.data?.find((entry: any) => entry.isDefault);
+          model = defaultModel?.model ?? defaultModel?.id;
+          if (!model) throw new Error('Codex did not report a default model. Choose a model explicitly.');
+        }
+      }
+    }
     if (session.threadId) {
       try {
         const resumed = await session.connection.call('thread/resume', {
@@ -660,9 +732,14 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
           approvalPolicy: spec.approvalPolicy,
           approvalsReviewer: spec.approvalsReviewer,
           sandbox: spec.sandbox,
-          model: spec.model,
+          model,
+          ...(modelProvider ? { modelProvider } : {}),
         });
+        if (session.switchingProvider || route.provider === 'openrouter') {
+          assertCodexModelProvider(resumed, modelProvider!);
+        }
         const parentThreadId = String(resumed?.thread?.parentThreadId ?? '').trim();
+        if (parentThreadId && session.switchingProvider) throw new Error('Cannot switch providers on a Codex subagent thread.');
         if (!parentThreadId) {
           session.threadId = String(resumed?.thread?.id ?? session.threadId);
           session.rolloutPath = resumed.thread?.path ?? undefined;
@@ -676,7 +753,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
         session.threadId = null;
         session.threadReady = false;
       } catch (error) {
-        if (!isMissingThreadError(error)) throw error;
+        if (session.switchingProvider || route.provider === 'openrouter' || !isMissingThreadError(error)) throw error;
         session.threadId = null;
         session.threadReady = false;
       }
@@ -696,7 +773,10 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
       const forked = await session.connection.call('thread/fork', {
         threadId: spec.forkThreadId,
         ...(lastTurnId ? { lastTurnId } : {}),
+        ...(model ? { model } : {}),
+        ...(modelProvider ? { modelProvider } : {}),
       });
+      if (modelProvider) assertCodexModelProvider(forked, modelProvider);
       const threadId = String(forked?.thread?.id ?? '').trim();
       if (!threadId) throw new Error('Codex App Server did not return a forked thread id');
       if (lastTurnId) {
@@ -720,8 +800,10 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
       approvalPolicy: spec.approvalPolicy,
       approvalsReviewer: spec.approvalsReviewer,
       sandbox: spec.sandbox,
-      model: spec.model,
+      model,
+      ...(modelProvider ? { modelProvider } : {}),
     });
+    if (route.provider === 'openrouter') assertCodexModelProvider(started, CODEX_OPENROUTER_PROVIDER);
     const threadId = String(started?.thread?.id ?? '').trim();
     if (!threadId) throw new Error('Codex App Server did not return a thread id');
     session.threadId = threadId;
@@ -806,7 +888,12 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     });
     session.startingRun = run;
     try {
+      await this.switchProvider(session, message.codexAppServer);
       let threadId = await this.ensureThread(session, message.codexAppServer);
+      const switchedProvider = session.switchingProvider;
+      session.switchingProvider = false;
+      session.selection = message.codexAppServer.model;
+      session.effort = message.codexAppServer.effort;
       await this.ensureDroneHubMcp(session, message.codexAppServer, threadId);
       const sandboxPolicy = sandboxPolicyForMode(message.codexAppServer.sandbox);
       run = await this.options.mutate(() =>
@@ -817,7 +904,8 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
           threadId: targetThreadId,
           input: promptInput(message.codexAppServer),
           clientUserMessageId: message.id,
-          ...(message.codexAppServer.model ? { model: message.codexAppServer.model } : {}),
+          ...(codexModelRoute(message.codexAppServer.model).model
+            ? { model: codexModelRoute(message.codexAppServer.model).model } : {}),
           ...(message.codexAppServer.effort ? { effort: message.codexAppServer.effort } : {}),
           ...(message.codexAppServer.approvalPolicy
             ? { approvalPolicy: message.codexAppServer.approvalPolicy }
@@ -831,7 +919,8 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
       try {
         response = await startTurn(threadId);
       } catch (error) {
-        if (!isDirectSubagentInputError(error)) throw error;
+        if (switchedProvider || codexModelRoute(message.codexAppServer.model).provider === 'openrouter' ||
+            !isDirectSubagentInputError(error)) throw error;
         // Some Codex App Server versions resume a sub-agent thread without
         // returning parentThreadId and only identify it when direct input is
         // attempted. Retry this queued message once on a fresh root thread.
@@ -869,7 +958,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
           .catch(() => undefined);
       }
     } catch (error) {
-      if (message.codexAppServer.requireDroneHubMcp && !session.verifiedMcpThreadId) {
+      if (!session.connection.running || (message.codexAppServer.requireDroneHubMcp && !session.verifiedMcpThreadId)) {
         // A retry must start a new connection with the current credentials,
         // rather than retaining a process whose MCP startup already failed.
         await this.failSession(session, asError(error));

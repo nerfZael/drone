@@ -197,3 +197,15 @@ test('an absent cache price only prevents estimation when cached tokens were use
     expect(store.analytics({ chatId: 'uncached' }).totals.estimatedCost).toBeCloseTo(0.00014, 9);
   } finally { store.close(); }
 });
+
+test('Codex preserves OpenRouter usage attribution', () => {
+  const tracker = new CodexUsageTracker();
+  tracker.observe({ method: 'turn/started', params: { threadId: 'thread', turn: { id: 'turn' } } });
+  const events = tracker.observe({ method: 'thread/tokenUsage/updated', params: {
+    threadId: 'thread', turnId: 'turn', tokenUsage: {
+      total: { inputTokens: 10, outputTokens: 3 }, last: { inputTokens: 10, outputTokens: 3 },
+    },
+  } }, 'vendor/model', 'openrouter');
+  expect(events[0]).toMatchObject({ provider: 'openrouter', model: 'vendor/model', complete: false, partialReason: 'missing-baseline' });
+  expect(parse('codex', events)[0]).toMatchObject({ provider: 'openrouter', model: 'vendor/model' });
+});

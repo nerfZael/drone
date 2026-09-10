@@ -5,7 +5,7 @@ export class CodexUsageTracker {
   private readonly totals = new Map<string, Record<string, number>>();
   private readonly turns = new Map<string, string>();
 
-  observe(notification: { method: string; params?: any }, model?: string): any[] {
+  observe(notification: { method: string; params?: any }, model?: string, provider = 'openai-codex'): any[] {
     const p = notification.params ?? {};
     const thread = String(p.threadId ?? p.thread?.id ?? '');
     const turn = String(p.turnId ?? p.turn?.id ?? '');
@@ -30,6 +30,6 @@ export class CodexUsageTracker {
     if (!Object.values(usage).some((value) => value > 0)) return [];
     return [{ type: 'usage.delta', sessionId: thread, turnId: turn,
       eventId: crypto.createHash('sha256').update(JSON.stringify([thread, turn, current])).digest('hex'),
-      model: model ?? 'unknown', provider: 'openai-codex', complete: Boolean(previous), partialReason: previous ? undefined : 'missing-baseline', usage }];
+      model: model ?? 'unknown', provider, complete: Boolean(previous), partialReason: previous ? undefined : 'missing-baseline', usage }];
   }
 }

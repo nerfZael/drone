@@ -130,7 +130,9 @@ test('manager reconciles before marking a turn complete and restart recovery can
 test('daemon stores the server-provided rollout path for newly created and resumed threads', async () => {
   for (const resume of [false, true]) {
     const session: any = { threadId: resume ? 'thread' : null, threadReady: false,
-      connection: { call: async () => ({ thread: { id: 'thread', path: '/local/rollout.jsonl' }, model: 'gpt-5.6-sol' }) } };
+      connection: { call: async (method: string) => method === 'config/read'
+        ? { config: { model: 'gpt-5.6-sol' } }
+        : { thread: { id: 'thread', path: '/local/rollout.jsonl' }, model: 'gpt-5.6-sol' } } };
     const manager = new CodexPromptRunManager<any>({} as any);
     await (manager as any).ensureThread(session, {});
     expect(session.rolloutPath).toBe('/local/rollout.jsonl');

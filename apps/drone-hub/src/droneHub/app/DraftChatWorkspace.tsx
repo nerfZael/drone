@@ -207,7 +207,8 @@ export function DraftChatWorkspace({
         currentThinkingLevel: spawnReasoning || undefined,
         options: modelChoices,
         disabled: controlsLocked,
-        showReasoning: true,
+        showReasoning: !spawnModel.startsWith('openrouter:') ||
+          modelChoices.some((choice) => choice.id === spawnModel && Boolean(choice.thinkingLevel)),
         searchable: true,
         searchPlaceholder: 'Search models',
         title: 'Choose model and reasoning',
