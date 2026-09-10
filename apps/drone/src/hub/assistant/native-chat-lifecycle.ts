@@ -1,3 +1,4 @@
+import { getUsageStore } from '../usage/UsageStore';
 import type { HubAssistantService } from '../assistant';
 import type { BlipAssistantHost } from './blip-assistant-host';
 
@@ -5,6 +6,7 @@ export type NativeChatIdentity = {
   id: string;
   droneId: string;
   chatName: string;
+  repo?: string;
   provider?: string;
   model?: string;
   thinkingLevel?: string;
@@ -19,6 +21,7 @@ export class NativeChatLifecycle {
   ) {}
 
   ensure(input: NativeChatIdentity) {
+    getUsageStore().bindChat(input.id, input.droneId, input.chatName, input.repo);
     return this.assistantService.ensureNativeThread({
       ...input,
       title: input.chatName,

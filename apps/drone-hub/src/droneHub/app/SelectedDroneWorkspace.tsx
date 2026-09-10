@@ -1,5 +1,6 @@
 import { PendingEventsCard } from '../chat/PendingEventsCard';
 import { usePendingEvents, questionPendingDeliveryStatus } from '../chat/use-pending-events';
+import { ChatUsageSummary } from '../usage/ChatUsageSummary';
 import { detachedChatKey, DETACHED_CHAT_FOCUS_EVENT, useDetachedChatStore } from './detached-chat-store';
 import { SideChatControls } from './SideChatControls';
 import { readSideChatWorkspaceState, saveSideChatWorkspaceState } from './side-chat-workspace-state';
@@ -2540,6 +2541,7 @@ export function SelectedDroneWorkspace({
                 fleetDropHintVisible && 'pointer-events-none select-none opacity-0',
               )}
             >
+              {!nativeChatActive && !currentChatIsDraft && chatUiMode !== 'cli' ? <ChatUsageSummary droneId={currentDrone.id} chatName={activeChatName} /> : null}
               {droneHubPermissionsOpen && !nativeChatActive ? (
                 <div className="absolute inset-0 z-30 overflow-y-auto">
                   <DroneHubPermissionsView

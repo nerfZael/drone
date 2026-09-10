@@ -628,6 +628,8 @@ export const streamAnthropic: StreamFunction<"anthropic-messages", AnthropicOpti
 					if (event.delta.stop_reason) {
 						output.stopReason = mapStopReason(event.delta.stop_reason);
 					}
+					const thinkingTokens = (event.usage as any).output_tokens_details?.thinking_tokens;
+					if (thinkingTokens != null) output.usage.reasoning = thinkingTokens;
 					// Only update usage fields if present (not null).
 					// Preserves input_tokens from message_start when proxies omit it in message_delta.
 					if (event.usage.input_tokens != null) {

@@ -84,6 +84,7 @@ export interface ConvertResponsesToolsOptions {
 }
 
 type ResponsesUsage = {
+	output_tokens_details?: { reasoning_tokens?: number | null } | null;
 	input_tokens?: number | null;
 	output_tokens?: number | null;
 	total_tokens?: number | null;
@@ -99,6 +100,7 @@ export function parseResponsesUsage(rawUsage: ResponsesUsage): Usage {
 	return {
 		input: Math.max(0, (rawUsage.input_tokens || 0) - cacheRead - cacheWrite),
 		output: rawUsage.output_tokens || 0,
+		...(rawUsage.output_tokens_details?.reasoning_tokens != null ? { reasoning: rawUsage.output_tokens_details.reasoning_tokens } : {}),
 		cacheRead,
 		cacheWrite,
 		totalTokens: rawUsage.total_tokens || 0,

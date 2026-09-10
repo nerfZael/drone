@@ -1,3 +1,4 @@
+import { NativeUsageOutbox } from '../usage/NativeUsageOutbox';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
@@ -153,8 +154,9 @@ function openDatabase(databasePath: string): DatabaseLike {
 
 export class HubSessionRepository implements SessionRepository {
   private readonly db: DatabaseLike;
+  private readonly usageOutbox?: NativeUsageOutbox;
 
-  constructor(databasePathOrOptions: string | { inMemory: true } = droneRootPath('assistant-blip.sqlite')) {
+  constructor(databasePathOrOptions: string | { inMemory: true; trackUsage?: boolean } = droneRootPath('assistant-blip.sqlite')) {
     const inMemory = typeof databasePathOrOptions !== 'string';
     const databasePath = inMemory ? ':memory:' : path.resolve(databasePathOrOptions);
     this.db = openDatabase(databasePath);
@@ -183,6 +185,9 @@ export class HubSessionRepository implements SessionRepository {
         FOREIGN KEY(session_id) REFERENCES assistant_blip_sessions(id) ON DELETE CASCADE
       );
     `);
+    if (!inMemory || (typeof databasePathOrOptions !== 'string' && databasePathOrOptions.trackUsage)) {
+      this.usageOutbox = new NativeUsageOutbox(this.db, !inMemory);
+    }
   }
 
   async create(input: CreateSessionInput): Promise<BlipSessionState> {
@@ -258,11 +263,14 @@ export class HubSessionRepository implements SessionRepository {
   }
 
   async appendEntry(session: BlipSessionState, entry: TranscriptEntry): Promise<void> {
-    this.db
-      .prepare(
-        'INSERT INTO assistant_blip_entries (session_id, entry_json, created_at) VALUES (?, ?, ?)',
-      )
-      .run(session.id, JSON.stringify(entry), nowIso());
+    const append = () => {
+      this.db.prepare('INSERT INTO assistant_blip_entries (session_id, entry_json, created_at) VALUES (?, ?, ?)')
+        .run(session.id, JSON.stringify(entry), nowIso());
+      if (entry.type === 'runtime_event') this.usageOutbox?.append(session.id, entry.event);
+    };
+    if (this.db.transaction) this.db.transaction(append)();
+    else append();
+    this.usageOutbox?.drain();
   }
 
   appendMessage(session: BlipSessionState, message: AgentMessage): Promise<void> {
@@ -951,6 +959,7 @@ export class HubSessionRepository implements SessionRepository {
   }
 
   close(): void {
+    this.usageOutbox?.close();
     this.db.close();
   }
 }

@@ -370,6 +370,7 @@ async function modelSummary(input: {
   reasoning?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
   apiKey?: string;
   streamFn?: StreamFn;
+  onUsage?: (response: import('@mariozechner/pi-ai').AssistantMessage) => Promise<void>;
   signal?: AbortSignal;
 }): Promise<string> {
   const maxTokens = Math.min(
@@ -389,6 +390,7 @@ async function modelSummary(input: {
   const response = input.streamFn
     ? await (await input.streamFn(input.model, context, options)).result()
     : await completeSimple(input.model, context, options);
+  await input.onUsage?.(response);
   if (response.stopReason === 'error' || response.stopReason === 'aborted') {
     throw new Error(response.errorMessage || `summary generation ${response.stopReason}`);
   }
@@ -420,6 +422,7 @@ export async function createCompaction(input: {
   reasoning?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
   apiKey?: string;
   streamFn?: StreamFn;
+  onUsage?: (response: import('@mariozechner/pi-ai').AssistantMessage) => Promise<void>;
   signal?: AbortSignal;
 }): Promise<CompactionEntry | undefined> {
   const plan = prepareCompaction({
@@ -440,6 +443,7 @@ export async function createCompaction(input: {
           reasoning: input.reasoning,
           apiKey: input.apiKey,
           streamFn: input.streamFn,
+          onUsage: input.onUsage,
           signal: input.signal,
         })
       : deterministicSummary({ session: input.session, plan });

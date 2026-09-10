@@ -197,6 +197,8 @@ export interface ToolCall {
 }
 
 export interface Usage {
+	/** Reported reasoning tokens, already included in output. Omitted when unavailable. */
+	reasoning?: number;
 	input: number;
 	output: number;
 	cacheRead: number;

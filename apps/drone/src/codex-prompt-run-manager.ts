@@ -1,3 +1,4 @@
+import { CodexUsageTracker } from './CodexUsageTracker';
 import crypto from 'node:crypto';
 
 import type { CodexApprovalDecision, CodexPendingApproval } from '@drone/assistant-chat';
@@ -144,6 +145,8 @@ type CodexPromptRunManagerOptions<TMessage extends CodexPromptMessage> = {
 };
 
 type CodexRunSession = {
+  usageTracker: CodexUsageTracker;
+  model?: string;
   key: string;
   connection: CodexAppServerConnection;
   threadId: string | null;
@@ -397,6 +400,8 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
       },
     });
     session = {
+      usageTracker: new CodexUsageTracker(),
+      model: spec.model,
       key: spec.sessionKey,
       connection,
       threadId: spec.threadId ?? spec.existingThreadId ?? null,
@@ -605,6 +610,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
         );
       }
       const currentRun = session.activeRun ?? session.startingRun;
+      const usageEvents = session.usageTracker.observe(notification, belongsToRootThread ? session.model : undefined);
       if (
         currentRun &&
         belongsToRootThread &&
@@ -621,6 +627,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
         belongsToRootThread || !isLifecycleNotification
           ? translateCodexAppServerNotification(translatedNotification)
           : [];
+      events.push(...usageEvents);
       if (currentRun && events.length > 0) {
         const updated = await this.options.mutate(() =>
           this.options.appendRunEvents(currentRun, events),
@@ -654,6 +661,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
         if (!parentThreadId) {
           session.threadId = String(resumed?.thread?.id ?? session.threadId);
           session.threadReady = true;
+          session.model = spec.model ?? resumed.model ?? session.model;
           return session.threadId;
         }
         // Older Drone builds could persist a subagent notification as the chat's
@@ -697,6 +705,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
       }
       session.threadId = threadId;
       session.threadReady = true;
+      session.model = spec.model ?? forked.model ?? session.model;
       return threadId;
     }
     const started = await session.connection.call('thread/start', {
@@ -710,6 +719,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     if (!threadId) throw new Error('Codex App Server did not return a thread id');
     session.threadId = threadId;
     session.threadReady = true;
+    session.model = spec.model ?? started.model ?? session.model;
     return threadId;
   }
 
@@ -771,6 +781,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
       await this.startNextRun(session);
       return;
     }
+    session.model = message.codexAppServer.model ?? session.model;
     const startedAt = this.now();
     session.observedTurnIds.clear();
     let run = await this.options.mutate(async () => {

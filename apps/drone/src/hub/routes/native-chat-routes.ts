@@ -80,6 +80,7 @@ export function registerNativeChatRoutes(
           id: chatId,
           droneId: resolved.id,
           chatName,
+          repo: resolved.drone?.repoPath,
           provider: chat?.nativeProvider,
           model: chat?.model,
           thinkingLevel: chat?.reasoning,
