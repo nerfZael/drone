@@ -1159,23 +1159,6 @@ export function SelectedDroneWorkspace({
     if (chatUiMode !== 'cli') return [];
     return visiblePendingPromptsWithStartup.filter((item) => item.state !== 'failed').slice(-3);
   }, [chatUiMode, visiblePendingPromptsWithStartup]);
-  const shouldAutoFocusInput = React.useMemo(() => {
-    if (chatUiMode === 'transcript') {
-      return (
-        !loadingTranscript &&
-        (transcripts?.length ?? 0) === 0 &&
-        visiblePendingPromptsWithStartup.length === 0
-      );
-    }
-    return !loadingSession && !sessionText.trim();
-  }, [
-    chatUiMode,
-    loadingSession,
-    loadingTranscript,
-    sessionText,
-    transcripts,
-    visiblePendingPromptsWithStartup.length,
-  ]);
   React.useEffect(() => {
     const target = { droneId: currentDrone.id, chatName: activeChatName };
     if (blockChatContentForConfig) return;
@@ -2798,7 +2781,7 @@ export function SelectedDroneWorkspace({
                   composerLeadingControls={externalLeadingComposerControls}
                   composerTrailingControls={externalTrailingComposerControls}
                   composerControls={externalComposerControls}
-                  autoFocus={shouldAutoFocusInput}
+                  autoFocus={false}
                   onStop={
                     !currentChatIsDraft && canStopResponse ? () => requestStopResponse() : undefined
                   }

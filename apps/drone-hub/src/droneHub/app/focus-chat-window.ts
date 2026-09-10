@@ -1,6 +1,5 @@
-// Dockview mounts content through a portal; the composer can arrive even later.
-// Claim the chat scope first so shortcuts target it during loading, then focus
-// its composer unless the user has already moved focus elsewhere.
+// Dockview mounts content through a portal. Focus the chat scope when it
+// arrives so shortcuts target it without typing into the composer.
 export function focusChatWindow(
   root: HTMLElement,
   findScope: () => HTMLElement | null | undefined,
@@ -26,19 +25,14 @@ export function focusChatWindow(
     if (scope && (!scope.isConnected || document.activeElement !== scope)) { cancel(); return; }
     scope = findScope() ?? null;
     if (!scope) return;
-    const composer = scope.querySelector<HTMLElement>('textarea:not(:disabled), [contenteditable="true"]');
-    if (composer) {
-      composer.focus();
-      cancel();
-    } else {
-      scope.tabIndex = -1;
-      scope.focus();
-    }
+    scope.tabIndex = -1;
+    scope.focus();
+    cancel();
   };
   const observer = new MutationObserver(() => {
     if (!cancelled && frame === null) frame = requestAnimationFrame(tryFocus);
   });
-  observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled'] });
+  observer.observe(root, { childList: true, subtree: true });
   document.addEventListener('pointerdown', onInteraction, true);
   document.addEventListener('focusin', onInteraction, true);
   frame = requestAnimationFrame(tryFocus);

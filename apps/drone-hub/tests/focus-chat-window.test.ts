@@ -53,21 +53,21 @@ function harness() {
   };
 }
 
-test('focus waits for the window portal, then transfers from the loading scope to its composer', () => {
+test('focus waits for the window portal and stays on the chat when its composer loads', () => {
   const h = harness();
   h.start(); h.frame();
   expect(h.document.activeElement).toBeNull();
   h.mount(); h.mutate(); h.frame();
   expect(h.document.activeElement).toBe(h.scope);
   h.loadComposer(); h.mutate(); h.frame();
-  expect(h.document.activeElement).toBe(h.composer);
+  expect(h.document.activeElement).toBe(h.scope);
   expect(h.observed()).toBe(false);
 });
 
-test('an immediately available composer receives focus', () => {
+test('the chat receives focus even when its composer is immediately available', () => {
   const h = harness();
   h.mount(); h.loadComposer(); h.start(); h.frame();
-  expect(h.document.activeElement).toBe(h.composer);
+  expect(h.document.activeElement).toBe(h.scope);
   expect(h.observed()).toBe(false);
 });
 

@@ -648,31 +648,33 @@ export function DockableDroneWorkspace({
     if (focusFloatingChat(sideChatFocusRequest.chatName)) handledFocusRequestRef.current = sideChatFocusRequest;
   }, [currentDrone.id, sideChatFocusRequest, sideChats, readyVersion, focusFloatingChat]);
 
-  const previousMainChatRef = React.useRef({ chatName: mainChatName, returnRequest: sideChatReturnRequest });
+  const previousMainChatRef = React.useRef<{ droneId: string; chatName: string | undefined; returnRequest: typeof sideChatReturnRequest } | null>(null);
   React.useEffect(() => {
-    const { chatName: previous, returnRequest: previousReturnRequest } = previousMainChatRef.current;
-    previousMainChatRef.current = { chatName: mainChatName, returnRequest: sideChatReturnRequest };
-    if (previous === mainChatName) return;
+    const previous = previousMainChatRef.current?.chatName;
+    const previousReturnRequest = previousMainChatRef.current?.returnRequest;
+    if (previousMainChatRef.current?.droneId === currentDrone.id && previous === mainChatName) return;
     const api = apiRef.current;
-    if (!api) return;
+    const root = workspaceElementRef.current;
+    if (!api || !root) return;
+    previousMainChatRef.current = { droneId: currentDrone.id, chatName: mainChatName, returnRequest: sideChatReturnRequest };
+    if (sideChatFocusRequest?.droneId === currentDrone.id &&
+      sideChatFocusRequest.chatName !== mainChatName && previous === undefined) return;
     const promoted = sideChats.some((chat) => chat.name === mainChatName);
     const returned = sideChats.some((chat) => chat.name === previous);
-    if (!promoted && !returned) return;
     // Only the explicit return action focuses the restored floating chat.
     // Selecting a regular chat in the sidebar must focus that new main chat.
     const focusReturned = returned && !promoted && sideChatReturnRequest !== previousReturnRequest
       && sideChatReturnRequest?.droneId === currentDrone.id && sideChatReturnRequest.chatName === previous;
     const panel = api.getPanel(focusReturned ? `${SIDE_CHAT_PANEL_PREFIX}${previous}` : CHAT_PANEL_ID);
     panel?.api.setActive();
-    const frame = requestAnimationFrame(() => {
-      const scope = !focusReturned
-        ? workspaceElementRef.current?.querySelector<HTMLElement>('[data-main-workspace-chat]')
-        : [...(workspaceElementRef.current?.querySelectorAll<HTMLElement>('[data-side-chat-name]') ?? [])]
-            .find((element) => element.dataset.sideChatName === previous && element.querySelector('[data-active-composer-id]'));
-      scope?.querySelector<HTMLElement>('textarea, [contenteditable="true"]')?.focus();
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [currentDrone.id, mainChatName, sideChats, sideChatReturnRequest]);
+    return focusChatWindow(root,
+      () => !focusReturned
+        ? root.querySelector<HTMLElement>('[data-main-workspace-chat]')
+        : [...root.querySelectorAll<HTMLElement>('[data-side-chat-name]')]
+            .find((element) => element.dataset.sideChatName === previous && !element.closest('.dv-tabs-container')),
+      () => root.isConnected,
+    );
+  }, [currentDrone.id, mainChatName, sideChats, sideChatReturnRequest, sideChatFocusRequest, readyVersion]);
 
   React.useEffect(() => {
     if (!useMobileLayout) return;
