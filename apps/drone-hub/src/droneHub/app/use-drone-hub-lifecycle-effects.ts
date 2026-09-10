@@ -397,7 +397,8 @@ export function useDroneHubLifecycleEffects({
         if (!move || move.disabled || move.getClientRects().length === 0) {
           unavailable.toggleSideChatMain = 'Select an available fork';
         }
-        quickActions.open(unavailable);
+        const sourceChatName = scope?.dataset.chatName ?? activeSide?.dataset.sideChatName ?? selectedChat;
+        quickActions.open(unavailable, sourceChatName ? { createSideChat: `Fork “${sourceChatName}”` } : {});
         return true;
       },
       openHome: () => {
@@ -661,6 +662,7 @@ export function useDroneHubLifecycleEffects({
   }, [
     quickActions,
     currentDrone,
+    selectedChat,
     runCompanionShortcut,
     applyCompanionProposal,
     activeComposer,

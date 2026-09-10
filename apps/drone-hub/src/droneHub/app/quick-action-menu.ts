@@ -36,6 +36,7 @@ export type QuickActionSnapshot = {
   path: readonly QuickAction[];
   items: readonly QuickAction[];
   unavailable: QuickActionUnavailable;
+  labels: Partial<Record<ShortcutActionId, string>>;
 } | null;
 
 export function quickActionDisabledReason(item: QuickAction, unavailable: QuickActionUnavailable): string | undefined {
@@ -82,7 +83,8 @@ export function createQuickActionController(
       listeners.add(listener);
       return () => { listeners.delete(listener); };
     },
-    open: (unavailable: QuickActionUnavailable = {}) => update({ path: [], items: root, unavailable }),
+    open: (unavailable: QuickActionUnavailable = {}, labels: Partial<Record<ShortcutActionId, string>> = {}) =>
+      update({ path: [], items: root, unavailable, labels }),
     close,
     back,
     select,

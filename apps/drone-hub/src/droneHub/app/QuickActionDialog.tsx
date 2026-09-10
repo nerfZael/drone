@@ -75,12 +75,13 @@ export function QuickActionDialog({ controller }: QuickActionDialogProps) {
                   const item = snapshot.items.find((entry) => entry.key === key);
                   if (!item) return <div key={key} aria-hidden="true" />;
                   const reason = quickActionDisabledReason(item, snapshot.unavailable);
+                  const label = (item.action && snapshot.labels[item.action]) || item.label;
                   return (
                     <button
                       key={key}
                       type="button"
                       disabled={Boolean(reason)}
-                      title={reason ?? item.label}
+                      title={reason ? `${label}: ${reason}` : label}
                       aria-keyshortcuts={key.toUpperCase()}
                       onClick={() => controller.select(key)}
                       className="flex min-h-[5.5rem] flex-col justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-soft)] p-3 text-left text-[var(--fg-secondary)] hover:border-[var(--accent-border)] hover:bg-[var(--accent-subtle)] hover:text-[var(--fg-strong)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:border-[var(--border)] disabled:hover:bg-[var(--surface-soft)] disabled:hover:text-[var(--fg-secondary)]"
@@ -89,7 +90,7 @@ export function QuickActionDialog({ controller }: QuickActionDialogProps) {
                         <kbd className={KEY_CHIP}>{key}</kbd>
                         {item.children ? <span aria-hidden="true" className="text-base text-[var(--muted)]">›</span> : null}
                       </span>
-                      <span className="line-clamp-2 text-sm font-medium leading-snug">{item.label}</span>
+                      <span className="line-clamp-2 break-words text-sm font-medium leading-snug">{label}</span>
                     </button>
                   );
                 })}
