@@ -10,6 +10,7 @@ export * from './chat-attachment-policy.js';
 export * from './chat-queue-actions.js';
 export * from './chat-question-request.js';
 export * from './companion-client.js';
+export * from './companion-compaction.js';
 export * from './companion.js';
 export * from './companion-instructions.js';
 export * from './companion-proposal.js';

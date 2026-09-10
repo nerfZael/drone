@@ -1,3 +1,4 @@
+import type { CompanionCompactionActivity } from '@drone/assistant-chat';
 import React from 'react';
 import * as Crypto from 'expo-crypto';
 import { COMPANION_CAPABILITY, COMPANION_RUN_OPERATIONS, isGranted } from '@drone/device-protocol';
@@ -61,6 +62,7 @@ type MobileCompanionContextValue = {
   startedAt: number | null;
   endedAt: number | null;
   activity: CompanionToolActivity[];
+  compaction: CompanionCompactionActivity | null;
   proposal: CompanionProposal | null;
   proposalExecution: CompanionProposalExecution | null;
   proposalDefaultRepoPath: string | null;

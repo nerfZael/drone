@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   CompanionTelemetryService,
+  CompanionRunTelemetry,
   type CompanionRunTelemetryRecord,
 } from '../src/hub/companion/companion-telemetry';
 
@@ -148,4 +149,55 @@ describe('Companion telemetry', () => {
     expect(JSON.stringify({ report, logs })).not.toContain('prompt');
     expect(JSON.stringify({ report, logs })).not.toContain('private spoken content');
   });
+});
+
+
+test('reports compaction latency, model usage, reduction and fallback without content', async () => {
+  let now = 0;
+  const service = new CompanionTelemetryService();
+  const run = new CompanionRunTelemetry(service, {
+    messageId: 'metrics', runId: 'run', transport: 'device_mesh', coldStart: false,
+  }, { epochMs: () => now, monotonicMs: () => now });
+  const base = { version: 1 as const, eventId: 'event', sessionId: 'session', timestamp: new Date(0).toISOString() };
+  run.observe({ ...base, type: 'compaction_started', reason: 'auto' });
+  now = 100;
+  run.observe({ ...base, type: 'compaction_completed', summaryId: 'private summary identifier', tokensBefore: 9000, tokensAfter: 2000,
+    fallbackUsed: true, fallbackReason: 'private provider response',
+    metrics: { durationMs: 95, modelDurationMs: 80, modelCallCount: 2, modelResponseCount: 1, incompleteModelResponseCount: 1,
+      usage: { input: 1000, output: 200, cacheRead: 300, cacheWrite: 0, totalTokens: 1500 } },
+  });
+  run.observe({ ...base, type: 'compaction_started', reason: 'manual' });
+  now = 120;
+  run.observe({ ...base, type: 'compaction_skipped', reason: 'private failure reason' });
+  run.observe({ ...base, type: 'compaction_started', reason: 'context_overflow' });
+  now = 150;
+  await run.finish('cancelled');
+  const report = service.report();
+  expect(report.compaction).toMatchObject({
+    attemptCount: 3, measuredAttemptCount: 1,
+    statusCounts: { completed: 1, skipped: 1, failed: 0, cancelled: 1, interrupted: 0 },
+    duration: { count: 3, p50Ms: 30, p95Ms: 95 },
+    modelDuration: { count: 1, p50Ms: 80 },
+    modelCallCount: 2, modelResponseCount: 1, incompleteModelResponseCount: 1,
+    reportedUsage: { input: 1000, output: 200, cacheRead: 300, cacheWrite: 0, totalTokens: 1500 },
+    fallbackCount: 1, tokensBefore: 9000, tokensAfter: 2000,
+  });
+  expect(report.runs[0]?.compactions?.map((attempt) => attempt.trigger)).toEqual(['auto', 'manual', 'context_overflow']);
+  expect(JSON.stringify(report)).not.toContain('private');
+});
+
+test('records a single explicit compaction failure and tolerates legacy telemetry', async () => {
+  const service = new CompanionTelemetryService();
+  const run = service.begin({ messageId: 'failure', runId: 'run', transport: 'websocket', coldStart: false });
+  const base = { version: 1 as const, eventId: 'event', sessionId: 'session', timestamp: new Date(0).toISOString() };
+  run.observe({ ...base, type: 'compaction_started', reason: 'unknown private reason' });
+  run.observe({ ...base, type: 'compaction_failed', reason: 'error' });
+  await run.finish('error', 'private error');
+  await service.record(record('old-runtime', 10));
+  const report = service.report();
+  expect(report.compaction.attemptCount).toBe(1);
+  expect(report.compaction.statusCounts.failed).toBe(1);
+  expect(report.compaction.measuredAttemptCount).toBe(0);
+  expect(report.compaction.modelDuration.count).toBe(0);
+  expect(JSON.stringify(report)).not.toContain('private');
 });

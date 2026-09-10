@@ -1,10 +1,11 @@
+import { summaryText } from './helpers/compaction-fixtures';
 import { describe, expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from '@mariozechner/pi-ai';
+import { fauxAssistantMessage, fauxToolCall, registerFauxProvider, type Context } from '@mariozechner/pi-ai';
 import type { AgentMessage } from '@mariozechner/pi-agent-core';
 import { createLocalCompaction, estimateEntriesTokens } from '../src/index';
 import { compactSession, runBlipTask, SessionStore } from '../src/node';
@@ -501,7 +502,7 @@ describe('Blip runtime', () => {
   test('manual compaction uses model summary and stores retained boundary', async () => {
     const workspace = await tempWorkspace();
     const faux = registerFauxProvider({ api: 'faux', provider: 'faux', tokensPerSecond: 0 });
-    faux.setResponses([fauxAssistantMessage('## Goal\n- Model summary')]);
+    faux.setResponses([fauxAssistantMessage(summaryText('Model summary'))]);
     const store = new SessionStore(workspace);
     const session = await store.create({
       provider: 'faux',
@@ -510,7 +511,7 @@ describe('Blip runtime', () => {
       toolProfile: 'no-shell-workspace-write',
     });
     await store.appendMessage(session, user('old request'));
-    await store.appendMessage(session, assistant('old response'));
+    await store.appendMessage(session, assistant('old response '.repeat(300)));
     await store.appendMessage(session, user('recent request'));
     await store.appendMessage(session, assistant('recent response'));
 
@@ -538,8 +539,8 @@ describe('Blip runtime', () => {
     const workspace = await tempWorkspace();
     const faux = registerFauxProvider({ api: 'faux', provider: 'faux', tokensPerSecond: 0 });
     faux.setResponses([
-      fauxAssistantMessage('## Goal\n- First summary'),
-      fauxAssistantMessage('## Goal\n- Updated summary'),
+      fauxAssistantMessage(summaryText('First summary')),
+      fauxAssistantMessage(summaryText('Updated summary')),
     ]);
     const store = new SessionStore(workspace);
     const session = await store.create({
@@ -549,9 +550,9 @@ describe('Blip runtime', () => {
       toolProfile: 'no-shell-workspace-write',
     });
     await store.appendMessage(session, user('turn one'));
-    await store.appendMessage(session, assistant('turn one done'));
+    await store.appendMessage(session, assistant('turn one done '.repeat(300)));
     await store.appendMessage(session, user('turn two'));
-    await store.appendMessage(session, assistant('turn two done'));
+    await store.appendMessage(session, assistant('turn two done ' + 'detail '.repeat(300)));
 
     await compactSession({
       workspaceRoot: workspace,
@@ -559,6 +560,7 @@ describe('Blip runtime', () => {
       trigger: 'manual',
       settings: { auto: true, reserveTokens: 10, keepRecentTokens: 1, keepRecentTurns: 1 },
     });
+    await store.appendMessage(await store.load(session.id), assistant('More work completed '.repeat(300)));
     await store.appendMessage(await store.load(session.id), user('turn three'));
     await compactSession({
       workspaceRoot: workspace,
@@ -584,10 +586,16 @@ describe('Blip runtime', () => {
   test('auto compacts before a run when context exceeds the model window', async () => {
     const workspace = await tempWorkspace();
     const faux = registerFauxProvider({ api: 'faux', provider: 'faux', tokensPerSecond: 0 });
-    faux.setResponses([
-      fauxAssistantMessage('## Goal\n- Auto summary'),
-      fauxAssistantMessage('continued'),
-    ]);
+    let summaryCalls = 0;
+    const response = (context: Context) => {
+      if (context.systemPrompt.includes('performing context compaction')) {
+        summaryCalls += 1;
+        faux.appendResponses([response]);
+        return fauxAssistantMessage(summaryText('Auto summary'));
+      }
+      return fauxAssistantMessage('continued');
+    };
+    faux.setResponses([response]);
     const store = new SessionStore(workspace);
     const session = await store.create({
       provider: 'faux',
@@ -596,7 +604,7 @@ describe('Blip runtime', () => {
       toolProfile: 'no-shell-workspace-write',
     });
     await store.appendMessage(session, user('old ' + 'x'.repeat(600_000)));
-    await store.appendMessage(session, assistant('old response'));
+    await store.appendMessage(session, assistant('old response ' + 'detail '.repeat(300)));
     await store.appendMessage(session, user('middle request'));
     await store.appendMessage(session, assistant('middle response'));
     await store.appendMessage(session, user('recent request'));
@@ -616,6 +624,7 @@ describe('Blip runtime', () => {
     );
 
     expect(events).toContain('compaction_completed');
+    expect(summaryCalls).toBeGreaterThan(1);
     const transcript = await store.readTranscript(session);
     expect(transcript.some((entry) => entry.type === 'compaction')).toBe(true);
 

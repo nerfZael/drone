@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { getModel, getModels, type Model } from '@mariozechner/pi-ai';
 import {
@@ -7,33 +6,17 @@ import {
   type PermissionMode,
   type ToolProfile,
 } from '@blip/tools';
+import { BlipContextManager } from './context-manager.js';
+import type { AgentMessage, AgentTool, StreamFn } from '@mariozechner/pi-agent-core';
+import type { Message } from '@mariozechner/pi-ai';
 import { createBlipSession } from './blip-session.js';
-import type { BlipEventSink } from './blip-session-types.js';
-import {
-  createCompaction,
-  DEFAULT_COMPACTION_SETTINGS,
-  type CompactionSettings,
-} from './compaction.js';
+import { createReadToolOutputTool } from './createReadToolOutputTool.js';
+import { pruneToolOutputs } from './pruneToolOutputs.js';
+import type { BlipEventSink, BlipToolProvider, BlipPromptProvider } from './blip-session-types.js';
+import { DEFAULT_COMPACTION_SETTINGS, type CompactionSettings } from './compaction.js';
 import type { SessionRepository } from './session-repository.js';
 import { SessionStore } from './session-store.js';
 import type { BlipRuntimeEvent, BlipSessionState, RunBlipOptions } from './types.js';
-
-function nowIso(): string {
-  return new Date().toISOString();
-}
-
-function eventBase(
-  sessionId: string,
-  turnId?: string,
-): Pick<BlipRuntimeEvent, 'version' | 'eventId' | 'sessionId' | 'timestamp'> & { turnId?: string } {
-  return {
-    version: 1,
-    eventId: randomUUID(),
-    sessionId,
-    timestamp: nowIso(),
-    ...(turnId ? { turnId } : {}),
-  };
-}
 
 function summarizeProcessItems(items: unknown[]): Array<{ type: string; count: number }> {
   const counts = new Map<string, number>();
@@ -135,6 +118,13 @@ export interface CompactStoredSessionOptions {
   reasoning?: RunBlipOptions['reasoning'];
   getApiKey?: RunBlipOptions['getApiKey'];
   eventSink?: BlipEventSink;
+  signal?: AbortSignal;
+  streamFn?: StreamFn;
+  /** Supply the same prompt, tools and transforms used for normal requests. */
+  systemPrompt?: string;
+  tools?: AgentTool<any>[];
+  transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
+  convertToLlm?: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
 }
 
 /** Manually compacts a session through any repository implementation. */
@@ -142,70 +132,83 @@ export async function compactStoredSession(
   options: CompactStoredSessionOptions,
 ): Promise<BlipSessionState> {
   const { session, sessionRepository } = options;
-  const turnId = `t_${randomUUID().slice(0, 8)}`;
-  const emit = async (event: BlipRuntimeEvent) => {
-    await sessionRepository.appendRuntimeEvent(session, event);
-    await options.eventSink?.(event);
-  };
-  await emit({
-    ...eventBase(session.id, turnId),
-    type: 'compaction_started',
-    reason: options.trigger ?? 'manual',
-  });
-  const entries = await sessionRepository.readTranscript(session);
-  const model = options.model ?? resolveBlipModel(session.modelProvider, session.modelId);
-  const compaction = await createCompaction({
-    session,
-    entries,
-    trigger: options.trigger ?? 'manual',
+  const manager = new BlipContextManager({
+    state: session,
+    repository: sessionRepository,
+    model: options.model ?? resolveBlipModel(session.modelProvider, session.modelId),
     settings: options.settings,
-    model,
     reasoning: options.reasoning,
-    apiKey: await options.getApiKey?.(model.provider),
+    getApiKey: options.getApiKey,
+    streamFn: options.streamFn,
+    activeTurnId: () => undefined,
+    systemPrompt: () => options.systemPrompt ?? '',
+    tools: () => options.tools ?? [],
+    transformContext: options.transformContext,
+    convertToLlm: options.convertToLlm,
+    replaceAgentMessages: () => {},
+    emit: async (event) => {
+      await sessionRepository.appendRuntimeEvent(session, event);
+      await options.eventSink?.(event);
+    },
   });
-  if (!compaction) {
-    await emit({
-      ...eventBase(session.id, turnId),
-      type: 'compaction_skipped',
-      reason: 'nothing to compact yet',
-    });
-    return session;
-  }
-  await sessionRepository.appendEntry(session, compaction);
-  session.compactedSummary = compaction.summary;
-  await sessionRepository.save(session);
-  await emit({
-    ...eventBase(session.id, turnId),
-    type: 'compaction_completed',
-    summaryId: compaction.id,
-    tokensBefore: compaction.tokensBefore,
-    tokensAfter: compaction.tokensAfterEstimate ?? 0,
-  });
+  await manager.compact(options.settings, options.signal, options.trigger);
   return session;
 }
 
 /** File-backed CLI compatibility entry point. */
-export async function compactSession(input: {
-  workspaceRoot: string;
-  sessionId?: string;
-  trigger?: 'manual' | 'auto';
-  settings?: CompactionSettings;
-  model?: Model<any>;
-  reasoning?: RunBlipOptions['reasoning'];
-  getApiKey?: RunBlipOptions['getApiKey'];
-  onEvent?: BlipEventSink;
-}): Promise<BlipSessionState> {
+export async function compactSession(
+  input: Omit<CompactStoredSessionOptions, 'sessionRepository' | 'session' | 'eventSink'> & {
+    workspaceRoot: string;
+    sessionId?: string;
+    onEvent?: BlipEventSink;
+    toolProviders?: BlipToolProvider[];
+    promptProvider?: BlipPromptProvider;
+  },
+): Promise<BlipSessionState> {
   const repository = new SessionStore(input.workspaceRoot);
   const session = input.sessionId
     ? await repository.load(input.sessionId)
     : await repository.latest();
   if (!session) throw new Error('no session found to compact');
+  input.signal?.throwIfAborted();
+  const model = input.model ?? resolveBlipModel(session.modelProvider, session.modelId);
+  const context = {
+    session,
+    repository,
+    model,
+    workspaceRoot: input.workspaceRoot,
+    permissionMode: session.permissionMode,
+    toolProfile: session.toolProfile,
+  };
+  const tools = input.tools
+    ? [...input.tools]
+    : [
+        ...createProfileTools({
+          workspaceRoot: input.workspaceRoot,
+          permissionMode: session.permissionMode,
+          profile: session.toolProfile,
+        }),
+        createReadToolOutputTool(repository, session),
+      ];
+  const sections = [input.systemPrompt ?? (await input.promptProvider?.(context)) ?? ''];
+  for (const provider of input.toolProviders ?? []) {
+    tools.push(...(await provider.load(context)));
+    sections.push(...((await provider.promptSections?.(context)) ?? []));
+  }
   return compactStoredSession({
+    ...input,
     sessionRepository: repository,
     session,
     trigger: input.trigger,
     settings: input.settings,
-    model: input.model,
+    model,
+    tools,
+    systemPrompt: sections.filter((section) => section.trim()).join('\n\n'),
+    transformContext: async (messages, signal) => {
+      const originals = new Set(messages);
+      const transformed = (await input.transformContext?.(messages, signal)) ?? messages;
+      return pruneToolOutputs(transformed, originals);
+    },
     reasoning: input.reasoning,
     getApiKey: input.getApiKey,
     eventSink: input.onEvent,

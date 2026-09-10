@@ -1,3 +1,4 @@
+import { summaryText } from './helpers/compaction-fixtures';
 import { describe, expect, test } from 'bun:test';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -9,6 +10,7 @@ import {
   fauxAssistantMessage,
   fauxToolCall,
   registerFauxProvider,
+  type Context,
 } from '@mariozechner/pi-ai';
 import { createProfileTools } from '@blip/tools';
 import { createBlipSession, type BlipRuntimeEvent } from '../src/index';
@@ -63,7 +65,7 @@ describe('Embedded Blip session', () => {
           systemPrompt: context.systemPrompt,
           lastUser: context.messages.filter((message) => message.role === 'user').at(-1),
         });
-        return fauxAssistantMessage('first response');
+        return fauxAssistantMessage('first response ' + 'detail '.repeat(300));
       },
       (context) => {
         observed.push({
@@ -72,7 +74,7 @@ describe('Embedded Blip session', () => {
         });
         return fauxAssistantMessage('second response');
       },
-      fauxAssistantMessage('embedded summary'),
+      fauxAssistantMessage(summaryText('embedded summary')),
     ]);
     const events: BlipRuntimeEvent[] = [];
     const providerResponses: Array<{ status: number; model: string }> = [];
@@ -89,7 +91,7 @@ describe('Embedded Blip session', () => {
       eventSink: (event) => events.push(event),
     });
 
-    const firstId = (await session.prompt('first prompt')).id;
+    const firstId = (await session.prompt('first prompt '.repeat(300))).id;
     const secondState = await session.prompt({
       text: 'second prompt',
       images: [{ type: 'image', data: 'aGVsbG8=', mimeType: 'image/png' }],
@@ -629,20 +631,24 @@ describe('Embedded Blip session', () => {
       tokensPerSecond: 0,
     });
     let finalContext: AgentMessage[] = [];
+    const afterTool = (context: Context) => {
+      if (context.systemPrompt.includes('performing context compaction')) {
+        faux.appendResponses([afterTool]);
+        return fauxAssistantMessage(summaryText('Compacted current turn'));
+      }
+      finalContext = context.messages;
+      return fauxAssistantMessage('Handled compacted output.');
+    };
     faux.setResponses([
       fauxAssistantMessage(fauxToolCall('large_output', {}, { id: 'call_large' }), {
         stopReason: 'toolUse',
       }),
-      fauxAssistantMessage('Compacted current turn'),
-      (context) => {
-        finalContext = context.messages;
-        return fauxAssistantMessage('Handled compacted output.');
-      },
+      afterTool,
     ]);
     const events: BlipRuntimeEvent[] = [];
     const session = await createBlipSession({
       workspaceRoot: workspace,
-      model: { ...faux.getModel(), contextWindow: 1_000, maxTokens: 200 },
+      model: { ...faux.getModel(), contextWindow: 16_000, maxTokens: 500 },
       permissionMode: 'workspace-write',
       toolProfile: 'no-shell-workspace-write',
       sessionRepository: new SessionStore(workspace),
@@ -660,7 +666,7 @@ describe('Embedded Blip session', () => {
       ],
       compactionSettings: {
         auto: true,
-        reserveTokens: 200,
+        reserveTokens: 14_000,
         keepRecentTokens: 100,
         keepRecentTurns: 1,
       },
@@ -670,7 +676,8 @@ describe('Embedded Blip session', () => {
     await session.prompt('Run the large output tool');
 
     expect(events.some((event) => event.type === 'compaction_completed')).toBe(true);
-    expect(finalContext).toHaveLength(1);
+    expect(finalContext).toHaveLength(2);
+    expect(userText(finalContext[1])).toBe('Run the large output tool');
     expect(userText(finalContext[0])).toContain('Summary of earlier conversation');
     session.close();
     faux.unregister();
@@ -686,13 +693,13 @@ describe('Embedded Blip session', () => {
     const repository = new SessionStore(workspace);
     const seed = await createBlipSession({
       workspaceRoot: workspace,
-      model: { ...faux.getModel(), contextWindow: 1_000, maxTokens: 200 },
+      model: { ...faux.getModel(), contextWindow: 16_000, maxTokens: 500 },
       permissionMode: 'workspace-write',
       toolProfile: 'no-shell-workspace-write',
       sessionRepository: repository,
       compactionSettings: {
         auto: false,
-        reserveTokens: 200,
+        reserveTokens: 14_000,
         keepRecentTokens: 10,
         keepRecentTurns: 1,
       },
@@ -704,7 +711,7 @@ describe('Embedded Blip session', () => {
     });
     await repository.appendMessage(
       seed.state,
-      fauxAssistantMessage('Older response that should be summarized.'),
+      fauxAssistantMessage('Older response that should be summarized. '.repeat(100)),
     );
     seed.close();
 
@@ -713,21 +720,20 @@ describe('Embedded Blip session', () => {
         stopReason: 'error',
         errorMessage: 'input context_length_exceeded',
       }),
-      fauxAssistantMessage('Overflow recovery summary'),
-      fauxAssistantMessage('Emergency overflow recovery summary'),
+      fauxAssistantMessage(summaryText('Overflow recovery summary')),
       fauxAssistantMessage('Recovered after one retry.'),
     ]);
     const events: BlipRuntimeEvent[] = [];
     const session = await createBlipSession({
       workspaceRoot: workspace,
-      model: { ...faux.getModel(), contextWindow: 1_000, maxTokens: 200 },
+      model: { ...faux.getModel(), contextWindow: 16_000, maxTokens: 500 },
       permissionMode: 'workspace-write',
       toolProfile: 'no-shell-workspace-write',
       sessionRepository: repository,
       sessionId: seed.state.id,
       compactionSettings: {
         auto: false,
-        reserveTokens: 200,
+        reserveTokens: 14_000,
         keepRecentTokens: 10,
         keepRecentTurns: 1,
       },
@@ -921,7 +927,7 @@ describe('Embedded Blip session', () => {
     };
     const session = await createBlipSession({
       workspaceRoot: workspace,
-      model: { ...faux.getModel(), contextWindow: 200 },
+      model: { ...faux.getModel(), contextWindow: 2_000, maxTokens: 200 },
       permissionMode: 'workspace-write',
       toolProfile: 'no-shell-workspace-write',
       sessionRepository: repository,
@@ -937,7 +943,7 @@ describe('Embedded Blip session', () => {
     for (let index = 0; index < 3; index += 1) {
       await repository.appendMessage(session.state, {
         role: 'user',
-        content: index === 0 ? 'old context '.repeat(100) : `recent prompt ${index}`,
+        content: index === 0 ? 'old context '.repeat(1_000) : `recent prompt ${index}`,
         timestamp: Date.now() + index,
       });
     }

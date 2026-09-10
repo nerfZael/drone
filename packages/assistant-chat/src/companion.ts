@@ -1,3 +1,4 @@
+import type { CompanionCompactionEvent } from './companion-compaction.js';
 export const COMPANION_MAX_PROMPT_CHARS = 20_000;
 export const COMPANION_MAX_RUN_ID_CHARS = 128;
 
@@ -66,7 +67,7 @@ export type CompanionToolActivity = {
   status: 'running' | 'completed' | 'failed';
 };
 
-export type CompanionToolActivityEvent = {
+export type CompanionToolActivityEvent = CompanionCompactionEvent & {
   type: string;
   callId?: unknown;
   tool?: unknown;

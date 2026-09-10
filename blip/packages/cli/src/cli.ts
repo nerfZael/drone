@@ -1283,15 +1283,30 @@ async function main(): Promise<void> {
 
   if (options.compact) {
     const compactEmit = options.jsonl ? emit : (event: BlipRuntimeEvent) => renderHuman(event);
-    await compactSession({
-      workspaceRoot,
-      sessionId: options.sessionId,
-      trigger: 'manual',
-      reasoning,
-      getApiKey,
-      onEvent: compactEmit,
-    });
-    humanRenderer.close?.();
+    const managedMcp = await connectManagedMcp();
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    process.on('SIGINT', abort);
+    process.on('SIGTERM', abort);
+    try {
+      await compactSession({
+        workspaceRoot,
+        sessionId: options.sessionId,
+        trigger: 'manual',
+        reasoning,
+        getApiKey,
+        signal: controller.signal,
+        toolProviders: managedMcp.toolProviders,
+        promptProvider: (context) =>
+          assembleCliSystemPrompt({ workspaceRoot, toolProfile: context.toolProfile }),
+        onEvent: compactEmit,
+      });
+    } finally {
+      process.off('SIGINT', abort);
+      process.off('SIGTERM', abort);
+      await managedMcp.close();
+      humanRenderer.close?.();
+    }
     return;
   }
 

@@ -100,6 +100,20 @@ export class CompanionBrowserToolBroker {
 
 export function boundedCompanionActivityEvent(event: any): any | null {
   const type = String(event?.type ?? '');
+  // Only status and estimated sizes cross the activity channel. In particular,
+  // fallback errors may contain provider content and must not be forwarded.
+  if (type === 'compaction_started' || type === 'compaction_skipped') return { type };
+  if (type === 'compaction_failed') {
+    return { type, reason: event.reason === 'cancelled' ? 'cancelled' : 'error' };
+  }
+  if (type === 'compaction_completed') {
+    const count = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value >= 0
+      ? value : undefined;
+    return {
+      type, tokensBefore: count(event.tokensBefore), tokensAfter: count(event.tokensAfter),
+      fallbackUsed: event.fallbackUsed === true,
+    };
+  }
   if (!type.startsWith('tool_call_')) return null;
   if (type === 'tool_call_started') return { ...event, args: boundedActivityValue(event.args) };
   if (type === 'tool_call_completed') {

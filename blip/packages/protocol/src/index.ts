@@ -132,6 +132,17 @@ export type AgentRunFileChangesV2 = {
 
 export type AgentRunFileChanges = AgentRunFileChangesV1 | AgentRunFileChangesV2;
 
+/** Content-free measurements for one compaction, including any emergency retry. */
+export type BlipCompactionMetrics = {
+  durationMs: number;
+  modelDurationMs: number;
+  modelCallCount: number;
+  modelResponseCount: number;
+  incompleteModelResponseCount: number;
+  /** Provider-reported usage only; missing responses can leave usage unreported. */
+  usage: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number };
+};
+
 export type BlipRuntimeEvent =
   | (BlipRuntimeEventBase & {
       type: "usage_observed"; model: string; provider: string; purpose: "chat" | "compaction";
@@ -202,9 +213,11 @@ export type BlipRuntimeEvent =
       activeRequests: Array<{ type: string; count: number }>;
     })
   | (BlipRuntimeEventBase & { type: "compaction_started"; reason: string })
-  | (BlipRuntimeEventBase & { type: "compaction_skipped"; reason: string })
+  | (BlipRuntimeEventBase & { type: "compaction_skipped"; reason: string; metrics?: BlipCompactionMetrics })
+  | (BlipRuntimeEventBase & { type: "compaction_failed"; reason: "cancelled" | "error"; metrics?: BlipCompactionMetrics })
   | (BlipRuntimeEventBase & {
       type: "compaction_completed";
+      metrics?: BlipCompactionMetrics;
       summaryId: string;
       tokensBefore: number;
       tokensAfter: number;

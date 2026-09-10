@@ -44,6 +44,14 @@ export interface SessionRepository {
   ): Promise<boolean>;
   readToolSuspensions(session: BlipSessionState): Promise<BlipToolSuspension[]>;
   readTranscript(session: BlipSessionState): Promise<TranscriptEntry[]>;
+  /** Latest checkpoint, retained tail and pinned user instruction, then subsequent messages.
+   * Preserve transcript order; fall back to all messages if any retained reference is invalid. */
+  readActiveTranscript?(session: BlipSessionState): Promise<TranscriptEntry[]>;
+  /** Retrieve an original result, including results preceding a compaction checkpoint. */
+  readToolResult?(
+    session: BlipSessionState,
+    callId: string,
+  ): Promise<Extract<AgentMessage, { role: 'toolResult' }> | undefined>;
   readMessages(session: BlipSessionState): Promise<AgentMessage[]>;
   readModelMessages(session: BlipSessionState): Promise<AgentMessage[]>;
   fork(source: BlipSessionState, input: ForkSessionInput): Promise<BlipSessionState>;

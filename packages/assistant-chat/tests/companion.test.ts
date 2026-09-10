@@ -402,6 +402,7 @@ describe('Companion contracts', () => {
       startedAt: null,
       endedAt: null,
       activity: [],
+      compaction: null,
     });
     expect(connection.cancelled).toEqual(['run-2']);
   });
@@ -460,3 +461,54 @@ test('queued messages use their own tool executor and reject expired or ambiguou
   await call('closed', 'b');
   expect(connection.toolResults).toHaveLength(count);
 });
+
+
+test('Companion compaction follows the latest request and does not inflate tool counts', async () => {
+  const connection = clientTransport();
+  const controller = new CompanionClientController({ createId: () => 'session' });
+  const submit = (messageId: string) => controller.submitPrompt({
+    prompt: messageId, messageId, createTransport: () => connection.transport, executeTool: () => ({}),
+  });
+  const activity = (type: string, messageId = 'first', fields = {}) => connection.message({
+    type: 'activity', messageId, event: { type, ...fields },
+  });
+  await submit('first');
+  activity('compaction_started');
+  expect(controller.getSnapshot().compaction?.status).toBe('running');
+  activity('compaction_completed', 'first', { tokensBefore: 9000, tokensAfter: 2000, fallbackUsed: true });
+  expect(controller.getSnapshot().compaction).toEqual({
+    status: 'completed', tokensBefore: 9000, tokensAfter: 2000, fallbackUsed: true,
+  });
+  expect(controller.getSnapshot().activity).toEqual([]);
+  activity('compaction_started');
+  activity('compaction_skipped');
+  expect(controller.getSnapshot().compaction).toEqual({ status: 'skipped' });
+  await submit('second');
+  expect(controller.getSnapshot().compaction).toBeNull();
+  activity('compaction_started');
+  expect(controller.getSnapshot().compaction).toBeNull();
+  activity('compaction_started', 'second');
+  activity('compaction_failed', 'second', { reason: 'cancelled' });
+  expect(controller.getSnapshot().compaction?.status).toBe('cancelled');
+  await controller.close();
+});
+
+test.each(['completed', 'cancelled', 'error', 'disconnect', 'local-cancel'])(
+  'Companion clears the compaction indicator on %s', async (terminal) => {
+    const connection = clientTransport();
+    const controller = new CompanionClientController({ createId: () => 'session' });
+    await controller.submitPrompt({ prompt: 'Continue', createTransport: () => connection.transport, executeTool: () => ({}) });
+    connection.message({ type: 'activity', event: { type: 'compaction_started' } });
+    if (terminal === 'disconnect') connection.disconnect('Disconnected');
+    else if (terminal === 'local-cancel') await controller.cancel();
+    else if (terminal === 'error') connection.message({ type: 'error', error: 'Failed' });
+    else connection.message({ type: 'status', status: terminal });
+    expect(controller.getSnapshot().compaction?.status).toBe(
+      terminal === 'completed' ? 'interrupted' : terminal === 'cancelled' || terminal === 'local-cancel' ? 'cancelled' : 'failed',
+    );
+    connection.message({ type: 'activity', event: { type: 'compaction_started' } });
+    expect(controller.getSnapshot().compaction?.status).not.toBe('running');
+    await controller.close();
+    expect(controller.getSnapshot().compaction).toBeNull();
+  },
+);

@@ -22,6 +22,8 @@ import type {
 import type { BlipRuntimeEvent, BlipSessionState, BlipToolSuspension } from './types.js';
 import { createPortableId } from './platform.js';
 import { ToolSuspensionWorkflow } from './tool-suspension-workflow.js';
+import { createReadToolOutputTool } from './createReadToolOutputTool.js';
+import { pruneToolOutputs } from './pruneToolOutputs.js';
 
 type ToolFailure = {
   callId: string;
@@ -225,6 +227,7 @@ async function resolveSession(
 class BlipSession implements BlipSessionHandle {
   private readonly agent: Agent;
   private readonly contextManager: BlipContextManager;
+  private manualCompactionAbort?: AbortController;
   private readonly toolSuspensions: ToolSuspensionWorkflow;
   private readonly unsubscribe: () => void;
   private active?: ActivePrompt;
@@ -238,6 +241,13 @@ class BlipSession implements BlipSessionHandle {
     tools: AgentTool<any>[],
     initialMessages: AgentMessage[],
   ) {
+    const transformContext = async (messages: AgentMessage[], signal?: AbortSignal) => {
+      const originals = new Set(messages);
+      const transformed = (await options.transformContext?.(messages, signal)) ?? messages;
+      return options.pruneToolOutputs === false
+        ? transformed
+        : pruneToolOutputs(transformed, originals);
+    };
     this.agent = new Agent({
       initialState: {
         systemPrompt: '',
@@ -251,7 +261,7 @@ class BlipSession implements BlipSessionHandle {
       getApiKey: options.getApiKey,
       onResponse: options.onResponse,
       streamFn: options.streamFn,
-      transformContext: options.transformContext,
+      transformContext,
       convertToLlm: options.convertToLlm,
       beforeModelCall: (context, signal) => this.contextManager.beforeModelCall(context, signal),
       beforeToolCall: (context, signal) => this.preflight(context, signal),
@@ -268,6 +278,8 @@ class BlipSession implements BlipSessionHandle {
       activeTurnId: () => this.active?.turnId,
       systemPrompt: () => this.agent.state.systemPrompt,
       tools: () => this.agent.state.tools,
+      transformContext,
+      convertToLlm: options.convertToLlm,
       replaceAgentMessages: (messages) => {
         this.agent.state.messages = messages;
       },
@@ -287,6 +299,9 @@ class BlipSession implements BlipSessionHandle {
     const tools = [...(options.tools ?? [])];
     for (const provider of options.toolProviders ?? []) {
       tools.push(...(await provider.load(context)));
+    }
+    if (options.pruneToolOutputs !== false) {
+      tools.push(createReadToolOutputTool(options.sessionRepository, session));
     }
     const seenTools = new Set<string>();
     for (const tool of tools) {
@@ -352,12 +367,15 @@ class BlipSession implements BlipSessionHandle {
   }
 
   steer(input: BlipPromptInput): void {
+    if (this.manualCompactionAbort) throw new Error('Cannot steer a compacting Blip session');
     if (this.closed) throw new Error('Blip session is closed');
     if (!this.activePromise) throw new Error('Cannot steer an idle Blip session');
     this.agent.steer(normalizePrompt(input));
   }
 
   enqueue(input: BlipPromptInput): Promise<BlipSessionState> {
+    if (this.manualCompactionAbort)
+      return Promise.reject(new Error('Cannot enqueue into a compacting Blip session'));
     if (this.closed) return Promise.reject(new Error('Blip session is closed'));
     if (!this.activePromise) return this.prompt(input);
     this.agent.followUp(normalizePrompt(input));
@@ -367,8 +385,20 @@ class BlipSession implements BlipSessionHandle {
   async compact(settings?: CompactionSettings): Promise<BlipSessionState> {
     if (this.closed) throw new Error('Blip session is closed');
     if (this.activePromise) throw new Error('Cannot compact a running Blip session');
-    await this.contextManager.compact(settings);
-    return this.state;
+    const controller = new AbortController();
+    this.manualCompactionAbort = controller;
+    const promise = (async () => {
+      await this.refreshSystemPrompt();
+      await this.contextManager.compact(settings, controller.signal);
+      return this.state;
+    })();
+    this.activePromise = promise;
+    try {
+      return await promise;
+    } finally {
+      if (this.activePromise === promise) this.activePromise = undefined;
+      if (this.manualCompactionAbort === controller) this.manualCompactionAbort = undefined;
+    }
   }
 
   async pendingToolSuspensions(): Promise<BlipToolSuspension[]> {
@@ -400,6 +430,7 @@ class BlipSession implements BlipSessionHandle {
 
   abort(): void {
     if (this.active) this.active.cancelRequested = true;
+    this.manualCompactionAbort?.abort();
     this.contextManager.abort();
     this.resolutionAbortController?.abort();
     this.agent.abort();
@@ -578,8 +609,11 @@ class BlipSession implements BlipSessionHandle {
       });
       if (event.message.role === 'assistant') {
         await this.emit({
-          ...eventBase(this.state.id, active.turnId), type: 'usage_observed',
-          model: event.message.model, provider: event.message.provider, purpose: 'chat',
+          ...eventBase(this.state.id, active.turnId),
+          type: 'usage_observed',
+          model: event.message.model,
+          provider: event.message.provider,
+          purpose: 'chat',
           complete: event.message.stopReason !== 'error' && event.message.stopReason !== 'aborted',
           usage: event.message.usage,
         });
@@ -1016,12 +1050,14 @@ class BlipSession implements BlipSessionHandle {
         turnId: active.turnId,
         kind: active.kind,
       });
-      const contextMessages = active.cancelRequested ? [] : await this.options.promptContext?.({
-        ...this.context(),
-        prompt: message,
-        turnId: active.turnId,
-        kind: active.kind,
-      }) ?? [];
+      const contextMessages = active.cancelRequested
+        ? []
+        : ((await this.options.promptContext?.({
+            ...this.context(),
+            prompt: message,
+            turnId: active.turnId,
+            kind: active.kind,
+          })) ?? []);
       if (active.cancelRequested) active.cancelled = true;
       else await this.agent.prompt([message, ...contextMessages]);
     } catch (error) {

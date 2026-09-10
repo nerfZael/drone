@@ -16,6 +16,8 @@ import type {
   TranscriptEntry,
 } from './types.js';
 import { modelMessagesFromTranscript } from './model-context.js';
+import { ActiveTranscript } from './ActiveTranscript.js';
+import { readTranscriptBackwards } from './readTranscriptBackwards.js';
 import { toolSuspensionsFromTranscript } from './tool-suspension.js';
 
 const BLIP_DATA_DIR_ENV = 'BLIP_DATA_DIR';
@@ -235,7 +237,24 @@ export class SessionStore implements SessionRepository {
   }
 
   async readModelMessages(session: BlipSessionState): Promise<AgentMessage[]> {
-    return modelMessagesFromTranscript(await this.readTranscript(session));
+    return modelMessagesFromTranscript(await this.readActiveTranscript(session));
+  }
+
+  async readActiveTranscript(session: BlipSessionState): Promise<TranscriptEntry[]> {
+    const active = new ActiveTranscript();
+    for await (const entry of readTranscriptBackwards(session.transcriptPath)) {
+      if (active.add(entry)) break;
+    }
+    return active.finish();
+  }
+
+  async readToolResult(session: BlipSessionState, callId: string) {
+    for await (const entry of readTranscriptBackwards(session.transcriptPath)) {
+      if (entry.type === 'message' && entry.message.role === 'toolResult' && entry.message.toolCallId === callId) {
+        return entry.message;
+      }
+    }
+    return undefined;
   }
 
   async fork(source: BlipSessionState, input: ForkSessionInput): Promise<BlipSessionState> {
