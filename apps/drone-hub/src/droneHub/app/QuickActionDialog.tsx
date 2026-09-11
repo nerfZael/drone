@@ -1,3 +1,5 @@
+import { requestJsonWithTimeout } from '../http';
+import { WINDOW_LAYOUT_SLOTS } from '@drone/hub-model';
 import React from 'react';
 import { Dialog } from 'radix-ui';
 import { QUICK_ACTION_ROWS, quickActionDisabledReason, type createQuickActionController } from './quick-action-menu';
@@ -11,6 +13,17 @@ const KEY_CHIP = 'inline-flex h-7 min-w-7 items-center justify-center rounded-md
 
 export function QuickActionDialog({ controller }: QuickActionDialogProps) {
   const snapshot = React.useSyncExternalStore(controller.subscribe, controller.getSnapshot, () => null);
+  React.useEffect(() => {
+    if (!snapshot) return;
+    let cancelled = false;
+    void requestJsonWithTimeout<{ presets: Record<string, unknown> }>('/api/window-layout-presets', undefined, 15_000).then(({ presets }) => {
+      if (!cancelled) controller.setLabels(Object.fromEntries(WINDOW_LAYOUT_SLOTS.flatMap(slot => [
+        [`loadLayout${slot}`, presets[slot] ? `Load slot ${slot}` : `Slot ${slot} · Empty`],
+        [`saveLayout${slot}`, presets[slot] ? `Replace slot ${slot}` : `Save slot ${slot}`],
+      ])));
+    }).catch(() => { /* Selecting a slot reports request failures with a retryable error. */ });
+    return () => { cancelled = true; };
+  }, [controller, Boolean(snapshot)]);
   const panelRef = React.useRef<HTMLDivElement>(null);
   const previousFocusRef = React.useRef<HTMLElement | null>(null);
   const previousPathRef = React.useRef<typeof snapshot>(null);
@@ -49,6 +62,7 @@ export function QuickActionDialog({ controller }: QuickActionDialogProps) {
               <button
                 type="button"
                 onClick={controller.back}
+                disabled={snapshot.busy}
                 aria-label="Back"
                 title="Back (Backspace)"
                 className="-ml-1 flex h-7 w-7 items-center justify-center rounded text-lg text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-strong)] focus-visible:outline focus-visible:outline-[var(--accent)]"
@@ -62,14 +76,18 @@ export function QuickActionDialog({ controller }: QuickActionDialogProps) {
             <button
               type="button"
               onClick={controller.close}
+              disabled={snapshot.busy}
               aria-label="Close"
               className="ml-auto rounded px-2 py-1 font-mono text-xs text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-strong)] focus-visible:outline focus-visible:outline-[var(--accent)]"
             >
               Esc
             </button>
           </div>
+          <div aria-live="polite" className="mb-2 text-sm text-[var(--muted)]">
+            {snapshot.busy ? 'Working…' : snapshot.error ? <span role="alert">{snapshot.error}</span> : current?.label === 'Save preset' ? 'Choose a slot. Saving replaces its previous preset. Floating chats are excluded.' : current?.label === 'Organize windows' ? 'Choose a slot to load, Q to save, or E to close docked windows. Agent chat and floating chats stay open.' : null}
+          </div>
           <div className="space-y-2">
-            {QUICK_ACTION_ROWS.map((row, rowIndex) => (
+            {QUICK_ACTION_ROWS.filter(row => [...row].some(key => snapshot.items.some(item => item.key === key))).map((row, rowIndex) => (
               <div key={row} className="grid gap-2" style={{ gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', marginLeft: `${rowIndex * 2.5}%` }}>
                 {[...row].map((key) => {
                   const item = snapshot.items.find((entry) => entry.key === key);
@@ -80,7 +98,7 @@ export function QuickActionDialog({ controller }: QuickActionDialogProps) {
                     <button
                       key={key}
                       type="button"
-                      disabled={Boolean(reason)}
+                      disabled={snapshot.busy || Boolean(reason)}
                       title={reason ? `${label}: ${reason}` : label}
                       aria-keyshortcuts={key.toUpperCase()}
                       onClick={() => controller.select(key)}

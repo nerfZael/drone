@@ -1,4 +1,9 @@
 import { READ_WORKSPACE_LAYOUT } from '../workspace-layout/workspace-layout-events';
+import { retainClosedSideChatWindows } from './retainClosedSideChatWindows';
+import { closeDockedWindows } from './closeDockedWindows';
+import { flushSync } from 'react-dom';
+import { captureWorkspacePreset, restoreWorkspacePreset, remapPresetFiles, assertWorkspacePresetCanRestore } from './workspace-layout-presets';
+import { registerWorkspacePresetTarget } from './workspace-preset-target';
 import { registerChatWindowLayout } from '../chat-layout/registerChatWindowLayout';
 import { UndoChatWindowLayout } from '../chat-layout/UndoChatWindowLayout';
 import React from 'react';
@@ -95,6 +100,8 @@ type DockableDroneWorkspaceProps = {
 
 export type WorkspaceFileWindow = { tabId: string; path: string; name: string };
 export type WorkspaceFileWindows = {
+  presetRootPath?: string;
+  restorePresetFiles?: (files: WorkspaceFileWindow[]) => void;
   render: (file: WorkspaceFileWindow) => React.ReactNode;
   /** Tab ids currently open in the editor state; windows for other ids close themselves. */
   openTabIds: readonly string[];
@@ -679,6 +686,9 @@ export function DockableDroneWorkspace({
   fileWindows,
 }: DockableDroneWorkspaceProps) {
   const apiRef = React.useRef<DockviewApi | null>(null);
+  const restoringPresetRef = React.useRef(false);
+  const sideChatsRef = React.useRef(sideChats);
+  sideChatsRef.current = sideChats;
   const fileWindowsRef = React.useRef(fileWindows);
   fileWindowsRef.current = fileWindows;
   const lastDetachedFileTabsRef = React.useRef<string | null>(null);
@@ -698,6 +708,7 @@ export function DockableDroneWorkspace({
   const [readyVersion, setReadyVersion] = React.useState(0);
   const disposablesRef = React.useRef<Array<{ dispose: () => void }>>([]);
   const removedPanelTimersRef = React.useRef<Map<string, number>>(new Map());
+  const workspaceLayoutRevisionRef = React.useRef(0);
   const layoutSaveTimerRef = React.useRef<number | null>(null);
   const suppressSaveRef = React.useRef(false);
   const arrangingWorkspaceRef = React.useRef(false);
@@ -827,7 +838,14 @@ export function DockableDroneWorkspace({
     const api = apiRef.current;
     const root = workspaceElementRef.current;
     if (!api || !root) return;
-    const floatingChats = sideChats.filter((chat) => chat.name !== mainChatName);
+    const state = readSideChatWorkspaceState(currentDrone.id);
+    // Selecting a closed fork as the main chat makes it available to return to
+    // a floating window through the existing main/floating action.
+    if (state.closedWindows.includes(mainChatName ?? '')) {
+      state.closedWindows = state.closedWindows.filter(name => name !== mainChatName);
+      saveSideChatWorkspaceState(currentDrone.id, { closedWindows: state.closedWindows });
+    }
+    const floatingChats = sideChats.filter((chat) => chat.name !== mainChatName && !state.closedWindows.includes(chat.name));
     const wanted = new Set(floatingChats.map((chat) => `${SIDE_CHAT_PANEL_PREFIX}${chat.name}`));
     for (const panel of api.panels) {
       if (!panel.id.startsWith(SIDE_CHAT_PANEL_PREFIX) || wanted.has(panel.id)) continue;
@@ -938,6 +956,66 @@ export function DockableDroneWorkspace({
     }
   }, [currentDrone.id]);
 
+  const changeDockedWindows = React.useCallback((action: () => void) => {
+    if (arrangingWorkspaceRef.current || restoringPresetRef.current) throw new Error('The workspace is already being arranged.');
+    const previouslySuppressed = suppressSaveRef.current;
+    workspaceLayoutRevisionRef.current++;
+    suppressSaveRef.current = true;
+    restoringPresetRef.current = true;
+    removedPanelTimersRef.current.forEach(timer => window.clearTimeout(timer));
+    removedPanelTimersRef.current.clear();
+    const finishSideChatVisibility = retainClosedSideChatWindows(currentDrone.id, apiRef.current!);
+    try { action(); } finally {
+      finishSideChatVisibility();
+      restoringPresetRef.current = false;
+      suppressSaveRef.current = previouslySuppressed;
+      updateWorkspacePanelState();
+      const active = apiRef.current?.activePanel;
+      const tab = active ? tabFromPanel(active) : null;
+      if (tab) onActiveToolTabChange?.(tab);
+      persistCurrentLayout();
+    }
+  }, [currentDrone.id, onActiveToolTabChange, persistCurrentLayout, updateWorkspacePanelState]);
+
+  React.useEffect(() => {
+    if (useMobileLayout || !apiRef.current) return;
+    return registerWorkspacePresetTarget(currentDrone.id, {
+      identity: apiRef.current,
+      // Retain editor tabs (including unsaved edits) when closing their windows.
+      closeDockedWindows: () => changeDockedWindows(() => closeDockedWindows(apiRef.current!)),
+      capture: () => {
+        const layout = captureWorkspacePreset(apiRef.current!);
+        const root = fileWindowsRef.current?.presetRootPath?.replace(/\/+$/, '');
+        for (const panel of Object.values(layout.panels)) {
+          if (panel.contentComponent !== 'file' || !panel.params) continue;
+          delete panel.params.presetRelativePath;
+          if (root && panel.params.path?.startsWith(`${root}/`)) {
+            panel.params.presetRelativePath = panel.params.path.slice(root.length + 1);
+          }
+        }
+        return layout;
+      },
+      restore: (layout) => {
+        // Validate drone-specific chat/file references before closing anything.
+        for (const panel of Object.values(layout.panels)) {
+          if (panel.contentComponent === 'sideChat' && !sideChatsRef.current.some(chat => chat.name === panel.params?.chatName)) {
+            throw new Error('This preset contains a docked fork that is not available in this drone.');
+          }
+        }
+        const fileHost = fileWindowsRef.current;
+        const restored = remapPresetFiles(layout, currentDrone.id, fileHost?.presetRootPath ?? '');
+        assertWorkspacePresetCanRestore(apiRef.current!, restored);
+        const files = Object.values(restored.panels).filter(panel => panel.contentComponent === 'file')
+          .map(panel => panel.params as WorkspaceFileWindow);
+        if (files.length && !fileHost?.restorePresetFiles) throw new Error('File windows are unavailable in this workspace.');
+        changeDockedWindows(() => {
+          if (files.length) flushSync(() => fileHost!.restorePresetFiles!(files));
+          restoreWorkspacePreset(apiRef.current!, restored);
+        });
+      },
+    });
+  }, [currentDrone.id, readyVersion, useMobileLayout, changeDockedWindows]);
+
   React.useEffect(() => {
     const align = (event: Event) => {
       if ((event as CustomEvent<{ droneId: string }>).detail?.droneId !== currentDrone.id) return;
@@ -1012,8 +1090,9 @@ export function DockableDroneWorkspace({
       const rect = root.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0 || api.width <= 0 || api.height <= 0) return;
       detail.source = { api, root, transaction(action: () => void) {
-        if (arrangingWorkspaceRef.current || pointerDownRef.current) throw new Error('WORKSPACE_LAYOUT_BUSY: finish the current drag before arranging');
+        if (arrangingWorkspaceRef.current || restoringPresetRef.current || pointerDownRef.current) throw new Error('WORKSPACE_LAYOUT_BUSY: finish the current drag before arranging');
         const previouslySuppressed = suppressSaveRef.current;
+        workspaceLayoutRevisionRef.current++;
         arrangingWorkspaceRef.current = true;
         suppressSaveRef.current = true;
         try { action(); } finally {
@@ -1049,9 +1128,10 @@ export function DockableDroneWorkspace({
       afterRebalance?.();
       return;
     }
+    const revision = workspaceLayoutRevisionRef.current;
     window.setTimeout(() => {
       const currentApi = apiRef.current;
-      if (!currentApi) return;
+      if (currentApi !== api || revision !== workspaceLayoutRevisionRef.current) return;
       suppressSaveRef.current = true;
       try {
         rebalanceGridGroupWidths(currentApi, options);
@@ -1168,7 +1248,7 @@ export function DockableDroneWorkspace({
       setReadyVersion((version) => version + 1);
 
       const layoutDisposable = event.api.onDidLayoutChange(() => {
-        if (arrangingWorkspaceRef.current) return;
+        if (arrangingWorkspaceRef.current || restoringPresetRef.current) return;
         // A slot dragged shut is removed only once the pointer is released
         // (see the pointerup effect): pulling a view out from under Dockview's
         // divider drag would break the drag still in progress.
@@ -1177,7 +1257,7 @@ export function DockableDroneWorkspace({
         schedulePersistCurrentLayout();
       });
       const activePanelDisposable = event.api.onDidActivePanelChange((panel) => {
-        if (arrangingWorkspaceRef.current || !panel) return;
+        if (arrangingWorkspaceRef.current || restoringPresetRef.current || !panel) return;
         const tab = tabFromPanel(panel);
         if (tab) onActiveToolTabChange?.(tab);
       });
@@ -1222,6 +1302,7 @@ export function DockableDroneWorkspace({
         }
       });
       const removeDisposable = event.api.onDidRemovePanel((panel) => {
+        if (restoringPresetRef.current) return;
         const panelId = panel.id;
         const pendingTimer = removedPanelTimersRef.current.get(panelId);
         if (pendingTimer !== undefined) window.clearTimeout(pendingTimer);

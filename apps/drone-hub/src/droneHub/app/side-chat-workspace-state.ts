@@ -4,6 +4,8 @@ import type { WorkspaceRect } from './side-chat-placement';
 
 type SideChatWorkspaceState = {
   previousMainChat: string;
+  /** Fork windows closed by workspace actions; the conversations remain available. */
+  closedWindows: string[];
   floatingBounds: Record<string, WorkspaceRect>;
   /** Where the user last put each floating chat, independent of the workspace size at the time. */
   floatingIntent: Record<string, WorkspaceRect>;
@@ -28,12 +30,14 @@ function storageKey(droneId: string): string {
 }
 
 export function parseSideChatWorkspaceState(raw: string | null): SideChatWorkspaceState {
-  const state: SideChatWorkspaceState = { previousMainChat: 'default', floatingBounds: {}, floatingIntent: {} };
+  const state: SideChatWorkspaceState = { previousMainChat: 'default', closedWindows: [], floatingBounds: {}, floatingIntent: {} };
   try {
     const value = JSON.parse(raw ?? 'null');
     if (typeof value?.previousMainChat === 'string' && value.previousMainChat.trim()) {
       state.previousMainChat = value.previousMainChat;
     }
+    state.closedWindows = Array.isArray(value?.closedWindows)
+      ? [...new Set<string>(value.closedWindows.filter((name: unknown) => typeof name === 'string' && name.length > 0))] : [];
     state.floatingBounds = readRects(value?.floatingBounds);
     state.floatingIntent = readRects(value?.floatingIntent);
   } catch {
@@ -67,6 +71,7 @@ export function saveSideChatWorkspaceState(droneId: string, update: Partial<Side
 export function renameSideChatWorkspaceChat(droneId: string, oldName: string, newName: string): void {
   if (oldName === newName) return;
   const state = readSideChatWorkspaceState(droneId);
+  state.closedWindows = state.closedWindows.map(name => name === oldName ? newName : name);
   if (state.previousMainChat === oldName) state.previousMainChat = newName;
   for (const field of ['floatingBounds', 'floatingIntent'] as const) {
     if (!Object.prototype.hasOwnProperty.call(state[field], oldName)) continue;
