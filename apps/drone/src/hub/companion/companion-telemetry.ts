@@ -1,3 +1,4 @@
+import { CompanionCompactionTelemetryCollector, type CompanionCompactionTelemetry } from './companion-compaction-telemetry';
 import type { BlipRuntimeEvent } from '@blip/core';
 import type { BlipContextUsage, BlipSessionTiming } from '@blip/protocol';
 
@@ -45,6 +46,7 @@ export type CompanionRunTelemetryRecord = {
     blip?: BlipSessionTiming;
     contextUsage?: BlipContextUsage;
   };
+  compactions?: CompanionCompactionTelemetry[];
   failureCategory?: string;
 };
 
@@ -219,6 +221,7 @@ const systemClock: RunClock = {
 };
 
 export class CompanionRunTelemetry {
+  private readonly compactions = new CompanionCompactionTelemetryCollector();
   private readonly phases = new Map<string, number>();
   private readonly startedEpochMs: number;
   private readonly startedMonotonicMs: number;
@@ -287,6 +290,7 @@ export class CompanionRunTelemetry {
     this.sessionId = event.sessionId || this.sessionId;
     this.turnId = event.turnId || this.turnId;
     const now = this.clock.monotonicMs();
+    this.compactions.observe(event, now);
     if (event.type === 'turn_started' && this.firstTurnStartedMonotonicMs === undefined) {
       this.firstTurnStartedMonotonicMs = now;
       return;
@@ -313,6 +317,8 @@ export class CompanionRunTelemetry {
         : status === 'completed' && this.blipStatus === 'error'
           ? 'error'
           : status;
+    this.compactions.finish(effectiveStatus === 'cancelled' ? 'cancelled'
+      : effectiveStatus === 'error' ? 'failed' : 'interrupted', this.clock.monotonicMs());
     const finishedEpochMs = this.clock.epochMs();
     const durationMs = roundedMs(this.clock.monotonicMs() - this.startedMonotonicMs);
     const firstTurnStartedMs =
@@ -341,6 +347,7 @@ export class CompanionRunTelemetry {
       ...(this.sessionId ? { sessionId: this.sessionId } : {}),
       ...(this.turnId ? { turnId: this.turnId } : {}),
       phases: Object.fromEntries(this.phases),
+      ...(this.compactions.attempts.length ? { compactions: this.compactions.attempts } : {}),
       ...(this.input.client ? { client: this.input.client } : {}),
       ...(
         firstTurnStartedMs !== undefined ||
@@ -503,6 +510,10 @@ export class CompanionTelemetryService {
         tools.set(name, values);
       }
     }
+    const compactions = runs.flatMap((run) => run.compactions ?? []);
+    const measured = compactions.flatMap((attempt) => attempt.metrics ? [attempt.metrics] : []);
+    const completed = compactions.filter((attempt) => attempt.status === 'completed');
+    const usageKeys = ['input', 'output', 'cacheRead', 'cacheWrite', 'totalTokens'] as const;
     return {
       generatedAt: new Date().toISOString(),
       sampleSize: runs.length,
@@ -518,6 +529,27 @@ export class CompanionTelemetryService {
           runs.filter((run) => run.transport === transport).length,
         ]),
       ),
+      compaction: {
+        attemptCount: compactions.length,
+        measuredAttemptCount: measured.length,
+        statusCounts: Object.fromEntries(
+          ['completed', 'skipped', 'failed', 'cancelled', 'interrupted'].map((status) => [
+            status, compactions.filter((attempt) => attempt.status === status).length,
+          ]),
+        ),
+        duration: distribution(compactions.map((attempt) => attempt.durationMs)),
+        modelDuration: distribution(measured.map((metrics) => metrics.modelDurationMs)),
+        modelCallCount: measured.reduce((sum, metrics) => sum + metrics.modelCallCount, 0),
+        modelResponseCount: measured.reduce((sum, metrics) => sum + metrics.modelResponseCount, 0),
+        incompleteModelResponseCount: measured.reduce((sum, metrics) => sum + metrics.incompleteModelResponseCount, 0),
+        reportedUsage: Object.fromEntries(usageKeys.map((key) => [
+          key, measured.reduce((sum, metrics) => sum + metrics.usage[key], 0),
+        ])),
+        fallbackCount: completed.filter((attempt) => attempt.fallbackUsed).length,
+        // These are estimated active-context sizes, not provider billing tokens.
+        tokensBefore: completed.reduce((sum, attempt) => sum + (attempt.tokensBefore ?? 0), 0),
+        tokensAfter: completed.reduce((sum, attempt) => sum + (attempt.tokensAfter ?? 0), 0),
+      },
       total: distribution(runs.map((run) => run.durationMs)),
       queueWait: distribution(runs.map((run) => run.queueWaitMs)),
       transcription: distribution(

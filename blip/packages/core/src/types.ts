@@ -74,6 +74,8 @@ export type TranscriptEntry =
       fallbackReason?: string;
       /** Omitted when emergency compaction summarizes all prior messages. */
       firstKeptEntryId?: string;
+      /** Latest user instruction retained when the boundary falls inside its turn. */
+      retainedUserEntryId?: string;
       summary: string;
       details: { readFiles: string[]; modifiedFiles: string[] };
     };

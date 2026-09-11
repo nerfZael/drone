@@ -1,3 +1,4 @@
+import type { CompanionCompactionEvent } from './companion-compaction.js';
 export const COMPANION_MAX_PROMPT_CHARS = 20_000;
 export const COMPANION_MAX_RUN_ID_CHARS = 128;
 
@@ -13,6 +14,8 @@ export const COMPANION_BROWSER_TOOL_NAMES = [
   'apply_companion_proposal_patch',
   'open_drone_chat',
   'highlight_drones',
+  'get_chat_window_layout',
+  'arrange_chat_windows',
 ] as const;
 
 export type CompanionBrowserToolName = (typeof COMPANION_BROWSER_TOOL_NAMES)[number];
@@ -66,7 +69,7 @@ export type CompanionToolActivity = {
   status: 'running' | 'completed' | 'failed';
 };
 
-export type CompanionToolActivityEvent = {
+export type CompanionToolActivityEvent = CompanionCompactionEvent & {
   type: string;
   callId?: unknown;
   tool?: unknown;

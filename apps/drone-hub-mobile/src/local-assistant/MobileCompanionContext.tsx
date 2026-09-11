@@ -1,3 +1,4 @@
+import type { CompanionCompactionActivity } from '@drone/assistant-chat';
 import React from 'react';
 import * as Crypto from 'expo-crypto';
 import { COMPANION_CAPABILITY, COMPANION_RUN_OPERATIONS, isGranted } from '@drone/device-protocol';
@@ -33,6 +34,8 @@ export type MobileCompanionEditorTarget = {
   apply(baseRevision: string, content: string): { ok: true; revision: string };
 };
 
+export type MobileCompanionProposalExecutionContext = CompanionProposalExecutionContext & { targetDeviceId: string };
+
 export type MobileCompanionWorkspaceTarget = {
   targetDeviceId: string;
   targetName: string;
@@ -46,7 +49,7 @@ export type MobileCompanionWorkspaceTarget = {
   ): { ok: true; revision: string };
   executeProposal(
     proposal: CompanionProposal,
-    context: CompanionProposalExecutionContext,
+    context: MobileCompanionProposalExecutionContext,
   ): Promise<CompanionProposalExecution>;
   openDroneChat(args: Record<string, unknown>): Promise<Record<string, unknown>>;
   highlightDrones(args: Record<string, unknown>): Record<string, unknown>;
@@ -61,6 +64,7 @@ type MobileCompanionContextValue = {
   startedAt: number | null;
   endedAt: number | null;
   activity: CompanionToolActivity[];
+  compaction: CompanionCompactionActivity | null;
   proposal: CompanionProposal | null;
   proposalExecution: CompanionProposalExecution | null;
   proposalDefaultRepoPath: string | null;
@@ -108,7 +112,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
   const proposalRevisionRef = React.useRef(0);
   const proposalExecutingRef = React.useRef(false);
   const proposalExecutionRef = React.useRef<CompanionProposalExecution | null>(null);
-  const proposalExecutionContextRef = React.useRef<CompanionProposalExecutionContext | null>(null);
+  const proposalExecutionContextRef = React.useRef<MobileCompanionProposalExecutionContext | null>(null);
   const proposalExecutionGenerationRef = React.useRef(0);
 
   const registerWorkspaceTarget = React.useCallback((target: MobileCompanionWorkspaceTarget) => {
@@ -202,7 +206,9 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       const defaultRepoPath = typeof appContext?.activeRepoPath === 'string'
         ? appContext.activeRepoPath
         : '';
-      proposalExecutionContextRef.current = { defaultRepoPath };
+      const targetDeviceId = workspaceTargetRef.current?.targetDeviceId;
+      if (!targetDeviceId) throw new Error('NO_ACTIVE_MOBILE_CONTEXT');
+      proposalExecutionContextRef.current = { defaultRepoPath, targetDeviceId };
       setProposalDefaultRepoPath(defaultRepoPath);
     }
     proposalRevisionRef.current += 1;
@@ -234,7 +240,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     const executionContext = proposalExecutionContextRef.current;
     if (!target || !current || !executionContext || current.operations.length === 0 ||
       proposalExecutingRef.current || proposalExecutionRef.current) return;
-    if (!target.reachable) {
+    if (!target.reachable || target.targetDeviceId !== executionContext.targetDeviceId) {
       const execution: CompanionProposalExecution = {
         ok: false,
         operations: current.operations.map((operation, index) => index === 0
@@ -242,7 +248,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
               id: operation.id,
               type: operation.type,
               status: 'failed',
-              error: 'TARGET_DEVICE_OFFLINE',
+              error: target.targetDeviceId !== executionContext.targetDeviceId ? 'PROPOSAL_TARGET_CHANGED' : 'TARGET_DEVICE_OFFLINE',
             }
           : { id: operation.id, type: operation.type, status: 'skipped' }),
       };
@@ -293,6 +299,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       tool: CompanionBrowserToolName,
       args: Record<string, unknown>,
     ) => {
+      if (workspaceTargetRef.current?.targetDeviceId !== expectedTargetDeviceId) throw new Error('STALE_MOBILE_CONTEXT');
       if (tool === 'read_companion_proposal') return readProposal();
       if (tool === 'apply_companion_proposal_patch') {
         return applyProposal(

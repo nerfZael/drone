@@ -1,3 +1,4 @@
+import { focusedChatWindow } from './focused-chat-window';
 const SIDE_CHAT_SELECTOR = '[data-side-chat-name]';
 const COMPOSER_SELECTOR = '[data-active-composer-id]';
 
@@ -28,7 +29,7 @@ export function routeComposerFocus(
   markEditorTarget: (id: string) => void,
 ): void {
   // Quick actions operate on the chat that was active before the menu opened.
-  if (target.closest('[data-quick-action-menu]')) return;
+  if (target.closest('[data-quick-action-menu]') || target.closest('[data-companion-surface]')) return;
   const doc = target.ownerDocument;
   const side = sideChatScopeForFocus(target);
   const hadActiveSide = Boolean(doc.querySelector('[data-side-chat-active]'));
@@ -58,7 +59,7 @@ export function routeComposerFocus(
   if (side) {
     const name = side.dataset.sideChatName;
     registry.focusWithin(() => {
-      const active = doc.querySelector<HTMLElement>('[data-side-chat-active]');
+      const active = focusedChatWindow(doc);
       if (!active || active.dataset.sideChatName !== name || active.closest('[aria-hidden="true"]')) {
         markEditorTarget('');
         return undefined;

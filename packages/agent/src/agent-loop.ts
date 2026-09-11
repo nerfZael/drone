@@ -25,6 +25,7 @@ import {
   type AgentToolSuspendedCall,
   type StreamFn,
 } from './types.js';
+import { ContextTokenTracker } from './ContextTokenTracker.js';
 import { agentToolErrorResult, executeAgentTool } from './tool-execution.js';
 
 export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;
@@ -165,6 +166,7 @@ async function runLoop(
   emit: AgentEventSink,
   streamFn?: StreamFn,
 ): Promise<void> {
+  const tokenTracker = config.beforeModelCall ? new ContextTokenTracker() : undefined;
   let firstTurn = true;
   // Check for steering messages at start (user may have typed while waiting)
   let pendingMessages: AgentMessage[] = (await config.getSteeringMessages?.()) || [];
@@ -193,7 +195,14 @@ async function runLoop(
       }
 
       // Stream assistant response
-      const message = await streamAssistantResponse(currentContext, config, signal, emit, streamFn);
+      const message = await streamAssistantResponse(
+        currentContext,
+        config,
+        signal,
+        emit,
+        tokenTracker,
+        streamFn,
+      );
       newMessages.push(message);
 
       if (message.stopReason === 'error' || message.stopReason === 'aborted') {
@@ -272,6 +281,7 @@ async function streamAssistantResponse(
   config: AgentLoopConfig,
   signal: AbortSignal | undefined,
   emit: AgentEventSink,
+  tokenTracker: ContextTokenTracker | undefined,
   streamFn?: StreamFn,
 ): Promise<AssistantMessage> {
   const streamFunction = streamFn || streamSimple;
@@ -285,11 +295,15 @@ async function streamAssistantResponse(
       if (config.transformContext) {
         transformed = await config.transformContext(transformed, signal);
       }
-      return estimateContextTokens(config.model, {
+      const request = {
         systemPrompt: context.systemPrompt,
         messages: await config.convertToLlm(transformed),
         tools: context.tools,
-      });
+      };
+      return (
+        tokenTracker?.estimate(config.model, request) ??
+        estimateContextTokens(config.model, request)
+      );
     };
     const prepared = await config.beforeModelCall?.(
       {
@@ -322,7 +336,7 @@ async function streamAssistantResponse(
     }
     const llmContext: Context = {
       systemPrompt: context.systemPrompt,
-      messages: await config.convertToLlm(transformedMessages),
+      messages: [...(await config.convertToLlm(transformedMessages))],
       tools: context.tools,
     };
     const resolvedApiKey =
@@ -330,6 +344,7 @@ async function streamAssistantResponse(
       config.apiKey;
     const response = await streamFunction(config.model, llmContext, {
       ...config,
+      ...(prepared?.maxTokens !== undefined ? { maxTokens: prepared.maxTokens } : {}),
       apiKey: resolvedApiKey,
       signal,
     });
@@ -388,6 +403,7 @@ async function streamAssistantResponse(
       continue;
     }
 
+    tokenTracker?.record(config.model, llmContext, finalMessage);
     if (addedPartial) {
       context.messages[context.messages.length - 1] = finalMessage;
     } else {

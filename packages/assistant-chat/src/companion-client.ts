@@ -1,3 +1,4 @@
+import { reduceCompanionCompaction, type CompanionCompactionActivity } from './companion-compaction.js';
 import {
   reduceCompanionToolActivity,
   type CompanionBrowserToolName,
@@ -16,6 +17,7 @@ export type CompanionClientState = {
   startedAt: number | null;
   endedAt: number | null;
   activity: CompanionToolActivity[];
+  compaction: CompanionCompactionActivity | null;
 };
 
 export type CompanionClientConnectionTelemetry = Pick<
@@ -54,6 +56,8 @@ export type CompanionBrowserToolExecutor = (
 
 export type CompanionBrowserWorkspace = {
   getAppContext(): Promise<unknown> | unknown;
+  getChatWindowLayout?(): Promise<unknown> | unknown;
+  arrangeChatWindows?(args: Record<string, unknown>): Promise<unknown> | unknown;
   readActiveComposer(): Promise<unknown> | unknown;
   applyComposer(
     targetId: string,
@@ -84,6 +88,7 @@ const INITIAL_STATE: CompanionClientState = {
   startedAt: null,
   endedAt: null,
   activity: [],
+  compaction: null,
 };
 
 export class CompanionClientController {
@@ -156,6 +161,7 @@ export class CompanionClientController {
       startedAt: this.now(),
       endedAt: null,
       activity: [],
+      compaction: null,
     });
 
     try {
@@ -257,7 +263,11 @@ export class CompanionClientController {
     if (message.type === 'tool_call') {
       void this.executeTool(session, message);
     } else if (message.type === 'activity') {
-      this.update({ activity: reduceCompanionToolActivity(this.state.activity, message.event) });
+      this.update({
+        activity: reduceCompanionToolActivity(this.state.activity, message.event),
+        compaction: this.state.status === 'working'
+          ? reduceCompanionCompaction(this.state.compaction, message.event) : this.state.compaction,
+      });
     } else if (message.type === 'reply') {
       this.update({ reply: String(message.reply ?? '') });
     } else if (message.type === 'status' && message.status === 'completed') {
@@ -337,6 +347,14 @@ export class CompanionClientController {
   }
 
   private update(next: Partial<CompanionClientState>): void {
+    const compaction = next.compaction === undefined ? this.state.compaction : next.compaction;
+    if (compaction?.status === 'running' && next.status &&
+      ['completed', 'cancelled', 'error'].includes(next.status)) {
+      next = { ...next, compaction: {
+        status: next.status === 'cancelled' ? 'cancelled'
+          : next.status === 'error' ? 'failed' : 'interrupted',
+      } };
+    }
     this.replace({ ...this.state, ...next });
   }
 
@@ -373,6 +391,11 @@ export async function executeCompanionBrowserTool(
     );
   }
   if (tool === 'open_drone_chat') return await workspace.openDroneChat(args);
+  if (tool === 'get_chat_window_layout') return workspace.getChatWindowLayout ? await workspace.getChatWindowLayout() : { supported: false };
+  if (tool === 'arrange_chat_windows') {
+    if (!workspace.arrangeChatWindows) throw new Error('CHAT_LAYOUT_UNSUPPORTED');
+    return await workspace.arrangeChatWindows(args);
+  }
   if (tool === 'highlight_drones') return await workspace.highlightDrones(args);
   throw new Error(`Unsupported Companion browser tool: ${tool}`);
 }

@@ -103,6 +103,15 @@ function modelMessagesFromTranscript(entries: TranscriptEntry[]): AgentMessage[]
       timestamp: Date.parse(compaction.createdAt) || Date.now(),
     },
   ];
+  if (compaction.retainedUserEntryId) {
+    const pinnedIndex = entries.findIndex((entry) => entry.id === compaction.retainedUserEntryId);
+    const pinned = pinnedIndex < compactionIndex ? entries[pinnedIndex] : undefined;
+    if (pinned?.type !== 'message' || pinned.message.role !== 'user') {
+      return entries.flatMap((entry) => entry.type === 'message' ? [entry.message] : []);
+    }
+    const boundaryIndex = entries.findIndex((entry) => entry.id === compaction.firstKeptEntryId);
+    if (boundaryIndex < 0 || pinnedIndex < boundaryIndex) messages.push(pinned.message);
+  }
   if (!compaction.firstKeptEntryId) {
     return [
       ...messages,
@@ -178,6 +187,15 @@ export class HubSessionRepository implements SessionRepository {
       );
       CREATE INDEX IF NOT EXISTS assistant_blip_entries_session_sequence
         ON assistant_blip_entries(session_id, sequence);
+      CREATE INDEX IF NOT EXISTS assistant_blip_entries_checkpoints
+        ON assistant_blip_entries(session_id, sequence)
+        WHERE json_extract(entry_json, '$.type') = 'compaction';
+      CREATE INDEX IF NOT EXISTS assistant_blip_entries_context
+        ON assistant_blip_entries(session_id, sequence)
+        WHERE json_extract(entry_json, '$.type') IN ('message', 'compaction');
+      CREATE INDEX IF NOT EXISTS assistant_blip_entries_context_ids
+        ON assistant_blip_entries(session_id, json_extract(entry_json, '$.id'))
+        WHERE json_extract(entry_json, '$.type') IN ('message', 'compaction');
       CREATE TABLE IF NOT EXISTS assistant_blip_thread_bindings (
         thread_id TEXT PRIMARY KEY,
         session_id TEXT NOT NULL UNIQUE,
@@ -459,7 +477,83 @@ export class HubSessionRepository implements SessionRepository {
   }
 
   async readModelMessages(session: BlipSessionState): Promise<AgentMessage[]> {
-    return modelMessagesFromTranscript(await this.readTranscript(session));
+    return modelMessagesFromTranscript(await this.readActiveTranscript(session));
+  }
+
+  async readActiveTranscript(session: BlipSessionState): Promise<TranscriptEntry[]> {
+    this.db.exec('SAVEPOINT blip_active_context');
+    try {
+      // No cached checkpoint can survive a transcript edit, fork, or rollback.
+      const latest = this.db.prepare(`
+        SELECT sequence, entry_json FROM assistant_blip_entries
+        WHERE session_id = ? AND json_extract(entry_json, '$.type') = 'compaction'
+        ORDER BY sequence DESC LIMIT 1
+      `).get(session.id) as { sequence: number; entry_json: string } | undefined;
+      let start = 0;
+      let boundaryId: string | undefined;
+      let pinned: TranscriptEntry | undefined;
+      if (latest) {
+        const checkpoint = JSON.parse(latest.entry_json) as Extract<TranscriptEntry, { type: 'compaction' }>;
+        if (checkpoint.firstKeptEntryId) {
+          const boundary = (this.db.prepare(`
+            SELECT sequence FROM assistant_blip_entries
+            WHERE session_id = ? AND sequence < ? AND json_extract(entry_json, '$.id') = ?
+              AND json_extract(entry_json, '$.type') IN ('message', 'compaction')
+            ORDER BY sequence DESC LIMIT 1
+          `).get(session.id, latest.sequence, checkpoint.firstKeptEntryId) ?? this.db.prepare(`
+            SELECT sequence FROM assistant_blip_entries
+            WHERE session_id = ? AND sequence < ? AND json_extract(entry_json, '$.id') = ?
+            ORDER BY sequence DESC LIMIT 1
+          `).get(session.id, latest.sequence, checkpoint.firstKeptEntryId)) as { sequence: number } | undefined;
+          if (boundary) {
+            start = boundary.sequence;
+            boundaryId = checkpoint.firstKeptEntryId;
+          } else {
+            return this.readTranscript(session);
+          }
+        } else {
+          start = latest.sequence;
+        }
+        if (checkpoint.retainedUserEntryId) {
+          const row = this.db.prepare(`
+            SELECT entry_json FROM assistant_blip_entries
+            WHERE session_id = ? AND json_extract(entry_json, '$.type') IN ('message', 'compaction')
+              AND json_extract(entry_json, '$.id') = ? AND sequence < ? ORDER BY sequence LIMIT 1
+          `).get(session.id, checkpoint.retainedUserEntryId, latest.sequence) as { entry_json: string } | undefined;
+          pinned = row ? JSON.parse(row.entry_json) as TranscriptEntry : undefined;
+          if (pinned?.type !== 'message' || pinned.message.role !== 'user') return this.readTranscript(session);
+        }
+      }
+      const rows = this.db.prepare(`
+        SELECT entry_json FROM assistant_blip_entries
+        WHERE session_id = ? AND sequence >= ?
+          AND json_extract(entry_json, '$.type') IN ('message', 'compaction')
+        ORDER BY sequence
+      `).all(session.id, start) as Array<{ entry_json: string }>;
+      const entries = rows.map((row) => JSON.parse(row.entry_json) as TranscriptEntry);
+      // Legacy checkpoints may name a non-message entry. Preserve that boundary marker.
+      if (boundaryId && entries[0]?.id !== boundaryId) {
+        const row = this.db.prepare('SELECT entry_json FROM assistant_blip_entries WHERE session_id = ? AND sequence = ?')
+          .get(session.id, start) as { entry_json: string };
+        entries.unshift(JSON.parse(row.entry_json));
+      }
+      if (pinned && !entries.some((entry) => entry.id === pinned.id)) entries.unshift(pinned);
+      return entries;
+    } finally {
+      this.db.exec('RELEASE blip_active_context');
+    }
+  }
+
+  async readToolResult(session: BlipSessionState, callId: string) {
+    const row = this.db.prepare(`
+      SELECT entry_json FROM assistant_blip_entries
+      WHERE session_id = ? AND json_extract(entry_json, '$.type') IN ('message', 'compaction')
+        AND json_extract(entry_json, '$.message.role') = 'toolResult'
+        AND json_extract(entry_json, '$.message.toolCallId') = ?
+      ORDER BY sequence DESC LIMIT 1
+    `).get(session.id, callId) as { entry_json: string } | undefined;
+    return row ? (JSON.parse(row.entry_json) as Extract<TranscriptEntry, { type: 'message' }>).message as
+      Extract<AgentMessage, { role: 'toolResult' }> : undefined;
   }
 
   async fork(source: BlipSessionState, input: ForkSessionInput, checkpointId?: string): Promise<BlipSessionState> {

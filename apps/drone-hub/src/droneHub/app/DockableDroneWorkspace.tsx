@@ -1,3 +1,5 @@
+import { registerChatWindowLayout } from '../chat-layout/registerChatWindowLayout';
+import { UndoChatWindowLayout } from '../chat-layout/UndoChatWindowLayout';
 import React from 'react';
 import { IconTrash } from './icons';
 import { ChatWindowTab, usePanelTitle } from './ChatWindowTab';
@@ -557,7 +559,7 @@ function WorkspaceTab(props: IDockviewPanelHeaderProps) {
   }, [onRenameSideChat, props.containerApi, props.api.id, chatName, ctx.droneId]);
 
   if (sideChat) {
-    return <ChatWindowTab {...props} data-side-chat-name={chatName} chatName={chatName} droneId={ctx.droneId}
+    return <ChatWindowTab {...props} data-side-chat-name={chatName} data-chat-drone-id={ctx.droneId} data-chat-name={chatName} chatName={chatName} droneId={ctx.droneId}
       onRename={onRenameSideChat ? rename : undefined} onPointerDown={handlePointerDown} />;
   }
   if (!closeable) return <MainChatTab {...props} />;
@@ -985,6 +987,21 @@ export function DockableDroneWorkspace({
     };
   }, [persistCurrentLayout]);
 
+  React.useEffect(() => registerChatWindowLayout({
+    workspaceId: currentDrone.id, api: () => apiRef.current, root: () => workspaceElementRef.current,
+    available: () => !isMobileViewport,
+    identity: (id) => id.startsWith(SIDE_CHAT_PANEL_PREFIX)
+      ? { droneId: currentDrone.id, chatName: id.slice(SIDE_CHAT_PANEL_PREFIX.length), kind: 'side_chat' } : null,
+    layer: 0,
+    persist: (id, bounds) => {
+      floatingWindows.set(id, bounds);
+      const panel = apiRef.current?.getPanel(id);
+      if (panel) prepareSideChatPanel(panel);
+      saveSideChatWorkspaceState(currentDrone.id, { floatingBounds: { [id.slice(SIDE_CHAT_PANEL_PREFIX.length)]: bounds } });
+      persistCurrentLayout();
+    },
+  }), [currentDrone.id, isMobileViewport, persistCurrentLayout, floatingWindows]);
+
   const schedulePersistCurrentLayout = React.useCallback(() => {
     if (layoutSaveTimerRef.current !== null) window.clearTimeout(layoutSaveTimerRef.current);
     layoutSaveTimerRef.current = window.setTimeout(() => {
@@ -1362,11 +1379,12 @@ export function DockableDroneWorkspace({
       ) : (
         <div
           ref={workspaceElementRef}
-          className={`flex-1 min-h-0 min-w-0 overflow-hidden dh-dockable-workspace ${
+          className={`relative flex-1 min-h-0 min-w-0 overflow-hidden dh-dockable-workspace ${
             paneHeaderMode === 'compact' ? 'dh-dockable-workspace--compact-headers' : ''
           } ${workspacePanelCount <= 1 ? 'dh-dockable-workspace--single-panel' : ''}`}
           onMouseDownCapture={handleWorkspaceMouseDownCapture}
         >
+          <UndoChatWindowLayout workspaceId={currentDrone.id} />
           <DockviewReact
             className="dockview-theme-dark dh-dockview"
             components={components}
