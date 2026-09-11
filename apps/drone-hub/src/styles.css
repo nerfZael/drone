@@ -3121,6 +3121,11 @@ select:disabled optgroup {
   background: var(--hover);
 }
 
+/* An empty slot is a deliberate gap: it reads as workspace background, not as a window. */
+.dh-dockable-workspace .dv-groupview:has([data-workspace-empty-slot]) {
+  background: var(--panel);
+}
+
 /* Only the docked group hides its tab bar; floating side chats keep their own headers. */
 .dh-dockable-workspace--single-panel .dv-grid-view .dv-tabs-and-actions-container {
   display: none;

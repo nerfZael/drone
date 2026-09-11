@@ -1,5 +1,6 @@
 import React from 'react';
 import { FileTypeIcon } from './FileTypeIcon';
+import { setFileTabDragPayload } from '../app/file-tab-drag';
 import type { DroneOpenedFileTabState } from './opened-file-types';
 
 type OpenedDroneFileTabsProps = {
@@ -70,7 +71,7 @@ export function OpenedDroneFileTabs({
   if (normalizedTabs.length === 0 && !trailingActions && !fullScreenAction) return null;
 
   return (
-    <div className="flex h-9 items-stretch border-b border-[var(--border-subtle)] bg-[var(--panel-alt)]">
+    <div className="flex h-9 items-stretch border-b border-[var(--border-subtle)] bg-[var(--panel-alt)]" data-file-tab-strip="">
       <div className="flex h-9 min-w-0 flex-1 items-stretch overflow-x-auto" role="tablist" aria-label="Open files">
         {normalizedTabs.map((tab) => {
           const active = tab.tabId === activeTabId;
@@ -91,6 +92,13 @@ export function OpenedDroneFileTabs({
                 setDraggingTabId(tab.tabId);
                 event.dataTransfer.effectAllowed = 'move';
                 event.dataTransfer.setData('text/plain', tab.tabId);
+                // Dropping the tab on the workspace grid opens it in its own window.
+                setFileTabDragPayload(event.dataTransfer, {
+                  droneId: tab.droneId,
+                  tabId: tab.tabId,
+                  path: tab.path ?? '',
+                  name: displayName,
+                });
               }}
               onDragEnd={() => setDraggingTabId(null)}
               onMouseDown={(event) => {

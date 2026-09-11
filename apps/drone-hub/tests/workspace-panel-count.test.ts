@@ -12,6 +12,11 @@ describe('workspace panel count', () => {
     expect(workspaceGridPanelCount([])).toBe(0);
   });
 
+  test('an empty slot occupies the grid, so the lone chat keeps its tab bar next to it', () => {
+    expect(workspaceGridPanelCount([group('grid', 1), group('grid', 0)])).toBe(2);
+    expect(workspaceGridPanelCount([group('grid', 0), group('floating', 1)])).toBe(1);
+  });
+
   test('the single-panel tab bar rule is scoped to the docked grid', () => {
     const styles = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
     expect(styles).toContain('.dh-dockable-workspace--single-panel .dv-grid-view .dv-tabs-and-actions-container');

@@ -524,6 +524,7 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     visibleToolTabs,
     onVisibleToolTabsChange,
     renderRightPanelTabContent,
+    fileWindows,
     renderPersistentPreviewContent,
     renameCanvasChat,
   } = args;
@@ -781,6 +782,7 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
           visibleToolTabs,
           onVisibleToolTabsChange,
           renderRightPanelTabContent,
+          fileWindows,
         }
       : null,
   };

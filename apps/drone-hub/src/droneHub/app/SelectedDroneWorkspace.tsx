@@ -71,6 +71,7 @@ import {
   DockableDroneWorkspace,
   readWorkspacePaneHeaderMode,
   writeWorkspacePaneHeaderMode,
+  type WorkspaceFileWindows,
   type WorkspacePaneHeaderMode,
 } from './DockableDroneWorkspace';
 import { DroneWorkspaceHeaderFrame } from './DroneWorkspaceHeaderFrame';
@@ -546,6 +547,8 @@ type SelectedDroneWorkspaceProps = {
     tab: RightPanelTab,
     pane: 'single' | 'top' | 'bottom',
   ) => React.ReactNode;
+  /** Files shown in their own workspace windows after being dragged out of the editor. */
+  fileWindows?: WorkspaceFileWindows;
   onPersistentPreviewHostChange?: (state: {
     style: React.CSSProperties;
     activeDroneId: string | null;
@@ -666,6 +669,7 @@ export function SelectedDroneWorkspace({
   visibleToolTabs,
   onVisibleToolTabsChange,
   renderRightPanelTabContent,
+  fileWindows,
   onPersistentPreviewHostChange,
 }: SelectedDroneWorkspaceProps) {
   const {
@@ -2405,6 +2409,7 @@ export function SelectedDroneWorkspace({
         activeToolTab={rightPanelTab}
         openRequestNonce={rightPanelOpenRequestSeq}
         renderToolPane={(tab, paneKey) => renderRightPanelTabContent(currentDrone, tab, paneKey)}
+        fileWindows={fileWindows}
         previewTab="preview"
         onActiveToolTabChange={setRightPanelTab}
         onVisibleToolTabsChange={onVisibleToolTabsChange}

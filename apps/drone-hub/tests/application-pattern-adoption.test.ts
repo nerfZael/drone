@@ -10,7 +10,7 @@ const productionSurfaces = [
   {
     name: 'Dockable workspace chrome',
     path: '../src/droneHub/app/DockableDroneWorkspace.tsx',
-    components: ['UiPaneState', 'UiPanel', 'UiPanelToolbar', 'UiToolbarSegmentedControl'],
+    components: ['UiPanel', 'UiPanelToolbar', 'UiToolbarSegmentedControl'],
   },
   {
     name: 'Changes',

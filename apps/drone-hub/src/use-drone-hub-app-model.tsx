@@ -51,6 +51,9 @@ import type { DroneDeleteConfirmModalDrone } from './droneHub/app/DroneDeleteCon
 import type { DroneHubOverlaysProps } from './droneHub/app/DroneHubOverlays';
 import type { DroneHubWorkspaceContentProps } from './droneHub/app/DroneHubWorkspaceContent';
 import { RightPanelTabContent } from './droneHub/app/RightPanelTabContent';
+import { DetachedFileWindow } from './droneHub/files/DetachedFileWindow';
+import { focusFilePanel } from './droneHub/app/file-tab-drag';
+import type { WorkspaceFileWindows } from './droneHub/app/DockableDroneWorkspace';
 import { dispatchFleetAssignmentUpdated } from './droneHub/app/fleet-assignment-events';
 import { assignFleetTargets } from './droneHub/fleet/fleet-api';
 import {
@@ -2744,6 +2747,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [],
   );
+  // Tabs dragged out of the editor into their own workspace windows.
+  const [detachedFileTabIds, setDetachedFileTabIds] = React.useState<string[]>([]);
+  const focusDetachedFileWindow = React.useCallback(
+    (tabId: string) => { focusFilePanel(String(currentDrone?.id ?? '').trim(), tabId); },
+    [currentDrone?.id],
+  );
   const {
     openedFile: openedEditorFile,
     loading: openedEditorFileLoading,
@@ -2787,12 +2796,23 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     reloadOpenedFileFromDisk,
     overwriteOpenedFile,
     saveOpenedFile,
+    setFileTabContent,
+    reloadFileTabFromDisk,
+    overwriteFileTab,
+    saveFileTab,
     appendAndSaveFileDictationLine,
   } = useFileEditorState({
     currentDrone,
     requestJson,
     onRefreshFsList: refreshFsList,
+    hostedTabIds: detachedFileTabIds,
+    onHostedTabActivated: focusDetachedFileWindow,
   });
+  const editorStripFileTabs = React.useMemo(() => {
+    if (detachedFileTabIds.length === 0) return openedEditorFileTabs;
+    const detached = new Set(detachedFileTabIds);
+    return openedEditorFileTabs.filter((tab) => !detached.has(tab.tabId));
+  }, [detachedFileTabIds, openedEditorFileTabs]);
   const startupSeedForCurrentDrone = currentDrone
     ? (startupSeedByDrone[currentDrone.id] ?? null)
     : null;
@@ -5188,6 +5208,59 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     return createCanvasChatNodeId(droneId, chatName);
   }, [selectedChat, selectedDrone]);
 
+  const openedEditorFileTabsRef = React.useRef(openedEditorFileTabs);
+  openedEditorFileTabsRef.current = openedEditorFileTabs;
+  const handleDetachedFileTabsChange = React.useCallback((tabIds: string[]) => {
+    setDetachedFileTabIds((current) =>
+      current.length === tabIds.length && current.every((id, index) => id === tabIds[index]) ? current : tabIds,
+    );
+  }, []);
+  const handleFileWindowClosed = React.useCallback((tabId: string) => {
+    const tab = openedEditorFileTabsRef.current.find((entry) => entry.tabId === tabId);
+    // Unsaved work goes back to the editor's tab strip instead of being lost.
+    if (tab && !tab.dirty) closeEditorFile(tabId);
+  }, [closeEditorFile]);
+  const renderFileWindow = React.useCallback(
+    (file: { tabId: string; path: string; name: string }): React.ReactNode => {
+      const tab = openedEditorFileTabs.find((entry) => entry.tabId === file.tabId);
+      if (!tab || !currentDrone) return null;
+      return (
+        <DetachedFileWindow
+          droneId={tab.droneId}
+          droneName={currentDrone.name}
+          file={tab}
+          onFileContentChange={(next) => setFileTabContent(tab.tabId, next)}
+          onSaveFile={(content) => saveFileTab(tab.tabId, content)}
+          onReloadFromDisk={() => reloadFileTabFromDisk(tab.tabId)}
+          onOverwriteFile={() => overwriteFileTab(tab.tabId)}
+          onCloseFile={() => closeEditorFile(tab.tabId)}
+          onOpenResolvedFile={openFileInFilesPane}
+          onAppendFileDictationLine={appendAndSaveFileDictationLine}
+          onOpenFileDictationTarget={openFileDictationTarget}
+        />
+      );
+    },
+    [
+      appendAndSaveFileDictationLine,
+      closeEditorFile,
+      currentDrone,
+      openFileDictationTarget,
+      openFileInFilesPane,
+      openedEditorFileTabs,
+      overwriteFileTab,
+      reloadFileTabFromDisk,
+      saveFileTab,
+      setFileTabContent,
+    ],
+  );
+  const fileWindows = React.useMemo<WorkspaceFileWindows>(() => ({
+    render: renderFileWindow,
+    openTabIds: openedEditorFileTabs.map((tab) => tab.tabId),
+    dirtyTabIds: openedEditorFileTabs.filter((tab) => tab.dirty).map((tab) => tab.tabId),
+    onDetachedTabsChange: handleDetachedFileTabsChange,
+    onClosed: handleFileWindowClosed,
+  }), [handleDetachedFileTabsChange, handleFileWindowClosed, openedEditorFileTabs, renderFileWindow]);
+
   const renderRightPanelTabContent = React.useCallback(
     (drone: DroneSummary, tab: RightPanelTab, paneKey: PreviewPaneKey): React.ReactNode => {
       const terminalKey = terminalPaneStateKey(drone.id, paneKey);
@@ -5354,7 +5427,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
               if (location) revealEditorLocationFromRoot(location.path);
             },
           }}
-          openedFileTabs={openedEditorFileTabs}
+          openedFileTabs={editorStripFileTabs}
           activeOpenedFileTabId={activeOpenedFileTabId}
           onOpenedEditorFileContentChange={setOpenedFileContent}
           onSaveOpenedEditorFile={saveOpenedFile}
@@ -5885,6 +5958,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     visibleToolTabs,
     onVisibleToolTabsChange: handleVisibleToolTabsChange,
     renderRightPanelTabContent,
+    fileWindows,
     renderPersistentPreviewContent,
   });
 

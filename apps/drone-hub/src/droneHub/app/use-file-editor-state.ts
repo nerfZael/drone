@@ -56,7 +56,13 @@ type UseFileEditorStateArgs = {
   currentDrone: DroneSummary | null;
   requestJson: RequestJson;
   onRefreshFsList: () => void;
+  /** Tabs shown in their own workspace windows instead of the editor's tab strip. */
+  hostedTabIds?: readonly string[];
+  /** A hosted tab was made active (e.g. opened again); the host should focus its window. */
+  onHostedTabActivated?: (tabId: string) => void;
 };
+
+type LoadSession = { droneId: string; path: string; cancel: () => void };
 
 function rememberedEditorFilesFromTabState(
   stateByDroneId: Record<string, OpenedFileTabsState>,
@@ -178,6 +184,8 @@ export function useFileEditorState({
   currentDrone,
   requestJson,
   onRefreshFsList,
+  hostedTabIds,
+  onHostedTabActivated,
 }: UseFileEditorStateArgs) {
   const currentDroneId = String(currentDrone?.id ?? '').trim();
   const [tabStateByDroneId, setTabStateByDroneId] = React.useState<Record<string, OpenedFileTabsState>>(
@@ -195,7 +203,6 @@ export function useFileEditorState({
   const contentRef = React.useRef('');
   const activeTabIdRef = React.useRef<string | null>(null);
   const tabsRef = React.useRef<OpenedFileTab[]>(tabs);
-  const requestSeqRef = React.useRef(0);
   const initialFileReadRef = React.useRef<{ droneId: string; path: string; read: InitialFileRead } | null>(null);
   const liveReloadSeqByTabRef = React.useRef(new Map<string, number>());
   const navigationSeqRef = React.useRef(0);
@@ -262,6 +269,20 @@ export function useFileEditorState({
     [activeTabId, tabs],
   );
   tabsRef.current = tabs;
+  const hostedTabIdsKey = (hostedTabIds ?? []).join('\u0000');
+  // Tabs that need live file data: the editor's active tab plus every tab
+  // hosted in its own window.
+  const liveTabs = React.useMemo(() => {
+    const hosted = new Set(hostedTabIdsKey ? hostedTabIdsKey.split('\u0000') : []);
+    const result: OpenedFileTab[] = [];
+    if (activeTab && !hosted.has(activeTab.tabId)) result.push(activeTab);
+    for (const tab of tabs) if (hosted.has(tab.tabId)) result.push(tab);
+    return result;
+  }, [activeTab, hostedTabIdsKey, tabs]);
+  const liveTabsRef = React.useRef(liveTabs);
+  liveTabsRef.current = liveTabs;
+  const onHostedTabActivatedRef = React.useRef(onHostedTabActivated);
+  onHostedTabActivatedRef.current = onHostedTabActivated;
   React.useEffect(() => {
     if (!activeTab?.loaded) return;
     const id = desktopWorkspaceLoads.find('file-open', { droneId: activeTab.droneId, path: activeTab.path });
@@ -277,6 +298,22 @@ export function useFileEditorState({
   const updateTabs = React.useCallback((updater: (tabs: OpenedFileTab[]) => OpenedFileTab[]) => {
     setTabState((prev) => ({ ...prev, tabs: updater(prev.tabs) }));
   }, [setTabState]);
+
+  // A hosted tab lives in its own window, so the editor strip cannot show it
+  // as active: hand focus to that window and activate a neighbouring tab.
+  React.useEffect(() => {
+    if (!activeTabId || !hostedTabIdsKey) return;
+    const hosted = new Set(hostedTabIdsKey.split('\u0000'));
+    if (!hosted.has(activeTabId)) return;
+    onHostedTabActivatedRef.current?.(activeTabId);
+    setTabState((prev) => {
+      if (!prev.activeTabId || !hosted.has(prev.activeTabId)) return prev;
+      const index = prev.tabs.findIndex((tab) => tab.tabId === prev.activeTabId);
+      const fallback = [...prev.tabs.slice(index + 1), ...prev.tabs.slice(0, Math.max(0, index)).reverse()]
+        .find((tab) => !hosted.has(tab.tabId));
+      return { ...prev, activeTabId: fallback?.tabId ?? null };
+    });
+  }, [activeTabId, hostedTabIdsKey, setTabState]);
 
   const closeEditorFile = React.useCallback((tabId?: string | null) => {
     const requestedTabId = String(tabId ?? activeTabId ?? '').trim();
@@ -511,17 +548,16 @@ export function useFileEditorState({
     };
   }, [currentDrone?.id, quickOpenOpen, quickOpenQuery, requestJson]);
 
-  React.useEffect(() => {
-    if (!activeTab) return;
-    if (activeTab.loaded || activeTab.loading) return;
-    const activeId = activeTab.tabId;
-    const droneId = String(activeTab.droneId ?? '').trim();
-    const filePath = String(activeTab.path ?? '');
-    if (!droneId || !filePath) return;
+  const loadSessionsRef = React.useRef(new Map<string, LoadSession>());
+  const loadSeqByTabRef = React.useRef(new Map<string, number>());
+  const startTabLoad = React.useCallback((tabToLoad: OpenedFileTab): LoadSession => {
+    const activeId = tabToLoad.tabId;
+    const droneId = String(tabToLoad.droneId ?? '').trim();
+    const filePath = String(tabToLoad.path ?? '');
     if (!desktopWorkspaceLoads.find('file-open', { droneId, path: filePath }))
       beginDesktopWorkspaceLoad('file-open', droneId, filePath);
-    const seq = requestSeqRef.current + 1;
-    requestSeqRef.current = seq;
+    const seq = (loadSeqByTabRef.current.get(activeId) ?? 0) + 1;
+    loadSeqByTabRef.current.set(activeId, seq);
 
     updateTabs((prevTabs) =>
       prevTabs.map((tab) =>
@@ -545,9 +581,21 @@ export function useFileEditorState({
       ),
     );
     setOpenFailure(null);
-    contentRef.current = '';
+    if (activeTabIdRef.current === activeId) contentRef.current = '';
 
     let cancelled = false;
+    const session: LoadSession = {
+      droneId,
+      path: filePath,
+      cancel: () => {
+        cancelled = true;
+        updateTabs((prevTabs) =>
+          prevTabs.map((tab) =>
+            tab.tabId === activeId && tab.loading && !tab.loaded ? { ...tab, loading: false } : tab,
+          ),
+        );
+      },
+    };
     const prepared = initialFileReadRef.current;
     initialFileReadRef.current = null;
     const read = prepared?.droneId === droneId && prepared.path === filePath
@@ -555,7 +603,7 @@ export function useFileEditorState({
       : readDesktopFile(requestJson, droneId, filePath);
     void read
       .then((data) => {
-        if (cancelled || requestSeqRef.current !== seq) return;
+        if (cancelled || loadSeqByTabRef.current.get(activeId) !== seq) return;
         const diagnosticId = desktopWorkspaceLoads.find('file-open', { droneId, path: filePath });
         desktopWorkspaceLoads.mark(diagnosticId, 'dataApplied');
         desktopWorkspaceLoads.mark(diagnosticId, 'fileBytes', Number(data.size) || 0);
@@ -585,7 +633,7 @@ export function useFileEditorState({
         const shouldRetryFallback =
           Boolean(fallbackPath) && fallbackPath !== filePath && looksLikeFileNotFound(firstMsg);
         if (!shouldRetryFallback) {
-          if (cancelled || requestSeqRef.current !== seq) return;
+          if (cancelled || loadSeqByTabRef.current.get(activeId) !== seq) return;
           const tooLarge = Number(e?.status ?? 0) === 413 ? parseFileTooLargeMessage(firstMsg) : null;
           const tooLargeKind = tooLarge ? oversizedFileKindForPath(filePath) : null;
           updateTabs((prevTabs) =>
@@ -630,7 +678,7 @@ export function useFileEditorState({
 
         void readDesktopFile(requestJson, droneId, fallbackPath)
           .then((data) => {
-            if (cancelled || requestSeqRef.current !== seq) return;
+            if (cancelled || loadSeqByTabRef.current.get(activeId) !== seq) return;
             desktopWorkspaceLoads.retarget(desktopWorkspaceLoads.find('file-open', { droneId, path: filePath }), data.path);
             const nextLoadedState = readPayloadToTabState(data);
             updateTabs((prevTabs) =>
@@ -652,7 +700,7 @@ export function useFileEditorState({
             setOpenFailure(null);
           })
           .catch((fallbackErr: any) => {
-            if (cancelled || requestSeqRef.current !== seq) return;
+            if (cancelled || loadSeqByTabRef.current.get(activeId) !== seq) return;
             const msg = fallbackErr?.message ?? firstMsg;
             const tooLarge = Number(fallbackErr?.status ?? 0) === 413 ? parseFileTooLargeMessage(msg) : null;
             const tooLargeKind = tooLarge ? oversizedFileKindForPath(fallbackPath) : null;
@@ -696,34 +744,38 @@ export function useFileEditorState({
           });
       })
       .finally(() => {
-        if (cancelled || requestSeqRef.current !== seq) return;
+        if (loadSessionsRef.current.get(activeId) === session) loadSessionsRef.current.delete(activeId);
+        if (cancelled || loadSeqByTabRef.current.get(activeId) !== seq) return;
         updateTabs((prevTabs) => prevTabs.map((tab) => (tab.tabId === activeId ? { ...tab, loading: false } : tab)));
       });
 
-    return () => {
-      cancelled = true;
-      updateTabs((prevTabs) =>
-        prevTabs.map((tab) =>
-          tab.tabId === activeId && tab.loading && !tab.loaded ? { ...tab, loading: false } : tab,
-        ),
-      );
-    };
-  }, [
-    activeTab?.droneId,
-    activeTab?.loaded,
-    activeTab?.path,
-    activeTab?.refreshNonce,
-    activeTab?.tabId,
-    requestJson,
-    updateTabs,
-  ]);
+    return session;
+  }, [requestJson, updateTabs]);
 
   React.useEffect(() => {
-    if (!activeTab?.loaded || !activeTab.droneId || !activeTab.path) return;
-    if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') return;
-    const tabId = activeTab.tabId;
+    const sessions = loadSessionsRef.current;
+    const live = new Map(liveTabs.map((tab) => [tab.tabId, tab]));
+    for (const [tabId, session] of [...sessions]) {
+      const tab = live.get(tabId);
+      if (tab && tab.droneId === session.droneId && tab.path === session.path) continue;
+      session.cancel();
+      sessions.delete(tabId);
+    }
+    for (const tab of liveTabs) {
+      if (tab.loaded || tab.loading || sessions.has(tab.tabId)) continue;
+      if (!String(tab.droneId ?? '').trim() || !String(tab.path ?? '')) continue;
+      sessions.set(tab.tabId, startTabLoad(tab));
+    }
+  }, [liveTabs, startTabLoad]);
+  React.useEffect(() => () => {
+    for (const session of loadSessionsRef.current.values()) session.cancel();
+    loadSessionsRef.current.clear();
+  }, []);
+
+  const openTabWatch = React.useCallback((watchedTab: OpenedFileTab): (() => void) => {
+    const tabId = watchedTab.tabId;
     const source = new window.EventSource(
-      `/api/drones/${encodeURIComponent(activeTab.droneId)}/fs/file-events?path=${encodeURIComponent(activeTab.path)}`,
+      `/api/drones/${encodeURIComponent(watchedTab.droneId)}/fs/file-events?path=${encodeURIComponent(watchedTab.path)}`,
     );
     let retryTimer: number | null = null;
     const onRevision = (event: MessageEvent) => {
@@ -842,14 +894,35 @@ export function useFileEditorState({
       if (retryTimer != null) window.clearTimeout(retryTimer);
       source.close();
     };
-  }, [
-    activeTab?.droneId,
-    activeTab?.loaded,
-    activeTab?.path,
-    activeTab?.tabId,
-    requestJson,
-    updateTabs,
-  ]);
+  }, [requestJson, updateTabs]);
+
+  const watchKey = liveTabs
+    .filter((tab) => tab.loaded && tab.droneId && tab.path)
+    .map((tab) => `${tab.tabId}\u0001${tab.droneId}\u0001${tab.path}`)
+    .join('\u0000');
+  const watchSessionsRef = React.useRef(new Map<string, { key: string; dispose: () => void }>());
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') return;
+    const wanted = new Map(
+      (watchKey ? watchKey.split('\u0000') : []).map((entry) => [entry.split('\u0001')[0], entry] as const),
+    );
+    const sessions = watchSessionsRef.current;
+    for (const [tabId, session] of [...sessions]) {
+      if (wanted.get(tabId) === session.key) continue;
+      session.dispose();
+      sessions.delete(tabId);
+    }
+    for (const [tabId, key] of wanted) {
+      if (sessions.has(tabId)) continue;
+      const tab = liveTabsRef.current.find((entry) => entry.tabId === tabId);
+      if (!tab) continue;
+      sessions.set(tabId, { key, dispose: openTabWatch(tab) });
+    }
+  }, [openTabWatch, watchKey]);
+  React.useEffect(() => () => {
+    for (const session of watchSessionsRef.current.values()) session.dispose();
+    watchSessionsRef.current.clear();
+  }, []);
 
   const openedFile = activeTab
     ? {
@@ -912,14 +985,26 @@ export function useFileEditorState({
     setTabState((prev) => reorderFileTabs(prev, fromTabId, toTabId));
   }, [setTabState]);
 
-  const saveOpenedFile = React.useCallback(async (
+  const findTab = React.useCallback(
+    (tabIdRaw: string): OpenedFileTab | null => {
+      const tabId = String(tabIdRaw ?? '').trim();
+      return (tabId && tabsRef.current.find((tab) => tab.tabId === tabId)) || null;
+    },
+    [],
+  );
+
+  const saveFileTab = React.useCallback(async (
+    tabIdRaw: string,
     contentOverride?: string,
     expectedRevisionOverride?: string | null,
   ): Promise<boolean> => {
-    if (!activeTab || activeTab.loading || activeTab.saving) return false;
-    if (activeTab.kind !== 'text') return false;
-    const tabId = activeTab.tabId;
-    const textToSave = typeof contentOverride === 'string' ? contentOverride : contentRef.current;
+    const targetTab = findTab(tabIdRaw);
+    if (!targetTab || targetTab.loading || targetTab.saving) return false;
+    if (targetTab.kind !== 'text') return false;
+    const tabId = targetTab.tabId;
+    const textToSave = typeof contentOverride === 'string'
+      ? contentOverride
+      : activeTabIdRef.current === tabId ? contentRef.current : targetTab.content;
     if (typeof contentOverride === 'string') {
       contentRef.current = contentOverride;
       updateTabs((prevTabs) => updateFileTabContent(prevTabs, tabId, contentOverride));
@@ -927,14 +1012,14 @@ export function useFileEditorState({
     updateTabs((prevTabs) => prevTabs.map((tab) => (tab.tabId === tabId ? { ...tab, saving: true, error: null } : tab)));
     try {
       const resp = await requestJson<Extract<DroneFsWritePayload, { ok: true }>>(
-        `/api/drones/${encodeURIComponent(activeTab.droneId)}/fs/file`,
+        `/api/drones/${encodeURIComponent(targetTab.droneId)}/fs/file`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            path: activeTab.path,
+            path: targetTab.path,
             content: textToSave,
-            expectedRevision: expectedRevisionOverride ?? activeTab.revision,
+            expectedRevision: expectedRevisionOverride ?? targetTab.revision,
           }),
         },
       );
@@ -979,7 +1064,13 @@ export function useFileEditorState({
       );
       return false;
     }
-  }, [activeTab, onRefreshFsList, requestJson, updateTabs]);
+  }, [findTab, onRefreshFsList, requestJson, updateTabs]);
+
+  const saveOpenedFile = React.useCallback(
+    (contentOverride?: string, expectedRevisionOverride?: string | null): Promise<boolean> =>
+      activeTab ? saveFileTab(activeTab.tabId, contentOverride, expectedRevisionOverride) : Promise.resolve(false),
+    [activeTab, saveFileTab],
+  );
 
   const appendAndSaveFileDictationLine = React.useCallback(
     async (input: { droneId: string; path: string; line: string }): Promise<boolean> => {
@@ -1102,27 +1193,40 @@ export function useFileEditorState({
     [currentDroneId, onRefreshFsList, requestJson, setTabStateForDrone],
   );
 
-  const overwriteOpenedFile = React.useCallback(
-    async (): Promise<boolean> => {
-      if (!activeTab?.externalRevision || activeTab.externalRevision === 'deleted') return false;
-      return await saveOpenedFile(undefined, activeTab.externalRevision);
+  const overwriteFileTab = React.useCallback(
+    async (tabIdRaw: string): Promise<boolean> => {
+      const targetTab = findTab(tabIdRaw);
+      if (!targetTab?.externalRevision || targetTab.externalRevision === 'deleted') return false;
+      return await saveFileTab(targetTab.tabId, undefined, targetTab.externalRevision);
     },
-    [activeTab?.externalRevision, saveOpenedFile],
+    [findTab, saveFileTab],
   );
 
-  const setOpenedFileContent = React.useCallback((next: string) => {
-    if (!activeTab || activeTab.kind !== 'text') return;
-    const nextText = typeof next === 'string' ? next : '';
-    contentRef.current = nextText;
-    updateTabs((prevTabs) => updateFileTabContent(prevTabs, activeTab.tabId, nextText));
-  }, [activeTab, updateTabs]);
+  const overwriteOpenedFile = React.useCallback(
+    (): Promise<boolean> => (activeTab ? overwriteFileTab(activeTab.tabId) : Promise.resolve(false)),
+    [activeTab, overwriteFileTab],
+  );
 
-  const refreshOpenedFile = React.useCallback(() => {
-    if (!activeTab || activeTab.loading || activeTab.saving) return;
-    if (activeTab.kind === 'text' && activeTab.content !== activeTab.savedContent) return;
+  const setFileTabContent = React.useCallback((tabIdRaw: string, next: string) => {
+    const targetTab = findTab(tabIdRaw);
+    if (!targetTab || targetTab.kind !== 'text') return;
+    const nextText = typeof next === 'string' ? next : '';
+    if (activeTabIdRef.current === targetTab.tabId) contentRef.current = nextText;
+    updateTabs((prevTabs) => updateFileTabContent(prevTabs, targetTab.tabId, nextText));
+  }, [findTab, updateTabs]);
+
+  const setOpenedFileContent = React.useCallback((next: string) => {
+    if (!activeTab) return;
+    setFileTabContent(activeTab.tabId, next);
+  }, [activeTab, setFileTabContent]);
+
+  const refreshFileTab = React.useCallback((tabIdRaw: string) => {
+    const targetTab = findTab(tabIdRaw);
+    if (!targetTab || targetTab.loading || targetTab.saving) return;
+    if (targetTab.kind === 'text' && targetTab.content !== targetTab.savedContent) return;
     updateTabs((prevTabs) =>
       prevTabs.map((tab) =>
-        tab.tabId === activeTab.tabId
+        tab.tabId === targetTab.tabId
           ? {
               ...tab,
               loaded: false,
@@ -1133,13 +1237,18 @@ export function useFileEditorState({
           : tab,
       ),
     );
-  }, [activeTab, updateTabs]);
+  }, [findTab, updateTabs]);
 
-  const reloadOpenedFileFromDisk = React.useCallback(() => {
-    if (!activeTab || activeTab.loading || activeTab.saving) return;
+  const refreshOpenedFile = React.useCallback(() => {
+    if (activeTab) refreshFileTab(activeTab.tabId);
+  }, [activeTab, refreshFileTab]);
+
+  const reloadFileTabFromDisk = React.useCallback((tabIdRaw: string) => {
+    const targetTab = findTab(tabIdRaw);
+    if (!targetTab || targetTab.loading || targetTab.saving) return;
     updateTabs((prevTabs) =>
       prevTabs.map((tab) =>
-        tab.tabId === activeTab.tabId
+        tab.tabId === targetTab.tabId
           ? {
               ...tab,
               loaded: false,
@@ -1151,7 +1260,11 @@ export function useFileEditorState({
           : tab,
       ),
     );
-  }, [activeTab, updateTabs]);
+  }, [findTab, updateTabs]);
+
+  const reloadOpenedFileFromDisk = React.useCallback(() => {
+    if (activeTab) reloadFileTabFromDisk(activeTab.tabId);
+  }, [activeTab, reloadFileTabFromDisk]);
 
   const confirmCloseOpenedFileTabsForPaths = React.useCallback((paths: string[], actionLabel = 'This action'): boolean => {
     const dirtyTabs = dirtyFileTabsForPaths(tabs, paths);
@@ -1223,6 +1336,11 @@ export function useFileEditorState({
     reloadOpenedFileFromDisk,
     overwriteOpenedFile,
     saveOpenedFile,
+    setFileTabContent,
+    refreshFileTab,
+    reloadFileTabFromDisk,
+    overwriteFileTab,
+    saveFileTab,
     appendAndSaveFileDictationLine,
   };
 }

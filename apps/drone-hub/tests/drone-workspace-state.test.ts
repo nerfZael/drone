@@ -46,11 +46,13 @@ const {
 const {
   resetWorkspaceToChat,
   rebalanceGridGroupWidths,
+  isChatOnlyGrid,
   sizeWorkspaceOpenedFromChat,
   ensureWorkspaceToolPanel,
   migrateEditorChangesPanels,
   refreshWorkspacePanelTitles,
   restoreRequiredWorkspacePanels,
+  syncEmptyWorkspaceSlots,
 } = await import('../src/droneHub/app/DockableDroneWorkspace');
 const {
   readWorkspaceExplorerWidth,
@@ -192,6 +194,25 @@ describe('per-drone workspace state', () => {
     expect(added[0].initialWidth).toBe(1200);
   });
 
+  test('floating forked chats do not shrink the first tool opened next to the chat', () => {
+    const added: any[] = [];
+    const floating = { api: { group: { api: { location: { type: 'floating' } } } } };
+    const api = {
+      width: 1800,
+      panels: [
+        { id: 'agent-chat', api: { group: { api: { location: { type: 'grid' } } } } },
+        { id: 'side-chat:fork-a', ...floating },
+        { id: 'side-chat:fork-b', ...floating },
+      ],
+      groups: [{ panels: [{ id: 'agent-chat' }], width: 1800, api: { location: { type: 'grid' } } }],
+      getPanel: () => undefined,
+      addPanel: (panel: unknown) => added.push(panel),
+    };
+    expect(isChatOnlyGrid(api as any)).toBe(true);
+    ensureWorkspaceToolPanel(api as any, 'terminal', 'single');
+    expect(added[0].initialWidth).toBe(1200);
+  });
+
   function sizingWorkspace(panelIds: string[][], widths: number[]) {
     const calls: Array<{ ids: string[]; width: number }> = [];
     const groups = panelIds.map((ids, index) => ({
@@ -239,6 +260,17 @@ describe('per-drone workspace state', () => {
     expect(calls).toEqual([
       { ids: ['agent-chat'], width: 780 },
       { ids: ['tool:editor'], width: 780 },
+      { ids: ['file-explorer'], width: 240 },
+    ]);
+  });
+
+  test('closing the editor restores the explorer width measured before Dockview stretched it', () => {
+    // After the editor group is removed Dockview hands its space to the
+    // explorer, so the live width is already inflated when rebalancing runs.
+    const { api, calls } = sizingWorkspace([['agent-chat'], ['file-explorer']], [600, 1200]);
+    rebalanceGridGroupWidths(api, { explorerWidth: 240 });
+    expect(calls).toEqual([
+      { ids: ['agent-chat'], width: 1560 },
       { ids: ['file-explorer'], width: 240 },
     ]);
   });
@@ -396,13 +428,60 @@ describe('per-drone workspace state', () => {
 
     restoreRequiredWorkspacePanels(api as unknown as Parameters<typeof restoreRequiredWorkspacePanels>[0]);
 
-    expect(removedGroups).toEqual([emptyGroup]);
+    // Empty slots are deliberate layout gaps and survive a reload.
+    expect(removedGroups).toEqual([]);
     expect(addedPanels).toHaveLength(1);
     expect(addedPanels[0]).toMatchObject({
       id: 'agent-chat',
       component: 'chat',
       position: { direction: 'left', referencePanel: 'tool:editor' },
     });
+  });
+
+  test('empty slots lose their chrome and minimum size, and vanish once dragged shut', () => {
+    const removed: unknown[] = [];
+    const makeGroup = (panels: number, width: number, height: number, type = 'grid') => {
+      const constraints: unknown[] = [];
+      return {
+        panels: Array(panels).fill({ id: 'p' }),
+        width,
+        height,
+        header: { hidden: false },
+        constraints,
+        api: { location: { type }, setConstraints: (value: unknown) => constraints.push(value) },
+      };
+    };
+    const emptySlot = makeGroup(0, 600, 900);
+    const collapsed = makeGroup(0, 8, 900);
+    const occupied = makeGroup(1, 600, 900);
+    const floatingEmpty = makeGroup(0, 300, 300, 'floating');
+    const api = {
+      width: 1800,
+      height: 900,
+      groups: [emptySlot, collapsed, occupied, floatingEmpty] as unknown[],
+      removeGroup: (group: unknown) => {
+        removed.push(group);
+        api.groups = api.groups.filter((entry) => entry !== group);
+      },
+    };
+
+    // While a divider is being dragged the collapsed slot only loses its chrome.
+    expect(syncEmptyWorkspaceSlots(api as any, { removeCollapsed: false })).toBe(false);
+    expect(removed).toEqual([]);
+    expect(collapsed.header.hidden).toBe(true);
+    expect(syncEmptyWorkspaceSlots(api as any)).toBe(true);
+    expect(removed).toEqual([collapsed]);
+    expect(emptySlot.header.hidden).toBe(true);
+    expect(emptySlot.constraints).toEqual([{ minimumWidth: 0, minimumHeight: 0 }]);
+    expect(occupied.header.hidden).toBe(false);
+    expect(occupied.constraints).toEqual([]);
+    expect(floatingEmpty.header.hidden).toBe(false);
+
+    // A pane dropped into the slot brings its header and minimum size back.
+    emptySlot.panels.push({ id: 'tool:editor' });
+    expect(syncEmptyWorkspaceSlots(api as any)).toBe(false);
+    expect(emptySlot.header.hidden).toBe(false);
+    expect(emptySlot.constraints.at(-1)).toEqual({ minimumWidth: 100, minimumHeight: 100 });
   });
 
   test('replaces stale titles restored from saved workspace layouts', () => {
@@ -447,7 +526,7 @@ describe('per-drone workspace state', () => {
     expect(removalHandler).toContain('const timer = window.setTimeout(() => {');
     expect(removalHandler).toContain('if (api.getPanel(panelId)) return;');
     expect(removalHandler.indexOf('if (api.getPanel(panelId)) return;')).toBeLessThan(
-      removalHandler.indexOf('rebalanceWorkspaceGridGroups(onAfterToolPanelRemove);'),
+      removalHandler.indexOf('rebalanceWorkspaceGridGroups(onAfterToolPanelRemove, { explorerWidth });'),
     );
   });
 
