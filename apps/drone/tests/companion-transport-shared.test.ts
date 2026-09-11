@@ -78,3 +78,19 @@ describe('Companion browser tool broker', () => {
     expect(String(bounded.result).length).toBeLessThan(21_000);
   });
 });
+
+
+test('compaction activity exposes only status and valid estimated sizes', () => {
+  const privateFields = { summary: 'private summary', fallbackReason: 'private provider error', metrics: { secret: true } };
+  expect(boundedCompanionActivityEvent({ type: 'compaction_started', reason: 'private', ...privateFields }))
+    .toEqual({ type: 'compaction_started' });
+  expect(boundedCompanionActivityEvent({ type: 'compaction_skipped', reason: 'private', ...privateFields }))
+    .toEqual({ type: 'compaction_skipped' });
+  expect(boundedCompanionActivityEvent({ type: 'compaction_completed', tokensBefore: 5000, tokensAfter: 1000, fallbackUsed: true, ...privateFields }))
+    .toEqual({ type: 'compaction_completed', tokensBefore: 5000, tokensAfter: 1000, fallbackUsed: true });
+  expect(boundedCompanionActivityEvent({ type: 'compaction_failed', reason: 'cancelled', ...privateFields }))
+    .toEqual({ type: 'compaction_failed', reason: 'cancelled' });
+  const invalid = boundedCompanionActivityEvent({ type: 'compaction_completed', tokensBefore: Infinity, tokensAfter: -1 });
+  expect(invalid.tokensBefore).toBeUndefined();
+  expect(invalid.tokensAfter).toBeUndefined();
+});

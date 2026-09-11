@@ -2,6 +2,7 @@ import { useRecorderCompanion } from '../dictation/RecorderCompanionContext';
 import React from 'react';
 import {
   companionToolActivityLabel,
+  companionCompactionLabel,
   groupCompanionToolActivity,
   type CompanionStatus,
 } from '@drone/assistant-chat';
@@ -364,6 +365,17 @@ export function CompanionOverlay() {
               <ChatMessageBody role="assistant" text={companion.reply} autoExpand />
             </div>
           ) : null}
+        </div>
+      ) : null}
+
+      {companion.compaction ? (
+        <div role="status" aria-live="polite" className={`flex shrink-0 items-center gap-2 border-t border-[var(--border-subtle)] px-3.5 py-2 text-[11px] ${
+          companion.compaction.status === 'failed' ? 'text-[var(--red)]' : 'text-[var(--muted)]'
+        }`}>
+          {companion.compaction.status === 'running' ? (
+            <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[var(--accent)] motion-reduce:animate-none" />
+          ) : null}
+          {companionCompactionLabel(companion.compaction)}
         </div>
       ) : null}
 

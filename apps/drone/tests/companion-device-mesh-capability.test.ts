@@ -41,6 +41,8 @@ describe('Companion device mesh capability', () => {
           tool: 'get_app_context',
           args: {},
         });
+        input.onEvent({ type: 'compaction_started', reason: 'auto' });
+        input.onEvent({ type: 'compaction_completed', tokensBefore: 5000, tokensAfter: 1000 });
         const appContext = await input.callBrowser('get_app_context', {});
         input.onEvent({
           type: 'tool_call_completed',
@@ -86,7 +88,13 @@ describe('Companion device mesh capability', () => {
         expect.objectContaining({ type: 'status', status: 'completed' }),
       ]),
     );
-    expect(events.filter((event) => event.type === 'activity')).toHaveLength(2);
+    expect(events.filter((event) => event.type === 'activity')).toHaveLength(4);
+    expect(events.filter((event) => event.type === 'activity').map((event) => event.event)).toEqual(
+      expect.arrayContaining([
+        { type: 'compaction_started' },
+        { type: 'compaction_completed', tokensBefore: 5000, tokensAfter: 1000, fallbackUsed: false },
+      ]),
+    );
   });
 
   test('cancels and removes a run when its phone closes the overlay', async () => {

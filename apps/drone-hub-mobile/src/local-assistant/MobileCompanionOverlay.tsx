@@ -3,6 +3,7 @@ import {
   companionProposalOperationLabel,
   companionProposalOperationDetails,
   companionToolActivityLabel,
+  companionCompactionLabel,
   groupCompanionToolActivity,
 } from '@drone/assistant-chat';
 import {
@@ -269,6 +270,17 @@ export function MobileCompanionOverlay() {
               <View style={styles.transcriptBubble}>
                 <Text style={styles.transcriptText}>{companion.transcript}</Text>
               </View>
+            </View>
+          ) : null}
+
+          {companion.compaction ? (
+            <View style={styles.toolHeader} accessibilityLiveRegion="polite">
+              {companion.compaction.status === 'running' ? (
+                <ActivityIndicator color={colors.accent} size="small" />
+              ) : null}
+              <Text style={[styles.toolName, companion.compaction.status === 'failed' && { color: colors.danger }]}>
+                {companionCompactionLabel(companion.compaction)}
+              </Text>
             </View>
           ) : null}
 

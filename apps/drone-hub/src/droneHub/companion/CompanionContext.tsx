@@ -1,3 +1,4 @@
+import type { CompanionCompactionActivity } from '@drone/assistant-chat';
 import React from 'react';
 import { useRecorderCompanion } from '../dictation/RecorderCompanionContext';
 import {
@@ -51,6 +52,7 @@ type CompanionContextValue = {
   startedAt: number | null;
   endedAt: number | null;
   activity: CompanionToolActivity[];
+  compaction: CompanionCompactionActivity | null;
   proposal: CompanionProposal | null;
   proposalExecution: CompanionProposalExecution | null;
   proposalExecutionProgress: CompanionProposalExecutionProgress | null;

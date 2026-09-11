@@ -63,6 +63,8 @@ export interface BeforeModelCallContext {
 }
 
 export interface BeforeModelCallResult {
+  /** Output allowance forwarded to providers that support maxTokens. */
+  maxTokens?: number;
   /** Replacement model context, typically reconstructed from a durable compaction boundary. */
   messages?: AgentMessage[];
   /** When true, replacement messages become the agent's canonical in-memory context. */

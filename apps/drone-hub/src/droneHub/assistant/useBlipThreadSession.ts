@@ -228,7 +228,7 @@ export function useBlipThreadSession({
         setCompactionInProgress(true);
         return;
       }
-      if (event.type === 'compaction_skipped') {
+      if (event.type === 'compaction_skipped' || event.type === 'compaction_failed') {
         setCompactionInProgress(false);
         return;
       }

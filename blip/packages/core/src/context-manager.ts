@@ -1,3 +1,4 @@
+import { CompactionEventObserver } from './CompactionEventObserver.js';
 import type {
   AgentMessage,
   AgentTool,
@@ -6,17 +7,26 @@ import type {
   StreamFn,
   ThinkingLevel,
 } from '@mariozechner/pi-agent-core/portable';
-import { estimateContextTokens, type Model } from '@mariozechner/pi-ai/agent-core';
 import {
-  createCompaction,
-  DEFAULT_COMPACTION_SETTINGS,
-  type CompactionSettings,
-} from './compaction.js';
+  estimateContextTokens,
+  type ContextTokenEstimate,
+  type Model,
+  type Message,
+} from '@mariozechner/pi-ai/agent-core';
+import { createCompaction, prepareCompaction, type CompactionSettings } from './compaction.js';
+import { compactionBudget, resolveCompactionSettings } from './compaction-settings.js';
 import { modelMessagesFromTranscript } from './model-context.js';
+import { readActiveTranscript } from './readActiveTranscript.js';
 import { createPortableId } from './platform.js';
 import type { SessionRepository } from './session-repository.js';
-import type { BlipContextUsage, BlipRuntimeEvent, BlipSessionState } from './types.js';
+import type {
+  BlipContextUsage,
+  BlipRuntimeEvent,
+  BlipSessionState,
+  TranscriptEntry,
+} from './types.js';
 
+type Estimate = (messages: AgentMessage[]) => Promise<ContextTokenEstimate>;
 type ContextManagerOptions = {
   state: BlipSessionState;
   repository: SessionRepository;
@@ -29,39 +39,20 @@ type ContextManagerOptions = {
   activeTurnId: () => string | undefined;
   systemPrompt: () => string;
   tools: () => AgentTool<any>[];
+  transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
+  convertToLlm?: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
   replaceAgentMessages: (messages: AgentMessage[]) => void;
 };
 
-function nowIso(): string {
-  return new Date().toISOString();
-}
-
-function eventBase(
-  sessionId: string,
-  turnId?: string,
-): Pick<BlipRuntimeEvent, 'version' | 'eventId' | 'sessionId' | 'timestamp'> & {
-  turnId?: string;
-} {
-  return {
-    version: 1,
-    eventId: createPortableId(),
-    sessionId,
-    timestamp: nowIso(),
-    ...(turnId ? { turnId } : {}),
-  };
-}
-
-/**
- * Owns durable model-context management for one Blip session.
- *
- * The generic agent loop decides when preflight runs. This class decides when
- * Blip must compact, persists the selected boundary, and exposes request-level
- * accounting without coupling those concerns to the session lifecycle.
- */
+/** One planning, validation, cancellation, and persistence path for every trigger. */
 export class BlipContextManager {
   private abortController?: AbortController;
 
-  constructor(private readonly options: ContextManagerOptions) {}
+  private readonly observer: CompactionEventObserver;
+
+  constructor(private readonly options: ContextManagerOptions) {
+    this.observer = new CompactionEventObserver(options.emit);
+  }
 
   abort(): void {
     this.abortController?.abort();
@@ -71,59 +62,55 @@ export class BlipContextManager {
     context: BeforeModelCallContext,
     signal?: AbortSignal,
   ): Promise<BeforeModelCallResult | undefined> {
-    const settings = this.options.settings ?? DEFAULT_COMPACTION_SETTINGS;
-    const estimate = await context.estimate();
-    const contextWindow = this.options.model.contextWindow;
-    if (!contextWindow || contextWindow <= 0) return undefined;
-    const hardLimit = Math.max(1, contextWindow - settings.reserveTokens);
-    if (context.reason === 'preflight' && (!settings.auto || estimate.inputTokens <= hardLimit)) {
+    const settings = resolveCompactionSettings(this.options.settings);
+    if (!Number.isFinite(this.options.model.contextWindow) || this.options.model.contextWindow <= 0)
       return undefined;
-    }
-
-    const replacement = await this.compactForModelCall(context, settings, signal);
-    if (!replacement) {
-      if (context.reason === 'overflow') {
-        throw new Error('Model context overflowed, but no safe compaction boundary was available');
-      }
-      return undefined;
-    }
+    const budget = compactionBudget(this.options.model, settings);
+    const before = await context.estimate();
+    if (
+      context.reason === 'preflight' &&
+      (!settings.auto || before.inputTokens <= budget.hardLimit)
+    )
+      return { maxTokens: budget.outputTokens };
+    const messages = await this.runCompaction({
+      settings,
+      reason: context.reason === 'overflow' ? 'context_overflow' : 'auto',
+      estimate: context.estimate,
+      before,
+      signal,
+    });
+    if (!messages)
+      throw new Error(
+        'Compaction could not produce a smaller context within the model budget. Reduce the request, tools, or reserved output.',
+      );
     return {
-      messages: replacement,
+      messages,
+      maxTokens: budget.outputTokens,
       replaceContext: true,
       reason: context.reason === 'overflow' ? 'context overflow recovery' : 'automatic compaction',
     };
   }
 
-  async compact(settings?: CompactionSettings): Promise<void> {
-    if (this.abortController) throw new Error('Blip session is already compacting');
-    const abortController = new AbortController();
-    this.abortController = abortController;
-    try {
-      await this.performManualCompaction(
-        settings ?? this.options.settings ?? DEFAULT_COMPACTION_SETTINGS,
-        abortController.signal,
-      );
-    } catch (error) {
-      if (abortController.signal.aborted) {
-        throw Object.assign(new Error('Compaction was aborted'), {
-          name: 'AbortError',
-          cause: error,
-        });
-      }
-      throw error;
-    } finally {
-      if (this.abortController === abortController) this.abortController = undefined;
-    }
+  async compact(
+    settings?: CompactionSettings,
+    signal?: AbortSignal,
+    trigger: 'manual' | 'auto' = 'manual',
+  ): Promise<void> {
+    const messages = await this.runCompaction({
+      settings: resolveCompactionSettings(settings ?? this.options.settings),
+      reason: trigger,
+      estimate: (messages) => this.estimate(messages, signal),
+      signal,
+    });
+    if (messages) this.options.replaceAgentMessages(messages);
   }
 
   async contextUsage(): Promise<BlipContextUsage | undefined> {
     const contextWindow = this.options.model.contextWindow;
-    if (!contextWindow || contextWindow <= 0) return undefined;
-    const estimate = estimateContextTokens(this.options.model, {
-      systemPrompt: this.options.systemPrompt(),
-      messages: await this.options.repository.readModelMessages(this.options.state),
-      tools: this.options.tools(),
-    });
+    if (!Number.isFinite(contextWindow) || contextWindow <= 0) return undefined;
+    const estimate = await this.estimate(
+      await this.options.repository.readModelMessages(this.options.state),
+    );
     return {
       tokens: estimate.inputTokens,
       contextWindow,
@@ -139,108 +126,185 @@ export class BlipContextManager {
     };
   }
 
-  private async compactForModelCall(
-    context: BeforeModelCallContext,
-    settings: CompactionSettings,
+  private async estimate(
+    messages: AgentMessage[],
     signal?: AbortSignal,
-  ): Promise<AgentMessage[] | undefined> {
-    if (this.abortController) throw new Error('Blip session is already compacting');
-    const abortController = new AbortController();
-    const abort = () => abortController.abort();
-    signal?.addEventListener('abort', abort, { once: true });
-    this.abortController = abortController;
-    try {
-      const entries = await this.options.repository.readTranscript(this.options.state);
-      const turnId = this.options.activeTurnId() ?? `t_${createPortableId().slice(0, 8)}`;
-      await this.options.emit({
-        ...eventBase(this.options.state.id, turnId),
-        type: 'compaction_started',
-        reason: context.reason === 'overflow' ? 'context_overflow' : 'auto',
-      });
-      const apiKey = await this.options.getApiKey?.(this.options.model.provider);
-      let emergencyUsed = false;
-      let compaction = await createCompaction({
-        session: this.options.state,
-        entries,
-        trigger: 'auto',
-        settings,
-        model: this.options.model,
-        reasoning: this.options.reasoning,
-        apiKey,
-        streamFn: this.options.streamFn,
-        onUsage: async (response) => {
-          await this.options.emit({
-            ...eventBase(this.options.state.id, this.options.activeTurnId()),
-            type: 'usage_observed', purpose: 'compaction', model: response.model, provider: response.provider,
-            complete: response.stopReason !== 'error' && response.stopReason !== 'aborted', usage: response.usage,
-          });
-        },
-        signal: abortController.signal,
-      });
-      if (!compaction) {
-        compaction = await this.createEmergencyCompaction(
-          entries,
-          settings,
-          apiKey,
-          abortController.signal,
+  ): Promise<ContextTokenEstimate> {
+    const transformed = this.options.transformContext
+      ? await this.options.transformContext(messages, signal)
+      : messages;
+    const converted = this.options.convertToLlm
+      ? await this.options.convertToLlm(transformed)
+      : transformed.filter((message): message is Message =>
+          ['user', 'assistant', 'toolResult'].includes(message.role),
         );
-        emergencyUsed = compaction !== undefined;
-        if (!compaction) {
-          await this.options.emit({
-            ...eventBase(this.options.state.id, turnId),
+    return estimateContextTokens(this.options.model, {
+      systemPrompt: this.options.systemPrompt(),
+      messages: converted,
+      tools: this.options.tools(),
+    });
+  }
+
+  private async runCompaction(input: {
+    settings: Required<CompactionSettings>;
+    reason: 'manual' | 'auto' | 'context_overflow';
+    estimate: Estimate;
+    before?: ContextTokenEstimate;
+    signal?: AbortSignal;
+  }): Promise<AgentMessage[] | undefined> {
+    if (this.abortController) throw new Error('Blip session is already compacting');
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    input.signal?.addEventListener('abort', abort, { once: true });
+    if (input.signal?.aborted) abort();
+    this.abortController = controller;
+    const base = {
+      version: 1 as const,
+      sessionId: this.options.state.id,
+      turnId: this.options.activeTurnId() ?? `t_${createPortableId().slice(0, 8)}`,
+    };
+    const emit = (
+      event: Omit<
+        Extract<BlipRuntimeEvent, { type: 'compaction_skipped' }>,
+        keyof typeof base | 'timestamp' | 'eventId'
+      >,
+    ) =>
+      this.observer.emit({
+        ...base,
+        timestamp: new Date().toISOString(),
+        eventId: createPortableId(),
+        ...event,
+      });
+    try {
+      controller.signal.throwIfAborted();
+      await this.observer.emit({
+        ...base,
+        timestamp: new Date().toISOString(),
+        eventId: createPortableId(),
+        type: 'compaction_started',
+        reason: input.reason,
+      });
+      const entries = await readActiveTranscript(this.options.repository, this.options.state);
+      const before = input.before ?? (await input.estimate(modelMessagesFromTranscript(entries)));
+      const budget = compactionBudget(this.options.model, input.settings);
+      const overhead = await input.estimate([]);
+      const settings = { ...input.settings, summaryMaxTokens: budget.summaryTokens };
+      let tailBudget = Math.max(
+        0,
+        Math.min(
+          settings.keepRecentTokens,
+          budget.targetLimit - overhead.inputTokens - budget.summaryTokens - 32,
+        ),
+      );
+      let plan = prepareCompaction({ session: this.options.state, entries, settings, tailBudget });
+      if (!plan) {
+        await emit({ type: 'compaction_skipped', reason: 'nothing to compact at a safe boundary' });
+        return undefined;
+      }
+      // Test the retained context with space reserved for the summary BEFORE the
+      // model call. Replanning here costs no model calls, even for a long turn.
+      const candidateFor = (summary: string) =>
+        modelMessagesFromTranscript([
+          ...entries,
+          {
+            type: 'compaction',
+            id: 'preview',
+            createdAt: new Date().toISOString(),
+            trigger: 'auto',
+            firstKeptEntryId: plan!.firstKeptEntryId,
+            retainedUserEntryId: plan!.retainedUserEntryId,
+            summary,
+            tokensBefore: before.inputTokens,
+            details: plan!.details,
+          },
+        ]);
+      let retained = await input.estimate(candidateFor(''));
+      if (retained.inputTokens + budget.summaryTokens > budget.hardLimit && tailBudget > 0) {
+        tailBudget = 0;
+        plan = prepareCompaction({ session: this.options.state, entries, settings, tailBudget });
+        if (!plan) {
+          await emit({
             type: 'compaction_skipped',
-            reason: 'nothing to compact yet',
+            reason: 'no complete tool boundary fits the model budget',
           });
           return undefined;
         }
+        retained = await input.estimate(candidateFor(''));
       }
-
-      const before = await context.estimate();
-      let candidate = modelMessagesFromTranscript([...entries, compaction]);
-      let after = await context.estimate(candidate);
-      const hardLimit = Math.max(1, this.options.model.contextWindow - settings.reserveTokens);
-      let materiallySmaller = after.inputTokens < before.inputTokens;
-      let safe = after.inputTokens <= hardLimit;
-      if ((!materiallySmaller || !safe) && !emergencyUsed) {
-        const emergency = await this.createEmergencyCompaction(
-          entries,
-          settings,
-          apiKey,
-          abortController.signal,
-        );
-        if (emergency) {
-          const emergencyCandidate = modelMessagesFromTranscript([...entries, emergency]);
-          const emergencyEstimate = await context.estimate(emergencyCandidate);
-          if (
-            emergencyEstimate.inputTokens < before.inputTokens &&
-            emergencyEstimate.inputTokens <= hardLimit
-          ) {
-            compaction = emergency;
-            candidate = emergencyCandidate;
-            after = emergencyEstimate;
-            materiallySmaller = true;
-            safe = true;
-          }
-        }
-      }
-      if (!materiallySmaller || !safe) {
-        const reason = !materiallySmaller
-          ? 'candidate context was not smaller'
-          : `candidate still exceeded safe limit (${after.inputTokens} > ${hardLimit})`;
-        await this.options.emit({
-          ...eventBase(this.options.state.id, turnId),
+      if (retained.inputTokens + budget.summaryTokens > budget.hardLimit) {
+        await emit({
           type: 'compaction_skipped',
-          reason,
+          reason: 'latest user request and fixed context leave insufficient room for a summary',
         });
-        if (context.reason === 'overflow') throw new Error(`Compaction failed: ${reason}`);
         return undefined;
       }
-
+      controller.signal.throwIfAborted();
+      const compaction = await createCompaction({
+        session: this.options.state,
+        entries,
+        plan,
+        settings,
+        trigger: input.reason === 'manual' ? 'manual' : 'auto',
+        model: this.options.model,
+        reasoning: this.options.reasoning,
+        apiKey: await this.options.getApiKey?.(this.options.model.provider),
+        streamFn: this.options.streamFn,
+        signal: controller.signal,
+        onModelCall: this.observer.modelCall,
+        onUsage: async (response) =>
+          this.observer.emit({
+            ...base,
+            timestamp: new Date().toISOString(),
+            eventId: createPortableId(),
+            type: 'usage_observed',
+            purpose: 'compaction',
+            model: response.model,
+            provider: response.provider,
+            complete: response.stopReason !== 'error' && response.stopReason !== 'aborted',
+            usage: response.usage,
+          }),
+      });
+      controller.signal.throwIfAborted();
+      if (!compaction) return undefined;
+      const candidate = modelMessagesFromTranscript([...entries, compaction]);
+      const after = await input.estimate(candidate);
+      const summaryTokens =
+        estimateContextTokens(this.options.model, {
+          messages: [{ role: 'user', content: compaction.summary, timestamp: 0 }],
+        }).inputTokens - 7;
+      const reduction = before.inputTokens - after.inputTokens;
+      const failure =
+        summaryTokens > budget.summaryTokens
+          ? 'summary exceeded its token budget'
+          : after.inputTokens > budget.hardLimit
+            ? 'candidate still exceeded the safe context limit'
+            : reduction < Math.max(1, Math.ceil(before.inputTokens * settings.minimumReduction))
+              ? 'candidate did not reduce context enough'
+              : undefined;
+      if (failure) {
+        await emit({ type: 'compaction_skipped', reason: failure });
+        return undefined;
+      }
+      // Abort or a newly appended message must never install a stale checkpoint.
+      controller.signal.throwIfAborted();
+      const current = await readActiveTranscript(this.options.repository, this.options.state);
+      const historyIds = (items: TranscriptEntry[]) =>
+        items
+          .filter((entry) => entry.type === 'message' || entry.type === 'compaction')
+          .map((entry) => entry.id)
+          .join('\n');
+      if (historyIds(current) !== historyIds(entries))
+        throw new Error('Session history changed during compaction; retry when idle');
+      controller.signal.throwIfAborted();
       compaction.tokensBefore = before.inputTokens;
       compaction.tokensAfterEstimate = after.inputTokens;
-      await this.persistCompaction(compaction);
-      await this.options.emit({
-        ...eventBase(this.options.state.id, turnId),
+      await this.options.repository.appendEntry(this.options.state, compaction);
+      this.options.state.compactedSummary = compaction.summary;
+      await this.options.repository.save(this.options.state);
+      await this.observer.emit({
+        ...base,
+        timestamp: new Date().toISOString(),
+        eventId: createPortableId(),
         type: 'compaction_completed',
         summaryId: compaction.id,
         tokensBefore: before.inputTokens,
@@ -249,97 +313,19 @@ export class BlipContextManager {
         fallbackReason: compaction.fallbackReason,
       });
       return candidate;
+    } catch (error) {
+      await this.observer
+        .fail(controller.signal.aborted || (error instanceof Error && error.name === 'AbortError'))
+        .catch(() => undefined);
+      if (controller.signal.aborted)
+        throw Object.assign(new Error('Compaction was aborted'), {
+          name: 'AbortError',
+          cause: error,
+        });
+      throw error;
     } finally {
-      signal?.removeEventListener('abort', abort);
-      if (this.abortController === abortController) this.abortController = undefined;
+      input.signal?.removeEventListener('abort', abort);
+      if (this.abortController === controller) this.abortController = undefined;
     }
-  }
-
-  private createEmergencyCompaction(
-    entries: Awaited<ReturnType<SessionRepository['readTranscript']>>,
-    settings: CompactionSettings,
-    apiKey: string | undefined,
-    signal: AbortSignal,
-  ) {
-    return createCompaction({
-      session: this.options.state,
-      entries,
-      trigger: 'auto',
-      settings: { ...settings, keepRecentTokens: 0, keepRecentTurns: 0 },
-      model: this.options.model,
-      reasoning: this.options.reasoning,
-      apiKey,
-      streamFn: this.options.streamFn,
-        onUsage: async (response) => {
-          await this.options.emit({
-            ...eventBase(this.options.state.id, this.options.activeTurnId()),
-            type: 'usage_observed', purpose: 'compaction', model: response.model, provider: response.provider,
-            complete: response.stopReason !== 'error' && response.stopReason !== 'aborted', usage: response.usage,
-          });
-        },
-      signal,
-    });
-  }
-
-  private async performManualCompaction(
-    settings: CompactionSettings,
-    signal: AbortSignal,
-  ): Promise<void> {
-    const entries = await this.options.repository.readTranscript(this.options.state);
-    const turnId = `t_${createPortableId().slice(0, 8)}`;
-    await this.options.emit({
-      ...eventBase(this.options.state.id, turnId),
-      type: 'compaction_started',
-      reason: 'manual',
-    });
-    const compaction = await createCompaction({
-      session: this.options.state,
-      entries,
-      trigger: 'manual',
-      settings,
-      model: this.options.model,
-      reasoning: this.options.reasoning,
-      apiKey: await this.options.getApiKey?.(this.options.model.provider),
-      streamFn: this.options.streamFn,
-        onUsage: async (response) => {
-          await this.options.emit({
-            ...eventBase(this.options.state.id, this.options.activeTurnId()),
-            type: 'usage_observed', purpose: 'compaction', model: response.model, provider: response.provider,
-            complete: response.stopReason !== 'error' && response.stopReason !== 'aborted', usage: response.usage,
-          });
-        },
-      signal,
-    });
-    if (signal.aborted) {
-      throw Object.assign(new Error('Compaction was aborted'), { name: 'AbortError' });
-    }
-    if (!compaction) {
-      await this.options.emit({
-        ...eventBase(this.options.state.id, turnId),
-        type: 'compaction_skipped',
-        reason: 'nothing to compact yet',
-      });
-      return;
-    }
-    await this.persistCompaction(compaction);
-    const messages = await this.options.repository.readModelMessages(this.options.state);
-    this.options.replaceAgentMessages(messages);
-    await this.options.emit({
-      ...eventBase(this.options.state.id, turnId),
-      type: 'compaction_completed',
-      summaryId: compaction.id,
-      tokensBefore: compaction.tokensBefore,
-      tokensAfter: compaction.tokensAfterEstimate ?? 0,
-      fallbackUsed: compaction.fallbackUsed,
-      fallbackReason: compaction.fallbackReason,
-    });
-  }
-
-  private async persistCompaction(
-    compaction: Extract<Awaited<ReturnType<typeof createCompaction>>, { type: 'compaction' }>,
-  ): Promise<void> {
-    await this.options.repository.appendEntry(this.options.state, compaction);
-    this.options.state.compactedSummary = compaction.summary;
-    await this.options.repository.save(this.options.state);
   }
 }

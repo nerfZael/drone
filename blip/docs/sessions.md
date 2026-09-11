@@ -76,6 +76,53 @@ The transcript is JSONL and currently stores:
 
 Compaction does not delete earlier transcript entries.
 
+## Tool output previews
+
+By default, `createBlipSession()` shortens older text-only tool results larger than 12,000
+characters in model requests. The two newest assistant tool-call batches remain intact. Eligible
+results retain their first 3,000 and last 1,000 characters, plus an explicit omission notice.
+User and assistant messages, images, reported errors, skill/instruction tools, and identifiable
+instruction-file reads remain intact. Host-transformed results that are no longer the original
+message objects are also left alone.
+
+The complete original result stays in the transcript. The model can call `read_tool_output` with
+the original `call_id`, a zero-based character `offset`, and an optional `limit` (at most 12,000)
+to retrieve a page, including after compaction or resume. This returns saved historical output;
+it never repeats the original command. Retrieval is scoped to the current session. Host permission
+preflight still applies. Raw history shown in the UI and evidence supplied to summary generation
+are unchanged.
+
+This is a deterministic request transformation and makes no additional model call. Retrieving
+omitted evidence can require another tool/model round trip. The recovery tool adds a small tool
+definition to requests, even before any output needs shortening. Embedders can set
+`pruneToolOutputs: false` to disable both previews and the recovery tool. When enabled,
+`read_tool_output` is a reserved tool name.
+
+## Active history reads
+
+The repository's optional `readActiveTranscript()` returns the latest checkpoint, its retained
+tail and pinned user instruction, and messages after it. Core context accounting and compaction
+use this path; older repository implementations fall back to `readTranscript()`. Raw history,
+forks, and UI history retain their complete transcript APIs.
+
+- The Node JSONL store reads backward in 64 KiB blocks and stops once all retained references
+  have been found. A distant pinned instruction can require scanning farther back. Before the
+  first checkpoint, it still scans the complete file.
+- Hub SQLite uses partial indexes to find checkpoints, retained messages, and instruction IDs.
+  Reads use a database snapshot, so no cached boundary can become stale after edits. Existing
+  databases create these indexes on first open; this adds startup work and some index storage.
+- The mobile repository walks its in-memory transcript backward to the retained boundary. It
+  still keeps and persists full history; this optimization does not reduce snapshot storage.
+
+Missing or invalid retained references preserve the full-message fallback. The optional
+`readToolResult()` retrieves original output independently of the active boundary; older embedded
+repositories can support recovery through the full-transcript fallback.
+
+To manually verify: produce a large successful tool result, run two subsequent tool-call batches,
+then ask for a detail in the omitted middle. Check that the model retrieves the saved text and that
+the UI still shows the original output. Repeat after compaction and reopening the session; also
+confirm a large skill read or failed command stays intact.
+
 ## CLI Session Commands
 
 Implemented session flags:

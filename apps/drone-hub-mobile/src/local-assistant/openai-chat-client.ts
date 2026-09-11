@@ -155,6 +155,7 @@ export function createOpenAiMobileStream(apiKey: string): StreamFn {
           signal: options?.signal,
           body: JSON.stringify({
             model: model.id,
+            ...(options?.maxTokens !== undefined ? { max_completion_tokens: options.maxTokens } : {}),
             ...(options?.reasoning ? { reasoning_effort: options.reasoning } : {}),
             messages: [
               ...(context.systemPrompt

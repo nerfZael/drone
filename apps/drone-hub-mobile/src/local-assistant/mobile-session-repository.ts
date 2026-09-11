@@ -1,4 +1,5 @@
 import {
+  ActiveTranscript,
   createPortableId,
   modelMessagesFromTranscript,
   toolSuspensionsFromTranscript,
@@ -282,7 +283,25 @@ export class MobileSessionRepository implements SessionRepository {
   }
 
   async readModelMessages(): Promise<AgentMessage[]> {
-    return modelMessagesFromTranscript(this.transcript);
+    return modelMessagesFromTranscript(await this.readActiveTranscript());
+  }
+
+  async readActiveTranscript(): Promise<TranscriptEntry[]> {
+    const active = new ActiveTranscript();
+    for (let index = this.transcript.length - 1; index >= 0; index -= 1) {
+      if (active.add(this.transcript[index]!)) break;
+    }
+    return active.finish();
+  }
+
+  async readToolResult(_session: BlipSessionState, callId: string) {
+    for (let index = this.transcript.length - 1; index >= 0; index -= 1) {
+      const entry = this.transcript[index]!;
+      if (entry.type === 'message' && entry.message.role === 'toolResult' && entry.message.toolCallId === callId) {
+        return entry.message;
+      }
+    }
+    return undefined;
   }
 
   async fork(_source: BlipSessionState, input: ForkSessionInput): Promise<BlipSessionState> {

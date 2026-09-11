@@ -26,6 +26,15 @@ export function modelMessagesFromTranscript(transcript: TranscriptEntry[]): Agen
     },
   ];
 
+  if (compaction.retainedUserEntryId) {
+    const pinnedIndex = transcript.findIndex((entry) => entry.id === compaction.retainedUserEntryId);
+    const pinned = pinnedIndex < compactionIndex ? transcript[pinnedIndex] : undefined;
+    if (pinned?.type !== 'message' || pinned.message.role !== 'user') {
+      return transcript.flatMap((entry) => entry.type === 'message' ? [entry.message] : []);
+    }
+    const boundaryIndex = transcript.findIndex((entry) => entry.id === compaction.firstKeptEntryId);
+    if (boundaryIndex < 0 || pinnedIndex < boundaryIndex) messages.push(pinned.message);
+  }
   if (!compaction.firstKeptEntryId) {
     for (let index = compactionIndex + 1; index < transcript.length; index += 1) {
       const entry = transcript[index];
