@@ -19,6 +19,7 @@ import {
 import {
   COMPANION_RUNTIME_CONTRACT,
   COMPANION_TOOL_SUMMARIES,
+  COMPANION_SUBSCRIPTION_TOOL_NAMES,
   companionSettingsEqual,
   readCompanionSettings,
   type CompanionBrowserToolName,
@@ -34,6 +35,8 @@ import {
 import type { CompanionWorkspaceService } from './companion-workspaces';
 import { CompanionProposalModels } from './companion-proposal-models';
 import { CompanionSkills } from './companion-skills';
+import type { ResourceSubscriptionService, SessionSubscriptionDelivery } from '../subscriptions/resource-subscription-service';
+import type { ResourceSubscriptionDeliveryMode } from '../subscriptions/resource-subscription-types';
 
 const MAX_BROWSER_TEXT_CHARS = 1_000_000;
 
@@ -69,6 +72,7 @@ type RuntimeDependencies = {
   buildDroneSummaries(registry: any): AssistantDroneSummary[];
   telemetry?: CompanionTelemetryService;
   workspaces?: CompanionWorkspaceService;
+  resourceSubscriptions?: () => ResourceSubscriptionService | null;
 };
 
 function result(data: Record<string, unknown>, text?: string) {
@@ -122,6 +126,7 @@ export class CompanionRuntime {
   private readonly activeRunCompletions = new Map<string, Promise<void>>();
   private readonly cancelledRunIds = new Set<string>();
   private readonly telemetryByThreadId = new Map<string, CompanionRunTelemetry>();
+  private readonly subscriptionSessions = new Map<string, () => Promise<void>>();
   private closing = false;
   private readonly repository = new HubSessionRepository({ inMemory: true, trackUsage: true });
   private readonly host: BlipAssistantHost;
@@ -136,14 +141,26 @@ export class CompanionRuntime {
   }
 
   /** Deliver through ASAP when enabled; false leaves the request buffered by the transport. */
-  steer(runId: string, prompt: string): boolean {
+  steer(runId: string, prompt: string, deliveryMode?: ResourceSubscriptionDeliveryMode): boolean {
     if (this.closing || this.cancelledRunIds.has(runId)) throw new Error('Companion run cancelled');
     const threadId = `companion:${runId}`;
     const context = this.contexts.get(threadId);
-    if (!context?.acceptsSteering || context.settings.promptDeliveryMode === 'queue') return false;
+    if (!context?.acceptsSteering || (deliveryMode ?? context.settings.promptDeliveryMode) === 'queue') return false;
     if (!this.activeRunIds.has(runId) || !this.host.canSteerThread(threadId)) return false;
     this.host.steerThread(threadId, prompt);
     return true;
+  }
+
+  connectSubscriptions(runId: string, deliver: (input: SessionSubscriptionDelivery) => Promise<void>): void {
+    const service = this.deps.resourceSubscriptions?.();
+    if (!service) return;
+    if (this.closing || this.subscriptionSessions.has(runId)) throw new Error('Companion session already exists or is closing');
+    const release = service.registerSessionSubscriber({
+      subscriber: { chatId: `companion:${runId}`, droneId: 'companion', chatName: runId },
+      readDroneIds: async () => this.deps.buildDroneSummaries(await loadDroneSummaryRegistry()).map((drone) => drone.id),
+      deliver,
+    });
+    this.subscriptionSessions.set(runId, release);
   }
 
   async run(input: {
@@ -288,18 +305,25 @@ export class CompanionRuntime {
     const completion = this.activeRunCompletions.get(normalizedRunId);
     this.cancel(normalizedRunId);
     if (completion) await completion.catch(() => undefined);
-    const threadId = `companion:${normalizedRunId}`;
-    await this.host.deleteThread(threadId).catch(() => undefined);
-    this.contexts.delete(threadId);
-    this.activeRunIds.delete(normalizedRunId);
-    this.activeRunCompletions.delete(normalizedRunId);
-    this.cancelledRunIds.delete(normalizedRunId);
+    const releaseSubscriptions = this.subscriptionSessions.get(normalizedRunId);
+    this.subscriptionSessions.delete(normalizedRunId);
+    try {
+      await releaseSubscriptions?.();
+    } finally {
+      const threadId = `companion:${normalizedRunId}`;
+      await this.host.deleteThread(threadId).catch(() => undefined);
+      this.contexts.delete(threadId);
+      this.activeRunIds.delete(normalizedRunId);
+      this.activeRunCompletions.delete(normalizedRunId);
+      this.cancelledRunIds.delete(normalizedRunId);
+    }
   }
 
   async close(): Promise<void> {
     this.closing = true;
     const sessionIds = new Set([
       ...this.activeRunIds,
+      ...this.subscriptionSessions.keys(),
       ...[...this.contexts.keys()].map((threadId) => threadId.replace(/^companion:/, '')),
     ]);
     await Promise.allSettled([...sessionIds].map((runId) => this.deleteSession(runId)));
@@ -335,6 +359,25 @@ export class CompanionRuntime {
         allowedWriteDroneRefs: [],
         allowedDroneIds: drones.map((drone) => drone.id),
         hubServices: this.deps.hubServices,
+        ...(this.subscriptionSessions.has(context.runId) ? {
+          workspaceDroneRefs: { read: refs, write: [], execute: [] },
+          principal: {
+            kind: 'chat' as const,
+            tokenId: threadId,
+            name: 'Companion',
+            chatId: threadId,
+            droneId: 'companion',
+            chatName: context.runId,
+            accessScope: {
+              readMode: 'selected' as const,
+              writeMode: 'selected' as const,
+              executeMode: 'selected' as const,
+              droneIds: [],
+              updatedAt: new Date().toISOString(),
+            },
+            selectedDroneRefs: refs,
+          },
+        } : {}),
       });
     const mcpClient = telemetry
       ? await telemetry.measure('handle.mcpClientMs', createMcpClient)
@@ -354,12 +397,19 @@ export class CompanionRuntime {
       ),
     );
     const enabled = new Set(context.settings.enabledTools);
+    if (!this.subscriptionSessions.has(context.runId)) {
+      for (const name of COMPANION_SUBSCRIPTION_TOOL_NAMES) enabled.delete(name);
+    }
     const filteredMcpProvider: BlipToolProvider = {
       id: 'companion-drone-hub',
       promptSections: () => [],
       async load(blipContext) {
         return (await mcpProvider.load(blipContext))
           .map((tool) => ({ ...tool, name: tool.name.replace(/^drone_hub__/, '') }))
+          .map((tool) => !(COMPANION_SUBSCRIPTION_TOOL_NAMES as readonly string[]).includes(tool.name) ? tool : {
+            ...tool,
+            description: `${tool.description}\nIn Companion, subscriptions belong to this open conversation and are cancelled on close, disconnect, or Hub restart. They do not persist beyond the Companion session.`,
+          })
           .filter((tool) => mcpNames.has(tool.name as CompanionToolName) && enabled.has(tool.name as CompanionToolName))
           .map((tool) => tool.name !== 'list_agent_models' ? tool : {
             ...tool,

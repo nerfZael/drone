@@ -53,7 +53,20 @@ import {
   type ResourceSubscriptionSettings,
   type ResourceSubscriptionSubscriber,
   type ResourceSubscriptionType,
+  type ResourceSubscriptionDeliveryMode,
 } from './resource-subscription-types';
+
+export type SessionSubscriptionDelivery = {
+  prompt: string;
+  messageId: string;
+  deliveryMode: ResourceSubscriptionDeliveryMode;
+};
+
+type SessionSubscriber = {
+  subscriber: ResourceSubscriptionSubscriber;
+  readDroneIds(): Promise<string[]>;
+  deliver(input: SessionSubscriptionDelivery): Promise<void>;
+};
 
 export type ChatSubscriptionStatus = {
   idle: boolean;
@@ -88,6 +101,7 @@ export type ResourceSubscriptionServiceDependencies = {
 };
 
 export class ResourceSubscriptionService {
+  private readonly sessionSubscribers = new Map<string, SessionSubscriber>();
   private readonly localLoop: ManagedLoop;
   private readonly githubLoop: ManagedLoop;
   private started = false;
@@ -112,6 +126,53 @@ export class ResourceSubscriptionService {
         if (!this.githubAbortController.signal.aborted) this.logTickError('GitHub', error);
       },
     });
+  }
+
+  /** Session conversations share event storage, but disappear with their transport. */
+  registerSessionSubscriber(session: SessionSubscriber): () => Promise<void> {
+    const id = session.subscriber.chatId;
+    if (this.sessionSubscribers.has(id)) throw new Error('Subscription session already exists');
+    this.sessionSubscribers.set(id, session);
+    return async () => {
+      if (this.sessionSubscribers.get(id) !== session) return;
+      this.sessionSubscribers.delete(id);
+      for (const subscription of this.deps.repository.list(id, true)) {
+        if (subscription.status !== 'cancelled') await this.cancel(subscription.id, id);
+      }
+    };
+  }
+
+  private resolveSubscriber(chatId: string): ChatResourceLocation | null {
+    return this.sessionSubscribers.get(chatId)?.subscriber ?? this.deps.repository.resolveChatResource(chatId);
+  }
+
+  private authorizeDelivery(
+    subscription: ResourceSubscription,
+    subscriber: ChatResourceLocation,
+    event: ResourceEvent,
+  ): Promise<boolean> {
+    const session = this.sessionSubscribers.get(subscriber.chatId);
+    if (session) return this.authorizeSessionDelivery(session, subscription, event);
+    return this.deps.authorizeDelivery?.(subscription, subscriber, event) ?? Promise.resolve(true);
+  }
+
+  private async authorizeSessionDelivery(
+    session: SessionSubscriber,
+    subscription: ResourceSubscription,
+    event: ResourceEvent,
+  ): Promise<boolean> {
+    if (subscription.provider !== 'drone-hub') return true;
+    let droneId: string | undefined;
+    if (subscription.resourceType === 'custom_event') {
+      droneId = (event.providerContent.source as { droneId?: string } | undefined)?.droneId;
+    } else if (subscription.resourceType === 'chat') {
+      droneId = this.deps.repository.resolveChatResource(subscription.resourceId)?.droneId;
+    } else if (subscription.resourceType === 'change_request') {
+      droneId = this.resolveChangeRequest(subscription.resourceId)?.droneId;
+    } else {
+      return true;
+    }
+    return Boolean(droneId && (await session.readDroneIds()).includes(droneId));
   }
 
   async start(): Promise<void> {
@@ -397,7 +458,10 @@ export class ResourceSubscriptionService {
     },
   ) {
     const reader = this.requireCustomEventConversation(input.reader);
-    let readableDroneIds = (await this.deps.readCustomEventHistorySourceIds?.(reader)) ?? [];
+    const session = this.sessionSubscribers.get(reader.chatId);
+    let readableDroneIds = (await (session
+      ? session.readDroneIds()
+      : this.deps.readCustomEventHistorySourceIds?.(reader))) ?? [];
     if (input.readDroneIds !== undefined) {
       if (!Array.isArray(input.readDroneIds) || input.readDroneIds.some((id) => typeof id !== 'string' || !id || id.length > 200)) {
         throw new Error('readDroneIds must be an array of drone IDs');
@@ -569,7 +633,7 @@ export class ResourceSubscriptionService {
     if (!input || typeof input !== 'object')
       throw new Error('custom events require a DroneHub conversation identity');
     const subscriber = normalizeSubscriber(input);
-    const location = this.deps.repository.resolveChatResource(subscriber.chatId);
+    const location = this.resolveSubscriber(subscriber.chatId);
     if (
       !location ||
       location.droneId !== subscriber.droneId ||
@@ -700,7 +764,7 @@ export class ResourceSubscriptionService {
     if (!settings.enabled) return;
     if (Date.now() - this.lastOrphanCleanupAt >= 60_000) {
       this.lastOrphanCleanupAt = Date.now();
-      await cancelOrphanedResourceSubscriptions(this.deps.repository, this.deps.log);
+      await cancelOrphanedResourceSubscriptions(this.deps.repository, this.deps.log, (id) => this.resolveSubscriber(id));
     }
     await this.pollChats();
     await this.pollCron(new Date());
@@ -897,7 +961,7 @@ export class ResourceSubscriptionService {
     settings: ResourceSubscriptionSettings,
   ): Promise<void> {
     try {
-      const currentSubscriber = this.deps.repository.resolveChatResource(batch.subscriber.chatId);
+      const currentSubscriber = this.resolveSubscriber(batch.subscriber.chatId);
       if (!currentSubscriber) {
         for (const subscriptionId of new Set(batch.items.map((item) => item.subscription.id))) {
           await this.deps.repository.cancel(subscriptionId, batch.subscriber.chatId);
@@ -946,9 +1010,7 @@ export class ResourceSubscriptionService {
           if (!authorizationResults.has(authorizationKey)) {
             authorizationResults.set(
               authorizationKey,
-              this.deps.authorizeDelivery
-                ? this.deps.authorizeDelivery(current, currentSubscriber, item.event)
-                : Promise.resolve(true),
+              this.authorizeDelivery(current, currentSubscriber, item.event),
             );
           }
           const authorized = await authorizationResults.get(authorizationKey)!;
@@ -1016,9 +1078,23 @@ export class ResourceSubscriptionService {
         });
         return;
       }
+      const prompt = renderSubscriptionPrompt(deliverableBatch);
+      const session = this.sessionSubscribers.get(currentSubscriber.chatId);
+      if (session) {
+        await session.deliver({
+          prompt,
+          messageId: batch.promptId,
+          deliveryMode: resourceSubscriptionDeliveryMode(settings, deliverableItems[0]!.event.eventType),
+        });
+        await this.deps.repository.completeBatch(batch.id);
+        return;
+      }
+      // A session can close while authorization or repository writes are pending.
+      if (!this.deps.repository.resolveChatResource(currentSubscriber.chatId)) {
+        throw new Error('subscribing conversation no longer exists');
+      }
       const queue = getPromptQueueRepository();
       if (!queue) throw new Error('prompt queue is unavailable');
-      const prompt = renderSubscriptionPrompt(deliverableBatch);
       await queue.enqueue({
         droneId: currentSubscriber.droneId,
         chatName: currentSubscriber.chatName,
@@ -1078,13 +1154,14 @@ export async function cancelOrphanedResourceSubscriptions(
     'listActive' | 'resolveChatResource' | 'cancelActive'
   >,
   log: ResourceSubscriptionServiceDependencies['log'],
+  resolveSubscriber: (chatId: string) => ChatResourceLocation | null = (id) => repository.resolveChatResource(id),
 ): Promise<void> {
   const subscriptions = repository.listActive();
   const subscriberExists = new Map<string, boolean>();
   for (const subscription of subscriptions) {
     const chatId = subscription.subscriber.chatId;
     if (!subscriberExists.has(chatId)) {
-      subscriberExists.set(chatId, Boolean(repository.resolveChatResource(chatId)));
+      subscriberExists.set(chatId, Boolean(resolveSubscriber(chatId)));
     }
     if (subscriberExists.get(chatId)) continue;
     const cancelled = await repository.cancelActive(subscription.id, chatId);

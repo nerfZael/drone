@@ -3,6 +3,7 @@ import type { CompanionClientTelemetry, CompanionRunEvent } from '@drone/assista
 
 import type { CompanionBrowserCall, CompanionRuntime } from './companion-runtime';
 import type { CompanionTelemetryTransport } from './companion-telemetry';
+import type { SessionSubscriptionDelivery } from '../subscriptions/resource-subscription-service';
 import {
   boundedCompanionActivityEvent,
   CompanionBrowserToolBroker,
@@ -12,6 +13,7 @@ type CompanionPromptInput = {
   prompt: string;
   messageId?: string;
   telemetry?: CompanionClientTelemetry;
+  subscriptionDeliveryMode?: 'queue' | 'asap';
 };
 
 type BufferedCompanionPrompt = CompanionPromptInput & {
@@ -26,7 +28,7 @@ type CompanionRunSessionOptions = {
   clientRunId: string;
   runtimeRunId: string;
   transport: CompanionTelemetryTransport;
-  runtime: Pick<CompanionRuntime, 'run' | 'steer' | 'deleteSession'>;
+  runtime: Pick<CompanionRuntime, 'run' | 'steer' | 'deleteSession'> & Partial<Pick<CompanionRuntime, 'connectSubscriptions'>>;
   emit(event: CompanionRunSessionEvent): void | Promise<void>;
   isAvailable(): boolean;
   unavailableMessage: string;
@@ -42,6 +44,7 @@ export class CompanionRunSession {
   private activeMessageId = '';
   private active = false;
   private closed = false;
+  private readonly subscriptionDeliveries = new Map<string, Promise<void>>();
 
   constructor(private readonly options: CompanionRunSessionOptions) {
     this.clientRunId = options.clientRunId;
@@ -55,6 +58,21 @@ export class CompanionRunSession {
           ...call,
         }),
     });
+    options.runtime.connectSubscriptions?.(options.runtimeRunId, (input) => this.deliverSubscription(input));
+  }
+
+  private async deliverSubscription(input: SessionSubscriptionDelivery): Promise<void> {
+    if (!this.isAvailable()) throw new Error(this.options.unavailableMessage);
+    const existing = this.subscriptionDeliveries.get(input.messageId);
+    if (existing) return existing;
+    const delivery = Promise.resolve()
+      .then(() => this.submit({ ...input, subscriptionDeliveryMode: input.deliveryMode }))
+      .catch((error) => {
+        this.subscriptionDeliveries.delete(input.messageId);
+        throw error;
+      });
+    this.subscriptionDeliveries.set(input.messageId, delivery);
+    return delivery;
   }
 
   async submit(prompt: CompanionPromptInput): Promise<void> {
@@ -97,6 +115,7 @@ export class CompanionRunSession {
     this.closed = true;
     this.generation += 1;
     this.prompts.length = 0;
+    this.subscriptionDeliveries.clear();
     this.activeMessageId = '';
     this.browserTools.rejectAll(message);
     this.options.onClose();
@@ -171,10 +190,14 @@ export class CompanionRunSession {
     if (!this.isAvailable()) return;
     // The runtime uses the delivery setting captured for this run. Queue mode
     // keeps follow-ups buffered; ASAP flushes them once the agent can accept steering.
-    while (this.prompts.length) {
-      const next = this.prompts[0];
+    for (let index = 0; index < this.prompts.length;) {
+      const next = this.prompts[index];
       try {
-        if (!this.options.runtime.steer(this.options.runtimeRunId, next.prompt)) break;
+        if (next.subscriptionDeliveryMode === 'queue' ||
+          !this.options.runtime.steer(this.options.runtimeRunId, next.prompt, next.subscriptionDeliveryMode)) {
+          index += 1;
+          continue;
+        }
       } catch (error) {
         void Promise.resolve().then(() => this.options.emit({
           type: 'error', messageId: next.messageId,
@@ -183,8 +206,13 @@ export class CompanionRunSession {
         void this.close('Companion steering failed').catch(() => undefined);
         return;
       }
-      this.prompts.shift();
+      this.prompts.splice(index, 1);
+      const afterMessageId = this.activeMessageId;
       this.activeMessageId = next.messageId;
+      if (next.subscriptionDeliveryMode) {
+        void Promise.resolve(this.options.emit({ type: 'subscription', messageId: next.messageId, afterMessageId }))
+          .catch(() => this.close(this.options.unavailableMessage));
+      }
       // Keep the generation: a browser tool already in flight must retain its result.
     }
   }
@@ -192,6 +220,10 @@ export class CompanionRunSession {
   private async beginPrompt(prompt: BufferedCompanionPrompt): Promise<void> {
     this.generation += 1;
     this.activeMessageId = prompt.messageId;
+    if (prompt.subscriptionDeliveryMode) {
+      await this.options.emit({ type: 'subscription', messageId: prompt.messageId });
+      if (!this.isAvailable()) throw new Error(this.options.unavailableMessage);
+    }
     await this.options.emit({ type: 'status', messageId: prompt.messageId, status: 'working' });
   }
 
