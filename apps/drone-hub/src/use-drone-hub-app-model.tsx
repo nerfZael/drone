@@ -1,3 +1,4 @@
+import { CompanionEditorFiles, type CompanionEditorTarget } from './droneHub/files/CompanionEditorFiles';
 import { WorkspaceWindowLayoutController } from './droneHub/workspace-layout/WorkspaceWindowLayoutController';
 import { ChatWindowLayoutController } from './droneHub/chat-layout/ChatWindowLayoutController';
 import { focusedChatIdentity } from './droneHub/chat/focused-chat-window';
@@ -276,7 +277,9 @@ function droneHubBusyDebugEnabled(): boolean {
 
 export function useDroneHubAppModel(): DroneHubAppModel {
   const companionWorkspace = useCompanionWorkspace();
+  const companionEditorTarget = React.useRef<CompanionEditorTarget | null>(null);
   const [workspaceWindowLayout] = React.useState(() => new WorkspaceWindowLayoutController());
+  const [companionEditorFiles] = React.useState(() => new CompanionEditorFiles(() => companionEditorTarget.current, requestJson, () => workspaceWindowLayout.read(companionEditorTarget.current?.droneId ?? '')));
   const [chatWindowLayout] = React.useState(() => new ChatWindowLayoutController());
   const confirmDelete = useAppConfirmDialog();
   const sidebarCommandQueueRef = React.useRef<ReturnType<typeof createSidebarCommandQueue> | null>(null);
@@ -2785,6 +2788,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     openedFileTabs: openedEditorFileTabs,
     activeOpenedFileTabId,
     openEditorFile,
+    acceptCompanionFile,
     openEditorLocation,
     closeEditorFile,
     confirmCloseOpenedFileTabsForPaths,
@@ -3080,7 +3084,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         body: JSON.stringify(operation),
       });
     return companionWorkspace.registerWorkspaceTarget({
-      getWorkspaceWindowLayout: () => workspaceWindowLayout.read(currentDrone?.id ?? ''),
+      openWorkspaceFiles: (args) => companionEditorFiles.open(args),
+      setEditorFilePresentation: (args) => companionEditorFiles.present(args),
+      getWorkspaceWindowLayout: () => companionEditorFiles.readLayout(),
       arrangeWorkspaceWindows: (args) => workspaceWindowLayout.arrange(currentDrone?.id ?? '', args),
       getChatWindowLayout: () => chatWindowLayout.read(currentDrone?.id ?? ''),
       arrangeChatWindows: (args) => chatWindowLayout.arrange(currentDrone?.id ?? '', args),
@@ -3647,6 +3653,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setPendingFileOpen(null);
     return () => { pathNavigationVersion.current += 1; };
   }, [currentDrone?.id]);
+  const companionEditorSession = React.useMemo(() => Symbol(), [currentDrone?.id, currentDrone?.cwd, currentDrone?.repoPath, appView]);
+  companionEditorTarget.current = currentDrone ? {
+    droneId: currentDrone.id, session: companionEditorSession, tabs: openedEditorFileTabs,
+    accept: (data) => acceptCompanionFile(currentDrone.id, data),
+    activate: (tabId) => setActiveOpenedFileTab(tabId),
+  } : null;
   const openFileInFilesPane = React.useCallback(
     (next: { path: string; name: string; line?: number | null; column?: number | null }) => {
       const resolvedPath = normalizeWorkspaceLinkPath(resolveDroneFileOpenPath(currentDrone, next.path));

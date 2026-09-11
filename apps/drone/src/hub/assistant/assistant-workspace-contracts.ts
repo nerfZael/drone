@@ -59,6 +59,7 @@ export type AssistantToolCallbacks = {
   statDronePath?: (opts: {
     droneId: string;
     path: string;
+    followSymlinks?: boolean;
   }) => Promise<AssistantDronePathStatResult>;
   readDroneFileChunk?: (opts: {
     droneId: string;

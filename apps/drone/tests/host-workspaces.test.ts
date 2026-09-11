@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { HubAssistantService } from '../src/hub/assistant';
 import { updateRegistry } from '../src/host/registry';
 import { createAssistantFilesystemService } from '../src/hub/assistant-filesystem-service';
 import { hostDroneWorkspacePath } from '../src/host/runtime';
@@ -53,6 +54,19 @@ test('registered repositories support host file operations without a drone and r
     });
     const droneId = workspaces[0].id;
     await files.assistantWriteDroneFile({ droneId, path: 'hello.txt', content: 'hello' });
+    const assistant = new HubAssistantService({
+      listDrones: async () => [],
+      statDronePath: files.assistantStatDronePath,
+    });
+    const editorStat = await assistant.executeAuthorizedWorkspaceTool(droneId, { tool: 'editor_stat', args: { path: 'hello.txt' } }, async () => {});
+    expect(editorStat).toMatchObject({ type: 'file', path: path.join(root, 'hello.txt') });
+    await fs.symlink('hello.txt', path.join(root, 'linked-file.txt'));
+    expect(await assistant.executeAuthorizedWorkspaceTool(droneId, { tool: 'editor_stat', args: { path: 'linked-file.txt' } }, async () => {}))
+      .toMatchObject({ type: 'file', path: path.join(root, 'linked-file.txt') });
+    await expect(assistant.executeAuthorizedWorkspaceTool(droneId, { tool: 'transfer_stat', args: { path: 'linked-file.txt' } }, async () => {}))
+      .rejects.toThrow('transfer source was not found');
+    const transferStat = await assistant.executeAuthorizedWorkspaceTool(droneId, { tool: 'transfer_stat', args: { path: 'hello.txt' } }, async () => {});
+    expect(transferStat.path).toBeUndefined();
     expect((await files.assistantReadDroneFile({ droneId, path: 'hello.txt' })).content).toBe(
       'hello',
     );
@@ -77,6 +91,7 @@ test('registered repositories support host file operations without a drone and r
       'linked/secret.txt',
       'linked/new/nested.txt',
     ]) {
+      await expect(assistant.executeAuthorizedWorkspaceTool(droneId, { tool: 'editor_stat', args: { path: target } }, async () => {})).rejects.toThrow(/selected workspace|invalid file path/);
       await expect(files.assistantReadDroneFile({ droneId, path: target })).rejects.toThrow(
         'selected workspace',
       );

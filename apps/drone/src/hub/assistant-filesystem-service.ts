@@ -227,7 +227,7 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
     };
   }
 
-  async function assistantStatDronePath(opts: { droneId: string; path: string }): Promise<any> {
+  async function assistantStatDronePath(opts: { droneId: string; path: string; followSymlinks?: boolean }): Promise<any> {
     const target = await resolveAssistantDroneFsTarget({
       droneId: opts.droneId,
       path: opts.path,
@@ -237,7 +237,7 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
     if (target.runtime === 'host') {
       const resolvedPath = path.resolve(target.targetPath);
       try {
-        const st = await fs.lstat(resolvedPath);
+        const st = await (opts.followSymlinks ? fs.stat(resolvedPath) : fs.lstat(resolvedPath));
         return {
           droneId: target.id,
           path: resolvedPath,

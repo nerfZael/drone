@@ -527,6 +527,23 @@ export class CompanionRuntime {
     });
 
     if (context.windowLayoutTools) {
+      add('open_workspace_files', {
+        parameters: objectParameters({
+          droneId: { type: 'string', description: 'Exact ID of the currently open drone.' },
+          workspaceId: { type: 'string', description: 'Optional filesystem target ID from list_targets, such as host:… or drone:…. Must match this drone; not the layout workspaceId.' },
+          paths: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'string', minLength: 1, maxLength: 4096 } },
+          presentation: { type: 'string', enum: ['tabs', 'panes'], default: 'tabs' },
+        }, ['droneId', 'paths']),
+        execute: async (_callId, args, signal) => result(await context.callBrowser('open_workspace_files', args as Record<string, unknown>, signal)),
+      });
+      add('set_editor_file_presentation', {
+        parameters: objectParameters({
+          droneId: { type: 'string', description: 'Exact ID of the currently open drone.' },
+          tabIds: { type: 'array', minItems: 1, maxItems: 20, uniqueItems: true, items: { type: 'string' }, description: 'Exact editorTabs tab IDs from get_workspace_window_layout.' },
+          presentation: { type: 'string', enum: ['tabs', 'panes'] },
+        }, ['droneId', 'tabIds', 'presentation']),
+        execute: async (_callId, args, signal) => result(await context.callBrowser('set_editor_file_presentation', args as Record<string, unknown>, signal)),
+      });
       add('get_workspace_window_layout', {
         parameters: objectParameters({}),
         execute: async (_callId, args, signal) => result(await context.callBrowser('get_workspace_window_layout', args as Record<string, unknown>, signal)),

@@ -20,6 +20,8 @@ export type CompanionTextTarget = {
 };
 
 export type CompanionWorkspaceTarget = {
+  openWorkspaceFiles?(args: Record<string, unknown>): unknown;
+  setEditorFilePresentation?(args: Record<string, unknown>): unknown;
   getWorkspaceWindowLayout?(): unknown;
   arrangeWorkspaceWindows?(args: Record<string, unknown>): unknown;
   getChatWindowLayout?(): unknown;
@@ -173,6 +175,16 @@ export function CompanionWorkspaceProvider({ children }: { children: React.React
           },
           openDroneChat: async (args) => await resolveWorkspaceTarget().openDroneChat(args),
           highlightDrones: async (args) => await resolveWorkspaceTarget().highlightDrones(args),
+          openWorkspaceFiles: (args) => {
+            const target = resolveWorkspaceTarget();
+            if (!target.openWorkspaceFiles) throw new Error('EDITOR_FILES_UNSUPPORTED');
+            return target.openWorkspaceFiles(args);
+          },
+          setEditorFilePresentation: (args) => {
+            const target = resolveWorkspaceTarget();
+            if (!target.setEditorFilePresentation) throw new Error('EDITOR_FILES_UNSUPPORTED');
+            return target.setEditorFilePresentation(args);
+          },
           getWorkspaceWindowLayout: () => resolveWorkspaceTarget().getWorkspaceWindowLayout?.() ?? { supported: false },
           arrangeWorkspaceWindows: (args) => {
             const target = resolveWorkspaceTarget();

@@ -34,6 +34,14 @@ export function registerCompanionRoutes(
     }
   });
   if (workspaces) {
+    router.get('/api/companion/workspaces/current', async ({ url, json, fail }) => {
+      try { json(200, await workspaces.current(url.searchParams.get('droneId') || '')); }
+      catch (error) { fail(400, error instanceof Error ? error.message : String(error)); }
+    });
+    router.post('/api/companion/editor-file', async ({ readJson, json, fail }) => {
+      try { json(200, await workspaces.editorFile(await readJson())); }
+      catch (error) { fail(400, error instanceof Error ? error.message : String(error)); }
+    });
     router.get('/api/companion/workspaces', async ({ url, json, fail }) => {
       try { json(200, await workspaces.catalog(url.searchParams.get('deviceId') || undefined)); }
       catch (error) { fail(400, error instanceof Error ? error.message : String(error)); }
