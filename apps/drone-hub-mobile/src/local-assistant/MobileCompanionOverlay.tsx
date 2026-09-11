@@ -40,6 +40,7 @@ import { ThemedTextInput } from '../components/ThemedTextInput';
 import { colors } from '../theme';
 import { NativeMarkdown } from './NativeMarkdown';
 import { formatMobileVoiceDuration } from './mobile-voice-transcription-model';
+import { MobileCompanionLivePanel } from './MobileCompanionLivePanel';
 import { MobileCompanionWorkspaceModal } from './MobileCompanionWorkspaceModal';
 import { useMobileCompanion } from './MobileCompanionContext';
 
@@ -80,7 +81,8 @@ export function MobileCompanionOverlay() {
     () => new Set(),
   );
   const [, tick] = React.useState(0);
-  const visible = companion.status !== 'idle';
+  const liveActive = companion.live.status === 'connecting' || companion.live.status === 'listening';
+  const visible = companion.status !== 'idle' || liveActive || companion.live.status === 'error' || companion.checkingVoiceMode;
   const translateY = useSharedValue(0);
   const sheetHeight = useSharedValue(320);
   const close = companion.close;
@@ -164,7 +166,7 @@ export function MobileCompanionOverlay() {
 
   const status = companion.status;
   const active = status === 'working';
-  const voiceBusy = status === 'starting' || status === 'transcribing';
+  const voiceBusy = status === 'starting' || status === 'transcribing' || companion.checkingVoiceMode;
   const recording = status === 'recording';
   const elapsed = companion.startedAt != null
     ? Math.max(0, (companion.endedAt ?? Date.now()) - companion.startedAt)
@@ -176,7 +178,7 @@ export function MobileCompanionOverlay() {
     0;
   const inputLocked = active || voiceBusy || recording || submitting || companion.proposalExecuting;
   const canSend = Boolean(draft.trim()) && !inputLocked;
-  const micDisabled = active || voiceBusy || submitting || companion.proposalExecuting;
+  const micDisabled = !liveActive && (voiceBusy || submitting || companion.proposalExecuting);
   const applyDisabled =
     companion.proposalExecuting ||
     active ||
@@ -265,6 +267,8 @@ export function MobileCompanionOverlay() {
           nestedScrollEnabled
           showsVerticalScrollIndicator
         >
+          <MobileCompanionLivePanel live={companion.live} working={active} stopTurn={() => void companion.cancel()} />
+          {companion.checkingVoiceMode ? <Text style={styles.status}>Loading voice setting…</Text> : null}
           {companion.transcript ? (
             <View style={styles.transcriptRow}>
               <View style={styles.transcriptBubble}>
@@ -581,7 +585,7 @@ export function MobileCompanionOverlay() {
           />
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={recording ? 'Stop recording' : 'Talk to Companion'}
+            accessibilityLabel={liveActive ? 'End Live voice' : recording ? 'Stop recording' : 'Talk to Companion'}
             accessibilityState={{ disabled: micDisabled }}
             disabled={micDisabled}
             hitSlop={4}
@@ -594,7 +598,7 @@ export function MobileCompanionOverlay() {
           >
             {voiceBusy ? (
               <ActivityIndicator color={colors.accent} size="small" />
-            ) : recording ? (
+            ) : recording || liveActive ? (
               <Square color={colors.danger} fill={colors.danger} size={15} strokeWidth={2} />
             ) : (
               <Mic color={colors.textSecondary} size={18} strokeWidth={2.2} />

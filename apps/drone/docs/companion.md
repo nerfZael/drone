@@ -136,7 +136,7 @@ Add a dedicated Companion WebSocket route using the existing `ws` and Hub authen
 
 Build the final reply from assistant text parts only. Do not use `latestAssistantText` unchanged because it currently includes thinking parts; Companion must never render hidden reasoning as the answer.
 
-Mobile starts the same runtime over the paired-device mesh instead of opening the browser-only WebSocket. The mesh capability binds one temporary conversation to the initiating phone, uses the same saved ASAP/Queue delivery choice, streams the same status/activity/reply events, relays phone-local composer and editor tools, and deletes the conversation on overlay close or device revocation. The phone uses its existing one-shot transcription setup; Companion model, prompt, and enabled tools remain canonical on the Hub.
+Mobile starts the same runtime over the paired-device mesh instead of opening the browser-only WebSocket. The mesh capability binds one temporary conversation to the initiating phone, uses the same saved ASAP/Queue delivery choice, streams the same status/activity/reply events, relays phone-local composer and editor tools, and deletes the conversation on overlay close or device revocation. The phone uses its existing one-shot transcription setup when Live is off, or native WebRTC with client delegation when Live is enabled in Settings → Built-in → Companion Live voice. See [Companion Live voice](companion-live-voice.md#mobile) for native setup and lifecycle. Companion model, prompt, and enabled tools remain canonical on the Hub.
 
 ### 3. Use a fixed, backend-enforced tool set
 

@@ -1,0 +1,133 @@
+import React, { act } from 'react';
+import { createRequire } from 'node:module';
+import type { ReactTestRenderer } from 'react-test-renderer';
+import { expect, mock, test } from 'bun:test';
+import { COMPANION_CAPABILITY, COMPANION_RUN_OPERATIONS } from '@drone/device-protocol';
+import { MobileMicrophoneCoordinator } from '../src/local-assistant/mobile-microphone-coordinator';
+
+let enabled = false;
+let rejectSettings = false;
+let recorded = 0;
+let nextId = 0;
+let backend: ((prompt: string, signal: AbortSignal) => Promise<string>) | null = null;
+const calls: { operation: string; payload: any }[] = [];
+const listeners = new Set<(event: any) => void>();
+const live: any = { status: 'idle', error: '', captions: '', targetDeviceId: '',
+  start: async (id: string, _name: string, run: typeof backend) => { live.status = 'listening'; live.targetDeviceId = id; backend = run; },
+  stop: () => { live.status = 'idle'; }, reset: () => { live.status = 'idle'; }, toggleMute() {} };
+const voice = {
+  session: { kind: 'idle', status: 'idle', microphoneAvailable: true }, microphoneCoordinator: new MobileMicrophoneCoordinator(),
+  discardRecording: async () => {}, startRecording: async () => { recorded++; return true; }, setError() {}, getError: () => '',
+};
+const mesh = {
+  identity: { id: 'phone' }, devices: [{ id: 'phone', grants: [{ capability: 'companion', version: 1, operations: ['*'] }] }],
+  profile: { capabilitiesByDevice: { hub: [COMPANION_CAPABILITY] } }, setBackgroundActivityRequired() {},
+  request: async (_id: string, _capability: string, operation: string, payload?: any) => {
+    calls.push({ operation, payload });
+    if (operation.startsWith('live.settings')) {
+      if (rejectSettings) throw new Error('Hub unavailable');
+      if (operation === 'live.settings.update') enabled = payload.enabled;
+      return { enabled };
+    }
+    return {};
+  },
+  subscribe: (_capability: string, _event: string, listener: (event: any) => void) => {
+    listeners.add(listener); return () => listeners.delete(listener);
+  },
+};
+mock.module('../src/mesh/MeshContext', () => ({ useMesh: () => mesh }));
+mock.module('../src/local-assistant/MobileChatVoiceRecorderContext', () => ({ useSharedMobileChatVoiceRecorder: () => voice }));
+mock.module('../src/local-assistant/use-mobile-companion-live', () => ({ useMobileCompanionLive: () => live }));
+mock.module('expo-crypto', () => ({ randomUUID: () => `id-${++nextId}` }));
+// Keep the renderer on the app's React instance in this multi-version workspace.
+const rendererRequire = createRequire(import.meta.resolve('react-test-renderer'));
+mock.module(rendererRequire.resolve('react'), () => React);
+const { create } = await import('react-test-renderer');
+const { MobileCompanionProvider, useMobileCompanion } = await import('../src/local-assistant/MobileCompanionContext');
+const { useMobileCompanionLiveSettings } = await import('../src/local-assistant/use-mobile-companion-live-settings');
+
+async function harness(settingsOnly = false) {
+  enabled = false; rejectSettings = false; recorded = 0; backend = null; live.status = 'idle'; calls.length = 0;
+  const originalAct = Object.getOwnPropertyDescriptor(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
+  Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
+  let root!: ReactTestRenderer;
+  let context!: ReturnType<typeof useMobileCompanion>;
+  let settings!: ReturnType<typeof useMobileCompanionLiveSettings>;
+  function Capture() { context = useMobileCompanion(); return null; }
+  function Settings() { settings = useMobileCompanionLiveSettings('hub'); return null; }
+  await act(async () => { root = create(settingsOnly ? <Settings /> : <MobileCompanionProvider><Capture /></MobileCompanionProvider>); });
+  let workspace = 'first';
+  if (!settingsOnly) await act(async () => { context.registerWorkspaceTarget({
+    targetDeviceId: 'hub', targetName: 'Hub', reachable: true,
+    getAppContext: () => ({ mainDroneId: workspace }),
+    readComposer: () => ({ targetId: 'composer', path: '', content: '', revision: '0', mode: 'edit' }),
+    applyComposer: () => ({ ok: true, revision: '1' }), executeProposal: async () => ({ ok: true, operations: [] }),
+    openDroneChat: async () => ({}), highlightDrones: () => ({}),
+  }); });
+  return { context: () => context, settings: () => settings, changeWorkspace: () => { workspace = 'second'; },
+    async cleanup() {
+      await act(async () => root.unmount());
+      if (originalAct) Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', originalAct);
+      else Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
+    },
+  };
+}
+
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+test('mobile keeps recording when Live is off, uses client delegation when on, and sends follow-ups while working', async () => {
+  const h = await harness();
+  const abort = new AbortController();
+  try {
+    mesh.devices[0].grants[0].operations = [...COMPANION_RUN_OPERATIONS];
+    await act(async () => { await h.context().toggle(); });
+    expect(recorded).toBe(1); expect(backend).toBeNull();
+    enabled = true;
+    mesh.devices[0].grants[0].operations = ['*'];
+    await act(async () => { await h.context().toggle(); });
+    expect(backend).not.toBeNull(); expect(recorded).toBe(1);
+    let first!: Promise<string>; let second!: Promise<string>;
+    await act(async () => { first = backend!('first', abort.signal); await tick(); });
+    expect(h.context().status).toBe('working');
+    await act(async () => { second = backend!('correction', abort.signal); await tick(); });
+    const prompts = calls.filter((call) => call.operation === 'run.start');
+    expect(prompts.map((call) => call.payload.prompt)).toEqual(['first', 'correction']);
+    const latest = prompts.at(-1)!.payload;
+    await act(async () => {
+      for (const listener of listeners) {
+        listener({ sourceDeviceId: 'hub', payload: { runId: latest.runId, messageId: latest.messageId, type: 'reply', reply: 'Updated' } });
+        listener({ sourceDeviceId: 'hub', payload: { runId: latest.runId, messageId: latest.messageId, type: 'status', status: 'completed' } });
+      }
+    });
+    expect(await first).toBe('Updated'); expect(await second).toBe('Updated');
+    h.changeWorkspace();
+    await expect(backend!('new edit', abort.signal)).rejects.toThrow('workspace changed');
+    await act(async () => { await h.context().close(); });
+    expect(live.status).toBe('idle');
+  } finally { abort.abort(); await h.cleanup(); }
+});
+
+test('mobile reports a failed preference read without silently recording in the wrong mode', async () => {
+  const h = await harness();
+  try {
+    rejectSettings = true;
+    await act(async () => { await h.context().toggle(); });
+    expect(recorded).toBe(0); expect(backend).toBeNull();
+    expect(h.context().error).toBe('Hub unavailable');
+  } finally { await h.cleanup(); }
+});
+
+test('mobile Live setting persists through Hub requests and failed writes keep the saved value', async () => {
+  const h = await harness(true);
+  try {
+    expect(h.settings().enabled).toBe(false);
+    await act(async () => { await h.settings().save(true); });
+    expect(enabled).toBe(true); expect(h.settings().enabled).toBe(true);
+    rejectSettings = true;
+    await act(async () => { await h.settings().save(false); });
+    expect(h.settings().error).toBe('Hub unavailable'); expect(h.settings().enabled).toBe(true);
+    rejectSettings = false;
+    await act(async () => { await h.settings().load(); });
+    expect(h.settings().enabled).toBe(true); expect(h.settings().error).toBe('');
+  } finally { await h.cleanup(); }
+});

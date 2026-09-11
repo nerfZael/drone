@@ -183,7 +183,7 @@ Because the current runtime queues follow-ups, a correction may arrive too late 
 
 Show connecting, listening, speaking, backend working, reconnecting, and error states. Disable competing microphone capture while this session owns the mic. Empty or unclear speech should not create tasks. Keep captions and typing available if audio fails, and show whether a task continues after the voice connection closes.
 
-Start with a desktop opt-in mode. Mobile needs separate validation of native audio, Bluetooth, speaker echo, backgrounding, and screen-lock behavior; reuse the existing device-mesh/runtime path where it fits, but do not assume browser WebRTC code is a drop-in mobile implementation.
+The integration now includes desktop and mobile opt-in modes. Mobile uses native WebRTC and the existing device-mesh/runtime path; it ends voice when backgrounded. Native audio, Bluetooth, speaker echo, and screen-lock behavior still need device validation. See the [mobile implementation guide](companion-live-voice.md#mobile).
 
 ## Prompts, limits, and costs
 

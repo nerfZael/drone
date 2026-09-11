@@ -16,6 +16,7 @@ import {
 
 type MobileChatVoiceRecorderContextValue = {
   session: MobileVoiceSession;
+  microphoneCoordinator: MobileMicrophoneCoordinator;
   continuousVoice: ReturnType<typeof useMobileContinuousVoice>;
   continuousDictation: ReturnType<typeof useMobileContinuousDictation>;
   error: string;
@@ -83,6 +84,7 @@ export function MobileChatVoiceRecorderProvider({ children }: { children: React.
   });
   const getError = React.useCallback(() => errorRef.current, []);
   const value: MobileChatVoiceRecorderContextValue = {
+    microphoneCoordinator,
     session,
     continuousVoice,
     continuousDictation,

@@ -99,12 +99,13 @@ export const PROVIDER_CREDENTIALS_CAPABILITY: CapabilityDescriptor = {
 };
 
 export const COMPANION_RUN_OPERATIONS = ['run.start', 'run.cancel', 'tool.result'] as const;
+export const COMPANION_LIVE_OPERATIONS = ['live.start', 'live.event', 'live.ping', 'live.close', 'live.settings.get', 'live.settings.update'] as const;
 export const COMPANION_WORKSPACE_OPERATIONS = ['workspaces.list', 'workspaces.update'] as const;
 
 export const COMPANION_CAPABILITY: CapabilityDescriptor = {
   id: 'companion',
   version: 1,
-  operations: [...COMPANION_RUN_OPERATIONS, ...COMPANION_WORKSPACE_OPERATIONS],
+  operations: [...COMPANION_RUN_OPERATIONS, ...COMPANION_WORKSPACE_OPERATIONS, ...COMPANION_LIVE_OPERATIONS],
 };
 
 export function isGranted(
@@ -118,6 +119,10 @@ export function isGranted(
     (grant) =>
       grant.capability === capability &&
       grant.version === version &&
-      (grant.operations.includes(operation) || grant.operations.includes('*')),
+      (grant.operations.includes(operation) || grant.operations.includes('*') ||
+        // Reading this non-secret mode flag is part of starting Companion. Keep
+        // existing phones working when Live is off; Live controls/writes still need their own grants.
+        (capability === COMPANION_CAPABILITY.id && version === COMPANION_CAPABILITY.version &&
+          operation === 'live.settings.get' && grant.operations.includes('run.start'))),
   );
 }
