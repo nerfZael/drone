@@ -8,14 +8,14 @@ test('layout tools are separate immediate browser calls and unavailable in mobil
   const context = { settings: DEFAULT_COMPANION_SETTINGS, windowLayoutTools: true, callBrowser: async (name: string) => { calls.push(name); return { ok: true }; } };
   const runtime = Object.create(CompanionRuntime.prototype);
   const tools = await runtime.customTools(context, []);
-  for (const name of ['get_chat_window_layout', 'arrange_chat_windows', 'get_workspace_window_layout', 'arrange_workspace_windows']) {
+  for (const name of ['get_chat_window_layout', 'arrange_chat_windows', 'get_workspace_window_layout', 'arrange_workspace_windows', 'open_workspace_files', 'set_editor_file_presentation']) {
     const tool = tools.find((t: any) => t.name === name);
     expect(tool).toBeDefined();
     await tool.execute('call', {}, undefined);
   }
-  expect(calls).toEqual(['get_chat_window_layout', 'arrange_chat_windows', 'get_workspace_window_layout', 'arrange_workspace_windows']);
+  expect(calls).toEqual(['get_chat_window_layout', 'arrange_chat_windows', 'get_workspace_window_layout', 'arrange_workspace_windows', 'open_workspace_files', 'set_editor_file_presentation']);
   const mobile = await runtime.customTools({ ...context, windowLayoutTools: false }, []);
-  expect(mobile.some((t: any) => ['get_chat_window_layout', 'arrange_chat_windows', 'get_workspace_window_layout', 'arrange_workspace_windows'].includes(t.name))).toBe(false);
+  expect(mobile.some((t: any) => ['get_chat_window_layout', 'arrange_chat_windows', 'get_workspace_window_layout', 'arrange_workspace_windows', 'open_workspace_files', 'set_editor_file_presentation'].includes(t.name))).toBe(false);
 });
 
 test('browser executor dispatches layout without reading app context or a proposal', async () => {
@@ -53,4 +53,28 @@ test('v8 enables workspace layout for previous window arrangers and preserves ex
   expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, schemaVersion: 7, enabledTools: ['arrange_chat_windows'] }).enabledTools).toContain('arrange_workspace_windows');
   expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, schemaVersion: 8, enabledTools: ['arrange_chat_windows'] }).enabledTools).not.toContain('arrange_workspace_windows');
   expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, enabledTools: ['arrange_workspace_windows'] }).enabledTools).toContain('get_workspace_window_layout');
+});
+
+
+test('editor tools route without proposals and have no native mobile fallback', async () => {
+  const workspace = {
+    openWorkspaceFiles: (args: unknown) => args,
+    setEditorFilePresentation: (args: unknown) => args,
+  } as unknown as CompanionBrowserWorkspace;
+  const open = { droneId: 'a', paths: ['src/a.ts'], presentation: 'panes' };
+  expect(await executeCompanionBrowserTool(workspace, 'open_workspace_files', open)).toEqual(open);
+  const present = { droneId: 'a', tabIds: ['file:a'], presentation: 'tabs' };
+  expect(await executeCompanionBrowserTool(workspace, 'set_editor_file_presentation', present)).toEqual(present);
+  await expect(executeCompanionBrowserTool({} as CompanionBrowserWorkspace, 'open_workspace_files', open)).rejects.toThrow('UNSUPPORTED');
+  await expect(executeCompanionBrowserTool({} as CompanionBrowserWorkspace, 'set_editor_file_presentation', present)).rejects.toThrow('UNSUPPORTED');
+});
+
+test('v9 enables file presentation for existing workspace arrangers but respects explicit choices', () => {
+  const migrated = normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, schemaVersion: 8, enabledTools: ['arrange_workspace_windows'] });
+  expect(migrated.enabledTools).toContain('open_workspace_files');
+  expect(migrated.enabledTools).toContain('set_editor_file_presentation');
+  const explicit = normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, schemaVersion: 9, enabledTools: ['arrange_workspace_windows'] });
+  expect(explicit.enabledTools).not.toContain('open_workspace_files');
+  expect(explicit.enabledTools).not.toContain('set_editor_file_presentation');
+  expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, enabledTools: ['set_editor_file_presentation'] }).enabledTools).toContain('get_workspace_window_layout');
 });

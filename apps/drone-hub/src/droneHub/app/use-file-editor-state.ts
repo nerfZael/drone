@@ -9,6 +9,7 @@ import {
   dirtyFileTabsForPaths,
   openedFileTabDirty,
   openFileTab,
+  openedFileTabId,
   reorderFileTabs,
   remapFileTabsForPathChange,
   updateFileTabContent,
@@ -955,6 +956,7 @@ export function useFileEditorState({
         droneId: tab.droneId,
         path: tab.path,
         name: tab.name,
+        loaded: tab.loaded,
         loading: tab.loading,
         saving: tab.saving,
         error: tab.error,
@@ -1293,7 +1295,29 @@ export function useFileEditorState({
     }
   }, [currentDrone?.id, setTabState]);
 
+  const acceptCompanionFile = (droneId: string, data: Extract<DroneFsReadPayload, { ok: true }>) => {
+    if (droneId !== currentDroneId) throw new Error('DRONE_NOT_OPEN');
+    const path = data.path;
+    const existing = tabStateByDroneIdRef.current[droneId]?.tabs.find(tab => tab.path === path);
+    if (existing?.loaded) {
+      setTabStateForDrone(droneId, state => activateFileTab(state, existing.tabId));
+      return existing.tabId;
+    }
+    const tabId = openedFileTabId(droneId, path);
+    loadSeqByTabRef.current.set(tabId, (loadSeqByTabRef.current.get(tabId) ?? 0) + 1);
+    loadSessionsRef.current.get(tabId)?.cancel();
+    const loaded = readPayloadToTabState(data);
+    const navigationSeq = ++navigationSeqRef.current;
+    liveReloadSeqByTabRef.current.set(tabId, (liveReloadSeqByTabRef.current.get(tabId) ?? 0) + 1);
+    setTabStateForDrone(droneId, state => {
+      const next = openFileTab(state, { droneId, path, name: loaded.name || path, targetLine: null, targetColumn: null, navigationSeq });
+      return { ...next, tabs: next.tabs.map(tab => tab.tabId === tabId ? { ...tab, ...loaded, path, name: loaded.name || path, loading: false, loaded: true, error: null } : tab) };
+    });
+    return tabId;
+  };
+
   return {
+    acceptCompanionFile,
     openedFile,
     loading,
     saving,

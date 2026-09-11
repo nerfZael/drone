@@ -1,3 +1,4 @@
+import { CompanionCurrentWorkspaceAccess } from './CompanionCurrentWorkspaceAccess';
 import { useRecorderCompanion } from '../dictation/RecorderCompanionContext';
 import React from 'react';
 import {
@@ -351,6 +352,7 @@ export function CompanionOverlay() {
             ×
           </button>
         </div>
+        <CompanionCurrentWorkspaceAccess refreshKey={workspacePickerOpen} />
         {/* Run summary sits under the buttons so it costs no extra row. */}
         {active || companion.activity.length > 0 ? (
           <button

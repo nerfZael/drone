@@ -1,3 +1,4 @@
+import { COMPANION_FILE_PRESENTATION, type FilePresentation, type PresentedFile } from '../files/companion-file-presentation';
 import { READ_WORKSPACE_LAYOUT } from '../workspace-layout/workspace-layout-events';
 import { retainClosedSideChatWindows } from './retainClosedSideChatWindows';
 import { closeDockedWindows } from './closeDockedWindows';
@@ -712,6 +713,7 @@ export function DockableDroneWorkspace({
   const layoutSaveTimerRef = React.useRef<number | null>(null);
   const suppressSaveRef = React.useRef(false);
   const arrangingWorkspaceRef = React.useRef(false);
+  const reattachingFilePanelsRef = React.useRef(new Set<string>());
   const unmountingRef = React.useRef(false);
   const lastAppliedOpenRequestRef = React.useRef(openRequestNonce);
   const [previewHostVersion, setPreviewHostVersion] = React.useState(0);
@@ -1240,6 +1242,38 @@ export function DockableDroneWorkspace({
     persistCurrentLayout();
   }, [persistCurrentLayout, updateWorkspacePanelState]);
 
+  React.useEffect(() => {
+    const present = (event: Event) => {
+      const detail = (event as CustomEvent<{ droneId: string; files: PresentedFile[]; presentation: FilePresentation; panelIds?: string[]; error?: string }>).detail;
+      if (detail.droneId !== currentDrone.id) return;
+      const api = apiRef.current;
+      try {
+        if (isMobileViewport || !api || !workspaceElementRef.current?.isConnected) throw new Error('EDITOR_WORKSPACE_UNAVAILABLE');
+        if (pointerDownRef.current) throw new Error('WORKSPACE_LAYOUT_BUSY');
+        const bounds = workspaceElementRef.current.getBoundingClientRect();
+        if (bounds.width <= 0 || bounds.height <= 0) throw new Error('EDITOR_WORKSPACE_UNAVAILABLE');
+        if (detail.files.some(file => !fileWindowsRef.current?.openTabIds.includes(file.tabId))) throw new Error('STALE_EDITOR_TAB');
+        if (detail.presentation === 'panes') {
+          for (const file of detail.files) openFileWindow({ ...file, droneId: currentDrone.id }, 'right', api.getPanel(CHAT_PANEL_ID)?.group.id ?? null);
+          detail.panelIds = detail.files.map(file => filePanelId(file.tabId));
+        } else {
+          ensureWorkspaceToolPanel(api, 'editor', 'single');
+          for (const file of detail.files) {
+            const panel = api.getPanel(filePanelId(file.tabId));
+            if (panel) { reattachingFilePanelsRef.current.add(panel.id); api.removePanel(panel); }
+          }
+          const editor = editorChangesPanels(api)[0];
+          if (!editor) throw new Error('EDITOR_PANEL_NOT_READY');
+          detail.panelIds = detail.files.map(() => editor.id);
+        }
+        updateWorkspacePanelState();
+        persistCurrentLayout();
+      } catch (error) { detail.error = error instanceof Error ? error.message : String(error); }
+    };
+    window.addEventListener(COMPANION_FILE_PRESENTATION, present);
+    return () => window.removeEventListener(COMPANION_FILE_PRESENTATION, present);
+  }, [currentDrone.id, isMobileViewport, openFileWindow, persistCurrentLayout, updateWorkspacePanelState]);
+
   const handleReady = React.useCallback(
     (event: DockviewReadyEvent) => {
       apiRef.current = event.api;
@@ -1304,6 +1338,7 @@ export function DockableDroneWorkspace({
       const removeDisposable = event.api.onDidRemovePanel((panel) => {
         if (restoringPresetRef.current) return;
         const panelId = panel.id;
+        const reattachingFile = reattachingFilePanelsRef.current.delete(panelId);
         const pendingTimer = removedPanelTimersRef.current.get(panelId);
         if (pendingTimer !== undefined) window.clearTimeout(pendingTimer);
         // Dockview fires this before it drops the emptied group and hands that
@@ -1323,7 +1358,7 @@ export function DockableDroneWorkspace({
           if (!api) return;
           if (api.getPanel(panelId)) return;
 
-          if (panelId.startsWith(SIDE_CHAT_PANEL_PREFIX)) {
+          if (reattachingFile || panelId.startsWith(SIDE_CHAT_PANEL_PREFIX)) {
             updateWorkspacePanelState();
             persistCurrentLayout();
             return;

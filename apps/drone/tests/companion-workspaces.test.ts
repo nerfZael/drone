@@ -14,6 +14,7 @@ import { withTempDroneDataDir } from './test-helpers';
 function fixture(hostWorkspaces = buildHostWorkspaces([], [])) {
   let saved: ChatWorkspaceAccess = { targets: [], defaultTargetId: null };
   const calls: Array<{ id: string; tool: string }> = [];
+  let afterStat = () => {};
   const drones = ['a', 'b'].map((id) => ({
     id,
     name: id,
@@ -40,6 +41,7 @@ function fixture(hostWorkspaces = buildHostWorkspaces([], [])) {
       executeAuthorizedWorkspaceTool: async (id, call, authorize) => {
         await authorize();
         calls.push({ id, tool: call.tool });
+        if (call.tool === 'editor_stat') { afterStat(); return { type: 'file', path: `/repo/${call.args.path}` }; }
         return { content: [{ type: 'text', text: 'ok' }], details: { id } };
       },
     },
@@ -61,6 +63,7 @@ function fixture(hostWorkspaces = buildHostWorkspaces([], [])) {
   );
   return {
     service,
+    afterStat: (fn: () => void) => { afterStat = fn; },
     drones,
     calls,
     shared,
@@ -430,4 +433,31 @@ describe('Companion workspace access', () => {
       }
     });
   });
+});
+
+
+test('current workspace uses the canonical shared host folder and a container uses its drone name', async () => {
+  const { service, drones } = fixture(buildHostWorkspaces([], ['/repo']));
+  drones[0]!.runtime = 'host';
+  const host = await service.current('a');
+  expect(host.target).toMatchObject({ kind: 'host', name: 'repo', path: '/repo', deviceName: 'Home' });
+  expect((await service.current('b')).target).toMatchObject({ id: 'drone:b', name: 'b', kind: 'drone' });
+  drones[1]!.runtime = 'host';
+  expect((await service.current('b')).target.id).toBe(host.target.id);
+  expect((await service.catalog()).access.targets).toEqual([]);
+  await expect(service.current('gone')).rejects.toThrow('DRONE_UNAVAILABLE');
+});
+
+test('editor file resolution requires the correct Read grant and rechecks revocation after stat', async () => {
+  const f = fixture(buildHostWorkspaces([], ['/repo']));
+  f.drones[0]!.runtime = 'host';
+  const current = await f.service.current('a');
+  await expect(f.service.editorFile({ droneId: 'a', path: 'one.ts' })).rejects.toThrow('read access');
+  expect(f.calls).toHaveLength(0);
+  await f.service.save({ targets: [{ ...current.target, write: false, execute: false }], defaultTargetId: current.target.id }, current.revision);
+  await expect(f.service.editorFile({ droneId: 'a', workspaceId: 'drone:b', path: 'one.ts' })).rejects.toThrow('WORKSPACE_TARGET_MISMATCH');
+  expect(await f.service.editorFile({ droneId: 'a', path: 'one.ts' })).toEqual({ droneId: 'a', workspaceId: current.target.id, path: '/repo/one.ts' });
+  expect(f.calls).toEqual([{ id: current.target.id, tool: 'editor_stat' }]);
+  f.afterStat(() => f.setAccess({ targets: [], defaultTargetId: null }));
+  await expect(f.service.editorFile({ droneId: 'a', path: 'two.ts' })).rejects.toThrow('read access');
 });

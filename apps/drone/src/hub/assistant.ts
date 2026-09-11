@@ -2560,14 +2560,16 @@ export class HubAssistantService {
     call.signal?.throwIfAborted();
     await authorize();
     const params: any = call.args ?? {};
-    if (call.tool === 'transfer_stat') {
+    if (call.tool === 'transfer_stat' || call.tool === 'editor_stat') {
       const result = await this.requireFileCallback('statDronePath')({
         droneId,
         path: normalizeAssistantDroneFilePath(params.path),
+        ...(call.tool === 'editor_stat' ? { followSymlinks: true } : {}),
       });
       if (!result.exists || (result.kind !== 'file' && result.kind !== 'directory'))
-        throw new Error(`transfer source was not found: ${String(params.path ?? '')}`);
+        throw new Error(`${call.tool === 'editor_stat' ? 'editor file' : 'transfer source'} was not found: ${String(params.path ?? '')}`);
       return {
+        ...(call.tool === 'editor_stat' ? { path: result.path } : {}),
         type: result.kind,
         size: result.kind === 'file' ? (result.size ?? 0) : 0,
         mtimeMs: result.mtimeMs,

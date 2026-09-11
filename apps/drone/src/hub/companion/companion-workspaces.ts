@@ -1,3 +1,4 @@
+import { hostWorkspaceId, hostWorkspaceRoot } from '../assistant/host-workspaces';
 import crypto from 'node:crypto';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import type { WorkspaceTarget, WorkspaceCapability } from '@blip/tools';
@@ -142,6 +143,28 @@ export class CompanionWorkspaceService {
       workspaces,
       devices,
     };
+  }
+
+  async current(droneId: string) {
+    const [inventory, catalog] = await Promise.all([this.assistant.workspaceInventory(), this.catalog()]);
+    const drone = inventory.drones.find(item => item.id === droneId);
+    if (!drone) throw new Error('DRONE_UNAVAILABLE');
+    const id = drone.runtime === 'host' ? hostWorkspaceId(hostWorkspaceRoot(drone)) : `drone:${drone.id}`;
+    const target = catalog.workspaces.find(option => option.id === id);
+    if (!target) throw new Error('WORKSPACE_UNAVAILABLE');
+    return { ...catalog, target };
+  }
+
+  async editorFile(input: { droneId: string; workspaceId?: string; path: string }) {
+    if (typeof input.droneId !== 'string' || typeof input.path !== 'string' || !input.path.trim() || input.path.length > 4096 || /[\0\r\n]/.test(input.path)) throw new Error('INVALID_EDITOR_FILE');
+    const current = await this.current(input.droneId);
+    const target = current.target;
+    if (input.workspaceId !== undefined && input.workspaceId !== target.id) throw new Error('WORKSPACE_TARGET_MISMATCH');
+    const authorize = async () => assertCompanionWorkspacePermission(await this.store.read(), target.id, 'read');
+    const stat = await this.assistant.executeAuthorizedWorkspaceTool(target.kind === 'host' ? target.id : input.droneId, { tool: 'editor_stat', args: { path: input.path } }, authorize);
+    if (stat.type !== 'file' || typeof stat.path !== 'string') throw new Error('NOT_A_FILE');
+    await authorize();
+    return { workspaceId: target.id, droneId: input.droneId, path: stat.path };
   }
 
   save(value: unknown, revision: string): Promise<ChatWorkspaceCatalog> {

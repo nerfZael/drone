@@ -220,7 +220,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
       await assistantDeleteDroneDirectory({ droneId, path, recursive }),
     searchDroneFiles: async ({ droneId, path, query, limit, contextBefore, contextAfter }) =>
       await assistantSearchDroneFiles({ droneId, path, query, limit, contextBefore, contextAfter }),
-    statDronePath: async ({ droneId, path }) => await assistantStatDronePath({ droneId, path }),
+    statDronePath: async (input) => await assistantStatDronePath(input),
     readDroneFileChunk: async (input) => await assistantReadDroneFileChunk(input),
     createDroneTransferDirectory: async (input) =>
       await assistantCreateDroneTransferDirectory(input),
