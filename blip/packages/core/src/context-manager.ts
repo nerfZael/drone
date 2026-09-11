@@ -184,6 +184,7 @@ export class BlipContextManager {
         type: 'compaction_started',
         reason: input.reason,
       });
+      await this.observer.stage('preparing');
       const entries = await readActiveTranscript(this.options.repository, this.options.state);
       const before = input.before ?? (await input.estimate(modelMessagesFromTranscript(entries)));
       const budget = compactionBudget(this.options.model, input.settings);
@@ -239,6 +240,9 @@ export class BlipContextManager {
         return undefined;
       }
       controller.signal.throwIfAborted();
+      await this.observer.stage('credentials');
+      const apiKey = await this.options.getApiKey?.(this.options.model.provider);
+      await this.observer.stage('summarizing');
       const compaction = await createCompaction({
         session: this.options.state,
         entries,
@@ -247,10 +251,11 @@ export class BlipContextManager {
         trigger: input.reason === 'manual' ? 'manual' : 'auto',
         model: this.options.model,
         reasoning: this.options.reasoning,
-        apiKey: await this.options.getApiKey?.(this.options.model.provider),
+        apiKey,
         streamFn: this.options.streamFn,
         signal: controller.signal,
         onModelCall: this.observer.modelCall,
+        onModelActivity: this.observer.modelActivity,
         onUsage: async (response) =>
           this.observer.emit({
             ...base,
@@ -266,6 +271,7 @@ export class BlipContextManager {
       });
       controller.signal.throwIfAborted();
       if (!compaction) return undefined;
+      await this.observer.stage('validating');
       const candidate = modelMessagesFromTranscript([...entries, compaction]);
       const after = await input.estimate(candidate);
       const summaryTokens =
@@ -298,6 +304,7 @@ export class BlipContextManager {
       controller.signal.throwIfAborted();
       compaction.tokensBefore = before.inputTokens;
       compaction.tokensAfterEstimate = after.inputTokens;
+      await this.observer.stage('saving');
       await this.options.repository.appendEntry(this.options.state, compaction);
       this.options.state.compactedSummary = compaction.summary;
       await this.options.repository.save(this.options.state);

@@ -1,5 +1,6 @@
 import type { CompanionCompactionActivity } from '@drone/assistant-chat';
 import React from 'react';
+import { createCompanionActionReporter, type CompanionActionNotification } from './companion-action-notifications';
 import { useRecorderCompanion } from '../dictation/RecorderCompanionContext';
 import {
   COMPANION_PROPOSAL_FORMAT,
@@ -65,6 +66,8 @@ type CompanionContextValue = {
   proposalExecuting: boolean;
   autoApprove: boolean;
   proposalHistory: CompanionProposalHistoryEntry[];
+  actionNotifications: CompanionActionNotification[];
+  dismissActionNotification(id: string): void;
   submitText(prompt: string): Promise<CompanionTextSubmitResult>;
   prepareTextSubmission(): (prompt: string) => Promise<CompanionTextSubmitResult>;
   toggle(): Promise<void>;
@@ -109,6 +112,10 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const [proposalDefaultRepoPath, setProposalDefaultRepoPath] = React.useState<string | null>(null);
   const [proposalExecuting, setProposalExecuting] = React.useState(false);
   const [autoApprove, setAutoApprove] = React.useState(false);
+  const [actionNotifications, setActionNotifications] = React.useState<CompanionActionNotification[]>([]);
+  const dismissActionNotification = React.useCallback((id: string) => {
+    setActionNotifications((items) => items.filter((item) => item.id !== id));
+  }, []);
   const [proposalHistory, setProposalHistory] = React.useState<CompanionProposalHistoryEntry[]>([]);
   const proposalExecutingRef = React.useRef(false);
   const proposalExecutionRef = React.useRef<CompanionProposalExecution | null>(null);
@@ -151,6 +158,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     setProposalDefaultRepoPath(null);
     setAutoApprove(false);
     setProposalHistory([]);
+    setActionNotifications([]);
     proposalExecutingRef.current = false;
     setProposalExecuting(false);
   }, [controller, voice.discardRecording, live.reset]);
@@ -232,6 +240,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const toggleAutoApprove = React.useCallback(() => {
+    setActionNotifications([]);
     setAutoApprove((enabled) => !enabled);
   }, []);
 
@@ -255,11 +264,15 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       }),
     );
     setProposalDroneNames(droneNames);
+    const reportActions = createCompanionActionReporter(current, droneNames, (notifications) => {
+      if (autoApproved) setActionNotifications((items) => [...items, ...notifications].slice(-3));
+    });
     let completedExecution: CompanionProposalExecution;
     try {
       completedExecution = await workspace.executeProposal(current, executionContext, (progress) => {
         if (proposalExecutionGenerationRef.current === executionGeneration) {
           setProposalExecutionProgress(progress);
+          reportActions(progress.operations);
         }
       });
     } catch (executionError) {
@@ -278,6 +291,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       };
     } finally {
       if (proposalExecutionGenerationRef.current === executionGeneration) {
+        reportActions(completedExecution!.operations);
         proposalExecutionRef.current = completedExecution!;
         setProposalExecution(completedExecution!);
         setProposalExecutionProgress(null);
@@ -533,6 +547,8 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       proposalExecuting,
       autoApprove,
       proposalHistory,
+      actionNotifications,
+      dismissActionNotification,
       submitText,
       prepareTextSubmission,
       toggle,
@@ -559,6 +575,8 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       proposalDroneNames,
       proposalExecuting,
       proposalHistory,
+      actionNotifications,
+      dismissActionNotification,
       state,
       stop,
       submitText,

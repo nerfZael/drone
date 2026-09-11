@@ -201,3 +201,53 @@ test('records a single explicit compaction failure and tolerates legacy telemetr
   expect(report.compaction.modelDuration.count).toBe(0);
   expect(JSON.stringify(report)).not.toContain('private');
 });
+
+test('reports active compaction before run completion, heartbeats stalled calls, and stops on failure', async () => {
+  let now = 0;
+  const logs: Array<{ event?: string; [key: string]: unknown }> = [];
+  const telemetry = new CompanionTelemetryService({ heartbeatMs: 5, log: (_level, message, meta) => {
+    if (message === 'Companion compaction progress') logs.push(meta ?? {});
+  } });
+  const run = new CompanionRunTelemetry(telemetry, { messageId: 'live-message', runId: 'live-run', transport: 'websocket', coldStart: false }, {
+    epochMs: () => Date.parse('2026-09-11T00:00:00Z') + now, monotonicMs: () => now,
+  });
+  const base = { version: 1 as const, sessionId: 'session', eventId: 'event', timestamp: '2026-09-11T00:00:00Z' };
+  run.setModel({ provider: 'test', model: 'summary-model', thinkingLevel: 'medium' });
+  try {
+    run.observe({ ...base, type: 'compaction_started', reason: 'auto' });
+    run.observe({ ...base, type: 'compaction_progress', progress: {
+      phase: 'summarizing', durationMs: 0, modelCallCount: 2, modelResponseCount: 1,
+      modelCallActive: true, modelCallDurationMs: 0, modelDurationMs: 1500,
+      modelEventCount: 3, modelIdleMs: 0,
+    } });
+    now = 180_000;
+    const report = telemetry.report();
+    expect(report.runs).toHaveLength(0);
+    expect(report.activeCompactions).toEqual([expect.objectContaining({
+      messageId: 'live-message', model: 'summary-model', thinkingLevel: 'medium', phase: 'summarizing',
+      durationMs: 180_000, modelCallCount: 2, modelCallActive: true,
+      modelCallDurationMs: 180_000, modelIdleMs: 180_000, modelEventCount: 3,
+    })]);
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    expect(logs.some((row) => row.event === 'heartbeat' && row.modelIdleMs === 180_000)).toBe(true);
+    run.observe({ ...base, type: 'compaction_failed', reason: 'error' });
+    expect(telemetry.report().activeCompactions).toEqual([]);
+    expect(logs.at(-1)).toMatchObject({ event: 'compaction_failed', status: 'failed' });
+    const count = logs.length;
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    expect(logs).toHaveLength(count);
+  } finally { await run.finish('error'); }
+});
+
+test.each(['completed', 'cancelled', 'error'] as const)('run ending %s clears live compaction even without a terminal compaction event', async (status) => {
+  const telemetry = new CompanionTelemetryService();
+  const run = telemetry.begin({ messageId: status, runId: status, transport: 'websocket', coldStart: false });
+  const event = { version: 1 as const, sessionId: 'session', eventId: 'event', timestamp: new Date().toISOString(), type: 'compaction_started' as const, reason: 'private unknown reason' };
+  run.observe(event);
+  expect(telemetry.report().activeCompactions).toHaveLength(1);
+  expect(JSON.stringify(telemetry.report().activeCompactions)).not.toContain('private');
+  await run.finish(status);
+  expect(telemetry.report().activeCompactions).toEqual([]);
+  run.observe(event);
+  expect(telemetry.report().activeCompactions).toEqual([]);
+});

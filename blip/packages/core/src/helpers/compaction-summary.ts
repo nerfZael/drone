@@ -1,5 +1,5 @@
 import {
-  completeSimple,
+  streamSimple,
   estimateContextTokens,
   type Context,
   type Model,
@@ -17,7 +17,8 @@ type SummaryInput = {
   reasoning?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
   apiKey?: string;
   streamFn?: StreamFn;
-  onModelCall?: (phase: 'started' | 'finished') => void;
+  onModelCall?: (phase: 'started' | 'finished') => void | Promise<void>;
+  onModelActivity?: () => void | Promise<void>;
   onUsage?: (response: AssistantMessage) => Promise<void>;
   signal?: AbortSignal;
   /** Remaining allowance after the caller reserves appended checkpoint metadata. */
@@ -71,14 +72,19 @@ export async function modelSummary(input: SummaryInput): Promise<string> {
   for (const batch of summaryInputBatches(input.plan, availableChars)) {
     input.signal?.throwIfAborted();
     const context = summaryContext(summary, batch);
-    input.onModelCall?.('started');
+    await input.onModelCall?.('started');
     let response: AssistantMessage;
     try {
-      response = input.streamFn
-        ? await (await input.streamFn(input.model, context, options)).result()
-        : await completeSimple(input.model, context, options);
+      const stream = input.streamFn
+        ? await input.streamFn(input.model, context, options)
+        : streamSimple(input.model, context, options);
+      for await (const _event of stream) {
+        // Count activity only. Never forward summary or hidden reasoning content.
+        try { await input.onModelActivity?.(); } catch { /* Best-effort diagnostics. */ }
+      }
+      response = await stream.result();
     } finally {
-      input.onModelCall?.('finished');
+      await input.onModelCall?.('finished');
     }
     await input.onUsage?.(response);
     input.signal?.throwIfAborted();

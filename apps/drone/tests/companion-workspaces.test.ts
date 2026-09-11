@@ -461,3 +461,21 @@ test('editor file resolution requires the correct Read grant and rechecks revoca
   f.afterStat(() => f.setAccess({ targets: [], defaultTargetId: null }));
   await expect(f.service.editorFile({ droneId: 'a', path: 'two.ts' })).rejects.toThrow('read access');
 });
+
+test('records workspace and authorization phases on successful and denied editor requests', async () => {
+  const { service, setAccess } = fixture();
+  const phases: string[] = [];
+  const measure = async <T>(phase: string, run: () => Promise<T>) => {
+    try { return await run(); } finally { phases.push(phase); }
+  };
+  const current = await service.current('a');
+  setAccess({ targets: [{ ...current.target, read: true, write: false, execute: false }], defaultTargetId: current.target.id });
+  await service.editorFile({ droneId: 'a', path: 'file.txt' }, measure);
+  for (const phase of ['companion_current_workspace', 'companion_current_inventory', 'companion_catalog_inventory', 'companion_catalog', 'companion_device_directory', 'companion_access_read', 'companion_authorize', 'companion_editor_stat']) expect(phases).toContain(phase);
+  expect(phases.filter((phase) => phase === 'companion_authorize')).toHaveLength(2);
+  phases.length = 0;
+  setAccess({ targets: [], defaultTargetId: null });
+  await expect(service.editorFile({ droneId: 'a', path: 'file.txt' }, measure)).rejects.toThrow('read access');
+  expect(phases).toContain('companion_authorize');
+  expect(phases).toContain('companion_editor_stat');
+});

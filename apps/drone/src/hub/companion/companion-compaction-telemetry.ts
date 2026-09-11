@@ -1,4 +1,4 @@
-import type { BlipCompactionMetrics, BlipRuntimeEvent } from '@blip/protocol';
+import type { BlipCompactionMetrics, BlipCompactionProgress, BlipRuntimeEvent } from '@blip/protocol';
 
 export type CompanionCompactionTelemetry = {
   trigger: 'auto' | 'manual' | 'context_overflow' | 'unknown';
@@ -13,14 +13,41 @@ export type CompanionCompactionTelemetry = {
 /** Keeps content-free attempt records; tolerates older runtimes without metrics. */
 export class CompanionCompactionTelemetryCollector {
   readonly attempts: CompanionCompactionTelemetry[] = [];
-  private active?: { trigger: CompanionCompactionTelemetry['trigger']; startedAt: number };
+  private active?: { trigger: CompanionCompactionTelemetry['trigger']; startedAt: number; updatedAt: number; progress?: BlipCompactionProgress };
+
+  live(now: number) {
+    if (!this.active) return undefined;
+    const { trigger, startedAt, updatedAt, progress } = this.active;
+    const age = Math.max(0, now - updatedAt);
+    return {
+      trigger, status: 'running' as const, durationMs: Math.max(0, now - startedAt),
+      phase: progress?.phase ?? 'preparing', lastProgressAgeMs: age,
+      modelCallCount: progress?.modelCallCount ?? 0, modelResponseCount: progress?.modelResponseCount ?? 0,
+      modelCallActive: progress?.modelCallActive ?? false,
+      modelCallDurationMs: (progress?.modelCallDurationMs ?? 0) + (progress?.modelCallActive ? age : 0),
+      modelDurationMs: (progress?.modelDurationMs ?? 0) + (progress?.modelCallActive ? age : 0),
+      modelEventCount: progress?.modelEventCount ?? 0,
+      ...(progress?.modelIdleMs === undefined ? {} : { modelIdleMs: progress.modelIdleMs + age }),
+    };
+  }
 
   observe(event: BlipRuntimeEvent, now: number): void {
     if (event.type === 'compaction_started') {
       this.finish('interrupted', now);
       const trigger = event.reason === 'auto' || event.reason === 'manual' || event.reason === 'context_overflow'
         ? event.reason : 'unknown';
-      this.active = { trigger, startedAt: now };
+      this.active = { trigger, startedAt: now, updatedAt: now };
+    } else if (event.type === 'compaction_progress' && this.active) {
+      const p = event.progress;
+      if (!['preparing', 'credentials', 'summarizing', 'validating', 'saving'].includes(p.phase)) return;
+      this.active.updatedAt = now;
+      this.active.progress = {
+        phase: p.phase, durationMs: nonnegative(p.durationMs),
+        modelCallCount: nonnegative(p.modelCallCount), modelResponseCount: nonnegative(p.modelResponseCount),
+        modelCallActive: p.modelCallActive === true, modelCallDurationMs: nonnegative(p.modelCallDurationMs),
+        modelDurationMs: nonnegative(p.modelDurationMs), modelEventCount: nonnegative(p.modelEventCount),
+        ...(p.modelIdleMs === undefined ? {} : { modelIdleMs: nonnegative(p.modelIdleMs) }),
+      };
     } else if (event.type === 'compaction_completed' || event.type === 'compaction_skipped' ||
       event.type === 'compaction_failed') {
       const metrics = safeMetrics(event.metrics);

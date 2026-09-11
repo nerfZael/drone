@@ -29,6 +29,8 @@ const WRITE: WorkspaceCapability[] = [
   'directories.delete',
   'patch.apply',
 ];
+export type CompanionRequestMeasure = <T>(phase: string, run: () => Promise<T>) => Promise<T>;
+const unmeasured: CompanionRequestMeasure = (_phase, run) => run();
 type Permission = 'read' | 'write' | 'execute';
 type Mesh = WorkspaceAccessMesh & {
   remoteWorkspaceTargets(
@@ -107,11 +109,11 @@ export class CompanionWorkspaceService {
       .digest('hex');
   }
 
-  async catalog(deviceId?: string): Promise<ChatWorkspaceCatalog> {
+  async catalog(deviceId?: string, measure: CompanionRequestMeasure = unmeasured): Promise<ChatWorkspaceCatalog> {
     const [inventory, directory, access] = await Promise.all([
-      this.assistant.workspaceInventory(),
-      this.mesh.workspaceAccessDevices(),
-      this.store.read(),
+      measure('companion_catalog_inventory', () => this.assistant.workspaceInventory()),
+      measure('companion_device_directory', () => this.mesh.workspaceAccessDevices()),
+      measure('companion_access_read', () => this.store.read()),
     ]);
     const workspaces = localWorkspaceOptions(inventory, directory.self).workspaces.map(
       (option) => ({
@@ -145,8 +147,11 @@ export class CompanionWorkspaceService {
     };
   }
 
-  async current(droneId: string) {
-    const [inventory, catalog] = await Promise.all([this.assistant.workspaceInventory(), this.catalog()]);
+  async current(droneId: string, measure: CompanionRequestMeasure = unmeasured) {
+    const [inventory, catalog] = await Promise.all([
+      measure('companion_current_inventory', () => this.assistant.workspaceInventory()),
+      measure('companion_catalog', () => this.catalog(undefined, measure)),
+    ]);
     const drone = inventory.drones.find(item => item.id === droneId);
     if (!drone) throw new Error('DRONE_UNAVAILABLE');
     const id = drone.runtime === 'host' ? hostWorkspaceId(hostWorkspaceRoot(drone)) : `drone:${drone.id}`;
@@ -155,13 +160,13 @@ export class CompanionWorkspaceService {
     return { ...catalog, target };
   }
 
-  async editorFile(input: { droneId: string; workspaceId?: string; path: string }) {
+  async editorFile(input: { droneId: string; workspaceId?: string; path: string }, measure: CompanionRequestMeasure = unmeasured) {
     if (typeof input.droneId !== 'string' || typeof input.path !== 'string' || !input.path.trim() || input.path.length > 4096 || /[\0\r\n]/.test(input.path)) throw new Error('INVALID_EDITOR_FILE');
-    const current = await this.current(input.droneId);
+    const current = await measure('companion_current_workspace', () => this.current(input.droneId, measure));
     const target = current.target;
     if (input.workspaceId !== undefined && input.workspaceId !== target.id) throw new Error('WORKSPACE_TARGET_MISMATCH');
-    const authorize = async () => assertCompanionWorkspacePermission(await this.store.read(), target.id, 'read');
-    const stat = await this.assistant.executeAuthorizedWorkspaceTool(target.kind === 'host' ? target.id : input.droneId, { tool: 'editor_stat', args: { path: input.path } }, authorize);
+    const authorize = () => measure('companion_authorize', async () => assertCompanionWorkspacePermission(await this.store.read(), target.id, 'read'));
+    const stat = await measure('companion_editor_stat', () => this.assistant.executeAuthorizedWorkspaceTool(target.kind === 'host' ? target.id : input.droneId, { tool: 'editor_stat', args: { path: input.path } }, authorize));
     if (stat.type !== 'file' || typeof stat.path !== 'string') throw new Error('NOT_A_FILE');
     await authorize();
     return { workspaceId: target.id, droneId: input.droneId, path: stat.path };

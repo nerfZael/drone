@@ -1,3 +1,4 @@
+import { observeRequest } from '../request-diagnostics';
 import React from 'react';
 import { CompanionLiveConnection } from './CompanionLiveConnection';
 import { CompanionLiveConversation } from './CompanionLiveConversation';
@@ -148,14 +149,23 @@ const EMPTY_STATE: LiveState = {
 };
 
 async function settingsRequest(enabled?: boolean): Promise<{ enabled: boolean }> {
-  const response = await fetch('/api/settings/companion/live-voice', {
+  const url = '/api/settings/companion/live-voice';
+  const init: RequestInit = {
     signal: AbortSignal.timeout(10_000),
     ...(enabled === undefined ? {} : {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }),
     }),
-  });
-  if (!response.ok) throw new Error(`Could not ${enabled === undefined ? 'load' : 'save'} Live voice setting (${response.status}).`);
-  const value = await response.json();
-  if (!value || typeof value.enabled !== 'boolean') throw new Error('Invalid Live voice setting response.');
-  return value;
+  };
+  const diagnostic = observeRequest(url, init);
+  const headers = new Headers(init.headers);
+  if (diagnostic) headers.set('x-drone-client-request-id', diagnostic.requestId);
+  try {
+    const response = await fetch(url, { ...init, headers });
+    diagnostic?.response(response);
+    if (!response.ok) throw new Error(`Could not ${enabled === undefined ? 'load' : 'save'} Live voice setting (${response.status}).`);
+    const value = await response.json();
+    if (!value || typeof value.enabled !== 'boolean') throw new Error('Invalid Live voice setting response.');
+    diagnostic?.finish();
+    return value;
+  } catch (error) { diagnostic?.fail(error); throw error; }
 }

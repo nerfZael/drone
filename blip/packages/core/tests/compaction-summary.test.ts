@@ -259,3 +259,24 @@ function reconstruct(batches: string[]): any[] {
   }
   return [...records.values()].map((record) => JSON.parse(record));
 }
+
+test('reports summary stream activity before the final response without forwarding content', async () => {
+  const result = new AssistantMessageEventStream();
+  const response = fauxAssistantMessage(summaryText('Private continuation facts'));
+  const phases: string[] = [];
+  let firstActivity!: () => void;
+  const activity = new Promise<void>((resolve) => { firstActivity = resolve; });
+  let settled = false;
+  const summary = modelSummary({
+    model, plan: plan([entry('one', user('Private transcript'))]),
+    streamFn: () => { result.push({ type: 'start', partial: response }); return result; },
+    onModelCall: (phase) => { phases.push(phase); },
+    onModelActivity: (...args) => { expect(args).toEqual([]); firstActivity(); },
+  }).finally(() => { settled = true; });
+  await activity;
+  expect(settled).toBe(false);
+  expect(phases).toEqual(['started']);
+  result.push({ type: 'done', reason: 'stop', message: response });
+  expect(await summary).toContain('Private continuation facts');
+  expect(phases).toEqual(['started', 'finished']);
+});

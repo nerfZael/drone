@@ -76,6 +76,32 @@ async function harness(settingsOnly = false, executeProposal = async () => ({ ok
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+test('mobile starts Live with stale local grants and authorizes Companion requests through the Hub', async () => {
+  const previous = mesh.devices[0].grants[0].operations;
+  mesh.devices[0].grants[0].operations = [];
+  const h = await harness();
+  const abort = new AbortController();
+  let reply: Promise<string> | undefined;
+  try {
+    enabled = true;
+    await act(async () => { await h.context().toggle(); });
+    expect(backend).not.toBeNull();
+    expect(recorded).toBe(0);
+    await act(async () => {
+      reply = backend!('hello', abort.signal);
+      await tick();
+    });
+    expect(calls.some((call) => call.operation === 'run.start')).toBe(true);
+    expect(live.status).toBe('listening');
+  } finally {
+    const settled = reply?.catch(() => undefined);
+    abort.abort();
+    await settled;
+    await h.cleanup();
+    mesh.devices[0].grants[0].operations = previous;
+  }
+});
+
 test('mobile keeps recording when Live is off, uses client delegation when on, and sends follow-ups while working', async () => {
   const h = await harness();
   const abort = new AbortController();

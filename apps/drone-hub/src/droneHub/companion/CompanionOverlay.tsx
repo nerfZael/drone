@@ -1,6 +1,7 @@
 import { CompanionCurrentWorkspaceAccess } from './CompanionCurrentWorkspaceAccess';
 import { useRecorderCompanion } from '../dictation/RecorderCompanionContext';
 import React from 'react';
+import { CompanionActionNotifications } from './CompanionActionNotifications';
 import {
   companionToolActivityLabel,
   companionCompactionLabel,
@@ -185,6 +186,9 @@ export function CompanionOverlay() {
       {workspacePickerOpen ? <CompanionWorkspacePicker onClose={() => setWorkspacePickerOpen(false)} /> : null}
       {promptEditorOpen ? <CompanionPromptEditor onClose={() => setPromptEditorOpen(false)} /> : null}
       {instructionsEditorOpen ? <CompanionInstructionsEditor onClose={() => setInstructionsEditorOpen(false)} /> : null}
+      {companion.autoApprove && companion.status !== 'idle' && companion.actionNotifications.length > 0 ? (
+        <CompanionActionNotifications notifications={companion.actionNotifications} onDismiss={companion.dismissActionNotification} />
+      ) : null}
       <aside
         className="flex max-h-[calc(100vh-2rem)] w-full flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--panel-raised)] shadow-[var(--edge-highlight),var(--shadow-dialog)] min-[860px]:w-[28rem] min-[860px]:self-end"
         aria-label="Companion"

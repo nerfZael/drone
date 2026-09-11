@@ -1,3 +1,4 @@
+import { measureHubRequestPhase } from '../hub-performance-diagnostics';
 import { executeCompanionOrganization } from './executeCompanionOrganization';
 import type { HubServices } from '../application/hub-services';
 import type { SidebarCommandService } from '../sidebar-command-service';
@@ -15,11 +16,14 @@ export function registerCompanionRoutes(
   workspaces?: CompanionWorkspaceService,
   organization?: { services: HubServices; sidebar: SidebarCommandService },
 ): void {
-  router.get('/api/settings/companion/live-voice', async ({ json }) => {
-    json(200, { ok: true, ...await readCompanionLiveSettings() });
+  router.get('/api/settings/companion/live-voice', async ({ req, json }) => {
+    json(200, { ok: true, ...await measureHubRequestPhase(req, 'companion_settings_read', () => readCompanionLiveSettings()) });
   });
-  router.put('/api/settings/companion/live-voice', async ({ readJson, json, fail }) => {
-    try { json(200, { ok: true, ...await writeCompanionLiveSettings(await readJson()) }); }
+  router.put('/api/settings/companion/live-voice', async ({ req, readJson, json, fail }) => {
+    try {
+      const body = await measureHubRequestPhase(req, 'companion_request_body', () => readJson());
+      json(200, { ok: true, ...await measureHubRequestPhase(req, 'companion_settings_write', () => writeCompanionLiveSettings(body)) });
+    }
     catch (error) { fail(400, error instanceof Error ? error.message : String(error)); }
   });
   if (organization) {
@@ -42,12 +46,15 @@ export function registerCompanionRoutes(
     }
   });
   if (workspaces) {
-    router.get('/api/companion/workspaces/current', async ({ url, json, fail }) => {
-      try { json(200, await workspaces.current(url.searchParams.get('droneId') || '')); }
+    router.get('/api/companion/workspaces/current', async ({ req, url, json, fail }) => {
+      try { json(200, await workspaces.current(url.searchParams.get('droneId') || '', (phase, run) => measureHubRequestPhase(req, phase, run))); }
       catch (error) { fail(400, error instanceof Error ? error.message : String(error)); }
     });
-    router.post('/api/companion/editor-file', async ({ readJson, json, fail }) => {
-      try { json(200, await workspaces.editorFile(await readJson())); }
+    router.post('/api/companion/editor-file', async ({ req, readJson, json, fail }) => {
+      try {
+        const body = await measureHubRequestPhase(req, 'companion_request_body', () => readJson());
+        json(200, await workspaces.editorFile(body, (phase, run) => measureHubRequestPhase(req, phase, run)));
+      }
       catch (error) { fail(400, error instanceof Error ? error.message : String(error)); }
     });
     router.get('/api/companion/workspaces', async ({ url, json, fail }) => {

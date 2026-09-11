@@ -1,3 +1,4 @@
+import { normalizeRequestDiagnostic } from '@drone/hub-model';
 import { GROQ_TRANSCRIPTION_MAX_BYTES, transcribeAudioWithGroq } from '../groq-transcription';
 import {
   createSpeechJobId,
@@ -414,6 +415,13 @@ export function registerOperationalRoutes(
       'chat load timing',
       serializeChatLoadTelemetryForLog(telemetry),
     );
+    json(202, { ok: true });
+  });
+
+  apiRouter.post('/api/telemetry/request', async ({ readJson, json }) => {
+    const record = normalizeRequestDiagnostic(await readJson());
+    if (!record) { json(400, { ok: false, error: 'invalid request telemetry' }); return; }
+    hubLog(record.outcome === 'completed' ? 'info' : 'warn', 'client request timing', record);
     json(202, { ok: true });
   });
 

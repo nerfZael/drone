@@ -1,7 +1,7 @@
 import type { CompanionCompactionActivity } from '@drone/assistant-chat';
 import React from 'react';
 import * as Crypto from 'expo-crypto';
-import { COMPANION_CAPABILITY, COMPANION_RUN_OPERATIONS, isGranted } from '@drone/device-protocol';
+import { COMPANION_CAPABILITY, COMPANION_RUN_OPERATIONS } from '@drone/device-protocol';
 import {
   COMPANION_PROPOSAL_FORMAT,
   COMPANION_PROPOSAL_PATH,
@@ -153,31 +153,19 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
           capability.version === COMPANION_CAPABILITY.version,
       )
     : undefined;
-  const selfDevice = mesh.devices.find((device) => device.id === mesh.identity?.id);
   const hasOperations = COMPANION_RUN_OPERATIONS.every((operation) =>
     targetCapability?.operations.includes(operation),
   );
-  const hasGrant = Boolean(
-    selfDevice &&
-    COMPANION_RUN_OPERATIONS.every((operation) =>
-      isGranted(
-        selfDevice.grants,
-        COMPANION_CAPABILITY.id,
-        COMPANION_CAPABILITY.version,
-        operation,
-      ),
-    ),
-  );
-  const available = Boolean(target && target.reachable && hasOperations && hasGrant);
+  // Grants in the phone directory are not the target Hub's current access policy.
+  // Let the Hub authorize each request so saved permission changes apply immediately.
+  const available = Boolean(target && target.reachable && hasOperations);
   const unavailableReason = !target
     ? 'Open Drone Hub before starting Companion.'
     : !target.reachable
       ? `${target.targetName} is offline.`
       : !hasOperations
         ? `${target.targetName} does not support mobile Companion yet.`
-        : !hasGrant
-          ? `Allow Companion for this phone in ${target.targetName} device settings.`
-          : '';
+        : '';
   void targetRevision;
 
   const resolveEditor = React.useCallback(() => {
@@ -376,12 +364,11 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       !activeTarget ||
       activeTarget.targetDeviceId !== activeTargetDeviceId ||
       !activeTarget.reachable ||
-      !hasOperations ||
-      !hasGrant
+      !hasOperations
     ) {
       void close();
     }
-  }, [close, hasGrant, hasOperations, proposalExecuting, targetRevision]);
+  }, [close, hasOperations, proposalExecuting, targetRevision]);
 
   const run = React.useCallback(
     async (prompt: string, telemetry?: CompanionClientTelemetry, requestedMessageId?: string, liveWorkspaceKey?: string) => {
@@ -494,9 +481,8 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
         if (typeof preference?.enabled !== 'boolean') throw new Error('Could not read the Hub Live voice preference.');
         if (preference.enabled) {
           const operations = ['live.start', 'live.event', 'live.ping', 'live.close'];
-          if (!selfDevice || operations.some((operation) => !targetCapability?.operations.includes(operation) ||
-            !isGranted(selfDevice.grants, COMPANION_CAPABILITY.id, COMPANION_CAPABILITY.version, operation))) {
-            throw new Error('Allow Live voice for this phone in the Hub device settings.');
+          if (operations.some((operation) => !targetCapability?.operations.includes(operation))) {
+            throw new Error('This Hub does not support all required Live voice operations. Update the Hub and try again.');
           }
           const workspaceKey = mobileLiveWorkspaceKey(activeTarget);
           await live.start(activeTarget.targetDeviceId, activeTarget.targetName, (prompt, signal) => {
@@ -526,7 +512,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     run,
     unavailableReason,
     voice,
-    liveActive, live.start, live.stop, mesh.request, targetCapability, selfDevice,
+    liveActive, live.start, live.stop, mesh.request, targetCapability,
   ]);
 
   React.useEffect(() => {

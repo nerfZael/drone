@@ -143,6 +143,19 @@ export type BlipCompactionMetrics = {
   usage: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number };
 };
 
+/** Progress metadata only; never contains transcript, summary, or reasoning text. */
+export type BlipCompactionProgress = {
+  phase: 'preparing' | 'credentials' | 'summarizing' | 'validating' | 'saving';
+  durationMs: number;
+  modelCallCount: number;
+  modelResponseCount: number;
+  modelCallActive: boolean;
+  modelCallDurationMs: number;
+  modelDurationMs: number;
+  modelEventCount: number;
+  modelIdleMs?: number;
+};
+
 export type BlipRuntimeEvent =
   | (BlipRuntimeEventBase & {
       type: "usage_observed"; model: string; provider: string; purpose: "chat" | "compaction";
@@ -212,6 +225,7 @@ export type BlipRuntimeEvent =
       activeHandles: Array<{ type: string; count: number }>;
       activeRequests: Array<{ type: string; count: number }>;
     })
+  | (BlipRuntimeEventBase & { type: "compaction_progress"; progress: BlipCompactionProgress })
   | (BlipRuntimeEventBase & { type: "compaction_started"; reason: string })
   | (BlipRuntimeEventBase & { type: "compaction_skipped"; reason: string; metrics?: BlipCompactionMetrics })
   | (BlipRuntimeEventBase & { type: "compaction_failed"; reason: "cancelled" | "error"; metrics?: BlipCompactionMetrics })

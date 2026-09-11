@@ -95,7 +95,8 @@ export async function createCompaction(input: {
   reasoning?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
   apiKey?: string;
   streamFn?: StreamFn;
-  onModelCall?: (phase: 'started' | 'finished') => void;
+  onModelCall?: (phase: 'started' | 'finished') => void | Promise<void>;
+  onModelActivity?: () => void | Promise<void>;
   onUsage?: (response: import('@mariozechner/pi-ai').AssistantMessage) => Promise<void>;
   signal?: AbortSignal;
 }): Promise<CompactionEntry | undefined> {
@@ -126,6 +127,7 @@ export async function createCompaction(input: {
           streamFn: input.streamFn,
           onUsage: input.onUsage,
           onModelCall: input.onModelCall,
+          onModelActivity: input.onModelActivity,
           signal: input.signal,
           maxTokens: generationTokens,
         })

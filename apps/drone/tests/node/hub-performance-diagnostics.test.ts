@@ -125,3 +125,31 @@ test('fast filesystem requests preserve correlation and bounded phases without p
   assert.ok(!JSON.stringify(logs).includes('secret'));
   assert.equal(logs[0].phases.bad, undefined);
 });
+
+test('client correlation is logged on arrival and close before response headers', () => {
+  const req = { url: '/api/settings/companion/live-voice?secret=value', method: 'GET', headers: { 'x-drone-client-request-id': 'client-123' } } as unknown as http.IncomingMessage;
+  const res = new http.ServerResponse(req);
+  const logs: any[] = [];
+  observeHubHttpRequest(req, res, (_level, message, meta) => logs.push({ message, ...meta }));
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0].message, 'hub HTTP request received');
+  assert.equal(logs[0].clientRequestId, 'client-123');
+  res.emit('close');
+  assert.equal(logs.length, 2);
+  assert.equal(logs[1].requestId, logs[0].requestId);
+  assert.equal(logs[1].clientRequestId, 'client-123');
+  assert.equal(logs[1].outcome, 'closed');
+  assert.equal(logs[1].entryToHeadersMs, undefined);
+  assert.ok(!JSON.stringify(logs).includes('secret'));
+});
+
+test('rejects invalid client IDs and avoids receipt logging unrelated endpoints', () => {
+  for (const [url, id] of [['/api/settings/companion/live-voice', 'bad\nvalue'], ['/api/telemetry/request', 'valid-id']]) {
+    const req = { url, method: 'POST', headers: { 'x-drone-client-request-id': id } } as unknown as http.IncomingMessage;
+    const logs: unknown[] = [];
+    const res = new http.ServerResponse(req);
+    observeHubHttpRequest(req, res, (_level, _message, meta) => logs.push(meta));
+    res.writeHead(200); res.emit('finish');
+    assert.equal(logs.length, 0);
+  }
+});

@@ -1,3 +1,4 @@
+import { observeRequest } from './request-diagnostics';
 import {
   observeChatLoadRequest,
   responseTextBytes,
@@ -53,19 +54,24 @@ async function requestJsonResponse<T>(
   allowNotModified: boolean,
 ): Promise<JsonResponse<T>> {
   const headers = new Headers(init?.headers);
+  const diagnostic = observeRequest(url, init);
+  if (diagnostic) headers.set('x-drone-client-request-id', diagnostic.requestId);
   const observation = observeDesktopFilesystemRequest(url) ?? observeChatLoadRequest(url);
   let r: Response;
   let text = '';
   let parseMs = 0;
   try {
     r = await fetch(url, { ...init, headers });
+    diagnostic?.response(r);
     observation?.response(r);
     text = await r.text();
   } catch (error) {
+    diagnostic?.fail(error);
     observation?.fail(error);
     throw error;
   }
   if (allowNotModified && r.status === 304) {
+    diagnostic?.finish();
     observation?.finish({ responseBytes: responseTextBytes(text), parseMs: 0 });
     return { data: null, response: r, notModified: true };
   }
@@ -78,6 +84,7 @@ async function requestJsonResponse<T>(
       data = JSON.parse(text);
     } catch {
       parseMs = performance.now() - parseStartedAt;
+      diagnostic?.fail(new Error('invalid JSON'));
       observation?.fail(new Error('invalid JSON'));
       if (looksHtml) {
         const err = new Error(buildUnexpectedHtmlError(url)) as Error & { status?: number; data?: any };
@@ -94,6 +101,7 @@ async function requestJsonResponse<T>(
     parseMs = performance.now() - parseStartedAt;
   }
   if (!r.ok) {
+    diagnostic?.finish();
     observation?.finish({ responseBytes: responseTextBytes(text), parseMs });
     const msg =
       data?.error ??
@@ -108,6 +116,7 @@ async function requestJsonResponse<T>(
     throw err;
   }
   if (data == null) {
+    diagnostic?.fail(new Error('empty response'));
     observation?.fail(new Error('empty response'));
     const err = new Error(`Expected JSON from ${url}, but response body was empty.`) as Error & {
       status?: number;
@@ -117,6 +126,7 @@ async function requestJsonResponse<T>(
     err.data = data;
     throw err;
   }
+  diagnostic?.finish();
   observation?.finish({ responseBytes: responseTextBytes(text), parseMs });
   return { data: data as T, response: r, notModified: false };
 }

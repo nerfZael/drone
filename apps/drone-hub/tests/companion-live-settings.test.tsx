@@ -20,6 +20,7 @@ test('the Live toggle loads persisted state, rolls back failed saves, and surviv
   set('IS_REACT_ACT_ENVIRONMENT', true);
   set('fetch', async (url: string, init?: RequestInit) => {
     expect(url).toBe('/api/settings/companion/live-voice');
+    expect(new Headers(init?.headers).get('x-drone-client-request-id')).toMatch(/^[a-zA-Z0-9_-]{1,128}$/);
     if (init?.method === 'PUT') {
       if (failSave) return new Response('', { status: 500 });
       const body = JSON.parse(String(init.body));

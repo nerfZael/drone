@@ -11,7 +11,7 @@ export async function readDirectoryWithRetry<T>(
     const abort = () => controller.abort(signal.reason);
     signal.addEventListener('abort', abort, { once: true });
     let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, options.timeoutMs ?? 12_000);
+    const timer = setTimeout(() => { timedOut = true; controller.abort(new DOMException('Directory request deadline exceeded', 'TimeoutError')); }, options.timeoutMs ?? 12_000);
     try {
       return await read(controller.signal);
     } catch (error) {

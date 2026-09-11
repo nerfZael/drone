@@ -1,10 +1,10 @@
 import React from 'react';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import { CompanionLiveConversation } from '@drone/assistant-chat';
 import { useMesh } from '../mesh/MeshContext';
 import { MobileCompanionLiveConnection } from './MobileCompanionLiveConnection';
-import { openMobileLiveAudio } from './openMobileLiveAudio';
+import { openMobileLiveAudio, prepareMobileLiveAudio } from './openMobileLiveAudio';
 import type { MobileMicrophoneCoordinator } from './mobile-microphone-coordinator';
 
 type State = { status: 'idle' | 'connecting' | 'listening' | 'error'; error: string; captions: string;
@@ -15,7 +15,10 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
   const mesh = useMesh();
   const [state, setState] = React.useState<State>(EMPTY);
   const active = React.useRef<Session | null>(null);
+  const preparing = React.useRef<AbortController | null>(null);
   const stop = React.useCallback(() => {
+    preparing.current?.abort();
+    preparing.current = null;
     const session = active.current;
     active.current = null;
     session?.abort.abort(); session?.conversation.stop(); session?.connection.close();
@@ -23,20 +26,35 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
   }, []);
   const reset = React.useCallback(() => { stop(); setState(EMPTY); }, [stop]);
   React.useEffect(() => {
-    const listener = AppState.addEventListener('change', (status) => { if (status === 'background') stop(); });
+    const listener = AppState.addEventListener('change', (status) => {
+      if (Platform.OS !== 'android' && status === 'background' && !preparing.current) stop();
+    });
     return () => { listener.remove(); stop(); };
   }, [stop]);
   const start = React.useCallback(async (targetDeviceId: string, targetName: string,
     runBackend: (prompt: string, signal: AbortSignal) => Promise<string>) => {
-    if (active.current || AppState.currentState !== 'active') return;
+    if (active.current || preparing.current || AppState.currentState !== 'active') return;
+    const preparation = new AbortController();
+    preparing.current = preparation;
     setState({ ...EMPTY, status: 'connecting', targetDeviceId, targetName });
+    try {
+      await prepareMobileLiveAudio();
+    } catch (error) {
+      if (!preparation.signal.aborted) setState((value) => ({ ...value, status: 'error',
+        error: error instanceof Error ? error.message : 'Could not prepare the microphone.' }));
+      return;
+    } finally {
+      if (preparing.current === preparation) preparing.current = null;
+    }
+    if (preparation.signal.aborted) return;
     let session!: Session;
     const update = (patch: Partial<State>) => {
       if (active.current === session) setState((value) => ({ ...value, ...patch }));
     };
     const connection = new MobileCompanionLiveConnection({
       targetDeviceId, sessionId: Crypto.randomUUID(), microphoneCoordinator,
-      request: mesh.request, subscribe: mesh.subscribe, openAudio: openMobileLiveAudio,
+      request: mesh.request, subscribe: mesh.subscribe,
+      openAudio: () => openMobileLiveAudio(() => { if (active.current === session) stop(); }),
       onEvent: (event) => { if (active.current === session) session.conversation.receive(event); },
       onReady: (backendModel) => update({ status: 'listening', backendModel }),
       onError: (error) => {
@@ -55,7 +73,7 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
     session = { connection, conversation, abort: new AbortController(), muted: false };
     active.current = session;
     await connection.start();
-  }, [mesh.request, mesh.subscribe, microphoneCoordinator]);
+  }, [mesh.request, mesh.subscribe, microphoneCoordinator, stop]);
   const toggleMute = React.useCallback(() => {
     const session = active.current;
     if (!session) return;

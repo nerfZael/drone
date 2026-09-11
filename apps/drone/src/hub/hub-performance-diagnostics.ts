@@ -1,3 +1,4 @@
+import { diagnosticOperation } from '@drone/hub-model';
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { performance, PerformanceObserver } from 'node:perf_hooks';
@@ -41,6 +42,10 @@ export function observeHubHttpRequest(req: IncomingMessage, res: ServerResponse,
   requests.set(req, timing);
   const startedAt = new Date().toISOString();
   const requestId = randomUUID();
+  const clientRaw = req.headers?.['x-drone-client-request-id'];
+  const clientRequestId = typeof clientRaw === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(clientRaw) ? clientRaw : undefined;
+  const operation = diagnosticOperation(pathname);
+  if (clientRequestId && operation) log('info', 'hub HTTP request received', { requestId, clientRequestId, operation, method: req.method, startedAt });
   const parentRaw = req.headers?.['x-drone-parent-request-id'];
   const parentRequestId = typeof parentRaw === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(parentRaw) ? parentRaw : undefined;
   const chatRead =
@@ -108,9 +113,10 @@ export function observeHubHttpRequest(req: IncomingMessage, res: ServerResponse,
     const durationMs = ms(performance.now() - started);
     // Stream lifetime isn't request latency. Always retain chat reads, including
     // fast handlers whose browser may have waited before request entry.
-    if (streaming || (!chatRead && !fileRead && !retainedResponses.has(res) && durationMs < 250)) return;
+    if (streaming || (!chatRead && !fileRead && !retainedResponses.has(res) && !(clientRequestId && operation) && durationMs < 250)) return;
     log(durationMs >= 250 ? 'warn' : 'info', 'hub HTTP request timing', {
       requestId,
+      ...(clientRequestId ? { clientRequestId } : {}),
       ...(parentRequestId ? { parentRequestId } : {}),
       ...(Object.keys(timing.phases).length ? { phases: timing.phases } : {}),
       startedAt,

@@ -238,6 +238,7 @@ export class CompanionRunTelemetry {
   private contextUsage?: BlipContextUsage;
   private blipStatus?: string;
   private coldStart: boolean;
+  private finished = false;
 
   constructor(
     private readonly service: CompanionTelemetryService,
@@ -286,11 +287,28 @@ export class CompanionRunTelemetry {
     this.coldStart = true;
   }
 
+  private liveCompaction() {
+    const progress = this.compactions.live(this.clock.monotonicMs());
+    return progress ? {
+      ...progress, messageId: this.input.messageId, runId: this.input.runId,
+      sessionId: this.sessionId, turnId: this.turnId,
+      provider: this.provider, model: this.model, thinkingLevel: this.thinkingLevel,
+      startedAt: new Date(this.clock.epochMs() - progress.durationMs).toISOString(),
+    } : undefined;
+  }
+
   observe(event: BlipRuntimeEvent): void {
+    if (this.finished) return;
     this.sessionId = event.sessionId || this.sessionId;
     this.turnId = event.turnId || this.turnId;
     const now = this.clock.monotonicMs();
+    const before = this.liveCompaction();
     this.compactions.observe(event, now);
+    if (event.type.startsWith('compaction_') || (before && event.type === 'session_finished')) {
+      const after = this.liveCompaction();
+      this.service.updateLiveCompaction(this.input.messageId, after ? () => this.liveCompaction() : undefined,
+        after ?? (before ? { ...before, ...this.compactions.attempts.at(-1), modelCallActive: false } : undefined), event.type);
+    }
     if (event.type === 'turn_started' && this.firstTurnStartedMonotonicMs === undefined) {
       this.firstTurnStartedMonotonicMs = now;
       return;
@@ -311,6 +329,9 @@ export class CompanionRunTelemetry {
   }
 
   async finish(status: CompanionTelemetryStatus, error?: unknown): Promise<void> {
+    if (this.finished) return;
+    this.finished = true;
+    const activeCompaction = this.liveCompaction();
     const effectiveStatus: CompanionTelemetryStatus =
       status === 'completed' && this.blipStatus === 'cancelled'
         ? 'cancelled'
@@ -319,6 +340,8 @@ export class CompanionRunTelemetry {
           : status;
     this.compactions.finish(effectiveStatus === 'cancelled' ? 'cancelled'
       : effectiveStatus === 'error' ? 'failed' : 'interrupted', this.clock.monotonicMs());
+    if (activeCompaction) this.service.updateLiveCompaction(this.input.messageId, undefined,
+      { ...activeCompaction, ...this.compactions.attempts.at(-1), modelCallActive: false }, 'run_finished');
     const finishedEpochMs = this.clock.epochMs();
     const durationMs = roundedMs(this.clock.monotonicMs() - this.startedMonotonicMs);
     const firstTurnStartedMs =
@@ -397,12 +420,47 @@ export class CompanionTelemetryService {
   private readonly recent: CompanionRunTelemetryRecord[] = [];
   private readonly pendingTranscriptions = new Map<string, CompanionTranscriptionTelemetry>();
 
-  constructor(input: { database?: HubDatabase | null; log?: TelemetryLog } = {}) {
+  private readonly activeCompactions = new Map<string, () => Record<string, unknown> | undefined>();
+  private heartbeat?: ReturnType<typeof setInterval>;
+  private readonly heartbeatMs: number;
+
+  constructor(input: { database?: HubDatabase | null; log?: TelemetryLog; heartbeatMs?: number } = {}) {
     this.store = CompanionTelemetryStore.open(input.database);
     this.log = input.log;
+    this.heartbeatMs = input.heartbeatMs ?? 15_000;
   }
 
   private readonly log?: TelemetryLog;
+
+  updateLiveCompaction(
+    messageId: string,
+    read: (() => Record<string, unknown> | undefined) | undefined,
+    snapshot: Record<string, unknown> | undefined,
+    event: string,
+  ): void {
+    if (read) {
+      this.activeCompactions.set(messageId, read);
+      if (this.activeCompactions.size > 100) this.activeCompactions.delete(this.activeCompactions.keys().next().value!);
+    } else this.activeCompactions.delete(messageId);
+    if (snapshot) this.logCompaction(event, snapshot);
+    if (this.activeCompactions.size && !this.heartbeat) {
+      this.heartbeat = setInterval(() => {
+        for (const read of this.activeCompactions.values()) {
+          const value = read();
+          if (value) this.logCompaction('heartbeat', value);
+        }
+      }, this.heartbeatMs);
+      this.heartbeat.unref?.();
+    } else if (!this.activeCompactions.size && this.heartbeat) {
+      clearInterval(this.heartbeat);
+      this.heartbeat = undefined;
+    }
+  }
+
+  private logCompaction(event: string, snapshot: Record<string, unknown>): void {
+    try { this.log?.('info', 'Companion compaction progress', { event, ...snapshot }); }
+    catch { /* Diagnostics must not affect the active run. */ }
+  }
 
   begin(input: ConstructorParameters<typeof CompanionRunTelemetry>[1]): CompanionRunTelemetry {
     return new CompanionRunTelemetry(this, input);
@@ -516,6 +574,7 @@ export class CompanionTelemetryService {
     const usageKeys = ['input', 'output', 'cacheRead', 'cacheWrite', 'totalTokens'] as const;
     return {
       generatedAt: new Date().toISOString(),
+      activeCompactions: [...this.activeCompactions.values()].flatMap((read) => { const snapshot = read(); return snapshot ? [snapshot] : []; }),
       sampleSize: runs.length,
       statusCounts: Object.fromEntries(
         ['completed', 'cancelled', 'error'].map((status) => [
