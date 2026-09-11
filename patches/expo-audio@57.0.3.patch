@@ -1,8 +1,156 @@
+diff --git a/android/src/main/AndroidManifest.xml b/android/src/main/AndroidManifest.xml
+index 36a19f2..98e0892 100644
+--- a/android/src/main/AndroidManifest.xml
++++ b/android/src/main/AndroidManifest.xml
+@@ -1,3 +1,4 @@
+ <manifest xmlns:android="http://schemas.android.com/apk/res/android">
++  <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+   <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+ </manifest>
+diff --git a/android/src/main/java/expo/modules/audio/AudioDeviceRouter.kt b/android/src/main/java/expo/modules/audio/AudioDeviceRouter.kt
+new file mode 100644
+index 0000000..b6bb013
+--- /dev/null
++++ b/android/src/main/java/expo/modules/audio/AudioDeviceRouter.kt
+@@ -0,0 +1,100 @@
++package expo.modules.audio
++
++import android.media.AudioDeviceCallback
++import android.media.AudioDeviceInfo
++import android.media.AudioManager
++import android.os.Build
++import android.os.Handler
++import android.os.Looper
++
++/** Own the communication route only while recording; media playback uses the OS route. */
++@Suppress("DEPRECATION")
++internal class AudioDeviceRouter(private val manager: AudioManager) {
++  private var recording = false
++  private var earpiece = false
++  private var previousMode: Int? = null
++  private var legacySco = false
++  private val callback = object : AudioDeviceCallback() {
++    override fun onAudioDevicesAdded(devices: Array<AudioDeviceInfo>) = updateRoute()
++    override fun onAudioDevicesRemoved(devices: Array<AudioDeviceInfo>) = updateRoute()
++  }
++
++  init {
++    manager.registerAudioDeviceCallback(callback, Handler(Looper.getMainLooper()))
++  }
++
++  fun configure(allowsRecording: Boolean?, throughEarpiece: Boolean?) {
++    allowsRecording?.let { recording = it }
++    throughEarpiece?.let { earpiece = it }
++    updateRoute()
++  }
++
++  private fun updateRoute() {
++    if (!recording && !earpiece) {
++      releaseRoute()
++      return
++    }
++    if (previousMode == null) previousMode = manager.mode
++    manager.mode = AudioManager.MODE_IN_COMMUNICATION
++    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
++      val devices = manager.availableCommunicationDevices
++      // Preserve an external route chosen by the system/user. Otherwise prefer
++      // attached devices over the phone, trying another if a route is rejected.
++      val current = manager.communicationDevice
++      val external = devices.filter { isExternal(it.type) }
++        .sortedBy { if (it.id == current?.id) 0 else 1 }
++      val fallbackType = if (earpiece) AudioDeviceInfo.TYPE_BUILTIN_EARPIECE else AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
++      val candidates = external + devices.filter { it.type == fallbackType }
++      for (device in candidates) {
++        if (device.id == current?.id || manager.setCommunicationDevice(device)) return
++      }
++      manager.clearCommunicationDevice()
++    } else {
++      val devices = manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
++      val bluetooth = devices.any { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
++      val wired = devices.any { isExternal(it.type) && it.type != AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
++      if (bluetooth && !wired && !legacySco) {
++        manager.startBluetoothSco()
++        manager.isBluetoothScoOn = true
++        legacySco = true
++      } else if ((!bluetooth || wired) && legacySco) {
++        stopLegacySco()
++      }
++      manager.isSpeakerphoneOn = !earpiece && !bluetooth && !wired
++    }
++  }
++
++  private fun isExternal(type: Int): Boolean = when (type) {
++    AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
++    AudioDeviceInfo.TYPE_BLE_HEADSET,
++    AudioDeviceInfo.TYPE_BLE_SPEAKER,
++    AudioDeviceInfo.TYPE_WIRED_HEADSET,
++    AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
++    AudioDeviceInfo.TYPE_USB_HEADSET,
++    AudioDeviceInfo.TYPE_USB_DEVICE,
++    AudioDeviceInfo.TYPE_HEARING_AID -> true
++    else -> false
++  }
++
++  private fun stopLegacySco() {
++    manager.stopBluetoothSco()
++    manager.isBluetoothScoOn = false
++    legacySco = false
++  }
++
++  private fun releaseRoute() {
++    val mode = previousMode ?: return
++    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) manager.clearCommunicationDevice()
++    if (legacySco) stopLegacySco()
++    manager.isSpeakerphoneOn = false
++    manager.mode = mode
++    previousMode = null
++  }
++
++  fun close() {
++    manager.unregisterAudioDeviceCallback(callback)
++    recording = false
++    earpiece = false
++    releaseRoute()
++  }
++}
 diff --git a/android/src/main/java/expo/modules/audio/AudioModule.kt b/android/src/main/java/expo/modules/audio/AudioModule.kt
-index 992239b..3b52466 100644
+index 992239b..bc8b5bc 100644
 --- a/android/src/main/java/expo/modules/audio/AudioModule.kt
 +++ b/android/src/main/java/expo/modules/audio/AudioModule.kt
-@@ -652,6 +652,7 @@ class AudioModule : Module() {
+@@ -47,6 +47,7 @@ import java.util.concurrent.ConcurrentHashMap
+ @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+ class AudioModule : Module() {
+   private lateinit var audioManager: AudioManager
++  private lateinit var deviceRouter: AudioDeviceRouter
+   private val context: Context
+     get() = appContext.reactContext ?: throw Exceptions.ReactContextLost()
+   private val httpClient = OkHttpClient()
+@@ -205,6 +206,7 @@ class AudioModule : Module() {
+
+     OnCreate {
+       audioManager = appContext.reactContext?.getSystemService(Context.AUDIO_SERVICE) as AudioManager
++      deviceRouter = AudioDeviceRouter(audioManager)
+       context.registerReceiver(ringerModeReceiver, IntentFilter(AudioManager.RINGER_MODE_CHANGED_ACTION))
+     }
+
+@@ -212,7 +214,7 @@ class AudioModule : Module() {
+       shouldPlayInBackground = mode.shouldPlayInBackground
+       interruptionMode = mode.interruptionMode
+       playsInSilentMode = mode.playsInSilentMode
+-      updatePlaySoundThroughEarpiece(mode.shouldRouteThroughEarpiece ?: false)
++      runOnMain { deviceRouter.configure(mode.allowsRecording, mode.shouldRouteThroughEarpiece) }
+       allowsBackgroundRecording = mode.allowsBackgroundRecording
+
+       recorders.values.forEach { recorder ->
+@@ -332,6 +334,7 @@ class AudioModule : Module() {
+     }
+
+     OnDestroy {
++      runOnMain { deviceRouter.close() }
+       context.unregisterReceiver(ringerModeReceiver)
+       GlobalScope.launch(Dispatchers.Main) {
+         releaseAudioFocus()
+@@ -652,6 +655,7 @@ class AudioModule : Module() {
  
        AsyncFunction("start") Coroutine { stream: AudioStream ->
          checkRecordingPermission()
@@ -10,8 +158,18 @@ index 992239b..3b52466 100644
          stream.start()
        }
  
+@@ -916,8 +920,7 @@ class AudioModule : Module() {
+
+   @Suppress("DEPRECATION")
+   private fun updatePlaySoundThroughEarpiece(playThroughEarpiece: Boolean) {
+-    audioManager.mode = if (playThroughEarpiece) AudioManager.MODE_IN_COMMUNICATION else AudioManager.MODE_NORMAL
+-    audioManager.setSpeakerphoneOn(!playThroughEarpiece)
++    runOnMain { deviceRouter.configure(null, playThroughEarpiece) }
+   }
+
+   private fun retrieveStreamType(uri: Uri): Int = Util.inferContentType(uri)
 diff --git a/android/src/main/java/expo/modules/audio/AudioRecorder.kt b/android/src/main/java/expo/modules/audio/AudioRecorder.kt
-index 9a76836..b66f74b 100644
+index 9a76836..a77c4ed 100644
 --- a/android/src/main/java/expo/modules/audio/AudioRecorder.kt
 +++ b/android/src/main/java/expo/modules/audio/AudioRecorder.kt
 @@ -14,6 +14,7 @@ import android.os.Bundle
@@ -67,6 +225,15 @@ index 9a76836..b66f74b 100644
    private fun reset() {
      recordingTimerJob?.cancel()
      recordingTimerJob = null
+@@ -257,7 +261,7 @@ class AudioRecorder(
+       return
+     }
+     with(recorder) {
+-      setAudioSource(options.audioSource?.toAudioSource() ?: MediaRecorder.AudioSource.MIC)
++      setAudioSource(options.audioSource?.toAudioSource() ?: MediaRecorder.AudioSource.VOICE_COMMUNICATION)
+       if (options.outputFormat != null) {
+         setOutputFormat(options.outputFormat.toMediaOutputFormat())
+       } else {
 @@ -430,14 +434,6 @@ class AudioRecorder(
    private fun hasRecordingPermissions() =
      ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
@@ -82,8 +249,20 @@ index 9a76836..b66f74b 100644
    fun getAvailableInputs(audioManager: AudioManager) =
      audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS).mapNotNull { deviceInfo ->
        val type = deviceInfo.type
+diff --git a/android/src/main/java/expo/modules/audio/AudioRecords.kt b/android/src/main/java/expo/modules/audio/AudioRecords.kt
+index 86880d9..39e01c5 100644
+--- a/android/src/main/java/expo/modules/audio/AudioRecords.kt
++++ b/android/src/main/java/expo/modules/audio/AudioRecords.kt
+@@ -23,6 +23,7 @@ enum class LoopMode(val value: String) : Enumerable {
+
+ @OptimizedRecord
+ class AudioMode(
++  @Field val allowsRecording: Boolean? = null,
+   @Field val shouldPlayInBackground: Boolean = false,
+   @Field val shouldRouteThroughEarpiece: Boolean?,
+   @Field val interruptionMode: InterruptionMode?,
 diff --git a/android/src/main/java/expo/modules/audio/AudioStream.kt b/android/src/main/java/expo/modules/audio/AudioStream.kt
-index 8ecdcc1..3c88c14 100644
+index 8ecdcc1..9e78c26 100644
 --- a/android/src/main/java/expo/modules/audio/AudioStream.kt
 +++ b/android/src/main/java/expo/modules/audio/AudioStream.kt
 @@ -3,8 +3,13 @@ package expo.modules.audio
@@ -218,6 +397,15 @@ index 8ecdcc1..3c88c14 100644
    }
  
    private fun resolveAudioConfig(): ResolvedAudioConfig {
+@@ -139,7 +207,7 @@ class AudioStream(
+   @RequiresPermission(Manifest.permission.RECORD_AUDIO)
+   private fun createAudioRecord(config: ResolvedAudioConfig): AudioRecord {
+     val recorder = AudioRecord(
+-      MediaRecorder.AudioSource.MIC,
++      MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+       config.sampleRate,
+       config.channelConfig,
+       config.audioEncoding,
 @@ -182,11 +250,11 @@ class AudioStream(
      }
    }
@@ -674,6 +862,30 @@ index da91d06..155bb8b 100644
 -//# sourceMappingURL=AudioStream.types.d.ts.map
 \ No newline at end of file
 +//# sourceMappingURL=AudioStream.types.d.ts.map
+diff --git a/build/ExpoAudio.js b/build/ExpoAudio.js
+index 977ef78..ca71535 100644
+--- a/build/ExpoAudio.js
++++ b/build/ExpoAudio.js
+@@ -407,6 +407,7 @@ export async function setAudioModeAsync(mode) {
+         : {
+             shouldPlayInBackground: mode.shouldPlayInBackground,
+             shouldRouteThroughEarpiece: mode.shouldRouteThroughEarpiece,
++          allowsRecording: mode.allowsRecording,
+             interruptionMode: mode.interruptionMode ?? mode.interruptionModeAndroid,
+             allowsBackgroundRecording: mode.allowsBackgroundRecording,
+             playsInSilentMode: mode.playsInSilentMode,
+diff --git a/ios/AudioModule.swift b/ios/AudioModule.swift
+index d265606..21fd686 100644
+--- a/ios/AudioModule.swift
++++ b/ios/AudioModule.swift
+@@ -800,6 +800,7 @@ public class AudioModule: Module {
+
+ #if !os(tvOS)
+       if category == .playAndRecord {
++        categoryOptions.insert(.allowBluetoothA2DP)
+         if !mode.shouldRouteThroughEarpiece {
+           categoryOptions.insert(.defaultToSpeaker)
+         }
 diff --git a/ios/AudioStream.swift b/ios/AudioStream.swift
 index f938eff..5e463da 100644
 --- a/ios/AudioStream.swift
@@ -919,3 +1131,15 @@ index 1f4bc46..02b9af2 100644
  };
  
  export type AudioStreamEvents = {
+diff --git a/src/ExpoAudio.ts b/src/ExpoAudio.ts
+index af5998e..7bbca41 100644
+--- a/src/ExpoAudio.ts
++++ b/src/ExpoAudio.ts
+@@ -496,6 +496,7 @@ export async function setAudioModeAsync(mode: Partial<AudioMode>): Promise<void>
+       : {
+           shouldPlayInBackground: mode.shouldPlayInBackground,
+           shouldRouteThroughEarpiece: mode.shouldRouteThroughEarpiece,
++          allowsRecording: mode.allowsRecording,
+           interruptionMode: mode.interruptionMode ?? mode.interruptionModeAndroid,
+           allowsBackgroundRecording: mode.allowsBackgroundRecording,
+           playsInSilentMode: mode.playsInSilentMode,
