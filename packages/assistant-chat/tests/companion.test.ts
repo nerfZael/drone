@@ -568,3 +568,88 @@ test('Queue keeps showing the active task while multiple follow-ups wait', async
   expect(controller.getSnapshot()).toMatchObject({ startedAt: 200, activity: [] });
   await controller.close();
 });
+
+test('subscription resumes a completed Companion client and retains the latest browser context', async () => {
+  const transport = clientTransport();
+  let id = 0;
+  const controller = new CompanionClientController({ createId: () => `id-${++id}` });
+  await controller.submitPrompt({ prompt: 'watch', messageId: 'user', createTransport: () => transport.transport,
+    executeTool: async () => ({ selectedChat: 'captured-chat' }) });
+  transport.message({ type: 'reply', messageId: 'user', reply: 'Watching' });
+  transport.message({ type: 'status', messageId: 'user', status: 'completed' });
+  transport.message({ type: 'subscription', messageId: 'event' });
+  expect(controller.getSnapshot()).toMatchObject({ status: 'working', transcript: 'Event notification', reply: '' });
+  transport.message({ type: 'status', messageId: 'event', status: 'working' });
+  transport.message({ type: 'tool_call', messageId: 'event', generation: 2, callId: 'context', tool: 'get_app_context', args: {} });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(transport.toolResults.at(-1)).toMatchObject({ ok: true, result: { selectedChat: 'captured-chat' } });
+  transport.message({ type: 'reply', messageId: 'event', reply: 'The chat finished.' });
+  transport.message({ type: 'status', messageId: 'event', status: 'completed' });
+  expect(controller.getSnapshot()).toMatchObject({ status: 'completed', reply: 'The chat finished.' });
+  await controller.close();
+  transport.message({ type: 'subscription', messageId: 'late' });
+  expect(controller.getSnapshot().status).toBe('idle');
+});
+
+test('ASAP subscription owns the combined reply without overwriting a newer queued user request', async () => {
+  for (const newerUser of [false, true]) {
+    const transport = clientTransport();
+    let id = 0;
+    const controller = new CompanionClientController({ createId: () => `id-${++id}` });
+    const submit = (messageId: string) => controller.submitPrompt({ prompt: messageId, messageId,
+      createTransport: () => transport.transport, executeTool: async () => ({}) });
+    await submit('first');
+    transport.message({ type: 'status', messageId: 'first', status: 'working' });
+    if (newerUser) await submit('newer');
+    transport.message({ type: 'subscription', messageId: 'event', afterMessageId: 'first' });
+    transport.message({ type: 'reply', messageId: 'event', reply: 'Event answer' });
+    transport.message({ type: 'status', messageId: 'event', status: 'completed' });
+    if (newerUser) {
+      expect(controller.getSnapshot()).toMatchObject({ status: 'working', reply: '', transcript: 'newer' });
+      transport.message({ type: 'reply', messageId: 'newer', reply: 'Newer answer' });
+      transport.message({ type: 'status', messageId: 'newer', status: 'completed' });
+      expect(controller.getSnapshot().reply).toBe('Newer answer');
+    } else {
+      expect(controller.getSnapshot()).toMatchObject({ status: 'completed', reply: 'Event answer' });
+    }
+    await controller.close();
+  }
+});
+
+test('unexpected disconnect after completion reports that event subscriptions ended', async () => {
+  const transport = clientTransport();
+  const controller = new CompanionClientController({ createId: () => 'session' });
+  await controller.submitPrompt({ prompt: 'watch', messageId: 'user', createTransport: () => transport.transport,
+    executeTool: async () => ({}) });
+  transport.message({ type: 'status', messageId: 'user', status: 'completed' });
+  transport.disconnect('Connection closed');
+  expect(controller.getSnapshot().status).toBe('error');
+  expect(controller.getSnapshot().error).toContain('Event subscriptions have ended');
+  expect(controller.hasSession()).toBe(false);
+});
+
+
+test('queued subscription starts fresh activity while a newer user request owns the visible reply', async () => {
+  const connection = clientTransport();
+  let now = 1;
+  const controller = new CompanionClientController({ createId: () => 'session', now: () => now });
+  const submit = (messageId: string) => controller.submitPrompt({ prompt: messageId, messageId,
+    createTransport: () => connection.transport, executeTool: () => ({}) });
+  try {
+    await submit('first');
+    connection.message({ type: 'status', status: 'working', messageId: 'first' });
+    connection.message({ type: 'activity', messageId: 'first',
+      event: { type: 'tool_call_started', callId: 'first-tool', tool: 'list_drones', args: {} } });
+    await submit('newer');
+    connection.message({ type: 'status', status: 'completed', messageId: 'first' });
+    now = 100;
+    connection.message({ type: 'subscription', messageId: 'event' });
+    connection.message({ type: 'status', status: 'working', messageId: 'event' });
+    expect(controller.getSnapshot()).toMatchObject({
+      status: 'working', startedAt: 100, activity: [], compaction: null, transcript: 'newer',
+    });
+    connection.message({ type: 'reply', messageId: 'event', reply: 'Event reply' });
+    connection.message({ type: 'status', status: 'completed', messageId: 'event' });
+    expect(controller.getSnapshot()).toMatchObject({ status: 'working', reply: '', transcript: 'newer' });
+  } finally { await controller.close(); }
+});

@@ -96,7 +96,7 @@ test('Companion socket cancels its active run when the browser disconnects', asy
       client.once('error', reject);
     });
     await cancelled;
-    expect(cancelledRunId).toBe('disconnect-test');
+    expect(cancelledRunId).toStartWith('websocket:');
   } finally {
     finishRun('');
     await closeTestServer(client, webSocketServer, httpServer);
@@ -142,7 +142,7 @@ test('Companion socket rejects late browser tools from a cancelled run after res
       status: 'working',
     });
     client.send(JSON.stringify({ type: 'cancel_run', runId: 'first-run' }));
-    await waitFor(() => deletedSessions.includes('first-run'));
+    await waitFor(() => deletedSessions.includes(runs[0].runId));
     client.send(JSON.stringify({ type: 'start_run', runId: 'second-run', prompt: 'Second' }));
     await waitFor(() => runs.length === 2);
 
@@ -225,9 +225,54 @@ test('Companion socket steers follow-ups on the running session and correlates t
       runId: 'conversation', type: 'reply', messageId: 'message-2', reply: 'Answer after steering',
     }]);
     client.send(JSON.stringify({ type: 'cancel_run', runId: 'conversation' }));
-    await waitFor(() => deletedSessions.includes('conversation'));
+    await waitFor(() => deletedSessions.includes(runs[0].runId));
   } finally {
     for (const complete of completions) complete('');
     await closeTestServer(client, webSocketServer, httpServer);
+  }
+});
+
+test('desktop subscriptions resume idle sessions and isolate clients that reuse a run ID', async () => {
+  const deliveries = new Map<string, (input: any) => Promise<void>>();
+  const deleted: string[] = [];
+  const runtime = {
+    connectSubscriptions: (id: string, deliver: (input: any) => Promise<void>) => {
+      expect(deliveries.has(id)).toBe(false);
+      deliveries.set(id, deliver);
+    },
+    run: async (input: any) => `Reply to ${input.prompt}`,
+    steer: () => false,
+    deleteSession: async (id: string) => { deliveries.delete(id); deleted.push(id); },
+  };
+  const server = createCompanionWebSocketServer(runtime as any);
+  const httpServer = http.createServer();
+  httpServer.on('upgrade', (request, socket, head) => {
+    server.handleUpgrade(request, socket, head, (client) => server.emit('connection', client, request));
+  });
+  await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
+  const address = httpServer.address();
+  if (!address || typeof address === 'string') throw new Error('test server did not bind');
+  const clients = [new WebSocket(`ws://127.0.0.1:${address.port}`), new WebSocket(`ws://127.0.0.1:${address.port}`)];
+  const messages: any[][] = [[], []];
+  try {
+    await Promise.all(clients.map((client) => new Promise<void>((resolve) => client.once('open', resolve))));
+    clients.forEach((client, index) => {
+      client.on('message', (raw) => messages[index].push(JSON.parse(raw.toString())));
+      client.send(JSON.stringify({ type: 'start_run', runId: 'same-client-id', messageId: 'user', prompt: 'watch' }));
+    });
+    await waitFor(() => messages.every((events) => events.some((event) => event.status === 'completed')));
+    expect(deliveries.size).toBe(2);
+    const [id, deliver] = [...deliveries.entries()][0];
+    await deliver({ prompt: 'event', messageId: 'event', deliveryMode: 'queue' });
+    await waitFor(() => messages.flat().some((event) => event.messageId === 'event' && event.status === 'completed'));
+    expect(messages.flat().filter((event) => event.type === 'subscription')).toHaveLength(1);
+    expect(messages.flat().filter((event) => event.reply === 'Reply to event')).toHaveLength(1);
+    clients.forEach((client) => client.close());
+    await waitFor(() => deleted.length === 2);
+    expect(deleted).toContain(id);
+    await expect(deliver({ prompt: 'late', messageId: 'late', deliveryMode: 'asap' })).rejects.toThrow('disconnected');
+  } finally {
+    clients[1].terminate();
+    await closeTestServer(clients[0], server, httpServer);
   }
 });

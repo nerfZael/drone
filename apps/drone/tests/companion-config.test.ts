@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { HUB_AGENT_MODEL_OPTIONS } from '../src/hub/llm-model-catalog';
 import {
   COMPANION_TOOL_SUMMARIES,
+  COMPANION_SUBSCRIPTION_TOOL_NAMES,
   DEFAULT_COMPANION_SETTINGS,
   companionSettingsEqual,
   normalizeCompanionSettings,
@@ -40,6 +41,7 @@ describe('Companion settings', () => {
         (tool) => tool.name,
       ),
     ).toEqual([
+      ...COMPANION_SUBSCRIPTION_TOOL_NAMES,
       'list_repos',
       'list_drones',
       'list_agent_models',
@@ -238,9 +240,9 @@ describe('Companion settings', () => {
 
 
 test('upgrades chat readers to chat-tree access without re-enabling tools disabled in v6', () => {
-  expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, schemaVersion: 5, enabledTools: ['list_chats'] }).enabledTools).toEqual(['list_chats', 'get_chat_tree']);
+  expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, schemaVersion: 5, enabledTools: ['list_chats'] }).enabledTools).toEqual([...COMPANION_SUBSCRIPTION_TOOL_NAMES, 'list_chats', 'get_chat_tree']);
   expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, schemaVersion: 5, enabledTools: [] }).enabledTools).toEqual([]);
-  expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, schemaVersion: 6, enabledTools: ['list_chats'] }).enabledTools).toEqual(['list_chats']);
+  expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, schemaVersion: 6, enabledTools: ['list_chats'] }).enabledTools).toEqual([...COMPANION_SUBSCRIPTION_TOOL_NAMES, 'list_chats']);
 });
 
 
