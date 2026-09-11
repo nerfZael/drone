@@ -1,3 +1,4 @@
+import { useCompanionAutoApprove } from './use-companion-auto-approve';
 import type { CompanionCompactionActivity } from '@drone/assistant-chat';
 import React from 'react';
 import { createCompanionActionReporter, type CompanionActionNotification } from './companion-action-notifications';
@@ -111,7 +112,8 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     React.useState<Readonly<Record<string, string>>>({});
   const [proposalDefaultRepoPath, setProposalDefaultRepoPath] = React.useState<string | null>(null);
   const [proposalExecuting, setProposalExecuting] = React.useState(false);
-  const [autoApprove, setAutoApprove] = React.useState(false);
+  const autoApproveSettings = useCompanionAutoApprove();
+  const autoApprove = autoApproveSettings.enabled;
   const [actionNotifications, setActionNotifications] = React.useState<CompanionActionNotification[]>([]);
   const dismissActionNotification = React.useCallback((id: string) => {
     setActionNotifications((items) => items.filter((item) => item.id !== id));
@@ -156,7 +158,6 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     setProposalExecutionProgress(null);
     setProposalDroneNames({});
     setProposalDefaultRepoPath(null);
-    setAutoApprove(false);
     setProposalHistory([]);
     setActionNotifications([]);
     proposalExecutingRef.current = false;
@@ -241,8 +242,8 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
 
   const toggleAutoApprove = React.useCallback(() => {
     setActionNotifications([]);
-    setAutoApprove((enabled) => !enabled);
-  }, []);
+    void autoApproveSettings.toggle();
+  }, [autoApproveSettings.toggle]);
 
   const executeProposal = React.useCallback(async (options?: { autoApproved?: boolean }) => {
     const current = proposalRef.current;
@@ -534,6 +535,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const value = React.useMemo<CompanionContextValue>(
     () => ({
       ...state,
+      error: state.error || autoApproveSettings.error,
       live,
       transcript: state.transcript.startsWith(LIVE_COMPANION_PROMPT_PREFIX) ? '' : state.transcript,
       status: effectiveStatus,
@@ -563,6 +565,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     [
       close,
       live,
+      autoApproveSettings.error,
       autoApprove,
       discardProposal,
       discardRecording,

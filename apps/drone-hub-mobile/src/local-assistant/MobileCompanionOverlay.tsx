@@ -15,6 +15,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   useWindowDimensions,
   View,
@@ -267,6 +268,14 @@ export function MobileCompanionOverlay() {
           nestedScrollEnabled
           showsVerticalScrollIndicator
         >
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Text style={{ color: colors.text }}>Auto-approve proposals</Text>
+            <Switch accessibilityLabel="Auto-approve proposals"
+              value={companion.autoApproveSettings.enabled}
+              disabled={!companion.available || !companion.autoApproveSettings.supported || companion.autoApproveSettings.loading || companion.autoApproveSettings.saving || companion.proposalExecuting}
+              onValueChange={(enabled) => void companion.autoApproveSettings.save(enabled)} />
+          </View>
+          {companion.autoApproveSettings.error ? <Text style={{ color: colors.danger }}>{companion.autoApproveSettings.error}</Text> : null}
           <MobileCompanionLivePanel live={companion.live} working={active} stopTurn={() => void companion.cancel()} />
           {companion.checkingVoiceMode ? <Text style={styles.status}>Loading voice setting…</Text> : null}
           {companion.transcript ? (

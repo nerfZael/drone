@@ -1,3 +1,4 @@
+import { readCompanionAutoApproveSettings, writeCompanionAutoApproveSettings } from './companion-auto-approve-settings';
 import { measureHubRequestPhase } from '../hub-performance-diagnostics';
 import { executeCompanionOrganization } from './executeCompanionOrganization';
 import type { HubServices } from '../application/hub-services';
@@ -23,6 +24,16 @@ export function registerCompanionRoutes(
     try {
       const body = await measureHubRequestPhase(req, 'companion_request_body', () => readJson());
       json(200, { ok: true, ...await measureHubRequestPhase(req, 'companion_settings_write', () => writeCompanionLiveSettings(body)) });
+    }
+    catch (error) { fail(400, error instanceof Error ? error.message : String(error)); }
+  });
+  router.get('/api/settings/companion/auto-approve', async ({ req, json }) => {
+    json(200, { ok: true, ...await measureHubRequestPhase(req, 'companion_settings_read', () => readCompanionAutoApproveSettings()) });
+  });
+  router.put('/api/settings/companion/auto-approve', async ({ req, readJson, json, fail }) => {
+    try {
+      const body = await measureHubRequestPhase(req, 'companion_request_body', () => readJson());
+      json(200, { ok: true, ...await measureHubRequestPhase(req, 'companion_settings_write', () => writeCompanionAutoApproveSettings(body)) });
     }
     catch (error) { fail(400, error instanceof Error ? error.message : String(error)); }
   });

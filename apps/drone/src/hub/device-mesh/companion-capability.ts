@@ -1,3 +1,4 @@
+import { readCompanionAutoApproveSettings, writeCompanionAutoApproveSettings } from '../companion/companion-auto-approve-settings';
 import crypto from 'node:crypto';
 import { validateCompanionRunInput } from '@drone/assistant-chat';
 import { COMPANION_CAPABILITY } from '@drone/device-protocol';
@@ -72,6 +73,8 @@ export function createCompanionCapability(
     async invoke(operation, rawPayload, context) {
       const payload = object(rawPayload);
       const sourceDeviceId = context.sourceDevice.id;
+      if (operation === 'auto-approve.settings.get') return readCompanionAutoApproveSettings();
+      if (operation === 'auto-approve.settings.update') return writeCompanionAutoApproveSettings(payload);
       if (operation.startsWith('live.')) return live.invoke(sourceDeviceId, operation, payload);
 
       if (operation === 'workspaces.list' || operation === 'workspaces.update') {

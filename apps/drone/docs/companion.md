@@ -347,3 +347,10 @@ The server resolves the canonical workspace and checks its current Companion Rea
 `set_editor_file_presentation({droneId, tabIds, presentation: "tabs" | "panes"})` extracts already-open tabs or returns file panes to the editor. Obtain exact tab IDs from `get_workspace_window_layout.editorTabs`. It preserves unsaved buffers and does not require filesystem access because it only changes the presentation of existing tabs. Returning panes does not run the file-close callback. Both tools act immediately, without proposals, and return the current layout for a subsequent `arrange_workspace_windows` call. The existing editor flow may also open File Explorer when the editor is first shown.
 
 For example, open three paths with `presentation: "panes"`, then arrange their returned panel IDs in a row above the main chat. Include any other docked panels in the requested layout, possibly as tabs in a shared group. Native mobile does not advertise the file tools; narrow/hidden desktop workspaces reject them before opening files. Native mobile retains its existing workspace picker. Settings v9 enables the new tools for previous workspace-arrangement profiles and preserves explicit v9 disablement.
+
+
+### Auto-approve proposals
+
+Desktop and mobile Companion offer an **Auto-approve proposals** toggle. It defaults off and is saved per Hub in the canonical backend settings repository, shared by both clients. Closing Companion or restarting the app or Hub preserves the preference. Clients restore it when they reconnect to their Hub. Only completed, nonempty proposals with an execution context are auto-applied, and each proposal runs at most once; failed and cancelled turns remain available for manual review.
+
+Desktop uses `GET`/`PUT /api/settings/companion/auto-approve`; mobile uses the `auto-approve.settings.get` and `auto-approve.settings.update` Companion capability operations. These mesh operations require their own grants (or a wildcard Companion grant).

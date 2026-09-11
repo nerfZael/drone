@@ -7,6 +7,7 @@ import { COMPANION_CAPABILITY, COMPANION_RUN_OPERATIONS } from '@drone/device-pr
 import { MobileMicrophoneCoordinator } from '../src/local-assistant/mobile-microphone-coordinator';
 
 let enabled = false;
+let autoApprove = false;
 let rejectSettings = false;
 let recorded = 0;
 let nextId = 0;
@@ -25,6 +26,11 @@ const mesh = {
   profile: { capabilitiesByDevice: { hub: [COMPANION_CAPABILITY] } }, setBackgroundActivityRequired() {},
   request: async (_id: string, _capability: string, operation: string, payload?: any) => {
     calls.push({ operation, payload });
+    if (operation.startsWith('auto-approve.settings')) {
+      if (rejectSettings) throw new Error('Hub unavailable');
+      if (operation === 'auto-approve.settings.update') autoApprove = payload.enabled;
+      return { enabled: autoApprove };
+    }
     if (operation.startsWith('live.settings')) {
       if (rejectSettings) throw new Error('Hub unavailable');
       if (operation === 'live.settings.update') enabled = payload.enabled;
@@ -47,8 +53,8 @@ const { create } = await import('react-test-renderer');
 const { MobileCompanionProvider, useMobileCompanion } = await import('../src/local-assistant/MobileCompanionContext');
 const { useMobileCompanionLiveSettings } = await import('../src/local-assistant/use-mobile-companion-live-settings');
 
-async function harness(settingsOnly = false, executeProposal = async () => ({ ok: true, operations: [] })) {
-  enabled = false; rejectSettings = false; recorded = 0; backend = null; live.status = 'idle'; calls.length = 0;
+async function harness(settingsOnly = false, executeProposal = async () => ({ ok: true, operations: [] }), savedAutoApprove = false) {
+  autoApprove = savedAutoApprove; enabled = false; rejectSettings = false; recorded = 0; backend = null; live.status = 'idle'; calls.length = 0;
   const originalAct = Object.getOwnPropertyDescriptor(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
   Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
   let root!: ReactTestRenderer;
@@ -197,5 +203,57 @@ test('mobile Live setting persists through Hub requests and failed writes keep t
     rejectSettings = false;
     await act(async () => { await h.settings().load(); });
     expect(h.settings().enabled).toBe(true); expect(h.settings().error).toBe('');
+  } finally { await h.cleanup(); }
+});
+
+for (const status of ['completed', 'error', 'cancelled'] as const) {
+  test(`mobile auto-approval executes only a completed proposal once (${status}) and survives closing`, async () => {
+    let executions = 0;
+    const h = await harness(false, async () => { executions++; return { ok: true, operations: [] }; });
+    try {
+      await act(async () => { await h.context().autoApproveSettings.save(true); });
+      expect(autoApprove).toBe(true);
+      await act(async () => { await h.context().submitText('prepare a proposal'); });
+      const request = calls.find((call) => call.operation === 'run.start')!.payload;
+      const emit = (payload: any) => {
+        for (const listener of listeners) listener({ sourceDeviceId: 'hub', payload: {
+          runId: request.runId, messageId: request.messageId, ...payload,
+        } });
+      };
+      await act(async () => {
+        emit({ type: 'tool_call', generation: 1, callId: 'proposal', tool: 'apply_companion_proposal_patch', args: {
+          targetId: COMPANION_PROPOSAL_TARGET_ID, baseRevision: '0',
+          content: JSON.stringify({ version: 1, title: 'Create review group', operations: [{ id: 'group', type: 'create_group', name: 'Review' }] }),
+        } });
+        await tick();
+      });
+      expect(executions).toBe(0);
+      await act(async () => { emit({ type: 'status', status }); await tick(); });
+      expect(executions).toBe(status === 'completed' ? 1 : 0);
+      await act(async () => { emit({ type: 'status', status }); await tick(); });
+      expect(executions).toBe(status === 'completed' ? 1 : 0);
+      await act(async () => { await h.context().close(); });
+      expect(h.context().autoApproveSettings.enabled).toBe(true);
+    } finally { await h.cleanup(); }
+  });
+}
+
+
+test('mobile restores auto-approval after remount and keeps the saved value when a write fails', async () => {
+  let h = await harness();
+  try {
+    await act(async () => { await h.context().autoApproveSettings.save(true); });
+    const saved = autoApprove;
+    await h.cleanup();
+    h = await harness(false, undefined, saved);
+    expect(h.context().autoApproveSettings.enabled).toBe(true);
+    rejectSettings = true;
+    await act(async () => { await h.context().autoApproveSettings.save(false); });
+    expect(h.context().autoApproveSettings.enabled).toBe(true);
+    expect(h.context().autoApproveSettings.error).toBe('Hub unavailable');
+    rejectSettings = false;
+    await act(async () => { await h.context().autoApproveSettings.save(false); });
+    expect(h.context().autoApproveSettings.enabled).toBe(false);
+    expect(autoApprove).toBe(false);
   } finally { await h.cleanup(); }
 });

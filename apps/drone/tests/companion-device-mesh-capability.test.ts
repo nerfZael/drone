@@ -1,3 +1,5 @@
+import { withTempDroneDataDir } from './test-helpers';
+import { resetHubSettingsRepositoryForTests } from '../src/host/hub-settings-repository';
 import { describe, expect, test } from 'bun:test';
 
 import { createCompanionCapability } from '../src/hub/device-mesh/companion-capability';
@@ -277,4 +279,19 @@ test('existing Companion run grants do not authorize workspace settings', async 
   const grants = [{ capability: COMPANION_CAPABILITY.id, version: 1, operations: [...COMPANION_RUN_OPERATIONS] }];
   expect(COMPANION_RUN_OPERATIONS.every((operation) => isGranted(grants, 'companion', 1, operation))).toBe(true);
   expect(COMPANION_WORKSPACE_OPERATIONS.some((operation) => isGranted(grants, 'companion', 1, operation))).toBe(false);
+});
+
+
+test('mobile auto-approval settings survive capability and storage restarts', async () => {
+  await withTempDroneDataDir('companion-mobile-auto-approve-', async () => {
+    let capability = createCompanionCapability({} as any, async () => {});
+    expect(await capability.invoke('auto-approve.settings.get', {}, context())).toEqual({ enabled: false });
+    await capability.invoke('auto-approve.settings.update', { enabled: true }, context());
+    await capability.close?.();
+    resetHubSettingsRepositoryForTests();
+    capability = createCompanionCapability({} as any, async () => {});
+    expect(await capability.invoke('auto-approve.settings.get', {}, context())).toEqual({ enabled: true });
+    await expect(capability.invoke('auto-approve.settings.update', { enabled: 'false' }, context())).rejects.toThrow('boolean');
+    await capability.close?.();
+  });
 });

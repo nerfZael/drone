@@ -1,3 +1,4 @@
+import { useMobileCompanionAutoApproveSettings } from './use-mobile-companion-auto-approve-settings';
 import type { CompanionCompactionActivity } from '@drone/assistant-chat';
 import React from 'react';
 import * as Crypto from 'expo-crypto';
@@ -62,6 +63,7 @@ type MobileCompanionContextValue = {
   status: CompanionStatus;
   live: ReturnType<typeof useMobileCompanionLive>;
   checkingVoiceMode: boolean;
+  autoApproveSettings: ReturnType<typeof useMobileCompanionAutoApproveSettings>;
   error: string;
   reply: string;
   transcript: string;
@@ -166,6 +168,9 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       : !hasOperations
         ? `${target.targetName} does not support mobile Companion yet.`
         : '';
+  const autoApproveSettings = useMobileCompanionAutoApproveSettings(
+    available && targetCapability?.operations.includes('auto-approve.settings.get') ? target!.targetDeviceId : '',
+  );
   void targetRevision;
 
   const resolveEditor = React.useCallback(() => {
@@ -551,12 +556,20 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
   const effectiveDurationMillis =
     voice.session.kind === 'companion' ? voice.session.durationMillis : 0;
 
+  React.useEffect(() => {
+    if (!autoApproveSettings.enabled || autoApproveSettings.loading || effectiveStatus !== 'completed' ||
+      !proposal?.operations.length || proposalExecuting || proposalExecution ||
+      proposalExecutionContextRef.current?.targetDeviceId !== target?.targetDeviceId) return;
+    void executeProposal();
+  }, [autoApproveSettings.enabled, autoApproveSettings.loading, effectiveStatus, proposal, proposalExecuting, proposalExecution, target?.targetDeviceId, executeProposal]);
+
   const value = React.useMemo<MobileCompanionContextValue>(
     () => ({
       ...state,
       transcript: state.transcript.startsWith(LIVE_COMPANION_PROMPT_PREFIX) ? '' : state.transcript,
       live,
       checkingVoiceMode,
+      autoApproveSettings,
       status: effectiveStatus,
       durationMillis: effectiveDurationMillis,
       proposal,
@@ -576,7 +589,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       registerEditorTarget,
     }),
     [
-      live, checkingVoiceMode,
+      live, checkingVoiceMode, autoApproveSettings,
       target?.targetDeviceId,
       available,
       cancel,
