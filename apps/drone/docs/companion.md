@@ -311,3 +311,14 @@ The native mobile Companion overlay also has a Workspaces button. It opens a ful
 Mobile workspace configuration uses the independently permissioned Companion `workspaces.list` and `workspaces.update` mesh operations. Existing grants for `run.start`, `run.cancel`, and `tool.result` continue to allow normal Companion use without automatically granting settings access. Older Hubs or phones lacking the settings grants get an explanatory message. Desktop and mobile share the same saved workspace record and server validation.
 
 Mobile proposals retain their originating device ID and reject application after the target changes. Successful and partially failed proposals refresh the sidebar. Phone-local organization resolves each operation inside the storage write queue so consecutive creates, moves, and renames use the latest layout.
+
+## Floating chat arrangement
+
+Desktop Companion has two immediate browser tools, separate from proposal execution and `get_app_context`:
+
+- `get_chat_window_layout` reads the visible workspace ID, layout revision, viewport, and floating window IDs, chat identities, pixel bounds, minimum sizes, focus and layer order.
+- `arrange_chat_windows` requires that workspace ID and revision. `tile` fills the area with equal-sized cells, `pack` packs against a corner without overlap, `stack` intentionally overlaps windows, and `custom` accepts a rectangle for each selected window. `undo` restores the last arrangement while its revision remains current. The workspace also shows an Undo arrangement button.
+
+`windows` defaults to `all_floating`; an explicit ID list controls ordering. Area and custom rectangles use workspace fractions; gap, stack offset and preferred size use pixels. Invalid, stale and non-fitting requests fail before any change. Tile and pack avoid unselected windows. An arrangement returns the actual layout and updated revision. Positions persist through existing workspace storage; drafts and focus are preserved.
+
+Only single-tab, unmaximized floating groups are movable. Main chat and tools are not moved. Filling the workspace with floating chats covers the main chat. Detached chats retain their existing layer above side chats; stack/custom requests that reverse that layer order fail explicitly. Stacking order is session-local, while window bounds persist. Native mobile sessions do not advertise either tool; narrow desktop workspaces return unsupported. Settings v7 enables the tools for existing profiles with chat navigation enabled and preserves explicit v7 disablement.

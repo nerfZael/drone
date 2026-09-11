@@ -1,3 +1,4 @@
+import { ChatWindowLayoutController } from './droneHub/chat-layout/ChatWindowLayoutController';
 import { focusedChatIdentity } from './droneHub/chat/focused-chat-window';
 import { prewarmShellTerminal } from './droneHub/terminal/terminal-open-request';
 import { useDetachedChatStore } from './droneHub/app/detached-chat-store';
@@ -271,6 +272,7 @@ function droneHubBusyDebugEnabled(): boolean {
 
 export function useDroneHubAppModel(): DroneHubAppModel {
   const companionWorkspace = useCompanionWorkspace();
+  const [chatWindowLayout] = React.useState(() => new ChatWindowLayoutController());
   const confirmDelete = useAppConfirmDialog();
   const sidebarCommandQueueRef = React.useRef<ReturnType<typeof createSidebarCommandQueue> | null>(null);
   if (!sidebarCommandQueueRef.current) sidebarCommandQueueRef.current = createSidebarCommandQueue();
@@ -3056,6 +3058,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         body: JSON.stringify(operation),
       });
     return companionWorkspace.registerWorkspaceTarget({
+      getChatWindowLayout: () => chatWindowLayout.read(currentDrone?.id ?? ''),
+      arrangeChatWindows: (args) => chatWindowLayout.arrange(currentDrone?.id ?? '', args),
       resolveDroneName: (droneId) => {
         const drone = droneByIdRef.current[String(droneId ?? '').trim()];
         return drone ? String(drone.name ?? '').trim() || drone.id : null;
