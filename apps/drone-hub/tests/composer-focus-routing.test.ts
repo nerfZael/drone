@@ -1,3 +1,4 @@
+import { focusedChatIdentity } from '../src/droneHub/chat/focused-chat-window';
 import { describe, expect, test } from 'bun:test';
 import { ActiveComposerRegistry } from '../src/droneHub/chat/ActiveComposerContext';
 import { routeComposerFocus } from '../src/droneHub/chat/composer-focus-routing';
@@ -249,4 +250,48 @@ test('detached chats with the same name route shortcuts by drone and chat identi
   h.focus(h.second.container);
   h.shortcuts();
   expect(h.actions).toEqual([`${first}:q`, `${first}:w`, `${first}:e`, `${first}:s`, `${second}:q`, `${second}:w`, `${second}:e`, `${second}:s`]);
+});
+
+
+describe('Companion focused chat context', () => {
+  const main = { droneId: 'main-drone', chatName: 'default' };
+  function withIdentity() {
+    const h = fixture();
+    h.first.root.setAttribute('data-chat-drone-id', main.droneId);
+    h.first.root.setAttribute('data-chat-name', 'side-a');
+    h.second.root.setAttribute('data-chat-drone-id', 'other-drone');
+    h.second.root.setAttribute('data-chat-name', 'review');
+    return { ...h, selected: () => focusedChatIdentity(h.doc as unknown as Document, main) };
+  }
+  test('main, floating, docked and foreign-drone windows report their actual identity', () => {
+    const h = withIdentity();
+    expect(h.selected()).toEqual(main);
+    h.focus(h.first.tab);
+    expect(h.selected()).toEqual({ droneId: main.droneId, chatName: 'side-a' });
+    h.focus(h.second.container);
+    expect(h.selected()).toEqual({ droneId: 'other-drone', chatName: 'review' });
+    h.focus(h.main);
+    expect(h.selected()).toEqual(main);
+  });
+  test('opening and typing in Companion preserve the fork context and composer', () => {
+    const h = withIdentity();
+    h.focus(h.first.tab);
+    const overlay = h.doc.append({ 'data-companion-surface': 'true' });
+    h.focus(overlay.append());
+    expect(h.selected()).toEqual({ droneId: main.droneId, chatName: 'side-a' });
+    h.shortcuts();
+    expect(h.actions).toEqual(['side-a:q', 'side-a:w', 'side-a:e', 'side-a:s']);
+  });
+  test('loading keeps identity without falling back to the main composer; closed/hidden windows fall back', () => {
+    const h = withIdentity();
+    h.first.composer.removeAttribute('data-active-composer-id');
+    h.focus(h.first.tab);
+    expect(h.selected()?.chatName).toBe('side-a');
+    h.shortcuts();
+    expect(h.actions).toEqual([]);
+    h.first.group.setAttribute('aria-hidden', 'true');
+    expect(h.selected()).toEqual(main);
+    h.doc.children = h.doc.children.filter((node) => node !== h.first.group);
+    expect(h.selected()).toEqual(main);
+  });
 });

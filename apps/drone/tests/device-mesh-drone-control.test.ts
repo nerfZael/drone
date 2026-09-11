@@ -2842,3 +2842,32 @@ test('loads a full question form on demand and rejects requests belonging to ano
     await expect(capability.invoke('chat.read', { droneId: 'drone-a', chatName: 'review', questionRequestId: 'question-a' }, { sourceDevice: { id: 'phone' } } as any)).rejects.toThrow('does not belong to this chat');
   } finally { globalThis.fetch = originalFetch; }
 });
+
+test('mobile side forks forward the side-chat option without inventing a checkpoint', async () => {
+  const originalFetch = globalThis.fetch;
+  const bodies: unknown[] = [];
+  globalThis.fetch = (async (_input, init) => {
+    bodies.push(JSON.parse(String(init?.body)));
+    return Response.json({ ok: true, chat: 'side-review', chats: ['default'] });
+  }) as typeof fetch;
+  try {
+    const capability = createDroneControlCapability({ baseUrl: () => 'http://127.0.0.1:7777', apiToken: 'test' });
+    await capability.invoke('chat.create', { droneId: 'drone', name: 'side-review', copyFrom: 'default', mode: 'fork', sideChat: true });
+    expect(bodies).toEqual([{ name: 'side-review', copyFrom: 'default', mode: 'fork', sideChat: true }]);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('mobile organization reaches the same validated endpoint used by desktop Apply', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: unknown[] = [];
+  globalThis.fetch = (async (input, init) => {
+    calls.push({ url: String(input), method: init?.method, body: JSON.parse(String(init?.body)) });
+    return Response.json({ ok: true, chatsDeleted: false });
+  }) as typeof fetch;
+  try {
+    const capability = createDroneControlCapability({ baseUrl: () => 'http://127.0.0.1:7777', apiToken: 'test' });
+    const operation = { id: 'delete', type: 'delete_chat_group', droneId: 'drone', group: 'Work' };
+    await expect(capability.invoke('sidebar.organize', operation)).resolves.toMatchObject({ chatsDeleted: false });
+    expect(calls).toEqual([{ url: 'http://127.0.0.1:7777/api/companion/organization', method: 'POST', body: operation }]);
+  } finally { globalThis.fetch = originalFetch; }
+});

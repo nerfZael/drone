@@ -76,6 +76,7 @@ export type CompanionProposalOperation =
     })
   | (CompanionProposalOperationBase & {
       type: 'clone_chat';
+      sideChat?: boolean;
       droneId: string;
       sourceChat: string;
       chatName: string;
@@ -93,12 +94,46 @@ export type CompanionProposalOperation =
       newName: string;
     })
   | (CompanionProposalOperationBase & {
+      type: 'create_chat_group';
+      droneId: string;
+      group: string;
+      parentGroup?: string;
+    })
+  | (CompanionProposalOperationBase & {
+      type: 'rename_chat_group';
+      droneId: string;
+      group: string;
+      newName: string;
+    })
+  | (CompanionProposalOperationBase & {
+      type: 'delete_chat_group';
+      droneId: string;
+      group: string;
+    })
+  | (CompanionProposalOperationBase & {
+      type: 'set_drone_group';
+      droneId: string;
+      /** Empty means ungrouped; a name is scoped to the drone's repository. */
+      group: string;
+    })
+  | (CompanionProposalOperationBase & {
+      type: 'move_chats';
+      droneId: string;
+      chats: string[];
+      /** Empty means the root of this drone's chat tree. */
+      targetGroup: string;
+    })
+  | (CompanionProposalOperationBase & {
       type: 'send_message';
       droneId: string;
       chatName?: string;
       message: string;
       delivery?: 'asap' | 'queue';
     });
+
+export type CompanionOrganizationOperation = Extract<CompanionProposalOperation, {
+  type: 'create_chat_group' | 'rename_chat_group' | 'delete_chat_group' | 'set_drone_group' | 'move_chats';
+}>;
 
 export type CompanionProposal = {
   version: typeof COMPANION_PROPOSAL_VERSION;
@@ -142,6 +177,11 @@ export type CompanionProposalOperationDetail = {
 type CompanionProposalActionResult = Record<string, unknown> | void;
 
 export type CompanionProposalExecutor = {
+  moveChats(operation: Extract<CompanionProposalOperation, { type: 'move_chats' }>): Promise<CompanionProposalActionResult>;
+  setDroneGroup(operation: Extract<CompanionProposalOperation, { type: 'set_drone_group' }>): Promise<CompanionProposalActionResult>;
+  deleteChatGroup(operation: Extract<CompanionProposalOperation, { type: 'delete_chat_group' }>): Promise<CompanionProposalActionResult>;
+  renameChatGroup(operation: Extract<CompanionProposalOperation, { type: 'rename_chat_group' }>): Promise<CompanionProposalActionResult>;
+  createChatGroup(operation: Extract<CompanionProposalOperation, { type: 'create_chat_group' }>): Promise<CompanionProposalActionResult>;
   createGroup(operation: Extract<CompanionProposalOperation, { type: 'create_group' }>): Promise<CompanionProposalActionResult>;
   deleteGroup(operation: Extract<CompanionProposalOperation, { type: 'delete_group' }>): Promise<CompanionProposalActionResult>;
   renameGroup(operation: Extract<CompanionProposalOperation, { type: 'rename_group' }>): Promise<CompanionProposalActionResult>;
@@ -179,7 +219,14 @@ export const COMPANION_PROPOSAL_FORMAT = [
   '- rename_drone: { id, type, droneId, newName }',
   '- create_chat: { id, type, droneId, chatName, copyFromChat?, draft? }',
   '  create_chat also accepts optional agent, provider, model, reasoning, agentPermissionMode, and approvalPolicy overrides. copyFromChat copies configuration only.',
-  '- clone_chat: { id, type, droneId, sourceChat, chatName, draft? } (clones history and configuration)',
+  '- clone_chat: { id, type, droneId, sourceChat, chatName, draft?, sideChat? } (clones history and configuration; sideChat defaults to false)',
+  'With clone_chat sideChat:true, fork into a temporary side chat at the latest available checkpoint when applied. No checkpoint argument is needed. Unsupported agents or sources without a usable checkpoint fail explicitly. sideChat and draft cannot both be true.',
+  '- create_chat_group: { id, type, droneId, group, parentGroup? } (group is a name or path; with parentGroup, group must be a single name)',
+  '- rename_chat_group: { id, type, droneId, group, newName } (group is its existing path; newName is a single name)',
+  '- delete_chat_group: { id, type, droneId, group } (removes the group and nested group folders, preserves chats and promotes them to the parent)',
+  '- set_drone_group: { id, type, droneId, group } (name scoped to the drone repository; empty string clears membership; a missing named group is created)',
+  '- move_chats: { id, type, droneId, chats: string[], targetGroup } (existing chat group path, or empty string for root; same drone only; preserves relative order and appends at destination)',
+  'Use get_chat_tree to discover chat groups and membership before proposing changes. Chat groups inside drones differ from repository-scoped drone groups.',
   'Agent overrides use "native", "builtin:cursor", "builtin:codex", "builtin:claude", "builtin:opencode", "builtin:pi", "builtin:blip", or an existing "custom:<id>" agent. Custom agents are unavailable on mobile and host runtime targets.',
   'For both create_drone and create_chat, resolve friendly model names through list_agent_models before proposing overrides. Use the exact supported model ID with its compatible agent (catalog codex becomes builtin:codex) and, for native only, provider. Never guess IDs; ask the user or leave settings unchanged when unresolved or ambiguous.',
   'Provider is openai, codex, gemini, or openrouter and only applies to the native agent. agentPermissionMode is read, write, or execute. approvalPolicy is ask, auto, or none. Unsupported agent combinations fail validation during Apply.',
@@ -269,9 +316,14 @@ export function companionProposalOperationLabel(
     case 'delete_drone': return `Delete drone ${drone}`;
     case 'rename_drone': return `Rename drone ${drone} to “${operation.newName}”`;
     case 'create_chat': return `Create ${operation.draft ? 'draft ' : ''}chat “${operation.chatName}” in ${drone}`;
-    case 'clone_chat': return `Clone chat “${operation.sourceChat}” as “${operation.chatName}” in ${drone}`;
+    case 'clone_chat': return `${operation.sideChat ? 'Fork as side chat' : 'Clone chat'} “${operation.sourceChat}” as “${operation.chatName}” in ${drone}`;
     case 'delete_chat': return `Delete chat “${operation.chatName}” from ${drone}`;
     case 'rename_chat': return `Rename chat “${operation.chatName}” to “${operation.newName}”`;
+    case 'create_chat_group': return `Create chat group “${[operation.parentGroup, operation.group].filter(Boolean).join('/')}” in ${drone}`;
+    case 'rename_chat_group': return `Rename chat group “${operation.group}” to “${operation.newName}” in ${drone}`;
+    case 'delete_chat_group': return `Delete chat group “${operation.group}” in ${drone}, keeping its chats`;
+    case 'set_drone_group': return `Move drone ${drone} to ${operation.group ? `“${operation.group}”` : 'Ungrouped'}`;
+    case 'move_chats': return `Move ${operation.chats.length} chat${operation.chats.length === 1 ? '' : 's'} in ${drone} to ${operation.targetGroup ? `“${operation.targetGroup}”` : 'the root'}`;
     case 'send_message': return `${operation.delivery === 'asap' ? 'Send' : 'Queue'} message to ${drone} / ${operation.chatName ?? 'default'}`;
   }
 }
@@ -351,7 +403,21 @@ export function companionProposalOperationDetails(
         ),
       ];
     case 'clone_chat':
-      return [{ label: 'Clone history from', value: operation.sourceChat }];
+      return [
+        { label: 'Clone history from', value: operation.sourceChat },
+        { label: 'Destination', value: operation.sideChat ? 'Temporary side chat' : 'Sidebar chat' },
+        ...(operation.sideChat ? [{ label: 'Fork point', value: 'Latest available checkpoint when applied' }] : []),
+      ];
+    case 'create_chat_group':
+      return [{ label: 'Parent group', value: operation.parentGroup || 'Root' }];
+    case 'rename_chat_group':
+      return [{ label: 'Existing group', value: operation.group }, { label: 'New name', value: operation.newName }];
+    case 'delete_chat_group':
+      return [{ label: 'Contents', value: 'Chats are kept and promoted to the parent. Nested group folders are removed.' }];
+    case 'set_drone_group':
+      return [{ label: 'Destination group', value: operation.group || 'Ungrouped' }, { label: 'Repository', value: 'Drone repository (unchanged)' }];
+    case 'move_chats':
+      return [{ label: 'Chats', value: operation.chats.join(', ') }, { label: 'Destination group', value: operation.targetGroup || 'Root' }];
     case 'send_message':
       return [{ label: 'Message', value: operation.message }];
     case 'delete_drone':
@@ -410,6 +476,11 @@ export async function executeCompanionProposal(
         case 'clone_chat': result = await executor.cloneChat(operation); break;
         case 'delete_chat': result = await executor.deleteChat(operation); break;
         case 'rename_chat': result = await executor.renameChat(operation); break;
+        case 'create_chat_group': result = await executor.createChatGroup(operation); break;
+        case 'rename_chat_group': result = await executor.renameChatGroup(operation); break;
+        case 'delete_chat_group': result = await executor.deleteChatGroup(operation); break;
+        case 'set_drone_group': result = await executor.setDroneGroup(operation); break;
+        case 'move_chats': result = await executor.moveChats(operation); break;
         case 'send_message': result = await executor.sendMessage(operation); break;
       }
       results.push({
@@ -533,12 +604,14 @@ function validateOperation(value: unknown, path: string): CompanionProposalOpera
     };
   }
   if (type === 'clone_chat') {
-    exactKeys(operation, ['id', 'type', 'droneId', 'sourceChat', 'chatName', 'draft'], path);
+    if (operation.sideChat === true && operation.draft === true) throw new Error(`${path}: sideChat and draft cannot both be true`);
+    exactKeys(operation, ['id', 'type', 'droneId', 'sourceChat', 'chatName', 'draft', 'sideChat'], path);
     return {
       id,
       type,
       droneId: requiredSingleLineText(operation.droneId, `${path}.droneId`, 256),
       sourceChat: requiredSingleLineText(operation.sourceChat, `${path}.sourceChat`, 160),
+      ...optionalBooleanField(operation, 'sideChat', path),
       chatName: requiredSingleLineText(operation.chatName, `${path}.chatName`, 160),
       ...optionalBooleanField(operation, 'draft', path),
     };
@@ -565,6 +638,34 @@ function validateOperation(value: unknown, path: string): CompanionProposalOpera
       chatName,
       newName: requiredSingleLineText(operation.newName, `${path}.newName`, 160),
     };
+  }
+  if (type === 'create_chat_group' || type === 'rename_chat_group' || type === 'delete_chat_group') {
+    exactKeys(operation, ['id', 'type', 'droneId', 'group', ...(type === 'create_chat_group' ? ['parentGroup'] : type === 'rename_chat_group' ? ['newName'] : [])], path);
+    const base = { id, droneId: requiredSingleLineText(operation.droneId, `${path}.droneId`, 256), group: groupPath(operation.group, `${path}.group`) };
+    if (type === 'create_chat_group') {
+      const parentGroup = operation.parentGroup === undefined ? undefined : groupPath(operation.parentGroup, `${path}.parentGroup`);
+      if (parentGroup && base.group.includes('/')) throw new Error(`${path}.group must be a single name when parentGroup is supplied`);
+      return { ...base, type, ...(parentGroup ? { parentGroup } : {}) };
+    }
+    if (type === 'rename_chat_group') {
+      const newName = groupPath(operation.newName, `${path}.newName`);
+      if (newName.includes('/')) throw new Error(`${path}.newName must be a single name`);
+      return { ...base, type, newName };
+    }
+    return { ...base, type };
+  }
+  if (type === 'set_drone_group') {
+    exactKeys(operation, ['id', 'type', 'droneId', 'group'], path);
+    const group = groupPath(operation.group, `${path}.group`, true, 64);
+    if (group.toLowerCase() === 'ungrouped') throw new Error(`${path}.group must be an empty string to clear membership; Ungrouped is reserved`);
+    return { id, type, droneId: requiredSingleLineText(operation.droneId, `${path}.droneId`, 256), group };
+  }
+  if (type === 'move_chats') {
+    exactKeys(operation, ['id', 'type', 'droneId', 'chats', 'targetGroup'], path);
+    if (!Array.isArray(operation.chats) || operation.chats.length < 1 || operation.chats.length > 100) throw new Error(`${path}.chats must contain 1 to 100 chat names`);
+    const chats = operation.chats.map((chat, index) => requiredSingleLineText(chat, `${path}.chats[${index}]`, 160));
+    if (new Set(chats).size !== chats.length) throw new Error(`${path}.chats must contain unique chat names`);
+    return { id, type, droneId: requiredSingleLineText(operation.droneId, `${path}.droneId`, 256), chats, targetGroup: groupPath(operation.targetGroup, `${path}.targetGroup`, true) };
   }
   if (type === 'send_message') {
     exactKeys(operation, ['id', 'type', 'droneId', 'chatName', 'message', 'delivery'], path);
@@ -726,4 +827,13 @@ function validateCreateOverrides(
     );
   }
   return overrides;
+}
+
+function groupPath(value: unknown, path: string, allowRoot = false, maxLength = 512): string {
+  if (allowRoot && value === '') return '';
+  const text = requiredSingleLineText(value, path, maxLength);
+  if (text.includes('\\')) throw new Error(`${path} must use / as the group path separator`);
+  const parts = text.split('/').map((part) => part.trim());
+  if (parts.some((part) => !part || part === '.' || part === '..')) throw new Error(`${path} must be a valid group path`);
+  return parts.join('/');
 }

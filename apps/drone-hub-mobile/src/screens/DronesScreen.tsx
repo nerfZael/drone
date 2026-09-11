@@ -2652,6 +2652,10 @@ export function DronesScreen({
     },
     requestDroneControl: async (operation, payload) =>
       await requestDroneControl(targetId, operation, payload),
+    onProposalApplied: () => {
+      // Refresh both full and partial execution results without replacing a newer device view.
+      if (targetIdRef.current === targetId) void loadDronesRef.current(true).catch(() => undefined);
+    },
     openChat: async (drone, requestedChat) => {
       await saveNewDroneDraftBeforeNavigation();
       navigationItems.find((item) => item.id === 'drones')?.onPress();

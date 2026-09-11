@@ -20,6 +20,8 @@ export type CompanionTextTarget = {
 };
 
 export type CompanionWorkspaceTarget = {
+  getChatWindowLayout?(): unknown;
+  arrangeChatWindows?(args: Record<string, unknown>): unknown;
   getAppContext(): Record<string, unknown>;
   resolveDroneName(droneId: string): string | null;
   /** Effective new-drone preferences a create_drone operation inherits when it omits overrides. */
@@ -169,6 +171,12 @@ export function CompanionWorkspaceProvider({ children }: { children: React.React
           },
           openDroneChat: async (args) => await resolveWorkspaceTarget().openDroneChat(args),
           highlightDrones: async (args) => await resolveWorkspaceTarget().highlightDrones(args),
+          getChatWindowLayout: () => resolveWorkspaceTarget().getChatWindowLayout?.() ?? { supported: false },
+          arrangeChatWindows: (args) => {
+            const target = resolveWorkspaceTarget();
+            if (!target.arrangeChatWindows) throw new Error('CHAT_LAYOUT_UNSUPPORTED');
+            return target.arrangeChatWindows(args);
+          },
         };
       },
       registerWorkspaceTarget,

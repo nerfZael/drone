@@ -1,3 +1,4 @@
+import { registerChatWindowLayout } from '../chat-layout/registerChatWindowLayout';
 import { SideChatForkContext } from '../chat/SideChatForkContext';
 import React from 'react';
 import { DockviewReact, type DockviewApi, type IDockviewPanelProps, type IDockviewPanelHeaderProps, type IDockviewHeaderActionsProps } from 'dockview';
@@ -140,7 +141,7 @@ function DetachedTab(props: IDockviewPanelHeaderProps) {
     }
     return onRenameChat(chat.droneId, chat.chatName, newName);
   }, [chat, onRenameChat, props.containerApi, props.api.id]);
-  return <ChatWindowTab {...props} data-side-chat-name={props.api.id} chatName={chat?.chatName ?? ''} droneId={chat?.droneId}
+  return <ChatWindowTab {...props} data-side-chat-name={props.api.id} data-chat-drone-id={chat?.droneId} data-chat-name={chat?.chatName} chatName={chat?.chatName ?? ''} droneId={chat?.droneId}
     onRename={chat && onRenameChat && chat.chatName !== 'default' ? rename : undefined} />;
 }
 function DetachedHeaderActions({ activePanel }: IDockviewHeaderActionsProps) {
@@ -202,6 +203,15 @@ export function DetachedChatWindows(props: DetachedChatWindowsProps) {
       if (bounds.width > 0 && bounds.height > 0) useDetachedChatStore.getState().saveBounds(panel.id, bounds);
     }
   }, []);
+  React.useEffect(() => registerChatWindowLayout({
+    workspaceId: props.currentDroneId ?? '', api: () => apiRef.current, root: () => rootRef.current,
+    available: () => visibleRef.current && !window.matchMedia('(max-width: 767px)').matches,
+    identity: (id) => {
+      const chat = useDetachedChatStore.getState().chats[id];
+      return chat ? { droneId: chat.droneId, chatName: chat.chatName, kind: 'detached_chat' } : null;
+    },
+    layer: 1, persist: (id, bounds) => useDetachedChatStore.getState().saveBounds(id, bounds),
+  }), [props.currentDroneId]);
   const focus = React.useCallback((key: string) => {
     const panel = apiRef.current?.getPanel(key);
     if (!panel) return;

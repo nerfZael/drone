@@ -51,7 +51,7 @@ test('captured repo, drone, chat, and multi-selection survive navigation and lat
   const { workspace } = harness();
   const initial = {
     activeRepoPath: '/repo-a', selectedDrone: { id: 'a', repoPath: '/repo-a' },
-    selectedChat: 'first', selectedDroneIds: ['a'],
+    selectedChat: 'first', mainChat: 'default', mainDroneId: 'a', selectedDroneIds: ['a'],
   };
   workspace.registerWorkspaceTarget(workspaceTarget(initial));
   const first = workspace.capture();
@@ -61,7 +61,7 @@ test('captured repo, drone, chat, and multi-selection survive navigation and lat
   const second = workspace.capture();
   expect(first.getAppContext()).toEqual({
     activeRepoPath: '/repo-a', selectedDrone: { id: 'a', repoPath: '/repo-a' },
-    selectedChat: 'first', selectedDroneIds: ['a'],
+    selectedChat: 'first', mainChat: 'default', mainDroneId: 'a', selectedDroneIds: ['a'],
   });
   first.getAppContext().activeRepoPath = '/tampered';
   expect(first.getAppContext().activeRepoPath).toBe('/repo-a');

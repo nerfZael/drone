@@ -61,7 +61,7 @@ describe('device protocol', () => {
   });
 
   test('advertises Companion run controls as explicit permissions', () => {
-    expect(COMPANION_CAPABILITY.operations).toEqual(['run.start', 'run.cancel', 'tool.result']);
+    expect(COMPANION_CAPABILITY.operations).toEqual(['run.start', 'run.cancel', 'tool.result', 'workspaces.list', 'workspaces.update']);
     expect(isGranted([], COMPANION_CAPABILITY.id, COMPANION_CAPABILITY.version, 'run.start')).toBe(
       false,
     );
@@ -149,6 +149,8 @@ describe('device protocol', () => {
 
   test('advertises sidebar ordering as an explicit permission', () => {
     expect(DRONE_CONTROL_CAPABILITY.operations).toContain('sidebar.move');
+    expect(DRONE_CONTROL_CAPABILITY.operations).toContain('sidebar.organize');
+    expect(isGranted([{ capability: 'drone-control', version: 1, operations: ['chat.read'] }], 'drone-control', 1, 'sidebar.organize')).toBe(false);
   });
 
   test('validates sidebar commands at the protocol boundary', () => {

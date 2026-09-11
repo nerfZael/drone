@@ -1,3 +1,4 @@
+import { chatWindowLayoutProperties } from './chat-window-layout-schema';
 import crypto from 'node:crypto';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import type { BlipRuntimeEvent, BlipToolProvider } from '@blip/core';
@@ -42,6 +43,7 @@ export type CompanionBrowserCall = (
 ) => Promise<any>;
 
 type RunContext = {
+  windowLayoutTools: boolean;
   runId: string;
   settings: CompanionSettings;
   workspaceRevision: string;
@@ -196,6 +198,7 @@ export class CompanionRuntime {
         existingContext.snapshots.clear();
       } else {
         this.contexts.set(threadId, {
+          windowLayoutTools: input.transport === 'websocket',
           runId,
           settings,
           workspaceRevision,
@@ -521,6 +524,17 @@ export class CompanionRuntime {
         await context.callBrowser('open_drone_chat', args as Record<string, unknown>, signal),
       ),
     });
+
+    if (context.windowLayoutTools) {
+      add('get_chat_window_layout', {
+        parameters: objectParameters({}),
+        execute: async (_callId, args, signal) => result(await context.callBrowser('get_chat_window_layout', args as Record<string, unknown>, signal)),
+      });
+      add('arrange_chat_windows', {
+        parameters: objectParameters(chatWindowLayoutProperties, ['workspaceId', 'layoutRevision', 'mode']),
+        execute: async (_callId, args, signal) => result(await context.callBrowser('arrange_chat_windows', args as Record<string, unknown>, signal)),
+      });
+    }
 
     add('highlight_drones', {
       parameters: objectParameters({

@@ -1,3 +1,5 @@
+import { resolveLocalChatOrganization } from './resolveLocalChatOrganization';
+import { validateCompanionProposal } from '@drone/assistant-chat';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Crypto from 'expo-crypto';
 import { Directory, File, FileMode, Paths } from 'expo-file-system';
@@ -542,10 +544,39 @@ function useLocalDroneControlValue() {
       if (operation === 'drone.create.container') {
         throw new Error('Container drones are not available on this phone');
       }
-      if (operation === 'sidebar.move') {
-        const command = parseSidebarMoveCommandRequest(payload);
+      const organization = operation === 'sidebar.organize'
+        ? validateCompanionProposal({ version: 1, title: 'Organize', operations: [payload] }).operations[0]!
+        : null;
+      if (organization?.type === 'set_drone_group') {
+        const group = organization.group ? parseLocalGroupName(organization.group) : null;
+        const write = writeRef.current.then(async () => {
+          const drone = getDrone();
+          const nextGroups = group && !groupsRef.current.some((item) => item.name === group)
+            ? [...groupsRef.current, { id: `phone_group_${Crypto.randomUUID()}`, name: group, createdAt: new Date().toISOString() }]
+            : groupsRef.current;
+          const nextDrones = dronesRef.current.map((item) => item.id === drone.id ? { ...item, group } : item);
+          // Publish only after persistence succeeds, as with the existing sidebar write path.
+          await Promise.all([
+            AsyncStorage.setItem(LOCAL_DRONES_KEY, JSON.stringify(nextDrones)),
+            AsyncStorage.setItem(LOCAL_GROUPS_KEY, JSON.stringify(nextGroups)),
+          ]);
+          dronesRef.current = nextDrones;
+          groupsRef.current = nextGroups;
+          setDrones(nextDrones);
+          setGroups(nextGroups);
+          return { ok: true, droneId: drone.id, group };
+        });
+        writeRef.current = write.then(() => undefined, () => undefined);
+        return await write;
+      }
+      if (organization && organization.type !== 'create_chat_group' && organization.type !== 'rename_chat_group' && organization.type !== 'delete_chat_group' && organization.type !== 'move_chats') {
+        throw new Error('Unsupported organization operation');
+      }
+      if (operation === 'sidebar.move' || organization) {
+        const requestedCommand = organization ? null : parseSidebarMoveCommandRequest(payload);
+        const command = requestedCommand;
         if (
-          command.intent.kind === 'set-pinned' &&
+          command?.intent.kind === 'set-pinned' &&
           command.intent.droneIds.some(
             (droneId: string) => !dronesRef.current.some((drone) => drone.id === droneId),
           )
@@ -557,6 +588,11 @@ function useLocalDroneControlValue() {
             ...sidebarOrderRef.current,
             pinnedDroneIds: pinnedDroneIdsRef.current,
           });
+          const intent = organization
+            ? resolveLocalChatOrganization(organization, dronesRef.current, currentLayout)
+            : requestedCommand!.intent;
+          if (!intent) return { ok: true, changed: false };
+          const command = { mutationId: requestedCommand?.mutationId ?? Crypto.randomUUID(), intent };
           const nextLayout = applySidebarMove(currentLayout, command.intent);
           const nextDrones =
             command.intent.kind === 'move-into-folder'
@@ -750,6 +786,7 @@ function useLocalDroneControlValue() {
         return { ok: true, chats: Object.keys(drone.chats) };
       }
       if (operation === 'chat.create') {
+        if (payload.sideChat === true) throw new Error('Temporary side chats are available on Hub drones. Phone-native chats support ordinary history clones only.');
         const drone = getDrone();
         const chatName = parseLocalChatName(payload.name);
         if (drone.chats[chatName]) throw new Error(`Chat already exists: ${chatName}`);

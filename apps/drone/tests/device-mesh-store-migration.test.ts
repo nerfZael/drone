@@ -86,6 +86,7 @@ describe('device mesh grant migrations', () => {
           'group.create',
           'group.rename',
           'group.delete',
+          'sidebar.organize',
         ],
       },
     ]);
@@ -115,7 +116,7 @@ describe('device mesh grant migrations', () => {
       {
         capability: 'drone-control',
         version: 1,
-        operations: ['drones.list', 'sidebar.move'],
+        operations: ['drones.list', 'sidebar.move', 'sidebar.organize'],
       },
     ]);
   });
@@ -133,8 +134,16 @@ describe('device mesh grant migrations', () => {
       {
         capability: 'drone-control',
         version: 1,
-        operations: ['drones.list', 'sidebar.move'],
+        operations: ['drones.list', 'sidebar.move', 'sidebar.organize'],
       },
     ]);
   });
+});
+
+
+test('organization inherits equivalent sidebar authority and is not granted to chat readers', () => {
+  const organize = migrateDeviceMeshGrants([{ capability: 'drone-control', version: 1, operations: ['sidebar.move'] }]);
+  expect(organize[0]!.operations).toEqual(['sidebar.move', 'sidebar.organize']);
+  expect(migrateDeviceMeshGrants(organize)).toEqual(organize);
+  expect(migrateDeviceMeshGrants([{ capability: 'drone-control', version: 1, operations: ['chat.read'] }])[0]!.operations).not.toContain('sidebar.organize');
 });

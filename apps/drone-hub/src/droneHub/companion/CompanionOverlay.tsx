@@ -147,7 +147,7 @@ export function CompanionOverlay() {
   ]?.execution;
   const latestProposalExecutionFailed = latestProposalExecution?.ok === false;
   return (
-    <div style={recorderHeight > 0 ? {
+    <div data-companion-surface="true" style={recorderHeight > 0 ? {
       zIndex: panelOpen ? 100 : 80,
       bottom: recorderHeight + 32,
       maxHeight: `calc(100dvh - ${recorderHeight + 48}px)`,

@@ -13,6 +13,11 @@ function executor(overrides: Record<string, (...args: any[]) => Promise<any>> = 
   const complete = async () => ({ ok: true });
   return {
     createGroup: complete,
+    createChatGroup: complete,
+    renameChatGroup: complete,
+    deleteChatGroup: complete,
+    setDroneGroup: complete,
+    moveChats: complete,
     deleteGroup: complete,
     renameGroup: complete,
     createDrone: async () => ({ droneId: 'created-drone', droneName: 'Created' }),
@@ -309,5 +314,53 @@ describe('Companion proposal contract', () => {
       { id: 'rename', status: 'failed', error: 'rename conflict' },
       { id: 'delete', status: 'skipped' },
     ]);
+  });
+});
+
+
+describe('Companion organization and side-chat proposals', () => {
+  const clone = { id: 'fork', type: 'clone_chat', droneId: 'drone', sourceChat: 'default', chatName: 'investigation' };
+  const parse = (operation: unknown) => validateCompanionProposal({ version: 1, title: 'Organize', operations: [operation] }).operations[0]!;
+
+  test('ordinary clones remain ordinary, and side forks disclose their execution-time checkpoint', () => {
+    expect(parse(clone)).not.toHaveProperty('sideChat');
+    expect(parse({ ...clone, sideChat: false })).toHaveProperty('sideChat', false);
+    const fork = parse({ ...clone, sideChat: true });
+    expect(companionProposalOperationLabel(fork)).toContain('Fork as side chat');
+    expect(companionProposalOperationDetails(fork)).toContainEqual({ label: 'Fork point', value: 'Latest available checkpoint when applied' });
+    expect(() => parse({ ...clone, sideChat: 'true' })).toThrow();
+    expect(() => parse({ ...clone, sideChat: true, draft: true })).toThrow('cannot both be true');
+  });
+
+  test('requires explicit destinations, valid paths and unique chat names', () => {
+    expect(() => parse({ id: 'move', type: 'set_drone_group', droneId: 'drone' })).toThrow();
+    expect(parse({ id: 'move', type: 'set_drone_group', droneId: 'drone', group: '' })).toHaveProperty('group', '');
+    expect(() => parse({ id: 'move', type: 'set_drone_group', droneId: 'drone', group: 'Ungrouped' })).toThrow();
+    expect(() => parse({ id: 'group', type: 'create_chat_group', droneId: 'drone', group: 'Work\\Other' })).toThrow();
+    expect(() => parse({ id: 'move', type: 'move_chats', droneId: 'drone', chats: ['a', 'a'], targetGroup: '' })).toThrow('unique');
+    expect(() => parse({ id: 'group', type: 'create_chat_group', droneId: 'drone', group: 'Work/../Other' })).toThrow('valid group path');
+    expect(() => parse({ id: 'group', type: 'create_chat_group', droneId: 'drone', group: 'Work/Other', parentGroup: 'Parent' })).toThrow('single name');
+    expect(() => parse({ id: 'group', type: 'rename_chat_group', droneId: 'drone', group: 'Work', newName: 'New/Nested' })).toThrow('single name');
+  });
+
+  test('executes organization and side forks in order with created-drone references', async () => {
+    const calls: string[] = [];
+    const record = (name: string) => async (op: any) => {
+      expect(op.droneId).toBe('created-drone');
+      calls.push(name);
+      if (name === 'fork') expect(op.sideChat).toBe(true);
+      return { ok: true };
+    };
+    const result = await executeCompanionProposal({ version: 1, title: 'Set up', operations: [
+      { id: 'drone', type: 'create_drone', prompt: 'Start' },
+      { id: 'group', type: 'create_chat_group', droneId: '$drone', group: 'Work' },
+      { id: 'rename', type: 'rename_chat_group', droneId: '$drone', group: 'Work', newName: 'Tasks' },
+      { id: 'move', type: 'move_chats', droneId: '$drone', chats: ['default'], targetGroup: 'Tasks' },
+      { id: 'assign', type: 'set_drone_group', droneId: '$drone', group: 'Review' },
+      { id: 'delete', type: 'delete_chat_group', droneId: '$drone', group: 'Tasks' },
+      { id: 'fork', type: 'clone_chat', droneId: '$drone', sourceChat: 'default', chatName: 'side', sideChat: true },
+    ] }, executor({ createChatGroup: record('create'), renameChatGroup: record('rename'), moveChats: record('move'), setDroneGroup: record('assign'), deleteChatGroup: record('delete'), cloneChat: record('fork') }));
+    expect(result.ok).toBe(true);
+    expect(calls).toEqual(['create', 'rename', 'move', 'assign', 'delete', 'fork']);
   });
 });
