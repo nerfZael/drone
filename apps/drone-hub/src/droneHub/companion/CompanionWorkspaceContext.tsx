@@ -20,6 +20,8 @@ export type CompanionTextTarget = {
 };
 
 export type CompanionWorkspaceTarget = {
+  getWorkspaceWindowLayout?(): unknown;
+  arrangeWorkspaceWindows?(args: Record<string, unknown>): unknown;
   getChatWindowLayout?(): unknown;
   arrangeChatWindows?(args: Record<string, unknown>): unknown;
   getAppContext(): Record<string, unknown>;
@@ -171,6 +173,12 @@ export function CompanionWorkspaceProvider({ children }: { children: React.React
           },
           openDroneChat: async (args) => await resolveWorkspaceTarget().openDroneChat(args),
           highlightDrones: async (args) => await resolveWorkspaceTarget().highlightDrones(args),
+          getWorkspaceWindowLayout: () => resolveWorkspaceTarget().getWorkspaceWindowLayout?.() ?? { supported: false },
+          arrangeWorkspaceWindows: (args) => {
+            const target = resolveWorkspaceTarget();
+            if (!target.arrangeWorkspaceWindows) throw new Error('WORKSPACE_LAYOUT_UNSUPPORTED');
+            return target.arrangeWorkspaceWindows(args);
+          },
           getChatWindowLayout: () => resolveWorkspaceTarget().getChatWindowLayout?.() ?? { supported: false },
           arrangeChatWindows: (args) => {
             const target = resolveWorkspaceTarget();

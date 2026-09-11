@@ -14,6 +14,8 @@ export const COMPANION_BROWSER_TOOL_NAMES = [
   'apply_companion_proposal_patch',
   'open_drone_chat',
   'highlight_drones',
+  'get_workspace_window_layout',
+  'arrange_workspace_windows',
   'get_chat_window_layout',
   'arrange_chat_windows',
 ] as const;
