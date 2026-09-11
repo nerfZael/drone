@@ -5592,7 +5592,7 @@ async function startDroneHubApiServerWithLifecycle(
   }
 
   const apiRouter = new HubRouter(json, readJsonBody);
-  registerCompanionRoutes(apiRouter, companionTelemetry, companionWorkspaces);
+  registerCompanionRoutes(apiRouter, companionTelemetry, companionWorkspaces, { services: hubApplication, sidebar: sidebarCommands });
   registerDesktopEventRoutes(apiRouter, {
     assistantService,
     droneChatBroadcaster,

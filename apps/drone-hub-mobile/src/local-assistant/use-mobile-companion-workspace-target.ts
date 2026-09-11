@@ -42,6 +42,7 @@ export function useMobileCompanionWorkspaceTarget({
   createDrone,
   requestDroneControl,
   openChat,
+  onProposalApplied,
 }: {
   targetDeviceId: string;
   targetName: string;
@@ -58,6 +59,7 @@ export function useMobileCompanionWorkspaceTarget({
   createDrone: CreateDrone;
   requestDroneControl: DroneControlRequest;
   openChat(drone: MobileDroneSummary, chatName: string): Promise<void>;
+  onProposalApplied?(): void;
 }): string[] {
   const companion = useMobileCompanion();
   const [highlightedDroneIds, setHighlightedDroneIds] = React.useState<string[]>([]);
@@ -93,6 +95,9 @@ export function useMobileCompanionWorkspaceTarget({
   implementationRef.current = {
     getAppContext: () => ({
       surface: 'mobile',
+      selectedChat: selectedDrone ? chatName : null,
+      mainChat: selectedDrone ? chatName : null,
+      mainDroneId: selectedDrone?.id ?? null,
       activeRepoPath: selectedDrone?.repoPath || null,
       targetDevice: {
         id: targetDeviceId,
@@ -163,6 +168,7 @@ export function useMobileCompanionWorkspaceTarget({
       return { ok: true, revision: String(composerRef.current.revision) };
     },
     executeProposal: async (proposal: CompanionProposal, executionContext) => {
+      if (executionContext.targetDeviceId !== targetDeviceId) throw new Error('PROPOSAL_TARGET_CHANGED');
       if (!targetReachable) throw new Error('TARGET_DEVICE_OFFLINE');
       const activeRepoPath = executionContext.defaultRepoPath;
       const proposalRepoPath = (repoPath: string | undefined) => {
@@ -226,7 +232,12 @@ export function useMobileCompanionWorkspaceTarget({
           syncNativeThread: true,
         });
       };
-      return await executeCompanionProposal(proposal, {
+      const execution = await executeCompanionProposal(proposal, {
+        createChatGroup: async (operation) => await requestDroneControl<Record<string, unknown>>('sidebar.organize', operation),
+        renameChatGroup: async (operation) => await requestDroneControl<Record<string, unknown>>('sidebar.organize', operation),
+        deleteChatGroup: async (operation) => await requestDroneControl<Record<string, unknown>>('sidebar.organize', operation),
+        setDroneGroup: async (operation) => await requestDroneControl<Record<string, unknown>>('sidebar.organize', operation),
+        moveChats: async (operation) => await requestDroneControl<Record<string, unknown>>('sidebar.organize', operation),
         createGroup: async (operation) =>
           await requestDroneControl('group.create', {
             name: operation.name,
@@ -376,6 +387,7 @@ export function useMobileCompanionWorkspaceTarget({
             name: operation.chatName,
             copyFrom: operation.sourceChat,
             mode: 'fork',
+            ...(operation.sideChat === true ? { sideChat: true } : {}),
             ...(operation.draft === true ? { draft: true } : {}),
           }),
         deleteChat: async (operation) =>
@@ -398,6 +410,8 @@ export function useMobileCompanionWorkspaceTarget({
             submittedAt: new Date().toISOString(),
           }),
       });
+      onProposalApplied?.();
+      return execution;
     },
     openDroneChat: async (args) => {
       if (!targetReachable) throw new Error('TARGET_DEVICE_OFFLINE');

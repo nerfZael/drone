@@ -11,3 +11,5 @@ export * from './mutations';
 export * from './optimistic-journal';
 export * from './command-queue';
 export * from './chat-groups';
+
+export { buildChatOrganizationIntent } from './buildChatOrganizationIntent';

@@ -39,6 +39,7 @@ describe('Companion settings', () => {
       'list_drones',
       'list_agent_models',
       'list_chats',
+      'get_chat_tree',
       'read_chat',
       'search_chat_messages',
     ]);
@@ -228,4 +229,11 @@ describe('Companion settings', () => {
     expect(migratedCustomized.enabledTools).not.toContain('list_agent_models');
     expect(migratedCustomized.enabledTools).not.toContain('list_groups');
   });
+});
+
+
+test('upgrades chat readers to chat-tree access without re-enabling tools disabled in v6', () => {
+  expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, schemaVersion: 5, enabledTools: ['list_chats'] }).enabledTools).toEqual(['list_chats', 'get_chat_tree']);
+  expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, schemaVersion: 5, enabledTools: [] }).enabledTools).toEqual([]);
+  expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, schemaVersion: 6, enabledTools: ['list_chats'] }).enabledTools).toEqual(['list_chats']);
 });

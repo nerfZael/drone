@@ -1,3 +1,4 @@
+import { focusedChatIdentity } from './droneHub/chat/focused-chat-window';
 import { prewarmShellTerminal } from './droneHub/terminal/terminal-open-request';
 import { useDetachedChatStore } from './droneHub/app/detached-chat-store';
 import { recordUiAction } from './ui-diagnostics';
@@ -13,6 +14,7 @@ import {
   executeCompanionProposal,
   resolveCompanionChatName,
   type CompanionProposalChatOverrides,
+  type CompanionOrganizationOperation,
 } from '@drone/assistant-chat';
 import {
   type AgentApprovalPolicy,
@@ -3047,33 +3049,53 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         hasSpawnContext: hasSpawnContextPreferencesForRepo(spawnContexts, repoPath),
       });
     };
+    const organize = async (operation: CompanionOrganizationOperation) =>
+      await requestJson<Record<string, unknown>>('/api/companion/organization', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(operation),
+      });
     return companionWorkspace.registerWorkspaceTarget({
       resolveDroneName: (droneId) => {
         const drone = droneByIdRef.current[String(droneId ?? '').trim()];
         return drone ? String(drone.name ?? '').trim() || drone.id : null;
       },
       resolveDroneCreationDefaults,
-      getAppContext: () => ({
-        appView,
-        activeRepoPath: activeRepoPath || null,
-        selectedDrone: currentDrone
-          ? {
-              id: currentDrone.id,
-              name: currentDrone.name,
-              repoPath: currentDrone.repoPath || null,
-              chatCount: currentDrone.chats?.length ?? 1,
-            }
-          : null,
-        selectedChat: selectedChat || null,
-        selectedDroneIds: [...selectedDroneIds],
-        activePane: rightPanelTab,
-        visiblePanes: visibleToolTabs,
-        openFile: openedEditorFile?.path
-          ? { path: openedEditorFile.path }
-          : null,
-      }),
+      getAppContext: () => {
+        const focused = focusedChatIdentity(
+          document,
+          currentDrone ? { droneId: currentDrone.id, chatName: selectedChat || 'default' } : null,
+        );
+        const focusedDrone = focused
+          ? droneByIdRef.current[focused.droneId] ?? (currentDrone?.id === focused.droneId ? currentDrone : null)
+          : null;
+        return {
+          appView,
+          activeRepoPath: focusedDrone ? focusedDrone.repoPath || null : activeRepoPath || null,
+          selectedDrone: focusedDrone
+            ? {
+                id: focusedDrone.id,
+                name: focusedDrone.name,
+                repoPath: focusedDrone.repoPath || null,
+                chatCount: focusedDrone.chats?.length ?? 1,
+              }
+            : null,
+          selectedChat: focused?.chatName ?? null,
+          mainChat: currentDrone ? selectedChat || 'default' : null,
+          mainDroneId: currentDrone?.id ?? null,
+          selectedDroneIds: [...selectedDroneIds],
+          activePane: rightPanelTab,
+          visiblePanes: visibleToolTabs,
+          openFile: openedEditorFile?.path ? { path: openedEditorFile.path } : null,
+        };
+      },
       executeProposal: async (proposal, executionContext, onProgress) =>
         await executeCompanionProposal(proposal, {
+          createChatGroup: organize,
+          renameChatGroup: organize,
+          deleteChatGroup: organize,
+          setDroneGroup: organize,
+          moveChats: organize,
           createGroup: async (operation) => {
             const repoPath = operation.repoPath ?? executionContext.defaultRepoPath;
             await requestJson('/api/groups', {
@@ -3247,6 +3269,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
                 name: operation.chatName,
                 copyFromChat: operation.sourceChat,
                 mode: 'fork',
+                ...(operation.sideChat === true ? { sideChat: true } : {}),
                 ...(operation.draft ? { draft: true } : {}),
               }),
             });

@@ -458,7 +458,7 @@ function WorkspaceTab(props: IDockviewPanelHeaderProps) {
   }, [onRenameSideChat, props.containerApi, props.api.id, chatName, ctx.droneId]);
 
   if (sideChat) {
-    return <ChatWindowTab {...props} data-side-chat-name={chatName} chatName={chatName} droneId={ctx.droneId}
+    return <ChatWindowTab {...props} data-side-chat-name={chatName} data-chat-drone-id={ctx.droneId} data-chat-name={chatName} chatName={chatName} droneId={ctx.droneId}
       onRename={onRenameSideChat ? rename : undefined} onPointerDown={handlePointerDown} />;
   }
   if (!closeable) return <MainChatTab {...props} />;

@@ -1,3 +1,6 @@
+import { executeCompanionOrganization } from './executeCompanionOrganization';
+import type { HubServices } from '../application/hub-services';
+import type { SidebarCommandService } from '../sidebar-command-service';
 import type { CompanionWorkspaceService } from './companion-workspaces';
 import type { HubRouter } from '../hub-router';
 import { companionSettingsResponse, writeCompanionSettings } from './companion-config';
@@ -9,7 +12,14 @@ export function registerCompanionRoutes(
   router: HubRouter,
   telemetry?: CompanionTelemetryService,
   workspaces?: CompanionWorkspaceService,
+  organization?: { services: HubServices; sidebar: SidebarCommandService },
 ): void {
+  if (organization) {
+    router.post('/api/companion/organization', async ({ readJson, json, fail }) => {
+      try { json(200, await executeCompanionOrganization(await readJson<unknown>(), organization)); }
+      catch (error) { fail(400, error instanceof Error ? error.message : String(error)); }
+    });
+  }
   router.get('/api/companion/instructions', async ({ json }) => {
     json(200, { ok: true, instructions: await readCompanionInstructions(), maxChars: COMPANION_INSTRUCTIONS_MAX_CHARS });
   });

@@ -43,6 +43,8 @@ export function WorkspaceSideChatContent({
     >
       <div
         data-side-chat-name={chat.name}
+        data-chat-drone-id={drone.id}
+        data-chat-name={chat.name}
         className="dh-floating-chat flex h-full min-h-0 min-w-0 flex-col bg-[var(--chat-background)]"
       >
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">

@@ -906,6 +906,10 @@ export function createDroneControlCapability(
         }
       }
 
+      if (operation === 'sidebar.organize') {
+        return await localHubRequest(requestAccess, '/api/companion/organization', { method: 'POST', body: JSON.stringify(payload) });
+      }
+
       if (operation === 'sidebar.move') {
         if (!sidebarCommands) {
           throw Object.assign(new Error('sidebar commands are unavailable'), {
@@ -1017,6 +1021,7 @@ export function createDroneControlCapability(
             name: chatName,
             ...(copyFrom ? { copyFrom, ...(mode ? { mode } : {}) } : {}),
             ...(payload.draft === true ? { draft: true } : {}),
+            ...(payload.sideChat === true ? { sideChat: true } : {}),
           }),
         });
         return {

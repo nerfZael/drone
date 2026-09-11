@@ -66,6 +66,8 @@ export function migrateDeviceMeshGrants(grants: readonly CapabilityGrant[]): Cap
   ) {
     operations.push('sidebar.move');
   }
+  // Named organization performs the same membership and chat-tree changes as sidebar moves.
+  if (droneControl?.operations.includes('sidebar.move') || operations.includes('sidebar.move')) operations.push('sidebar.organize');
   if (operations.length === 0) return next;
   if (!droneControl) {
     next.push({ capability: 'drone-control', version: 1, operations });

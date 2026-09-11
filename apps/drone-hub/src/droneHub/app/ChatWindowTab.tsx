@@ -25,7 +25,7 @@ export function ChatWindowTab({ api, containerApi: _containerApi, params: _param
   /** Shows the chat's estimated cost after its name. */
   droneId?: string;
   onRename?: ChatWindowRename;
-} & Pick<React.HTMLAttributes<HTMLDivElement>, 'onPointerDown'> & { 'data-side-chat-name'?: string }) {
+} & Pick<React.HTMLAttributes<HTMLDivElement>, 'onPointerDown'> & { 'data-side-chat-name'?: string; 'data-chat-drone-id'?: string; 'data-chat-name'?: string }) {
   const title = usePanelTitle(api);
   const rootRef = React.useRef<HTMLDivElement | null>(null);
   const inputRef = React.useRef<HTMLInputElement | null>(null);

@@ -10,6 +10,16 @@
 
 Companion is a voice-first assistant opened with a keyboard shortcut on desktop or a sidebar microphone on mobile. It transcribes a short request, runs a small Blip agent with Drone Hub tools, and shows the answer in a desktop corner overlay or at the top of the mobile app.
 
+### Chat focus and organization
+
+On desktop, `get_app_context.selectedChat` identifies the focused chat, including temporary forks and detached windows. `selectedDrone` and `activeRepoPath` follow that chat's drone. `mainChat` and `mainDroneId` identify the main workspace independently, including when a detached window belongs to another drone. Opening or typing in the Companion overlay preserves the previous chat focus. A loading chat window retains its identity; closing or hiding it returns selection to the main chat. Both identities are captured with the request at recording start or text submission. Mobile reports its single selected chat in both fields.
+
+`clone_chat` accepts `sideChat?: boolean` (default false). With true, Apply creates a temporary side chat through the existing fork backend at its latest available checkpoint at execution time. There is no checkpoint argument. The proposal explicitly identifies the side-chat destination and fork timing; `sideChat:true` and `draft:true` cannot be combined. The usual provider/checkpoint restrictions apply. On desktop, the existing workspace displays the new side chat when the drone summary refreshes. Mobile can request this on a connected Hub; phone-native chats do not have temporary side-chat presentation and reject this option explicitly.
+
+Proposal operations also include `create_chat_group`, `rename_chat_group`, `delete_chat_group`, `set_drone_group`, and `move_chats`. Chat groups support nesting. Deleting one removes its nested folders but preserves and promotes their conversations to the parent. Drone moves preserve repository membership; an empty group clears membership, while a missing named group is created in the drone's repository. Chat moves target an existing group path or the root (`targetGroup:""`) inside the same drone, preserving relative order and appending at the destination. Temporary side chats must first be kept in the sidebar using the existing user control before they can be organized into chat groups.
+
+`get_chat_tree` supplies ordered chat-group membership. Settings schema v6 enables it for existing configurations with `list_chats` enabled; subsequent explicit tool choices are preserved. Mutations remain proposal-only with the existing Apply/auto-approval flow. Desktop Apply and mobile's permissioned `sidebar.organize` operation share the validated `/api/companion/organization` endpoint. Devices already trusted with `sidebar.move` inherit the equivalent named organization permission. Phone-native organization uses the same shared chat-tree intents and its existing local sidebar persistence.
+
 ### Persistent instructions
 
 The desktop Companion header includes **Edit Companion instructions**, beside the system-prompt editor. Instructions start empty and use the same editor with Save and Discard. They are stored independently as the versioned Hub setting `companion.instructions`, with a 50,000-character limit. Clearing the text is a valid save. Closing a conversation does not erase instructions.
@@ -299,3 +309,5 @@ Tool visibility follows the union of selected workspace capabilities. Every actu
 The native mobile Companion overlay also has a Workspaces button. It opens a full-screen editor with safe-area spacing, search, device/category grouping, and separate 44-point Write/Execute controls. Save applies the workspace selection to the connected Hub; closing with unsaved changes requires explicit discard. Saving blocks dismissal. The destination Hub is pinned when the editor opens.
 
 Mobile workspace configuration uses the independently permissioned Companion `workspaces.list` and `workspaces.update` mesh operations. Existing grants for `run.start`, `run.cancel`, and `tool.result` continue to allow normal Companion use without automatically granting settings access. Older Hubs or phones lacking the settings grants get an explanatory message. Desktop and mobile share the same saved workspace record and server validation.
+
+Mobile proposals retain their originating device ID and reject application after the target changes. Successful and partially failed proposals refresh the sidebar. Phone-local organization resolves each operation inside the storage write queue so consecutive creates, moves, and renames use the latest layout.

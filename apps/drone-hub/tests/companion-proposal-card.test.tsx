@@ -398,3 +398,24 @@ describe('Companion proposal card', () => {
     expect(html).toContain('aria-expanded="true"');
   });
 });
+
+test('review identifies side forks, group destinations, moved chats and preserved conversations', () => {
+  const html = renderToStaticMarkup(<CompanionProposalCard
+    proposal={{ version: 1, title: 'Organize', operations: [
+      { id: 'fork', type: 'clone_chat', droneId: 'drone', sourceChat: 'default', chatName: 'Investigate', sideChat: true },
+      { id: 'create', type: 'create_chat_group', droneId: 'drone', group: 'Tests', parentGroup: 'Work' },
+      { id: 'rename', type: 'rename_chat_group', droneId: 'drone', group: 'Work/Tests', newName: 'Checks' },
+      { id: 'move', type: 'move_chats', droneId: 'drone', chats: ['api', 'review'], targetGroup: 'Work/Checks' },
+      { id: 'drone', type: 'set_drone_group', droneId: 'drone', group: 'Reviewers' },
+      { id: 'delete', type: 'delete_chat_group', droneId: 'drone', group: 'Work/Checks' },
+    ] }} defaultRepoPath="/repo" execution={null} executing={false} companionStatus="completed"
+    onExecute={() => {}} onDiscard={() => {}}
+    historyDetails={{ startedAt: 1000, completedAt: 2000, autoApproved: false, onBack: () => {} }} />);
+  expect(html).toContain('Fork as side chat');
+  expect(html).toContain('Latest available checkpoint when applied');
+  expect(html).toContain('Work/Tests');
+  expect(html).toContain('api, review');
+  expect(html).toContain('Reviewers');
+  expect(html).toContain('keeping its chats');
+  expect(html).toContain('Nested group folders are removed');
+});
