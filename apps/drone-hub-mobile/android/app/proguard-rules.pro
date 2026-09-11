@@ -12,3 +12,6 @@
 -keep class com.facebook.react.turbomodule.** { *; }
 
 # Add any project specific keep options here:
+
+# Native WebRTC callback methods are reached through JNI.
+-keep class org.webrtc.** { *; }

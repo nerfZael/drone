@@ -7,6 +7,8 @@ import {
   COMPANION_PROPOSAL_PATH,
   COMPANION_PROPOSAL_TARGET_ID,
   CompanionClientController,
+  waitForCompanionReply,
+  LIVE_COMPANION_PROMPT_PREFIX,
   EMPTY_COMPANION_PROPOSAL,
   executeCompanionBrowserTool,
   parseCompanionProposalText,
@@ -22,6 +24,7 @@ import {
   type CompanionToolActivity,
 } from '@drone/assistant-chat';
 
+import { useMobileCompanionLive } from './use-mobile-companion-live';
 import { useMesh } from '../mesh/MeshContext';
 import { useSharedMobileChatVoiceRecorder } from './MobileChatVoiceRecorderContext';
 import { createMobileCompanionTransport } from './mobile-companion-transport';
@@ -57,6 +60,8 @@ export type MobileCompanionWorkspaceTarget = {
 
 type MobileCompanionContextValue = {
   status: CompanionStatus;
+  live: ReturnType<typeof useMobileCompanionLive>;
+  checkingVoiceMode: boolean;
   error: string;
   reply: string;
   transcript: string;
@@ -76,6 +81,7 @@ type MobileCompanionContextValue = {
   /** Send already-transcribed text to Companion as if it had just been spoken. */
   submitText(prompt: string): Promise<{ ok: true } | { ok: false; error: string }>;
   close(): Promise<void>;
+  cancel(): Promise<void>;
   executeProposal(): Promise<void>;
   discardProposal(): void;
   registerWorkspaceTarget(target: MobileCompanionWorkspaceTarget): () => void;
@@ -87,6 +93,10 @@ const MobileCompanionContext = React.createContext<MobileCompanionContextValue |
 export function MobileCompanionProvider({ children }: { children: React.ReactNode }) {
   const mesh = useMesh();
   const voice = useSharedMobileChatVoiceRecorder();
+  const live = useMobileCompanionLive(voice.microphoneCoordinator);
+  const [checkingVoiceMode, setCheckingVoiceMode] = React.useState(false);
+  const preparingVoice = React.useRef(false);
+  const liveActive = live.status === 'connecting' || live.status === 'listening';
   const companionVoiceActive = voice.session.kind === 'companion';
   const controllerRef = React.useRef<CompanionClientController | null>(null);
   if (!controllerRef.current) {
@@ -334,7 +344,14 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     [applyProposal, readProposal, resolveEditor],
   );
 
+  const cancel = React.useCallback(async () => {
+    live.stop();
+    await controller.cancel();
+    await voice.discardRecording('companion');
+  }, [controller, live.stop, voice.discardRecording]);
+
   const close = React.useCallback(async () => {
+    live.reset();
     if (proposalExecutingRef.current) return;
     activeTargetDeviceIdRef.current = '';
     await controller.close();
@@ -349,7 +366,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     setProposalDefaultRepoPath(null);
     proposalExecutingRef.current = false;
     setProposalExecuting(false);
-  }, [controller, voice.discardRecording]);
+  }, [controller, live.reset, voice.discardRecording]);
 
   React.useEffect(() => {
     const activeTargetDeviceId = activeTargetDeviceIdRef.current;
@@ -367,7 +384,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
   }, [close, hasGrant, hasOperations, proposalExecuting, targetRevision]);
 
   const run = React.useCallback(
-    async (prompt: string, telemetry?: CompanionClientTelemetry, requestedMessageId?: string) => {
+    async (prompt: string, telemetry?: CompanionClientTelemetry, requestedMessageId?: string, liveWorkspaceKey?: string) => {
       const activeTarget = workspaceTargetRef.current;
       if (!activeTarget) {
         controller.fail('Open Drone Hub before starting Companion.');
@@ -390,7 +407,12 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
             request: mesh.request,
             subscribe: mesh.subscribe,
           }),
-        executeTool: (tool, args) => executeMobileTool(activeTarget.targetDeviceId, tool, args),
+        executeTool: (tool, args) => {
+          if (liveWorkspaceKey !== undefined && mobileLiveWorkspaceKey(workspaceTargetRef.current) !== liveWorkspaceKey) {
+            throw new Error('Live workspace changed. Start a new voice conversation before editing the new workspace.');
+          }
+          return executeMobileTool(activeTarget.targetDeviceId, tool, args);
+        },
       });
     },
     [close, controller, executeMobileTool, mesh.request, mesh.subscribe],
@@ -409,6 +431,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
         return { ok: false, error: 'Companion is already working.' };
       }
       if (status === 'cancelled' || status === 'error') await close();
+      live.stop();
       await run(text);
       const next = controller.getSnapshot();
       if (next.status === 'error') {
@@ -416,10 +439,12 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       }
       return { ok: true };
     },
-    [available, close, companionVoiceActive, controller, run, unavailableReason],
+    [available, close, companionVoiceActive, controller, live.stop, run, unavailableReason],
   );
 
   const toggle = React.useCallback(async () => {
+    if (liveActive) { live.stop(); return; }
+    if (preparingVoice.current) return;
     if (
       companionVoiceActive &&
       (voice.session.status === 'starting' || voice.session.status === 'transcribing')
@@ -459,6 +484,33 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     activeTargetDeviceIdRef.current = activeTarget.targetDeviceId;
     voice.setError('');
     const token = controller.getToken();
+    const supportsLive = targetCapability?.operations.includes('live.settings.get');
+    if (supportsLive) {
+      preparingVoice.current = true;
+      setCheckingVoiceMode(true);
+      try {
+        const preference = await mesh.request(activeTarget.targetDeviceId, COMPANION_CAPABILITY.id, 'live.settings.get') as { enabled?: unknown };
+        if (!controller.isCurrent(token) || workspaceTargetRef.current?.targetDeviceId !== activeTarget.targetDeviceId) return;
+        if (typeof preference?.enabled !== 'boolean') throw new Error('Could not read the Hub Live voice preference.');
+        if (preference.enabled) {
+          const operations = ['live.start', 'live.event', 'live.ping', 'live.close'];
+          if (!selfDevice || operations.some((operation) => !targetCapability?.operations.includes(operation) ||
+            !isGranted(selfDevice.grants, COMPANION_CAPABILITY.id, COMPANION_CAPABILITY.version, operation))) {
+            throw new Error('Allow Live voice for this phone in the Hub device settings.');
+          }
+          const workspaceKey = mobileLiveWorkspaceKey(activeTarget);
+          await live.start(activeTarget.targetDeviceId, activeTarget.targetName, (prompt, signal) => {
+            if (proposalExecutingRef.current) return Promise.reject(new Error('Companion is applying a proposal. Please ask again when it finishes.'));
+            if (mobileLiveWorkspaceKey(workspaceTargetRef.current) !== workspaceKey) return Promise.reject(new Error('Live workspace changed. Start a new voice conversation.'));
+            return waitForCompanionReply(controller, () => run(prompt, undefined, undefined, workspaceKey), signal);
+          });
+          return;
+        }
+      } catch (error) {
+        if (controller.isCurrent(token)) controller.reportVoiceError(error instanceof Error ? error.message : 'Could not start Live voice.');
+        return;
+      } finally { preparingVoice.current = false; setCheckingVoiceMode(false); }
+    }
     const started = await voice.startRecording('companion');
     if (!controller.isCurrent(token)) return;
     if (!started) {
@@ -474,6 +526,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     run,
     unavailableReason,
     voice,
+    liveActive, live.start, live.stop, mesh.request, targetCapability, selfDevice,
   ]);
 
   React.useEffect(() => {
@@ -488,15 +541,15 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
   }, [companionVoiceActive, controller, voice.error, voice.session.status]);
 
   React.useEffect(() => {
-    if (state.status === 'cancelled' || state.status === 'error' || state.status === 'idle') {
+    if (!liveActive && !checkingVoiceMode && (state.status === 'cancelled' || state.status === 'error' || state.status === 'idle')) {
       activeTargetDeviceIdRef.current = '';
     }
-    const active = state.status === 'working';
+    const active = state.status === 'working' || liveActive;
     mesh.setBackgroundActivityRequired(active);
     return () => {
       if (active) mesh.setBackgroundActivityRequired(false);
     };
-  }, [mesh.setBackgroundActivityRequired, state.status]);
+  }, [mesh.setBackgroundActivityRequired, state.status, liveActive, checkingVoiceMode]);
 
   React.useEffect(
     () => () => {
@@ -515,6 +568,9 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
   const value = React.useMemo<MobileCompanionContextValue>(
     () => ({
       ...state,
+      transcript: state.transcript.startsWith(LIVE_COMPANION_PROMPT_PREFIX) ? '' : state.transcript,
+      live,
+      checkingVoiceMode,
       status: effectiveStatus,
       durationMillis: effectiveDurationMillis,
       proposal,
@@ -527,14 +583,17 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       toggle,
       submitText,
       close,
+      cancel,
       executeProposal,
       discardProposal,
       registerWorkspaceTarget,
       registerEditorTarget,
     }),
     [
+      live, checkingVoiceMode,
       target?.targetDeviceId,
       available,
+      cancel,
       close,
       discardProposal,
       executeProposal,
@@ -562,4 +621,10 @@ export function useMobileCompanion(): MobileCompanionContextValue {
   const value = React.useContext(MobileCompanionContext);
   if (!value) throw new Error('useMobileCompanion must be used inside MobileCompanionProvider');
   return value;
+}
+
+function mobileLiveWorkspaceKey(target: MobileCompanionWorkspaceTarget | null): string {
+  const context = target?.getAppContext();
+  const openFile = context?.openFile as { path?: unknown } | undefined;
+  return JSON.stringify([target?.targetDeviceId, context?.mainDroneId, context?.selectedChat, context?.pane, openFile?.path]);
 }

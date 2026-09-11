@@ -27,6 +27,9 @@ import {
   shouldCancelCompanionRecordingWithEscape,
 } from './companion-shortcut';
 import { createCompanionWebSocketTransport } from './companion-websocket-transport';
+import { useCompanionLive } from './use-companion-live';
+import { LIVE_COMPANION_PROMPT_PREFIX } from './CompanionLiveConversation';
+import { waitForCompanionReply } from './waitForCompanionReply';
 import { useCompanionWorkspace, type CapturedCompanionWorkspace } from './CompanionWorkspaceContext';
 
 export type CompanionProposalHistoryEntry = {
@@ -43,6 +46,7 @@ export type CompanionProposalHistoryEntry = {
 type CompanionTextSubmitResult = { ok: true } | { ok: false; error: string };
 
 type CompanionContextValue = {
+  live: ReturnType<typeof useCompanionLive>;
   status: CompanionStatus;
   recordingPaused: boolean;
   error: string;
@@ -122,12 +126,14 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     [controller],
   );
   const voice = useChatVoiceRecorder({ onError: onVoiceError, microphoneOwner: 'companion' });
+  const live = useCompanionLive();
   const voiceStatusRef = React.useRef(voice.status);
   const discardVoiceRecordingRef = React.useRef(voice.discardRecording);
   voiceStatusRef.current = voice.status;
 
   const close = React.useCallback(async () => {
     if (proposalExecutingRef.current) return;
+    live.reset();
     voiceSubmissionGenerationRef.current += 1;
     textSubmissionGenerationRef.current += 1;
     recordingWorkspaceRef.current = null;
@@ -147,13 +153,14 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     setProposalHistory([]);
     proposalExecutingRef.current = false;
     setProposalExecuting(false);
-  }, [controller, voice.discardRecording]);
+  }, [controller, voice.discardRecording, live.reset]);
 
   const stop = React.useCallback(() => {
     if (controller.getSnapshot().status !== 'working') return;
+    live.cancelPending();
     textSubmissionGenerationRef.current += 1;
     void controller.cancel();
-  }, [controller]);
+  }, [controller, live.cancelPending]);
 
   const toggleRecordingPause = React.useCallback(() => {
     voice.toggleRecordingPause();
@@ -386,6 +393,23 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   );
 
   const toggle = React.useCallback(async () => {
+    if (live.loading || live.saving) return;
+    if (!live.resolved) {
+      controller.reportVoiceError('Could not load the voice preference. Retry the Live voice setting before starting the microphone.');
+      return;
+    }
+    if (live.enabled && voice.status === 'idle') {
+      if (live.status === 'connecting' || live.status === 'listening') { live.stop(); return; }
+      const capturedWorkspace = captureWorkspace();
+      const context = capturedWorkspace?.getAppContext();
+      const workspaceLabel = [context?.activeRepoPath, context?.selectedChat].filter((value) => typeof value === 'string' && value).join(' · ') || 'No workspace selected';
+      await live.start(async (prompt, signal) => {
+        if (signal.aborted) throw new Error('Voice conversation ended.');
+        if (proposalExecutingRef.current) throw new Error('Companion is applying a proposal. Please ask again when it finishes.');
+        return await waitForCompanionReply(controller, () => run(prompt, capturedWorkspace), signal);
+      }, workspaceLabel);
+      return;
+    }
     if (voice.status === 'starting' || voice.status === 'transcribing') return;
     if (voice.status === 'recording' || voice.status === 'paused') {
       const recording = recordingWorkspaceRef.current;
@@ -417,7 +441,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     if (recordingWorkspaceRef.current !== recording) return;
     if (!started) recordingWorkspaceRef.current = null;
     if (!started && controller.getSnapshot().status !== 'error') controller.resetIfNoSession();
-  }, [captureWorkspace, close, controller, run, voice]);
+  }, [captureWorkspace, close, controller, run, voice, live]);
 
   const submitText = React.useCallback(
     async (prompt: string, capturedWorkspace = captureWorkspace()): Promise<CompanionTextSubmitResult> => {
@@ -430,6 +454,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       if (status === 'working' || proposalExecutingRef.current) {
         return { ok: false, error: 'Companion is already working.' };
       }
+      live.stop();
       if (status === 'cancelled' || status === 'error') {
         await close();
       }
@@ -440,7 +465,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       }
       return { ok: true };
     },
-    [captureWorkspace, close, controller, run],
+    [captureWorkspace, close, controller, run, live.stop],
   );
 
   const prepareTextSubmission = React.useCallback(() => {
@@ -465,7 +490,12 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   );
 
   const effectiveStatus: CompanionStatus =
-    voice.status === 'paused' ? 'recording' : voice.status !== 'idle' ? voice.status : state.status;
+    voice.status === 'paused' ? 'recording' : voice.status !== 'idle' ? voice.status
+      : state.status === 'working' ? 'working'
+      : live.status === 'connecting' ? 'starting'
+      : live.status === 'listening' && state.status === 'idle' ? 'recording'
+      : live.status === 'error' && state.status === 'idle' ? 'error'
+      : state.status;
 
   React.useEffect(() => {
     if (!proposal || !shouldAutoExecuteCompanionProposal({
@@ -490,6 +520,8 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const value = React.useMemo<CompanionContextValue>(
     () => ({
       ...state,
+      live,
+      transcript: state.transcript.startsWith(LIVE_COMPANION_PROMPT_PREFIX) ? '' : state.transcript,
       status: effectiveStatus,
       recordingPaused: voice.status === 'paused',
       durationMillis: voice.durationMillis,
@@ -514,6 +546,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     }),
     [
       close,
+      live,
       autoApprove,
       discardProposal,
       discardRecording,

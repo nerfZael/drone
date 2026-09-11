@@ -6,7 +6,12 @@ import {
   DEFAULT_COMPANION_SETTINGS,
   companionSettingsEqual,
   normalizeCompanionSettings,
+  readCompanionSettings,
+  writeCompanionSettings,
 } from '../src/hub/companion/companion-config';
+
+import { withTempDroneDataDir } from './test-helpers';
+import { resetHubSettingsRepositoryForTests } from '../src/host/hub-settings-repository';
 
 describe('Companion settings', () => {
   test('offers OpenAI, Codex, Gemini, and OpenRouter including Gemini 3.5 Flash-Lite', () => {
@@ -236,4 +241,23 @@ test('upgrades chat readers to chat-tree access without re-enabling tools disabl
   expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, schemaVersion: 5, enabledTools: ['list_chats'] }).enabledTools).toEqual(['list_chats', 'get_chat_tree']);
   expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, schemaVersion: 5, enabledTools: [] }).enabledTools).toEqual([]);
   expect(normalizeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, schemaVersion: 6, enabledTools: ['list_chats'] }).enabledTools).toEqual(['list_chats']);
+});
+
+
+test('follow-up delivery defaults to ASAP for existing settings and persists explicit Queue', async () => {
+  const { promptDeliveryMode: _mode, ...legacy } = DEFAULT_COMPANION_SETTINGS;
+  expect(normalizeCompanionSettings(legacy).promptDeliveryMode).toBe('asap');
+  expect(normalizeCompanionSettings(undefined).promptDeliveryMode).toBe('asap');
+  await withTempDroneDataDir('companion-delivery-', async () => {
+    const saved = await writeCompanionSettings({ ...DEFAULT_COMPANION_SETTINGS, promptDeliveryMode: 'queue' });
+    resetHubSettingsRepositoryForTests();
+    expect(await readCompanionSettings()).toEqual(saved);
+    expect(saved.promptDeliveryMode).toBe('queue');
+    expect(saved.model).toBe(DEFAULT_COMPANION_SETTINGS.model);
+    expect(companionSettingsEqual(saved, DEFAULT_COMPANION_SETTINGS)).toBe(false);
+    await expect(writeCompanionSettings({ ...saved, promptDeliveryMode: 'invalid' })).rejects.toThrow('asap or queue');
+    expect((await readCompanionSettings()).promptDeliveryMode).toBe('queue');
+    await writeCompanionSettings({ ...saved, promptDeliveryMode: 'asap' });
+    expect((await readCompanionSettings()).promptDeliveryMode).toBe('asap');
+  });
 });

@@ -4,11 +4,15 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { CompanionClientTransport, CompanionServerMessage } from '@drone/assistant-chat';
 import * as voiceModule from '../src/droneHub/chat/use-chat-voice-recorder';
 import * as transportModule from '../src/droneHub/companion/companion-websocket-transport';
+import * as liveModule from '../src/droneHub/companion/use-companion-live';
 import { ActiveComposerProvider } from '../src/droneHub/chat/ActiveComposerContext';
 import { CompanionProvider, useCompanion } from '../src/droneHub/companion/CompanionContext';
 import { CompanionWorkspaceProvider, useCompanionWorkspace } from '../src/droneHub/companion/CompanionWorkspaceContext';
 
 test('recording origin survives pause, navigation, transcription, proposal creation, and a new recording', async () => {
+  // SSR does not run the effect that loads the persisted mode. Simulate a loaded, disabled setting.
+  const useLive = liveModule.useCompanionLive;
+  const liveSpy = spyOn(liveModule, 'useCompanionLive').mockImplementation(() => ({ ...useLive(), loading: false, resolved: true }));
   let finishTranscript!: (text: string) => void;
   const voice = {
     status: 'idle' as ReturnType<typeof voiceModule.useChatVoiceRecorder>['status'],
@@ -79,12 +83,13 @@ test('recording origin survives pause, navigation, transcription, proposal creat
     });
     await companion.executeProposal();
     expect(executedRepo).toBe('/a');
-    receive({ type: 'status', messageId: prompts.at(-1)!.messageId, status: 'completed' });
+    // A new transcription is submitted while the first backend request is still active.
     await companion.toggle(); // A fresh recording now captures C.
     repo = '/d';
     const next = companion.toggle();
     finishTranscript('which repo?');
     await next;
+    expect(prompts).toHaveLength(2);
     expect(await tool('get_app_context')).toMatchObject({ activeRepoPath: '/c' });
     await companion.close();
     await companion.toggle();
@@ -139,6 +144,7 @@ test('recording origin survives pause, navigation, transcription, proposal creat
     await companion?.close();
     voiceSpy.mockRestore();
     transportSpy.mockRestore();
+    liveSpy.mockRestore();
     if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
     else Reflect.deleteProperty(globalThis, 'window');
   }

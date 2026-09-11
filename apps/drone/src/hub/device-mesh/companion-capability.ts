@@ -5,6 +5,7 @@ import { COMPANION_CAPABILITY } from '@drone/device-protocol';
 import { CompanionRunSession } from '../companion/companion-run-session';
 import type { CompanionWorkspaceService } from '../companion/companion-workspaces';
 import type { CompanionRuntime } from '../companion/companion-runtime';
+import { CompanionLiveMeshSessions } from './CompanionLiveMeshSessions';
 import type { CapabilityHandler } from './device-mesh-types';
 
 type CompanionMeshSession = {
@@ -39,6 +40,9 @@ export function createCompanionCapability(
   broadcast: BroadcastEvent,
   workspaces?: Pick<CompanionWorkspaceService, 'catalog' | 'save'>,
 ): CapabilityHandler {
+  const live = new CompanionLiveMeshSessions({
+    emit: (deviceId, payload) => broadcast(COMPANION_CAPABILITY.id, 'live.event', payload, 'live.start', [deviceId]),
+  });
   const sessionsByDeviceId = new Map<string, CompanionMeshSession>();
 
   const emit = async (session: CompanionMeshSession, message: Record<string, unknown>) => {
@@ -68,6 +72,7 @@ export function createCompanionCapability(
     async invoke(operation, rawPayload, context) {
       const payload = object(rawPayload);
       const sourceDeviceId = context.sourceDevice.id;
+      if (operation.startsWith('live.')) return live.invoke(sourceDeviceId, operation, payload);
 
       if (operation === 'workspaces.list' || operation === 'workspaces.update') {
         if (!workspaces) throw new Error('Companion workspace settings are unavailable on this Hub.');
@@ -146,15 +151,17 @@ export function createCompanionCapability(
         session = createdSession;
         sessionsByDeviceId.set(sourceDeviceId, session);
       }
-      await session.run.enqueue({ prompt, messageId, telemetry });
+      await session.run.submit({ prompt, messageId, telemetry });
       return { accepted: true };
     },
     async close() {
+      live.close();
       await Promise.all(
         [...sessionsByDeviceId.values()].map((session) => cancelSession(session, false)),
       );
     },
     async revokeDevice(deviceId) {
+      live.revokeDevice(deviceId);
       const session = sessionsByDeviceId.get(deviceId);
       if (session) await cancelSession(session, false);
     },

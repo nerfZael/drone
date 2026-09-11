@@ -25,6 +25,11 @@ const POLICIES: Readonly<Record<string, CapabilityEventPolicy>> = {
     maxPayloadBytes: 4 * 1024,
     maxEventsPerMinute: 60,
   },
+  'companion\0live.event': {
+    requiredOperation: 'live.start',
+    maxPayloadBytes: 128 * 1024,
+    maxEventsPerMinute: 1800,
+  },
   'companion\0run.event': {
     requiredOperation: 'run.start',
     maxPayloadBytes: 64 * 1024,

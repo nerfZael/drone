@@ -198,12 +198,14 @@ describe('Companion device mesh capability', () => {
     expect(cancelled).toHaveLength(2);
   });
 
-  test('queues follow-ups on the same mobile Companion session', async () => {
+  test('steers follow-ups on the same mobile Companion session', async () => {
     const prompts: string[] = [];
     const runtimeRunIds: string[] = [];
+    const steering: Array<{ runId: string; prompt: string }> = [];
     const messageIds: string[] = [];
     const completions: Array<(reply: string) => void> = [];
     const runtime = {
+      steer: (runId: string, prompt: string) => { steering.push({ runId, prompt }); return true; },
       cancel() {},
       async deleteSession() {},
       run(input: any) {
@@ -239,14 +241,13 @@ describe('Companion device mesh capability', () => {
     await waitFor(() => prompts.length === 1);
     expect(prompts).toEqual(['First']);
 
-    completions[0]!('First reply');
-    await waitFor(() => prompts.length === 2);
-    expect(prompts).toEqual(['First', 'Second']);
-    expect(runtimeRunIds[1]).toBe(runtimeRunIds[0]);
-    expect(messageIds).toEqual(['mobile-message-1', 'mobile-message-2']);
-
-    completions[1]!('Second reply');
-    await waitFor(() => events.filter((event) => event.status === 'completed').length === 2);
+    expect(steering).toEqual([{ runId: runtimeRunIds[0], prompt: 'Second' }]);
+    expect(messageIds).toEqual(['mobile-message-1']);
+    completions[0]!('Steered reply');
+    await waitFor(() => events.some((event) => event.status === 'completed'));
+    expect(events.filter((event) => event.type === 'reply')).toMatchObject([{
+      messageId: 'mobile-message-2', reply: 'Steered reply',
+    }]);
     await capability.invoke('run.cancel', { runId: 'conversation-1' }, context());
   });
 });
