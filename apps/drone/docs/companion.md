@@ -1,5 +1,7 @@
 # Companion
 
+Desktop Companion now includes an optional, remembered [Live voice mode](companion-live-voice.md). It defaults off and uses GPT-Live 1 with client delegation to the existing configured Companion backend. See that document for controls, lifecycle, and manual validation.
+
 | Field               | Value                                                                                                                                  |
 | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | Type                | Feature                                                                                                                                |
@@ -38,9 +40,9 @@ The agent should perform UI work through real tools, not describe or return acti
 
 The existing built-in agent belongs to a drone chat. Companion belongs to the whole app and should understand the current drone, chat, composer, and editor file without the user repeating that context.
 
-On desktop, each Companion recording captures the repository, drone, chat, selection, pane, and file context when recording starts, before microphone startup. Pause/resume, navigation, transcription, and queued follow-ups do not replace that recording's context. Each new recording captures a fresh context. Text submissions capture at Send; the Dictation scratchpad's Companion destination captures as soon as the destination button/shortcut is pressed, before awaiting outstanding transcriptions.
+On desktop, each Companion recording captures the repository, drone, chat, selection, pane, and file context when recording starts, before microphone startup. Pause/resume, navigation, transcription, and ASAP follow-ups do not replace that recording's context. Each new recording captures a fresh context. Text submissions capture at Send; the Dictation scratchpad's Companion destination captures as soon as the destination button/shortcut is pressed, before awaiting outstanding transcriptions.
 
-`get_app_context` returns the message's captured selection. Composer and editor tools remain bound to the captured target IDs, read current contents/revisions of those targets, and fail if the original target is no longer available. New proposals inherit their default repository from the originating message rather than the current UI selection; an existing proposal keeps its original default when revised. Tool executors are correlated by message ID so queued requests cannot overwrite one another's context. Captures are discarded on completion, cancellation, or close. Navigation tools still act on the UI, and workspace access grants remain current.
+`get_app_context` returns the message's captured selection. Composer and editor tools remain bound to the captured target IDs, read current contents/revisions of those targets, and fail if the original target is no longer available. New proposals inherit their default repository from the originating message rather than the current UI selection; an existing proposal keeps its original default when revised. Tool executors are correlated by message ID so follow-up requests cannot overwrite one another's context. Captures are discarded on completion, cancellation, or close. Navigation tools still act on the UI, and workspace access grants remain current.
 
 ```text
 shortcut -> record -> transcribe -> one Blip run
@@ -113,7 +115,7 @@ Register the open editor buffer in the same small browser text-target layer. The
 
 The overlay should reuse the agent-chat Working presentation. Show elapsed time and tool count in a clickable row; expanding it shows running and completed tool calls and their bounded results. Keep model reasoning hidden. Render the final response through `ChatMessageBody` so normal Markdown behavior stays consistent with agent chat.
 
-Closing the overlay erases the conversation. If recording, transcription, or Blip is active, close must abort it first; then clear the audio blob, transcript, activity, reply, queued turns, and browser state and delete the temporary Companion thread. Completed conversations are not recoverable in the first version. Closing does not undo tool effects that already completed, such as a composer patch; those remain visible and undoable. A run-generation check must prevent a late browser tool result from mutating state after close.
+Closing the overlay erases the conversation. If recording, transcription, or Blip is active, close must abort it first; then clear the audio blob, transcript, activity, reply, pending follow-ups, and browser state and delete the temporary Companion thread. Completed conversations are not recoverable in the first version. Closing does not undo tool effects that already completed, such as a composer patch; those remain visible and undoable. A run-generation check must prevent a late browser tool result from mutating state after close.
 
 ### 2. Reuse the existing Blip host
 
@@ -128,13 +130,13 @@ For each run:
 5. Send the final answer to the overlay.
 6. In a `finally` block, delete the temporary thread and remove its socket/run binding.
 
-This reuses the complete SQLite repository behavior without writing Companion sessions to disk or creating another repository implementation. A completed turn keeps its thread available for follow-ups; overlay close calls `deleteThread`. Turns submitted while one is active queue in order on that thread. A hard Hub crash drops the in-memory database with the process, so no startup sweep or global deletion of unbound assistant sessions is needed. Close the in-memory repository during graceful Hub shutdown.
+This reuses the complete SQLite repository behavior without writing Companion sessions to disk or creating another repository implementation. A completed turn keeps its thread available for follow-ups; overlay close calls `deleteThread`. Settings → Companion → Follow-up delivery selects ASAP (default) or Queue, using the normal Save button and canonical Hub settings. Both record-and-transcribe and Live mode use this setting. ASAP delivers follow-ups to the running agent through its steering channel; Queue runs them in order after the current request finishes. Changes apply to new backend runs, while an active run keeps its saved delivery mode. Tool activity and elapsed time remain attached to that active run; its final answer is correlated with the latest message. In ASAP mode, follow-ups wait only for runtime startup or teardown when no agent can accept steering. Steering takes effect at the next agent processing point and does not undo completed tool actions. A hard Hub crash drops the in-memory database with the process, so no startup sweep or global deletion of unbound assistant sessions is needed. Close the in-memory repository during graceful Hub shutdown.
 
 Add a dedicated Companion WebSocket route using the existing `ws` and Hub authentication patterns. Its protocol only needs `start_run`, `cancel_run`, `tool_call`, `tool_result`, `activity`, `status`, `reply`, and `error` messages. Stream bounded Blip tool activity to the overlay. Bind runs and tool calls to that socket, apply timeouts, and reject late or mismatched results. Closing the socket aborts its active run and rejects pending browser tool calls. Use a separate no-server `WebSocketServer`, route it from the existing upgrade handler, and extend Hub transport shutdown to close both the terminal and Companion servers.
 
 Build the final reply from assistant text parts only. Do not use `latestAssistantText` unchanged because it currently includes thinking parts; Companion must never render hidden reasoning as the answer.
 
-Mobile starts the same runtime over the paired-device mesh instead of opening the browser-only WebSocket. The mesh capability binds one temporary conversation to the initiating phone, queues its turns, streams the same status/activity/reply events, relays phone-local composer and editor tools, and deletes the conversation on overlay close or device revocation. The phone uses its existing one-shot transcription setup; Companion model, prompt, and enabled tools remain canonical on the Hub.
+Mobile starts the same runtime over the paired-device mesh instead of opening the browser-only WebSocket. The mesh capability binds one temporary conversation to the initiating phone, uses the same saved ASAP/Queue delivery choice, streams the same status/activity/reply events, relays phone-local composer and editor tools, and deletes the conversation on overlay close or device revocation. The phone uses its existing one-shot transcription setup when Live is off, or native WebRTC with client delegation when Live is enabled in Settings → Built-in → Companion Live voice. See [Companion Live voice](companion-live-voice.md#mobile) for native setup and lifecycle. Companion model, prompt, and enabled tools remain canonical on the Hub.
 
 ### 3. Use a fixed, backend-enforced tool set
 
@@ -203,7 +205,7 @@ Add `CompanionSettingsTab` and `useCompanionSettings` under the existing Setting
 
 Store this as one profile-scoped canonical Companion settings record containing `provider`, `model`, `thinkingLevel`, `systemPrompt`, and `enabledTools`. Add `GET` and `PUT /api/settings/companion`; the response should also include the current model choices and Companion tool summaries so the frontend does not duplicate either catalog. Validate the provider/model/reasoning combination, reject unknown tool names, and cap prompt size on the backend.
 
-Use one draft and Save action so provider, model, prompt, and tools change together. Show loading, dirty, saving, saved, and error states, and warn before discarding unsaved changes. Each message snapshots the saved settings when it starts; changing settings does not mutate an active message, and the next queued or follow-up message rebuilds the session configuration while preserving its transcript. If the selected provider lacks credentials, show that in Settings and fail the message clearly rather than silently switching providers.
+Use one draft and Save action so provider, model, prompt, and tools change together. Show loading, dirty, saving, saved, and error states, and warn before discarding unsaved changes. Each fresh backend run snapshots the saved settings when it starts. ASAP follow-ups keep the active run's settings; changes rebuild the session configuration for the next fresh run while preserving its transcript. If the selected provider lacks credentials, show that in Settings and fail the message clearly rather than silently switching providers.
 
 ### 5. Observe message latency without retaining content
 

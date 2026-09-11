@@ -2273,7 +2273,8 @@ function DrawerCompanionButton({ onClose }: { onClose(): void }) {
   const companion = useMobileCompanion();
   const busy =
     companion.status === 'starting' ||
-    companion.status === 'transcribing';
+    companion.status === 'transcribing' || companion.checkingVoiceMode;
+  const liveActive = companion.live.status === 'connecting' || companion.live.status === 'listening';
   return (
     <View style={styles.companionFooter}>
       <Pressable
@@ -2310,7 +2311,7 @@ function DrawerCompanionButton({ onClose }: { onClose(): void }) {
             companion.status === 'recording' && styles.companionButtonTextRecording,
           ]}
         >
-          {companion.status === 'recording' ? 'Listening' : 'Companion'}
+          {liveActive ? 'End Live voice' : companion.status === 'recording' ? 'Listening' : 'Companion'}
         </Text>
       </Pressable>
     </View>

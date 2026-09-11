@@ -15,6 +15,7 @@ import { mobileDeviceConnectionLabel } from '../drones/mobile-device-reachabilit
 import { useMesh } from '../mesh/MeshContext';
 import { colors } from '../theme';
 import { LocalAssistantSettingsCard } from '../local-assistant/LocalAssistantSettingsCard';
+import { MobileCompanionLiveSettingsCard } from '../local-assistant/MobileCompanionLiveSettingsCard';
 import { MobileVoiceInputSettingsCard } from '../local-assistant/MobileVoiceInputSettingsCard';
 import { MobileReadingSettingsCard } from './MobileReadingSettingsCard';
 import { MobileFilesSettingsCard } from './MobileFilesSettingsCard';
@@ -105,6 +106,7 @@ export function SettingsScreen({
           <>
             <LocalAssistantSettingsCard />
             <MobileVoiceInputSettingsCard />
+            <MobileCompanionLiveSettingsCard />
           </>
         ) : (
           <>

@@ -155,8 +155,10 @@ test('Companion socket rejects late browser tools from a cancelled run after res
   }
 });
 
-test('Companion socket queues follow-ups on the same session', async () => {
+test('Companion socket steers follow-ups on the running session and correlates the final reply', async () => {
   const runs: any[] = [];
+  const steered: string[] = [];
+  const messages: any[] = [];
   const completions: Array<(reply: string) => void> = [];
   const deletedSessions: string[] = [];
   const runtime = {
@@ -164,6 +166,7 @@ test('Companion socket queues follow-ups on the same session', async () => {
       runs.push(input);
       return new Promise<string>((resolve) => completions.push(resolve));
     },
+    steer: (_runId: string, prompt: string) => { steered.push(prompt); return true; },
     cancel() {},
     async deleteSession(runId: string) {
       deletedSessions.push(runId);
@@ -186,6 +189,7 @@ test('Companion socket queues follow-ups on the same session', async () => {
       client.once('open', resolve);
       client.once('error', reject);
     });
+    client.on('message', (raw) => messages.push(JSON.parse(raw.toString())));
     client.send(
       JSON.stringify({
         type: 'start_run',
@@ -212,13 +216,14 @@ test('Companion socket queues follow-ups on the same session', async () => {
     });
     expect(runs[0].queueWaitMs).toBeGreaterThanOrEqual(0);
 
-    completions[0]!('First reply');
-    await waitFor(() => runs.length === 2);
-    expect(runs.map((run) => run.prompt)).toEqual(['First', 'Second']);
-    expect(runs[1].runId).toBe(runs[0].runId);
-    expect(runs[1].messageId).toBe('message-2');
-
-    completions[1]!('Second reply');
+    await waitFor(() => steered.length === 1);
+    expect(steered).toEqual(['Second']);
+    expect(runs).toHaveLength(1);
+    completions[0]!('Answer after steering');
+    await waitFor(() => messages.some((message) => message.status === 'completed'));
+    expect(messages.filter((message) => message.type === 'reply')).toEqual([{
+      runId: 'conversation', type: 'reply', messageId: 'message-2', reply: 'Answer after steering',
+    }]);
     client.send(JSON.stringify({ type: 'cancel_run', runId: 'conversation' }));
     await waitFor(() => deletedSessions.includes('conversation'));
   } finally {

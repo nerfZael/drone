@@ -199,6 +199,10 @@ export class BlipAssistantHost {
     return this.handles.get(threadId)?.running === true;
   }
 
+  canSteerThread(threadId: string): boolean {
+    return this.handles.get(threadId)?.acceptsSteering === true;
+  }
+
   hasThreadHandle(threadId: string): boolean {
     return this.handles.has(threadId);
   }

@@ -17,7 +17,7 @@
     "android": {
       "package": "com.dronehub.mobile",
       "softwareKeyboardLayoutMode": "resize",
-      "permissions": ["CAMERA"]
+      "permissions": ["CAMERA", "RECORD_AUDIO", "MODIFY_AUDIO_SETTINGS"]
     },
     "plugins": [
       "./plugins/with-browser-loopback",

@@ -3,6 +3,7 @@ import { UiSegmentedControl } from '../../ui/components';
 import { AssistantToolsPanel } from '../assistant/AssistantSettingsPanels';
 import type { AssistantToolSummary } from '../assistant/assistant-types';
 import { ChatComposerModelPicker } from '../chat/ChatComposerModelPicker';
+import { useCompanion } from './CompanionContext';
 import {
   changeCompanionProvider,
   isCompanionModelSelectionValid,
@@ -14,6 +15,8 @@ const PROVIDER_LABELS = { openai: 'OpenAI', codex: 'Codex', gemini: 'Gemini', op
 export function CompanionSettingsTab({ settings }: {
   settings: ReturnType<typeof useCompanionSettings>;
 }) {
+  const companion = useCompanion();
+  const live = companion?.live;
   const { data, draft, setDraft, loading, saving, error, saved, dirty, save } = settings;
   if (loading && !data) return <div className="py-8 text-sm text-[var(--muted)]">Loading Companion settings…</div>;
   if (!data || !draft) return <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] p-3 text-sm text-[var(--red)]">{error || 'Companion settings are unavailable.'}</div>;
@@ -50,6 +53,22 @@ export function CompanionSettingsTab({ settings }: {
 
   return (
     <div className="max-w-3xl space-y-5">
+      {live ? <section className="rounded border border-[var(--border)] bg-[var(--surface-inset-faint)] p-4">
+        <label className="flex items-center gap-2 text-sm font-semibold text-[var(--fg)]">
+          <input type="checkbox" checked={live.enabled}
+            disabled={live.loading || live.saving || (!live.enabled && ['starting', 'recording', 'transcribing'].includes(companion.status))}
+            onChange={() => void live.toggleEnabled()} />
+          Live voice
+        </label>
+        <p className="mt-1 text-xs text-[var(--muted)]">
+          {live.loading ? 'Loading voice preference…' : live.saving ? 'Saving voice preference…'
+            : 'Saved immediately for this Hub. Uses GPT-Live 1 for conversation and the Companion backend selected below for tasks. Start the microphone to begin.'}
+          {' '}Requires an OpenAI API key; voice usage is billed separately. Finish or discard a recording before changing modes.
+        </p>
+        {live.settingsError ? <p role="alert" className="mt-2 text-xs text-[var(--red)]">
+          {live.settingsError} <button type="button" className="underline" onClick={() => void live.load()}>Retry</button>
+        </p> : null}
+      </section> : null}
       <section className="rounded border border-[var(--border)] bg-[var(--surface-inset-faint)] p-4">
         <h3 className="text-sm font-semibold text-[var(--fg)]">Provider and model</h3>
         <p className="mt-1 text-xs text-[var(--muted)]">
@@ -101,6 +120,23 @@ export function CompanionSettingsTab({ settings }: {
           </div>
         ) : null}
         {!providerHasCredentials ? <div className="mt-2 text-xs text-[var(--red)]">{PROVIDER_LABELS[draft.provider]} credentials are not configured. Runs will fail until they are added in General settings.</div> : null}
+      </section>
+
+      <section className="rounded border border-[var(--border)] bg-[var(--surface-inset-faint)] p-4">
+        <h3 className="text-sm font-semibold text-[var(--fg)]">Follow-up delivery</h3>
+        <div className="mt-3">
+          <UiSegmentedControl
+            label="Companion follow-up delivery"
+            value={draft.promptDeliveryMode}
+            options={[{ value: 'asap', label: 'ASAP (default)' }, { value: 'queue', label: 'Queue' }]}
+            onValueChange={(promptDeliveryMode) => setDraft({ ...draft, promptDeliveryMode })}
+            disabled={saving}
+          />
+        </div>
+        <p className="mt-2 text-xs text-[var(--muted)]">
+          ASAP steers the running backend at its next processing point. Queue waits for the current request to finish.
+          {' '}Applies to both Live and record-and-transcribe mode, including the mobile backend. Save to apply to new backend runs; the current run keeps its setting.
+        </p>
       </section>
 
       <section>

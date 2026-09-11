@@ -318,7 +318,7 @@ describe('Companion contracts', () => {
     expect(connection.closes).toBe(0);
   });
 
-  test.each([false, true])('keeps footer metrics per request when a follow-up is queued: %s', async (queued) => {
+  test.each([false, true])('preserves active work when a follow-up steers it: %s', async (queued) => {
     const connection = clientTransport();
     let now = 0;
     const controller = new CompanionClientController({ createId: () => 'run', now: () => now });
@@ -345,9 +345,11 @@ describe('Companion contracts', () => {
     const second = controller.getSnapshot();
     expect(second).toMatchObject({
       status: 'working', transcript: 'second', reply: '',
-      startedAt: now, endedAt: null, activity: [],
+      startedAt: queued ? 0 : now, endedAt: null,
     });
-    // Old completion/activity must not stop the new timer or inflate its count.
+    expect(second.activity.map((item) => item.callId)).toEqual(queued ? ['first-tool'] : []);
+    // Old completion/activity cannot finish the updated request. The server routes
+    // continuing activity under the latest message ID after steering.
     connection.message({
       type: 'activity', messageId: 'first',
       event: { type: 'tool_call_completed', callId: 'first-tool', result: {} },
@@ -372,8 +374,8 @@ describe('Companion contracts', () => {
     connection.message({ type: 'reply', messageId: 'second', reply: 'Second reply' });
     connection.message({ type: 'status', messageId: 'second', status: 'completed' });
     const finished = controller.getSnapshot();
-    expect(finished.endedAt! - finished.startedAt!).toBe(3_000);
-    expect(finished.activity.map((item) => item.callId)).toEqual(['second-tool']);
+    expect(finished.endedAt! - finished.startedAt!).toBe(queued ? 10_003_000 : 3_000);
+    expect(finished.activity.map((item) => item.callId)).toEqual(queued ? ['first-tool', 'second-tool'] : ['second-tool']);
     expect(finished.reply).toBe('Second reply');
     expect(connection.opens).toBe(1);
     now += 60_000;
@@ -484,9 +486,9 @@ test('Companion compaction follows the latest request and does not inflate tool 
   activity('compaction_skipped');
   expect(controller.getSnapshot().compaction).toEqual({ status: 'skipped' });
   await submit('second');
-  expect(controller.getSnapshot().compaction).toBeNull();
+  expect(controller.getSnapshot().compaction).toEqual({ status: 'skipped' });
   activity('compaction_started');
-  expect(controller.getSnapshot().compaction).toBeNull();
+  expect(controller.getSnapshot().compaction).toEqual({ status: 'skipped' });
   activity('compaction_started', 'second');
   activity('compaction_failed', 'second', { reason: 'cancelled' });
   expect(controller.getSnapshot().compaction?.status).toBe('cancelled');
@@ -512,3 +514,57 @@ test.each(['completed', 'cancelled', 'error', 'disconnect', 'local-cancel'])(
     expect(controller.getSnapshot().compaction).toBeNull();
   },
 );
+
+
+test('a queued follow-up starts fresh activity and timing when the server starts its run', async () => {
+  const connection = clientTransport();
+  let now = 1;
+  const controller = new CompanionClientController({ createId: () => 'session', now: () => now });
+  const submit = (messageId: string) => controller.submitPrompt({
+    prompt: messageId, messageId, createTransport: () => connection.transport, executeTool: () => ({}),
+  });
+  await submit('first');
+  connection.message({ type: 'status', status: 'working', messageId: 'first' });
+  connection.message({ type: 'activity', messageId: 'first',
+    event: { type: 'tool_call_started', callId: 'old-tool', tool: 'list_drones', args: {} } });
+  await submit('second');
+  expect(controller.getSnapshot().activity).toHaveLength(1);
+  connection.message({ type: 'status', status: 'completed', messageId: 'first' });
+  now = 100;
+  connection.message({ type: 'status', status: 'working', messageId: 'second' });
+  expect(controller.getSnapshot()).toMatchObject({ status: 'working', startedAt: 100, activity: [] });
+  await controller.close();
+});
+
+test('Queue keeps showing the active task while multiple follow-ups wait', async () => {
+  const connection = clientTransport();
+  let now = 1;
+  const controller = new CompanionClientController({ createId: () => 'session', now: () => now });
+  const submit = (messageId: string) => controller.submitPrompt({ prompt: messageId, messageId,
+    createTransport: () => connection.transport, executeTool: () => ({}) });
+  await submit('first');
+  connection.message({ type: 'status', status: 'working', messageId: 'first' });
+  connection.message({ type: 'activity', messageId: 'first',
+    event: { type: 'tool_call_started', callId: 'first-tool', tool: 'list_drones', args: {} } });
+  await submit('second'); await submit('third');
+  connection.message({ type: 'activity', messageId: 'first',
+    event: { type: 'tool_call_completed', callId: 'first-tool', result: {} } });
+  expect(controller.getSnapshot().activity[0].status).toBe('completed');
+  connection.message({ type: 'status', status: 'completed', messageId: 'first' });
+  now = 100;
+  connection.message({ type: 'status', status: 'working', messageId: 'second' });
+  expect(controller.getSnapshot()).toMatchObject({ status: 'working', startedAt: 100, activity: [] });
+  connection.message({ type: 'activity', messageId: 'second',
+    event: { type: 'tool_call_started', callId: 'second-tool', tool: 'list_drones', args: {} } });
+  expect(controller.getSnapshot().activity[0].callId).toBe('second-tool');
+  connection.message({ type: 'activity', messageId: 'first',
+    event: { type: 'tool_call_started', callId: 'stale', tool: 'list_drones', args: {} } });
+  expect(controller.getSnapshot().activity).toHaveLength(1);
+  connection.message({ type: 'reply', messageId: 'second', reply: 'Intermediate reply' });
+  connection.message({ type: 'status', status: 'completed', messageId: 'second' });
+  expect(controller.getSnapshot().reply).toBe('');
+  now = 200;
+  connection.message({ type: 'status', status: 'working', messageId: 'third' });
+  expect(controller.getSnapshot()).toMatchObject({ startedAt: 200, activity: [] });
+  await controller.close();
+});

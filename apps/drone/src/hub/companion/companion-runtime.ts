@@ -44,6 +44,7 @@ export type CompanionBrowserCall = (
 ) => Promise<any>;
 
 type RunContext = {
+  acceptsSteering: boolean;
   windowLayoutTools: boolean;
   runId: string;
   settings: CompanionSettings;
@@ -134,6 +135,17 @@ export class CompanionRuntime {
     );
   }
 
+  /** Deliver through ASAP when enabled; false leaves the request buffered by the transport. */
+  steer(runId: string, prompt: string): boolean {
+    if (this.closing || this.cancelledRunIds.has(runId)) throw new Error('Companion run cancelled');
+    const threadId = `companion:${runId}`;
+    const context = this.contexts.get(threadId);
+    if (!context?.acceptsSteering || context.settings.promptDeliveryMode === 'queue') return false;
+    if (!this.activeRunIds.has(runId) || !this.host.canSteerThread(threadId)) return false;
+    this.host.steerThread(threadId, prompt);
+    return true;
+  }
+
   async run(input: {
     runId: string;
     messageId: string;
@@ -199,6 +211,7 @@ export class CompanionRuntime {
         existingContext.snapshots.clear();
       } else {
         this.contexts.set(threadId, {
+          acceptsSteering: false,
           windowLayoutTools: input.transport === 'websocket',
           runId,
           settings,
@@ -240,6 +253,8 @@ export class CompanionRuntime {
         : 'error';
       throw error;
     } finally {
+      const context = this.contexts.get(threadId);
+      if (context) context.acceptsSteering = false;
       this.activeRunIds.delete(runId);
       this.activeRunCompletions.delete(runId);
       this.cancelledRunIds.delete(runId);
@@ -371,6 +386,10 @@ export class CompanionRuntime {
         ...workspaceTools,
       ],
       toolProviders: [filteredMcpProvider, context.skills],
+      beforePrompt: () => { context.acceptsSteering = true; },
+      // The handle stays "running" while saving its final state. Steering then
+      // would never reach the finished agent loop, so let the transport start a new run.
+      afterPrompt: () => { context.acceptsSteering = false; },
       promptContext: (lifecycle: Parameters<CompanionSkills['promptContext']>[0]) => context.skills.promptContext(lifecycle),
       transformContext: (messages: Parameters<CompanionSkills['transformContext']>[0]) => context.skills.transformContext(messages),
       getApiKey: resolveBlipProviderApiKey,

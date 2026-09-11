@@ -16,6 +16,7 @@ import { CompanionPromptEditor } from './CompanionPromptEditor';
 import { CompanionInstructionsEditor } from './CompanionInstructionsEditor';
 import { CompanionProposalCard } from './CompanionProposalCard';
 import { CompanionProposalHistory } from './CompanionProposalHistory';
+import { CompanionLivePanel } from './CompanionLivePanel';
 import { useCompanionWorkspace } from './CompanionWorkspaceContext';
 
 function Chevron({ open }: { open: boolean }) {
@@ -215,7 +216,7 @@ export function CompanionOverlay() {
               <span className="truncate">
                 {companionStatusLabel(companion.status, companion.recordingPaused)}
               </span>
-              {companion.status === 'recording' ? (
+              {companion.status === 'recording' && companion.live?.status !== 'listening' ? (
                 <span
                   className="shrink-0 font-mono text-[10px] font-[var(--weight-regular)] tabular-nums text-[var(--muted)]"
                   aria-label={`${formatChatVoiceDuration(companion.durationMillis)} elapsed`}
@@ -228,7 +229,7 @@ export function CompanionOverlay() {
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
         <div className="flex items-center gap-1.5">
-          {companion.status === 'recording' ? (
+          {companion.status === 'recording' && companion.live?.status !== 'listening' && companion.live?.status !== 'connecting' ? (
             <>
               <CompanionHeaderButton
                 label="Discard recording"
@@ -267,7 +268,7 @@ export function CompanionOverlay() {
               </CompanionHeaderButton>
             </>
           ) : null}
-          {companion.status === 'starting' || companion.status === 'transcribing' ? (
+          {(companion.status === 'starting' || companion.status === 'transcribing') && companion.live?.status !== 'listening' && companion.live?.status !== 'connecting' ? (
             <CompanionHeaderButton
               label="Discard recording"
               tone="danger"
@@ -280,7 +281,7 @@ export function CompanionOverlay() {
             </CompanionHeaderButton>
           ) : null}
           {companion.status === 'working' ? (
-            <CompanionHeaderButton label="Stop Companion turn" tone="danger" onClick={companion.stop}>
+            <CompanionHeaderButton label={companion.live?.status === 'listening' ? 'Stop Companion turn and end voice' : 'Stop Companion turn'} tone="danger" onClick={companion.stop}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                 <rect x="7" y="7" width="10" height="10" rx="1" />
               </svg>
@@ -296,6 +297,18 @@ export function CompanionOverlay() {
               <path d="m13 2-9 12h7l-1 8 9-12h-7z" />
             </svg>
           </CompanionHeaderButton>
+          {companion.live ? <CompanionHeaderButton
+            label={companion.live.loading ? 'Loading Live voice setting' : companion.live.saving ? 'Saving Live voice setting'
+              : `Live voice ${companion.live.enabled ? 'on' : 'off'}; remembered across Companion sessions`}
+            tone={companion.live.enabled ? 'accent' : 'neutral'}
+            pressed={companion.live.enabled}
+            disabled={companion.live.loading || companion.live.saving || (!companion.live.enabled && ['starting', 'recording', 'transcribing'].includes(companion.status))}
+            onClick={() => void companion.live.toggleEnabled()}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+              <path d="M3 10v4M7 6v12M12 3v18M17 6v12M21 10v4" />
+            </svg>
+          </CompanionHeaderButton> : null}
           <CompanionHeaderButton
             label={companion.proposalHistory.length > 0
               ? `Show execution history${latestProposalExecutionFailed ? '; latest execution failed' : ''}`
@@ -386,6 +399,7 @@ export function CompanionOverlay() {
         </div>
       </div>
 
+      <CompanionLivePanel />
       {/* Tool calls, expanded on demand right under their toggle. */}
       {expanded && companion.activity.length ? (
         <div

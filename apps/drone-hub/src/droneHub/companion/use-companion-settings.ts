@@ -3,7 +3,8 @@ import React from 'react';
 export type CompanionProvider = 'openai' | 'codex' | 'gemini' | 'openrouter';
 
 export type CompanionSettingsDraft = {
-  schemaVersion: 3;
+  schemaVersion: number;
+  promptDeliveryMode: 'asap' | 'queue';
   provider: CompanionProvider;
   model: string;
   thinkingLevel: string;

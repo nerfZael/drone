@@ -30,3 +30,6 @@ export * from './run-stop.js';
 
 export * from './workspace-access.js';
 export * from './token-usage.js';
+
+export { CompanionLiveConversation, LIVE_COMPANION_PROMPT_PREFIX, splitLiveCommentary } from './CompanionLiveConversation';
+export { waitForCompanionReply } from './waitForCompanionReply';

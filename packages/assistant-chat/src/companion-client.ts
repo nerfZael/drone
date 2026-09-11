@@ -82,6 +82,7 @@ type ActiveSession = {
   ready: Promise<CompanionClientConnectionTelemetry | undefined>;
   sentMessages: number;
   latestMessageId: string | null;
+  activityMessageId: string | null;
 };
 
 const INITIAL_STATE: CompanionClientState = {
@@ -153,19 +154,21 @@ export class CompanionClientController {
     const prompt = input.prompt.trim();
     if (!prompt) return;
 
+    const steering = this.state.status === 'working' && this.activeSession !== null;
     const session = this.activeSession ?? this.createSession(input);
     const messageId = input.messageId || this.options.createId();
     session.messageExecutors.set(messageId, input.executeTool);
     session.latestMessageId = messageId;
+    if (!steering) session.activityMessageId = null;
     this.update({
       status: 'working',
       error: '',
       reply: '',
       transcript: prompt,
-      startedAt: this.now(),
+      startedAt: steering ? this.state.startedAt : this.now(),
       endedAt: null,
-      activity: [],
-      compaction: null,
+      activity: steering ? this.state.activity : [],
+      compaction: steering ? this.state.compaction : null,
     });
 
     try {
@@ -239,6 +242,7 @@ export class CompanionClientController {
       ready: Promise.resolve(undefined),
       sentMessages: 0,
       latestMessageId: null,
+      activityMessageId: null,
     };
     this.activeSession = session;
     session.ready = Promise.resolve().then(() =>
@@ -255,18 +259,29 @@ export class CompanionClientController {
     if (!this.isActive(session) || (message.runId && message.runId !== session.runId)) return;
     if (message.type === 'status' && message.status === 'completed') {
       const messageId = message.messageId ?? session.latestMessageId;
-      if (messageId) session.messageExecutors.delete(messageId);
+      if (messageId === session.latestMessageId) session.messageExecutors.clear();
+      else if (messageId) session.messageExecutors.delete(messageId);
     }
-    // A queued follow-up owns the visible footer. Earlier requests must still finish their
+    // The latest follow-up owns the visible reply. Earlier requests must still finish their
     // browser tool calls, and session-wide failures must still terminate the session.
     if (
       message.messageId && message.messageId !== session.latestMessageId &&
-      (message.type === 'activity' || message.type === 'reply' ||
+      (message.type === 'reply' ||
         (message.type === 'status' && message.status === 'completed'))
     ) return;
-    if (message.type === 'tool_call') {
+    if (message.type === 'status' && message.status === 'working') {
+      if (message.messageId && !session.messageExecutors.has(message.messageId)) return;
+      // Queue can start an intermediate request while later requests still wait.
+      // Track the server's active run independently from the latest requested reply.
+      if (session.activityMessageId && session.activityMessageId !== message.messageId) {
+        this.update({ activity: [], compaction: null, startedAt: this.now() });
+      }
+      session.activityMessageId = message.messageId ?? session.latestMessageId;
+    } else if (message.type === 'tool_call') {
       void this.executeTool(session, message);
     } else if (message.type === 'activity') {
+      if (message.messageId && message.messageId !== session.latestMessageId &&
+        (message.messageId !== session.activityMessageId || !session.messageExecutors.has(message.messageId))) return;
       this.update({
         activity: reduceCompanionToolActivity(this.state.activity, message.event),
         compaction: this.state.status === 'working'
