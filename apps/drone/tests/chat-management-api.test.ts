@@ -13,6 +13,7 @@ import {
 } from '../src/hub/transcript-store';
 import { upsertCanonicalDroneLifecycle } from '../src/hub/drone-lifecycle-service';
 import { getSocketListenSupport } from './socket-listen-support';
+import { createInProcessDroneHubMcpClient } from '../src/hub/assistant/in-process-drone-hub-mcp';
 
 const listenSupport = getSocketListenSupport();
 if (!listenSupport.ok && process.env.CI) {
@@ -125,6 +126,81 @@ describeSocketSuite('chat management api', () => {
     expect(Array.isArray(listed.data?.chats)).toBe(true);
     expect((listed.data?.chats ?? []).includes('default')).toBe(true);
     expect((listed.data?.chats ?? []).includes('review')).toBe(true);
+  });
+
+  test('MCP discovers and messages side chats while draft reads expose held messages', async () => {
+    const droneId = 'drone-side-chat-catalog';
+    await seedDrone(droneId);
+    const chats: Record<string, any> = {
+      'Untitled 1': {},
+      'Untitled 2': { draft: true },
+      'side-a': { visibility: 'side-chat', sideChatOrigin: { sourceChatName: 'default', checkpointId: 'checkpoint' } },
+      'side-b': { visibility: 'side-chat', sideChatOrigin: { sourceChatName: 'side-a', checkpointId: 'checkpoint' } },
+      'side-c': { visibility: 'side-chat', sideChatOrigin: { sourceChatName: 'side-b', checkpointId: 'checkpoint' } },
+      'side-d': { visibility: 'side-chat', sideChatOrigin: { sourceChatName: 'side-c', checkpointId: 'checkpoint' } },
+      'workflow-chat': { visibility: 'workflow' },
+    };
+    for (const [chatName, metadata] of Object.entries(chats)) {
+      const chatEntry = {
+        id: `id-${chatName}`, createdAt: new Date().toISOString(),
+        agent: { kind: 'builtin', id: 'cursor' },
+        firstMessageNameSuggestionAttemptedAt: new Date().toISOString(),
+        ...metadata,
+      };
+      await updateRegistry((reg: any) => { reg.drones[droneId].chats[chatName] = chatEntry; });
+      await upsertChatInStore({ droneId, chatName, chatEntry });
+    }
+    const sidebar = await apiFetch(`/api/drones/${droneId}/chats`);
+    expect(sidebar.data.chats.slice().sort()).toEqual(['Untitled 1', 'Untitled 2', 'default']);
+
+    const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
+    const previousToken = process.env.DRONE_TOKEN;
+    process.env.DRONE_HUB_BASE_URL = baseUrl;
+    process.env.DRONE_TOKEN = token;
+    let client: Awaited<ReturnType<typeof createInProcessDroneHubMcpClient>> | null = null;
+    try {
+      client = await createInProcessDroneHubMcpClient({ correlationId: 'side-chat-catalog' });
+      const listed = await client.callTool({ name: 'list_chats', arguments: { drone: droneId } });
+      expect(listed.isError).not.toBe(true);
+      const catalog = (listed.structuredContent as any).chats;
+      expect(catalog).toHaveLength(8);
+      expect(catalog.find((chat: any) => chat.name === 'side-b')).toMatchObject({
+        resourceId: 'id-side-b', type: 'side', draft: false,
+        sourceChatName: 'side-a', checkpointId: 'checkpoint',
+      });
+      expect(catalog.find((chat: any) => chat.name === 'Untitled 2')).toMatchObject({ type: 'ordinary', draft: true });
+      expect(catalog.find((chat: any) => chat.name === 'workflow-chat')).toMatchObject({ type: 'workflow', draft: false });
+      const drones = await client.callTool({ name: 'list_drones', arguments: { names: [droneId] } });
+      expect(drones.isError).not.toBe(true);
+      const summary = (drones.structuredContent as any).drones[0];
+      expect(summary.chats.slice().sort()).toEqual(catalog.map((chat: any) => chat.name).sort());
+      for (const detail of summary.chatDetails) {
+        expect(catalog.find((chat: any) => chat.name === detail.name)).toMatchObject(detail);
+      }
+      const side = await client.callTool({ name: 'send_message', arguments: {
+        drone: droneId, chat: 'side-a', message: 'Message the side chat',
+      } });
+      expect(side.isError).not.toBe(true);
+      expect(side.structuredContent).toMatchObject({ ok: true, chat: 'side-a', draft: false });
+
+      const sent = await client.callTool({ name: 'send_message', arguments: {
+        drone: droneId, chat: 'Untitled 2', message: 'Held question',
+      } });
+      expect(sent.isError).not.toBe(true);
+      expect(sent.structuredContent).toMatchObject({ ok: true, draft: true, status: 'held_in_draft' });
+      const read = await client.callTool({ name: 'read_chat', arguments: { drone: droneId, chat: 'Untitled 2' } });
+      expect(read.isError).not.toBe(true);
+      expect(read.structuredContent).toMatchObject({
+        draft: true, turns: [], pendingCount: 1, pendingTruncated: false,
+        pending: [{ id: (sent.structuredContent as any).runId, prompt: 'Held question', status: 'held_in_draft', state: 'queued' }],
+      });
+    } finally {
+      await client?.close();
+      if (previousBaseUrl == null) delete process.env.DRONE_HUB_BASE_URL;
+      else process.env.DRONE_HUB_BASE_URL = previousBaseUrl;
+      if (previousToken == null) delete process.env.DRONE_TOKEN;
+      else process.env.DRONE_TOKEN = previousToken;
+    }
   });
 
   test('does not materialize an unknown chat when a prompt requires an existing chat', async () => {

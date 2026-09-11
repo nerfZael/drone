@@ -1,3 +1,4 @@
+import { chatCatalogMetadata } from './chat-catalog';
 import { listHostWorkspaces, hostWorkspaceFilesystemEntry } from './assistant/host-workspaces';
 import { drainNativePrompts } from './native-prompt-drain';
 import { createNativePromptSubmitter } from './native-prompt-submission';
@@ -45,6 +46,7 @@ export interface AssistantRuntimeDependencies {
   busyChatNamesForDrone: (drone: any, droneId: string) => string[];
   deviceMesh: any;
   normalizeDroneIdentity: (value: unknown) => string;
+  normalizePendingStartupPrompts: (value: unknown) => Array<{ chatName: string }>;
   nowIso: () => string;
   onNativePromptQueueChanged?: (owner: { droneId: string; chatName: string }) => void;
   onNativeThreadStateChanged?: (owner: { droneId: string; chatName: string }) => void;
@@ -115,6 +117,11 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
         cwd: String((d as any)?.cwd ?? '').trim(),
         status: hubPhase || (busyChats.length > 0 ? 'busy' : 'ready'),
         chats,
+        chatDetails: chats.map((chat) => ({
+          chat,
+          chatId: chatObj[chat]?.id ?? null,
+          ...chatCatalogMetadata(chatObj[chat]),
+        })),
         ...(busyChats.length > 0 ? { busyChats, busy: true } : {}),
         ...(activity.lastActivityAt ? { lastActivityAt: activity.lastActivityAt } : {}),
         ...(activity.lastMessageAt ? { lastMessageAt: activity.lastMessageAt } : {}),
@@ -126,6 +133,12 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
       const id = normalizeDroneIdentity((d as any)?.id) || normalizeDroneIdentity(idRaw);
       if (!id || out.some((item) => item.id === id)) continue;
       const activity = summarizeDroneActivity(d);
+      const startupChats = [
+        ...new Set(
+          deps.normalizePendingStartupPrompts(d.startupQueuedPrompts).map((item) => item.chatName),
+        ),
+      ];
+      const chats = startupChats.length > 0 ? startupChats : ['default'];
       out.push({
         id,
         name: String((d as any)?.name ?? id).trim() || id,
@@ -137,7 +150,8 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
         repoPath: String((d as any)?.repoPath ?? '').trim(),
         cwd: String((d as any)?.cwd ?? '').trim(),
         status: String((d as any)?.phase ?? 'starting').trim() || 'starting',
-        chats: ['default'],
+        chats,
+        chatDetails: chats.map((chat) => ({ chat, ...chatCatalogMetadata(null) })),
         ...(activity.lastActivityAt ? { lastActivityAt: activity.lastActivityAt } : {}),
         ...(activity.lastMessageAt ? { lastMessageAt: activity.lastMessageAt } : {}),
         ...(activity.lastActivityChat ? { lastActivityChat: activity.lastActivityChat } : {}),

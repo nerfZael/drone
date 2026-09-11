@@ -1666,12 +1666,68 @@ describe('Drone Hub assistant MCP transport', () => {
     });
   });
 
+  test.each([false, true])('reads bounded draft queues, including custom agents (%s)', async (custom) => {
+    await withTempDroneDataDir('drone-mcp-draft-read-', async () => {
+      const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
+      const previousToken = process.env.DRONE_TOKEN;
+      const previousFetch = globalThis.fetch;
+      const requests: string[] = [];
+      globalThis.fetch = (async (input) => {
+        const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url);
+        requests.push(url.pathname + url.search);
+        if (url.pathname !== '/api/drones/draft-drone/chats/draft/state') {
+          return Response.json({ error: 'unexpected request' }, { status: 500 });
+        }
+        expect(url.searchParams.get('pending')).toBe('all');
+        if (custom && url.searchParams.get('transcript') !== 'none') {
+          return Response.json({ error: 'custom agent has no transcript' }, { status: 410 });
+        }
+        return Response.json({
+          draft: true, transcripts: [],
+          pending: Array.from({ length: 3 }, (_, i) => ({
+            id: `prompt-${i}`, at: '2026-09-11T16:17:36.000Z', state: 'queued', prompt: '  Question with whitespace  ',
+            attachments: [{ dataBase64: 'do-not-expose-attachments' }],
+          })),
+        });
+      }) as typeof fetch;
+      process.env.DRONE_HUB_BASE_URL = 'http://drone-hub.test';
+      process.env.DRONE_TOKEN = 'draft-read-token';
+      let client: Awaited<ReturnType<typeof createInProcessDroneHubMcpClient>> | null = null;
+      try {
+        client = await createInProcessDroneHubMcpClient({ correlationId: 'draft-read' });
+        const read = await client.callTool({ name: 'read_chat', arguments: {
+          drone: 'draft-drone', chat: 'draft', limit: 2, maxCharsPerField: 10,
+        } });
+        expect(read.isError).not.toBe(true);
+        expect(read.structuredContent).toMatchObject({
+          draft: true, turns: [], pendingCount: 3, pendingTruncated: true,
+        });
+        const pending = (read.structuredContent as any).pending;
+        expect(pending).toHaveLength(2);
+        expect(pending[0]).toMatchObject({
+          id: 'prompt-0', state: 'queued', status: 'held_in_draft',
+          promptOriginalLength: 28, promptTruncated: true,
+        });
+        expect(pending[0].prompt.startsWith('  Question')).toBe(true);
+        expect(JSON.stringify(read.structuredContent)).not.toContain('do-not-expose-attachments');
+        expect(requests).toHaveLength(custom ? 2 : 1);
+      } finally {
+        await client?.close();
+        globalThis.fetch = previousFetch;
+        if (previousBaseUrl == null) delete process.env.DRONE_HUB_BASE_URL;
+        else process.env.DRONE_HUB_BASE_URL = previousBaseUrl;
+        if (previousToken == null) delete process.env.DRONE_TOKEN;
+        else process.env.DRONE_TOKEN = previousToken;
+      }
+    });
+  });
+
   test('sends only to existing chat names unless creation is explicit', async () => {
     await withTempDroneDataDir('drone-assistant-mcp-send-message-chat-', async () => {
       const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
       const previousToken = process.env.DRONE_TOKEN;
       const previousFetch = globalThis.fetch;
-      const chatNames = ['default'];
+      const chatNames = ['default', 'side-test'];
       const chatIds = new Map([['default', 'chat-default-resource-id']]);
       const createdChats: string[] = [];
       const promptedChats: string[] = [];
@@ -1697,7 +1753,7 @@ describe('Drone Hub assistant MCP transport', () => {
         if (url.pathname === '/api/drones/drone-1/chats' && method === 'GET') {
           return Response.json({
             ok: true,
-            chats: [...chatNames],
+            chats: chatNames.filter((chat) => chat !== 'side-test'),
             chatDetails: chatNames.map((chat) => ({
               chat,
               chatId: chatIds.get(chat),
@@ -1718,6 +1774,9 @@ describe('Drone Hub assistant MCP transport', () => {
         );
         if (promptMatch && method === 'POST') {
           const chat = decodeURIComponent(promptMatch[1]!);
+          if (body.requireExistingChat && !chatNames.includes(chat)) {
+            return Response.json({ ok: false, error: `unknown chat: ${chat}` }, { status: 404 });
+          }
           promptedChats.push(chat);
           promptBodies.push(body);
           return Response.json({
@@ -1761,6 +1820,12 @@ describe('Drone Hub assistant MCP transport', () => {
         });
         expect(existing.isError).not.toBe(true);
 
+        const side = await client.callTool({
+          name: 'send_message',
+          arguments: { drone: 'drone-1', chat: 'side-test', message: 'Ask the actual side chat' },
+        });
+        expect(side.isError).not.toBe(true);
+
         const implicitDefault = await client.callTool({
           name: 'send_message',
           arguments: { drone: 'legacy-drone', message: 'Use the logical default chat' },
@@ -1798,10 +1863,11 @@ describe('Drone Hub assistant MCP transport', () => {
         });
         expect(explicit.isError).not.toBe(true);
         expect(createdChats).toEqual(['review']);
-        expect(promptedChats).toEqual(['default', 'legacy-drone/default', 'review']);
+        expect(promptedChats).toEqual(['default', 'side-test', 'legacy-drone/default', 'review']);
         expect(promptBodies[0]).toMatchObject({ requireExistingChat: true });
         expect(promptBodies[1]).toMatchObject({ requireExistingChat: true });
-        expect(promptBodies[2]?.requireExistingChat).toBeUndefined();
+        expect(promptBodies[2]).toMatchObject({ requireExistingChat: true });
+        expect(promptBodies[3]?.requireExistingChat).toBeUndefined();
       } finally {
         await client?.close();
         globalThis.fetch = previousFetch;

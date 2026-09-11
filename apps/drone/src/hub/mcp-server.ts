@@ -46,6 +46,7 @@ import {
 } from '../host/profiles';
 import { GROQ_SPEECH_MAX_CHARS, GROQ_SPEECH_VOICES } from './groq-speech';
 import { droneSummary } from './mcp-summaries';
+import { normalizeMcpChatList, type McpChatListEntry } from './chat-catalog';
 import { placeMcpRepoScopedGroupNodeAtTop } from './mcp-sidebar-group-order';
 import { searchActiveChatMessages } from './transcript-store';
 import { registerWorkflowMcpTools } from './workflows/workflow-mcp-tools';
@@ -897,31 +898,31 @@ async function updateUiPreferences(
   throw new Error('Failed to update UI preferences');
 }
 
-type McpChatListEntry = {
-  name: string;
-  resourceId?: string;
-  draft?: true;
-  agent?:
-    | { kind: 'native' }
-    | { kind: 'builtin'; id: string }
-    | { kind: 'custom'; id: string; label: string };
-  provider?: string;
-  model?: string;
-  reasoning?: string;
-};
-
-function normalizeMcpChatAgent(value: any): McpChatListEntry['agent'] {
-  if (value?.kind === 'native') return { kind: 'native' };
-  if (value?.kind === 'builtin') {
-    const id = cleanString(value.id);
-    return id ? { kind: 'builtin', id } : undefined;
-  }
-  if (value?.kind === 'custom') {
-    const id = cleanString(value.id);
-    const label = cleanString(value.label, id || 'Custom');
-    return id ? { kind: 'custom', id, label } : undefined;
-  }
-  return undefined;
+function pendingChatSummary(response: any, limit: number, maxCharsPerField: number) {
+  const pendingMessages = Array.isArray(response?.pending) ? response.pending : [];
+  const pending = pendingMessages.slice(0, limit).map((item: any) => {
+    const prompt = truncateString(String(item?.prompt ?? ''), maxCharsPerField);
+    return {
+      id: cleanString(item?.id),
+      at: cleanString(item?.at),
+      state: cleanString(item?.state, 'queued'),
+      status: response?.draft === true ? 'held_in_draft' : cleanString(item?.state, 'queued'),
+      prompt: prompt.value,
+      promptOriginalLength: prompt.originalLength,
+      ...(prompt.truncated ? { promptTruncated: true } : {}),
+    };
+  });
+  return {
+    draft: response?.draft === true,
+    pending,
+    pendingCount: pendingMessages.length,
+    pendingTruncated: pendingMessages.length > pending.length,
+    ...(response?.draft === true && pendingMessages.length > 0
+      ? {
+          message: 'Pending messages are held until this draft chat is published. They have not started execution.',
+        }
+      : {}),
+  };
 }
 
 type McpChatTreeSnapshot = {
@@ -933,61 +934,6 @@ type McpChatTreeSnapshot = {
   chats: McpChatListEntry[];
   tree: SidebarChatTreeModel;
 };
-
-function normalizeMcpChatList(response: any): McpChatListEntry[] {
-  const draftByChat: Record<string, boolean> =
-    response?.draftChats &&
-    typeof response.draftChats === 'object' &&
-    !Array.isArray(response.draftChats)
-      ? Object.fromEntries(
-          Object.entries(response.draftChats)
-            .map(([name, draft]) => [cleanString(name), draft === true] as const)
-            .filter(([name, draft]) => Boolean(name) && draft),
-        )
-      : {};
-  const chatIdByName = Object.fromEntries(
-    (Array.isArray(response?.chatDetails) ? response.chatDetails : [])
-      .map(
-        (item: any) => [cleanString(item?.chat ?? item?.name), cleanString(item?.chatId)] as const,
-      )
-      .filter(([name, id]: readonly [string, string]) => Boolean(name && id)),
-  );
-  const chatDetailByName = new Map<string, any>(
-    (Array.isArray(response?.chatDetails) ? response.chatDetails : [])
-      .map((item: any) => [cleanString(item?.chat ?? item?.name), item] as const)
-      .filter(([name]: readonly [string, any]) => Boolean(name)),
-  );
-  for (const item of Array.isArray(response?.chatDetails) ? response.chatDetails : []) {
-    const name = cleanString(item?.chat ?? item?.name);
-    if (name && item?.draft === true) draftByChat[name] = true;
-  }
-  return (Array.isArray(response?.chats) ? response.chats : [])
-    .map((item: any) => {
-      const name =
-        typeof item === 'string' ? cleanString(item) : cleanString(item?.chat ?? item?.name);
-      if (!name) return null;
-      const resourceId =
-        (typeof item === 'object' ? cleanString(item?.chatId ?? item?.id) : '') ||
-        chatIdByName[name];
-      const detail = chatDetailByName.get(name);
-      const provider = cleanString(detail?.provider);
-      const model = cleanString(detail?.model);
-      const reasoning = cleanString(detail?.reasoning);
-      const agent = normalizeMcpChatAgent(detail?.agent);
-      return {
-        name,
-        ...(resourceId ? { resourceId } : {}),
-        ...(agent ? { agent } : {}),
-        ...(provider ? { provider } : {}),
-        ...(model ? { model } : {}),
-        ...(reasoning ? { reasoning } : {}),
-        ...((typeof item === 'object' && item?.draft === true) || draftByChat[name]
-          ? { draft: true as const }
-          : {}),
-      };
-    })
-    .filter((entry: McpChatListEntry | null): entry is McpChatListEntry => Boolean(entry));
-}
 
 async function readMcpChatTreeSnapshot(
   droneRef: string,
@@ -1735,7 +1681,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     {
       title: 'List drones',
       description:
-        'List local Drone Hub drones, optionally filtered by repository, canonical group id, group name, or drone names.',
+        'List local Drone Hub drones with all chat names and chatDetails describing ordinary, side, and workflow chats, draft status, and side-chat origins. Optionally filter by repository, canonical group id, group name, or drone names.',
       inputSchema: {
         repoPath: z.string().optional(),
         groupId: z.string().optional(),
@@ -2616,13 +2562,14 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     {
       title: 'List drone chats',
       description:
-        "List chats for a Drone Hub drone, including each chat's configured agent, provider, model, and reasoning when explicitly set. Omitted configuration fields use Drone Hub defaults.",
+        "List all ordinary, side, and workflow chats for a Drone Hub drone, including type, draft status, side-chat source and checkpoint, and configured agent, provider, model, and reasoning. Omitted configuration fields use Drone Hub defaults.",
       inputSchema: { drone: z.string() },
     },
     async (args) => {
-      const response = await requestJson(`/api/drones/${encodeURIComponent(args.drone)}/chats`, {
-        method: 'GET',
-      });
+      const response = await requestJson(
+        `/api/drones/${encodeURIComponent(args.drone)}/chats?includeHidden=1`,
+        { method: 'GET' },
+      );
       return toolResult({
         ok: true,
         drone: args.drone,
@@ -3288,7 +3235,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     {
       title: 'Send drone message',
       description:
-        'Send a message to a Drone Hub drone chat as a new execution and return the queued run. This tool never live-steers or interrupts an execution already in progress; when the chat is busy, the new execution starts after the current one finishes.',
+        'Send a message to a Drone Hub drone chat as a new execution and return the queued run. This tool never live-steers or interrupts an execution already in progress; when the chat is busy, the new execution starts after the current one finishes. Draft chats hold messages until published; status held_in_draft means accepted but not running.',
       inputSchema: {
         drone: z.string(),
         chat: z
@@ -3313,16 +3260,9 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
         }).catch((error: any) => {
           if (error?.status !== 409) throw error;
         });
-      } else {
-        const listed = await requestJson(`/api/drones/${encodeURIComponent(args.drone)}/chats`, {
-          method: 'GET',
-        });
-        const existingChats = normalizeMcpChatList(listed);
-        const existing =
-          existingChats.some((entry) => entry.name === chat) ||
-          (chat === 'default' && existingChats.length === 0);
-        if (!existing) throw new Error(`unknown chat: ${chat}`);
       }
+      // The prompt endpoint validates canonical existence with requireExistingChat.
+      // Sidebar listings deliberately omit side/workflow chats and cannot validate recipients.
       const body = {
         prompt: args.message,
         submissionSource: 'assistant-tool',
@@ -3342,7 +3282,12 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
         drone: cleanString(response?.id, args.drone),
         chat,
         runId: cleanString(response?.promptId || body.promptId),
-        status: cleanString(response?.pendingState, 'queued'),
+        status:
+          response?.draft === true ? 'held_in_draft' : cleanString(response?.pendingState, 'queued'),
+        draft: response?.draft === true,
+        ...(response?.draft === true
+          ? { message: 'Message accepted and held until the draft chat is published. It has not started execution.' }
+          : {}),
         raw: response,
       });
     },
@@ -3626,7 +3571,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     'read_chat',
     {
       title: 'Read drone chat',
-      description: 'Read recent transcript turns for a Drone Hub drone chat.',
+      description: 'Read recent completed transcript turns and pending messages for a Drone Hub drone chat. Draft messages are held until publication; an empty transcript does not mean the pending queue is empty.',
       inputSchema: {
         drone: z.string(),
         chat: z.string().optional(),
@@ -3640,7 +3585,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
       const maxCharsPerField = cleanPositiveInt(args.maxCharsPerField, 4000, 8000);
       try {
         const response = await requestJson(
-          `/api/drones/${encodeURIComponent(args.drone)}/chats/${encodeURIComponent(chat)}/state?turn=all&transcript=selected&pending=none`,
+          `/api/drones/${encodeURIComponent(args.drone)}/chats/${encodeURIComponent(chat)}/state?turn=all&transcript=selected&pending=all`,
           { method: 'GET' },
         );
         const turns = Array.isArray(response?.transcripts)
@@ -3648,9 +3593,28 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
               .slice(-limit)
               .map((turn: any) => boundedTranscriptTurn(turn, maxCharsPerField))
           : [];
-        return toolResult({ ok: true, drone: args.drone, chat, turns, limit, maxCharsPerField });
+        return toolResult({
+          ok: true,
+          drone: args.drone,
+          chat,
+          turns,
+          ...pendingChatSummary(response, limit, maxCharsPerField),
+          limit,
+          maxCharsPerField,
+        });
       } catch (error: any) {
         if (error?.status !== 410) throw error;
+        const state = await requestJson(
+          `/api/drones/${encodeURIComponent(args.drone)}/chats/${encodeURIComponent(chat)}/state?transcript=none&pending=all`,
+          { method: 'GET' },
+        );
+        const pendingSummary = pendingChatSummary(state, limit, maxCharsPerField);
+        if (state?.draft === true) {
+          return toolResult({
+            ok: true, drone: args.drone, chat, turns: [],
+            ...pendingSummary, limit, maxCharsPerField,
+          });
+        }
         const response = await requestJson(
           `/api/drones/${encodeURIComponent(args.drone)}/chats/${encodeURIComponent(chat)}/output`,
           { method: 'GET' },
@@ -3660,6 +3624,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
           ok: true,
           drone: args.drone,
           chat,
+          ...pendingSummary,
           output: output.value,
           outputOriginalLength: output.originalLength,
           outputTruncated: output.truncated,

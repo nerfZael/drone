@@ -913,6 +913,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
         selection: string;
         transcripts: any[];
         pending: PendingPrompt[];
+        draft: boolean;
         agent?: ChatAgentConfig;
         model: string | null;
         reasoning: string | null;
@@ -942,6 +943,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
         ? chat.approvalPolicy
         : 'ask';
     return {
+      draft: chat?.draft === true,
       reasoning: normalizeChatReasoning(chat?.reasoning),
       agentPermissionMode: normalizeAgentPermissionMode(chat?.agentPermissionMode),
       approvalPolicy: approvalPolicy as AgentApprovalPolicy,
@@ -1519,6 +1521,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       selection: snapshot.selection,
       transcripts: snapshot.transcripts,
       pending: snapshot.pending,
+      draft: snapshot.draft,
       ...(snapshot.agent ? { agent: snapshot.agent } : {}),
       model: snapshot.model,
       reasoning: snapshot.reasoning,

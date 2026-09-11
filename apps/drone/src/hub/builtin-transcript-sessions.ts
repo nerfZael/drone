@@ -34,6 +34,28 @@ function extractContentText(raw: any): string | null {
   return parts.join('\n');
 }
 
+function codexMcpToolError(item: any, status: string): unknown {
+  const failed = status === 'failed' || status === 'declined' || item.result?.isError === true;
+  if (!failed && item.error == null) return undefined;
+
+  // MCP application errors live in result.content/structuredContent, while
+  // transport errors live in item.error. Do not replace either with a status.
+  const hasDetail = (value: unknown, depth = 0): boolean => {
+    if (typeof value === 'string') {
+      return Boolean(value.trim()) && !/^(failed|declined|tool call failed\.?)$/i.test(value.trim());
+    }
+    if (!value || typeof value !== 'object' || depth >= 8) return false;
+    if (Array.isArray(value)) return value.slice(0, 100).some((child) => hasDetail(child, depth + 1));
+    return Object.entries(value).slice(0, 100).some(([key, child]) =>
+      !['isError', 'status', 'type'].includes(key) && hasDetail(child, depth + 1),
+    );
+  };
+  for (const candidate of [item.error, item.result, item.aggregated_output, item.output]) {
+    if (hasDetail(candidate)) return candidate;
+  }
+  return status === 'declined' ? 'declined' : 'Tool call failed.';
+}
+
 function contentHasOutputText(raw: any): boolean {
   if (!Array.isArray(raw)) return false;
   return raw.some((c) => {
@@ -388,10 +410,12 @@ function createCodexJsonlParser(): {
         status === 'declined';
       if (completed) {
         const error =
-          item.error ??
-          (status === 'failed' || status === 'declined'
-            ? (item.aggregated_output ?? item.output ?? status)
-            : undefined);
+          itemType === 'mcp_tool_call'
+            ? codexMcpToolError(item, status)
+            : item.error ??
+              (status === 'failed' || status === 'declined'
+                ? (item.aggregated_output ?? item.output ?? status)
+                : undefined);
         activity.upsertToolResult({
           id,
           name: toolName,

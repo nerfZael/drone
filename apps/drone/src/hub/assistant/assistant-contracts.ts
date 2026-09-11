@@ -1,3 +1,4 @@
+import type { ChatCatalogMetadata } from '../chat-catalog';
 import type {
   NativeAgentModelOption,
   NativeAgentThinkingLevel,
@@ -18,6 +19,7 @@ export type AssistantDroneSummary = {
   cwd?: string;
   status: string;
   chats: string[];
+  chatDetails?: Array<ChatCatalogMetadata & { chat: string; chatId?: string | null }>;
   busy?: boolean;
   busyChats?: string[];
 };

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { translateCodexAppServerNotification } from '../src/codex-app-server';
 import {
   createCodexPromptJobTranscriptAccumulator,
   formatTranscriptJobFailure,
@@ -20,6 +21,92 @@ import {
 } from '../src/hub/builtin-agent-activity';
 
 describe('parseCodexJsonl', () => {
+  test.each([
+    {
+      label: 'missing chat in a failed MCP result', status: 'failed',
+      result: { content: [{ type: 'text', text: 'unknown chat: side-0cd0d787' }] },
+      expected: 'unknown chat: side-0cd0d787',
+    },
+    {
+      label: 'permission error in a completed MCP invocation', status: 'completed',
+      result: { isError: true, content: [{ type: 'text', text: 'execute scope does not allow drone Hey' }] },
+      expected: 'execute scope does not allow drone Hey',
+    },
+    {
+      label: 'structured unsupported-operation error', status: 'failed',
+      result: { structuredContent: { error: { code: 'unsupported_operation', message: 'Operation is not supported for this chat' } } },
+      expected: 'Operation is not supported for this chat',
+    },
+    {
+      label: 'detailed result behind a generic error', status: 'failed', error: 'failed',
+      result: { content: [{ type: 'text', text: 'unknown chat: side-bb8f3123' }] },
+      expected: 'unknown chat: side-bb8f3123',
+    },
+    {
+      label: 'explicit transport error', status: 'failed',
+      error: { message: 'MCP server connection closed' }, result: null,
+      expected: 'MCP server connection closed',
+    },
+    {
+      label: 'explicit user rejection', status: 'declined',
+      error: 'user rejected MCP tool call', result: null,
+      expected: 'user rejected MCP tool call',
+    },
+    {
+      label: 'empty failure payload', status: 'failed', result: { content: [], isError: true },
+      expected: 'Tool call failed.',
+    },
+  ])('preserves $label in live and persisted activity', (scenario) => {
+    const events = translateCodexAppServerNotification({
+      method: 'item/completed',
+      params: { item: {
+        id: 'mcp-error', type: 'mcpToolCall', server: 'drone-hub', tool: 'send_message',
+        arguments: { drone: 'Hey', chat: 'side-0cd0d787' },
+        status: scenario.status, error: 'error' in scenario ? scenario.error : null,
+        result: scenario.result,
+      } },
+    });
+    const jsonl = events.map((event) => JSON.stringify(event)).join('\n');
+    const accumulator = createCodexPromptJobTranscriptAccumulator();
+    for (const line of jsonl.split('\n')) accumulator.pushLine(line);
+    const live = accumulator.transcript();
+    const reparsed = parseCodexJsonl(jsonl);
+    for (const activity of [live.activity, reparsed.activity, JSON.parse(JSON.stringify(live)).activity]) {
+      const result = activity?.messages.find((message: any) => message.role === 'toolResult');
+      expect(result).toMatchObject({ toolCallId: 'mcp-error', toolName: 'drone-hub.send_message', isError: true });
+      expect(result?.content).toContain(scenario.expected);
+      expect(result?.errorMessage).toContain(scenario.expected);
+    }
+  });
+
+  test('does not infer MCP failure from successful result text', () => {
+    const parsed = parseCodexJsonl(JSON.stringify({ type: 'item.completed', item: {
+      id: 'mcp-ok', type: 'mcp_tool_call', status: 'completed',
+      server: 'drone-hub', tool: 'read_chat',
+      result: { isError: false, content: [{ type: 'text', text: 'Previous attempt failed; retry succeeded.' }] },
+    } }));
+    const result = parsed.activity?.messages.find((message) => message.role === 'toolResult');
+    expect(result?.isError).not.toBe(true);
+    expect(result?.content).toContain('retry succeeded');
+  });
+
+  test('keeps preserved MCP error payloads bounded and redacted', () => {
+    const parsed = parseCodexJsonl(JSON.stringify({ type: 'item.completed', item: {
+      id: 'mcp-error', type: 'mcp_tool_call', status: 'failed',
+      server: 'drone-hub', tool: 'send_message',
+      result: {
+        isError: true,
+        content: [{ type: 'text', text: 'unknown chat: side-test' }],
+        structuredContent: { authorization: 'private-token', diagnostic: 'x'.repeat(100_000) },
+      },
+    } }));
+    const result = parsed.activity?.messages.find((message) => message.role === 'toolResult');
+    expect(result?.content).toContain('unknown chat: side-test');
+    expect(JSON.stringify(result)).not.toContain('private-token');
+    expect(result?.details).toMatchObject({ truncated: true });
+    expect(Buffer.byteLength(String(result?.content))).toBeLessThanOrEqual(64 * 1024);
+  });
+
   test('records explicitly invoked and successfully loaded Codex skills', () => {
     const parsed = parseCodexJsonl([
       JSON.stringify({

@@ -1019,6 +1019,30 @@ describe('agent chat surface adapters', () => {
     expect(rawHtml).not.toContain('data-tool-structured-value="result"');
   });
 
+  test('tool details display preserved MCP failure reasons', () => {
+    for (const reason of [
+      'unknown chat: side-0cd0d787',
+      'execute scope does not allow drone Hey',
+      'Operation is not supported for this chat',
+    ]) {
+      const content = JSON.stringify({
+        isError: true,
+        content: [{ type: 'text', text: reason }],
+      });
+      const html = renderToStaticMarkup(
+        <ToolPayloadDetails
+          call={{ id: 'mcp-error', name: 'drone-hub.send_message', args: {} }}
+          result={{
+            role: 'toolResult', toolCallId: 'mcp-error',
+            isError: true, content, errorMessage: content,
+          }}
+        />,
+      );
+      expect(html).toContain(reason);
+      expect(html).not.toContain('No result payload.');
+    }
+  });
+
   test('tool payload formatting handles encoded, circular, and oversized values safely', () => {
     const circularArguments: Record<string, unknown> = { command: 'inspect' };
     circularArguments.self = circularArguments;

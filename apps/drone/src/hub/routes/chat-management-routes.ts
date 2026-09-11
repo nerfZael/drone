@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { chatCatalogMetadata } from '../chat-catalog';
 
 import {
   chatConfigBodySchema,
@@ -701,6 +702,10 @@ export function createChatManagementRouteHandler(
               id: droneId,
               name: droneName,
               chats: startupChats.length > 0 ? startupChats : ['default'],
+              chatDetails: (startupChats.length > 0 ? startupChats : ['default']).map((chat) => ({
+                chat,
+                ...chatCatalogMetadata(null),
+              })),
             });
             return;
           }
@@ -718,10 +723,13 @@ export function createChatManagementRouteHandler(
           timer.mark('store');
           const allChats = storeChats.available ? storeChats.chats : importedChats;
           const storedChats = new Map<string, ReturnType<typeof readChatFromStore>>();
+          const includeHidden = parseBoolParam(u.searchParams.get('includeHidden'), false);
           const chats = allChats.filter((chatName: string) => {
             const stored = readChatFromStore({ droneId, chatName });
             storedChats.set(chatName, stored);
-            return !isWorkflowChatEntry(stored?.chat) && !isSideChatEntry(stored?.chat);
+            return (
+              includeHidden || (!isWorkflowChatEntry(stored?.chat) && !isSideChatEntry(stored?.chat))
+            );
           });
           const readStates = listChatReadStatesFromStore({ droneId });
           const chatDetails = chats.map((chatName: string) => {
@@ -734,7 +742,7 @@ export function createChatManagementRouteHandler(
             return {
               chat: chatName,
               chatId: String((chatEntry as any)?.id ?? '').trim() || null,
-              draft: isDraftChatEntry(chatEntry),
+              ...chatCatalogMetadata(chatEntry),
               agent: agentSummary,
               provider: agent?.kind === 'native'
                 ? String((chatEntry as any)?.nativeProvider ?? '').trim() || null

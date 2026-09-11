@@ -441,6 +441,8 @@ export function createChatPromptRouteHandler(
             chat,
             promptId: r.id,
             pendingState: r.pendingState,
+            draft: isDraftChatEntry(existingChatEntry),
+            ...(isDraftChatEntry(existingChatEntry) ? { executionStatus: 'held_in_draft' } : {}),
             autoRenameChat: autoRenameFromFirstPrompt,
           });
           return;

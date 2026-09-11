@@ -65,6 +65,8 @@ async function submit(options: { starting?: boolean; draft?: boolean; attachment
   });
   expect(res.statusCode).toBe(202);
   expect(response).toMatchObject({ accepted: true, promptId: 'stable-request-id' });
+  expect(response.draft).toBe(options.draft === true);
+  if (options.draft) expect(response.executionStatus).toBe('held_in_draft');
   return calls;
 }
 

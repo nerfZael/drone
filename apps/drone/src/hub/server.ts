@@ -4345,6 +4345,7 @@ async function startDroneHubApiServerWithLifecycle(
     busyChatNamesForDrone,
     deviceMesh,
     normalizeDroneIdentity,
+    normalizePendingStartupPrompts,
     nowIso,
     hubServices: hubApplication,
     onNativePromptQueueChanged: ({ droneId, chatName }) => {

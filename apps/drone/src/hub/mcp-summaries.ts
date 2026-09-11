@@ -1,3 +1,5 @@
+import { normalizeMcpChatList } from './chat-catalog';
+
 function cleanString(value: unknown, fallback = ''): string {
   const text = String(value ?? '').trim();
   return text || fallback;
@@ -48,6 +50,7 @@ export function droneSummary(drone: any) {
       : null,
     chatCount: chats.length || 1,
     chats: chats.length > 0 ? chats : ['default'],
+    chatDetails: normalizeMcpChatList({ ...drone, chats: chats.length > 0 ? chats : ['default'] }),
     cwd: cleanString(drone?.cwd) || null,
     status: droneStatusSummary(drone),
     createdAt: cleanIsoTimestamp(drone?.createdAt),
