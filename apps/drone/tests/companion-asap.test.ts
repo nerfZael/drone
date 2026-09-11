@@ -10,7 +10,7 @@ test('Companion routes ASAP to the running host and buffers only when it cannot 
   let running = false;
   const steered: unknown[] = [];
   Object.assign(runtime, {
-    contexts: new Map([['companion:run', { acceptsSteering: true }]]),
+    contexts: new Map([['companion:run', { acceptsSteering: true, settings: { promptDeliveryMode: 'asap' } }]]),
     activeRunIds: new Set(['run']), cancelledRunIds: new Set(), closing: false,
     host: { isThreadRunning: () => running, steerThread: (...args: unknown[]) => steered.push(args) },
   });
@@ -18,6 +18,9 @@ test('Companion routes ASAP to the running host and buffers only when it cannot 
   running = true;
   expect(runtime.steer('run', 'correction')).toBe(true);
   expect(steered).toEqual([['companion:run', 'correction']]);
+  runtime.contexts.get('companion:run').settings.promptDeliveryMode = 'queue';
+  expect(runtime.steer('run', 'queued correction')).toBe(false);
+  expect(steered).toHaveLength(1);
   runtime.contexts.get('companion:run').acceptsSteering = false;
   expect(runtime.steer('run', 'arrived while saving the final state')).toBe(false);
   runtime.cancelledRunIds.add('run');
@@ -31,7 +34,7 @@ test('Companion ASAP is consumed by the real agent loop before the active reques
     const started = Promise.withResolvers<void>();
     const resume = Promise.withResolvers<void>();
     const prompts: string[] = [];
-    const context = { acceptsSteering: false };
+    const context = { acceptsSteering: false, settings: { promptDeliveryMode: 'asap' } };
     faux.setResponses([
       async () => { started.resolve(); await resume.promise; return fauxAssistantMessage('initial answer'); },
       (input) => {
@@ -144,13 +147,42 @@ test('steering failure is reported and cannot leave a buffered task that restart
   expect(h.messages.some((message) => message.type === 'reply')).toBe(false);
 });
 
-function harness() {
+test('Queue mode keeps follow-ups in order until the current request finishes', async () => {
+  const h = harness('queue');
+  try {
+    await h.session.submit({ prompt: 'initial', messageId: 'a' });
+    h.ready = true;
+    await h.session.submit({ prompt: 'second', messageId: 'b' });
+    await h.session.submit({ prompt: 'third', messageId: 'c' });
+    h.runs[0].onEvent({ type: 'turn_started' });
+    expect(h.steered).toEqual([]);
+    expect(h.runs).toHaveLength(1);
+    h.finish[0]('first answer');
+    await tick();
+    expect(h.runs.map((run) => run.prompt)).toEqual(['initial', 'second']);
+    h.finish[1]('second answer');
+    await tick();
+    expect(h.runs.map((run) => run.prompt)).toEqual(['initial', 'second', 'third']);
+    expect(h.steered).toEqual([]);
+    h.finish[2]('third answer');
+    await tick();
+    expect(h.messages.filter((message) => message.type === 'reply').map((message) => message.messageId)).toEqual(['a', 'b', 'c']);
+  } finally { await h.session.close('test complete'); }
+});
+
+function harness(promptDeliveryMode: 'asap' | 'queue' = 'asap') {
   const h = { ready: false, steerError: false, steered: [] as string[], runs: [] as any[], messages: [] as any[], finish: [] as Array<(reply: string) => void> };
+  const steeringRuntime = Object.create(CompanionRuntime.prototype);
+  Object.assign(steeringRuntime, {
+    activeRunIds: new Set(['run']), cancelledRunIds: new Set(), closing: false,
+    contexts: new Map([['companion:run', { acceptsSteering: true, settings: { promptDeliveryMode } }]]),
+    host: { isThreadRunning: () => h.ready, steerThread: (_threadId: string, prompt: string) => h.steered.push(prompt) },
+  });
   const session = new CompanionRunSession({
     clientRunId: 'run', runtimeRunId: 'run', transport: 'websocket',
     runtime: {
       run: (input) => { h.runs.push(input); return new Promise<string>((resolve) => h.finish.push(resolve)); },
-      steer: (_runId, prompt) => { if (h.steerError) throw new Error('Steering failed'); if (!h.ready) return false; h.steered.push(prompt); return true; },
+      steer: (runId, prompt) => { if (h.steerError) throw new Error('Steering failed'); return steeringRuntime.steer(runId, prompt); },
       deleteSession: async () => {},
     },
     emit: (message) => { h.messages.push(message); }, isAvailable: () => true,

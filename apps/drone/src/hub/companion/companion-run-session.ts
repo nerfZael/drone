@@ -169,8 +169,8 @@ export class CompanionRunSession {
 
   private flushSteering(): void {
     if (!this.isAvailable()) return;
-    // Only buffer while the runtime is starting or finishing. Once it is running,
-    // follow-ups enter the agent's steering channel without waiting for completion.
+    // The runtime uses the delivery setting captured for this run. Queue mode
+    // keeps follow-ups buffered; ASAP flushes them once the agent can accept steering.
     while (this.prompts.length) {
       const next = this.prompts[0];
       try {

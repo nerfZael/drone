@@ -514,3 +514,24 @@ test.each(['completed', 'cancelled', 'error', 'disconnect', 'local-cancel'])(
     expect(controller.getSnapshot().compaction).toBeNull();
   },
 );
+
+
+test('a queued follow-up starts fresh activity and timing when the server starts its run', async () => {
+  const connection = clientTransport();
+  let now = 1;
+  const controller = new CompanionClientController({ createId: () => 'session', now: () => now });
+  const submit = (messageId: string) => controller.submitPrompt({
+    prompt: messageId, messageId, createTransport: () => connection.transport, executeTool: () => ({}),
+  });
+  await submit('first');
+  connection.message({ type: 'status', status: 'working', messageId: 'first' });
+  connection.message({ type: 'activity', messageId: 'first',
+    event: { type: 'tool_call_started', callId: 'old-tool', tool: 'list_drones', args: {} } });
+  await submit('second');
+  expect(controller.getSnapshot().activity).toHaveLength(1);
+  connection.message({ type: 'status', status: 'completed', messageId: 'first' });
+  now = 100;
+  connection.message({ type: 'status', status: 'working', messageId: 'second' });
+  expect(controller.getSnapshot()).toMatchObject({ status: 'working', startedAt: 100, activity: [] });
+  await controller.close();
+});

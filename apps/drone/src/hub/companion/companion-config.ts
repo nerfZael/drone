@@ -17,6 +17,7 @@ export type CompanionThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'hig
 
 export type CompanionSettings = {
   schemaVersion: 9;
+  promptDeliveryMode: 'asap' | 'queue';
   provider: LlmProviderId;
   model: string;
   thinkingLevel: CompanionThinkingLevel;
@@ -27,6 +28,7 @@ export type CompanionSettings = {
 export function companionSettingsEqual(left: CompanionSettings, right: CompanionSettings): boolean {
   return (
     left.schemaVersion === right.schemaVersion &&
+    left.promptDeliveryMode === right.promptDeliveryMode &&
     left.provider === right.provider &&
     left.model === right.model &&
     left.thinkingLevel === right.thinkingLevel &&
@@ -334,6 +336,7 @@ const TOOL_DEPENDENCIES = new Map<CompanionToolName, CompanionToolName>(
 
 export const DEFAULT_COMPANION_SETTINGS: CompanionSettings = {
   schemaVersion: COMPANION_SETTINGS_SCHEMA_VERSION,
+  promptDeliveryMode: 'asap',
   provider: 'codex',
   model: DEFAULT_CODEX_MODEL,
   thinkingLevel: 'medium',
@@ -392,6 +395,9 @@ export function normalizeCompanionSettings(value: unknown): CompanionSettings {
     throw new Error('Companion settings must be an object');
   }
   const raw = input as Record<string, unknown>;
+  if (raw.promptDeliveryMode !== undefined && raw.promptDeliveryMode !== 'asap' && raw.promptDeliveryMode !== 'queue') {
+    throw new Error('Companion follow-up delivery must be asap or queue');
+  }
   const storedSchemaVersion = Number.isInteger(raw.schemaVersion)
     ? Number(raw.schemaVersion)
     : 0;
@@ -420,6 +426,7 @@ export function normalizeCompanionSettings(value: unknown): CompanionSettings {
     : storedPrompt;
   return {
     schemaVersion: COMPANION_SETTINGS_SCHEMA_VERSION,
+    promptDeliveryMode: raw.promptDeliveryMode === 'queue' ? 'queue' : 'asap',
     provider,
     model: match.id,
     thinkingLevel: match.thinkingLevel,

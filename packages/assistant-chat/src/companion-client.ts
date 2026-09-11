@@ -82,6 +82,7 @@ type ActiveSession = {
   ready: Promise<CompanionClientConnectionTelemetry | undefined>;
   sentMessages: number;
   latestMessageId: string | null;
+  preservedActivityMessageId: string | null;
 };
 
 const INITIAL_STATE: CompanionClientState = {
@@ -158,6 +159,7 @@ export class CompanionClientController {
     const messageId = input.messageId || this.options.createId();
     session.messageExecutors.set(messageId, input.executeTool);
     session.latestMessageId = messageId;
+    session.preservedActivityMessageId = steering ? messageId : null;
     this.update({
       status: 'working',
       error: '',
@@ -240,6 +242,7 @@ export class CompanionClientController {
       ready: Promise.resolve(undefined),
       sentMessages: 0,
       latestMessageId: null,
+      preservedActivityMessageId: null,
     };
     this.activeSession = session;
     session.ready = Promise.resolve().then(() =>
@@ -266,7 +269,13 @@ export class CompanionClientController {
       (message.type === 'activity' || message.type === 'reply' ||
         (message.type === 'status' && message.status === 'completed'))
     ) return;
-    if (message.type === 'tool_call') {
+    if (message.type === 'status' && message.status === 'working' &&
+      message.messageId === session.latestMessageId && message.messageId === session.preservedActivityMessageId) {
+      // ASAP stays in the active run; Queue emits a new working status when its
+      // fresh run starts. Only then replace the previous run's activity and timer.
+      session.preservedActivityMessageId = null;
+      this.update({ activity: [], compaction: null, startedAt: this.now() });
+    } else if (message.type === 'tool_call') {
       void this.executeTool(session, message);
     } else if (message.type === 'activity') {
       this.update({

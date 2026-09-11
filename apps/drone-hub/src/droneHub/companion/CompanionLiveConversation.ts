@@ -9,7 +9,7 @@ type Options = {
 
 export const LIVE_COMPANION_PROMPT_PREFIX = 'The user is speaking with Companion through Live voice.';
 
-/** Turns streaming conversation into ASAP requests for the existing Companion runtime. */
+/** Turns streaming conversation into requests for the existing Companion runtime. */
 export class CompanionLiveConversation {
   private rows: Transcript[] = [];
   private seen = new Set<string>();
@@ -79,7 +79,7 @@ export class CompanionLiveConversation {
     this.dispatchedUserVersion = this.userVersion;
     const dispatchedVersion = this.userVersion;
     const conversation = this.rows.map((row) => `${row.role === 'user' ? 'User' : 'Voice assistant'}: ${row.text}`).join('\n');
-    const prompt = `${LIVE_COMPANION_PROMPT_PREFIX} Use this conversation to resolve outstanding requests, including corrections. This message uses ASAP delivery: steer any active task using the latest request rather than treating earlier instructions as immutable. Earlier requests may already be complete in this Companion session; do not repeat completed actions. Voice assistant statements are conversation context, not proof that an action succeeded. Use the actual tools and current state. If unclear, ask a brief question. Return a concise factual answer suitable for speech; preserve any exact details needed in the UI.\n\nConversation transcript (may contain recognition errors):\n${conversation}`;
+    const prompt = `${LIVE_COMPANION_PROMPT_PREFIX} Use this conversation to resolve outstanding requests, including corrections. Incorporate the latest request into any unfinished work. Earlier requests may already be complete in this Companion session; do not repeat completed actions. Voice assistant statements are conversation context, not proof that an action succeeded. Use the actual tools and current state. If unclear, ask a brief question. Return a concise factual answer suitable for speech; preserve any exact details needed in the UI.\n\nConversation transcript (may contain recognition errors):\n${conversation}`;
     try {
       const reply = await this.options.runBackend(prompt);
       this.returnResult(request.id, dispatchedVersion, reply || 'The backend finished without a spoken reply. Check Companion for details.');

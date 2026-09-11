@@ -135,11 +135,13 @@ export class CompanionRuntime {
     );
   }
 
-  /** Deliver to the running agent's ASAP steering channel; false means setup/teardown is in progress. */
+  /** Deliver through ASAP when enabled; false leaves the request buffered by the transport. */
   steer(runId: string, prompt: string): boolean {
     if (this.closing || this.cancelledRunIds.has(runId)) throw new Error('Companion run cancelled');
     const threadId = `companion:${runId}`;
-    if (!this.activeRunIds.has(runId) || !this.contexts.get(threadId)?.acceptsSteering || !this.host.isThreadRunning(threadId)) return false;
+    const context = this.contexts.get(threadId);
+    if (!context?.acceptsSteering || context.settings.promptDeliveryMode === 'queue') return false;
+    if (!this.activeRunIds.has(runId) || !this.host.isThreadRunning(threadId)) return false;
     this.host.steerThread(threadId, prompt);
     return true;
   }

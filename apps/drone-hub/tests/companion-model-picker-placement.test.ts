@@ -15,7 +15,8 @@ const models: CompanionModelOption[] = [
 ];
 
 const draft: CompanionSettingsDraft = {
-  schemaVersion: 3,
+  schemaVersion: 9,
+  promptDeliveryMode: 'asap',
   provider: 'openai',
   model: 'shared',
   thinkingLevel: 'low',

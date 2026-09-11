@@ -122,6 +122,23 @@ export function CompanionSettingsTab({ settings }: {
         {!providerHasCredentials ? <div className="mt-2 text-xs text-[var(--red)]">{PROVIDER_LABELS[draft.provider]} credentials are not configured. Runs will fail until they are added in General settings.</div> : null}
       </section>
 
+      <section className="rounded border border-[var(--border)] bg-[var(--surface-inset-faint)] p-4">
+        <h3 className="text-sm font-semibold text-[var(--fg)]">Follow-up delivery</h3>
+        <div className="mt-3">
+          <UiSegmentedControl
+            label="Companion follow-up delivery"
+            value={draft.promptDeliveryMode}
+            options={[{ value: 'asap', label: 'ASAP (default)' }, { value: 'queue', label: 'Queue' }]}
+            onValueChange={(promptDeliveryMode) => setDraft({ ...draft, promptDeliveryMode })}
+            disabled={saving}
+          />
+        </div>
+        <p className="mt-2 text-xs text-[var(--muted)]">
+          ASAP steers the running backend at its next processing point. Queue waits for the current request to finish.
+          {' '}Applies to both Live and record-and-transcribe mode, including the mobile backend. Save to apply to new backend runs; the current run keeps its setting.
+        </p>
+      </section>
+
       <section>
         <AssistantToolsPanel
           tools={tools}
