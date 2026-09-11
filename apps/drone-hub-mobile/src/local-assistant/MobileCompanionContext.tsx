@@ -8,6 +8,7 @@ import {
   COMPANION_PROPOSAL_TARGET_ID,
   CompanionClientController,
   waitForCompanionReply,
+  LIVE_COMPANION_PROMPT_PREFIX,
   EMPTY_COMPANION_PROPOSAL,
   executeCompanionBrowserTool,
   parseCompanionProposalText,
@@ -499,6 +500,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
           }
           const workspaceKey = mobileLiveWorkspaceKey(activeTarget);
           await live.start(activeTarget.targetDeviceId, activeTarget.targetName, (prompt, signal) => {
+            if (proposalExecutingRef.current) return Promise.reject(new Error('Companion is applying a proposal. Please ask again when it finishes.'));
             if (mobileLiveWorkspaceKey(workspaceTargetRef.current) !== workspaceKey) return Promise.reject(new Error('Live workspace changed. Start a new voice conversation.'));
             return waitForCompanionReply(controller, () => run(prompt, undefined, undefined, workspaceKey), signal);
           });
@@ -566,6 +568,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
   const value = React.useMemo<MobileCompanionContextValue>(
     () => ({
       ...state,
+      transcript: state.transcript.startsWith(LIVE_COMPANION_PROMPT_PREFIX) ? '' : state.transcript,
       live,
       checkingVoiceMode,
       status: effectiveStatus,

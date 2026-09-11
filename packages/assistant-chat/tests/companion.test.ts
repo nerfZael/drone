@@ -535,3 +535,36 @@ test('a queued follow-up starts fresh activity and timing when the server starts
   expect(controller.getSnapshot()).toMatchObject({ status: 'working', startedAt: 100, activity: [] });
   await controller.close();
 });
+
+test('Queue keeps showing the active task while multiple follow-ups wait', async () => {
+  const connection = clientTransport();
+  let now = 1;
+  const controller = new CompanionClientController({ createId: () => 'session', now: () => now });
+  const submit = (messageId: string) => controller.submitPrompt({ prompt: messageId, messageId,
+    createTransport: () => connection.transport, executeTool: () => ({}) });
+  await submit('first');
+  connection.message({ type: 'status', status: 'working', messageId: 'first' });
+  connection.message({ type: 'activity', messageId: 'first',
+    event: { type: 'tool_call_started', callId: 'first-tool', tool: 'list_drones', args: {} } });
+  await submit('second'); await submit('third');
+  connection.message({ type: 'activity', messageId: 'first',
+    event: { type: 'tool_call_completed', callId: 'first-tool', result: {} } });
+  expect(controller.getSnapshot().activity[0].status).toBe('completed');
+  connection.message({ type: 'status', status: 'completed', messageId: 'first' });
+  now = 100;
+  connection.message({ type: 'status', status: 'working', messageId: 'second' });
+  expect(controller.getSnapshot()).toMatchObject({ status: 'working', startedAt: 100, activity: [] });
+  connection.message({ type: 'activity', messageId: 'second',
+    event: { type: 'tool_call_started', callId: 'second-tool', tool: 'list_drones', args: {} } });
+  expect(controller.getSnapshot().activity[0].callId).toBe('second-tool');
+  connection.message({ type: 'activity', messageId: 'first',
+    event: { type: 'tool_call_started', callId: 'stale', tool: 'list_drones', args: {} } });
+  expect(controller.getSnapshot().activity).toHaveLength(1);
+  connection.message({ type: 'reply', messageId: 'second', reply: 'Intermediate reply' });
+  connection.message({ type: 'status', status: 'completed', messageId: 'second' });
+  expect(controller.getSnapshot().reply).toBe('');
+  now = 200;
+  connection.message({ type: 'status', status: 'working', messageId: 'third' });
+  expect(controller.getSnapshot()).toMatchObject({ startedAt: 200, activity: [] });
+  await controller.close();
+});

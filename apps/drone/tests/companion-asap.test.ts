@@ -12,7 +12,7 @@ test('Companion routes ASAP to the running host and buffers only when it cannot 
   Object.assign(runtime, {
     contexts: new Map([['companion:run', { acceptsSteering: true, settings: { promptDeliveryMode: 'asap' } }]]),
     activeRunIds: new Set(['run']), cancelledRunIds: new Set(), closing: false,
-    host: { isThreadRunning: () => running, steerThread: (...args: unknown[]) => steered.push(args) },
+    host: { canSteerThread: () => running, steerThread: (...args: unknown[]) => steered.push(args) },
   });
   expect(runtime.steer('run', 'correction')).toBe(false);
   running = true;
@@ -176,7 +176,7 @@ function harness(promptDeliveryMode: 'asap' | 'queue' = 'asap') {
   Object.assign(steeringRuntime, {
     activeRunIds: new Set(['run']), cancelledRunIds: new Set(), closing: false,
     contexts: new Map([['companion:run', { acceptsSteering: true, settings: { promptDeliveryMode } }]]),
-    host: { isThreadRunning: () => h.ready, steerThread: (_threadId: string, prompt: string) => h.steered.push(prompt) },
+    host: { canSteerThread: () => h.ready, steerThread: (_threadId: string, prompt: string) => h.steered.push(prompt) },
   });
   const session = new CompanionRunSession({
     clientRunId: 'run', runtimeRunId: 'run', transport: 'websocket',
@@ -192,3 +192,41 @@ function harness(promptDeliveryMode: 'asap' | 'queue' = 'asap') {
 }
 
 function tick() { return new Promise((resolve) => setTimeout(resolve, 0)); }
+
+test('ASAP refuses delivery during agent_end listeners, before afterPrompt starts', async () => {
+  await withTempDroneDataDir('companion-final-event-', async () => {
+    const faux = registerFauxProvider({ api: 'faux', provider: 'faux', tokensPerSecond: 0 });
+    faux.setResponses([fauxAssistantMessage('first'), fauxAssistantMessage('second')]);
+    const context = { acceptsSteering: false, settings: { promptDeliveryMode: 'asap' } };
+    const host = new BlipAssistantHost(async () => ({
+      provider: 'faux', model: faux.getModel().id, thinkingLevel: 'off', systemPrompt: 'Test', tools: [],
+      beforePrompt: () => { context.acceptsSteering = true; },
+      afterPrompt: () => { context.acceptsSteering = false; },
+    }));
+    const runtime = Object.create(CompanionRuntime.prototype);
+    Object.assign(runtime, { host, contexts: new Map([['companion:run', context]]),
+      activeRunIds: new Set(['run']), cancelledRunIds: new Set(), closing: false });
+    const ended = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let unsubscribe = () => {};
+    let first: Promise<unknown> | undefined;
+    try {
+      await host.prepareThread('companion:run');
+      // Hold an actual agent_end listener open to reproduce the gap before afterPrompt.
+      const handle = (host as any).handles.get('companion:run');
+      unsubscribe = handle.agent.subscribe(async (event: { type: string }) => {
+        if (event.type === 'agent_end') { ended.resolve(); await release.promise; }
+      });
+      first = host.promptThread('companion:run', 'first request');
+      await ended.promise;
+      expect(context.acceptsSteering).toBe(true);
+      expect(host.isThreadRunning('companion:run')).toBe(true);
+      expect(runtime.steer('run', 'must start next')).toBe(false);
+      release.resolve(); await first;
+      await host.promptThread('companion:run', 'must start next');
+      expect(await host.latestAssistantVisibleText('companion:run')).toBe('second');
+    } finally {
+      release.resolve(); await first; unsubscribe(); await host.close(); faux.unregister();
+    }
+  });
+});

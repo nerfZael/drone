@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { MobileCompanionLiveConnection } from '../src/local-assistant/MobileCompanionLiveConnection';
 import { MobileMicrophoneCoordinator } from '../src/local-assistant/mobile-microphone-coordinator';
 
-function harness(options: { delayedAudio?: boolean; rejectStart?: boolean } = {}) {
+function harness(options: { delayedAudio?: boolean; rejectStart?: boolean; blockEvents?: boolean } = {}) {
   const coordinator = new MobileMicrophoneCoordinator();
   const requests: Array<{ operation: string; payload: any }> = [];
   const received: any[] = [];
@@ -12,6 +12,7 @@ function harness(options: { delayedAudio?: boolean; rejectStart?: boolean } = {}
   let released = 0;
   let stopped = 0;
   let closed = 0;
+  let releaseEvent: (() => void) | undefined;
   let resolveAudio!: (audio: any) => void;
   const channel: any = {};
   const track = { enabled: true, stop: () => { stopped++; } };
@@ -27,6 +28,7 @@ function harness(options: { delayedAudio?: boolean; rejectStart?: boolean } = {}
     openAudio: () => options.delayedAudio ? new Promise((resolve) => { resolveAudio = resolve; }) : Promise.resolve(audio),
     request: async (_device, _capability, operation, payload) => {
       requests.push({ operation, payload });
+      if (options.blockEvents && operation === 'live.event') await new Promise<void>((resolve) => { releaseEvent = resolve; });
       if (options.rejectStart && operation === 'live.start') throw new Error('No API credentials');
       return {};
     },
@@ -34,7 +36,7 @@ function harness(options: { delayedAudio?: boolean; rejectStart?: boolean } = {}
     onEvent: (event) => received.push(event), onReady: (model) => ready.push(model), onError: (error) => errors.push(error),
   });
   return { connection, coordinator, requests, received, errors, ready, track, peer, channel,
-    finishAudio: () => resolveAudio(audio), released: () => released, stopped: () => stopped, closed: () => closed,
+    releaseEvent: () => releaseEvent?.(), finishAudio: () => resolveAudio(audio), released: () => released, stopped: () => stopped, closed: () => closed,
     emit: (payload: any, sourceDeviceId = 'hub') => listener?.({ sourceDeviceId, payload: { sessionId: 'voice', ...payload } }),
   };
 }
@@ -60,6 +62,7 @@ test('mobile Live negotiates over mesh, waits for session.started, filters sessi
     h.emit({ type: 'live_event', event: { type: 'session.delegation.created' } });
     expect(h.received).toEqual([{ type: 'session.delegation.created' }]);
     h.connection.send({ type: 'session.commentary.append', content: 'Done', delegation_id: 'a' });
+    await tick();
     expect(h.requests.at(-1)?.operation).toBe('live.event');
   } finally { h.connection.close(); }
   expect(h.track.enabled).toBe(false);
@@ -100,4 +103,21 @@ test('Live cannot take the microphone from another voice feature', async () => {
   expect(h.coordinator.getSnapshot()).toBe('continuous');
   expect(h.requests.some((request) => request.operation === 'live.start')).toBe(false);
   await lease.release();
+});
+
+
+test('mobile sends spoken result chunks in order and drops unsent chunks after End voice', async () => {
+  const h = harness({ blockEvents: true });
+  try {
+    await h.connection.start();
+    h.connection.send({ content: 'first' }); h.connection.send({ content: 'second' });
+    await tick();
+    const chunks = () => h.requests.filter((request) => request.operation === 'live.event').map((request) => request.payload.event.content);
+    expect(chunks()).toEqual(['first']);
+    h.releaseEvent(); await tick();
+    expect(chunks()).toEqual(['first', 'second']);
+    h.connection.send({ content: 'third' });
+    h.connection.close(); h.releaseEvent(); await tick();
+    expect(chunks()).toEqual(['first', 'second']);
+  } finally { h.releaseEvent(); h.connection.close(); }
 });

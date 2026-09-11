@@ -22,6 +22,7 @@ export class MobileCompanionLiveConnection {
   private ready = false;
   private muted = false;
   private started = false;
+  private outgoingEvents = Promise.resolve();
   private backendModel = '';
   private unsubscribe: (() => void) | undefined;
   private heartbeat: ReturnType<typeof setInterval> | undefined;
@@ -95,7 +96,9 @@ export class MobileCompanionLiveConnection {
   }
 
   send(event: Record<string, unknown>): void {
-    if (!this.closed) void this.request('live.event', { event }).catch(() => this.fail('Could not send the backend result to Live.'));
+    this.outgoingEvents = this.outgoingEvents.then(async () => {
+      if (!this.closed) await this.request('live.event', { event });
+    }).catch(() => this.fail('Could not send the backend result to Live.'));
   }
 
   mute(muted: boolean): void {

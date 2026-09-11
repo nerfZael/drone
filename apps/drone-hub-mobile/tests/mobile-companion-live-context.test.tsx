@@ -2,6 +2,7 @@ import React, { act } from 'react';
 import { createRequire } from 'node:module';
 import type { ReactTestRenderer } from 'react-test-renderer';
 import { expect, mock, test } from 'bun:test';
+import { COMPANION_PROPOSAL_TARGET_ID, LIVE_COMPANION_PROMPT_PREFIX } from '@drone/assistant-chat';
 import { COMPANION_CAPABILITY, COMPANION_RUN_OPERATIONS } from '@drone/device-protocol';
 import { MobileMicrophoneCoordinator } from '../src/local-assistant/mobile-microphone-coordinator';
 
@@ -46,7 +47,7 @@ const { create } = await import('react-test-renderer');
 const { MobileCompanionProvider, useMobileCompanion } = await import('../src/local-assistant/MobileCompanionContext');
 const { useMobileCompanionLiveSettings } = await import('../src/local-assistant/use-mobile-companion-live-settings');
 
-async function harness(settingsOnly = false) {
+async function harness(settingsOnly = false, executeProposal = async () => ({ ok: true, operations: [] })) {
   enabled = false; rejectSettings = false; recorded = 0; backend = null; live.status = 'idle'; calls.length = 0;
   const originalAct = Object.getOwnPropertyDescriptor(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
   Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
@@ -61,7 +62,7 @@ async function harness(settingsOnly = false) {
     targetDeviceId: 'hub', targetName: 'Hub', reachable: true,
     getAppContext: () => ({ mainDroneId: workspace }),
     readComposer: () => ({ targetId: 'composer', path: '', content: '', revision: '0', mode: 'edit' }),
-    applyComposer: () => ({ ok: true, revision: '1' }), executeProposal: async () => ({ ok: true, operations: [] }),
+    applyComposer: () => ({ ok: true, revision: '1' }), executeProposal,
     openDroneChat: async () => ({}), highlightDrones: () => ({}),
   }); });
   return { context: () => context, settings: () => settings, changeWorkspace: () => { workspace = 'second'; },
@@ -89,9 +90,11 @@ test('mobile keeps recording when Live is off, uses client delegation when on, a
     let first!: Promise<string>; let second!: Promise<string>;
     await act(async () => { first = backend!('first', abort.signal); await tick(); });
     expect(h.context().status).toBe('working');
-    await act(async () => { second = backend!('correction', abort.signal); await tick(); });
+    expect(h.context().transcript).toBe('first');
+    await act(async () => { second = backend!(LIVE_COMPANION_PROMPT_PREFIX + ' internal delegation instructions', abort.signal); await tick(); });
     const prompts = calls.filter((call) => call.operation === 'run.start');
-    expect(prompts.map((call) => call.payload.prompt)).toEqual(['first', 'correction']);
+    expect(prompts.map((call) => call.payload.prompt)).toEqual(['first', LIVE_COMPANION_PROMPT_PREFIX + ' internal delegation instructions']);
+    expect(h.context().transcript).toBe('');
     const latest = prompts.at(-1)!.payload;
     await act(async () => {
       for (const listener of listeners) {
@@ -115,6 +118,45 @@ test('mobile reports a failed preference read without silently recording in the 
     expect(recorded).toBe(0); expect(backend).toBeNull();
     expect(h.context().error).toBe('Hub unavailable');
   } finally { await h.cleanup(); }
+});
+
+test('mobile refuses Live delegation while a proposal is being applied', async () => {
+  const release = Promise.withResolvers<void>();
+  const h = await harness(false, async () => { await release.promise; return { ok: true, operations: [] }; });
+  const abort = new AbortController();
+  let applying: Promise<void> | undefined;
+  let reply: Promise<string> | undefined;
+  try {
+    enabled = true;
+    await act(async () => { await h.context().toggle(); });
+    await act(async () => { reply = backend!('prepare a proposal', abort.signal); await tick(); });
+    const request = calls.find((call) => call.operation === 'run.start')!.payload;
+    const emit = (payload: any) => {
+      for (const listener of listeners) listener({ sourceDeviceId: 'hub', payload: {
+        runId: request.runId, messageId: request.messageId, ...payload,
+      } });
+    };
+    await act(async () => {
+      emit({ type: 'tool_call', generation: 1, callId: 'proposal', tool: 'apply_companion_proposal_patch', args: {
+        targetId: COMPANION_PROPOSAL_TARGET_ID, baseRevision: '0',
+        content: JSON.stringify({ version: 1, title: 'Create review group', operations: [{ id: 'group', type: 'create_group', name: 'Review' }] }),
+      } });
+      await tick();
+      expect(calls.find((call) => call.operation === 'tool.result')?.payload).toMatchObject({ ok: true });
+      emit({ type: 'reply', reply: 'Ready to apply' });
+      emit({ type: 'status', status: 'completed' });
+      await reply;
+      applying = h.context().executeProposal();
+    });
+    expect(h.context().proposalExecuting).toBe(true);
+    await expect(backend!('change the plan', abort.signal)).rejects.toThrow('applying a proposal');
+    expect(calls.filter((call) => call.operation === 'run.start')).toHaveLength(1);
+  } finally {
+    release.resolve();
+    await act(async () => { await applying; });
+    const settled = reply?.catch(() => undefined);
+    abort.abort(); await settled; await h.cleanup();
+  }
 });
 
 test('mobile Live setting persists through Hub requests and failed writes keep the saved value', async () => {

@@ -231,6 +231,7 @@ class BlipSession implements BlipSessionHandle {
   private readonly toolSuspensions: ToolSuspensionWorkflow;
   private readonly unsubscribe: () => void;
   private active?: ActivePrompt;
+  private agentLoopEnded = false;
   private activePromise?: Promise<BlipSessionState>;
   private resolutionAbortController?: AbortController;
   private closed = false;
@@ -336,6 +337,10 @@ class BlipSession implements BlipSessionHandle {
 
   get running(): boolean {
     return this.activePromise !== undefined;
+  }
+
+  get acceptsSteering(): boolean {
+    return this.running && !this.agentLoopEnded && !this.manualCompactionAbort && !this.closed;
   }
 
   prompt(input: BlipPromptInput): Promise<BlipSessionState> {
@@ -540,6 +545,8 @@ class BlipSession implements BlipSessionHandle {
   }
 
   private async onAgentEvent(event: AgentEvent): Promise<void> {
+    if (event.type === 'agent_end') this.agentLoopEnded = true;
+    else if (event.type === 'agent_start') this.agentLoopEnded = false;
     const active = this.active;
     if (!active) return;
     if (event.type === 'message_retry') {
@@ -728,6 +735,7 @@ class BlipSession implements BlipSessionHandle {
   }
 
   private createActive(message: AgentMessage, kind: ActivePrompt['kind'] = 'prompt'): ActivePrompt {
+    this.agentLoopEnded = false;
     const startedAt = Date.now();
     return {
       message,

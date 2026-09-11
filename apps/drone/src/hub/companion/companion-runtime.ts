@@ -141,7 +141,7 @@ export class CompanionRuntime {
     const threadId = `companion:${runId}`;
     const context = this.contexts.get(threadId);
     if (!context?.acceptsSteering || context.settings.promptDeliveryMode === 'queue') return false;
-    if (!this.activeRunIds.has(runId) || !this.host.isThreadRunning(threadId)) return false;
+    if (!this.activeRunIds.has(runId) || !this.host.canSteerThread(threadId)) return false;
     this.host.steerThread(threadId, prompt);
     return true;
   }

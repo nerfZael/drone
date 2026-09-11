@@ -120,6 +120,8 @@ export interface CreateBlipSessionOptions {
 export interface BlipSessionHandle {
   readonly state: BlipSessionState;
   readonly running: boolean;
+  /** False once the agent loop ends, even while final events/state are being saved. */
+  readonly acceptsSteering: boolean;
   prompt(input: BlipPromptInput): Promise<BlipSessionState>;
   retry(): Promise<BlipSessionState>;
   steer(input: BlipPromptInput): void;
