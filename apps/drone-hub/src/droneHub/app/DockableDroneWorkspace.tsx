@@ -1,3 +1,4 @@
+import { READ_WORKSPACE_LAYOUT } from '../workspace-layout/workspace-layout-events';
 import { registerChatWindowLayout } from '../chat-layout/registerChatWindowLayout';
 import { UndoChatWindowLayout } from '../chat-layout/UndoChatWindowLayout';
 import React from 'react';
@@ -699,6 +700,7 @@ export function DockableDroneWorkspace({
   const removedPanelTimersRef = React.useRef<Map<string, number>>(new Map());
   const layoutSaveTimerRef = React.useRef<number | null>(null);
   const suppressSaveRef = React.useRef(false);
+  const arrangingWorkspaceRef = React.useRef(false);
   const unmountingRef = React.useRef(false);
   const lastAppliedOpenRequestRef = React.useRef(openRequestNonce);
   const [previewHostVersion, setPreviewHostVersion] = React.useState(0);
@@ -1002,6 +1004,37 @@ export function DockableDroneWorkspace({
     },
   }), [currentDrone.id, isMobileViewport, persistCurrentLayout, floatingWindows]);
 
+  React.useEffect(() => {
+    const read = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      const api = apiRef.current, root = workspaceElementRef.current;
+      if (detail.workspaceId !== currentDrone.id || isMobileViewport || !api || !root?.isConnected) return;
+      const rect = root.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0 || api.width <= 0 || api.height <= 0) return;
+      detail.source = { api, root, transaction(action: () => void) {
+        if (arrangingWorkspaceRef.current || pointerDownRef.current) throw new Error('WORKSPACE_LAYOUT_BUSY: finish the current drag before arranging');
+        const previouslySuppressed = suppressSaveRef.current;
+        arrangingWorkspaceRef.current = true;
+        suppressSaveRef.current = true;
+        try { action(); } finally {
+          try { syncEmptyWorkspaceSlots(api); } finally {
+            arrangingWorkspaceRef.current = false;
+            suppressSaveRef.current = previouslySuppressed;
+          }
+          for (const group of api.groups) if (group.api.location.type === 'floating' && group.panels.length === 1) {
+            floatingWindows.set(group.panels[0]!.id, measureSideChatBounds(group.element, root));
+          }
+          updateWorkspacePanelState();
+          const tab = api.activePanel ? tabFromPanel(api.activePanel) : null;
+          if (tab) onActiveToolTabChange?.(tab);
+          persistCurrentLayout();
+        }
+      } };
+    };
+    window.addEventListener(READ_WORKSPACE_LAYOUT, read);
+    return () => window.removeEventListener(READ_WORKSPACE_LAYOUT, read);
+  }, [currentDrone.id, isMobileViewport, floatingWindows, persistCurrentLayout, updateWorkspacePanelState, onActiveToolTabChange]);
+
   const schedulePersistCurrentLayout = React.useCallback(() => {
     if (layoutSaveTimerRef.current !== null) window.clearTimeout(layoutSaveTimerRef.current);
     layoutSaveTimerRef.current = window.setTimeout(() => {
@@ -1135,6 +1168,7 @@ export function DockableDroneWorkspace({
       setReadyVersion((version) => version + 1);
 
       const layoutDisposable = event.api.onDidLayoutChange(() => {
+        if (arrangingWorkspaceRef.current) return;
         // A slot dragged shut is removed only once the pointer is released
         // (see the pointerup effect): pulling a view out from under Dockview's
         // divider drag would break the drag still in progress.
@@ -1143,7 +1177,7 @@ export function DockableDroneWorkspace({
         schedulePersistCurrentLayout();
       });
       const activePanelDisposable = event.api.onDidActivePanelChange((panel) => {
-        if (!panel) return;
+        if (arrangingWorkspaceRef.current || !panel) return;
         const tab = tabFromPanel(panel);
         if (tab) onActiveToolTabChange?.(tab);
       });

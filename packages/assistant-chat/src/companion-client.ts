@@ -56,6 +56,8 @@ export type CompanionBrowserToolExecutor = (
 
 export type CompanionBrowserWorkspace = {
   getAppContext(): Promise<unknown> | unknown;
+  getWorkspaceWindowLayout?(): Promise<unknown> | unknown;
+  arrangeWorkspaceWindows?(args: Record<string, unknown>): Promise<unknown> | unknown;
   getChatWindowLayout?(): Promise<unknown> | unknown;
   arrangeChatWindows?(args: Record<string, unknown>): Promise<unknown> | unknown;
   readActiveComposer(): Promise<unknown> | unknown;
@@ -391,6 +393,11 @@ export async function executeCompanionBrowserTool(
     );
   }
   if (tool === 'open_drone_chat') return await workspace.openDroneChat(args);
+  if (tool === 'get_workspace_window_layout') return workspace.getWorkspaceWindowLayout ? await workspace.getWorkspaceWindowLayout() : { supported: false };
+  if (tool === 'arrange_workspace_windows') {
+    if (!workspace.arrangeWorkspaceWindows) throw new Error('WORKSPACE_LAYOUT_UNSUPPORTED');
+    return await workspace.arrangeWorkspaceWindows(args);
+  }
   if (tool === 'get_chat_window_layout') return workspace.getChatWindowLayout ? await workspace.getChatWindowLayout() : { supported: false };
   if (tool === 'arrange_chat_windows') {
     if (!workspace.arrangeChatWindows) throw new Error('CHAT_LAYOUT_UNSUPPORTED');

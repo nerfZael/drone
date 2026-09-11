@@ -1,3 +1,4 @@
+import { workspaceWindowLayoutProperties } from './workspace-window-layout-schema';
 import { chatWindowLayoutProperties } from './chat-window-layout-schema';
 import crypto from 'node:crypto';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
@@ -526,6 +527,14 @@ export class CompanionRuntime {
     });
 
     if (context.windowLayoutTools) {
+      add('get_workspace_window_layout', {
+        parameters: objectParameters({}),
+        execute: async (_callId, args, signal) => result(await context.callBrowser('get_workspace_window_layout', args as Record<string, unknown>, signal)),
+      });
+      add('arrange_workspace_windows', {
+        parameters: objectParameters(workspaceWindowLayoutProperties, ['workspaceId', 'layoutRevision']),
+        execute: async (_callId, args, signal) => result(await context.callBrowser('arrange_workspace_windows', args as Record<string, unknown>, signal)),
+      });
       add('get_chat_window_layout', {
         parameters: objectParameters({}),
         execute: async (_callId, args, signal) => result(await context.callBrowser('get_chat_window_layout', args as Record<string, unknown>, signal)),
