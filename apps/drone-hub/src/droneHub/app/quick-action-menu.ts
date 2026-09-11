@@ -1,10 +1,12 @@
+import { WINDOW_LAYOUT_SLOTS, type WindowLayoutSlot } from '@drone/hub-model';
 import type { ShortcutActionId } from './shortcuts';
 
-export const QUICK_ACTION_ROWS = ['qwert', 'asdf', 'zxcv'] as const;
+export const QUICK_ACTION_ROWS = ['12345', '67890', 'qwert', 'asdf', 'zxcv'] as const;
+export type QuickActionId = ShortcutActionId | 'closeDockedWindows' | `saveLayout${WindowLayoutSlot}` | `loadLayout${WindowLayoutSlot}`;
 export type QuickAction = {
   key: string;
   label: string;
-} & ({ action: ShortcutActionId; children?: never } | { children: readonly QuickAction[]; action?: never });
+} & ({ action: QuickActionId; children?: never } | { children: readonly QuickAction[]; action?: never });
 
 // Every level uses the same key positions. Add children to any item to nest further.
 export const QUICK_ACTIONS: readonly QuickAction[] = [
@@ -17,12 +19,17 @@ export const QUICK_ACTIONS: readonly QuickAction[] = [
     { key: 'a', label: 'New drone group', action: 'createDraftGroup' },
     { key: 's', label: 'New chat group', action: 'createChatGroup' },
   ] },
-  { key: 'w', label: 'Windows', children: [
+  { key: 'w', label: 'Open window', children: [
     { key: 'r', label: 'Pull requests', action: 'openPullRequestsTab' },
     { key: 't', label: 'Terminal', action: 'openTerminalTab' },
     { key: 'f', label: 'File Explorer', action: 'openFilesTab' },
     { key: 'x', label: 'Canvas', action: 'openCanvasTab' },
     { key: 'c', label: 'Changes', action: 'openChangesTab' },
+  ] },
+  { key: 'f', label: 'Organize windows', children: [
+    { key: 'e', label: 'Close windows', action: 'closeDockedWindows' },
+    { key: 'q', label: 'Save preset', children: WINDOW_LAYOUT_SLOTS.map(key => ({ key, label: `Save slot ${key}`, action: `saveLayout${key}` as const })) },
+    ...WINDOW_LAYOUT_SLOTS.map(key => ({ key, label: `Load slot ${key}`, action: `loadLayout${key}` as const })),
   ] },
   { key: 'a', label: 'Organize drone', children: [
     { key: 'q', label: 'Pin / unpin', action: 'toggleSelectedDronePinned' },
@@ -35,12 +42,14 @@ export const QUICK_ACTIONS: readonly QuickAction[] = [
   { key: 'v', label: 'Home', action: 'openHome' },
 ];
 
-export type QuickActionUnavailable = Partial<Record<ShortcutActionId, string>>;
+export type QuickActionUnavailable = Partial<Record<QuickActionId, string>>;
 export type QuickActionSnapshot = {
+  busy?: boolean;
+  error?: string;
   path: readonly QuickAction[];
   items: readonly QuickAction[];
   unavailable: QuickActionUnavailable;
-  labels: Partial<Record<ShortcutActionId, string>>;
+  labels: Partial<Record<QuickActionId, string>>;
 } | null;
 
 export function quickActionDisabledReason(item: QuickAction, unavailable: QuickActionUnavailable): string | undefined {
@@ -53,7 +62,7 @@ type MenuKeyEvent = Pick<KeyboardEvent, 'key' | 'repeat' | 'isComposing' | 'ctrl
 
 /** Synchronous state keeps rapid sequences independent of React's render timing. */
 export function createQuickActionController(
-  execute: (action: ShortcutActionId) => void,
+  execute: (action: QuickActionId) => unknown,
   commit: (update: () => void) => void = (update) => update(),
   root: readonly QuickAction[] = QUICK_ACTIONS,
 ) {
@@ -63,22 +72,30 @@ export function createQuickActionController(
     snapshot = next;
     listeners.forEach((listener) => listener());
   };
-  const close = () => update(null);
+  const close = () => { if (!snapshot?.busy) update(null); };
   const back = () => {
-    if (!snapshot?.path.length) return;
+    if (!snapshot?.path.length || snapshot.busy) return;
     const path = snapshot.path.slice(0, -1);
-    update({ ...snapshot, path, items: path[path.length - 1]?.children ?? root });
+    update({ ...snapshot, error: undefined, path, items: path[path.length - 1]?.children ?? root });
   };
   const select = (key: string) => {
-    if (!snapshot) return;
+    if (!snapshot || snapshot.busy) return;
     const item = snapshot.items.find((entry) => entry.key === key);
     if (!item || quickActionDisabledReason(item, snapshot.unavailable)) return;
     if (item.children) {
-      update({ ...snapshot, path: [...snapshot.path, item], items: item.children });
+      update({ ...snapshot, error: undefined, path: [...snapshot.path, item], items: item.children });
+    } else if (item.action === 'closeDockedWindows' || /^(save|load)Layout/.test(item.action)) {
+      const pending = { ...snapshot, busy: true, error: undefined };
+      update(pending);
+      void Promise.resolve().then(() => execute(item.action)).then(() => {
+        if (snapshot === pending) update(null);
+      }, (error) => {
+        if (snapshot === pending) update({ ...pending, busy: false, error: error instanceof Error ? error.message : String(error) });
+      });
     } else {
       // Remove the modal and its focus trap before the action focuses its target.
       commit(close);
-      execute(item.action);
+      void execute(item.action);
     }
   };
   return {
@@ -87,8 +104,11 @@ export function createQuickActionController(
       listeners.add(listener);
       return () => { listeners.delete(listener); };
     },
-    open: (unavailable: QuickActionUnavailable = {}, labels: Partial<Record<ShortcutActionId, string>> = {}) =>
+    open: (unavailable: QuickActionUnavailable = {}, labels: Partial<Record<QuickActionId, string>> = {}) =>
       update({ path: [], items: root, unavailable, labels }),
+    setLabels: (labels: Partial<Record<QuickActionId, string>>) => {
+      if (snapshot && !snapshot.busy) update({ ...snapshot, labels: { ...snapshot.labels, ...labels } });
+    },
     close,
     back,
     select,

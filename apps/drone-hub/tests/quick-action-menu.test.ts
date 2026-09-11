@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createQuickActionController, QUICK_ACTIONS, QUICK_ACTION_ROWS, quickActionDisabledReason, type QuickAction } from '../src/droneHub/app/quick-action-menu';
+import { createQuickActionController, QUICK_ACTIONS, QUICK_ACTION_ROWS, quickActionDisabledReason, type QuickAction, type QuickActionId } from '../src/droneHub/app/quick-action-menu';
 import { cloneDefaultShortcutBindings, migrateQuickActionShortcuts, type ShortcutActionId } from '../src/droneHub/app/shortcuts';
 import { migrateDroneHubUiPersistedState } from '../src/droneHub/app/use-drone-hub-ui-store';
 
@@ -8,7 +8,7 @@ const plain = (key: string) => ({ key, mod: false, ctrl: false, meta: false, alt
 
 describe('quick action sequences', () => {
   test('executes direct and nested actions without waiting for a render', () => {
-    const actions: ShortcutActionId[] = [];
+    const actions: QuickActionId[] = [];
     const menu = createQuickActionController((action) => {
       expect(menu.getSnapshot()).toBeNull();
       actions.push(action);
@@ -71,7 +71,7 @@ describe('quick action sequences', () => {
     const menu = createQuickActionController((action) => actions.push(action));
     menu.open({ createDroneChat: 'Select a drone', toggleSelectedDronePinned: 'Select a drone', moveSelectedDroneToTop: 'Select a drone', toggleSelectedDronesToDo: 'Select a drone', alignFloatingChats: 'Select a drone' });
     const state = menu.getSnapshot()!;
-    expect(state.items.map((item) => item.key).join('')).toBe('qwadzv');
+    expect(state.items.map((item) => item.key).join('')).toBe('qwfadzv');
     expect(quickActionDisabledReason(state.items.find((item) => item.key === 'a')!, state.unavailable)).toBe('Select a drone');
     menu.select('a');
     expect(menu.getSnapshot()?.path).toEqual([]);

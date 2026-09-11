@@ -5285,12 +5285,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     ],
   );
   const fileWindows = React.useMemo<WorkspaceFileWindows>(() => ({
+    presetRootPath: defaultFsPathForCurrentDrone,
+    restorePresetFiles: (files) => { for (const file of files) openEditorFile({ path: file.path, name: file.name }); },
     render: renderFileWindow,
     openTabIds: openedEditorFileTabs.map((tab) => tab.tabId),
     dirtyTabIds: openedEditorFileTabs.filter((tab) => tab.dirty).map((tab) => tab.tabId),
     onDetachedTabsChange: handleDetachedFileTabsChange,
     onClosed: handleFileWindowClosed,
-  }), [handleDetachedFileTabsChange, handleFileWindowClosed, openedEditorFileTabs, renderFileWindow]);
+  }), [defaultFsPathForCurrentDrone, openEditorFile, handleDetachedFileTabsChange, handleFileWindowClosed, openedEditorFileTabs, renderFileWindow]);
 
   const renderRightPanelTabContent = React.useCallback(
     (drone: DroneSummary, tab: RightPanelTab, paneKey: PreviewPaneKey): React.ReactNode => {

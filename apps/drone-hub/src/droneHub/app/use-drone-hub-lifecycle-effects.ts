@@ -1,3 +1,7 @@
+import { WINDOW_LAYOUT_SLOTS } from '@drone/hub-model';
+import { executeWorkspacePreset } from './executeWorkspacePreset';
+import { workspacePresetTarget } from './workspace-preset-target';
+import type { QuickActionId } from './quick-action-menu';
 import React from 'react';
 import { flushSync } from 'react-dom';
 import { createQuickActionController, type QuickActionUnavailable } from './quick-action-menu';
@@ -172,7 +176,9 @@ export function useDroneHubLifecycleEffects({
   onDeleteSelectedDroneFromInputShortcut,
   onMarkSelectedDronesUnreadShortcut,
 }: UseDroneHubLifecycleEffectsArgs) {
-  const quickActionHandlerRef = React.useRef<(action: ShortcutActionId) => void>(() => {});
+  const presetDroneRef = React.useRef(currentDrone?.id);
+  presetDroneRef.current = currentDrone?.id;
+  const quickActionHandlerRef = React.useRef<(action: QuickActionId) => void | Promise<void>>(() => {});
   const quickActionUnavailableRef = React.useRef(quickActionUnavailable);
   quickActionUnavailableRef.current = quickActionUnavailable;
   const [quickActions] = React.useState(() => createQuickActionController(
@@ -385,7 +391,14 @@ export function useDroneHubLifecycleEffects({
     const shortcutActionHandlers: Record<ShortcutActionId, () => boolean> = {
       openQuickActions: () => {
         if (document.querySelector('[role="dialog"][aria-modal="true"]')) return false;
-        const unavailable = { ...quickActionUnavailableRef.current };
+        const unavailable: QuickActionUnavailable = { ...quickActionUnavailableRef.current };
+        if (!workspacePresetTarget(currentDrone?.id)) {
+          unavailable.closeDockedWindows = 'Select an available desktop drone workspace';
+          for (const slot of WINDOW_LAYOUT_SLOTS) {
+            unavailable[`saveLayout${slot}`] = 'Select an available desktop drone workspace';
+            unavailable[`loadLayout${slot}`] = 'Select an available desktop drone workspace';
+          }
+        }
         const activeSide = document.querySelector<HTMLElement>('[data-side-chat-active]');
         const sideScopes = [...document.querySelectorAll<HTMLElement>('[data-side-chat-name]')];
         const scope = activeSide
@@ -515,7 +528,16 @@ export function useDroneHubLifecycleEffects({
       },
     };
 
-    quickActionHandlerRef.current = (actionId) => { shortcutActionHandlers[actionId](); };
+    quickActionHandlerRef.current = (actionId) => {
+      if (actionId === 'closeDockedWindows') {
+        const target = workspacePresetTarget(currentDrone?.id);
+        if (!target) throw new Error('Select an available desktop drone workspace.');
+        target.closeDockedWindows();
+        return;
+      }
+      if (/^(save|load)Layout[0-9]$/.test(actionId)) return executeWorkspacePreset(actionId, currentDrone?.id, () => presetDroneRef.current === currentDrone?.id);
+      shortcutActionHandlers[actionId as ShortcutActionId]();
+    };
     const runShortcutAction = (actionId: ShortcutActionId, _event: KeyboardEvent): boolean =>
       shortcutActionHandlers[actionId]();
 

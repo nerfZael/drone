@@ -335,6 +335,7 @@ import { registerOperationalRoutes } from './routes/operational-routes';
 import { registerResourceSubscriptionRoutes } from './routes/resource-subscription-routes';
 import { createRepositoryRouteHandler } from './routes/repository-operation-routes';
 import { registerRepositoryRoutes } from './routes/repository-routes';
+import { registerWindowLayoutPresetRoutes } from './routes/window-layout-preset-routes';
 import { registerSettingsRoutes } from './routes/settings-routes';
 import { registerSidebarRoutes } from './routes/sidebar-routes';
 import { registerSystemRoutes } from './routes/system-routes';
@@ -5611,6 +5612,7 @@ async function startDroneHubApiServerWithLifecycle(
     dismissWelcomeForScope,
   });
 
+  registerWindowLayoutPresetRoutes(apiRouter);
   registerSettingsRoutes(apiRouter, {
     resolveGroqApiKeySettings,
     resolveExaApiKeySettings,

@@ -30,7 +30,7 @@ describe('side chat workspace persistence', () => {
     memoryStorage();
     saveSideChatWorkspaceState('a', { previousMainChat: 'review', floatingBounds: { review: first } });
     renameSideChatWorkspaceChat('a', 'review', 'renamed');
-    expect(readSideChatWorkspaceState('a')).toEqual({ previousMainChat: 'renamed', floatingBounds: { renamed: first }, floatingIntent: {} });
+    expect(readSideChatWorkspaceState('a')).toEqual({ closedWindows: [], previousMainChat: 'renamed', floatingBounds: { renamed: first }, floatingIntent: {} });
   });
   test('retains independent floating positions and the previous main chat across drone navigation', () => {
     memoryStorage();
@@ -40,6 +40,7 @@ describe('side chat workspace persistence', () => {
     // Promoting a second side chat must not erase the first return position.
     saveSideChatWorkspaceState('a', { floatingBounds: { 'side-2': second } });
     expect(readSideChatWorkspaceState('a')).toEqual({
+      closedWindows: [],
       previousMainChat: 'review', floatingBounds: { 'side-1': first, 'side-2': second }, floatingIntent: {},
     });
     expect(readSideChatWorkspaceState('b').floatingBounds['side-1']).toEqual(second);
@@ -50,11 +51,11 @@ describe('side chat workspace persistence', () => {
   });
 
   test('ignores corrupt or invalid saved bounds', () => {
-    expect(parseSideChatWorkspaceState('{')).toEqual({ previousMainChat: 'default', floatingBounds: {}, floatingIntent: {} });
+    expect(parseSideChatWorkspaceState('{')).toEqual({ closedWindows: [], previousMainChat: 'default', floatingBounds: {}, floatingIntent: {} });
     expect(parseSideChatWorkspaceState(JSON.stringify({
       previousMainChat: 42,
       floatingBounds: { good: first, negative: { ...first, width: -1 }, missing: { x: 1 }, nil: null },
-    }))).toEqual({ previousMainChat: 'default', floatingBounds: { good: first }, floatingIntent: {} });
+    }))).toEqual({ closedWindows: [], previousMainChat: 'default', floatingBounds: { good: first }, floatingIntent: {} });
   });
 
   test('keeps chat switching usable when storage is blocked', () => {
@@ -91,4 +92,14 @@ test('uses the group position when promoting a side chat that was docked', () =>
     getBoundingClientRect: () => ({ x: 680, y: 130, width: 320, height: 440 }),
   } as unknown as Element;
   expect(measureSideChatBounds(group, workspace)).toEqual({ x: 480, y: 30, width: 320, height: 440 });
+});
+
+
+test('closed fork windows persist, follow renames, and tolerate invalid stored names', () => {
+  memoryStorage();
+  saveSideChatWorkspaceState('a', { closedWindows: ['review'] });
+  renameSideChatWorkspaceChat('a', 'review', 'renamed');
+  expect(readSideChatWorkspaceState('a').closedWindows).toEqual(['renamed']);
+  expect(readSideChatWorkspaceState('b').closedWindows).toEqual([]);
+  expect(parseSideChatWorkspaceState(JSON.stringify({ closedWindows: ['fork', null, 3, '', 'fork'] })).closedWindows).toEqual(['fork']);
 });
