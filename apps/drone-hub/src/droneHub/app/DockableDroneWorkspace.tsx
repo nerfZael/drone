@@ -4,9 +4,10 @@ import { ChatWindowTab, usePanelTitle } from './ChatWindowTab';
 import { ChatUsageBadge } from '../usage/ChatUsageBadge';
 import { measureSideChatBounds, readSideChatWorkspaceState, restoreSideChatBounds, saveSideChatWorkspaceState } from './side-chat-workspace-state';
 import { placeSideChat } from './side-chat-placement';
+import { alignFloatingChats, SIDE_CHAT_PANEL_PREFIX } from './align-floating-chats';
 import { prepareSideChatPanel } from './prepareSideChatPanel';
 import { focusChatWindow } from './focus-chat-window';
-import { FOCUS_SIDE_CHAT_EVENT } from './side-chat-events';
+import { ALIGN_FLOATING_CHATS_EVENT, FOCUS_SIDE_CHAT_EVENT } from './side-chat-events';
 import type { WorkspaceSideChat } from './use-workspace-side-chats';
 import { EditorPaneContext } from './editor-pane-context';
 import { readWorkspaceExplorerWidth } from './workspace-explorer-preferences';
@@ -74,7 +75,6 @@ type DockableDroneWorkspaceProps = {
 
 const CHAT_PANEL_ID = 'agent-chat';
 const DEFAULT_CHAT_NAME = 'default';
-const SIDE_CHAT_PANEL_PREFIX = 'side-chat:';
 const EXPLORER_PANEL_ID = 'file-explorer';
 const TOOL_PANEL_PREFIX = 'tool:';
 const DEFAULT_WORKSPACE_TOOL_TAB: RightPanelTab = 'editor';
@@ -741,6 +741,32 @@ export function DockableDroneWorkspace({
       // Ignore layout persistence failures; the active workspace can keep running.
     }
   }, [currentDrone.id]);
+
+  React.useEffect(() => {
+    const align = (event: Event) => {
+      if ((event as CustomEvent<{ droneId: string }>).detail?.droneId !== currentDrone.id) return;
+      const api = apiRef.current;
+      const root = workspaceElementRef.current;
+      if (!api || !root) return;
+      const main = api.getPanel(CHAT_PANEL_ID);
+      const detached = [...(root.closest('[data-drone-workspace-root]')?.querySelectorAll('[data-detached-chat-key]') ?? [])]
+        .map((element) => element.closest('.dv-groupview')).filter((element): element is Element => Boolean(element));
+      const occupied = [...(main?.group.api.location.type === 'floating' ? [main.group.element] : []), ...detached]
+        .filter((element) => element.closest('.dv-resize-container'))
+        .map((element) => measureSideChatBounds(element, root));
+      const floatingBounds = alignFloatingChats(api, occupied);
+      if (!Object.keys(floatingBounds).length) return;
+      for (const name of Object.keys(floatingBounds)) {
+        const panel = api.getPanel(`${SIDE_CHAT_PANEL_PREFIX}${name}`);
+        if (panel) prepareSideChatPanel(panel);
+      }
+      saveSideChatWorkspaceState(currentDrone.id, { floatingBounds });
+      persistCurrentLayout();
+      event.preventDefault();
+    };
+    window.addEventListener(ALIGN_FLOATING_CHATS_EVENT, align);
+    return () => window.removeEventListener(ALIGN_FLOATING_CHATS_EVENT, align);
+  }, [currentDrone.id, persistCurrentLayout]);
 
   const schedulePersistCurrentLayout = React.useCallback(() => {
     if (layoutSaveTimerRef.current !== null) window.clearTimeout(layoutSaveTimerRef.current);

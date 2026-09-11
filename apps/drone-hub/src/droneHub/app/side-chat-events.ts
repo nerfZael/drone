@@ -1,6 +1,13 @@
 import { dispatchAssistantOpenDroneChat } from '../assistant/open-drone-chat-event';
 export const OPEN_SIDE_CHAT_EVENT = 'drone-hub:open-side-chat';
 export const FOCUS_SIDE_CHAT_EVENT = 'drone-hub:focus-side-chat';
+export const ALIGN_FLOATING_CHATS_EVENT = 'drone-hub:align-floating-chats';
+
+export function requestAlignFloatingChats(droneId: string): boolean {
+  const event = new CustomEvent(ALIGN_FLOATING_CHATS_EVENT, { detail: { droneId }, cancelable: true });
+  window.dispatchEvent(event);
+  return event.defaultPrevented;
+}
 
 export type SideChatCheckpointTarget = { sourceChatName: string; checkpointId: string };
 export type OpenSideChatDetail = { droneId: string; target?: SideChatCheckpointTarget };

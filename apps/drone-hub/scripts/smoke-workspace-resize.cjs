@@ -19,6 +19,10 @@ async function main() {
           import { DockviewComponent } from 'dockview';
           import { DockableDroneWorkspace } from './src/droneHub/app/DockableDroneWorkspace';
           import { saveSideChatWorkspaceState } from './src/droneHub/app/side-chat-workspace-state';
+          import { readSideChatWorkspaceState } from './src/droneHub/app/side-chat-workspace-state';
+          import { requestAlignFloatingChats } from './src/droneHub/app/side-chat-events';
+          window.alignChats = requestAlignFloatingChats;
+          window.savedChatBounds = () => readSideChatWorkspaceState('resize-smoke').floatingBounds;
           saveSideChatWorkspaceState('resize-smoke', {
             floatingBounds: { fork: { x: 650, y: 100, width: 500, height: 450 } },
           });
@@ -35,12 +39,14 @@ async function main() {
           };
           function App() {
             const [revision, setRevision] = React.useState(0);
+            const [forks, setForks] = React.useState(['fork']);
+            window.addForks = () => setForks(['fork', 'second', 'third', 'fourth']);
             window.refreshWorkspace = () => setRevision(n => n + 1);
             return <DockableDroneWorkspace currentDrone={{ id: 'resize-smoke' }}
               paneHeaderMode="normal" activeToolTab="terminal" openRequestNonce={0}
               chatContent={<div data-revision={revision}>Chat {revision}</div>}
-              sideChats={[{ name: 'fork' }]} mainChatName="default"
-              renderSideChat={() => <div data-side-chat-name="fork">Fork {revision}</div>}
+              sideChats={forks.map(name => ({ name }))} mainChatName="default"
+              renderSideChat={chat => <div data-side-chat-name={chat.name}>Fork {revision}<input data-fork-draft={chat.name} /></div>}
               renderToolPane={() => <div>Tool {revision}</div>} previewTab="preview" />;
           }
           createRoot(document.getElementById('root')).render(<App />);
@@ -55,6 +61,7 @@ async function main() {
         html, body, #root { margin: 0; width: 100%; height: 100%; }
         .dh-dockable-workspace { position: absolute; inset: 0; }
         .h-full { height: 100%; }
+        .overflow-hidden { overflow: hidden; }
       </style></head><body><div id="root"></div><script src="fixture.js"></script></body></html>
     `);
     function desktopRunner() {
@@ -94,6 +101,7 @@ async function main() {
         const y = Math.round(handle.y + handle.height / 2);
         win.webContents.sendInputEvent({ type: 'mouseMove', x, y });
         win.webContents.sendInputEvent({ type: 'mouseDown', button: 'left', x, y });
+        await pause();
         // Dockview records the starting bounds on the first pointermove.
         win.webContents.sendInputEvent({ type: 'mouseMove', x: ++x, y });
         await pause();
@@ -134,6 +142,46 @@ async function main() {
         const updates = await evaluate('window.optionUpdates') - originalUpdates;
         assert.equal(updates, 0, 'Background renders must not reconfigure or force layout in Dockview');
         console.log('PASS: floating and docked resizing survive background React renders without forced layouts');
+
+        await evaluate(`window.addForks()`);
+        for (let i = 0; i < 200; i++) {
+          if (await evaluate('!!window.workspaceApi.getPanel("side-chat:fourth")')) break;
+          await pause();
+        }
+        await evaluate(`window.draftNode = document.querySelector('[data-fork-draft="fork"]');
+          window.draftNode.value = 'Unsent draft';
+          window.workspaceApi.getPanel('agent-chat').api.setActive();`);
+        const toolGroup = await evaluate('window.workspaceApi.getPanel("tool:terminal").group.id');
+        assert.equal(await evaluate('window.alignChats("another-drone")'), false, 'Ignores other drones');
+        assert.equal(await evaluate('window.alignChats("resize-smoke")'), true, 'Alignment handled');
+        await pause();
+        const aligned = await evaluate(`(() => {
+          const api = window.workspaceApi;
+          return { width: api.width, height: api.height, bounds: window.savedChatBounds(),
+            active: api.activePanel.id, toolGroup: api.getPanel('tool:terminal').group.id,
+            draftPreserved: window.draftNode === document.querySelector('[data-fork-draft="fork"]')
+              && window.draftNode.value === 'Unsent draft',
+            actual: ['fork', 'second', 'third', 'fourth'].map(name => {
+              const rect = api.getPanel('side-chat:' + name).group.element.closest('.dv-resize-container').getBoundingClientRect();
+              return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+            }) };
+        })()`);
+        assert(aligned.draftPreserved, 'Alignment preserves the mounted chat and unsent draft');
+        assert.equal(aligned.active, 'agent-chat', 'Alignment preserves the active panel');
+        assert.equal(aligned.toolGroup, toolGroup, 'Alignment leaves tools in place');
+        const expectedHeight = Math.max(220, Math.round(aligned.height / 4));
+        const expected = [0, 1, 2, 3].map(index => ({
+          x: aligned.width - 320 - Math.floor(index / 3) * 328,
+          y: aligned.height - expectedHeight - (index % 3) * (expectedHeight + 8),
+          width: 320, height: expectedHeight,
+        }));
+        assert.deepEqual(aligned.actual, expected, 'Resets size and packs upward, then left');
+        assert.deepEqual(['fork', 'second', 'third', 'fourth'].map(name => aligned.bounds[name]), expected,
+          'Saves the aligned positions for returning forks');
+        await evaluate('window.alignChats("resize-smoke")');
+        await pause();
+        assert.deepEqual(await evaluate('window.savedChatBounds()'), aligned.bounds, 'Repeated alignment is stable');
+        console.log('PASS: floating chat alignment resets and persists geometry without losing drafts or changing tools');
         app.exit(0);
       }).catch(error => { console.error(error.stack); app.exit(1); });
     }

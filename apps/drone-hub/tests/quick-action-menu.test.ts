@@ -13,12 +13,12 @@ describe('quick action sequences', () => {
       expect(menu.getSnapshot()).toBeNull();
       actions.push(action);
     });
-    for (const sequence of ['q', 'r', 'we', 'wq', 'ww', 'ae', 'f']) {
+    for (const sequence of ['qe', 'qt', 'qa', 'qq', 'qw', 'qr', 'qs', 'ae', 'ar', 'wf', 'wt', 'wc', 'wx', 'wr']) {
       menu.open();
       for (const letter of sequence) expect(menu.handleKey(key(letter))).toBe(true);
       expect(menu.getSnapshot()).toBeNull();
     }
-    expect(actions).toEqual(['createDroneChat', 'createSideChat', 'createDraftGroup', 'createDraftDrone', 'createDraftDroneInCurrentGroup', 'toggleSelectedDronesToDo', 'openFilesTab']);
+    expect(actions).toEqual(['createDroneChat', 'createSideChat', 'createDraftGroup', 'createDraftDrone', 'createDraftDroneInCurrentGroup', 'cloneDroneChat', 'createChatGroup', 'toggleSelectedDronesToDo', 'alignFloatingChats', 'openFilesTab', 'openTerminalTab', 'openChangesTab', 'openCanvasTab', 'openPullRequestsTab']);
   });
 
   test('supports deeper nesting and backs up exactly one level', () => {
@@ -61,24 +61,38 @@ describe('quick action sequences', () => {
     expect(actions).toEqual([]);
     expect(menu.getSnapshot()).not.toBeNull();
     for (const native of ['Tab', 'Enter', ' ']) expect(menu.handleKey(key(native))).toBe(false);
-    menu.handleKey(key('r'));
+    menu.handleKey(key('q'));
+    menu.handleKey(key('t'));
     expect(actions).toEqual(['createSideChat']);
   });
 
   test('disabled buttons keep their positions and ignore clicks and keys', () => {
     const actions: string[] = [];
     const menu = createQuickActionController((action) => actions.push(action));
-    menu.open({ createDroneChat: 'Select a drone', toggleSelectedDronePinned: 'Select a drone', moveSelectedDroneToTop: 'Select a drone', toggleSelectedDronesToDo: 'Select a drone' });
+    menu.open({ createDroneChat: 'Select a drone', toggleSelectedDronePinned: 'Select a drone', moveSelectedDroneToTop: 'Select a drone', toggleSelectedDronesToDo: 'Select a drone', alignFloatingChats: 'Select a drone' });
     const state = menu.getSnapshot()!;
-    expect(state.items.map((item) => item.key).join('')).toBe(QUICK_ACTION_ROWS.join(''));
+    expect(state.items.map((item) => item.key).join('')).toBe('qwadzv');
     expect(quickActionDisabledReason(state.items.find((item) => item.key === 'a')!, state.unavailable)).toBe('Select a drone');
-    menu.select('q');
-    menu.handleKey(key('q'));
     menu.select('a');
     expect(menu.getSnapshot()?.path).toEqual([]);
+    menu.select('q');
+    menu.handleKey(key('e'));
+    expect(menu.getSnapshot()?.path.map((item) => item.label)).toEqual(['Create']);
+    menu.back();
     expect(actions).toEqual([]);
     menu.select('v');
     expect(actions).toEqual(['openHome']);
+  });
+
+  test('every submenu uses unique keys with visible positions in the grid', () => {
+    const check = (items: readonly QuickAction[]) => {
+      expect(new Set(items.map((item) => item.key)).size).toBe(items.length);
+      for (const item of items) {
+        expect(QUICK_ACTION_ROWS.join('')).toContain(item.key);
+        if (item.children) check(item.children);
+      }
+    };
+    check(QUICK_ACTIONS);
   });
 });
 

@@ -1,7 +1,7 @@
 import React from 'react';
 import { flushSync } from 'react-dom';
 import { createQuickActionController, type QuickActionUnavailable } from './quick-action-menu';
-import { requestSideChat } from './side-chat-events';
+import { requestAlignFloatingChats, requestSideChat } from './side-chat-events';
 import { focusedSideChatMainControl, toggleFocusedSideChatMain } from './side-chat-main-shortcut';
 import type { DroneSummary, PendingPrompt, TranscriptItem } from '../types';
 import type { DraftChatState, DroneErrorModalState, StartupSeedState } from './app-types';
@@ -16,7 +16,7 @@ import {
 } from './lifecycle-effect-helpers';
 import { APP_SHORTCUT_BOUNDARY_SELECTOR } from './AppShortcutBoundary';
 import { useDropdownDismiss } from '../../ui/dropdown';
-import { requestSidebarGroupDraft } from './sidebar-group-draft-events';
+import { requestSidebarChatGroup, requestSidebarGroupDraft } from './sidebar-group-draft-events';
 import { requestSidebarRootDroneDraft } from './sidebar-drone-draft-events';
 import { useContinuousDictation } from '../chat/ContinuousDictationContext';
 import { useActiveComposer } from '../chat/ActiveComposerContext';
@@ -397,6 +397,10 @@ export function useDroneHubLifecycleEffects({
         if (!focusedSideChatMainControl()) {
           unavailable.toggleSideChatMain = 'Select an available fork';
         }
+        if (!document.querySelector('[data-main-workspace-chat]')?.closest('[data-drone-workspace-root]')
+          ?.querySelector('.dv-resize-container [data-side-chat-name]')) {
+          unavailable.alignFloatingChats = 'No floating chats to align';
+        }
         const sourceChatName = scope?.dataset.chatName ?? activeSide?.dataset.sideChatName ?? selectedChat;
         quickActions.open(unavailable, sourceChatName ? { createSideChat: `Fork “${sourceChatName}”` } : {});
         return true;
@@ -410,6 +414,12 @@ export function useDroneHubLifecycleEffects({
         return true;
       },
       createDraftGroup: () => requestSidebarGroupDraft(),
+      createChatGroup: () => {
+        if (!currentDrone) return false;
+        setSidebarCollapsed(false);
+        return requestSidebarChatGroup(currentDrone.id);
+      },
+      alignFloatingChats: () => currentDrone ? requestAlignFloatingChats(currentDrone.id) : false,
       createDraftDroneInCurrentGroup: () => openCurrentGroupDraftChatComposer(),
       createDroneChat: () => {
         if (!currentDrone) return false;

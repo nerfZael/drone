@@ -1,4 +1,11 @@
 export const SIDEBAR_GROUP_DRAFT_REQUEST_EVENT = 'drone-hub:sidebar-group-draft-request';
+export const SIDEBAR_CHAT_GROUP_REQUEST_EVENT = 'drone-hub:sidebar-chat-group-request';
+
+export function requestSidebarChatGroup(droneId: string): boolean {
+  const event = new CustomEvent(SIDEBAR_CHAT_GROUP_REQUEST_EVENT, { detail: { droneId }, cancelable: true });
+  window.dispatchEvent(event);
+  return event.defaultPrevented;
+}
 
 type SidebarGroupDraftRequestDetail = {
   handled: boolean;

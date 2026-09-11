@@ -3,6 +3,8 @@ export type ShortcutActionId =
   | 'openHome'
   | 'createDraftDrone'
   | 'createDraftGroup'
+  | 'createChatGroup'
+  | 'alignFloatingChats'
   | 'createDraftDroneInCurrentGroup'
   | 'createDroneChat'
   | 'cloneDroneChat'
@@ -72,6 +74,16 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     id: 'createDraftGroup',
     label: 'Create new group',
     description: 'Creates a temporary untitled group at the top of the sidebar for inline naming.',
+  },
+  {
+    id: 'createChatGroup',
+    label: 'Create new chat group',
+    description: 'Opens the inline chat-group editor for the selected drone.',
+  },
+  {
+    id: 'alignFloatingChats',
+    label: 'Align floating chats',
+    description: 'Restores floating forks to their default size, arranged from bottom right upward, then left.',
   },
   {
     id: 'createDraftDroneInCurrentGroup',
@@ -236,6 +248,8 @@ const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   openHome: { key: 'v', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   createDraftDrone: { key: '1', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   createDraftGroup: null,
+  createChatGroup: null,
+  alignFloatingChats: null,
   createDraftDroneInCurrentGroup: { key: '2', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   createDroneChat: { key: '3', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   cloneDroneChat: { key: '4', mod: false, ctrl: false, meta: false, alt: false, shift: false },
@@ -479,6 +493,8 @@ export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
     openHome: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openHome),
     createDraftDrone: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createDraftDrone),
     createDraftGroup: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createDraftGroup),
+    createChatGroup: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createChatGroup),
+    alignFloatingChats: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.alignFloatingChats),
     createDraftDroneInCurrentGroup: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createDraftDroneInCurrentGroup),
     createDroneChat: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createDroneChat),
     cloneDroneChat: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.cloneDroneChat),

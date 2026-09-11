@@ -8,26 +8,30 @@ export type QuickAction = {
 
 // Every level uses the same key positions. Add children to any item to nest further.
 export const QUICK_ACTIONS: readonly QuickAction[] = [
-  { key: 'q', label: 'New chat', action: 'createDroneChat' },
-  { key: 'w', label: 'Create', children: [
+  { key: 'q', label: 'Create', children: [
     { key: 'q', label: 'Root drone', action: 'createDraftDrone' },
-    { key: 'w', label: 'Drone in current group', action: 'createDraftDroneInCurrentGroup' },
-    { key: 'e', label: 'New group', action: 'createDraftGroup' },
+    { key: 'w', label: 'Drone in group', action: 'createDraftDroneInCurrentGroup' },
+    { key: 'e', label: 'New chat', action: 'createDroneChat' },
+    { key: 'r', label: 'Clone chat', action: 'cloneDroneChat' },
+    { key: 't', label: 'Fork chat', action: 'createSideChat' },
+    { key: 'a', label: 'New drone group', action: 'createDraftGroup' },
+    { key: 's', label: 'New chat group', action: 'createChatGroup' },
   ] },
-  { key: 'e', label: 'Clone chat', action: 'cloneDroneChat' },
-  { key: 'r', label: 'Fork chat', action: 'createSideChat' },
-  { key: 't', label: 'Terminal', action: 'openTerminalTab' },
+  { key: 'w', label: 'Windows', children: [
+    { key: 'r', label: 'Pull requests', action: 'openPullRequestsTab' },
+    { key: 't', label: 'Terminal', action: 'openTerminalTab' },
+    { key: 'f', label: 'File Explorer', action: 'openFilesTab' },
+    { key: 'x', label: 'Canvas', action: 'openCanvasTab' },
+    { key: 'c', label: 'Changes', action: 'openChangesTab' },
+  ] },
   { key: 'a', label: 'Organize drone', children: [
     { key: 'q', label: 'Pin / unpin', action: 'toggleSelectedDronePinned' },
     { key: 'w', label: 'Move to top', action: 'moveSelectedDroneToTop' },
     { key: 'e', label: 'Toggle to do', action: 'toggleSelectedDronesToDo' },
+    { key: 'r', label: 'Align floating chats', action: 'alignFloatingChats' },
   ] },
-  { key: 's', label: 'Pull requests', action: 'openPullRequestsTab' },
   { key: 'd', label: 'Main / floating chat', action: 'toggleSideChatMain' },
-  { key: 'f', label: 'File Explorer', action: 'openFilesTab' },
   { key: 'z', label: 'Mark unread', action: 'markSelectedDronesUnread' },
-  { key: 'x', label: 'Canvas', action: 'openCanvasTab' },
-  { key: 'c', label: 'Changes', action: 'openChangesTab' },
   { key: 'v', label: 'Home', action: 'openHome' },
 ];
 

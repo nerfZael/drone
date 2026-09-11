@@ -1,5 +1,6 @@
 import { DetachedChatIndicator, detachChatMenuItem } from './DetachedChatIndicator';
 import React from 'react';
+import { SIDEBAR_CHAT_GROUP_REQUEST_EVENT } from './sidebar-group-draft-events';
 import { useDndMonitor, useDraggable, useDroppable, type DragEndEvent, type DragMoveEvent, type DragOverEvent, type DragStartEvent } from '@dnd-kit/core';
 import { isUngroupedGroupName } from '../../domain';
 import {
@@ -2579,13 +2580,32 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
   }, [chatSelectionAnchorByDrone, flattenedChatNodeIds]);
 
   const createChatGroup = React.useCallback((droneId: string, parentPath: string | null = null) => {
+    const ancestorKeys: string[] = [];
+    let ancestor = nodeTree.nodesById[sidebarDroneNodeId(droneId)];
+    while (ancestor) {
+      if (ancestor.kind === 'folder') ancestorKeys.push(sidebarFolderCollapseKey(ancestor, props.repositoryRootView === true));
+      ancestor = nodeTree.nodesById[ancestor.parentId];
+    }
+    if (ancestorKeys.length) props.setCollapsedGroups((prev) => ({
+      ...prev, ...Object.fromEntries(ancestorKeys.map((key) => [key, false])),
+    }));
     setChatTreeEditor({ mode: 'create', droneId, parentPath, path: null, value: '', error: null });
     props.setCollapsedDroneSections((prev) => ({
       ...prev,
       [sidebarInlineSectionKey(droneId, 'chats')]: false,
       ...(parentPath ? { [chatGroupCollapseKey(droneId, parentPath)]: false } : {}),
     }));
-  }, [props.setCollapsedDroneSections]);
+  }, [nodeTree, props.repositoryRootView, props.setCollapsedGroups, props.setCollapsedDroneSections]);
+  React.useEffect(() => {
+    const onRequest = (event: Event) => {
+      const droneId = (event as CustomEvent<{ droneId: string }>).detail?.droneId;
+      if (event.defaultPrevented || props.actionsEnabled === false || !droneId || !droneById[droneId]) return;
+      createChatGroup(droneId);
+      event.preventDefault();
+    };
+    window.addEventListener(SIDEBAR_CHAT_GROUP_REQUEST_EVENT, onRequest);
+    return () => window.removeEventListener(SIDEBAR_CHAT_GROUP_REQUEST_EVENT, onRequest);
+  }, [createChatGroup, droneById, props.actionsEnabled]);
   const renameChatGroup = React.useCallback((droneId: string, path: string) => {
     setChatTreeEditor({ mode: 'rename', droneId, parentPath: sidebarChatGroupParentPath(path), path, value: sidebarChatGroupBaseName(path), error: null });
   }, []);

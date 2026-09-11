@@ -5022,7 +5022,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const quickActionDialogProps = useDroneHubLifecycleEffects({
     quickActionUnavailable: {
       ...(!currentDrone || selectedGroupMultiChat ? Object.fromEntries([
-        'createDroneChat', 'cloneDroneChat', 'createSideChat', 'openTerminalTab',
+        'createDroneChat', 'cloneDroneChat', 'createSideChat', 'createChatGroup', 'alignFloatingChats', 'openTerminalTab',
         'openPullRequestsTab', 'openFilesTab', 'openCanvasTab', 'openChangesTab',
       ].map((id) => [id, 'Select a drone chat'])) : {}),
       ...(selectedGroupMultiChat || !selectedDrone || !currentDrone
