@@ -1,5 +1,6 @@
 import React from 'react';
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { buildAgentRunChangeTree } from '@drone/assistant-chat';
 
@@ -287,5 +288,22 @@ describe('changed files card', () => {
     expect(collapsedHtml.match(/title="Lines deleted"/g)).toHaveLength(1);
     expect(expandedHtml).toContain('changed.ts');
     expect(collapsedHtml).not.toContain('changed.ts');
+  });
+
+  test('re-measures the slim floating layout once file changes arrive on a mounted card', () => {
+    // The card renders nothing until it has changes, so the compact probe
+    // must re-run when they show up later (a run reporting changes mid-flight);
+    // otherwise a slim floating window auto-expands the list.
+    const source = readFileSync(
+      new URL('../src/droneHub/chat/ChangedFilesCard.tsx', import.meta.url),
+      'utf8',
+    );
+    const hasChangesAt = source.indexOf('const hasFileChanges = isAgentRunFileChanges(fileChanges);');
+    const probeAt = source.indexOf('useCompactChat(rootRef, hasFileChanges)');
+    const earlyReturnAt = source.indexOf('if (!hasFileChanges) return null;');
+    expect(hasChangesAt).toBeGreaterThan(-1);
+    expect(probeAt).toBeGreaterThan(hasChangesAt);
+    expect(earlyReturnAt).toBeGreaterThan(probeAt);
+    expect(source).not.toContain('useCompactChat(rootRef);');
   });
 });

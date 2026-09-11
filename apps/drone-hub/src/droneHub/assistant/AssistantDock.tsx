@@ -76,6 +76,8 @@ import {
 } from './AssistantTranscript';
 import { ApprovalCard } from './AssistantWorkflowCards';
 import { AssistantQuestionCard } from './AssistantQuestionCard';
+import { FloatingQuestionDock } from '../chat/FloatingQuestionDock';
+import { useCompactChat } from '../chat/use-compact-chat';
 import { AssistantQuestionResultCard } from './AssistantQuestionResultCard';
 import { buildNativeAgentComposerControls } from './native-agent-composer-controls';
 import {
@@ -525,6 +527,10 @@ export function AssistantDock({
     () => threadQuestionRequests.filter((request) => request.status !== 'pending' && request.result),
     [threadQuestionRequests],
   );
+  // A slim floating window has no room for questionnaires in the transcript;
+  // they live in a dock that expands over the chat instead.
+  const chatBodyRef = React.useRef<HTMLDivElement | null>(null);
+  const dockQuestions = useCompactChat(chatBodyRef, Boolean(activeThread));
   const activeApprovalStartedAt = React.useMemo(() => {
     const timestamps = activePendingApprovals
       .map((approval) => Date.parse(approval.createdAt))
@@ -2386,7 +2392,7 @@ export function AssistantDock({
       ),
     });
   }
-  for (const request of activeQuestionRequests) {
+  for (const request of dockQuestions ? [] : activeQuestionRequests) {
     nativeTranscriptItems.push({
       key: `questions:${request.id}`,
       kind: 'approval',
@@ -2569,8 +2575,11 @@ export function AssistantDock({
           />
         ) : (
           <div
-            ref={setDroneReferenceDropNodeRef}
-            className={`flex min-h-0 flex-1 flex-col ${
+            ref={(node) => {
+              setDroneReferenceDropNodeRef(node);
+              chatBodyRef.current = node;
+            }}
+            className={`relative flex min-h-0 flex-1 flex-col ${
               droneReferenceDropActive ? 'ring-1 ring-inset ring-[var(--accent-muted)]' : ''
             }`}
           >
@@ -2606,6 +2615,17 @@ export function AssistantDock({
               }
               items={nativeTranscriptItems}
             />
+
+            {dockQuestions ? (
+              <FloatingQuestionDock
+                requests={activeQuestionRequests}
+                busyId={questionBusyId}
+                onSubmit={(request, { responses, notes }) =>
+                  void resolveQuestionRequest(request, { kind: 'submit', responses, notes })
+                }
+                onSkip={(request, notes) => void resolveQuestionRequest(request, { kind: 'skip', notes })}
+              />
+            ) : null}
 
             <ChatSurfaceComposer
               overlay={nativeComposerOverlay}

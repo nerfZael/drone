@@ -3121,7 +3121,8 @@ select:disabled optgroup {
   background: var(--hover);
 }
 
-.dh-dockable-workspace--single-panel .dv-tabs-and-actions-container {
+/* Only the docked group hides its tab bar; floating side chats keep their own headers. */
+.dh-dockable-workspace--single-panel .dv-grid-view .dv-tabs-and-actions-container {
   display: none;
 }
 
@@ -3743,8 +3744,15 @@ select:disabled optgroup {
 }
 
 @container floating-chat (max-width: 560px) {
-  .dh-chat-transcript {
+  /*
+   * Read by use-compact-chat. Set on the window's children rather than the
+   * transcript frame: the multi-chat column has no frame element, so keying
+   * on it left non-native floating chats auto-expanding activity and files.
+   */
+  .dh-floating-chat > * {
     --chat-compact: 1;
+    /* Turn spacing in the multi-chat column; the shared frame sets its own gap below. */
+    --chat-turn-gap: .625rem;
   }
 
 

@@ -1453,7 +1453,7 @@ export function ToolRunActivity({
     !activityEndedWithAssistantOutput;
 
   return (
-    <div ref={rootRef}>
+    <div ref={rootRef} data-chat-working={active ? 'true' : undefined}>
       <AgentRunSummaryLine
         active={active}
         durationMs={durationMs}

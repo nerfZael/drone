@@ -14,6 +14,7 @@ import {
   chatSubscriptionResourceLabel,
   chatSubscriptionSummary,
   normalizeChatResourceSubscriptions,
+  presentableChatSubscriptions,
 } from '../src/droneHub/app/chat-resource-subscriptions';
 import { SubscriptionEventMessage } from '../src/droneHub/chat/SubscriptionEventBadge';
 
@@ -214,6 +215,55 @@ describe('chat resource subscription presentation', () => {
 
     expect(html).toContain('data-chat-subscription-indicator="true"');
     expect(html).toContain('PR merged · acme/widgets#42');
+  });
+
+  test('leaves questionnaire subscriptions out of the composer: the question card already says it', () => {
+    const subscriptions = normalizeChatResourceSubscriptions([
+      {
+        id: 'question',
+        provider: 'drone-hub',
+        resourceType: 'question_request',
+        resourceId: 'req-1',
+        resourceLabel: 'Which database should the service use?',
+        events: ['question_request.resolved'],
+        status: 'active',
+      },
+    ]);
+    expect(subscriptions).toHaveLength(1);
+    expect(presentableChatSubscriptions(subscriptions)).toEqual([]);
+
+    const html = renderToStaticMarkup(
+      React.createElement(DroneChatComposerMetadata, {
+        runtime: 'container',
+        chatId: 'chat-1',
+        initialSubscriptions: subscriptions,
+        showWorkspaceInfo: false,
+      }),
+    );
+    expect(html).toBe('');
+
+    // Other subscriptions still show, on their own.
+    const mixed = normalizeChatResourceSubscriptions([
+      subscriptions[0],
+      {
+        id: 'one',
+        provider: 'github',
+        resourceType: 'pull_request',
+        resourceId: 'acme/widgets#42',
+        events: ['pull_request.merged'],
+        status: 'active',
+      },
+    ]);
+    const mixedHtml = renderToStaticMarkup(
+      React.createElement(DroneChatComposerMetadata, {
+        runtime: 'container',
+        chatId: 'chat-1',
+        initialSubscriptions: mixed,
+      }),
+    );
+    expect(mixedHtml).toContain('PR merged · acme/widgets#42');
+    expect(mixedHtml).not.toContain('Subscriptions · 2');
+    expect(mixedHtml).not.toContain('Which database');
   });
 
   test('shows a read-only current branch indicator only when a branch is available', () => {

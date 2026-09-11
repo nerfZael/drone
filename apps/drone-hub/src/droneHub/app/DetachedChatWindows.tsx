@@ -12,6 +12,8 @@ import { droneHomePath } from './helpers';
 import { detachedChatKey, DETACHED_CHAT_BEFORE_ATTACH_EVENT, DETACHED_CHAT_FOCUS_EVENT, useDetachedChatStore, type DetachedChat } from './detached-chat-store';
 import { placeDetachedChat } from './detached-chat-placement';
 import { measureSideChatBounds } from './side-chat-workspace-state';
+import { useFloatingWindowKeeper } from './use-floating-window-keeper';
+import { useFloatingChatFocusGrow } from './use-floating-chat-focus-grow';
 import { prepareSideChatPanel } from './prepareSideChatPanel';
 import { focusChatWindow } from './focus-chat-window';
 import { requestChatFileOpen } from './chat-file-navigation';
@@ -193,15 +195,26 @@ export function DetachedChatWindows(props: DetachedChatWindowsProps) {
     mutations.observe(host, { childList: true, subtree: true });
     return () => { observer.disconnect(); mutations.disconnect(); };
   }, [props.visible, props.currentDroneId]);
+  // Detached windows keep their arrangement across app window resizes; the
+  // store holds where the user last put each one, not where a clamp left it.
+  const floatingWindows = useFloatingWindowKeeper({
+    apiRef,
+    rootRef,
+    ready,
+    persist: (id, bounds) => useDetachedChatStore.getState().saveBounds(id, bounds),
+    restore: (id) => useDetachedChatStore.getState().chats[id]?.bounds,
+    onMoved: (api, id) => {
+      const panel = api.getPanel(id);
+      if (panel) prepareSideChatPanel(panel);
+    },
+  });
+  useFloatingChatFocusGrow({ apiRef, rootRef, ready, keeper: floatingWindows });
   const save = React.useCallback(() => {
-    const api = apiRef.current;
-    const root = rootRef.current;
-    if (!api || !root || !visibleRef.current || api.width <= 0 || api.height <= 0) return;
-    for (const panel of api.panels) {
-      const bounds = measureSideChatBounds(panel.group.element, root);
-      if (bounds.width > 0 && bounds.height > 0) useDetachedChatStore.getState().saveBounds(panel.id, bounds);
+    for (const id of floatingWindows.ids()) {
+      const bounds = floatingWindows.intent(id);
+      if (bounds) useDetachedChatStore.getState().saveBounds(id, bounds);
     }
-  }, []);
+  }, [floatingWindows]);
   const focus = React.useCallback((key: string) => {
     const panel = apiRef.current?.getPanel(key);
     if (!panel) return;
@@ -250,13 +263,6 @@ export function DetachedChatWindows(props: DetachedChatWindowsProps) {
       window.removeEventListener(DETACHED_CHAT_BEFORE_ATTACH_EVENT, save);
     };
   }, [focus, save]);
-  React.useEffect(() => {
-    const api = apiRef.current;
-    if (!api) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const subscription = api.onDidLayoutChange(() => { clearTimeout(timer); timer = setTimeout(save, 100); });
-    return () => { clearTimeout(timer); save(); subscription.dispose(); };
-  }, [ready, save]);
   return (
     <WindowContext.Provider value={props}>
       <div ref={rootRef} aria-hidden={!props.visible} className="dh-dockable-workspace dh-detached-chats absolute inset-0 z-30 pointer-events-none"

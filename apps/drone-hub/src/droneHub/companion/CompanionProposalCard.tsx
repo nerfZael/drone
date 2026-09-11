@@ -14,6 +14,8 @@ import {
   type CompanionStatus,
 } from '@drone/assistant-chat';
 import { UiBadge, type UiBadgeTone } from '../../ui/components/Badge';
+import { UiButton, UiIconButton } from '../../ui/components/Button';
+import { UiDialog } from '../../ui/components/Dialog';
 import type { DesktopNewDronePreferences } from '../app/new-drone-preferences';
 
 const BUILTIN_AGENT_LABELS: Readonly<Record<string, string>> = {
@@ -398,6 +400,326 @@ export type CompanionProposalHistoryDetails = {
   onBack(): void;
 };
 
+type ProposalOperationListProps = {
+  proposal: CompanionProposal;
+  defaultRepoPath: string;
+  operationResult: ReadonlyMap<string, CompanionProposalExecutionItem>;
+  executing: boolean;
+  executionProgress: CompanionProposalExecutionProgress | null;
+  historyDetails?: CompanionProposalHistoryDetails;
+  creationDefaults: ReadonlyMap<string, DesktopNewDronePreferences | null>;
+  droneLabel(droneId: string): string;
+  createdInStep(droneId: string): number | null;
+  /** Show every operation in full: details open and no clamped previews. */
+  full?: boolean;
+  /** Prefix for the per-operation details ids, unique per mounted list. */
+  idPrefix?: string;
+};
+
+function ProposalOperationList({
+  proposal,
+  defaultRepoPath,
+  operationResult,
+  executing,
+  executionProgress,
+  historyDetails,
+  creationDefaults,
+  droneLabel,
+  createdInStep,
+  full = false,
+  idPrefix = 'proposal-operation-details',
+}: ProposalOperationListProps) {
+  const [expandedOperationIds, setExpandedOperationIds] = React.useState<Set<string>>(
+    () => new Set(full || historyDetails ? proposal.operations.map((operation) => operation.id) : []),
+  );
+  const toggleOperationDetails = React.useCallback((operationId: string) => {
+    setExpandedOperationIds((current) => {
+      const next = new Set(current);
+      if (next.has(operationId)) next.delete(operationId);
+      else next.add(operationId);
+      return next;
+    });
+  }, []);
+
+  if (proposal.operations.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed border-[var(--border-subtle)] px-3 py-4 text-center text-xs text-[var(--muted)]">
+        Companion has not added any operations yet.
+      </div>
+    );
+  }
+
+  return (
+    <ol className="space-y-0">
+      {proposal.operations.map((operation, index) => {
+        const outcome = operationResult.get(operation.id);
+        const isMessage = operation.type === 'send_message';
+        const isCreateDrone = operation.type === 'create_drone';
+        const isLast = index === proposal.operations.length - 1;
+        const createSettings = isCreateDrone
+          ? effectiveCreationSettings(
+              operation,
+              creationDefaults.get(operation.repoPath ?? defaultRepoPath) ?? null,
+            )
+          : null;
+        const details: CompanionProposalOperationDetail[] = isCreateDrone && createSettings
+          ? [
+              ...creationDetailRowsFromSettings(operation, defaultRepoPath, createSettings),
+              ...(historyDetails ? [{ label: 'Initial prompt', value: operation.prompt }] : []),
+            ]
+          : isMessage
+            ? historyDetails
+              ? companionProposalOperationDetails(operation, defaultRepoPath)
+              : []
+            : companionProposalOperationDetails(operation, defaultRepoPath);
+        const createLocation = isCreateDrone
+          ? proposalLocation(operation, defaultRepoPath)
+          : null;
+        const operationLabel = companionProposalOperationLabel(
+          operation,
+          'droneId' in operation ? droneLabel(operation.droneId) : '',
+        );
+        const detailsId = `${idPrefix}-${operation.id}`;
+        const detailsExpanded = expandedOperationIds.has(operation.id);
+        const targetStep = 'droneId' in operation ? createdInStep(operation.droneId) : null;
+        const targetStepPill = targetStep !== null ? (
+          <Pill tone="accent" title={`Targets the drone created in step ${targetStep}`}>
+            ↑ Step {targetStep}
+          </Pill>
+        ) : null;
+        const headline = (
+          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px] leading-snug text-[var(--fg-secondary)]">
+            <span><OperationHeadline operation={operation} droneLabel={droneLabel} /></span>
+            {targetStepPill}
+            {isMessage && operation.chatName && operation.chatName !== 'default' ? (
+              <Pill title="Chat">{operation.chatName}</Pill>
+            ) : null}
+            {isMessage && operation.delivery === 'asap' ? (
+              <Pill tone="warning" title="Delivered right away, interrupting whatever the drone is doing">
+                Send immediately
+              </Pill>
+            ) : null}
+          </div>
+        );
+        const summaryContent = (
+          <>
+            {headline}
+            {isMessage ? (
+              <blockquote className={`mt-1.5 whitespace-pre-wrap break-words border-l-2 border-[var(--info-border)] pl-2.5 text-xs leading-relaxed text-[var(--fg)] ${full ? '' : 'line-clamp-4'}`}>
+                {operation.message}
+              </blockquote>
+            ) : null}
+            {isCreateDrone && createSettings ? (
+              <>
+                <div className={`mt-1.5 whitespace-pre-wrap break-words text-xs leading-relaxed text-[var(--fg-secondary)] ${full ? '' : 'line-clamp-2'}`}>
+                  {operation.prompt}
+                </div>
+                {/* Where it lands and how it runs, on one quiet line. */}
+                <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="flex min-w-0 max-w-full items-center gap-1 text-[11px] text-[var(--muted)]">
+                    <svg className="h-3 w-3 shrink-0" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M1.5 3.5A1 1 0 0 1 2.5 2.5h2.2l1 1.2h3.8a1 1 0 0 1 1 1v4.3a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1z" />
+                    </svg>
+                    <span className="truncate">{createLocation?.groupPath}</span>
+                  </span>
+                  <span className="flex flex-wrap items-center gap-1">
+                    <SettingPill setting={createSettings.runtime} label="Runtime" tone="neutral" format={runtimeLabel} />
+                    <SettingPill setting={createSettings.agent} label="Agent" tone="accent" format={agentDisplayLabel} />
+                    {createSettings.model.value && createSettings.model.value !== UNRESOLVED_DEFAULT ? (
+                      <Pill
+                        tone={createSettings.model.isDefault && createSettings.reasoning.isDefault ? 'neutral' : 'info'}
+                        title={[
+                          `Model${createSettings.model.isDefault ? ' (saved default)' : ''}`,
+                          createSettings.reasoning.value && createSettings.reasoning.value !== UNRESOLVED_DEFAULT
+                            ? `Reasoning${createSettings.reasoning.isDefault ? ' (saved default)' : ''}`
+                            : '',
+                        ].filter(Boolean).join(' · ')}
+                      >
+                        {formatModelDisplayLabel(createSettings.model.value)}
+                        {createSettings.reasoning.value && createSettings.reasoning.value !== UNRESOLVED_DEFAULT
+                          ? ` · ${formatReasoningLabel(createSettings.reasoning.value) || createSettings.reasoning.value}`
+                          : ''}
+                      </Pill>
+                    ) : null}
+                  </span>
+                </div>
+              </>
+            ) : null}
+          </>
+        );
+        const summary = details.length > 0 ? (
+          <button
+            type="button"
+            className="relative block w-full min-w-0 appearance-none rounded-sm bg-transparent p-0 pr-5 text-left outline-none hover:brightness-110 focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+            aria-expanded={detailsExpanded}
+            aria-controls={detailsId}
+            aria-label={`${
+              isCreateDrone
+                ? `Preview full initial message and group path for ${operation.name || 'new drone'}; `
+                : ''
+            }${detailsExpanded ? 'hide' : 'review'} details for ${operationLabel}`}
+            onClick={() => toggleOperationDetails(operation.id)}
+          >
+            {summaryContent}
+            <svg
+              className={`absolute right-0 top-1 h-3 w-3 text-[var(--muted)] transition-transform ${
+                detailsExpanded ? 'rotate-90' : ''
+              }`}
+              viewBox="0 0 10 10"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="m3.5 2 3 3-3 3" />
+            </svg>
+          </button>
+        ) : (
+          <div
+            className="min-w-0 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+            tabIndex={!full && (isMessage || isCreateDrone) ? 0 : undefined}
+            aria-label={full
+              ? undefined
+              : isMessage
+                ? `Preview full message to ${droneLabel(operation.droneId)}`
+                : isCreateDrone
+                  ? `Preview full initial message and group path for ${operation.name || 'new drone'}`
+                  : undefined}
+          >
+            {summaryContent}
+          </div>
+        );
+        return (
+          <li key={operation.id} className="relative flex gap-3 pb-4 last:pb-0">
+            <div className="relative flex shrink-0 flex-col items-center">
+              <ProposalOperationMarker
+                index={index + 1}
+                active={executing && executionProgress?.activeOperationId === operation.id}
+                outcome={outcome}
+              />
+              {!isLast ? (
+                <span
+                  className="mt-1 w-px flex-1 bg-[var(--border-subtle)]"
+                  aria-hidden="true"
+                />
+              ) : null}
+            </div>
+            <div className="min-w-0 flex-1 pt-0.5">
+              {/* The dialog already shows everything, so the hover preview only serves the compact card. */}
+              {!full && (isMessage || isCreateDrone) ? (
+                <ProposalOperationHoverCard
+                  operation={operation}
+                  defaultRepoPath={defaultRepoPath}
+                  droneLabel={droneLabel}
+                >
+                  {summary}
+                </ProposalOperationHoverCard>
+              ) : (
+                summary
+              )}
+              {details.length > 0 && detailsExpanded ? (
+                <dl
+                  id={detailsId}
+                  className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-md bg-[var(--surface-soft)] px-2.5 py-2 text-[11px]"
+                >
+                  {details.map((detail) => (
+                    <React.Fragment key={detail.label}>
+                      <dt className="text-[var(--muted-dim)]">{detail.label}</dt>
+                      <dd className="max-h-40 min-w-0 overflow-auto whitespace-pre-wrap break-words text-[var(--fg-secondary)]">
+                        {detail.value}
+                      </dd>
+                    </React.Fragment>
+                  ))}
+                </dl>
+              ) : null}
+              {outcome && historyDetails ? (
+                <div className="mt-1.5 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-2.5 py-2 text-[11px]">
+                  <div className={outcome.status === 'completed'
+                    ? 'font-[var(--weight-medium)] text-[var(--green)]'
+                    : outcome.status === 'failed'
+                      ? 'font-[var(--weight-medium)] text-[var(--red)]'
+                      : 'text-[var(--muted-dim)]'}>
+                    {outcome.status === 'completed'
+                      ? 'Succeeded'
+                      : outcome.status === 'skipped'
+                        ? 'Not run'
+                        : `Failed${outcome.error ? `: ${outcome.error}` : ''}`}
+                  </div>
+                  {outcome.result ? (
+                    <div className="mt-1.5">
+                      <div className="text-[10px] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]">
+                        Outcome details
+                      </div>
+                      <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-[10px] text-[var(--fg-secondary)]">
+                        {JSON.stringify(outcome.result, null, 2)}
+                      </pre>
+                    </div>
+                  ) : null}
+                </div>
+              ) : outcome && outcome.status !== 'completed' ? (
+                <div className={`mt-1.5 text-[11px] ${outcome.status === 'failed' ? 'text-[var(--red)]' : 'text-[var(--muted-dim)]'}`}>
+                  {outcome.status === 'skipped' ? 'Not run' : outcome.error || 'Failed'}
+                </div>
+              ) : null}
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/** Discard / Apply (or Back to history), shared by the card footer and the expanded dialog. */
+function ProposalActions({
+  executing,
+  execution,
+  applyDisabled,
+  historyDetails,
+  onExecute,
+  onDiscard,
+}: {
+  executing: boolean;
+  execution: CompanionProposalExecution | null;
+  applyDisabled: boolean;
+  historyDetails?: CompanionProposalHistoryDetails;
+  onExecute?(): void;
+  onDiscard?(): void;
+}) {
+  if (historyDetails) {
+    return (
+      <UiButton variant="ghost" size="small" onClick={historyDetails.onBack}>
+        Back to history
+      </UiButton>
+    );
+  }
+  return (
+    <>
+      <UiButton variant="ghost" size="small" onClick={onDiscard} disabled={executing}>
+        Discard
+      </UiButton>
+      <UiButton variant="primary" size="small" onClick={onExecute} disabled={applyDisabled} loading={executing}>
+        {executing
+          ? 'Applying…'
+          : execution?.ok
+            ? 'Applied'
+            : execution
+              ? 'Discard to retry'
+              : 'Apply proposal'}
+      </UiButton>
+    </>
+  );
+}
+
+function ExpandIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5" aria-hidden="true">
+      <path d="M9.5 2.5h4v4M13.5 2.5 9 7M6.5 13.5h-4v-4M2.5 13.5 7 9" />
+    </svg>
+  );
+}
+
 export function CompanionProposalCard({
   proposal,
   defaultRepoPath,
@@ -426,9 +748,6 @@ export function CompanionProposalCard({
   onDiscard?(): void;
   historyDetails?: CompanionProposalHistoryDetails;
 }) {
-  const [expandedOperationIds, setExpandedOperationIds] = React.useState<Set<string>>(
-    () => new Set(historyDetails ? proposal.operations.map((operation) => operation.id) : []),
-  );
   const operationResult = React.useMemo(
     () => new Map((execution?.operations ?? executionProgress?.operations ?? []).map((item) => [item.id, item])),
     [execution, executionProgress],
@@ -443,6 +762,7 @@ export function CompanionProposalCard({
     ? { tone: 'success' as const, label: 'Applied' }
     : failureStatus(execution, completedCount);
   const [descriptionOpen, setDescriptionOpen] = React.useState(Boolean(historyDetails));
+  const [dialogOpen, setDialogOpen] = React.useState(false);
   /** 1-based step number of the create/clone operation an `$id` drone reference points at. */
   const stepIndexByOperationId = React.useMemo(
     () => new Map(proposal.operations.map((operation, index) => [operation.id, index + 1])),
@@ -475,14 +795,6 @@ export function CompanionProposalCard({
     if (!droneId.startsWith('$')) return null;
     return stepIndexByOperationId.get(droneId.slice(1)) ?? null;
   }, [stepIndexByOperationId]);
-  const toggleOperationDetails = React.useCallback((operationId: string) => {
-    setExpandedOperationIds((current) => {
-      const next = new Set(current);
-      if (next.has(operationId)) next.delete(operationId);
-      else next.add(operationId);
-      return next;
-    });
-  }, []);
 
   // The Apply button already reads "Applying…" / "Applied"; the pill only adds
   // information when the apply went wrong.
@@ -491,235 +803,40 @@ export function CompanionProposalCard({
       {status.label}
     </div>
   ) : null;
+  const listProps = {
+    proposal,
+    defaultRepoPath,
+    operationResult,
+    executing,
+    executionProgress,
+    historyDetails,
+    creationDefaults,
+    droneLabel,
+    createdInStep,
+  };
+  const actions = (
+    <ProposalActions
+      executing={executing}
+      execution={execution}
+      applyDisabled={applyDisabled}
+      historyDetails={historyDetails}
+      onExecute={onExecute}
+      onDiscard={onDiscard}
+    />
+  );
 
   return (
     <Tooltip.Provider delayDuration={250} skipDelayDuration={100}>
       <aside
         id={historyDetails ? 'companion-proposal-history' : undefined}
-        className="flex max-h-[min(36rem,calc(100vh-2rem))] w-full shrink-0 flex-col overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--panel)] shadow-2xl min-[860px]:w-[22rem] min-[1100px]:w-[26rem]"
+        className="flex max-h-[min(36rem,calc(100vh-2rem))] w-full shrink-0 flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--panel-raised)] shadow-[var(--edge-highlight),var(--shadow-dialog)] min-[860px]:w-[22rem] min-[1100px]:w-[26rem]"
         aria-label={historyDetails ? 'Companion proposal execution details' : 'Companion proposal'}
       >
       <div className="dh-agent-activity-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-3">
-        {proposal.operations.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-[var(--border-subtle)] px-3 py-4 text-center text-xs text-[var(--muted)]">
-            Companion has not added any operations yet.
-          </div>
-        ) : (
-          <ol className="space-y-0">
-            {proposal.operations.map((operation, index) => {
-              const outcome = operationResult.get(operation.id);
-              const isMessage = operation.type === 'send_message';
-              const isCreateDrone = operation.type === 'create_drone';
-              const isLast = index === proposal.operations.length - 1;
-              const createSettings = isCreateDrone
-                ? effectiveCreationSettings(
-                    operation,
-                    creationDefaults.get(operation.repoPath ?? defaultRepoPath) ?? null,
-                  )
-                : null;
-              const details: CompanionProposalOperationDetail[] = isCreateDrone && createSettings
-                ? [
-                    ...creationDetailRowsFromSettings(operation, defaultRepoPath, createSettings),
-                    ...(historyDetails ? [{ label: 'Initial prompt', value: operation.prompt }] : []),
-                  ]
-                : isMessage
-                  ? historyDetails
-                    ? companionProposalOperationDetails(operation, defaultRepoPath)
-                    : []
-                  : companionProposalOperationDetails(operation, defaultRepoPath);
-              const createLocation = isCreateDrone
-                ? proposalLocation(operation, defaultRepoPath)
-                : null;
-              const operationLabel = companionProposalOperationLabel(
-                operation,
-                'droneId' in operation ? droneLabel(operation.droneId) : '',
-              );
-              const detailsExpanded = expandedOperationIds.has(operation.id);
-              const targetStep = 'droneId' in operation ? createdInStep(operation.droneId) : null;
-              const targetStepPill = targetStep !== null ? (
-                <Pill tone="accent" title={`Targets the drone created in step ${targetStep}`}>
-                  ↑ Step {targetStep}
-                </Pill>
-              ) : null;
-              const headline = (
-                <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px] leading-snug text-[var(--fg-secondary)]">
-                  <span><OperationHeadline operation={operation} droneLabel={droneLabel} /></span>
-                  {targetStepPill}
-                  {isMessage && operation.chatName && operation.chatName !== 'default' ? (
-                    <Pill title="Chat">{operation.chatName}</Pill>
-                  ) : null}
-                  {isMessage && operation.delivery === 'asap' ? (
-                    <Pill tone="warning" title="Delivered right away, interrupting whatever the drone is doing">
-                      Send immediately
-                    </Pill>
-                  ) : null}
-                </div>
-              );
-              const summaryContent = (
-                <>
-                  {headline}
-                  {isMessage ? (
-                    <blockquote className="mt-1.5 line-clamp-4 whitespace-pre-wrap break-words border-l-2 border-[var(--info-border)] pl-2.5 text-xs leading-relaxed text-[var(--fg)]">
-                      {operation.message}
-                    </blockquote>
-                  ) : null}
-                  {isCreateDrone && createSettings ? (
-                    <>
-                      <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                        <SettingPill setting={createSettings.runtime} label="Runtime" tone="neutral" format={runtimeLabel} />
-                        <SettingPill setting={createSettings.agent} label="Agent" tone="accent" format={agentDisplayLabel} />
-                        {createSettings.model.value && createSettings.model.value !== UNRESOLVED_DEFAULT ? (
-                          <Pill
-                            tone={createSettings.model.isDefault && createSettings.reasoning.isDefault ? 'neutral' : 'info'}
-                            title={[
-                              `Model${createSettings.model.isDefault ? ' (saved default)' : ''}`,
-                              createSettings.reasoning.value && createSettings.reasoning.value !== UNRESOLVED_DEFAULT
-                                ? `Reasoning${createSettings.reasoning.isDefault ? ' (saved default)' : ''}`
-                                : '',
-                            ].filter(Boolean).join(' · ')}
-                          >
-                            {formatModelDisplayLabel(createSettings.model.value)}
-                            {createSettings.reasoning.value && createSettings.reasoning.value !== UNRESOLVED_DEFAULT
-                              ? ` · ${formatReasoningLabel(createSettings.reasoning.value) || createSettings.reasoning.value}`
-                              : ''}
-                          </Pill>
-                        ) : null}
-                      </div>
-                      <div className="mt-1.5 line-clamp-2 whitespace-pre-wrap break-words text-xs leading-relaxed text-[var(--fg-secondary)]">
-                        {operation.prompt}
-                      </div>
-                      <div className="mt-1.5 flex min-w-0 items-center gap-1 text-[11px] text-[var(--muted)]">
-                        <svg className="h-3 w-3 shrink-0" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" aria-hidden="true">
-                          <path d="M1.5 3.5A1 1 0 0 1 2.5 2.5h2.2l1 1.2h3.8a1 1 0 0 1 1 1v4.3a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1z" />
-                        </svg>
-                        <span className="truncate">{createLocation?.groupPath}</span>
-                      </div>
-                    </>
-                  ) : null}
-                </>
-              );
-              const summary = details.length > 0 ? (
-                <button
-                  type="button"
-                  className="relative block w-full min-w-0 appearance-none rounded-sm bg-transparent p-0 pr-5 text-left outline-none hover:brightness-110 focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
-                  aria-expanded={detailsExpanded}
-                  aria-controls={`proposal-operation-details-${operation.id}`}
-                  aria-label={`${
-                    isCreateDrone
-                      ? `Preview full initial message and group path for ${operation.name || 'new drone'}; `
-                      : ''
-                  }${detailsExpanded ? 'hide' : 'review'} details for ${operationLabel}`}
-                  onClick={() => toggleOperationDetails(operation.id)}
-                >
-                  {summaryContent}
-                  <svg
-                    className={`absolute right-0 top-1 h-3 w-3 text-[var(--muted)] transition-transform ${
-                      detailsExpanded ? 'rotate-90' : ''
-                    }`}
-                    viewBox="0 0 10 10"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="m3.5 2 3 3-3 3" />
-                  </svg>
-                </button>
-              ) : (
-                <div
-                  className="min-w-0 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
-                  tabIndex={isMessage || isCreateDrone ? 0 : undefined}
-                  aria-label={isMessage
-                    ? `Preview full message to ${droneLabel(operation.droneId)}`
-                    : isCreateDrone
-                      ? `Preview full initial message and group path for ${operation.name || 'new drone'}`
-                      : undefined}
-                >
-                  {summaryContent}
-                </div>
-              );
-              return (
-                <li key={operation.id} className="relative flex gap-3 pb-4 last:pb-0">
-                  <div className="relative flex shrink-0 flex-col items-center">
-                    <ProposalOperationMarker
-                      index={index + 1}
-                      active={executing && executionProgress?.activeOperationId === operation.id}
-                      outcome={outcome}
-                    />
-                    {!isLast ? (
-                      <span
-                        className="mt-1 w-px flex-1 bg-[var(--border-subtle)]"
-                        aria-hidden="true"
-                      />
-                    ) : null}
-                  </div>
-                  <div className="min-w-0 flex-1 pt-0.5">
-                    {isMessage || isCreateDrone ? (
-                      <ProposalOperationHoverCard
-                        operation={operation}
-                        defaultRepoPath={defaultRepoPath}
-                        droneLabel={droneLabel}
-                      >
-                        {summary}
-                      </ProposalOperationHoverCard>
-                    ) : (
-                      summary
-                    )}
-                    {details.length > 0 && detailsExpanded ? (
-                      <dl
-                        id={`proposal-operation-details-${operation.id}`}
-                        className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-md bg-[var(--surface-soft)] px-2.5 py-2 text-[11px]"
-                      >
-                        {details.map((detail) => (
-                          <React.Fragment key={detail.label}>
-                            <dt className="text-[var(--muted-dim)]">{detail.label}</dt>
-                            <dd className="max-h-40 min-w-0 overflow-auto whitespace-pre-wrap break-words text-[var(--fg-secondary)]">
-                              {detail.value}
-                            </dd>
-                          </React.Fragment>
-                        ))}
-                      </dl>
-                    ) : null}
-                    {outcome && historyDetails ? (
-                      <div className="mt-1.5 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-2.5 py-2 text-[11px]">
-                        <div className={outcome.status === 'completed'
-                          ? 'font-[var(--weight-medium)] text-[var(--green)]'
-                          : outcome.status === 'failed'
-                            ? 'font-[var(--weight-medium)] text-[var(--red)]'
-                            : 'text-[var(--muted-dim)]'}>
-                          {outcome.status === 'completed'
-                            ? 'Succeeded'
-                            : outcome.status === 'skipped'
-                              ? 'Not run'
-                              : `Failed${outcome.error ? `: ${outcome.error}` : ''}`}
-                        </div>
-                        {outcome.result ? (
-                          <div className="mt-1.5">
-                            <div className="text-[10px] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]">
-                              Outcome details
-                            </div>
-                            <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-[10px] text-[var(--fg-secondary)]">
-                              {JSON.stringify(outcome.result, null, 2)}
-                            </pre>
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : outcome && outcome.status !== 'completed' ? (
-                      <div className={`mt-1.5 text-[11px] ${outcome.status === 'failed' ? 'text-[var(--red)]' : 'text-[var(--muted-dim)]'}`}>
-                        {outcome.status === 'skipped' ? 'Not run' : outcome.error || 'Failed'}
-                      </div>
-                    ) : null}
-                  </div>
-                </li>
-              );
-            })}
-          </ol>
-        )}
+        <ProposalOperationList {...listProps} />
       </div>
 
-      <div className="shrink-0 border-t border-[var(--border-subtle)] px-4 py-2">
+      <div className="shrink-0 border-t border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-2 pl-4">
         <div className="flex items-center gap-3">
           <div className="flex min-w-0 flex-1 items-center gap-2">
             {proposal.summary ? (
@@ -752,41 +869,19 @@ export function CompanionProposalCard({
             )}
             {statusPill}
           </div>
-          <div className="flex shrink-0 items-center gap-2">
-            {historyDetails ? (
-              <button
-                type="button"
-                onClick={historyDetails.onBack}
-                className="rounded-md px-3 py-1.5 text-xs text-[var(--muted)] hover:bg-[var(--panel-hover)] hover:text-[var(--fg)]"
-              >
-                Back to history
-              </button>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  onClick={onDiscard}
-                  disabled={executing}
-                  className="rounded-md px-3 py-1.5 text-xs text-[var(--muted)] hover:bg-[var(--panel-hover)] hover:text-[var(--fg)] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Discard
-                </button>
-                <button
-                  type="button"
-                  onClick={onExecute}
-                  disabled={applyDisabled}
-                  className="inline-flex min-h-8 items-center rounded-md border border-[var(--accent)] bg-[var(--accent)] px-4 py-1.5 text-xs font-[var(--weight-bold)] text-[var(--accent-fg)] shadow-sm transition-[filter,opacity] hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-border)] disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {executing
-                    ? 'Applying…'
-                    : execution?.ok
-                      ? 'Applied'
-                      : execution
-                        ? 'Discard to retry'
-                        : 'Apply proposal'}
-                </button>
-              </>
-            )}
+          <div className="flex shrink-0 items-center gap-1.5">
+            <UiIconButton
+              variant="ghost"
+              size="small"
+              label="Expand proposal"
+              title="Expand proposal into a dialog"
+              icon={<ExpandIcon />}
+              aria-haspopup="dialog"
+              aria-expanded={dialogOpen}
+              disabled={proposal.operations.length === 0}
+              onClick={() => setDialogOpen(true)}
+            />
+            {actions}
           </div>
         </div>
         {proposal.summary && descriptionOpen ? (
@@ -811,6 +906,24 @@ export function CompanionProposalCard({
         ) : null}
       </div>
       </aside>
+      {/* Full-size preview for long proposals: every step open, nothing clamped. */}
+      <UiDialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        eyebrow={historyDetails ? 'Executed proposal' : 'Companion proposal'}
+        title={proposal.title}
+        description={proposal.summary}
+        size="large"
+        bodyClassName="dh-agent-activity-scrollbar max-h-[min(65vh,44rem)] overflow-y-auto"
+        footer={
+          <>
+            {statusPill ? <div className="mr-auto">{statusPill}</div> : null}
+            {actions}
+          </>
+        }
+      >
+        <ProposalOperationList {...listProps} full idPrefix="proposal-dialog-operation-details" />
+      </UiDialog>
     </Tooltip.Provider>
   );
 }

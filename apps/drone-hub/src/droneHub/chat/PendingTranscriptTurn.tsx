@@ -7,6 +7,7 @@ import {
   normalizePromptQueueInterruption,
   resolveChatQueueActionPresentation,
   type PromptQueueInterruptionResolution,
+  isAgentRunFileChanges,
 } from '@drone/assistant-chat';
 import { stripAnsi } from '../../domain';
 import type { PendingPrompt } from '../types';
@@ -119,6 +120,10 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
     (!notification || bundleHasHuman) &&
     (actionPresentation?.canCancel ?? item.state === 'queued');
   const showAgentPendingBubble = !actionPresentation && !(item.state === 'queued' && !isFailed);
+  // Once activity is streaming, the run summary line carries the status. The
+  // bubble is only worth its padding when it has something else to say.
+  const pendingBubbleHasContent =
+    isFailed || !activity || Boolean(observability) || Boolean(cancelError) || isAgentRunFileChanges(item.fileChanges);
   const agentCopyText = isFailed ? stripAnsi(item.error || 'failed to send') : 'Working…';
   const queuedFooter =
     item.state === 'queued' && !createNewChatBusy ? (
@@ -200,6 +205,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
 
   return (
     <div
+      data-chat-working={!isFailed && item.state !== 'queued' ? 'true' : undefined}
       className={`group/turn animate-fade-in ${isFailed && !isStopped && !isInterrupted ? 'opacity-90' : ''}`}
     >
       {isSubscriptionEvent ? (
@@ -326,7 +332,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
         >
           <CreatingNewChatStatus />
         </ChatMessageFrame>
-      ) : showAgentPendingBubble ? (
+      ) : showAgentPendingBubble && pendingBubbleHasContent ? (
         <ChatMessageFrame
           role="assistant"
           at={isFailed ? item.at : undefined}

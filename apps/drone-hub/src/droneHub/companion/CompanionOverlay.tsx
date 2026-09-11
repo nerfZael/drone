@@ -183,7 +183,7 @@ export function CompanionOverlay() {
       {promptEditorOpen ? <CompanionPromptEditor onClose={() => setPromptEditorOpen(false)} /> : null}
       {instructionsEditorOpen ? <CompanionInstructionsEditor onClose={() => setInstructionsEditorOpen(false)} /> : null}
       <aside
-        className="flex max-h-[calc(100vh-2rem)] w-full flex-col overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--panel)] shadow-2xl min-[860px]:w-[28rem] min-[860px]:self-end"
+        className="flex max-h-[calc(100vh-2rem)] w-full flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--panel-raised)] shadow-[var(--edge-highlight),var(--shadow-dialog)] min-[860px]:w-[28rem] min-[860px]:self-end"
         aria-label="Companion"
       >
       {/* Header doubles as the user's message once a transcript exists. */}
@@ -224,7 +224,8 @@ export function CompanionOverlay() {
             </div>
           )}
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
+        <div className="flex shrink-0 flex-col items-end gap-1">
+        <div className="flex items-center gap-1.5">
           {companion.status === 'recording' ? (
             <>
               <CompanionHeaderButton
@@ -349,7 +350,107 @@ export function CompanionOverlay() {
             ×
           </button>
         </div>
+        {/* Run summary sits under the buttons so it costs no extra row. */}
+        {active || companion.activity.length > 0 ? (
+          <button
+            type="button"
+            aria-expanded={expanded}
+            aria-controls="companion-tool-calls"
+            aria-label={`${expanded ? 'Collapse' : 'Expand'} tool calls`}
+            onClick={() => setExpanded((value) => !value)}
+            disabled={companion.activity.length === 0}
+            className="inline-flex h-4 items-center gap-1.5 rounded-sm pr-1 text-[11px] leading-none text-[var(--muted)] transition-colors hover:text-[var(--fg-secondary)] focus-visible:text-[var(--fg-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] disabled:cursor-default disabled:hover:text-[var(--muted)]"
+          >
+            {active ? (
+              <svg className="h-3 w-3 shrink-0 animate-spin text-[var(--accent)] motion-reduce:animate-none" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.5" opacity="0.25" />
+                <path d="M6 1.5a4.5 4.5 0 0 1 4.5 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            ) : null}
+            <span className="tabular-nums">
+              {active ? 'Working' : 'Worked'} for {formatWorkingDuration(duration)}
+            </span>
+            {companion.activity.length ? (
+              <span className="text-[var(--muted-dim)]">
+                · {companion.activity.length} tool {companion.activity.length === 1 ? 'call' : 'calls'}
+              </span>
+            ) : null}
+            {companion.activity.length ? (
+              <span className="text-[var(--muted-dim)]"><Chevron open={expanded} /></span>
+            ) : null}
+          </button>
+        ) : null}
+        </div>
       </div>
+
+      {/* Tool calls, expanded on demand right under their toggle. */}
+      {expanded && companion.activity.length ? (
+        <div
+          id="companion-tool-calls"
+          className="dh-agent-activity-scrollbar max-h-52 shrink-0 overflow-y-auto border-b border-[var(--border-subtle)] bg-[var(--surface-inset-faint)] px-3.5 py-1.5"
+        >
+          {activityGroups.map((group) => (
+            <React.Fragment key={group.key}>
+              {group.parallel ? (
+                <div
+                  className="flex items-center gap-2 py-1 text-[9px] uppercase tracking-wider text-[var(--muted-dim)]"
+                  aria-label={`${group.items.length} tool calls ran in parallel`}
+                >
+                  <span className="h-px flex-1 bg-[var(--border-subtle)]" />
+                  <span>Parallel · {group.items.length}</span>
+                  <span className="h-px flex-1 bg-[var(--border-subtle)]" />
+                </div>
+              ) : null}
+              {group.items.map((item) => (
+                <details
+                  key={item.callId}
+                  className="py-0.5 text-[11px]"
+                >
+                  <summary className="flex cursor-pointer items-center gap-1.5 text-[var(--fg-secondary)]">
+                    <span
+                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                        item.status === 'running'
+                          ? 'animate-pulse bg-[var(--accent)]'
+                          : item.status === 'failed'
+                            ? 'bg-[var(--red)]'
+                            : 'bg-[var(--green)]'
+                      }`}
+                      aria-label={item.status === 'running' ? 'Running' : item.status === 'failed' ? 'Failed' : 'Completed'}
+                      role="img"
+                    />
+                    <span className="truncate">{companionToolActivityLabel(item)}</span>
+                  </summary>
+                  <div className="mt-1 space-y-2 pl-3 text-[10px] text-[var(--muted-dim)]">
+                    {item.args !== undefined ? (
+                      <div>
+                        <div className="font-[var(--weight-semibold)] uppercase tracking-wide">Arguments</div>
+                        <pre className="overflow-auto whitespace-pre-wrap break-words">
+                          {JSON.stringify(item.args, null, 2)}
+                        </pre>
+                      </div>
+                    ) : null}
+                    {item.error !== undefined ? (
+                      <div>
+                        <div className="font-[var(--weight-semibold)] uppercase tracking-wide">Error</div>
+                        <pre className="overflow-auto whitespace-pre-wrap break-words">
+                          {JSON.stringify(item.error, null, 2)}
+                        </pre>
+                      </div>
+                    ) : item.result !== undefined ? (
+                      <div>
+                        <div className="font-[var(--weight-semibold)] uppercase tracking-wide">Result</div>
+                        <pre className="overflow-auto whitespace-pre-wrap break-words">
+                          {JSON.stringify(item.result, null, 2)}
+                        </pre>
+                      </div>
+                    ) : null}
+                  </div>
+                </details>
+              ))}
+            </React.Fragment>
+          ))}
+        </div>
+      ) : null}
 
       {/* Body: the reply is what the user came for. */}
       {companion.error || companion.reply ? (
@@ -367,101 +468,6 @@ export function CompanionOverlay() {
         </div>
       ) : null}
 
-      {/* Footer: run duration and tool calls, secondary but one click away. */}
-      {active || companion.activity.length > 0 ? (
-        <div className="shrink-0 border-t border-[var(--border-subtle)]">
-          <button
-            type="button"
-            aria-expanded={expanded}
-            aria-label={`${expanded ? 'Collapse' : 'Expand'} tool calls`}
-            onClick={() => setExpanded((value) => !value)}
-            disabled={companion.activity.length === 0}
-            className="flex h-7 w-full items-center gap-2 px-3.5 text-left text-[11px] text-[var(--muted)] transition-colors hover:text-[var(--fg-secondary)] focus-visible:text-[var(--fg-secondary)] focus-visible:outline-none disabled:cursor-default disabled:hover:text-[var(--muted)]"
-          >
-            {active ? (
-              <svg className="h-3 w-3 shrink-0 animate-spin text-[var(--accent)] motion-reduce:animate-none" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.5" opacity="0.25" />
-                <path d="M6 1.5a4.5 4.5 0 0 1 4.5 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-              </svg>
-            ) : null}
-            <span className="tabular-nums">
-              {active ? 'Working' : 'Worked'} for {formatWorkingDuration(duration)}
-            </span>
-            {companion.activity.length ? (
-              <span className="text-[var(--muted-dim)]">
-                · {companion.activity.length} tool {companion.activity.length === 1 ? 'call' : 'calls'}
-              </span>
-            ) : null}
-            {companion.activity.length ? (
-              <span className="ml-auto text-[var(--muted-dim)]"><Chevron open={expanded} /></span>
-            ) : null}
-          </button>
-          {expanded && companion.activity.length ? (
-            <div className="dh-agent-activity-scrollbar max-h-52 overflow-y-auto border-t border-[var(--border-subtle)] px-3.5 py-1.5">
-              {activityGroups.map((group) => (
-                <React.Fragment key={group.key}>
-                  {group.parallel ? (
-                    <div
-                      className="flex items-center gap-2 py-1 text-[9px] uppercase tracking-wider text-[var(--muted-dim)]"
-                      aria-label={`${group.items.length} tool calls ran in parallel`}
-                    >
-                      <span className="h-px flex-1 bg-[var(--border-subtle)]" />
-                      <span>Parallel · {group.items.length}</span>
-                      <span className="h-px flex-1 bg-[var(--border-subtle)]" />
-                    </div>
-                  ) : null}
-                  {group.items.map((item) => (
-                    <details
-                      key={item.callId}
-                      className="py-0.5 text-[11px]"
-                    >
-                      <summary className="flex cursor-pointer items-center gap-1.5 text-[var(--fg-secondary)]">
-                        <span
-                          className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                            item.status === 'running'
-                              ? 'animate-pulse bg-[var(--accent)]'
-                              : item.status === 'failed'
-                                ? 'bg-[var(--red)]'
-                                : 'bg-[var(--green)]'
-                          }`}
-                          aria-label={item.status === 'running' ? 'Running' : item.status === 'failed' ? 'Failed' : 'Completed'}
-                          role="img"
-                        />
-                        <span className="truncate">{companionToolActivityLabel(item)}</span>
-                      </summary>
-                      <div className="mt-1 space-y-2 pl-3 text-[10px] text-[var(--muted-dim)]">
-                        {item.args !== undefined ? (
-                          <div>
-                            <div className="font-[var(--weight-semibold)] uppercase tracking-wide">Arguments</div>
-                            <pre className="overflow-auto whitespace-pre-wrap break-words">
-                              {JSON.stringify(item.args, null, 2)}
-                            </pre>
-                          </div>
-                        ) : null}
-                        {item.error !== undefined ? (
-                          <div>
-                            <div className="font-[var(--weight-semibold)] uppercase tracking-wide">Error</div>
-                            <pre className="overflow-auto whitespace-pre-wrap break-words">
-                              {JSON.stringify(item.error, null, 2)}
-                            </pre>
-                          </div>
-                        ) : item.result !== undefined ? (
-                          <div>
-                            <div className="font-[var(--weight-semibold)] uppercase tracking-wide">Result</div>
-                            <pre className="overflow-auto whitespace-pre-wrap break-words">
-                              {JSON.stringify(item.result, null, 2)}
-                            </pre>
-                          </div>
-                        ) : null}
-                      </div>
-                    </details>
-                  ))}
-                </React.Fragment>
-              ))}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
       </aside>
       </div>
     </div>

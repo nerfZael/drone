@@ -187,9 +187,12 @@ export function ChangedFilesCard({
   initiallyExpanded?: boolean;
 }) {
   const rootRef = React.useRef<HTMLElement | null>(null);
+  const hasFileChanges = isAgentRunFileChanges(fileChanges);
   // A slim floating chat (for example a fork of a chat whose latest answer
   // auto-expands this card) has no room for the list; it opens on request.
-  const compact = useCompactChat(rootRef);
+  // The card renders nothing until it has changes, so re-measure once they
+  // arrive on an already-mounted card (a run reporting changes mid-flight).
+  const compact = useCompactChat(rootRef, hasFileChanges);
   const autoExpanded = initiallyExpanded && !compact;
   const [expanded, setExpanded] = React.useState(autoExpanded);
   const previousAutoExpanded = React.useRef(autoExpanded);
@@ -198,7 +201,7 @@ export function ChangedFilesCard({
     previousAutoExpanded.current = autoExpanded;
     setExpanded(autoExpanded);
   }, [autoExpanded]);
-  if (!isAgentRunFileChanges(fileChanges)) return null;
+  if (!hasFileChanges) return null;
 
   const attribution = fileChanges.version === 2 ? fileChanges.attribution : undefined;
   const attributionUnavailable = attribution === 'unavailable';

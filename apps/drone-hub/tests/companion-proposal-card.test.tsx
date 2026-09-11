@@ -119,6 +119,43 @@ describe('Companion proposal card', () => {
     expect(html).toContain('disabled');
   });
 
+  test('puts creation pills on the location line and offers a dialog preview', () => {
+    const html = renderToStaticMarkup(
+      <CompanionProposalCard
+        proposal={{
+          version: 1,
+          title: 'Create drone',
+          operations: [
+            { id: 'create', type: 'create_drone', name: 'Greeter', prompt: 'Say hello world.', runtime: 'container', agent: 'builtin:codex', model: 'gpt-5.6', reasoning: 'high' },
+          ],
+        }}
+        defaultRepoPath="/workspace/StorySpark"
+        execution={null}
+        executing={false}
+        companionStatus="completed"
+        onExecute={() => undefined}
+        onDiscard={() => undefined}
+      />,
+    );
+
+    // Repository first, then runtime / agent / model pills on the same line, all after the prompt.
+    const promptAt = html.indexOf('Say hello world.');
+    const repoAt = html.indexOf('>StorySpark</span>');
+    const runtimeAt = html.indexOf('>Container<');
+    const agentAt = html.indexOf('>Codex<');
+    expect(promptAt).toBeGreaterThan(-1);
+    expect(repoAt).toBeGreaterThan(promptAt);
+    expect(runtimeAt).toBeGreaterThan(repoAt);
+    expect(agentAt).toBeGreaterThan(runtimeAt);
+    // The dialog preview is one click away and stays closed until asked for.
+    expect(html).toContain('aria-label="Expand proposal"');
+    expect(html).toContain('aria-haspopup="dialog"');
+    expect(html).not.toContain('role="dialog"');
+    expect(html).not.toContain('proposal-dialog-operation-details');
+    // Actions come from the shared button set, so Apply matches the rest of the app.
+    expect(html).toContain('bg-[linear-gradient(180deg,var(--accent),var(--accent-muted))]');
+  });
+
   test('keeps clone semantics and explicit creation overrides behind item disclosures', () => {
     const html = renderToStaticMarkup(
       <CompanionProposalCard
@@ -312,7 +349,7 @@ describe('Companion proposal card', () => {
 
     // The Apply button carries the success state; no separate status pill duplicates it.
     expect(appliedHtml.match(/>Applied</g)).toHaveLength(1);
-    expect(appliedHtml).toContain('>Applied</button>');
+    expect(appliedHtml).toContain('>Applied</span></button>');
     expect(appliedHtml.match(/aria-label="Operation \d applied"/g)).toHaveLength(2);
     expect(appliedHtml).toContain('Refactoring opportunities review');
     expect(appliedHtml).toContain('Security code review');

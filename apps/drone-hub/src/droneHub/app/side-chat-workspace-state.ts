@@ -5,25 +5,37 @@ import type { WorkspaceRect } from './side-chat-placement';
 type SideChatWorkspaceState = {
   previousMainChat: string;
   floatingBounds: Record<string, WorkspaceRect>;
+  /** Where the user last put each floating chat, independent of the workspace size at the time. */
+  floatingIntent: Record<string, WorkspaceRect>;
 };
+
+function validRect(rect: unknown): rect is WorkspaceRect {
+  const bounds = rect as WorkspaceRect | null;
+  return Boolean(bounds) && [bounds!.x, bounds!.y, bounds!.width, bounds!.height].every(Number.isFinite) && bounds!.width > 0 && bounds!.height > 0;
+}
+
+function readRects(value: unknown): Record<string, WorkspaceRect> {
+  const rects: Record<string, WorkspaceRect> = {};
+  for (const [name, rect] of Object.entries((value ?? {}) as Record<string, unknown>)) {
+    if (!validRect(rect)) continue;
+    Object.defineProperty(rects, name, { value: rect, enumerable: true, configurable: true, writable: true });
+  }
+  return rects;
+}
 
 function storageKey(droneId: string): string {
   return profileStorageKey(`droneHub.sideChatWorkspace.${encodeURIComponent(droneId)}`);
 }
 
 export function parseSideChatWorkspaceState(raw: string | null): SideChatWorkspaceState {
-  const state: SideChatWorkspaceState = { previousMainChat: 'default', floatingBounds: {} };
+  const state: SideChatWorkspaceState = { previousMainChat: 'default', floatingBounds: {}, floatingIntent: {} };
   try {
     const value = JSON.parse(raw ?? 'null');
     if (typeof value?.previousMainChat === 'string' && value.previousMainChat.trim()) {
       state.previousMainChat = value.previousMainChat;
     }
-    for (const [name, rect] of Object.entries(value?.floatingBounds ?? {})) {
-      const bounds = rect as WorkspaceRect;
-      if (bounds && [bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite) && bounds.width > 0 && bounds.height > 0) {
-        Object.defineProperty(state.floatingBounds, name, { value: bounds, enumerable: true, configurable: true, writable: true });
-      }
-    }
+    state.floatingBounds = readRects(value?.floatingBounds);
+    state.floatingIntent = readRects(value?.floatingIntent);
   } catch {
     // Old or damaged preferences must not prevent opening a chat.
   }
@@ -45,6 +57,7 @@ export function saveSideChatWorkspaceState(droneId: string, update: Partial<Side
       ...previous,
       ...update,
       floatingBounds: { ...previous.floatingBounds, ...update.floatingBounds },
+      floatingIntent: { ...previous.floatingIntent, ...update.floatingIntent },
     }));
   } catch {
     // The workspace remains usable when storage is unavailable.
@@ -55,9 +68,10 @@ export function renameSideChatWorkspaceChat(droneId: string, oldName: string, ne
   if (oldName === newName) return;
   const state = readSideChatWorkspaceState(droneId);
   if (state.previousMainChat === oldName) state.previousMainChat = newName;
-  if (Object.prototype.hasOwnProperty.call(state.floatingBounds, oldName)) {
-    state.floatingBounds = { ...state.floatingBounds, [newName]: state.floatingBounds[oldName] };
-    delete state.floatingBounds[oldName];
+  for (const field of ['floatingBounds', 'floatingIntent'] as const) {
+    if (!Object.prototype.hasOwnProperty.call(state[field], oldName)) continue;
+    state[field] = { ...state[field], [newName]: state[field][oldName] };
+    delete state[field][oldName];
   }
   try { localStorage.setItem(storageKey(droneId), JSON.stringify(state)); } catch { /* Optional preferences. */ }
 }

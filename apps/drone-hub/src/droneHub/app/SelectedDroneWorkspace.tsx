@@ -14,7 +14,6 @@ import { createPortal } from 'react-dom';
 import { useDndMonitor, useDroppable } from '@dnd-kit/core';
 import type {
   ChatQuestionRequest,
-  ChatQuestionResponse,
   CodexApprovalDecision,
   CodexPendingApproval,
   PromptQueueInterruptionResolution,
@@ -119,6 +118,7 @@ import { useFleetAssignmentDropState } from './use-fleet-assignment-drop-state';
 import { AssistantDock } from '../assistant/AssistantDock';
 import { CodexApprovalCard } from '../assistant/CodexApprovalCard';
 import { AssistantQuestionCard } from '../assistant/AssistantQuestionCard';
+import { useExternalQuestionRequests } from '../chat/use-external-question-requests';
 import { AssistantQuestionResultCard } from '../assistant/AssistantQuestionResultCard';
 import {
   buildTranscriptExportFilename,
@@ -710,94 +710,16 @@ export function SelectedDroneWorkspace({
     activeChatName,
     currentAgentKey !== 'native' && !currentChatIsDraft,
   );
-  const [externalQuestionRequests, setExternalQuestionRequests] = React.useState<
-    ChatQuestionRequest[]
-  >([]);
-  const [externalQuestionBusyId, setExternalQuestionBusyId] = React.useState<string | null>(null);
-  const [externalQuestionError, setExternalQuestionError] = React.useState<string | null>(null);
-  React.useEffect(() => {
-    setExternalQuestionBusyId(null);
-    setExternalQuestionError(null);
-    if (currentAgentKey === 'native' || currentChatIsDraft) {
-      setExternalQuestionRequests([]);
-      return;
-    }
-    let active = true;
-    const load = async () => {
-      try {
-        const response = await requestJson<{ requests?: ChatQuestionRequest[] }>(
-          `/api/chat-question-requests?${new URLSearchParams({
-            droneId: currentDrone.id,
-            chatName: activeChatName,
-            includeResolved: 'true',
-          }).toString()}`,
-        );
-        if (active) setExternalQuestionRequests(response.requests ?? []);
-      } catch {
-        // The transcript and queue polling remain authoritative for connectivity errors.
-      }
-    };
-    void load();
-    const timer = window.setInterval(load, 2_000);
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-    };
-  }, [activeChatName, currentAgentKey, currentChatIsDraft, currentDrone.id]);
-
-  const resolveExternalQuestionRequest = React.useCallback(
-    async (
-      request: ChatQuestionRequest,
-      resolution:
-        | { kind: 'submit'; responses: ChatQuestionResponse[]; notes?: string }
-        | { kind: 'skip'; notes?: string },
-    ) => {
-      setExternalQuestionBusyId(request.id);
-      setExternalQuestionError(null);
-      try {
-        const response = await requestJson<{ result: ChatQuestionRequest['result'] }>(
-          `/api/chat-question-requests/${encodeURIComponent(request.id)}/${
-            resolution.kind === 'submit' ? 'submit' : 'skip'
-          }`,
-          {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify(
-              resolution.kind === 'submit'
-                ? { responses: resolution.responses, notes: resolution.notes }
-                : { reason: 'user_skipped', notes: resolution.notes },
-            ),
-          },
-        );
-        if (response.result) {
-          setExternalQuestionRequests((current) =>
-            current.map((candidate) =>
-              candidate.id === request.id
-                ? {
-                    ...candidate,
-                    status: response.result!.status,
-                    result: response.result,
-                    updatedAt: new Date().toISOString(),
-                  }
-                : candidate,
-            ),
-          );
-        }
-      } catch (error) {
-        setExternalQuestionError(
-          String((error as any)?.message ?? error ?? '').trim() ||
-            'Unable to resolve the question request.',
-        );
-      } finally {
-        setExternalQuestionBusyId((current) => (current === request.id ? null : current));
-      }
-    },
-    [],
+  const externalQuestions = useExternalQuestionRequests(
+    currentDrone.id,
+    activeChatName,
+    currentAgentKey !== 'native' && !currentChatIsDraft,
   );
-  const pendingExternalQuestionRequests = React.useMemo(
-    () => externalQuestionRequests.filter((request) => request.status === 'pending'),
-    [externalQuestionRequests],
-  );
+  const externalQuestionRequests = externalQuestions.requests;
+  const externalQuestionBusyId = externalQuestions.busyId;
+  const externalQuestionError = externalQuestions.error;
+  const resolveExternalQuestionRequest = externalQuestions.resolve;
+  const pendingExternalQuestionRequests = externalQuestions.pending;
   const externalTimelineItems = React.useMemo(
     () => buildChatTimelineItems(transcripts ?? [], visiblePendingPromptsWithStartup),
     [transcripts, visiblePendingPromptsWithStartup],

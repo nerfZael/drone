@@ -30,7 +30,7 @@ describe('side chat workspace persistence', () => {
     memoryStorage();
     saveSideChatWorkspaceState('a', { previousMainChat: 'review', floatingBounds: { review: first } });
     renameSideChatWorkspaceChat('a', 'review', 'renamed');
-    expect(readSideChatWorkspaceState('a')).toEqual({ previousMainChat: 'renamed', floatingBounds: { renamed: first } });
+    expect(readSideChatWorkspaceState('a')).toEqual({ previousMainChat: 'renamed', floatingBounds: { renamed: first }, floatingIntent: {} });
   });
   test('retains independent floating positions and the previous main chat across drone navigation', () => {
     memoryStorage();
@@ -40,7 +40,7 @@ describe('side chat workspace persistence', () => {
     // Promoting a second side chat must not erase the first return position.
     saveSideChatWorkspaceState('a', { floatingBounds: { 'side-2': second } });
     expect(readSideChatWorkspaceState('a')).toEqual({
-      previousMainChat: 'review', floatingBounds: { 'side-1': first, 'side-2': second },
+      previousMainChat: 'review', floatingBounds: { 'side-1': first, 'side-2': second }, floatingIntent: {},
     });
     expect(readSideChatWorkspaceState('b').floatingBounds['side-1']).toEqual(second);
     // A later promotion remembers the user's new normal main chat.
@@ -50,11 +50,11 @@ describe('side chat workspace persistence', () => {
   });
 
   test('ignores corrupt or invalid saved bounds', () => {
-    expect(parseSideChatWorkspaceState('{')).toEqual({ previousMainChat: 'default', floatingBounds: {} });
+    expect(parseSideChatWorkspaceState('{')).toEqual({ previousMainChat: 'default', floatingBounds: {}, floatingIntent: {} });
     expect(parseSideChatWorkspaceState(JSON.stringify({
       previousMainChat: 42,
       floatingBounds: { good: first, negative: { ...first, width: -1 }, missing: { x: 1 }, nil: null },
-    }))).toEqual({ previousMainChat: 'default', floatingBounds: { good: first } });
+    }))).toEqual({ previousMainChat: 'default', floatingBounds: { good: first }, floatingIntent: {} });
   });
 
   test('keeps chat switching usable when storage is blocked', () => {

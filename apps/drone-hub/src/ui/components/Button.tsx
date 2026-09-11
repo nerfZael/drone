@@ -83,7 +83,7 @@ export const UiIconButton = React.forwardRef<HTMLButtonElement, UiIconButtonProp
   ref,
 ) {
   const squareClassName =
-    size === 'small' ? 'w-7 px-0' : size === 'large' ? 'w-[var(--control-height)] px-0' : 'w-[var(--control-height-compact)] px-0';
+    size === 'small' ? 'w-7 !px-0' : size === 'large' ? 'w-[var(--control-height)] !px-0' : 'w-[var(--control-height-compact)] !px-0';
   return (
     <UiButton
       ref={ref}

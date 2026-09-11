@@ -69,6 +69,7 @@ export function AssistantQuestionCard({
   busy,
   disabled = false,
   error,
+  frameless = false,
   onSubmit,
   onSkip,
 }: {
@@ -76,6 +77,8 @@ export function AssistantQuestionCard({
   busy: boolean;
   disabled?: boolean;
   error?: string | null;
+  /** No card border, background, or width cap: the host already frames it (a small floating window). */
+  frameless?: boolean;
   onSubmit(input: { responses: ChatQuestionResponse[]; notes?: string }): void;
   onSkip(notes?: string): void;
 }) {
@@ -131,7 +134,9 @@ export function AssistantQuestionCard({
 
   return (
     <section
-      className="relative min-w-0 max-w-[var(--chat-interactive-max)] rounded-[var(--radius-large)] border border-[var(--chat-card-border)] bg-[var(--chat-card-bg)] px-4 py-3.5 text-[var(--fg-secondary)]"
+      className={frameless
+        ? 'relative min-w-0 text-[var(--fg-secondary)]'
+        : 'relative min-w-0 max-w-[var(--chat-interactive-max)] rounded-[var(--radius-large)] border border-[var(--chat-card-border)] bg-[var(--chat-card-bg)] px-4 py-3.5 text-[var(--fg-secondary)]'}
       role="region"
       aria-label="Questions from the agent"
       aria-busy={busy || undefined}
@@ -149,12 +154,15 @@ export function AssistantQuestionCard({
               key={question.id}
               disabled={locked}
               aria-labelledby={titleId}
-              className="min-w-0 space-y-2.5"
+              // Flex gap rather than space-y: the screen-reader legend is out of
+              // flow, and space-y would still count it and push the title down.
+              className="flex min-w-0 flex-col gap-2.5"
             >
               <legend className="sr-only">{question.question}</legend>
               <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-4 gap-y-1.5">
                 <div
                   id={titleId}
+                  data-question-title="true"
                   className="min-w-[min(100%,20rem)] flex-1 text-chat-question font-[var(--weight-strong)] leading-snug text-[var(--fg-strong)]"
                 >
                   {singleQuestion || !multiQuestion

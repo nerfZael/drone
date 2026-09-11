@@ -63,6 +63,8 @@ import { parseDroneHubDragData, useDroneHubActiveDrag } from './drone-hub-dnd';
 import { assignedDroneIdsFromData } from './drone-hub-dnd-utils';
 import { DroneHubPermissionsView } from './DroneHubPermissionsView';
 import { DroneChatComposerMetadata } from './ChatComposerMetadata';
+import { FloatingQuestionDock } from '../chat/FloatingQuestionDock';
+import { useExternalQuestionRequests } from '../chat/use-external-question-requests';
 import type { ChatResourceSubscriptionInfo } from '../../domain';
 import {
   buildChatTimelineItems,
@@ -133,6 +135,8 @@ export function GroupMultiChatColumn({
     () => resolveChatNameForDrone(drone, preferredChat),
     [drone, preferredChat],
   );
+  // Drafts have no agent to ask anything; published chats poll for questionnaires.
+  const questions = useExternalQuestionRequests(drone.id, chatName, !onPublish);
   const chatCacheKey = React.useMemo(() => `${drone.id}\u0000${chatName}`, [chatName, drone.id]);
   const droneHome = React.useMemo(() => droneHomePath(drone), [drone]);
   const loadTranscriptActivity = React.useCallback(
@@ -1169,7 +1173,8 @@ export function GroupMultiChatColumn({
           ) : null}
         </div>
       </div>
-      <div ref={bindColumnScrollRef} className="flex-1 min-h-0 overflow-auto px-3 py-3">
+      <div className="relative flex min-h-0 flex-1 flex-col">
+      <div ref={bindColumnScrollRef} data-chat-transcript-scroll="true" className="flex-1 min-h-0 overflow-auto px-3 py-3">
         {loading && !transcripts ? (
           <ChatLoadingState />
         ) : error ? (
@@ -1177,7 +1182,7 @@ export function GroupMultiChatColumn({
             {error}
           </div>
         ) : (transcripts && transcripts.length > 0) || visiblePendingPrompts.length > 0 ? (
-          <div ref={bindColumnContentRef} className="space-y-5">
+          <div ref={bindColumnContentRef} className="flex flex-col gap-[var(--chat-turn-gap,1.25rem)]">
             {olderLoading ? (
               <div className="text-center text-10 text-[var(--muted)]" role="status">
                 Loading older messages…
@@ -1270,6 +1275,15 @@ export function GroupMultiChatColumn({
           />
         )}
       </div>
+      <FloatingQuestionDock
+        requests={questions.pending}
+        busyId={questions.busyId}
+        error={questions.error}
+        onSubmit={(request, { responses, notes }) =>
+          void questions.resolve(request, { kind: 'submit', responses, notes })
+        }
+        onSkip={(request, notes) => void questions.resolve(request, { kind: 'skip', notes })}
+      />
       <ChatInput
         resetKey={`group:${drone.id}:${chatName}`}
         draftPersistenceKey={draftKey}
@@ -1296,6 +1310,7 @@ export function GroupMultiChatColumn({
         onSend={sendPrompt}
         onSendInNewChat={onSendPromptInNewChat}
       />
+      </div>
       {dirtyDroneApplyModal ? (
         <React.Suspense fallback={null}>
           <DirtyDroneApplyModal

@@ -10,6 +10,7 @@ import {
   chatSubscriptionResourceLabel,
   chatSubscriptionSummary,
   normalizeChatResourceSubscriptions,
+  presentableChatSubscriptions,
   type ChatResourceSubscription,
 } from './chat-resource-subscriptions';
 
@@ -28,7 +29,7 @@ function useChatResourceSubscriptions(
 ) {
   const chatId = String(chatIdRaw ?? '').trim();
   const initialSubscriptions = React.useMemo(
-    () => normalizeChatResourceSubscriptions(initialSubscriptionsRaw),
+    () => presentableChatSubscriptions(normalizeChatResourceSubscriptions(initialSubscriptionsRaw)),
     [initialSubscriptionsRaw],
   );
   const [snapshot, setSnapshot] = React.useState<{
@@ -54,7 +55,9 @@ function useChatResourceSubscriptions(
           `/api/resource-subscriptions?subscriberChatId=${encodeURIComponent(chatId)}`,
         );
         if (!mounted) return;
-        const next = normalizeChatResourceSubscriptions(response?.subscriptions);
+        const next = presentableChatSubscriptions(
+          normalizeChatResourceSubscriptions(response?.subscriptions),
+        );
         setSnapshot((current) =>
           current.chatId === chatId && sameSubscriptions(current.subscriptions, next)
             ? current

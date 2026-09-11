@@ -24,7 +24,7 @@ export const ChatTranscriptFrame = React.forwardRef<HTMLDivElement, ChatTranscri
 ) {
   return (
     <React.Profiler id="transcript" onRender={(_id, _phase, duration) => recordChatRenderDuration(duration)}>
-    <div ref={ref} className="h-full min-h-0 min-w-0 overflow-auto">
+    <div ref={ref} data-chat-transcript-scroll="true" className="h-full min-h-0 min-w-0 overflow-auto">
       {loading ? (
         <ChatLoadingState message={loadingMessage} />
       ) : hasContent ? (

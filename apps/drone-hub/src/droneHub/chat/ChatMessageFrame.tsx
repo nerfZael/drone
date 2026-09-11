@@ -46,6 +46,7 @@ export function ChatMessageFrame({
           : 'rounded-[var(--radius-xlarge)] rounded-tl-[4px] border border-[var(--assistant-bubble-border)] bg-[var(--assistant-bubble)] px-4 py-3';
   const bubble = (
     <div
+      data-message-role={role}
       className={`group/message relative ${showRoleIcon ? (user ? 'max-w-[min(85%,var(--chat-prose-max))]' : 'min-w-0 flex-1') : user ? 'max-w-[min(85%,var(--chat-prose-max))]' : 'w-full'} min-w-[120px]`}
     >
       {user && (at || hoverActions) ? (

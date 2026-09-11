@@ -1,6 +1,10 @@
 const SIDE_CHAT_SELECTOR = '[data-side-chat-name]';
 const COMPOSER_SELECTOR = '[data-active-composer-id]';
 
+/** Fired after focus routing: which floating chat is active now, and what the user pressed. */
+export const ACTIVE_SIDE_CHAT_EVENT = 'drone-hub:active-side-chat-change';
+export type ActiveSideChatEventDetail = { name: string | null; target: Element };
+
 type ComposerFocusRegistry = {
   focus(id: string): void;
   focusWithin(resolve: () => string | null | undefined): void;
@@ -32,6 +36,9 @@ export function routeComposerFocus(
     element.removeAttribute('data-side-chat-active'),
   );
   if (side) side.setAttribute('data-side-chat-active', 'true');
+  doc.defaultView?.dispatchEvent(new CustomEvent<ActiveSideChatEventDetail>(ACTIVE_SIDE_CHAT_EVENT, {
+    detail: { name: side?.dataset.sideChatName ?? null, target },
+  }));
 
   // Prefer the actual composer when its controls or editor receive focus.
   let composer = target.closest<HTMLElement>(COMPOSER_SELECTOR);

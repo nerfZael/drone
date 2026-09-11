@@ -78,11 +78,9 @@ export function useWorkspaceSideChats(drone: DroneSummary, mainChatName: string)
       const name = `side-${crypto.randomUUID().slice(0, 8)}`;
       busyRef.current = true;
       setBusy('create');
-      setStatus(
-        detail.target
-          ? 'Opening side chat at this answer…'
-          : 'Opening side chat at the last completed answer…',
-      );
+      // No in-flow progress banner: it shifted the main chat down and back
+      // again. The fork buttons spin and the new window appears instead.
+      setStatus(null);
       void requestJson<{
         sideChatOrigin: { sourceChatName: string; checkpointId: string };
         agent: WorkspaceSideChat['agent'];
@@ -145,7 +143,7 @@ export function useWorkspaceSideChats(drone: DroneSummary, mainChatName: string)
         )
           return;
         if (!workspace.active) return;
-        setStatus(keep ? 'Keeping chat in the sidebar…' : 'Deleting side chat…');
+        setStatus(null);
         await requestJson(
           `/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(chatName)}${keep ? '/keep' : ''}`,
           { method: keep ? 'POST' : 'DELETE' },

@@ -4,6 +4,10 @@ import { ChatWindowTab, usePanelTitle } from './ChatWindowTab';
 import { ChatUsageBadge } from '../usage/ChatUsageBadge';
 import { measureSideChatBounds, readSideChatWorkspaceState, restoreSideChatBounds, saveSideChatWorkspaceState } from './side-chat-workspace-state';
 import { placeSideChat } from './side-chat-placement';
+import { useFloatingWindowKeeper } from './use-floating-window-keeper';
+import { useFloatingChatFocusGrow } from './use-floating-chat-focus-grow';
+import { workspaceGridPanelCount } from './workspace-panel-count';
+import { isUsableFloatingBounds } from './floating-window-bounds';
 import { alignFloatingChats, SIDE_CHAT_PANEL_PREFIX } from './align-floating-chats';
 import { prepareSideChatPanel } from './prepareSideChatPanel';
 import { focusChatWindow } from './focus-chat-window';
@@ -558,6 +562,25 @@ export function DockableDroneWorkspace({
   const lastReportedPreviewHostRef = React.useRef<PreviewHostState | null>(null);
   const lastVisibleToolTabsRef = React.useRef<string>('');
   const isMobileViewport = useMobileViewport();
+  // Floating chats keep their arrangement when the app window shrinks and grows back.
+  const floatingWindows = useFloatingWindowKeeper({
+    apiRef,
+    rootRef: workspaceElementRef,
+    ready: `${currentDrone.id}:${readyVersion}`,
+    persist: (id, bounds) => {
+      if (!id.startsWith(SIDE_CHAT_PANEL_PREFIX)) return;
+      saveSideChatWorkspaceState(currentDrone.id, { floatingIntent: { [id.slice(SIDE_CHAT_PANEL_PREFIX.length)]: bounds } });
+    },
+    restore: (id) => id.startsWith(SIDE_CHAT_PANEL_PREFIX)
+      ? readSideChatWorkspaceState(currentDrone.id).floatingIntent[id.slice(SIDE_CHAT_PANEL_PREFIX.length)]
+      : undefined,
+    onMoved: (api, id) => {
+      const panel = api.getPanel(id);
+      if (panel) prepareSideChatPanel(panel);
+    },
+  });
+  // A small focused chat grows to read comfortably and shrinks back on blur.
+  useFloatingChatFocusGrow({ apiRef, rootRef: workspaceElementRef, ready: `${currentDrone.id}:${readyVersion}`, keeper: floatingWindows });
   const [hasOpenedSideChats, setHasOpenedSideChats] = React.useState(sideChats.length > 0);
   if (sideChats.length > 0 && !hasOpenedSideChats) setHasOpenedSideChats(true);
   // Once floating chats need Dockview, keep it for this workspace's lifetime.
@@ -579,7 +602,7 @@ export function DockableDroneWorkspace({
   );
   const updateWorkspacePanelState = React.useCallback(() => {
     const api = apiRef.current;
-    const nextPanelCount = Math.max(1, api?.totalPanels ?? 1);
+    const nextPanelCount = Math.max(1, api ? workspaceGridPanelCount(api.groups) : 1);
     setWorkspacePanelCount((current) => current === nextPanelCount ? current : nextPanelCount);
     const nextVisibleTabs = api ? visibleToolTabs(api) : [];
     const nextVisibleTabsKey = nextVisibleTabs.join('\u0000');
@@ -662,12 +685,17 @@ export function DockableDroneWorkspace({
         const rect = element.getBoundingClientRect();
         return { x: rect.x - rootRect.x, y: rect.y - rootRect.y, width: rect.width, height: rect.height };
       });
-      const savedBounds = readSideChatWorkspaceState(currentDrone.id).floatingBounds[chat.name];
+      // Dockview reports 0×0 until its first layout pass (a host that has not
+      // painted yet); sizing a window from that made 1px windows. The element
+      // is laid out on demand, so measure it instead.
+      const workspace = { width: api.width || rootRect.width, height: api.height || rootRect.height };
+      const state = readSideChatWorkspaceState(currentDrone.id);
+      const savedBounds = [state.floatingIntent[chat.name], state.floatingBounds[chat.name]].find(isUsableFloatingBounds);
       const bounds = savedBounds
-        ? restoreSideChatBounds(savedBounds, api)
-        : placeSideChat({ width: api.width, height: api.height }, occupied, api.panels.filter((panel) => panel.id.startsWith(SIDE_CHAT_PANEL_PREFIX)).length);
+        ? restoreSideChatBounds(savedBounds, workspace)
+        : placeSideChat(workspace, occupied, api.panels.filter((panel) => panel.id.startsWith(SIDE_CHAT_PANEL_PREFIX)).length);
       const panel = api.addPanel({ id, component: 'sideChat', title: chat.name, params: { chatName: chat.name },
-        minimumWidth: Math.min(320, api.width), minimumHeight: Math.min(220, api.height),
+        minimumWidth: Math.min(320, workspace.width), minimumHeight: Math.min(220, workspace.height),
         floating: bounds, inactive: true,
       });
       prepareSideChatPanel(panel);
@@ -756,17 +784,19 @@ export function DockableDroneWorkspace({
         .map((element) => measureSideChatBounds(element, root));
       const floatingBounds = alignFloatingChats(api, occupied);
       if (!Object.keys(floatingBounds).length) return;
-      for (const name of Object.keys(floatingBounds)) {
+      for (const [name, bounds] of Object.entries(floatingBounds)) {
         const panel = api.getPanel(`${SIDE_CHAT_PANEL_PREFIX}${name}`);
         if (panel) prepareSideChatPanel(panel);
+        // Alignment is a deliberate placement, so it becomes the intended bounds.
+        floatingWindows.set(`${SIDE_CHAT_PANEL_PREFIX}${name}`, bounds);
       }
-      saveSideChatWorkspaceState(currentDrone.id, { floatingBounds });
+      saveSideChatWorkspaceState(currentDrone.id, { floatingBounds, floatingIntent: floatingBounds });
       persistCurrentLayout();
       event.preventDefault();
     };
     window.addEventListener(ALIGN_FLOATING_CHATS_EVENT, align);
     return () => window.removeEventListener(ALIGN_FLOATING_CHATS_EVENT, align);
-  }, [currentDrone.id, persistCurrentLayout]);
+  }, [currentDrone.id, floatingWindows, persistCurrentLayout]);
 
   const schedulePersistCurrentLayout = React.useCallback(() => {
     if (layoutSaveTimerRef.current !== null) window.clearTimeout(layoutSaveTimerRef.current);

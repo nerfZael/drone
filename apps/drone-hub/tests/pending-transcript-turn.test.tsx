@@ -253,6 +253,29 @@ describe('external pending transcript turn', () => {
     expect(html.match(/Working for/g)).toHaveLength(1);
   });
 
+  test('renders no empty assistant bubble once activity carries the working status', () => {
+    const withActivity = renderToStaticMarkup(
+      <PendingTranscriptTurn
+        item={pendingPrompt({
+          activity: {
+            version: 1,
+            source: 'codex',
+            updatedAt: new Date().toISOString(),
+            messages: [],
+          },
+        })}
+      />,
+    );
+    expect(withActivity).toContain('data-agent-run-activity="codex"');
+    // The run summary line is the status; a padded bubble with nothing in it
+    // only added blank space under it (noticeable in small floating chats).
+    expect(withActivity).not.toContain('data-message-role="assistant"');
+
+    const beforeActivity = renderToStaticMarkup(<PendingTranscriptTurn item={pendingPrompt({})} />);
+    expect(beforeActivity).toContain('data-message-role="assistant"');
+    expect(beforeActivity).toContain('Working for');
+  });
+
   test('keeps the working summary visible before the first activity item arrives', () => {
     const html = renderToStaticMarkup(
       <PendingTranscriptTurn
