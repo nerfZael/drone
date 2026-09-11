@@ -4,6 +4,7 @@ import { type RawData, WebSocket, WebSocketServer } from 'ws';
 
 import { CompanionRunSession } from './companion-run-session';
 import type { CompanionRuntime } from './companion-runtime';
+import { CompanionLiveSocket } from './CompanionLiveSocket';
 
 const MAX_CLIENT_PAYLOAD_BYTES = 4 * 1024 * 1024;
 
@@ -19,6 +20,7 @@ export function createCompanionWebSocketServer(runtime: CompanionRuntime): WebSo
   server.on('connection', (socket: WebSocket, _request: http.IncomingMessage) => {
     let session: CompanionRunSession | null = null;
     let cleanedUp = false;
+    let live: CompanionLiveSocket | null = null;
 
     const send = (payload: unknown) => {
       if (socket.readyState !== WebSocket.OPEN) return;
@@ -37,6 +39,13 @@ export function createCompanionWebSocketServer(runtime: CompanionRuntime): WebSo
         send({ type: 'error', error: 'Invalid Companion message.' });
         return;
       }
+      if (String(message?.type).startsWith('live_')) {
+        if (session) return;
+        live ??= new CompanionLiveSocket(send);
+        live.handle(message as unknown as { type?: string });
+        return;
+      }
+      if (live) return;
       if (message?.type === 'tool_result') {
         if (message.runId !== session?.clientRunId) return;
         session.resolveBrowserTool({
@@ -95,6 +104,7 @@ export function createCompanionWebSocketServer(runtime: CompanionRuntime): WebSo
     const cleanup = () => {
       if (cleanedUp) return;
       cleanedUp = true;
+      live?.close();
       void session?.close('Companion browser disconnected').catch(() => undefined);
     };
     socket.once('close', cleanup);

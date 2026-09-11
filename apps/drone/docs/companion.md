@@ -1,5 +1,7 @@
 # Companion
 
+Desktop Companion now includes an optional, remembered [Live voice mode](companion-live-voice.md). It defaults off and uses GPT-Live 1 with client delegation to the existing configured Companion backend. See that document for controls, lifecycle, and manual validation.
+
 | Field               | Value                                                                                                                                  |
 | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | Type                | Feature                                                                                                                                |

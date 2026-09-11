@@ -7,6 +7,7 @@ import { companionSettingsResponse, writeCompanionSettings } from './companion-c
 import type { CompanionTelemetryService } from './companion-telemetry';
 import { COMPANION_INSTRUCTIONS_MAX_CHARS } from '@drone/assistant-chat';
 import { readCompanionInstructions, writeCompanionInstructions } from './companion-instructions';
+import { readCompanionLiveSettings, writeCompanionLiveSettings } from './companion-live-settings';
 
 export function registerCompanionRoutes(
   router: HubRouter,
@@ -14,6 +15,13 @@ export function registerCompanionRoutes(
   workspaces?: CompanionWorkspaceService,
   organization?: { services: HubServices; sidebar: SidebarCommandService },
 ): void {
+  router.get('/api/settings/companion/live-voice', async ({ json }) => {
+    json(200, { ok: true, ...await readCompanionLiveSettings() });
+  });
+  router.put('/api/settings/companion/live-voice', async ({ readJson, json, fail }) => {
+    try { json(200, { ok: true, ...await writeCompanionLiveSettings(await readJson()) }); }
+    catch (error) { fail(400, error instanceof Error ? error.message : String(error)); }
+  });
   if (organization) {
     router.post('/api/companion/organization', async ({ readJson, json, fail }) => {
       try { json(200, await executeCompanionOrganization(await readJson<unknown>(), organization)); }
