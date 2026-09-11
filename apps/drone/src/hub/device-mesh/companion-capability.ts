@@ -146,7 +146,7 @@ export function createCompanionCapability(
         session = createdSession;
         sessionsByDeviceId.set(sourceDeviceId, session);
       }
-      await session.run.enqueue({ prompt, messageId, telemetry });
+      await session.run.submit({ prompt, messageId, telemetry });
       return { accepted: true };
     },
     async close() {

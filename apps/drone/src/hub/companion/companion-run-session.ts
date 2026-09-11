@@ -14,7 +14,7 @@ type CompanionPromptInput = {
   telemetry?: CompanionClientTelemetry;
 };
 
-type QueuedCompanionPrompt = CompanionPromptInput & {
+type BufferedCompanionPrompt = CompanionPromptInput & {
   messageId: string;
   receivedAtEpochMs: number;
   receivedAtMonotonicMs: number;
@@ -26,7 +26,7 @@ type CompanionRunSessionOptions = {
   clientRunId: string;
   runtimeRunId: string;
   transport: CompanionTelemetryTransport;
-  runtime: Pick<CompanionRuntime, 'run' | 'deleteSession'>;
+  runtime: Pick<CompanionRuntime, 'run' | 'steer' | 'deleteSession'>;
   emit(event: CompanionRunSessionEvent): void | Promise<void>;
   isAvailable(): boolean;
   unavailableMessage: string;
@@ -36,7 +36,7 @@ type CompanionRunSessionOptions = {
 export class CompanionRunSession {
   readonly clientRunId: string;
 
-  private readonly prompts: QueuedCompanionPrompt[] = [];
+  private readonly prompts: BufferedCompanionPrompt[] = [];
   private readonly browserTools: CompanionBrowserToolBroker;
   private generation = 0;
   private activeMessageId = '';
@@ -57,7 +57,7 @@ export class CompanionRunSession {
     });
   }
 
-  async enqueue(prompt: CompanionPromptInput): Promise<void> {
+  async submit(prompt: CompanionPromptInput): Promise<void> {
     if (this.closed) throw new Error(this.options.unavailableMessage);
     const queued = {
       ...prompt,
@@ -67,6 +67,7 @@ export class CompanionRunSession {
     };
     if (this.active) {
       this.prompts.push(queued);
+      this.flushSteering();
       return;
     }
 
@@ -102,7 +103,7 @@ export class CompanionRunSession {
     await this.options.runtime.deleteSession(this.options.runtimeRunId);
   }
 
-  private async drain(queued: QueuedCompanionPrompt): Promise<void> {
+  private async drain(queued: BufferedCompanionPrompt): Promise<void> {
     try {
       while (this.isAvailable()) {
         const { prompt, messageId } = queued;
@@ -127,22 +128,25 @@ export class CompanionRunSession {
             callBrowser,
             onEvent: (event) => {
               if (!this.isCurrentGeneration(runGeneration)) return;
+              this.flushSteering();
+              if (!this.isCurrentGeneration(runGeneration)) return;
               const visibleEvent = boundedCompanionActivityEvent(event);
               if (!visibleEvent) return;
               void Promise.resolve(
-                this.options.emit({ type: 'activity', messageId, event: visibleEvent }),
+                this.options.emit({ type: 'activity', messageId: this.activeMessageId, event: visibleEvent }),
               ).catch(() => undefined);
             },
           });
           if (!this.isCurrentGeneration(runGeneration)) return;
-          await this.options.emit({ type: 'reply', messageId, reply });
+          const replyMessageId = this.activeMessageId;
+          await this.options.emit({ type: 'reply', messageId: replyMessageId, reply });
           if (!this.isCurrentGeneration(runGeneration)) return;
-          await this.options.emit({ type: 'status', messageId, status: 'completed' });
+          await this.options.emit({ type: 'status', messageId: replyMessageId, status: 'completed' });
         } catch (error) {
           if (!this.isCurrentGeneration(runGeneration)) return;
           await this.options.emit({
             type: 'error',
-            messageId,
+            messageId: this.activeMessageId,
             error: error instanceof Error ? error.message : String(error),
           });
         } finally {
@@ -163,7 +167,29 @@ export class CompanionRunSession {
     }
   }
 
-  private async beginPrompt(prompt: QueuedCompanionPrompt): Promise<void> {
+  private flushSteering(): void {
+    if (!this.isAvailable()) return;
+    // Only buffer while the runtime is starting or finishing. Once it is running,
+    // follow-ups enter the agent's steering channel without waiting for completion.
+    while (this.prompts.length) {
+      const next = this.prompts[0];
+      try {
+        if (!this.options.runtime.steer(this.options.runtimeRunId, next.prompt)) break;
+      } catch (error) {
+        void Promise.resolve().then(() => this.options.emit({
+          type: 'error', messageId: next.messageId,
+          error: error instanceof Error ? error.message : String(error),
+        })).catch(() => undefined);
+        void this.close('Companion steering failed').catch(() => undefined);
+        return;
+      }
+      this.prompts.shift();
+      this.activeMessageId = next.messageId;
+      // Keep the generation: a browser tool already in flight must retain its result.
+    }
+  }
+
+  private async beginPrompt(prompt: BufferedCompanionPrompt): Promise<void> {
     this.generation += 1;
     this.activeMessageId = prompt.messageId;
     await this.options.emit({ type: 'status', messageId: prompt.messageId, status: 'working' });

@@ -68,8 +68,13 @@ test('Live delegates through the existing backend with a fixed workspace and rej
       callId: 'context', tool: 'get_app_context', args: {} });
     for (let i = 0; i < 8; i++) await Promise.resolve();
     expect(results[0]).toMatchObject({ ok: true, result: { activeRepoPath: '/a' } });
-    receive({ type: 'reply', messageId: prompts[0].messageId, reply: 'Found the chat.' });
-    receive({ type: 'status', messageId: prompts[0].messageId, status: 'completed' });
+    const followUp = backend('Actually, find a different chat.', new AbortController().signal);
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1].prompt).toBe('Actually, find a different chat.');
+    receive({ type: 'reply', messageId: prompts[1].messageId, reply: 'Found the chat.' });
+    receive({ type: 'status', messageId: prompts[1].messageId, status: 'completed' });
+    expect(await followUp).toBe('Found the chat.');
     expect(await reply).toBe('Found the chat.');
     expect(recorded).toBe(0);
     await companion.close();

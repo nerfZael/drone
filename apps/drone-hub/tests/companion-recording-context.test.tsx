@@ -83,12 +83,13 @@ test('recording origin survives pause, navigation, transcription, proposal creat
     });
     await companion.executeProposal();
     expect(executedRepo).toBe('/a');
-    receive({ type: 'status', messageId: prompts.at(-1)!.messageId, status: 'completed' });
+    // A new transcription is submitted while the first backend request is still active.
     await companion.toggle(); // A fresh recording now captures C.
     repo = '/d';
     const next = companion.toggle();
     finishTranscript('which repo?');
     await next;
+    expect(prompts).toHaveLength(2);
     expect(await tool('get_app_context')).toMatchObject({ activeRepoPath: '/c' });
     await companion.close();
     await companion.toggle();

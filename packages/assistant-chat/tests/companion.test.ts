@@ -318,7 +318,7 @@ describe('Companion contracts', () => {
     expect(connection.closes).toBe(0);
   });
 
-  test.each([false, true])('keeps footer metrics per request when a follow-up is queued: %s', async (queued) => {
+  test.each([false, true])('preserves active work when a follow-up steers it: %s', async (queued) => {
     const connection = clientTransport();
     let now = 0;
     const controller = new CompanionClientController({ createId: () => 'run', now: () => now });
@@ -345,9 +345,11 @@ describe('Companion contracts', () => {
     const second = controller.getSnapshot();
     expect(second).toMatchObject({
       status: 'working', transcript: 'second', reply: '',
-      startedAt: now, endedAt: null, activity: [],
+      startedAt: queued ? 0 : now, endedAt: null,
     });
-    // Old completion/activity must not stop the new timer or inflate its count.
+    expect(second.activity.map((item) => item.callId)).toEqual(queued ? ['first-tool'] : []);
+    // Old completion/activity cannot finish the updated request. The server routes
+    // continuing activity under the latest message ID after steering.
     connection.message({
       type: 'activity', messageId: 'first',
       event: { type: 'tool_call_completed', callId: 'first-tool', result: {} },
@@ -372,8 +374,8 @@ describe('Companion contracts', () => {
     connection.message({ type: 'reply', messageId: 'second', reply: 'Second reply' });
     connection.message({ type: 'status', messageId: 'second', status: 'completed' });
     const finished = controller.getSnapshot();
-    expect(finished.endedAt! - finished.startedAt!).toBe(3_000);
-    expect(finished.activity.map((item) => item.callId)).toEqual(['second-tool']);
+    expect(finished.endedAt! - finished.startedAt!).toBe(queued ? 10_003_000 : 3_000);
+    expect(finished.activity.map((item) => item.callId)).toEqual(queued ? ['first-tool', 'second-tool'] : ['second-tool']);
     expect(finished.reply).toBe('Second reply');
     expect(connection.opens).toBe(1);
     now += 60_000;
@@ -484,9 +486,9 @@ test('Companion compaction follows the latest request and does not inflate tool 
   activity('compaction_skipped');
   expect(controller.getSnapshot().compaction).toEqual({ status: 'skipped' });
   await submit('second');
-  expect(controller.getSnapshot().compaction).toBeNull();
+  expect(controller.getSnapshot().compaction).toEqual({ status: 'skipped' });
   activity('compaction_started');
-  expect(controller.getSnapshot().compaction).toBeNull();
+  expect(controller.getSnapshot().compaction).toEqual({ status: 'skipped' });
   activity('compaction_started', 'second');
   activity('compaction_failed', 'second', { reason: 'cancelled' });
   expect(controller.getSnapshot().compaction?.status).toBe('cancelled');

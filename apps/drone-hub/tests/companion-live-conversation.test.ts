@@ -23,7 +23,7 @@ test('delegation waits for transcript, deduplicates notifications, and preserves
   conversation.stop();
 });
 
-test('speech continues during backend work and a newer request suppresses the stale spoken result', async () => {
+test('follow-ups dispatch while the backend is running and suppress late results in either completion order', async () => {
   const pending: Array<(reply: string) => void> = [];
   const prompts: string[] = [];
   const sent: any[] = [];
@@ -39,13 +39,15 @@ test('speech continues during backend work and a newer request suppresses the st
   conversation.receive(delegation('b'));
   expect(captions).toContain('chat B');
   expect(prompts).toHaveLength(1);
-  pending[0]('Found chat A.');
   await delay(550);
-  expect(sent).toHaveLength(0);
   expect(prompts).toHaveLength(2);
+  expect(sent).toHaveLength(0);
   pending[1]('Found chat B.');
   await delay(0);
   expect(sent[0].content).toBe('Found chat B.');
+  pending[0]('Late result for chat A.');
+  await delay(0);
+  expect(sent).toHaveLength(1);
   conversation.stop();
 });
 

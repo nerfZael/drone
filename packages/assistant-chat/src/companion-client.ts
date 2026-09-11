@@ -153,6 +153,7 @@ export class CompanionClientController {
     const prompt = input.prompt.trim();
     if (!prompt) return;
 
+    const steering = this.state.status === 'working' && this.activeSession !== null;
     const session = this.activeSession ?? this.createSession(input);
     const messageId = input.messageId || this.options.createId();
     session.messageExecutors.set(messageId, input.executeTool);
@@ -162,10 +163,10 @@ export class CompanionClientController {
       error: '',
       reply: '',
       transcript: prompt,
-      startedAt: this.now(),
+      startedAt: steering ? this.state.startedAt : this.now(),
       endedAt: null,
-      activity: [],
-      compaction: null,
+      activity: steering ? this.state.activity : [],
+      compaction: steering ? this.state.compaction : null,
     });
 
     try {
@@ -255,9 +256,10 @@ export class CompanionClientController {
     if (!this.isActive(session) || (message.runId && message.runId !== session.runId)) return;
     if (message.type === 'status' && message.status === 'completed') {
       const messageId = message.messageId ?? session.latestMessageId;
-      if (messageId) session.messageExecutors.delete(messageId);
+      if (messageId === session.latestMessageId) session.messageExecutors.clear();
+      else if (messageId) session.messageExecutors.delete(messageId);
     }
-    // A queued follow-up owns the visible footer. Earlier requests must still finish their
+    // The latest follow-up owns the visible reply. Earlier requests must still finish their
     // browser tool calls, and session-wide failures must still terminate the session.
     if (
       message.messageId && message.messageId !== session.latestMessageId &&

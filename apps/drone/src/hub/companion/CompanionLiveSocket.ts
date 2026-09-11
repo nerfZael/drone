@@ -177,7 +177,7 @@ Backend tools: inspect the app and workspaces, search chats, edit composers and 
 Delegate to the backend when: the user requests an app action, lookup, careful reasoning, or a correction to pending work.
 Do not delegate to the backend when: greeting, clarifying an unclear request, or repeating a still-current result.
 Delegate before answering questions that depend on backend work. Never invent results or claim a proposal was applied unless confirmed.
-Backend follow-ups may queue. Never promise that a correction changed an already-running action. For urgent cancellation, direct the user to Stop Companion turn.
+Backend follow-ups use ASAP steering at the next processing point. Never promise that a correction cancelled or undid an already-running action. For urgent cancellation, direct the user to Stop Companion turn.
 Use short spoken summaries. Exact results and tool activity appear in the app.`;
 
 function safeError(error: unknown): string {

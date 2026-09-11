@@ -98,7 +98,12 @@ export function createCompanionWebSocketServer(runtime: CompanionRuntime): WebSo
         });
         session = createdSession;
       }
-      void session.enqueue({ prompt, messageId, telemetry });
+      const activeSession = session;
+      void activeSession.submit({ prompt, messageId, telemetry }).catch((error) => {
+        if (session !== activeSession) return;
+        send({ type: 'error', runId, messageId, error: error instanceof Error ? error.message : String(error) });
+        void activeSession.close('Companion delivery failed').catch(() => undefined);
+      });
     });
 
     const cleanup = () => {

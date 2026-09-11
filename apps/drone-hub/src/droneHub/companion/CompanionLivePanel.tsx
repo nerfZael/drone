@@ -36,7 +36,7 @@ export function CompanionLivePanel() {
         </p>
         {active ? <p className="text-[var(--muted-dim)]">Microphone and speaker stay connected. Voice time, including silence, is billed separately.</p> : null}
         {active ? <p className="break-words text-[var(--muted-dim)]">Target: {live.workspaceLabel}. Start a new voice conversation to capture a different workspace. Sending typed text ends voice.</p> : null}
-        {live.queued > 0 ? <p role="status">{live.queued} voice {live.queued === 1 ? 'request waiting' : 'requests waiting'} for the backend. Corrections may wait for the current task.</p> : null}
+        {live.queued > 0 ? <p role="status">Preparing voice request from the transcript… Follow-ups use ASAP steering.</p> : null}
         {companion.status === 'working' ? <p role="status" className="text-[var(--accent)]">
           Backend: {runningTools.length ? runningTools.map(companionToolActivityLabel).join(' · ') : 'Working…'}
           {' '}Expand tool calls above for details.

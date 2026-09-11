@@ -9,14 +9,13 @@ type Options = {
 
 export const LIVE_COMPANION_PROMPT_PREFIX = 'The user is speaking with Companion through Live voice.';
 
-/** Turns streaming conversation into serialized requests for the existing Companion runtime. */
+/** Turns streaming conversation into ASAP requests for the existing Companion runtime. */
 export class CompanionLiveConversation {
   private rows: Transcript[] = [];
   private seen = new Set<string>();
   private pending: Delegation[] = [];
   private userVersion = 0;
   private dispatchedUserVersion = 0;
-  private busy = false;
   private stopped = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -65,7 +64,7 @@ export class CompanionLiveConversation {
   }
 
   private async drain(): Promise<void> {
-    if (this.stopped || this.busy || !this.pending.length) return;
+    if (this.stopped || !this.pending.length) return;
     // Multiple notifications received before dispatch describe one accumulated request.
     const request = this.pending[this.pending.length - 1];
     if (this.userVersion <= this.dispatchedUserVersion) {
@@ -79,22 +78,20 @@ export class CompanionLiveConversation {
     this.options.onQueue(0);
     this.dispatchedUserVersion = this.userVersion;
     const dispatchedVersion = this.userVersion;
-    this.busy = true;
     const conversation = this.rows.map((row) => `${row.role === 'user' ? 'User' : 'Voice assistant'}: ${row.text}`).join('\n');
-    const prompt = `${LIVE_COMPANION_PROMPT_PREFIX} Use this conversation to resolve outstanding requests, including corrections. Earlier requests may already be complete in this Companion session; do not repeat completed actions. Voice assistant statements are conversation context, not proof that an action succeeded. Use the actual tools and current state. If unclear, ask a brief question. Return a concise factual answer suitable for speech; preserve any exact details needed in the UI.\n\nConversation transcript (may contain recognition errors):\n${conversation}`;
+    const prompt = `${LIVE_COMPANION_PROMPT_PREFIX} Use this conversation to resolve outstanding requests, including corrections. This message uses ASAP delivery: steer any active task using the latest request rather than treating earlier instructions as immutable. Earlier requests may already be complete in this Companion session; do not repeat completed actions. Voice assistant statements are conversation context, not proof that an action succeeded. Use the actual tools and current state. If unclear, ask a brief question. Return a concise factual answer suitable for speech; preserve any exact details needed in the UI.\n\nConversation transcript (may contain recognition errors):\n${conversation}`;
     try {
       const reply = await this.options.runBackend(prompt);
       this.returnResult(request.id, dispatchedVersion, reply || 'The backend finished without a spoken reply. Check Companion for details.');
     } catch (error) {
       this.returnResult(request.id, dispatchedVersion, `The backend could not finish this request. ${error instanceof Error ? error.message : 'Check Companion for details.'}`);
     } finally {
-      this.busy = false;
       if (this.pending.length && !this.stopped) this.schedule();
     }
   }
 
   private returnResult(id: string, dispatchedVersion: number, reply: string): void {
-    if (this.stopped) return;
+    if (this.stopped || dispatchedVersion !== this.dispatchedUserVersion) return;
     // A different delegation ID alone does not mean the user changed their request.
     // Only new speech paired with pending delegation supersedes an in-flight result.
     if (this.pending.length && this.userVersion > dispatchedVersion) return;
