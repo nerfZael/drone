@@ -1,6 +1,7 @@
 import React from 'react';
 import { IconTrash } from './icons';
-import { ChatWindowTab } from './ChatWindowTab';
+import { ChatWindowTab, usePanelTitle } from './ChatWindowTab';
+import { ChatUsageBadge } from '../usage/ChatUsageBadge';
 import { measureSideChatBounds, readSideChatWorkspaceState, restoreSideChatBounds, saveSideChatWorkspaceState } from './side-chat-workspace-state';
 import { placeSideChat } from './side-chat-placement';
 import { prepareSideChatPanel } from './prepareSideChatPanel';
@@ -72,6 +73,7 @@ type DockableDroneWorkspaceProps = {
 };
 
 const CHAT_PANEL_ID = 'agent-chat';
+const DEFAULT_CHAT_NAME = 'default';
 const SIDE_CHAT_PANEL_PREFIX = 'side-chat:';
 const EXPLORER_PANEL_ID = 'file-explorer';
 const TOOL_PANEL_PREFIX = 'tool:';
@@ -326,7 +328,7 @@ function ensureChatPanel(api: DockviewApi): void {
   api.addPanel({
     id: CHAT_PANEL_ID,
     component: 'chat',
-    title: 'Agent Chat',
+    title: DEFAULT_CHAT_NAME,
     ...(referencePanel
       ? { position: { direction: 'left' as const, referencePanel: referencePanel.api.id } }
       : {}),
@@ -345,7 +347,8 @@ export function restoreRequiredWorkspacePanels(api: DockviewApi): void {
 export function refreshWorkspacePanelTitles(api: DockviewApi): void {
   for (const panel of api.panels) {
     if (panel.id === CHAT_PANEL_ID) {
-      panel.api.setTitle('Agent Chat');
+      // The mounted panel replaces this with the current main chat name.
+      panel.api.setTitle(DEFAULT_CHAT_NAME);
       continue;
     }
     const tab = tabFromPanel(panel);
@@ -379,12 +382,24 @@ export function resetWorkspaceToChat(api: DockviewApi): void {
 }
 
 function ChatPanel({ containerApi }: IDockviewPanelProps) {
-  const { chatContent: content, mainChatControls } = React.useContext(DockableDroneWorkspaceContext);
+  const { chatContent: content, mainChatControls, mainChatName } = React.useContext(DockableDroneWorkspaceContext);
   React.useEffect(() => {
     const panel = containerApi.getPanel(CHAT_PANEL_ID);
-    if (panel) panel.api.setTitle('Agent Chat');
-  }, [containerApi]);
-  return <UiPanel flush className="h-full" data-main-workspace-chat="true">{mainChatControls}{content}</UiPanel>;
+    if (panel) panel.api.setTitle(mainChatName || DEFAULT_CHAT_NAME);
+  }, [containerApi, mainChatName]);
+  return <UiPanel flush className="h-full outline-none" data-main-workspace-chat="true">{mainChatControls}{content}</UiPanel>;
+}
+
+/** Main chat tab: the chat name with its estimated cost. It never closes. */
+function MainChatTab({ api }: IDockviewPanelHeaderProps) {
+  const ctx = React.useContext(DockableDroneWorkspaceContext);
+  const title = usePanelTitle(api);
+  const chatName = ctx.mainChatName || DEFAULT_CHAT_NAME;
+  return (
+    <div className="dv-default-tab" data-testid="dockview-dv-default-tab" title={title}>
+      <span className="dv-default-tab-content">{title} <ChatUsageBadge droneId={ctx.droneId} chatName={chatName} /></span>
+    </div>
+  );
 }
 
 function SideChatPanel({ params }: IDockviewPanelProps<{ chatName: string }>) {
@@ -443,14 +458,14 @@ function WorkspaceTab(props: IDockviewPanelHeaderProps) {
   }, [onRenameSideChat, props.containerApi, props.api.id, chatName, ctx.droneId]);
 
   if (sideChat) {
-    return <ChatWindowTab {...props} data-side-chat-name={chatName} chatName={chatName}
+    return <ChatWindowTab {...props} data-side-chat-name={chatName} chatName={chatName} droneId={ctx.droneId}
       onRename={onRenameSideChat ? rename : undefined} onPointerDown={handlePointerDown} />;
   }
+  if (!closeable) return <MainChatTab {...props} />;
   return (
     <DockviewDefaultTab
       {...props}
-      hideClose={!closeable}
-      closeActionOverride={closeable ? () => props.api.close() : undefined}
+      closeActionOverride={() => props.api.close()}
       onPointerDown={handlePointerDown}
     />
   );
@@ -486,6 +501,7 @@ function WorkspaceWatermark() {
 const DockableDroneWorkspaceContext = React.createContext<{
   droneId: string;
   chatContent: React.ReactNode;
+  mainChatName?: string;
   mainChatControls?: React.ReactNode;
   sideChats: WorkspaceSideChat[];
   renderSideChat?: (chat: WorkspaceSideChat) => React.ReactNode;
@@ -575,6 +591,7 @@ export function DockableDroneWorkspace({
     () => ({
       chatContent,
       droneId: currentDrone.id,
+      mainChatName,
       mainChatControls,
       sideChats,
       renderSideChat,
@@ -585,7 +602,7 @@ export function DockableDroneWorkspace({
       previewTab,
       onPreviewHostChanged: markPreviewHostChanged,
     }),
-    [currentDrone.id, chatContent, mainChatControls, sideChats, renderSideChat, renderSideChatHeaderActions, onCloseSideChat, onRenameSideChat, markPreviewHostChanged, previewTab, renderToolPane],
+    [currentDrone.id, chatContent, mainChatName, mainChatControls, sideChats, renderSideChat, renderSideChatHeaderActions, onCloseSideChat, onRenameSideChat, markPreviewHostChanged, previewTab, renderToolPane],
   );
   const components = React.useMemo(() => ({ chat: ChatPanel, tool: ToolPanel, sideChat: SideChatPanel }), []);
 

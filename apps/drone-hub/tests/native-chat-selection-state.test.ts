@@ -195,6 +195,30 @@ describe('native chat selection state', () => {
     ).toBe(false);
   });
 
+  test('keeps the external composer while chat configuration reloads behind a visible transcript', () => {
+    expect(
+      genericChatComposerAvailable({
+        nativeChatActive: false,
+        chatConfigResolution: 'loading',
+        contentBlocked: false,
+      }),
+    ).toBe(true);
+    // The loading view renders its own composer.
+    expect(
+      genericChatComposerAvailable({
+        nativeChatActive: false,
+        chatConfigResolution: 'loading',
+        contentBlocked: true,
+      }),
+    ).toBe(false);
+    expect(
+      genericChatComposerAvailable({
+        nativeChatActive: false,
+        chatConfigResolution: 'loading',
+      }),
+    ).toBe(false);
+  });
+
   test('shows a drone startup failure instead of a chat metadata error', () => {
     expect(
       chatConfigResolutionState({

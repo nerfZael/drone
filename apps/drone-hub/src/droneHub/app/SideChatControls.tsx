@@ -1,4 +1,5 @@
 import React from 'react';
+import { ChatUsageBadge } from '../usage/ChatUsageBadge';
 import type { WorkspaceSideChat } from './use-workspace-side-chats';
 import { IconSidebarExpand } from './icons';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
@@ -9,10 +10,12 @@ import { formatShortcutBinding } from './shortcuts';
  * in the title bar next to the delete action; when the fork is the main chat
  * they form a slim row above the transcript that also names the chat.
  */
-export function SideChatControls({ chat, busy, main = false, onKeep, onOpenSource, onMove }: {
+export function SideChatControls({ chat, busy, main = false, droneId, onKeep, onOpenSource, onMove }: {
   chat: WorkspaceSideChat;
   busy: boolean;
   main?: boolean;
+  /** Shows the chat's estimated cost next to its name in the main-chat bar. */
+  droneId?: string;
   onKeep(): void;
   onOpenSource(): void;
   onMove(): void;
@@ -44,7 +47,10 @@ export function SideChatControls({ chat, busy, main = false, onKeep, onOpenSourc
   if (!main) return buttons;
   return (
     <div role="toolbar" aria-label="Side chat controls" className="flex shrink-0 items-center justify-end gap-1 border-b border-[var(--border)] px-2 py-0.5">
-      <span className="mr-auto min-w-0 truncate text-11 text-[var(--muted)]">{chat.name}</span>
+      <span className="mr-auto flex min-w-0 items-center gap-1.5 text-11 text-[var(--muted)]">
+        <span className="min-w-0 truncate">{chat.name}</span>
+        {droneId ? <ChatUsageBadge droneId={droneId} chatName={chat.name} /> : null}
+      </span>
       {buttons}
     </div>
   );

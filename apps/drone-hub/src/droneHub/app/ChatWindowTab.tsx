@@ -1,9 +1,10 @@
 import React from 'react';
 import type { IDockviewPanelHeaderProps } from 'dockview';
+import { ChatUsageBadge } from '../usage/ChatUsageBadge';
 
 export type ChatWindowRename = (newName: string) => Promise<{ ok: boolean; error?: string | null }>;
 
-function usePanelTitle(api: IDockviewPanelHeaderProps['api']): string {
+export function usePanelTitle(api: IDockviewPanelHeaderProps['api']): string {
   const [title, setTitle] = React.useState(api.title ?? '');
   React.useEffect(() => {
     const disposable = api.onDidTitleChange((event) => setTitle(event.title));
@@ -19,8 +20,10 @@ function usePanelTitle(api: IDockviewPanelHeaderProps['api']): string {
  * pointer directly) turns the name into an inline editor. Enter saves, Escape
  * or leaving the field cancels.
  */
-export function ChatWindowTab({ api, containerApi: _containerApi, params: _params, tabLocation: _tabLocation, chatName, onRename, ...rest }: IDockviewPanelHeaderProps & {
+export function ChatWindowTab({ api, containerApi: _containerApi, params: _params, tabLocation: _tabLocation, chatName, droneId, onRename, ...rest }: IDockviewPanelHeaderProps & {
   chatName: string;
+  /** Shows the chat's estimated cost after its name. */
+  droneId?: string;
   onRename?: ChatWindowRename;
 } & Pick<React.HTMLAttributes<HTMLDivElement>, 'onPointerDown'> & { 'data-side-chat-name'?: string }) {
   const title = usePanelTitle(api);
@@ -90,7 +93,7 @@ export function ChatWindowTab({ api, containerApi: _containerApi, params: _param
   return (
     <div ref={rootRef} {...rest} className="dv-default-tab" data-testid="dockview-dv-default-tab"
       title={onRename ? `${title}\nDouble-click to rename` : title}>
-      <span className="dv-default-tab-content">{title}</span>
+      <span className="dv-default-tab-content">{title}{droneId ? <> <ChatUsageBadge droneId={droneId} chatName={chatName} /></> : null}</span>
     </div>
   );
 }

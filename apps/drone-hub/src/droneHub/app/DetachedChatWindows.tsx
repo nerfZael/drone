@@ -140,7 +140,7 @@ function DetachedTab(props: IDockviewPanelHeaderProps) {
     }
     return onRenameChat(chat.droneId, chat.chatName, newName);
   }, [chat, onRenameChat, props.containerApi, props.api.id]);
-  return <ChatWindowTab {...props} data-side-chat-name={props.api.id} chatName={chat?.chatName ?? ''}
+  return <ChatWindowTab {...props} data-side-chat-name={props.api.id} chatName={chat?.chatName ?? ''} droneId={chat?.droneId}
     onRename={chat && onRenameChat && chat.chatName !== 'default' ? rename : undefined} />;
 }
 function DetachedHeaderActions({ activePanel }: IDockviewHeaderActionsProps) {

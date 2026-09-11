@@ -81,9 +81,15 @@ export function chatConfigResolutionState(input: {
 export function genericChatComposerAvailable(input: {
   nativeChatActive: boolean;
   chatConfigResolution: ReturnType<typeof chatConfigResolutionState>;
+  /** The loading view replaces the transcript and brings its own composer. */
+  contentBlocked?: boolean;
 }): boolean {
   if (input.nativeChatActive) return false;
-  return input.chatConfigResolution === 'ready' || input.chatConfigResolution === 'drone-error';
+  if (input.chatConfigResolution === 'ready' || input.chatConfigResolution === 'drone-error') return true;
+  // Chat configuration reloads while the history stays on screen (drone phase
+  // changes, chat switches served from cache). Removing the composer then
+  // makes it look like it vanished mid-conversation.
+  return input.chatConfigResolution === 'loading' && input.contentBlocked === false;
 }
 
 export function shouldShowDroneStartupFailureEmptyState(input: {

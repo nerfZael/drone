@@ -1,6 +1,6 @@
 import { PendingEventsCard } from '../chat/PendingEventsCard';
 import { usePendingEvents, questionPendingDeliveryStatus } from '../chat/use-pending-events';
-import { ChatUsageSummary } from '../usage/ChatUsageSummary';
+import { ChatUsageBadge } from '../usage/ChatUsageBadge';
 import { detachedChatKey, DETACHED_CHAT_FOCUS_EVENT, useDetachedChatStore } from './detached-chat-store';
 import { SideChatControls } from './SideChatControls';
 import { readSideChatWorkspaceState, saveSideChatWorkspaceState } from './side-chat-workspace-state';
@@ -1094,8 +1094,12 @@ export function SelectedDroneWorkspace({
   const genericChatActive = genericChatComposerAvailable({
     nativeChatActive,
     chatConfigResolution,
+    contentBlocked: blockChatContentForConfig,
   });
-  const chatComposerControlsAvailable = genericChatActive || nativeChatActive;
+  // Agent and access pickers need the chat configuration; a reloading chat
+  // keeps its composer but not the pickers, which would show fallback values.
+  const chatComposerControlsAvailable =
+    (genericChatActive && chatConfigResolution !== 'loading') || nativeChatActive;
   const selectedChatDockerSnapshotBusy = React.useMemo(
     () =>
       (transcripts ?? []).some((item) => {
@@ -2436,6 +2440,7 @@ export function SelectedDroneWorkspace({
             chat={mainSideChat}
             busy={Boolean(sideChatWorkspace.busy)}
             main
+            droneId={currentDrone.id}
             onKeep={() => void sideChatWorkspace.finish(mainSideChat.name, true)}
             onOpenSource={() => openSideChatSource(mainSideChat)}
             onMove={returnMainToFloating}
@@ -2541,7 +2546,6 @@ export function SelectedDroneWorkspace({
                 fleetDropHintVisible && 'pointer-events-none select-none opacity-0',
               )}
             >
-              {!nativeChatActive && !currentChatIsDraft && chatUiMode !== 'cli' ? <ChatUsageSummary droneId={currentDrone.id} chatName={activeChatName} /> : null}
               {droneHubPermissionsOpen && !nativeChatActive ? (
                 <div className="absolute inset-0 z-30 overflow-y-auto">
                   <DroneHubPermissionsView

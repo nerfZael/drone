@@ -10,6 +10,7 @@ import {
   agentRunWorkspacePreviewEntries,
   isAgentRunFileChanges,
 } from '@drone/assistant-chat';
+import { useCompactChat } from './use-compact-chat';
 
 import { IconChevron } from '../icons';
 import { requestAgentRunChanges, agentRunChangesDroneId, type AgentRunChangesSelection } from '../changes/navigation';
@@ -185,13 +186,18 @@ export function ChangedFilesCard({
   className?: string;
   initiallyExpanded?: boolean;
 }) {
-  const [expanded, setExpanded] = React.useState(initiallyExpanded);
-  const previousInitiallyExpanded = React.useRef(initiallyExpanded);
+  const rootRef = React.useRef<HTMLElement | null>(null);
+  // A slim floating chat (for example a fork of a chat whose latest answer
+  // auto-expands this card) has no room for the list; it opens on request.
+  const compact = useCompactChat(rootRef);
+  const autoExpanded = initiallyExpanded && !compact;
+  const [expanded, setExpanded] = React.useState(autoExpanded);
+  const previousAutoExpanded = React.useRef(autoExpanded);
   React.useEffect(() => {
-    if (previousInitiallyExpanded.current === initiallyExpanded) return;
-    previousInitiallyExpanded.current = initiallyExpanded;
-    setExpanded(initiallyExpanded);
-  }, [initiallyExpanded]);
+    if (previousAutoExpanded.current === autoExpanded) return;
+    previousAutoExpanded.current = autoExpanded;
+    setExpanded(autoExpanded);
+  }, [autoExpanded]);
   if (!isAgentRunFileChanges(fileChanges)) return null;
 
   const attribution = fileChanges.version === 2 ? fileChanges.attribution : undefined;
@@ -221,6 +227,7 @@ export function ChangedFilesCard({
 
   return (
     <section
+      ref={rootRef}
       className={`mt-2 overflow-hidden rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--muted)] ${className}`}
       aria-label="Files changed by this agent run"
     >

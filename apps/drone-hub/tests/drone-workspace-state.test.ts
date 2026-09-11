@@ -421,7 +421,7 @@ describe('per-drone workspace state', () => {
 
     refreshWorkspacePanelTitles({ panels } as unknown as Parameters<typeof refreshWorkspacePanelTitles>[0]);
 
-    expect(titles.get('agent-chat')).toBe('Agent Chat');
+    expect(titles.get('agent-chat')).toBe('default');
     expect(titles.get('tool:prs')).toBe('Pull requests');
     expect(titles.get('tool:requests')).toBe('Change requests');
   });

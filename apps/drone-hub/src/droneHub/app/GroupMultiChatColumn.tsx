@@ -1,6 +1,6 @@
 import type { MarkdownFileReference } from '../chat/MarkdownMessage';
 import React from 'react';
-import { ChatUsageSummary } from '../usage/ChatUsageSummary';
+import { ChatUsageBadge } from '../usage/ChatUsageBadge';
 import { latestExternalCheckpointId } from './side-chat-checkpoint-model';
 import { filterCompletedPendingPrompts } from '@drone/assistant-chat';
 import { useDndMonitor, useDroppable } from '@dnd-kit/core';
@@ -1065,8 +1065,9 @@ export function GroupMultiChatColumn({
               </button>
             </div>
           </div>
-          <div className="text-10 text-[var(--muted-dim)] font-mono mt-0.5">
-            chat: {chatName}
+          <div className="flex items-center gap-1.5 text-10 text-[var(--muted-dim)] font-mono mt-0.5">
+            <span className="min-w-0 truncate">chat: {chatName}</span>
+            <ChatUsageBadge droneId={drone.id} chatName={chatName} />
           </div>
           <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
             <button
@@ -1168,7 +1169,6 @@ export function GroupMultiChatColumn({
           ) : null}
         </div>
       </div>
-      <ChatUsageSummary droneId={drone.id} chatName={chatName} />
       <div ref={bindColumnScrollRef} className="flex-1 min-h-0 overflow-auto px-3 py-3">
         {loading && !transcripts ? (
           <ChatLoadingState />

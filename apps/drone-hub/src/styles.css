@@ -3726,10 +3726,27 @@ select:disabled optgroup {
   container: floating-chat / inline-size;
 }
 
+/* Chat scopes take programmatic focus for shortcuts; no focus ring on the panel itself. */
+[data-main-workspace-chat]:focus,
+[data-side-chat-name]:focus,
+[data-detached-chat-key]:focus {
+  outline: none;
+}
+
+/*
+ * Only the focused floating window shows its composer; the others give that
+ * space to the transcript. Focus routing marks the active window's tab or
+ * content root, so test the whole frame.
+ */
+.dh-dockable-workspace .dv-resize-container:has([data-side-chat-name]):not(:has([data-side-chat-active="true"])) .dh-floating-chat .dh-chat-composer {
+  display: none;
+}
+
 @container floating-chat (max-width: 560px) {
   .dh-chat-transcript {
     --chat-compact: 1;
   }
+
 
   .dh-chat-composer {
     padding: 0;
@@ -3781,6 +3798,18 @@ select:disabled optgroup {
 
   .dh-chat-transcript > [data-transcript-item-kind="tool"] {
     margin-top: -.375rem;
+  }
+
+  /*
+   * Nested scrollers trap the wheel in a small window: once the list hits
+   * its edge, the transcript behind it does not move. The transcript is the
+   * only scroller here; expanded lists take their full height.
+   */
+  .dh-changed-files-scrollbar,
+  .dh-agent-activity-scrollbar {
+    max-height: none;
+    overflow-y: visible;
+    overscroll-behavior: auto;
   }
 }
 
