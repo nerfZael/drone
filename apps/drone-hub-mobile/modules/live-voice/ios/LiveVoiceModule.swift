@@ -66,7 +66,7 @@ private final class LivePcmAudio {
   private var stopped = false
   private var muted = false
   private var tapped = false
-  private var queuedFrames = 0
+  private var playbackEnd: AVAudioFramePosition = 0
   private var observer: NSObjectProtocol?
   private let onAudio: (String) -> Void
   private let onError: (String) -> Void
@@ -127,8 +127,6 @@ private final class LivePcmAudio {
     if frames == 0 { return }
     lock.lock()
     if stopped { lock.unlock(); return }
-    if queuedFrames + frames > 120000 { lock.unlock(); throw LiveAudioError("Live playback fell behind. Start again.") }
-    queuedFrames += frames
     lock.unlock()
     guard let buffer = AVAudioPCMBuffer(pcmFormat: playFormat, frameCapacity: AVAudioFrameCount(frames)),
       let samples = buffer.floatChannelData?[0] else { throw LiveAudioError("Could not allocate Live playback") }
@@ -139,10 +137,15 @@ private final class LivePcmAudio {
         samples[i] = Float(Int16(bitPattern: value)) / 32768
       }
     }
-    player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
-      guard let self else { return }
-      self.lock.lock(); self.queuedFrames = max(0, self.queuedFrames - frames); self.lock.unlock()
-    }
+    // Use the player's render clock, not completion callbacks (which can lag
+    // behind rendering), to detect an empty queue and restore a 250 ms reserve.
+    // play/stop run on the main queue; capture only reads stopped/muted under lock.
+    let now = max(0, player.lastRenderTime.flatMap { player.playerTime(forNodeTime: $0) }?.sampleTime ?? 0)
+    let start = playbackEnd > now ? playbackEnd : now + 6000
+    let end = start + AVAudioFramePosition(frames)
+    if end - now > 120000 { throw LiveAudioError("Live playback fell behind. Start again.") }
+    player.scheduleBuffer(buffer, at: AVAudioTime(sampleTime: start, atRate: 24000), options: [], completionHandler: nil)
+    playbackEnd = end
   }
   func stop() {
     lock.lock()

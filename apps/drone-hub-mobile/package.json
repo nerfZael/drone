@@ -16,7 +16,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "check:blip-portability": "node scripts/check-blip-portability.mjs",
     "test": "bun test tests",
-    "test:audio-routing": "python3 scripts/test-audio-routing.py"
+    "test:audio-routing": "python3 scripts/test-audio-routing.py",
+    "test:live-playback": "python3 scripts/test-live-playback.py"
   },
   "dependencies": {
     "@blip/core": "workspace:*",
