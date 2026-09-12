@@ -937,7 +937,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
   persist(
     (set) => ({
       themeId: DEFAULT_DESKTOP_THEME_ID,
-      readingDensityMode: 'default',
+      readingDensityMode: 'comfortable',
       activeRepoPath: '',
       settingsActiveTab: 'general',
       chatHeaderRepoPath: '',

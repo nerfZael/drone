@@ -73,7 +73,7 @@ export function AgentRunSummaryLine({
     </>
   );
   const className =
-    'flex min-h-9 w-full items-center gap-2 border-b border-[var(--border-subtle)] py-1.5 text-left text-[var(--muted)] max-w-[var(--chat-prose-max)]';
+    'mx-auto flex min-h-9 w-full max-w-[var(--chat-prose-max)] items-center gap-2 border-b border-[var(--border-subtle)] py-1.5 text-left text-[var(--muted)]';
 
   if (onToggle) {
     return (

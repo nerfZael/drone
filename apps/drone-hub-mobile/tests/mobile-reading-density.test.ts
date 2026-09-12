@@ -8,6 +8,9 @@ describe('mobile reading density', () => {
     const source = readSource('../src/mobile-reading-density.ts');
 
     expect(source).toContain("value === 'comfortable' ? 'comfortable' : 'default'");
+    expect(source).toContain(
+      "const INITIAL_MOBILE_READING_DENSITY: MobileReadingDensity = 'comfortable'",
+    );
     expect(source).toContain('AsyncStorage.getItem(MOBILE_READING_DENSITY_STORAGE_KEY)');
     expect(source).toContain('AsyncStorage.setItem(MOBILE_READING_DENSITY_STORAGE_KEY, next)');
   });

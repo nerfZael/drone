@@ -209,7 +209,7 @@
   --type-caption: 11px;
   --type-compact: 12px;
   --type-ui: 13px;
-  --type-prose: 14px;
+  --type-prose: 15px;
   /* Legacy aliases collapse the old fractional scale onto crisp UI sizes. */
   --text-8: var(--type-micro);
   --text-9: var(--type-micro);
@@ -221,11 +221,11 @@
   --text-12-5: var(--type-ui);
   --text-13: var(--type-ui);
   --text-14: var(--type-prose);
-  --chat-text-size: .875rem;
-  --chat-question-size: .9375rem;
-  --chat-prose-max: 72ch;
-  --document-text-size: .9375rem;
-  --document-prose-max: 76ch;
+  --chat-text-size: .9375rem;
+  --chat-question-size: 1rem;
+  --chat-prose-max: 68ch;
+  --document-text-size: 1rem;
+  --document-prose-max: 72ch;
   --chat-interactive-max: 48rem;
   --weight-ui: 400;
   --weight-emphasis: 500;
@@ -293,10 +293,10 @@
   --type-caption: 12px;
   --type-compact: 13px;
   --type-ui: 14px;
-  --type-prose: 15px;
-  --chat-text-size: .9375rem;
-  --chat-question-size: 1rem;
-  --document-text-size: 1rem;
+  --type-prose: 16px;
+  --chat-text-size: 1rem;
+  --chat-question-size: 1.0625rem;
+  --document-text-size: 1.0625rem;
 }
 
 /* Expanded composers expose more controls at once, so their secondary chrome
@@ -1661,7 +1661,7 @@ code, pre {
 .dh-markdown--transcript {
   width: 100%;
   font-size: var(--chat-text-size);
-  line-height: 1.55;
+  line-height: 1.65;
 }
 .dh-markdown--transcript > * {
   max-width: min(100%, var(--chat-prose-max));
@@ -1728,6 +1728,44 @@ code, pre {
   font-size: var(--chat-text-size);
   color: var(--muted);
   letter-spacing: .04em;
+}
+
+/* Agent answers are reading surfaces, so their headings need enough contrast to
+   make a long response scannable without borrowing document-preview chrome. */
+.dh-markdown--transcript h1 {
+  margin: 1.75rem 0 .65rem;
+  font-size: 1.375rem;
+  font-weight: var(--weight-bold);
+  letter-spacing: -.012em;
+  line-height: 1.25;
+}
+.dh-markdown--transcript h2 {
+  margin: 1.5rem 0 .58rem;
+  font-size: 1.1875rem;
+  font-weight: var(--weight-bold);
+  letter-spacing: -.006em;
+  line-height: 1.3;
+}
+.dh-markdown--transcript h3 {
+  margin: 1.3rem 0 .5rem;
+  font-size: 1.0625rem;
+  line-height: 1.35;
+}
+.dh-markdown--transcript h4 {
+  margin: 1.15rem 0 .45rem;
+  font-size: 1rem;
+}
+.dh-markdown--transcript h5 {
+  margin: 1rem 0 .4rem;
+  font-size: var(--chat-text-size);
+  font-weight: var(--weight-strong);
+}
+.dh-markdown--transcript h6 {
+  margin: .95rem 0 .38rem;
+  font-size: .8125rem;
+  font-weight: var(--weight-strong);
+  letter-spacing: .055em;
+  text-transform: uppercase;
 }
 
 /* Full document previews need a much stronger hierarchy than compact chat prose. */
@@ -2664,6 +2702,24 @@ code, pre {
 }
 .dh-markdown tbody tr:nth-child(even) td {
   background: var(--surface-faint);
+}
+
+/* Keep prose on one centered reading axis. Code, tables, and diagrams retain
+   the full transcript width through the explicit wide-block class. */
+.dh-markdown--transcript > :not(.dh-markdown-block--wide) {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: min(100%, var(--chat-prose-max));
+  margin-right: auto;
+  margin-left: auto;
+}
+.dh-markdown--transcript > ul:not(.contains-task-list),
+.dh-markdown--transcript > ol:not(.contains-task-list) {
+  padding-left: 1.35rem;
+}
+.dh-markdown--transcript > ul.contains-task-list,
+.dh-markdown--transcript > ol.contains-task-list {
+  padding-left: 0;
 }
 
 /* ──────────────────────────────────────────────────────────

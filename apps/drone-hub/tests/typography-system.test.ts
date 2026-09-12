@@ -23,13 +23,14 @@ describe('desktop typography system', () => {
     expect(styles).toContain('--type-caption: 11px;');
     expect(styles).toContain('--type-compact: 12px;');
     expect(styles).toContain('--type-ui: 13px;');
-    expect(styles).toContain('--type-prose: 14px;');
+    expect(styles).toContain('--type-prose: 15px;');
     expect(styles).toContain('--weight-ui: 400;');
     expect(styles).toContain('--weight-emphasis: 500;');
-    expect(styles).toContain('--chat-text-size: .875rem;');
-    expect(styles).toContain('--chat-question-size: .9375rem;');
-    expect(styles).toContain('--document-text-size: .9375rem;');
-    expect(styles).toContain('--document-prose-max: 76ch;');
+    expect(styles).toContain('--chat-text-size: .9375rem;');
+    expect(styles).toContain('--chat-question-size: 1rem;');
+    expect(styles).toContain('--chat-prose-max: 68ch;');
+    expect(styles).toContain('--document-text-size: 1rem;');
+    expect(styles).toContain('--document-prose-max: 72ch;');
     expect(styles).toContain('--chat-interactive-max: 48rem;');
     expect(styles).toContain('--weight-semibold: var(--weight-emphasis);');
     expect(styles).toContain('--weight-bold: var(--weight-strong);');
@@ -51,12 +52,17 @@ describe('desktop typography system', () => {
   test('offers a semantic comfortable reading scale without theme overrides', () => {
     const styles = readSource('../src/styles.css');
     const settings = readSource('../src/droneHub/app/GeneralSettingsTab.tsx');
+    const store = readSource('../src/droneHub/app/use-drone-hub-ui-store.ts');
 
     expect(styles).toContain(":root[data-reading-density='comfortable'] {");
-    expect(styles).toContain('--chat-text-size: .9375rem;');
-    expect(styles).toContain('--document-text-size: 1rem;');
+    expect(styles).toContain('--chat-text-size: 1rem;');
+    expect(styles).toContain('--document-text-size: 1.0625rem;');
+    expect(styles).toContain('.dh-markdown--transcript h1 {');
+    expect(styles).toContain('.dh-markdown--transcript > :not(.dh-markdown-block--wide) {');
     expect(settings).toContain('label="Reading density"');
+    expect(settings).toContain("{ value: 'default', label: 'Compact' }");
     expect(settings).toContain("{ value: 'comfortable', label: 'Comfortable' }");
+    expect(store).toContain("readingDensityMode: 'comfortable'");
   });
 
   test('keeps shared primitives on reusable semantic roles', () => {
