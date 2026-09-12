@@ -9,7 +9,6 @@ import {
 
 const CHAT_VOICE_SAMPLE_RATE_HZ = 16_000;
 const CHAT_VOICE_CHANNELS = 1;
-const CHAT_VOICE_BYTES_PER_SECOND = CHAT_VOICE_SAMPLE_RATE_HZ * CHAT_VOICE_CHANNELS * 2;
 
 export type ChatVoiceRecordingStatus = 'idle' | 'starting' | 'recording' | 'paused' | 'transcribing';
 
@@ -24,12 +23,13 @@ export function formatChatVoiceDuration(durationMillis: number): string {
 
 type ChatVoiceCapture = {
   stream: MediaStream;
-  context: AudioContext;
-  source: MediaStreamAudioSourceNode;
-  processor: ScriptProcessorNode;
-  output: GainNode;
-  chunks: ArrayBuffer[];
-  totalBytes: number;
+  recorder: MediaRecorder;
+  chunks: Blob[];
+  mimeType: string;
+  startedAt: number;
+  pausedAt: number | null;
+  pausedMillis: number;
+  durationTimer: number;
 };
 
 type TranscriptionResponse = {
@@ -123,6 +123,20 @@ export async function transcribeChatVoiceWav(
     signal?: AbortSignal;
   } = {},
 ): Promise<string> {
+  return await transcribeChatVoiceAudio(wav, 'audio/wav', options);
+}
+
+export async function transcribeChatVoiceAudio(
+  audio: ArrayBuffer,
+  mimeType: string,
+  options: {
+    quality?: 'fast' | 'accurate';
+    language?: string | null;
+    prompt?: string | null;
+    telemetryId?: string;
+    signal?: AbortSignal;
+  } = {},
+): Promise<string> {
   const prompt = normalizeGroqTranscriptionPrompt(options.prompt);
   const promptBytes = prompt ? new TextEncoder().encode(prompt) : null;
   let promptBase64 = '';
@@ -134,7 +148,7 @@ export async function transcribeChatVoiceWav(
   const response = await fetch('/api/audio/transcriptions', {
     method: 'POST',
     headers: {
-      'content-type': 'audio/wav',
+      'content-type': mimeType || 'audio/webm',
       ...(options.quality ? { 'x-drone-transcription-quality': options.quality } : {}),
       ...(options.language ? { 'x-drone-transcription-language': options.language } : {}),
       ...(promptBase64 ? { 'x-drone-transcription-prompt-base64': promptBase64 } : {}),
@@ -142,7 +156,7 @@ export async function transcribeChatVoiceWav(
         ? { 'x-drone-companion-message-id': options.telemetryId.slice(0, 128) }
         : {}),
     },
-    body: wav,
+    body: audio,
     signal: options.signal,
   });
   const raw = await response.text();
@@ -172,7 +186,6 @@ export function useChatVoiceRecorder({
   const captureRef = React.useRef<ChatVoiceCapture | null>(null);
   const startIdRef = React.useRef(0);
   const stopPromiseRef = React.useRef<Promise<string> | null>(null);
-  const lastDurationUpdateAtRef = React.useRef(0);
   const mountedRef = React.useRef(false);
   const microphoneLeaseRef = React.useRef<BrowserMicrophoneLease | null>(null);
   const transcriptionAbortRef = React.useRef<AbortController | null>(null);
@@ -189,23 +202,13 @@ export function useChatVoiceRecorder({
 
   const stopCapture = React.useCallback((capture: ChatVoiceCapture | null) => {
     if (!capture) return;
+    window.clearInterval(capture.durationTimer);
     try {
-      capture.processor.disconnect();
+      if (capture.recorder.state !== 'inactive') capture.recorder.stop();
     } catch {
-      // Already disconnected.
-    }
-    try {
-      capture.source.disconnect();
-    } catch {
-      // Already disconnected.
-    }
-    try {
-      capture.output.disconnect();
-    } catch {
-      // Already disconnected.
+      // The recorder may already be stopping.
     }
     capture.stream.getTracks().forEach((track) => track.stop());
-    void capture.context.close().catch(() => undefined);
   }, []);
 
   React.useEffect(() => {
@@ -239,9 +242,7 @@ export function useChatVoiceRecorder({
       onError('Browser microphone recording is not available here.');
       return false;
     }
-    const AudioContextCtor =
-      window.AudioContext ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AudioContextCtor) {
+    if (typeof window.MediaRecorder === 'undefined') {
       onError('Browser microphone recording is not available here.');
       return false;
     }
@@ -259,60 +260,63 @@ export function useChatVoiceRecorder({
 
     const startId = startIdRef.current + 1;
     startIdRef.current = startId;
-    lastDurationUpdateAtRef.current = 0;
     setDurationMillis(0);
     setStatusValue('starting');
     onError('');
     let pendingStream: MediaStream | null = null;
-    let pendingContext: AudioContext | null = null;
     try {
       pendingStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      pendingContext = new AudioContextCtor({ sampleRate: CHAT_VOICE_SAMPLE_RATE_HZ });
       const stream = pendingStream;
-      const context = pendingContext;
-      if (context.state === 'suspended') {
-        await context.resume().catch(() => undefined);
-      }
-      const source = context.createMediaStreamSource(stream);
-      const processor = context.createScriptProcessor(4096, CHAT_VOICE_CHANNELS, CHAT_VOICE_CHANNELS);
-      const output = context.createGain();
-      output.gain.value = 0;
+      const preferredMimeType = preferredRecordingMimeType();
+      const recorder = preferredMimeType
+        ? new MediaRecorder(stream, { mimeType: preferredMimeType })
+        : new MediaRecorder(stream);
       const capture: ChatVoiceCapture = {
         stream,
-        context,
-        source,
-        processor,
-        output,
+        recorder,
         chunks: [],
-        totalBytes: 0,
+        mimeType: recorder.mimeType || preferredMimeType || 'audio/webm',
+        startedAt: Date.now(),
+        pausedAt: null,
+        pausedMillis: 0,
+        durationTimer: 0,
       };
-      processor.onaudioprocess = (event) => {
-        if (statusRef.current === 'paused') return;
-        const frame = floatToPcm16(event.inputBuffer.getChannelData(0), event.inputBuffer.sampleRate);
-        capture.chunks.push(frame.slice(0));
-        capture.totalBytes += frame.byteLength;
-        const now = Date.now();
-        if (mountedRef.current && now - lastDurationUpdateAtRef.current >= 200) {
-          lastDurationUpdateAtRef.current = now;
-          setDurationMillis((capture.totalBytes / CHAT_VOICE_BYTES_PER_SECOND) * 1000);
-        }
-      };
+      recorder.addEventListener('dataavailable', (event) => {
+        if (event.data.size > 0) capture.chunks.push(event.data);
+      });
+      recorder.addEventListener('error', () => {
+        if (captureRef.current !== capture) return;
+        captureRef.current = null;
+        stopCapture(capture);
+        releaseMicrophone(microphoneLease);
+        setStatusValue('idle');
+        onError('The microphone stopped unexpectedly. Start voice input again.');
+      });
+      recorder.addEventListener('stop', () => {
+        if (captureRef.current !== capture) return;
+        captureRef.current = null;
+        window.clearInterval(capture.durationTimer);
+        capture.stream.getTracks().forEach((track) => track.stop());
+        releaseMicrophone(microphoneLease);
+        setStatusValue('idle');
+        onError('The microphone stopped unexpectedly. Start voice input again.');
+      });
       if (startIdRef.current !== startId) {
         stopCapture(capture);
         releaseMicrophone(microphoneLease);
         return false;
       }
-      source.connect(processor);
-      processor.connect(output);
-      output.connect(context.destination);
+      recorder.start(250);
+      capture.durationTimer = window.setInterval(() => {
+        if (!mountedRef.current) return;
+        setDurationMillis(recordingDurationMillis(capture));
+      }, 200);
       captureRef.current = capture;
       pendingStream = null;
-      pendingContext = null;
       setStatusValue('recording');
       return true;
     } catch (err: any) {
       if (pendingStream) pendingStream.getTracks().forEach((track) => track.stop());
-      if (pendingContext) void pendingContext.close().catch(() => undefined);
       releaseMicrophone(microphoneLease);
       if (startIdRef.current === startId) {
         setStatusValue('idle');
@@ -323,67 +327,88 @@ export function useChatVoiceRecorder({
   }, [microphoneOwner, onError, releaseMicrophone, setStatusValue, stopCapture]);
 
   const toggleRecordingPause = React.useCallback(() => {
+    const capture = captureRef.current;
+    if (!capture) return;
     if (statusRef.current === 'recording') {
+      try {
+        capture.recorder.pause();
+        capture.pausedAt = Date.now();
+      } catch {
+        return;
+      }
       setStatusValue('paused');
       return;
     }
     if (statusRef.current === 'paused') {
+      try {
+        capture.recorder.resume();
+        if (capture.pausedAt !== null) capture.pausedMillis += Date.now() - capture.pausedAt;
+        capture.pausedAt = null;
+      } catch {
+        return;
+      }
       setStatusValue('recording');
     }
   }, [setStatusValue]);
 
-  const transcribeRecording = React.useCallback(async (options?: {
-    telemetryId?: string;
-  }): Promise<string> => {
-    const capture = captureRef.current;
-    const transcriptionId = startIdRef.current + 1;
-    startIdRef.current = transcriptionId;
-    if (!capture) {
-      setStatusValue('idle');
-      return '';
-    }
-
-    captureRef.current = null;
-    setDurationMillis((capture.totalBytes / CHAT_VOICE_BYTES_PER_SECOND) * 1000);
-    stopCapture(capture);
-    releaseMicrophone();
-    setStatusValue('transcribing');
-    onError('');
-    const transcriptionAbort = new AbortController();
-    transcriptionAbortRef.current = transcriptionAbort;
-    try {
-      if (capture.totalBytes <= 0) return '';
-      const pcm = concatArrayBuffers(capture.chunks, capture.totalBytes);
-      const wav = pcm16ToWav(pcm, CHAT_VOICE_SAMPLE_RATE_HZ, CHAT_VOICE_CHANNELS);
-      return await transcribeChatVoiceWav(wav, {
-        signal: transcriptionAbort.signal,
-        telemetryId: options?.telemetryId,
-      });
-    } catch (err: any) {
-      if (startIdRef.current === transcriptionId) {
-        onError(err?.message ?? String(err));
+  const transcribeRecording = React.useCallback(
+    async (options?: { telemetryId?: string }): Promise<string> => {
+      const capture = captureRef.current;
+      const transcriptionId = startIdRef.current + 1;
+      startIdRef.current = transcriptionId;
+      if (!capture) {
+        setStatusValue('idle');
+        return '';
       }
-      return '';
-    } finally {
-      if (transcriptionAbortRef.current === transcriptionAbort) {
-        transcriptionAbortRef.current = null;
-      }
-      if (startIdRef.current === transcriptionId) setStatusValue('idle');
-    }
-  }, [onError, releaseMicrophone, setStatusValue, stopCapture]);
 
-  const stopRecordingForTranscript = React.useCallback(async (options?: {
-    telemetryId?: string;
-  }): Promise<string> => {
-    if (stopPromiseRef.current) return stopPromiseRef.current;
-    const promise = transcribeRecording(options);
-    stopPromiseRef.current = promise;
-    try {
-      return await promise;
-    } finally {
-      stopPromiseRef.current = null;
-    }
-  }, [transcribeRecording]);
+      captureRef.current = null;
+      setDurationMillis(recordingDurationMillis(capture));
+      window.clearInterval(capture.durationTimer);
+      setStatusValue('transcribing');
+      onError('');
+      const transcriptionAbort = new AbortController();
+      transcriptionAbortRef.current = transcriptionAbort;
+      try {
+        let audio: ArrayBuffer;
+        try {
+          audio = await finishMediaRecording(capture);
+        } finally {
+          capture.stream.getTracks().forEach((track) => track.stop());
+          releaseMicrophone();
+        }
+        if (audio.byteLength <= 0) return '';
+        return await transcribeChatVoiceAudio(audio, capture.mimeType, {
+          signal: transcriptionAbort.signal,
+          telemetryId: options?.telemetryId,
+        });
+      } catch (err: any) {
+        if (startIdRef.current === transcriptionId) {
+          onError(err?.message ?? String(err));
+        }
+        return '';
+      } finally {
+        if (transcriptionAbortRef.current === transcriptionAbort) {
+          transcriptionAbortRef.current = null;
+        }
+        if (startIdRef.current === transcriptionId) setStatusValue('idle');
+      }
+    },
+    [onError, releaseMicrophone, setStatusValue],
+  );
+
+  const stopRecordingForTranscript = React.useCallback(
+    async (options?: { telemetryId?: string }): Promise<string> => {
+      if (stopPromiseRef.current) return stopPromiseRef.current;
+      const promise = transcribeRecording(options);
+      stopPromiseRef.current = promise;
+      try {
+        return await promise;
+      } finally {
+        stopPromiseRef.current = null;
+      }
+    },
+    [transcribeRecording],
+  );
 
   return {
     status,
@@ -395,14 +420,60 @@ export function useChatVoiceRecorder({
   };
 }
 
+function preferredRecordingMimeType(): string {
+  const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
+  return candidates.find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) ?? '';
+}
+
+function recordingDurationMillis(capture: ChatVoiceCapture, now = Date.now()): number {
+  const currentPauseMillis = capture.pausedAt === null ? 0 : Math.max(0, now - capture.pausedAt);
+  return Math.max(0, now - capture.startedAt - capture.pausedMillis - currentPauseMillis);
+}
+
+async function finishMediaRecording(capture: ChatVoiceCapture): Promise<ArrayBuffer> {
+  if (capture.recorder.state !== 'inactive') {
+    await new Promise<void>((resolve, reject) => {
+      const onStop = () => {
+        cleanup();
+        resolve();
+      };
+      const onError = () => {
+        cleanup();
+        reject(new Error('The microphone stopped before the recording could be saved.'));
+      };
+      const cleanup = () => {
+        capture.recorder.removeEventListener('stop', onStop);
+        capture.recorder.removeEventListener('error', onError);
+      };
+      capture.recorder.addEventListener('stop', onStop, { once: true });
+      capture.recorder.addEventListener('error', onError, { once: true });
+      try {
+        capture.recorder.stop();
+      } catch (error) {
+        cleanup();
+        reject(error);
+      }
+    });
+  }
+  return await new Blob(capture.chunks, { type: capture.mimeType }).arrayBuffer();
+}
+
 function writeAscii(view: DataView, offset: number, value: string): void {
   for (let index = 0; index < value.length; index += 1) {
     view.setUint8(offset + index, value.charCodeAt(index));
   }
 }
 
-function resampleFloat32(input: Float32Array, sourceSampleRate: number, targetSampleRate: number): Float32Array {
-  if (!Number.isFinite(sourceSampleRate) || sourceSampleRate <= 0 || Math.abs(sourceSampleRate - targetSampleRate) < 1) {
+function resampleFloat32(
+  input: Float32Array,
+  sourceSampleRate: number,
+  targetSampleRate: number,
+): Float32Array {
+  if (
+    !Number.isFinite(sourceSampleRate) ||
+    sourceSampleRate <= 0 ||
+    Math.abs(sourceSampleRate - targetSampleRate) < 1
+  ) {
     return input;
   }
   const ratio = sourceSampleRate / targetSampleRate;

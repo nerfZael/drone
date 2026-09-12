@@ -59,7 +59,8 @@
     "zod": "^4.3.6"
   },
   "optionalDependencies": {
-    "electron": "42.10.0"
+    "electron": "42.10.0",
+    "uiohook-napi": "1.5.5"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

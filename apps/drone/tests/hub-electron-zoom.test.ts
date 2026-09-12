@@ -24,6 +24,7 @@ describe('Drone Hub Electron zoom', () => {
 
     expect(mainSource).toContain("mainWindow.webContents.send(NAVIGATION_ZOOM_CHANNEL, { action })");
     expect(mainSource).toContain('mainWindow.webContents.setZoomFactor(1)');
+    expect(mainSource).toContain('backgroundThrottling: false');
     expect(mainSource).not.toContain('stepZoomFactor');
     expect(mainSource).not.toContain('currentZoomFactor');
   });
