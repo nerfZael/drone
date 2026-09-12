@@ -33,7 +33,7 @@ export function AgentRunFailureNotice({
       role={recoverable ? 'status' : 'alert'}
       aria-label={`${failure.title}. ${failure.summary}`}
       data-agent-run-failure={failure.kind}
-      className={`my-2 max-w-[var(--chat-prose-max)] rounded-[var(--radius-medium)] border px-3 py-2.5 ${
+      className={`mx-auto my-2 w-full max-w-[var(--chat-prose-max)] rounded-[var(--radius-medium)] border px-3 py-2.5 ${
         recoverable
           ? 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)]'
           : 'border-[var(--red-border)] bg-[var(--red-subtle)]'

@@ -5,7 +5,9 @@ export type MobileReadingDensity = 'default' | 'comfortable';
 
 export const MOBILE_READING_DENSITY_STORAGE_KEY = 'droneHub.mobile.readingDensity.v1';
 
-let currentDensity: MobileReadingDensity = 'default';
+const INITIAL_MOBILE_READING_DENSITY: MobileReadingDensity = 'comfortable';
+
+let currentDensity: MobileReadingDensity = INITIAL_MOBILE_READING_DENSITY;
 let loadPromise: Promise<MobileReadingDensity> | null = null;
 let preferenceRevision = 0;
 const listeners = new Set<() => void>();
@@ -25,7 +27,8 @@ export function loadMobileReadingDensity(): Promise<MobileReadingDensity> {
   const revisionAtLoad = preferenceRevision;
   loadPromise = AsyncStorage.getItem(MOBILE_READING_DENSITY_STORAGE_KEY)
     .then((stored) => {
-      const next = normalizeMobileReadingDensity(stored);
+      const next =
+        stored === null ? INITIAL_MOBILE_READING_DENSITY : normalizeMobileReadingDensity(stored);
       if (preferenceRevision === revisionAtLoad) publish(next);
       return currentDensity;
     })
@@ -54,7 +57,7 @@ export function useMobileReadingDensity(): MobileReadingDensity {
   const density = React.useSyncExternalStore(
     subscribe,
     () => currentDensity,
-    () => 'default' as MobileReadingDensity,
+    () => INITIAL_MOBILE_READING_DENSITY,
   );
   React.useEffect(() => {
     void loadMobileReadingDensity();

@@ -16,7 +16,7 @@ const options: Array<{
 }> = [
   {
     value: 'default',
-    label: 'Default',
+    label: 'Compact',
     description: 'Keeps the compact layout while preserving readable conversation text.',
   },
   {
@@ -33,7 +33,8 @@ export function MobileReadingSettingsCard() {
       <Label>Reading density</Label>
       <Text style={[textStyles.heading, styles.title]}>Choose a comfortable text size</Text>
       <Text style={textStyles.body}>
-        This preference is saved on this phone. Android system font scaling continues to apply.
+        Comfortable is used by default. This preference is saved on this phone, and Android system
+        font scaling continues to apply.
       </Text>
       <View accessibilityRole="radiogroup" style={styles.options}>
         {options.map((option) => {

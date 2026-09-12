@@ -35,7 +35,7 @@ export function AssistantQuestionResultCard({
         role="status"
         aria-label="Skipped questions"
         data-assistant-question-result="true"
-        className="flex min-h-9 max-w-[var(--chat-prose-max)] flex-wrap items-baseline gap-x-2 gap-y-0.5 border-b border-[var(--border-subtle)] py-1.5 text-[var(--muted)]"
+        className="mx-auto flex min-h-9 w-full max-w-[var(--chat-prose-max)] flex-wrap items-baseline gap-x-2 gap-y-0.5 border-b border-[var(--border-subtle)] py-1.5 text-[var(--muted)]"
       >
         <span
           className="text-ui font-[var(--weight-emphasis)]"
