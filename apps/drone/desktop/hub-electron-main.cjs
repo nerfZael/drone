@@ -394,6 +394,9 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
+      // Global voice shortcuts are delivered while this window is minimized.
+      // Keep renderer shortcut handling and media capture at normal priority.
+      backgroundThrottling: false,
     },
   });
 

@@ -1,4 +1,10 @@
 import React from 'react';
+import type {
+  DroneHubGlobalShortcutBindings,
+  DroneHubGlobalShortcutSettingsResponse,
+} from '@drone/hub-model';
+import { requestJson } from '../http';
+import { applyGlobalShortcutSettings } from './global-shortcut-state';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 import {
   SHORTCUT_DEFINITIONS,
@@ -7,85 +13,176 @@ import {
   shortcutBindingFromKeyboardEvent,
   shortcutBindingSignature,
   type ShortcutActionId,
+  type ShortcutBinding,
 } from './shortcuts';
 
 export function ShortcutSettingsSection() {
-  const shortcutBindings = useDroneHubUiStore((s) => s.shortcutBindings);
-  const setShortcutBinding = useDroneHubUiStore((s) => s.setShortcutBinding);
-  const resetShortcutBindings = useDroneHubUiStore((s) => s.resetShortcutBindings);
+  const shortcutBindings = useDroneHubUiStore((state) => state.shortcutBindings);
+  const setShortcutBindings = useDroneHubUiStore((state) => state.setShortcutBindings);
+  const setShortcutBinding = useDroneHubUiStore((state) => state.setShortcutBinding);
+  const resetShortcutBindings = useDroneHubUiStore((state) => state.resetShortcutBindings);
   const [capturingActionId, setCapturingActionId] = React.useState<ShortcutActionId | null>(null);
-
+  const [globalSettings, setGlobalSettings] =
+    React.useState<DroneHubGlobalShortcutSettingsResponse | null>(null);
+  const [globalError, setGlobalError] = React.useState('');
+  const [pendingGlobalActionIds, setPendingGlobalActionIds] = React.useState<Set<ShortcutActionId>>(
+    () => new Set(),
+  );
+  const globalBindingsRef = React.useRef<DroneHubGlobalShortcutBindings>({});
+  const globalSaveQueueRef = React.useRef<Promise<void>>(Promise.resolve());
+  const globalSaveSequenceRef = React.useRef(0);
+  const latestSaveByActionRef = React.useRef(new Map<ShortcutActionId, number>());
   const defaultShortcutBindings = React.useMemo(() => cloneDefaultShortcutBindings(), []);
 
-  const conflictingActionIds = React.useMemo(() => {
-    const sigToActionIds = new Map<string, ShortcutActionId[]>();
-    for (const def of SHORTCUT_DEFINITIONS) {
-      const sig = shortcutBindingSignature(shortcutBindings[def.id]);
-      if (!sig) continue;
-      const list = sigToActionIds.get(sig) ?? [];
-      list.push(def.id);
-      sigToActionIds.set(sig, list);
-    }
-    const out = new Set<ShortcutActionId>();
-    for (const ids of sigToActionIds.values()) {
-      if (ids.length < 2) continue;
-      for (const id of ids) out.add(id);
-    }
-    return out;
-  }, [shortcutBindings]);
-
-  const conflictByActionId = React.useMemo(() => {
-    const sigToActionIds = new Map<string, ShortcutActionId[]>();
-    for (const def of SHORTCUT_DEFINITIONS) {
-      const sig = shortcutBindingSignature(shortcutBindings[def.id]);
-      if (!sig) continue;
-      const list = sigToActionIds.get(sig) ?? [];
-      list.push(def.id);
-      sigToActionIds.set(sig, list);
-    }
-
-    const labelByAction = new Map<ShortcutActionId, string>(SHORTCUT_DEFINITIONS.map((def) => [def.id, def.label]));
-    const out = new Map<ShortcutActionId, string[]>();
-    for (const ids of sigToActionIds.values()) {
-      if (ids.length < 2) continue;
-      for (const id of ids) {
-        const others = ids.filter((candidate) => candidate !== id);
-        out.set(
-          id,
-          others
-            .map((candidate) => labelByAction.get(candidate) ?? candidate)
-            .filter(Boolean),
-        );
+  const applySettings = React.useCallback(
+    (settings: DroneHubGlobalShortcutSettingsResponse, mergeBindings: boolean) => {
+      globalBindingsRef.current = settings.bindings;
+      setGlobalSettings(settings);
+      applyGlobalShortcutSettings(settings);
+      if (mergeBindings) {
+        setShortcutBindings((current) => ({ ...current, ...settings.bindings }));
       }
-    }
-    return out;
-  }, [shortcutBindings]);
+    },
+    [setShortcutBindings],
+  );
+
+  React.useEffect(() => {
+    let cancelled = false;
+    void requestJson<DroneHubGlobalShortcutSettingsResponse>('/api/settings/global-shortcuts')
+      .then((settings) => {
+        if (cancelled) return;
+        setGlobalError('');
+        applySettings(settings, true);
+      })
+      .catch((error) => {
+        if (!cancelled) setGlobalError(error instanceof Error ? error.message : String(error));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [applySettings]);
+
+  const saveGlobalBindings = React.useCallback(
+    async (next: DroneHubGlobalShortcutBindings, actionIds: ShortcutActionId[]) => {
+      const sequence = ++globalSaveSequenceRef.current;
+      globalBindingsRef.current = next;
+      for (const actionId of actionIds) latestSaveByActionRef.current.set(actionId, sequence);
+      setPendingGlobalActionIds((current) => new Set([...current, ...actionIds]));
+      setGlobalError('');
+      const save = globalSaveQueueRef.current
+        .catch(() => undefined)
+        .then(async () => {
+          const settings = await requestJson<DroneHubGlobalShortcutSettingsResponse>(
+            '/api/settings/global-shortcuts',
+            {
+              method: 'PUT',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ bindings: next }),
+            },
+          );
+          if (sequence === globalSaveSequenceRef.current) {
+            setGlobalError('');
+            applySettings(settings, false);
+          } else {
+            setGlobalSettings(settings);
+            applyGlobalShortcutSettings(settings);
+          }
+        });
+      globalSaveQueueRef.current = save;
+      try {
+        await save;
+      } catch (error) {
+        if (sequence === globalSaveSequenceRef.current) {
+          setGlobalError(error instanceof Error ? error.message : String(error));
+          try {
+            const settings = await requestJson<DroneHubGlobalShortcutSettingsResponse>(
+              '/api/settings/global-shortcuts',
+            );
+            applySettings(settings, true);
+          } catch {
+            // Keep the original save error visible when recovery also fails.
+          }
+        }
+      } finally {
+        setPendingGlobalActionIds((current) => {
+          const updated = new Set(current);
+          for (const actionId of actionIds) {
+            if (latestSaveByActionRef.current.get(actionId) !== sequence) continue;
+            latestSaveByActionRef.current.delete(actionId);
+            updated.delete(actionId);
+          }
+          return updated;
+        });
+      }
+    },
+    [applySettings],
+  );
+
+  const updateBinding = React.useCallback(
+    (actionId: ShortcutActionId, binding: ShortcutBinding | null) => {
+      setShortcutBinding(actionId, binding);
+      if (!globalBindingsRef.current[actionId]) return;
+      const next = { ...globalBindingsRef.current };
+      if (binding) next[actionId] = binding;
+      else delete next[actionId];
+      void saveGlobalBindings(next, [actionId]);
+    },
+    [saveGlobalBindings, setShortcutBinding],
+  );
+
+  const toggleGlobal = React.useCallback(
+    (actionId: ShortcutActionId) => {
+      const next = { ...globalBindingsRef.current };
+      if (next[actionId]) {
+        delete next[actionId];
+      } else {
+        const binding = shortcutBindings[actionId];
+        if (!binding) return;
+        next[actionId] = binding;
+      }
+      void saveGlobalBindings(next, [actionId]);
+    },
+    [saveGlobalBindings, shortcutBindings],
+  );
+
+  const conflicts = React.useMemo(() => shortcutConflicts(shortcutBindings), [shortcutBindings]);
 
   const handleCaptureKeyDown = React.useCallback(
-    (actionId: ShortcutActionId, e: React.KeyboardEvent<HTMLButtonElement>) => {
+    (actionId: ShortcutActionId, event: React.KeyboardEvent<HTMLButtonElement>) => {
       if (capturingActionId !== actionId) return;
-      e.preventDefault();
-      e.stopPropagation();
-
-      if (e.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key === 'Escape') {
         setCapturingActionId(null);
         return;
       }
-      if (e.key === 'Backspace' || e.key === 'Delete') {
-        setShortcutBinding(actionId, null);
+      if (event.key === 'Backspace' || event.key === 'Delete') {
+        updateBinding(actionId, null);
         setCapturingActionId(null);
         return;
       }
-
-      const next = shortcutBindingFromKeyboardEvent(e.nativeEvent, {
+      const next = shortcutBindingFromKeyboardEvent(event.nativeEvent, {
         preferPortablePrimaryModifier: true,
       });
       if (!next) return;
-      setShortcutBinding(actionId, next);
+      updateBinding(actionId, next);
       setCapturingActionId(null);
     },
-    [capturingActionId, setShortcutBinding],
+    [capturingActionId, updateBinding],
   );
+
+  const resetAll = () => {
+    setCapturingActionId(null);
+    resetShortcutBindings();
+    const next: DroneHubGlobalShortcutBindings = {};
+    const changed: ShortcutActionId[] = [];
+    for (const actionId of Object.keys(globalBindingsRef.current) as ShortcutActionId[]) {
+      changed.push(actionId);
+      const binding = defaultShortcutBindings[actionId];
+      if (binding) next[actionId] = binding;
+    }
+    if (changed.length > 0) void saveGlobalBindings(next, changed);
+  };
 
   return (
     <div className="dh-settings-section">
@@ -95,15 +192,28 @@ export function ShortcutSettingsSection() {
             Keyboard shortcuts
           </div>
           <div className="text-11 text-[var(--muted-dim)] mt-1 leading-relaxed">
-            Click a shortcut, then press any key combo (letters, function keys, and modifiers). Ctrl and Cmd are captured as a portable Ctrl/Cmd modifier.
+            Numpad keys are kept separate from number-row keys. Enable Global for shortcuts that
+            should run while Drone Hub is unfocused or minimized. Global keys are observed without
+            blocking the foreground application.
           </div>
+          <div className="text-11 text-[var(--muted-dim)] mt-1 leading-relaxed">
+            For voice shortcuts, open Hub once and grant microphone permission before relying on a
+            minimized window.
+          </div>
+          {globalSettings?.status.warning && (
+            <div className="text-11 text-[var(--yellow)] mt-2">
+              {globalSettings.status.warning}
+            </div>
+          )}
+          {globalError && (
+            <div className="text-11 text-[var(--red)] mt-2">
+              Global shortcuts: {globalError}
+            </div>
+          )}
         </div>
         <button
           type="button"
-          onClick={() => {
-            setCapturingActionId(null);
-            resetShortcutBindings();
-          }}
+          onClick={resetAll}
           className="inline-flex items-center justify-center whitespace-nowrap shrink-0 h-8 px-3 rounded text-11 font-[var(--weight-semibold)] tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
           style={{ fontFamily: 'var(--display)' }}
           title="Reset all shortcuts to defaults"
@@ -113,38 +223,63 @@ export function ShortcutSettingsSection() {
       </div>
 
       <div className="grid grid-cols-1 gap-2">
-        {SHORTCUT_DEFINITIONS.map((def) => {
-          const binding = shortcutBindings[def.id];
-          const isCapturing = capturingActionId === def.id;
-          const hasConflict = conflictingActionIds.has(def.id);
+        {SHORTCUT_DEFINITIONS.map((definition) => {
+          const binding = shortcutBindings[definition.id];
+          const isCapturing = capturingActionId === definition.id;
+          const globalEnabled = Boolean(globalSettings?.bindings[definition.id]);
+          const globalPending = pendingGlobalActionIds.has(definition.id);
+          const globalStatus = globalSettings?.status.actions[definition.id];
+          const conflictLabels = conflicts.get(definition.id) ?? [];
           return (
-            <div key={def.id} className="dh-settings-row flex flex-col gap-2 px-1 py-3">
+            <div key={definition.id} className="dh-settings-row flex flex-col gap-2 px-1 py-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-12 text-[var(--fg-secondary)] font-[var(--weight-semibold)]">{def.label}</div>
-                  <div className="text-11 text-[var(--muted-dim)] mt-1 leading-relaxed">{def.description}</div>
+                  <div className="text-12 text-[var(--fg-secondary)] font-[var(--weight-semibold)]">
+                    {definition.label}
+                  </div>
+                  <div className="text-11 text-[var(--muted-dim)] mt-1 leading-relaxed">
+                    {definition.description}
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center justify-end gap-2">
                   <button
                     type="button"
                     data-shortcut-capture="true"
-                    onClick={() => setCapturingActionId(def.id)}
+                    onClick={() => setCapturingActionId(definition.id)}
                     onBlur={() => {
-                      if (capturingActionId === def.id) setCapturingActionId(null);
+                      if (capturingActionId === definition.id) setCapturingActionId(null);
                     }}
-                    onKeyDown={(e) => handleCaptureKeyDown(def.id, e)}
+                    onKeyDown={(event) => handleCaptureKeyDown(definition.id, event)}
                     className={`h-9 min-w-[180px] px-3 rounded text-11 font-[var(--weight-semibold)] border transition-all font-mono ${
                       isCapturing
                         ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                         : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
                     }`}
-                    title={isCapturing ? 'Press your new shortcut. Esc to cancel, Backspace/Delete to clear.' : 'Click and press keys to change this shortcut'}
+                    title={
+                      isCapturing
+                        ? 'Press your new shortcut. Esc to cancel, Backspace/Delete to clear.'
+                        : 'Click and press keys to change this shortcut'
+                    }
                   >
                     {isCapturing ? 'Press keys...' : formatShortcutBinding(binding)}
                   </button>
                   <button
                     type="button"
-                    onClick={() => setShortcutBinding(def.id, null)}
+                    onClick={() => toggleGlobal(definition.id)}
+                    disabled={!globalSettings || !binding || globalPending}
+                    className={`h-9 px-3 rounded text-11 font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
+                      globalEnabled
+                        ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                        : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                    } ${!globalSettings || !binding || globalPending ? 'opacity-40 cursor-not-allowed' : ''}`}
+                    style={{ fontFamily: 'var(--display)' }}
+                    title="Run this shortcut even when Drone Hub is not focused"
+                  >
+                    {globalPending ? 'Saving' : 'Global'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => updateBinding(definition.id, null)}
                     disabled={!binding}
                     className={`h-9 px-3 rounded text-11 font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                       binding
@@ -159,8 +294,8 @@ export function ShortcutSettingsSection() {
                   <button
                     type="button"
                     onClick={() => {
-                      const defaultBinding = defaultShortcutBindings[def.id];
-                      setShortcutBinding(def.id, defaultBinding ? { ...defaultBinding } : null);
+                      const defaultBinding = defaultShortcutBindings[definition.id];
+                      updateBinding(definition.id, defaultBinding ? { ...defaultBinding } : null);
                     }}
                     className="h-9 px-3 rounded text-11 font-[var(--weight-semibold)] tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
                     style={{ fontFamily: 'var(--display)' }}
@@ -170,9 +305,20 @@ export function ShortcutSettingsSection() {
                   </button>
                 </div>
               </div>
-              {hasConflict && (
+              {conflictLabels.length > 0 && (
                 <div className="text-11 text-[var(--yellow)]">
-                  Conflicts with: {(conflictByActionId.get(def.id) ?? []).join(', ')}. The first matching action in the list will run.
+                  Conflicts with: {conflictLabels.join(', ')}. Global conflicts are disabled until
+                  each action has a unique key.
+                </div>
+              )}
+              {globalEnabled && globalStatus?.error && (
+                <div className="text-11 text-[var(--red)]">
+                  Global shortcut unavailable: {globalStatus.error}
+                </div>
+              )}
+              {globalEnabled && globalStatus?.active && (
+                <div className="text-11 text-[var(--muted-dim)]">
+                  Active globally while the Hub process is running.
                 </div>
               )}
             </div>
@@ -181,4 +327,33 @@ export function ShortcutSettingsSection() {
       </div>
     </div>
   );
+}
+
+function shortcutConflicts(
+  bindings: Record<ShortcutActionId, ShortcutBinding | null>,
+): Map<ShortcutActionId, string[]> {
+  const signatureToIds = new Map<string, ShortcutActionId[]>();
+  for (const definition of SHORTCUT_DEFINITIONS) {
+    const signature = shortcutBindingSignature(bindings[definition.id]);
+    if (!signature) continue;
+    const ids = signatureToIds.get(signature) ?? [];
+    ids.push(definition.id);
+    signatureToIds.set(signature, ids);
+  }
+  const labels = new Map(
+    SHORTCUT_DEFINITIONS.map((definition) => [definition.id, definition.label]),
+  );
+  const conflicts = new Map<ShortcutActionId, string[]>();
+  for (const ids of signatureToIds.values()) {
+    if (ids.length < 2) continue;
+    for (const id of ids) {
+      conflicts.set(
+        id,
+        ids
+          .filter((candidate) => candidate !== id)
+          .map((candidate) => labels.get(candidate) ?? candidate),
+      );
+    }
+  }
+  return conflicts;
 }
