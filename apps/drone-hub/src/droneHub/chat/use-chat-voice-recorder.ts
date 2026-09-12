@@ -292,6 +292,15 @@ export function useChatVoiceRecorder({
         setStatusValue('idle');
         onError('The microphone stopped unexpectedly. Start voice input again.');
       });
+      recorder.addEventListener('stop', () => {
+        if (captureRef.current !== capture) return;
+        captureRef.current = null;
+        window.clearInterval(capture.durationTimer);
+        capture.stream.getTracks().forEach((track) => track.stop());
+        releaseMicrophone(microphoneLease);
+        setStatusValue('idle');
+        onError('The microphone stopped unexpectedly. Start voice input again.');
+      });
       if (startIdRef.current !== startId) {
         stopCapture(capture);
         releaseMicrophone(microphoneLease);

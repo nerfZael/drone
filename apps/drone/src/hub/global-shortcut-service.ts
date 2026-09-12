@@ -262,9 +262,10 @@ export class GlobalShortcutService {
   }
 
   private handleKeyDown(event: KeyboardHookEvent): void {
+    const candidates = this.compiledByKeycode.get(event.keycode) ?? [];
+    if (candidates.length === 0) return;
     if (this.pressedKeycodes.has(event.keycode)) return;
     this.pressedKeycodes.add(event.keycode);
-    const candidates = this.compiledByKeycode.get(event.keycode) ?? [];
     const matched = candidates.find((candidate) =>
       modifiersMatch(candidate.binding, event, this.deps.platform),
     );

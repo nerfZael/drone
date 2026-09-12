@@ -7,10 +7,6 @@ import { flushSync } from 'react-dom';
 import { createQuickActionController, type QuickActionUnavailable } from './quick-action-menu';
 import { requestAlignFloatingChats, requestSideChat } from './side-chat-events';
 import { focusedSideChatMainControl, toggleFocusedSideChatMain } from './side-chat-main-shortcut';
-import {
-  isDroneHubShortcutActionId,
-  type DroneHubGlobalShortcutSettingsResponse,
-} from '@drone/hub-model';
 import type { DroneSummary, PendingPrompt, TranscriptItem } from '../types';
 import type { DraftChatState, DroneErrorModalState, StartupSeedState } from './app-types';
 import type { RightPanelTab } from './app-config';
@@ -39,11 +35,9 @@ import {
   shouldConsumeCompanionProposalShortcut,
 } from '../companion/companion-shortcut';
 import {
-  applyGlobalShortcutSettings,
-  clearActiveGlobalShortcutSettings,
-  isActiveGlobalShortcutAction,
+  activeGlobalShortcutBindings,
 } from './global-shortcut-state';
-import { useDroneHubUiStore } from './use-drone-hub-ui-store';
+import { useGlobalShortcutClient } from './use-global-shortcut-client';
 
 type Updater<T> = T | ((prev: T) => T);
 type Setter<T> = (next: Updater<T>) => void;
@@ -253,70 +247,9 @@ export function useDroneHubLifecycleEffects({
   const toggleActiveComposerVoiceRecording = activeComposer.toggleVoiceRecording;
   const toggleFileDictation = useFileDictation()?.toggle;
   const outputScrollContextRef = React.useRef<string>('');
-  const globalShortcutActionHandlerRef = React.useRef<
-    ((actionId: ShortcutActionId) => void) | null
-  >(null);
+  const globalShortcutActionHandlerRef = useGlobalShortcutClient();
   useDropdownDismiss(terminalMenuRef, terminalMenuOpen, setTerminalMenuOpen);
   useDropdownDismiss(headerOverflowRef, headerOverflowOpen, setHeaderOverflowOpen);
-
-  React.useEffect(() => {
-    let source: EventSource | null = null;
-    let closed = false;
-    const randomClientId = window.crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
-    const clientId = `hub-${randomClientId.replace(/[^A-Za-z0-9_-]/g, '')}`;
-    const sendActivity = () => {
-      void requestJson(
-        `/api/global-shortcuts/clients/${encodeURIComponent(clientId)}/activity`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            focused: document.hasFocus(),
-            visible: document.visibilityState === 'visible',
-          }),
-        },
-      ).catch(() => undefined);
-    };
-    const onShortcut = (event: MessageEvent) => {
-      let data: unknown = null;
-      try {
-        data = JSON.parse(event.data);
-      } catch {
-        return;
-      }
-      const actionId = (data as { actionId?: unknown } | null)?.actionId;
-      if (!isDroneHubShortcutActionId(actionId)) return;
-      globalShortcutActionHandlerRef.current?.(actionId);
-    };
-
-    void requestJson<DroneHubGlobalShortcutSettingsResponse>('/api/settings/global-shortcuts')
-      .then((settings) => {
-        if (closed) return;
-        applyGlobalShortcutSettings(settings);
-        useDroneHubUiStore.getState().setShortcutBindings((current) => ({
-          ...current,
-          ...settings.bindings,
-        }));
-        source = new window.EventSource(
-          `/api/global-shortcuts/events?clientId=${encodeURIComponent(clientId)}`,
-        );
-        source.addEventListener('connected', sendActivity);
-        source.addEventListener('shortcut', onShortcut);
-      })
-      .catch(() => undefined);
-    window.addEventListener('focus', sendActivity);
-    window.addEventListener('blur', sendActivity);
-    document.addEventListener('visibilitychange', sendActivity);
-
-    return () => {
-      closed = true;
-      source?.close();
-      clearActiveGlobalShortcutSettings();
-      window.removeEventListener('focus', sendActivity);
-      window.removeEventListener('blur', sendActivity);
-      document.removeEventListener('visibilitychange', sendActivity);
-    };
-  }, [requestJson]);
 
   React.useEffect(() => {
     const previousFocusKey = pendingRootVoiceDraftFocusKeyRef.current;
@@ -621,6 +554,10 @@ export function useDroneHubLifecycleEffects({
       runShortcutAction(actionId, new KeyboardEvent('keydown'));
     };
     globalShortcutActionHandlerRef.current = runGlobalShortcutAction;
+    const isActiveGlobalShortcutMatch = (event: KeyboardEvent): boolean =>
+      Object.values(activeGlobalShortcutBindings()).some((binding) =>
+        isShortcutMatch(binding, event),
+      );
 
     const isEditableTarget = (target: EventTarget | null): boolean => {
       if (!(target instanceof HTMLElement)) return false;
@@ -664,6 +601,11 @@ export function useDroneHubLifecycleEffects({
 
     const onChatComposerEditorShortcutCapture = (e: KeyboardEvent) => {
       if (quickActions.getSnapshot()) {
+        if (!e.repeat && !e.isComposing && isActiveGlobalShortcutMatch(e)) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          return;
+        }
         if (quickActions.handleKey(e)) {
           e.preventDefault();
           e.stopImmediatePropagation();
@@ -677,7 +619,7 @@ export function useDroneHubLifecycleEffects({
       const matched = SHORTCUT_DEFINITIONS.find((definition) =>
         isShortcutMatch(shortcutBindings[definition.id], e),
       );
-      if (matched && isActiveGlobalShortcutAction(matched.id)) {
+      if (isActiveGlobalShortcutMatch(e)) {
         e.preventDefault();
         e.stopPropagation();
         return;
@@ -740,7 +682,7 @@ export function useDroneHubLifecycleEffects({
       if (e.repeat) return;
       const matched = SHORTCUT_DEFINITIONS.find((def) => isShortcutMatch(shortcutBindings[def.id], e)) ?? null;
       if (matched?.id === 'openQuickActions' && (modalOpen || isEditableTarget(document.activeElement))) return;
-      if (matched && !captureRoot && isActiveGlobalShortcutAction(matched.id)) {
+      if (!captureRoot && isActiveGlobalShortcutMatch(e)) {
         e.preventDefault();
         return;
       }

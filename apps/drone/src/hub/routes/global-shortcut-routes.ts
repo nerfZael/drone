@@ -1,5 +1,6 @@
 import type { HubRouter } from '../hub-router';
 import type { GlobalShortcutService } from '../global-shortcut-service';
+import { openHubSseStream } from './hub-sse-stream';
 
 export function registerGlobalShortcutRoutes(
   apiRouter: HubRouter,
@@ -30,36 +31,23 @@ export function registerGlobalShortcutRoutes(
 
   apiRouter.get('/api/global-shortcuts/events', ({ url, req, res, fail }) => {
     const clientId = url.searchParams.get('clientId');
-    function write(eventName: string, value: unknown) {
-      if (res.destroyed || res.writableEnded) throw new Error('shortcut event client disconnected');
-      res.write(`event: ${eventName}\ndata: ${JSON.stringify(value)}\n\n`);
-    }
-    let disconnect: (() => void) | null = null;
+    const writeEvent = (response: typeof res, eventName: string, value: unknown) => {
+      if (response.destroyed || response.writableEnded) {
+        throw new Error('shortcut event client disconnected');
+      }
+      response.write(`event: ${eventName}\ndata: ${JSON.stringify(value)}\n\n`);
+    };
     try {
-      disconnect = service.connectClient(clientId, (event) => write('shortcut', event));
+      openHubSseStream({
+        request: req,
+        response: res,
+        connectedData: { ok: true, clientId },
+        writeEvent,
+        subscribe: () =>
+          service.connectClient(clientId, (event) => writeEvent(res, 'shortcut', event)),
+      });
     } catch (error) {
       return fail(400, error instanceof Error ? error.message : String(error));
     }
-    res.statusCode = 200;
-    res.setHeader('content-type', 'text/event-stream; charset=utf-8');
-    res.setHeader('cache-control', 'no-cache, no-transform');
-    res.setHeader('connection', 'keep-alive');
-    req.socket.setTimeout(0);
-    (res as any).flushHeaders?.();
-    write('connected', { ok: true, clientId });
-    const keepAlive = setInterval(() => {
-      if (!res.destroyed && !res.writableEnded) res.write(': keepalive\n\n');
-    }, 25_000);
-    (keepAlive as any).unref?.();
-    let cleanedUp = false;
-    const cleanup = () => {
-      if (cleanedUp) return;
-      cleanedUp = true;
-      clearInterval(keepAlive);
-      disconnect?.();
-    };
-    req.on('close', cleanup);
-    res.on('close', cleanup);
-    res.on('finish', cleanup);
   });
 }

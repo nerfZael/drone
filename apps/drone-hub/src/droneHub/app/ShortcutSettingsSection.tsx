@@ -307,8 +307,8 @@ export function ShortcutSettingsSection() {
               </div>
               {conflictLabels.length > 0 && (
                 <div className="text-11 text-[var(--yellow)]">
-                  Conflicts with: {conflictLabels.join(', ')}. Global conflicts are disabled until
-                  each action has a unique key.
+                  Conflicts with: {conflictLabels.join(', ')}. The first local match runs, a global
+                  action takes priority, and duplicate global actions are disabled.
                 </div>
               )}
               {globalEnabled && globalStatus?.error && (

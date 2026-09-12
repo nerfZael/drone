@@ -56,6 +56,7 @@ function createService(initialBindings: unknown, options: { env?: NodeJS.Process
           NumpadDecimal: 83,
           NumpadDelete: 61_011,
           Q: 16,
+          P: 25,
         },
       };
     },
@@ -142,6 +143,32 @@ describe('GlobalShortcutService', () => {
     hook.emit('keyup', keyboardEvent(61_011));
 
     expect(events.map((event) => event.actionId)).toEqual(['toggleVoiceClipboardRecording']);
+    service.close();
+  });
+
+  test('requires an exact portable modifier match', async () => {
+    const { service, hook } = createService({
+      openQuickOpen: {
+        key: 'p',
+        mod: true,
+        ctrl: false,
+        meta: false,
+        alt: true,
+        shift: false,
+      },
+    });
+    await service.start();
+    const events: GlobalShortcutDispatchEvent[] = [];
+    service.connectClient('client-one', (event) => events.push(event));
+
+    hook.emit('keydown', keyboardEvent(25, { ctrlKey: true }));
+    hook.emit('keyup', keyboardEvent(25));
+    hook.emit('keydown', keyboardEvent(25, { ctrlKey: true, altKey: true, shiftKey: true }));
+    hook.emit('keyup', keyboardEvent(25));
+    hook.emit('keydown', keyboardEvent(25, { ctrlKey: true, altKey: true }));
+    hook.emit('keyup', keyboardEvent(25));
+
+    expect(events.map((event) => event.actionId)).toEqual(['openQuickOpen']);
     service.close();
   });
 
