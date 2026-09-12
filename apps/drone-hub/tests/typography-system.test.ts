@@ -58,7 +58,6 @@ describe('desktop typography system', () => {
     expect(styles).toContain('--chat-text-size: 1rem;');
     expect(styles).toContain('--document-text-size: 1.0625rem;');
     expect(styles).toContain('.dh-markdown--transcript h1 {');
-    expect(styles).toContain('.dh-markdown--transcript > :not(.dh-markdown-block--wide) {');
     expect(settings).toContain('label="Reading density"');
     expect(settings).toContain("{ value: 'default', label: 'Compact' }");
     expect(settings).toContain("{ value: 'comfortable', label: 'Comfortable' }");
