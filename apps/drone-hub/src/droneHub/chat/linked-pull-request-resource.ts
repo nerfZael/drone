@@ -1,4 +1,5 @@
 import React from 'react';
+import { ExpiringMap } from '@drone/hub-model';
 import { requestJson } from '../http';
 import type { RepoPullRequestsPayload } from '../types';
 
@@ -32,7 +33,9 @@ type LinkedPullRequestResource = {
 };
 
 const EMPTY_SNAPSHOT: LinkedPullRequestSnapshot = { data: null, loading: false, error: null };
-const cache = new Map<string, { atMs: number; data: Extract<RepoPullRequestsPayload, { ok: true }> }>();
+const cache = new ExpiringMap<string, { atMs: number; data: Extract<RepoPullRequestsPayload, { ok: true }> }>(
+  (entry) => entry.atMs + LINKED_PR_CACHE_TTL_MS,
+);
 const resources = new Map<string, LinkedPullRequestResource>();
 
 function normalizeRepoKey(repoPath: string): string {

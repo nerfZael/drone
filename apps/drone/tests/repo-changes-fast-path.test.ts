@@ -11,6 +11,14 @@ import { ShortLivedSingleFlightCache } from '../src/hub/repo-changes-scan-cache'
 import { createRepositoryRouteHandler } from '../src/hub/routes/repository-operation-routes';
 
 describe('repository changes fast path', () => {
+  test('releases an expired result without another scan request', async () => {
+    const cache = new ShortLivedSingleFlightCache<string>(20);
+    await cache.getOrLoad('untouched', async () => 'large scan result');
+    expect((cache as any).cached.size).toBe(1);
+    await Bun.sleep(50);
+    expect((cache as any).cached.size).toBe(0);
+  });
+
   test('coalesces identical scans and serves the short-lived cached result', async () => {
     let now = 1_000;
     let resolveScan: ((value: string) => void) | null = null;

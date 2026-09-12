@@ -105,18 +105,13 @@ function copyResponseHeaders(response, res) {
   }
 }
 
-async function readBody(req) {
-  const chunks = [];
-  for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  return Buffer.concat(chunks);
-}
-
 async function proxyApiRequest({ req, res, apiHost, apiPort, apiToken, signal }) {
   const method = String(req.method || 'GET').toUpperCase();
   const requestUrl = new URL(req.url || '/', `http://${req.headers.host || '127.0.0.1'}`);
-  const body = method === 'GET' || method === 'HEAD' ? null : await readBody(req);
+  const hasBody = method !== 'GET' && method !== 'HEAD';
   await new Promise((resolve, reject) => {
     let upstreamResponse = null;
+    let settled = false;
     const upstream = http.request({
       host: apiHost,
       port: apiPort,
@@ -124,6 +119,7 @@ async function proxyApiRequest({ req, res, apiHost, apiPort, apiToken, signal })
       path: `${requestUrl.pathname}${requestUrl.search}`,
       headers: {
         authorization: `Bearer ${apiToken}`,
+        ...(hasBody && req.headers['content-length'] ? { 'content-length': req.headers['content-length'] } : {}),
         ...(req.headers['content-type'] ? { 'content-type': String(req.headers['content-type']) } : {}),
         ...(req.headers['if-none-match'] ? { 'if-none-match': String(req.headers['if-none-match']) } : {}),
         ...(req.headers['mcp-session-id'] ? { 'mcp-session-id': String(req.headers['mcp-session-id']) } : {}),
@@ -133,30 +129,56 @@ async function proxyApiRequest({ req, res, apiHost, apiPort, apiToken, signal })
         ...(req.headers['x-drone-companion-message-id'] ? { 'x-drone-companion-message-id': String(req.headers['x-drone-companion-message-id']) } : {}),
       },
     });
-    const cleanup = () => signal.removeEventListener('abort', abort);
-    const succeed = () => {
-      cleanup();
-      resolve();
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', abort);
+      req.removeListener('aborted', clientAborted);
+      res.removeListener('close', clientClosed);
+      req.unpipe(upstream);
+      // An early upstream rejection must still reach the client. Discard any
+      // remaining upload without retaining it while that response is delivered.
+      if (!req.complete && !req.destroyed) req.resume();
+      // Keep successfully completed requests eligible for HTTP connection reuse.
+      // An early response may leave the upload unfinished and needs closing.
+      if (error || !upstream.writableFinished) upstream.destroy(error);
+      if (error) upstreamResponse?.destroy(error);
+      if (error) reject(error);
+      else resolve();
     };
-    const fail = (error) => {
-      cleanup();
-      reject(error);
-    };
-    const abort = () => {
-      const error = new Error('Drone Hub desktop proxy is closing');
-      upstream.destroy(error);
-      upstreamResponse?.destroy(error);
+    const succeed = () => finish();
+    const fail = (error) => finish(error);
+    const abort = () => fail(new Error('Drone Hub desktop proxy is closing'));
+    const clientAborted = () => fail(new Error('Desktop API request was aborted'));
+    const clientClosed = () => {
+      if (!res.writableFinished) clientAborted();
     };
     signal.addEventListener('abort', abort, { once: true });
-    upstream.once('error', fail);
+    req.once('aborted', clientAborted);
+    req.once('error', fail);
+    res.once('close', clientClosed);
+    upstream.on('error', (error) => {
+      // A server may reject an upload before consuming its body. Once a
+      // response exists, its pipeline owns errors so an EPIPE from the upload
+      // side cannot replace the server's response with a proxy error.
+      if (!upstreamResponse) fail(error);
+    });
     upstream.once('response', (response) => {
       upstreamResponse = response;
+      if (settled) {
+        response.destroy();
+        return;
+      }
+      // A response can start while the backend is still consuming the upload.
+      // Keep forwarding until the response finishes or the request is cancelled.
       res.statusCode = response.statusCode || 502;
       copyResponseHeaders(response, res);
       void pipeline(response, res).then(succeed, fail);
     });
     if (signal.aborted) abort();
-    else upstream.end(body ?? undefined);
+    else if (req.aborted || res.destroyed) clientAborted();
+    else if (hasBody) req.pipe(upstream); // pipe applies writable backpressure.
+    else upstream.end();
   });
 }
 

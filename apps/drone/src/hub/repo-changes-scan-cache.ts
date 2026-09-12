@@ -1,12 +1,16 @@
+import { ExpiringMap } from '@drone/hub-model';
+
 export class ShortLivedSingleFlightCache<T> {
-  private readonly cached = new Map<string, { expiresAt: number; value: T }>();
+  private readonly cached: ExpiringMap<string, { expiresAt: number; value: T }>;
   private readonly inFlight = new Map<string, Promise<T>>();
   private generation = 0;
 
   constructor(
     private readonly ttlMs = 2_000,
     private readonly now = () => Date.now(),
-  ) {}
+  ) {
+    this.cached = new ExpiringMap((entry) => entry.expiresAt, now);
+  }
 
   getOrLoad(key: string, load: () => Promise<T>): Promise<T> {
     const cached = this.cached.get(key);

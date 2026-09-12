@@ -1,3 +1,4 @@
+import { CacheExpiryTimer } from '@drone/hub-model';
 import type { ChatInfo } from '../../domain';
 import type { PendingPrompt, TranscriptItem } from '../types';
 import { chatSelectionKey } from './chat-selection-model';
@@ -24,6 +25,21 @@ export type ChatRuntimeCacheSnapshot = {
 };
 
 const cache = new Map<string, ChatRuntimeCacheEntry>();
+const fields = ['chatInfo', 'pending', 'transcripts'] as const;
+const expiry = new CacheExpiryTimer((nowMs) => {
+  let next: number | null = null;
+  for (const [key, entry] of cache) {
+    for (const field of fields) {
+      const value = entry[field];
+      if (!value) continue;
+      const deadline = value.atMs + CHAT_RUNTIME_CACHE_TTL_MS;
+      if (deadline <= nowMs) delete entry[field];
+      else next = next === null ? deadline : Math.min(next, deadline);
+    }
+    if (Object.keys(entry).length === 0) cache.delete(key);
+  }
+  return next;
+});
 
 export function chatRuntimeCacheKey(
   droneId: string | null | undefined,
@@ -40,7 +56,7 @@ export function readFreshChatRuntimeCache(
   if (!entry) return null;
 
   const snapshot: ChatRuntimeCacheSnapshot = {};
-  for (const field of ['chatInfo', 'pending', 'transcripts'] as const) {
+  for (const field of fields) {
     const timedValue = entry[field];
     if (!timedValue) continue;
     if (nowMs - timedValue.atMs >= CHAT_RUNTIME_CACHE_TTL_MS) {
@@ -51,7 +67,7 @@ export function readFreshChatRuntimeCache(
   }
 
   if (Object.keys(snapshot).length > 0) return snapshot;
-  cache.delete(key);
+  deleteChatRuntimeCache(key);
   return null;
 }
 
@@ -71,10 +87,14 @@ export function writeChatRuntimeCache(
   if (patch.transcripts) entry.transcripts = { atMs, value: patch.transcripts };
   cache.delete(key);
   cache.set(key, entry);
+  for (const field of fields) {
+    if (entry[field]) expiry.schedule(entry[field].atMs + CHAT_RUNTIME_CACHE_TTL_MS);
+  }
 }
 
 export function deleteChatRuntimeCache(key: string): void {
   if (key) cache.delete(key);
+  if (cache.size === 0) expiry.clear();
 }
 
 export function renameChatRuntimeCache(
@@ -87,7 +107,7 @@ export function renameChatRuntimeCache(
   if (!oldKey || !newKey || oldKey === newKey) return;
   const oldEntry = cache.get(oldKey);
   if (!oldEntry) {
-    cache.delete(newKey);
+    deleteChatRuntimeCache(newKey);
     return;
   }
   const renamedEntry = { ...oldEntry };
@@ -104,7 +124,10 @@ export function renameChatRuntimeCache(
 }
 
 export const chatRuntimeCacheTesting = {
+  entryCount: () => cache.size,
+  fieldCount: () => [...cache.values()].reduce((count, entry) => count + Object.keys(entry).length, 0),
   reset() {
     cache.clear();
+    expiry.clear();
   },
 };

@@ -1,4 +1,5 @@
 import React from 'react';
+import { ExpiringMap } from '@drone/hub-model';
 import {
   pullRequestCloseConfirmation,
   pullRequestMergeConfirmation,
@@ -51,13 +52,13 @@ const EMPTY_PULL_REQUEST_SUMMARY_SNAPSHOT: RepoPullRequestSummarySnapshot = {
   error: null,
 };
 
-const headerRepoPullRequestSummaryCache = new Map<
+const headerRepoPullRequestSummaryCache = new ExpiringMap<
   string,
   {
     atMs: number;
     payload: Extract<RepoPullRequestsPayload, { ok: true }>;
   }
->();
+>((entry) => entry.atMs + HEADER_REPO_PR_CACHE_TTL_MS);
 const repoPullRequestSummaryResources = new Map<string, RepoPullRequestSummaryResource>();
 
 function normalizeRepoPullRequestSummaryCacheKey(repoPath: string): string {

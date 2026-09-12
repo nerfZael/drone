@@ -31,6 +31,26 @@ function chatInfo(chat: string, agent: any) {
 afterEach(() => chatRuntimeCacheTesting.reset());
 
 describe('chat runtime cache', () => {
+  test('releases untouched expired chats without a subsequent cache read', async () => {
+    const atMs = Date.now() - CHAT_RUNTIME_CACHE_TTL_MS + 20;
+    writeChatRuntimeCache('untouched', { transcripts: [{ id: 'old' } as any] }, atMs);
+    expect(chatRuntimeCacheTesting.entryCount()).toBe(1);
+    await Bun.sleep(50);
+    // Inspect retained entries directly: a normal read would itself expire them.
+    expect(chatRuntimeCacheTesting.entryCount()).toBe(0);
+  });
+
+  test('expires fields independently and preserves refreshed data', async () => {
+    const oldAt = Date.now() - CHAT_RUNTIME_CACHE_TTL_MS + 20;
+    writeChatRuntimeCache('mixed', { transcripts: [{ id: 'old' } as any], pending: [] }, oldAt);
+    const pending = [{ id: 'fresh' } as any];
+    writeChatRuntimeCache('mixed', { pending });
+    await Bun.sleep(50);
+    expect(chatRuntimeCacheTesting.entryCount()).toBe(1);
+    expect(chatRuntimeCacheTesting.fieldCount()).toBe(1);
+    expect(readFreshChatRuntimeCache('mixed')?.pending).toBe(pending);
+  });
+
   test.each([
     ['builtin', { kind: 'builtin', id: 'codex' }],
     ['native', { kind: 'native' }],

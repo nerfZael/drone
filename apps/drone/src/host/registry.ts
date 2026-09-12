@@ -772,8 +772,13 @@ function parseRegistry(raw: string): DroneRegistry | null {
 }
 
 function normalizeRegistryForPersistence(reg: DroneRegistry): DroneRegistry {
-  const cloned = JSON.parse(JSON.stringify(reg ?? { version: 2, drones: {}, pending: {} }));
-  const parsed = parseRegistry(JSON.stringify(cloned));
+  // parseRegistry already creates the independent object that normalization
+  // mutates; an intermediate JSON clone only duplicates the entire registry.
+  const serialized = JSON.stringify(reg ?? { version: 2, drones: {}, pending: {} });
+  // Preserve the previous failure for roots that JSON.stringify cannot encode,
+  // rather than letting parseRegistry turn them into an empty fallback registry.
+  if (serialized === undefined) throw new SyntaxError('Registry is not JSON-serializable');
+  const parsed = parseRegistry(serialized);
   return parsed ?? { version: 2, drones: {}, pending: {} };
 }
 

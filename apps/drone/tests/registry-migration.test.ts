@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, test } from 'bun:test';
 import { resetDroneRootDirForTests } from '../src/host/paths';
-import { loadRegistry } from '../src/host/registry';
+import { loadRegistry, saveRegistry } from '../src/host/registry';
 
 async function withTempHomes<T>(fn: (ctx: { tempRoot: string; homeDir: string; xdgDataHome: string }) => Promise<T>): Promise<T> {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-registry-migration-'));
@@ -37,6 +37,29 @@ async function withTempHomes<T>(fn: (ctx: { tempRoot: string; homeDir: string; x
 }
 
 describe('registry migration fallback', () => {
+  test('normalizes persisted data without mutating the caller or accepting unserializable roots', async () => {
+    await withTempHomes(async ({ xdgDataHome }) => {
+      const input: any = {
+        version: 2, drones: {}, pending: {},
+        playbooks: { retired: { label: 'remove only from persisted state' } },
+        customUserState: { text: 'keep 🌍', values: [1, null, { nested: true }] },
+      };
+      const before = JSON.stringify(input);
+      await saveRegistry(input);
+      expect(JSON.stringify(input)).toBe(before);
+      const registryPath = path.join(xdgDataHome, 'drone', 'registry.json');
+      const saved = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
+      expect(saved.playbooks).toBeUndefined();
+      expect(saved.customUserState).toEqual(input.customUserState);
+      const beforeRejectedWrite = fs.readFileSync(registryPath, 'utf8');
+      await expect(saveRegistry({ toJSON: () => undefined } as any)).rejects.toBeInstanceOf(SyntaxError);
+      const cyclic: any = { version: 2, drones: {} };
+      cyclic.self = cyclic;
+      await expect(saveRegistry(cyclic)).rejects.toBeInstanceOf(TypeError);
+      expect(fs.readFileSync(registryPath, 'utf8')).toBe(beforeRejectedWrite);
+    });
+  });
+
   test('restores legacy populated registry when preferred registry is empty and removes the legacy live file', async () => {
     await withTempHomes(async ({ homeDir, xdgDataHome }) => {
       const legacyDir = path.join(homeDir, '.drone');

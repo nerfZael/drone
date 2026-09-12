@@ -1,4 +1,5 @@
 import { captureLegacyTerminalSnapshot } from './terminal-legacy-snapshot';
+import { ExpiringMap } from '@drone/hub-model';
 import { getCodexOpenRouterCatalog } from './codex-openrouter-catalog';
 import { registerUsageRoutes } from './routes/usage-routes';
 import http from 'node:http';
@@ -2737,13 +2738,13 @@ const CHAT_MODEL_MAX_LEN = 160;
 const CLI_MODEL_FLAG_CACHE_TTL_MS = 5 * 60 * 1000;
 const cliModelFlagSupportCache = new Map<string, { atMs: number; supported: boolean }>();
 const PULL_PREVIEW_HOST_MERGE_CACHE_TTL_MS = 25_000;
-const pullPreviewHostMergeCache = new Map<
+const pullPreviewHostMergeCache = new ExpiringMap<
   string,
   { atMs: number; entries: RepoPullChangeEntry[] }
->();
+>((entry) => entry.atMs + PULL_PREVIEW_HOST_MERGE_CACHE_TTL_MS);
 const GITHUB_PULL_REQUEST_LIST_CACHE_TTL_MS = 12_000;
 const repoChangesScanCache = new ShortLivedSingleFlightCache<any>(2_000);
-const githubPullRequestListCache = new Map<
+const githubPullRequestListCache = new ExpiringMap<
   string,
   {
     atMs: number;
@@ -2755,7 +2756,7 @@ const githubPullRequestListCache = new Map<
       pullRequests: any[];
     };
   }
->();
+>((entry) => entry.atMs + GITHUB_PULL_REQUEST_LIST_CACHE_TTL_MS);
 
 function attachReviewMetadataToPullEntries<T extends { path: string; originalPath: string | null }>(
   entries: T[],

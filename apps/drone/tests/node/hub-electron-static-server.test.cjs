@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const http = require('node:http');
+const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
@@ -9,6 +10,177 @@ const { WebSocket, WebSocketServer } = require('ws');
 const {
   startDesktopStaticUiServer,
 } = require('../../desktop/hub-electron-static-server.cjs');
+
+async function uploadProxy(t, handler) {
+  const staticDir = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-upload-proxy-'));
+  fs.writeFileSync(path.join(staticDir, 'index.html'), '<html></html>');
+  const sockets = new Set();
+  const upstream = http.createServer(handler);
+  upstream.on('connection', socket => {
+    sockets.add(socket);
+    socket.once('close', () => sockets.delete(socket));
+  });
+  await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
+  const proxy = await startDesktopStaticUiServer({
+    staticDir, apiHost: '127.0.0.1', apiPort: upstream.address().port, apiToken: 'upload-test-token',
+  });
+  t.after(async () => {
+    await proxy.close();
+    for (const socket of sockets) socket.destroy();
+    await new Promise(resolve => upstream.close(resolve));
+    fs.rmSync(staticDir, { recursive: true, force: true });
+  });
+  return proxy;
+}
+
+test('streams fixed-length and chunked uploads before the client finishes, preserving bytes', { timeout: 5000 }, async t => {
+  for (const fixedLength of [true, false]) {
+    await t.test(fixedLength ? 'content-length' : 'chunked', async t => {
+      let firstChunk;
+      const started = new Promise(resolve => { firstChunk = resolve; });
+      const first = crypto.randomBytes(256 * 1024);
+      const last = crypto.randomBytes(128 * 1024);
+      const expectedHash = crypto.createHash('sha256').update(first).update(last).digest('hex');
+      const proxy = await uploadProxy(t, (req, res) => {
+        assert.equal(req.headers.authorization, 'Bearer upload-test-token');
+        assert.equal(req.headers['content-type'], 'application/octet-stream');
+        const hash = crypto.createHash('sha256');
+        let bytes = 0;
+        req.on('data', chunk => { bytes += chunk.length; hash.update(chunk); firstChunk(); });
+        req.on('end', () => {
+          res.writeHead(201, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ bytes, hash: hash.digest('hex') }));
+        });
+      });
+      let request;
+      const response = new Promise((resolve, reject) => {
+        request = http.request(`${proxy.url}/api/upload`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/octet-stream',
+            ...(fixedLength ? { 'content-length': first.length + last.length } : {}),
+          },
+        }, res => {
+          let text = '';
+          res.setEncoding('utf8');
+          res.on('data', chunk => { text += chunk; });
+          res.on('end', () => resolve({ status: res.statusCode, ...JSON.parse(text) }));
+          res.on('error', reject);
+        });
+        request.on('error', reject);
+      });
+      t.after(() => request.destroy());
+      request.write(first);
+      await started; // Whole-body buffering would deadlock here.
+      request.end(last);
+      assert.deepEqual(await response, { status: 201, bytes: first.length + last.length, hash: expectedHash });
+    });
+  }
+});
+
+test('forwards JSON and empty POST bodies', { timeout: 5000 }, async t => {
+  const connections = new Set();
+  const proxy = await uploadProxy(t, (req, res) => {
+    connections.add(req.socket);
+    let text = '';
+    req.setEncoding('utf8');
+    req.on('data', chunk => { text += chunk; });
+    req.on('end', () => res.end(text));
+  });
+  for (const body of ['', JSON.stringify({ message: 'hello 🌍' })]) {
+    const response = await fetch(`${proxy.url}/api/echo`, { method: 'POST', body });
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), body);
+  }
+  if (http.globalAgent.options.keepAlive) assert.equal(connections.size, 1);
+});
+
+test('continues uploading when the backend starts its response before the body is complete', { timeout: 5000 }, async t => {
+  const proxy = await uploadProxy(t, (req, res) => {
+    let body = '';
+    req.setEncoding('utf8');
+    req.on('data', chunk => {
+      body += chunk;
+      if (!res.headersSent) res.write('ready\n');
+    });
+    req.on('end', () => res.end(body));
+  });
+  let request, ready;
+  const acknowledged = new Promise(resolve => { ready = resolve; });
+  const completed = new Promise((resolve, reject) => {
+    request = http.request(`${proxy.url}/api/upload`, { method: 'POST' }, res => {
+      let text = '';
+      res.setEncoding('utf8');
+      res.on('data', chunk => { text += chunk; ready(); });
+      res.on('end', () => resolve(text));
+      res.on('error', reject);
+    });
+    request.on('error', reject);
+  });
+  t.after(() => request.destroy());
+  request.write('first');
+  await acknowledged;
+  request.end('last');
+  assert.equal(await completed, 'ready\nfirstlast');
+});
+
+test('delivers an early backend rejection without waiting for the upload to finish', { timeout: 5000 }, async t => {
+  const proxy = await uploadProxy(t, (_req, res) => {
+    res.writeHead(413, { 'content-type': 'text/plain' });
+    res.end('file too large');
+  });
+  let request;
+  const response = new Promise((resolve, reject) => {
+    request = http.request(`${proxy.url}/api/upload`, { method: 'POST' }, res => {
+      let text = '';
+      res.setEncoding('utf8');
+      res.on('data', chunk => { text += chunk; });
+      res.on('end', () => resolve({ status: res.statusCode, text }));
+      res.on('error', reject);
+    });
+    request.on('error', reject);
+  });
+  t.after(() => request.destroy());
+  request.write(Buffer.alloc(1024)); // Deliberately never call end().
+  assert.deepEqual(await response, { status: 413, text: 'file too large' });
+});
+
+test('cancels an upstream upload when its desktop client disconnects', { timeout: 5000 }, async t => {
+  let started, aborted;
+  const sawData = new Promise(resolve => { started = resolve; });
+  const sawAbort = new Promise(resolve => { aborted = resolve; });
+  const proxy = await uploadProxy(t, (req, _res) => {
+    req.on('data', started);
+    req.on('aborted', aborted);
+    req.on('error', () => {});
+  });
+  const request = http.request(`${proxy.url}/api/upload`, { method: 'POST' });
+  request.on('error', () => {});
+  t.after(() => request.destroy());
+  request.write(Buffer.alloc(1024));
+  await sawData;
+  request.destroy();
+  await sawAbort;
+});
+
+test('closing the desktop cancels an unfinished upload', { timeout: 5000 }, async t => {
+  let started;
+  const sawData = new Promise(resolve => { started = resolve; });
+  const proxy = await uploadProxy(t, req => { req.on('data', started); });
+  const request = http.request(`${proxy.url}/api/upload`, { method: 'POST' });
+  request.on('error', () => {});
+  t.after(() => request.destroy());
+  request.write(Buffer.alloc(1024));
+  await sawData;
+  await proxy.close();
+});
+
+test('reports an upstream disconnect during upload as a proxy error', { timeout: 5000 }, async t => {
+  const proxy = await uploadProxy(t, req => { req.once('data', () => req.socket.destroy()); });
+  const response = await fetch(`${proxy.url}/api/upload`, { method: 'POST', body: Buffer.alloc(1024) });
+  assert.equal(response.status, 502);
+  await response.text();
+});
 
 test('Electron static UI separates fetch traffic onto a CORS-protected localhost origin', async (t) => {
   const staticDir = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-hub-static-'));
