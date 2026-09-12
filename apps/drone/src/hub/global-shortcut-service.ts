@@ -41,6 +41,7 @@ type GlobalShortcutClient = {
   lastActiveAt: number;
   focused: boolean;
   visible: boolean;
+  capturing: boolean;
   send: (event: GlobalShortcutDispatchEvent) => void;
 };
 
@@ -48,6 +49,14 @@ export type GlobalShortcutDispatchEvent = {
   id: string;
   actionId: DroneHubShortcutActionId;
   at: string;
+};
+
+export type DesktopShortcutConfiguration = {
+  revision: number;
+  bindings: DroneHubGlobalShortcutBindings;
+  suspended: boolean;
+  observedNumpad: boolean;
+  numpadUnavailable: boolean;
 };
 
 export type GlobalShortcutServiceDependencies = {
@@ -76,8 +85,15 @@ export class GlobalShortcutService {
   private keyupListener: ((event: KeyboardHookEvent) => void) | null = null;
   private compiledByKeycode = new Map<number, CompiledBinding[]>();
   private readonly pressedKeycodes = new Set<number>();
+  private readonly desktopPressSequences = new Map<DroneHubShortcutActionId, number>();
+  private readonly desktopDispatchedSequences = new Map<DroneHubShortcutActionId, number>();
   private readonly clients = new Map<string, GlobalShortcutClient>();
   private dispatchSequence = 0;
+  private desktop: { id: string; send: (config: DesktopShortcutConfiguration) => void } | null = null;
+  private desktopRevision = 0;
+  private desktopPending: Promise<void> | null = null;
+  private finishDesktopUpdate: (() => void) | null = null;
+  private readonly settingsListeners = new Set<() => void>();
 
   constructor(private readonly deps: GlobalShortcutServiceDependencies = defaultDependencies()) {}
 
@@ -91,7 +107,112 @@ export class GlobalShortcutService {
     await this.deps.writeBindings(bindings);
     this.bindings = bindings;
     this.reconfigureHook();
+    await this.desktopPending;
+    this.notifySettingsChanged();
     return this.snapshot();
+  }
+
+  onSettingsChanged(listener: () => void): () => void {
+    this.settingsListeners.add(listener);
+    return () => this.settingsListeners.delete(listener);
+  }
+
+  connectDesktop(id: string, send: (config: DesktopShortcutConfiguration) => void): () => void {
+    if (!normalizeClientId(id)) throw new Error('Invalid desktop session');
+    if (this.desktop) throw new Error('A desktop shortcut session is already connected');
+    const desktop = { id, send };
+    this.desktop = desktop;
+    try {
+      this.reconfigureHook();
+    } catch (error) {
+      this.desktop = null;
+      this.finishDesktopUpdate?.();
+      this.reconfigureHook();
+      throw error;
+    }
+    return () => {
+      if (this.desktop !== desktop) return;
+      this.desktop = null;
+      this.finishDesktopUpdate?.();
+      this.reconfigureHook();
+      this.notifySettingsChanged();
+    };
+  }
+
+  reportDesktopStatus(id: string, revision: unknown, value: unknown): boolean {
+    if (this.desktop?.id !== id || revision !== this.desktopRevision) return false;
+    const actions = (value as DroneHubGlobalShortcutStatus | null)?.actions;
+    this.status = {
+      running: false, error: '', warning: '',
+      actions: Object.fromEntries(Object.keys(this.bindings).map((actionId) => {
+        const reported = actions?.[actionId as DroneHubShortcutActionId];
+        return [actionId, {
+          active: reported?.active === true,
+          error: reported?.active === true ? '' : String(reported?.error || 'Desktop shortcut registration failed.'),
+        }];
+      })),
+    };
+    this.status.running = Object.values(this.status.actions).some((action) => action?.active);
+    this.finishDesktopUpdate?.();
+    this.notifySettingsChanged();
+    return true;
+  }
+
+  dispatchDesktop(id: string, revision: unknown, actionId: unknown): boolean {
+    if (this.desktop?.id !== id || revision !== this.desktopRevision ||
+        typeof actionId !== 'string' || !this.status.actions[actionId as DroneHubShortcutActionId]?.active) return false;
+    if (this.captureActive()) return false;
+    // X11 reports keypad navigation keys differently with Num Lock off. The
+    // observer dispatches those physical keys; Electron still owns their grabs.
+    if (!(this.hook && this.bindings[actionId as DroneHubShortcutActionId]?.key.startsWith('num'))) {
+      const action = actionId as DroneHubShortcutActionId;
+      const sequence = this.desktopPressSequences.get(action);
+      if (sequence !== undefined) {
+        if (this.desktopDispatchedSequences.get(action) === sequence) return true;
+        this.desktopDispatchedSequences.set(action, sequence);
+      }
+      this.dispatch(action);
+    }
+    return true;
+  }
+
+  private notifySettingsChanged(): void {
+    for (const listener of this.settingsListeners) listener();
+  }
+
+  private configureDesktop(): void {
+    this.finishDesktopUpdate?.();
+    const revision = ++this.desktopRevision;
+    this.status = {
+      running: false, error: '', warning: '',
+      actions: Object.fromEntries(Object.keys(this.bindings).map((actionId) => [actionId, {
+        active: false, error: 'Waiting for desktop shortcut registration.',
+      }])),
+    };
+    this.desktopPending = new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        for (const action of Object.values(this.status.actions)) {
+          if (action) action.error = 'Desktop shortcut registration timed out. Reopen the desktop app to retry.';
+        }
+        this.finishDesktopUpdate?.();
+        this.notifySettingsChanged();
+      }, 5_000);
+      timer.unref?.();
+      this.finishDesktopUpdate = () => {
+        clearTimeout(timer);
+        this.finishDesktopUpdate = null;
+        resolve();
+      };
+    });
+    this.desktop?.send({
+      revision, bindings: cloneBindings(this.bindings), suspended: this.captureActive(),
+      observedNumpad: this.hook !== null,
+      numpadUnavailable: this.deps.platform === 'linux' && !this.deps.env.WAYLAND_DISPLAY && !this.hook,
+    });
+  }
+
+  private captureActive(): boolean {
+    return [...this.clients.values()].some((client) => client.focused && client.capturing);
   }
 
   snapshot(): DroneHubGlobalShortcutSettingsResponse {
@@ -120,33 +241,55 @@ export class GlobalShortcutService {
       lastActiveAt: now,
       focused: false,
       visible: false,
+      capturing: false,
       send,
     });
     return () => {
       const current = this.clients.get(id);
-      if (current?.send === send) this.clients.delete(id);
+      if (current?.send === send) {
+        const wasCapturing = this.captureActive();
+        this.clients.delete(id);
+        if (this.desktop && wasCapturing !== this.captureActive()) this.configureDesktop();
+      }
     };
   }
 
-  updateClientActivity(idRaw: unknown, value: { focused?: unknown; visible?: unknown }): boolean {
+  updateClientActivity(idRaw: unknown, value: { focused?: unknown; visible?: unknown; capturing?: unknown }): boolean {
     const id = normalizeClientId(idRaw);
     const client = id ? this.clients.get(id) : null;
     if (!client) return false;
+    const wasCapturing = this.captureActive();
     client.focused = value.focused === true;
     client.visible = value.visible === true;
+    client.capturing = value.capturing === true;
     if (client.focused || client.visible) client.lastActiveAt = this.deps.now();
+    if (this.desktop && wasCapturing !== this.captureActive()) this.configureDesktop();
     return true;
   }
 
   close(): void {
+    this.desktop = null;
+    this.finishDesktopUpdate?.();
     this.stopHook();
     this.clients.clear();
+    this.settingsListeners.clear();
   }
 
   private reconfigureHook(): void {
     this.stopHook();
+    if (this.desktop) {
+      if (this.deps.platform === 'linux' && !this.deps.env.WAYLAND_DISPLAY) {
+        this.startHook(this.bindings);
+      }
+      this.configureDesktop();
+      return;
+    }
+    this.startHook(this.bindings);
+  }
+
+  private startHook(observedBindings: DroneHubGlobalShortcutBindings): void {
     const actionStatuses: DroneHubGlobalShortcutStatus['actions'] = {};
-    const bindings = Object.entries(this.bindings) as Array<
+    const bindings = Object.entries(observedBindings) as Array<
       [DroneHubShortcutActionId, DroneHubShortcutBinding]
     >;
     if (bindings.length === 0) {
@@ -259,6 +402,8 @@ export class GlobalShortcutService {
     this.keyupListener = null;
     this.compiledByKeycode.clear();
     this.pressedKeycodes.clear();
+    this.desktopPressSequences.clear();
+    this.desktopDispatchedSequences.clear();
   }
 
   private handleKeyDown(event: KeyboardHookEvent): void {
@@ -269,7 +414,14 @@ export class GlobalShortcutService {
     const matched = candidates.find((candidate) =>
       modifiersMatch(candidate.binding, event, this.deps.platform),
     );
-    if (matched) this.dispatch(matched.actionId);
+    if (!matched) return;
+    if (this.desktop) {
+      // Native X11 callbacks repeat while a key is held. Record physical presses
+      // to deduplicate callbacks, but let native registration authorize dispatch.
+      this.desktopPressSequences.set(matched.actionId, (this.desktopPressSequences.get(matched.actionId) ?? 0) + 1);
+      if (!matched.binding.key.startsWith('num') || !this.status.actions[matched.actionId]?.active || this.captureActive()) return;
+    }
+    this.dispatch(matched.actionId);
   }
 
   private dispatch(actionId: DroneHubShortcutActionId): void {
