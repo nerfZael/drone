@@ -16,9 +16,10 @@ let nextId = 0;
 let backend: ((prompt: string, signal: AbortSignal) => Promise<string>) | null = null;
 const calls: { operation: string; payload: any }[] = [];
 const listeners = new Set<(event: any) => void>();
-const live: any = { status: 'idle', error: '', captions: '', targetDeviceId: '',
-  start: async (id: string, _name: string, run: typeof backend) => { live.status = 'listening'; live.targetDeviceId = id; backend = run; },
-  stop: () => { live.status = 'idle'; }, reset: () => { live.status = 'idle'; }, toggleMute() {} };
+const live: any = { hasStarted: false, status: 'idle', error: '', captions: '', targetDeviceId: '',
+  start: async (id: string, _name: string, run: typeof backend) => { live.hasStarted = true; live.status = 'listening'; live.targetDeviceId = id; backend = run; },
+  pause: () => { live.status = 'paused'; }, resume: async () => { live.status = 'listening'; },
+  stop: () => { live.status = 'idle'; }, reset: () => { live.hasStarted = false; live.status = 'idle'; }, toggleMute() {} };
 const voice = {
   error: '',
   session: { kind: 'idle', status: 'idle', microphoneAvailable: true }, microphoneCoordinator: new MobileMicrophoneCoordinator(),
@@ -63,7 +64,7 @@ const { MobileCompanionProvider, useMobileCompanion } = await import('../src/loc
 const { useMobileCompanionLiveSettings } = await import('../src/local-assistant/use-mobile-companion-live-settings');
 
 async function harness(settingsOnly = false, executeProposal: MobileCompanionWorkspaceTarget['executeProposal'] = async () => ({ ok: true, operations: [] }), savedAutoApprove = false) {
-  autoApprove = savedAutoApprove; enabled = false; livePrompt = 'Speak calmly.'; rejectSettings = false; recorded = 0; backend = null; live.status = 'idle'; calls.length = 0;
+  autoApprove = savedAutoApprove; enabled = false; livePrompt = 'Speak calmly.'; rejectSettings = false; recorded = 0; backend = null; live.hasStarted = false; live.status = 'idle'; calls.length = 0;
   const originalAct = Object.getOwnPropertyDescriptor(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
   Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
   let root!: ReactTestRenderer;
@@ -81,6 +82,7 @@ async function harness(settingsOnly = false, executeProposal: MobileCompanionWor
     openDroneChat: async () => ({}), highlightDrones: () => ({}),
   }); });
   return { context: () => context, settings: () => settings, changeWorkspace: () => { workspace = 'second'; },
+    async refresh() { await act(async () => { root.update(<MobileCompanionProvider><Capture /></MobileCompanionProvider>); }); },
     async cleanup() {
       await act(async () => root.unmount());
       if (originalAct) Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', originalAct);
@@ -416,5 +418,25 @@ test('mobile restores auto-approval after remount and keeps the saved value when
     await act(async () => { await h.context().autoApproveSettings.save(false); });
     expect(h.context().autoApproveSettings.enabled).toBe(false);
     expect(autoApprove).toBe(false);
+  } finally { await h.cleanup(); }
+});
+
+test('Companion toggle stops only Live and keeps the overlay available for headset or button restart', async () => {
+  const h = await harness();
+  try {
+    enabled = true;
+    await act(async () => { await h.context().toggle(); });
+    await h.refresh();
+    expect(live.status).toBe('listening');
+    await act(async () => { await h.context().toggle(); });
+    await h.refresh();
+    expect(live.status).toBe('paused');
+    expect(h.context().overlayOpen).toBe(true);
+    expect(calls.some((call) => call.operation === 'run.cancel')).toBe(false);
+    await act(async () => { await h.context().toggle(); });
+    await h.refresh();
+    expect(live.status).toBe('listening');
+    await act(async () => { await h.context().close(); });
+    expect(live.hasStarted).toBe(false);
   } finally { await h.cleanup(); }
 });

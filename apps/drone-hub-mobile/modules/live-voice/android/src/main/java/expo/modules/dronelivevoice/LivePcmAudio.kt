@@ -1,12 +1,16 @@
 package expo.modules.dronelivevoice
 
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
+import android.media.AudioRouting
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
 import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.NoiseSuppressor
+import android.os.Handler
+import android.os.Looper
 import android.os.Process
 import android.util.Base64
 import java.util.concurrent.ArrayBlockingQueue
@@ -14,9 +18,26 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 /** One microphone for the whole call, including network startup. PCM16LE / 24 kHz. */
-internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val onError: (String) -> Unit) {
+internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val onError: (String) -> Unit,
+  private val onHeadsetDisconnected: () -> Unit = {}) {
   @Volatile private var running = false
   @Volatile private var muted = false
+  private var headsetRouted = false
+  private val routeListener = AudioRouting.OnRoutingChangedListener { routing ->
+    if (running) {
+      when (routing.routedDevice?.type) {
+        AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_BLE_HEADSET,
+        AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+        AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_HEARING_AID -> headsetRouted = true
+        AudioDeviceInfo.TYPE_BUILTIN_SPEAKER, AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> {
+          if (headsetRouted) {
+            headsetRouted = false
+            onHeadsetDisconnected()
+          }
+        }
+      }
+    }
+  }
   private var recorder: AudioRecord? = null
   private var player: AudioTrack? = null
   private var echo: AcousticEchoCanceler? = null
@@ -50,6 +71,8 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
       check(input.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "Could not start the Live microphone" }
       output.play()
       running = true
+      output.addOnRoutingChangedListener(routeListener, Handler(Looper.getMainLooper()))
+      routeListener.onRoutingChanged(output)
       captureThread = Thread({
         Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
         val samples = ShortArray(4800)
@@ -114,6 +137,7 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
   }
   fun stop() {
     running = false
+    player?.removeOnRoutingChangedListener(routeListener)
     muted = true
     try { recorder?.stop() } catch (_: Exception) {}
     try { player?.pause(); player?.flush() } catch (_: Exception) {}

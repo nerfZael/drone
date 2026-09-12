@@ -31,7 +31,7 @@ class LiveVoiceService : Service() {
         val controls = LiveVoiceSession.mediaControls
         if (controls == null) stopSelf()
         else {
-          controls.command("stop") // Stop capture now; let JS close Live and play the stopped cue.
+          controls.command("end") // Stop capture now; let JS close Live and play the stopped cue.
           val ending = sessionId
           Handler(Looper.getMainLooper()).postDelayed({ if (LiveVoiceSession.id == ending) stopSelf() }, 2_000)
         }

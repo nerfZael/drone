@@ -8,7 +8,7 @@ import { MobileMicrophoneCoordinator } from '../src/local-assistant/mobile-micro
 let appStateListener: ((state: string) => void) | null = null;
 let prepareAudio: () => Promise<void> = async () => {};
 const connections: Array<{ options: any; closed: number; sent: Record<string, unknown>[] }> = [];
-let mediaAction: ((action: 'play' | 'pause' | 'stop') => void) | undefined;
+let mediaAction: ((action: 'play' | 'pause' | 'stop' | 'end') => void) | undefined;
 let controlsReleased = 0;
 const cues: string[] = [];
 let cuePlayback: (kind: string) => Promise<void> = async () => {};
@@ -172,7 +172,7 @@ test('headset pause closes Live; locked-screen play starts fresh audio after cle
     expect(cues).toEqual(['recording', 'stopped', 'recording']);
     await act(async () => { first.options.onReady('stale'); first.options.onError('stale'); });
     expect(live.status).toBe('listening'); expect(live.error).toBe('');
-    await act(async () => { mediaAction?.('stop'); });
+    await act(async () => { mediaAction?.('end'); });
     expect(live.status).toBe('idle'); expect(controlsReleased).toBe(releasedBefore + 1);
     const endedCount = connections.length;
     await act(async () => { mediaAction?.('play'); });
@@ -291,6 +291,61 @@ test('mobile reconnect routes backend completion and subscription replies to the
   } finally {
     await act(async () => { root.unmount(); await controller.close(); });
     prepareAudio = async () => {};
+    Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
+  }
+});
+
+test('headset stop preserves Companion and submitted backend work, and play resumes while locked', async () => {
+  Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
+  let root!: ReactTestRenderer; let live!: ReturnType<typeof useMobileCompanionLive>;
+  let nextId = 0;
+  const controller = new CompanionClientController({ createId: () => String(++nextId) });
+  const coordinator = new MobileMicrophoneCoordinator();
+  const backendCalls: string[] = [];
+  let receive!: (event: CompanionServerMessage) => void;
+  let messageId = '';
+  function Capture() { live = useMobileCompanionLive(coordinator, controller); return null; }
+  const releasedBefore = controlsReleased;
+  try {
+    await act(async () => { root = create(<Capture />); });
+    await act(async () => { await live.start('hub', 'Hub', async () => 'reply'); });
+    await controller.submitPrompt({ prompt: 'Work continues', executeTool: () => ({}), createTransport: () => ({
+      open: async (options) => { receive = options.onMessage; return undefined; },
+      sendPrompt: (input) => { messageId = input.messageId; }, sendToolResult: () => {},
+      cancel: () => { backendCalls.push('cancel'); }, close: () => { backendCalls.push('close'); },
+    }) });
+    const first = connections.at(-1)!;
+    await act(async () => { appState.currentState = 'background'; mediaAction?.('stop'); });
+    expect(first.closed).toBe(1);
+    expect(live.status).toBe('paused');
+    expect(live.hasStarted).toBe(true);
+    expect(controlsReleased).toBe(releasedBefore);
+    expect(controller.getSnapshot().status).toBe('working');
+    expect(backendCalls).toEqual([]);
+    await act(async () => { mediaAction?.('play'); });
+    expect(live.status).toBe('listening');
+    const current = connections.at(-1)!;
+    expect(current).not.toBe(first);
+    await act(async () => {
+      receive({ type: 'reply', messageId, reply: 'Finished' });
+      receive({ type: 'status', messageId, status: 'completed' });
+    });
+    expect(current.sent).toEqual([{ type: 'session.commentary.append', delegation_id: null, content: 'Finished' }]);
+    // The app's stop control uses the same pause path; the headset can restart it.
+    await act(async () => { live.pause(); });
+    expect(live.status).toBe('paused');
+    await act(async () => { mediaAction?.('play'); });
+    expect(live.status).toBe('listening');
+    await act(async () => { live.reset(); });
+    const count = connections.length;
+    expect(live.hasStarted).toBe(false);
+    expect(controlsReleased).toBe(releasedBefore + 1);
+    await act(async () => { mediaAction?.('play'); });
+    expect(connections).toHaveLength(count);
+    expect(backendCalls).toEqual([]);
+  } finally {
+    appState.currentState = 'active';
+    await act(async () => { root.unmount(); await controller.close(); });
     Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
   }
 });
