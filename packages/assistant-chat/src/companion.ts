@@ -1,4 +1,9 @@
 import type { CompanionCompactionEvent } from './companion-compaction.js';
+import {
+  validateCompanionProposal,
+  type CompanionProposalApplyResult,
+  type CompanionProposalExecution,
+} from './companion-proposal.js';
 export const COMPANION_MAX_PROMPT_CHARS = 20_000;
 export const COMPANION_MAX_RUN_ID_CHARS = 128;
 
@@ -227,7 +232,87 @@ export type CompanionClientMessage =
       ok: boolean;
       result?: unknown;
       error?: string;
+    }
+  | {
+      type: 'proposal_result';
+      runId: string;
+      messageId: string;
+      result: CompanionProposalApplyResult;
     };
+
+export type CompanionProposalResultInputValidation =
+  | {
+      ok: true;
+      runId: string;
+      messageId: string;
+      result: CompanionProposalApplyResult;
+    }
+  | { ok: false; runId: string; messageId: string; error: string };
+
+export function validateCompanionProposalResultInput(input: {
+  runId?: unknown;
+  messageId?: unknown;
+  result?: unknown;
+}): CompanionProposalResultInputValidation {
+  const runId = typeof input.runId === 'string' ? input.runId.trim() : '';
+  const messageId = typeof input.messageId === 'string' ? input.messageId.trim() : '';
+  const validId = (value: string) => Boolean(value) &&
+    value.length <= COMPANION_MAX_RUN_ID_CHARS && !/[\u0000-\u001f\u007f]/.test(value);
+  if (!validId(runId) || !validId(messageId)) {
+    return { ok: false, runId, messageId, error: 'Valid runId and messageId values are required.' };
+  }
+  try {
+    const raw = input.result as Record<string, unknown> | null;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || raw.applied !== true ||
+      typeof raw.autoApproved !== 'boolean') throw new Error('result is invalid');
+    const proposal = validateCompanionProposal(raw.proposal);
+    const execution = validateProposalExecution(raw.execution, proposal.operations);
+    const result = { applied: true as const, autoApproved: raw.autoApproved, proposal, execution };
+    if (JSON.stringify(result).length > 250_000) throw new Error('result is too large');
+    return { ok: true, runId, messageId, result };
+  } catch (error) {
+    return {
+      ok: false,
+      runId,
+      messageId,
+      error: `Invalid Companion proposal result: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+function validateProposalExecution(
+  value: unknown,
+  operations: CompanionProposalApplyResult['proposal']['operations'],
+): CompanionProposalExecution {
+  const raw = value as Record<string, unknown> | null;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw) || typeof raw.ok !== 'boolean' ||
+    !Array.isArray(raw.operations) || raw.operations.length !== operations.length) {
+    throw new Error('execution is invalid');
+  }
+  const results = raw.operations.map((item, index) => {
+    const operation = operations[index]!;
+    const result = item as Record<string, unknown> | null;
+    if (!result || typeof result !== 'object' || Array.isArray(result) ||
+      result.id !== operation.id || result.type !== operation.type ||
+      !['completed', 'failed', 'skipped'].includes(String(result.status))) {
+      throw new Error(`execution operation ${index + 1} does not match the proposal`);
+    }
+    if (result.result !== undefined && (!result.result || typeof result.result !== 'object' || Array.isArray(result.result))) {
+      throw new Error(`execution operation ${index + 1} has an invalid result`);
+    }
+    if (result.error !== undefined && typeof result.error !== 'string') {
+      throw new Error(`execution operation ${index + 1} has an invalid error`);
+    }
+    return {
+      id: operation.id,
+      type: operation.type,
+      status: result.status as 'completed' | 'failed' | 'skipped',
+      ...(result.result === undefined ? {} : { result: result.result as Record<string, unknown> }),
+      ...(result.error === undefined ? {} : { error: result.error }),
+    };
+  });
+  return { ok: raw.ok, operations: results };
+}
 
 export type CompanionServerMessage = CompanionRunEvent & { runId?: string; messageId?: string };
 

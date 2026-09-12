@@ -1,6 +1,9 @@
 import { readCompanionAutoApproveSettings, writeCompanionAutoApproveSettings } from '../companion/companion-auto-approve-settings';
 import crypto from 'node:crypto';
-import { validateCompanionRunInput } from '@drone/assistant-chat';
+import {
+  validateCompanionProposalResultInput,
+  validateCompanionRunInput,
+} from '@drone/assistant-chat';
 import { COMPANION_CAPABILITY } from '@drone/device-protocol';
 
 import { CompanionRunSession } from '../companion/companion-run-session';
@@ -112,6 +115,18 @@ export function createCompanionCapability(
           error: payload.error,
         });
         return { ok: true };
+      }
+
+      if (operation === 'proposal.result') {
+        const validation = validateCompanionProposalResultInput(payload);
+        if (!validation.ok) {
+          throw Object.assign(new Error(validation.error), { code: 'INVALID_REQUEST' });
+        }
+        const { runId: clientRunId, messageId, result } = validation;
+        const session = sessionsByDeviceId.get(sourceDeviceId);
+        if (session?.clientRunId !== clientRunId) return { ok: true };
+        await session.run.submitProposalResult({ messageId, result });
+        return { accepted: true };
       }
 
       if (operation !== 'run.start') {

@@ -748,6 +748,49 @@ describe('Blip assistant host', () => {
     });
   });
 
+  test('continues from a host-supplied tool result', async () => {
+    await withTempDroneDataDir('blip-assistant-tool-result-', async () => {
+      const faux = registerFauxProvider({ api: 'faux', provider: 'faux', tokensPerSecond: 0 });
+      let receivedResult: any;
+      faux.setResponses([
+        fauxAssistantMessage('The proposal is ready.'),
+        (context) => {
+          receivedResult = context.messages.at(-1);
+          return fauxAssistantMessage('The proposal was applied successfully.');
+        },
+      ]);
+      const host = new BlipAssistantHost(async () => ({
+        provider: 'faux',
+        model: faux.getModel().id,
+        thinkingLevel: 'off',
+        systemPrompt: 'Hub host prompt',
+        tools: [],
+      }));
+      try {
+        await host.promptThread('thread-tool-result', 'Prepare a proposal');
+        await host.promptThreadWithToolResult('thread-tool-result', {
+          toolName: 'apply_companion_proposal_patch',
+          args: { action: 'apply_reviewed_proposal' },
+          text: '{"applied":true,"execution":{"ok":true}}',
+          details: { applied: true, execution: { ok: true } },
+        });
+
+        expect(receivedResult).toMatchObject({
+          role: 'toolResult',
+          toolName: 'apply_companion_proposal_patch',
+          isError: false,
+          details: { applied: true, execution: { ok: true } },
+        });
+        expect(await host.latestAssistantVisibleText('thread-tool-result')).toBe(
+          'The proposal was applied successfully.',
+        );
+      } finally {
+        await host.close();
+        faux.unregister();
+      }
+    });
+  });
+
   test('deletes one canonical message or the selected message and its suffix', async () => {
     await withTempDroneDataDir('blip-assistant-message-delete-', async () => {
       const faux = registerFauxProvider({

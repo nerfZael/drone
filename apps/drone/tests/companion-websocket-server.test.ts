@@ -232,6 +232,92 @@ test('Companion socket steers follow-ups on the running session and correlates t
   }
 });
 
+test('Companion socket queues an applied proposal result and runs a result-aware continuation', async () => {
+  const events: any[] = [];
+  let finishInitial!: (reply: string) => void;
+  const initial = new Promise<string>((resolve) => { finishInitial = resolve; });
+  const resumed: any[] = [];
+  const order: string[] = [];
+  const steered: string[] = [];
+  let runCount = 0;
+  const runtime = {
+    run: async (input: any) => {
+      order.push(`run:${input.prompt}`);
+      runCount += 1;
+      return runCount === 1 ? await initial : 'Handled after the proposal result.';
+    },
+    resumeWithProposalResult: async (input: any) => {
+      order.push('proposal-result');
+      resumed.push(input);
+      return input.result.execution.ok ? 'The proposal was applied.' : 'The proposal failed.';
+    },
+    steer: (_runId: string, prompt: string) => { steered.push(prompt); return true; },
+    async deleteSession() {},
+  };
+  const server = createCompanionWebSocketServer(runtime as any);
+  const httpServer = http.createServer();
+  httpServer.on('upgrade', (request, socket, head) => {
+    server.handleUpgrade(request, socket, head, (client) => server.emit('connection', client, request));
+  });
+  await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
+  const address = httpServer.address();
+  if (!address || typeof address === 'string') throw new Error('test server did not bind');
+  const client = new WebSocket(`ws://127.0.0.1:${address.port}`);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      client.once('open', resolve);
+      client.once('error', reject);
+    });
+    client.on('message', (raw) => events.push(JSON.parse(raw.toString())));
+    client.send(JSON.stringify({
+      type: 'start_run', runId: 'proposal-run', messageId: 'proposal-draft', prompt: 'Rename it',
+    }));
+    await waitFor(() => events.some((event) => event.status === 'working'));
+    const result = {
+      applied: true,
+      autoApproved: false,
+      proposal: {
+        version: 1,
+        title: 'Rename chat',
+        operations: [{ id: 'rename', type: 'rename_chat', droneId: 'd1', chatName: 'old', newName: 'new' }],
+      },
+      execution: {
+        ok: true,
+        operations: [{ id: 'rename', type: 'rename_chat', status: 'completed' }],
+      },
+    };
+    const proposalResultMessage = JSON.stringify({
+      type: 'proposal_result', runId: 'proposal-run', messageId: 'proposal-applied', result,
+    });
+    client.send(proposalResultMessage);
+    client.send(proposalResultMessage);
+    client.send(JSON.stringify({
+      type: 'start_run', runId: 'proposal-run', messageId: 'later-prompt', prompt: 'What next?',
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(resumed).toHaveLength(0);
+
+    finishInitial('Ready to apply.');
+    await waitFor(() => resumed.length === 1);
+    expect(resumed[0].result).toEqual(result);
+    await waitFor(() => events.some(
+      (event) => event.messageId === 'proposal-applied' && event.status === 'completed',
+    ));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'reply', messageId: 'proposal-applied', reply: 'The proposal was applied.',
+    }));
+    expect(resumed).toHaveLength(1);
+    await waitFor(() => events.some(
+      (event) => event.messageId === 'later-prompt' && event.status === 'completed',
+    ));
+    expect(order).toEqual(['run:Rename it', 'proposal-result', 'run:What next?']);
+    expect(steered).toEqual([]);
+  } finally {
+    finishInitial('');
+    await closeTestServer(client, server, httpServer);
+  }
+});
+
 test('desktop subscriptions resume idle sessions and isolate clients that reuse a run ID', async () => {
   const deliveries = new Map<string, (input: any) => Promise<void>>();
   const deleted: string[] = [];

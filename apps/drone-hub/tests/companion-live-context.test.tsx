@@ -32,6 +32,7 @@ test('Live delegates through the existing backend with a fixed workspace and rej
   const transportSpy = spyOn(transportModule, 'createCompanionWebSocketTransport').mockReturnValue({
     open: async (input) => { receive = input.onMessage; return undefined; },
     sendPrompt: (input) => { prompts.push(input); }, sendToolResult: (input) => { results.push(input); },
+    sendProposalResult: () => {},
     cancel: () => {}, close: () => {},
   });
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');

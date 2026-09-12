@@ -8,6 +8,7 @@ import {
   COMPANION_PROPOSAL_PATH,
   COMPANION_PROPOSAL_TARGET_ID,
   CompanionClientController,
+  companionProposalApplyResult,
   EMPTY_COMPANION_PROPOSAL,
   executeCompanionBrowserTool,
   parseCompanionProposalText,
@@ -250,7 +251,10 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     void autoApproveSettings.toggle();
   }, [autoApproveSettings.toggle]);
 
-  const executeProposal = React.useCallback(async (options?: { autoApproved?: boolean }) => {
+  const executeProposal = React.useCallback(async (options?: {
+    autoApproved?: boolean;
+    returnResultToTool?: boolean;
+  }): Promise<CompanionProposalExecution | undefined> => {
     const current = proposalRef.current;
     const executionContext = proposalExecutionContextRef.current;
     if (!workspace || !current || !executionContext || current.operations.length === 0 ||
@@ -325,7 +329,11 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         setProposalExecuting(false);
       }
     }
-  }, [workspace]);
+    if (proposalExecutionGenerationRef.current !== executionGeneration) return undefined;
+    const applyResult = companionProposalApplyResult(current, completedExecution!, autoApproved);
+    if (!options?.returnResultToTool) await controller.submitProposalResult(applyResult);
+    return completedExecution!;
+  }, [controller, workspace]);
 
   React.useLayoutEffect(() => {
     const cancelOnEscape = (event: KeyboardEvent) => {
@@ -372,12 +380,18 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       }
       if (tool === 'read_companion_proposal') return readProposal();
       if (tool === 'apply_companion_proposal_patch') {
-        return applyProposal(
+        const proposalUpdate = applyProposal(
           String(args.targetId ?? ''),
           String(args.baseRevision ?? ''),
           String(args.content ?? ''),
           capturedWorkspace,
         );
+        if (!autoApprove || autoApproveSettings.loading) return proposalUpdate;
+        const current = proposalRef.current;
+        if (!current?.operations.length) return proposalUpdate;
+        const execution = await executeProposal({ autoApproved: true, returnResultToTool: true });
+        if (!execution) throw new Error('PROPOSAL_EXECUTION_UNAVAILABLE');
+        return companionProposalApplyResult(current, execution, true);
       }
       if (!capturedWorkspace) {
         if (tool === 'read_active_composer' || tool === 'apply_composer_patch') {
@@ -390,7 +404,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       }
       return await executeCompanionBrowserTool(capturedWorkspace, tool, args);
     },
-    [applyProposal, readProposal, recorder],
+    [applyProposal, autoApprove, autoApproveSettings.loading, executeProposal, readProposal, recorder],
   );
 
   const run = React.useCallback(
@@ -598,7 +612,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       toggleRecordingPause,
       discardRecording,
       close,
-      executeProposal,
+      executeProposal: async () => { await executeProposal(); },
       discardProposal,
       toggleAutoApprove,
     }),

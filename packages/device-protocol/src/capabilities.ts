@@ -98,7 +98,12 @@ export const PROVIDER_CREDENTIALS_CAPABILITY: CapabilityDescriptor = {
   ],
 };
 
-export const COMPANION_RUN_OPERATIONS = ['run.start', 'run.cancel', 'tool.result'] as const;
+export const COMPANION_RUN_OPERATIONS = [
+  'run.start',
+  'run.cancel',
+  'tool.result',
+  'proposal.result',
+] as const;
 export const COMPANION_LIVE_OPERATIONS = [
   'live.start',
   'live.event',
@@ -129,9 +134,11 @@ export function isGranted(
       grant.capability === capability &&
       grant.version === version &&
       (grant.operations.includes(operation) || grant.operations.includes('*') ||
-        // Reading this non-secret mode flag is part of starting Companion. Keep
-        // existing phones working when Live is off; Live controls/writes still need their own grants.
+        // These operations are part of an already authorized Companion run.
+        // Keep existing pairings working when the run protocol gains them;
+        // Live controls/writes still need their own grants.
         (capability === COMPANION_CAPABILITY.id && version === COMPANION_CAPABILITY.version &&
-          operation === 'live.settings.get' && grant.operations.includes('run.start'))),
+          (operation === 'live.settings.get' || operation === 'proposal.result') &&
+          grant.operations.includes('run.start'))),
   );
 }

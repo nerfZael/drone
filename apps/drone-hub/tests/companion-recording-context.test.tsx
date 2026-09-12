@@ -31,10 +31,12 @@ test('recording origin survives pause, navigation, transcription, proposal creat
   let receive!: (message: CompanionServerMessage) => void;
   const prompts: Parameters<CompanionClientTransport['sendPrompt']>[0][] = [];
   const results: Parameters<CompanionClientTransport['sendToolResult']>[0][] = [];
+  const proposalResults: Parameters<CompanionClientTransport['sendProposalResult']>[0][] = [];
   const transport: CompanionClientTransport = {
     open: async (input) => { receive = input.onMessage; return undefined; },
     sendPrompt: (input) => { prompts.push(input); },
     sendToolResult: (input) => { results.push(input); },
+    sendProposalResult: (input) => { proposalResults.push(input); },
     cancel: () => {}, close: () => {},
   };
   const transportSpy = spyOn(transportModule, 'createCompanionWebSocketTransport').mockReturnValue(transport);
@@ -83,6 +85,15 @@ test('recording origin survives pause, navigation, transcription, proposal creat
     });
     await companion.executeProposal();
     expect(executedRepo).toBe('/a');
+    expect(proposalResults).toHaveLength(1);
+    expect(proposalResults[0]).toMatchObject({
+      result: {
+        applied: true,
+        autoApproved: false,
+        proposal: { title: 'Create drone' },
+        execution: { ok: true },
+      },
+    });
     // A new transcription is submitted while the first backend request is still active.
     await companion.toggle(); // A fresh recording now captures C.
     repo = '/d';

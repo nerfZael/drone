@@ -155,6 +155,22 @@ export type CompanionProposalExecution = {
   operations: CompanionProposalExecutionItem[];
 };
 
+/** The result returned to Companion after the reviewed proposal is actually applied. */
+export type CompanionProposalApplyResult = {
+  applied: true;
+  autoApproved: boolean;
+  proposal: CompanionProposal;
+  execution: CompanionProposalExecution;
+};
+
+export function companionProposalApplyResult(
+  proposal: CompanionProposal,
+  execution: CompanionProposalExecution,
+  autoApproved: boolean,
+): CompanionProposalApplyResult {
+  return { applied: true, autoApproved, proposal, execution };
+}
+
 export type CompanionProposalExecutionProgress = {
   activeOperationId: string | null;
   operations: CompanionProposalExecutionItem[];

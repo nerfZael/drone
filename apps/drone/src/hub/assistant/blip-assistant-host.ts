@@ -128,6 +128,66 @@ export class BlipAssistantHost {
     });
   }
 
+  /**
+   * Continue an idle thread from a host-executed action as a real tool result.
+   * The synthetic call keeps provider transcripts valid and lets the model base
+   * its next response on the action's structured outcome.
+   */
+  async promptThreadWithToolResult(
+    threadId: string,
+    input: {
+      toolName: string;
+      args: Record<string, unknown>;
+      text: string;
+      details?: unknown;
+      isError?: boolean;
+    },
+    onEvent?: (event: BlipRuntimeEvent) => Promise<void> | void,
+  ): Promise<void> {
+    const handle = await this.handle(threadId);
+    if (handle.running) throw new Error('Assistant thread is already processing');
+    const history = await this.repository.readMessages(handle.state);
+    const previous = [...history].reverse().find(
+      (message): message is Extract<AgentMessage, { role: 'assistant' }> =>
+        message.role === 'assistant',
+    );
+    if (!previous) throw new Error('Assistant thread has no response to continue');
+    const callId = `host_tool_${crypto.randomUUID().replace(/-/g, '')}`;
+    const timestamp = Date.now();
+    await this.appendExternalMessage(threadId, {
+      ...previous,
+      content: [{
+        type: 'toolCall',
+        id: callId,
+        name: input.toolName,
+        arguments: input.args,
+        synthetic: true,
+      }],
+      stopReason: 'toolUse',
+      timestamp,
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+    });
+    // appendExternalMessage persists directly, so reload the handle before the
+    // tool result is prompted to keep its in-memory transcript in sync.
+    this.invalidateThread(threadId);
+    await this.promptThread(threadId, {
+      role: 'toolResult',
+      toolCallId: callId,
+      toolName: input.toolName,
+      content: [{ type: 'text', text: input.text }],
+      details: input.details ?? {},
+      isError: input.isError === true,
+      timestamp,
+    }, onEvent);
+  }
+
   async interruptThreadWithPrompt(threadId: string, prompt: BlipPromptInput): Promise<void> {
     const handle = await this.handle(threadId);
     if (handle.running) {

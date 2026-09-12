@@ -3,7 +3,7 @@ import { chatWindowLayoutProperties } from './chat-window-layout-schema';
 import crypto from 'node:crypto';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import type { BlipRuntimeEvent, BlipToolProvider } from '@blip/core';
-import type { CompanionClientTelemetry } from '@drone/assistant-chat';
+import type { CompanionClientTelemetry, CompanionProposalApplyResult } from '@drone/assistant-chat';
 
 import { BlipAssistantHost } from '../assistant/blip-assistant-host';
 import { loadBlipMcp, loadBlipTools } from '../assistant/blip-runtime-loader';
@@ -272,6 +272,87 @@ export class CompanionRuntime {
     } finally {
       const context = this.contexts.get(threadId);
       if (context) context.acceptsSteering = false;
+      this.activeRunIds.delete(runId);
+      this.activeRunCompletions.delete(runId);
+      this.cancelledRunIds.delete(runId);
+      if (this.telemetryByThreadId.get(threadId) === telemetry) {
+        this.telemetryByThreadId.delete(threadId);
+      }
+      await telemetry?.finish(runStatus, runError).catch(() => undefined);
+      settleRun();
+    }
+  }
+
+  async resumeWithProposalResult(input: {
+    runId: string;
+    messageId: string;
+    result: CompanionProposalApplyResult;
+    transport: CompanionTelemetryTransport;
+    queueWaitMs?: number;
+    receivedAtEpochMs?: number;
+    receivedAtMonotonicMs?: number;
+    callBrowser: CompanionBrowserCall;
+    onEvent(event: BlipRuntimeEvent): Promise<void> | void;
+  }): Promise<string> {
+    const runId = String(input.runId).trim();
+    const threadId = `companion:${runId}`;
+    if (this.closing || this.cancelledRunIds.has(runId)) {
+      throw new Error('Companion run cancelled');
+    }
+    if (this.activeRunIds.has(runId)) throw new Error('Companion run already exists');
+    const context = this.contexts.get(threadId);
+    if (!context || !this.host.hasThreadHandle(threadId)) {
+      throw new Error('Companion proposal conversation is unavailable');
+    }
+
+    this.activeRunIds.add(runId);
+    const telemetry = this.deps.telemetry?.begin({
+      messageId: input.messageId,
+      runId,
+      transport: input.transport,
+      queueWaitMs: input.queueWaitMs,
+      coldStart: false,
+      receivedAtEpochMs: input.receivedAtEpochMs,
+      receivedAtMonotonicMs: input.receivedAtMonotonicMs,
+    });
+    if (telemetry) {
+      telemetry.setModel(context.settings);
+      this.telemetryByThreadId.set(threadId, telemetry);
+    }
+    context.callBrowser = this.instrumentBrowserCall(input.callBrowser, telemetry);
+    context.snapshots.clear();
+    let settleRun!: () => void;
+    this.activeRunCompletions.set(runId, new Promise<void>((resolve) => {
+      settleRun = resolve;
+    }));
+    let runStatus: 'completed' | 'cancelled' | 'error' = 'completed';
+    let runError: unknown;
+    try {
+      const text = JSON.stringify(input.result, null, 2);
+      telemetry?.markAgentRunStarted();
+      const continueWithResult = () => this.host.promptThreadWithToolResult(threadId, {
+        toolName: 'apply_companion_proposal_patch',
+        args: { action: 'apply_reviewed_proposal', autoApproved: input.result.autoApproved },
+        text,
+        details: input.result,
+        isError: !input.result.execution.ok,
+      }, input.onEvent);
+      if (telemetry) {
+        await telemetry.measure('agentRunMs', continueWithResult);
+        return await telemetry.measure('replyReadMs', () =>
+          this.host.latestAssistantVisibleText(threadId));
+      }
+      await continueWithResult();
+      return await this.host.latestAssistantVisibleText(threadId);
+    } catch (error) {
+      runError = error;
+      runStatus = /abort|cancel/i.test(error instanceof Error ? error.message : String(error))
+        ? 'cancelled'
+        : 'error';
+      throw error;
+    } finally {
+      const latestContext = this.contexts.get(threadId);
+      if (latestContext) latestContext.acceptsSteering = false;
       this.activeRunIds.delete(runId);
       this.activeRunCompletions.delete(runId);
       this.cancelledRunIds.delete(runId);
