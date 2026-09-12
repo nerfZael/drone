@@ -19,6 +19,8 @@ internal object LiveVoiceSession {
   val stopped = mutableListOf<Promise>()
   var stopAudio: (() -> Unit)? = null
   var emitStopped: ((String) -> Unit)? = null
+  var mediaControls: LiveMediaControls? = null
+  var refreshNotification: (() -> Unit)? = null
 
   fun finish(sessionId: String? = id) {
     if (id != sessionId) return
@@ -26,6 +28,7 @@ internal object LiveVoiceSession {
     id = null
     stopAudio?.invoke()
     stopAudio = null
+    mediaControls?.close(); mediaControls = null; refreshNotification = null
     started?.reject("LIVE_STOPPED", "Live voice was stopped before startup completed", null)
     started = null
     emitStopped?.invoke(oldId)
@@ -43,7 +46,28 @@ class LiveVoiceModule : Module() {
   private var pcmId: String? = null
   override fun definition() = ModuleDefinition {
     Name("DroneLiveVoice")
-    Events("stopped", "pcmAudio", "pcmError")
+    Events("stopped", "pcmAudio", "pcmError", "mediaControl")
+    AsyncFunction("armControls") { id: String ->
+      check(LiveVoiceSession.id != null) { "Start the Live foreground service first" }
+      val context = appContext.reactContext ?: error("React context is unavailable")
+      check(LiveVoiceSession.mediaControls == null) { "Live headset controls are already active" }
+      LiveVoiceSession.mediaControls = LiveMediaControls(context, id) { action ->
+        sendEvent("mediaControl", mapOf("id" to id, "action" to action))
+      }
+      LiveVoiceSession.refreshNotification?.invoke()
+    }.runOnQueue(Queues.MAIN)
+    AsyncFunction("updateControls") { id: String, state: String ->
+      LiveVoiceSession.mediaControls?.takeIf { it.id == id }?.update(state)
+    }.runOnQueue(Queues.MAIN)
+    AsyncFunction("disarmControls") { id: String ->
+      if (LiveVoiceSession.mediaControls?.id == id) {
+        LiveVoiceSession.mediaControls?.close(); LiveVoiceSession.mediaControls = null
+      }
+    }.runOnQueue(Queues.MAIN)
+    AsyncFunction("playCue") { id: String, kind: String, promise: Promise ->
+      val controls = LiveVoiceSession.mediaControls?.takeIf { it.id == id }
+      if (controls == null) promise.resolve() else controls.playCue(kind, promise)
+    }.runOnQueue(Queues.MAIN)
     AsyncFunction("startPcm") { id: String ->
       check(LiveVoiceSession.id != null) { "Start the Live foreground service first" }
       check(pcm == null) { "Live audio is already running" }

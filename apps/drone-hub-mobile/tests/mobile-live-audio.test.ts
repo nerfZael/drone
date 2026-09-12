@@ -98,3 +98,13 @@ test('aborting native microphone startup waits for its completion before stoppin
     expect(listeners.size).toBe(0);
   } finally { pauseMicrophone = false; finishMicrophone?.(); await failed; }
 });
+
+test('paused Live stops capture and plays its cue before releasing shared audio mode', async () => {
+  calls.length = 0;
+  const audio = await openMobileLiveAudio({ onAudio() {}, onError() {} }, () => {}, {
+    backgroundAlreadyStarted: true,
+    onCaptureStopped: async () => { expect(microphoneRunning).toBe(false); calls.push('cue.stopped'); },
+  });
+  await audio.release();
+  expect(calls).toEqual(['background:true', 'microphone.open', 'microphone.stop', 'cue.stopped', 'background:false']);
+});

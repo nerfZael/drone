@@ -8,11 +8,12 @@ export function MobileCompanionLivePanel({ live, stopTurn, working }: {
   live: ReturnType<typeof useMobileCompanionLive>; stopTurn(): void; working: boolean;
 }) {
   const active = live.status === 'connecting' || live.status === 'listening';
-  if (!active && !live.error && !live.captions) return null;
+  const paused = live.status === 'paused';
+  if (!active && !paused && !live.error && !live.captions) return null;
   return <View style={styles.panel} accessibilityLabel="Companion Live voice">
     <View style={styles.row}>
       {live.status === 'connecting' ? <ActivityIndicator color={colors.accent} size="small" /> : null}
-      <Text style={styles.title}>{live.status === 'connecting' ? live.muted ? 'Connecting · Mic muted' : live.capturing ? 'Recording · Connecting Live…' : 'Opening microphone…' : active ? live.muted ? 'Live · Mic muted' : 'Live · Listening' : 'Live ended'}</Text>
+      <Text style={styles.title}>{live.status === 'connecting' ? live.muted ? 'Connecting · Mic muted' : live.capturing ? 'Recording · Connecting Live…' : 'Opening microphone…' : active ? live.muted ? 'Live · Mic muted' : 'Live · Listening' : paused ? 'Live paused · Microphone off' : 'Live ended'}</Text>
     </View>
     <Text style={styles.copy}>{live.targetName}{live.backendModel ? ` · ${live.backendModel}` : ''}</Text>
     {live.error ? <Text style={styles.error}>{live.error}</Text> : null}
@@ -21,11 +22,13 @@ export function MobileCompanionLivePanel({ live, stopTurn, working }: {
     <View style={styles.row}>
       {active ? <>
         <Button tone="quiet" onPress={live.toggleMute}>{live.muted ? 'Unmute' : 'Mute'}</Button>
-        <Button tone="quiet" onPress={live.stop}>End voice</Button>
+        <Button tone="quiet" onPress={live.pause}>Pause</Button>
       </> : null}
+      {paused ? <Button tone="quiet" onPress={() => { void live.resume(); }}>Start voice</Button> : null}
+      {active || paused ? <Button tone="quiet" onPress={live.stop}>End voice</Button> : null}
       {working ? <Button tone="quiet" onPress={stopTurn}>Stop Companion turn</Button> : null}
     </View>
-    {active ? <Text style={styles.copy}>End voice keeps backend work running. Close Companion cancels it. Start a new voice conversation after switching workspaces.</Text> : null}
+    {active || paused ? <Text style={styles.copy}>Headset play/pause stops Live and starts a fresh session. Distinct cues confirm recording and stopping. End voice releases headset controls. Backend work already submitted continues.</Text> : null}
   </View>;
 }
 

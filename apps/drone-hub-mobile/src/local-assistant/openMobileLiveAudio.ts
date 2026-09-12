@@ -44,12 +44,13 @@ type NativePcm = {
   addListener(event: string, callback: (event: { id: string; audio?: string; error?: string }) => void): { remove(): void };
 };
 
-export async function openMobileLiveAudio(callbacks: LivePcmCallbacks, onStopped: () => void = () => {}): Promise<LivePcmAudio> {
+export async function openMobileLiveAudio(callbacks: LivePcmCallbacks, onStopped: () => void = () => {},
+  options: { backgroundAlreadyStarted?: boolean; onCaptureStopped?(): Promise<void> } = {}): Promise<LivePcmAudio> {
   throwIfAborted(callbacks.signal);
   const native = requireOptionalNativeModule<NativePcm>('DroneLiveVoice');
   if (!native?.startPcm) throw new Error('Update the Drone Hub mobile app to use buffered Live voice.');
   const id = Crypto.randomUUID();
-  const stopBackground = await startMobileLiveBackground(onStopped);
+  const stopBackground = options.backgroundAlreadyStarted ? async () => {} : await startMobileLiveBackground(onStopped);
   let closed = false;
   const subscriptions: { remove(): void }[] = [];
   let startup: Promise<void> = Promise.resolve();
@@ -63,7 +64,11 @@ export async function openMobileLiveAudio(callbacks: LivePcmCallbacks, onStopped
       // Native setup cannot be cancelled mid-call. Wait for it before undoing
       // its effects, so a late completion cannot re-enable audio after cleanup.
       await startup.catch(() => undefined);
-      try { await native.stopPcm(id); }
+      try {
+        await native.stopPcm(id);
+        // The caller still owns the microphone lease and audio mode here.
+        await options.onCaptureStopped?.();
+      }
       finally {
         try { await setAudioModeAsync({ allowsRecording: false, shouldPlayInBackground: false }); }
         finally { await stopBackground(); }
@@ -81,7 +86,7 @@ export async function openMobileLiveAudio(callbacks: LivePcmCallbacks, onStopped
     subscriptions.push(native.addListener('pcmError', (event) => {
       if (!closed && event.id === id) callbacks.onError(event.error ?? 'Live microphone failed.');
     }));
-    await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true, shouldPlayInBackground: Platform.OS === 'android',
+    await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true, shouldPlayInBackground: options.backgroundAlreadyStarted || Platform.OS === 'android',
       shouldRouteThroughEarpiece: false, interruptionMode: 'doNotMix' });
     throwIfAborted(callbacks.signal);
     await native.startPcm(id);

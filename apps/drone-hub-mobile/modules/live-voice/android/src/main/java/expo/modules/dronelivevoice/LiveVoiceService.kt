@@ -1,6 +1,7 @@
 package expo.modules.dronelivevoice
 
 import android.app.NotificationChannel
+import android.app.Notification
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
@@ -11,7 +12,6 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
-import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.jstasks.HeadlessJsTaskConfig
@@ -27,7 +27,21 @@ class LiveVoiceService : Service() {
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     if (intent?.action == STOP) {
-      if (sessionId == null || intent.getStringExtra("sessionId") == sessionId) stopSelf()
+      if (sessionId == null || intent.getStringExtra("sessionId") == sessionId) {
+        val controls = LiveVoiceSession.mediaControls
+        if (controls == null) stopSelf()
+        else {
+          controls.command("stop") // Stop capture now; let JS close Live and play the stopped cue.
+          val ending = sessionId
+          Handler(Looper.getMainLooper()).postDelayed({ if (LiveVoiceSession.id == ending) stopSelf() }, 2_000)
+        }
+      }
+      return START_NOT_STICKY
+    }
+    if (intent?.action == TOGGLE) {
+      if (intent.getStringExtra("sessionId") == sessionId) {
+        LiveVoiceSession.mediaControls?.let { it.command(if (it.isPlaying()) "pause" else "play") }
+      }
       return START_NOT_STICKY
     }
     val sessionId = LiveVoiceSession.id
@@ -43,26 +57,12 @@ class LiveVoiceService : Service() {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         manager.createNotificationChannel(NotificationChannel(CHANNEL, "Live Companion", NotificationManager.IMPORTANCE_LOW))
       }
-      val stop = PendingIntent.getService(this, sessionId.hashCode(),
-        Intent(this, LiveVoiceService::class.java).setAction(STOP).putExtra("sessionId", sessionId),
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-      val open = packageManager.getLaunchIntentForPackage(packageName)?.let {
-        PendingIntent.getActivity(this, 0, it, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-      }
-      val notification = NotificationCompat.Builder(this, CHANNEL)
-        .setContentTitle("Live Companion is active")
-        .setContentText("Voice stays connected while the screen is locked")
-        .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-        .setContentIntent(open)
-        .setOngoing(true).setSilent(true).setShowWhen(false)
-        .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-        .setCategory(NotificationCompat.CATEGORY_SERVICE)
-        .addAction(android.R.drawable.ic_media_pause, "Stop", stop)
-        .build()
+      val notification = notification(sessionId)
       val types = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
         ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
       } else ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
       ServiceCompat.startForeground(this, 7402, notification, types)
+      LiveVoiceSession.refreshNotification = { manager.notify(7402, notification(sessionId)) }
       wakeLock = getSystemService(PowerManager::class.java)
         .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "DroneHub:LiveCompanion").apply {
           setReferenceCounted(false)
@@ -84,6 +84,32 @@ class LiveVoiceService : Service() {
     return START_NOT_STICKY
   }
 
+  private fun notification(id: String): Notification {
+    fun action(name: String) = PendingIntent.getService(this, id.hashCode(),
+      Intent(this, LiveVoiceService::class.java).setAction(name).putExtra("sessionId", id),
+      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    val open = packageManager.getLaunchIntentForPackage(packageName)?.let {
+      PendingIntent.getActivity(this, 0, it, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    }
+    val controls = LiveVoiceSession.mediaControls
+    val playing = controls?.isPlaying() != false
+    @Suppress("DEPRECATION")
+    val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, CHANNEL) else Notification.Builder(this)
+    builder.setContentTitle(if (playing) "Live Companion" else "Live Companion paused")
+      .setContentText(if (playing) "Headset button pauses voice" else "Microphone off · Press play for a new Live session")
+      .setSmallIcon(android.R.drawable.ic_btn_speak_now).setContentIntent(open)
+      .setOngoing(true).setOnlyAlertOnce(true).setShowWhen(false)
+      .setVisibility(Notification.VISIBILITY_PUBLIC).setCategory(Notification.CATEGORY_TRANSPORT)
+    if (controls != null) {
+      builder.addAction(Notification.Action.Builder(
+        if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
+        if (playing) "Pause" else "Start", action(TOGGLE)).build())
+      builder.setStyle(Notification.MediaStyle().setMediaSession(controls.session.sessionToken).setShowActionsInCompactView(0))
+    }
+    builder.addAction(Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel, "End voice", action(STOP)).build())
+    return builder.build()
+  }
+
   override fun onDestroy() {
     LiveVoiceSession.finish(sessionId)
     val oldTasks = tasks
@@ -101,5 +127,6 @@ class LiveVoiceService : Service() {
   companion object {
     private const val CHANNEL = "drone-live-companion"
     private const val STOP = "com.dronehub.mobile.STOP_LIVE_VOICE"
+    private const val TOGGLE = "com.dronehub.mobile.TOGGLE_LIVE_VOICE"
   }
 }

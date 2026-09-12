@@ -28,7 +28,7 @@
         {
           "microphonePermission": "Allow Drone Hub to listen for voice input and transcribe your messages.",
           "enableBackgroundRecording": true,
-          "enableBackgroundPlayback": false
+          "enableBackgroundPlayback": true
         }
       ],
       [

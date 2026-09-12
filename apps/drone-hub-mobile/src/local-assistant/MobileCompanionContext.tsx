@@ -99,6 +99,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
   const [checkingVoiceMode, setCheckingVoiceMode] = React.useState(false);
   const preparingVoice = React.useRef(false);
   const liveActive = live.status === 'connecting' || live.status === 'listening';
+  const liveArmed = liveActive || live.status === 'paused';
   const companionVoiceActive = voice.session.kind === 'companion';
   const controllerRef = React.useRef<CompanionClientController | null>(null);
   if (!controllerRef.current) {
@@ -436,6 +437,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
 
   const toggle = React.useCallback(async () => {
     if (liveActive) { live.stop(); return; }
+    if (live.status === 'paused') { await live.resume(); return; }
     if (preparingVoice.current) return;
     if (
       companionVoiceActive &&
@@ -517,7 +519,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     run,
     unavailableReason,
     voice,
-    liveActive, live.start, live.stop, mesh.request, targetCapability,
+    liveActive, live.status, live.resume, live.start, live.stop, mesh.request, targetCapability,
   ]);
 
   React.useEffect(() => {
@@ -532,15 +534,15 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
   }, [companionVoiceActive, controller, voice.error, voice.session.status]);
 
   React.useEffect(() => {
-    if (!liveActive && !checkingVoiceMode && (state.status === 'cancelled' || state.status === 'error' || state.status === 'idle')) {
+    if (!liveArmed && !checkingVoiceMode && (state.status === 'cancelled' || state.status === 'error' || state.status === 'idle')) {
       activeTargetDeviceIdRef.current = '';
     }
-    const active = state.status === 'working' || liveActive;
+    const active = state.status === 'working' || liveArmed;
     mesh.setBackgroundActivityRequired(active);
     return () => {
       if (active) mesh.setBackgroundActivityRequired(false);
     };
-  }, [mesh.setBackgroundActivityRequired, state.status, liveActive, checkingVoiceMode]);
+  }, [mesh.setBackgroundActivityRequired, state.status, liveArmed, checkingVoiceMode]);
 
   React.useEffect(
     () => () => {

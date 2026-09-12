@@ -40,13 +40,50 @@ Expo continues to own recording permissions and the app's audio-mode/routing set
 An older native installation gets an update-required error instead of a silent
 fallback that loses startup speech.
 
-Tap the Companion microphone to connect. The Live panel shows captions and the backend model; normal backend activity, replies, and proposals remain below it. Internal delegation instructions stay hidden from the transcript bubble. While a proposal is being applied, new Live delegations are rejected with a request to ask again after it finishes. Mute preserves playback. End voice stops audio while submitted backend work continues; Stop Companion turn cancels work and ends voice. On iOS, backgrounding the app or locking the screen ends voice. Android retains its foreground recording notification and Stop action while backgrounded. Reopen and tap the microphone to start a fresh voice session. Other recording features cannot take the microphone until Live releases it, including cleanup after a late permission response.
+Tap the Companion microphone to connect. The Live panel shows captions and the backend model; normal backend activity, replies, and proposals remain below it. Internal delegation instructions stay hidden from the transcript bubble. While a proposal is being applied, new Live delegations are rejected with a request to ask again after it finishes. Mute preserves playback. End voice stops audio while submitted backend work continues; Stop Companion turn cancels work and ends voice. Live supports background audio and headset media controls on Android and iOS. Android retains its foreground notification, including Pause/Start and End voice actions. Start Live once in the foreground to grant permission and register headset controls. Other recording features cannot take the microphone until Live releases it, including cleanup after a late permission response.
 
 Switching to another Hub ends the session. Changing chat/file context cannot redirect an existing Live request's phone tools: those calls fail with a request to start a new conversation. Start a new voice session after changing workspaces.
 
 Mobile uses device-mesh operations `live.start`, `live.event`, `live.ping`, and `live.close`, plus `live.settings.get`/`live.settings.update`, with device/session-scoped `live.event` notifications. Live controls and preference writes require explicit device grants. Existing `run.start` access also permits reading the non-secret mode flag, so old backend permissions continue to work when Live is off. Enabling Live without granting its controls produces an actionable error.
 
 `CompanionLiveMeshSessions` reuses the Hub's `CompanionLiveSocket` entry point, client-only delegation, event validation, and heartbeat expiry. OpenAI credentials stay on the Hub. PCM microphone/speaker audio, delegation, and backend work travel through the paired-device mesh. The Hub relays audio through a primary Live WebSocket; it does not send audio through a WebRTC sideband. The shared `CompanionLiveConversation` and `waitForCompanionReply` live in `@drone/assistant-chat`, so desktop and mobile share result correlation and stale-answer suppression. The selected backend and ASAP/Queue choice still come from normal Companion settings.
+
+## Headset and lock-screen controls (mobile)
+
+Start Live once with the app open. Bluetooth play/pause and the system media controls
+then operate that Companion conversation while the phone is locked. Pause closes the
+GPT-Live session, stops the microphone and speaker, and discards unsent audio. The
+media controls remain registered. Play opens a fresh recording, buffers its opening
+speech, and connects a new Live session. It does not reuse the previous voice context.
+Backend tasks already submitted continue independently.
+
+A recording cue sounds only after the first captured audio frame; speech is already
+buffering when it sounds. A distinct stopped cue plays after capture has stopped.
+Cues are generated locally and do not use GPT-Live. Microphone permission and hardware
+startup still take time: the recording cue confirms when it is safe to speak. Rapid
+presses wait for previous audio cleanup, and End voice cancels pending restarts.
+
+Use **Pause** to keep headset controls available, and **End voice** to release them.
+Ending Companion, switching Hubs, native startup failures, and lost workspace access
+also disarm controls. An app that takes media ownership can receive subsequent headset
+commands instead; the app is not restarted after force-stop or reboot. Android keeps
+its foreground service available while paused, but has no microphone capture or active
+Live connection. iOS uses Remote Command Center, Now Playing, and the audio background
+mode; paused background resumption still needs physical-device verification.
+
+Mute remains separate: it preserves the Live session and its charges. Active Live
+session duration includes silence and muted periods, so Pause uses `live.close` /
+`session.close`, not mute ([OpenAI cost documentation](https://developers.openai.com/api/docs/guides/voice-latency-cost?api=live)).
+The stop cue confirms local capture has stopped, not receipt of final usage from
+OpenAI. Closure needs a working connection; existing Hub heartbeat expiry remains the
+fallback after a network failure. Already submitted backend work can still incur its
+own charges while voice is paused.
+
+Native checks cover Android compilation; hook tests simulate lock-screen commands,
+rapid presses, cancellation, cue order, and cleanup. Before release, verify real
+Bluetooth Play/Pause on both platforms, lock-screen controls after a long pause,
+audio focus changes, incoming calls, headset disconnects, cue routing and volume,
+initial-word transcription, and final Live usage. iOS compilation requires Xcode.
 
 ## Implementation
 
@@ -117,7 +154,7 @@ Manual checks before release:
 6. On an updated Android app, verify the mobile settings toggle, separate Live grants, microphone permission denial/delayed approval, speaker and Bluetooth routing, echo/interruption, mute, background/screen-lock cleanup, app force-stop, and phone network changes. Verify normal recording can reclaim the microphone after Live ends. Repeat ASAP and Queue checks on mobile.
 7. Inspect actual session usage and billing. Compare useful-answer latency against the old flow; voice connection time and backend wait time both contribute to the experience.
 
-Known limits: iOS Live ends in the background and buffered mobile Live requires a native app update; no automatic voice reconnection, ASAP steering waits for the next agent processing point, and no measured latency improvement yet. An ended voice session starts fresh on reconnect; backend state remains governed by Companion's existing session lifecycle. Audio and API behavior require real-device verification.
+Known limits: mobile Live and headset controls require a native app update; no automatic voice reconnection, ASAP steering waits for the next agent processing point, and no measured latency improvement yet. An ended voice session starts fresh on reconnect; backend state remains governed by Companion's existing session lifecycle. Audio and API behavior require real-device verification.
 
 Buffer regression checks: run the `live-audio-buffer`, desktop/mobile
 `companion-live-connection`, `companion-pcm-live`, mobile native-audio/lifecycle,

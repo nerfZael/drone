@@ -4,10 +4,29 @@ import ExpoModulesCore
 public class LiveVoiceModule: Module {
   private var audio: LivePcmAudio?
   private var audioId: String?
+  private var controls: LiveMediaControls?
 
   public func definition() -> ModuleDefinition {
     Name("DroneLiveVoice")
-    Events("pcmAudio", "pcmError")
+    Events("pcmAudio", "pcmError", "mediaControl")
+    AsyncFunction("armControls") { (id: String) in
+      guard self.controls == nil else { throw LiveAudioError("Live headset controls are already active") }
+      self.controls = LiveMediaControls(id: id) { [weak self] action in
+        guard let self else { return }
+        if action != "play" { self.audio?.stop(); self.audio = nil; self.audioId = nil }
+        self.sendEvent("mediaControl", ["id": id, "action": action])
+      }
+    }.runOnQueue(.main)
+    AsyncFunction("updateControls") { (id: String, state: String) in
+      if self.controls?.id == id { self.controls?.update(state) }
+    }.runOnQueue(.main)
+    AsyncFunction("disarmControls") { (id: String) in
+      if self.controls?.id == id { self.controls?.close(); self.controls = nil }
+    }.runOnQueue(.main)
+    AsyncFunction("playCue") { (id: String, kind: String, promise: Promise) in
+      if let controls = self.controls, controls.id == id { try controls.playCue(kind, promise: promise) }
+      else { promise.resolve() }
+    }.runOnQueue(.main)
     AsyncFunction("startPcm") { (id: String) in
       guard self.audio == nil else { throw LiveAudioError("Live audio is already running") }
       let audio = LivePcmAudio(
@@ -27,11 +46,10 @@ public class LiveVoiceModule: Module {
     AsyncFunction("playPcm") { (id: String, data: String) in
       if self.audioId == id { try self.audio?.play(data) }
     }.runOnQueue(.main)
-    OnAppEntersBackground {
-      // Match the mobile hook: iOS Live ends when backgrounded.
+    OnDestroy {
       self.audio?.stop(); self.audio = nil; self.audioId = nil
+      self.controls?.close(); self.controls = nil
     }
-    OnDestroy { self.audio?.stop(); self.audio = nil; self.audioId = nil }
   }
 }
 

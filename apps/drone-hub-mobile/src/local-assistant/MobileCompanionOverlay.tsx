@@ -83,7 +83,7 @@ export function MobileCompanionOverlay() {
   );
   const [, tick] = React.useState(0);
   const liveActive = companion.live.status === 'connecting' || companion.live.status === 'listening';
-  const visible = companion.status !== 'idle' || liveActive || companion.live.status === 'error' || companion.checkingVoiceMode;
+  const visible = companion.status !== 'idle' || liveActive || companion.live.status === 'paused' || companion.live.status === 'error' || companion.checkingVoiceMode;
   const translateY = useSharedValue(0);
   const sheetHeight = useSharedValue(320);
   const close = companion.close;

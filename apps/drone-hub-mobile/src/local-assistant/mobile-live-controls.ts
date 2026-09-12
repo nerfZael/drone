@@ -1,0 +1,42 @@
+import { requireOptionalNativeModule } from 'expo-modules-core';
+import * as Crypto from 'expo-crypto';
+import { startMobileLiveBackground } from './mobile-live-background';
+
+export type LiveMediaAction = 'play' | 'pause' | 'stop';
+export type LiveMediaState = 'connecting' | 'recording' | 'paused';
+type NativeControls = {
+  armControls(id: string): Promise<void>;
+  updateControls(id: string, state: LiveMediaState): Promise<void>;
+  disarmControls(id: string): Promise<void>;
+  playCue(id: string, cue: 'recording' | 'stopped'): Promise<void>;
+  addListener(event: string, callback: (event: { id: string; action: LiveMediaAction }) => void): { remove(): void };
+};
+
+/** A media session survives paused Live connections, until End voice. */
+export async function openMobileLiveControls(onAction: (action: LiveMediaAction) => void) {
+  const native = requireOptionalNativeModule<NativeControls>('DroneLiveVoice');
+  if (!native?.armControls) throw new Error('Update the mobile app to use Live headset controls.');
+  const id = Crypto.randomUUID();
+  const stopBackground = await startMobileLiveBackground(() => onAction('stop'));
+  let closed = false;
+  let listener: { remove(): void } | undefined;
+  let releasing: Promise<void> | undefined;
+  const release = () => {
+    if (releasing) return releasing;
+    closed = true; listener?.remove();
+    releasing = (async () => { try { await native.disarmControls(id); } finally { await stopBackground(); } })();
+    return releasing;
+  };
+  try {
+    listener = native.addListener('mediaControl', (event) => {
+      if (!closed && event.id === id) onAction(event.action);
+    });
+    await native.armControls(id);
+    return {
+      async update(state: LiveMediaState) { if (!closed) await native.updateControls(id, state); },
+      async cue(cue: 'recording' | 'stopped') { if (!closed) await native.playCue(id, cue); },
+      release,
+    };
+  } catch (error) { await release(); throw error; }
+}
+export type MobileLiveControls = Awaited<ReturnType<typeof openMobileLiveControls>>;

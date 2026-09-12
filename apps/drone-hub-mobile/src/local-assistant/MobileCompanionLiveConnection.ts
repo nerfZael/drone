@@ -28,6 +28,7 @@ export class MobileCompanionLiveConnection {
   private heartbeat?: ReturnType<typeof setInterval>;
   private timeout?: ReturnType<typeof setTimeout>;
   private pendingAudio: Promise<void> = Promise.resolve();
+  private cleanup: Promise<void> = Promise.resolve();
   private readonly audioAbort = new AbortController();
   private readonly buffer: LiveAudioBuffer;
 
@@ -81,8 +82,8 @@ export class MobileCompanionLiveConnection {
     }).catch(() => this.fail('Could not send the backend result to Live.'));
   }
   mute(muted: boolean): void { this.muted = muted; this.buffer.mute(muted); this.audio?.mute(muted); }
-  close(): void {
-    if (this.closed) return;
+  close(): Promise<void> {
+    if (this.closed) return this.cleanup;
     this.closed = true;
     this.buffer.close();
     this.audioAbort.abort();
@@ -91,12 +92,13 @@ export class MobileCompanionLiveConnection {
     this.unsubscribe?.();
     this.audio?.mute(true);
     const release = this.audio?.release();
-    void this.lease?.release(async () => {
+    this.cleanup = (this.lease?.release(async () => {
       await this.pendingAudio;
       await (release ?? this.audio?.release());
       this.audio = null;
-    }).catch(() => undefined);
+    }) ?? Promise.resolve()).catch(() => undefined);
     if (this.started) void this.request('live.close').catch(() => undefined);
+    return this.cleanup;
   }
   private request(operation: string, payload: Record<string, unknown> = {}): Promise<unknown> {
     return this.options.request(this.options.targetDeviceId, COMPANION_CAPABILITY.id, operation,
