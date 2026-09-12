@@ -1,4 +1,5 @@
 import React from 'react';
+import { CompanionOperationHeadline } from './CompanionOperationHeadline';
 import type { CompanionActionNotification } from './companion-action-notifications';
 
 export const COMPANION_NOTIFICATION_DURATION_MS = 8_000;
@@ -26,8 +27,10 @@ export function CompanionActionNotifications({ notifications, onDismiss }: {
             {notification.status === 'failed' ? '!' : '✓'}
           </span>
           <div className="min-w-0 flex-1 break-words text-[var(--fg-secondary)]">
-            <span className="font-[var(--weight-semibold)]">{notification.status === 'failed' ? 'Failed' : 'Completed'}: </span>
-            {notification.label}
+            {notification.status === 'failed'
+              ? <span className="font-[var(--weight-semibold)] text-[var(--red)]">Failed: </span>
+              : <span className="sr-only">Completed: </span>}
+            <CompanionOperationHeadline operation={notification.operation} droneLabel={() => notification.droneName} />
             {notification.error ? <div className="mt-1 text-[var(--red)]">{notification.error}</div> : null}
           </div>
           <button type="button" aria-label={`Dismiss notification: ${notification.label}`} onClick={() => onDismiss(notification.id)} className="shrink-0 rounded px-1 text-[var(--muted)] hover:text-[var(--fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]">×</button>

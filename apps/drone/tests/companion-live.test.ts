@@ -48,9 +48,10 @@ test('Live session fixes client delegation, keeps keys server-side, forwards eve
   await tick();
   expect(h.requests[0].session).toMatchObject({ model: 'gpt-live-1', delegation: { type: 'client' }, store: false });
   expect(h.requests[0].session.delegation.responses).toBeUndefined();
+  expect(h.messages).toEqual([{ type: 'live_answer', sdp: 'answer', backendModel: 'chosen-model' }]);
   h.upstream.readyState = WebSocket.OPEN;
   h.upstream.emit('open');
-  expect(h.messages[0]).toEqual({ type: 'live_ready', sdp: 'answer', backendModel: 'chosen-model' });
+  expect(h.messages[1]).toEqual({ type: 'live_ready', sdp: 'answer', backendModel: 'chosen-model' });
   expect(JSON.stringify(h.messages)).not.toContain('test-private-key');
   expect(() => h.upstream.emit('message', Buffer.from('null'))).not.toThrow();
   const event = { type: 'session.delegation.created', delegation: { id: 'opaque', target: 'client' } };
@@ -97,7 +98,7 @@ test('sideband connection failure hangs up the allocated session exactly once', 
   h.upstream.emit('close');
   await tick();
   expect(requests.filter((url) => url.endsWith('/hangup'))).toHaveLength(1);
-  expect(h.messages[0].type).toBe('live_error');
+  expect(h.messages.some((message) => message.type === 'live_error')).toBe(true);
 });
 
 test('malformed session creation data fails safely and cleans up any known session', async () => {

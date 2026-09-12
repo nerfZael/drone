@@ -58,12 +58,14 @@ describe('Companion action notifications', () => {
 
   test('renders accessible success and failure notifications with dismissal controls', () => {
     const html = renderToStaticMarkup(<CompanionActionNotifications notifications={[
-      { id: '1', label: 'Create drone “Reviewer”', status: 'completed', createdAt: Date.now() },
-      { id: '2', label: 'Send message to Reviewer', status: 'failed', error: 'Chat unavailable', createdAt: Date.now() },
+      { operation: { id: 'create', type: 'create_drone', name: 'Reviewer', prompt: 'Review' }, droneName: '', id: '1', label: 'Create drone “Reviewer”', status: 'completed', createdAt: Date.now() },
+      { operation: { id: 'send', type: 'send_message', droneId: 'reviewer', message: 'Run tests' }, droneName: 'Reviewer', id: '2', label: 'Send message to Reviewer', status: 'failed', error: 'Chat unavailable', createdAt: Date.now() },
     ]} onDismiss={() => {}} />);
     expect(html).toContain('aria-live="polite"');
-    expect(html).toContain('Completed');
-    expect(html).toContain('Failed');
+    expect(html).toContain('<span class="sr-only">Completed: </span>');
+    expect(html).toContain('text-[var(--green)]">Create drone</span>');
+    expect(html).toContain('text-[var(--info)]">Send message</span>');
+    expect(html).toContain('text-[var(--red)]">Failed: </span>');
     expect(html).toContain('Chat unavailable');
     expect(html).toContain('Dismiss notification:');
   });

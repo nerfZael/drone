@@ -156,6 +156,9 @@ export class CompanionLiveSocket {
       this.closed = true;
       void this.hangup();
     });
+    // Start client ICE/DTLS while the control socket attaches. Clients still gate
+    // microphone delivery on live_ready so early delegation events cannot be lost.
+    this.send({ type: 'live_answer', sdp: result.transport.sdp, backendModel: backend.model });
     upstream.once('open', () => {
       if (this.closed) { this.requestClose(); return; }
       this.lastPing = Date.now();

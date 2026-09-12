@@ -17,6 +17,11 @@ export class CompanionLiveConnection {
   private audio: HTMLAudioElement | null = null;
   private closed = false;
   private ready = false;
+  private muted = false;
+  private started = false;
+  private mediaReady = false;
+  private controlReady = false;
+  private answerReceived = false;
   private heartbeat: ReturnType<typeof setInterval> | undefined;
   private startupTimer: ReturnType<typeof setTimeout> | undefined;
   private disconnectTimer: ReturnType<typeof setTimeout> | undefined;
@@ -27,6 +32,8 @@ export class CompanionLiveConnection {
   constructor(private readonly options: Options) {}
 
   async start(): Promise<void> {
+    if (this.started || this.closed) return;
+    this.started = true;
     try {
       if (!navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection === 'undefined') {
         throw new Error('Live voice needs microphone access and WebRTC in a secure browser.');
@@ -70,23 +77,24 @@ export class CompanionLiveConnection {
         if (!event || typeof event !== 'object' || Array.isArray(event)) return;
         if (event.type === 'session.closed' && this.closed) { this.releaseTransports(); return; }
         if (event.type === 'session.started' && !this.closed && !this.ready) {
-          clearTimeout(this.startupTimer);
-          this.ready = true;
-          microphone.getTracks().forEach((track) => { track.enabled = true; });
-          this.options.onReady(this.backendModel);
+          this.mediaReady = true;
+          this.becomeReady();
         }
         if (event.type === 'session.closed') this.fail('Live conversation ended. Start again to reconnect.');
       };
       channel.onclose = () => { if (!this.closed) this.fail('Live voice disconnected. Start a new conversation.'); };
-      await peer.setLocalDescription(await peer.createOffer());
-      if (this.closed) return;
-      await this.waitForIce(peer);
-      if (this.closed) return;
       const socket = new WebSocket(buildDirectApiWebSocketUrl('/api/companion/stream'));
       this.socket = socket;
+      let offerReady = false;
+      let offerSent = false;
+      const sendOffer = () => {
+        if (this.closed || offerSent || !offerReady || socket.readyState !== WebSocket.OPEN) return;
+        offerSent = true;
+        socket.send(JSON.stringify({ type: 'live_start', sdp: peer.localDescription?.sdp }));
+      };
       socket.onopen = () => {
         if (this.closed) { socket.close(); return; }
-        socket.send(JSON.stringify({ type: 'live_start', sdp: peer.localDescription?.sdp }));
+        sendOffer();
         this.heartbeat = setInterval(() => {
           if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'live_ping' }));
         }, 10_000);
@@ -99,9 +107,14 @@ export class CompanionLiveConnection {
           if (event.type === 'live_closed') this.releaseTransports();
           return;
         }
-        if (event.type === 'live_ready' && typeof event.sdp === 'string') {
+        if ((event.type === 'live_answer' || event.type === 'live_ready') && typeof event.sdp === 'string') {
           this.backendModel = String(event.backendModel ?? '');
-          void peer.setRemoteDescription({ type: 'answer', sdp: event.sdp }).catch(() => this.fail('Could not connect Live audio.'));
+          if (!this.answerReceived) {
+            this.answerReceived = true;
+            void peer.setRemoteDescription({ type: 'answer', sdp: event.sdp }).catch(() => this.fail('Could not connect Live audio.'));
+          }
+          if (event.type === 'live_ready') this.controlReady = true;
+          this.becomeReady();
         } else if (event.type === 'live_event') {
           const payload = event.event as Record<string, unknown>;
           if (payload?.type === 'error') {
@@ -112,6 +125,12 @@ export class CompanionLiveConnection {
       };
       socket.onerror = () => this.fail('Live voice could not connect to Drone Hub.');
       socket.onclose = () => { if (!this.closed) this.fail('Live voice disconnected from Drone Hub.'); };
+      await peer.setLocalDescription(await peer.createOffer());
+      if (this.closed) return;
+      await this.waitForIce(peer);
+      if (this.closed) return;
+      offerReady = true;
+      sendOffer();
     } catch (error) {
       this.fail(error instanceof Error ? error.message : 'Live voice could not start.');
     }
@@ -124,7 +143,8 @@ export class CompanionLiveConnection {
   }
 
   mute(muted: boolean): void {
-    this.microphone?.getTracks().forEach((track) => { track.enabled = this.ready && !muted; });
+    this.muted = muted;
+    this.microphone?.getTracks().forEach((track) => { track.enabled = !this.closed && this.ready && !muted; });
   }
 
   async play(): Promise<void> {
@@ -161,6 +181,14 @@ export class CompanionLiveConnection {
     clearTimeout(this.closeTimer);
     this.socket?.close();
     this.peer?.close();
+  }
+
+  private becomeReady(): void {
+    if (this.closed || this.ready || !this.mediaReady || !this.controlReady) return;
+    this.ready = true;
+    clearTimeout(this.startupTimer);
+    this.mute(this.muted);
+    this.options.onReady(this.backendModel);
   }
 
   private fail(error: string): void {

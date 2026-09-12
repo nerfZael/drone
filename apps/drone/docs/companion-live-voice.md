@@ -47,6 +47,29 @@ The integration keeps the OpenAI project key on the Hub and does not forward pri
 
 Protocol references: [Live delegation](https://developers.openai.com/api/docs/guides/live-delegation), [WebRTC setup](https://developers.openai.com/api/docs/guides/voice-webrtc?api=live), [server-side controls](https://developers.openai.com/api/docs/guides/voice-server-controls?api=live), [HTTP hangup](https://developers.openai.com/api/reference/python/resources/live/subresources/sessions/methods/hangup), and [session lifecycle](https://developers.openai.com/api/docs/guides/live-conversations). See the [primer](gpt-live-1-primer.md) for the architectural and latency comparison.
 
+## Startup latency
+
+Desktop opens the Hub WebSocket while gathering ICE candidates. After OpenAI creates a
+session, the Hub sends `live_answer` immediately so both desktop and mobile can apply
+the SDP and negotiate media while the sideband attaches. The existing `live_ready`
+message still follows sideband attachment. Clients enable microphone delivery only
+after both control readiness and `session.started`, preserving transcript/delegation
+observation from the start. Older clients ignore `live_answer` and continue to use
+`live_ready`; new clients also accept Hubs that only send `live_ready`.
+
+These changes overlap network steps; they do not establish a measured reduction on
+real devices. Microphone permission/setup, ICE, OpenAI session creation, and media
+negotiation still contribute to startup time. Startup microphone buffering has not
+been implemented. The current tracks remain disabled until the session is ready.
+
+Live WebRTC audio must use the negotiated media track. The sideband explicitly does
+not accept `session.input_audio.append` ([official transport guidance](https://developers.openai.com/api/docs/guides/voice-server-controls?api=live)).
+Preserving opening speech therefore needs a capture/replay pipeline in the browser
+and native mobile audio layer, or a change to the primary WebSocket audio transport.
+Replay must preserve the order of ongoing speech; sending current microphone audio
+alongside the backlog would overlap or duplicate it. Capturing early does not make
+recognition available before connection, and device permission still gates capture.
+
 ## Validation
 
 Focused tests cover mode persistence and failed saves, unchanged model settings, the disabled recording path, captured workspaces, delegation arriving before text, duplicate notifications, continued transcripts during backend work, stale spoken results, ending voice during a task, API-key isolation, and microphone/session cleanup. WebRTC and OpenAI events are simulated; these tests do not establish live API access or real audio quality.

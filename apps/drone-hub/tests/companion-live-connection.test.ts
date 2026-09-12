@@ -53,6 +53,43 @@ test('Live audio waits for startup, handles captions and autoplay, and releases 
   } finally { connection.close(); h.restore(); }
 });
 
+test('Live overlaps negotiation with control attachment and preserves startup mute', async () => {
+  const h = browserHarness();
+  const models: string[] = [];
+  const connection = new CompanionLiveConnection({ onEvent() {}, onReady: (model) => models.push(model), onError() {}, onPlaybackBlocked() {} });
+  try {
+    await connection.start();
+    h.socket().open();
+    h.socket().message({ type: 'live_answer', sdp: 'early-answer', backendModel: 'chosen' });
+    expect(h.peer().answers).toEqual(['early-answer']);
+    h.peer().channel.message({ type: 'session.started' });
+    expect(models).toEqual([]);
+    expect(h.track.enabled).toBe(false);
+    connection.mute(true);
+    h.socket().message({ type: 'live_ready', sdp: 'early-answer', backendModel: 'chosen' });
+    expect(models).toEqual(['chosen']);
+    expect(h.track.enabled).toBe(false);
+    expect(h.peer().answers).toEqual(['early-answer']);
+    connection.mute(false);
+    expect(h.track.enabled).toBe(true);
+  } finally { connection.close(); h.peer().channel.message({ type: 'session.closed' }); h.restore(); }
+});
+
+test('desktop opens its control socket while ICE is gathering and sends the offer once', async () => {
+  const h = browserHarness(undefined, true);
+  const connection = new CompanionLiveConnection({ onEvent() {}, onReady() {}, onError() {}, onPlaybackBlocked() {} });
+  try {
+    const starting = connection.start();
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    h.socket().open();
+    expect(h.socket().sent).toEqual([]);
+    h.peer().iceGatheringState = 'complete';
+    h.peer().dispatchEvent(new Event('icegatheringstatechange'));
+    await starting;
+    expect(h.socket().sent).toEqual([{ type: 'live_start', sdp: 'v=0\r\n' }]);
+  } finally { connection.close(); h.peer().channel.message({ type: 'session.closed' }); h.restore(); }
+});
+
 test('cancelling microphone startup stops a late stream and never creates a session', async () => {
   let finish!: (stream: unknown) => void;
   const h = browserHarness(() => new Promise((resolve) => { finish = resolve; }));
@@ -89,7 +126,7 @@ test('ending voice rejects the result waiter without cancelling an active Compan
   await controller.close();
 });
 
-function browserHarness(getUserMedia?: () => Promise<unknown>) {
+function browserHarness(getUserMedia?: () => Promise<unknown>, gathering = false) {
   const originals = new Map<string, PropertyDescriptor | undefined>();
   const set = (key: string, value: unknown) => {
     originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
@@ -116,7 +153,7 @@ function browserHarness(getUserMedia?: () => Promise<unknown>) {
     close() { this.readyState = 3; this.onclose?.(); }
   }
   class FakePeer extends EventTarget {
-    iceGatheringState = 'complete';
+    iceGatheringState = gathering ? 'gathering' : 'complete';
     localDescription = { sdp: 'v=0\r\n' };
     connectionState = 'connected';
     closed = false;
@@ -128,7 +165,8 @@ function browserHarness(getUserMedia?: () => Promise<unknown>) {
     createDataChannel() { return this.channel; }
     async createOffer() { return this.localDescription; }
     async setLocalDescription() {}
-    async setRemoteDescription() {}
+    answers: string[] = [];
+    async setRemoteDescription(answer: { sdp: string }) { this.answers.push(answer.sdp); }
     close() { this.closed = true; }
   }
   set('window', { location: { origin: 'http://localhost' } });

@@ -1,12 +1,15 @@
 import {
   companionProposalOperationLabel,
   type CompanionProposal,
+  type CompanionProposalOperation,
   type CompanionProposalExecutionItem,
 } from '@drone/assistant-chat';
 
 export type CompanionActionNotification = {
   id: string;
   label: string;
+  operation: CompanionProposalOperation;
+  droneName: string;
   status: 'completed' | 'failed';
   error?: string;
   createdAt: number;
@@ -34,11 +37,14 @@ export function createCompanionActionReporter(
       const namedOperation = operation.type === 'create_drone'
         ? { ...operation, name: names[`$${operation.id}`] }
         : operation;
-      const label = companionProposalOperationLabel(namedOperation, 'droneId' in operation ? names[operation.droneId] : '');
+      const droneName = 'droneId' in operation ? names[operation.droneId] || operation.droneId : '';
+      const label = companionProposalOperationLabel(namedOperation, droneName);
       if (!label) continue;
       notifications.push({
         id: globalThis.crypto?.randomUUID?.() ?? `companion-action-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         label,
+        operation: namedOperation,
+        droneName,
         status: result.status,
         error: result.error,
         createdAt: Date.now(),

@@ -20,6 +20,9 @@ export class MobileCompanionLiveConnection {
   private lease: MobileMicrophoneLease | null = null;
   private closed = false;
   private ready = false;
+  private mediaReady = false;
+  private controlReady = false;
+  private answerReceived = false;
   private muted = false;
   private started = false;
   private outgoingEvents = Promise.resolve();
@@ -63,19 +66,22 @@ export class MobileCompanionLiveConnection {
         const event = parseEvent(data);
         if (this.closed) return;
         if (event?.type === 'session.started' && !this.ready) {
-          this.ready = true;
-          clearTimeout(this.timeout);
-          this.mute(this.muted);
-          this.options.onReady(this.backendModel);
+          this.mediaReady = true;
+          this.becomeReady();
         } else if (event?.type === 'session.closed') this.fail('Live conversation ended. Start again to reconnect.');
       };
       channel.onclose = () => { if (!this.closed) this.fail('Live voice disconnected.'); };
       this.unsubscribe = this.options.subscribe(COMPANION_CAPABILITY.id, 'live.event', (event) => {
         if (this.closed || event.sourceDeviceId !== this.options.targetDeviceId || event.payload?.sessionId !== this.options.sessionId) return;
         const payload = event.payload;
-        if (payload.type === 'live_ready' && typeof payload.sdp === 'string') {
+        if ((payload.type === 'live_answer' || payload.type === 'live_ready') && typeof payload.sdp === 'string') {
           this.backendModel = String(payload.backendModel ?? '');
-          void peer.setRemoteDescription({ type: 'answer', sdp: payload.sdp }).catch(() => this.fail('Could not connect Live audio.'));
+          if (!this.answerReceived) {
+            this.answerReceived = true;
+            void peer.setRemoteDescription({ type: 'answer', sdp: payload.sdp }).catch(() => this.fail('Could not connect Live audio.'));
+          }
+          if (payload.type === 'live_ready') this.controlReady = true;
+          this.becomeReady();
         } else if (payload.type === 'live_event') {
           const liveEvent = payload.event;
           if (liveEvent?.type === 'error') this.fail('Live voice reported an error. Start a new conversation.');
@@ -129,6 +135,14 @@ export class MobileCompanionLiveConnection {
   private request(operation: string, payload: Record<string, unknown> = {}): Promise<unknown> {
     return this.options.request(this.options.targetDeviceId, COMPANION_CAPABILITY.id, operation,
       { sessionId: this.options.sessionId, ...payload });
+  }
+
+  private becomeReady(): void {
+    if (this.closed || this.ready || !this.mediaReady || !this.controlReady) return;
+    this.ready = true;
+    clearTimeout(this.timeout);
+    this.mute(this.muted);
+    this.options.onReady(this.backendModel);
   }
 
   private fail(error: string): void {

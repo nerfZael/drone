@@ -121,3 +121,21 @@ test('mobile sends spoken result chunks in order and drops unsent chunks after E
     expect(chunks()).toEqual(['first', 'second']);
   } finally { h.releaseEvent(); h.connection.close(); }
 });
+
+test('mobile negotiates the early answer but waits for control attachment before unmuting', async () => {
+  const h = harness();
+  try {
+    await h.connection.start();
+    h.emit({ type: 'live_answer', sdp: 'early', backendModel: 'chosen' });
+    expect(h.peer.answer).toEqual({ type: 'answer', sdp: 'early' });
+    h.channel.onmessage({ data: JSON.stringify({ type: 'session.started' }) });
+    expect(h.ready).toEqual([]);
+    expect(h.track.enabled).toBe(false);
+    h.connection.mute(true);
+    h.emit({ type: 'live_ready', sdp: 'early', backendModel: 'chosen' });
+    expect(h.ready).toEqual(['chosen']);
+    expect(h.track.enabled).toBe(false);
+    h.connection.mute(false);
+    expect(h.track.enabled).toBe(true);
+  } finally { h.connection.close(); await tick(); }
+});
