@@ -171,13 +171,18 @@ internal class LiveMediaControls(private val context: Context, val id: String, p
       // Bluetooth headset, routes through SCO. The voice-call stream follows that route, so the
       // cue reaches the headset instead of racing the route switch on the music stream.
       val stream = if (audioManager?.mode == AudioManager.MODE_IN_COMMUNICATION) AudioManager.STREAM_VOICE_CALL else AudioManager.STREAM_MUSIC
-      val tone = ToneGenerator(stream, 65)
+      val tone = ToneGenerator(stream, 80)
       cue = tone
-      tone.startTone(if (kind == "recording") ToneGenerator.TONE_PROP_ACK else ToneGenerator.TONE_PROP_NACK, 180)
+      // ACK is two 100 ms bursts separated by 100 ms. The old 180 ms
+      // deadline cut off the second burst, making capture easy to miss.
+      val duration = if (kind == "recording") 350 else 300
+      check(tone.startTone(if (kind == "recording") ToneGenerator.TONE_PROP_ACK else ToneGenerator.TONE_PROP_NACK, duration)) {
+        "Could not play the Live microphone cue"
+      }
       handler.postDelayed({
         if (cue === tone) { tone.release(); cue = null }
         promise.resolve()
-      }, 200)
+      }, (duration + 50).toLong())
     } catch (error: Exception) { promise.reject("LIVE_CUE", error.message, error) }
   }
 

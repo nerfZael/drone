@@ -14,7 +14,43 @@ private fun waitUntil(condition: () -> Boolean) {
 private fun chunk(marker: Int, frames: Int = 2400) = ByteArray(frames * 2) { marker.toByte() }
 private fun encode(bytes: ByteArray) = java.util.Base64.getEncoder().encodeToString(bytes)
 
+private fun openingCapture() {
+  val captured = CopyOnWriteArrayList<ByteArray>()
+  val errors = CopyOnWriteArrayList<String>()
+  android.media.AudioRecord.sample = 0x1234
+  val audio = LivePcmAudio({ captured.add(java.util.Base64.getDecoder().decode(it)) }, errors::add, awaitHeadset = true)
+  try {
+    audio.start()
+    val track = AudioTrack.latest
+    waitUntil { captured.isNotEmpty() }
+    check(track.volume == 0f)
+    check(captured.first().asList().chunked(2).all { it == listOf(0x34.toByte(), 0x12.toByte()) }) {
+      "Opening microphone speech must survive before the output route and Live connection are ready"
+    }
+    audio.mute(true)
+    waitUntil { captured.last().all { it == 0.toByte() } }
+    check(errors.isEmpty())
+  } finally { audio.stop(); android.media.AudioRecord.sample = 0 }
+
+  // Some devices only report an output route after the first write. No server
+  // speech has arrived, but the start cue still needs a usable headset route.
+  AudioTrack.routeOnWrite = AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+  val priming = LivePcmAudio({}, errors::add, awaitHeadset = true)
+  try {
+    priming.start()
+    waitUntil { AudioTrack.latest.snapshot().isNotEmpty() }
+    var ready = false
+    priming.whenPlaybackReady { ready = it }
+    waitUntil { ready }
+    check(AudioTrack.latest.snapshot().isNotEmpty())
+    check(AudioTrack.latest.snapshot().all { span -> span.bytes.all { it == 0.toByte() } })
+    check(errors.isEmpty())
+  } finally { priming.stop(); AudioTrack.routeOnWrite = null }
+  println("Opening speech survives pending output routing; explicit mute still silences capture; cue routing needs no server audio")
+}
+
 fun main() {
+  openingCapture()
   val errors = CopyOnWriteArrayList<String>()
   val audio = LivePcmAudio({}, { errors.add(it) })
   audio.start()
@@ -102,11 +138,11 @@ fun main() {
   connectingTrack.route(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
   connecting.play(encode(chunk(45)))
   Thread.sleep(50)
-  check(ready == null && connectingTrack.volume == 0f && connectingTrack.snapshot().isEmpty())
+  check(ready == null && connectingTrack.volume == 0f)
+  check(connectingTrack.snapshot().all { span -> span.bytes.all { it == 0.toByte() } })
   connectingTrack.route(AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
   check(ready == true && connectingTrack.volume == 1f)
-  waitUntil { connectingTrack.snapshot().size == 2 }
-  check(connectingTrack.snapshot()[1].bytes.contentEquals(chunk(45)))
+  waitUntil { connectingTrack.snapshot().any { it.bytes.contentEquals(chunk(45)) } }
   connecting.stop()
   check(android.os.Handler.pending.isEmpty())
 

@@ -103,7 +103,9 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
             if (used != samples.size) continue
             val bytes = ByteArray(samples.size)
             for (i in 0 until samples.size / 2) {
-              val value = if (muted || !playbackReady) 0 else (samples[i * 2].toInt() + samples[i * 2 + 1].toInt()) / 2
+              // Capture belongs to the startup buffer, independently of output
+              // routing. Waiting for playback must never erase opening speech.
+              val value = if (muted) 0 else (samples[i * 2].toInt() + samples[i * 2 + 1].toInt()) / 2
               bytes[i * 2] = value.toByte()
               bytes[i * 2 + 1] = (value shr 8).toByte()
             }
@@ -129,6 +131,10 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
           }
         }
         try {
+          // A streaming track may need data before Android reports its route.
+          // Prime it with silence so the recording cue can run without waiting
+          // for the first server response. User speech remains queued below.
+          if (!playbackReady) write(ByteArray(4800))
           while (running) {
             if (!playbackReady) { Thread.sleep(10); continue }
             val bytes = playback.poll(100, TimeUnit.MILLISECONDS) ?: continue

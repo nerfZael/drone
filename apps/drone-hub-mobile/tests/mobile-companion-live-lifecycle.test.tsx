@@ -13,6 +13,7 @@ let controlsReleased = 0;
 const cues: string[] = [];
 let cuePlayback: (kind: string) => Promise<void> = async () => {};
 let releaseAudio: () => Promise<void> = async () => {};
+let connectImmediately = true;
 const appState = { currentState: 'active', addEventListener: (_event: string, callback: (state: string) => void) => {
   appStateListener = callback; return { remove() { appStateListener = null; } };
 } };
@@ -33,7 +34,11 @@ mock.module('../src/local-assistant/MobileCompanionLiveConnection', () => ({
     readonly instance: { options: any; closed: number; sent: Record<string, unknown>[] };
     private audio: any;
     constructor(options: any) { this.instance = { options, closed: 0, sent: [] }; connections.push(this.instance); }
-    async start() { this.audio = await this.instance.options.openAudio(); this.instance.options.onCapturing(); this.instance.options.onReady('selected-backend'); }
+    async start() {
+      this.audio = await this.instance.options.openAudio();
+      this.instance.options.onCapturing();
+      if (connectImmediately) this.instance.options.onReady('selected-backend');
+    }
     close() { this.instance.closed++; return releaseAudio().then(() => this.audio?.release()); }
     mute() {} send(event: Record<string, unknown>) { this.instance.sent.push(event); }
   },
@@ -42,6 +47,28 @@ const rendererRequire = createRequire(import.meta.resolve('react-test-renderer')
 mock.module(rendererRequire.resolve('react'), () => React);
 const { create } = await import('react-test-renderer');
 const { useMobileCompanionLive } = await import('../src/local-assistant/use-mobile-companion-live');
+
+test('start cue announces capture while Live connects and does not sound again on connection', async () => {
+  Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
+  let root!: ReactTestRenderer; let live!: ReturnType<typeof useMobileCompanionLive>;
+  const coordinator = new MobileMicrophoneCoordinator();
+  function Capture() { live = useMobileCompanionLive(coordinator); return null; }
+  try {
+    connectImmediately = false; cues.length = 0;
+    await act(async () => { root = create(<Capture />); });
+    await act(async () => { await live.start('hub', 'Hub', async () => 'reply'); });
+    expect(live.status).toBe('connecting');
+    expect(live.capturing).toBe(true);
+    expect(cues).toEqual(['recording']);
+    await act(async () => { connections.at(-1)!.options.onReady('selected-backend'); });
+    expect(live.status).toBe('listening');
+    expect(cues).toEqual(['recording']);
+  } finally {
+    connectImmediately = true;
+    await act(async () => { root?.unmount(); });
+    Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
+  }
+});
 
 test('Android Live survives screen lock and the notification Stop ends the session', async () => {
   Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });

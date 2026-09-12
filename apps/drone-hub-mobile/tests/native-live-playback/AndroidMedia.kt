@@ -23,11 +23,17 @@ class AudioRecord(source: Int, rate: Int, channels: Int, encoding: Int, size: In
   val audioSessionId = 1
   @Volatile var recordingState = 0
   fun startRecording() { recordingState = RECORDSTATE_RECORDING }
-  fun read(samples: ShortArray, offset: Int, size: Int): Int { Thread.sleep(5); return if (recordingState == 0) 0 else size }
+  fun read(samples: ShortArray, offset: Int, size: Int): Int {
+    Thread.sleep(5)
+    if (recordingState == 0) return 0
+    samples.fill(sample, offset, offset + size)
+    return size
+  }
   fun stop() { beforeStop?.invoke(); recordingState = 0 }
   fun release() {}
   companion object {
     var beforeStop: (() -> Unit)? = null
+    @Volatile var sample: Short = 0
     const val STATE_INITIALIZED = 1; const val RECORDSTATE_RECORDING = 1
     fun getMinBufferSize(rate: Int, channels: Int, encoding: Int) = 4800
   }
@@ -72,6 +78,7 @@ class AudioTrack : AudioRouting {
     val count = minOf(size, maxWriteBytes)
     val start = maxOf(nowFrames, spans.lastOrNull()?.end ?: nowFrames)
     spans.add(Span(start, start + count / 2, bytes.copyOfRange(offset, offset + count)))
+    routeOnWrite?.let { if (routedDevice == null) route(it) }
     return count
   }
   @Synchronized fun snapshot() = spans.toList()
@@ -91,6 +98,7 @@ class AudioTrack : AudioRouting {
   companion object {
     const val STATE_INITIALIZED = 1; const val MODE_STREAM = 1
     lateinit var latest: AudioTrack
+    var routeOnWrite: Int? = null
     fun getMinBufferSize(rate: Int, channels: Int, encoding: Int) = 4800
   }
 }

@@ -79,3 +79,19 @@ Physical MEDIA_PLAY now toggles using the current native playback state, like PL
 A regression test reproduced the ignored press before the change. It exercises successive Play-only stop/resume/stop presses without a delay, duplicate/up/repeat handling, explicit transport commands, stale recording acknowledgement, and silence before headset teardown. Physical speaker-spill timing still requires testing the installed build.
 
 Validation: all three native JVM suites passed, including the new Play-only headset regression.
+
+
+## Follow-up: opening capture and audible microphone cues
+
+The user confirmed `96ede281` cuts speech without a speaker spill and usually resumes immediately. They reported missing opening speech and an inaudible start cue, and requested a slightly longer/louder stop cue.
+
+Device logs show the start cue was requested during microphone startup, rather than on server connection: at 22:15:20.468 native playback was opened, the route became ready at 22:15:20.511, ACK began at 22:15:20.525, and server playback resumed at 22:15:22.398. Similar sequences occur at 22:14:37 and 22:15:29. These logs establish a cue request, not that the user could hear it or that all opening speech was delivered.
+
+Two native issues were addressed:
+
+- Capture replaced every sample with zero until the *output* route became ready. Opening microphone samples now enter the existing 40-second connection buffer independently of playback readiness. Explicit microphone mute still sends silence. A regression using nonzero input reproduced the lost samples before the change.
+- A streaming output now receives 100 ms of silent priming data when waiting for a headset. That allows devices which report routing only after a write to release the start-cue gate without waiting for server speech. Assistant audio stays held until the headset route is ready; stop still silences output before microphone and route teardown.
+
+The existing capture callback already requests the cue before connecting Live, so it remains in that location. Android's [ToneGenerator definition](https://developer.android.com/reference/android/media/ToneGenerator#TONE_PROP_ACK) gives ACK two 100 ms bursts separated by 100 ms. The previous 180 ms deadline truncated its second burst. ACK now has a 350 ms window, the stop tone lasts 300 ms, and tone volume is raised from 65 to 80. Cleanup waits for the cue window before releasing the headset route. No cue was added to the network-ready callback.
+
+Validation: all three native JVM suites passed, including nonzero opening capture before output readiness, explicit mute, silent priming without server audio, cancellation and route-loss silence. Targeted connection and lifecycle tests verify buffered speech order and a single capture cue while Live is still connecting. Audible cue clarity and real speech recognition still need a physical test after deployment.
