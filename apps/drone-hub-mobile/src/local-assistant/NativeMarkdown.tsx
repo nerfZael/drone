@@ -11,12 +11,12 @@ import WrapText from 'lucide-react-native/icons/text-wrap';
 import {
   Linking,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
   type GestureResponderEvent,
 } from 'react-native';
+import { EmbeddedHorizontalScrollView } from '../components/EmbeddedHorizontalScrollView';
 import { MobileHighlightedCode } from '../components/MobileHighlightedCode';
 import { colors } from '../theme';
 import { useMobileReadingDensity } from '../mobile-reading-density';
@@ -118,8 +118,7 @@ function NativeCodeBlock({ code, language }: { code: string; language: string })
           />
         </View>
       ) : (
-        <ScrollView
-          horizontal
+        <EmbeddedHorizontalScrollView
           nestedScrollEnabled
           showsHorizontalScrollIndicator
           style={styles.codeScroll}
@@ -132,7 +131,7 @@ function NativeCodeBlock({ code, language }: { code: string; language: string })
               style={[styles.codeText, { width: contentWidth }]}
             />
           </View>
-        </ScrollView>
+        </EmbeddedHorizontalScrollView>
       )}
     </View>
   );
@@ -351,8 +350,7 @@ function NativeMarkdownTable({
           </Pressable>
         </View>
       ) : null}
-      <ScrollView
-        horizontal
+      <EmbeddedHorizontalScrollView
         nestedScrollEnabled
         showsHorizontalScrollIndicator
         style={styles.tableFrame}
@@ -453,7 +451,7 @@ function NativeMarkdownTable({
             </View>
           ))}
         </View>
-      </ScrollView>
+      </EmbeddedHorizontalScrollView>
     </View>
   );
 }

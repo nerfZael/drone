@@ -21,6 +21,8 @@ import Mic from 'lucide-react-native/icons/mic';
 import X from 'lucide-react-native/icons/x';
 import Svg, { Circle, Line, Path } from 'react-native-svg';
 import { Drawer } from 'react-native-drawer-layout';
+import type { GestureType } from 'react-native-gesture-handler';
+import { DrawerSwipeGestureContext } from '../components/EmbeddedHorizontalScrollView';
 import { colors, radii } from '../theme';
 import { APP_HEADER_HEIGHT } from '../layout';
 import { useMobileReadingDensity } from '../mobile-reading-density';
@@ -246,6 +248,7 @@ function mobileSidebarChatId(droneId: string, chatName: string): string {
 }
 
 export function AppDrawerProvider({ children }: { children: React.ReactNode }) {
+  const drawerGestureRef = React.useRef<GestureType | undefined>(undefined);
   const [drawerProps, setDrawerProps] = React.useState<AppDrawerProps | null>(null);
   const [drawerOpen, setDrawerOpen] = React.useState(false);
   const [drawerSwipeEnabled, setDrawerSwipeEnabled] = React.useState(true);
@@ -314,6 +317,7 @@ export function AppDrawerProvider({ children }: { children: React.ReactNode }) {
       >[0],
     ) =>
       gesture
+        .withRef(drawerGestureRef)
         .hitSlop({
           left: 0,
           width: windowWidth,
@@ -365,7 +369,9 @@ export function AppDrawerProvider({ children }: { children: React.ReactNode }) {
         keyboardDismissMode="on-drag"
         style={styles.host}
       >
-        {drawerChildren}
+        <DrawerSwipeGestureContext.Provider value={drawerGestureRef}>
+          {drawerChildren}
+        </DrawerSwipeGestureContext.Provider>
       </Drawer>
     </AppDrawerHostContext.Provider>
   );
