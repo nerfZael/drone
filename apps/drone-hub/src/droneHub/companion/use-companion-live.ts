@@ -88,6 +88,7 @@ export function useCompanionLive() {
       setEnabled(result.enabled);
       setResolved(true);
       if (!result.enabled) stop();
+      return result.enabled;
     } catch (error) {
       if (mounted.current) setSettingsError(error instanceof Error ? error.message : 'Could not save Live voice setting.');
     } finally {

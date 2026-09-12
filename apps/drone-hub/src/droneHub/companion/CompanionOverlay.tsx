@@ -24,10 +24,6 @@ import { CompanionSubscriptions } from './CompanionSubscriptions';
 import { CompanionModelPicker } from './CompanionModelPicker';
 import { useCompanionWorkspace } from './CompanionWorkspaceContext';
 
-function Chevron({ open }: { open: boolean }) {
-  return <span className={`text-xs transition-transform ${open ? 'rotate-90' : ''}`}>›</span>;
-}
-
 function companionStatusLabel(status: CompanionStatus, recordingPaused: boolean): string {
   if (recordingPaused) return 'Listening paused';
   if (status === 'starting') return 'Starting microphone';
@@ -194,7 +190,7 @@ export function CompanionOverlay() {
           onDiscard={companion.discardProposal}
         />
       ) : null}
-      <div className={`flex min-h-0 w-full flex-col gap-3 ${panelOpen ? 'min-[860px]:w-[34rem]' : 'min-[860px]:w-[28rem]'}`}>
+      <div className={`flex min-h-0 w-full flex-col gap-3 ${panelOpen ? 'min-[860px]:w-[34rem]' : 'min-[860px]:w-fit min-[860px]:max-w-[28rem]'}`}>
       {workspacePickerOpen ? <CompanionWorkspacePicker onClose={() => setWorkspacePickerOpen(false)} /> : null}
       {promptEditorOpen ? <CompanionPromptEditor onClose={() => setPromptEditorOpen(false)} /> : null}
       {instructionsEditorOpen ? <CompanionInstructionsEditor onClose={() => setInstructionsEditorOpen(false)} /> : null}
@@ -202,17 +198,98 @@ export function CompanionOverlay() {
         <CompanionActionNotifications notifications={companion.actionNotifications} onDismiss={companion.dismissActionNotification} />
       ) : null}
       <aside
-        className="flex max-h-[calc(100vh-2rem)] w-full flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--panel-raised)] shadow-[var(--edge-highlight),var(--shadow-dialog)] min-[860px]:w-[28rem] min-[860px]:self-end"
+        className="flex max-h-[calc(100vh-2rem)] w-full flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--panel-raised)] shadow-[var(--edge-highlight),var(--shadow-dialog)] min-[860px]:max-w-[28rem] min-[860px]:self-end"
         aria-label="Companion"
       >
       {/* Header doubles as the user's message once a transcript exists. */}
-      <div className="flex shrink-0 items-start gap-2.5 border-b border-[var(--border-subtle)] py-2 pl-3.5 pr-2">
-        <div className="flex h-7 shrink-0 items-center">
-          <CompanionStatusIndicator
-            status={companion.status}
-            recordingPaused={companion.recordingPaused}
-          />
+      <div className="flex shrink-0 items-start gap-2.5 py-1.5 pl-3 pr-1.5">
+        <Popover.Root open={expanded} onOpenChange={setExpanded}>
+          <Popover.Trigger asChild>
+            <button type="button" aria-label={active ? 'Working — show tool activity' : 'Show Companion activity'}
+              title={active ? 'Working' : 'Companion activity'}
+              className="flex h-7 shrink-0 items-center justify-center rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]">
+              {active ? <svg className="h-3 w-3 animate-spin text-[var(--accent)] motion-reduce:animate-none" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.5" opacity="0.25" />
+                <path d="M6 1.5a4.5 4.5 0 0 1 4.5 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg> : <CompanionStatusIndicator status={companion.status} recordingPaused={companion.recordingPaused} />}
+            </button>
+          </Popover.Trigger>
+          <Popover.Portal>
+            <Popover.Content side="top" align="start" sideOffset={8} aria-label="Companion activity" data-companion-surface="true"
+              className="z-[110] w-[min(24rem,calc(100vw-2rem))] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--panel-raised)] shadow-[var(--shadow-dialog)]">
+              <div className="px-3.5 py-2 text-xs text-[var(--muted)]">
+                {active ? 'Working' : 'Worked'} for {formatWorkingDuration(duration)} · {companion.activity.length} tool calls
+              </div>
+        <div
+          id="companion-tool-calls"
+          className="dh-agent-activity-scrollbar max-h-52 shrink-0 overflow-y-auto border-b border-[var(--border-subtle)] bg-[var(--surface-inset-faint)] px-3.5 py-1.5"
+        >
+          {activityGroups.map((group) => (
+            <React.Fragment key={group.key}>
+              {group.parallel ? (
+                <div
+                  className="flex items-center gap-2 py-1 text-[9px] uppercase tracking-wider text-[var(--muted-dim)]"
+                  aria-label={`${group.items.length} tool calls ran in parallel`}
+                >
+                  <span className="h-px flex-1 bg-[var(--border-subtle)]" />
+                  <span>Parallel · {group.items.length}</span>
+                  <span className="h-px flex-1 bg-[var(--border-subtle)]" />
+                </div>
+              ) : null}
+              {group.items.map((item) => (
+                <details
+                  key={item.callId}
+                  className="py-0.5 text-[11px]"
+                >
+                  <summary className="flex cursor-pointer items-center gap-1.5 text-[var(--fg-secondary)]">
+                    <span
+                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                        item.status === 'running'
+                          ? 'animate-pulse bg-[var(--accent)]'
+                          : item.status === 'failed'
+                            ? 'bg-[var(--red)]'
+                            : 'bg-[var(--green)]'
+                      }`}
+                      aria-label={item.status === 'running' ? 'Running' : item.status === 'failed' ? 'Failed' : 'Completed'}
+                      role="img"
+                    />
+                    <span className="truncate">{companionToolActivityLabel(item)}</span>
+                  </summary>
+                  <div className="mt-1 space-y-2 pl-3 text-[10px] text-[var(--muted-dim)]">
+                    {item.args !== undefined ? (
+                      <div>
+                        <div className="font-[var(--weight-semibold)] uppercase tracking-wide">Arguments</div>
+                        <pre className="overflow-auto whitespace-pre-wrap break-words">
+                          {JSON.stringify(item.args, null, 2)}
+                        </pre>
+                      </div>
+                    ) : null}
+                    {item.error !== undefined ? (
+                      <div>
+                        <div className="font-[var(--weight-semibold)] uppercase tracking-wide">Error</div>
+                        <pre className="overflow-auto whitespace-pre-wrap break-words">
+                          {JSON.stringify(item.error, null, 2)}
+                        </pre>
+                      </div>
+                    ) : item.result !== undefined ? (
+                      <div>
+                        <div className="font-[var(--weight-semibold)] uppercase tracking-wide">Result</div>
+                        <pre className="overflow-auto whitespace-pre-wrap break-words">
+                          {JSON.stringify(item.result, null, 2)}
+                        </pre>
+                      </div>
+                    ) : null}
+                  </div>
+                </details>
+              ))}
+            </React.Fragment>
+          ))}
         </div>
+              {companion.activity.length === 0 ? <p className="px-3.5 pb-2 text-xs text-[var(--muted)]">No tool calls yet.</p> : null}
+              {companion.compaction ? <p role="status" className="px-3.5 py-2 text-xs text-[var(--muted)]">{companionCompactionLabel(companion.compaction)}</p> : null}
+            </Popover.Content>
+          </Popover.Portal>
+        </Popover.Root>
         <div className="flex min-h-7 min-w-0 flex-1 items-center">
           {companion.transcript ? (
             <button
@@ -221,8 +298,8 @@ export function CompanionOverlay() {
               aria-expanded={transcriptExpanded}
               aria-label={transcriptExpanded ? 'Collapse your message' : 'Expand your message'}
               title={transcriptExpanded ? undefined : companion.transcript}
-              className={`w-full whitespace-pre-wrap break-words rounded-sm text-left text-xs leading-relaxed text-[var(--fg-secondary)] outline-none hover:text-[var(--fg)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${
-                transcriptExpanded ? '' : 'line-clamp-[10]'
+              className={`w-full rounded-sm text-left text-xs leading-relaxed text-[var(--fg-secondary)] outline-none hover:text-[var(--fg)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${
+                transcriptExpanded ? 'whitespace-pre-wrap break-words' : 'truncate'
               }`}
             >
               {companion.transcript}
@@ -256,6 +333,19 @@ export function CompanionOverlay() {
               <path d="m13 2-9 12h7l-1 8 9-12h-7z" />
             </svg>
           </CompanionHeaderButton>
+          {companion.live ? <CompanionHeaderButton
+            menuLabel={`Live voice ${companion.live.enabled ? 'on' : 'off'}`}
+            label={companion.live.loading ? 'Loading Live voice setting' : companion.live.saving ? 'Saving Live voice setting'
+              : `Live voice ${companion.live.enabled ? 'on' : 'off'}; remembered across Companion sessions`}
+            tone={companion.live.enabled ? 'accent' : 'neutral'}
+            pressed={companion.live.enabled}
+            disabled={companion.live.loading || companion.live.saving || companion.switchingVoice || ['starting', 'transcribing'].includes(companion.status)}
+            onClick={() => void companion.toggleLiveVoice()}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+              <path d="M3 10v4M7 6v12M12 3v18M17 6v12M21 10v4" />
+            </svg>
+          </CompanionHeaderButton> : null}
           <Popover.Root open={menuOpen} onOpenChange={setMenuOpen}>
             <Popover.Trigger asChild>
               <button type="button" aria-label="Companion options" title="Companion options"
@@ -269,19 +359,7 @@ export function CompanionOverlay() {
               <Popover.Content side="top" align="end" sideOffset={8} aria-label="Companion options" data-companion-surface="true"
                 className="z-[110] w-[min(21rem,calc(100vw-2rem))] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--panel-raised)] p-1 shadow-[var(--shadow-dialog)]">
                 <CompanionMenuContext.Provider value={() => setMenuOpen(false)}>
-                  {companion.live ? <CompanionHeaderButton
-                    menuLabel={`Live voice ${companion.live.enabled ? 'on' : 'off'}`}
-                    label={companion.live.loading ? 'Loading Live voice setting' : companion.live.saving ? 'Saving Live voice setting'
-                      : `Live voice ${companion.live.enabled ? 'on' : 'off'}; remembered across Companion sessions`}
-                    tone={companion.live.enabled ? 'accent' : 'neutral'}
-                    pressed={companion.live.enabled}
-                    disabled={companion.live.loading || companion.live.saving || (!companion.live.enabled && ['starting', 'recording', 'transcribing'].includes(companion.status))}
-                    onClick={() => void companion.live.toggleEnabled()}
-                  >
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-                      <path d="M3 10v4M7 6v12M12 3v18M17 6v12M21 10v4" />
-                    </svg>
-                  </CompanionHeaderButton> : null}
+
                   <CompanionHeaderButton
                     label={companion.proposalHistory.length > 0
                       ? `Show execution history${latestProposalExecutionFailed ? '; latest execution failed' : ''}`
@@ -388,6 +466,7 @@ export function CompanionOverlay() {
                   ) : null}
                 </CompanionMenuContext.Provider>
                 <div className="my-1 border-t border-[var(--border-subtle)]" />
+                <CompanionLivePanel />
                 <CompanionModelPicker embedded />
                 <div className="my-1 border-t border-[var(--border-subtle)]" />
                 <div className="p-2"><CompanionCurrentWorkspaceAccess refreshKey={workspacePickerOpen} /></div>
@@ -404,108 +483,8 @@ export function CompanionOverlay() {
             ×
           </button>
         </div>
-        {/* Run summary sits under the buttons so it costs no extra row. */}
-        {active || companion.activity.length > 0 ? (
-          <button
-            type="button"
-            aria-expanded={expanded}
-            aria-controls="companion-tool-calls"
-            aria-label={`${expanded ? 'Collapse' : 'Expand'} tool calls`}
-            onClick={() => setExpanded((value) => !value)}
-            disabled={companion.activity.length === 0}
-            className="inline-flex h-4 items-center gap-1.5 rounded-sm pr-1 text-[11px] leading-none text-[var(--muted)] transition-colors hover:text-[var(--fg-secondary)] focus-visible:text-[var(--fg-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] disabled:cursor-default disabled:hover:text-[var(--muted)]"
-          >
-            {active ? (
-              <svg className="h-3 w-3 shrink-0 animate-spin text-[var(--accent)] motion-reduce:animate-none" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.5" opacity="0.25" />
-                <path d="M6 1.5a4.5 4.5 0 0 1 4.5 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-              </svg>
-            ) : null}
-            <span className="tabular-nums">
-              {active ? 'Working' : 'Worked'} for {formatWorkingDuration(duration)}
-            </span>
-            {companion.activity.length ? (
-              <span className="text-[var(--muted-dim)]">
-                · {companion.activity.length} tool {companion.activity.length === 1 ? 'call' : 'calls'}
-              </span>
-            ) : null}
-            {companion.activity.length ? (
-              <span className="text-[var(--muted-dim)]"><Chevron open={expanded} /></span>
-            ) : null}
-          </button>
-        ) : null}
         </div>
       </div>
-
-      <CompanionLivePanel />
-      {/* Tool calls, expanded on demand right under their toggle. */}
-      {expanded && companion.activity.length ? (
-        <div
-          id="companion-tool-calls"
-          className="dh-agent-activity-scrollbar max-h-52 shrink-0 overflow-y-auto border-b border-[var(--border-subtle)] bg-[var(--surface-inset-faint)] px-3.5 py-1.5"
-        >
-          {activityGroups.map((group) => (
-            <React.Fragment key={group.key}>
-              {group.parallel ? (
-                <div
-                  className="flex items-center gap-2 py-1 text-[9px] uppercase tracking-wider text-[var(--muted-dim)]"
-                  aria-label={`${group.items.length} tool calls ran in parallel`}
-                >
-                  <span className="h-px flex-1 bg-[var(--border-subtle)]" />
-                  <span>Parallel · {group.items.length}</span>
-                  <span className="h-px flex-1 bg-[var(--border-subtle)]" />
-                </div>
-              ) : null}
-              {group.items.map((item) => (
-                <details
-                  key={item.callId}
-                  className="py-0.5 text-[11px]"
-                >
-                  <summary className="flex cursor-pointer items-center gap-1.5 text-[var(--fg-secondary)]">
-                    <span
-                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                        item.status === 'running'
-                          ? 'animate-pulse bg-[var(--accent)]'
-                          : item.status === 'failed'
-                            ? 'bg-[var(--red)]'
-                            : 'bg-[var(--green)]'
-                      }`}
-                      aria-label={item.status === 'running' ? 'Running' : item.status === 'failed' ? 'Failed' : 'Completed'}
-                      role="img"
-                    />
-                    <span className="truncate">{companionToolActivityLabel(item)}</span>
-                  </summary>
-                  <div className="mt-1 space-y-2 pl-3 text-[10px] text-[var(--muted-dim)]">
-                    {item.args !== undefined ? (
-                      <div>
-                        <div className="font-[var(--weight-semibold)] uppercase tracking-wide">Arguments</div>
-                        <pre className="overflow-auto whitespace-pre-wrap break-words">
-                          {JSON.stringify(item.args, null, 2)}
-                        </pre>
-                      </div>
-                    ) : null}
-                    {item.error !== undefined ? (
-                      <div>
-                        <div className="font-[var(--weight-semibold)] uppercase tracking-wide">Error</div>
-                        <pre className="overflow-auto whitespace-pre-wrap break-words">
-                          {JSON.stringify(item.error, null, 2)}
-                        </pre>
-                      </div>
-                    ) : item.result !== undefined ? (
-                      <div>
-                        <div className="font-[var(--weight-semibold)] uppercase tracking-wide">Result</div>
-                        <pre className="overflow-auto whitespace-pre-wrap break-words">
-                          {JSON.stringify(item.result, null, 2)}
-                        </pre>
-                      </div>
-                    ) : null}
-                  </div>
-                </details>
-              ))}
-            </React.Fragment>
-          ))}
-        </div>
-      ) : null}
 
       {/* Body: the reply is what the user came for. */}
       {companion.error || companion.reply ? (
@@ -516,23 +495,13 @@ export function CompanionOverlay() {
             </div>
           ) : null}
           {companion.reply ? (
-            <div className="px-3.5 py-2.5">
+            <div className="px-3 pb-2 pt-0.5">
               <ChatMessageBody role="assistant" text={companion.reply} autoExpand />
             </div>
           ) : null}
         </div>
       ) : null}
 
-      {companion.compaction ? (
-        <div role="status" aria-live="polite" className={`flex shrink-0 items-center gap-2 border-t border-[var(--border-subtle)] px-3.5 py-2 text-[11px] ${
-          companion.compaction.status === 'failed' ? 'text-[var(--red)]' : 'text-[var(--muted)]'
-        }`}>
-          {companion.compaction.status === 'running' ? (
-            <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[var(--accent)] motion-reduce:animate-none" />
-          ) : null}
-          {companionCompactionLabel(companion.compaction)}
-        </div>
-      ) : null}
 
       </aside>
       </div>

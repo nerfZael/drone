@@ -73,6 +73,8 @@ type CompanionContextValue = {
   submitText(prompt: string): Promise<CompanionTextSubmitResult>;
   prepareTextSubmission(): (prompt: string) => Promise<CompanionTextSubmitResult>;
   toggle(): Promise<void>;
+  toggleLiveVoice(): Promise<void>;
+  switchingVoice: boolean;
   stop(): void;
   toggleRecordingPause(): void;
   discardRecording(): Promise<void>;
@@ -137,6 +139,8 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   );
   const voice = useChatVoiceRecorder({ onError: onVoiceError, microphoneOwner: 'companion' });
   const live = useCompanionLive();
+  const [switchingVoice, setSwitchingVoice] = React.useState(false);
+  const switchingVoiceRef = React.useRef(false);
   const voiceStatusRef = React.useRef(voice.status);
   const discardVoiceRecordingRef = React.useRef(voice.discardRecording);
   voiceStatusRef.current = voice.status;
@@ -408,14 +412,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     [controller, executeBrowserTool],
   );
 
-  const toggle = React.useCallback(async () => {
-    if (live.loading || live.saving) return;
-    if (!live.resolved) {
-      controller.reportVoiceError('Could not load the voice preference. Retry the Live voice setting before starting the microphone.');
-      return;
-    }
-    if (live.enabled && voice.status === 'idle') {
-      if (live.status === 'connecting' || live.status === 'listening') { live.stop(); return; }
+  const startLiveVoice = React.useCallback(async () => {
       const capturedWorkspace = captureWorkspace();
       const context = capturedWorkspace?.getAppContext();
       const workspaceLabel = [context?.activeRepoPath, context?.selectedChat].filter((value) => typeof value === 'string' && value).join(' · ') || 'No workspace selected';
@@ -424,6 +421,17 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
         if (proposalExecutingRef.current) throw new Error('Companion is applying a proposal. Please ask again when it finishes.');
         return await waitForCompanionReply(controller, () => run(prompt, capturedWorkspace), signal);
       }, workspaceLabel);
+  }, [captureWorkspace, controller, live.start, run]);
+
+  const toggle = React.useCallback(async (finishForModeSwitch = false) => {
+    if (live.loading || live.saving || (switchingVoiceRef.current && !finishForModeSwitch)) return;
+    if (!live.resolved) {
+      controller.reportVoiceError('Could not load the voice preference. Retry the Live voice setting before starting the microphone.');
+      return;
+    }
+    if (live.enabled && voice.status === 'idle') {
+      if (live.status === 'connecting' || live.status === 'listening') { live.stop(); return; }
+      await startLiveVoice();
       return;
     }
     if (voice.status === 'starting' || voice.status === 'transcribing') return;
@@ -457,7 +465,35 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     if (recordingWorkspaceRef.current !== recording) return;
     if (!started) recordingWorkspaceRef.current = null;
     if (!started && controller.getSnapshot().status !== 'error') controller.resetIfNoSession();
-  }, [captureWorkspace, close, controller, run, voice, live]);
+  }, [captureWorkspace, close, controller, run, voice, live, startLiveVoice]);
+
+  const toggleLiveVoice = React.useCallback(async () => {
+    if (switchingVoiceRef.current || live.loading || live.saving ||
+      voice.status === 'starting' || voice.status === 'transcribing') return;
+    switchingVoiceRef.current = true;
+    setSwitchingVoice(true);
+    const generation = voiceSubmissionGenerationRef.current;
+    try {
+      // Finish existing dictation before changing microphone modes.
+      if (!live.enabled && (voice.status === 'recording' || voice.status === 'paused')) {
+        await toggle(true);
+      }
+      if (generation !== voiceSubmissionGenerationRef.current) return;
+      const enabled = await live.toggleEnabled();
+      if (enabled === undefined || generation !== voiceSubmissionGenerationRef.current) return;
+      if (enabled) {
+        await startLiveVoice();
+      } else {
+        const recording = { workspace: captureWorkspace() };
+        recordingWorkspaceRef.current = recording;
+        const started = await voice.startRecording();
+        if (!started && recordingWorkspaceRef.current === recording) recordingWorkspaceRef.current = null;
+      }
+    } finally {
+      switchingVoiceRef.current = false;
+      setSwitchingVoice(false);
+    }
+  }, [captureWorkspace, live, startLiveVoice, toggle, voice]);
 
   const submitText = React.useCallback(
     async (prompt: string, capturedWorkspace = captureWorkspace()): Promise<CompanionTextSubmitResult> => {
@@ -506,7 +542,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   );
 
   const effectiveStatus: CompanionStatus =
-    voice.status === 'paused' ? 'recording' : voice.status !== 'idle' ? voice.status
+    switchingVoice ? 'starting' : voice.status === 'paused' ? 'recording' : voice.status !== 'idle' ? voice.status
       : state.status === 'working' ? 'working'
       : live.status === 'connecting' ? 'starting'
       : live.status === 'listening' && state.status === 'idle' ? 'recording'
@@ -556,6 +592,8 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       submitText,
       prepareTextSubmission,
       toggle,
+      toggleLiveVoice,
+      switchingVoice,
       stop,
       toggleRecordingPause,
       discardRecording,
@@ -587,6 +625,8 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       submitText,
       prepareTextSubmission,
       toggle,
+      toggleLiveVoice,
+      switchingVoice,
       toggleRecordingPause,
       toggleAutoApprove,
       voice.durationMillis,
