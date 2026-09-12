@@ -1,6 +1,10 @@
 import { expect, mock, test } from 'bun:test';
 
-mock.module('expo-modules-core', () => ({ requireOptionalNativeModule: () => null }));
+let headsetRequests = 0;
+let headsetDialog = false;
+mock.module('expo-modules-core', () => ({ requireOptionalNativeModule: () => ({
+  requestHeadsetPermission: async () => { headsetRequests++; if (headsetDialog) appState.currentState = 'background'; },
+}) }));
 mock.module('expo-crypto', () => ({ randomUUID: () => 'permission-test' }));
 
 let granted = true;
@@ -50,4 +54,21 @@ test('Live waits for foreground after a native permission dialog', async () => {
 test('Live reports denied microphone permission', async () => {
   requestGranted = false;
   await expect(prepareMobileLiveAudio()).rejects.toThrow('Allow microphone access');
+});
+
+
+test('Live requests headset access before arming background controls and waits for its dialog to close', async () => {
+  granted = true; headsetDialog = true; appState.currentState = 'active';
+  const previous = headsetRequests;
+  let ready = false;
+  const preparation = prepareMobileLiveAudio().then(() => { ready = true; });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(headsetRequests).toBe(previous + 1);
+  expect(ready).toBe(false);
+  appState.currentState = 'active';
+  for (const listener of listeners) listener('active');
+  await preparation;
+  expect(ready).toBe(true);
+  expect(listeners.size).toBe(0);
+  headsetDialog = false;
 });

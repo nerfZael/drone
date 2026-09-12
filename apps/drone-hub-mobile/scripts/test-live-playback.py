@@ -26,9 +26,11 @@ with tempfile.TemporaryDirectory(prefix='drone-live-playback-') as directory:
     work = Path(directory)
     compiler = ['java', '-cp', cp, 'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler', '-no-stdlib', '-no-reflect']
     subprocess.run([*compiler, '-classpath', cp + os.pathsep + str(platforms[-1]), '-d', str(work / 'android'), str(source)], check=True)
-    subprocess.run([*compiler, '-classpath', cp, '-d', str(work / 'tests'), str(source), str(source.with_name('LiveMediaControls.kt')),
+    subprocess.run([*compiler, '-classpath', cp, '-d', str(work / 'tests'), str(source), str(source.with_name('LiveMediaControls.kt')), str(source.with_name('LiveBluetoothRoute.kt')),
                     *map(str, (app / 'tests/native-live-playback').glob('*.kt'))], check=True)
     subprocess.run(['java', '-cp', str(work / 'tests') + os.pathsep + cp,
                     'expo.modules.dronelivevoice.LivePlaybackTestKt'], check=True)
     subprocess.run(['java', '-cp', str(work / 'tests') + os.pathsep + cp,
                     'expo.modules.dronelivevoice.LiveMediaControlsTestKt'], check=True)
+    subprocess.run(['java', '-cp', str(work / 'tests') + os.pathsep + cp,
+                    'expo.modules.dronelivevoice.LiveBluetoothRouteTestKt'], check=True)

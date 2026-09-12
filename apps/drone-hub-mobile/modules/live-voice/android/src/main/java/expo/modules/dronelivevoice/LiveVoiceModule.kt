@@ -1,5 +1,8 @@
 package expo.modules.dronelivevoice
 
+import android.Manifest
+import android.os.Build
+import expo.modules.interfaces.permissions.Permissions
 import android.content.Intent
 import android.media.AudioManager
 import android.media.AudioDeviceInfo
@@ -20,6 +23,7 @@ internal object LiveVoiceSession {
   var started: Promise? = null
   val stopped = mutableListOf<Promise>()
   var stopAudio: (() -> Unit)? = null
+  var closeRoute: (() -> Unit)? = null
   var emitStopped: ((String) -> Unit)? = null
   var mediaControls: LiveMediaControls? = null
   var refreshNotification: (() -> Unit)? = null
@@ -30,6 +34,7 @@ internal object LiveVoiceSession {
     id = null
     stopAudio?.invoke()
     stopAudio = null
+    closeRoute?.invoke(); closeRoute = null
     mediaControls?.close(); mediaControls = null; refreshNotification = null
     started?.reject("LIVE_STOPPED", "Live voice was stopped before startup completed", null)
     started = null
@@ -46,9 +51,42 @@ class LiveVoiceModule : Module() {
   private var foreground = true
   private var pcm: LivePcmAudio? = null
   private var pcmId: String? = null
+  private var bluetoothRoute: LiveBluetoothRoute? = null
   override fun definition() = ModuleDefinition {
     Name("DroneLiveVoice")
     Events("stopped", "pcmAudio", "pcmError", "mediaControl")
+    AsyncFunction("requestHeadsetPermission") { promise: Promise ->
+      val context = appContext.reactContext ?: error("React context is unavailable")
+      if (Build.VERSION.SDK_INT < 31 || LiveBluetoothRoute.candidate(context) == null || LiveBluetoothRoute.permitted(context)) {
+        promise.resolve()
+      } else {
+        Permissions.askForPermissionsWithPermissionsManager(appContext.permissions, promise, Manifest.permission.BLUETOOTH_CONNECT)
+      }
+    }.runOnQueue(Queues.MAIN)
+    AsyncFunction("preparePcmRoute") { id: String, promise: Promise ->
+      check(LiveVoiceSession.id != null) { "Start the Live foreground service first" }
+      check(bluetoothRoute == null) { "Previous headset audio is still releasing" }
+      val context = appContext.reactContext ?: error("React context is unavailable")
+      val output = LiveBluetoothRoute.candidate(context)
+      if (output == null || !LiveBluetoothRoute.permitted(context)) promise.resolve(false)
+      else {
+        val route = LiveBluetoothRoute(context, id, output) { LiveVoiceSession.mediaControls?.pauseForHeadsetDisconnect() }
+        bluetoothRoute = route
+        LiveVoiceSession.closeRoute = { route.close(); if (bluetoothRoute === route) bluetoothRoute = null }
+        route.start(promise)
+      }
+    }.runOnQueue(Queues.MAIN)
+    AsyncFunction("cancelPcmRoute") { id: String ->
+      bluetoothRoute?.takeIf { it.id == id }?.cancelStartup()
+    }.runOnQueue(Queues.MAIN)
+    AsyncFunction("releasePcmRoute") { id: String, promise: Promise ->
+      val route = bluetoothRoute?.takeIf { it.id == id }
+      if (route == null) promise.resolve()
+      else {
+        bluetoothRoute = null; LiveVoiceSession.closeRoute = null
+        route.close(promise)
+      }
+    }.runOnQueue(Queues.MAIN)
     AsyncFunction("armControls") { id: String ->
       check(LiveVoiceSession.id != null) { "Start the Live foreground service first" }
       val context = appContext.reactContext ?: error("React context is unavailable")
@@ -157,6 +195,7 @@ class LiveVoiceModule : Module() {
     OnDestroy {
       Handler(Looper.getMainLooper()).post {
         pcm?.stop(); pcm = null; pcmId = null
+        bluetoothRoute?.close(); bluetoothRoute = null
         if (LiveVoiceSession.id == ownedSessionId) {
           LiveVoiceSession.context?.get()?.let { context ->
             context.stopService(Intent(context, LiveVoiceService::class.java))

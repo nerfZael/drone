@@ -3,8 +3,10 @@ import android.media.AudioManager
 
 class Context {
   val audioManager = AudioManager()
+  val bluetoothManager = android.bluetooth.BluetoothManager()
+  var bluetoothPermission = true
   var receiver: BroadcastReceiver? = null
-  fun <T> getSystemService(type: Class<T>): T = type.cast(audioManager)
+  fun <T> getSystemService(type: Class<T>): T = type.cast(if (type == AudioManager::class.java) audioManager else bluetoothManager)
   fun unregisterReceiver(value: BroadcastReceiver) { check(receiver === value); receiver = null }
 }
 abstract class BroadcastReceiver { abstract fun onReceive(context: Context, intent: Intent) }

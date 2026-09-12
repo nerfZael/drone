@@ -39,11 +39,11 @@ interface AudioRouting {
   val routedDevice: AudioDeviceInfo?
   fun interface OnRoutingChangedListener { fun onRoutingChanged(router: AudioRouting) }
 }
-class AudioDeviceInfo(val type: Int) {
+class AudioDeviceInfo(val type: Int, val address: String = "headset") {
   companion object {
     const val TYPE_BLUETOOTH_SCO = 7; const val TYPE_BLE_HEADSET = 26
     const val TYPE_WIRED_HEADSET = 3; const val TYPE_WIRED_HEADPHONES = 4
-    const val TYPE_USB_HEADSET = 22; const val TYPE_HEARING_AID = 23
+    const val TYPE_USB_DEVICE = 11; const val TYPE_USB_HEADSET = 22; const val TYPE_HEARING_AID = 23
     const val TYPE_BUILTIN_SPEAKER = 2; const val TYPE_BUILTIN_EARPIECE = 1
   }
 }
@@ -96,6 +96,17 @@ class AudioTrack : AudioRouting {
 }
 
 class AudioManager {
+  var isBluetoothScoOn = false
+  var outputs = emptyArray<AudioDeviceInfo>()
+  val routeCalls = mutableListOf<String>()
+  fun getDevices(flags: Int) = outputs
+  fun setCommunicationDevice(device: AudioDeviceInfo): Boolean {
+    check(isBluetoothScoOn) { "Cannot request a virtual call before external SCO is connected" }
+    routeCalls.add("select")
+    communicationDevice = device
+    return true
+  }
+  fun clearCommunicationDevice() { routeCalls.add("clear"); communicationDevice = null }
   var mode = MODE_IN_COMMUNICATION
   var communicationDevice: AudioDeviceInfo? = null
   var listener: OnCommunicationDeviceChangedListener? = null
@@ -108,6 +119,7 @@ class AudioManager {
   fun interface OnCommunicationDeviceChangedListener { fun onCommunicationDeviceChanged(device: AudioDeviceInfo?) }
   fun interface OnAudioFocusChangeListener { fun onAudioFocusChange(change: Int) }
   companion object {
+    const val MODE_NORMAL = 0; const val GET_DEVICES_OUTPUTS = 2
     const val ACTION_SCO_AUDIO_STATE_UPDATED = "sco"
     const val EXTRA_SCO_AUDIO_STATE = "state"
     const val SCO_AUDIO_STATE_CONNECTED = 1; const val SCO_AUDIO_STATE_DISCONNECTED = 0

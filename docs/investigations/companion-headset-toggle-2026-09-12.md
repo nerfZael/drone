@@ -50,3 +50,21 @@ The follow-up listens for SCO state and communication-device changes, with the o
 When a headset is connected, PCM starts silently and holds speech plus the recording cue until the track actually reports a headset route. Capture sends silence during that transition. Cancellation resolves pending cue requests without playing; a five-second route timeout reports an error while output remains silent. Phone-only Live continues to start immediately.
 
 Follow-up validation: the Android Kotlin build and mobile typecheck passed; all 25 existing targeted TypeScript tests passed. Native JVM regressions exercise early SCO/BLE stop before any AudioTrack speaker callback, one-press resume, stale recording state, repeated/up key events, route-gated speech and cues, startup cancellation/timeout, and output silence before microphone shutdown. These tests simulate Android events; physical headset timing and whether the previously missed press is resolved still require testing the new installed build.
+
+
+## Follow-up: confirmed Android post-call Play suppression
+
+The user confirmed that the route-gated start cue works, but a resume press roughly three seconds after stop is lost; waiting over five seconds works. Retained Bluetooth logs from the installed `fa18fb46` build establish why:
+
+- At 21:38:21.933 the headset reported HFP audio disconnected. Drone published paused at 21:38:22.714 and returned to normal audio mode at 21:38:23.019.
+- At 21:38:25.847 Bluetooth received AVRCP Play (operation 68) and logged `Dropping the Play command received right after call end cmd`. The corresponding release was also dropped. Neither event reached MediaSessionService.
+- The next Play at 21:38:31.827 was delivered and resumed Drone. The same dropped-then-delivered sequence occurred at 21:38:48.539 and 21:38:53.658.
+- AudioManager's SCO broadcast was announced at 21:38:21.939, but the app still did not pause until 21:38:22.714. Subscribing to that broadcast did not eliminate the device's fallback interval.
+
+Changing JS debounce or accepting duplicate Play cannot recover an event discarded inside Bluetooth. Android's [Bluetooth stack](https://android.googlesource.com/platform/system/bt/+/9ac641d/btif/src/btif_rc.c) implements post-call media-command suppression for device interoperability. The new classic Bluetooth route instead opens the public [BluetoothHeadset.startVoiceRecognition](https://developer.android.com/reference/android/bluetooth/BluetoothHeadset#startVoiceRecognition(android.bluetooth.BluetoothDevice)) audio connection before selecting the communication device. That avoids starting an HFP virtual call. This API selects headset audio; recognition and Companion processing remain in Drone.
+
+The route owns its audio mode and cleanup, so expo-audio does not start a competing virtual call. It waits for AudioService to observe external SCO before selecting the route, retains existing cue gating, and waits for actual disconnection during cleanup before a queued resume begins. It listens directly to HFP audio-state broadcasts for earlier stop. Pending profile binding and connection can be cancelled; timeout, late callbacks, unsupported headsets, and another app already using SCO are handled explicitly.
+
+Android 12+ requires Nearby devices / BLUETOOTH_CONNECT permission for these public headset APIs and broadcasts. Drone requests it during foreground Live preparation only when a classic headset is attached. Denial or a headset without voice-recognition support retains the standard route, including its possible post-call delay. Wired, USB, BLE and phone-only routing continue through the existing path.
+
+Validation: Android Kotlin compilation, mobile typecheck, 19 targeted TypeScript tests (audio ownership/cancellation, permissions, Companion lifecycle), and three native JVM suites passed. Native tests cover external-SCO-before-route ordering, direct hangup, immediate restart, teardown completion, late binding, timeout, unsupported hardware and refusal to disturb another active headset session. The new route still requires a physical headset test after allowing Nearby devices; simulated Bluetooth events do not establish firmware behavior or actual speaker-leak timing.

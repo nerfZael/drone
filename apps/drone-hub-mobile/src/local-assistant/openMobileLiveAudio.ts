@@ -17,6 +17,10 @@ export async function prepareMobileLiveAudio() {
     platform: Platform.OS, platformVersion: Number(Platform.Version),
     requestPermission: requestNotificationPermissionsAsync,
   });
+  if (Platform.OS === 'android') {
+    const native = requireOptionalNativeModule<NativePcm>('DroneLiveVoice');
+    await native?.requestHeadsetPermission?.();
+  }
   // Android permission activities temporarily background the app. Wait for their
   // dismissal before opening audio, but never start recording in the background.
   if (AppState.currentState !== 'active') {
@@ -37,6 +41,10 @@ export async function prepareMobileLiveAudio() {
 }
 
 type NativePcm = {
+  requestHeadsetPermission?(): Promise<void>;
+  preparePcmRoute?(id: string): Promise<boolean>;
+  cancelPcmRoute?(id: string): Promise<void>;
+  releasePcmRoute?(id: string): Promise<void>;
   startPcm(id: string): Promise<void>;
   stopPcm(id: string): Promise<void>;
   playPcm(id: string, audio: string): Promise<void>;
@@ -52,6 +60,7 @@ export async function openMobileLiveAudio(callbacks: LivePcmCallbacks, onStopped
   const id = Crypto.randomUUID();
   const stopBackground = options.backgroundAlreadyStarted ? async () => {} : await startMobileLiveBackground(onStopped);
   let closed = false;
+  let headsetOwnsMode = false;
   const subscriptions: { remove(): void }[] = [];
   let startup: Promise<void> = Promise.resolve();
   let releasePromise: Promise<void> | undefined;
@@ -61,8 +70,9 @@ export async function openMobileLiveAudio(callbacks: LivePcmCallbacks, onStopped
     callbacks.signal?.removeEventListener('abort', abort);
     subscriptions.forEach((subscription) => subscription.remove());
     releasePromise = (async () => {
-      // Native setup cannot be cancelled mid-call. Wait for it before undoing
-      // its effects, so a late completion cannot re-enable audio after cleanup.
+      // Cancel a pending headset bind/connect, but stop an active microphone before releasing its route.
+      await native.cancelPcmRoute?.(id).catch(() => undefined);
+      // Native microphone setup cannot be cancelled mid-call; wait before undoing its effects.
       await startup.catch(() => undefined);
       try {
         await native.stopPcm(id);
@@ -70,8 +80,12 @@ export async function openMobileLiveAudio(callbacks: LivePcmCallbacks, onStopped
         await options.onCaptureStopped?.();
       }
       finally {
-        try { await setAudioModeAsync({ allowsRecording: false, shouldPlayInBackground: false }); }
-        finally { await stopBackground(); }
+        try {
+          if (!headsetOwnsMode) await setAudioModeAsync({ allowsRecording: false, shouldPlayInBackground: false });
+        } finally {
+          try { await native.releasePcmRoute?.(id); }
+          finally { await stopBackground(); }
+        }
       }
     })();
     return releasePromise;
@@ -86,7 +100,9 @@ export async function openMobileLiveAudio(callbacks: LivePcmCallbacks, onStopped
     subscriptions.push(native.addListener('pcmError', (event) => {
       if (!closed && event.id === id) callbacks.onError(event.error ?? 'Live microphone failed.');
     }));
-    await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true, shouldPlayInBackground: options.backgroundAlreadyStarted || Platform.OS === 'android',
+    headsetOwnsMode = await native.preparePcmRoute?.(id) ?? false;
+    throwIfAborted(callbacks.signal);
+    if (!headsetOwnsMode) await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true, shouldPlayInBackground: options.backgroundAlreadyStarted || Platform.OS === 'android',
       shouldRouteThroughEarpiece: false, interruptionMode: 'doNotMix' });
     throwIfAborted(callbacks.signal);
     await native.startPcm(id);
