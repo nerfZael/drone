@@ -151,7 +151,8 @@ export class CompanionRuntime {
     return true;
   }
 
-  connectSubscriptions(runId: string, deliver: (input: SessionSubscriptionDelivery) => Promise<void>): void {
+  connectSubscriptions(runId: string, deliver: (input: SessionSubscriptionDelivery) => Promise<void>,
+    subscriptionsChanged?: (subscriptions: unknown[]) => void): void {
     const service = this.deps.resourceSubscriptions?.();
     if (!service) return;
     if (this.closing || this.subscriptionSessions.has(runId)) throw new Error('Companion session already exists or is closing');
@@ -159,6 +160,7 @@ export class CompanionRuntime {
       subscriber: { chatId: `companion:${runId}`, droneId: 'companion', chatName: runId },
       readDroneIds: async () => this.deps.buildDroneSummaries(await loadDroneSummaryRegistry()).map((drone) => drone.id),
       deliver,
+      subscriptionsChanged,
     });
     this.subscriptionSessions.set(runId, release);
   }

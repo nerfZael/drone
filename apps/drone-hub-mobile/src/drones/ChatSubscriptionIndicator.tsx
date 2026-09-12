@@ -16,31 +16,34 @@ import {
 
 export function ChatSubscriptionIndicator({
   subscriptions,
+  companion = false,
 }: {
   subscriptions: MobileChatSubscription[];
+  companion?: boolean;
 }) {
   const [open, setOpen] = React.useState(false);
   const insets = useSafeAreaInsets();
 
   React.useEffect(() => {
-    if (subscriptions.length === 0) setOpen(false);
-  }, [subscriptions.length]);
+    if (!companion && subscriptions.length === 0) setOpen(false);
+  }, [companion, subscriptions.length]);
 
-  if (subscriptions.length === 0) return null;
+  if (!companion && subscriptions.length === 0) return null;
+  const title = companion ? 'Companion subscriptions' : 'Chat subscriptions';
   const summary = mobileChatSubscriptionSummary(subscriptions);
 
   return (
     <>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${summary}. Show chat subscriptions.`}
+        accessibilityLabel={`${summary}. Show ${title.toLowerCase()}.`}
         accessibilityState={{ expanded: open }}
         onPress={() => setOpen(true)}
         style={({ pressed }) => [styles.trigger, pressed && styles.pressed]}
       >
         <Bell color={colors.accent} size={15} strokeWidth={2} />
         <Text numberOfLines={1} style={styles.triggerText}>
-          {summary}
+          {companion ? subscriptions.length : summary}
         </Text>
       </Pressable>
       <Modal
@@ -54,7 +57,7 @@ export function ChatSubscriptionIndicator({
         <View style={[styles.layer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Close chat subscriptions"
+            accessibilityLabel={`Close ${title.toLowerCase()}`}
             onPress={() => setOpen(false)}
             style={StyleSheet.absoluteFill}
           />
@@ -62,7 +65,7 @@ export function ChatSubscriptionIndicator({
             <View style={styles.header}>
               <View style={styles.headerCopy}>
                 <Text accessibilityRole="header" style={styles.title}>
-                  Chat subscriptions
+                  {title}
                 </Text>
                 <Text style={styles.subtitle}>
                   Watching {subscriptions.length} resource{subscriptions.length === 1 ? '' : 's'}
@@ -70,7 +73,7 @@ export function ChatSubscriptionIndicator({
               </View>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Close chat subscriptions"
+                accessibilityLabel={`Close ${title.toLowerCase()}`}
                 hitSlop={8}
                 onPress={() => setOpen(false)}
                 style={({ pressed }) => [styles.close, pressed && styles.pressed]}
@@ -79,6 +82,9 @@ export function ChatSubscriptionIndicator({
               </Pressable>
             </View>
             <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
+              {companion && subscriptions.length === 0 ? (
+                <Text style={styles.intent}>Companion has no active subscriptions.</Text>
+              ) : null}
               {subscriptions.map((subscription) => {
                 const nextRun = mobileChatSubscriptionNextRunLabel(subscription);
                 const displayIntent = mobileChatSubscriptionDisplayIntent(

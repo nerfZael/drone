@@ -38,6 +38,7 @@ import Zap from 'lucide-react-native/icons/zap';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors } from '../theme';
+import { ChatSubscriptionIndicator } from '../drones/ChatSubscriptionIndicator';
 import { NativeMarkdown } from './NativeMarkdown';
 import { formatMobileVoiceDuration } from './mobile-voice-transcription-model';
 import { MobileCompanionMenu, type MobileCompanionMenuItem, type MobileCompanionMenuTone } from './MobileCompanionMenu';
@@ -487,6 +488,7 @@ export function MobileCompanionOverlay() {
                   </Text>
                 )}
               </View>
+              <ChatSubscriptionIndicator companion subscriptions={companion.subscriptions ?? []} />
               {liveActive ? (
                 <HeaderButton
                   label={live.muted ? 'Unmute microphone' : 'Mute microphone'}

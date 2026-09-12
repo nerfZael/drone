@@ -322,7 +322,7 @@ export function CompanionOverlay() {
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
         <div className="flex items-center gap-1.5">
-          <CompanionSubscriptions sessionId={companion.sessionId} />
+          <CompanionSubscriptions subscriptions={companion.subscriptions ?? []} />
           <CompanionHeaderButton
             label={`Auto-approve proposals ${companion.autoApprove ? 'on' : 'off'}; double-tap Caps Lock to toggle`}
             tone={companion.autoApprove ? 'success' : 'neutral'}

@@ -446,6 +446,7 @@ describe('Companion contracts', () => {
       endedAt: null,
       activity: [],
       compaction: null,
+      subscriptions: [],
     });
     expect(connection.cancelled).toEqual(['run-2']);
   });
@@ -756,4 +757,27 @@ test('queued subscription starts fresh activity while a newer user request owns 
     connection.message({ type: 'status', status: 'completed', messageId: 'event' });
     expect(controller.getSnapshot()).toMatchObject({ status: 'working', reply: '', transcript: 'newer' });
   } finally { await controller.close(); }
+});
+
+test('subscription snapshots update independently of turns and clear on disconnect', async () => {
+  const connection = clientTransport();
+  const controller = new CompanionClientController({ createId: () => 'session' });
+  await controller.submitPrompt({ prompt: 'watch', messageId: 'user',
+    createTransport: () => connection.transport, executeTool: () => ({}) });
+  const row = { id: 'watch', provider: 'github', resourceType: 'pull_request',
+    resourceId: 'acme/repo#1', status: 'active', events: ['pull_request.merged'] };
+  connection.message({ type: 'subscriptions', subscriptions: [row], runId: 'another-session' });
+  expect(controller.getSnapshot().subscriptions).toEqual([]);
+  connection.message({ type: 'status', messageId: 'user', status: 'completed' });
+  connection.message({ type: 'subscriptions', subscriptions: [row] });
+  expect(controller.getSnapshot().subscriptions.map((item) => item.id)).toEqual(['watch']);
+  expect(controller.getSnapshot().status).toBe('completed');
+  connection.message({ type: 'subscriptions', subscriptions: [] });
+  expect(controller.getSnapshot().subscriptions).toEqual([]);
+  connection.message({ type: 'subscriptions', subscriptions: [row] });
+  connection.disconnect('offline');
+  expect(controller.getSnapshot().subscriptions).toEqual([]);
+  connection.message({ type: 'subscriptions', subscriptions: [row] });
+  expect(controller.getSnapshot().subscriptions).toEqual([]);
+  await controller.close();
 });

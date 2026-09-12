@@ -60,6 +60,7 @@ type CompanionContextValue = {
   startedAt: number | null;
   endedAt: number | null;
   activity: CompanionToolActivity[];
+  subscriptions: import('@drone/assistant-chat').PresentedChatResourceSubscription[];
   compaction: CompanionCompactionActivity | null;
   proposal: CompanionProposal | null;
   proposalExecution: CompanionProposalExecution | null;

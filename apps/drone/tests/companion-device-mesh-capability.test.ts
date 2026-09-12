@@ -307,7 +307,10 @@ test.each(['disconnectDevice', 'accessChanged', 'revokeDevice'] as const)(
   const deleted: string[] = [];
   let deliver!: (input: any) => Promise<void>;
   const capability = createCompanionCapability({
-    connectSubscriptions: (_id: string, callback: typeof deliver) => { deliver = callback; },
+    connectSubscriptions: (_id: string, callback: typeof deliver, changed: (rows: unknown[]) => void) => {
+      deliver = callback;
+      changed([{ id: 'watch', status: 'active' }]);
+    },
     run: async (input: any) => `Reply to ${input.prompt}`,
     steer: () => false,
     deleteSession: async (id: string) => { deleted.push(id); },
@@ -317,6 +320,7 @@ test.each(['disconnectDevice', 'accessChanged', 'revokeDevice'] as const)(
     await waitFor(() => events.some((event) => event.status === 'completed'));
     await deliver({ prompt: 'event', messageId: 'event', deliveryMode: 'queue' });
     await waitFor(() => events.some((event) => event.messageId === 'event' && event.status === 'completed'));
+    expect(events.find((event) => event.type === 'subscriptions')).toMatchObject({ runId: 'mobile', subscriptions: [{ id: 'watch', status: 'active' }] });
     expect(events.find((event) => event.type === 'subscription')).toMatchObject({ runId: 'mobile', messageId: 'event' });
     expect(events.find((event) => event.reply === 'Reply to event')).toMatchObject({ runId: 'mobile', messageId: 'event' });
     await capability[lifecycle]?.('phone-1');

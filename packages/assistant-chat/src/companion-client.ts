@@ -1,3 +1,4 @@
+import { normalizePresentedChatResourceSubscriptions, type PresentedChatResourceSubscription } from './resource-subscription-presentation.js';
 import { reduceCompanionCompaction, type CompanionCompactionActivity } from './companion-compaction.js';
 import type { CompanionProposalApplyResult } from './companion-proposal.js';
 import {
@@ -18,6 +19,7 @@ export type CompanionClientState = {
   startedAt: number | null;
   endedAt: number | null;
   activity: CompanionToolActivity[];
+  subscriptions: PresentedChatResourceSubscription[];
   compaction: CompanionCompactionActivity | null;
 };
 
@@ -93,6 +95,7 @@ type ActiveSession = {
 };
 
 const INITIAL_STATE: CompanionClientState = {
+  subscriptions: [],
   status: 'idle',
   error: '',
   reply: '',
@@ -256,6 +259,7 @@ export class CompanionClientController {
     this.generation += 1;
     const session = this.activeSession;
     this.activeSession = null;
+    this.update({ subscriptions: [] });
     if (session) {
       session.messageExecutors.clear();
       session.latestExecutor = undefined;
@@ -273,6 +277,7 @@ export class CompanionClientController {
     this.generation += 1;
     const session = this.activeSession;
     this.activeSession = null;
+    this.update({ subscriptions: [] });
     if (session) {
       session.messageExecutors.clear();
       session.latestExecutor = undefined;
@@ -313,6 +318,10 @@ export class CompanionClientController {
 
   private handleMessage(session: ActiveSession, message: CompanionServerMessage): void {
     if (!this.isActive(session) || (message.runId && message.runId !== session.runId)) return;
+    if (message.type === 'subscriptions') {
+      this.update({ subscriptions: normalizePresentedChatResourceSubscriptions(message.subscriptions) });
+      return;
+    }
     if (message.type === 'subscription') {
       if (!message.messageId || !session.latestExecutor) return;
       const hasPendingUserMessage = session.latestMessageId !== null &&
@@ -409,6 +418,7 @@ export class CompanionClientController {
   private handleDisconnect(session: ActiveSession, message: string): void {
     if (!this.isActive(session)) return;
     this.activeSession = null;
+    this.update({ subscriptions: [] });
     session.messageExecutors.clear();
     session.latestExecutor = undefined;
     void closeTransport(session.transport);
@@ -432,6 +442,7 @@ export class CompanionClientController {
   ): void {
     if (!this.isActive(session)) return;
     this.activeSession = null;
+    this.update({ subscriptions: [] });
     session.messageExecutors.clear();
     session.latestExecutor = undefined;
     this.update({ status, error, endedAt: this.now() });

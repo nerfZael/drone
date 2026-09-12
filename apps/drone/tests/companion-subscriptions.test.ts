@@ -117,10 +117,11 @@ function harness(emit?: (event: any) => void | Promise<void>) {
   const runs: any[] = [], messages: any[] = [], finish: Array<(reply: string) => void> = [];
   const steered: unknown[] = [], deleted: string[] = [];
   let deliver!: (input: SessionSubscriptionDelivery) => Promise<void>;
+  let subscriptionsChanged!: (subscriptions: unknown[]) => void;
   const session = new CompanionRunSession({
     clientRunId: 'run', runtimeRunId: 'run', transport: 'websocket',
     runtime: {
-      connectSubscriptions: (_id, callback) => { deliver = callback; },
+      connectSubscriptions: (_id, callback, changed) => { deliver = callback; subscriptionsChanged = changed!; },
       run: async (input) => { runs.push(input); return new Promise<string>((resolve) => finish.push(resolve)); },
       steer: (_id, prompt, mode) => { steered.push({ prompt, mode }); return true; },
       deleteSession: async (id) => { deleted.push(id); },
@@ -128,7 +129,26 @@ function harness(emit?: (event: any) => void | Promise<void>) {
     emit: (event) => { messages.push(event); return emit?.(event); },
     isAvailable: () => true, unavailableMessage: 'closed', onClose: () => {},
   });
-  return { session, runs, messages, finish, steered, deleted, deliver: (input: SessionSubscriptionDelivery) => deliver(input) };
+  return { session, runs, messages, finish, steered, deleted, subscriptionsChanged: (rows: unknown[]) => subscriptionsChanged(rows), deliver: (input: SessionSubscriptionDelivery) => deliver(input) };
 }
 
 function tick() { return new Promise((resolve) => setTimeout(resolve, 0)); }
+
+test('session pushes changed subscription snapshots and suppresses duplicates and closed-session updates', async () => {
+  const h = harness();
+  const row = { id: 'watch', status: 'active' };
+  h.subscriptionsChanged([]);
+  h.subscriptionsChanged([row]);
+  h.subscriptionsChanged([row]);
+  h.subscriptionsChanged([]);
+  await tick();
+  expect(h.messages).toEqual([
+    { type: 'subscriptions', subscriptions: [] },
+    { type: 'subscriptions', subscriptions: [row] },
+    { type: 'subscriptions', subscriptions: [] },
+  ]);
+  await h.session.close('closed');
+  h.subscriptionsChanged([row]);
+  await tick();
+  expect(h.messages).toHaveLength(3);
+});

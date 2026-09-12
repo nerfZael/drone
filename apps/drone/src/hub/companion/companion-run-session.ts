@@ -37,7 +37,9 @@ type BufferedCompanionProposalResult = {
 
 type BufferedCompanionWork = BufferedCompanionPrompt | BufferedCompanionProposalResult;
 
-type CompanionRunSessionEvent = CompanionRunEvent & { messageId: string };
+type CompanionRunSessionEvent =
+  | (Exclude<CompanionRunEvent, { type: 'subscriptions' }> & { messageId: string })
+  | Extract<CompanionRunEvent, { type: 'subscriptions' }>;
 
 type CompanionRunSessionOptions = {
   clientRunId: string;
@@ -76,7 +78,16 @@ export class CompanionRunSession {
           ...call,
         }),
     });
-    options.runtime.connectSubscriptions?.(options.runtimeRunId, (input) => this.deliverSubscription(input));
+    let lastSubscriptions = '';
+    options.runtime.connectSubscriptions?.(options.runtimeRunId, (input) => this.deliverSubscription(input),
+      (subscriptions) => {
+        const snapshot = JSON.stringify(subscriptions);
+        if (snapshot === lastSubscriptions) return;
+        lastSubscriptions = snapshot;
+        void Promise.resolve().then(() => {
+          if (!this.closed && options.isAvailable()) return options.emit({ type: 'subscriptions', subscriptions });
+        }).catch(() => undefined);
+      });
   }
 
   private async deliverSubscription(input: SessionSubscriptionDelivery): Promise<void> {

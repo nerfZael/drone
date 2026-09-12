@@ -2,46 +2,28 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { expect, test } from 'bun:test';
-import { useCompanionSubscriptions } from '../src/droneHub/companion/CompanionSubscriptions';
+import { normalizePresentedChatResourceSubscriptions } from '@drone/assistant-chat';
+import { CompanionSubscriptions } from '../src/droneHub/companion/CompanionSubscriptions';
 
-test('loads only the current session subscriptions, refreshes on open, and clears on close', async () => {
+test('the indicator updates from pushed subscription snapshots without fetching', async () => {
   const dom = new Window({ url: 'http://localhost' });
   const originals = new Map<string, PropertyDescriptor | undefined>();
-  const urls: string[] = [];
-  let fail = false;
-  let rows = [{ id: 'watch', provider: 'github', resourceType: 'pull_request', resourceId: 'acme/repo#1', events: ['pull_request.merged'], status: 'active' }];
+  let fetches = 0;
   for (const [key, value] of Object.entries({ window: dom, document: dom.document, IS_REACT_ACT_ENVIRONMENT: true,
-    fetch: async (url: string) => {
-      urls.push(url);
-      if (fail) throw new Error('Offline');
-      return new Response(JSON.stringify({ subscriptions: rows }), { headers: { 'content-type': 'application/json' } });
-    } })) {
+    fetch: async () => { fetches++; throw new Error('Unexpected polling'); } })) {
     originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
     Object.defineProperty(globalThis, key, { configurable: true, value });
   }
-  const root = createRoot(dom.document.createElement('div') as unknown as HTMLElement);
-  let state!: ReturnType<typeof useCompanionSubscriptions>;
-  function Harness({ id, open = false }: { id: string | null; open?: boolean }) {
-    state = useCompanionSubscriptions(id, open); return null;
-  }
+  const container = dom.document.createElement('div');
+  const root = createRoot(container as unknown as HTMLElement);
+  const rows = normalizePresentedChatResourceSubscriptions([{ id: 'watch', provider: 'github',
+    resourceType: 'pull_request', resourceId: 'acme/repo#1', events: ['pull_request.merged'], status: 'active' }]);
   try {
-    await act(async () => { root.render(<Harness id="session-a" />); });
-    expect(urls.at(-1)).toContain('subscriberChatId=companion%3Asession-a');
-    expect(state.subscriptions).toHaveLength(1);
-    rows = [];
-    await act(async () => { root.render(<Harness id="session-a" open />); });
-    expect(state.subscriptions).toHaveLength(0);
-    fail = true;
-    await act(async () => { root.render(<Harness id="session-b" open />); });
-    expect(urls.at(-1)).toContain('companion%3Asession-b');
-    expect(state.error).toContain('Offline');
-    expect(state.subscriptions).toHaveLength(0);
-    fail = false;
-    await act(async () => { state.reload(); });
-    expect(state.error).toBe('');
-    await act(async () => { root.render(<Harness id={null} />); });
-    expect(state.subscriptions).toHaveLength(0);
-    expect(state.loading).toBe(false);
+    for (const subscriptions of [[], rows, []]) {
+      await act(async () => { root.render(<CompanionSubscriptions subscriptions={subscriptions} />); });
+      expect(container.querySelector('button')?.getAttribute('aria-label')).toBe(`Companion subscriptions: ${subscriptions.length}`);
+    }
+    expect(fetches).toBe(0);
   } finally {
     await act(async () => { root.unmount(); });
     for (const [key, descriptor] of originals) {

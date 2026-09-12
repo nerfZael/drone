@@ -66,6 +66,7 @@ type SessionSubscriber = {
   subscriber: ResourceSubscriptionSubscriber;
   readDroneIds(): Promise<string[]>;
   deliver(input: SessionSubscriptionDelivery): Promise<void>;
+  subscriptionsChanged?(subscriptions: ResourceSubscription[]): void;
 };
 
 export type ChatSubscriptionStatus = {
@@ -133,6 +134,7 @@ export class ResourceSubscriptionService {
     const id = session.subscriber.chatId;
     if (this.sessionSubscribers.has(id)) throw new Error('Subscription session already exists');
     this.sessionSubscribers.set(id, session);
+    this.notifySessionSubscriptions(id);
     return async () => {
       if (this.sessionSubscribers.get(id) !== session) return;
       this.sessionSubscribers.delete(id);
@@ -140,6 +142,16 @@ export class ResourceSubscriptionService {
         if (subscription.status !== 'cancelled') await this.cancel(subscription.id, id);
       }
     };
+  }
+
+  private notifySessionSubscriptions(chatId: string): void {
+    const session = this.sessionSubscribers.get(chatId);
+    if (!session?.subscriptionsChanged) return;
+    try {
+      session.subscriptionsChanged(this.list(chatId));
+    } catch {
+      // UI delivery must not turn a committed subscription change into a tool failure.
+    }
   }
 
   private resolveSubscriber(chatId: string): ChatResourceLocation | null {
@@ -420,6 +432,7 @@ export class ResourceSubscriptionService {
         : {}),
       maxActive: settings.maxActiveSubscriptionsPerConversation,
     });
+    this.notifySessionSubscriptions(subscriber.chatId);
     return { ...result, subscription: this.withResourceLabel(result.subscription) };
   }
 
@@ -596,6 +609,7 @@ export class ResourceSubscriptionService {
       },
       description,
     );
+    this.notifySessionSubscriptions(subscriber.chatId);
     return { ...result, name, subscription: this.withResourceLabel(result.subscription) };
   }
 
@@ -670,7 +684,7 @@ export class ResourceSubscriptionService {
           item.resourceId === schedule.resourceId,
       );
     const settings = await this.settings();
-    return await this.deps.repository.upsert({
+    const result = await this.deps.repository.upsert({
       subscriber,
       provider: 'drone-hub',
       resourceType: 'cron',
@@ -685,6 +699,8 @@ export class ResourceSubscriptionService {
           : schedule.nextEventAt,
       maxActive: settings.maxActiveSubscriptionsPerConversation,
     });
+    this.notifySessionSubscriptions(subscriber.chatId);
+    return result;
   }
 
   async update(input: {
@@ -706,11 +722,13 @@ export class ResourceSubscriptionService {
         ? { intent: String(input.intent).trim().slice(0, 2_000) }
         : {}),
     });
+    if (subscription) this.notifySessionSubscriptions(subscription.subscriber.chatId);
     return subscription ? this.withResourceLabel(subscription) : null;
   }
 
   async cancel(id: string, subscriberChatId: string): Promise<ResourceSubscription | null> {
     const subscription = await this.deps.repository.cancel(id, subscriberChatId);
+    if (subscription) this.notifySessionSubscriptions(subscription.subscriber.chatId);
     return subscription ? this.withResourceLabel(subscription) : null;
   }
 
@@ -741,6 +759,7 @@ export class ResourceSubscriptionService {
     const tick = Promise.resolve()
       .then(() => this.tickLocal())
       .finally(() => {
+        for (const id of this.sessionSubscribers.keys()) this.notifySessionSubscriptions(id);
         if (this.localTickInFlight === tick) this.localTickInFlight = null;
       });
     this.localTickInFlight = tick;
