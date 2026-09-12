@@ -2704,24 +2704,6 @@ code, pre {
   background: var(--surface-faint);
 }
 
-/* Keep prose on one centered reading axis. Code, tables, and diagrams retain
-   the full transcript width through the explicit wide-block class. */
-.dh-markdown--transcript > :not(.dh-markdown-block--wide) {
-  box-sizing: border-box;
-  width: 100%;
-  max-width: min(100%, var(--chat-prose-max));
-  margin-right: auto;
-  margin-left: auto;
-}
-.dh-markdown--transcript > ul:not(.contains-task-list),
-.dh-markdown--transcript > ol:not(.contains-task-list) {
-  padding-left: 1.35rem;
-}
-.dh-markdown--transcript > ul.contains-task-list,
-.dh-markdown--transcript > ol.contains-task-list {
-  padding-left: 0;
-}
-
 /* ──────────────────────────────────────────────────────────
    Assistant approvals
 
