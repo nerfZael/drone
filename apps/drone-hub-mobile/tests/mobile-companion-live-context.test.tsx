@@ -7,6 +7,7 @@ import { COMPANION_CAPABILITY, COMPANION_RUN_OPERATIONS } from '@drone/device-pr
 import { MobileMicrophoneCoordinator } from '../src/local-assistant/mobile-microphone-coordinator';
 
 let enabled = false;
+let livePrompt = 'Speak calmly.';
 let autoApprove = false;
 let rejectSettings = false;
 let recorded = 0;
@@ -36,6 +37,11 @@ const mesh = {
       if (operation === 'live.settings.update') enabled = payload.enabled;
       return { enabled };
     }
+    if (operation.startsWith('live.prompt')) {
+      if (rejectSettings) throw new Error('Hub unavailable');
+      if (operation === 'live.prompt.update') livePrompt = payload.systemPrompt;
+      return { enabled, systemPrompt: livePrompt, defaultSystemPrompt: 'Speak calmly.', maxSystemPromptChars: 8000 };
+    }
     return {};
   },
   subscribe: (_capability: string, _event: string, listener: (event: any) => void) => {
@@ -54,7 +60,7 @@ const { MobileCompanionProvider, useMobileCompanion } = await import('../src/loc
 const { useMobileCompanionLiveSettings } = await import('../src/local-assistant/use-mobile-companion-live-settings');
 
 async function harness(settingsOnly = false, executeProposal = async () => ({ ok: true, operations: [] }), savedAutoApprove = false) {
-  autoApprove = savedAutoApprove; enabled = false; rejectSettings = false; recorded = 0; backend = null; live.status = 'idle'; calls.length = 0;
+  autoApprove = savedAutoApprove; enabled = false; livePrompt = 'Speak calmly.'; rejectSettings = false; recorded = 0; backend = null; live.status = 'idle'; calls.length = 0;
   const originalAct = Object.getOwnPropertyDescriptor(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
   Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
   let root!: ReactTestRenderer;
@@ -195,8 +201,11 @@ test('mobile Live setting persists through Hub requests and failed writes keep t
   const h = await harness(true);
   try {
     expect(h.settings().enabled).toBe(false);
+    expect(h.settings().systemPrompt).toBe('Speak calmly.');
     await act(async () => { await h.settings().save(true); });
     expect(enabled).toBe(true); expect(h.settings().enabled).toBe(true);
+    await act(async () => { expect(await h.settings().saveSystemPrompt('Speak warmly.')).toBe(true); });
+    expect(livePrompt).toBe('Speak warmly.'); expect(h.settings().systemPrompt).toBe('Speak warmly.');
     rejectSettings = true;
     await act(async () => { await h.settings().save(false); });
     expect(h.settings().error).toBe('Hub unavailable'); expect(h.settings().enabled).toBe(true);

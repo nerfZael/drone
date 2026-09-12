@@ -15,6 +15,12 @@ type LiveState = {
   backendModel: string;
   workspaceLabel: string;
 };
+type LiveSettings = {
+  enabled: boolean;
+  systemPrompt: string;
+  defaultSystemPrompt: string;
+  maxSystemPromptChars: number;
+};
 
 export function useCompanionLive() {
   const [enabled, setEnabled] = React.useState(false);
@@ -22,6 +28,9 @@ export function useCompanionLive() {
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
   const [settingsError, setSettingsError] = React.useState('');
+  const [systemPrompt, setSystemPrompt] = React.useState('');
+  const [defaultSystemPrompt, setDefaultSystemPrompt] = React.useState('');
+  const [maxSystemPromptChars, setMaxSystemPromptChars] = React.useState(0);
   const [state, setState] = React.useState<LiveState>(EMPTY_STATE);
   const active = React.useRef<LiveSession | null>(null);
   const mounted = React.useRef(true);
@@ -51,6 +60,9 @@ export function useCompanionLive() {
       if (!mounted.current || writing.current || generation !== settingsGeneration.current) return;
       enabledRef.current = result.enabled;
       setEnabled(result.enabled);
+      setSystemPrompt(result.systemPrompt);
+      setDefaultSystemPrompt(result.defaultSystemPrompt);
+      setMaxSystemPromptChars(result.maxSystemPromptChars);
       setResolved(true);
       setSettingsError('');
       if (!result.enabled) stop();
@@ -81,10 +93,13 @@ export function useCompanionLive() {
     setSaving(true);
     setSettingsError('');
     try {
-      const result = await settingsRequest(!enabledRef.current);
+      const result = await settingsRequest({ enabled: !enabledRef.current });
       if (!mounted.current) return;
       enabledRef.current = result.enabled;
       setEnabled(result.enabled);
+      setSystemPrompt(result.systemPrompt);
+      setDefaultSystemPrompt(result.defaultSystemPrompt);
+      setMaxSystemPromptChars(result.maxSystemPromptChars);
       setResolved(true);
       if (!result.enabled) stop();
     } catch (error) {
@@ -94,6 +109,32 @@ export function useCompanionLive() {
       if (mounted.current) setSaving(false);
     }
   }, [loading, stop]);
+
+  const saveSystemPrompt = React.useCallback(async (nextSystemPrompt: string) => {
+    if (writing.current) return false;
+    writing.current = true;
+    const generation = ++settingsGeneration.current;
+    setSaving(true);
+    setSettingsError('');
+    try {
+      const result = await settingsRequest({ systemPrompt: nextSystemPrompt });
+      if (!mounted.current || generation !== settingsGeneration.current) return false;
+      enabledRef.current = result.enabled;
+      setEnabled(result.enabled);
+      setSystemPrompt(result.systemPrompt);
+      setDefaultSystemPrompt(result.defaultSystemPrompt);
+      setMaxSystemPromptChars(result.maxSystemPromptChars);
+      return true;
+    } catch (error) {
+      if (mounted.current && generation === settingsGeneration.current) {
+        setSettingsError(error instanceof Error ? error.message : 'Could not save Live voice system prompt.');
+      }
+      return false;
+    } finally {
+      writing.current = false;
+      if (mounted.current && generation === settingsGeneration.current) setSaving(false);
+    }
+  }, []);
 
   const start = React.useCallback(async (runBackend: (prompt: string, signal: AbortSignal) => Promise<string>, workspaceLabel: string) => {
     if (active.current || !enabledRef.current) return;
@@ -141,19 +182,38 @@ export function useCompanionLive() {
     stop();
   }, [stop]);
 
-  return { ...state, enabled, resolved, loading, saving, settingsError, toggleEnabled, load, start, stop, reset, toggleMute, play, cancelPending };
+  return {
+    ...state,
+    enabled,
+    resolved,
+    loading,
+    saving,
+    settingsError,
+    systemPrompt,
+    defaultSystemPrompt,
+    maxSystemPromptChars,
+    toggleEnabled,
+    saveSystemPrompt,
+    load,
+    start,
+    stop,
+    reset,
+    toggleMute,
+    play,
+    cancelPending,
+  };
 }
 
 const EMPTY_STATE: LiveState = {
   status: 'idle', error: '', captions: '', queued: 0, muted: false, playbackBlocked: false, backendModel: '', workspaceLabel: '',
 };
 
-async function settingsRequest(enabled?: boolean): Promise<{ enabled: boolean }> {
+async function settingsRequest(update?: Partial<Pick<LiveSettings, 'enabled' | 'systemPrompt'>>): Promise<LiveSettings> {
   const url = '/api/settings/companion/live-voice';
   const init: RequestInit = {
     signal: AbortSignal.timeout(10_000),
-    ...(enabled === undefined ? {} : {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }),
+    ...(update === undefined ? {} : {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(update),
     }),
   };
   const diagnostic = observeRequest(url, init);
@@ -162,9 +222,12 @@ async function settingsRequest(enabled?: boolean): Promise<{ enabled: boolean }>
   try {
     const response = await fetch(url, { ...init, headers });
     diagnostic?.response(response);
-    if (!response.ok) throw new Error(`Could not ${enabled === undefined ? 'load' : 'save'} Live voice setting (${response.status}).`);
+    if (!response.ok) throw new Error(`Could not ${update === undefined ? 'load' : 'save'} Live voice setting (${response.status}).`);
     const value = await response.json();
-    if (!value || typeof value.enabled !== 'boolean') throw new Error('Invalid Live voice setting response.');
+    if (!value || typeof value.enabled !== 'boolean' || typeof value.systemPrompt !== 'string' ||
+      typeof value.defaultSystemPrompt !== 'string' || typeof value.maxSystemPromptChars !== 'number') {
+      throw new Error('Invalid Live voice setting response.');
+    }
     diagnostic?.finish();
     return value;
   } catch (error) { diagnostic?.fail(error); throw error; }

@@ -17,7 +17,14 @@ export function CompanionSettingsTab({ settings }: {
 }) {
   const companion = useCompanion();
   const live = companion?.live;
+  const [livePromptDraft, setLivePromptDraft] = React.useState('');
+  const [livePromptSaved, setLivePromptSaved] = React.useState(false);
   const { data, draft, setDraft, loading, saving, error, saved, dirty, save } = settings;
+  React.useEffect(() => {
+    if (!live || live.saving) return;
+    setLivePromptDraft(live.systemPrompt);
+    setLivePromptSaved(false);
+  }, [live?.systemPrompt]);
   if (loading && !data) return <div className="py-8 text-sm text-[var(--muted)]">Loading Companion settings…</div>;
   if (!data || !draft) return <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] p-3 text-sm text-[var(--red)]">{error || 'Companion settings are unavailable.'}</div>;
 
@@ -68,6 +75,39 @@ export function CompanionSettingsTab({ settings }: {
         {live.settingsError ? <p role="alert" className="mt-2 text-xs text-[var(--red)]">
           {live.settingsError} <button type="button" className="underline" onClick={() => void live.load()}>Retry</button>
         </p> : null}
+        <div className="mt-4 border-t border-[var(--border-subtle)] pt-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h4 className="text-xs font-semibold text-[var(--fg)]">GPT-Live system prompt</h4>
+              <p className="mt-1 text-xs text-[var(--muted)]">
+                Controls the voice assistant’s personality, speaking style, tone, and conversational behavior. It is separate from the delegated Companion backend system prompt below. Drone Hub always appends required delegation, result-verification, and cancellation rules.
+              </p>
+            </div>
+            <button type="button" disabled={live.saving || livePromptDraft === live.defaultSystemPrompt}
+              onClick={() => { setLivePromptDraft(live.defaultSystemPrompt); setLivePromptSaved(false); }}
+              className="shrink-0 rounded border border-[var(--border-subtle)] px-2.5 py-1.5 text-xs text-[var(--muted)] hover:bg-[var(--hover)] disabled:opacity-40">
+              Restore default
+            </button>
+          </div>
+          <textarea aria-label="GPT-Live Companion system prompt" value={livePromptDraft}
+            disabled={live.saving} maxLength={live.maxSystemPromptChars}
+            onChange={(event) => { setLivePromptDraft(event.target.value); setLivePromptSaved(false); }}
+            className="mt-3 min-h-36 w-full resize-y rounded border border-[var(--border)] bg-[var(--panel)] p-3 font-mono text-xs text-[var(--fg-secondary)] outline-none focus:border-[var(--accent-muted)]" />
+          <div className="mt-1 flex items-center justify-between gap-3">
+            <span className="text-[10px] text-[var(--muted-dim)]">
+              {livePromptSaved && livePromptDraft === live.systemPrompt ? 'Saved. Applies when the next Live session starts.'
+                : livePromptDraft !== live.systemPrompt ? 'Unsaved changes · active sessions are unchanged.' : 'Applies to new Live sessions.'}
+            </span>
+            <span className="text-[10px] text-[var(--muted-dim)]">{livePromptDraft.length} / {live.maxSystemPromptChars}</span>
+          </div>
+          <div className="mt-2 flex justify-end">
+            <button type="button" disabled={live.saving || livePromptDraft === live.systemPrompt}
+              onClick={() => void live.saveSystemPrompt(livePromptDraft).then(setLivePromptSaved)}
+              className="rounded bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-[var(--accent-contrast)] disabled:opacity-40">
+              {live.saving ? 'Saving…' : 'Save Live prompt'}
+            </button>
+          </div>
+        </div>
       </section> : null}
       <section className="rounded border border-[var(--border)] bg-[var(--surface-inset-faint)] p-4">
         <h3 className="text-sm font-semibold text-[var(--fg)]">Provider and model</h3>
@@ -155,8 +195,8 @@ export function CompanionSettingsTab({ settings }: {
       <section className="rounded border border-[var(--border)] bg-[var(--surface-inset-faint)] p-4">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h3 className="text-sm font-semibold text-[var(--fg)]">System prompt</h3>
-            <p className="mt-1 text-xs text-[var(--muted)]">Customize Companion’s role. Tool access and safety checks remain enforced by Drone Hub.</p>
+            <h3 className="text-sm font-semibold text-[var(--fg)]">Delegated backend system prompt</h3>
+            <p className="mt-1 text-xs text-[var(--muted)]">Customizes the task agent used by both text and voice requests. It is not sent to GPT-Live. Tool access and safety checks remain enforced by Drone Hub.</p>
           </div>
           <button type="button" disabled={saving || draft.systemPrompt === data.defaultSystemPrompt} onClick={() => setDraft({ ...draft, systemPrompt: data.defaultSystemPrompt })} className="rounded border border-[var(--border-subtle)] px-2.5 py-1.5 text-xs text-[var(--muted)] hover:bg-[var(--hover)] disabled:opacity-40">Restore default</button>
         </div>

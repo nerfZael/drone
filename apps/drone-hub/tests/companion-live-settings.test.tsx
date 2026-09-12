@@ -12,6 +12,7 @@ test('the Live toggle loads persisted state, rolls back failed saves, and surviv
     Object.defineProperty(globalThis, key, { configurable: true, value });
   };
   let saved = false;
+  let prompt = 'Speak calmly.';
   let failSave = false;
   let failLoad = false;
   const writes: unknown[] = [];
@@ -25,10 +26,11 @@ test('the Live toggle loads persisted state, rolls back failed saves, and surviv
       if (failSave) return new Response('', { status: 500 });
       const body = JSON.parse(String(init.body));
       writes.push(body);
-      saved = body.enabled;
+      if (typeof body.enabled === 'boolean') saved = body.enabled;
+      if (typeof body.systemPrompt === 'string') prompt = body.systemPrompt;
     }
     if (failLoad && init?.method !== 'PUT') return new Response('', { status: 503 });
-    return Response.json({ ok: true, enabled: saved });
+    return Response.json({ ok: true, enabled: saved, systemPrompt: prompt, defaultSystemPrompt: 'Speak calmly.', maxSystemPromptChars: 8000 });
   });
   const element = dom.document.createElement('div');
   dom.document.body.append(element);
@@ -42,6 +44,9 @@ test('the Live toggle loads persisted state, rolls back failed saves, and surviv
     await act(async () => { await live.toggleEnabled(); });
     expect(live.enabled).toBe(true);
     expect(writes).toEqual([{ enabled: true }]);
+    await act(async () => { expect(await live.saveSystemPrompt('Speak brightly.')).toBe(true); });
+    expect(live.systemPrompt).toBe('Speak brightly.');
+    expect(writes.at(-1)).toEqual({ systemPrompt: 'Speak brightly.' });
     failSave = true;
     await act(async () => { await live.toggleEnabled(); });
     expect(live.enabled).toBe(true);
