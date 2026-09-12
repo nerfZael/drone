@@ -1,3 +1,4 @@
+import { MobileLiveClock } from '../src/local-assistant/mobile-live-clock';
 import React, { act } from 'react';
 import { createRequire } from 'node:module';
 import type { ReactTestRenderer } from 'react-test-renderer';
@@ -10,6 +11,7 @@ let prepareAudio: () => Promise<void> = async () => {};
 const connections: Array<{ options: any; closed: number; sent: Record<string, unknown>[] }> = [];
 let mediaAction: ((action: 'play' | 'pause' | 'stop' | 'end') => void) | undefined;
 let controlsReleased = 0;
+let controlSchedule: MobileLiveClock['schedule'] | undefined;
 const cues: string[] = [];
 const controlStates: string[] = [];
 const controlModes: boolean[] = [];
@@ -24,7 +26,7 @@ let stopFromNotification: (() => void) | undefined;
 mock.module('react-native', () => ({ Platform: platform, AppState: appState }));
 mock.module('../src/local-assistant/mobile-live-controls', () => ({ openMobileLiveControls: async (action: typeof mediaAction, standby = false) => {
   controlModes.push(standby);
-  mediaAction = action; return { update: async (state: string) => { controlStates.push(state); }, cue: async (kind: string) => { cues.push(kind); await cuePlayback(kind); }, release: async () => { controlsReleased++; } };
+  mediaAction = action; return { schedule: controlSchedule, update: async (state: string) => { controlStates.push(state); }, cue: async (kind: string) => { cues.push(kind); await cuePlayback(kind); }, release: async () => { controlsReleased++; } };
 } }));
 mock.module('expo-crypto', () => ({ randomUUID: () => 'voice-session' }));
 mock.module('../src/mesh/MeshContext', () => ({ useMesh: () => ({ request: async () => ({}), subscribe: () => () => {} }) }));
@@ -525,6 +527,35 @@ test('disabling while shortcut permission is pending never opens background cont
   } finally {
     permission.resolve(); prepareAudio = async () => {}; platform.OS = 'ios';
     await act(async () => { root?.unmount(); });
+    Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
+  }
+});
+
+
+test('Live uses the controls clock to dispatch a background backend task without JS timers', async () => {
+  Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
+  let now = 0; const clock = new MobileLiveClock(() => now, () => () => {});
+  controlSchedule = clock.schedule;
+  let root!: ReactTestRenderer; let live!: ReturnType<typeof useMobileCompanionLive>;
+  const coordinator = new MobileMicrophoneCoordinator(); const prompts: string[] = [];
+  function Capture() { live = useMobileCompanionLive(coordinator); return null; }
+  try {
+    await act(async () => { root = create(<Capture />); });
+    await act(async () => { await live.start('hub', 'Hub', async (prompt) => { prompts.push(prompt); return 'Done'; }); });
+    const current = connections.at(-1)!;
+    expect(current.options.schedule).toBe(clock.schedule);
+    await act(async () => {
+      appState.currentState = 'background';
+      current.options.onEvent({ type: 'session.input_transcript.delta', delta: 'Do the task.' });
+      current.options.onEvent({ type: 'session.delegation.created', delegation: { id: 'background', target: 'client' } });
+    });
+    expect(prompts).toHaveLength(0);
+    await act(async () => { now = 500; clock.tick(); });
+    expect(prompts).toHaveLength(1);
+    expect(current.sent).toEqual([{ type: 'session.commentary.append', delegation_id: 'background', content: 'Done' }]);
+  } finally {
+    appState.currentState = 'active'; controlSchedule = undefined;
+    await act(async () => { root?.unmount(); }); clock.close();
     Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
   }
 });

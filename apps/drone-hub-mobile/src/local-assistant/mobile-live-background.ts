@@ -12,7 +12,8 @@ const native = Platform.OS === 'android'
   ? requireOptionalNativeModule<NativeLiveVoice>('DroneLiveVoice') : null;
 
 if (Platform.OS === 'android') {
-  // An active headless task keeps React Native timers running for voice and mesh traffic.
+  // Keep the JS runtime owned by the service. Live deadlines use the native controls clock
+  // because RN timers still depend on display frames even with a headless task.
   AppRegistry.registerHeadlessTask('DroneLiveVoice', () => async ({ sessionId }: { sessionId: string }) => {
     if (!native) return;
     await new Promise<void>((resolve) => {

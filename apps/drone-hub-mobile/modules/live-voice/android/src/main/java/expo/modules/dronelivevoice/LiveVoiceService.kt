@@ -68,7 +68,8 @@ class LiveVoiceService : Service() {
           setReferenceCounted(false)
           acquire()
         }
-      // React Native otherwise pauses JS timers on screen lock, including Hub heartbeats.
+      // Keep the runtime active while locked. LiveMediaControls supplies a Handler clock
+      // for deadlines because React Native timers still depend on display frames.
       tasks = HeadlessJsTaskContext.getInstance(context)
       taskId = tasks!!.startTask(HeadlessJsTaskConfig("DroneLiveVoice", Arguments.createMap().apply {
         putString("sessionId", sessionId)

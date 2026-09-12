@@ -1,4 +1,5 @@
 import { LIVE_AUDIO_TRANSPORT, LIVE_AUDIO_AUTH_SUITE } from '@drone/device-protocol';
+import { MobileLiveClock } from '../src/local-assistant/mobile-live-clock';
 import { expect, test } from 'bun:test';
 import type { LivePcmAudio, LivePcmCallbacks } from '@drone/assistant-chat';
 import { MobileCompanionLiveConnection } from '../src/local-assistant/MobileCompanionLiveConnection';
@@ -6,7 +7,7 @@ import { MobileMicrophoneCoordinator } from '../src/local-assistant/mobile-micro
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 const offer = { suite: LIVE_AUDIO_AUTH_SUITE, publicKey: 'test-key' };
 
-function harness(options: { delayedAudio?: boolean; delayedStream?: boolean; legacyHub?: boolean; rejectStart?: boolean; blockEvents?: boolean; rejectAnswer?: boolean; delayedStart?: boolean; rejectClose?: boolean; silentAudio?: boolean } = {}) {
+function harness(options: { schedule?: MobileLiveClock['schedule']; delayedAudio?: boolean; delayedStream?: boolean; legacyHub?: boolean; rejectStart?: boolean; blockEvents?: boolean; rejectAnswer?: boolean; delayedStart?: boolean; rejectClose?: boolean; silentAudio?: boolean } = {}) {
   const coordinator = new MobileMicrophoneCoordinator();
   const requests: Array<{ operation: string; payload: any }> = [];
   const received: any[] = []; const errors: string[] = []; const ready: string[] = []; const played: string[] = [];
@@ -25,7 +26,7 @@ function harness(options: { delayedAudio?: boolean; delayedStream?: boolean; leg
   const streamed: string[] = [];
   let playback: (audio: string) => void = () => {};
   const connection = new MobileCompanionLiveConnection({
-    targetDeviceId: 'hub', sessionId: 'voice', microphoneCoordinator: coordinator,
+    targetDeviceId: 'hub', sessionId: 'voice', microphoneCoordinator: coordinator, schedule: options.schedule,
     openLiveAudio: async (_target, _session, onAudio) => {
       playback = onAudio;
       if (options.delayedStream) await new Promise<void>((resolve) => { finishStream = resolve; });
@@ -177,4 +178,34 @@ test('Stop completes a late key exchange for stream termination even when the HT
   expect(h.accepted()).toBe(1); expect(h.streamClosed()).toBe(1);
   expect(h.streamed).toEqual([]); expect(h.ready).toEqual([]); expect(h.errors).toEqual([]);
   expect(h.released()).toBe(1);
+});
+
+
+test('screen-off native ticks keep Live heartbeats running beyond the Hub timeout', async () => {
+  let now = 0;
+  // No JS timer callbacks are fired during this test.
+  const clock = new MobileLiveClock(() => now, () => () => {});
+  const h = harness({ schedule: clock.schedule });
+  try {
+    await h.connection.start(); h.emit({ type: 'live_ready', transport: 'pcm' });
+    for (now = 250; now <= 120_000; now += 250) { clock.tick(); await Promise.resolve(); }
+    expect(h.requests.filter((request) => request.operation === 'live.ping')).toHaveLength(12);
+    expect(h.errors).toEqual([]);
+    await h.connection.close();
+    now += 20_000; clock.tick();
+    expect(h.requests.filter((request) => request.operation === 'live.ping')).toHaveLength(12);
+  } finally { clock.close(); await h.connection.close(); }
+});
+
+test('screen-off startup deadline releases capture when the Hub never becomes ready', async () => {
+  let now = 0;
+  const clock = new MobileLiveClock(() => now, () => () => {});
+  const h = harness({ schedule: clock.schedule });
+  try {
+    await h.connection.start();
+    now = 40_000; clock.tick();
+    expect(h.errors).toEqual(['Live voice took too long to connect. Try again.']);
+    await h.connection.close();
+    expect(h.coordinator.getSnapshot()).toBeNull();
+  } finally { clock.close(); await h.connection.close(); }
 });

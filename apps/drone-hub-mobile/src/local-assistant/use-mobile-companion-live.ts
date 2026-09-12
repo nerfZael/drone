@@ -132,11 +132,16 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
       };
       const connection = new MobileCompanionLiveConnection({
         targetDeviceId, sessionId: Crypto.randomUUID(), microphoneCoordinator,
+        schedule: currentControls.schedule,
         request: mesh.request, subscribe: mesh.subscribe, openLiveAudio: mesh.openLiveAudio,
         openAudio: (callbacks) => openMobileLiveAudio(callbacks, () => {
           if (active.current === session) stop();
         }, { backgroundAlreadyStarted: true, onCaptureStopped: () => currentControls.cue('stopped') }),
-        onEvent: (event) => { if (active.current === session) session.conversation.receive(event); },
+        onEvent: (event) => {
+          if (active.current !== session) return;
+          if (event.type === 'session.delegation.created') console.info('[CompanionLive] Delegation received', AppState.currentState);
+          session.conversation.receive(event);
+        },
         onCapturing: () => {
           if (active.current !== session) return;
           update({ capturing: true });
@@ -154,12 +159,17 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
         },
         onError: (error) => {
           if (active.current !== session) return;
+          console.warn('[CompanionLive] Session failed', error, AppState.currentState);
           stop(); setState((value) => ({ ...value, status: 'error', error }));
         },
       });
       const conversation = new CompanionLiveConversation({
         externalBackendReplies: Boolean(controller),
-        runBackend: (prompt) => runBackend(prompt, session.abort.signal),
+        schedule: currentControls.schedule,
+        runBackend: (prompt) => {
+          console.info('[CompanionLive] Dispatching backend task', AppState.currentState);
+          return runBackend(prompt, session.abort.signal);
+        },
         send: (event) => connection.send(event),
         onTranscript: (rows) => update({ captions: rows.map((row) => `${row.role === 'user' ? 'You' : 'Companion'}: ${row.text}`).join('\n') }),
         onQueue: (queued) => update({ queued }),

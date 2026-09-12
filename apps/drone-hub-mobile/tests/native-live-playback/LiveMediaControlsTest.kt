@@ -102,7 +102,24 @@ private fun standbyDoesNotTakeAudioFocus() {
   println("Standby headset shortcut receives Play without requesting audio focus or starting capture until pressed")
 }
 
+private fun controlClockRunsWhilePausedAndStopsOnClose() {
+  var ticks = 0
+  val controls = LiveMediaControls(Context(), "clock", {}, initialState = "paused", onTick = { ticks++ })
+  try {
+    Handler.advanceTimeBy(1_000)
+    check(ticks == 4 && !controls.isPlaying())
+    controls.command("play")
+    Handler.advanceTimeBy(500)
+    check(ticks == 6)
+    controls.close()
+    Handler.advanceTimeBy(1_000)
+    check(ticks == 6) { "Closed controls must stop their native clock" }
+  } finally { controls.close() }
+  println("Handler control clock runs without display frames, including standby, and cancels on close")
+}
+
 fun main() {
+  controlClockRunsWhilePausedAndStopsOnClose()
   standbyDoesNotTakeAudioFocus()
   stalePauseHeadsetButton()
   val context = Context()

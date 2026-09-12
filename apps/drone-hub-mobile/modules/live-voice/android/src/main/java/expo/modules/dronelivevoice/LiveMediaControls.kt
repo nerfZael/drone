@@ -21,8 +21,16 @@ import android.view.KeyEvent
 import expo.modules.kotlin.Promise
 
 /** Owned by the foreground service, including while the GPT-Live session is closed. */
-internal class LiveMediaControls(private val context: Context, val id: String, private val emit: (String) -> Unit, initialState: String = "connecting") {
+internal class LiveMediaControls(private val context: Context, val id: String, private val emit: (String) -> Unit, initialState: String = "connecting", private val onTick: (() -> Unit)? = null) {
   private val handler = Handler(Looper.getMainLooper())
+  // Handler deadlines do not depend on display frames (unlike RN's Choreographer timers).
+  private val tick = object : Runnable {
+    override fun run() {
+      if (closed) return
+      onTick?.invoke()
+      handler.postDelayed(this, 250)
+    }
+  }
   private var playing = true
   private var closed = false
   private var skipStoppedCue = false
@@ -105,6 +113,7 @@ internal class LiveMediaControls(private val context: Context, val id: String, p
         audioManager.addOnCommunicationDeviceChangedListener({ runnable -> handler.post(runnable); Unit }, listener)
       }
       update(initialState)
+      if (onTick != null) handler.postDelayed(tick, 250)
     } catch (error: Exception) { close(); throw error }
   }
 
@@ -200,6 +209,7 @@ internal class LiveMediaControls(private val context: Context, val id: String, p
   fun close() {
     if (closed) return
     closed = true
+    handler.removeCallbacks(tick)
     if (receiverRegistered) { context.unregisterReceiver(routeReceiver); receiverRegistered = false }
     if (Build.VERSION.SDK_INT >= 31) communicationListener?.let { audioManager.removeOnCommunicationDeviceChangedListener(it) }
     if (Build.VERSION.SDK_INT >= 31) modeListener?.let { audioManager.removeOnModeChangedListener(it) }

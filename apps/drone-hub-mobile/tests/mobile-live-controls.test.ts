@@ -1,4 +1,6 @@
 import { expect, mock, test } from 'bun:test';
+mock.module('react-native', () => ({ Platform: { OS: 'android' } }));
+let tickListener: ((event: { id: string }) => void) | undefined;
 const calls: string[] = [];
 let sequence = 0; let failArm = false;
 let listener: ((event: { id: string; action: string }) => void) | undefined;
@@ -15,7 +17,10 @@ mock.module('expo-modules-core', () => ({ requireOptionalNativeModule: () => ({
   updateControls: async (id: string, state: string) => { calls.push(`state:${id}:${state}`); },
   disarmControls: async (id: string) => { calls.push(`disarm:${id}`); },
   playCue: async (id: string, cue: string) => { calls.push(`cue:${id}:${cue}`); },
-  addListener: (_event: string, callback: typeof listener) => { listener = callback; return { remove() { listener = undefined; } }; },
+  addListener: (event: string, callback: any) => {
+    if (event === 'controlTick') { tickListener = callback; return { remove() { tickListener = undefined; } }; }
+    listener = callback; return { remove() { listener = undefined; } };
+  },
 }) }));
 const { openMobileLiveControls } = await import('../src/local-assistant/mobile-live-controls');
 
@@ -53,4 +58,19 @@ test('standby registers paused natively rather than briefly starting playback', 
   try {
     expect(calls).toEqual(['service.start', `standby:control-${sequence}`]);
   } finally { await controls.release(); }
+});
+
+
+test('native ticks drive only their owned clock and release cancels pending work', async () => {
+  const controls = await openMobileLiveControls(() => {});
+  let fired = 0;
+  controls.schedule(() => { fired++; }, 0);
+  tickListener?.({ id: 'stale' }); expect(fired).toBe(0);
+  tickListener?.({ id: `control-${sequence}` }); expect(fired).toBe(1);
+  tickListener?.({ id: `control-${sequence}` }); expect(fired).toBe(1);
+  controls.schedule(() => { fired++; }, 0);
+  const stale = tickListener;
+  await controls.release();
+  stale?.({ id: `control-${sequence}` });
+  expect(fired).toBe(1); expect(tickListener).toBeUndefined();
 });

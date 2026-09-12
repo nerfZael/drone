@@ -54,7 +54,7 @@ class LiveVoiceModule : Module() {
   private var bluetoothRoute: LiveBluetoothRoute? = null
   override fun definition() = ModuleDefinition {
     Name("DroneLiveVoice")
-    Events("stopped", "pcmAudio", "pcmError", "mediaControl")
+    Events("stopped", "pcmAudio", "pcmError", "mediaControl", "controlTick")
     AsyncFunction("requestHeadsetPermission") { promise: Promise ->
       val context = appContext.reactContext ?: error("React context is unavailable")
       if (Build.VERSION.SDK_INT < 31 || LiveBluetoothRoute.candidate(context) == null || LiveBluetoothRoute.permitted(context)) {
@@ -98,7 +98,7 @@ class LiveVoiceModule : Module() {
       check(LiveVoiceSession.mediaControls == null) { "Live headset controls are already active" }
       LiveVoiceSession.mediaControls = LiveMediaControls(context, id, { action ->
         sendEvent("mediaControl", mapOf("id" to id, "action" to action))
-      })
+      }, onTick = { sendEvent("controlTick", mapOf("id" to id)) })
       LiveVoiceSession.refreshNotification?.invoke()
     }.runOnQueue(Queues.MAIN)
     AsyncFunction("armStandbyControls") { id: String ->
@@ -108,7 +108,7 @@ class LiveVoiceModule : Module() {
       // Register paused without claiming audio focus, opening SCO, or starting capture.
       LiveVoiceSession.mediaControls = LiveMediaControls(context, id, { action ->
         sendEvent("mediaControl", mapOf("id" to id, "action" to action))
-      }, initialState = "paused")
+      }, initialState = "paused", onTick = { sendEvent("controlTick", mapOf("id" to id)) })
       LiveVoiceSession.refreshNotification?.invoke()
     }.runOnQueue(Queues.MAIN)
     AsyncFunction("updateControls") { id: String, state: String ->

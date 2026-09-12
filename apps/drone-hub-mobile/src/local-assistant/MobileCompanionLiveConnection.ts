@@ -14,6 +14,7 @@ type Options = {
   onReady(model: string): void;
   onCapturing?(): void;
   onError(error: string): void;
+  schedule?(callback: () => void, delayMs: number): () => void;
 };
 
 export class MobileCompanionLiveConnection {
@@ -30,8 +31,8 @@ export class MobileCompanionLiveConnection {
   private started = false;
   private outgoingEvents = Promise.resolve();
   private unsubscribe?: () => void;
-  private heartbeat?: ReturnType<typeof setInterval>;
-  private timeout?: ReturnType<typeof setTimeout>;
+  private heartbeat?: () => void;
+  private timeout?: () => void;
   private pendingAudio: Promise<void> = Promise.resolve();
   private cleanup: Promise<void> = Promise.resolve();
   private readonly audioAbort = new AbortController();
@@ -51,7 +52,7 @@ export class MobileCompanionLiveConnection {
     this.started = true;
     this.lease = this.options.microphoneCoordinator.acquire('companion');
     if (!this.lease) { this.fail('Another voice feature is using the microphone. Stop it before starting Live.'); return; }
-    this.timeout = setTimeout(() => this.fail('Live voice took too long to connect. Try again.'), 40_000);
+    this.timeout = this.schedule(() => this.fail('Live voice took too long to connect. Try again.'), 40_000);
     let settled!: () => void;
     this.pendingAudio = new Promise((resolve) => { settled = resolve; });
     try {
@@ -87,9 +88,7 @@ export class MobileCompanionLiveConnection {
       this.startAccepted = true;
       this.becomeReady();
       if (this.closed) { void this.request('live.close').catch(() => undefined); return; }
-      this.heartbeat = setInterval(() => {
-        void this.request('live.ping').catch(() => this.fail('Live voice lost its connection to the Hub.'));
-      }, 10_000);
+      this.scheduleHeartbeat();
     } catch (error) { this.fail(error instanceof Error ? error.message : 'Live voice could not start.'); }
   }
 
@@ -105,8 +104,8 @@ export class MobileCompanionLiveConnection {
     this.buffer.close();
     this.stream?.close();
     this.audioAbort.abort();
-    clearTimeout(this.timeout);
-    clearInterval(this.heartbeat);
+    this.timeout?.();
+    this.heartbeat?.();
     this.unsubscribe?.();
     this.audio?.mute(true);
     const release = this.audio?.release();
@@ -118,9 +117,21 @@ export class MobileCompanionLiveConnection {
     if (this.started) void this.request('live.close').catch(() => undefined);
     return this.cleanup;
   }
+  private schedule(callback: () => void, delayMs: number): () => void {
+    if (this.options.schedule) return this.options.schedule(callback, delayMs);
+    const timer = setTimeout(callback, delayMs);
+    return () => clearTimeout(timer);
+  }
+  private scheduleHeartbeat(): void {
+    this.heartbeat = this.schedule(() => {
+      if (this.closed) return;
+      void this.request('live.ping').catch(() => this.fail('Live voice lost its connection to the Hub.'));
+      this.scheduleHeartbeat();
+    }, 10_000);
+  }
   private becomeReady(): void {
     if (this.closed || this.ready || !this.backendReady || !this.startAccepted || !this.stream) return;
-    this.ready = true; clearTimeout(this.timeout); this.buffer.connect(); this.options.onReady(this.backendModel);
+    this.ready = true; this.timeout?.(); this.buffer.connect(); this.options.onReady(this.backendModel);
   }
   private request(operation: string, payload: Record<string, unknown> = {}): Promise<unknown> {
     return this.options.request(this.options.targetDeviceId, COMPANION_CAPABILITY.id, operation,

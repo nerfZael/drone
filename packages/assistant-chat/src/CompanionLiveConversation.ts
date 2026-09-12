@@ -7,6 +7,8 @@ type Options = {
   send(event: Record<string, unknown>): void;
   onTranscript(rows: readonly Transcript[]): void;
   onQueue(size: number): void;
+  /** Mobile can supply a clock that runs without display frames. */
+  schedule?(callback: () => void, delayMs: number): () => void;
 };
 
 export const LIVE_COMPANION_PROMPT_PREFIX = 'The user is speaking with Companion through Live voice.';
@@ -20,7 +22,7 @@ export class CompanionLiveConversation {
   private dispatchedUserVersion = 0;
   private stopped = false;
   private resultDelegationId: string | null = null;
-  private timer: ReturnType<typeof setTimeout> | undefined;
+  private cancelTimer: (() => void) | undefined;
 
   constructor(private readonly options: Options) {}
 
@@ -53,7 +55,7 @@ export class CompanionLiveConversation {
 
   stop(): void {
     this.stopped = true;
-    clearTimeout(this.timer);
+    this.cancelTimer?.();
     this.pending = [];
     this.options.onQueue(0);
   }
@@ -68,11 +70,16 @@ export class CompanionLiveConversation {
   }
 
   private schedule(): void {
-    clearTimeout(this.timer);
+    this.cancelTimer?.();
     // Bound the debounce so a continuing stream of speech cannot starve dispatch.
     const age = this.pending.length ? Date.now() - this.pending[0].receivedAt : 0;
     const delay = this.userVersion > this.dispatchedUserVersion ? Math.min(450, Math.max(0, 1_000 - age)) : 450;
-    this.timer = setTimeout(() => void this.drain(), delay);
+    const callback = () => void this.drain();
+    if (this.options.schedule) this.cancelTimer = this.options.schedule(callback, delay);
+    else {
+      const timer = setTimeout(callback, delay);
+      this.cancelTimer = () => clearTimeout(timer);
+    }
   }
 
   private async drain(): Promise<void> {
