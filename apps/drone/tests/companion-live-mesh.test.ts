@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { CompanionLiveMeshSessions } from '../src/hub/device-mesh/CompanionLiveMeshSessions';
-import { readCompanionLiveSettings } from '../src/hub/companion/companion-live-settings';
+import { DEFAULT_COMPANION_LIVE_SYSTEM_PROMPT, readCompanionLiveSettings } from '../src/hub/companion/companion-live-settings';
 import { withTempDroneDataDir } from './test-helpers';
 import { capabilityEventPolicy, isGranted, COMPANION_RUN_OPERATIONS } from '@drone/device-protocol';
 
@@ -54,9 +54,13 @@ test('mobile Live settings use the existing Hub preference and validate writes',
     const h = harness();
     expect(await h.live.invoke('phone', 'live.settings.get', {})).toEqual({ enabled: false });
     await h.live.invoke('phone', 'live.settings.update', { enabled: true });
-    expect(await readCompanionLiveSettings()).toEqual({ enabled: true });
+    expect(await readCompanionLiveSettings()).toEqual({ enabled: true, systemPrompt: DEFAULT_COMPANION_LIVE_SYSTEM_PROMPT });
+    expect(await h.live.invoke('phone', 'live.prompt.get', {})).toMatchObject({ systemPrompt: DEFAULT_COMPANION_LIVE_SYSTEM_PROMPT, maxSystemPromptChars: 8_000 });
+    await h.live.invoke('phone', 'live.prompt.update', { systemPrompt: 'Be gently humorous.' });
+    expect(await readCompanionLiveSettings()).toEqual({ enabled: true, systemPrompt: 'Be gently humorous.' });
     await expect(h.live.invoke('phone', 'live.settings.update', { enabled: 'yes' })).rejects.toThrow('boolean');
-    expect(await readCompanionLiveSettings()).toEqual({ enabled: true });
+    await expect(h.live.invoke('phone', 'live.prompt.update', { systemPrompt: 42 })).rejects.toThrow('string');
+    expect(await readCompanionLiveSettings()).toEqual({ enabled: true, systemPrompt: 'Be gently humorous.' });
     h.live.close();
   });
 });
@@ -67,5 +71,7 @@ test('Live events and settings require explicit permissions beyond existing back
   expect(isGranted([], 'companion', 1, 'live.settings.get')).toBe(false);
   expect(isGranted(grants, 'companion', 1, 'live.start')).toBe(false);
   expect(isGranted(grants, 'companion', 1, 'live.settings.update')).toBe(false);
+  expect(isGranted(grants, 'companion', 1, 'live.prompt.get')).toBe(false);
+  expect(isGranted(grants, 'companion', 1, 'live.prompt.update')).toBe(false);
   expect(capabilityEventPolicy('companion', 'live.event')?.requiredOperation).toBe('live.start');
 });
