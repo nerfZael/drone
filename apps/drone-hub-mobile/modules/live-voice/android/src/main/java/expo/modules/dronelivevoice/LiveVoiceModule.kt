@@ -126,7 +126,8 @@ class LiveVoiceModule : Module() {
       val audio = LivePcmAudio(
         { audio -> sendEvent("pcmAudio", mapOf("id" to id, "audio" to audio)) },
         { error -> sendEvent("pcmError", mapOf("id" to id, "error" to error)) },
-        { LiveVoiceSession.mediaControls?.pauseForHeadsetDisconnect() }, awaitHeadset)
+        { LiveVoiceSession.mediaControls?.pauseForHeadsetDisconnect() }, awaitHeadset,
+        { LiveVoiceSession.mediaControls?.hasVoiceModeSettled() == true })
       pcm = audio
       pcmId = id
       LiveVoiceSession.stopAudio = { pcm?.stop(); pcm = null; pcmId = null; LiveVoiceSession.stopAudio = null }

@@ -14,11 +14,60 @@ private fun waitUntil(condition: () -> Boolean) {
 private fun chunk(marker: Int, frames: Int = 2400) = ByteArray(frames * 2) { marker.toByte() }
 private fun encode(bytes: ByteArray) = java.util.Base64.getEncoder().encodeToString(bytes)
 
+private fun bluetoothVolumeSettling() {
+  val context = android.content.Context()
+  context.audioManager.mode = android.media.AudioManager.MODE_NORMAL
+  val controls = LiveMediaControls(context, "volume-settling", {})
+  try {
+    repeat(3) { attempt ->
+      val captured = CopyOnWriteArrayList<ByteArray>()
+      val errors = CopyOnWriteArrayList<String>()
+      android.media.AudioRecord.sample = 0x1234
+      val audio = LivePcmAudio({ captured.add(java.util.Base64.getDecoder().decode(it)) }, errors::add,
+        awaitHeadset = true, isVoiceRouteReady = controls::hasVoiceModeSettled)
+      try {
+        audio.start()
+        val track = AudioTrack.latest
+        audio.playRecordingCue()
+        track.route(AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
+        // Route callbacks can precede the actual mode change, including on resume.
+        android.os.Handler.advanceTimeBy(1000)
+        waitUntil { captured.isNotEmpty() && track.snapshot().isNotEmpty() }
+        check(track.volume == 1f && track.snapshot().all { span -> span.bytes.all { it == 0.toByte() } })
+        check(captured.first()[0] == 0x34.toByte()) { "Microphone must buffer during volume settling" }
+        context.audioManager.modeListener!!.onModeChanged(android.media.AudioManager.MODE_IN_COMMUNICATION)
+        android.os.Handler.advanceTimeBy(500) // Android's delayed voice-volume update.
+        check(track.snapshot().all { span -> span.bytes.all { it == 0.toByte() } })
+        android.os.Handler.advanceTimeBy(250)
+        waitUntil { track.snapshot().any { span -> span.bytes.any { it != 0.toByte() } } }
+        check(track.volume == 1f && errors.isEmpty()) { "Resume $attempt did not produce a cue" }
+      } finally { audio.stop(); android.media.AudioRecord.sample = 0 }
+      context.audioManager.modeListener!!.onModeChanged(android.media.AudioManager.MODE_NORMAL)
+    }
+    val cancelled = LivePcmAudio({}, { error(it) }, awaitHeadset = true,
+      isVoiceRouteReady = controls::hasVoiceModeSettled)
+    try {
+      cancelled.start()
+      val track = AudioTrack.latest
+      cancelled.playRecordingCue()
+      track.route(AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
+      context.audioManager.modeListener!!.onModeChanged(android.media.AudioManager.MODE_IN_COMMUNICATION)
+      android.os.Handler.advanceTimeBy(500)
+      cancelled.stop()
+      android.os.Handler.advanceTimeBy(500)
+      check(track.paused && track.volume == 0f)
+      check(track.snapshot().all { span -> span.bytes.all { it == 0.toByte() } })
+    } finally { cancelled.stop() }
+  } finally { controls.close() }
+  check(context.audioManager.modeListener == null && android.os.Handler.pending.isEmpty())
+  println("Repeated Bluetooth starts hold the cue through delayed mode/volume updates while preserving opening capture")
+}
+
 private fun recordingCue() {
   for (headset in listOf(false, true)) {
     val captured = CopyOnWriteArrayList<String>()
     val errors = CopyOnWriteArrayList<String>()
-    val audio = LivePcmAudio(captured::add, errors::add, awaitHeadset = headset)
+    val audio = LivePcmAudio(captured::add, errors::add, awaitHeadset = headset, bluetoothWarmupMs = 0)
     try {
       audio.start()
       val track = AudioTrack.latest
@@ -34,6 +83,9 @@ private fun recordingCue() {
       val tones = track.snapshot().filter { span -> span.bytes.any { it != 0.toByte() } }
       check(tones.size == 1 && tones.single().bytes.size == 14400)
       val bytes = tones.single().bytes
+      val samples = bytes.asList().chunked(2).map { ((it[0].toInt() and 255) or (it[1].toInt() shl 8)).toShort().toInt() }
+      check(samples.maxOf { kotlin.math.abs(it) } <= 3500)
+      check(samples.take(120).maxOf { kotlin.math.abs(it) } < 400) // Smooth, quiet onset.
       check(bytes.take(4800).any { it != 0.toByte() } && bytes.drop(9600).any { it != 0.toByte() })
       check(bytes.sliceArray(4800 until 9600).all { it == 0.toByte() })
       audio.play(encode(chunk(47)))
@@ -45,7 +97,7 @@ private fun recordingCue() {
       check(errors.isEmpty())
     } finally { audio.stop() }
   }
-  val cancelled = LivePcmAudio({}, { error(it) }, awaitHeadset = true)
+  val cancelled = LivePcmAudio({}, { error(it) }, awaitHeadset = true, bluetoothWarmupMs = 0)
   try {
     cancelled.start()
     val track = AudioTrack.latest
@@ -62,7 +114,7 @@ private fun openingCapture() {
   val captured = CopyOnWriteArrayList<ByteArray>()
   val errors = CopyOnWriteArrayList<String>()
   android.media.AudioRecord.sample = 0x1234
-  val audio = LivePcmAudio({ captured.add(java.util.Base64.getDecoder().decode(it)) }, errors::add, awaitHeadset = true)
+  val audio = LivePcmAudio({ captured.add(java.util.Base64.getDecoder().decode(it)) }, errors::add, awaitHeadset = true, bluetoothWarmupMs = 0)
   try {
     audio.start()
     val track = AudioTrack.latest
@@ -79,7 +131,7 @@ private fun openingCapture() {
   // Some devices only report an output route after the first write. No server
   // speech has arrived, but the start cue still needs a usable headset route.
   AudioTrack.routeOnWrite = AudioDeviceInfo.TYPE_BLUETOOTH_SCO
-  val priming = LivePcmAudio({}, errors::add, awaitHeadset = true)
+  val priming = LivePcmAudio({}, errors::add, awaitHeadset = true, bluetoothWarmupMs = 0)
   try {
     priming.start()
     waitUntil { AudioTrack.latest.snapshot().isNotEmpty() }
@@ -94,6 +146,7 @@ private fun openingCapture() {
 }
 
 fun main() {
+  bluetoothVolumeSettling()
   recordingCue()
   openingCapture()
   val errors = CopyOnWriteArrayList<String>()
@@ -175,7 +228,7 @@ fun main() {
   android.media.AudioRecord.beforeStop = null
 
   // Initial phone routing must produce neither speech nor a start cue while waiting for SCO.
-  val connecting = LivePcmAudio({}, { errors.add(it) }, awaitHeadset = true)
+  val connecting = LivePcmAudio({}, { errors.add(it) }, awaitHeadset = true, bluetoothWarmupMs = 0)
   connecting.start()
   val connectingTrack = AudioTrack.latest
   var ready: Boolean? = null
@@ -191,14 +244,14 @@ fun main() {
   connecting.stop()
   check(android.os.Handler.pending.isEmpty())
 
-  val cancelled = LivePcmAudio({}, { errors.add(it) }, awaitHeadset = true)
+  val cancelled = LivePcmAudio({}, { errors.add(it) }, awaitHeadset = true, bluetoothWarmupMs = 0)
   cancelled.start()
   var cancelledReady: Boolean? = null
   cancelled.whenPlaybackReady { cancelledReady = it }
   cancelled.stop()
   check(cancelledReady == false && android.os.Handler.pending.isEmpty())
   val timeoutErrors = mutableListOf<String>()
-  val timeout = LivePcmAudio({}, { timeoutErrors.add(it) }, awaitHeadset = true)
+  val timeout = LivePcmAudio({}, { timeoutErrors.add(it) }, awaitHeadset = true, bluetoothWarmupMs = 0)
   timeout.start()
   android.os.Handler.runDelayed()
   check(timeoutErrors.size == 1 && AudioTrack.latest.volume == 0f)

@@ -16,6 +16,7 @@ import android.media.session.PlaybackState
 import android.os.Handler
 import android.os.Looper
 import android.os.Build
+import android.os.SystemClock
 import android.view.KeyEvent
 import expo.modules.kotlin.Promise
 
@@ -45,6 +46,8 @@ internal class LiveMediaControls(private val context: Context, val id: String, p
     }
   }
   private val audioManager = context.getSystemService(AudioManager::class.java)
+  private var voiceModeSince: Long? = if (audioManager.mode == AudioManager.MODE_IN_COMMUNICATION) SystemClock.elapsedRealtime() else null
+  private var modeListener: AudioManager.OnModeChangedListener? = null
   private var focused = false
   private var focusRequest: AudioFocusRequest? = null
   private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
@@ -84,6 +87,11 @@ internal class LiveMediaControls(private val context: Context, val id: String, p
       ContextCompat.registerReceiver(context, routeReceiver, filter, ContextCompat.RECEIVER_EXPORTED)
       receiverRegistered = true
       if (Build.VERSION.SDK_INT >= 31) {
+        val mode = AudioManager.OnModeChangedListener { value ->
+          if (!closed) voiceModeSince = if (value == AudioManager.MODE_IN_COMMUNICATION) SystemClock.elapsedRealtime() else null
+        }
+        modeListener = mode
+        audioManager.addOnModeChangedListener({ runnable -> handler.post(runnable); Unit }, mode)
         val listener = AudioManager.OnCommunicationDeviceChangedListener { device ->
           if (!closed) {
             val headset = isHeadset(device)
@@ -150,6 +158,9 @@ internal class LiveMediaControls(private val context: Context, val id: String, p
 
   fun isPlaying() = playing
 
+  fun hasVoiceModeSettled(): Boolean = Build.VERSION.SDK_INT < 31 ||
+    voiceModeSince?.let { SystemClock.elapsedRealtime() - it >= 750 } == true
+
   fun pauseForHeadsetDisconnect() {
     // During a queued resume the previous route can still be disconnecting.
     // It must not cancel the new intent before its microphone has started.
@@ -191,6 +202,8 @@ internal class LiveMediaControls(private val context: Context, val id: String, p
     closed = true
     if (receiverRegistered) { context.unregisterReceiver(routeReceiver); receiverRegistered = false }
     if (Build.VERSION.SDK_INT >= 31) communicationListener?.let { audioManager.removeOnCommunicationDeviceChangedListener(it) }
+    if (Build.VERSION.SDK_INT >= 31) modeListener?.let { audioManager.removeOnModeChangedListener(it) }
+    modeListener = null
     communicationListener = null
     cue?.release(); cue = null
     releaseFocus()

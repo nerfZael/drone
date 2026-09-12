@@ -116,6 +116,10 @@ class AudioManager {
   }
   fun clearCommunicationDevice() { routeCalls.add("clear"); communicationDevice = null }
   var mode = MODE_IN_COMMUNICATION
+  var modeListener: OnModeChangedListener? = null
+  fun interface OnModeChangedListener { fun onModeChanged(mode: Int) }
+  fun addOnModeChangedListener(executor: java.util.concurrent.Executor, listener: OnModeChangedListener) { modeListener = listener }
+  fun removeOnModeChangedListener(listener: OnModeChangedListener) { modeListener = null }
   var communicationDevice: AudioDeviceInfo? = null
   var listener: OnCommunicationDeviceChangedListener? = null
   fun addOnCommunicationDeviceChangedListener(executor: java.util.concurrent.Executor, value: OnCommunicationDeviceChangedListener) { listener = value }

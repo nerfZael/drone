@@ -120,7 +120,7 @@ fun main() {
   key(KeyEvent.KEYCODE_MEDIA_PLAY, repeats = 1)
   check(actions == listOf("pause", "play") && controls.isPlaying())
 
-  audio = LivePcmAudio({}, { error(it) }, awaitHeadset = true)
+  audio = LivePcmAudio({}, { error(it) }, awaitHeadset = true, bluetoothWarmupMs = 0)
   audio.start()
   track = AudioTrack.latest
   val startCue = Promise()

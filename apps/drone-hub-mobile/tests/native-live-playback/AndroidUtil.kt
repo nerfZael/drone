@@ -1,4 +1,6 @@
 package android.util
+
+object Log { fun i(tag: String, message: String) = 0 }
 object Base64 {
   const val NO_WRAP = 2
   const val DEFAULT = 0

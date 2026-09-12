@@ -113,3 +113,22 @@ The recording cue now consists of local PCM on the existing Live playback track,
 Validation: native regressions reproduced the stale-Pause failure before the fix. All three native suites pass, including stale headset state, resume during old-route teardown, cue-before-server playback on phone/headset, duplicate cue prevention, capture isolation, cancellation, and existing no-speaker-spill checks. Physical cue audibility still requires checking the installed build.
 
 The actual Android `:live-voice:compileDebugKotlin --offline` build and all nine mobile lifecycle tests also passed.
+
+
+## Follow-up: contextual Bluetooth volume settles after route readiness
+
+The user heard the PCM start cue only once across repeated starts on `046ace4e`; that cue was too sharp/loud. Phone audio events consistently put the contextual voice-volume change after the route-ready point:
+
+- Output gained its headset route at 22:44:20.575; Android applied the headset voice volume at 22:44:21.098.
+- The corresponding pairs were 22:44:29.364 / 22:44:29.920, 22:44:36.848 / 22:44:37.373, and 22:45:04.791 / 22:45:05.302.
+- At 22:45:47.772 the track was routed, but the volume update did not happen until 22:45:48.915, showing that route timing alone is insufficient when communication-mode activation also lags.
+
+This timing can swallow the entire 300 ms startup cue. Android's [AudioService](https://android.googlesource.com/platform/frameworks/base.git/+/master/services/core/java/com/android/server/audio/AudioService.java) deliberately delays contextual volume updates by 500 ms. The public [mode-change listener](https://developer.android.com/reference/android/media/AudioManager.OnModeChangedListener) supplies the actual mode-change notification.
+
+On each classic Bluetooth capture, playback now waits until both the headset route and the observed communication-mode transition have settled for 750 ms. This is a bounded settling allowance based on the measured volume delay, not a volume-acknowledgement API. The track keeps streaming silent PCM at normal gain on the headset so Android observes voice activity; the cue and assistant speech remain queued. Microphone samples continue into the startup buffer immediately. Phone and wired output do not acquire this Bluetooth delay. Stop and route loss still mute/flush immediately and cancel pending readiness callbacks.
+
+The start cue is now two quieter 600/750 Hz notes with 25 ms smooth fades, versus 1200 Hz with 5 ms fades. Peak PCM level falls from 10000 to 3500 (about 9 dB lower). Native diagnostic messages identify when playback clears the readiness gate and when the cue has been submitted, without logging microphone content.
+
+Validation covers repeated starts with delayed mode notifications, continued nonzero capture while output is silent, cue delivery after settling, stop during warmup, peak cue level/fade-in, and existing headset key/route-loss regressions. Physical audibility remains to be confirmed on the installed build.
+
+All three native regression suites and Android Kotlin compilation passed.

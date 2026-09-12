@@ -12,7 +12,9 @@ import android.media.audiofx.NoiseSuppressor
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
+import android.os.SystemClock
 import android.util.Base64
+import android.util.Log
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -21,7 +23,9 @@ import kotlin.math.sin
 /** One microphone for the whole call, including network startup. PCM16LE / 24 kHz. */
 internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val onError: (String) -> Unit,
   private val onHeadsetDisconnected: () -> Unit = {},
-  awaitHeadset: Boolean = false) {
+  awaitHeadset: Boolean = false,
+  private val isVoiceRouteReady: () -> Boolean = { true },
+  private val bluetoothWarmupMs: Long = 750) {
   @Volatile private var running = false
   @Volatile private var muted = false
   @Volatile private var playbackReady = !awaitHeadset
@@ -29,6 +33,23 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
   private val readyCallbacks = mutableListOf<(Boolean) -> Unit>()
   private val routeTimeout = Runnable {
     if (running && !playbackReady) onError("The headset audio route did not connect. Try Live again.")
+  }
+  private var bluetoothReadyAfter: Long? = null
+  private val checkReady = object : Runnable {
+    override fun run() {
+      if (!running || playbackReady) return
+      val after = bluetoothReadyAfter
+      if (after != null && (SystemClock.elapsedRealtime() < after || !isVoiceRouteReady())) {
+        handler.removeCallbacks(this)
+        handler.postDelayed(this, 25)
+        return
+      }
+      player?.setVolume(1f)
+      playbackReady = true
+      Log.i("DroneLiveVoice", "Live output ready after route/volume settling")
+      handler.removeCallbacks(routeTimeout)
+      completeReady(true)
+    }
   }
   private var headsetRouted = false
   private val routeListener = AudioRouting.OnRoutingChangedListener { routing ->
@@ -39,10 +60,19 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
         AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_HEARING_AID -> {
           headsetRouted = true
           if (!playbackReady) {
+            // Normal track gain with silent PCM lets Android observe active
+            // voice playback and apply its contextual volume. The queue remains
+            // gated, so no cue or speech can escape during this warmup.
             player?.setVolume(1f)
-            playbackReady = true
-            handler.removeCallbacks(routeTimeout)
-            completeReady(true)
+            // Routing can precede Android's contextual Bluetooth volume update
+            // by 500 ms. Keep output silent through that settling interval on
+            // every start, also waiting for the actual communication-mode event.
+            if (routing.routedDevice?.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO && bluetoothReadyAfter == null) {
+              bluetoothReadyAfter = SystemClock.elapsedRealtime() + bluetoothWarmupMs
+            } else if (routing.routedDevice?.type != AudioDeviceInfo.TYPE_BLUETOOTH_SCO) {
+              bluetoothReadyAfter = null
+            }
+            checkReady.run()
           }
         }
         AudioDeviceInfo.TYPE_BUILTIN_SPEAKER, AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> {
@@ -63,6 +93,7 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
   private val playback = ArrayBlockingQueue<ByteArray>(100)
   private val queuedBytes = AtomicInteger(0)
   private var recordingCueQueued = false
+  private var recordingCueBytes: ByteArray? = null
 
   fun start() {
     try {
@@ -136,14 +167,22 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
           // A streaming track may need data before Android reports its route.
           // Prime it with silence so the recording cue can run without waiting
           // for the first server response. User speech remains queued below.
-          if (!playbackReady) write(ByteArray(4800))
+          val startupSilence = ByteArray(4800)
           while (running) {
-            if (!playbackReady) { Thread.sleep(10); continue }
+            if (!playbackReady) {
+              // Keep the voice track active while its device and volume settle.
+              // AudioTrack.write supplies the real-time pacing; the short yield
+              // also avoids spinning on devices that accept writes immediately.
+              write(startupSilence)
+              Thread.sleep(5)
+              continue
+            }
             val bytes = playback.poll(100, TimeUnit.MILLISECONDS) ?: continue
             // Playback head is an unsigned 32-bit frame counter; compare modulo
             // 2^32 so long sessions keep detecting starvation after it wraps.
             if (writtenFrames.toInt() == output.playbackHeadPosition) write(reserve)
             write(bytes)
+            if (running && bytes === recordingCueBytes) Log.i("DroneLiveVoice", "Start cue submitted to Live output")
             queuedBytes.addAndGet(-bytes.size)
           }
         } catch (error: Exception) { if (running) onError(error.message ?: "Live playback failed") }
@@ -168,15 +207,18 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
     recordingCueQueued = true
     // Use the same track as Live speech. A separate ToneGenerator can compete
     // with the voice output during startup even after SCO reports connected.
-    // Two 100 ms, 1200 Hz beeps with a 100 ms gap and 5 ms fades (PCM16 / 24 kHz).
+    // Gentle 600/750 Hz notes, 100 ms each, with a 100 ms gap and 25 ms fades.
     val bytes = ByteArray(14400)
     for (frame in 0 until 7200) {
       val offset = frame % 4800
-      val envelope = minOf(1.0, offset / 120.0, (2399 - offset) / 120.0).coerceAtLeast(0.0)
-      val value = (sin(2 * Math.PI * 1200 * frame / 24000) * 10000 * envelope).toInt()
+      val ramp = minOf(1.0, offset / 600.0, (2399 - offset) / 600.0).coerceAtLeast(0.0)
+      val envelope = sin(Math.PI * ramp / 2).let { it * it }
+      val frequency = if (frame < 2400) 600 else 750
+      val value = (sin(2 * Math.PI * frequency * frame / 24000) * 3500 * envelope).toInt()
       bytes[frame * 2] = value.toByte()
       bytes[frame * 2 + 1] = (value shr 8).toByte()
     }
+    recordingCueBytes = bytes
     enqueue(bytes) // Queued before server speech, held until the output route is ready.
     whenPlaybackReady(callback)
   }
@@ -202,6 +244,7 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
     try { player?.setVolume(0f); player?.pause(); player?.flush() } catch (_: Exception) {}
     player?.removeOnRoutingChangedListener(routeListener)
     handler.removeCallbacks(routeTimeout)
+    handler.removeCallbacks(checkReady)
     completeReady(false)
     try { recorder?.stop() } catch (_: Exception) {}
     captureThread?.join(1000)
