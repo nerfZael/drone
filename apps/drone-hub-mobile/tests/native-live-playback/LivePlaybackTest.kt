@@ -1,6 +1,7 @@
 package expo.modules.dronelivevoice
 
 import android.media.AudioTrack
+import android.media.AudioDeviceInfo
 import java.util.concurrent.CopyOnWriteArrayList
 
 private fun waitUntil(condition: () -> Boolean) {
@@ -68,5 +69,22 @@ fun main() {
   pending.stop() // Must unblock a reserve write and never start the held speech.
   check(blocked.paused && blocked.released && blocked.snapshot().isEmpty())
   check(errors.isEmpty()) { errors.toString() }
+  var pauses = 0
+  lateinit var headset: LivePcmAudio
+  headset = LivePcmAudio({}, { errors.add(it) }, { pauses++; headset.stop() })
+  headset.start()
+  val routed = AudioTrack.latest
+  val routeListener = routed.routeListener!!
+  routed.route(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) // Initial SCO setup may start on the phone.
+  check(pauses == 0)
+  routed.route(AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
+  routed.route(null) // An intermediate unknown device is not a disconnect.
+  check(pauses == 0)
+  routed.route(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) // Headset hangs up SCO without a media key.
+  check(pauses == 1 && routed.paused && routed.released)
+  check(routed.routeListener == null)
+  routeListener.onRoutingChanged(routed) // Queued callbacks cannot pause a new Live session.
+  check(pauses == 1)
+  println("Headset route loss stops capture/playback; initial phone route, transient null and stale callbacks ignored")
   println("Native Live playback: jitter, bounded reserve, starvation, short tail, PCM order, partial writes, overflow and stop during buffering passed")
 }

@@ -142,8 +142,8 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
   }, [start]);
   mediaAction.current = (action) => {
     if (action === 'play') void resume();
-    else if (action === 'pause') pause();
-    else if (action === 'stop') stop();
+    else if (action === 'pause' || action === 'stop') pause();
+    else if (action === 'end') stop();
   };
   const toggleMute = React.useCallback(() => {
     const session = active.current;

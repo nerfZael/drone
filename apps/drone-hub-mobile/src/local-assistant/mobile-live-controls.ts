@@ -2,7 +2,7 @@ import { requireOptionalNativeModule } from 'expo-modules-core';
 import * as Crypto from 'expo-crypto';
 import { startMobileLiveBackground } from './mobile-live-background';
 
-export type LiveMediaAction = 'play' | 'pause' | 'stop';
+export type LiveMediaAction = 'play' | 'pause' | 'stop' | 'end';
 export type LiveMediaState = 'connecting' | 'recording' | 'paused';
 type NativeControls = {
   armControls(id: string): Promise<void>;
@@ -17,7 +17,7 @@ export async function openMobileLiveControls(onAction: (action: LiveMediaAction)
   const native = requireOptionalNativeModule<NativeControls>('DroneLiveVoice');
   if (!native?.armControls) throw new Error('Update the mobile app to use Live headset controls.');
   const id = Crypto.randomUUID();
-  const stopBackground = await startMobileLiveBackground(() => onAction('stop'));
+  const stopBackground = await startMobileLiveBackground(() => onAction('end'));
   let closed = false;
   let listener: { remove(): void } | undefined;
   let releasing: Promise<void> | undefined;

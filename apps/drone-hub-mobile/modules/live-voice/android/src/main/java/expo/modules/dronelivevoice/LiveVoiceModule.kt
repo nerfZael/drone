@@ -73,7 +73,8 @@ class LiveVoiceModule : Module() {
       check(pcm == null) { "Live audio is already running" }
       val audio = LivePcmAudio(
         { audio -> sendEvent("pcmAudio", mapOf("id" to id, "audio" to audio)) },
-        { error -> sendEvent("pcmError", mapOf("id" to id, "error" to error)) })
+        { error -> sendEvent("pcmError", mapOf("id" to id, "error" to error)) },
+        { LiveVoiceSession.mediaControls?.pauseForHeadsetDisconnect() })
       pcm = audio
       pcmId = id
       LiveVoiceSession.stopAudio = { pcm?.stop(); pcm = null; pcmId = null }

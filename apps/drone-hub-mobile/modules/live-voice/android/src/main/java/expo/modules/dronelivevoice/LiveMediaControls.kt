@@ -20,6 +20,7 @@ internal class LiveMediaControls(context: Context, val id: String, private val e
   private val handler = Handler(Looper.getMainLooper())
   private var playing = true
   private var closed = false
+  private var skipStoppedCue = false
   private var cue: ToneGenerator? = null
   private val audioManager = context.getSystemService(AudioManager::class.java)
   private var focused = false
@@ -89,8 +90,21 @@ internal class LiveMediaControls(context: Context, val id: String, private val e
 
   fun isPlaying() = playing
 
+  fun pauseForHeadsetDisconnect() {
+    if (closed || !playing) return
+    // The headset may hang up SCO instead of sending a media pause command.
+    // Stop capture/playback and keep the MediaSession armed for locked-screen play.
+    skipStoppedCue = true
+    command("pause")
+  }
+
   fun playCue(kind: String, promise: Promise) {
     if (closed) { promise.resolve(); return }
+    if (kind == "stopped" && skipStoppedCue) {
+      skipStoppedCue = false
+      promise.resolve()
+      return // Do not emit the stop cue through the phone after losing the headset.
+    }
     try {
       cue?.release()
       // During a Live session expo-audio puts the device in communication mode and, with a

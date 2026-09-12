@@ -319,8 +319,8 @@ export function MobileCompanionOverlay() {
             id: 'pause-voice',
             section: 'Voice',
             icon: Pause,
-            label: 'Pause voice',
-            detail: 'Keeps headset controls; the microphone and Live session stop.',
+            label: 'Stop live voice',
+            detail: 'Submitted work continues. Press the headset button to start again.',
             onPress: live.pause,
           } satisfies MobileCompanionMenuItem,
         ]
@@ -331,7 +331,7 @@ export function MobileCompanionOverlay() {
             id: 'resume-voice',
             section: 'Voice',
             icon: Play,
-            label: 'Resume voice',
+            label: 'Start live voice',
             tone: 'accent',
             onPress: () => void live.resume(),
           } satisfies MobileCompanionMenuItem,
@@ -343,7 +343,7 @@ export function MobileCompanionOverlay() {
             id: 'end-voice',
             section: 'Voice',
             icon: Square,
-            label: 'End voice',
+            label: 'Release headset controls',
             detail: 'Releases headset controls. Submitted work continues.',
             tone: 'danger',
             onPress: live.stop,
@@ -500,11 +500,11 @@ export function MobileCompanionOverlay() {
               ) : null}
               {liveSettings.enabled || liveActive || livePaused ? (
                 <HeaderButton
-                  label={liveActive || livePaused ? 'Stop live voice; submitted work continues' : 'Start live voice'}
-                  tone={liveActive || livePaused ? 'danger' : 'accent'}
+                  label={liveActive ? 'Stop live voice; submitted work continues' : 'Start live voice'}
+                  tone={liveActive ? 'danger' : 'accent'}
                   disabled={!liveActive && !livePaused && (liveBusy || voiceBusy || recording || !companion.available)}
-                  onPress={() => liveActive || livePaused ? live.stop() : void companion.toggle()}
-                  icon={liveActive || livePaused ? Square : Play}
+                  onPress={() => void companion.toggle()}
+                  icon={liveActive ? Square : Play}
                 />
               ) : null}
               <HeaderButton

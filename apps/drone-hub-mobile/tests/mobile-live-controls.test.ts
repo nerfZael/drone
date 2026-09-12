@@ -27,12 +27,12 @@ test('headset controls stay armed while paused and filter stale media commands',
   listener?.({ id: 'old', action: 'play' });
   listener?.({ id, action: 'play' }); listener?.({ id, action: 'pause' });
   expect(actions).toEqual(['play', 'pause']);
-  stopped?.(); expect(actions.at(-1)).toBe('stop');
+  stopped?.(); expect(actions.at(-1)).toBe('end');
   const stale = listener;
   await controls.release(); await controls.release();
   stale?.({ id, action: 'play' });
   await controls.update('recording'); await controls.cue('recording');
-  expect(actions).toEqual(['play', 'pause', 'stop']);
+  expect(actions).toEqual(['play', 'pause', 'end']);
   expect(calls.slice(-2)).toEqual([`disarm:${id}`, 'service.stop']);
   expect(calls.filter((call) => call === 'service.stop')).toHaveLength(1);
 });

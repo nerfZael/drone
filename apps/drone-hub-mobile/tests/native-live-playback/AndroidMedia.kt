@@ -34,7 +34,25 @@ class AudioRecord(source: Int, rate: Int, channels: Int, encoding: Int, size: In
 
 // Virtual audio device: the test advances the render clock separately from the
 // production playback thread. Record spans and PCM to detect gaps, loss, and order.
-class AudioTrack {
+interface AudioRouting {
+  val routedDevice: AudioDeviceInfo?
+  fun interface OnRoutingChangedListener { fun onRoutingChanged(router: AudioRouting) }
+}
+class AudioDeviceInfo(val type: Int) {
+  companion object {
+    const val TYPE_BLUETOOTH_SCO = 7; const val TYPE_BLE_HEADSET = 26
+    const val TYPE_WIRED_HEADSET = 3; const val TYPE_WIRED_HEADPHONES = 4
+    const val TYPE_USB_HEADSET = 22; const val TYPE_HEARING_AID = 23
+    const val TYPE_BUILTIN_SPEAKER = 2; const val TYPE_BUILTIN_EARPIECE = 1
+  }
+}
+class AudioTrack : AudioRouting {
+  override var routedDevice: AudioDeviceInfo? = null
+  var routeListener: AudioRouting.OnRoutingChangedListener? = null
+  fun addOnRoutingChangedListener(listener: AudioRouting.OnRoutingChangedListener, handler: android.os.Handler) { routeListener = listener }
+  fun removeOnRoutingChangedListener(listener: AudioRouting.OnRoutingChangedListener) { routeListener = null }
+  fun route(type: Int?) { routedDevice = type?.let { AudioDeviceInfo(it) }; routeListener?.onRoutingChanged(this) }
+
   data class Span(val start: Long, val end: Long, val bytes: ByteArray)
   val spans = mutableListOf<Span>()
   val state = STATE_INITIALIZED

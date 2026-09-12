@@ -524,7 +524,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
   );
 
   const toggle = React.useCallback(async () => {
-    if (liveActive) { live.stop(); return; }
+    if (liveActive) { live.pause(); return; }
     if (live.status === 'paused') { await live.resume(); return; }
     if (preparingVoice.current) return;
     if (
@@ -608,7 +608,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     run,
     unavailableReason,
     voice,
-    liveActive, live.status, live.resume, live.start, live.stop, mesh.request, targetCapability,
+    liveActive, live.status, live.resume, live.start, live.pause, mesh.request, targetCapability,
   ]);
 
   const companionRecording =
