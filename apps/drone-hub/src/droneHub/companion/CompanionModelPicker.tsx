@@ -5,14 +5,11 @@ import { useCompanionSettings, type CompanionSettingsResponse } from './use-comp
 
 const PROVIDER_LABELS = { openai: 'OpenAI', codex: 'Codex', gemini: 'Gemini', openrouter: 'OpenRouter' } as const;
 
-export function CompanionModelPicker() {
-  const { data, loading, error: loadError, load } = useCompanionSettings(requestJson);
-  const [savedData, setSavedData] = React.useState<CompanionSettingsResponse | null>(null);
+export function CompanionModelPicker({ embedded = false }: { embedded?: boolean }) {
+  const { data: current, loading, error: loadError, load, acceptSaved } = useCompanionSettings(requestJson);
   const [saving, setSaving] = React.useState(false);
   const [saveError, setSaveError] = React.useState('');
   const savingRef = React.useRef(false);
-  React.useEffect(() => setSavedData(null), [data]);
-  const current = savedData ?? data;
   const settings = current?.settings;
   const error = saveError || loadError;
 
@@ -38,7 +35,7 @@ export function CompanionModelPicker() {
           thinkingLevel: model.thinkingLevel,
         }),
       });
-      setSavedData(response);
+      acceptSaved(response);
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -48,11 +45,12 @@ export function CompanionModelPicker() {
   };
 
   return (
-    <div className="max-w-full self-end rounded-lg border border-[var(--border)] bg-[var(--panel-raised)] px-2 py-1 shadow-[var(--shadow-dialog)]">
-      <div className="flex items-center justify-end gap-1">
-        <span className="text-[10px] text-[var(--muted)]">Backend</span>
+    <div className={embedded ? "px-2 py-1" : "max-w-full self-end rounded-lg border border-[var(--border)] bg-[var(--panel-raised)] px-2 py-1 shadow-[var(--shadow-dialog)]"}>
+      <div className={embedded ? "flex flex-col items-stretch gap-1" : "flex items-center justify-end gap-1"}>
+        <span className="text-[10px] text-[var(--muted)]">{embedded ? 'Model and reasoning' : 'Backend'}</span>
         <ChatComposerModelPicker config={{
           id: 'companion-backend-model',
+          menuPlacement: embedded ? 'inline' : 'above',
           currentProvider: settings?.provider ?? '',
           currentModel: settings?.model ?? '',
           currentThinkingLevel: settings?.thinkingLevel,

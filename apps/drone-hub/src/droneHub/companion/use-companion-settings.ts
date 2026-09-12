@@ -66,6 +66,29 @@ export function changeCompanionProvider(
   };
 }
 
+const SETTINGS_CHANGED_EVENT = 'companion-settings-changed';
+
+// Rebase untouched fields while preserving edits in an open settings form.
+function mergeSavedSettings(
+  previous: CompanionSettingsDraft | undefined,
+  draft: CompanionSettingsDraft | null,
+  next: CompanionSettingsDraft,
+): CompanionSettingsDraft {
+  if (!previous || !draft) return next;
+  const merged = { ...next };
+  for (const key of ['promptDeliveryMode', 'systemPrompt', 'enabledTools'] as const) {
+    if (JSON.stringify(draft[key]) !== JSON.stringify(previous[key])) {
+      Object.assign(merged, { [key]: draft[key] });
+    }
+  }
+  // Provider, model and reasoning form one selection and must stay together.
+  if (['provider', 'model', 'thinkingLevel'].some((key) =>
+    draft[key as keyof CompanionSettingsDraft] !== previous[key as keyof CompanionSettingsDraft])) {
+    Object.assign(merged, { provider: draft.provider, model: draft.model, thinkingLevel: draft.thinkingLevel });
+  }
+  return merged;
+}
+
 type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
 
 export function useCompanionSettings(requestJson: RequestJson, enabled = true) {
@@ -75,19 +98,46 @@ export function useCompanionSettings(requestJson: RequestJson, enabled = true) {
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState('');
   const [saved, setSaved] = React.useState(false);
+  const dataRef = React.useRef(data);
+  const generation = React.useRef(0);
+
+  React.useEffect(() => {
+    const onChanged = (event: Event) => {
+      const response = (event as CustomEvent<CompanionSettingsResponse>).detail;
+      generation.current++;
+      const previous = dataRef.current;
+      dataRef.current = response;
+      setData(response);
+      setDraft((current) => mergeSavedSettings(previous?.settings, current, response.settings));
+      setLoading(false);
+      setSaved(false);
+    };
+    window.addEventListener(SETTINGS_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(SETTINGS_CHANGED_EVENT, onChanged);
+  }, []);
+
+  const acceptSaved = React.useCallback((response: CompanionSettingsResponse) => {
+    window.dispatchEvent(new CustomEvent(SETTINGS_CHANGED_EVENT, { detail: response }));
+    setDraft(response.settings);
+    setSaved(true);
+    setError('');
+  }, []);
 
   const load = React.useCallback(async () => {
+    const current = ++generation.current;
     setLoading(true);
     setError('');
     try {
       const response = await requestJson<CompanionSettingsResponse>('/api/settings/companion');
+      if (current !== generation.current) return;
+      dataRef.current = response;
       setData(response);
       setDraft(response.settings);
       setSaved(false);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : String(loadError));
+      if (current === generation.current) setError(loadError instanceof Error ? loadError.message : String(loadError));
     } finally {
-      setLoading(false);
+      if (current === generation.current) setLoading(false);
     }
   }, [requestJson]);
 
@@ -117,9 +167,7 @@ export function useCompanionSettings(requestJson: RequestJson, enabled = true) {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(draft),
       });
-      setData(response);
-      setDraft(response.settings);
-      setSaved(true);
+      acceptSaved(response);
       return true;
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : String(saveError));
@@ -127,7 +175,7 @@ export function useCompanionSettings(requestJson: RequestJson, enabled = true) {
     } finally {
       setSaving(false);
     }
-  }, [draft, requestJson, saving]);
+  }, [draft, requestJson, saving, acceptSaved]);
 
-  return { data, draft, setDraft, loading, saving, error, saved, dirty, load, save };
+  return { data, draft, setDraft, loading, saving, error, saved, dirty, load, save, acceptSaved };
 }

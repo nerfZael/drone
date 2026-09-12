@@ -125,6 +125,10 @@ export class CompanionClientController {
     return this.generation === token;
   }
 
+  getSessionId(): string | null {
+    return this.activeSession?.runId ?? null;
+  }
+
   hasSession(): boolean {
     return this.activeSession !== null;
   }

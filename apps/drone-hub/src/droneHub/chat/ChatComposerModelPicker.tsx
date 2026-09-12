@@ -25,7 +25,7 @@ export type ChatComposerModelPickerConfig = {
   requireExplicitModelSelection?: boolean;
   statusMessage?: string;
   title?: string;
-  menuPlacement?: 'above' | 'below';
+  menuPlacement?: 'above' | 'below' | 'inline';
   onSelect: (choice: ChatComposerModelChoice, selection: 'model' | 'reasoning') => void;
 };
 
@@ -237,8 +237,8 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
         <div
           role="dialog"
           aria-label={title}
-          className={`absolute right-0 z-50 flex max-h-[64vh] w-[min(20rem,calc(100vw-1.25rem))] flex-col overflow-hidden rounded-[.75rem] border border-[var(--border)] bg-[var(--panel)] shadow-[var(--chat-composer-shadow)] ${
-            menuPlacement === 'below' ? 'top-full mt-[.375rem]' : 'bottom-full mb-[.375rem]'
+          className={`${menuPlacement === 'inline' ? 'relative my-1 max-h-[40vh] w-full' : 'absolute right-0 z-50 max-h-[64vh] w-[min(20rem,calc(100vw-1.25rem))]'} flex flex-col overflow-hidden rounded-[.75rem] border border-[var(--border)] bg-[var(--panel)] shadow-[var(--chat-composer-shadow)] ${
+            menuPlacement === 'below' ? 'top-full mt-[.375rem]' : menuPlacement === 'above' ? 'bottom-full mb-[.375rem]' : ''
           }`}
         >
           <div className="flex min-h-9 flex-shrink-0 items-center px-3">

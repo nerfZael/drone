@@ -1,6 +1,8 @@
 import { CompanionCurrentWorkspaceAccess } from './CompanionCurrentWorkspaceAccess';
 import { useRecorderCompanion } from '../dictation/RecorderCompanionContext';
 import React from 'react';
+import { Popover } from 'radix-ui';
+import { contextMenuItemBaseClass } from '../../ui/dropdown';
 import { CompanionActionNotifications } from './CompanionActionNotifications';
 import {
   companionToolActivityLabel,
@@ -18,6 +20,7 @@ import { CompanionInstructionsEditor } from './CompanionInstructionsEditor';
 import { CompanionProposalCard } from './CompanionProposalCard';
 import { CompanionProposalHistory } from './CompanionProposalHistory';
 import { CompanionLivePanel } from './CompanionLivePanel';
+import { CompanionSubscriptions } from './CompanionSubscriptions';
 import { CompanionModelPicker } from './CompanionModelPicker';
 import { useCompanionWorkspace } from './CompanionWorkspaceContext';
 
@@ -65,8 +68,11 @@ function CompanionStatusIndicator({
   );
 }
 
+const CompanionMenuContext = React.createContext<(() => void) | null>(null);
+
 function CompanionHeaderButton({
   label,
+  menuLabel,
   tone = 'neutral',
   disabled = false,
   pressed,
@@ -76,6 +82,7 @@ function CompanionHeaderButton({
   children,
 }: {
   label: string;
+  menuLabel?: string;
   tone?: 'neutral' | 'accent' | 'success' | 'danger';
   disabled?: boolean;
   pressed?: boolean;
@@ -84,6 +91,7 @@ function CompanionHeaderButton({
   onClick(): void;
   children: React.ReactNode;
 }) {
+  const closeMenu = React.useContext(CompanionMenuContext);
   const classes = tone === 'danger'
     ? 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]'
     : tone === 'success'
@@ -94,16 +102,17 @@ function CompanionHeaderButton({
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={() => { onClick(); if (pressed === undefined) closeMenu?.(); }}
       disabled={disabled}
       aria-pressed={pressed}
       aria-expanded={expanded}
       aria-controls={controls}
-      className={`inline-flex h-7 w-7 items-center justify-center rounded-md border transition-opacity hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-40 ${classes}`}
+      className={closeMenu ? `${contextMenuItemBaseClass} hover:bg-[var(--hover)] ${classes}` : `inline-flex h-7 w-7 items-center justify-center rounded-md border transition-opacity hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-40 ${classes}`}
       title={label}
       aria-label={label}
     >
       {children}
+      {closeMenu ? <span>{menuLabel ?? label}</span> : null}
     </button>
   );
 }
@@ -119,6 +128,7 @@ export function CompanionOverlay() {
   const [promptEditorOpen, setPromptEditorOpen] = React.useState(false);
   const [instructionsEditorOpen, setInstructionsEditorOpen] = React.useState(false);
   const [historyOpen, setHistoryOpen] = React.useState(false);
+  const [menuOpen, setMenuOpen] = React.useState(false);
   const panelOpen = promptEditorOpen || workspacePickerOpen || instructionsEditorOpen;
   const [, tick] = React.useState(0);
   React.useEffect(() => {
@@ -129,6 +139,7 @@ export function CompanionOverlay() {
   React.useEffect(() => {
     if (companion?.status === 'idle') {
       setExpanded(false);
+      setMenuOpen(false);
       setTranscriptExpanded(false);
       setHistoryOpen(false);
     }
@@ -234,64 +245,7 @@ export function CompanionOverlay() {
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
         <div className="flex items-center gap-1.5">
-          {companion.status === 'recording' && companion.live?.status !== 'listening' && companion.live?.status !== 'connecting' ? (
-            <>
-              <CompanionHeaderButton
-                label="Discard recording"
-                tone="danger"
-                onClick={() => void companion.discardRecording()}
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-                  <path d="M6 6l12 12" />
-                  <path d="M18 6L6 18" />
-                </svg>
-              </CompanionHeaderButton>
-              <CompanionHeaderButton
-                label={companion.recordingPaused ? 'Resume recording' : 'Pause recording'}
-                tone={companion.recordingPaused ? 'accent' : 'neutral'}
-                onClick={companion.toggleRecordingPause}
-              >
-                {companion.recordingPaused ? (
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M8 5v14l11-7Z" />
-                  </svg>
-                ) : (
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-                    <path d="M9 5v14" />
-                    <path d="M15 5v14" />
-                  </svg>
-                )}
-              </CompanionHeaderButton>
-              <CompanionHeaderButton
-                label="Finish recording and send"
-                tone="success"
-                onClick={() => void companion.toggle()}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                  <rect x="7" y="7" width="10" height="10" rx="1" />
-                </svg>
-              </CompanionHeaderButton>
-            </>
-          ) : null}
-          {(companion.status === 'starting' || companion.status === 'transcribing') && companion.live?.status !== 'listening' && companion.live?.status !== 'connecting' ? (
-            <CompanionHeaderButton
-              label="Discard recording"
-              tone="danger"
-              onClick={() => void companion.discardRecording()}
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-                <path d="M6 6l12 12" />
-                <path d="M18 6L6 18" />
-              </svg>
-            </CompanionHeaderButton>
-          ) : null}
-          {companion.status === 'working' ? (
-            <CompanionHeaderButton label={companion.live?.status === 'listening' ? 'Stop Companion turn and end voice' : 'Stop Companion turn'} tone="danger" onClick={companion.stop}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                <rect x="7" y="7" width="10" height="10" rx="1" />
-              </svg>
-            </CompanionHeaderButton>
-          ) : null}
+          <CompanionSubscriptions sessionId={companion.sessionId} />
           <CompanionHeaderButton
             label={`Auto-approve proposals ${companion.autoApprove ? 'on' : 'off'}; double-tap Caps Lock to toggle`}
             tone={companion.autoApprove ? 'success' : 'neutral'}
@@ -302,64 +256,144 @@ export function CompanionOverlay() {
               <path d="m13 2-9 12h7l-1 8 9-12h-7z" />
             </svg>
           </CompanionHeaderButton>
-          {companion.live ? <CompanionHeaderButton
-            label={companion.live.loading ? 'Loading Live voice setting' : companion.live.saving ? 'Saving Live voice setting'
-              : `Live voice ${companion.live.enabled ? 'on' : 'off'}; remembered across Companion sessions`}
-            tone={companion.live.enabled ? 'accent' : 'neutral'}
-            pressed={companion.live.enabled}
-            disabled={companion.live.loading || companion.live.saving || (!companion.live.enabled && ['starting', 'recording', 'transcribing'].includes(companion.status))}
-            onClick={() => void companion.live.toggleEnabled()}
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-              <path d="M3 10v4M7 6v12M12 3v18M17 6v12M21 10v4" />
-            </svg>
-          </CompanionHeaderButton> : null}
-          <CompanionHeaderButton
-            label={companion.proposalHistory.length > 0
-              ? `Show execution history${latestProposalExecutionFailed ? '; latest execution failed' : ''}`
-              : 'No proposals executed this session'}
-            disabled={companion.proposalHistory.length === 0}
-            tone={historyOpen ? 'accent' : latestProposalExecutionFailed ? 'danger' : 'neutral'}
-            expanded={historyOpen}
-            controls="companion-proposal-history"
-            onClick={() => setHistoryOpen((open) => !open)}
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
-              <path d="M3 3v5h5" />
-              <path d="M12 7v5l3 2" />
-            </svg>
-          </CompanionHeaderButton>
-          <CompanionHeaderButton
-            label="Companion workspaces"
-            expanded={workspacePickerOpen}
-            controls="companion-workspace-picker"
-            onClick={() => setWorkspacePickerOpen(true)}
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10H3Z" />
-            </svg>
-          </CompanionHeaderButton>
-          <CompanionHeaderButton
-            label="Edit Companion system prompt"
-            expanded={promptEditorOpen}
-            controls="companion-prompt-editor"
-            onClick={() => setPromptEditorOpen(true)}
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="m16 3 5 5-12 12-6 1 1-6Z" /><path d="m14 5 5 5" />
-            </svg>
-          </CompanionHeaderButton>
-          <CompanionHeaderButton
-            label="Edit Companion instructions"
-            expanded={instructionsEditorOpen}
-            controls="companion-instructions-editor"
-            onClick={() => setInstructionsEditorOpen(true)}
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M4 3h12l4 4v14H4Z" /><path d="M14 3v6h6M8 13h8M8 17h5" />
-            </svg>
-          </CompanionHeaderButton>
+          <Popover.Root open={menuOpen} onOpenChange={setMenuOpen}>
+            <Popover.Trigger asChild>
+              <button type="button" aria-label="Companion options" title="Companion options"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--muted)] hover:text-[var(--fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" />
+                </svg>
+              </button>
+            </Popover.Trigger>
+            <Popover.Portal>
+              <Popover.Content side="top" align="end" sideOffset={8} aria-label="Companion options" data-companion-surface="true"
+                className="z-[110] w-[min(21rem,calc(100vw-2rem))] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--panel-raised)] p-1 shadow-[var(--shadow-dialog)]">
+                <CompanionMenuContext.Provider value={() => setMenuOpen(false)}>
+                  {companion.live ? <CompanionHeaderButton
+                    menuLabel={`Live voice ${companion.live.enabled ? 'on' : 'off'}`}
+                    label={companion.live.loading ? 'Loading Live voice setting' : companion.live.saving ? 'Saving Live voice setting'
+                      : `Live voice ${companion.live.enabled ? 'on' : 'off'}; remembered across Companion sessions`}
+                    tone={companion.live.enabled ? 'accent' : 'neutral'}
+                    pressed={companion.live.enabled}
+                    disabled={companion.live.loading || companion.live.saving || (!companion.live.enabled && ['starting', 'recording', 'transcribing'].includes(companion.status))}
+                    onClick={() => void companion.live.toggleEnabled()}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                      <path d="M3 10v4M7 6v12M12 3v18M17 6v12M21 10v4" />
+                    </svg>
+                  </CompanionHeaderButton> : null}
+                  <CompanionHeaderButton
+                    label={companion.proposalHistory.length > 0
+                      ? `Show execution history${latestProposalExecutionFailed ? '; latest execution failed' : ''}`
+                      : 'No proposals executed this session'}
+                    disabled={companion.proposalHistory.length === 0}
+                    tone={historyOpen ? 'accent' : latestProposalExecutionFailed ? 'danger' : 'neutral'}
+                    expanded={historyOpen}
+                    controls="companion-proposal-history"
+                    onClick={() => setHistoryOpen((open) => !open)}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+                      <path d="M3 3v5h5" />
+                      <path d="M12 7v5l3 2" />
+                    </svg>
+                  </CompanionHeaderButton>
+                  <CompanionHeaderButton
+                    label="Companion workspaces"
+                    expanded={workspacePickerOpen}
+                    controls="companion-workspace-picker"
+                    onClick={() => setWorkspacePickerOpen(true)}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10H3Z" />
+                    </svg>
+                  </CompanionHeaderButton>
+                  <CompanionHeaderButton
+                    label="Edit Companion system prompt"
+                    expanded={promptEditorOpen}
+                    controls="companion-prompt-editor"
+                    onClick={() => setPromptEditorOpen(true)}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="m16 3 5 5-12 12-6 1 1-6Z" /><path d="m14 5 5 5" />
+                    </svg>
+                  </CompanionHeaderButton>
+                  <CompanionHeaderButton
+                    label="Edit Companion instructions"
+                    expanded={instructionsEditorOpen}
+                    controls="companion-instructions-editor"
+                    onClick={() => setInstructionsEditorOpen(true)}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M4 3h12l4 4v14H4Z" /><path d="M14 3v6h6M8 13h8M8 17h5" />
+                    </svg>
+                  </CompanionHeaderButton>
+                  {companion.status === 'recording' && companion.live?.status !== 'listening' && companion.live?.status !== 'connecting' ? (
+                    <>
+                      <CompanionHeaderButton
+                        label="Discard recording"
+                        tone="danger"
+                        onClick={() => void companion.discardRecording()}
+                      >
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                          <path d="M6 6l12 12" />
+                          <path d="M18 6L6 18" />
+                        </svg>
+                      </CompanionHeaderButton>
+                      <CompanionHeaderButton
+                        label={companion.recordingPaused ? 'Resume recording' : 'Pause recording'}
+                        tone={companion.recordingPaused ? 'accent' : 'neutral'}
+                        onClick={companion.toggleRecordingPause}
+                      >
+                        {companion.recordingPaused ? (
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden="true">
+                            <path d="M8 5v14l11-7Z" />
+                          </svg>
+                        ) : (
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                            <path d="M9 5v14" />
+                            <path d="M15 5v14" />
+                          </svg>
+                        )}
+                      </CompanionHeaderButton>
+                      <CompanionHeaderButton
+                        label="Finish recording and send"
+                        tone="success"
+                        onClick={() => void companion.toggle()}
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                          <rect x="7" y="7" width="10" height="10" rx="1" />
+                        </svg>
+                      </CompanionHeaderButton>
+                    </>
+                  ) : null}
+                  {(companion.status === 'starting' || companion.status === 'transcribing') && companion.live?.status !== 'listening' && companion.live?.status !== 'connecting' ? (
+                    <CompanionHeaderButton
+                      label="Discard recording"
+                      tone="danger"
+                      onClick={() => void companion.discardRecording()}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                        <path d="M6 6l12 12" />
+                        <path d="M18 6L6 18" />
+                      </svg>
+                    </CompanionHeaderButton>
+                  ) : null}
+                  {companion.status === 'working' ? (
+                    <CompanionHeaderButton label={companion.live?.status === 'listening' ? 'Stop Companion turn and end voice' : 'Stop Companion turn'} tone="danger" onClick={companion.stop}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <rect x="7" y="7" width="10" height="10" rx="1" />
+                      </svg>
+                    </CompanionHeaderButton>
+                  ) : null}
+                </CompanionMenuContext.Provider>
+                <div className="my-1 border-t border-[var(--border-subtle)]" />
+                <CompanionModelPicker embedded />
+                <div className="my-1 border-t border-[var(--border-subtle)]" />
+                <div className="p-2"><CompanionCurrentWorkspaceAccess refreshKey={workspacePickerOpen} /></div>
+              </Popover.Content>
+            </Popover.Portal>
+          </Popover.Root>
           <button
             type="button"
             onClick={() => void companion.close()}
@@ -370,7 +404,6 @@ export function CompanionOverlay() {
             ×
           </button>
         </div>
-        <CompanionCurrentWorkspaceAccess refreshKey={workspacePickerOpen} />
         {/* Run summary sits under the buttons so it costs no extra row. */}
         {active || companion.activity.length > 0 ? (
           <button
@@ -502,7 +535,6 @@ export function CompanionOverlay() {
       ) : null}
 
       </aside>
-      <CompanionModelPicker />
       </div>
     </div>
   );

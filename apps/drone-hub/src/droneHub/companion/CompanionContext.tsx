@@ -48,6 +48,7 @@ export type CompanionProposalHistoryEntry = {
 type CompanionTextSubmitResult = { ok: true } | { ok: false; error: string };
 
 type CompanionContextValue = {
+  sessionId: string | null;
   live: ReturnType<typeof useCompanionLive>;
   status: CompanionStatus;
   recordingPaused: boolean;
@@ -535,6 +536,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const value = React.useMemo<CompanionContextValue>(
     () => ({
       ...state,
+      sessionId: controller.getSessionId(),
       error: state.error || autoApproveSettings.error,
       live,
       transcript: state.transcript.startsWith(LIVE_COMPANION_PROMPT_PREFIX) ? '' : state.transcript,
