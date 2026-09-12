@@ -68,3 +68,14 @@ The route owns its audio mode and cleanup, so expo-audio does not start a compet
 Android 12+ requires Nearby devices / BLUETOOTH_CONNECT permission for these public headset APIs and broadcasts. Drone requests it during foreground Live preparation only when a classic headset is attached. Denial or a headset without voice-recognition support retains the standard route, including its possible post-call delay. Wired, USB, BLE and phone-only routing continue through the existing path.
 
 Validation: Android Kotlin compilation, mobile typecheck, 19 targeted TypeScript tests (audio ownership/cancellation, permissions, Companion lifecycle), and three native JVM suites passed. Native tests cover external-SCO-before-route ordering, direct hangup, immediate restart, teardown completion, late binding, timeout, unsupported hardware and refusal to disturb another active headset session. The new route still requires a physical headset test after allowing Nearby devices; simulated Bluetooth events do not establish firmware behavior or actual speaker-leak timing.
+
+
+## Follow-up: Play-only headset button after permission grant
+
+With Nearby devices granted on `87bf4437`, device logs confirm the external headset route connected at 22:04:36.391 and 22:05:20.313. Physical presses now reach Drone as KEYCODE_MEDIA_PLAY down/up pairs even while Live is running (for example 22:04:43.886, 22:04:47.667 and 22:05:28.996). The native handler interpreted each as an idempotent start and ignored it because Live was already playing. The new connection itself was working.
+
+Physical MEDIA_PLAY now toggles using the current native playback state, like PLAY_PAUSE and HEADSETHOOK. Explicit MediaSession onPlay/onPause remain idempotent. Only the first key-down acts; releases and repeats are consumed. Pausing stops and mutes native audio while the headset is still connected, before JS tears down the route.
+
+A regression test reproduced the ignored press before the change. It exercises successive Play-only stop/resume/stop presses without a delay, duplicate/up/repeat handling, explicit transport commands, stale recording acknowledgement, and silence before headset teardown. Physical speaker-spill timing still requires testing the installed build.
+
+Validation: all three native JVM suites passed, including the new Play-only headset regression.

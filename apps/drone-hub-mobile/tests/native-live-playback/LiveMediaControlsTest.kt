@@ -16,6 +16,43 @@ internal object LiveVoiceSession {
   var refreshNotification: (() -> Unit)? = null
 }
 
+private fun playOnlyHeadsetButton() {
+  val actions = mutableListOf<String>()
+  val controls = LiveMediaControls(Context(), "play-only-headset", actions::add)
+  val audio = LivePcmAudio({}, { error(it) })
+  audio.start()
+  val track = AudioTrack.latest
+  track.route(AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
+  LiveVoiceSession.stopAudio = { audio.stop() }
+  fun press(action: Int = KeyEvent.ACTION_DOWN, repeat: Int = 0) {
+    check(controls.session.callback!!.onMediaButtonEvent(Intent(extras = mapOf(
+      Intent.EXTRA_KEY_EVENT to KeyEvent(action, KeyEvent.KEYCODE_MEDIA_PLAY, repeat)))))
+  }
+  try {
+    controls.session.callback!!.onPlay() // Explicit transport Play is still idempotent.
+    check(actions.isEmpty())
+    press()
+    check(actions == listOf("pause") && !controls.isPlaying()) { "A headset sending PLAY while Live is running must pause" }
+    check(track.paused && track.released && track.volume == 0f && track.routedDevice?.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
+    press(KeyEvent.ACTION_UP)
+    press(repeat = 1)
+    controls.session.callback!!.onPause()
+    controls.update("recording") // Late startup acknowledgement cannot undo the physical pause.
+    check(actions == listOf("pause") && !controls.isPlaying())
+    press(); press(KeyEvent.ACTION_UP)
+    check(actions == listOf("pause", "play") && controls.isPlaying())
+    controls.session.callback!!.onPlay()
+    check(actions == listOf("pause", "play"))
+    press(); press(KeyEvent.ACTION_UP)
+    check(actions == listOf("pause", "play", "pause") && !controls.isPlaying())
+  } finally {
+    audio.stop()
+    controls.close()
+    LiveVoiceSession.stopAudio = null
+  }
+  println("PLAY-only headset presses toggle active/paused Live once per press and silence audio before headset teardown")
+}
+
 fun main() {
   val context = Context()
   val actions = mutableListOf<String>()
@@ -85,5 +122,6 @@ fun main() {
   receiver.onReceive(context, Intent(AudioManager.ACTION_AUDIO_BECOMING_NOISY))
   communicationListener.onCommunicationDeviceChanged(null)
   check(actions.size == count)
+  playOnlyHeadsetButton()
   println("Native media controls: early SCO/BLE disconnect, paused-before-cleanup, single-press resume, delayed cue, stale JS update, duplicate/up/repeat keys and listener cleanup passed")
 }

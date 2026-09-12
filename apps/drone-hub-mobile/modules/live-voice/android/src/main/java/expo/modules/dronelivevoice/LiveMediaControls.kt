@@ -63,8 +63,10 @@ internal class LiveMediaControls(private val context: Context, val id: String, p
         @Suppress("DEPRECATION")
         val event = intent.getParcelableExtra<KeyEvent>(Intent.EXTRA_KEY_EVENT) ?: return false
         val action = when (event.keyCode) {
-          KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_HEADSETHOOK -> if (playing) "pause" else "play"
-          KeyEvent.KEYCODE_MEDIA_PLAY -> "play"
+          // Some headsets emit PLAY on every physical press in voice mode.
+          // Treat that button as the Companion toggle; onPlay remains idempotent.
+          KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+          KeyEvent.KEYCODE_HEADSETHOOK -> if (playing) "pause" else "play"
           KeyEvent.KEYCODE_MEDIA_PAUSE -> "pause"
           KeyEvent.KEYCODE_MEDIA_STOP -> "stop"
           else -> return false
