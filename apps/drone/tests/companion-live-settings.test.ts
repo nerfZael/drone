@@ -35,15 +35,18 @@ test('Live prompt migrates legacy settings and partial writes preserve independe
     await expect(writeCompanionLiveSettings({
       systemPrompt: 'x'.repeat(COMPANION_LIVE_SYSTEM_PROMPT_MAX_CHARS + 1),
     })).rejects.toThrow('cannot exceed');
+    await writeCompanionLiveSettings({ systemPrompt: '' });
+    resetHubSettingsRepositoryForTests();
+    expect(await readCompanionLiveSettings()).toEqual({ enabled: true, systemPrompt: '' });
   });
 });
 
-test('Live instructions keep editable guidance separate from the required Hub contract', () => {
-  const instructions = companionLiveSessionInstructions('Sound curious and upbeat.');
-  expect(instructions).toContain('User-configurable voice guidance');
-  expect(instructions).toContain('Sound curious and upbeat.');
-  expect(instructions).toContain('Required Drone Hub contract (takes precedence');
-  expect(instructions).toContain('Delegation policy:');
-  expect(instructions).toContain('Never invent results');
-  expect(instructions).not.toContain(DEFAULT_COMPANION_LIVE_SYSTEM_PROMPT);
+test('Live sends custom and empty prompts verbatim; only an absent prompt uses the complete default', () => {
+  for (const prompt of ['Sound curious and upbeat.', '', '  Keep my formatting.\n\n']) {
+    expect(companionLiveSessionInstructions(prompt)).toBe(prompt);
+  }
+  expect(companionLiveSessionInstructions()).toBe(DEFAULT_COMPANION_LIVE_SYSTEM_PROMPT);
+  expect(DEFAULT_COMPANION_LIVE_SYSTEM_PROMPT).toContain('Backchannel policy:');
+  expect(DEFAULT_COMPANION_LIVE_SYSTEM_PROMPT).toContain('Delegation policy:');
+  expect(DEFAULT_COMPANION_LIVE_SYSTEM_PROMPT).toContain('Interruption policy:');
 });

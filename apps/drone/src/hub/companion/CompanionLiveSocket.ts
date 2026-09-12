@@ -53,7 +53,7 @@ export class CompanionLiveSocket {
     if (message.type === 'live_event' && this.upstream?.readyState === WebSocket.OPEN && !this.closed) {
       const event = message.event as Record<string, unknown> | undefined;
       // The browser may provide conversation context/results, never session instructions,
-      // config, or credentials. Required Live policy is owned by the Hub.
+      // config, or credentials. Prompt edits apply through settings to new sessions.
       if (!event || !['session.commentary.append', 'session.thinking.append'].includes(String(event.type))) return;
       if (typeof event.content !== 'string' || !event.content.trim() || Buffer.byteLength(event.content, 'utf8') > 400) return;
       if (event.delegation_id !== null && typeof event.delegation_id !== 'string') return;

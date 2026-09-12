@@ -68,15 +68,11 @@ test('Live session fixes client delegation, keeps keys server-side, forwards eve
   expect(h.upstream.closed).toBe(true);
 });
 
-test('new Live sessions use the latest editable prompt plus required delegation rules', async () => {
+test('new Live sessions send exactly the saved prompt without appended instructions', async () => {
   const h = harness({ enabled: async () => ({ enabled: true, systemPrompt: 'Sound curious and upbeat.' }) });
   h.session.handle({ type: 'live_start', sdp: 'v=0\r\n' });
   await tick();
-  expect(h.requests[0].session.instructions).toContain('Sound curious and upbeat.');
-  expect(h.requests[0].session.instructions).toContain('Required Drone Hub contract (takes precedence');
-  expect(h.requests[0].session.instructions).toContain('Delegation policy:');
-  expect(h.requests[0].session.instructions).toContain('Never invent results');
-  expect(h.requests[0].session.instructions).not.toContain(DEFAULT_COMPANION_LIVE_SYSTEM_PROMPT);
+  expect(h.requests[0].session.instructions).toBe('Sound curious and upbeat.');
 });
 
 test('a session created after the browser leaves is hung up without opening a sideband', async () => {
