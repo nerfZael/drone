@@ -68,6 +68,35 @@ describe('Companion browser tool broker', () => {
     );
   });
 
+  test('waits for a slow proposal apply instead of losing its actual result', async () => {
+    let call: any;
+    const broker = new CompanionBrowserToolBroker({
+      available: () => true, unavailableMessage: 'disconnected', timeoutMs: 5,
+      dispatch: (value) => { call = value; },
+    });
+    let settled = false;
+    const pending = broker.request('apply_companion_proposal_patch', {}, 1);
+    void pending.then(() => { settled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(settled).toBe(false);
+    const result = { applied: true, execution: { ok: false, operations: [{ status: 'failed' }] } };
+    expect(broker.resolve({ ...call, ok: true, result })).toBe(true);
+    await expect(pending).resolves.toEqual(result);
+  });
+
+  test('a pending proposal apply still settles on Stop or disconnect', async () => {
+    const broker = new CompanionBrowserToolBroker({
+      available: () => true, unavailableMessage: 'disconnected', dispatch: () => {},
+    });
+    const controller = new AbortController();
+    const stopped = broker.request('apply_companion_proposal_patch', {}, 1, controller.signal);
+    controller.abort();
+    await expect(stopped).rejects.toThrow('cancelled');
+    const disconnected = broker.request('apply_companion_proposal_patch', {}, 2);
+    broker.rejectAll('disconnected');
+    await expect(disconnected).rejects.toThrow('disconnected');
+  });
+
   test('bounds visible tool activity and hides unrelated runtime events', () => {
     expect(boundedCompanionActivityEvent({ type: 'assistant_delta' })).toBeNull();
     const bounded = boundedCompanionActivityEvent({

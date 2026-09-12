@@ -5,6 +5,7 @@ import { expect, mock, test } from 'bun:test';
 import { COMPANION_PROPOSAL_TARGET_ID, LIVE_COMPANION_PROMPT_PREFIX } from '@drone/assistant-chat';
 import { COMPANION_CAPABILITY, COMPANION_RUN_OPERATIONS } from '@drone/device-protocol';
 import { MobileMicrophoneCoordinator } from '../src/local-assistant/mobile-microphone-coordinator';
+import type { MobileCompanionWorkspaceTarget } from '../src/local-assistant/MobileCompanionContext';
 
 let enabled = false;
 let livePrompt = 'Speak calmly.';
@@ -59,7 +60,7 @@ const { create } = await import('react-test-renderer');
 const { MobileCompanionProvider, useMobileCompanion } = await import('../src/local-assistant/MobileCompanionContext');
 const { useMobileCompanionLiveSettings } = await import('../src/local-assistant/use-mobile-companion-live-settings');
 
-async function harness(settingsOnly = false, executeProposal = async () => ({ ok: true, operations: [] }), savedAutoApprove = false) {
+async function harness(settingsOnly = false, executeProposal: MobileCompanionWorkspaceTarget['executeProposal'] = async () => ({ ok: true, operations: [] }), savedAutoApprove = false) {
   autoApprove = savedAutoApprove; enabled = false; livePrompt = 'Speak calmly.'; rejectSettings = false; recorded = 0; backend = null; live.status = 'idle'; calls.length = 0;
   const originalAct = Object.getOwnPropertyDescriptor(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
   Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
@@ -216,7 +217,7 @@ test('mobile Live setting persists through Hub requests and failed writes keep t
 });
 
 for (const status of ['completed', 'error', 'cancelled'] as const) {
-  test(`mobile auto-approval executes only a completed proposal once (${status}) and survives closing`, async () => {
+  test(`mobile auto-approval executes inline once, regardless of later turn status (${status})`, async () => {
     let executions = 0;
     const h = await harness(false, async () => { executions++; return { ok: true, operations: [] }; });
     try {
@@ -236,17 +237,83 @@ for (const status of ['completed', 'error', 'cancelled'] as const) {
         } });
         await tick();
       });
-      expect(executions).toBe(0);
+      expect(executions).toBe(1);
       await act(async () => { emit({ type: 'status', status }); await tick(); });
-      expect(executions).toBe(status === 'completed' ? 1 : 0);
+      expect(executions).toBe(1);
       await act(async () => { emit({ type: 'status', status }); await tick(); });
-      expect(executions).toBe(status === 'completed' ? 1 : 0);
+      expect(executions).toBe(1);
       await act(async () => { await h.context().close(); });
       expect(h.context().autoApproveSettings.enabled).toBe(true);
     } finally { await h.cleanup(); }
   });
 }
 
+
+test('mobile edits a pending draft in place and returns the applied revision', async () => {
+  const executed: any[] = [];
+  const h = await harness(false, async (proposal) => {
+    executed.push(proposal);
+    return { ok: true, operations: proposal.operations.map((op) => ({ id: op.id, type: op.type, status: 'completed' })) };
+  });
+  try {
+    await act(async () => { await h.context().submitText('Create a group'); });
+    let request = calls.find((call) => call.operation === 'run.start')!.payload;
+    await proposalTool(request, 'first', '0', 'Original');
+    await act(async () => { emitRun(request, { type: 'status', status: 'completed' }); });
+    await act(async () => { await h.context().submitText('Change the name'); });
+    request = calls.filter((call) => call.operation === 'run.start').at(-1)!.payload;
+    await proposalTool(request, 'edit', '1', 'Revised');
+    expect(executed).toEqual([]);
+    expect(h.context().proposal?.operations).toEqual([{ id: 'group', type: 'create_group', name: 'Revised' }]);
+    await act(async () => { emitRun(request, { type: 'status', status: 'completed' }); });
+    await act(async () => { await h.context().executeProposal(); });
+    expect(executed).toHaveLength(1);
+    expect(calls.find((call) => call.operation === 'proposal.result')!.payload.result).toMatchObject({
+      revision: '2', autoApproved: false, execution: { ok: true },
+      proposal: { operations: [{ id: 'group', type: 'create_group', name: 'Revised' }] },
+    });
+  } finally { await h.cleanup(); }
+});
+
+test('mobile uses current approval settings and permits successive inline proposals', async () => {
+  let executions = 0;
+  const h = await harness(false, async (proposal) => {
+    executions++;
+    return { ok: true, operations: proposal.operations.map((op) => ({ id: op.id, type: op.type, status: 'completed' })) };
+  }, true);
+  try {
+    await act(async () => { await h.context().submitText('Create groups'); });
+    const request = calls.find((call) => call.operation === 'run.start')!.payload;
+    await act(async () => { await h.context().autoApproveSettings.save(false); });
+    await proposalTool(request, 'draft', '0', 'First');
+    expect(executions).toBe(0);
+    await act(async () => { await h.context().autoApproveSettings.save(true); });
+    await proposalTool(request, 'apply-first', '1', 'First revised');
+    expect(executions).toBe(1);
+    expect(h.context().proposal).toBeNull();
+    await proposalTool(request, 'apply-second', '3', 'Second');
+    expect(executions).toBe(2);
+    expect(calls.filter((call) => call.operation === 'proposal.result')).toEqual([]);
+    expect(calls.filter((call) => call.operation === 'tool.result').at(-1)!.payload.result)
+      .toMatchObject({ applied: true, autoApproved: true, revision: '4', execution: { ok: true } });
+  } finally { await h.cleanup(); }
+});
+
+function emitRun(request: any, payload: any) {
+  for (const listener of listeners) listener({ sourceDeviceId: 'hub', payload: {
+    runId: request.runId, messageId: request.messageId, ...payload,
+  } });
+}
+
+async function proposalTool(request: any, callId: string, revision: string, name: string) {
+  await act(async () => {
+    emitRun(request, { type: 'tool_call', generation: 1, callId, tool: 'apply_companion_proposal_patch', args: {
+      targetId: COMPANION_PROPOSAL_TARGET_ID, baseRevision: revision,
+      content: JSON.stringify({ version: 1, title: 'Create group', operations: [{ id: 'group', type: 'create_group', name }] }),
+    } });
+    await tick();
+  });
+}
 
 test('mobile restores auto-approval after remount and keeps the saved value when a write fails', async () => {
   let h = await harness();

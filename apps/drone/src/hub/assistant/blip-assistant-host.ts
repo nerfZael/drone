@@ -80,6 +80,18 @@ export class BlipAssistantHost {
     onEvent?: (event: BlipRuntimeEvent) => Promise<void> | void,
     deliveryMode?: 'queue' | 'asap',
   ): Promise<void> {
+    return this.runThreadPrompt(threadId, prompt, onEvent, deliveryMode);
+  }
+
+  private async runThreadPrompt(
+    threadId: string,
+    prompt: BlipPromptInput | ((handle: BlipSessionHandle) => Promise<{
+      prompt: BlipPromptInput;
+      additionalMessages: AgentMessage[];
+    }>),
+    onEvent?: (event: BlipRuntimeEvent) => Promise<void> | void,
+    deliveryMode?: 'queue' | 'asap',
+  ): Promise<void> {
     const controller = new AbortController();
     const controllers = this.promptControllers.get(threadId) ?? new Set<AbortController>();
     controllers.add(controller);
@@ -90,6 +102,14 @@ export class BlipAssistantHost {
     try {
       const handle = await this.handle(threadId);
       controller.signal.throwIfAborted();
+      if (typeof prompt === 'function') {
+        if (handle.running) throw new Error('Assistant thread is already processing');
+        const prepared = await prompt(handle);
+        controller.signal.throwIfAborted();
+        await handle.prompt(prepared.prompt, prepared.additionalMessages);
+        controller.signal.throwIfAborted();
+        return;
+      }
       const effectiveDeliveryMode =
         deliveryMode ?? this.loadedConfigurations.get(threadId)?.promptDeliveryMode;
       if (handle.running && effectiveDeliveryMode === 'asap') {
@@ -144,47 +164,48 @@ export class BlipAssistantHost {
     },
     onEvent?: (event: BlipRuntimeEvent) => Promise<void> | void,
   ): Promise<void> {
-    const handle = await this.handle(threadId);
-    if (handle.running) throw new Error('Assistant thread is already processing');
-    const history = await this.repository.readMessages(handle.state);
-    const previous = [...history].reverse().find(
-      (message): message is Extract<AgentMessage, { role: 'assistant' }> =>
-        message.role === 'assistant',
-    );
-    if (!previous) throw new Error('Assistant thread has no response to continue');
-    const callId = `host_tool_${crypto.randomUUID().replace(/-/g, '')}`;
-    const timestamp = Date.now();
-    await this.appendExternalMessage(threadId, {
-      ...previous,
-      content: [{
-        type: 'toolCall',
-        id: callId,
-        name: input.toolName,
-        arguments: input.args,
-        synthetic: true,
-      }],
-      stopReason: 'toolUse',
-      timestamp,
-      usage: {
-        input: 0,
-        output: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-        totalTokens: 0,
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-      },
-    });
-    // appendExternalMessage persists directly, so reload the handle before the
-    // tool result is prompted to keep its in-memory transcript in sync.
-    this.invalidateThread(threadId);
-    await this.promptThread(threadId, {
-      role: 'toolResult',
-      toolCallId: callId,
-      toolName: input.toolName,
-      content: [{ type: 'text', text: input.text }],
-      details: input.details ?? {},
-      isError: input.isError === true,
-      timestamp,
+    await this.runThreadPrompt(threadId, async (handle) => {
+      const history = await this.repository.readMessages(handle.state);
+      const previous = [...history].reverse().find(
+        (message): message is Extract<AgentMessage, { role: 'assistant' }> =>
+          message.role === 'assistant',
+      );
+      if (!previous) throw new Error('Assistant thread has no response to continue');
+      const callId = `host_tool_${crypto.randomUUID().replace(/-/g, '')}`;
+      const timestamp = Date.now();
+      const call: AgentMessage = {
+        role: 'assistant',
+        api: previous.api,
+        provider: previous.provider,
+        model: previous.model,
+        content: [{
+          type: 'toolCall',
+          id: callId,
+          name: input.toolName,
+          arguments: input.args,
+          synthetic: true,
+        }],
+        stopReason: 'toolUse',
+        timestamp,
+        usage: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+      };
+      const result: AgentMessage = {
+        role: 'toolResult',
+        toolCallId: callId,
+        toolName: input.toolName,
+        content: [{ type: 'text', text: input.text }],
+        details: input.details ?? {},
+        isError: input.isError === true,
+        timestamp,
+      };
+      return { prompt: call, additionalMessages: [result] };
     }, onEvent);
   }
 

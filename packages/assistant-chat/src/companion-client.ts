@@ -212,10 +212,14 @@ export class CompanionClientController {
 
   async submitProposalResult(
     result: CompanionProposalApplyResult,
+    expectedRunId: string | null,
   ): Promise<boolean> {
     const session = this.activeSession;
     const executeTool = session?.latestExecutor;
-    if (!session || !executeTool) return false;
+    if (!session || !executeTool || session.runId !== expectedRunId) {
+      this.update({ error: 'The proposal finished, but Companion could not receive its result because the original conversation is unavailable.' });
+      return false;
+    }
     const messageId = this.options.createId();
     session.messageExecutors.set(messageId, executeTool);
     session.latestMessageId = messageId;

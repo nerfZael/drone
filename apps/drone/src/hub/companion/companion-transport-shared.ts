@@ -16,7 +16,7 @@ type PendingBrowserTool = {
   generation: number;
   resolve(value: unknown): void;
   reject(error: Error): void;
-  timer: ReturnType<typeof setTimeout>;
+  timer?: ReturnType<typeof setTimeout>;
   signal?: AbortSignal;
   onAbort(): void;
 };
@@ -44,11 +44,14 @@ export class CompanionBrowserToolBroker {
     const callId = crypto.randomUUID();
     return new Promise((resolve, reject) => {
       const onAbort = () => this.reject(callId, new Error('browser tool cancelled'));
-      const timer = setTimeout(
+      // A proposal patch may execute real operations before returning. Do not
+      // report a timeout while those operations are still running: the caller
+      // could retry and duplicate side effects. Stop/disconnect still reject it.
+      const timer = tool === 'apply_companion_proposal_patch' ? undefined : setTimeout(
         () => this.reject(callId, new Error(`browser tool timed out: ${tool}`)),
         this.options.timeoutMs ?? DEFAULT_BROWSER_TOOL_TIMEOUT_MS,
       );
-      timer.unref?.();
+      timer?.unref?.();
       this.pending.set(callId, { generation, resolve, reject, timer, signal, onAbort });
       if (signal?.aborted) {
         onAbort();

@@ -267,7 +267,12 @@ export function validateCompanionProposalResultInput(input: {
       typeof raw.autoApproved !== 'boolean') throw new Error('result is invalid');
     const proposal = validateCompanionProposal(raw.proposal);
     const execution = validateProposalExecution(raw.execution, proposal.operations);
-    const result = { applied: true as const, autoApproved: raw.autoApproved, proposal, execution };
+    if (raw.revision !== undefined && (typeof raw.revision !== 'string' || !/^\d{1,16}$/.test(raw.revision))) {
+      throw new Error('result revision is invalid');
+    }
+    const result = { applied: true as const, autoApproved: raw.autoApproved, proposal, execution,
+      ...(typeof raw.revision === 'string' ? { revision: raw.revision } : {}),
+    };
     if (JSON.stringify(result).length > 250_000) throw new Error('result is too large');
     return { ok: true, runId, messageId, result };
   } catch (error) {

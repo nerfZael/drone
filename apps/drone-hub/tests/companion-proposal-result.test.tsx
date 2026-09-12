@@ -13,7 +13,8 @@ import {
   useCompanionWorkspace,
 } from '../src/droneHub/companion/CompanionWorkspaceContext';
 
-test('auto-approved proposals execute inside the original tool call and return the actual result', async () => {
+for (const outcome of ['success', 'partial-failure', 'throw'] as const) {
+test(`auto-approved proposals return the actual ${outcome} inside the original tool call`, async () => {
   const autoApproveSpy = spyOn(autoApproveModule, 'useCompanionAutoApprove').mockReturnValue({
     enabled: true,
     loading: false,
@@ -51,6 +52,7 @@ test('auto-approved proposals execute inside the original tool call and return t
   });
   let companion!: NonNullable<ReturnType<typeof useCompanion>>;
   let executions = 0;
+  const finishExecution = Promise.withResolvers<void>();
 
   function Harness() {
     companion = useCompanion()!;
@@ -60,13 +62,16 @@ test('auto-approved proposals execute inside the original tool call and return t
       resolveDroneCreationDefaults: () => null,
       executeProposal: async (proposal) => {
         executions += 1;
+        await finishExecution.promise;
+        if (outcome === 'throw') throw new Error('Apply failed');
         return {
-          ok: true,
-          operations: proposal.operations.map((operation) => ({
+          ok: outcome === 'success',
+          operations: proposal.operations.map((operation, index) => ({
             id: operation.id,
             type: operation.type,
-            status: 'completed' as const,
-            result: { chatName: 'new-chat' },
+            ...(outcome === 'partial-failure' && index === 1
+              ? { status: 'failed' as const, error: 'Second operation failed' }
+              : { status: 'completed' as const, result: { chatName: 'new-chat' } }),
           })),
         };
       },
@@ -88,7 +93,10 @@ test('auto-approved proposals execute inside the original tool call and return t
     const proposal = {
       version: 1,
       title: 'Create chat',
-      operations: [{ id: 'create', type: 'create_chat', droneId: 'd1', chatName: 'new-chat' }],
+      operations: [
+        { id: 'create', type: 'create_chat', droneId: 'd1', chatName: 'new-chat' },
+        { id: 'second', type: 'create_chat', droneId: 'd1', chatName: 'another-chat' },
+      ],
     };
     receive({
       type: 'tool_call',
@@ -102,7 +110,11 @@ test('auto-approved proposals execute inside the original tool call and return t
         content: JSON.stringify(proposal),
       },
     });
-    for (let attempt = 0; attempt < 20 && toolResults.length === 0; attempt += 1) {
+    await Promise.resolve();
+    expect(executions).toBe(1);
+    expect(toolResults).toEqual([]);
+    finishExecution.resolve();
+    for (let attempt = 0; attempt < 30 && toolResults.length === 0; attempt += 1) {
       await Promise.resolve();
     }
 
@@ -114,19 +126,22 @@ test('auto-approved proposals execute inside the original tool call and return t
       result: {
         applied: true,
         autoApproved: true,
+        revision: '1',
         proposal,
         execution: {
-          ok: true,
-          operations: [{
-            id: 'create',
-            type: 'create_chat',
-            status: 'completed',
-            result: { chatName: 'new-chat' },
-          }],
+          ok: outcome === 'success',
+          operations: outcome === 'throw'
+            ? [{ id: 'create', type: 'create_chat', status: 'failed', error: 'Apply failed' },
+               { id: 'second', type: 'create_chat', status: 'skipped' }]
+            : [{ id: 'create', type: 'create_chat', status: 'completed', result: { chatName: 'new-chat' } },
+               outcome === 'partial-failure'
+                 ? { id: 'second', type: 'create_chat', status: 'failed', error: 'Second operation failed' }
+                 : { id: 'second', type: 'create_chat', status: 'completed', result: { chatName: 'new-chat' } }],
         },
       },
     });
   } finally {
+    finishExecution.resolve();
     await companion.close();
     if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
     else Reflect.deleteProperty(globalThis, 'window');
@@ -135,3 +150,4 @@ test('auto-approved proposals execute inside the original tool call and return t
     autoApproveSpy.mockRestore();
   }
 });
+}

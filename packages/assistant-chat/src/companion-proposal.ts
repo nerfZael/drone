@@ -159,6 +159,8 @@ export type CompanionProposalExecution = {
 export type CompanionProposalApplyResult = {
   applied: true;
   autoApproved: boolean;
+  /** Revision actually executed; absent for older clients. */
+  revision?: string;
   proposal: CompanionProposal;
   execution: CompanionProposalExecution;
 };
@@ -167,8 +169,9 @@ export function companionProposalApplyResult(
   proposal: CompanionProposal,
   execution: CompanionProposalExecution,
   autoApproved: boolean,
+  revision: string,
 ): CompanionProposalApplyResult {
-  return { applied: true, autoApproved, proposal, execution };
+  return { applied: true, autoApproved, revision, proposal, execution };
 }
 
 export type CompanionProposalExecutionProgress = {

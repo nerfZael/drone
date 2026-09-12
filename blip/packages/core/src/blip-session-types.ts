@@ -122,7 +122,8 @@ export interface BlipSessionHandle {
   readonly running: boolean;
   /** False once the agent loop ends, even while final events/state are being saved. */
   readonly acceptsSteering: boolean;
-  prompt(input: BlipPromptInput): Promise<BlipSessionState>;
+  /** Additional messages are submitted together, before host prompt context and the model call. */
+  prompt(input: BlipPromptInput, additionalMessages?: AgentMessage[]): Promise<BlipSessionState>;
   retry(): Promise<BlipSessionState>;
   steer(input: BlipPromptInput): void;
   enqueue(input: BlipPromptInput): Promise<BlipSessionState>;
