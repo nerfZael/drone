@@ -131,7 +131,7 @@ class LiveVoiceModule : Module() {
       pcm = audio
       pcmId = id
       LiveVoiceSession.stopAudio = { pcm?.stop(); pcm = null; pcmId = null; LiveVoiceSession.stopAudio = null }
-      try { audio.start() } catch (error: Exception) {
+      try { audio.start(recordingCue = LiveVoiceSession.mediaControls?.isPlaying() == true) } catch (error: Exception) {
         pcm = null; pcmId = null; LiveVoiceSession.stopAudio = null
         throw error
       }

@@ -95,7 +95,7 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
   private var recordingCueQueued = false
   private var recordingCueBytes: ByteArray? = null
 
-  fun start() {
+  fun start(recordingCue: Boolean = false) {
     try {
       val rate = 48000 // Widely supported hardware rate; downsample pairs to 24 kHz.
       val minimum = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
@@ -117,6 +117,7 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
       check(output.state == AudioTrack.STATE_INITIALIZED) { "Could not open Live playback" }
       input.startRecording()
       check(input.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "Could not start the Live microphone" }
+      Log.i("DroneLiveVoice", "Microphone recording started; startup buffering available")
       // AudioTrack must run to report its actual route. Keep it silent while SCO connects.
       output.setVolume(if (playbackReady) 1f else 0f)
       output.play()
@@ -180,13 +181,22 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
             val bytes = playback.poll(100, TimeUnit.MILLISECONDS) ?: continue
             // Playback head is an unsigned 32-bit frame counter; compare modulo
             // 2^32 so long sessions keep detecting starvation after it wraps.
-            if (writtenFrames.toInt() == output.playbackHeadPosition) write(reserve)
+            // A local cue needs no reserve for network jitter. Keep that extra
+            // 250 ms for assistant speech only, after the headset readiness gate.
+            if (bytes !== recordingCueBytes && writtenFrames.toInt() == output.playbackHeadPosition) write(reserve)
+            if (bytes === recordingCueBytes) {
+              val queuedFrames = (writtenFrames - (output.playbackHeadPosition.toLong() and 0xffffffffL)) and 0xffffffffL
+              Log.i("DroneLiveVoice", "Start cue playback begins after ${queuedFrames / 24} ms queued audio")
+            }
             write(bytes)
             if (running && bytes === recordingCueBytes) Log.i("DroneLiveVoice", "Start cue submitted to Live output")
             queuedBytes.addAndGet(-bytes.size)
           }
         } catch (error: Exception) { if (running) onError(error.message ?: "Live playback failed") }
       }, "LivePcmPlayback").apply { start() }
+      // Queue locally before resolving startPcm or opening any remote transport.
+      // The JS capture acknowledgement may arrive later and is deduplicated.
+      if (recordingCue) playRecordingCue()
     } catch (error: Exception) { stop(); throw error }
   }
 

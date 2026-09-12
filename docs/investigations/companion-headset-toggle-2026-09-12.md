@@ -132,3 +132,16 @@ The start cue is now two quieter 600/750 Hz notes with 25 ms smooth fades, versu
 Validation covers repeated starts with delayed mode notifications, continued nonzero capture while output is silent, cue delivery after settling, stop during warmup, peak cue level/fade-in, and existing headset key/route-loss regressions. Physical audibility remains to be confirmed on the installed build.
 
 All three native regression suites and Android Kotlin compilation passed.
+
+
+## Follow-up: trigger the cue directly from native capture startup
+
+The user reports that the improved cue still feels delayed and coincides with Live connecting. Current logs measure the headset readiness delay but do not contain a remote-ready timestamp, so they cannot establish that coincidence. At 23:00:27.221 the track opened and at 23:00:28.023 its readiness gate cleared. On another start those points were 23:00:32.285 and 23:00:33.703. The existing `Start cue submitted` log is written after all cue samples have been submitted; it must not be mistaken for the cue's onset.
+
+The PCM microphone already starts before opening the Live transport, and its samples enter LiveAudioBuffer until the remote session becomes ready. To make cue triggering independent of JS scheduling, Android now queues its recording cue directly in native microphone startup, before startPcm resolves. The existing JS acknowledgement is deduplicated. The cue still respects Bluetooth route/volume readiness, but no longer gets the 250 ms reserve used for streamed assistant speech when playback has starved. That reserve remains for network audio.
+
+The overlay now explicitly says `Listening · Connecting Live…` while capture is active and Live is connecting. Diagnostic timestamps distinguish microphone startup, cue write onset (with the amount of audio already queued), and remote Live readiness. They do not include microphone or transcript content. The Bluetooth settling allowance is retained because it made the cue consistently audible; these changes do not promise zero-delay headset feedback.
+
+Native regression tests start capture with no JS cue call and no server audio, assert exactly one local cue, and verify that phone cues have no network reserve. Existing repeated Bluetooth-start, capture-during-warmup, cancellation, and buffered-audio ordering tests remain in place.
+
+Validation: all three native suites, 21 connection/lifecycle tests, and Android Kotlin compilation passed.

@@ -107,6 +107,7 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
         },
         onReady: (backendModel) => {
           if (active.current !== session) return;
+          console.info('[CompanionLive] Remote Live session ready');
           session.replies?.ready();
           update({ status: 'listening', backendModel });
         },

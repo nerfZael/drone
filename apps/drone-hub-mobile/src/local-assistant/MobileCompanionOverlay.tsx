@@ -67,7 +67,7 @@ function headlineLabel(companion: Companion, elapsed: number): string {
   if (companion.checkingVoiceMode) return 'Loading voice setting…';
   if (companion.status === 'working') return statusLabel('working', 0, elapsed);
   if (live.status === 'connecting') {
-    return live.muted ? 'Connecting · Mic muted' : live.capturing ? 'Connecting Live…' : 'Opening microphone…';
+    return live.muted ? 'Connecting · Mic muted' : live.capturing ? 'Listening · Connecting Live…' : 'Opening microphone…';
   }
   if (live.status === 'listening') return live.muted ? 'Live · Mic muted' : 'Live · Listening';
   if (live.status === 'paused') return 'Live paused';

@@ -69,7 +69,7 @@ private fun recordingCue() {
     val errors = CopyOnWriteArrayList<String>()
     val audio = LivePcmAudio(captured::add, errors::add, awaitHeadset = headset, bluetoothWarmupMs = 0)
     try {
-      audio.start()
+      audio.start(recordingCue = true) // Native startup queues the cue without any JS/network callback.
       val track = AudioTrack.latest
       audio.playRecordingCue()
       audio.playRecordingCue() // Late duplicate capture notification cannot replay it.
@@ -81,6 +81,7 @@ private fun recordingCue() {
       // No server audio has arrived. The cue must already be on the one PCM track.
       waitUntil { track.snapshot().any { span -> span.bytes.any { it != 0.toByte() } } }
       val tones = track.snapshot().filter { span -> span.bytes.any { it != 0.toByte() } }
+      if (!headset) check(track.snapshot().first() == tones.first()) { "Local cue must not wait for network-jitter padding" }
       check(tones.size == 1 && tones.single().bytes.size == 14400)
       val bytes = tones.single().bytes
       val samples = bytes.asList().chunked(2).map { ((it[0].toInt() and 255) or (it[1].toInt() shl 8)).toShort().toInt() }
