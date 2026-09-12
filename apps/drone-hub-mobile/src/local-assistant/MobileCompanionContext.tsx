@@ -124,6 +124,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
   const [proposalExecuting, setProposalExecuting] = React.useState(false);
   const proposalRef = React.useRef<CompanionProposal | null>(null);
   const proposalRevisionRef = React.useRef(0);
+  const proposalSessionRef = React.useRef<string | null>(null);
   const proposalExecutingRef = React.useRef(false);
   const proposalExecutionRef = React.useRef<CompanionProposalExecution | null>(null);
   const proposalExecutionContextRef = React.useRef<MobileCompanionProposalExecutionContext | null>(null);
@@ -174,6 +175,8 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     available && targetCapability?.operations.includes('auto-approve.settings.get') ? target!.targetDeviceId : '',
   );
   void targetRevision;
+  const autoApproveSettingsRef = React.useRef(autoApproveSettings);
+  autoApproveSettingsRef.current = autoApproveSettings;
 
   const resolveEditor = React.useCallback(() => {
     const focused = focusedEditorIdRef.current
@@ -219,13 +222,14 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     proposalRevisionRef.current += 1;
     proposalExecutionGenerationRef.current += 1;
     proposalRef.current = next;
+    proposalSessionRef.current = controller.getSessionId();
     setProposal(next);
     return {
       ok: true as const,
       revision: String(proposalRevisionRef.current),
       operationCount: next.operations.length,
     };
-  }, []);
+  }, [controller]);
 
   const discardProposal = React.useCallback(() => {
     if (proposalExecutingRef.current) return;
@@ -244,6 +248,8 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     returnResultToTool?: boolean;
   }): Promise<CompanionProposalExecution | undefined> => {
     const current = proposalRef.current;
+    const appliedRevision = String(proposalRevisionRef.current);
+    const proposalSessionId = proposalSessionRef.current;
     const target = workspaceTargetRef.current;
     const executionContext = proposalExecutionContextRef.current;
     if (!target || !current || !executionContext || current.operations.length === 0 ||
@@ -264,7 +270,8 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       setProposalExecution(execution);
       if (!options?.returnResultToTool) {
         await controller.submitProposalResult(
-          companionProposalApplyResult(current, execution, options?.autoApproved === true),
+          companionProposalApplyResult(current, execution, options?.autoApproved === true, appliedRevision),
+          proposalSessionId,
         );
       }
       return execution;
@@ -306,12 +313,24 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       }
     }
     if (proposalExecutionGenerationRef.current !== executionGeneration) return undefined;
+    // Successful applications are no longer an editable draft. Allow the next
+    // tool call to create a new proposal, just as on desktop.
+    if (completedExecution!.ok) {
+      proposalRevisionRef.current += 1;
+      proposalRef.current = null;
+      proposalExecutionRef.current = null;
+      proposalExecutionContextRef.current = null;
+      setProposal(null);
+      setProposalExecution(null);
+      setProposalDefaultRepoPath(null);
+    }
     const applyResult = companionProposalApplyResult(
       current,
       completedExecution!,
       options?.autoApproved === true,
+      appliedRevision,
     );
-    if (!options?.returnResultToTool) await controller.submitProposalResult(applyResult);
+    if (!options?.returnResultToTool) await controller.submitProposalResult(applyResult, proposalSessionId);
     return completedExecution!;
   }, [controller]);
 
@@ -329,12 +348,12 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
           String(args.baseRevision ?? ''),
           String(args.content ?? ''),
         );
-        if (!autoApproveSettings.enabled || autoApproveSettings.loading) return proposalUpdate;
+        if (!autoApproveSettingsRef.current.enabled || autoApproveSettingsRef.current.loading) return proposalUpdate;
         const current = proposalRef.current;
         if (!current?.operations.length) return proposalUpdate;
         const execution = await executeProposal({ autoApproved: true, returnResultToTool: true });
         if (!execution) throw new Error('PROPOSAL_EXECUTION_UNAVAILABLE');
-        return companionProposalApplyResult(current, execution, true);
+        return companionProposalApplyResult(current, execution, true, proposalUpdate.revision);
       }
       const resolveTarget = () => {
         const activeTarget = workspaceTargetRef.current;
@@ -359,7 +378,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       };
       return await executeCompanionBrowserTool(workspace, tool, args);
     },
-    [applyProposal, autoApproveSettings.enabled, autoApproveSettings.loading, executeProposal, readProposal, resolveEditor],
+    [applyProposal, executeProposal, readProposal, resolveEditor],
   );
 
   const cancel = React.useCallback(async () => {

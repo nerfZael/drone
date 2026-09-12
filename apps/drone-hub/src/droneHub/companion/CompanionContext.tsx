@@ -118,6 +118,8 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const [proposalExecuting, setProposalExecuting] = React.useState(false);
   const autoApproveSettings = useCompanionAutoApprove();
   const autoApprove = autoApproveSettings.enabled;
+  const autoApproveSettingsRef = React.useRef(autoApproveSettings);
+  autoApproveSettingsRef.current = autoApproveSettings;
   const [actionNotifications, setActionNotifications] = React.useState<CompanionActionNotification[]>([]);
   const dismissActionNotification = React.useCallback((id: string) => {
     setActionNotifications((items) => items.filter((item) => item.id !== id));
@@ -128,6 +130,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
   const proposalExecutionContextRef = React.useRef<CompanionProposalExecutionContext | null>(null);
   const proposalRef = React.useRef<CompanionProposal | null>(null);
   const proposalRevisionRef = React.useRef(0);
+  const proposalSessionRef = React.useRef<string | null>(null);
   const proposalExecutionGenerationRef = React.useRef(0);
   const voiceSubmissionGenerationRef = React.useRef(0);
   const recordingWorkspaceRef = React.useRef<{ workspace: CapturedCompanionWorkspace | null } | null>(null);
@@ -222,6 +225,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     proposalRevisionRef.current += 1;
     proposalExecutionGenerationRef.current += 1;
     proposalRef.current = next;
+    proposalSessionRef.current = controller.getSessionId();
     setProposal(next);
     setProposalExecutionProgress(null);
     setProposalDroneNames({});
@@ -230,7 +234,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       revision: String(proposalRevisionRef.current),
       operationCount: next.operations.length,
     };
-  }, []);
+  }, [controller]);
 
   const discardProposal = React.useCallback(() => {
     if (proposalExecutingRef.current) return;
@@ -256,6 +260,8 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     returnResultToTool?: boolean;
   }): Promise<CompanionProposalExecution | undefined> => {
     const current = proposalRef.current;
+    const appliedRevision = String(proposalRevisionRef.current);
+    const proposalSessionId = proposalSessionRef.current;
     const executionContext = proposalExecutionContextRef.current;
     if (!workspace || !current || !executionContext || current.operations.length === 0 ||
       proposalExecutingRef.current || proposalExecutionRef.current) return;
@@ -330,8 +336,8 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       }
     }
     if (proposalExecutionGenerationRef.current !== executionGeneration) return undefined;
-    const applyResult = companionProposalApplyResult(current, completedExecution!, autoApproved);
-    if (!options?.returnResultToTool) await controller.submitProposalResult(applyResult);
+    const applyResult = companionProposalApplyResult(current, completedExecution!, autoApproved, appliedRevision);
+    if (!options?.returnResultToTool) await controller.submitProposalResult(applyResult, proposalSessionId);
     return completedExecution!;
   }, [controller, workspace]);
 
@@ -386,12 +392,12 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
           String(args.content ?? ''),
           capturedWorkspace,
         );
-        if (!autoApprove || autoApproveSettings.loading) return proposalUpdate;
+        if (!autoApproveSettingsRef.current.enabled || autoApproveSettingsRef.current.loading) return proposalUpdate;
         const current = proposalRef.current;
         if (!current?.operations.length) return proposalUpdate;
         const execution = await executeProposal({ autoApproved: true, returnResultToTool: true });
         if (!execution) throw new Error('PROPOSAL_EXECUTION_UNAVAILABLE');
-        return companionProposalApplyResult(current, execution, true);
+        return companionProposalApplyResult(current, execution, true, proposalUpdate.revision);
       }
       if (!capturedWorkspace) {
         if (tool === 'read_active_composer' || tool === 'apply_composer_patch') {
@@ -404,7 +410,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
       }
       return await executeCompanionBrowserTool(capturedWorkspace, tool, args);
     },
-    [applyProposal, autoApprove, autoApproveSettings.loading, executeProposal, readProposal, recorder],
+    [applyProposal, executeProposal, readProposal, recorder],
   );
 
   const run = React.useCallback(

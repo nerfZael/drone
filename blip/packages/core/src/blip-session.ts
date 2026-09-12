@@ -344,7 +344,7 @@ class BlipSession implements BlipSessionHandle {
     return this.running && !this.agentLoopEnded && !this.manualCompactionAbort && !this.closed;
   }
 
-  prompt(input: BlipPromptInput): Promise<BlipSessionState> {
+  prompt(input: BlipPromptInput, additionalMessages: AgentMessage[] = []): Promise<BlipSessionState> {
     if (this.closed) return Promise.reject(new Error('Blip session is closed'));
     if (this.activePromise) {
       return Promise.reject(
@@ -352,7 +352,7 @@ class BlipSession implements BlipSessionHandle {
       );
     }
     const message = normalizePrompt(input);
-    const promise = this.runPrompt(message);
+    const promise = this.runPrompt(message, additionalMessages);
     this.activePromise = promise;
     return promise;
   }
@@ -1048,7 +1048,7 @@ class BlipSession implements BlipSessionHandle {
     return this.state;
   }
 
-  private async runPrompt(message: AgentMessage): Promise<BlipSessionState> {
+  private async runPrompt(message: AgentMessage, additionalMessages: AgentMessage[] = []): Promise<BlipSessionState> {
     const active = this.createActive(message);
     this.active = active;
     try {
@@ -1068,7 +1068,7 @@ class BlipSession implements BlipSessionHandle {
             kind: active.kind,
           })) ?? []);
       if (active.cancelRequested) active.cancelled = true;
-      else await this.agent.prompt([message, ...contextMessages]);
+      else await this.agent.prompt([message, ...additionalMessages, ...contextMessages]);
     } catch (error) {
       if (active.cancelRequested || (error instanceof Error && error.name === 'AbortError')) {
         active.cancelled = true;

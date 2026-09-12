@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
@@ -752,6 +752,7 @@ describe('Blip assistant host', () => {
     await withTempDroneDataDir('blip-assistant-tool-result-', async () => {
       const faux = registerFauxProvider({ api: 'faux', provider: 'faux', tokensPerSecond: 0 });
       let receivedResult: any;
+      let configurations = 0;
       faux.setResponses([
         fauxAssistantMessage('The proposal is ready.'),
         (context) => {
@@ -759,13 +760,13 @@ describe('Blip assistant host', () => {
           return fauxAssistantMessage('The proposal was applied successfully.');
         },
       ]);
-      const host = new BlipAssistantHost(async () => ({
+      const host = new BlipAssistantHost(async () => { configurations++; return {
         provider: 'faux',
         model: faux.getModel().id,
         thinkingLevel: 'off',
         systemPrompt: 'Hub host prompt',
         tools: [],
-      }));
+      }; });
       try {
         await host.promptThread('thread-tool-result', 'Prepare a proposal');
         await host.promptThreadWithToolResult('thread-tool-result', {
@@ -781,6 +782,11 @@ describe('Blip assistant host', () => {
           isError: false,
           details: { applied: true, execution: { ok: true } },
         });
+        expect(configurations).toBe(1);
+        const history = await host.historyPage('thread-tool-result');
+        expect(history.entries.map((entry) => entry.message.role)).toEqual([
+          'user', 'assistant', 'assistant', 'toolResult', 'assistant',
+        ]);
         expect(await host.latestAssistantVisibleText('thread-tool-result')).toBe(
           'The proposal was applied successfully.',
         );
@@ -790,6 +796,48 @@ describe('Blip assistant host', () => {
       }
     });
   });
+
+  for (const pauseAt of ['history', 'beforePrompt'] as const) {
+    test(`Stop cancels a tool-result continuation during ${pauseAt} without orphan messages`, async () => {
+      await withTempDroneDataDir('blip-stop-result-', async () => {
+        const faux = registerFauxProvider({ api: 'faux', provider: 'faux', tokensPerSecond: 0 });
+        let modelCalls = 0;
+        faux.setResponses([() => { modelCalls++; return fauxAssistantMessage('Draft ready'); },
+          () => { modelCalls++; return fauxAssistantMessage('Unexpected continuation'); }]);
+        const repository = new HubSessionRepository({ inMemory: true });
+        const started = Promise.withResolvers<void>();
+        const resume = Promise.withResolvers<void>();
+        let pause = false;
+        const wait = async () => { started.resolve(); await resume.promise; };
+        const host = new BlipAssistantHost(async () => ({
+          provider: 'faux', model: faux.getModel().id, thinkingLevel: 'off', systemPrompt: 'Test', tools: [],
+          beforePrompt: async () => { if (pause && pauseAt === 'beforePrompt') await wait(); },
+        }), undefined, repository);
+        const read = repository.readMessages.bind(repository);
+        const readSpy = spyOn(repository, 'readMessages').mockImplementation(async (state) => {
+          if (pause && pauseAt === 'history') await wait();
+          return read(state);
+        });
+        try {
+          await host.promptThread('stop-result', 'Draft');
+          pause = true;
+          const continuation = host.promptThreadWithToolResult('stop-result', {
+            toolName: 'apply_companion_proposal_patch', args: {}, text: 'Executed',
+          });
+          const settled = Promise.allSettled([continuation]);
+          await started.promise;
+          host.abortThread('stop-result');
+          resume.resolve();
+          expect((await settled)[0]!.status).toBe('rejected');
+          expect(modelCalls).toBe(1);
+          expect((await host.historyPage('stop-result')).entries.map((entry) => entry.message.role))
+            .toEqual(['user', 'assistant']);
+        } finally {
+          resume.resolve(); readSpy.mockRestore(); await host.close(); faux.unregister();
+        }
+      });
+    });
+  }
 
   test('deletes one canonical message or the selected message and its suffix', async () => {
     await withTempDroneDataDir('blip-assistant-message-delete-', async () => {

@@ -162,6 +162,10 @@ describe('Companion contracts', () => {
       },
     };
     expect(validateCompanionProposalResultInput(input)).toMatchObject({ ok: true });
+    expect(validateCompanionProposalResultInput({ ...input, result: { ...input.result, revision: '2' } }))
+      .toMatchObject({ ok: true, result: { revision: '2' } });
+    expect(validateCompanionProposalResultInput({ ...input, result: { ...input.result, revision: 'invalid' } }))
+      .toMatchObject({ ok: false });
     expect(validateCompanionProposalResultInput({
       ...input,
       result: {
@@ -526,7 +530,7 @@ test('proposal application results resume the same Companion session with browse
       operations: [{ id: 'rename', type: 'rename_chat' as const, status: 'completed' as const }],
     },
   };
-  expect(await controller.submitProposalResult(result)).toBe(true);
+  expect(await controller.submitProposalResult(result, 'proposal-session')).toBe(true);
   expect(connection.proposalResults).toEqual([{
     runId: 'proposal-session',
     messageId: 'proposal-result-message',
@@ -535,6 +539,9 @@ test('proposal application results resume the same Companion session with browse
   expect(controller.getSnapshot()).toMatchObject({
     status: 'working', transcript: 'Proposal applied', reply: '',
   });
+  expect(await controller.submitProposalResult(result, 'other-session')).toBe(false);
+  expect(connection.proposalResults).toHaveLength(1);
+  expect(controller.getSnapshot().error).toContain('original conversation is unavailable');
 
   connection.message({
     type: 'tool_call', messageId: 'proposal-result-message', generation: 2,
@@ -556,6 +563,9 @@ test('proposal application results resume the same Companion session with browse
     status: 'completed', reply: 'The chat was renamed.',
   });
   await controller.close();
+  expect(await controller.submitProposalResult(result, 'proposal-session')).toBe(false);
+  expect(connection.proposalResults).toHaveLength(1);
+  expect(controller.getSnapshot().error).toContain('original conversation is unavailable');
 });
 
 
