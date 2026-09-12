@@ -1,5 +1,8 @@
 import { expect, mock, test } from 'bun:test';
 
+mock.module('expo-modules-core', () => ({ requireOptionalNativeModule: () => null }));
+mock.module('expo-crypto', () => ({ randomUUID: () => 'permission-test' }));
+
 let granted = true;
 let requestGranted = true;
 let requests = 0;

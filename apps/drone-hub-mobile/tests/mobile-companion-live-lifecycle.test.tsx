@@ -16,7 +16,7 @@ mock.module('react-native', () => ({ Platform: platform, AppState: { currentStat
 mock.module('expo-crypto', () => ({ randomUUID: () => 'voice-session' }));
 mock.module('../src/mesh/MeshContext', () => ({ useMesh: () => ({ request: async () => ({}), subscribe: () => () => {} }) }));
 mock.module('../src/local-assistant/openMobileLiveAudio', () => ({
-  openMobileLiveAudio: async (onStopped: () => void) => { stopFromNotification = onStopped; return {}; },
+  openMobileLiveAudio: async (_callbacks: unknown, onStopped: () => void) => { stopFromNotification = onStopped; return {}; },
   prepareMobileLiveAudio: () => prepareAudio(),
 }));
 mock.module('../src/local-assistant/MobileCompanionLiveConnection', () => ({

@@ -69,3 +69,30 @@ test('Live events and settings require explicit permissions beyond existing back
   expect(isGranted(grants, 'companion', 1, 'live.settings.update')).toBe(false);
   expect(capabilityEventPolicy('companion', 'live.event')?.requiredOperation).toBe('live.start');
 });
+
+test('mesh forwards PCM transport selection and audio only to the owning session', async () => {
+  const h = harness();
+  await h.live.invoke('phone', 'live.start', { sessionId: 'pcm', transport: 'pcm' });
+  expect(h.sockets[0].messages[0]).toMatchObject({ type: 'live_start', transport: 'pcm' });
+  const event = { type: 'session.input_audio.append', audio: 'AQI=' };
+  await h.live.invoke('other', 'live.event', { sessionId: 'pcm', event });
+  await h.live.invoke('phone', 'live.event', { sessionId: 'stale', event });
+  expect(h.sockets[0].messages).toHaveLength(1);
+  await h.live.invoke('phone', 'live.event', { sessionId: 'pcm', event });
+  expect(h.sockets[0].messages.at(-1)).toEqual({ type: 'live_event', event });
+  h.live.close();
+});
+
+test('mesh bounds audio waiting for a stalled receiver and closes the affected session', async () => {
+  let release!: () => void;
+  let send!: (event: unknown) => void;
+  let closed = 0;
+  const live = new CompanionLiveMeshSessions({
+    emit: () => new Promise<void>((resolve) => { release = resolve; }),
+    createSocket: (callback) => { send = callback; return { handle() {}, close() { closed++; } }; },
+  });
+  await live.invoke('phone', 'live.start', { sessionId: 'pcm', transport: 'pcm' });
+  for (let i = 0; i < 100; i++) send({ type: 'live_event', event: { type: 'session.output_audio.delta', delta: 'A'.repeat(32000) } });
+  await tick(); expect(closed).toBe(1);
+  live.close(); release(); await tick();
+});

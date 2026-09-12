@@ -12,15 +12,15 @@ export function MobileCompanionLivePanel({ live, stopTurn, working }: {
   return <View style={styles.panel} accessibilityLabel="Companion Live voice">
     <View style={styles.row}>
       {live.status === 'connecting' ? <ActivityIndicator color={colors.accent} size="small" /> : null}
-      <Text style={styles.title}>{live.status === 'connecting' ? 'Connecting Live…' : active ? live.muted ? 'Live · Mic muted' : 'Live · Listening' : 'Live ended'}</Text>
+      <Text style={styles.title}>{live.status === 'connecting' ? live.muted ? 'Connecting · Mic muted' : live.capturing ? 'Recording · Connecting Live…' : 'Opening microphone…' : active ? live.muted ? 'Live · Mic muted' : 'Live · Listening' : 'Live ended'}</Text>
     </View>
     <Text style={styles.copy}>{live.targetName}{live.backendModel ? ` · ${live.backendModel}` : ''}</Text>
     {live.error ? <Text style={styles.error}>{live.error}</Text> : null}
-    {live.captions ? <Text selectable style={styles.copy}>{live.captions}</Text> : <Text style={styles.copy}>Speak when connected. Captions and backend activity will appear here.</Text>}
+    {live.captions ? <Text selectable style={styles.copy}>{live.captions}</Text> : <Text style={styles.copy}>Speech is captured while Live connects. Captions appear once connected.</Text>}
     {live.queued > 0 ? <Text style={styles.copy}>Waiting for transcript. Follow-up delivery follows Companion settings.</Text> : null}
     <View style={styles.row}>
       {active ? <>
-        <Button tone="quiet" disabled={live.status === 'connecting'} onPress={live.toggleMute}>{live.muted ? 'Unmute' : 'Mute'}</Button>
+        <Button tone="quiet" onPress={live.toggleMute}>{live.muted ? 'Unmute' : 'Mute'}</Button>
         <Button tone="quiet" onPress={live.stop}>End voice</Button>
       </> : null}
       {working ? <Button tone="quiet" onPress={stopTurn}>Stop Companion turn</Button> : null}

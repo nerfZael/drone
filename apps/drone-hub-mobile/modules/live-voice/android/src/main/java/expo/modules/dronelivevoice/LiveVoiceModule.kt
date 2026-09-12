@@ -17,12 +17,15 @@ internal object LiveVoiceSession {
   var context: WeakReference<ReactContext>? = null
   var started: Promise? = null
   val stopped = mutableListOf<Promise>()
+  var stopAudio: (() -> Unit)? = null
   var emitStopped: ((String) -> Unit)? = null
 
   fun finish(sessionId: String? = id) {
     if (id != sessionId) return
     val oldId = id ?: return
     id = null
+    stopAudio?.invoke()
+    stopAudio = null
     started?.reject("LIVE_STOPPED", "Live voice was stopped before startup completed", null)
     started = null
     emitStopped?.invoke(oldId)
@@ -36,9 +39,36 @@ internal object LiveVoiceSession {
 class LiveVoiceModule : Module() {
   private var ownedSessionId: String? = null
   private var foreground = true
+  private var pcm: LivePcmAudio? = null
+  private var pcmId: String? = null
   override fun definition() = ModuleDefinition {
     Name("DroneLiveVoice")
-    Events("stopped")
+    Events("stopped", "pcmAudio", "pcmError")
+    AsyncFunction("startPcm") { id: String ->
+      check(LiveVoiceSession.id != null) { "Start the Live foreground service first" }
+      check(pcm == null) { "Live audio is already running" }
+      val audio = LivePcmAudio(
+        { audio -> sendEvent("pcmAudio", mapOf("id" to id, "audio" to audio)) },
+        { error -> sendEvent("pcmError", mapOf("id" to id, "error" to error)) })
+      pcm = audio
+      pcmId = id
+      LiveVoiceSession.stopAudio = { pcm?.stop(); pcm = null; pcmId = null }
+      try { audio.start() } catch (error: Exception) {
+        pcm = null; pcmId = null; LiveVoiceSession.stopAudio = null
+        throw error
+      }
+    }.runOnQueue(Queues.MAIN)
+    AsyncFunction("stopPcm") { id: String ->
+      if (pcmId == id) {
+        pcm?.stop(); pcm = null; pcmId = null; LiveVoiceSession.stopAudio = null
+      }
+    }.runOnQueue(Queues.MAIN)
+    AsyncFunction("mutePcm") { id: String, muted: Boolean ->
+      if (pcmId == id) pcm?.mute(muted)
+    }.runOnQueue(Queues.MAIN)
+    AsyncFunction("playPcm") { id: String, audio: String ->
+      if (pcmId == id) pcm?.play(audio)
+    }.runOnQueue(Queues.MAIN)
     OnActivityEntersForeground { foreground = true }
     OnActivityEntersBackground { foreground = false }
     AsyncFunction("start") { sessionId: String, promise: Promise ->
@@ -84,6 +114,7 @@ class LiveVoiceModule : Module() {
       .runOnQueue(Queues.MAIN)
     OnDestroy {
       Handler(Looper.getMainLooper()).post {
+        pcm?.stop(); pcm = null; pcmId = null
         if (LiveVoiceSession.id == ownedSessionId) {
           LiveVoiceSession.context?.get()?.let { context ->
             context.stopService(Intent(context, LiveVoiceService::class.java))

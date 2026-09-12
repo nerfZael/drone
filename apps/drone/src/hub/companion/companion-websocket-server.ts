@@ -26,6 +26,8 @@ export function createCompanionWebSocketServer(runtime: CompanionRuntime): WebSo
     const send = (payload: unknown) => {
       if (socket.readyState !== WebSocket.OPEN) return;
       try {
+        // Bound PCM output when a desktop client stops draining its socket.
+        if (live && socket.bufferedAmount > 1_000_000) { socket.terminate(); return; }
         socket.send(JSON.stringify(payload));
       } catch {
         // The socket can close after the ready-state check.

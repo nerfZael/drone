@@ -1,108 +1,122 @@
 import { expect, test } from 'bun:test';
 import { CompanionLiveConnection } from '../src/droneHub/companion/CompanionLiveConnection';
 import { browserMicrophoneCoordinator } from '../src/droneHub/chat/browser-microphone-coordinator';
-import { CompanionClientController, type CompanionServerMessage } from '@drone/assistant-chat';
+import { CompanionClientController, type CompanionServerMessage, type LivePcmCallbacks, type LivePcmAudio } from '@drone/assistant-chat';
 import { waitForCompanionReply } from '../src/droneHub/companion/waitForCompanionReply';
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-test('Live audio waits for startup, handles captions and autoplay, and releases all local resources', async () => {
-  const h = browserHarness();
-  const errors: string[] = [];
-  const events: unknown[] = [];
-  const models: string[] = [];
-  const blocked: boolean[] = [];
-  const connection = new CompanionLiveConnection({
-    onEvent: (event) => events.push(event), onReady: (model) => models.push(model),
-    onError: (error) => errors.push(error), onPlaybackBlocked: (value) => blocked.push(value),
-  });
+function harness(delayed = false) {
+  const originalSocket = Object.getOwnPropertyDescriptor(globalThis, 'WebSocket');
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  let socket: FakeSocket | undefined;
+  class FakeSocket {
+    static OPEN = 1;
+    readyState = 0; bufferedAmount = 0; sent: any[] = [];
+    failSend = false;
+    onopen?: () => void; onclose?: () => void; onerror?: () => void; onmessage?: (event: { data: string }) => void;
+    constructor(_url: string) { socket = this; }
+    open() { this.readyState = 1; this.onopen?.(); }
+    send(data: string) { if (this.failSend) throw new Error('Socket failed'); this.sent.push(JSON.parse(data)); }
+    message(event: unknown) { this.onmessage?.({ data: JSON.stringify(event) }); }
+    close() { this.readyState = 3; this.onclose?.(); }
+  }
+  Object.defineProperty(globalThis, 'WebSocket', { configurable: true, value: FakeSocket });
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { location: { origin: 'http://localhost' } } });
+  let capture!: LivePcmCallbacks; let finish!: (audio: LivePcmAudio) => void;
+  let released = 0; let muted = false; let resumed = false;
+  const played: string[] = []; const errors: string[] = []; const models: string[] = []; const events: unknown[] = [];
+  const audio: LivePcmAudio = { mute: (value) => { muted = value; }, play: (value) => played.push(value),
+    resume: async () => { resumed = true; }, release: async () => { released++; } };
+  const connection = new CompanionLiveConnection({ onEvent: (event) => events.push(event), onReady: (model) => models.push(model),
+    onError: (error) => errors.push(error), onPlaybackBlocked() {}, openAudio: async (callbacks) => {
+      capture = callbacks;
+      capture.onAudio('AQI='); // Capture may begin before native/browser setup resolves.
+      return delayed ? new Promise((resolve) => { finish = resolve; }) : audio;
+    } });
+  return { connection, socket: () => socket!, capture: (value: string) => capture.onAudio(value),
+    finish: () => finish(audio), errors, models, events, played, released: () => released, muted: () => muted, resumed: () => resumed,
+    async cleanup() {
+      connection.close(); socket?.message({ type: 'live_closed' }); await tick();
+      for (const [name, value] of [['WebSocket', originalSocket], ['window', originalWindow]] as const) {
+        if (value) Object.defineProperty(globalThis, name, value); else Reflect.deleteProperty(globalThis, name);
+      }
+    } };
+}
+
+test('desktop buffers from audio startup and flushes once before continuing live capture', async () => {
+  const h = harness();
   try {
-    await connection.start();
-    expect(h.track.enabled).toBe(false);
-    expect(browserMicrophoneCoordinator.getSnapshot()).toBe('companion');
+    await h.connection.start();
+    h.capture('AwQ=');
+    expect(h.muted()).toBe(false);
     h.socket().open();
-    expect(h.socket().sent[0]).toMatchObject({ type: 'live_start', sdp: 'v=0\r\n' });
-    h.socket().message({ type: 'live_ready', sdp: 'answer', backendModel: 'selected-backend' });
-    h.peer().channel.readyState = 'open';
-    h.peer().channel.message(null);
-    h.socket().message(null);
-    h.peer().channel.message({ type: 'session.started' });
-    expect(h.track.enabled).toBe(true);
-    expect(models).toEqual(['selected-backend']);
-    h.peer().ontrack?.({ streams: [{}] });
-    await Promise.resolve();
-    expect(blocked.at(-1)).toBe(true);
-    h.audio.allowPlayback = true;
-    await connection.play();
-    expect(blocked.at(-1)).toBe(false);
+    expect(h.socket().sent).toEqual([{ type: 'live_start', transport: 'pcm' }]);
+    h.socket().message({ type: 'live_ready', transport: 'pcm', backendModel: 'chosen' });
+    h.capture('BQY='); await tick();
+    expect(h.socket().sent.slice(1).map((message) => message.event.audio)).toEqual(['AQIDBA==', 'BQY=']);
+    h.socket().message({ type: 'live_ready', transport: 'pcm', backendModel: 'chosen' });
+    expect(h.models).toEqual(['chosen']);
+    h.socket().message({ type: 'live_event', event: { type: 'session.output_audio.delta', delta: 'Bwg=' } });
     h.socket().message({ type: 'live_event', event: { type: 'session.input_transcript.delta', delta: 'Hello' } });
-    expect(events).toHaveLength(1);
-    connection.mute(true);
-    expect(h.track.enabled).toBe(false);
-    connection.mute(false);
-    expect(h.track.enabled).toBe(true);
-    connection.close();
-    expect(h.track.stopped).toBe(true);
-    expect(h.peer().closed).toBe(false);
-    h.peer().ontrack?.({ streams: [{}] });
-    expect(h.audio.srcObject).toBeNull();
-    h.peer().channel.message({ type: 'session.closed' });
-    expect(h.peer().closed).toBe(true);
-    expect(h.socket().sent.at(-1)).toEqual({ type: 'live_close' });
-    expect(h.audio.srcObject).toBeNull();
+    expect(h.played).toEqual(['Bwg=']); expect(h.events).toHaveLength(1);
+    await h.connection.play(); expect(h.resumed()).toBe(true);
+    expect(h.errors).toEqual([]);
+  } finally { await h.cleanup(); }
+  expect(h.released()).toBe(1);
+  expect(browserMicrophoneCoordinator.getSnapshot()).toBeNull();
+});
+
+test('desktop startup mute discards queued speech and remains muted on connection', async () => {
+  const h = harness();
+  try {
+    await h.connection.start(); h.connection.mute(true); h.capture('AwQ='); h.socket().open();
+    h.socket().message({ type: 'live_ready', transport: 'pcm' }); await tick();
+    expect(h.socket().sent.slice(1).map((message) => message.event.audio)).toEqual(['AAA=']);
+    expect(h.muted()).toBe(true);
+  } finally { await h.cleanup(); }
+});
+
+test('desktop cancel during microphone startup releases late audio without opening a session', async () => {
+  const h = harness(true);
+  try {
+    const start = h.connection.start(); h.connection.close();
+    expect(browserMicrophoneCoordinator.getSnapshot()).toBe('companion');
+    h.finish(); await start; await tick();
+    expect(h.socket()).toBeUndefined(); expect(h.released()).toBe(1);
     expect(browserMicrophoneCoordinator.getSnapshot()).toBeNull();
-    expect(errors).toEqual([]);
-  } finally { connection.close(); h.restore(); }
+  } finally { await h.cleanup(); }
 });
 
-test('Live overlaps negotiation with control attachment and preserves startup mute', async () => {
-  const h = browserHarness();
-  const models: string[] = [];
-  const connection = new CompanionLiveConnection({ onEvent() {}, onReady: (model) => models.push(model), onError() {}, onPlaybackBlocked() {} });
+test('desktop drops queued speech after a startup error and ignores late readiness', async () => {
+  const h = harness();
   try {
-    await connection.start();
-    h.socket().open();
-    h.socket().message({ type: 'live_answer', sdp: 'early-answer', backendModel: 'chosen' });
-    expect(h.peer().answers).toEqual(['early-answer']);
-    h.peer().channel.message({ type: 'session.started' });
-    expect(models).toEqual([]);
-    expect(h.track.enabled).toBe(false);
-    connection.mute(true);
-    h.socket().message({ type: 'live_ready', sdp: 'early-answer', backendModel: 'chosen' });
-    expect(models).toEqual(['chosen']);
-    expect(h.track.enabled).toBe(false);
-    expect(h.peer().answers).toEqual(['early-answer']);
-    connection.mute(false);
-    expect(h.track.enabled).toBe(true);
-  } finally { connection.close(); h.peer().channel.message({ type: 'session.closed' }); h.restore(); }
+    await h.connection.start(); h.socket().open(); h.socket().message({ type: 'live_error', error: 'No credentials' });
+    h.capture('AwQ='); h.socket().message({ type: 'live_ready', transport: 'pcm' }); await tick();
+    expect(h.models).toEqual([]); expect(h.errors).toEqual(['No credentials']);
+    expect(h.socket().sent.some((event) => event.type === 'live_event')).toBe(false);
+    expect(h.released()).toBe(1);
+  } finally { await h.cleanup(); }
 });
 
-test('desktop opens its control socket while ICE is gathering and sends the offer once', async () => {
-  const h = browserHarness(undefined, true);
-  const connection = new CompanionLiveConnection({ onEvent() {}, onReady() {}, onError() {}, onPlaybackBlocked() {} });
-  try {
-    const starting = connection.start();
-    for (let i = 0; i < 5; i++) await Promise.resolve();
-    h.socket().open();
-    expect(h.socket().sent).toEqual([]);
-    h.peer().iceGatheringState = 'complete';
-    h.peer().dispatchEvent(new Event('icegatheringstatechange'));
-    await starting;
-    expect(h.socket().sent).toEqual([{ type: 'live_start', sdp: 'v=0\r\n' }]);
-  } finally { connection.close(); h.peer().channel.message({ type: 'session.closed' }); h.restore(); }
-});
-
-test('cancelling microphone startup stops a late stream and never creates a session', async () => {
-  let finish!: (stream: unknown) => void;
-  const h = browserHarness(() => new Promise((resolve) => { finish = resolve; }));
-  const connection = new CompanionLiveConnection({ onEvent: () => {}, onReady: () => {}, onError: () => {}, onPlaybackBlocked: () => {} });
-  try {
-    const starting = connection.start();
-    connection.close();
-    finish(h.stream);
-    await starting;
-    expect(h.track.stopped).toBe(true);
-    expect(h.socket()).toBeUndefined();
-    expect(browserMicrophoneCoordinator.getSnapshot()).toBeNull();
-  } finally { connection.close(); h.restore(); }
+test('desktop socket send failures report an error and still release the microphone', async () => {
+  for (const phase of ['start', 'event', 'close']) {
+    const h = harness();
+    try {
+      await h.connection.start();
+      if (phase !== 'start') h.socket().open();
+      h.socket().failSend = true;
+      expect(() => {
+        if (phase === 'start') h.socket().open();
+        else if (phase === 'event') h.connection.send({ type: 'session.commentary.append' });
+        else h.connection.close();
+      }).not.toThrow();
+      await tick();
+      expect(h.released()).toBe(1);
+      expect(h.socket().readyState).toBe(3);
+      expect(h.errors).toHaveLength(phase === 'close' ? 0 : 1);
+      expect(browserMicrophoneCoordinator.getSnapshot()).toBeNull();
+    } finally { await h.cleanup(); }
+  }
 });
 
 test('ending voice rejects the result waiter without cancelling an active Companion backend', async () => {
@@ -125,59 +139,3 @@ test('ending voice rejects the result waiter without cancelling an active Compan
   expect(controller.getSnapshot().reply).toBe('Finished in the UI');
   await controller.close();
 });
-
-function browserHarness(getUserMedia?: () => Promise<unknown>, gathering = false) {
-  const originals = new Map<string, PropertyDescriptor | undefined>();
-  const set = (key: string, value: unknown) => {
-    originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
-    Object.defineProperty(globalThis, key, { configurable: true, value });
-  };
-  const track = { enabled: true, stopped: false, onended: null as null | (() => void), stop() { this.stopped = true; } };
-  const stream = { getTracks: () => [track] };
-  const audio = { autoplay: false, srcObject: null as unknown, allowPlayback: false, pause() {},
-    async play() { if (!this.allowPlayback) throw new Error('autoplay blocked'); } };
-  let socket: FakeSocket;
-  let peer: FakePeer;
-  class FakeSocket {
-    static OPEN = 1;
-    readyState: number | string = 0;
-    sent: any[] = [];
-    onopen?: () => void;
-    onclose?: () => void;
-    onerror?: () => void;
-    onmessage?: (event: { data: string }) => void;
-    constructor(_url: string) { socket = this; }
-    open() { this.readyState = 1; this.onopen?.(); }
-    send(text: string) { this.sent.push(JSON.parse(text)); }
-    message(event: unknown) { this.onmessage?.({ data: JSON.stringify(event) }); }
-    close() { this.readyState = 3; this.onclose?.(); }
-  }
-  class FakePeer extends EventTarget {
-    iceGatheringState = gathering ? 'gathering' : 'complete';
-    localDescription = { sdp: 'v=0\r\n' };
-    connectionState = 'connected';
-    closed = false;
-    channel = new FakeSocket('channel');
-    ontrack?: (event: any) => void;
-    onconnectionstatechange?: () => void;
-    constructor() { super(); peer = this; }
-    addTrack() {}
-    createDataChannel() { return this.channel; }
-    async createOffer() { return this.localDescription; }
-    async setLocalDescription() {}
-    answers: string[] = [];
-    async setRemoteDescription(answer: { sdp: string }) { this.answers.push(answer.sdp); }
-    close() { this.closed = true; }
-  }
-  set('window', { location: { origin: 'http://localhost' } });
-  set('navigator', { mediaDevices: { getUserMedia: getUserMedia ?? (async () => stream) } });
-  set('document', { createElement: () => audio });
-  set('RTCPeerConnection', FakePeer);
-  set('WebSocket', FakeSocket);
-  return { track, stream, audio, socket: () => socket, peer: () => peer, restore: () => {
-    for (const [key, original] of originals) {
-      if (original) Object.defineProperty(globalThis, key, original);
-      else Reflect.deleteProperty(globalThis, key);
-    }
-  } };
-}

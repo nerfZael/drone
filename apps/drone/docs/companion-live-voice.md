@@ -8,6 +8,16 @@ Configure an **OpenAI API key** in Hub Settings for the voice model. The backend
 
 ## Using it
 
+Both apps capture microphone audio while Live connects. Once the session is ready,
+they send the buffered opening speech in order and continue using the same recorder.
+The panel shows **Recording · connecting** after the first audio frame arrives.
+Microphone permission, native audio setup, and voice-mode selection still precede
+capture; captions require a connected session. Mute is available during connection
+and discards unsent speech. End voice, errors, and timeout discard the local buffer.
+The in-memory input queue is capped at 40 seconds (1.92 MB of PCM); overflow ends the
+session with an error rather than silently losing the beginning of an utterance.
+
+
 - Live captions show both sides of the conversation. The existing backend reply, tool activity, tool details, and proposal controls remain available. The Live panel also shows currently running tools.
 - **Mute mic** disables input while preserving the conversation and spoken output. A **Play voice audio** button appears if the browser blocks playback.
 - **End voice** closes audio and discards voice requests that have not yet been submitted. A backend task already submitted continues and can finish in the UI.
@@ -21,21 +31,50 @@ Configure an **OpenAI API key** in Hub Settings for the voice model. The backend
 
 Mobile also supports Live with client delegation. **Settings → Built-in → Companion Live voice** contains the toggle; the compact Companion overlay keeps only conversation controls. Select the Hub if more than one is connected. The toggle saves immediately to that Hub and shares the desktop preference. The phone rereads it before starting voice. With Live off, the existing recording and transcription path remains available.
 
-Install an updated native app containing `react-native-webrtc`; this is not an Expo Go or JavaScript-only update. The checked-in Android project autolinks the module and includes microphone/audio routing permissions and WebRTC ProGuard rules. Native audio setup uses Expo audio permissions and speaker routing. [React Native WebRTC installation](https://github.com/react-native-webrtc/react-native-webrtc), [Android requirements](https://github.com/react-native-webrtc/react-native-webrtc/blob/master/Documentation/AndroidInstallation.md).
+Install an updated native app containing the `DroneLiveVoice` PCM capture/playback
+module and update the Hub together. This requires a native build, not Expo Go or a
+JavaScript-only update. Android uses voice-communication capture, hardware echo
+cancellation/noise suppression when available, continuous PCM playback, and the
+existing foreground service. The iOS module uses a voice-processing audio engine.
+Expo continues to own recording permissions and the app's audio-mode/routing setup.
+An older native installation gets an update-required error instead of a silent
+fallback that loses startup speech.
 
-Tap the Companion microphone to connect. The Live panel shows captions and the backend model; normal backend activity, replies, and proposals remain below it. Internal delegation instructions stay hidden from the transcript bubble. While a proposal is being applied, new Live delegations are rejected with a request to ask again after it finishes. Mute preserves playback. End voice stops audio while submitted backend work continues; Stop Companion turn cancels work and ends voice. Backgrounding the app or locking the screen ends voice. Reopen and tap the microphone to start a fresh voice session. Other recording features cannot take the microphone until Live releases it, including cleanup after a late permission response.
+Tap the Companion microphone to connect. The Live panel shows captions and the backend model; normal backend activity, replies, and proposals remain below it. Internal delegation instructions stay hidden from the transcript bubble. While a proposal is being applied, new Live delegations are rejected with a request to ask again after it finishes. Mute preserves playback. End voice stops audio while submitted backend work continues; Stop Companion turn cancels work and ends voice. On iOS, backgrounding the app or locking the screen ends voice. Android retains its foreground recording notification and Stop action while backgrounded. Reopen and tap the microphone to start a fresh voice session. Other recording features cannot take the microphone until Live releases it, including cleanup after a late permission response.
 
 Switching to another Hub ends the session. Changing chat/file context cannot redirect an existing Live request's phone tools: those calls fail with a request to start a new conversation. Start a new voice session after changing workspaces.
 
 Mobile uses device-mesh operations `live.start`, `live.event`, `live.ping`, and `live.close`, plus `live.settings.get`/`live.settings.update`, with device/session-scoped `live.event` notifications. Live controls and preference writes require explicit device grants. Existing `run.start` access also permits reading the non-secret mode flag, so old backend permissions continue to work when Live is off. Enabling Live without granting its controls produces an actionable error.
 
-`CompanionLiveMeshSessions` reuses the Hub's `CompanionLiveSocket` session creation, client-only delegation, event validation, heartbeat expiry, and HTTP hangup fallback. OpenAI credentials stay on the Hub. Native microphone/speaker audio travels directly to OpenAI over WebRTC; delegation and backend work travel through the paired-device mesh. The shared `CompanionLiveConversation` and `waitForCompanionReply` live in `@drone/assistant-chat`, so desktop and mobile share result correlation and stale-answer suppression. The selected backend and ASAP/Queue choice still come from normal Companion settings.
+`CompanionLiveMeshSessions` reuses the Hub's `CompanionLiveSocket` entry point, client-only delegation, event validation, and heartbeat expiry. OpenAI credentials stay on the Hub. PCM microphone/speaker audio, delegation, and backend work travel through the paired-device mesh. The Hub relays audio through a primary Live WebSocket; it does not send audio through a WebRTC sideband. The shared `CompanionLiveConversation` and `waitForCompanionReply` live in `@drone/assistant-chat`, so desktop and mobile share result correlation and stale-answer suppression. The selected backend and ASAP/Queue choice still come from normal Companion settings.
 
 ## Implementation
 
 `GET` and `PUT /api/settings/companion/live-voice` read/write `{ enabled: boolean }` under the independent `companion-live-voice` settings key. This avoids overwriting model settings when the toggle changes.
 
-A dedicated connection to the existing authenticated `/api/companion/stream` WebSocket carries `live_start`, `live_ready`, `live_event`, `live_ping`, and `live_close` messages. It owns one OpenAI Live session. `CompanionLiveSocket` fixes the voice model to `gpt-live-1`, client delegation, and `store: false`; it keeps the project API key on the Hub. The browser exchanges SDP through this socket and carries audio directly over WebRTC. The Hub sideband receives transcript/delegation events and returns speakable results. It also requests session closure on browser disconnect or missing heartbeats and waits briefly for finalization. Ending voice releases the microphone immediately while WebRTC and the control channel drain final events. The Hub uses the HTTP hangup endpoint if creation finishes after the browser leaves, attachment fails, or graceful closure times out; it logs unconfirmed final usage when no final event arrives.
+A dedicated connection to the authenticated `/api/companion/stream` WebSocket
+carries `live_start` with `transport: "pcm"`, `live_ready`, `live_event`, `live_ping`,
+and `live_close`. Mobile uses the equivalent device-scoped mesh operations. The
+client opens its recorder first and buffers audio before starting the network
+session. `CompanionPcmLiveSocket` opens `wss://api.openai.com/v1/live/sessions` and
+sends `session.start` with `gpt-live-1`, client delegation, `store: false`, and mono
+PCM16LE at 24 kHz. Only after `session.started` does it report `live_ready` and accept
+validated `session.input_audio.append` events. Each chunk is at most 500 ms; the
+clients normally emit roughly 85–100 ms. Audio chunks drain in capture order, with
+one input send in flight at a time on mobile, so continuing capture cannot overtake
+the startup buffer. Muted frames contain silence to keep Live's audio clock running.
+
+`session.output_audio.delta` drives scheduled PCM playback, independently from
+captions and backend work. Local input/output queues and Hub transport queues have
+bounds; slow or disconnected sessions fail rather than accumulating indefinitely.
+Closing stops local capture/playback immediately, drops unsent audio, and sends
+`session.close`; the primary socket is terminated if finalization does not arrive
+within five seconds. The project key remains on the Hub and audio is not written
+to local recording files by this path.
+
+The legacy SDP/WebRTC path remains available on the Hub for older clients. Its
+sideband setup and HTTP hangup fallback remain unchanged. New buffered clients
+require the new PCM-aware Hub.
 
 `CompanionLiveConversation` accumulates bounded conversation context and holds delegation notifications until transcript text arrives. It deduplicates delegation IDs, coalesces pending notifications into the current accumulated request, and dispatches new requests even while the backend is working. Only the latest dispatched request can supply a spoken result. Results return with the original client delegation ID. Appends stay below 400 UTF-8 bytes each. Answers requiring more than four appends are referred to the UI in full rather than cut off mid-answer; the UI keeps the backend's complete reply. Original audio is not automatically supplied to the backend.
 
@@ -49,30 +88,24 @@ Protocol references: [Live delegation](https://developers.openai.com/api/docs/gu
 
 ## Startup latency
 
-Desktop opens the Hub WebSocket while gathering ICE candidates. After OpenAI creates a
-session, the Hub sends `live_answer` immediately so both desktop and mobile can apply
-the SDP and negotiate media while the sideband attaches. The existing `live_ready`
-message still follows sideband attachment. Clients enable microphone delivery only
-after both control readiness and `session.started`, preserving transcript/delegation
-observation from the start. Older clients ignore `live_answer` and continue to use
-`live_ready`; new clients also accept Hubs that only send `live_ready`.
+The PCM path eliminates the client's ICE gathering, SDP exchange, and separate
+sideband attachment. Microphone setup, Hub/mesh connectivity, and OpenAI session
+startup still take time; buffering protects speech captured during the network
+portion. No real-device latency improvement has been measured yet.
 
-These changes overlap network steps; they do not establish a measured reduction on
-real devices. Microphone permission/setup, ICE, OpenAI session creation, and media
-negotiation still contribute to startup time. Startup microphone buffering has not
-been implemented. The current tracks remain disabled until the session is ready.
-
-Live WebRTC audio must use the negotiated media track. The sideband explicitly does
-not accept `session.input_audio.append` ([official transport guidance](https://developers.openai.com/api/docs/guides/voice-server-controls?api=live)).
-Preserving opening speech therefore needs a capture/replay pipeline in the browser
-and native mobile audio layer, or a change to the primary WebSocket audio transport.
-Replay must preserve the order of ongoing speech; sending current microphone audio
-alongside the backlog would overlap or duplicate it. Capturing early does not make
-recognition available before connection, and device permission still gates capture.
+Live requires microphone audio on its primary transport. The sideband explicitly
+rejects audio appends ([server controls](https://developers.openai.com/api/docs/guides/voice-server-controls?api=live)).
+The supported [primary WebSocket audio flow](https://developers.openai.com/api/docs/guides/voice-websockets?api=live)
+is used here because the mobile WebRTC library does not expose replay of captured
+PCM into its microphone track. This changes the network path: audio now passes
+through the Hub and mobile device mesh, so poor Hub connectivity can affect speech
+latency and playback. Real-device verification must include initial backlog
+handling, echo cancellation, interruption, Bluetooth/headset routing, and network
+changes.
 
 ## Validation
 
-Focused tests cover mode persistence and failed saves, unchanged model settings, the disabled recording path, captured workspaces, delegation arriving before text, duplicate notifications, continued transcripts during backend work, stale spoken results, ending voice during a task, API-key isolation, and microphone/session cleanup. WebRTC and OpenAI events are simulated; these tests do not establish live API access or real audio quality.
+Focused tests cover mode persistence and failed saves, unchanged model settings, the disabled recording path, captured workspaces, delegation arriving before text, duplicate notifications, continued transcripts during backend work, stale spoken results, ending voice during a task, API-key isolation, and microphone/session cleanup. OpenAI/mesh events are simulated; a Chrome smoke test also exercises actual Web Audio capture and playback using a synthetic microphone. Android native module compilation is checked. iOS compilation requires a macOS/Xcode environment. These checks do not establish live API access or real audio quality.
 
 Manual checks before release:
 
@@ -84,4 +117,13 @@ Manual checks before release:
 6. On an updated Android app, verify the mobile settings toggle, separate Live grants, microphone permission denial/delayed approval, speaker and Bluetooth routing, echo/interruption, mute, background/screen-lock cleanup, app force-stop, and phone network changes. Verify normal recording can reclaim the microphone after Live ends. Repeat ASAP and Queue checks on mobile.
 7. Inspect actual session usage and billing. Compare useful-answer latency against the old flow; voice connection time and backend wait time both contribute to the experience.
 
-Known limits: mobile Live ends in the background and requires a native app update; no automatic voice reconnection, ASAP steering waits for the next agent processing point, and no measured latency improvement yet. An ended voice session starts fresh on reconnect; backend state remains governed by Companion's existing session lifecycle. Audio and API behavior require real-device verification.
+Known limits: iOS Live ends in the background and buffered mobile Live requires a native app update; no automatic voice reconnection, ASAP steering waits for the next agent processing point, and no measured latency improvement yet. An ended voice session starts fresh on reconnect; backend state remains governed by Companion's existing session lifecycle. Audio and API behavior require real-device verification.
+
+Buffer regression checks: run the `live-audio-buffer`, desktop/mobile
+`companion-live-connection`, `companion-pcm-live`, mobile native-audio/lifecycle,
+and mesh tests. `bun apps/drone-hub/scripts/smoke-live-pcm.ts` runs the synthetic
+Chrome microphone check without contacting OpenAI. Before release, say a distinctive
+phrase immediately after **Recording · connecting** appears on each app, throttle
+the Hub connection, continue speaking through readiness, and confirm every word
+appears once. Repeat with Mute and End voice before readiness, permission denial,
+startup failure, and reconnecting into a fresh session.

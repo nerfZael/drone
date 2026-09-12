@@ -33,3 +33,4 @@ export * from './token-usage.js';
 
 export { CompanionLiveConversation, LIVE_COMPANION_PROMPT_PREFIX, splitLiveCommentary } from './CompanionLiveConversation';
 export { waitForCompanionReply } from './waitForCompanionReply';
+export { LiveAudioBuffer, type LivePcmAudio, type LivePcmCallbacks } from './live-audio-buffer';

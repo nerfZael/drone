@@ -7,6 +7,7 @@ type LiveStatus = 'idle' | 'connecting' | 'listening' | 'error';
 type LiveSession = { connection: CompanionLiveConnection; conversation: CompanionLiveConversation; abort: AbortController; muted: boolean };
 type LiveState = {
   status: LiveStatus;
+  capturing: boolean;
   error: string;
   captions: string;
   queued: number;
@@ -35,7 +36,7 @@ export function useCompanionLive() {
     session?.abort.abort();
     session?.conversation.stop();
     session?.connection.close();
-    if (mounted.current) setState((previous) => ({ ...previous, status: 'idle', error: '', muted: false, queued: 0, playbackBlocked: false }));
+    if (mounted.current) setState((previous) => ({ ...previous, status: 'idle', capturing: false, error: '', muted: false, queued: 0, playbackBlocked: false }));
   }, []);
 
   const reset = React.useCallback(() => {
@@ -104,12 +105,13 @@ export function useCompanionLive() {
     };
     const connection = new CompanionLiveConnection({
       onEvent: (event) => { if (active.current === session) session.conversation.receive(event); },
+      onCapturing: () => update({ capturing: true }),
       onReady: (backendModel) => update({ status: 'listening', backendModel }),
       onError: (error) => {
         if (active.current !== session) return;
         session.conversation.stop();
         session.abort.abort();
-        update({ status: 'error', error, queued: 0 });
+        update({ status: 'error', capturing: false, error, queued: 0 });
         active.current = null;
       },
       onPlaybackBlocked: (playbackBlocked) => update({ playbackBlocked }),
@@ -145,7 +147,7 @@ export function useCompanionLive() {
 }
 
 const EMPTY_STATE: LiveState = {
-  status: 'idle', error: '', captions: '', queued: 0, muted: false, playbackBlocked: false, backendModel: '', workspaceLabel: '',
+  status: 'idle', capturing: false, error: '', captions: '', queued: 0, muted: false, playbackBlocked: false, backendModel: '', workspaceLabel: '',
 };
 
 async function settingsRequest(enabled?: boolean): Promise<{ enabled: boolean }> {

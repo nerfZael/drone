@@ -1,4 +1,16 @@
 {
-  "platforms": ["android"],
-  "android": { "modules": ["expo.modules.dronelivevoice.LiveVoiceModule"] }
+  "platforms": [
+    "android",
+    "apple"
+  ],
+  "android": {
+    "modules": [
+      "expo.modules.dronelivevoice.LiveVoiceModule"
+    ]
+  },
+  "apple": {
+    "modules": [
+      "LiveVoiceModule"
+    ]
+  }
 }

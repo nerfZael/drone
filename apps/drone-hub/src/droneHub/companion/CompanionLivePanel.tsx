@@ -17,7 +17,7 @@ export function CompanionLivePanel() {
       {live.enabled ? <>
         <div className="flex flex-wrap items-center gap-2">
           <span role="status" className="text-[var(--fg-secondary)]">
-            {live.status === 'connecting' ? 'Connecting Live voice…'
+            {live.status === 'connecting' ? live.muted ? 'Connecting · microphone muted' : live.capturing ? 'Recording · connecting Live voice…' : 'Opening microphone…'
               : live.status === 'listening' ? live.muted ? 'Live voice · microphone muted' : 'Live voice · listening'
                 : live.status === 'error' ? 'Live voice unavailable' : 'Live voice ready'}
           </span>
@@ -25,7 +25,7 @@ export function CompanionLivePanel() {
             onClick={() => active ? live.stop() : void companion.toggle()}>
             {active ? 'End voice' : 'Start voice'}
           </button>
-          {live.status === 'listening' ? <button className={button} aria-pressed={live.muted} onClick={live.toggleMute}>
+          {active ? <button className={button} aria-pressed={live.muted} onClick={live.toggleMute}>
             {live.muted ? 'Unmute mic' : 'Mute mic'}
           </button> : null}
           {live.playbackBlocked ? <button className={button} onClick={live.play}>Play voice audio</button> : null}

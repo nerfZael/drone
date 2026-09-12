@@ -7,7 +7,7 @@ import { MobileCompanionLiveConnection } from './MobileCompanionLiveConnection';
 import { openMobileLiveAudio, prepareMobileLiveAudio } from './openMobileLiveAudio';
 import type { MobileMicrophoneCoordinator } from './mobile-microphone-coordinator';
 
-type State = { status: 'idle' | 'connecting' | 'listening' | 'error'; error: string; captions: string;
+type State = { capturing: boolean; status: 'idle' | 'connecting' | 'listening' | 'error'; error: string; captions: string;
   backendModel: string; targetDeviceId: string; targetName: string; muted: boolean; queued: number };
 type Session = { connection: MobileCompanionLiveConnection; conversation: CompanionLiveConversation; abort: AbortController; muted: boolean };
 
@@ -22,7 +22,7 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
     const session = active.current;
     active.current = null;
     session?.abort.abort(); session?.conversation.stop(); session?.connection.close();
-    setState((value) => ({ ...value, status: 'idle', error: '', queued: 0, muted: false }));
+    setState((value) => ({ ...value, status: 'idle', capturing: false, error: '', queued: 0, muted: false }));
   }, []);
   const reset = React.useCallback(() => { stop(); setState(EMPTY); }, [stop]);
   React.useEffect(() => {
@@ -54,13 +54,14 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
     const connection = new MobileCompanionLiveConnection({
       targetDeviceId, sessionId: Crypto.randomUUID(), microphoneCoordinator,
       request: mesh.request, subscribe: mesh.subscribe,
-      openAudio: () => openMobileLiveAudio(() => { if (active.current === session) stop(); }),
+      openAudio: (callbacks) => openMobileLiveAudio(callbacks, () => { if (active.current === session) stop(); }),
       onEvent: (event) => { if (active.current === session) session.conversation.receive(event); },
+      onCapturing: () => update({ capturing: true }),
       onReady: (backendModel) => update({ status: 'listening', backendModel }),
       onError: (error) => {
         if (active.current !== session) return;
         session.abort.abort(); session.conversation.stop();
-        update({ status: 'error', error, queued: 0 });
+        update({ status: 'error', capturing: false, error, queued: 0 });
         active.current = null;
       },
     });
@@ -84,4 +85,4 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
   return { ...state, start, stop, reset, toggleMute };
 }
 
-const EMPTY: State = { status: 'idle', error: '', captions: '', backendModel: '', targetDeviceId: '', targetName: '', muted: false, queued: 0 };
+const EMPTY: State = { status: 'idle', capturing: false, error: '', captions: '', backendModel: '', targetDeviceId: '', targetName: '', muted: false, queued: 0 };

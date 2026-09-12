@@ -1,215 +1,125 @@
+import { LiveAudioBuffer, type LivePcmAudio, type LivePcmCallbacks } from '@drone/assistant-chat';
 import { buildDirectApiWebSocketUrl } from '../app/direct-api-fetch';
 import { browserMicrophoneCoordinator, type BrowserMicrophoneLease } from '../chat/browser-microphone-coordinator';
+import { openBrowserLivePcmAudio } from './browser-live-pcm-audio';
 
 type Options = {
   onEvent(event: Record<string, unknown>): void;
   onReady(model: string): void;
+  onCapturing?(): void;
   onError(error: string): void;
   onPlaybackBlocked(blocked: boolean): void;
+  openAudio?(callbacks: LivePcmCallbacks): Promise<LivePcmAudio>;
 };
 
 export class CompanionLiveConnection {
-  private peer: RTCPeerConnection | null = null;
-  private channel: RTCDataChannel | null = null;
   private socket: WebSocket | null = null;
-  private microphone: MediaStream | null = null;
+  private audio: LivePcmAudio | null = null;
   private lease: BrowserMicrophoneLease | null = null;
-  private audio: HTMLAudioElement | null = null;
   private closed = false;
-  private ready = false;
-  private muted = false;
   private started = false;
-  private mediaReady = false;
-  private controlReady = false;
-  private answerReceived = false;
-  private heartbeat: ReturnType<typeof setInterval> | undefined;
-  private startupTimer: ReturnType<typeof setTimeout> | undefined;
-  private disconnectTimer: ReturnType<typeof setTimeout> | undefined;
-  private closeTimer: ReturnType<typeof setTimeout> | undefined;
-  private backendModel = '';
-  private releasePendingStart: (() => void) | undefined;
+  private ready = false;
+  private capturing = false;
+  private muted = false;
+  private heartbeat?: ReturnType<typeof setInterval>;
+  private timeout?: ReturnType<typeof setTimeout>;
+  private closeTimer?: ReturnType<typeof setTimeout>;
+  private pendingAudio: Promise<void> = Promise.resolve();
+  private readonly audioAbort = new AbortController();
+  private readonly buffer: LiveAudioBuffer;
 
-  constructor(private readonly options: Options) {}
+  constructor(private readonly options: Options) {
+    this.buffer = new LiveAudioBuffer(async (audio) => {
+      if (this.closed) return;
+      const socket = this.socket;
+      if (socket?.readyState !== WebSocket.OPEN || socket.bufferedAmount > 2_000_000) throw new Error('Live connection is too slow.');
+      socket.send(JSON.stringify({ type: 'live_event', event: { type: 'session.input_audio.append', audio } }));
+    }, (error) => this.fail(error));
+  }
 
   async start(): Promise<void> {
     if (this.started || this.closed) return;
     this.started = true;
+    this.lease = browserMicrophoneCoordinator.acquire('companion');
+    if (!this.lease) { this.fail('Another recording is using the microphone. Stop it before starting Live voice.'); return; }
+    this.timeout = setTimeout(() => this.fail('Live voice took too long to connect. Try again.'), 40_000);
+    let settled!: () => void;
+    this.pendingAudio = new Promise((resolve) => { settled = resolve; });
     try {
-      if (!navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection === 'undefined') {
-        throw new Error('Live voice needs microphone access and WebRTC in a secure browser.');
-      }
-      this.lease = browserMicrophoneCoordinator.acquire('companion');
-      if (!this.lease) throw new Error('Another recording is using the microphone. Stop it before starting Live voice.');
-      this.startupTimer = setTimeout(() => this.fail('Live voice took too long to connect. Try again.'), 40_000);
-      const microphone = await navigator.mediaDevices.getUserMedia({ audio: {
-        echoCancellation: true, noiseSuppression: true, autoGainControl: true,
-      } });
-      if (this.closed) { microphone.getTracks().forEach((track) => track.stop()); return; }
-      this.microphone = microphone;
-      const peer = new RTCPeerConnection();
-      this.peer = peer;
-      const audio = document.createElement('audio');
-      audio.autoplay = true;
-      this.audio = audio;
-      peer.ontrack = (event) => {
-        if (this.closed) return;
-        audio.srcObject = event.streams[0] ?? new MediaStream([event.track]);
-        void this.play();
-      };
-      for (const track of microphone.getTracks()) {
-        track.enabled = false;
-        track.onended = () => this.fail('Microphone disconnected. Start Live voice again after reconnecting it.');
-        peer.addTrack(track, microphone);
-      }
-      peer.onconnectionstatechange = () => {
-        if (this.closed) return;
-        clearTimeout(this.disconnectTimer);
-        if (peer.connectionState === 'failed') this.fail('Live audio connection failed. Start a new conversation.');
-        if (peer.connectionState === 'disconnected') {
-          this.disconnectTimer = setTimeout(() => this.fail('Live audio disconnected. Start a new conversation.'), 5_000);
-        }
-      };
-      const channel = peer.createDataChannel('oai-events');
-      this.channel = channel;
-      channel.onmessage = (message) => {
-        let event: Record<string, unknown>;
-        try { event = JSON.parse(String(message.data)); } catch { return; }
-        if (!event || typeof event !== 'object' || Array.isArray(event)) return;
-        if (event.type === 'session.closed' && this.closed) { this.releaseTransports(); return; }
-        if (event.type === 'session.started' && !this.closed && !this.ready) {
-          this.mediaReady = true;
-          this.becomeReady();
-        }
-        if (event.type === 'session.closed') this.fail('Live conversation ended. Start again to reconnect.');
-      };
-      channel.onclose = () => { if (!this.closed) this.fail('Live voice disconnected. Start a new conversation.'); };
+      try {
+        this.audio = await (this.options.openAudio ?? ((callbacks) => openBrowserLivePcmAudio(callbacks, this.options.onPlaybackBlocked)))({
+          signal: this.audioAbort.signal, onAudio: (audio) => this.capture(audio), onError: (error) => this.fail(error),
+        });
+      } finally { settled(); }
+      if (this.closed) return;
+      this.audio.mute(this.muted);
       const socket = new WebSocket(buildDirectApiWebSocketUrl('/api/companion/stream'));
       this.socket = socket;
-      let offerReady = false;
-      let offerSent = false;
-      const sendOffer = () => {
-        if (this.closed || offerSent || !offerReady || socket.readyState !== WebSocket.OPEN) return;
-        offerSent = true;
-        socket.send(JSON.stringify({ type: 'live_start', sdp: peer.localDescription?.sdp }));
-      };
       socket.onopen = () => {
         if (this.closed) { socket.close(); return; }
-        sendOffer();
+        if (!this.sendMessage({ type: 'live_start', transport: 'pcm' })) return;
         this.heartbeat = setInterval(() => {
-          if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'live_ping' }));
+          if (socket.readyState === WebSocket.OPEN) this.sendMessage({ type: 'live_ping' });
         }, 10_000);
       };
-      socket.onmessage = (message) => {
+      socket.onmessage = ({ data }) => {
         let event: Record<string, unknown>;
-        try { event = JSON.parse(String(message.data)); } catch { return; }
-        if (!event || typeof event !== 'object' || Array.isArray(event)) return;
-        if (this.closed) {
-          if (event.type === 'live_closed') this.releaseTransports();
-          return;
-        }
-        if ((event.type === 'live_answer' || event.type === 'live_ready') && typeof event.sdp === 'string') {
-          this.backendModel = String(event.backendModel ?? '');
-          if (!this.answerReceived) {
-            this.answerReceived = true;
-            void peer.setRemoteDescription({ type: 'answer', sdp: event.sdp }).catch(() => this.fail('Could not connect Live audio.'));
-          }
-          if (event.type === 'live_ready') this.controlReady = true;
-          this.becomeReady();
+        try { event = JSON.parse(String(data)); } catch { return; }
+        if (!event || typeof event !== 'object') return;
+        if (event.type === 'live_closed') { if (this.closed) socket.close(); else this.fail('Live conversation ended. Start again.'); return; }
+        if (this.closed) return;
+        if (event.type === 'live_ready' && event.transport === 'pcm' && !this.ready) {
+          this.ready = true;
+          clearTimeout(this.timeout);
+          this.buffer.connect();
+          this.options.onReady(String(event.backendModel ?? ''));
         } else if (event.type === 'live_event') {
-          const payload = event.event as Record<string, unknown>;
-          if (payload?.type === 'error') {
-            this.fail('Live voice reported an error. End the conversation and try again.');
-          } else if (payload && typeof payload === 'object' && !Array.isArray(payload)) this.options.onEvent(payload);
+          const payload = event.event as Record<string, unknown> | undefined;
+          if (payload?.type === 'error') this.fail('Live voice reported an error. Start again.');
+          else if (payload?.type === 'session.output_audio.delta' && typeof payload.delta === 'string') this.audio?.play(payload.delta);
+          else if (payload && typeof payload === 'object') this.options.onEvent(payload);
         } else if (event.type === 'live_error') this.fail(String(event.error ?? 'Live voice failed.'));
-        else if (event.type === 'live_closed') this.fail('Live conversation ended. Start again to reconnect.');
       };
       socket.onerror = () => this.fail('Live voice could not connect to Drone Hub.');
-      socket.onclose = () => { if (!this.closed) this.fail('Live voice disconnected from Drone Hub.'); };
-      await peer.setLocalDescription(await peer.createOffer());
-      if (this.closed) return;
-      await this.waitForIce(peer);
-      if (this.closed) return;
-      offerReady = true;
-      sendOffer();
-    } catch (error) {
-      this.fail(error instanceof Error ? error.message : 'Live voice could not start.');
-    }
+      socket.onclose = () => { clearTimeout(this.closeTimer); if (!this.closed) this.fail('Live voice disconnected from Drone Hub.'); };
+    } catch (error) { this.fail(error instanceof Error ? error.message : 'Live voice could not start.'); }
   }
 
   send(event: Record<string, unknown>): void {
-    if (!this.closed && this.socket?.readyState === WebSocket.OPEN) {
-      this.socket.send(JSON.stringify({ type: 'live_event', event }));
-    }
+    if (!this.closed && this.socket?.readyState === WebSocket.OPEN) this.sendMessage({ type: 'live_event', event });
   }
-
-  mute(muted: boolean): void {
-    this.muted = muted;
-    this.microphone?.getTracks().forEach((track) => { track.enabled = !this.closed && this.ready && !muted; });
-  }
-
+  mute(muted: boolean): void { this.muted = muted; this.buffer.mute(muted); this.audio?.mute(muted); }
   async play(): Promise<void> {
-    if (this.closed || !this.audio) return;
-    try { await this.audio.play(); if (!this.closed) this.options.onPlaybackBlocked(false); }
-    catch { if (!this.closed) this.options.onPlaybackBlocked(true); }
+    if (this.closed) return;
+    try { await this.audio?.resume(); } catch { this.options.onPlaybackBlocked(true); }
   }
-
   close(): void {
     if (this.closed) return;
     this.closed = true;
-    clearTimeout(this.startupTimer);
-    clearTimeout(this.disconnectTimer);
+    this.buffer.close();
+    this.audioAbort.abort();
+    clearTimeout(this.timeout);
     clearInterval(this.heartbeat);
-    this.releasePendingStart?.();
-    this.microphone?.getTracks().forEach((track) => { track.onended = null; track.stop(); });
-    this.microphone = null;
-    this.lease?.release();
-    this.lease = null;
-    if (this.audio) { this.audio.pause(); this.audio.srcObject = null; }
-    // Release the microphone immediately, but let final session events drain before
-    // tearing down WebRTC. The Hub also has a hangup fallback if either path fails.
-    const canClose = this.channel?.readyState === 'open' || this.socket?.readyState === WebSocket.OPEN;
-    if (canClose) {
-      this.closeTimer = setTimeout(() => this.releaseTransports(), 6_000);
+    this.audio?.mute(true);
+    const release = this.audio?.release();
+    void this.pendingAudio.then(async () => {
+      await (release ?? this.audio?.release());
+    }).catch(() => undefined).finally(() => { this.audio = null; this.lease?.release(); this.lease = null; });
+    if (this.socket?.readyState === WebSocket.OPEN) {
       try {
-        if (this.channel?.readyState === 'open') this.channel.send(JSON.stringify({ type: 'session.close' }));
-        if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify({ type: 'live_close' }));
-      } catch { this.releaseTransports(); }
-    } else this.releaseTransports();
+        this.socket.send(JSON.stringify({ type: 'live_close' }));
+        this.closeTimer = setTimeout(() => this.socket?.close(), 6_000);
+      } catch { this.socket.close(); }
+    } else this.socket?.close();
   }
-
-  private releaseTransports(): void {
-    clearTimeout(this.closeTimer);
-    this.socket?.close();
-    this.peer?.close();
+  private sendMessage(message: Record<string, unknown>): boolean {
+    try { this.socket?.send(JSON.stringify(message)); return true; }
+    catch { this.fail('Live voice lost its connection to Drone Hub.'); return false; }
   }
-
-  private becomeReady(): void {
-    if (this.closed || this.ready || !this.mediaReady || !this.controlReady) return;
-    this.ready = true;
-    clearTimeout(this.startupTimer);
-    this.mute(this.muted);
-    this.options.onReady(this.backendModel);
-  }
-
-  private fail(error: string): void {
+  private capture(audio: string): void {
     if (this.closed) return;
-    this.close();
-    this.options.onError(error);
+    if (!this.capturing) { this.capturing = true; this.options.onCapturing?.(); }
+    this.buffer.append(audio);
   }
-
-  private waitForIce(peer: RTCPeerConnection): Promise<void> {
-    if (peer.iceGatheringState === 'complete') return Promise.resolve();
-    return new Promise((resolve) => {
-      const finish = () => {
-        clearTimeout(timer);
-        peer.removeEventListener('icegatheringstatechange', change);
-        this.releasePendingStart = undefined;
-        resolve();
-      };
-      const change = () => { if (peer.iceGatheringState === 'complete') finish(); };
-      const timer = setTimeout(finish, 5_000);
-      this.releasePendingStart = finish;
-      peer.addEventListener('icegatheringstatechange', change);
-    });
-  }
+  private fail(error: string): void { if (!this.closed) { this.close(); this.options.onError(error); } }
 }

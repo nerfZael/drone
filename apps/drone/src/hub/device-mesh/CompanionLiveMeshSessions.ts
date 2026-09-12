@@ -1,13 +1,13 @@
 import { CompanionLiveSocket } from '../companion/CompanionLiveSocket';
 import { readCompanionLiveSettings, writeCompanionLiveSettings } from '../companion/companion-live-settings';
 
-type Session = { id: string; socket: Pick<CompanionLiveSocket, 'handle' | 'close'>; events: Promise<void> };
+type Session = { id: string; socket: Pick<CompanionLiveSocket, 'handle' | 'close'>; events: Promise<void>; queuedBytes: number; congested: boolean };
 type Options = {
   emit(deviceId: string, payload: Record<string, unknown>): Promise<void>;
   createSocket?(send: (message: unknown) => void): Session['socket'];
 };
 
-/** Device-owned Live control sessions; microphone audio travels directly over WebRTC. */
+/** Device-owned Live sessions. PCM clients relay ordered audio over the mesh. */
 export class CompanionLiveMeshSessions {
   private sessions = new Map<string, Session>();
   private retired = new Map<string, Set<string>>();
@@ -34,14 +34,21 @@ export class CompanionLiveMeshSessions {
       let created!: Session;
       const socket = (this.options.createSocket ?? ((send) => new CompanionLiveSocket(send)))((message) => {
         if (this.sessions.get(deviceId) !== created) return;
+        const bytes = Buffer.byteLength(JSON.stringify(message), 'utf8');
+        const isAudio = (message as { event?: { type?: string } })?.event?.type === 'session.output_audio.delta';
+        if (isAudio && (created.congested || created.queuedBytes + bytes > 512_000)) {
+          if (!created.congested) { created.congested = true; created.socket.close(); }
+          return;
+        }
+        created.queuedBytes += bytes;
         created.events = created.events.catch(() => undefined).then(async () => {
           if (this.sessions.get(deviceId) !== created) return;
           await this.options.emit(deviceId, { sessionId: id, ...(message as Record<string, unknown>) });
-        }).catch(() => { created.socket.close(); });
+        }).catch(() => { created.socket.close(); }).finally(() => { created.queuedBytes -= bytes; });
       });
-      created = { id, socket, events: Promise.resolve() };
+      created = { id, socket, events: Promise.resolve(), queuedBytes: 0, congested: false };
       this.sessions.set(deviceId, created);
-      socket.handle({ type: 'live_start', sdp: payload.sdp });
+      socket.handle({ type: 'live_start', sdp: payload.sdp, transport: payload.transport });
       return { accepted: true };
     }
     if (session?.id !== id) return { ok: true };

@@ -1,9 +1,10 @@
 import { WebSocket } from 'ws';
+import { CompanionPcmLiveSocket } from './CompanionPcmLiveSocket';
 import { resolveEffectiveProviderApiKeySettings } from '../hub-settings';
 import { readCompanionSettings } from './companion-config';
 import { readCompanionLiveSettings } from './companion-live-settings';
 
-type LiveMessage = { type?: string; sdp?: unknown; event?: unknown };
+type LiveMessage = { transport?: unknown; type?: string; sdp?: unknown; event?: unknown };
 type Dependencies = {
   fetch: typeof fetch;
   connect(url: string, apiKey: string): WebSocket;
@@ -14,6 +15,7 @@ type Dependencies = {
 
 /** One authenticated browser socket owns one Live session and its cleanup sideband. */
 export class CompanionLiveSocket {
+  private pcm: CompanionPcmLiveSocket | undefined;
   private upstream: WebSocket | null = null;
   private starting = false;
   private finalized = false;
@@ -39,6 +41,13 @@ export class CompanionLiveSocket {
   }
 
   handle(message: LiveMessage): void {
+    if (this.pcm) { this.pcm.handle(message); return; }
+    if (message.type === 'live_start' && message.transport === 'pcm' && !this.closed && !this.starting) {
+      this.starting = true;
+      this.pcm = new CompanionPcmLiveSocket(this.send, this.deps, LIVE_INSTRUCTIONS);
+      this.pcm.handle(message);
+      return;
+    }
     if (message.type === 'live_ping') { this.lastPing = Date.now(); return; }
     if (message.type === 'live_close') { this.close(); return; }
     if (message.type === 'live_start') {
@@ -64,6 +73,7 @@ export class CompanionLiveSocket {
   }
 
   close(): void {
+    this.pcm?.close();
     if (this.closed) return;
     this.closed = true;
     clearInterval(this.heartbeat);
