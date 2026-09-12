@@ -3,6 +3,8 @@ export type BlipToolProfile = "local-trusted-write" | "read-only" | "no-shell-wo
 export type BlipSessionStatus = "completed" | "cancelled" | "error" | "suspended";
 
 export interface BlipRuntimeEventBase {
+  /** Speculative compaction does not block agent inference. */
+  background?: boolean;
   version: 1;
   eventId: string;
   type: string;

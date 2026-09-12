@@ -102,6 +102,7 @@ export class CompanionBrowserToolBroker {
 }
 
 export function boundedCompanionActivityEvent(event: any): any | null {
+  if (event?.background === true) return null;
   const type = String(event?.type ?? '');
   // Only status and estimated sizes cross the activity channel. In particular,
   // fallback errors may contain provider content and must not be forwarded.

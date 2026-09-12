@@ -1,6 +1,7 @@
 import type { BlipCompactionMetrics, BlipCompactionProgress, BlipRuntimeEvent } from '@blip/protocol';
 
 export type CompanionCompactionTelemetry = {
+  background?: boolean;
   trigger: 'auto' | 'manual' | 'context_overflow' | 'unknown';
   status: 'completed' | 'skipped' | 'failed' | 'cancelled' | 'interrupted';
   durationMs: number;
@@ -13,14 +14,14 @@ export type CompanionCompactionTelemetry = {
 /** Keeps content-free attempt records; tolerates older runtimes without metrics. */
 export class CompanionCompactionTelemetryCollector {
   readonly attempts: CompanionCompactionTelemetry[] = [];
-  private active?: { trigger: CompanionCompactionTelemetry['trigger']; startedAt: number; updatedAt: number; progress?: BlipCompactionProgress };
+  private active?: { trigger: CompanionCompactionTelemetry['trigger']; background?: boolean; startedAt: number; updatedAt: number; progress?: BlipCompactionProgress };
 
   live(now: number) {
     if (!this.active) return undefined;
     const { trigger, startedAt, updatedAt, progress } = this.active;
     const age = Math.max(0, now - updatedAt);
     return {
-      trigger, status: 'running' as const, durationMs: Math.max(0, now - startedAt),
+      trigger, background: this.active.background, status: 'running' as const, durationMs: Math.max(0, now - startedAt),
       phase: progress?.phase ?? 'preparing', lastProgressAgeMs: age,
       modelCallCount: progress?.modelCallCount ?? 0, modelResponseCount: progress?.modelResponseCount ?? 0,
       modelCallActive: progress?.modelCallActive ?? false,
@@ -36,7 +37,7 @@ export class CompanionCompactionTelemetryCollector {
       this.finish('interrupted', now);
       const trigger = event.reason === 'auto' || event.reason === 'manual' || event.reason === 'context_overflow'
         ? event.reason : 'unknown';
-      this.active = { trigger, startedAt: now, updatedAt: now };
+      this.active = { trigger, background: event.background, startedAt: now, updatedAt: now };
     } else if (event.type === 'compaction_progress' && this.active) {
       const p = event.progress;
       if (!['preparing', 'credentials', 'summarizing', 'validating', 'saving'].includes(p.phase)) return;
@@ -53,6 +54,7 @@ export class CompanionCompactionTelemetryCollector {
       const metrics = safeMetrics(event.metrics);
       this.attempts.push({
         trigger: this.active?.trigger ?? 'unknown',
+        ...(event.background ? { background: true } : {}),
         status: event.type === 'compaction_completed' ? 'completed'
           : event.type === 'compaction_skipped' ? 'skipped'
             : event.reason === 'cancelled' ? 'cancelled' : 'failed',
@@ -65,7 +67,7 @@ export class CompanionCompactionTelemetryCollector {
         } : {}),
       });
       this.active = undefined;
-    } else if (event.type === 'session_finished') {
+    } else if (event.type === 'session_finished' && !this.active?.background) {
       this.finish(event.status === 'cancelled' ? 'cancelled'
         : event.status === 'error' ? 'failed' : 'interrupted', now);
     }

@@ -89,6 +89,15 @@ async function fixture(oldText = 'old response '.repeat(500)) {
 }
 
 describe('shared compaction validation', () => {
+  test('rejects fixed context that fits the hard limit but cannot meet the target before generating', async () => {
+    const f = await fixture();
+    await f.repository.appendMessage(f.state, { role: 'user', content: 'x'.repeat(40_000), timestamp: 5 });
+    await f.manager.compact();
+    expect(f.requests).toHaveLength(0);
+    expect(f.events).toContainEqual(expect.objectContaining({ type: 'compaction_skipped',
+      reason: 'latest user request and fixed context cannot fit the post-compaction target with a summary' }));
+    expect((await f.repository.readTranscript(f.state)).some((e) => e.type === 'compaction')).toBe(false);
+  });
   test('manual compaction honors an independent summary cap and reports measured savings', async () => {
     const f = await fixture();
     await f.manager.compact();

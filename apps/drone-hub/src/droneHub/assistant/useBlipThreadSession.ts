@@ -225,10 +225,12 @@ export function useBlipThreadSession({
         return;
       }
       if (event.type === 'compaction_started') {
+        if (event.background) return;
         setCompactionInProgress(true);
         return;
       }
       if (event.type === 'compaction_skipped' || event.type === 'compaction_failed') {
+        if (event.background) return;
         setCompactionInProgress(false);
         return;
       }

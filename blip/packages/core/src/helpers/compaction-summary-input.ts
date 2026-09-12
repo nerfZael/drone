@@ -9,7 +9,7 @@ export function* summaryInputBatches(
   plan: CompactionPlan,
   availableChars?: () => number,
 ): Generator<string> {
-  const configuredLimit = charLimit(plan.settings.maxSummaryInputChars, 120_000);
+  const configuredLimit = charLimit(plan.settings.maxSummaryInputChars, Number.MAX_SAFE_INTEGER);
   const configuredFragmentLimit = charLimit(plan.settings.maxSummaryMessageChars, 12_000);
   if (configuredFragmentLimit < 2) throw new Error('Summary fragments need room for a complete Unicode character');
   let batchLimit = configuredLimit;
@@ -18,7 +18,7 @@ export function* summaryInputBatches(
     const record = summaryRecord(entry);
     for (let offset = 0; offset < record.length;) {
       if (!batch) {
-        batchLimit = Math.floor(Math.min(configuredLimit, availableChars?.() ?? configuredLimit));
+        batchLimit = Math.floor(Math.min(configuredLimit, availableChars?.() ?? 120_000));
         if (!(batchLimit >= 130)) throw new Error('Summary checkpoint and instructions leave no room for transcript input');
       }
       const fragmentLimit = Math.min(configuredFragmentLimit, batchLimit - batch.length - 128);

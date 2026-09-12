@@ -1,6 +1,7 @@
 import {
   streamSimple,
   estimateContextTokens,
+  isContextOverflow,
   type Context,
   type Model,
   type SimpleStreamOptions,
@@ -23,6 +24,8 @@ type SummaryInput = {
   signal?: AbortSignal;
   /** Remaining allowance after the caller reserves appended checkpoint metadata. */
   maxTokens?: number;
+  /** Internal bounded retry count for provider limits stricter than local estimates. */
+  overflowRetries?: number;
 };
 
 const REQUIRED_HEADINGS = [
@@ -54,8 +57,9 @@ ${REQUIRED_HEADINGS.join('\n')}`;
 
 /** A candidate is returned only after every batch succeeds. Nothing is persisted here. */
 export async function modelSummary(input: SummaryInput): Promise<string> {
+  const budget = compactionBudget(input.model, resolveCompactionSettings(input.plan.settings));
   const maxTokens = Math.min(
-    compactionBudget(input.model, resolveCompactionSettings(input.plan.settings)).summaryTokens,
+    budget.summaryTokens,
     input.maxTokens ?? Number.POSITIVE_INFINITY,
   );
   const options: SimpleStreamOptions =
@@ -64,11 +68,11 @@ export async function modelSummary(input: SummaryInput): Promise<string> {
       : { maxTokens, apiKey: input.apiKey, signal: input.signal };
   let summary = input.plan.previousSummary;
   const availableChars = () => {
-    if (!(input.model.contextWindow > 0) || !Number.isFinite(input.model.contextWindow)) return Number.POSITIVE_INFINITY;
+    if (!(input.model.contextWindow > 0) || !Number.isFinite(input.model.contextWindow)) return 120_000;
     const overhead = estimateContextTokens(input.model, summaryContext(summary, '')).inputTokens;
-    const margin = Math.max(32, Math.ceil(input.model.contextWindow * 0.05));
+    const margin = Math.max(32, Math.ceil(budget.contextWindow * 0.05));
     const outputAllowance = outputTokenAllowance(input.model, maxTokens, Boolean(input.model.reasoning && input.reasoning && input.reasoning !== 'off'));
-    return (input.model.contextWindow - outputAllowance - margin - overhead) * 4 - 4;
+    return (budget.contextWindow - outputAllowance - margin - overhead) * 4 - 4;
   };
   for (const batch of summaryInputBatches(input.plan, availableChars)) {
     input.signal?.throwIfAborted();
@@ -89,6 +93,14 @@ export async function modelSummary(input: SummaryInput): Promise<string> {
     }
     await input.onUsage?.(response);
     input.signal?.throwIfAborted();
+    if (isContextOverflow(response, budget.contextWindow) && (input.overflowRetries ?? 0) < 2 && batch.length >= 260) {
+      // Restart from original evidence; never install a partial checkpoint. Explicit
+      // caps remain ceilings, and every failed response is still accounted for.
+      return modelSummary({ ...input, overflowRetries: (input.overflowRetries ?? 0) + 1,
+        plan: { ...input.plan, settings: { ...input.plan.settings,
+          maxSummaryInputChars: Math.min(input.plan.settings.maxSummaryInputChars ?? Number.MAX_SAFE_INTEGER,
+            Math.floor(batch.length / 2)) } } });
+    }
     summary = validatedSummary(response);
   }
   if (!summary) throw new Error('Summary generation had no transcript input');

@@ -29,6 +29,32 @@ const session: BlipSessionState = {
 };
 
 describe('Compaction summary reliability and coverage', () => {
+  test('retries actual provider overflow with smaller batches and accounts for the rejected call', async () => {
+    const inputPlan = plan([entry('large', user('fact '.repeat(40_000)))]);
+    const contexts: Context[] = [];
+    let usage = 0;
+    await modelSummary({ model, plan: inputPlan, onUsage: async () => { usage++; },
+      streamFn: stream((context) => {
+        contexts.push(context);
+        return contexts.length === 1
+          ? fauxAssistantMessage('', { stopReason: 'error', errorMessage: 'maximum context length exceeded' })
+          : fauxAssistantMessage(summaryText('Retained facts'));
+      }) });
+    expect(contexts.length).toBeGreaterThan(2);
+    expect(usage).toBe(contexts.length);
+    expect(String(contexts[1].messages[0].content).length).toBeLessThan(String(contexts[0].messages[0].content).length);
+  });
+  test('uses one model call for a transcript above the old 120k character ceiling when it fits', async () => {
+    const inputPlan = plan([entry('large', user('preserve this fact '.repeat(12_000)))]);
+    let calls = 0;
+    await modelSummary({ model, plan: inputPlan, streamFn: stream((context) => {
+      calls++;
+      expect(String(context.messages[0].content).length).toBeGreaterThan(120_000);
+      expect(estimateContextTokens(model, context).inputTokens + 4096).toBeLessThan(model.contextWindow);
+      return fauxAssistantMessage(summaryText('All facts summarized'));
+    }) });
+    expect(calls).toBe(1);
+  });
   test('preserves user instructions chronologically and previews large errors with recovery and failure status', () => {
     const originalUser = 'Keep offline. ' + '中😀\\"\n'.repeat(30_000) + ' No publishing.';
     const originalTool = 'output '.repeat(30_000) + 'ERROR sentinel: permission denied';

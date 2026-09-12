@@ -123,3 +123,10 @@ test('compaction activity exposes only status and valid estimated sizes', () => 
   expect(invalid.tokensBefore).toBeUndefined();
   expect(invalid.tokensAfter).toBeUndefined();
 });
+
+test('background compaction does not produce a blocking Companion activity', () => {
+  expect(boundedCompanionActivityEvent({ type: 'compaction_started', background: true })).toBeNull();
+  expect(boundedCompanionActivityEvent({ type: 'compaction_completed', background: true,
+    tokensBefore: 180_000, tokensAfter: 20_000 })).toBeNull();
+  expect(boundedCompanionActivityEvent({ type: 'compaction_started' })).toEqual({ type: 'compaction_started' });
+});

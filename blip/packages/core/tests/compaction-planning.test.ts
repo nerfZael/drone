@@ -7,6 +7,18 @@ import { compactionBudget, resolveCompactionSettings } from '../src/compaction-s
 import type { BlipSessionState, TranscriptEntry } from '../src/types';
 
 const session = { readFiles: [], changedFiles: [] } as unknown as BlipSessionState;
+
+test('provider operating budgets preserve model capabilities and explicit overrides cannot exceed them', () => {
+  const model = { provider: 'openai', contextWindow: 1_050_000, maxTokens: 128_000, reasoning: true } as any;
+  const defaults = resolveCompactionSettings();
+  expect(compactionBudget(model, defaults)).toMatchObject({ contextWindow: 272_000, hardLimit: 215_456, targetLimit: 163_200 });
+  expect(model.contextWindow).toBe(1_050_000);
+  expect(compactionBudget({ ...model, provider: 'anthropic' }, defaults).contextWindow).toBe(1_050_000);
+  expect(compactionBudget(model, { ...defaults, contextWindowTokens: 400_000 }).contextWindow).toBe(400_000);
+  expect(compactionBudget({ ...model, contextWindow: 128_000 }, { ...defaults, contextWindowTokens: 400_000 }).contextWindow).toBe(128_000);
+  expect(() => resolveCompactionSettings({ ...defaults, contextWindowTokens: -1 })).toThrow();
+  expect(() => resolveCompactionSettings({ ...defaults, backgroundThreshold: 1 })).toThrow();
+});
 const settings = { auto: true, reserveTokens: 200, keepRecentTokens: 100, keepRecentTurns: 2 };
 const user = (content: string): AgentMessage => ({ role: 'user', content, timestamp: 0 });
 const result = (id: string, text: string): AgentMessage => ({
