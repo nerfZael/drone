@@ -11,12 +11,14 @@ import {
   type CompanionClientTransport,
   type CompanionServerMessage,
   validateCompanionRunInput,
+  validateCompanionProposalResultInput,
 } from '../src';
 
 function clientTransport() {
   let onMessage: ((message: CompanionServerMessage) => void) | null = null;
   let onDisconnect: ((message: string) => void) | null = null;
   const toolResults: unknown[] = [];
+  const proposalResults: unknown[] = [];
   const prompts: unknown[] = [];
   const cancelled: string[] = [];
   let closes = 0;
@@ -34,6 +36,9 @@ function clientTransport() {
     sendToolResult(input) {
       toolResults.push(input);
     },
+    sendProposalResult(input) {
+      proposalResults.push(input);
+    },
     cancel(runId) {
       cancelled.push(runId);
     },
@@ -50,6 +55,7 @@ function clientTransport() {
       onDisconnect?.(message);
     },
     toolResults,
+    proposalResults,
     prompts,
     cancelled,
     get opens() {
@@ -135,6 +141,37 @@ describe('Companion contracts', () => {
         prompt: 'hello',
       }),
     ).toMatchObject({ ok: false, error: 'A valid messageId is required.' });
+  });
+
+  test('validates proposal application results against the reviewed operations', () => {
+    const input = {
+      runId: 'run-1',
+      messageId: 'apply-1',
+      result: {
+        applied: true,
+        autoApproved: false,
+        proposal: {
+          version: 1,
+          title: 'Rename chat',
+          operations: [{ id: 'rename', type: 'rename_chat', droneId: 'd1', chatName: 'old', newName: 'new' }],
+        },
+        execution: {
+          ok: true,
+          operations: [{ id: 'rename', type: 'rename_chat', status: 'completed' }],
+        },
+      },
+    };
+    expect(validateCompanionProposalResultInput(input)).toMatchObject({ ok: true });
+    expect(validateCompanionProposalResultInput({
+      ...input,
+      result: {
+        ...input.result,
+        execution: {
+          ok: true,
+          operations: [{ id: 'another-operation', type: 'rename_chat', status: 'completed' }],
+        },
+      },
+    })).toMatchObject({ ok: false, error: expect.stringContaining('does not match') });
   });
 
   test('reduces tool activity from start through completion', () => {
@@ -462,6 +499,63 @@ test('queued messages use their own tool executor and reject expired or ambiguou
   const count = connection.toolResults.length;
   await call('closed', 'b');
   expect(connection.toolResults).toHaveLength(count);
+});
+
+test('proposal application results resume the same Companion session with browser context', async () => {
+  const connection = clientTransport();
+  const ids = ['proposal-session', 'initial-message', 'proposal-result-message'];
+  const controller = new CompanionClientController({ createId: () => ids.shift()! });
+  await controller.submitPrompt({
+    prompt: 'Create the proposal',
+    createTransport: () => connection.transport,
+    executeTool: () => ({ selectedChat: 'captured-chat' }),
+  });
+  connection.message({ type: 'reply', messageId: 'initial-message', reply: 'Ready to apply.' });
+  connection.message({ type: 'status', messageId: 'initial-message', status: 'completed' });
+
+  const result = {
+    applied: true as const,
+    autoApproved: false,
+    proposal: {
+      version: 1 as const,
+      title: 'Rename chat',
+      operations: [{ id: 'rename', type: 'rename_chat' as const, droneId: 'd1', chatName: 'old', newName: 'new' }],
+    },
+    execution: {
+      ok: true,
+      operations: [{ id: 'rename', type: 'rename_chat' as const, status: 'completed' as const }],
+    },
+  };
+  expect(await controller.submitProposalResult(result)).toBe(true);
+  expect(connection.proposalResults).toEqual([{
+    runId: 'proposal-session',
+    messageId: 'proposal-result-message',
+    result,
+  }]);
+  expect(controller.getSnapshot()).toMatchObject({
+    status: 'working', transcript: 'Proposal applied', reply: '',
+  });
+
+  connection.message({
+    type: 'tool_call', messageId: 'proposal-result-message', generation: 2,
+    callId: 'context-after-apply', tool: 'get_app_context', args: {},
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(connection.toolResults.at(-1)).toMatchObject({
+    ok: true,
+    result: { selectedChat: 'captured-chat' },
+  });
+  connection.message({
+    type: 'reply', messageId: 'proposal-result-message', reply: 'The chat was renamed.',
+  });
+  connection.message({
+    type: 'status', messageId: 'proposal-result-message', status: 'completed',
+  });
+  expect(controller.getSnapshot()).toMatchObject({
+    status: 'completed', reply: 'The chat was renamed.',
+  });
+  await controller.close();
 });
 
 

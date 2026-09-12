@@ -1,6 +1,10 @@
 import type http from 'node:http';
 import crypto from 'node:crypto';
-import { validateCompanionRunInput, type CompanionClientMessage } from '@drone/assistant-chat';
+import {
+  validateCompanionProposalResultInput,
+  validateCompanionRunInput,
+  type CompanionClientMessage,
+} from '@drone/assistant-chat';
 import { type RawData, WebSocket, WebSocketServer } from 'ws';
 
 import { CompanionRunSession } from './companion-run-session';
@@ -57,6 +61,31 @@ export function createCompanionWebSocketServer(runtime: CompanionRuntime): WebSo
           ok: message.ok !== false,
           result: message.result,
           error: message.error,
+        });
+        return;
+      }
+      if (message?.type === 'proposal_result') {
+        if (message.runId !== session?.clientRunId) return;
+        const activeSession = session;
+        const validation = validateCompanionProposalResultInput(message);
+        if (!validation.ok) {
+          send({
+            type: 'error',
+            runId: validation.runId,
+            messageId: validation.messageId,
+            error: validation.error,
+          });
+          return;
+        }
+        const { messageId, result } = validation;
+        void activeSession.submitProposalResult({ messageId, result }).catch((error) => {
+          if (session !== activeSession) return;
+          send({
+            type: 'error',
+            runId: message.runId,
+            messageId,
+            error: error instanceof Error ? error.message : String(error),
+          });
         });
         return;
       }

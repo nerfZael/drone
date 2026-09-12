@@ -41,6 +41,9 @@ export function createMobileCompanionTransport(input: {
     async sendToolResult(result) {
       await input.request(input.targetDeviceId, COMPANION_CAPABILITY.id, 'tool.result', result);
     },
+    async sendProposalResult(result) {
+      await input.request(input.targetDeviceId, COMPANION_CAPABILITY.id, 'proposal.result', result);
+    },
     async cancel(runId) {
       await input.request(input.targetDeviceId, COMPANION_CAPABILITY.id, 'run.cancel', { runId });
     },

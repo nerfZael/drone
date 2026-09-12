@@ -1,5 +1,9 @@
 import crypto from 'node:crypto';
-import type { CompanionClientTelemetry, CompanionRunEvent } from '@drone/assistant-chat';
+import type {
+  CompanionClientTelemetry,
+  CompanionProposalApplyResult,
+  CompanionRunEvent,
+} from '@drone/assistant-chat';
 
 import type { CompanionBrowserCall, CompanionRuntime } from './companion-runtime';
 import type { CompanionTelemetryTransport } from './companion-telemetry';
@@ -17,10 +21,21 @@ type CompanionPromptInput = {
 };
 
 type BufferedCompanionPrompt = CompanionPromptInput & {
+  kind: 'prompt';
   messageId: string;
   receivedAtEpochMs: number;
   receivedAtMonotonicMs: number;
 };
+
+type BufferedCompanionProposalResult = {
+  kind: 'proposal_result';
+  messageId: string;
+  result: CompanionProposalApplyResult;
+  receivedAtEpochMs: number;
+  receivedAtMonotonicMs: number;
+};
+
+type BufferedCompanionWork = BufferedCompanionPrompt | BufferedCompanionProposalResult;
 
 type CompanionRunSessionEvent = CompanionRunEvent & { messageId: string };
 
@@ -28,7 +43,9 @@ type CompanionRunSessionOptions = {
   clientRunId: string;
   runtimeRunId: string;
   transport: CompanionTelemetryTransport;
-  runtime: Pick<CompanionRuntime, 'run' | 'steer' | 'deleteSession'> & Partial<Pick<CompanionRuntime, 'connectSubscriptions'>>;
+  runtime: Pick<CompanionRuntime, 'run' | 'steer' | 'deleteSession'> & Partial<
+    Pick<CompanionRuntime, 'connectSubscriptions' | 'resumeWithProposalResult'>
+  >;
   emit(event: CompanionRunSessionEvent): void | Promise<void>;
   isAvailable(): boolean;
   unavailableMessage: string;
@@ -38,13 +55,14 @@ type CompanionRunSessionOptions = {
 export class CompanionRunSession {
   readonly clientRunId: string;
 
-  private readonly prompts: BufferedCompanionPrompt[] = [];
+  private readonly workQueue: BufferedCompanionWork[] = [];
   private readonly browserTools: CompanionBrowserToolBroker;
   private generation = 0;
   private activeMessageId = '';
   private active = false;
   private closed = false;
   private readonly subscriptionDeliveries = new Map<string, Promise<void>>();
+  private readonly proposalResultMessageIds = new Set<string>();
 
   constructor(private readonly options: CompanionRunSessionOptions) {
     this.clientRunId = options.clientRunId;
@@ -79,19 +97,48 @@ export class CompanionRunSession {
     if (this.closed) throw new Error(this.options.unavailableMessage);
     const queued = {
       ...prompt,
+      kind: 'prompt' as const,
       messageId: prompt.messageId || crypto.randomUUID(),
       receivedAtEpochMs: Date.now(),
       receivedAtMonotonicMs: performance.now(),
     };
     if (this.active) {
-      this.prompts.push(queued);
+      this.workQueue.push(queued);
       this.flushSteering();
       return;
     }
 
     this.active = true;
     try {
-      await this.beginPrompt(queued);
+      await this.beginWork(queued);
+    } catch (error) {
+      await this.close(this.options.unavailableMessage).catch(() => undefined);
+      throw error;
+    }
+    void this.drain(queued);
+  }
+
+  async submitProposalResult(input: {
+    messageId?: string;
+    result: CompanionProposalApplyResult;
+  }): Promise<void> {
+    if (this.closed) throw new Error(this.options.unavailableMessage);
+    if (input.messageId && this.proposalResultMessageIds.has(input.messageId)) return;
+    const queued: BufferedCompanionProposalResult = {
+      kind: 'proposal_result',
+      messageId: input.messageId || crypto.randomUUID(),
+      result: input.result,
+      receivedAtEpochMs: Date.now(),
+      receivedAtMonotonicMs: performance.now(),
+    };
+    this.proposalResultMessageIds.add(queued.messageId);
+    if (this.active) {
+      this.workQueue.push(queued);
+      return;
+    }
+    this.active = true;
+    try {
+      await this.beginWork(queued);
     } catch (error) {
       await this.close(this.options.unavailableMessage).catch(() => undefined);
       throw error;
@@ -114,18 +161,19 @@ export class CompanionRunSession {
     if (this.closed) return;
     this.closed = true;
     this.generation += 1;
-    this.prompts.length = 0;
+    this.workQueue.length = 0;
     this.subscriptionDeliveries.clear();
+    this.proposalResultMessageIds.clear();
     this.activeMessageId = '';
     this.browserTools.rejectAll(message);
     this.options.onClose();
     await this.options.runtime.deleteSession(this.options.runtimeRunId);
   }
 
-  private async drain(queued: BufferedCompanionPrompt): Promise<void> {
+  private async drain(queued: BufferedCompanionWork): Promise<void> {
     try {
       while (this.isAvailable()) {
-        const { prompt, messageId } = queued;
+        const { messageId } = queued;
         const runGeneration = this.generation;
         const callBrowser: CompanionBrowserCall = (tool, args, signal) => {
           if (!this.isCurrentGeneration(runGeneration)) {
@@ -135,27 +183,44 @@ export class CompanionRunSession {
         };
 
         try {
-          const reply = await this.options.runtime.run({
-            runId: this.options.runtimeRunId,
-            messageId,
-            prompt,
-            transport: this.options.transport,
-            queueWaitMs: performance.now() - queued.receivedAtMonotonicMs,
-            receivedAtEpochMs: queued.receivedAtEpochMs,
-            receivedAtMonotonicMs: queued.receivedAtMonotonicMs,
-            clientTelemetry: queued.telemetry,
-            callBrowser,
-            onEvent: (event) => {
-              if (!this.isCurrentGeneration(runGeneration)) return;
-              this.flushSteering();
-              if (!this.isCurrentGeneration(runGeneration)) return;
-              const visibleEvent = boundedCompanionActivityEvent(event);
-              if (!visibleEvent) return;
-              void Promise.resolve(
-                this.options.emit({ type: 'activity', messageId: this.activeMessageId, event: visibleEvent }),
-              ).catch(() => undefined);
-            },
-          });
+          const onEvent = (event: Parameters<Parameters<CompanionRuntime['run']>[0]['onEvent']>[0]) => {
+            if (!this.isCurrentGeneration(runGeneration)) return;
+            this.flushSteering();
+            if (!this.isCurrentGeneration(runGeneration)) return;
+            const visibleEvent = boundedCompanionActivityEvent(event);
+            if (!visibleEvent) return;
+            void Promise.resolve(
+              this.options.emit({ type: 'activity', messageId: this.activeMessageId, event: visibleEvent }),
+            ).catch(() => undefined);
+          };
+          const reply = queued.kind === 'prompt'
+            ? await this.options.runtime.run({
+                runId: this.options.runtimeRunId,
+                messageId,
+                prompt: queued.prompt,
+                transport: this.options.transport,
+                queueWaitMs: performance.now() - queued.receivedAtMonotonicMs,
+                receivedAtEpochMs: queued.receivedAtEpochMs,
+                receivedAtMonotonicMs: queued.receivedAtMonotonicMs,
+                clientTelemetry: queued.telemetry,
+                callBrowser,
+                onEvent,
+              })
+            : await (() => {
+                const resume = this.options.runtime.resumeWithProposalResult;
+                if (!resume) throw new Error('Companion proposal continuation is unavailable');
+                return resume.call(this.options.runtime, {
+                  runId: this.options.runtimeRunId,
+                  messageId,
+                  result: queued.result,
+                  transport: this.options.transport,
+                  queueWaitMs: performance.now() - queued.receivedAtMonotonicMs,
+                  receivedAtEpochMs: queued.receivedAtEpochMs,
+                  receivedAtMonotonicMs: queued.receivedAtMonotonicMs,
+                  callBrowser,
+                  onEvent,
+                });
+              })();
           if (!this.isCurrentGeneration(runGeneration)) return;
           const replyMessageId = this.activeMessageId;
           await this.options.emit({ type: 'reply', messageId: replyMessageId, reply });
@@ -174,9 +239,9 @@ export class CompanionRunSession {
             this.activeMessageId = '';
           }
         }
-        const next = this.prompts.shift();
+        const next = this.workQueue.shift();
         if (!next) break;
-        await this.beginPrompt(next);
+        await this.beginWork(next);
         queued = next;
       }
     } catch {
@@ -190,8 +255,13 @@ export class CompanionRunSession {
     if (!this.isAvailable()) return;
     // The runtime uses the delivery setting captured for this run. Queue mode
     // keeps follow-ups buffered; ASAP flushes them once the agent can accept steering.
-    for (let index = 0; index < this.prompts.length;) {
-      const next = this.prompts[index];
+    for (let index = 0; index < this.workQueue.length;) {
+      const next = this.workQueue[index];
+      if (next.kind !== 'prompt') {
+        // Host action results preserve arrival order and must reach the model
+        // before any later user prompt is steered into the active request.
+        break;
+      }
       try {
         if (next.subscriptionDeliveryMode === 'queue' ||
           !this.options.runtime.steer(this.options.runtimeRunId, next.prompt, next.subscriptionDeliveryMode)) {
@@ -206,7 +276,7 @@ export class CompanionRunSession {
         void this.close('Companion steering failed').catch(() => undefined);
         return;
       }
-      this.prompts.splice(index, 1);
+      this.workQueue.splice(index, 1);
       const afterMessageId = this.activeMessageId;
       this.activeMessageId = next.messageId;
       if (next.subscriptionDeliveryMode) {
@@ -217,10 +287,10 @@ export class CompanionRunSession {
     }
   }
 
-  private async beginPrompt(prompt: BufferedCompanionPrompt): Promise<void> {
+  private async beginWork(prompt: BufferedCompanionWork): Promise<void> {
     this.generation += 1;
     this.activeMessageId = prompt.messageId;
-    if (prompt.subscriptionDeliveryMode) {
+    if (prompt.kind === 'prompt' && prompt.subscriptionDeliveryMode) {
       await this.options.emit({ type: 'subscription', messageId: prompt.messageId });
       if (!this.isAvailable()) throw new Error(this.options.unavailableMessage);
     }

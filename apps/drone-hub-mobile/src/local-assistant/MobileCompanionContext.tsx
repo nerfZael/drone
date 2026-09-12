@@ -8,6 +8,7 @@ import {
   COMPANION_PROPOSAL_PATH,
   COMPANION_PROPOSAL_TARGET_ID,
   CompanionClientController,
+  companionProposalApplyResult,
   waitForCompanionReply,
   LIVE_COMPANION_PROMPT_PREFIX,
   EMPTY_COMPANION_PROPOSAL,
@@ -238,7 +239,10 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     setProposalDefaultRepoPath(null);
   }, []);
 
-  const executeProposal = React.useCallback(async () => {
+  const executeProposal = React.useCallback(async (options?: {
+    autoApproved?: boolean;
+    returnResultToTool?: boolean;
+  }): Promise<CompanionProposalExecution | undefined> => {
     const current = proposalRef.current;
     const target = workspaceTargetRef.current;
     const executionContext = proposalExecutionContextRef.current;
@@ -258,36 +262,42 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       };
       proposalExecutionRef.current = execution;
       setProposalExecution(execution);
-      return;
+      if (!options?.returnResultToTool) {
+        await controller.submitProposalResult(
+          companionProposalApplyResult(current, execution, options?.autoApproved === true),
+        );
+      }
+      return execution;
     }
     const executionGeneration = proposalExecutionGenerationRef.current + 1;
     proposalExecutionGenerationRef.current = executionGeneration;
     proposalExecutingRef.current = true;
     setProposalExecuting(true);
     setProposalExecution(null);
+    let completedExecution: CompanionProposalExecution;
     try {
-      const execution = await target.executeProposal(current, executionContext);
+      completedExecution = await target.executeProposal(current, executionContext);
       if (proposalExecutionGenerationRef.current === executionGeneration) {
-        proposalExecutionRef.current = execution;
-        setProposalExecution(execution);
+        proposalExecutionRef.current = completedExecution;
+        setProposalExecution(completedExecution);
       }
     } catch (executionError) {
+      completedExecution = {
+        ok: false,
+        operations: current.operations.map((operation, index) => index === 0
+          ? {
+              id: operation.id,
+              type: operation.type,
+              status: 'failed',
+              error: executionError instanceof Error
+                ? executionError.message
+                : String(executionError),
+            }
+          : { id: operation.id, type: operation.type, status: 'skipped' }),
+      };
       if (proposalExecutionGenerationRef.current === executionGeneration) {
-        const execution: CompanionProposalExecution = {
-          ok: false,
-          operations: current.operations.map((operation, index) => index === 0
-            ? {
-                id: operation.id,
-                type: operation.type,
-                status: 'failed',
-                error: executionError instanceof Error
-                  ? executionError.message
-                  : String(executionError),
-              }
-            : { id: operation.id, type: operation.type, status: 'skipped' }),
-        };
-        proposalExecutionRef.current = execution;
-        setProposalExecution(execution);
+        proposalExecutionRef.current = completedExecution;
+        setProposalExecution(completedExecution);
       }
     } finally {
       if (proposalExecutionGenerationRef.current === executionGeneration) {
@@ -295,7 +305,15 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
         setProposalExecuting(false);
       }
     }
-  }, []);
+    if (proposalExecutionGenerationRef.current !== executionGeneration) return undefined;
+    const applyResult = companionProposalApplyResult(
+      current,
+      completedExecution!,
+      options?.autoApproved === true,
+    );
+    if (!options?.returnResultToTool) await controller.submitProposalResult(applyResult);
+    return completedExecution!;
+  }, [controller]);
 
   const executeMobileTool = React.useCallback(
     async (
@@ -306,11 +324,17 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       if (workspaceTargetRef.current?.targetDeviceId !== expectedTargetDeviceId) throw new Error('STALE_MOBILE_CONTEXT');
       if (tool === 'read_companion_proposal') return readProposal();
       if (tool === 'apply_companion_proposal_patch') {
-        return applyProposal(
+        const proposalUpdate = applyProposal(
           String(args.targetId ?? ''),
           String(args.baseRevision ?? ''),
           String(args.content ?? ''),
         );
+        if (!autoApproveSettings.enabled || autoApproveSettings.loading) return proposalUpdate;
+        const current = proposalRef.current;
+        if (!current?.operations.length) return proposalUpdate;
+        const execution = await executeProposal({ autoApproved: true, returnResultToTool: true });
+        if (!execution) throw new Error('PROPOSAL_EXECUTION_UNAVAILABLE');
+        return companionProposalApplyResult(current, execution, true);
       }
       const resolveTarget = () => {
         const activeTarget = workspaceTargetRef.current;
@@ -335,7 +359,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       };
       return await executeCompanionBrowserTool(workspace, tool, args);
     },
-    [applyProposal, readProposal, resolveEditor],
+    [applyProposal, autoApproveSettings.enabled, autoApproveSettings.loading, executeProposal, readProposal, resolveEditor],
   );
 
   const cancel = React.useCallback(async () => {
@@ -562,7 +586,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     if (!autoApproveSettings.enabled || autoApproveSettings.loading || effectiveStatus !== 'completed' ||
       !proposal?.operations.length || proposalExecuting || proposalExecution ||
       proposalExecutionContextRef.current?.targetDeviceId !== target?.targetDeviceId) return;
-    void executeProposal();
+    void executeProposal({ autoApproved: true });
   }, [autoApproveSettings.enabled, autoApproveSettings.loading, effectiveStatus, proposal, proposalExecuting, proposalExecution, target?.targetDeviceId, executeProposal]);
 
   const value = React.useMemo<MobileCompanionContextValue>(
@@ -585,7 +609,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       submitText,
       close,
       cancel,
-      executeProposal,
+      executeProposal: async () => { await executeProposal(); },
       discardProposal,
       registerWorkspaceTarget,
       registerEditorTarget,

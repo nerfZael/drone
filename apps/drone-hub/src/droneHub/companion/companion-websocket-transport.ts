@@ -84,6 +84,9 @@ export function createCompanionWebSocketTransport(url: string): CompanionClientT
     sendToolResult(input) {
       send({ type: 'tool_result', ...input });
     },
+    sendProposalResult(input) {
+      send({ type: 'proposal_result', ...input });
+    },
     cancel(runId) {
       if (socket?.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ type: 'cancel_run', runId }));

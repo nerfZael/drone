@@ -1,4 +1,5 @@
 import { reduceCompanionCompaction, type CompanionCompactionActivity } from './companion-compaction.js';
+import type { CompanionProposalApplyResult } from './companion-proposal.js';
 import {
   reduceCompanionToolActivity,
   type CompanionBrowserToolName,
@@ -44,6 +45,11 @@ export type CompanionClientTransport = {
     ok: boolean;
     result?: unknown;
     error?: string;
+  }): Promise<void> | void;
+  sendProposalResult(input: {
+    runId: string;
+    messageId: string;
+    result: CompanionProposalApplyResult;
   }): Promise<void> | void;
   cancel(runId: string): Promise<void> | void;
   close(): Promise<void> | void;
@@ -201,6 +207,44 @@ export class CompanionClientController {
         session,
         error instanceof Error ? error.message : String(error || 'Companion could not start.'),
       );
+    }
+  }
+
+  async submitProposalResult(
+    result: CompanionProposalApplyResult,
+  ): Promise<boolean> {
+    const session = this.activeSession;
+    const executeTool = session?.latestExecutor;
+    if (!session || !executeTool) return false;
+    const messageId = this.options.createId();
+    session.messageExecutors.set(messageId, executeTool);
+    session.latestMessageId = messageId;
+    session.activityMessageId = null;
+    this.update({
+      status: 'working',
+      error: '',
+      reply: '',
+      transcript: 'Proposal applied',
+      startedAt: this.now(),
+      endedAt: null,
+      activity: [],
+      compaction: null,
+    });
+    try {
+      await session.ready;
+      if (!this.isActive(session)) return false;
+      await session.transport.sendProposalResult({
+        runId: session.runId,
+        messageId,
+        result,
+      });
+      return true;
+    } catch (error) {
+      this.handleDisconnect(
+        session,
+        error instanceof Error ? error.message : String(error || 'Companion could not continue.'),
+      );
+      return false;
     }
   }
 
