@@ -34,4 +34,19 @@ A Live session must first be started in the foreground to obtain permissions and
 - Native JVM regression reproducing Bluetooth-to-speaker routing passed, along with existing PCM playback tests.
 - `:live-voice:compileDebugKotlin --offline` passed against the actual Android dependencies.
 
-The patched application has not been installed on the phone. Physical headset verification of the fixed build remains pending, including stop/start after locking the screen and confirming that explicit Companion close prevents restart.
+The first fix was merged in `93bcf52d` and deployed to the connected Samsung phone at 21:21:47. The following findings are from the user testing that installed build.
+
+
+## Follow-up: brief speaker playback and delayed resume cue
+
+Device diagnostics at 21:23–21:24 confirm the remaining timing problem:
+
+- SCO disconnected at 21:23:59.166; Drone's track reported the phone output at 21:23:59.959 and stopped at 21:23:59.990. Waiting for the track route change left roughly 800 ms before the app reacted. The user reported hearing a brief fragment on the phone.
+- On resume at 21:24:09.215 the recorder and track started on the phone. SCO connected at 21:24:09.354; the track reached Bluetooth at 21:24:09.933. The recording cue previously ran immediately after capture started, during this transition.
+- The Bluetooth MEDIA_PLAY commands recorded at 21:24:08.938 and 21:24:26.691 both led to a new recorder. These logs do not establish what happened to the reported extra physical press: there is no corresponding ignored play event in the available history.
+
+The follow-up listens for SCO state and communication-device changes, with the original AudioTrack listener retained as a fallback. Android documents the asynchronous connection and its notifications in [AudioManager](https://developer.android.com/reference/android/media/AudioManager#ACTION_SCO_AUDIO_STATE_UPDATED). Native stop mutes, pauses and flushes output before blocking microphone cleanup. Paused media state is published before cleanup; a late JS recording update cannot overwrite it and make the next play look redundant.
+
+When a headset is connected, PCM starts silently and holds speech plus the recording cue until the track actually reports a headset route. Capture sends silence during that transition. Cancellation resolves pending cue requests without playing; a five-second route timeout reports an error while output remains silent. Phone-only Live continues to start immediately.
+
+Follow-up validation: the Android Kotlin build and mobile typecheck passed; all 25 existing targeted TypeScript tests passed. Native JVM regressions exercise early SCO/BLE stop before any AudioTrack speaker callback, one-press resume, stale recording state, repeated/up key events, route-gated speech and cues, startup cancellation/timeout, and output silence before microphone shutdown. These tests simulate Android events; physical headset timing and whether the previously missed press is resolved still require testing the new installed build.

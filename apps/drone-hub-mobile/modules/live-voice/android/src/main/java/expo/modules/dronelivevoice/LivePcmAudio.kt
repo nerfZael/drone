@@ -19,16 +19,31 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /** One microphone for the whole call, including network startup. PCM16LE / 24 kHz. */
 internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val onError: (String) -> Unit,
-  private val onHeadsetDisconnected: () -> Unit = {}) {
+  private val onHeadsetDisconnected: () -> Unit = {},
+  awaitHeadset: Boolean = false) {
   @Volatile private var running = false
   @Volatile private var muted = false
+  @Volatile private var playbackReady = !awaitHeadset
+  private val handler = Handler(Looper.getMainLooper())
+  private val readyCallbacks = mutableListOf<(Boolean) -> Unit>()
+  private val routeTimeout = Runnable {
+    if (running && !playbackReady) onError("The headset audio route did not connect. Try Live again.")
+  }
   private var headsetRouted = false
   private val routeListener = AudioRouting.OnRoutingChangedListener { routing ->
     if (running) {
       when (routing.routedDevice?.type) {
         AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_BLE_HEADSET,
         AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
-        AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_HEARING_AID -> headsetRouted = true
+        AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_HEARING_AID -> {
+          headsetRouted = true
+          if (!playbackReady) {
+            player?.setVolume(1f)
+            playbackReady = true
+            handler.removeCallbacks(routeTimeout)
+            completeReady(true)
+          }
+        }
         AudioDeviceInfo.TYPE_BUILTIN_SPEAKER, AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> {
           if (headsetRouted) {
             headsetRouted = false
@@ -69,10 +84,13 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
       check(output.state == AudioTrack.STATE_INITIALIZED) { "Could not open Live playback" }
       input.startRecording()
       check(input.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "Could not start the Live microphone" }
+      // AudioTrack must run to report its actual route. Keep it silent while SCO connects.
+      output.setVolume(if (playbackReady) 1f else 0f)
       output.play()
       running = true
-      output.addOnRoutingChangedListener(routeListener, Handler(Looper.getMainLooper()))
+      output.addOnRoutingChangedListener(routeListener, handler)
       routeListener.onRoutingChanged(output)
+      if (!playbackReady) handler.postDelayed(routeTimeout, 5000)
       captureThread = Thread({
         Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
         val samples = ShortArray(4800)
@@ -85,7 +103,7 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
             if (used != samples.size) continue
             val bytes = ByteArray(samples.size)
             for (i in 0 until samples.size / 2) {
-              val value = if (muted) 0 else (samples[i * 2].toInt() + samples[i * 2 + 1].toInt()) / 2
+              val value = if (muted || !playbackReady) 0 else (samples[i * 2].toInt() + samples[i * 2 + 1].toInt()) / 2
               bytes[i * 2] = value.toByte()
               bytes[i * 2 + 1] = (value shr 8).toByte()
             }
@@ -112,6 +130,7 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
         }
         try {
           while (running) {
+            if (!playbackReady) { Thread.sleep(10); continue }
             val bytes = playback.poll(100, TimeUnit.MILLISECONDS) ?: continue
             // Playback head is an unsigned 32-bit frame counter; compare modulo
             // 2^32 so long sessions keep detecting starvation after it wraps.
@@ -122,6 +141,17 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
         } catch (error: Exception) { if (running) onError(error.message ?: "Live playback failed") }
       }, "LivePcmPlayback").apply { start() }
     } catch (error: Exception) { stop(); throw error }
+  }
+
+  fun whenPlaybackReady(callback: (Boolean) -> Unit) {
+    if (!running || playbackReady) callback(running && playbackReady)
+    else readyCallbacks.add(callback)
+  }
+
+  private fun completeReady(ready: Boolean) {
+    val callbacks = readyCallbacks.toList()
+    readyCallbacks.clear()
+    callbacks.forEach { it(ready) }
   }
 
   fun mute(value: Boolean) { muted = value }
@@ -137,10 +167,13 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
   }
   fun stop() {
     running = false
-    player?.removeOnRoutingChangedListener(routeListener)
     muted = true
+    // AudioRecord.stop can block. Silence queued output before waiting for the microphone.
+    try { player?.setVolume(0f); player?.pause(); player?.flush() } catch (_: Exception) {}
+    player?.removeOnRoutingChangedListener(routeListener)
+    handler.removeCallbacks(routeTimeout)
+    completeReady(false)
     try { recorder?.stop() } catch (_: Exception) {}
-    try { player?.pause(); player?.flush() } catch (_: Exception) {}
     captureThread?.join(1000)
     playbackThread?.join(1000)
     recorder?.release(); recorder = null

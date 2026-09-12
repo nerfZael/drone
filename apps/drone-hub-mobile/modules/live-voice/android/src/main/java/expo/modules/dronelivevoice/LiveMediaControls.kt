@@ -1,6 +1,10 @@
 package expo.modules.dronelivevoice
 
 import android.content.Context
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
+import android.media.AudioDeviceInfo
+import androidx.core.content.ContextCompat
 import android.content.Intent
 import android.media.AudioManager
 import android.media.AudioAttributes
@@ -16,12 +20,30 @@ import android.view.KeyEvent
 import expo.modules.kotlin.Promise
 
 /** Owned by the foreground service, including while the GPT-Live session is closed. */
-internal class LiveMediaControls(context: Context, val id: String, private val emit: (String) -> Unit) {
+internal class LiveMediaControls(private val context: Context, val id: String, private val emit: (String) -> Unit) {
   private val handler = Handler(Looper.getMainLooper())
   private var playing = true
   private var closed = false
   private var skipStoppedCue = false
   private var cue: ToneGenerator? = null
+  private var receiverRegistered = false
+  private var scoConnected = false
+  private var communicationHeadsetConnected = false
+  private var communicationListener: AudioManager.OnCommunicationDeviceChangedListener? = null
+  private val routeReceiver = object : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+      if (closed) return
+      when (intent.action) {
+        AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED -> {
+          val connected = intent.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, -1) == AudioManager.SCO_AUDIO_STATE_CONNECTED
+          val disconnected = scoConnected && !connected
+          scoConnected = connected
+          if (disconnected) pauseForHeadsetDisconnect()
+        }
+        AudioManager.ACTION_AUDIO_BECOMING_NOISY -> pauseForHeadsetDisconnect()
+      }
+    }
+  }
   private val audioManager = context.getSystemService(AudioManager::class.java)
   private var focused = false
   private var focusRequest: AudioFocusRequest? = null
@@ -52,20 +74,52 @@ internal class LiveMediaControls(context: Context, val id: String, private val e
       }
     }, handler)
     session.isActive = true
-    try { update("connecting") } catch (error: Exception) { close(); throw error }
+    try {
+      // SCO state arrives before AudioTrack's fallback-to-speaker routing callback.
+      val filter = IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED).apply {
+        addAction(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
+      }
+      ContextCompat.registerReceiver(context, routeReceiver, filter, ContextCompat.RECEIVER_EXPORTED)
+      receiverRegistered = true
+      if (Build.VERSION.SDK_INT >= 31) {
+        val listener = AudioManager.OnCommunicationDeviceChangedListener { device ->
+          if (!closed) {
+            val headset = isHeadset(device)
+            val disconnected = communicationHeadsetConnected && !headset
+            communicationHeadsetConnected = headset
+            if (disconnected) pauseForHeadsetDisconnect()
+          }
+        }
+        communicationListener = listener
+        communicationHeadsetConnected = isHeadset(audioManager.communicationDevice)
+        audioManager.addOnCommunicationDeviceChangedListener({ runnable -> handler.post(runnable); Unit }, listener)
+      }
+      update("connecting")
+    } catch (error: Exception) { close(); throw error }
   }
 
   fun command(action: String) {
     if (closed || action == "play" && playing || action == "pause" && !playing) return
-    if (action != "play") LiveVoiceSession.stopAudio?.invoke()
+    if (action != "play") {
+      // Publish paused before potentially blocking cleanup, so AVRCP sees the next press as play.
+      playing = false
+      scoConnected = false; communicationHeadsetConnected = false
+      publishPlaybackState()
+      cue?.release(); cue = null
+      LiveVoiceSession.stopAudio?.invoke()
+    }
     try { update(if (action == "play") "connecting" else "paused") }
     catch (_: Exception) { update("paused"); emit("stop"); return }
     emit(action)
   }
 
   fun update(state: String) {
-    if (closed) return
+    if (closed || state == "recording" && !playing) return
     playing = state != "paused"
+    if (!playing) {
+      scoConnected = false; communicationHeadsetConnected = false
+      cue?.release(); cue = null
+    }
     if (playing && !focused) {
       val result = if (Build.VERSION.SDK_INT >= 26) {
         val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
@@ -81,11 +135,15 @@ internal class LiveMediaControls(context: Context, val id: String, private val e
       check(result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) { "Another app is using audio. Try Live again." }
       focused = true
     } else if (!playing) releaseFocus()
+    publishPlaybackState()
+    LiveVoiceSession.refreshNotification?.invoke()
+  }
+
+  private fun publishPlaybackState() {
     session.setPlaybackState(PlaybackState.Builder()
       .setActions(PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_STOP)
       .setState(if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED, PlaybackState.PLAYBACK_POSITION_UNKNOWN, if (playing) 1f else 0f)
       .build())
-    LiveVoiceSession.refreshNotification?.invoke()
   }
 
   fun isPlaying() = playing
@@ -99,7 +157,7 @@ internal class LiveMediaControls(context: Context, val id: String, private val e
   }
 
   fun playCue(kind: String, promise: Promise) {
-    if (closed) { promise.resolve(); return }
+    if (closed || kind == "recording" && !playing) { promise.resolve(); return }
     if (kind == "stopped" && skipStoppedCue) {
       skipStoppedCue = false
       promise.resolve()
@@ -124,9 +182,19 @@ internal class LiveMediaControls(context: Context, val id: String, private val e
   fun close() {
     if (closed) return
     closed = true
+    if (receiverRegistered) { context.unregisterReceiver(routeReceiver); receiverRegistered = false }
+    if (Build.VERSION.SDK_INT >= 31) communicationListener?.let { audioManager.removeOnCommunicationDeviceChangedListener(it) }
+    communicationListener = null
     cue?.release(); cue = null
     releaseFocus()
     session.isActive = false; session.release()
+  }
+
+  private fun isHeadset(device: AudioDeviceInfo?) = when (device?.type) {
+    AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_BLE_HEADSET,
+    AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+    AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_HEARING_AID -> true
+    else -> false
   }
 
   private fun releaseFocus() {

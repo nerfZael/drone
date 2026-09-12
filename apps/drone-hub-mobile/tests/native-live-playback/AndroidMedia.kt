@@ -6,7 +6,7 @@ class AudioAttributes {
     fun setContentType(value: Int) = this
     fun build() = AudioAttributes()
   }
-  companion object { const val USAGE_VOICE_COMMUNICATION = 1; const val CONTENT_TYPE_SPEECH = 1 }
+  companion object { const val USAGE_MEDIA = 2; const val USAGE_VOICE_COMMUNICATION = 1; const val CONTENT_TYPE_SPEECH = 1 }
 }
 class AudioFormat {
   class Builder {
@@ -24,9 +24,10 @@ class AudioRecord(source: Int, rate: Int, channels: Int, encoding: Int, size: In
   @Volatile var recordingState = 0
   fun startRecording() { recordingState = RECORDSTATE_RECORDING }
   fun read(samples: ShortArray, offset: Int, size: Int): Int { Thread.sleep(5); return if (recordingState == 0) 0 else size }
-  fun stop() { recordingState = 0 }
+  fun stop() { beforeStop?.invoke(); recordingState = 0 }
   fun release() {}
   companion object {
+    var beforeStop: (() -> Unit)? = null
     const val STATE_INITIALIZED = 1; const val RECORDSTATE_RECORDING = 1
     fun getMinBufferSize(rate: Int, channels: Int, encoding: Int) = 4800
   }
@@ -74,6 +75,8 @@ class AudioTrack : AudioRouting {
     return count
   }
   @Synchronized fun snapshot() = spans.toList()
+  var volume = 1f
+  fun setVolume(value: Float): Int { volume = value; return 0 }
   fun play() {}
   fun pause() { paused = true }
   fun flush() {}
@@ -90,4 +93,43 @@ class AudioTrack : AudioRouting {
     lateinit var latest: AudioTrack
     fun getMinBufferSize(rate: Int, channels: Int, encoding: Int) = 4800
   }
+}
+
+class AudioManager {
+  var mode = MODE_IN_COMMUNICATION
+  var communicationDevice: AudioDeviceInfo? = null
+  var listener: OnCommunicationDeviceChangedListener? = null
+  fun addOnCommunicationDeviceChangedListener(executor: java.util.concurrent.Executor, value: OnCommunicationDeviceChangedListener) { listener = value }
+  fun removeOnCommunicationDeviceChangedListener(value: OnCommunicationDeviceChangedListener) { listener = null }
+  fun requestAudioFocus(request: AudioFocusRequest) = AUDIOFOCUS_REQUEST_GRANTED
+  fun requestAudioFocus(listener: OnAudioFocusChangeListener, stream: Int, gain: Int) = AUDIOFOCUS_REQUEST_GRANTED
+  fun abandonAudioFocusRequest(request: AudioFocusRequest) {}
+  fun abandonAudioFocus(listener: OnAudioFocusChangeListener) {}
+  fun interface OnCommunicationDeviceChangedListener { fun onCommunicationDeviceChanged(device: AudioDeviceInfo?) }
+  fun interface OnAudioFocusChangeListener { fun onAudioFocusChange(change: Int) }
+  companion object {
+    const val ACTION_SCO_AUDIO_STATE_UPDATED = "sco"
+    const val EXTRA_SCO_AUDIO_STATE = "state"
+    const val SCO_AUDIO_STATE_CONNECTED = 1; const val SCO_AUDIO_STATE_DISCONNECTED = 0
+    const val ACTION_AUDIO_BECOMING_NOISY = "noisy"
+    const val AUDIOFOCUS_GAIN = 1; const val AUDIOFOCUS_REQUEST_GRANTED = 1
+    const val MODE_IN_COMMUNICATION = 3; const val STREAM_VOICE_CALL = 0; const val STREAM_MUSIC = 3
+  }
+}
+class AudioFocusRequest {
+  class Builder(gain: Int) {
+    fun setAudioAttributes(attributes: AudioAttributes) = this
+    fun setOnAudioFocusChangeListener(listener: AudioManager.OnAudioFocusChangeListener, handler: android.os.Handler) = this
+    fun build() = AudioFocusRequest()
+  }
+}
+class MediaMetadata {
+  class Builder { fun putString(key: String, value: String) = this; fun build() = MediaMetadata() }
+  companion object { const val METADATA_KEY_TITLE = "title" }
+}
+class ToneGenerator(stream: Int, volume: Int) {
+  var released = false
+  fun release() { released = true }
+  fun startTone(kind: Int, length: Int): Boolean { played++; return true }
+  companion object { const val TONE_PROP_ACK = 1; const val TONE_PROP_NACK = 2; var played = 0 }
 }

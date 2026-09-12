@@ -85,6 +85,44 @@ fun main() {
   check(routed.routeListener == null)
   routeListener.onRoutingChanged(routed) // Queued callbacks cannot pause a new Live session.
   check(pauses == 1)
+  // Stop output before a slow microphone shutdown has any opportunity to leak speech.
+  val stopping = LivePcmAudio({}, { errors.add(it) })
+  stopping.start()
+  val stoppingTrack = AudioTrack.latest
+  android.media.AudioRecord.beforeStop = { check(stoppingTrack.paused && stoppingTrack.volume == 0f) }
+  stopping.stop()
+  android.media.AudioRecord.beforeStop = null
+
+  // Initial phone routing must produce neither speech nor a start cue while waiting for SCO.
+  val connecting = LivePcmAudio({}, { errors.add(it) }, awaitHeadset = true)
+  connecting.start()
+  val connectingTrack = AudioTrack.latest
+  var ready: Boolean? = null
+  connecting.whenPlaybackReady { ready = it }
+  connectingTrack.route(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
+  connecting.play(encode(chunk(45)))
+  Thread.sleep(50)
+  check(ready == null && connectingTrack.volume == 0f && connectingTrack.snapshot().isEmpty())
+  connectingTrack.route(AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
+  check(ready == true && connectingTrack.volume == 1f)
+  waitUntil { connectingTrack.snapshot().size == 2 }
+  check(connectingTrack.snapshot()[1].bytes.contentEquals(chunk(45)))
+  connecting.stop()
+  check(android.os.Handler.pending.isEmpty())
+
+  val cancelled = LivePcmAudio({}, { errors.add(it) }, awaitHeadset = true)
+  cancelled.start()
+  var cancelledReady: Boolean? = null
+  cancelled.whenPlaybackReady { cancelledReady = it }
+  cancelled.stop()
+  check(cancelledReady == false && android.os.Handler.pending.isEmpty())
+  val timeoutErrors = mutableListOf<String>()
+  val timeout = LivePcmAudio({}, { timeoutErrors.add(it) }, awaitHeadset = true)
+  timeout.start()
+  android.os.Handler.runDelayed()
+  check(timeoutErrors.size == 1 && AudioTrack.latest.volume == 0f)
+  timeout.stop()
+  println("Headset startup holds cues and speech until routed; cancellation and timeout stay silent; playback stops before microphone")
   println("Headset route loss stops capture/playback; initial phone route, transient null and stale callbacks ignored")
   println("Native Live playback: jitter, bounded reserve, starvation, short tail, PCM order, partial writes, overflow and stop during buffering passed")
 }

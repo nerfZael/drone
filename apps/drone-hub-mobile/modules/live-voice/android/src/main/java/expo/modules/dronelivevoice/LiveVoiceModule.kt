@@ -1,6 +1,8 @@
 package expo.modules.dronelivevoice
 
 import android.content.Intent
+import android.media.AudioManager
+import android.media.AudioDeviceInfo
 import android.os.Handler
 import android.os.Looper
 import androidx.core.content.ContextCompat
@@ -66,15 +68,30 @@ class LiveVoiceModule : Module() {
     }.runOnQueue(Queues.MAIN)
     AsyncFunction("playCue") { id: String, kind: String, promise: Promise ->
       val controls = LiveVoiceSession.mediaControls?.takeIf { it.id == id }
-      if (controls == null) promise.resolve() else controls.playCue(kind, promise)
+      if (controls == null) promise.resolve()
+      else if (kind == "recording") {
+        val audio = pcm
+        if (audio == null) promise.resolve()
+        else audio.whenPlaybackReady { ready ->
+          if (ready && pcm === audio && LiveVoiceSession.mediaControls === controls && controls.isPlaying()) controls.playCue(kind, promise)
+          else promise.resolve()
+        }
+      } else controls.playCue(kind, promise)
     }.runOnQueue(Queues.MAIN)
     AsyncFunction("startPcm") { id: String ->
       check(LiveVoiceSession.id != null) { "Start the Live foreground service first" }
       check(pcm == null) { "Live audio is already running" }
+      val context = appContext.reactContext ?: error("React context is unavailable")
+      val manager = context.getSystemService(AudioManager::class.java)
+      val awaitHeadset = manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any {
+        it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || it.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
+          it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET || it.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+          it.type == AudioDeviceInfo.TYPE_USB_HEADSET || it.type == AudioDeviceInfo.TYPE_HEARING_AID
+      }
       val audio = LivePcmAudio(
         { audio -> sendEvent("pcmAudio", mapOf("id" to id, "audio" to audio)) },
         { error -> sendEvent("pcmError", mapOf("id" to id, "error" to error)) },
-        { LiveVoiceSession.mediaControls?.pauseForHeadsetDisconnect() })
+        { LiveVoiceSession.mediaControls?.pauseForHeadsetDisconnect() }, awaitHeadset)
       pcm = audio
       pcmId = id
       LiveVoiceSession.stopAudio = { pcm?.stop(); pcm = null; pcmId = null }
