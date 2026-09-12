@@ -80,7 +80,7 @@ export function CompanionSettingsTab({ settings }: {
             <div>
               <h4 className="text-xs font-semibold text-[var(--fg)]">GPT-Live system prompt</h4>
               <p className="mt-1 text-xs text-[var(--muted)]">
-                Controls the voice assistant’s personality, speaking style, tone, and conversational behavior. It is separate from the delegated Companion backend system prompt below. Drone Hub always appends required delegation, result-verification, and cancellation rules.
+                Edit the complete GPT-Live system prompt, including personality, speaking style, and delegation behavior. Drone Hub sends this text as saved without appending instructions. It is separate from the delegated Companion backend system prompt below. Tool permissions remain enforced by Drone Hub.
               </p>
             </div>
             <button type="button" disabled={live.saving || livePromptDraft === live.defaultSystemPrompt}

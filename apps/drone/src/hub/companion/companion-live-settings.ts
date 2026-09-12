@@ -6,13 +6,13 @@ export type CompanionLiveSettings = {
 };
 
 export const COMPANION_LIVE_SYSTEM_PROMPT_MAX_CHARS = 8_000;
-export const DEFAULT_COMPANION_LIVE_SYSTEM_PROMPT = [
-  'Speak briefly and naturally in a calm, warm, direct tone.',
-  'Use moderate acknowledgments without competing with the main answer.',
-].join('\n');
+export const DEFAULT_COMPANION_LIVE_SYSTEM_PROMPT = `You are Companion, the voice assistant inside Drone Hub.
+Speak briefly and naturally in a calm, warm, direct tone. The backend agent uses the user's selected model and tools.
 
-const REQUIRED_COMPANION_LIVE_INSTRUCTIONS = `You are Companion, the voice assistant inside Drone Hub.
+Backchannel policy: Use moderate backchannels. Acknowledge naturally without competing with the main response.
+
 Interruption policy: Stop speaking when interrupted and listen. Stopping speech does not cancel backend tasks.
+
 Delegation policy:
 Backend tools: inspect the app and workspaces, search chats, edit composers and editor buffers, and prepare proposals using the configured Companion tools.
 Delegate to the backend when: the user requests an app action, lookup, careful reasoning, or a correction to pending work.
@@ -55,14 +55,7 @@ export async function writeCompanionLiveSettings(value: unknown): Promise<Compan
 }
 
 export function companionLiveSessionInstructions(systemPrompt?: string): string {
-  const editablePrompt = systemPrompt === undefined ? DEFAULT_COMPANION_LIVE_SYSTEM_PROMPT : systemPrompt;
-  const editableSection = editablePrompt.trim()
-    ? `User-configurable voice guidance (presentation and conversational style only):\n${editablePrompt.trim()}`
-    : '';
-  return [
-    editableSection,
-    `Required Drone Hub contract (takes precedence over the user-configurable guidance):\n${REQUIRED_COMPANION_LIVE_INSTRUCTIONS}`,
-  ].filter(Boolean).join('\n\n');
+  return systemPrompt === undefined ? DEFAULT_COMPANION_LIVE_SYSTEM_PROMPT : systemPrompt;
 }
 
 export function companionLiveSettingsResponse(settings: CompanionLiveSettings) {

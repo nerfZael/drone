@@ -53,7 +53,7 @@ export function MobileCompanionLiveSettingsCard() {
       {promptSupported && promptReadable ? <><View style={styles.promptHeader}>
         <View style={styles.promptCopy}>
           <Text style={styles.promptTitle}>GPT-Live system prompt</Text>
-          <Text style={styles.copy}>Controls voice personality, speaking style, tone, and conversation behavior. It stays separate from the delegated Companion backend prompt. Required delegation and result-verification rules are always appended by the Hub.</Text>
+          <Text style={styles.copy}>Edit the complete GPT-Live system prompt, including personality, speaking style, and delegation behavior. Drone Hub sends this text as saved without appending instructions. It stays separate from the delegated Companion backend prompt. Tool permissions remain enforced by Drone Hub.</Text>
         </View>
         <Button tone="quiet" disabled={preference.saving || !promptWritable || systemPrompt === preference.defaultSystemPrompt}
           onPress={() => { setSystemPrompt(preference.defaultSystemPrompt); setPromptSaved(false); }}>Restore</Button>
