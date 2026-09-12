@@ -95,3 +95,21 @@ Two native issues were addressed:
 The existing capture callback already requests the cue before connecting Live, so it remains in that location. Android's [ToneGenerator definition](https://developer.android.com/reference/android/media/ToneGenerator#TONE_PROP_ACK) gives ACK two 100 ms bursts separated by 100 ms. The previous 180 ms deadline truncated its second burst. ACK now has a 350 ms window, the stop tone lasts 300 ms, and tone volume is raised from 65 to 80. Cleanup waits for the cue window before releasing the headset route. No cue was added to the network-ready callback.
 
 Validation: all three native JVM suites passed, including nonzero opening capture before output readiness, explicit mute, silent priming without server audio, cancellation and route-loss silence. Targeted connection and lifecycle tests verify buffered speech order and a single capture cue while Live is still connecting. Audible cue clarity and real speech recognition still need a physical test after deployment.
+
+
+## Follow-up: stale Pause keys and a separate start-cue player
+
+On `b4c46b2c`, the user can hear the stop cue but not the start cue and still needs to wait before resuming. The phone logs now identify another key mapping case:
+
+- Stop at 22:27:25.451 arrives as MEDIA_PLAY and correctly pauses. The next physical press at 22:27:27.814 arrives as MEDIA_PAUSE despite Drone being paused. The native idempotent pause handler discards it. A later MEDIA_PLAY at 22:27:31.122 resumes.
+- The same ignored Pause sequence occurs at 22:27:37.195 and 22:28:06.803. These events reach Drone; this is not the earlier Bluetooth post-call suppression.
+
+All physical Play/Pause/Play-Pause/Headset-Hook keys now toggle the current native state. Explicit MediaSession onPlay/onPause remain idempotent, and releases/repeats do not toggle. The shared native capture callback is cleared when capture stops. Route-loss handling ignores old-session teardown when a resume is queued but its microphone has not started yet.
+
+Start ToneGenerator requests still occur (for example 22:27:41.243), but a request does not prove audible output. Audio policy opens a separate tone track alongside the PCM track on the voice output. The logs include delayed voice-activity/volume updates and a ToneGenerator stop timeout at 22:28:25.018. They do not establish exactly where the headset loses the tone.
+
+The recording cue now consists of local PCM on the existing Live playback track, with two 100 ms 1200 Hz beeps, a 100 ms gap, and 5 ms fades. It is queued from microphone capture startup, before server audio, and uses the same headset routing gate and playback reserve as speech. This removes the separate start-cue player and its startup race. Capture keeps buffering throughout. A per-capture guard prevents duplicate cues; stopping clears the queued cue and silences the existing track. The confirmed audible stop tone remains on its existing path after capture has stopped.
+
+Validation: native regressions reproduced the stale-Pause failure before the fix. All three native suites pass, including stale headset state, resume during old-route teardown, cue-before-server playback on phone/headset, duplicate cue prevention, capture isolation, cancellation, and existing no-speaker-spill checks. Physical cue audibility still requires checking the installed build.
+
+The actual Android `:live-voice:compileDebugKotlin --offline` build and all nine mobile lifecycle tests also passed.

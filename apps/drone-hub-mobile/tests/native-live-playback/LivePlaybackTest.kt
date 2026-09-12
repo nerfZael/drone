@@ -14,6 +14,50 @@ private fun waitUntil(condition: () -> Boolean) {
 private fun chunk(marker: Int, frames: Int = 2400) = ByteArray(frames * 2) { marker.toByte() }
 private fun encode(bytes: ByteArray) = java.util.Base64.getEncoder().encodeToString(bytes)
 
+private fun recordingCue() {
+  for (headset in listOf(false, true)) {
+    val captured = CopyOnWriteArrayList<String>()
+    val errors = CopyOnWriteArrayList<String>()
+    val audio = LivePcmAudio(captured::add, errors::add, awaitHeadset = headset)
+    try {
+      audio.start()
+      val track = AudioTrack.latest
+      audio.playRecordingCue()
+      audio.playRecordingCue() // Late duplicate capture notification cannot replay it.
+      if (headset) {
+        Thread.sleep(30)
+        check(track.snapshot().all { span -> span.bytes.all { it == 0.toByte() } })
+        track.route(AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
+      }
+      // No server audio has arrived. The cue must already be on the one PCM track.
+      waitUntil { track.snapshot().any { span -> span.bytes.any { it != 0.toByte() } } }
+      val tones = track.snapshot().filter { span -> span.bytes.any { it != 0.toByte() } }
+      check(tones.size == 1 && tones.single().bytes.size == 14400)
+      val bytes = tones.single().bytes
+      check(bytes.take(4800).any { it != 0.toByte() } && bytes.drop(9600).any { it != 0.toByte() })
+      check(bytes.sliceArray(4800 until 9600).all { it == 0.toByte() })
+      audio.play(encode(chunk(47)))
+      waitUntil { track.snapshot().any { it.bytes.contentEquals(chunk(47)) } }
+      check(track.snapshot().last().bytes.contentEquals(chunk(47)))
+      check(AudioTrack.latest === track)
+      waitUntil { captured.isNotEmpty() }
+      check(captured.all { java.util.Base64.getDecoder().decode(it).all { sample -> sample == 0.toByte() } })
+      check(errors.isEmpty())
+    } finally { audio.stop() }
+  }
+  val cancelled = LivePcmAudio({}, { error(it) }, awaitHeadset = true)
+  try {
+    cancelled.start()
+    val track = AudioTrack.latest
+    var ready: Boolean? = null
+    cancelled.playRecordingCue { ready = it }
+    cancelled.stop()
+    check(ready == false && track.volume == 0f && track.paused)
+    check(track.snapshot().all { span -> span.bytes.all { it == 0.toByte() } })
+  } finally { cancelled.stop() }
+  println("Recording cue renders once on the Live PCM track before server audio, follows headset routing, and cancels silently")
+}
+
 private fun openingCapture() {
   val captured = CopyOnWriteArrayList<ByteArray>()
   val errors = CopyOnWriteArrayList<String>()
@@ -50,6 +94,7 @@ private fun openingCapture() {
 }
 
 fun main() {
+  recordingCue()
   openingCapture()
   val errors = CopyOnWriteArrayList<String>()
   val audio = LivePcmAudio({}, { errors.add(it) })

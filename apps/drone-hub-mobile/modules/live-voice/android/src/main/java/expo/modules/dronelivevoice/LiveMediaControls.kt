@@ -63,11 +63,11 @@ internal class LiveMediaControls(private val context: Context, val id: String, p
         @Suppress("DEPRECATION")
         val event = intent.getParcelableExtra<KeyEvent>(Intent.EXTRA_KEY_EVENT) ?: return false
         val action = when (event.keyCode) {
-          // Some headsets emit PLAY on every physical press in voice mode.
-          // Treat that button as the Companion toggle; onPlay remains idempotent.
-          KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+          // Headsets may emit PLAY while active, or PAUSE after we have stopped,
+          // while their cached state catches up. Each physical press is a toggle;
+          // explicit onPlay/onPause transport commands remain idempotent.
+          KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
           KeyEvent.KEYCODE_HEADSETHOOK -> if (playing) "pause" else "play"
-          KeyEvent.KEYCODE_MEDIA_PAUSE -> "pause"
           KeyEvent.KEYCODE_MEDIA_STOP -> "stop"
           else -> return false
         }
@@ -151,16 +151,18 @@ internal class LiveMediaControls(private val context: Context, val id: String, p
   fun isPlaying() = playing
 
   fun pauseForHeadsetDisconnect() {
-    if (closed || !playing) return
+    // During a queued resume the previous route can still be disconnecting.
+    // It must not cancel the new intent before its microphone has started.
+    if (closed || !playing || LiveVoiceSession.stopAudio == null) return
     // The headset may hang up SCO instead of sending a media pause command.
     // Stop capture/playback and keep the MediaSession armed for locked-screen play.
     skipStoppedCue = true
     command("pause")
   }
 
-  fun playCue(kind: String, promise: Promise) {
-    if (closed || kind == "recording" && !playing) { promise.resolve(); return }
-    if (kind == "stopped" && skipStoppedCue) {
+  fun playStoppedCue(promise: Promise) {
+    if (closed) { promise.resolve(); return }
+    if (skipStoppedCue) {
       skipStoppedCue = false
       promise.resolve()
       return // Do not emit the stop cue through the phone after losing the headset.
@@ -173,10 +175,8 @@ internal class LiveMediaControls(private val context: Context, val id: String, p
       val stream = if (audioManager?.mode == AudioManager.MODE_IN_COMMUNICATION) AudioManager.STREAM_VOICE_CALL else AudioManager.STREAM_MUSIC
       val tone = ToneGenerator(stream, 80)
       cue = tone
-      // ACK is two 100 ms bursts separated by 100 ms. The old 180 ms
-      // deadline cut off the second burst, making capture easy to miss.
-      val duration = if (kind == "recording") 350 else 300
-      check(tone.startTone(if (kind == "recording") ToneGenerator.TONE_PROP_ACK else ToneGenerator.TONE_PROP_NACK, duration)) {
+      val duration = 300
+      check(tone.startTone(ToneGenerator.TONE_PROP_NACK, duration)) {
         "Could not play the Live microphone cue"
       }
       handler.postDelayed({

@@ -109,12 +109,9 @@ class LiveVoiceModule : Module() {
       if (controls == null) promise.resolve()
       else if (kind == "recording") {
         val audio = pcm
-        if (audio == null) promise.resolve()
-        else audio.whenPlaybackReady { ready ->
-          if (ready && pcm === audio && LiveVoiceSession.mediaControls === controls && controls.isPlaying()) controls.playCue(kind, promise)
-          else promise.resolve()
-        }
-      } else controls.playCue(kind, promise)
+        if (audio == null || !controls.isPlaying()) promise.resolve()
+        else audio.playRecordingCue { promise.resolve() }
+      } else controls.playStoppedCue(promise)
     }.runOnQueue(Queues.MAIN)
     AsyncFunction("startPcm") { id: String ->
       check(LiveVoiceSession.id != null) { "Start the Live foreground service first" }
@@ -132,7 +129,7 @@ class LiveVoiceModule : Module() {
         { LiveVoiceSession.mediaControls?.pauseForHeadsetDisconnect() }, awaitHeadset)
       pcm = audio
       pcmId = id
-      LiveVoiceSession.stopAudio = { pcm?.stop(); pcm = null; pcmId = null }
+      LiveVoiceSession.stopAudio = { pcm?.stop(); pcm = null; pcmId = null; LiveVoiceSession.stopAudio = null }
       try { audio.start() } catch (error: Exception) {
         pcm = null; pcmId = null; LiveVoiceSession.stopAudio = null
         throw error

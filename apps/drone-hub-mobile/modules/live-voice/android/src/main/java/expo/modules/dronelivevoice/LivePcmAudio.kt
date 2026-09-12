@@ -16,6 +16,7 @@ import android.util.Base64
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.math.sin
 
 /** One microphone for the whole call, including network startup. PCM16LE / 24 kHz. */
 internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val onError: (String) -> Unit,
@@ -61,6 +62,7 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
   private var playbackThread: Thread? = null
   private val playback = ArrayBlockingQueue<ByteArray>(100)
   private val queuedBytes = AtomicInteger(0)
+  private var recordingCueQueued = false
 
   fun start() {
     try {
@@ -161,11 +163,33 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
   }
 
   fun mute(value: Boolean) { muted = value }
+  fun playRecordingCue(callback: (Boolean) -> Unit = {}) {
+    if (!running || recordingCueQueued) { callback(false); return }
+    recordingCueQueued = true
+    // Use the same track as Live speech. A separate ToneGenerator can compete
+    // with the voice output during startup even after SCO reports connected.
+    // Two 100 ms, 1200 Hz beeps with a 100 ms gap and 5 ms fades (PCM16 / 24 kHz).
+    val bytes = ByteArray(14400)
+    for (frame in 0 until 7200) {
+      val offset = frame % 4800
+      val envelope = minOf(1.0, offset / 120.0, (2399 - offset) / 120.0).coerceAtLeast(0.0)
+      val value = (sin(2 * Math.PI * 1200 * frame / 24000) * 10000 * envelope).toInt()
+      bytes[frame * 2] = value.toByte()
+      bytes[frame * 2 + 1] = (value shr 8).toByte()
+    }
+    enqueue(bytes) // Queued before server speech, held until the output route is ready.
+    whenPlaybackReady(callback)
+  }
+
   fun play(audio: String) {
     if (!running) return
     require(audio.length <= 256000) { "Invalid Live audio chunk" }
     val bytes = Base64.decode(audio, Base64.DEFAULT)
     require(bytes.isNotEmpty() && bytes.size % 2 == 0) { "Invalid Live PCM audio" }
+    enqueue(bytes)
+  }
+
+  private fun enqueue(bytes: ByteArray) {
     if (queuedBytes.addAndGet(bytes.size) > 240000 || !playback.offer(bytes)) {
       queuedBytes.addAndGet(-bytes.size)
       error("Live voice playback fell behind. Start again.")

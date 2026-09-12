@@ -53,7 +53,38 @@ private fun playOnlyHeadsetButton() {
   println("PLAY-only headset presses toggle active/paused Live once per press and silence audio before headset teardown")
 }
 
+private fun stalePauseHeadsetButton() {
+  val actions = mutableListOf<String>()
+  val controls = LiveMediaControls(Context(), "stale-headset-state", actions::add)
+  fun key(code: Int, action: Int = KeyEvent.ACTION_DOWN, repeat: Int = 0) {
+    check(controls.session.callback!!.onMediaButtonEvent(Intent(extras = mapOf(
+      Intent.EXTRA_KEY_EVENT to KeyEvent(action, code, repeat)))))
+  }
+  try {
+    key(KeyEvent.KEYCODE_MEDIA_PLAY)
+    key(KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.ACTION_UP)
+    check(actions == listOf("pause"))
+    controls.session.callback!!.onPause() // Explicit transport pause remains idempotent.
+    key(KeyEvent.KEYCODE_MEDIA_PAUSE) // Headset has not yet observed our paused state.
+    check(actions == listOf("pause", "play") && controls.isPlaying()) {
+      "A physical Pause press while paused must resume immediately"
+    }
+    // The old route may hang up after this resume was accepted, before the new
+    // microphone starts. This is cleanup, not a second stop request.
+    controls.pauseForHeadsetDisconnect()
+    check(actions == listOf("pause", "play") && controls.isPlaying())
+    key(KeyEvent.KEYCODE_MEDIA_PAUSE, KeyEvent.ACTION_UP)
+    key(KeyEvent.KEYCODE_MEDIA_PAUSE, repeat = 1)
+    controls.session.callback!!.onPlay()
+    check(actions == listOf("pause", "play"))
+    key(KeyEvent.KEYCODE_MEDIA_PAUSE)
+    check(actions == listOf("pause", "play", "pause") && !controls.isPlaying())
+  } finally { controls.close() }
+  println("Physical Play/Pause keys toggle despite stale headset state; explicit transports and key releases/repeats stay idempotent")
+}
+
 fun main() {
+  stalePauseHeadsetButton()
   val context = Context()
   val actions = mutableListOf<String>()
   val controls = LiveMediaControls(context, "test", actions::add)
@@ -80,7 +111,7 @@ fun main() {
   check(actions == listOf("pause") && !controls.isPlaying())
   check(track.paused && track.volume == 0f && track.routedDevice?.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
   val stopCue = Promise()
-  controls.playCue("stopped", stopCue)
+  controls.playStoppedCue(stopCue)
   check(stopCue.resolved && ToneGenerator.played == 0)
   controls.update("recording") // A JS capturing callback queued before the hang-up cannot resurrect playback state.
   check(!controls.isPlaying())
@@ -93,13 +124,11 @@ fun main() {
   audio.start()
   track = AudioTrack.latest
   val startCue = Promise()
-  audio.whenPlaybackReady { ready ->
-    if (ready && controls.isPlaying()) controls.playCue("recording", startCue) else startCue.resolve()
-  }
+  audio.playRecordingCue { startCue.resolve() }
   track.route(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
   check(!startCue.resolved && ToneGenerator.played == 0)
   track.route(AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
-  check(ToneGenerator.played == 1)
+  check(ToneGenerator.played == 0) // Start uses the PCM player, without a second tone track.
   Handler.runDelayed()
   check(startCue.resolved)
   // A communication-device callback provides the same early stop for BLE and wired headsets.
