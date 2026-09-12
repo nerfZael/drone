@@ -262,7 +262,7 @@ const ASSISTANT_TOOL_SUMMARY_DEFINITIONS: AssistantToolSummary[] = [
     name: 'read_chat',
     label: 'Read chat',
     category: 'chats',
-    description: 'Read a paginated timeline for a drone chat.',
+    description: 'Read recent prompts, final replies, and pending messages. Detailed agent traces require includeActivity=true; use a small limit when requesting them.',
   },
   {
     name: 'search_chat_messages',

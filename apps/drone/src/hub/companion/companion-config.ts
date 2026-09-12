@@ -250,7 +250,7 @@ export const COMPANION_TOOL_SUMMARIES = [
     category: 'chats',
     execution: 'mcp',
     requires: null,
-    description: 'Read recent visible turns from an active chat.',
+    description: 'Read recent prompts, final replies, and pending messages. Detailed agent traces require includeActivity=true; use a small limit when requesting them.',
   },
   {
     name: 'search_chat_messages',

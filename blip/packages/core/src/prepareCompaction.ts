@@ -7,6 +7,8 @@ type MessageEntry = Extract<TranscriptEntry, { type: 'message' }>;
 type CompactionEntry = Extract<TranscriptEntry, { type: 'compaction' }>;
 
 export interface CompactionPlan {
+  /** False only when the embedding session disables recoverable tool previews. */
+  pruneToolOutputs?: boolean;
   previousSummary?: string;
   retainedUserEntryId?: string;
   firstKeptEntryId?: string;

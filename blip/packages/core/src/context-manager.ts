@@ -33,6 +33,7 @@ type ContextManagerOptions = {
   model: Model<any>;
   reasoning?: ThinkingLevel;
   settings?: CompactionSettings;
+  pruneToolOutputs?: boolean;
   streamFn?: StreamFn;
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
   emit: (event: BlipRuntimeEvent) => Promise<void>;
@@ -253,6 +254,7 @@ export class BlipContextManager {
         reasoning: this.options.reasoning,
         apiKey,
         streamFn: this.options.streamFn,
+        pruneToolOutputs: this.options.pruneToolOutputs,
         signal: controller.signal,
         onModelCall: this.observer.modelCall,
         onModelActivity: this.observer.modelActivity,

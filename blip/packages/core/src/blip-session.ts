@@ -273,6 +273,7 @@ class BlipSession implements BlipSessionHandle {
       model: options.model,
       reasoning: options.reasoning,
       settings: options.compactionSettings,
+      pruneToolOutputs: options.pruneToolOutputs,
       streamFn: options.streamFn,
       getApiKey: options.getApiKey,
       emit: (event) => this.emit(event),

@@ -1329,11 +1329,19 @@ function normalizeRenameRequests(args: any = {}) {
     });
 }
 
-function boundedTranscriptTurn(turn: any, maxCharsPerField: number) {
-  const result = { ...turn };
+function boundedTranscriptTurn(turn: any, maxCharsPerField: number, includeActivity = false) {
+  // Deliberate conversational projection: never spread raw turn data into model text.
+  const result: Record<string, unknown> = {};
+  for (const key of ['id', 'at', 'promptAt', 'startedAt', 'completedAt', 'model', 'reasoning']) {
+    if (typeof turn?.[key] === 'string') result[key] = turn[key].slice(0, 256);
+  }
+  if (Number.isSafeInteger(turn?.turn) && turn.turn > 0) result.turn = turn.turn;
+  for (const key of ['ok', 'inheritedFromClone', 'silentCompletion']) {
+    if (typeof turn?.[key] === 'boolean') result[key] = turn[key];
+  }
   for (const key of ['prompt', 'output', 'error']) {
-    if (typeof result[key] !== 'string') continue;
-    const next = truncateString(result[key], maxCharsPerField);
+    if (typeof turn?.[key] !== 'string') continue;
+    const next = truncateString(turn[key], maxCharsPerField);
     result[key] = next.value;
     result[`${key}OriginalLength`] = next.originalLength;
     if (next.truncated) {
@@ -1341,7 +1349,40 @@ function boundedTranscriptTurn(turn: any, maxCharsPerField: number) {
       result.truncated = true;
     }
   }
+  const summary = turn?.activitySummary;
+  if (summary?.available === true) {
+    result.activitySummary = {
+      available: true,
+      source: typeof summary.source === 'string' ? summary.source.slice(0, 128) : undefined,
+      messageCount: boundedCount(summary.messageCount),
+      toolCallCount: boundedCount(summary.toolCallCount),
+      truncated: summary.truncated === true,
+    };
+  }
+  if (turn?.fileChanges?.counts) {
+    const changes = turn.fileChanges;
+    const counts = changes.counts;
+    result.fileChangesSummary = {
+      changed: boundedCount(counts.changed),
+      additions: boundedCount(counts.additions),
+      deletions: boundedCount(counts.deletions),
+      ...(['exact', 'base-normalized', 'partial', 'unavailable'].includes(changes.attribution)
+        ? { attribution: changes.attribution } : {}),
+      ...(changes.truncated === true || changes.metadataTruncated === true
+        ? { truncated: true } : {}),
+    };
+  }
+  if (Array.isArray(turn?.attachments) && turn.attachments.length > 0) {
+    result.attachmentCount = turn.attachments.length;
+  }
+  // Detailed evidence is opt-in. The shared Blip result budget still applies to model requests.
+  if (includeActivity && turn?.activity) result.activity = turn.activity;
   return result;
+}
+
+function boundedCount(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, Math.floor(value))) : 0;
 }
 
 async function createDronePreferences(services: HubServices, repoPath = '') {
@@ -3571,27 +3612,29 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     'read_chat',
     {
       title: 'Read drone chat',
-      description: 'Read recent completed transcript turns and pending messages for a Drone Hub drone chat. Draft messages are held until publication; an empty transcript does not mean the pending queue is empty.',
+      description: 'Read recent completed user prompts, final replies/errors, compact activity/file-change counts, and pending messages. Detailed reasoning and tool traces are omitted by default; set includeActivity=true when needed, preferably with limit=1. Draft messages are held until publication; an empty transcript does not mean the pending queue is empty.',
       inputSchema: {
         drone: z.string(),
         chat: z.string().optional(),
         limit: z.number().optional(),
         maxCharsPerField: z.number().optional(),
+        includeActivity: z.boolean().optional().describe('Include detailed agent messages, reasoning, tool calls and results. Defaults to false; use a small limit for detailed reads.'),
       },
     },
     async (args) => {
       const chat = chatName(args.chat);
       const limit = cleanPositiveInt(args.limit, 10, 20);
       const maxCharsPerField = cleanPositiveInt(args.maxCharsPerField, 4000, 8000);
+      const includeActivity = args.includeActivity === true;
       try {
         const response = await requestJson(
-          `/api/drones/${encodeURIComponent(args.drone)}/chats/${encodeURIComponent(chat)}/state?turn=all&transcript=selected&pending=all`,
+          `/api/drones/${encodeURIComponent(args.drone)}/chats/${encodeURIComponent(chat)}/state?transcript=tail&tail=${limit}&pending=all&activity=${includeActivity ? 'full' : 'summary'}`,
           { method: 'GET' },
         );
         const turns = Array.isArray(response?.transcripts)
           ? response.transcripts
               .slice(-limit)
-              .map((turn: any) => boundedTranscriptTurn(turn, maxCharsPerField))
+              .map((turn: any) => boundedTranscriptTurn(turn, maxCharsPerField, includeActivity))
           : [];
         return toolResult({
           ok: true,
@@ -3601,6 +3644,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
           ...pendingChatSummary(response, limit, maxCharsPerField),
           limit,
           maxCharsPerField,
+          includeActivity,
         });
       } catch (error: any) {
         if (error?.status !== 410) throw error;
@@ -3612,7 +3656,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
         if (state?.draft === true) {
           return toolResult({
             ok: true, drone: args.drone, chat, turns: [],
-            ...pendingSummary, limit, maxCharsPerField,
+            ...pendingSummary, limit, maxCharsPerField, includeActivity,
           });
         }
         const response = await requestJson(

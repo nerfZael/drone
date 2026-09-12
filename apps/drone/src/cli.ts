@@ -955,8 +955,8 @@ function parseHubSecretSnapshot(raw: unknown): HubSecretSnapshot | null {
   return {
     present: value.present === true,
     hasValue: value.hasValue === true,
-    rawLength: Number.isFinite(Number(value.rawLength)) ? Number(value.rawLength) : null,
-    trimmedLength: Number.isFinite(Number(value.trimmedLength)) ? Number(value.trimmedLength) : null,
+    rawLength: value.rawLength != null && Number.isFinite(Number(value.rawLength)) ? Number(value.rawLength) : null,
+    trimmedLength: value.trimmedLength != null && Number.isFinite(Number(value.trimmedLength)) ? Number(value.trimmedLength) : null,
     fingerprint: typeof value.fingerprint === 'string' && value.fingerprint.trim() ? value.fingerprint.trim() : null,
   };
 }

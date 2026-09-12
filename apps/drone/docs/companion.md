@@ -159,7 +159,7 @@ Reuse the in-process Drone Hub MCP client for these server-owned tools:
 - `list_drones`: add `hasRepository` and repository filters, and return an unambiguous `repository: null | {...}` plus `chatCount`;
 - `list_agent_models`: return available models and reported reasoning levels for a Built-in or CLI agent on the requested runtime;
 - `list_groups`: return existing group names and repository scope so proposal operations can target them exactly;
-- `list_chats` and `read_chat`: enumerate a drone's chats with their explicit agent/model configuration and inspect a selected transcript;
+- `list_chats` and `read_chat`: enumerate a drone's chats with their explicit agent/model configuration and inspect recent prompts, final replies/errors, pending messages, and compact activity/file-change counts. `read_chat` defaults to 10 turns (maximum 20) and 4,000 characters per prompt/output/error (maximum 8,000). It requests only that tail with summary activity, and does not return nested agent messages, plans, attachments, or arbitrary turn metadata. To inspect detailed reasoning and tool calls/results, explicitly pass `includeActivity: true`, preferably with `limit: 1`; shared Blip output budgets still apply to model requests. Original chat records remain unchanged;
 - `search_chat_messages`: perform bounded keyword search across active chats, optionally scoped to a repository, drone, or chat;
 - optional read-only workspace tools for the active drone.
 

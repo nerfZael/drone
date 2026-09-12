@@ -11,6 +11,11 @@ Compaction keeps the raw transcript on disk, stores a summary checkpoint, and ch
 ```
 
 Older raw messages are not sent to the model when a valid compaction boundary exists.
+Tool results supplied to summary generation use the shared recoverable output budgets described
+in [sessions](sessions.md#tool-output-previews), including for deterministic fallback. Raw
+transcript results remain available through `read_tool_output` after compaction. Omission markers
+identify incomplete evidence; the summary must preserve relevant recovery handles rather than
+infer facts from omitted text. User messages and prior summaries are not shortened by this policy.
 
 ## Triggers
 

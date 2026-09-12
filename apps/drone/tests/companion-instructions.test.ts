@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createBlipSession } from '@blip/core';
-import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from '@mariozechner/pi-ai';
+import { fauxAssistantMessage, fauxToolCall, registerFauxProvider, type Context } from '@mariozechner/pi-ai';
 import { COMPANION_INSTRUCTIONS_MAX_CHARS, COMPANION_INSTRUCTIONS_SKILL } from '@drone/assistant-chat';
 import { HubSessionRepository } from '../src/hub/assistant/hub-session-repository';
 import { getHubSettingsRepository, resetHubSettingsRepositoryForTests } from '../src/host/hub-settings-repository';
@@ -9,6 +9,7 @@ import { CompanionSkills } from '../src/hub/companion/companion-skills';
 import { withTempDroneDataDir } from './test-helpers';
 import { HubRouter } from '../src/hub/hub-router';
 import { registerCompanionRoutes } from '../src/hub/companion/companion-routes';
+import { summaryText } from '../../../blip/packages/core/tests/helpers/compaction-fixtures';
 
 const patch = (before: string, after: string) =>
   `*** Begin Patch\n*** Update File: companion-instructions.md\n@@\n${before ? `-${before}\n` : ''}+${after}\n*** End Patch`;
@@ -231,13 +232,16 @@ test('automatic mid-turn compaction preserves the exact instructions in the next
     let answered = false;
     faux.setResponses([
       fauxAssistantMessage(fauxToolCall('large_output', {}), { stopReason: 'toolUse' }),
-      fauxAssistantMessage('Summary: the user requested a large tool result.'),
-      (context) => {
+      // Small windows can require several summary batches before normal generation resumes.
+      ...Array.from({ length: 10 }, () => (context: Context) => {
+        if (context.systemPrompt?.startsWith('You are performing context compaction')) {
+          return fauxAssistantMessage(summaryText('The user requested a large tool result.'));
+        }
         answered = true;
         expect(JSON.stringify(context.messages)).toContain('Always read files before editing them.');
         expect(context.messages.filter((message) => message.role === 'toolResult' && message.toolName === 'read_skill')).toHaveLength(1);
         return fauxAssistantMessage('Done.');
-      },
+      }),
     ]);
     const session = await createBlipSession({
       workspaceRoot: 'drone-hub', model: { ...faux.getModel(), contextWindow: 4_000, maxTokens: 500 },

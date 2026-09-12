@@ -120,6 +120,7 @@ export interface CompactStoredSessionOptions {
   eventSink?: BlipEventSink;
   signal?: AbortSignal;
   streamFn?: StreamFn;
+  pruneToolOutputs?: boolean;
   /** Supply the same prompt, tools and transforms used for normal requests. */
   systemPrompt?: string;
   tools?: AgentTool<any>[];
@@ -137,13 +138,18 @@ export async function compactStoredSession(
     repository: sessionRepository,
     model: options.model ?? resolveBlipModel(session.modelProvider, session.modelId),
     settings: options.settings,
+    pruneToolOutputs: options.pruneToolOutputs,
     reasoning: options.reasoning,
     getApiKey: options.getApiKey,
     streamFn: options.streamFn,
     activeTurnId: () => undefined,
     systemPrompt: () => options.systemPrompt ?? '',
     tools: () => options.tools ?? [],
-    transformContext: options.transformContext,
+    transformContext: async (messages, signal) => {
+      const originals = new Set(messages);
+      const transformed = (await options.transformContext?.(messages, signal)) ?? messages;
+      return options.pruneToolOutputs === false ? transformed : pruneToolOutputs(transformed, originals);
+    },
     convertToLlm: options.convertToLlm,
     replaceAgentMessages: () => {},
     emit: async (event) => {
@@ -204,11 +210,7 @@ export async function compactSession(
     model,
     tools,
     systemPrompt: sections.filter((section) => section.trim()).join('\n\n'),
-    transformContext: async (messages, signal) => {
-      const originals = new Set(messages);
-      const transformed = (await input.transformContext?.(messages, signal)) ?? messages;
-      return pruneToolOutputs(transformed, originals);
-    },
+    transformContext: input.transformContext,
     reasoning: input.reasoning,
     getApiKey: input.getApiKey,
     eventSink: input.onEvent,

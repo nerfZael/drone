@@ -95,6 +95,7 @@ export async function createCompaction(input: {
   reasoning?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
   apiKey?: string;
   streamFn?: StreamFn;
+  pruneToolOutputs?: boolean;
   onModelCall?: (phase: 'started' | 'finished') => void | Promise<void>;
   onModelActivity?: () => void | Promise<void>;
   onUsage?: (response: import('@mariozechner/pi-ai').AssistantMessage) => Promise<void>;
@@ -106,6 +107,7 @@ export async function createCompaction(input: {
     settings: input.settings,
   });
   if (!plan) return undefined;
+  const summaryPlan = { ...plan, pruneToolOutputs: input.pruneToolOutputs ?? plan.pruneToolOutputs };
   input.signal?.throwIfAborted();
   const settings = resolveCompactionSettings(plan.settings);
   const summaryTokens = input.model
@@ -121,7 +123,7 @@ export async function createCompaction(input: {
     summary = input.model
       ? await modelSummary({
           model: input.model,
-          plan,
+          plan: summaryPlan,
           reasoning: input.reasoning,
           apiKey: input.apiKey,
           streamFn: input.streamFn,
@@ -131,12 +133,12 @@ export async function createCompaction(input: {
           signal: input.signal,
           maxTokens: generationTokens,
         })
-      : deterministicSummary(plan);
+      : deterministicSummary(summaryPlan);
   } catch (error) {
     if (input.signal?.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
     fallbackUsed = true;
     fallbackReason = error instanceof Error ? error.message : String(error);
-    summary = deterministicSummary(plan);
+    summary = deterministicSummary(summaryPlan);
   }
   summary = summary.trim() + metadata;
 

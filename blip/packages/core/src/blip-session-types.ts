@@ -104,7 +104,7 @@ export interface CreateBlipSessionOptions {
   permissionPreflight?: BlipToolPreflight;
   eventSink?: BlipEventSink;
   compactionSettings?: CompactionSettings;
-  /** Default true: preview older large tool outputs and expose read_tool_output for recovery. */
+  /** Default true: bound tool output in model/compaction requests and expose read_tool_output for recovery. */
   pruneToolOutputs?: boolean;
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
   beforePrompt?: (context: BlipPromptLifecycleContext) => Promise<void> | void;

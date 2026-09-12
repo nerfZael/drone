@@ -1666,6 +1666,83 @@ describe('Drone Hub assistant MCP transport', () => {
     });
   });
 
+  test.each([undefined, false, true])('read_chat returns conversational fields and opts into activity (%s)', async (includeActivity) => {
+    await withTempDroneDataDir('drone-mcp-chat-projection-', async () => {
+      const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
+      const previousToken = process.env.DRONE_TOKEN;
+      const previousFetch = globalThis.fetch;
+      const requests: URL[] = [];
+      const activity = { version: 1, source: 'codex', messages: [
+        { role: 'assistant', content: [{ type: 'thinking', thinking: 'DETAILED_REASONING' }] },
+        { role: 'toolResult', toolName: 'exec', content: 'NESTED_TOOL_OUTPUT ' + 'x'.repeat(1_000_000) },
+      ] };
+      globalThis.fetch = (async (input) => {
+        const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url);
+        requests.push(url);
+        return Response.json({ draft: false, pending: [], transcripts: [{
+          turn: 7, id: 'turn-7', at: '2026-09-12T00:00:00Z', ok: false,
+          model: 'test-model', reasoning: 'medium',
+          prompt: 'p'.repeat(10_000), output: 'o'.repeat(10_000), error: 'e'.repeat(10_000),
+          // Even a server returning full activity in summary mode must not leak it by default.
+          activity,
+          activitySummary: { available: true, source: 'codex', messageCount: 2, toolCallCount: 1,
+            truncated: false, unexpected: 'UNEXPECTED_METADATA' },
+          fileChanges: { counts: { changed: 1, additions: 2, deletions: 3 }, attribution: 'partial', metadataTruncated: true,
+            workspaces: [{ entries: [{ path: 'UNEXPECTED_METADATA' }] }] },
+          agentPlan: { items: [{ text: 'UNEXPECTED_METADATA' }] },
+          attachments: [{ dataBase64: 'UNEXPECTED_METADATA' }],
+          unknownFutureField: 'UNEXPECTED_METADATA',
+        }] });
+      }) as typeof fetch;
+      process.env.DRONE_HUB_BASE_URL = 'http://drone-hub.test';
+      process.env.DRONE_TOKEN = 'chat-projection-token';
+      let client: Awaited<ReturnType<typeof createInProcessDroneHubMcpClient>> | null = null;
+      try {
+        client = await createInProcessDroneHubMcpClient({ correlationId: 'chat-projection' });
+        const read = await client.callTool({ name: 'read_chat', arguments: {
+          drone: 'test-drone', chat: 'default', limit: 1,
+          ...(includeActivity === undefined ? {} : { includeActivity }),
+        } });
+        expect(read.isError).not.toBe(true);
+        const data = read.structuredContent as any;
+        expect(data.includeActivity).toBe(includeActivity === true);
+        expect(data.turns).toHaveLength(1);
+        expect(data.turns[0]).toMatchObject({
+          turn: 7, id: 'turn-7', ok: false, model: 'test-model', reasoning: 'medium',
+          promptOriginalLength: 10_000, outputOriginalLength: 10_000, errorOriginalLength: 10_000,
+          promptTruncated: true, outputTruncated: true, errorTruncated: true,
+          activitySummary: { available: true, source: 'codex', messageCount: 2, toolCallCount: 1, truncated: false },
+          fileChangesSummary: { changed: 1, additions: 2, deletions: 3, attribution: 'partial', truncated: true },
+          attachmentCount: 1,
+        });
+        for (const key of ['prompt', 'output', 'error']) expect(data.turns[0][key]).toHaveLength(4000);
+        const serialized = JSON.stringify(data);
+        expect(serialized).not.toContain('UNEXPECTED_METADATA');
+        if (includeActivity) {
+          expect(data.turns[0].activity).toEqual(activity);
+        } else {
+          expect(data.turns[0].activity).toBeUndefined();
+          expect(serialized).not.toContain('DETAILED_REASONING');
+          expect(serialized).not.toContain('NESTED_TOOL_OUTPUT');
+          expect(serialized.length).toBeLessThan(14_000);
+        }
+        expect(JSON.parse((read.content as any)[0].text)).toEqual(data);
+        expect(requests).toHaveLength(1);
+        expect(requests[0].searchParams.get('transcript')).toBe('tail');
+        expect(requests[0].searchParams.get('tail')).toBe('1');
+        expect(requests[0].searchParams.get('activity')).toBe(includeActivity ? 'full' : 'summary');
+        expect(requests[0].searchParams.get('pending')).toBe('all');
+      } finally {
+        await client?.close();
+        globalThis.fetch = previousFetch;
+        if (previousBaseUrl == null) delete process.env.DRONE_HUB_BASE_URL;
+        else process.env.DRONE_HUB_BASE_URL = previousBaseUrl;
+        if (previousToken == null) delete process.env.DRONE_TOKEN;
+        else process.env.DRONE_TOKEN = previousToken;
+      }
+    });
+  });
+
   test.each([false, true])('reads bounded draft queues, including custom agents (%s)', async (custom) => {
     await withTempDroneDataDir('drone-mcp-draft-read-', async () => {
       const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;

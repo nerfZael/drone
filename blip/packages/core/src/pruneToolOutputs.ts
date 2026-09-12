@@ -1,4 +1,5 @@
 import type { AgentMessage } from '@mariozechner/pi-agent-core/portable';
+import { previewToolOutput, toolOutputFailed, toolOutputText, TOOL_BATCH_OUTPUT_CHARS, TOOL_OUTPUT_CHARS } from './toolOutputPreview.js';
 
 const MIN_OUTPUT_CHARS = 12_000;
 const PREVIEW_CHARS = 4_000;
@@ -21,30 +22,40 @@ export function pruneToolOutputs(messages: AgentMessage[], originals = new Set(m
       });
     }
   }
-  return messages.map((message) => {
-    if (message.role !== 'toolResult' || message.isError || !originals.has(message)) return message;
+  const candidates = new Map<AgentMessage, {
+    text: string; limit: number; older: boolean; instructions: boolean;
+  }>();
+  const batches = new Map<number, Array<{ limit: number }>>();
+  for (const message of messages) {
+    if (message.role !== 'toolResult' || !originals.has(message)) continue;
     const call = calls.get(message.toolCallId);
     // Results without their original call, including injected host context, are left intact.
-    if (!call || call.protected || call.batch > batch - 2 || failed(message.details)) return message;
-    if (message.content.some((part) => part.type !== 'text')) return message;
-    const text = message.content.map((part) => part.type === 'text' ? part.text : '').join('\n');
-    if (text.length <= MIN_OUTPUT_CHARS || INSTRUCTIONS.test(text)) return message;
-    const head = PREVIEW_CHARS * 3 / 4;
-    const tail = PREVIEW_CHARS - head;
-    return {
-      ...message,
-      content: [{ type: 'text', text:
-        `[Older tool output shortened from ${text.length} characters. Original saved in this session. ` +
-        `Use read_tool_output with call_id=${JSON.stringify(message.toolCallId)}, offset=${head} to read omitted text.]\n` +
-        text.slice(0, head) + `\n[... ${text.length - PREVIEW_CHARS} characters omitted ...]\n` + text.slice(-tail),
-      }],
+    if (!call) continue;
+    const text = toolOutputText(message);
+    const instructions = INSTRUCTIONS.test(text);
+    const older = !call.protected && call.batch <= batch - 2 && !toolOutputFailed(message) &&
+      message.content.every((part) => part.type === 'text') && !instructions && text.length > MIN_OUTPUT_CHARS;
+    const candidate = {
+      text, older, instructions: instructions || call.protected,
+      limit: Math.min(text.length, older ? PREVIEW_CHARS : TOOL_OUTPUT_CHARS),
     };
+    candidates.set(message, candidate);
+    const group = batches.get(call.batch) ?? [];
+    group.push(candidate);
+    batches.set(call.batch, group);
+  }
+  // Share a batch budget fairly, letting small results keep their full allowance.
+  for (const group of batches.values()) {
+    group.sort((a, b) => a.limit - b.limit);
+    let remaining = TOOL_BATCH_OUTPUT_CHARS;
+    for (const [index, candidate] of group.entries()) {
+      candidate.limit = Math.min(candidate.limit, Math.floor(remaining / (group.length - index)));
+      remaining -= candidate.limit;
+    }
+  }
+  return messages.map((message) => {
+    const candidate = candidates.get(message);
+    if (message.role !== 'toolResult' || !candidate) return message;
+    return previewToolOutput(message, candidate.text, candidate.limit, candidate.older, candidate.instructions);
   });
-}
-
-function failed(details: unknown): boolean {
-  if (!details || typeof details !== 'object') return false;
-  const result = details as Record<string, unknown>;
-  return result.timedOut === true || result.isError === true || result.success === false ||
-    ['exitCode', 'exit_code'].some((key) => key in result && result[key] !== 0);
 }

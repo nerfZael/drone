@@ -29,7 +29,7 @@ const session: BlipSessionState = {
 };
 
 describe('Compaction summary reliability and coverage', () => {
-  test('covers all text chronologically, including older instructions and the ends of large tool errors', () => {
+  test('preserves user instructions chronologically and previews large errors with recovery and failure status', () => {
     const originalUser = 'Keep offline. ' + '中😀\\"\n'.repeat(30_000) + ' No publishing.';
     const originalTool = 'output '.repeat(30_000) + 'ERROR sentinel: permission denied';
     const entries = [
@@ -47,8 +47,39 @@ describe('Compaction summary reliability and coverage', () => {
     expect(records[0].content).toBe(originalUser);
     expect(records[1].content[0]).toEqual({ type: 'toolCall', id: 'call_check', name: 'exec', arguments: { command: 'check' } });
     expect(records[2]).toMatchObject({ isError: true, toolCallId: 'call_check' });
-    expect(records[2].content[0].text).toBe(originalTool);
+    expect(records[2].toolReportedFailure).toBe(true);
+    expect(records[2].content[0].text.length).toBeLessThan(24_600);
+    expect(records[2].content[0].text).toContain('ERROR sentinel: permission denied');
+    expect(records[2].content[0].text).toContain('call_id="call_check"');
+    expect((entries[2].message.content as any)[0].text).toBe(originalTool);
     expect(records[3].content).toBe('Correction: only inspect src/config.ts.');
+  });
+
+  test('summarizes a large parallel tool batch in one bounded call, retaining raw data and opt-out', async () => {
+    const ids = ['mcp', 'browser', 'file', 'shell'];
+    const entries = [
+      entry('user', user('Keep the exact user instruction.')),
+      entry('calls', fauxAssistantMessage(ids.map((id) => fauxToolCall(id, {}, { id })), { stopReason: 'toolUse' })),
+      ...ids.map((id) => entry(id, { role: 'toolResult', toolName: id, toolCallId: id, isError: false,
+        content: [{ type: 'text', text: 'HEAD ' + 'x'.repeat(1_000_000) + ' TAIL' }], timestamp: 1 })),
+    ];
+    const inputPlan = plan(entries);
+    const original = JSON.stringify(entries);
+    const batches = [...summaryInputBatches(inputPlan)];
+    expect(batches).toHaveLength(1);
+    expect(batches[0].length).toBeLessThan(52_000);
+    expect(reconstruct(batches)[0].content).toBe('Keep the exact user instruction.');
+    let calls = 0;
+    await modelSummary({ model, plan: inputPlan, streamFn: stream((context) => {
+      calls++;
+      expect(String(context.messages[0].content)).toContain('read_tool_output');
+      expect(context.systemPrompt).toContain('Never infer success');
+      return fauxAssistantMessage(summaryText('Continue using saved output'));
+    }) });
+    expect(calls).toBe(1);
+    expect(deterministicSummary(inputPlan).length).toBeLessThan(52_000);
+    expect(JSON.stringify(entries)).toBe(original);
+    expect([...summaryInputBatches({ ...inputPlan, pruneToolOutputs: false })].length).toBeGreaterThan(30);
   });
 
   test('carries checkpoints through every batch and accounts for every model response', async () => {

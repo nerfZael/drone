@@ -78,24 +78,36 @@ Compaction does not delete earlier transcript entries.
 
 ## Tool output previews
 
-By default, `createBlipSession()` shortens older text-only tool results larger than 12,000
-characters in model requests. The two newest assistant tool-call batches remain intact. Eligible
-results retain their first 3,000 and last 1,000 characters, plus an explicit omission notice.
-User and assistant messages, images, reported errors, skill/instruction tools, and identifiable
-instruction-file reads remain intact. Host-transformed results that are no longer the original
-message objects are also left alone.
+By default, `createBlipSession()` retains at most 24,000 source text characters per tool result
+and 48,000 across results from one assistant tool-call batch, plus short omission/retrieval
+notices. Small results keep their allowance; remaining capacity is shared among larger results.
+These are character budgets, not exact tokenizer limits or a whole-conversation token ceiling.
+The shared core policy covers MCP, browser/custom, and workspace tools, including fresh results.
+Images and other non-text blocks, error flags, and structured `details` remain intact.
+
+Older successful text-only results larger than 12,000 characters still receive smaller previews:
+normally the first 3,000 and last 1,000 characters. The two newest batches, errors, skills,
+instruction reads, and retrieval results are exempt from this additional age-based reduction,
+but remain subject to the fresh-result and batch budgets. Instruction previews explicitly tell
+the agent to retrieve omitted instructions before acting on them; failure previews retain a
+failure notice. User/assistant messages and host-transformed or unpaired injected results are
+not truncated. Previews preserve both ends without splitting Unicode surrogate pairs.
 
 The complete original result stays in the transcript. The model can call `read_tool_output` with
 the original `call_id`, a zero-based character `offset`, and an optional `limit` (at most 12,000)
 to retrieve a page, including after compaction or resume. This returns saved historical output;
-it never repeats the original command. Retrieval is scoped to the current session. Host permission
-preflight still applies. Raw history shown in the UI and evidence supplied to summary generation
-are unchanged.
+it never repeats the original command. Text blocks are joined with newlines for offsets; images
+do not consume text offsets. Page bounds are validated at execution as well as in the schema.
+Retrieval is scoped to the current session. Host permission preflight still applies. Raw history
+shown in the UI remains unchanged. Summary generation and deterministic fallback use the same
+tool-output projection, so compaction does not reintroduce omitted megabytes. The summary prompt
+requires retaining relevant recovery handles and treating omitted evidence as incomplete.
 
 This is a deterministic request transformation and makes no additional model call. Retrieving
 omitted evidence can require another tool/model round trip. The recovery tool adds a small tool
 definition to requests, even before any output needs shortening. Embedders can set
-`pruneToolOutputs: false` to disable both previews and the recovery tool. When enabled,
+`pruneToolOutputs: false` to disable previews in normal requests and compaction, and disable the
+recovery tool. The stored-session compaction API also accepts this option. When enabled,
 `read_tool_output` is a reserved tool name.
 
 ## Active history reads
