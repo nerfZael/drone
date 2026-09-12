@@ -1,3 +1,5 @@
+import { WebSocket } from 'ws';
+import { decodeLiveAudioFrame, sendLiveAudioFrame, type LiveAudioFrame, type LiveAudioSocket } from '@drone/device-protocol';
 import { EventEmitter } from 'node:events';
 import { gzip } from 'node:zlib';
 import type http from 'node:http';
@@ -16,6 +18,50 @@ export class DeviceHttpChannel extends EventEmitter {
     return this.client?.bufferedAmount ?? this.stream?.writableLength ?? 0;
   }
   private client?: DeviceHttpEventClient;
+  audioAuthorized = false;
+  private audioSocket?: LiveAudioSocket;
+  private audioOpening?: Promise<void>;
+  private audioReadyWaiters: Array<{ resolve(): void; reject(error: Error): void }> = [];
+
+  attachLiveAudio(socket: LiveAudioSocket): void {
+    if (!this.audioAuthorized || this.audioSocket || this.readyState !== 1) throw new Error('Live audio channel is unavailable');
+    this.audioSocket = socket; socket.binaryType = 'arraybuffer';
+    socket.onmessage = ({ data }) => {
+      try { this.emit('liveAudio', decodeLiveAudioFrame(data)); }
+      catch { socket.close(); }
+    };
+    socket.onclose = () => { this.audioSocket = undefined; this.audioOpening = undefined; this.emit('liveAudioClosed'); };
+    socket.onerror = () => socket.close();
+    for (const waiter of this.audioReadyWaiters.splice(0)) waiter.resolve();
+  }
+
+  async ensureLiveAudio(): Promise<void> {
+    if (this.audioSocket?.readyState === 1) return;
+    if (this.audioOpening) return this.audioOpening;
+    if (this.client) {
+      this.audioOpening = this.client.openLiveAudioSocket((url) => new WebSocket(url) as unknown as LiveAudioSocket)
+        .then((socket) => this.attachLiveAudio(socket));
+    } else {
+      this.audioOpening = new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => { this.audioReadyWaiters = this.audioReadyWaiters.filter((item) => item !== waiter); reject(new Error('Live audio channel timed out')); }, 10_000);
+        const waiter = { resolve: () => { clearTimeout(timer); resolve(); }, reject: (error: Error) => { clearTimeout(timer); reject(error); } };
+        this.audioReadyWaiters.push(waiter);
+      });
+    }
+    const opening = this.audioOpening;
+    try { await opening; }
+    catch (error) { if (this.audioOpening === opening) this.audioOpening = undefined; throw error; }
+  }
+
+  closeLiveAudio(): void { this.audioSocket?.close(); }
+
+  async sendLiveAudio(frame: LiveAudioFrame, active: () => boolean = () => true): Promise<void> {
+    if ((frame.closed || frame.aborted) && this.audioSocket?.readyState !== 1) return;
+    await this.ensureLiveAudio();
+    if (!this.audioSocket) return Promise.reject(new Error('Live audio channel unavailable'));
+    return sendLiveAudioFrame(this.audioSocket, frame, active);
+  }
+
   private readonly replies = new Map<string, http.ServerResponse>();
   private readonly compressedReplies = new WeakSet<http.ServerResponse>();
   private readonly pendingResults = new Map<string, SignedCapabilityRequest>();
@@ -141,6 +187,8 @@ export class DeviceHttpChannel extends EventEmitter {
     if (this.readyState === 3) return;
     this.readyState = 3;
     this.client?.close();
+    this.audioSocket?.close();
+    for (const waiter of this.audioReadyWaiters.splice(0)) waiter.reject(new Error('Device disconnected'));
     this.stream?.end();
     for (const response of this.replies.values())
       if (!response.writableEnded) response.writeHead(503).end();

@@ -163,7 +163,9 @@ export async function createDeviceMeshService(options: {
     options.ingressPort ?? 0,
     (request, response, url) => httpHandler.handlePublic(request, response, url),
     (endpoint) => router.announceEndpoint(endpoint),
-    (request, socket, head) => browsers.upgrade(request, socket, head),
+    async (request, socket, head) => {
+      if (!router.handleLiveAudioUpgrade(request, socket, head)) await browsers.upgrade(request, socket, head);
+    },
   );
   extensions.push(new DeviceMeshIngressHttp(ingress));
   const discovery = new DeviceMeshDiscovery(ingress, store, routeManager);
@@ -177,6 +179,7 @@ export async function createDeviceMeshService(options: {
   let pairingPruneTimer: ReturnType<typeof setInterval> | null = null;
 
   return {
+    handleLiveAudioUpgrade: (request: http.IncomingMessage, socket: import('node:stream').Duplex, head: Buffer) => router.handleLiveAudioUpgrade(request, socket, head),
     handleHttp: (request: http.IncomingMessage, response: http.ServerResponse, url: URL) =>
       httpHandler.handle(request, response, url),
     start: async () => {

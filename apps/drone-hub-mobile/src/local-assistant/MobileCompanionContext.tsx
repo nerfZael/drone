@@ -95,17 +95,17 @@ const MobileCompanionContext = React.createContext<MobileCompanionContextValue |
 export function MobileCompanionProvider({ children }: { children: React.ReactNode }) {
   const mesh = useMesh();
   const voice = useSharedMobileChatVoiceRecorder();
-  const live = useMobileCompanionLive(voice.microphoneCoordinator);
   const [checkingVoiceMode, setCheckingVoiceMode] = React.useState(false);
   const preparingVoice = React.useRef(false);
-  const liveActive = live.status === 'connecting' || live.status === 'listening';
-  const liveArmed = liveActive || live.status === 'paused';
   const companionVoiceActive = voice.session.kind === 'companion';
   const controllerRef = React.useRef<CompanionClientController | null>(null);
   if (!controllerRef.current) {
     controllerRef.current = new CompanionClientController({ createId: Crypto.randomUUID });
   }
   const controller = controllerRef.current;
+  const live = useMobileCompanionLive(voice.microphoneCoordinator, controller);
+  const liveActive = live.status === 'connecting' || live.status === 'listening';
+  const liveArmed = liveActive || live.status === 'paused';
   const state = React.useSyncExternalStore(
     controller.subscribe,
     controller.getSnapshot,

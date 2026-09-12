@@ -1,3 +1,4 @@
+import { LIVE_AUDIO_PATH, type LiveAudioSocket } from './live-audio-stream';
 /** The device-network wire version is independent of persisted membership and capability versions. */
 export const DEVICE_HTTP_PROTOCOL = 2;
 export const DEVICE_HTTP_PATH = '/api/device-mesh/v2/session';
@@ -65,6 +66,8 @@ export class DeviceHttpEventClient {
   onclose: (() => void) | null = null;
   private readonly lifetime = new AbortController();
   private token = '';
+  private audioSocket?: LiveAudioSocket;
+  private audioOpening?: Promise<LiveAudioSocket>;
   private readonly url: string;
   lastEventId: string;
   get signal(): AbortSignal {
@@ -211,6 +214,31 @@ export class DeviceHttpEventClient {
       });
   }
 
+  /** Audio uses the already authenticated HTTP session, never credentials in a URL. */
+  openLiveAudioSocket(createSocket: (url: string) => LiveAudioSocket): Promise<LiveAudioSocket> {
+    if (this.audioSocket?.readyState === 3) { this.audioOpening = undefined; this.audioSocket = undefined; }
+    if (this.audioOpening) return this.audioOpening;
+    if (this.readyState !== DeviceHttpEventClient.OPEN) return Promise.reject(new Error('Device session is closed'));
+    const url = new URL(this.url);
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    url.pathname = LIVE_AUDIO_PATH; url.search = '';
+    const socket = createSocket(url.toString());
+    this.audioSocket = socket; socket.binaryType = 'arraybuffer';
+    this.audioOpening = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => fail(), 10_000);
+      const fail = () => { clearTimeout(timer); socket.close(); reject(new Error('Could not establish the Live audio stream. Update the Hub and try again.')); };
+      socket.onopen = () => socket.send(JSON.stringify({ token: this.token }));
+      socket.onerror = fail;
+      socket.onclose = fail;
+      socket.onmessage = ({ data }) => {
+        if (data !== 'ready') { fail(); return; }
+        clearTimeout(timer); socket.onmessage = null; socket.onclose = null; socket.onerror = null;
+        resolve(socket);
+      };
+    });
+    return this.audioOpening;
+  }
+
   async prepareResultUpload(
     requestId: string,
     sourceDeviceId: string,
@@ -235,6 +263,7 @@ export class DeviceHttpEventClient {
     if (this.readyState === 3) return;
     this.readyState = 3;
     this.lifetime.abort();
+    this.audioSocket?.close();
     this.token = '';
     this.onclose?.();
   }

@@ -1,10 +1,11 @@
 import { observeRequest } from '../request-diagnostics';
 import React from 'react';
+import { connectCompanionLiveReplies, type CompanionClientController } from '@drone/assistant-chat';
 import { CompanionLiveConnection } from './CompanionLiveConnection';
 import { CompanionLiveConversation } from './CompanionLiveConversation';
 
 type LiveStatus = 'idle' | 'connecting' | 'listening' | 'error';
-type LiveSession = { connection: CompanionLiveConnection; conversation: CompanionLiveConversation; abort: AbortController; muted: boolean };
+type LiveSession = { connection: CompanionLiveConnection; conversation: CompanionLiveConversation; abort: AbortController; replies?: ReturnType<typeof connectCompanionLiveReplies>; muted: boolean };
 type LiveState = {
   status: LiveStatus;
   capturing: boolean;
@@ -23,7 +24,7 @@ type LiveSettings = {
   maxSystemPromptChars: number;
 };
 
-export function useCompanionLive() {
+export function useCompanionLive(controller?: CompanionClientController) {
   const [enabled, setEnabled] = React.useState(false);
   const [resolved, setResolved] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
@@ -42,6 +43,7 @@ export function useCompanionLive() {
   const stop = React.useCallback(() => {
     const session = active.current;
     active.current = null;
+    session?.replies?.stop();
     session?.abort.abort();
     session?.conversation.stop();
     session?.connection.close();
@@ -148,9 +150,14 @@ export function useCompanionLive() {
     const connection = new CompanionLiveConnection({
       onEvent: (event) => { if (active.current === session) session.conversation.receive(event); },
       onCapturing: () => update({ capturing: true }),
-      onReady: (backendModel) => update({ status: 'listening', backendModel }),
+      onReady: (backendModel) => {
+        if (active.current !== session) return;
+        session.replies?.ready();
+        update({ status: 'listening', backendModel });
+      },
       onError: (error) => {
         if (active.current !== session) return;
+        session.replies?.stop();
         session.conversation.stop();
         session.abort.abort();
         update({ status: 'error', capturing: false, error, queued: 0 });
@@ -159,6 +166,7 @@ export function useCompanionLive() {
       onPlaybackBlocked: (playbackBlocked) => update({ playbackBlocked }),
     });
     const conversation = new CompanionLiveConversation({
+      externalBackendReplies: Boolean(controller),
       runBackend: async (prompt) => {
         if (active.current !== session) throw new Error('Voice conversation ended.');
         return await runBackend(prompt, session.abort.signal);
@@ -168,9 +176,10 @@ export function useCompanionLive() {
       onQueue: (queued) => update({ queued }),
     });
     session = { connection, conversation, abort: new AbortController(), muted: false };
+    session.replies = controller ? connectCompanionLiveReplies(controller, conversation) : undefined;
     active.current = session;
     await connection.start();
-  }, []);
+  }, [controller]);
 
   const toggleMute = React.useCallback(() => {
     const session = active.current;

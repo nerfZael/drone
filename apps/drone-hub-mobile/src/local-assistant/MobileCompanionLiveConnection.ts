@@ -1,4 +1,4 @@
-import { COMPANION_CAPABILITY, type CapabilityEvent } from '@drone/device-protocol';
+import { COMPANION_CAPABILITY, LIVE_AUDIO_TRANSPORT, type LiveAudioClientStream, type CapabilityEvent } from '@drone/device-protocol';
 import { LiveAudioBuffer, type LivePcmAudio, type LivePcmCallbacks } from '@drone/assistant-chat';
 import type { MobileMicrophoneCoordinator, MobileMicrophoneLease } from './mobile-microphone-coordinator';
 
@@ -6,6 +6,7 @@ type Options = {
   targetDeviceId: string;
   sessionId: string;
   microphoneCoordinator: MobileMicrophoneCoordinator;
+  openLiveAudio(targetDeviceId: string, sessionId: string, onAudio: (audio: string) => void, onError: (error: string) => void): Promise<LiveAudioClientStream>;
   openAudio(callbacks: LivePcmCallbacks): Promise<LivePcmAudio>;
   request(deviceId: string, capability: string, operation: string, payload?: unknown): Promise<unknown>;
   subscribe(capability: string, event: string, listener: (event: CapabilityEvent) => void): () => void;
@@ -17,6 +18,10 @@ type Options = {
 
 export class MobileCompanionLiveConnection {
   private audio: LivePcmAudio | null = null;
+  private stream: LiveAudioClientStream | null = null;
+  private backendReady = false;
+  private startAccepted = false;
+  private backendModel = '';
   private lease: MobileMicrophoneLease | null = null;
   private closed = false;
   private ready = false;
@@ -34,7 +39,10 @@ export class MobileCompanionLiveConnection {
 
   constructor(private readonly options: Options) {
     this.buffer = new LiveAudioBuffer(async (audio) => {
-      if (!this.closed) await this.request('live.event', { event: { type: 'session.input_audio.append', audio } });
+      if (!this.closed) {
+        if (!this.stream) throw new Error('Live audio stream unavailable');
+        await this.stream.send(audio);
+      }
     }, (error) => this.fail(error));
   }
 
@@ -56,19 +64,25 @@ export class MobileCompanionLiveConnection {
         if (this.closed || event.sourceDeviceId !== this.options.targetDeviceId || event.payload?.sessionId !== this.options.sessionId) return;
         const payload = event.payload;
         if (payload.type === 'live_ready' && payload.transport === 'pcm' && !this.ready) {
-          this.ready = true;
-          clearTimeout(this.timeout);
-          this.buffer.connect();
-          this.options.onReady(String(payload.backendModel ?? ''));
+          this.backendReady = true;
+          this.backendModel = String(payload.backendModel ?? '');
+          this.becomeReady();
         } else if (payload.type === 'live_event') {
           const liveEvent = payload.event;
           if (liveEvent?.type === 'error') this.fail('Live voice reported an error. Start a new conversation.');
-          else if (liveEvent?.type === 'session.output_audio.delta' && typeof liveEvent.delta === 'string') this.audio?.play(liveEvent.delta);
+          else if (liveEvent?.type === 'session.output_audio.delta') return; // Audio belongs to the binary stream.
           else if (liveEvent && typeof liveEvent === 'object' && !Array.isArray(liveEvent)) this.options.onEvent(liveEvent);
         } else if (payload.type === 'live_error') this.fail(String(payload.error ?? 'Live voice failed.'));
         else if (payload.type === 'live_closed') this.fail('Live conversation ended. Start again to reconnect.');
       });
-      await this.request('live.start', { transport: 'pcm' });
+      this.stream = await this.options.openLiveAudio(this.options.targetDeviceId, this.options.sessionId,
+        (audio) => { if (!this.closed) this.audio?.play(audio); }, (error) => this.fail(error));
+      if (this.closed) { this.stream.close(); return; }
+      const started = await this.request('live.start', { transport: 'pcm', audioTransport: LIVE_AUDIO_TRANSPORT, audioOffer: this.stream.offer }) as { audioTransport?: string; audioAnswer?: unknown };
+      if (started?.audioTransport !== LIVE_AUDIO_TRANSPORT) throw new Error('Update the Hub to use Live audio streaming.');
+      this.stream.accept(started.audioAnswer);
+      this.startAccepted = true;
+      this.becomeReady();
       if (this.closed) { void this.request('live.close').catch(() => undefined); return; }
       this.heartbeat = setInterval(() => {
         void this.request('live.ping').catch(() => this.fail('Live voice lost its connection to the Hub.'));
@@ -86,6 +100,7 @@ export class MobileCompanionLiveConnection {
     if (this.closed) return this.cleanup;
     this.closed = true;
     this.buffer.close();
+    this.stream?.close();
     this.audioAbort.abort();
     clearTimeout(this.timeout);
     clearInterval(this.heartbeat);
@@ -99,6 +114,10 @@ export class MobileCompanionLiveConnection {
     }) ?? Promise.resolve()).catch(() => undefined);
     if (this.started) void this.request('live.close').catch(() => undefined);
     return this.cleanup;
+  }
+  private becomeReady(): void {
+    if (this.closed || this.ready || !this.backendReady || !this.startAccepted || !this.stream) return;
+    this.ready = true; clearTimeout(this.timeout); this.buffer.connect(); this.options.onReady(this.backendModel);
   }
   private request(operation: string, payload: Record<string, unknown> = {}): Promise<unknown> {
     return this.options.request(this.options.targetDeviceId, COMPANION_CAPABILITY.id, operation,

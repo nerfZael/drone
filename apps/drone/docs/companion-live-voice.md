@@ -95,14 +95,55 @@ initial-word transcription, and final Live usage. iOS compilation requires Xcode
 
 A dedicated connection to the authenticated `/api/companion/stream` WebSocket
 carries `live_start` with `transport: "pcm"`, `live_ready`, `live_event`, `live_ping`,
-and `live_close`. Mobile uses the equivalent device-scoped mesh operations. The
-client opens its recorder first and buffers audio before starting the network
+and `live_close`. Mobile uses the equivalent device-scoped mesh operations for
+session setup and controls. Microphone and playback PCM use a separate binary
+WebSocket at `/api/device-mesh/v2/live-audio`, authenticated with the existing HTTP
+session token in its first message (never in the URL). `live.start` negotiates
+`audioTransport: "mesh-pcm-v2"`; its signed request must grant both `live.start` and
+`live.event`. The request includes a fresh P-256 ECDH public key. The destination
+Hub signs its answer with its paired-device identity, binding both ephemeral keys,
+both device IDs, and the session ID. HKDF-SHA256 derives separate directional
+HMAC-SHA256 keys known only to the endpoints. Each PCM and terminal frame authenticates
+its routing header, sequence, and content. Relays can read PCM, but cannot alter
+accepted audio or impersonate an endpoint; this provides integrity, not end-to-end
+encryption. The shared package pins CommonJS-compatible noble releases to preserve
+the Hub's Node import compatibility.
+
+Routes also bind each stream to its authenticated peer hops, including a Hub that
+connects outbound through a relay. Sequence checks reject duplication and reordering.
+Audio that beats the HTTP answer waits in a bounded buffer until the mobile app
+verifies the answer and frame MACs. Disconnect, replacement, pause, and access
+changes retire the stream; audio is never replayed after reconnection.
+
+Audio bypasses per-frame capability request signatures, request journals, response caches,
+audit writes, and SSE event counters. This keeps microphone traffic out of the
+120/minute command budget and playback out of the 600/minute source-event budget.
+Session controls remain audited. A `[companion-live-audio]` summary records frame
+and byte totals, peak queued bytes, duration, and the close reason without audio
+content. Each direction has a 96 KB/s PCM budget with a bounded 40-second opening
+burst and a separate 100-frame/second budget. Frames hold at most 24 KB (500 ms),
+and each routing direction has its own 96 KB queue and serial sender. Audio output
+does not block caption or lifecycle delivery. Congestion, replay, or authentication
+failure retires only the affected session. A physical socket failure ends its
+sessions; an invalid peer-hop binding closes the offending socket.
+
+Stop sends an authenticated terminal frame outside the media queue as well as
+`live.close`, so HTTP throttling does not prevent stream termination. It cancels
+unsent PCM. If Stop happens during startup, a late valid answer is used only to
+authenticate the terminal. A relay forwards endpoint terminals unchanged; for its
+own delivery failures it sends a distinct hop-abort indication. That reports lost
+availability, never an authenticated endpoint close. Complete network loss still
+requires the existing Hub heartbeat expiry fallback.
+The updated mobile app requires streaming support on the Hub and any relay; it
+reports an update/connection error instead of silently returning to audio RPCs.
+
+The client opens its recorder first and buffers audio before starting the network
 session. `CompanionPcmLiveSocket` opens `wss://api.openai.com/v1/live/sessions` and
 sends `session.start` with `gpt-live-1`, client delegation, `store: false`, and mono
 PCM16LE at 24 kHz. Only after `session.started` does it report `live_ready` and accept
 validated `session.input_audio.append` events. Each chunk is at most 500 ms; the
 clients normally emit roughly 85–100 ms. Audio chunks drain in capture order, with
-one input send in flight at a time on mobile, so continuing capture cannot overtake
+ordered writes on mobile without a capability-response round trip per chunk, so continuing capture cannot overtake
 the startup buffer. Muted frames contain silence to keep Live's audio clock running.
 
 `session.output_audio.delta` drives scheduled PCM playback, independently from
@@ -148,6 +189,13 @@ handling, echo cancellation, interruption, Bluetooth/headset routing, and networ
 changes.
 
 ## Validation
+
+Binary transport tests exercise authenticated key exchange, tampered frames,
+replays, Stop before the startup answer, termination without an HTTP close request,
+and isolation between directions and sessions. Real loopback HTTP/WebSocket tests
+stream over 5 MB of PCM in each direction through both direct and relayed routes,
+including reverse-connected Hubs, reconnects, and access changes. These tests use a
+simulated voice backend and do not establish physical-device audio quality.
 
 Focused tests cover mode persistence and failed saves, unchanged model settings, the disabled recording path, captured workspaces, delegation arriving before text, duplicate notifications, continued transcripts during backend work, stale spoken results, ending voice during a task, API-key isolation, and microphone/session cleanup. OpenAI/mesh events are simulated; a Chrome smoke test also exercises actual Web Audio capture and playback using a synthetic microphone. Android native module compilation is checked. iOS compilation requires a macOS/Xcode environment. These checks do not establish live API access or real audio quality.
 

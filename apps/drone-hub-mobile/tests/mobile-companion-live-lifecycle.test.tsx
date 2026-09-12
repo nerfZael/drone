@@ -2,11 +2,12 @@ import React, { act } from 'react';
 import { createRequire } from 'node:module';
 import type { ReactTestRenderer } from 'react-test-renderer';
 import { expect, mock, test } from 'bun:test';
+import { CompanionClientController, waitForCompanionReply, type CompanionServerMessage } from '@drone/assistant-chat';
 import { MobileMicrophoneCoordinator } from '../src/local-assistant/mobile-microphone-coordinator';
 
 let appStateListener: ((state: string) => void) | null = null;
 let prepareAudio: () => Promise<void> = async () => {};
-const connections: Array<{ options: any; closed: number }> = [];
+const connections: Array<{ options: any; closed: number; sent: Record<string, unknown>[] }> = [];
 let mediaAction: ((action: 'play' | 'pause' | 'stop') => void) | undefined;
 let controlsReleased = 0;
 const cues: string[] = [];
@@ -29,12 +30,12 @@ mock.module('../src/local-assistant/openMobileLiveAudio', () => ({
 }));
 mock.module('../src/local-assistant/MobileCompanionLiveConnection', () => ({
   MobileCompanionLiveConnection: class {
-    readonly instance: { options: any; closed: number };
+    readonly instance: { options: any; closed: number; sent: Record<string, unknown>[] };
     private audio: any;
-    constructor(options: any) { this.instance = { options, closed: 0 }; connections.push(this.instance); }
+    constructor(options: any) { this.instance = { options, closed: 0, sent: [] }; connections.push(this.instance); }
     async start() { this.audio = await this.instance.options.openAudio(); this.instance.options.onCapturing(); this.instance.options.onReady('selected-backend'); }
     close() { this.instance.closed++; return releaseAudio().then(() => this.audio?.release()); }
-    mute() {} send() {}
+    mute() {} send(event: Record<string, unknown>) { this.instance.sent.push(event); }
   },
 }));
 const rendererRequire = createRequire(import.meta.resolve('react-test-renderer'));
@@ -222,6 +223,62 @@ test('a late cue failure from the previous recording cannot end the resumed sess
   } finally {
     cue.resolve(); cuePlayback = async () => {};
     await act(async () => root.unmount());
+    Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
+  }
+});
+
+
+test('mobile reconnect routes backend completion and subscription replies to the current Live connection', async () => {
+  Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
+  let root!: ReactTestRenderer;
+  let live!: ReturnType<typeof useMobileCompanionLive>;
+  let nextId = 0;
+  const controller = new CompanionClientController({ createId: () => String(++nextId) });
+  const coordinator = new MobileMicrophoneCoordinator();
+  let receive!: (event: CompanionServerMessage) => void;
+  let messageId = '';
+  const run = (_prompt: string, signal: AbortSignal) => waitForCompanionReply(controller, () => controller.submitPrompt({
+    prompt: 'Check this', executeTool: () => ({}), createTransport: () => ({
+      open: async (options) => { receive = options.onMessage; return undefined; },
+      sendPrompt: (input) => { messageId = input.messageId; },
+      sendToolResult: () => {}, cancel: () => {}, close: () => {},
+    }),
+  }), signal);
+  function Capture() { live = useMobileCompanionLive(coordinator, controller); return null; }
+  try {
+    await act(async () => { root = create(<Capture />); });
+    await act(async () => { await live.start('hub', 'Hub', run); });
+    const old = connections.at(-1)!;
+    await act(async () => {
+      old.options.onEvent({ type: 'session.input_transcript.delta', delta: 'Check this' });
+      old.options.onEvent({ type: 'session.delegation.created', delegation: { id: 'old', target: 'client' } });
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    });
+    await act(async () => { live.stop(); });
+    const preparation = Promise.withResolvers<void>();
+    prepareAudio = () => preparation.promise;
+    let restarting!: Promise<void>;
+    await act(async () => { restarting = live.start('hub', 'Hub', run); });
+    await act(async () => {
+      receive({ type: 'reply', messageId, reply: 'Finished' });
+      receive({ type: 'status', messageId, status: 'completed' });
+    });
+    expect(old.sent).toEqual([]);
+    await act(async () => { preparation.resolve(); await restarting; });
+    const current = connections.at(-1)!;
+    await act(async () => {
+      receive({ type: 'subscription', messageId: 'subscription' });
+      receive({ type: 'reply', messageId: 'subscription', reply: 'Notification' });
+      receive({ type: 'status', messageId: 'subscription', status: 'completed' });
+    });
+    expect(old.sent).toEqual([]);
+    expect(current.sent).toEqual([
+      { type: 'session.commentary.append', delegation_id: null, content: 'Finished' },
+      { type: 'session.commentary.append', delegation_id: null, content: 'Notification' },
+    ]);
+  } finally {
+    await act(async () => { root.unmount(); await controller.close(); });
+    prepareAudio = async () => {};
     Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
   }
 });

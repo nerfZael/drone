@@ -97,7 +97,7 @@ export class DeviceMeshIngress {
     defaultPort: number,
     private readonly handlePublicHttp: PublicHttpHandler,
     private readonly announceEndpoint: (endpoint: string | null) => Promise<void>,
-    private readonly handleBrowserUpgrade?: (request: http.IncomingMessage, socket: import('node:stream').Duplex, head: Buffer) => Promise<void>,
+    private readonly handleStreamUpgrade?: (request: http.IncomingMessage, socket: import('node:stream').Duplex, head: Buffer) => Promise<void>,
   ) {
     this.configPath = path.join(rootDir, 'ingress.json');
     this.config = {
@@ -233,8 +233,8 @@ export class DeviceMeshIngress {
       socket.on('close', () => sockets.delete(socket));
     });
     server.on('upgrade', (request, socket, head) => {
-      if (this.handleBrowserUpgrade && request.url?.startsWith('/api/device-mesh/v2/browser/')) {
-        void this.handleBrowserUpgrade(request, socket, head).catch(() => socket.destroy());
+      if (this.handleStreamUpgrade && (request.url?.startsWith('/api/device-mesh/v2/browser/') || request.url === '/api/device-mesh/v2/live-audio')) {
+        void this.handleStreamUpgrade(request, socket, head).catch(() => socket.destroy());
       } else socket.destroy();
     });
     try {

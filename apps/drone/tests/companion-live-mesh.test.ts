@@ -3,6 +3,8 @@ import { CompanionLiveMeshSessions } from '../src/hub/device-mesh/CompanionLiveM
 import { DEFAULT_COMPANION_LIVE_SYSTEM_PROMPT, readCompanionLiveSettings } from '../src/hub/companion/companion-live-settings';
 import { withTempDroneDataDir } from './test-helpers';
 import { capabilityEventPolicy, isGranted, COMPANION_RUN_OPERATIONS } from '@drone/device-protocol';
+import { LIVE_AUDIO_TRANSPORT } from '@drone/device-protocol';
+import type { LiveAudioEndpoint } from '../src/hub/device-mesh/mesh-live-audio-router';
 
 function harness() {
   const sockets: Array<{ messages: any[]; closed: number; send(message: unknown): void; handle(message: unknown): void; close(): void }> = [];
@@ -101,4 +103,31 @@ test('mesh bounds audio waiting for a stalled receiver and closes the affected s
   for (let i = 0; i < 100; i++) send({ type: 'live_event', event: { type: 'session.output_audio.delta', delta: 'A'.repeat(32000) } });
   await tick(); expect(closed).toBe(1);
   live.close(); release(); await tick();
+});
+
+test('stalled output audio does not delay control events or stream termination', async () => {
+  const h = harness(); let release!: () => void; let onClose = () => {}; let closed = false;
+  const audio: LiveAudioEndpoint = {
+    send: () => new Promise<void>((resolve) => { release = resolve; }),
+    close() { if (!closed) { closed = true; onClose(); } },
+    onAudio() {}, onClose(listener) { onClose = listener; },
+  };
+  await h.live.invoke('phone', 'live.start', { sessionId: 'pcm', transport: 'pcm', audioTransport: LIVE_AUDIO_TRANSPORT }, audio);
+  h.sockets[0].send({ type: 'live_event', event: { type: 'session.output_audio.delta', delta: 'AQI=' } });
+  await tick();
+  h.sockets[0].send({ type: 'live_event', event: { type: 'session.delegation.created' } });
+  await tick();
+  expect(h.events[0].payload.event.type).toBe('session.delegation.created');
+  h.sockets[0].send({ type: 'live_closed' }); await tick();
+  expect(closed).toBe(true); expect(h.sockets[0].closed).toBe(1);
+  expect(h.events.at(-1).payload.type).toBe('live_closed');
+  release(); h.live.close(); await tick();
+});
+
+test('unsupported streaming versions are rejected before allocating or replacing a backend session', async () => {
+  const h = harness();
+  await h.live.invoke('phone', 'live.start', { sessionId: 'active', transport: 'pcm' });
+  await expect(h.live.invoke('phone', 'live.start', { sessionId: 'old', transport: 'pcm', audioTransport: 'mesh-pcm-v1' })).rejects.toThrow('Unsupported');
+  expect(h.sockets).toHaveLength(1); expect(h.sockets[0].closed).toBe(0);
+  h.live.close();
 });

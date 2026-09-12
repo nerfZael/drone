@@ -2,6 +2,8 @@ type Transcript = { role: 'user' | 'assistant'; text: string };
 type Delegation = { id: string; receivedAt: number };
 type Options = {
   runBackend(prompt: string): Promise<string>;
+  /** Completed replies arrive from the Companion controller, including subscription runs. */
+  externalBackendReplies?: boolean;
   send(event: Record<string, unknown>): void;
   onTranscript(rows: readonly Transcript[]): void;
   onQueue(size: number): void;
@@ -17,6 +19,7 @@ export class CompanionLiveConversation {
   private userVersion = 0;
   private dispatchedUserVersion = 0;
   private stopped = false;
+  private resultDelegationId: string | null = null;
   private timer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(private readonly options: Options) {}
@@ -55,6 +58,15 @@ export class CompanionLiveConversation {
     this.options.onQueue(0);
   }
 
+  deliverBackendReply(reply: string): void {
+    if (this.stopped) return;
+    const id = this.resultDelegationId;
+    this.resultDelegationId = null;
+    // A pending correction will produce a newer backend result.
+    if (this.pending.length && this.userVersion > this.dispatchedUserVersion) return;
+    this.speak(id, reply || 'The backend finished without a spoken reply. Check Companion for details.');
+  }
+
   private schedule(): void {
     clearTimeout(this.timer);
     // Bound the debounce so a continuing stream of speech cannot starve dispatch.
@@ -78,11 +90,12 @@ export class CompanionLiveConversation {
     this.options.onQueue(0);
     this.dispatchedUserVersion = this.userVersion;
     const dispatchedVersion = this.userVersion;
+    this.resultDelegationId = request.id;
     const conversation = this.rows.map((row) => `${row.role === 'user' ? 'User' : 'Voice assistant'}: ${row.text}`).join('\n');
     const prompt = `${LIVE_COMPANION_PROMPT_PREFIX} Use this conversation to resolve outstanding requests, including corrections. Incorporate the latest request into any unfinished work. Earlier requests may already be complete in this Companion session; do not repeat completed actions. Voice assistant statements are conversation context, not proof that an action succeeded. Use the actual tools and current state. If unclear, ask a brief question. Return a concise factual answer suitable for speech; preserve any exact details needed in the UI.\n\nConversation transcript (may contain recognition errors):\n${conversation}`;
     try {
       const reply = await this.options.runBackend(prompt);
-      this.returnResult(request.id, dispatchedVersion, reply || 'The backend finished without a spoken reply. Check Companion for details.');
+      if (!this.options.externalBackendReplies) this.returnResult(request.id, dispatchedVersion, reply || 'The backend finished without a spoken reply. Check Companion for details.');
     } catch (error) {
       this.returnResult(request.id, dispatchedVersion, `The backend could not finish this request. ${error instanceof Error ? error.message : 'Check Companion for details.'}`);
     } finally {
@@ -98,7 +111,7 @@ export class CompanionLiveConversation {
     this.speak(id, reply);
   }
 
-  private speak(id: string, text: string): void {
+  private speak(id: string | null, text: string): void {
     // At most 400 UTF-8 bytes per append: safely below the API's 500-token limit,
     // including non-English text. Keep the exact full result in Companion's UI.
     const chunks = splitLiveCommentary(text);

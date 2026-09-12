@@ -1,3 +1,5 @@
+import { LIVE_AUDIO_TRANSPORT, answerLiveAudioOffer } from '@drone/device-protocol';
+import { MeshLiveAudioRouter, type LiveAudioEndpoint } from './mesh-live-audio-router';
 import crypto from 'node:crypto';
 import type http from 'node:http';
 import {
@@ -59,6 +61,9 @@ const CAPABILITY_EVENT_MAX_RELAYS_PER_TARGET = 3;
 const CAPABILITY_EVENT_ROUTE_TTL_MS = 5 * 60_000;
 const MAX_MESH_CONNECTIONS = 100;
 const MESH_MAX_BUFFERED_BYTES = 240 * 1024 * 2;
+// Android captures about 10 chunks/sec; iOS can exceed 20. Leave headroom for
+// startup buffering without letting microphone traffic consume control requests.
+const LIVE_AUDIO_REQUESTS_PER_MINUTE = 3_000;
 
 function send(ws: DeviceHttpChannel, payload: unknown): boolean {
   try {
@@ -131,6 +136,14 @@ function isBulkTransferRequest(request: SignedCapabilityRequest): boolean {
   );
 }
 
+function isLiveAudioRequest(request: SignedCapabilityRequest): boolean {
+  return (
+    request.capability === 'companion' &&
+    request.operation === 'live.event' &&
+    (request.payload as any)?.event?.type === 'session.input_audio.append'
+  );
+}
+
 function usesBoundedRead(request: SignedCapabilityRequest): boolean {
   return (
     request.capability === 'drone-control' &&
@@ -155,6 +168,7 @@ export class DeviceMeshRouter {
       targetDeviceId: string;
       requestId: string;
       timer: ReturnType<typeof setTimeout>;
+      liveAudioSession?: string;
     }
   >();
   private readonly capabilitySourceSockets = new Map<string, Set<DeviceHttpChannel>>();
@@ -165,8 +179,12 @@ export class DeviceMeshRouter {
   >();
   private readonly cancelledInvocations = new WeakMap<DeviceHttpChannel, Map<string, number>>();
   private readonly responses = new DeviceMeshResponseCache();
+  private readonly liveAudio = new MeshLiveAudioRouter((summary) => {
+    console.info('[companion-live-audio]', JSON.stringify(summary));
+  });
   private readonly requestTimes = new Map<string, number[]>();
   private readonly bulkRequestTimes = new Map<string, number[]>();
+  private readonly liveAudioRequestTimes = new Map<string, number[]>();
   private readonly capabilityEventDirectPeerTimes = new Map<string, number[]>();
   private readonly capabilityEventRelaySourceTimes = new Map<string, number[]>();
   private readonly capabilityEventInvalidRelayTimes = new Map<string, number[]>();
@@ -221,6 +239,7 @@ export class DeviceMeshRouter {
   }
 
   close(): void {
+    this.liveAudio.close();
     if (this.reconnectTimer) clearInterval(this.reconnectTimer);
     this.reconnectTimer = null;
     for (const connection of this.connections.values()) {
@@ -272,6 +291,10 @@ export class DeviceMeshRouter {
     }
   }
 
+  handleLiveAudioUpgrade(request: http.IncomingMessage, socket: import('node:stream').Duplex, head: Buffer): boolean {
+    return this.server.handleLiveAudioUpgrade(request, socket, head);
+  }
+
   handleHttp(
     request: http.IncomingMessage,
     response: http.ServerResponse,
@@ -291,6 +314,7 @@ export class DeviceMeshRouter {
   }
 
   async accessChanged(deviceId: string): Promise<void> {
+    this.liveAudio.revoke(deviceId);
     for (const [key, invocation] of this.activeInvocations)
       if (key.startsWith(`${deviceId}:`)) invocation.controller.abort();
     this.readResponses.clear();
@@ -521,6 +545,9 @@ export class DeviceMeshRouter {
       existing.ws.close(4000, 'replaced');
     }
     this.connections.set(connection.peerDeviceId, connection);
+    connection.ws.audioAuthorized = true;
+    connection.ws.on('liveAudio', (frame) => this.liveAudio.receive(connection.ws, frame));
+    connection.ws.on('liveAudioClosed', () => this.liveAudio.disconnect(connection.ws));
     this.peerErrors.delete(connection.peerDeviceId);
     this.notifyConnectionsChanged();
     connection.ws.on('message', (raw) => {
@@ -772,6 +799,9 @@ export class DeviceMeshRouter {
       ) {
         this.routes.delete(routeKey);
         clearTimeout(route.timer);
+        if (route.liveAudioSession && (!message.ok || message.result?.audioTransport !== LIVE_AUDIO_TRANSPORT)) {
+          this.liveAudio.closeSession(route.sourceDeviceId, route.targetDeviceId, route.liveAudioSession);
+        }
         if (!send(route.sourceWs, message)) {
           send(
             route.sourceWs,
@@ -801,8 +831,11 @@ export class DeviceMeshRouter {
       return;
     }
     const bulkTransfer = isBulkTransferRequest(request);
-    const rateLimit = bulkTransfer ? 600 : 120;
-    const rateMap = bulkTransfer ? this.bulkRequestTimes : this.requestTimes;
+    const liveAudio = isLiveAudioRequest(request);
+    const rateLimit = liveAudio ? LIVE_AUDIO_REQUESTS_PER_MINUTE : bulkTransfer ? 600 : 120;
+    const rateMap = liveAudio
+      ? this.liveAudioRequestTimes
+      : bulkTransfer ? this.bulkRequestTimes : this.requestTimes;
     const rateKey = connection.peerDeviceId;
     const recent = (rateMap.get(rateKey) ?? []).filter((time) => time > Date.now() - 60_000);
     if (recent.length >= rateLimit) {
@@ -838,6 +871,18 @@ export class DeviceMeshRouter {
         );
         return;
       }
+      const payload = request.payload as any;
+      if (request.capability === 'companion' && request.operation === 'live.close') {
+        this.liveAudio.closeSession(request.sourceDeviceId, request.targetDeviceId, String(payload?.sessionId ?? ''));
+      }
+      if (request.capability === 'companion' && request.operation === 'live.start' && payload?.audioTransport === LIVE_AUDIO_TRANSPORT) {
+        try {
+          await this.liveAudio.open(request.sourceDeviceId, request.targetDeviceId, String(payload.sessionId ?? ''), connection.ws, target.ws);
+        } catch {
+          send(connection.ws, this.errorResponse(request, 'LIVE_AUDIO_UNAVAILABLE', 'Could not establish the relayed Live audio stream'));
+          return;
+        }
+      }
       const routeKey = `${request.sourceDeviceId}:${request.requestId}`;
       if (this.routes.has(routeKey)) {
         send(
@@ -850,8 +895,10 @@ export class DeviceMeshRouter {
         );
         return;
       }
+      const liveAudioSession = request.capability === 'companion' && request.operation === 'live.start' && payload?.audioTransport === LIVE_AUDIO_TRANSPORT ? String(payload.sessionId) : undefined;
       const timer = setTimeout(() => {
         this.routes.delete(routeKey);
+        if (liveAudioSession) this.liveAudio.closeSession(request.sourceDeviceId, request.targetDeviceId, liveAudioSession);
         send(
           connection.ws,
           this.errorResponse(request, 'TARGET_TIMEOUT', 'target device did not respond'),
@@ -864,11 +911,13 @@ export class DeviceMeshRouter {
         targetWs: target.ws,
         targetDeviceId: request.targetDeviceId,
         requestId: request.requestId,
+        liveAudioSession,
         timer,
       });
       if (!send(target.ws, request)) {
         clearTimeout(timer);
         this.routes.delete(routeKey);
+        if (liveAudioSession) this.liveAudio.closeSession(request.sourceDeviceId, request.targetDeviceId, liveAudioSession);
         send(
           connection.ws,
           this.errorResponse(request, 'REQUEST_TOO_LARGE', 'mesh request is too large to forward'),
@@ -1134,7 +1183,16 @@ export class DeviceMeshRouter {
       ? setTimeout(abortInvocation, Math.max(0, expires - Date.now()))
       : null;
     expiryTimer?.unref?.();
+    let liveAudio: LiveAudioEndpoint | undefined;
     try {
+      invocationController.signal.throwIfAborted();
+      if (request.capability === 'companion' && request.operation === 'live.start' && (request.payload as any)?.audioTransport === LIVE_AUDIO_TRANSPORT) {
+        if (!connection || !isGranted(source.grants, 'companion', 1, 'live.event')) throw Object.assign(new Error('Live audio requires live.event permission'), { code: 'PERMISSION_DENIED' });
+        const sessionId = String((request.payload as any).sessionId ?? '');
+        const negotiation = answerLiveAudioOffer({ sourceDeviceId: source.id, targetDeviceId: state.selfDeviceId, sessionId },
+          (request.payload as any).audioOffer, crypto.randomBytes(48), (text) => signDeviceText(this.identity, text));
+        liveAudio = await this.liveAudio.open(source.id, state.selfDeviceId, sessionId, connection.ws, undefined, negotiation);
+      }
       invocationController.signal.throwIfAborted();
       const invocationStarted = performance.now();
       const result = await this.capabilities.invoke(
@@ -1143,6 +1201,7 @@ export class DeviceMeshRouter {
         request.operation,
         request.payload,
         {
+          liveAudio,
           sourceDevice: source,
           requestId: request.requestId,
           signal: invocationController.signal,
@@ -1155,7 +1214,7 @@ export class DeviceMeshRouter {
         });
       }
       const stillAuthorized = await this.validateRequest(request, false);
-      if (!('state' in stillAuthorized)) return stillAuthorized;
+      if (!('state' in stillAuthorized)) { liveAudio?.close(); return stillAuthorized; }
       await this.recordAudit(request, 'allowed');
       const response: CapabilityResponse = {
         type: 'capability.response',
@@ -1182,6 +1241,7 @@ export class DeviceMeshRouter {
       }
       return response;
     } catch (error: any) {
+      liveAudio?.close();
       await this.recordAudit(request, 'failed', String(error?.code ?? 'OPERATION_FAILED'));
       return this.errorResponse(
         request,
@@ -1196,6 +1256,7 @@ export class DeviceMeshRouter {
   }
 
   private cleanupConnectionCapabilities(connection: AuthenticatedSocket): void {
+    this.liveAudio.disconnect(connection.ws);
     this.readResponses.clear();
     if (connection.capabilityCleanupStarted) return;
     connection.capabilityCleanupStarted = true;

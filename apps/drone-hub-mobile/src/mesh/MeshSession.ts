@@ -1,3 +1,4 @@
+import { LiveAudioClient, createLiveAudioOffer, type LiveAudioSocket, type LiveAudioClientStream } from '@drone/device-protocol';
 import { throwIfAborted } from '@drone/device-protocol';
 import { fetch as expoFetch } from 'expo/fetch';
 import { DeviceHttpEventClient } from '@drone/device-protocol';
@@ -145,6 +146,20 @@ export class MeshSession {
     this.ready = false;
     this.rejectPending('Device connection closed');
     socket?.close();
+  }
+
+  private liveAudioClient?: { socket: LiveAudioSocket; client: LiveAudioClient };
+  async openLiveAudio(targetDeviceId: string, sessionId: string, onAudio: (audio: string) => void, onError: (error: string) => void): Promise<LiveAudioClientStream> {
+    const session = this.socket;
+    if (!this.ready || !session) throw new Error('No mesh connection is available');
+    const socket = await session.openLiveAudioSocket((url) => new WebSocket(url) as unknown as LiveAudioSocket);
+    if (this.socket !== session || !this.ready) throw new Error('Mesh connection changed while opening Live audio');
+    if (this.liveAudioClient?.socket !== socket) this.liveAudioClient = { socket, client: new LiveAudioClient(socket, this.identity.id) };
+    const hubKey = this.devicePublicKeyFor(targetDeviceId);
+    if (!hubKey) throw new Error('The Hub identity is unavailable');
+    const handshake = createLiveAudioOffer({ sourceDeviceId: this.identity.id, targetDeviceId, sessionId },
+      Crypto.getRandomBytes(48), (text, signature) => verifyP256Signature(hubKey, text, signature));
+    return this.liveAudioClient.client.open(targetDeviceId, sessionId, onAudio, onError, handshake);
   }
 
   async request(

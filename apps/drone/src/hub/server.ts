@@ -6348,6 +6348,7 @@ async function startDroneHubApiServerWithLifecycle(
     allowedOrigins,
     webSocketServer: wss,
     companionWebSocketServer: companionWss,
+    handleDeviceMeshUpgrade: deviceMesh.handleLiveAudioUpgrade,
     isSafeSessionName: isSafeTmuxSessionName,
     parseSince: parseOptionalNonNegativeInt,
     parseMaxBytes: (raw) =>

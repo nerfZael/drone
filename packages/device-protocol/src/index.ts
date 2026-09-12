@@ -13,3 +13,6 @@ export * from './sidebar';
 export * from './types';
 export * from './validation';
 export { throwIfAborted } from './abort-signal';
+export * from './live-audio-stream';
+export * from './live-audio-client';
+export * from './live-audio-auth';

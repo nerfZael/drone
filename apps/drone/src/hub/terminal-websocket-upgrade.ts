@@ -27,6 +27,7 @@ export function createTerminalWebSocketUpgradeHandler(opts: {
   allowedOrigins: Set<string>;
   webSocketServer: WebSocketServer;
   companionWebSocketServer?: WebSocketServer;
+  handleDeviceMeshUpgrade?: (request: http.IncomingMessage, socket: Duplex, head: Buffer) => boolean;
   isSafeSessionName: (value: string) => boolean;
   parseSince: (value: string | null) => number | undefined;
   parseMaxBytes: (value: string | null) => number;
@@ -44,6 +45,8 @@ export function createTerminalWebSocketUpgradeHandler(opts: {
           return;
         }
       }
+
+      if (opts.handleDeviceMeshUpgrade?.(req, socket, head)) return;
 
       const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
       if (url.pathname === '/api/companion/stream') {

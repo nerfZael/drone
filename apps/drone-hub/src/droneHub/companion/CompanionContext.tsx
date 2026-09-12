@@ -138,7 +138,7 @@ export function CompanionProvider({ children }: { children: React.ReactNode }) {
     [controller],
   );
   const voice = useChatVoiceRecorder({ onError: onVoiceError, microphoneOwner: 'companion' });
-  const live = useCompanionLive();
+  const live = useCompanionLive(controller);
   const [switchingVoice, setSwitchingVoice] = React.useState(false);
   const switchingVoiceRef = React.useRef(false);
   const voiceStatusRef = React.useRef(voice.status);

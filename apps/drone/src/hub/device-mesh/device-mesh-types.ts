@@ -38,6 +38,7 @@ export type DeviceMeshState = {
 };
 
 export type CapabilityContext = {
+  liveAudio?: import('./mesh-live-audio-router').LiveAudioEndpoint;
   sourceDevice: MeshDevice;
   requestId: string;
   signal?: AbortSignal;

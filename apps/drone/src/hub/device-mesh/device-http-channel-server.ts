@@ -1,3 +1,5 @@
+import { WebSocketServer } from 'ws';
+import { LIVE_AUDIO_PATH, LIVE_AUDIO_FRAME_BYTES, type LiveAudioSocket } from '@drone/device-protocol';
 import crypto from 'node:crypto';
 import type http from 'node:http';
 import {
@@ -10,6 +12,7 @@ import { DeviceHttpChannel } from './device-http-channel';
 
 /** Owns HTTP session admission, authentication, and event-stream lifetime. */
 export class DeviceHttpChannelServer {
+  private readonly audioServer = new WebSocketServer({ noServer: true, maxPayload: LIVE_AUDIO_FRAME_BYTES + 1028, perMessageDeflate: false });
   private readonly sessions = new Map<string, DeviceHttpChannel>();
   constructor(
     private readonly connected: (channel: DeviceHttpChannel, request: http.IncomingMessage) => void,
@@ -19,6 +22,27 @@ export class DeviceHttpChannelServer {
       revision: string,
     ) => Promise<unknown>,
   ) {}
+
+  handleLiveAudioUpgrade(request: http.IncomingMessage, socket: import('node:stream').Duplex, head: Buffer): boolean {
+    if (new URL(request.url ?? '/', 'http://localhost').pathname !== LIVE_AUDIO_PATH) return false;
+    if (this.audioServer.clients.size >= 100) { socket.destroy(); return true; }
+    this.audioServer.handleUpgrade(request, socket, head, (ws) => {
+      const timer = setTimeout(() => ws.terminate(), 10_000); timer.unref?.();
+      ws.once('close', () => clearTimeout(timer));
+      ws.on('error', () => ws.terminate());
+      ws.once('message', (data, binary) => {
+        clearTimeout(timer);
+        try {
+          if (binary || data.toString().length > 256) throw new Error('Invalid audio authentication');
+          const channel = this.sessions.get(JSON.parse(data.toString()).token);
+          if (!channel?.audioAuthorized) throw new Error('Unauthenticated device');
+          channel.attachLiveAudio(ws as unknown as LiveAudioSocket);
+          ws.send('ready');
+        } catch { ws.terminate(); }
+      });
+    });
+    return true;
+  }
 
   async handle(
     request: http.IncomingMessage,
@@ -115,5 +139,7 @@ export class DeviceHttpChannelServer {
   close(): void {
     for (const channel of this.sessions.values()) channel.close();
     this.sessions.clear();
+    for (const socket of this.audioServer.clients) socket.terminate();
+    this.audioServer.close();
   }
 }

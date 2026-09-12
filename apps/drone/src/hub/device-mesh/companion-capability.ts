@@ -81,7 +81,7 @@ export function createCompanionCapability(
       const sourceDeviceId = context.sourceDevice.id;
       if (operation === 'auto-approve.settings.get') return readCompanionAutoApproveSettings();
       if (operation === 'auto-approve.settings.update') return writeCompanionAutoApproveSettings(payload);
-      if (operation.startsWith('live.')) return live.invoke(sourceDeviceId, operation, payload);
+      if (operation.startsWith('live.')) return live.invoke(sourceDeviceId, operation, payload, context.liveAudio);
 
       if (operation === 'workspaces.list' || operation === 'workspaces.update') {
         if (!workspaces) throw new Error('Companion workspace settings are unavailable on this Hub.');

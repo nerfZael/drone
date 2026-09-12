@@ -1,3 +1,4 @@
+import type { LiveAudioClientStream } from '@drone/device-protocol';
 import { throwIfAborted } from '@drone/device-protocol';
 import React from 'react';
 import * as Crypto from 'expo-crypto';
@@ -58,6 +59,7 @@ type MeshContextValue = {
     payload?: unknown,
     signal?: AbortSignal,
   ): Promise<any>;
+  openLiveAudio(targetDeviceId: string, sessionId: string, onAudio: (audio: string) => void, onError: (error: string) => void): Promise<LiveAudioClientStream>;
   uploadChatAttachment(input: {
     targetDeviceId: string;
     droneId: string;
@@ -261,6 +263,12 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
       void connectionManager.ensureConnected();
     }, 10_000);
     return () => clearInterval(timer);
+  }, [connectionManager]);
+
+  const openLiveAudio = React.useCallback(async (targetDeviceId: string, sessionId: string, onAudio: (audio: string) => void, onError: (error: string) => void) => {
+    const socket = connectionManager.routeFor(targetDeviceId);
+    if (!socket) throw new Error('No paired device is connected');
+    return socket.openLiveAudio(targetDeviceId, sessionId, onAudio, onError);
   }, [connectionManager]);
 
   const request = React.useCallback(
@@ -563,6 +571,7 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
     error,
     pair,
     request,
+    openLiveAudio,
     uploadChatAttachment,
     retryDeviceConnection,
     setBackgroundActivityRequired,
