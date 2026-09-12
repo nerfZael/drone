@@ -1,3 +1,4 @@
+import { companionSettingsResponse, readCompanionSettings, writeCompanionSettings } from '../companion/companion-config';
 import { readCompanionAutoApproveSettings, writeCompanionAutoApproveSettings } from '../companion/companion-auto-approve-settings';
 import crypto from 'node:crypto';
 import {
@@ -82,6 +83,18 @@ export function createCompanionCapability(
     async invoke(operation, rawPayload, context) {
       const payload = object(rawPayload);
       const sourceDeviceId = context.sourceDevice.id;
+      if (operation === 'model.settings.get' || operation === 'model.settings.update') {
+        if (operation === 'model.settings.update') {
+          await writeCompanionSettings({
+            ...await readCompanionSettings(),
+            provider: payload.provider,
+            model: payload.model,
+            thinkingLevel: payload.thinkingLevel,
+          });
+        }
+        const { settings, models, credentials } = await companionSettingsResponse();
+        return { settings: { provider: settings.provider, model: settings.model, thinkingLevel: settings.thinkingLevel }, models, credentials };
+      }
       if (operation === 'auto-approve.settings.get') return readCompanionAutoApproveSettings();
       if (operation === 'auto-approve.settings.update') return writeCompanionAutoApproveSettings(payload);
       if (operation.startsWith('live.')) return live.invoke(sourceDeviceId, operation, payload, context.liveAudio);

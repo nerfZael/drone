@@ -328,3 +328,22 @@ test.each(['disconnectDevice', 'accessChanged', 'revokeDevice'] as const)(
     await expect(deliver({ prompt: 'late', messageId: 'late', deliveryMode: 'asap' })).rejects.toThrow('disconnected');
   } finally { await capability.close?.(); }
 });
+
+test('mobile model settings share desktop storage and preserve prompt and tools', async () => {
+  const { readCompanionSettings, writeCompanionSettings } = await import('../src/hub/companion/companion-config');
+  await withTempDroneDataDir('companion-mobile-model-', async () => {
+    const capability = createCompanionCapability({} as any, async () => {});
+    try {
+      const catalog = await capability.invoke('model.settings.get', {}, context()) as any;
+      const choice = catalog.models.find((model: any) => model.provider !== catalog.settings.provider);
+      expect(choice).toBeDefined();
+      const latest = await writeCompanionSettings({ ...await readCompanionSettings(), systemPrompt: 'Edited on desktop' });
+      const selection = { provider: choice.provider, model: choice.id, thinkingLevel: choice.thinkingLevel };
+      const saved = await capability.invoke('model.settings.update', { ...selection, systemPrompt: 'Must be ignored', enabledTools: [] }, context()) as any;
+      expect(saved.settings).toEqual(selection);
+      expect(await readCompanionSettings()).toEqual({ ...latest, ...selection });
+      await expect(capability.invoke('model.settings.update', { ...selection, model: 'invalid-model' }, context())).rejects.toThrow('not supported');
+      expect(await readCompanionSettings()).toEqual({ ...latest, ...selection });
+    } finally { await capability.close?.(); }
+  });
+});

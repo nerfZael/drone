@@ -119,7 +119,7 @@ export const COMPANION_WORKSPACE_OPERATIONS = ['workspaces.list', 'workspaces.up
 export const COMPANION_CAPABILITY: CapabilityDescriptor = {
   id: 'companion',
   version: 1,
-  operations: [...COMPANION_RUN_OPERATIONS, ...COMPANION_WORKSPACE_OPERATIONS, 'workspaces.current', ...COMPANION_LIVE_OPERATIONS, 'auto-approve.settings.get', 'auto-approve.settings.update'],
+  operations: ['model.settings.get', 'model.settings.update', ...COMPANION_RUN_OPERATIONS, ...COMPANION_WORKSPACE_OPERATIONS, 'workspaces.current', ...COMPANION_LIVE_OPERATIONS, 'auto-approve.settings.get', 'auto-approve.settings.update'],
 };
 
 export function isGranted(

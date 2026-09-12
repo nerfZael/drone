@@ -1,3 +1,4 @@
+import { MobileCompanionModelPicker } from './MobileCompanionModelPicker';
 import React from 'react';
 import {
   companionToolActivityLabel,
@@ -678,7 +679,9 @@ export function MobileCompanionOverlay() {
           ) : null}
         </View>
       </Animated.View>
-      <MobileCompanionMenu visible={menuOpen} items={menuItems} onClose={closeMenu} />
+      <MobileCompanionMenu visible={menuOpen} items={menuItems} onClose={closeMenu}>
+        {menuOpen ? <MobileCompanionModelPicker key={companion.workspaceDeviceId} deviceId={companion.workspaceDeviceId} /> : null}
+      </MobileCompanionMenu>
     </View>
   );
 }

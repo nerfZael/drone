@@ -1,7 +1,7 @@
 import React from 'react';
 import { ChatComposerModelPicker, type ChatComposerModelChoice } from '../chat/ChatComposerModelPicker';
 import { requestJson } from '../http';
-import { useCompanionSettings, type CompanionSettingsResponse } from './use-companion-settings';
+import { useCompanionSettings, type CompanionProvider, type CompanionSettingsResponse } from './use-companion-settings';
 
 const PROVIDER_LABELS = { openai: 'OpenAI', codex: 'Codex', gemini: 'Gemini', openrouter: 'OpenRouter' } as const;
 
@@ -10,7 +10,11 @@ export function CompanionModelPicker({ embedded = false }: { embedded?: boolean 
   const [saving, setSaving] = React.useState(false);
   const [saveError, setSaveError] = React.useState('');
   const savingRef = React.useRef(false);
+  const [providerDraft, setProviderDraft] = React.useState<CompanionProvider | null>(null);
   const settings = current?.settings;
+  const provider = providerDraft ?? settings?.provider ?? 'openai';
+  const providerModels = (current?.models ?? []).filter((model) => model.provider === provider);
+  const sameProvider = provider === settings?.provider;
   const error = saveError || loadError;
 
   const select = async (choice: ChatComposerModelChoice) => {
@@ -36,6 +40,7 @@ export function CompanionModelPicker({ embedded = false }: { embedded?: boolean 
         }),
       });
       acceptSaved(response);
+      setProviderDraft(null);
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -47,18 +52,23 @@ export function CompanionModelPicker({ embedded = false }: { embedded?: boolean 
   return (
     <div className={embedded ? "px-2 py-1" : "max-w-full self-end rounded-lg border border-[var(--border)] bg-[var(--panel-raised)] px-2 py-1 shadow-[var(--shadow-dialog)]"}>
       <div className={embedded ? "flex flex-col items-stretch gap-1" : "flex items-center justify-end gap-1"}>
-        <span className="text-[10px] text-[var(--muted)]">{embedded ? 'Model and reasoning' : 'Backend'}</span>
+        <span className="text-[10px] text-[var(--muted)]">Provider, model and reasoning</span>
+        <label className="flex items-center gap-2 text-xs text-[var(--muted)]">
+          Provider
+          <select aria-label="Companion provider" value={provider} disabled={loading || saving || !current}
+            onChange={(event) => setProviderDraft(event.target.value as CompanionProvider)}
+            className="min-w-0 rounded border border-[var(--border)] bg-[var(--panel)] p-1 text-[var(--fg)]">
+            {Object.entries(PROVIDER_LABELS).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+          </select>
+        </label>
         <ChatComposerModelPicker config={{
           id: 'companion-backend-model',
           menuPlacement: embedded ? 'inline' : 'above',
-          currentProvider: settings?.provider ?? '',
-          currentModel: settings?.model ?? '',
-          currentThinkingLevel: settings?.thinkingLevel,
-          options: (current?.models ?? []).map((model) => ({
-            ...model,
-            name: `${PROVIDER_LABELS[model.provider]} · ${model.name}`,
-          })),
-          disabled: loading || saving || !current || current.models.length === 0,
+          currentProvider: provider,
+          currentModel: sameProvider ? settings?.model ?? '' : '',
+          currentThinkingLevel: sameProvider ? settings?.thinkingLevel : undefined,
+          options: providerModels,
+          disabled: loading || saving || !current || providerModels.length === 0,
           triggerLabel: loading ? 'Loading models…' : saving ? 'Saving…' : !current ? 'Models unavailable' : undefined,
           requireExplicitModelSelection: true,
           title: 'Choose Companion backend model and reasoning',
@@ -66,9 +76,10 @@ export function CompanionModelPicker({ embedded = false }: { embedded?: boolean 
           onSelect: (choice) => void select(choice),
         }} />
       </div>
-      {current && current.models.length === 0 ? <p className="text-xs text-[var(--muted)]">No backend models available.</p> : null}
-      {settings && !current?.credentials[settings.provider] ? (
-        <p className="max-w-xs text-xs text-[var(--red)]">{PROVIDER_LABELS[settings.provider]} credentials are missing. Add them in General settings before running Companion.</p>
+      {!sameProvider ? <p className="text-xs text-[var(--muted)]">Choose a model to save the provider change.</p> : null}
+      {current && providerModels.length === 0 ? <p className="text-xs text-[var(--muted)]">No backend models available.</p> : null}
+      {current && !current.credentials[provider] ? (
+        <p className="max-w-xs text-xs text-[var(--red)]">{PROVIDER_LABELS[provider]} credentials are missing. Add them in General settings before running Companion.</p>
       ) : null}
       {error ? <p role="alert" className="max-w-xs text-xs text-[var(--red)]">
         {error}{' '}

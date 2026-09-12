@@ -57,10 +57,12 @@ const EXIT = { duration: 180, easing: Easing.in(Easing.quad) };
 export function MobileCompanionMenu({
   visible,
   items,
+  children,
   onClose,
 }: {
   visible: boolean;
   items: MobileCompanionMenuItem[];
+  children?: React.JSX.Element | null;
   onClose(): void;
 }) {
   const insets = useSafeAreaInsets();
@@ -153,9 +155,11 @@ export function MobileCompanionMenu({
           <ScrollView
             accessibilityLabel="Companion options"
             bounces={false}
+            keyboardShouldPersistTaps="handled"
             contentContainerStyle={styles.content}
             showsVerticalScrollIndicator={false}
           >
+            {children}
             {items.map((item, index) => {
               const Icon = item.icon;
               const tone = item.tone ?? (item.selected ? 'accent' : 'neutral');

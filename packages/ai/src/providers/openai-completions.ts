@@ -1,3 +1,4 @@
+import { measurePayload, measureProviderUsage } from "../utils/request-metrics.js";
 import OpenAI from "openai";
 import type {
 	ChatCompletionAssistantMessageParam,
@@ -134,6 +135,9 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 			timestamp: Date.now(),
 		};
 
+		const metrics = output.requestMetrics = { version: 1 as const, startedAt: Date.now(), chunkCount: 0 } as NonNullable<AssistantMessage["requestMetrics"]>;
+		const metricsStart = performance.now();
+		const elapsed = () => Math.max(0, performance.now() - metricsStart);
 		try {
 			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
 			const compat = getCompat(model);
@@ -145,6 +149,7 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 			if (nextParams !== undefined) {
 				params = nextParams as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming;
 			}
+			metrics.payload = measurePayload(params);
 			const requestOptions = {
 				...(options?.signal ? { signal: options.signal } : {}),
 				...(options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : {}),
@@ -153,6 +158,8 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 			const { data: openaiStream, response } = await client.chat.completions
 				.create(params, requestOptions)
 				.withResponse();
+			metrics.responseHeadersMs = elapsed();
+			metrics.status = response.status;
 			await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
 			stream.push({ type: "start", partial: output });
 
@@ -203,6 +210,8 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 
 			for await (const chunk of openaiStream) {
 				if (!chunk || typeof chunk !== "object") continue;
+				metrics.firstChunkMs ??= elapsed();
+				metrics.chunkCount++;
 
 				// OpenAI documents ChatCompletionChunk.id as the unique chat completion identifier,
 				// and each chunk in a streamed completion carries the same id.
@@ -212,6 +221,7 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 				}
 				if (chunk.usage) {
 					output.usage = parseChunkUsage(chunk.usage, model);
+					metrics.providerUsage = measureProviderUsage(chunk.usage);
 				}
 
 				const choice = Array.isArray(chunk.choices) ? chunk.choices[0] : undefined;
@@ -221,6 +231,7 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 				// in choice.usage instead of the standard chunk.usage
 				if (!chunk.usage && (choice as any).usage) {
 					output.usage = parseChunkUsage((choice as any).usage, model);
+					metrics.providerUsage = measureProviderUsage((choice as any).usage);
 				}
 
 				if (choice.finish_reason) {
@@ -232,6 +243,11 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 				}
 
 				if (choice.delta) {
+					const delta = choice.delta as Record<string, unknown>;
+					if (["content", "reasoning", "reasoning_content", "tool_calls", "reasoning_details"].some(key => {
+						const value = delta[key];
+						return (typeof value === "string" || Array.isArray(value)) && value.length > 0;
+					})) metrics.firstContentMs ??= elapsed();
 					if (
 						choice.delta.content !== null &&
 						choice.delta.content !== undefined &&
@@ -377,9 +393,11 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 				throw new Error(output.errorMessage || "Provider returned an error stop reason");
 			}
 
+			metrics.durationMs = elapsed();
 			stream.push({ type: "done", reason: output.stopReason, message: output });
 			stream.end();
 		} catch (error) {
+			metrics.durationMs = elapsed();
 			for (const block of output.content) {
 				delete (block as { index?: number }).index;
 				// Streaming scratch buffers are only used during parsing; never persist them.
