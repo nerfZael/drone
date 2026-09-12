@@ -11,6 +11,8 @@ const connections: Array<{ options: any; closed: number; sent: Record<string, un
 let mediaAction: ((action: 'play' | 'pause' | 'stop' | 'end') => void) | undefined;
 let controlsReleased = 0;
 const cues: string[] = [];
+const controlStates: string[] = [];
+const controlModes: boolean[] = [];
 let cuePlayback: (kind: string) => Promise<void> = async () => {};
 let releaseAudio: () => Promise<void> = async () => {};
 let connectImmediately = true;
@@ -20,8 +22,9 @@ const appState = { currentState: 'active', addEventListener: (_event: string, ca
 const platform = { OS: 'ios' };
 let stopFromNotification: (() => void) | undefined;
 mock.module('react-native', () => ({ Platform: platform, AppState: appState }));
-mock.module('../src/local-assistant/mobile-live-controls', () => ({ openMobileLiveControls: async (action: typeof mediaAction) => {
-  mediaAction = action; return { update: async () => {}, cue: async (kind: string) => { cues.push(kind); await cuePlayback(kind); }, release: async () => { controlsReleased++; } };
+mock.module('../src/local-assistant/mobile-live-controls', () => ({ openMobileLiveControls: async (action: typeof mediaAction, standby = false) => {
+  controlModes.push(standby);
+  mediaAction = action; return { update: async (state: string) => { controlStates.push(state); }, cue: async (kind: string) => { cues.push(kind); await cuePlayback(kind); }, release: async () => { controlsReleased++; } };
 } }));
 mock.module('expo-crypto', () => ({ randomUUID: () => 'voice-session' }));
 mock.module('../src/mesh/MeshContext', () => ({ useMesh: () => ({ request: async () => ({}), subscribe: () => () => {} }) }));
@@ -373,6 +376,155 @@ test('headset stop preserves Companion and submitted backend work, and play resu
   } finally {
     appState.currentState = 'active';
     await act(async () => { root.unmount(); await controller.close(); });
+    Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
+  }
+});
+
+
+test('opt-in shortcut arms without capture, opens Live while locked, and survives closing Companion', async () => {
+  Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
+  platform.OS = 'android';
+  let root!: ReactTestRenderer; let live!: ReturnType<typeof useMobileCompanionLive>;
+  const coordinator = new MobileMicrophoneCoordinator();
+  let ended = 0;
+  function Capture() { live = useMobileCompanionLive(coordinator, undefined, {
+    start: () => live.start('hub', 'Hub', async () => 'reply'), ended: () => { ended++; },
+  }); return null; }
+  const count = connections.length; const releases = controlsReleased;
+  try {
+    controlModes.length = 0;
+    await act(async () => { root = create(<Capture />); });
+    expect(live.shortcutArmed).toBe(false);
+    expect(controlModes).toEqual([]);
+    await act(async () => { await live.setHeadsetShortcut(true); });
+    expect(controlModes).toEqual([true]);
+    expect(live.shortcutArmed).toBe(true);
+    expect(live.status).toBe('idle'); expect(live.hasStarted).toBe(false);
+    expect(connections).toHaveLength(count); expect(coordinator.getSnapshot()).toBeNull();
+    await act(async () => { appState.currentState = 'background'; mediaAction?.('play'); });
+    expect(live.status).toBe('listening');
+    await act(async () => { live.reset(); });
+    expect(live.hasStarted).toBe(false); expect(live.shortcutArmed).toBe(true);
+    expect(controlsReleased).toBe(releases);
+    expect(controlStates.at(-1)).toBe('paused');
+    await act(async () => { mediaAction?.('play'); });
+    expect(connections).toHaveLength(count + 2); expect(live.status).toBe('listening');
+    await act(async () => { mediaAction?.('pause'); });
+    expect(live.status).toBe('paused');
+    await act(async () => { mediaAction?.('play'); });
+    expect(live.status).toBe('listening');
+    await act(async () => { mediaAction?.('end'); });
+    expect(ended).toBe(1); expect(live.shortcutArmed).toBe(false);
+    expect(controlsReleased).toBe(releases + 1);
+    const stoppedCount = connections.length;
+    await act(async () => { mediaAction?.('play'); });
+    expect(connections).toHaveLength(stoppedCount);
+  } finally {
+    appState.currentState = 'active'; platform.OS = 'ios';
+    await act(async () => { root?.unmount(); });
+    Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
+  }
+});
+
+test('disabling idle shortcut releases controls; disabling during Live preserves normal pause/resume', async () => {
+  Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
+  platform.OS = 'android';
+  let root!: ReactTestRenderer; let live!: ReturnType<typeof useMobileCompanionLive>;
+  const coordinator = new MobileMicrophoneCoordinator();
+  function Capture() { live = useMobileCompanionLive(coordinator); return null; }
+  const releases = controlsReleased;
+  try {
+    await act(async () => { root = create(<Capture />); });
+    await act(async () => { await live.setHeadsetShortcut(true); });
+    await act(async () => { await live.setHeadsetShortcut(false); });
+    expect(controlsReleased).toBe(releases + 1);
+    await act(async () => { await live.setHeadsetShortcut(true); });
+    await act(async () => { await live.start('hub', 'Hub', async () => 'reply'); });
+    await act(async () => { await live.setHeadsetShortcut(false); });
+    expect(live.status).toBe('listening'); expect(controlsReleased).toBe(releases + 1);
+    await act(async () => { live.pause(); mediaAction?.('play'); });
+    expect(live.status).toBe('listening');
+    await act(async () => { live.reset(); });
+    expect(controlsReleased).toBe(releases + 2);
+  } finally {
+    platform.OS = 'ios'; await act(async () => { root?.unmount(); });
+    Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
+  }
+});
+
+test('concurrent shortcut arming and Live startup share controls in either order', async () => {
+  Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
+  platform.OS = 'android';
+  let root!: ReactTestRenderer; let live!: ReturnType<typeof useMobileCompanionLive>;
+  const coordinator = new MobileMicrophoneCoordinator();
+  function Capture() { live = useMobileCompanionLive(coordinator); return null; }
+  try {
+    await act(async () => { root = create(<Capture />); });
+    for (const armFirst of [true, false]) {
+      const before = controlModes.length;
+      await act(async () => {
+        if (armFirst) await Promise.all([live.setHeadsetShortcut(true), live.start('hub', 'Hub', async () => 'reply')]);
+        else await Promise.all([live.start('hub', 'Hub', async () => 'reply'), live.setHeadsetShortcut(true)]);
+      });
+      expect(live.status).toBe('listening'); expect(live.shortcutArmed).toBe(true);
+      expect(controlModes.length).toBe(before + 1);
+      await act(async () => { await live.setHeadsetShortcut(false); live.reset(); });
+    }
+  } finally {
+    platform.OS = 'ios'; await act(async () => { root?.unmount(); });
+    Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
+  }
+});
+
+
+test('closing and immediately toggling a cold shortcut can cancel startup before old audio releases', async () => {
+  Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
+  platform.OS = 'android';
+  let root!: ReactTestRenderer; let live!: ReturnType<typeof useMobileCompanionLive>;
+  const coordinator = new MobileMicrophoneCoordinator();
+  const released = Promise.withResolvers<void>();
+  function Capture() { live = useMobileCompanionLive(coordinator, undefined, {
+    start: () => live.start('hub', 'Hub', async () => 'reply'), ended() {},
+  }); return null; }
+  try {
+    await act(async () => { root = create(<Capture />); });
+    await act(async () => { await live.setHeadsetShortcut(true); await live.start('hub', 'Hub', async () => 'reply'); });
+    const count = connections.length;
+    releaseAudio = () => released.promise;
+    await act(async () => { live.reset(); mediaAction?.('play'); mediaAction?.('pause'); });
+    expect(live.status).toBe('paused');
+    await act(async () => { released.resolve(); });
+    expect(connections).toHaveLength(count);
+    await act(async () => { mediaAction?.('play'); });
+    expect(live.status).toBe('listening'); expect(connections).toHaveLength(count + 1);
+  } finally {
+    released.resolve(); releaseAudio = async () => {}; platform.OS = 'ios';
+    await act(async () => { root?.unmount(); });
+    Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
+  }
+});
+
+test('disabling while shortcut permission is pending never opens background controls', async () => {
+  Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
+  platform.OS = 'android';
+  let root!: ReactTestRenderer; let live!: ReturnType<typeof useMobileCompanionLive>;
+  const coordinator = new MobileMicrophoneCoordinator();
+  const permission = Promise.withResolvers<void>();
+  function Capture() { live = useMobileCompanionLive(coordinator); return null; }
+  let enabling!: Promise<void>;
+  try {
+    prepareAudio = () => permission.promise;
+    const count = controlModes.length;
+    await act(async () => { root = create(<Capture />); });
+    await act(async () => { enabling = live.setHeadsetShortcut(true); });
+    await act(async () => {
+      const disabling = live.setHeadsetShortcut(false);
+      permission.resolve(); await Promise.all([enabling, disabling]);
+    });
+    expect(live.shortcutArmed).toBe(false); expect(controlModes).toHaveLength(count);
+  } finally {
+    permission.resolve(); prepareAudio = async () => {}; platform.OS = 'ios';
+    await act(async () => { root?.unmount(); });
     Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
   }
 });

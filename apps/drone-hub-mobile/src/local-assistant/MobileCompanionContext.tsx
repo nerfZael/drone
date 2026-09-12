@@ -27,6 +27,7 @@ import {
   type CompanionToolActivity,
 } from '@drone/assistant-chat';
 
+import { useMobileCompanionHeadsetShortcut } from './use-mobile-companion-headset-shortcut';
 import { useMobileCompanionLive } from './use-mobile-companion-live';
 import { useMesh } from '../mesh/MeshContext';
 import { useSharedMobileChatVoiceRecorder } from './MobileChatVoiceRecorderContext';
@@ -67,6 +68,7 @@ type MobileCompanionContextValue = {
   status: CompanionStatus;
   live: ReturnType<typeof useMobileCompanionLive>;
   checkingVoiceMode: boolean;
+  headsetShortcut: ReturnType<typeof useMobileCompanionHeadsetShortcut>;
   autoApproveSettings: ReturnType<typeof useMobileCompanionAutoApproveSettings>;
   /** The Hub's Live voice preference, shared with desktop Companion. */
   liveSettings: ReturnType<typeof useMobileCompanionLiveSettings> & { supported: boolean };
@@ -129,7 +131,11 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     controllerRef.current = new CompanionClientController({ createId: Crypto.randomUUID });
   }
   const controller = controllerRef.current;
-  const live = useMobileCompanionLive(voice.microphoneCoordinator, controller);
+  const headsetCallbacks = React.useRef({ start: async () => {}, ended: () => {} });
+  const live = useMobileCompanionLive(voice.microphoneCoordinator, controller, {
+    start: () => headsetCallbacks.current.start(), ended: () => headsetCallbacks.current.ended(),
+  });
+  const headsetShortcut = useMobileCompanionHeadsetShortcut(live.setHeadsetShortcut);
   const liveActive = live.status === 'connecting' || live.status === 'listening';
   const liveArmed = liveActive || live.status === 'paused';
   const state = React.useSyncExternalStore(
@@ -499,6 +505,30 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     [close, controller, executeMobileTool, mesh.request, mesh.subscribe],
   );
 
+  const startLive = React.useCallback(async () => {
+    const activeTarget = workspaceTargetRef.current;
+    if (!activeTarget || !available) throw new Error(unavailableReason || 'Companion is unavailable.');
+    if (voice.session.kind !== 'idle' || !voice.session.microphoneAvailable) {
+      throw new Error('Another voice feature is using the microphone. Stop it before starting Live.');
+    }
+    const operations = ['live.start', 'live.event', 'live.ping', 'live.close'];
+    if (operations.some((operation) => !targetCapability?.operations.includes(operation))) {
+      throw new Error('This Hub does not support all required Live voice operations. Update the Hub and try again.');
+    }
+    activeTargetDeviceIdRef.current = activeTarget.targetDeviceId;
+    voice.setError('');
+    const workspaceKey = mobileLiveWorkspaceKey(activeTarget);
+    await live.start(activeTarget.targetDeviceId, activeTarget.targetName, (prompt, signal) => {
+      if (proposalExecutingRef.current) return Promise.reject(new Error('Companion is applying a proposal. Please ask again when it finishes.'));
+      if (mobileLiveWorkspaceKey(workspaceTargetRef.current) !== workspaceKey) return Promise.reject(new Error('Live workspace changed. Start a new voice conversation.'));
+      return waitForCompanionReply(controller, () => run(prompt, undefined, undefined, workspaceKey), signal);
+    });
+  }, [available, unavailableReason, targetCapability, live.start, voice, controller, run]);
+  headsetCallbacks.current = { start: async () => {
+    if (preparingVoice.current) throw new Error('Companion is already preparing voice.');
+    await startLive();
+  }, ended: headsetShortcut.ended };
+
   const submitText = React.useCallback(
     async (prompt: string): Promise<{ ok: true } | { ok: false; error: string }> => {
       const text = String(prompt ?? '').trim();
@@ -576,16 +606,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
         if (!controller.isCurrent(token) || workspaceTargetRef.current?.targetDeviceId !== activeTarget.targetDeviceId) return;
         if (typeof preference?.enabled !== 'boolean') throw new Error('Could not read the Hub Live voice preference.');
         if (preference.enabled) {
-          const operations = ['live.start', 'live.event', 'live.ping', 'live.close'];
-          if (operations.some((operation) => !targetCapability?.operations.includes(operation))) {
-            throw new Error('This Hub does not support all required Live voice operations. Update the Hub and try again.');
-          }
-          const workspaceKey = mobileLiveWorkspaceKey(activeTarget);
-          await live.start(activeTarget.targetDeviceId, activeTarget.targetName, (prompt, signal) => {
-            if (proposalExecutingRef.current) return Promise.reject(new Error('Companion is applying a proposal. Please ask again when it finishes.'));
-            if (mobileLiveWorkspaceKey(workspaceTargetRef.current) !== workspaceKey) return Promise.reject(new Error('Live workspace changed. Start a new voice conversation.'));
-            return waitForCompanionReply(controller, () => run(prompt, undefined, undefined, workspaceKey), signal);
-          });
+          await startLive();
           return;
         }
       } catch (error) {
@@ -608,7 +629,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     run,
     unavailableReason,
     voice,
-    liveActive, live.status, live.resume, live.start, live.pause, mesh.request, targetCapability,
+    liveActive, live.status, live.resume, startLive, live.pause, mesh.request, targetCapability,
   ]);
 
   const companionRecording =
@@ -677,12 +698,12 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     if (!liveArmed && !checkingVoiceMode && (state.status === 'cancelled' || state.status === 'error' || state.status === 'idle')) {
       activeTargetDeviceIdRef.current = '';
     }
-    const active = state.status === 'working' || liveArmed;
+    const active = state.status === 'working' || liveArmed || live.shortcutArmed;
     mesh.setBackgroundActivityRequired(active);
     return () => {
       if (active) mesh.setBackgroundActivityRequired(false);
     };
-  }, [mesh.setBackgroundActivityRequired, state.status, liveArmed, checkingVoiceMode]);
+  }, [mesh.setBackgroundActivityRequired, state.status, liveArmed, live.shortcutArmed, checkingVoiceMode]);
 
   React.useEffect(
     () => () => {
@@ -713,6 +734,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       transcript: state.transcript.startsWith(LIVE_COMPANION_PROMPT_PREFIX) ? '' : state.transcript,
       live,
       checkingVoiceMode,
+      headsetShortcut,
       autoApproveSettings,
       liveSettings,
       switchingVoice,
@@ -747,7 +769,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       registerEditorTarget,
     }),
     [
-      live, checkingVoiceMode, autoApproveSettings, liveSettings, switchingVoice, currentWorkspaceSupported,
+      live, checkingVoiceMode, headsetShortcut, autoApproveSettings, liveSettings, switchingVoice, currentWorkspaceSupported,
       overlayOpen, overlayInset, reportOverlayInset, composerFocused,
       voice.session,
       toggleLiveVoice, toggleRecordingPause, discardRecording, readAppContext, resolveDroneName,

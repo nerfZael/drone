@@ -1,8 +1,11 @@
 import { expect, mock, test } from 'bun:test';
 
+let shortcutRequests = 0;
+let shortcutGranted = true;
 let headsetRequests = 0;
 let headsetDialog = false;
 mock.module('expo-modules-core', () => ({ requireOptionalNativeModule: () => ({
+  requestShortcutHeadsetPermission: async () => { shortcutRequests++; return { granted: shortcutGranted }; },
   requestHeadsetPermission: async () => { headsetRequests++; if (headsetDialog) appState.currentState = 'background'; },
 }) }));
 mock.module('expo-crypto', () => ({ randomUUID: () => 'permission-test' }));
@@ -71,4 +74,15 @@ test('Live requests headset access before arming background controls and waits f
   expect(ready).toBe(true);
   expect(listeners.size).toBe(0);
   headsetDialog = false;
+});
+
+
+test('shortcut obtains Bluetooth permission before a headset connects and reports denial', async () => {
+  granted = true; appState.currentState = 'active';
+  const previous = headsetRequests;
+  await prepareMobileLiveAudio({ headsetShortcut: true });
+  expect(shortcutRequests).toBe(1); expect(headsetRequests).toBe(previous);
+  shortcutGranted = false;
+  try { await expect(prepareMobileLiveAudio({ headsetShortcut: true })).rejects.toThrow('Allow Nearby devices access'); }
+  finally { shortcutGranted = true; }
 });

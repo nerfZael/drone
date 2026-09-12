@@ -21,7 +21,7 @@ import android.view.KeyEvent
 import expo.modules.kotlin.Promise
 
 /** Owned by the foreground service, including while the GPT-Live session is closed. */
-internal class LiveMediaControls(private val context: Context, val id: String, private val emit: (String) -> Unit) {
+internal class LiveMediaControls(private val context: Context, val id: String, private val emit: (String) -> Unit, initialState: String = "connecting") {
   private val handler = Handler(Looper.getMainLooper())
   private var playing = true
   private var closed = false
@@ -104,7 +104,7 @@ internal class LiveMediaControls(private val context: Context, val id: String, p
         communicationHeadsetConnected = isHeadset(audioManager.communicationDevice)
         audioManager.addOnCommunicationDeviceChangedListener({ runnable -> handler.post(runnable); Unit }, listener)
       }
-      update("connecting")
+      update(initialState)
     } catch (error: Exception) { close(); throw error }
   }
 

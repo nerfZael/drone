@@ -1,5 +1,5 @@
 import React from 'react';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import { CompanionLiveConversation, connectCompanionLiveReplies, type CompanionClientController } from '@drone/assistant-chat';
 import { useMesh } from '../mesh/MeshContext';
@@ -13,7 +13,8 @@ type State = { hasStarted: boolean; capturing: boolean; status: 'idle' | 'connec
 type Session = { connection: MobileCompanionLiveConnection; conversation: CompanionLiveConversation; abort: AbortController; replies?: ReturnType<typeof connectCompanionLiveReplies>; muted: boolean };
 type Target = { id: string; name: string; run: (prompt: string, signal: AbortSignal) => Promise<string> };
 
-export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCoordinator, controller?: CompanionClientController) {
+export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCoordinator, controller?: CompanionClientController,
+  shortcutCallbacks?: { start(): Promise<void>; ended(): void }) {
   const mesh = useMesh();
   const [state, setState] = React.useState<State>(EMPTY);
   const active = React.useRef<Session | null>(null);
@@ -23,6 +24,10 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
   const target = React.useRef<Target | null>(null);
   const cleanup = React.useRef<Promise<void>>(Promise.resolve());
   const pendingSetup = React.useRef<Promise<void>>(Promise.resolve());
+  const keepControls = React.useRef(false);
+  const arming = React.useRef<Promise<void> | null>(null);
+  const [shortcutArmed, setShortcutArmed] = React.useState(false);
+  const shortcut = React.useRef(shortcutCallbacks); shortcut.current = shortcutCallbacks;
   const mediaAction = React.useRef<(action: LiveMediaAction) => void>(() => {});
 
   const endConnection = React.useCallback(() => {
@@ -36,7 +41,9 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
   }, []);
   const stop = React.useCallback(() => {
     endConnection(); target.current = null;
-    const old = controls.current; controls.current = null;
+    const old = keepControls.current ? null : controls.current;
+    if (old) controls.current = null;
+    if (keepControls.current) void controls.current?.update('paused').catch(() => undefined);
     cleanup.current = cleanup.current.then(async () => {
       if (!old) return;
       await old.release();
@@ -54,7 +61,39 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
     setState((value) => ({ ...value, status: 'paused', capturing: false, muted: false, queued: 0 }));
   }, [endConnection, stop]);
   const reset = React.useCallback(() => { stop(); setState(EMPTY); }, [stop]);
-  React.useEffect(() => () => stop(), [stop]);
+  React.useEffect(() => () => { keepControls.current = false; stop(); }, [stop]);
+
+  const setHeadsetShortcut = React.useCallback(async (enabled: boolean) => {
+    if (enabled && Platform.OS !== 'android') throw new Error('Background headset shortcuts require Android.');
+    keepControls.current = enabled;
+    if (!enabled) {
+      setShortcutArmed(false);
+      await arming.current?.catch(() => undefined);
+      // Existing active/paused Live keeps its normal controls until Companion closes.
+      if (!active.current && !preparing.current && !target.current) stop();
+      await cleanup.current;
+      return;
+    }
+    if (arming.current) return arming.current;
+    const setupBeforeArming = pendingSetup.current;
+    const pending = (async () => {
+      await cleanup.current;
+      await setupBeforeArming;
+      if (!keepControls.current) return;
+      if (!controls.current) {
+        await prepareMobileLiveAudio({ headsetShortcut: true });
+        if (!keepControls.current) return;
+        const opened = await openMobileLiveControls((action) => mediaAction.current(action), true);
+        if (!keepControls.current) { await opened.release(); return; }
+        controls.current = opened;
+      }
+      setShortcutArmed(true);
+    })();
+    arming.current = pending;
+    try { await pending; }
+    catch (error) { keepControls.current = false; setShortcutArmed(false); throw error; }
+    finally { if (arming.current === pending) arming.current = null; }
+  }, [stop]);
 
   const start = React.useCallback(async (targetDeviceId: string, targetName: string,
     runBackend: Target['run']) => {
@@ -62,7 +101,9 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
     // Only a previously armed media session may restart from the lock screen.
     if (!controls.current && AppState.currentState !== 'active') return;
     const preparation = new AbortController(); preparing.current = preparation;
+    target.current = { id: targetDeviceId, name: targetName, run: runBackend };
     const previousCleanup = cleanup.current;
+    const previousArming = arming.current;
     let setupSettled!: () => void;
     pendingSetup.current = new Promise((resolve) => { setupSettled = resolve; });
     setState({ ...EMPTY, hasStarted: true, status: 'connecting', targetDeviceId, targetName });
@@ -75,6 +116,7 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
     preparingReplies.current = replies ?? null;
     try {
       await previousCleanup;
+      await previousArming;
       if (preparation.signal.aborted) return;
       if (microphoneCoordinator.getSnapshot()) throw new Error('Another voice feature is using the microphone. Stop it before starting Live.');
       if (!controls.current) {
@@ -84,7 +126,6 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
         if (preparation.signal.aborted) { await opened.release(); return; }
         controls.current = opened;
       }
-      target.current = { id: targetDeviceId, name: targetName, run: runBackend };
       const currentControls = controls.current;
       const update = (patch: Partial<State>) => {
         if (active.current === session) setState((value) => ({ ...value, ...patch }));
@@ -142,9 +183,19 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
     if (previous) await start(previous.id, previous.name, previous.run);
   }, [start]);
   mediaAction.current = (action) => {
-    if (action === 'play') void resume();
+    if (action === 'play') {
+      if (target.current) void resume();
+      else if (keepControls.current && controls.current) {
+        const current = controls.current;
+        void shortcut.current?.start().catch((error) => {
+          if (controls.current !== current || active.current || preparing.current) return;
+          void current.update('paused').catch(() => undefined);
+          setState((value) => ({ ...value, status: 'error', error: error instanceof Error ? error.message : 'Could not start Companion.' }));
+        });
+      }
+    }
     else if (action === 'pause' || action === 'stop') pause();
-    else if (action === 'end') stop();
+    else if (action === 'end') { keepControls.current = false; setShortcutArmed(false); shortcut.current?.ended(); stop(); }
   };
   const toggleMute = React.useCallback(() => {
     const session = active.current;
@@ -152,7 +203,7 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
     session.muted = !session.muted; session.connection.mute(session.muted);
     setState((value) => ({ ...value, muted: session.muted }));
   }, []);
-  return { ...state, start, stop, reset, pause, resume, toggleMute };
+  return { ...state, shortcutArmed, setHeadsetShortcut, start, stop, reset, pause, resume, toggleMute };
 }
 
 const EMPTY: State = { hasStarted: false, status: 'idle', capturing: false, error: '', captions: '', backendModel: '', targetDeviceId: '', targetName: '', muted: false, queued: 0 };

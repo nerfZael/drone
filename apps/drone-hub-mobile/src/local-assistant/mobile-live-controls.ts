@@ -6,6 +6,7 @@ export type LiveMediaAction = 'play' | 'pause' | 'stop' | 'end';
 export type LiveMediaState = 'connecting' | 'recording' | 'paused';
 type NativeControls = {
   armControls(id: string): Promise<void>;
+  armStandbyControls?(id: string): Promise<void>;
   updateControls(id: string, state: LiveMediaState): Promise<void>;
   disarmControls(id: string): Promise<void>;
   playCue(id: string, cue: 'recording' | 'stopped'): Promise<void>;
@@ -13,7 +14,7 @@ type NativeControls = {
 };
 
 /** A media session survives paused Live connections, until End voice. */
-export async function openMobileLiveControls(onAction: (action: LiveMediaAction) => void) {
+export async function openMobileLiveControls(onAction: (action: LiveMediaAction) => void, standby = false) {
   const native = requireOptionalNativeModule<NativeControls>('DroneLiveVoice');
   if (!native?.armControls) throw new Error('Update the mobile app to use Live headset controls.');
   const id = Crypto.randomUUID();
@@ -31,7 +32,10 @@ export async function openMobileLiveControls(onAction: (action: LiveMediaAction)
     listener = native.addListener('mediaControl', (event) => {
       if (!closed && event.id === id) onAction(event.action);
     });
-    await native.armControls(id);
+    if (standby) {
+      if (!native.armStandbyControls) throw new Error('Update the Android app to enable the headset shortcut.');
+      await native.armStandbyControls(id);
+    } else await native.armControls(id);
     return {
       async update(state: LiveMediaState) { if (!closed) await native.updateControls(id, state); },
       async cue(cue: 'recording' | 'stopped') { if (!closed) await native.playCue(id, cue); },

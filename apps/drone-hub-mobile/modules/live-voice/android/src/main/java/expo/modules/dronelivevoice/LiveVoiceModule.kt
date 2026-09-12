@@ -63,6 +63,11 @@ class LiveVoiceModule : Module() {
         Permissions.askForPermissionsWithPermissionsManager(appContext.permissions, promise, Manifest.permission.BLUETOOTH_CONNECT)
       }
     }.runOnQueue(Queues.MAIN)
+    AsyncFunction("requestShortcutHeadsetPermission") { promise: Promise ->
+      val context = appContext.reactContext ?: error("React context is unavailable")
+      if (Build.VERSION.SDK_INT < 31 || LiveBluetoothRoute.permitted(context)) promise.resolve()
+      else Permissions.askForPermissionsWithPermissionsManager(appContext.permissions, promise, Manifest.permission.BLUETOOTH_CONNECT)
+    }.runOnQueue(Queues.MAIN)
     AsyncFunction("preparePcmRoute") { id: String, promise: Promise ->
       check(LiveVoiceSession.id != null) { "Start the Live foreground service first" }
       check(bluetoothRoute == null) { "Previous headset audio is still releasing" }
@@ -91,9 +96,19 @@ class LiveVoiceModule : Module() {
       check(LiveVoiceSession.id != null) { "Start the Live foreground service first" }
       val context = appContext.reactContext ?: error("React context is unavailable")
       check(LiveVoiceSession.mediaControls == null) { "Live headset controls are already active" }
-      LiveVoiceSession.mediaControls = LiveMediaControls(context, id) { action ->
+      LiveVoiceSession.mediaControls = LiveMediaControls(context, id, { action ->
         sendEvent("mediaControl", mapOf("id" to id, "action" to action))
-      }
+      })
+      LiveVoiceSession.refreshNotification?.invoke()
+    }.runOnQueue(Queues.MAIN)
+    AsyncFunction("armStandbyControls") { id: String ->
+      check(LiveVoiceSession.id != null) { "Start the Live foreground service first" }
+      val context = appContext.reactContext ?: error("React context is unavailable")
+      check(LiveVoiceSession.mediaControls == null) { "Live headset controls are already active" }
+      // Register paused without claiming audio focus, opening SCO, or starting capture.
+      LiveVoiceSession.mediaControls = LiveMediaControls(context, id, { action ->
+        sendEvent("mediaControl", mapOf("id" to id, "action" to action))
+      }, initialState = "paused")
       LiveVoiceSession.refreshNotification?.invoke()
     }.runOnQueue(Queues.MAIN)
     AsyncFunction("updateControls") { id: String, state: String ->

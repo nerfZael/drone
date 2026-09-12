@@ -124,8 +124,9 @@ class AudioManager {
   var listener: OnCommunicationDeviceChangedListener? = null
   fun addOnCommunicationDeviceChangedListener(executor: java.util.concurrent.Executor, value: OnCommunicationDeviceChangedListener) { listener = value }
   fun removeOnCommunicationDeviceChangedListener(value: OnCommunicationDeviceChangedListener) { listener = null }
-  fun requestAudioFocus(request: AudioFocusRequest) = AUDIOFOCUS_REQUEST_GRANTED
-  fun requestAudioFocus(listener: OnAudioFocusChangeListener, stream: Int, gain: Int) = AUDIOFOCUS_REQUEST_GRANTED
+  var focusRequests = 0
+  fun requestAudioFocus(request: AudioFocusRequest): Int { focusRequests++; return AUDIOFOCUS_REQUEST_GRANTED }
+  fun requestAudioFocus(listener: OnAudioFocusChangeListener, stream: Int, gain: Int): Int { focusRequests++; return AUDIOFOCUS_REQUEST_GRANTED }
   fun abandonAudioFocusRequest(request: AudioFocusRequest) {}
   fun abandonAudioFocus(listener: OnAudioFocusChangeListener) {}
   fun interface OnCommunicationDeviceChangedListener { fun onCommunicationDeviceChanged(device: AudioDeviceInfo?) }

@@ -7,6 +7,8 @@ import { COMPANION_CAPABILITY, COMPANION_RUN_OPERATIONS } from '@drone/device-pr
 import { MobileMicrophoneCoordinator } from '../src/local-assistant/mobile-microphone-coordinator';
 import type { MobileCompanionWorkspaceTarget } from '../src/local-assistant/MobileCompanionContext';
 
+let headsetCallbacks: { start(): Promise<void>; ended(): void };
+mock.module('../src/local-assistant/use-mobile-companion-headset-shortcut', () => ({ useMobileCompanionHeadsetShortcut: () => ({ enabled: false, ended() {} }) }));
 let enabled = false;
 let livePrompt = 'Speak calmly.';
 let autoApprove = false;
@@ -54,7 +56,7 @@ const mesh = {
 };
 mock.module('../src/mesh/MeshContext', () => ({ useMesh: () => mesh }));
 mock.module('../src/local-assistant/MobileChatVoiceRecorderContext', () => ({ useSharedMobileChatVoiceRecorder: () => voice }));
-mock.module('../src/local-assistant/use-mobile-companion-live', () => ({ useMobileCompanionLive: () => live }));
+mock.module('../src/local-assistant/use-mobile-companion-live', () => ({ useMobileCompanionLive: (_coordinator: unknown, _controller: unknown, callbacks: typeof headsetCallbacks) => { headsetCallbacks = callbacks; return live; } }));
 mock.module('expo-crypto', () => ({ randomUUID: () => `id-${++nextId}` }));
 // Keep the renderer on the app's React instance in this multi-version workspace.
 const rendererRequire = createRequire(import.meta.resolve('react-test-renderer'));
@@ -439,4 +441,36 @@ test('Companion toggle stops only Live and keeps the overlay available for heads
     await act(async () => { await h.context().close(); });
     expect(live.hasStarted).toBe(false);
   } finally { await h.cleanup(); }
+});
+
+
+test('headset shortcut opens closed Companion directly in Live without switching the Hub preference', async () => {
+  const h = await harness();
+  try {
+    expect(h.context().overlayOpen).toBe(false);
+    calls.length = 0;
+    await act(async () => { await headsetCallbacks.start(); });
+    await h.refresh();
+    expect(h.context().overlayOpen).toBe(true);
+    expect(live.status).toBe('listening');
+    expect(live.targetDeviceId).toBe('hub');
+    expect(recorded).toBe(0);
+    expect(calls.some((call) => call.operation.startsWith('live.settings'))).toBe(false);
+    await act(async () => { await h.context().close(); });
+    await h.refresh();
+    expect(h.context().overlayOpen).toBe(false);
+    await act(async () => { await headsetCallbacks.start(); });
+    expect(live.status).toBe('listening');
+  } finally { await h.cleanup(); }
+});
+
+test('headset shortcut refuses to take a microphone from another voice feature', async () => {
+  const h = await harness();
+  const previous = voice.session;
+  try {
+    voice.session = { kind: 'continuous', status: 'recording', microphoneAvailable: false };
+    await h.refresh();
+    await expect(headsetCallbacks.start()).rejects.toThrow('Another voice feature');
+    expect(live.status).toBe('idle');
+  } finally { voice.session = previous; await h.cleanup(); }
 });

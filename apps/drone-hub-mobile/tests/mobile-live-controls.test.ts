@@ -10,6 +10,7 @@ mock.module('../src/local-assistant/mobile-live-background', () => ({
   },
 }));
 mock.module('expo-modules-core', () => ({ requireOptionalNativeModule: () => ({
+  armStandbyControls: async (id: string) => { calls.push(`standby:${id}`); },
   armControls: async (id: string) => { calls.push(`arm:${id}`); if (failArm) throw new Error('No controls'); },
   updateControls: async (id: string, state: string) => { calls.push(`state:${id}:${state}`); },
   disarmControls: async (id: string) => { calls.push(`disarm:${id}`); },
@@ -43,4 +44,13 @@ test('failed control registration releases the foreground service and event list
     await expect(openMobileLiveControls(() => {})).rejects.toThrow('No controls');
     expect(listener).toBeUndefined(); expect(calls.at(-1)).toBe('service.stop');
   } finally { failArm = false; }
+});
+
+
+test('standby registers paused natively rather than briefly starting playback', async () => {
+  calls.length = 0;
+  const controls = await openMobileLiveControls(() => {}, true);
+  try {
+    expect(calls).toEqual(['service.start', `standby:control-${sequence}`]);
+  } finally { await controls.release(); }
 });

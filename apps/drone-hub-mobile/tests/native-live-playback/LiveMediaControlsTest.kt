@@ -83,7 +83,27 @@ private fun stalePauseHeadsetButton() {
   println("Physical Play/Pause keys toggle despite stale headset state; explicit transports and key releases/repeats stay idempotent")
 }
 
+private fun standbyDoesNotTakeAudioFocus() {
+  val context = Context()
+  val manager = context.getSystemService(AudioManager::class.java)
+  val actions = mutableListOf<String>()
+  val controls = LiveMediaControls(context, "standby", actions::add, initialState = "paused")
+  try {
+    check(!controls.isPlaying() && controls.session.isActive)
+    check(manager.focusRequests == 0) { "Enabling the shortcut must not interrupt another media app" }
+    check(LiveVoiceSession.stopAudio == null)
+    controls.session.callback!!.onMediaButtonEvent(Intent(extras = mapOf(
+      Intent.EXTRA_KEY_EVENT to KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE))))
+    check(actions == listOf("play") && controls.isPlaying())
+    check(manager.focusRequests == 1)
+    controls.session.callback!!.onPause()
+    check(actions == listOf("play", "pause"))
+  } finally { controls.close() }
+  println("Standby headset shortcut receives Play without requesting audio focus or starting capture until pressed")
+}
+
 fun main() {
+  standbyDoesNotTakeAudioFocus()
   stalePauseHeadsetButton()
   val context = Context()
   val actions = mutableListOf<String>()

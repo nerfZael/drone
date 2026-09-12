@@ -15,7 +15,7 @@ export function MobileCompanionLiveSettingsCard() {
     mesh.profile?.capabilitiesByDevice[device.id]?.some((capability) => capability.id === COMPANION_CAPABILITY.id &&
       capability.version === COMPANION_CAPABILITY.version && capability.operations.includes('live.settings.get')));
   const [selected, setSelected] = React.useState('');
-  const target = hubs.find((device) => device.id === selected) ?? hubs[0];
+  const target = hubs.find((device) => device.id === (selected || companion.workspaceDeviceId)) ?? hubs[0];
   const targetCapability = target ? mesh.profile?.capabilitiesByDevice[target.id]?.find((capability) =>
     capability.id === COMPANION_CAPABILITY.id && capability.version === COMPANION_CAPABILITY.version) : undefined;
   const promptSupported = Boolean(targetCapability?.operations.includes('live.prompt.get'));
@@ -33,6 +33,22 @@ export function MobileCompanionLiveSettingsCard() {
   const promptWritable = Boolean(self && isGranted(self.grants, COMPANION_CAPABILITY.id, COMPANION_CAPABILITY.version, 'live.prompt.update'));
   return <View style={styles.card}>
     <Label>Companion Live voice</Label>
+    {companion.headsetShortcut.supported ? <>
+      <View style={styles.row}>
+        <Text style={styles.copy}>Start Companion with headset button</Text>
+        {companion.headsetShortcut.saving ? <ActivityIndicator color={colors.accent} /> : null}
+        <Switch accessibilityLabel="Start Companion with headset button" value={companion.headsetShortcut.enabled}
+          disabled={companion.headsetShortcut.loading || companion.headsetShortcut.saving}
+          onValueChange={(enabled) => { void companion.headsetShortcut.save(enabled); }} />
+      </View>
+      <Text style={styles.copy}>Off by default. Uses the Hub selected in Drone Hub, with Live voice enabled below. Your headset button starts Companion and Live even when Companion is closed, another app is open, or your phone is locked. While Live is running, the button pauses it.</Text>
+      <Text style={styles.copy}>Keeps a notification available; the microphone stays off until you start Live. Reopen Drone after a restart or force-stop. Other media apps may receive the headset button while they are active. End voice in the notification turns this shortcut off.</Text>
+      {companion.headsetShortcut.enabled ? <Text style={styles.copy}>{companion.live.shortcutArmed ? 'Headset shortcut ready' : 'Headset shortcut is not ready'}</Text> : null}
+      {companion.headsetShortcut.error ? <>
+        <ErrorBanner message={companion.headsetShortcut.error} />
+        {companion.headsetShortcut.enabled ? <Button tone="quiet" onPress={() => void companion.headsetShortcut.retry()}>Retry</Button> : null}
+      </> : null}
+    </> : null}
     {hubs.length > 1 ? <View style={styles.targets}>{hubs.map((hub) => <Pressable key={hub.id}
       accessibilityRole="radio" accessibilityState={{ selected: hub.id === target?.id }}
       disabled={preference.saving} onPress={() => setSelected(hub.id)}>
@@ -49,7 +65,7 @@ export function MobileCompanionLiveSettingsCard() {
           }); }} />
       </View>
       <Text style={styles.copy}>Off by default. Saves immediately on this Hub and also changes desktop Companion. Tap the Companion microphone to start a two-way Live conversation. The Hub’s Companion model and ASAP/Queue setting still apply.</Text>
-      <Text style={styles.copy}>Live uses the Hub’s OpenAI API key. Voice ends when the app goes into the background.</Text>
+      <Text style={styles.copy}>Live uses the Hub’s OpenAI API key. Headset controls can pause and resume Live while the phone is locked.</Text>
       {promptSupported && promptReadable ? <><View style={styles.promptHeader}>
         <View style={styles.promptCopy}>
           <Text style={styles.promptTitle}>GPT-Live system prompt</Text>

@@ -7,7 +7,7 @@ import { AppState, Platform } from 'react-native';
 import { ensureMobileRecordingPermission, ensureMobileBackgroundRecordingPermission } from './mobile-recording-permission';
 import { startMobileLiveBackground } from './mobile-live-background';
 
-export async function prepareMobileLiveAudio() {
+export async function prepareMobileLiveAudio(options: { headsetShortcut?: boolean } = {}) {
   const permission = await ensureMobileRecordingPermission({
     getPermission: getRecordingPermissionsAsync,
     requestPermission: requestRecordingPermissionsAsync,
@@ -19,7 +19,12 @@ export async function prepareMobileLiveAudio() {
   });
   if (Platform.OS === 'android') {
     const native = requireOptionalNativeModule<NativePcm>('DroneLiveVoice');
-    await native?.requestHeadsetPermission?.();
+    if (options.headsetShortcut) {
+      if (!native?.requestShortcutHeadsetPermission) throw new Error('Update the Android app to enable the headset shortcut.');
+      // Ask now even without a connected headset: a later background press cannot open a permission dialog.
+      const result = await native.requestShortcutHeadsetPermission();
+      if (result?.granted === false) throw new Error('Allow Nearby devices access to use the Bluetooth headset shortcut.');
+    } else await native?.requestHeadsetPermission?.();
   }
   // Android permission activities temporarily background the app. Wait for their
   // dismissal before opening audio, but never start recording in the background.
@@ -42,6 +47,7 @@ export async function prepareMobileLiveAudio() {
 
 type NativePcm = {
   requestHeadsetPermission?(): Promise<void>;
+  requestShortcutHeadsetPermission?(): Promise<{ granted?: boolean } | undefined>;
   preparePcmRoute?(id: string): Promise<boolean>;
   cancelPcmRoute?(id: string): Promise<void>;
   releasePcmRoute?(id: string): Promise<void>;
