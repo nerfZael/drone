@@ -76,14 +76,27 @@ async function harness(settingsOnly = false, executeProposal: MobileCompanionWor
   function Settings() { settings = useMobileCompanionLiveSettings('hub'); return null; }
   await act(async () => { root = create(settingsOnly ? <Settings /> : <MobileCompanionProvider><Capture /></MobileCompanionProvider>); });
   let workspace = 'first';
-  if (!settingsOnly) await act(async () => { context.registerWorkspaceTarget({
+  let chat = 'default'; let pane = 'chat'; let openFile: { path: string } | null = null;
+  let composerWrites = 0;
+  const target: MobileCompanionWorkspaceTarget = {
     targetDeviceId: 'hub', targetName: 'Hub', reachable: true,
-    getAppContext: () => ({ mainDroneId: workspace }),
-    readComposer: () => ({ targetId: 'composer', path: '', content: '', revision: '0', mode: 'edit' }),
-    applyComposer: () => ({ ok: true, revision: '1' }), executeProposal,
-    openDroneChat: async () => ({}), highlightDrones: () => ({}),
-  }); });
+    getAppContext: () => ({ mainDroneId: workspace, selectedChat: chat, pane, openFile }),
+    readComposer: () => ({ targetId: `composer:hub:${workspace}:${chat}`, path: '', content: '', revision: '0', mode: 'edit' }),
+    applyComposer: (targetId, revision) => {
+      if (targetId !== `composer:hub:${workspace}:${chat}`) throw new Error('STALE_COMPOSER_TARGET');
+      if (revision !== '0') throw new Error('STALE_COMPOSER_REVISION');
+      composerWrites++; return { ok: true, revision: '1' };
+    }, executeProposal,
+    openDroneChat: async (args) => {
+      if (args.droneId === 'missing') throw new Error('unknown drone');
+      workspace = String(args.droneId); chat = String(args.chatName ?? 'default'); pane = 'chat'; openFile = null;
+      return { ok: true, droneId: workspace, chatName: chat };
+    }, highlightDrones: () => ({}),
+  };
+  if (!settingsOnly) await act(async () => { context.registerWorkspaceTarget(target); });
   return { context: () => context, settings: () => settings, changeWorkspace: () => { workspace = 'second'; },
+    changeView: (nextChat: string, nextPane: string, path: string | null) => { chat = nextChat; pane = nextPane; openFile = path ? { path } : null; },
+    switchHub: () => { target.targetDeviceId = 'other-hub'; }, composerWrites: () => composerWrites,
     async refresh() { await act(async () => { root.update(<MobileCompanionProvider><Capture /></MobileCompanionProvider>); }); },
     async cleanup() {
       await act(async () => root.unmount());
@@ -174,7 +187,15 @@ test('mobile keeps recording when Live is off, uses client delegation when on, a
     });
     expect(await first).toBe('Updated'); expect(await second).toBe('Updated');
     h.changeWorkspace();
-    await expect(backend!('new edit', abort.signal)).rejects.toThrow('workspace changed');
+    let third!: Promise<string>;
+    await act(async () => { third = backend!('new edit', abort.signal); await tick(); });
+    const afterNavigation = calls.filter((call) => call.operation === 'run.start').at(-1)!.payload;
+    expect(afterNavigation.prompt).toBe('new edit');
+    await act(async () => {
+      emitRun(afterNavigation, { type: 'reply', reply: 'Navigation did not stop Live' });
+      emitRun(afterNavigation, { type: 'status', status: 'completed' });
+    });
+    expect(await third).toBe('Navigation did not stop Live');
     await act(async () => { await h.context().close(); });
     expect(live.status).toBe('idle');
   } finally { abort.abort(); await h.cleanup(); }
@@ -473,4 +494,92 @@ test('headset shortcut refuses to take a microphone from another voice feature',
     await expect(headsetCallbacks.start()).rejects.toThrow('Another voice feature');
     expect(live.status).toBe('idle');
   } finally { voice.session = previous; await h.cleanup(); }
+});
+
+
+async function liveTool(request: any, callId: string, tool: string, args: Record<string, unknown> = {}) {
+  await act(async () => {
+    emitRun(request, { type: 'tool_call', generation: 1, callId, tool, args });
+    await tick();
+  });
+  return calls.filter((call) => call.operation === 'tool.result' && call.payload.callId === callId).at(-1)!.payload;
+}
+
+test('Companion chat navigation and manual view changes never invalidate Live delegation', async () => {
+  const h = await harness(); const abort = new AbortController();
+  const logs: unknown[][] = []; const previousInfo = console.info;
+  console.info = (...args) => { logs.push(args); };
+  let reply!: Promise<string>;
+  try {
+    enabled = true;
+    await act(async () => { await h.context().toggle(); reply = backend!('private spoken request', abort.signal); await tick(); });
+    const first = calls.filter((call) => call.operation === 'run.start').at(-1)!.payload;
+    expect((await liveTool(first, 'open', 'open_drone_chat', { droneId: 'second', chatName: 'review' })).ok).toBe(true);
+    const context = await liveTool(first, 'context', 'get_app_context');
+    expect(context).toMatchObject({ ok: true, result: { mainDroneId: 'second', selectedChat: 'review' } });
+    h.changeView('different-chat', 'file', '/example/new-file.ts');
+    expect(await liveTool(first, 'context-after-user-nav', 'get_app_context'))
+      .toMatchObject({ ok: true, result: { selectedChat: 'different-chat', pane: 'file' } });
+    await act(async () => { emitRun(first, { type: 'reply', reply: 'Done' }); emitRun(first, { type: 'status', status: 'completed' }); });
+    expect(await reply).toBe('Done');
+    h.changeView('default', 'other', null); // e.g. switching to Settings
+    await act(async () => { reply = backend!('next private request', abort.signal); await tick(); });
+    const second = calls.filter((call) => call.operation === 'run.start').at(-1)!.payload;
+    expect(second.runId).toBe(first.runId); // Preserve the existing Companion backend.
+    expect(live.status).toBe('listening');
+    await act(async () => { emitRun(second, { type: 'reply', reply: 'Still working' }); emitRun(second, { type: 'status', status: 'completed' }); });
+    expect(await reply).toBe('Still working');
+    const changes = logs.filter((row) => row[0] === '[CompanionLive] Workspace context changed') as any[];
+    expect(changes.some((row) => row[1].changes.droneId?.to === 'second')).toBe(true);
+    expect(changes.some((row) => row[1].changes.openFile?.to === '/example/new-file.ts')).toBe(true);
+    expect(logs.some((row) => row[0] === '[CompanionLive] Browser tool completed')).toBe(true);
+    expect(JSON.stringify(logs)).not.toContain('private request');
+    expect(JSON.stringify(logs)).not.toContain('private spoken request');
+  } finally {
+    const settled = reply?.catch(() => undefined); abort.abort(); await settled;
+    console.info = previousInfo; await h.cleanup();
+  }
+});
+
+test('navigation preserves individual edit target/revision checks and logs tool failures', async () => {
+  const h = await harness(); const abort = new AbortController();
+  const logs: unknown[][] = []; const previousWarn = console.warn;
+  console.warn = (...args) => { logs.push(args); };
+  let reply!: Promise<string>;
+  try {
+    enabled = true;
+    await act(async () => { await h.context().toggle(); reply = backend!('test edit', abort.signal); await tick(); });
+    const request = calls.filter((call) => call.operation === 'run.start').at(-1)!.payload;
+    const before = await liveTool(request, 'read', 'read_active_composer');
+    const oldTarget = before.result.targetId;
+    h.changeWorkspace();
+    expect(await liveTool(request, 'stale-target', 'apply_composer_patch', { targetId: oldTarget, baseRevision: '0', content: 'private edit' }))
+      .toMatchObject({ ok: false, error: 'STALE_COMPOSER_TARGET' });
+    expect(h.composerWrites()).toBe(0);
+    const current = await liveTool(request, 'read-new', 'read_active_composer');
+    expect(await liveTool(request, 'stale-revision', 'apply_composer_patch', { targetId: current.result.targetId, baseRevision: 'stale', content: 'private edit' }))
+      .toMatchObject({ ok: false, error: 'STALE_COMPOSER_REVISION' });
+    expect(h.composerWrites()).toBe(0);
+    expect(await liveTool(request, 'valid-edit', 'apply_composer_patch', { targetId: current.result.targetId, baseRevision: '0', content: 'private edit' }))
+      .toMatchObject({ ok: true });
+    expect(h.composerWrites()).toBe(1);
+    expect(await liveTool(request, 'failed-navigation', 'open_drone_chat', { droneId: 'missing' })).toMatchObject({ ok: false, error: 'unknown drone' });
+    expect((await liveTool(request, 'read-after-failure', 'get_app_context')).ok).toBe(true);
+    expect(logs).toContainEqual(['[CompanionLive] Browser tool failed', expect.objectContaining({ messageId: request.messageId, tool: 'apply_composer_patch', error: 'STALE_COMPOSER_TARGET' })]);
+    expect(JSON.stringify(logs)).not.toContain('private edit');
+  } finally {
+    const settled = reply?.catch(() => undefined); abort.abort(); await settled;
+    console.warn = previousWarn; await h.cleanup();
+  }
+});
+
+test('Live remains bound to its Hub when a different Hub is selected', async () => {
+  const h = await harness(); const abort = new AbortController();
+  try {
+    enabled = true;
+    await act(async () => { await h.context().toggle(); });
+    h.switchHub(); const count = calls.filter((call) => call.operation === 'run.start').length;
+    await expect(backend!('wrong hub', abort.signal)).rejects.toThrow('different Hub');
+    expect(calls.filter((call) => call.operation === 'run.start')).toHaveLength(count);
+  } finally { abort.abort(); await h.cleanup(); }
 });

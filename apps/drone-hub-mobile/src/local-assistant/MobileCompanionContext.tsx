@@ -471,7 +471,8 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
   }, [close, hasOperations, proposalExecuting, targetRevision]);
 
   const run = React.useCallback(
-    async (prompt: string, telemetry?: CompanionClientTelemetry, requestedMessageId?: string, liveWorkspaceKey?: string) => {
+    async (prompt: string, telemetry?: CompanionClientTelemetry, requestedMessageId?: string, liveScope?: MobileLiveScope) => {
+      if (liveScope) observeMobileLiveWorkspace(liveScope, workspaceTargetRef.current, 'submit');
       const activeTarget = workspaceTargetRef.current;
       if (!activeTarget) {
         controller.fail('Open Drone Hub before starting Companion.');
@@ -484,21 +485,31 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
         await close();
       }
       activeTargetDeviceIdRef.current = activeTarget.targetDeviceId;
+      const messageId = requestedMessageId ?? (liveScope ? Crypto.randomUUID() : undefined);
       await controller.submitPrompt({
         prompt,
         telemetry,
-        messageId: requestedMessageId,
+        messageId,
         createTransport: () =>
           createMobileCompanionTransport({
             targetDeviceId: activeTarget.targetDeviceId,
             request: mesh.request,
             subscribe: mesh.subscribe,
           }),
-        executeTool: (tool, args) => {
-          if (liveWorkspaceKey !== undefined && mobileLiveWorkspaceKey(workspaceTargetRef.current) !== liveWorkspaceKey) {
-            throw new Error('Live workspace changed. Start a new voice conversation before editing the new workspace.');
+        executeTool: async (tool, args) => {
+          const started = performance.now();
+          const log = { contextId: liveScope?.id, messageId, tool };
+          try {
+            if (liveScope) observeMobileLiveWorkspace(liveScope, workspaceTargetRef.current, 'tool', tool);
+            const result = await executeMobileTool(activeTarget.targetDeviceId, tool, args);
+            if (liveScope) console.info('[CompanionLive] Browser tool completed', { ...log, durationMs: Math.round(performance.now() - started) });
+            return result;
+          } catch (error) {
+            if (liveScope) console.warn('[CompanionLive] Browser tool failed', {
+              ...log, durationMs: Math.round(performance.now() - started), error: error instanceof Error ? error.message : String(error),
+            });
+            throw error;
           }
-          return executeMobileTool(activeTarget.targetDeviceId, tool, args);
         },
       });
     },
@@ -517,11 +528,15 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     }
     activeTargetDeviceIdRef.current = activeTarget.targetDeviceId;
     voice.setError('');
-    const workspaceKey = mobileLiveWorkspaceKey(activeTarget);
-    await live.start(activeTarget.targetDeviceId, activeTarget.targetName, (prompt, signal) => {
+    const liveScope: MobileLiveScope = {
+      id: Crypto.randomUUID(), targetDeviceId: activeTarget.targetDeviceId,
+      lastWorkspace: mobileLiveWorkspaceSnapshot(activeTarget),
+    };
+    console.info('[CompanionLive] Context attached', { contextId: liveScope.id, workspace: liveScope.lastWorkspace });
+    await live.start(activeTarget.targetDeviceId, activeTarget.targetName, async (prompt, signal) => {
       if (proposalExecutingRef.current) return Promise.reject(new Error('Companion is applying a proposal. Please ask again when it finishes.'));
-      if (mobileLiveWorkspaceKey(workspaceTargetRef.current) !== workspaceKey) return Promise.reject(new Error('Live workspace changed. Start a new voice conversation.'));
-      return waitForCompanionReply(controller, () => run(prompt, undefined, undefined, workspaceKey), signal);
+      observeMobileLiveWorkspace(liveScope, workspaceTargetRef.current, 'delegation');
+      return waitForCompanionReply(controller, () => run(prompt, undefined, undefined, liveScope), signal);
     });
   }, [available, unavailableReason, targetCapability, live.start, voice, controller, run]);
   headsetCallbacks.current = { start: async () => {
@@ -805,8 +820,34 @@ export function useMobileCompanion(): MobileCompanionContextValue {
   return value;
 }
 
-function mobileLiveWorkspaceKey(target: MobileCompanionWorkspaceTarget | null): string {
+type MobileLiveWorkspaceSnapshot = ReturnType<typeof mobileLiveWorkspaceSnapshot>;
+type MobileLiveScope = { id: string; targetDeviceId: string; lastWorkspace: MobileLiveWorkspaceSnapshot };
+
+function mobileLiveWorkspaceSnapshot(target: MobileCompanionWorkspaceTarget | null) {
   const context = target?.getAppContext();
   const openFile = context?.openFile as { path?: unknown } | undefined;
-  return JSON.stringify([target?.targetDeviceId, context?.mainDroneId, context?.selectedChat, context?.pane, openFile?.path]);
+  const text = (value: unknown) => typeof value === 'string' ? value : null;
+  return {
+    targetDeviceId: target?.targetDeviceId ?? null,
+    droneId: text(context?.mainDroneId), chat: text(context?.selectedChat),
+    pane: text(context?.pane), openFile: text(openFile?.path),
+  };
+}
+
+/** Navigation is context for tools, never a reason to invalidate a Live conversation. */
+function observeMobileLiveWorkspace(scope: MobileLiveScope, target: MobileCompanionWorkspaceTarget | null,
+  stage: 'delegation' | 'submit' | 'tool', tool?: CompanionBrowserToolName) {
+  const current = mobileLiveWorkspaceSnapshot(target);
+  const fields = Object.keys(current) as Array<keyof MobileLiveWorkspaceSnapshot>;
+  const changes = Object.fromEntries(fields.filter((field) => current[field] !== scope.lastWorkspace[field])
+    .map((field) => [field, { from: scope.lastWorkspace[field], to: current[field] }]));
+  const log = { contextId: scope.id, stage, ...(tool ? { tool } : {}), changes };
+  // Keep routing bound to the Hub that owns this voice session. Individual edit
+  // tools validate target IDs and revisions when they actually apply a change.
+  if (current.targetDeviceId !== scope.targetDeviceId) {
+    console.warn('[CompanionLive] Hub routing mismatch', log);
+    throw new Error('Live is connected to a different Hub. Restart Live to use the selected Hub.');
+  }
+  if (Object.keys(changes).length) console.info('[CompanionLive] Workspace context changed', log);
+  scope.lastWorkspace = current;
 }

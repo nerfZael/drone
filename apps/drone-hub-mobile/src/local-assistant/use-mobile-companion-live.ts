@@ -166,9 +166,15 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
       const conversation = new CompanionLiveConversation({
         externalBackendReplies: Boolean(controller),
         schedule: currentControls.schedule,
-        runBackend: (prompt) => {
+        runBackend: async (prompt) => {
           console.info('[CompanionLive] Dispatching backend task', AppState.currentState);
-          return runBackend(prompt, session.abort.signal);
+          try { return await runBackend(prompt, session.abort.signal); }
+          catch (error) {
+            if (!session.abort.signal.aborted) console.warn('[CompanionLive] Backend delegation failed', {
+              targetDeviceId, appState: AppState.currentState, error: error instanceof Error ? error.message : String(error),
+            });
+            throw error;
+          }
         },
         send: (event) => connection.send(event),
         onTranscript: (rows) => update({ captions: rows.map((row) => `${row.role === 'user' ? 'You' : 'Companion'}: ${row.text}`).join('\n') }),
