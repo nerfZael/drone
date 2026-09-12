@@ -93,7 +93,11 @@ internal class LiveMediaControls(context: Context, val id: String, private val e
     if (closed) { promise.resolve(); return }
     try {
       cue?.release()
-      val tone = ToneGenerator(AudioManager.STREAM_MUSIC, 65)
+      // During a Live session expo-audio puts the device in communication mode and, with a
+      // Bluetooth headset, routes through SCO. The voice-call stream follows that route, so the
+      // cue reaches the headset instead of racing the route switch on the music stream.
+      val stream = if (audioManager?.mode == AudioManager.MODE_IN_COMMUNICATION) AudioManager.STREAM_VOICE_CALL else AudioManager.STREAM_MUSIC
+      val tone = ToneGenerator(stream, 65)
       cue = tone
       tone.startTone(if (kind == "recording") ToneGenerator.TONE_PROP_ACK else ToneGenerator.TONE_PROP_NACK, 180)
       handler.postDelayed({

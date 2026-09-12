@@ -20,7 +20,9 @@ const live: any = { status: 'idle', error: '', captions: '', targetDeviceId: '',
   start: async (id: string, _name: string, run: typeof backend) => { live.status = 'listening'; live.targetDeviceId = id; backend = run; },
   stop: () => { live.status = 'idle'; }, reset: () => { live.status = 'idle'; }, toggleMute() {} };
 const voice = {
+  error: '',
   session: { kind: 'idle', status: 'idle', microphoneAvailable: true }, microphoneCoordinator: new MobileMicrophoneCoordinator(),
+  stopRecordingForTranscript: async (_owner: string) => '',
   discardRecording: async () => {}, startRecording: async () => { recorded++; return true; }, setError() {}, getError: () => '',
 };
 const mesh = {
@@ -89,6 +91,31 @@ async function harness(settingsOnly = false, executeProposal: MobileCompanionWor
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+test('finishing paused Companion dictation transcribes and submits the recording', async () => {
+  const h = await harness();
+  const previousSession = voice.session;
+  const previousStop = voice.stopRecordingForTranscript;
+  let stopped = 0;
+  try {
+    voice.session = { kind: 'companion', status: 'paused', microphoneAvailable: false };
+    voice.stopRecordingForTranscript = async (owner) => {
+      expect(owner).toBe('companion');
+      stopped++;
+      voice.session = previousSession;
+      return 'Review this drone';
+    };
+    await act(async () => { h.context().reportOverlayInset(60); });
+    await act(async () => { await h.context().toggle(); });
+    expect(stopped).toBe(1);
+    expect(recorded).toBe(0);
+    expect(calls.find((call) => call.operation === 'run.start')?.payload.prompt).toBe('Review this drone');
+  } finally {
+    voice.session = previousSession;
+    voice.stopRecordingForTranscript = previousStop;
+    await h.cleanup();
+  }
+});
+
 test('mobile starts Live with stale local grants and authorizes Companion requests through the Hub', async () => {
   const previous = mesh.devices[0].grants[0].operations;
   mesh.devices[0].grants[0].operations = [];
@@ -147,6 +174,64 @@ test('mobile keeps recording when Live is off, uses client delegation when on, a
     await act(async () => { await h.context().close(); });
     expect(live.status).toBe('idle');
   } finally { abort.abort(); await h.cleanup(); }
+});
+
+test('mobile toggles the Hub Live preference from the overlay menu and starts the matching microphone mode', async () => {
+  const h = await harness();
+  const abort = new AbortController();
+  try {
+    await act(async () => { await tick(); });
+    expect(h.context().liveSettings.supported).toBe(true);
+    expect(h.context().liveSettings.enabled).toBe(false);
+    expect(h.context().currentWorkspaceSupported).toBe(true);
+    await act(async () => { await h.context().toggleLiveVoice(); });
+    expect(enabled).toBe(true);
+    expect(h.context().liveSettings.enabled).toBe(true);
+    expect(backend).not.toBeNull();
+    expect(recorded).toBe(0);
+    expect(live.status).toBe('listening');
+    // Turning Live off while it is connected only ends the voice session.
+    await act(async () => { await h.context().toggleLiveVoice(); });
+    expect(enabled).toBe(false);
+    expect(live.status).toBe('idle');
+    expect(recorded).toBe(0);
+    // Turning it off while idle starts plain dictation, like desktop.
+    enabled = true;
+    await act(async () => { await h.context().liveSettings.load(); });
+    live.status = 'idle';
+    await act(async () => { await h.context().toggleLiveVoice(); });
+    expect(enabled).toBe(false);
+    expect(recorded).toBe(1);
+    expect(h.context().switchingVoice).toBe(false);
+  } finally { abort.abort(); await h.cleanup(); }
+});
+
+test('closing Companion during a Live preference save does not reopen the microphone', async () => {
+  const h = await harness();
+  const originalRequest = mesh.request;
+  const pending = Promise.withResolvers<void>();
+  let switching!: Promise<void>;
+  try {
+    mesh.request = async (...args: Parameters<typeof originalRequest>) => {
+      if (args[2] === 'live.settings.update') await pending.promise;
+      return originalRequest(...args);
+    };
+    // Refresh the provider and settings hook with the deferred request.
+    await act(async () => { h.context().reportOverlayInset(60); });
+    await act(async () => { switching = h.context().toggleLiveVoice(); });
+    expect(h.context().switchingVoice).toBe(true);
+    await act(async () => { await h.context().close(); });
+    await act(async () => { pending.resolve(); await switching; });
+    expect(enabled).toBe(true);
+    expect(live.status).toBe('idle');
+    expect(backend).toBeNull();
+    expect(recorded).toBe(0);
+  } finally {
+    pending.resolve();
+    await switching;
+    mesh.request = originalRequest;
+    await h.cleanup();
+  }
 });
 
 test('mobile reports a failed preference read without silently recording in the wrong mode', async () => {

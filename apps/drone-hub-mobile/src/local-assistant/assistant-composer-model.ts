@@ -4,7 +4,10 @@ export function mobileAssistantComposerExpanded(input: {
   hasAttachments: boolean;
   voiceActive: boolean;
   voiceError: string;
+  /** The Companion sheet is open: stay a single line unless the user is typing or recording. */
+  collapsedByCompanion?: boolean;
 }): boolean {
+  if (input.collapsedByCompanion && !input.focused && !input.voiceActive && !input.voiceError) return false;
   return (
     input.focused ||
     Boolean(input.value.trim()) ||
@@ -28,29 +31,6 @@ export function mobileAssistantComposerCollapsesOnBack(input: {
     !input.hasAttachments &&
     !input.voiceActive
   );
-}
-
-type MobileAssistantComposerSwipe = {
-  translationX: number;
-  translationY: number;
-  velocityY?: number;
-};
-
-export function mobileAssistantComposerSwipeProgress(input: MobileAssistantComposerSwipe): number {
-  'worklet';
-  const upwardDistance = -input.translationY;
-  if (upwardDistance <= 0) return 0;
-  const horizontalDrift = Math.abs(input.translationX);
-  const directionPenalty = Math.max(0, horizontalDrift - upwardDistance) * 0.25;
-  const velocityBoost = Math.min(20, Math.max(0, (-(input.velocityY ?? 0) - 300) / 20));
-  return Math.max(0, Math.min(1, (upwardDistance + velocityBoost - directionPenalty) / 64));
-}
-
-export function mobileAssistantComposerSwipeStartsVoice(
-  input: MobileAssistantComposerSwipe,
-): boolean {
-  'worklet';
-  return mobileAssistantComposerSwipeProgress(input) >= 0.5;
 }
 
 export function mobileAssistantStopVisible(input: {

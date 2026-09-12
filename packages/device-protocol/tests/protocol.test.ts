@@ -61,7 +61,7 @@ describe('device protocol', () => {
   });
 
   test('advertises Companion run controls as explicit permissions', () => {
-    expect(COMPANION_CAPABILITY.operations).toEqual(['run.start', 'run.cancel', 'tool.result', 'proposal.result', 'workspaces.list', 'workspaces.update', 'live.start', 'live.event', 'live.ping', 'live.close', 'live.settings.get', 'live.settings.update', 'live.prompt.get', 'live.prompt.update', 'auto-approve.settings.get', 'auto-approve.settings.update']);
+    expect(COMPANION_CAPABILITY.operations).toEqual(['run.start', 'run.cancel', 'tool.result', 'proposal.result', 'workspaces.list', 'workspaces.update', 'workspaces.current', 'live.start', 'live.event', 'live.ping', 'live.close', 'live.settings.get', 'live.settings.update', 'live.prompt.get', 'live.prompt.update', 'auto-approve.settings.get', 'auto-approve.settings.update']);
     expect(isGranted([], COMPANION_CAPABILITY.id, COMPANION_CAPABILITY.version, 'run.start')).toBe(
       false,
     );
@@ -71,6 +71,15 @@ describe('device protocol', () => {
       1,
       'proposal.result',
     )).toBe(true);
+  });
+
+  test('current workspace reads are covered by the workspace catalog grant', () => {
+    expect(COMPANION_CAPABILITY.operations).toContain('workspaces.current');
+    const list = [{ capability: 'companion', version: 1, operations: ['workspaces.list'] }];
+    expect(isGranted(list, 'companion', 1, 'workspaces.current')).toBe(true);
+    expect(isGranted(list, 'companion', 1, 'workspaces.update')).toBe(false);
+    const run = [{ capability: 'companion', version: 1, operations: ['run.start'] }];
+    expect(isGranted(run, 'companion', 1, 'workspaces.current')).toBe(false);
   });
 
   test('advertises pull request reads and writes as separate permissions', () => {

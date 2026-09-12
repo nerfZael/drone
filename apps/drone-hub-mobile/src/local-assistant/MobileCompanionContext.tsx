@@ -1,4 +1,5 @@
 import { useMobileCompanionAutoApproveSettings } from './use-mobile-companion-auto-approve-settings';
+import { useMobileCompanionLiveSettings } from './use-mobile-companion-live-settings';
 import type { CompanionCompactionActivity } from '@drone/assistant-chat';
 import React from 'react';
 import * as Crypto from 'expo-crypto';
@@ -58,6 +59,8 @@ export type MobileCompanionWorkspaceTarget = {
   ): Promise<CompanionProposalExecution>;
   openDroneChat(args: Record<string, unknown>): Promise<Record<string, unknown>>;
   highlightDrones(args: Record<string, unknown>): Record<string, unknown>;
+  /** A known drone's display name on the target Hub, or null for unknown ids. */
+  resolveDroneName?(droneId: string): string | null;
 };
 
 type MobileCompanionContextValue = {
@@ -65,6 +68,20 @@ type MobileCompanionContextValue = {
   live: ReturnType<typeof useMobileCompanionLive>;
   checkingVoiceMode: boolean;
   autoApproveSettings: ReturnType<typeof useMobileCompanionAutoApproveSettings>;
+  /** The Hub's Live voice preference, shared with desktop Companion. */
+  liveSettings: ReturnType<typeof useMobileCompanionLiveSettings> & { supported: boolean };
+  switchingVoice: boolean;
+  recordingPaused: boolean;
+  /** Whether the target Hub can resolve the current drone's workspace for quick read access. */
+  currentWorkspaceSupported: boolean;
+  /** The Companion sheet is on screen. Chat composers collapse to one line while it is. */
+  overlayOpen: boolean;
+  /** Bottom space the chat screen reserves so the composer stays above the Companion sheet. */
+  overlayInset: number;
+  reportOverlayInset(px: number): void;
+  /** A chat composer has the keyboard; the Companion sheet shrinks to its header. */
+  composerFocused: boolean;
+  setComposerFocused(focused: boolean): void;
   error: string;
   reply: string;
   transcript: string;
@@ -81,6 +98,13 @@ type MobileCompanionContextValue = {
   workspaceDeviceId: string;
   unavailableReason: string;
   toggle(): Promise<void>;
+  /** Flip the Hub's Live voice preference and start the microphone in the new mode, like desktop. */
+  toggleLiveVoice(): Promise<void>;
+  toggleRecordingPause(): void;
+  discardRecording(): Promise<void>;
+  /** The registered workspace's app context, or null before Drone Hub is open. */
+  readAppContext(): Record<string, unknown> | null;
+  resolveDroneName(droneId: string): string | null;
   /** Send already-transcribed text to Companion as if it had just been spoken. */
   submitText(prompt: string): Promise<{ ok: true } | { ok: false; error: string }>;
   close(): Promise<void>;
@@ -174,6 +198,26 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
   const autoApproveSettings = useMobileCompanionAutoApproveSettings(
     available && targetCapability?.operations.includes('auto-approve.settings.get') ? target!.targetDeviceId : '',
   );
+  const liveSupported = Boolean(
+    available &&
+    targetCapability?.operations.includes('live.settings.get') &&
+    targetCapability?.operations.includes('live.settings.update'),
+  );
+  const liveSettingsState = useMobileCompanionLiveSettings(liveSupported ? target!.targetDeviceId : '', false);
+  const liveSettings = React.useMemo(
+    () => ({ ...liveSettingsState, supported: liveSupported }),
+    [liveSettingsState, liveSupported],
+  );
+  const currentWorkspaceSupported = Boolean(
+    available && targetCapability?.operations.includes('workspaces.current'),
+  );
+  const [switchingVoice, setSwitchingVoice] = React.useState(false);
+  const switchingVoiceRef = React.useRef(false);
+  const [overlayInset, setOverlayInset] = React.useState(0);
+  const [composerFocused, setComposerFocused] = React.useState(false);
+  const reportOverlayInset = React.useCallback((px: number) => {
+    setOverlayInset((current) => (Math.abs(current - px) < 0.5 ? current : px));
+  }, []);
   void targetRevision;
   const autoApproveSettingsRef = React.useRef(autoApproveSettings);
   autoApproveSettingsRef.current = autoApproveSettings;
@@ -488,7 +532,8 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     ) {
       return;
     }
-    if (voice.session.kind === 'companion' && voice.session.status === 'recording') {
+    if (voice.session.kind === 'companion' &&
+      (voice.session.status === 'recording' || voice.session.status === 'paused')) {
       const token = controller.getToken();
       const messageId = Crypto.randomUUID();
       const audioDurationMs = voice.session.durationMillis;
@@ -565,6 +610,57 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     liveActive, live.status, live.resume, live.start, live.stop, mesh.request, targetCapability,
   ]);
 
+  const companionRecording =
+    voice.session.kind === 'companion' &&
+    (voice.session.status === 'recording' || voice.session.status === 'paused');
+  const toggleLiveVoice = React.useCallback(async () => {
+    if (
+      switchingVoiceRef.current || !liveSettings.supported || liveSettings.loading || liveSettings.saving ||
+      preparingVoice.current ||
+      (companionVoiceActive && (voice.session.status === 'starting' || voice.session.status === 'transcribing'))
+    ) return;
+    switchingVoiceRef.current = true;
+    setSwitchingVoice(true);
+    try {
+      const wasLiveActive = liveActive || live.status === 'paused';
+      // Finish existing dictation before changing microphone modes.
+      if (!liveSettings.enabled && companionRecording) await toggle();
+      const token = controller.getToken();
+      const enabled = await liveSettings.save(!liveSettings.enabled);
+      // Closing Companion while the preference is saving must not reopen its microphone.
+      if (enabled === undefined || !controller.isCurrent(token)) return;
+      if (!enabled) {
+        // Ending Live is the whole change; dictation starts on the next microphone tap.
+        if (wasLiveActive) { live.stop(); return; }
+      }
+      if (controller.getSnapshot().status === 'working' || proposalExecutingRef.current) return;
+      await toggle();
+    } finally {
+      switchingVoiceRef.current = false;
+      setSwitchingVoice(false);
+    }
+  }, [companionRecording, companionVoiceActive, controller, live.status, live.stop, liveActive, liveSettings, toggle, voice.session.status]);
+
+  const toggleRecordingPause = React.useCallback(() => {
+    if (!companionRecording) return;
+    voice.toggleRecordingPause('companion');
+  }, [companionRecording, voice]);
+
+  const discardRecording = React.useCallback(async () => {
+    if (!companionVoiceActive) return;
+    await voice.discardRecording('companion');
+    controller.resetIfNoSession();
+  }, [companionVoiceActive, controller, voice]);
+
+  const readAppContext = React.useCallback(
+    () => workspaceTargetRef.current?.getAppContext() ?? null,
+    [],
+  );
+  const resolveDroneName = React.useCallback(
+    (droneId: string) => workspaceTargetRef.current?.resolveDroneName?.(droneId) ?? null,
+    [],
+  );
+
   React.useEffect(() => {
     if (
       !companionVoiceActive ||
@@ -598,6 +694,8 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
   );
 
   const effectiveStatus = resolveMobileCompanionVoiceStatus(state.status, voice.session);
+  const overlayOpen =
+    effectiveStatus !== 'idle' || liveArmed || live.status === 'error' || checkingVoiceMode;
   const effectiveDurationMillis =
     voice.session.kind === 'companion' ? voice.session.durationMillis : 0;
 
@@ -615,6 +713,15 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       live,
       checkingVoiceMode,
       autoApproveSettings,
+      liveSettings,
+      switchingVoice,
+      recordingPaused: voice.session.kind === 'companion' && voice.session.status === 'paused',
+      currentWorkspaceSupported,
+      overlayOpen,
+      overlayInset,
+      reportOverlayInset,
+      composerFocused,
+      setComposerFocused,
       status: effectiveStatus,
       durationMillis: effectiveDurationMillis,
       proposal,
@@ -625,6 +732,11 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       workspaceDeviceId: activeTargetDeviceIdRef.current || target?.targetDeviceId || '',
       unavailableReason,
       toggle,
+      toggleLiveVoice,
+      toggleRecordingPause,
+      discardRecording,
+      readAppContext,
+      resolveDroneName,
       submitText,
       close,
       cancel,
@@ -634,7 +746,10 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       registerEditorTarget,
     }),
     [
-      live, checkingVoiceMode, autoApproveSettings,
+      live, checkingVoiceMode, autoApproveSettings, liveSettings, switchingVoice, currentWorkspaceSupported,
+      overlayOpen, overlayInset, reportOverlayInset, composerFocused,
+      voice.session,
+      toggleLiveVoice, toggleRecordingPause, discardRecording, readAppContext, resolveDroneName,
       target?.targetDeviceId,
       available,
       cancel,

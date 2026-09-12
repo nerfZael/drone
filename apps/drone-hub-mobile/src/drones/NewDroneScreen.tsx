@@ -4,6 +4,8 @@ import { Keyboard, Pressable, ScrollView, StyleSheet, Text, View } from 'react-n
 import { ErrorBanner } from '../components/Ui';
 import { ThemedTextInput } from '../components/ThemedTextInput';
 import { AssistantComposer } from '../local-assistant/AssistantComposer';
+import { MobileCompanionOverlaySpacer } from '../local-assistant/MobileCompanionOverlaySpacer';
+import { useMobileCompanion } from '../local-assistant/MobileCompanionContext';
 import {
   AssistantModelPicker,
   type AssistantModelChoice,
@@ -190,6 +192,11 @@ export function NewDroneScreen({
   const scrollMessageIntoView = React.useCallback(() => {
     requestAnimationFrame(() => pageRef.current?.scrollToEnd({ animated: true }));
   }, []);
+  // The Companion sheet reserves space at the end of the page; keep the composer above it.
+  const companionInset = useMobileCompanion().overlayInset;
+  React.useEffect(() => {
+    if (companionInset > 0) scrollMessageIntoView();
+  }, [companionInset, scrollMessageIntoView]);
 
   React.useEffect(() => {
     if (!localDevice) return;
@@ -715,6 +722,7 @@ export function NewDroneScreen({
           />
         </View>
       </View>
+      <MobileCompanionOverlaySpacer />
     </ScrollView>
   );
 }

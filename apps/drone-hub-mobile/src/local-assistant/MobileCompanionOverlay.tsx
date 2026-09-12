@@ -1,7 +1,5 @@
 import React from 'react';
 import {
-  companionProposalOperationLabel,
-  companionProposalOperationDetails,
   companionToolActivityLabel,
   companionCompactionLabel,
   groupCompanionToolActivity,
@@ -10,12 +8,9 @@ import {
   ActivityIndicator,
   BackHandler,
   Keyboard,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   useWindowDimensions,
   View,
@@ -26,26 +21,33 @@ import Animated, {
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
-  withSpring,
   withTiming,
 } from 'react-native-reanimated';
-import ArrowUp from 'lucide-react-native/icons/arrow-up';
-import ChevronRight from 'lucide-react-native/icons/chevron-right';
+import AudioLines from 'lucide-react-native/icons/audio-lines';
+import Captions from 'lucide-react-native/icons/captions';
+import Ellipsis from 'lucide-react-native/icons/ellipsis';
 import Folder from 'lucide-react-native/icons/folder';
+import FolderOpen from 'lucide-react-native/icons/folder-open';
 import Mic from 'lucide-react-native/icons/mic';
+import MicOff from 'lucide-react-native/icons/mic-off';
+import Pause from 'lucide-react-native/icons/pause';
+import Play from 'lucide-react-native/icons/play';
 import Square from 'lucide-react-native/icons/square';
 import X from 'lucide-react-native/icons/x';
+import Zap from 'lucide-react-native/icons/zap';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ThemedTextInput } from '../components/ThemedTextInput';
 import { colors } from '../theme';
 import { NativeMarkdown } from './NativeMarkdown';
 import { formatMobileVoiceDuration } from './mobile-voice-transcription-model';
-import { MobileCompanionLivePanel } from './MobileCompanionLivePanel';
+import { MobileCompanionMenu, type MobileCompanionMenuItem, type MobileCompanionMenuTone } from './MobileCompanionMenu';
+import { MobileCompanionProposal } from './MobileCompanionProposal';
 import { MobileCompanionWorkspaceModal } from './MobileCompanionWorkspaceModal';
 import { useMobileCompanion } from './MobileCompanionContext';
+import { useMobileCompanionCurrentWorkspace } from './use-mobile-companion-current-workspace';
 
-type CompanionStatus = ReturnType<typeof useMobileCompanion>['status'];
+type Companion = ReturnType<typeof useMobileCompanion>;
+type CompanionStatus = Companion['status'];
 
 function statusLabel(status: CompanionStatus, duration: number, elapsed: number) {
   if (status === 'starting') return 'Starting microphone…';
@@ -53,40 +55,124 @@ function statusLabel(status: CompanionStatus, duration: number, elapsed: number)
   if (status === 'transcribing') return 'Transcribing…';
   if (status === 'working') return `Working · ${Math.round(elapsed / 1_000)}s`;
   if (status === 'completed') return 'Done';
-  if (status === 'cancelled') return 'Cancelled';
+  if (status === 'cancelled') return 'Stopped';
   if (status === 'error') return 'Needs attention';
-  return '';
+  return 'Idle';
 }
 
-function statusDotStyle(status: CompanionStatus) {
+/** Live voice owns the headline while it is connected; otherwise the turn status does. */
+function headlineLabel(companion: Companion, elapsed: number): string {
+  const live = companion.live;
+  if (companion.checkingVoiceMode) return 'Loading voice setting…';
+  if (companion.status === 'working') return statusLabel('working', 0, elapsed);
+  if (live.status === 'connecting') {
+    return live.muted ? 'Connecting · Mic muted' : live.capturing ? 'Connecting Live…' : 'Opening microphone…';
+  }
+  if (live.status === 'listening') return live.muted ? 'Live · Mic muted' : 'Live · Listening';
+  if (live.status === 'paused') return 'Live paused';
+  if (companion.recordingPaused) return 'Listening paused';
+  return statusLabel(companion.status, companion.durationMillis, elapsed);
+}
+
+function statusDotStyle(status: CompanionStatus, liveActive: boolean, recordingPaused: boolean) {
+  if (recordingPaused) return styles.dotWarning;
   if (status === 'recording' || status === 'error') return styles.dotDanger;
   if (status === 'starting' || status === 'transcribing') return styles.dotWarning;
   if (status === 'working') return styles.dotAccent;
   if (status === 'completed') return styles.dotOnline;
+  if (liveActive) return styles.dotAccent;
   return styles.dotMuted;
 }
 
-const SPRING = { damping: 24, stiffness: 240 };
+const headerTone: Record<MobileCompanionMenuTone, { container: object; color: string }> = {
+  neutral: { container: {}, color: colors.muted },
+  accent: { container: { borderColor: colors.accentBorder, backgroundColor: colors.accentDark }, color: colors.accent },
+  success: { container: { borderColor: colors.onlineBorder, backgroundColor: colors.onlineDark }, color: colors.online },
+  danger: { container: { borderColor: colors.dangerBorder, backgroundColor: colors.dangerDark }, color: colors.danger },
+};
+
+function HeaderButton({
+  label,
+  tone = 'neutral',
+  pressed,
+  disabled = false,
+  loading = false,
+  onPress,
+  icon: Icon,
+}: {
+  label: string;
+  tone?: MobileCompanionMenuTone;
+  pressed?: boolean;
+  disabled?: boolean;
+  loading?: boolean;
+  onPress(): void;
+  icon: MobileCompanionMenuItem['icon'];
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled, ...(pressed !== undefined ? { selected: pressed } : {}) }}
+      disabled={disabled || loading}
+      hitSlop={4}
+      onPress={onPress}
+      style={({ pressed: isPressed }) => [
+        styles.headerButton,
+        headerTone[tone].container,
+        disabled && styles.disabled,
+        isPressed && styles.pressed,
+      ]}
+    >
+      {loading ? (
+        <ActivityIndicator color={headerTone[tone].color} size="small" />
+      ) : (
+        <Icon color={headerTone[tone].color} size={15} strokeWidth={2.1} />
+      )}
+    </Pressable>
+  );
+}
+
+/** A plain ease-out slide: the sheet settles without bouncing. */
+const SETTLE = { duration: 220, easing: Easing.out(Easing.cubic) };
+/** Space between the sheet and the navigation bar, and between its top edge and the composer. */
+const SHEET_GAP = 10;
 
 export function MobileCompanionOverlay() {
   const companion = useMobileCompanion();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const [workspaceDeviceId, setWorkspaceDeviceId] = React.useState<string | null>(null);
-  const [draft, setDraft] = React.useState('');
-  const [submitError, setSubmitError] = React.useState('');
-  const [submitting, setSubmitting] = React.useState(false);
+  const [menuOpen, setMenuOpen] = React.useState(false);
   const [activityExpanded, setActivityExpanded] = React.useState(false);
+  const [transcriptExpanded, setTranscriptExpanded] = React.useState(false);
+  const [captionsOpen, setCaptionsOpen] = React.useState(false);
   const [expandedCalls, setExpandedCalls] = React.useState<Set<string>>(() => new Set());
-  const [expandedProposalOperations, setExpandedProposalOperations] = React.useState<Set<string>>(
-    () => new Set(),
-  );
   const [, tick] = React.useState(0);
   const liveActive = companion.live.status === 'connecting' || companion.live.status === 'listening';
-  const visible = companion.status !== 'idle' || liveActive || companion.live.status === 'paused' || companion.live.status === 'error' || companion.checkingVoiceMode;
+  const livePaused = companion.live.status === 'paused';
+  const visible = companion.overlayOpen;
+  const composerFocused = companion.composerFocused;
+  const reportOverlayInset = companion.reportOverlayInset;
+  // The reserved space only grows while the sheet stays open, so the chat does not
+  // jump around as a reply streams in. It resets when the sheet closes or shrinks
+  // to its header for the keyboard.
+  const insetFloor = React.useRef(0);
+  React.useEffect(() => {
+    insetFloor.current = 0;
+    if (!visible) reportOverlayInset(0);
+  }, [composerFocused, reportOverlayInset, visible]);
+  React.useEffect(() => () => reportOverlayInset(0), [reportOverlayInset]);
   const translateY = useSharedValue(0);
   const sheetHeight = useSharedValue(320);
   const close = companion.close;
+  const appContext = companion.readAppContext();
+  const currentDroneId = typeof appContext?.mainDroneId === 'string' ? appContext.mainDroneId : '';
+  const currentWorkspace = useMobileCompanionCurrentWorkspace({
+    deviceId: companion.workspaceDeviceId,
+    droneId: currentDroneId,
+    supported: companion.currentWorkspaceSupported,
+    active: menuOpen,
+  });
 
   React.useEffect(() => {
     if (companion.status !== 'working') return;
@@ -97,31 +183,35 @@ export function MobileCompanionOverlay() {
   React.useEffect(() => {
     if (companion.status === 'idle') {
       setActivityExpanded(false);
+      setTranscriptExpanded(false);
       setExpandedCalls(new Set());
-      setExpandedProposalOperations(new Set());
-      setSubmitError('');
     }
   }, [companion.status]);
 
   React.useEffect(() => {
-    setExpandedProposalOperations(new Set());
-  }, [companion.proposal]);
+    if (!visible) {
+      setMenuOpen(false);
+      setCaptionsOpen(false);
+    }
+  }, [visible]);
 
   React.useEffect(() => {
     if (!visible) return;
     translateY.value = 320;
-    translateY.value = withSpring(0, SPRING);
+    translateY.value = withTiming(0, SETTLE);
   }, [translateY, visible]);
 
   React.useEffect(() => {
-    if (!visible) return;
+    if (!visible || menuOpen) return;
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
       Keyboard.dismiss();
       void close();
       return true;
     });
     return () => subscription.remove();
-  }, [close, visible]);
+  }, [close, menuOpen, visible]);
+
+  const closeMenu = React.useCallback(() => setMenuOpen(false), []);
 
   const dismiss = React.useCallback(() => {
     Keyboard.dismiss();
@@ -151,11 +241,11 @@ export function MobileCompanionOverlay() {
               },
             );
           } else {
-            translateY.value = withSpring(0, SPRING);
+            translateY.value = withTiming(0, SETTLE);
           }
         })
         .onFinalize((_event, success) => {
-          if (!success) translateY.value = withSpring(0, SPRING);
+          if (!success) translateY.value = withTiming(0, SETTLE);
         }),
     [dismiss, sheetHeight, translateY],
   );
@@ -166,20 +256,14 @@ export function MobileCompanionOverlay() {
   if (!visible && !workspaceDeviceId) return null;
 
   const status = companion.status;
+  const live = companion.live;
   const active = status === 'working';
   const voiceBusy = status === 'starting' || status === 'transcribing' || companion.checkingVoiceMode;
-  const recording = status === 'recording';
+  const recording = status === 'recording' && !liveActive;
   const elapsed = companion.startedAt != null
     ? Math.max(0, (companion.endedAt ?? Date.now()) - companion.startedAt)
     : 0;
-  const showActivity = active || companion.activity.length > 0;
   const activityGroups = groupCompanionToolActivity(companion.activity);
-  const completedProposalOperations =
-    companion.proposalExecution?.operations.filter((item) => item.status === 'completed').length ??
-    0;
-  const inputLocked = active || voiceBusy || recording || submitting || companion.proposalExecuting;
-  const canSend = Boolean(draft.trim()) && !inputLocked;
-  const micDisabled = !liveActive && (voiceBusy || submitting || companion.proposalExecuting);
   const applyDisabled =
     companion.proposalExecuting ||
     active ||
@@ -188,66 +272,244 @@ export function MobileCompanionOverlay() {
     !companion.proposal ||
     companion.proposal.operations.length === 0 ||
     companion.proposalExecution !== null;
-
-  const submit = async () => {
-    const text = draft.trim();
-    if (!text || inputLocked) return;
-    setSubmitting(true);
-    setSubmitError('');
-    try {
-      const result = await companion.submitText(text);
-      if (!result.ok) {
-        setSubmitError(result.error);
-        return;
-      }
-      setDraft('');
-    } finally {
-      setSubmitting(false);
-    }
+  const autoApprove = companion.autoApproveSettings;
+  const liveSettings = companion.liveSettings;
+  const errors = [companion.error, live.error, liveSettings.error, autoApprove.error].filter(Boolean);
+  // A focused chat composer owns the keyboard; the sheet keeps only its header row.
+  const showBody = !composerFocused &&
+    (activityExpanded || captionsOpen || errors.length > 0 || Boolean(companion.reply) || Boolean(companion.proposal));
+  const openWorkspaces = () => {
+    Keyboard.dismiss();
+    setWorkspaceDeviceId(companion.workspaceDeviceId);
   };
+  const liveBusy = liveSettings.loading || liveSettings.saving || companion.switchingVoice;
+
+  const menuItems: MobileCompanionMenuItem[] = [
+    {
+      id: 'live',
+      section: 'Voice',
+      icon: AudioLines,
+      label: `Live voice ${liveSettings.enabled ? 'on' : 'off'}`,
+      detail: !liveSettings.supported
+        ? 'Update the Hub to use Live voice from your phone.'
+        : liveSettings.error
+          ? liveSettings.error
+          : liveActive || livePaused
+            ? [live.targetName, live.backendModel].filter(Boolean).join(' · ')
+            : 'Two-way voice conversation. Shared with desktop Companion.',
+      selected: liveSettings.enabled,
+      tone: liveSettings.enabled ? 'accent' : 'neutral',
+      disabled: !liveSettings.supported || voiceBusy,
+      loading: liveBusy,
+      onPress: () => void companion.toggleLiveVoice(),
+    },
+    ...(liveActive
+      ? [
+          {
+            id: 'mute',
+            section: 'Voice',
+            icon: live.muted ? MicOff : Mic,
+            label: live.muted ? 'Unmute microphone' : 'Mute microphone',
+            selected: live.muted,
+            tone: live.muted ? 'danger' : 'neutral',
+            onPress: live.toggleMute,
+          } satisfies MobileCompanionMenuItem,
+          {
+            id: 'pause-voice',
+            section: 'Voice',
+            icon: Pause,
+            label: 'Pause voice',
+            detail: 'Keeps headset controls; the microphone and Live session stop.',
+            onPress: live.pause,
+          } satisfies MobileCompanionMenuItem,
+        ]
+      : []),
+    ...(livePaused
+      ? [
+          {
+            id: 'resume-voice',
+            section: 'Voice',
+            icon: Play,
+            label: 'Resume voice',
+            tone: 'accent',
+            onPress: () => void live.resume(),
+          } satisfies MobileCompanionMenuItem,
+        ]
+      : []),
+    ...(liveActive || livePaused
+      ? [
+          {
+            id: 'end-voice',
+            section: 'Voice',
+            icon: Square,
+            label: 'End voice',
+            detail: 'Releases headset controls. Submitted work continues.',
+            tone: 'danger',
+            onPress: live.stop,
+          } satisfies MobileCompanionMenuItem,
+        ]
+      : []),
+    ...(recording
+      ? [
+          {
+            id: 'finish-recording',
+            section: 'Voice',
+            icon: Square,
+            label: 'Finish recording and send',
+            tone: 'success',
+            onPress: () => void companion.toggle(),
+          } satisfies MobileCompanionMenuItem,
+          {
+            id: 'pause-recording',
+            section: 'Voice',
+            icon: companion.recordingPaused ? Play : Pause,
+            label: companion.recordingPaused ? 'Resume recording' : 'Pause recording',
+            tone: companion.recordingPaused ? 'accent' : 'neutral',
+            keepOpen: true,
+            onPress: companion.toggleRecordingPause,
+          } satisfies MobileCompanionMenuItem,
+        ]
+      : []),
+    ...((recording || (voiceBusy && !liveActive && !companion.checkingVoiceMode))
+      ? [
+          {
+            id: 'discard-recording',
+            section: 'Voice',
+            icon: X,
+            label: 'Discard recording',
+            tone: 'danger',
+            onPress: () => void companion.discardRecording(),
+          } satisfies MobileCompanionMenuItem,
+        ]
+      : []),
+    ...(active
+      ? [
+          {
+            id: 'stop-turn',
+            section: 'Voice',
+            icon: Square,
+            label: liveActive ? 'Stop Companion turn and end voice' : 'Stop Companion turn',
+            tone: 'danger',
+            onPress: () => void companion.cancel(),
+          } satisfies MobileCompanionMenuItem,
+        ]
+      : []),
+    ...(liveActive || livePaused || live.captions
+      ? [
+          {
+            id: 'captions',
+            section: 'Voice',
+            icon: Captions,
+            label: captionsOpen ? 'Hide voice transcript' : 'Voice transcript',
+            keepOpen: false,
+            onPress: () => setCaptionsOpen((value) => !value),
+          } satisfies MobileCompanionMenuItem,
+        ]
+      : []),
+    {
+      id: 'workspaces',
+      section: 'Workspace',
+      icon: Folder,
+      label: 'Companion workspaces',
+      detail: 'Choose which workspaces Companion may read, write, or run commands in.',
+      disabled: !companion.workspaceDeviceId,
+      onPress: openWorkspaces,
+    },
+    {
+      id: 'current-workspace',
+      section: 'Workspace',
+      icon: FolderOpen,
+      label: currentWorkspace.label,
+      detail: currentWorkspace.detail,
+      selected: currentWorkspace.granted,
+      tone: currentWorkspace.granted ? 'success' : 'neutral',
+      disabled: !currentWorkspace.enabled,
+      loading: currentWorkspace.busy || (currentWorkspace.loading && !currentWorkspace.current),
+      keepOpen: true,
+      onPress: () => {
+        if (currentWorkspace.current) void currentWorkspace.grant();
+        else currentWorkspace.reload();
+      },
+    },
+  ];
 
   const maxHeight = Math.max(220, Math.min(height - insets.top - 48, height * 0.7));
+  // Float above the navigation bar like the desktop card; nothing sits under the phone's buttons.
+  const marginBottom = insets.bottom + SHEET_GAP;
 
   return (
-    <KeyboardAvoidingView
-      pointerEvents="box-none"
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={styles.layer}
-    >
+    <View pointerEvents="box-none" style={styles.layer}>
       {workspaceDeviceId ? <MobileCompanionWorkspaceModal deviceId={workspaceDeviceId} onClose={() => setWorkspaceDeviceId(null)} /> : null}
       <Animated.View
+        accessibilityLabel="Companion"
         onLayout={(event) => {
-          sheetHeight.value = event.nativeEvent.layout.height;
+          const sheet = event.nativeEvent.layout.height;
+          sheetHeight.value = sheet;
+          // The chat screen already sits above the system inset; reserve the sheet plus its gaps.
+          const next = Math.max(insetFloor.current, Math.round(sheet + SHEET_GAP));
+          insetFloor.current = next;
+          if (visible) reportOverlayInset(next);
         }}
-        style={[
-          styles.sheet,
-          { maxHeight, paddingBottom: Math.max(insets.bottom, 10) },
-          sheetStyle,
-        ]}
+        style={[styles.sheet, { maxHeight, marginBottom }, sheetStyle]}
       >
-        <GestureDetector gesture={dragGesture}>
-          <View>
+        <View style={styles.sheetInner}>
+          <GestureDetector gesture={dragGesture}>
             <View style={styles.header}>
-              <View style={[styles.dot, statusDotStyle(status)]} />
-              <Text style={styles.title}>Companion</Text>
-              <Text
-                accessibilityLiveRegion="polite"
-                numberOfLines={1}
-                style={[styles.status, status === 'error' && styles.statusError]}
-              >
-                {statusLabel(status, companion.durationMillis, elapsed)}
-              </Text>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Companion workspaces"
-                accessibilityState={{ disabled: !companion.workspaceDeviceId }}
-                disabled={!companion.workspaceDeviceId}
-                onPress={() => { Keyboard.dismiss(); setWorkspaceDeviceId(companion.workspaceDeviceId); }}
-                style={({ pressed }) => [styles.workspaceButton, pressed && styles.ghostPressed]}
+                accessibilityLabel={active ? 'Working — show tool activity' : 'Show Companion activity'}
+                accessibilityState={{ expanded: activityExpanded }}
+                hitSlop={8}
+                onPress={() => setActivityExpanded((value) => !value)}
+                style={({ pressed }) => [styles.dotButton, pressed && styles.pressed]}
               >
-                <Folder color={colors.muted} size={19} strokeWidth={2} />
+                {active ? (
+                  <ActivityIndicator color={colors.accent} size="small" />
+                ) : (
+                  <View style={[styles.dot, statusDotStyle(status, liveActive, companion.recordingPaused)]} />
+                )}
               </Pressable>
-              {active ? <ActivityIndicator color={colors.accent} size="small" /> : null}
+              <View style={styles.headline}>
+                {companion.transcript ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={transcriptExpanded ? 'Collapse your message' : 'Expand your message'}
+                    accessibilityState={{ expanded: transcriptExpanded }}
+                    onPress={() => setTranscriptExpanded((value) => !value)}
+                  >
+                    <Text numberOfLines={transcriptExpanded ? undefined : 1} style={styles.transcript}>
+                      {companion.transcript}
+                    </Text>
+                  </Pressable>
+                ) : (
+                  <Text accessibilityLiveRegion="polite" numberOfLines={1} style={[styles.title, status === 'error' && styles.titleError]}>
+                    {headlineLabel(companion, elapsed)}
+                  </Text>
+                )}
+              </View>
+              {liveActive ? (
+                <HeaderButton
+                  label={live.muted ? 'Unmute microphone' : 'Mute microphone'}
+                  tone={live.muted ? 'danger' : 'neutral'}
+                  pressed={live.muted}
+                  onPress={live.toggleMute}
+                  icon={live.muted ? MicOff : Mic}
+                />
+              ) : null}
+              <HeaderButton
+                label={`Auto-approve proposals ${autoApprove.enabled ? 'on' : 'off'}`}
+                tone={autoApprove.enabled ? 'success' : 'neutral'}
+                pressed={autoApprove.enabled}
+                disabled={!companion.available || !autoApprove.supported || companion.proposalExecuting}
+                loading={autoApprove.loading || autoApprove.saving}
+                onPress={() => void autoApprove.save(!autoApprove.enabled)}
+                icon={Zap}
+              />
+              <HeaderButton
+                label="Companion options"
+                onPress={() => { Keyboard.dismiss(); setMenuOpen(true); }}
+                icon={Ellipsis}
+              />
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={active ? 'Stop Companion' : 'Close Companion'}
@@ -258,70 +520,36 @@ export function MobileCompanionOverlay() {
                 <X color={colors.muted} size={17} strokeWidth={2.2} />
               </Pressable>
             </View>
-          </View>
-        </GestureDetector>
+          </GestureDetector>
 
-        <ScrollView
-          style={styles.body}
-          contentContainerStyle={styles.bodyContent}
-          keyboardShouldPersistTaps="handled"
-          nestedScrollEnabled
-          showsVerticalScrollIndicator
-        >
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Text style={{ color: colors.text }}>Auto-approve proposals</Text>
-            <Switch accessibilityLabel="Auto-approve proposals"
-              value={companion.autoApproveSettings.enabled}
-              disabled={!companion.available || !companion.autoApproveSettings.supported || companion.autoApproveSettings.loading || companion.autoApproveSettings.saving || companion.proposalExecuting}
-              onValueChange={(enabled) => void companion.autoApproveSettings.save(enabled)} />
-          </View>
-          {companion.autoApproveSettings.error ? <Text style={{ color: colors.danger }}>{companion.autoApproveSettings.error}</Text> : null}
-          <MobileCompanionLivePanel live={companion.live} working={active} stopTurn={() => void companion.cancel()} />
-          {companion.checkingVoiceMode ? <Text style={styles.status}>Loading voice setting…</Text> : null}
-          {companion.transcript ? (
-            <View style={styles.transcriptRow}>
-              <View style={styles.transcriptBubble}>
-                <Text style={styles.transcriptText}>{companion.transcript}</Text>
-              </View>
-            </View>
-          ) : null}
-
-          {companion.compaction ? (
-            <View style={styles.toolHeader} accessibilityLiveRegion="polite">
-              {companion.compaction.status === 'running' ? (
-                <ActivityIndicator color={colors.accent} size="small" />
-              ) : null}
-              <Text style={[styles.toolName, companion.compaction.status === 'failed' && { color: colors.danger }]}>
-                {companionCompactionLabel(companion.compaction)}
-              </Text>
-            </View>
-          ) : null}
-
-          {showActivity ? (
-            <View style={styles.activity}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={
-                  activityExpanded ? 'Hide Companion tool calls' : 'Show Companion tool calls'
-                }
-                accessibilityState={{ expanded: activityExpanded }}
-                onPress={() => setActivityExpanded((value) => !value)}
-                style={({ pressed }) => [styles.activitySummary, pressed && styles.pressed]}
-              >
-                <ChevronRight
-                  color={colors.muted}
-                  size={14}
-                  strokeWidth={2}
-                  style={{ transform: [{ rotate: activityExpanded ? '90deg' : '0deg' }] }}
-                />
-                <Text style={styles.activitySummaryText}>
-                  {companion.activity.length > 0
-                    ? `${companion.activity.length} tool ${companion.activity.length === 1 ? 'call' : 'calls'}`
-                    : 'Thinking…'}
-                </Text>
-              </Pressable>
-              {activityExpanded
-                ? activityGroups.map((group) => (
+          {showBody ? (
+            <ScrollView
+              style={styles.body}
+              contentContainerStyle={styles.bodyContent}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled
+              showsVerticalScrollIndicator
+            >
+              {activityExpanded ? (
+                <View style={styles.activity} accessibilityLabel="Companion activity">
+                  <Text style={styles.activitySummaryText}>
+                    {active ? 'Working' : 'Worked'} for {Math.round(elapsed / 1_000)}s ·{' '}
+                    {companion.activity.length} tool {companion.activity.length === 1 ? 'call' : 'calls'}
+                  </Text>
+                  {companion.compaction ? (
+                    <View style={styles.toolHeader} accessibilityLiveRegion="polite">
+                      {companion.compaction.status === 'running' ? (
+                        <ActivityIndicator color={colors.accent} size="small" />
+                      ) : null}
+                      <Text style={[styles.toolName, companion.compaction.status === 'failed' && { color: colors.danger }]}>
+                        {companionCompactionLabel(companion.compaction)}
+                      </Text>
+                    </View>
+                  ) : null}
+                  {companion.activity.length === 0 ? (
+                    <Text style={styles.toolName}>{active ? 'Thinking…' : 'No tool calls yet.'}</Text>
+                  ) : null}
+                  {activityGroups.map((group) => (
                     <View key={group.key}>
                       {group.parallel ? (
                         <View
@@ -398,243 +626,49 @@ export function MobileCompanionOverlay() {
                         );
                       })}
                     </View>
-                  ))
-                : null}
-            </View>
-          ) : null}
-
-          {companion.error || submitError ? (
-            <Text style={styles.errorText}>{companion.error || submitError}</Text>
-          ) : null}
-
-          {companion.reply ? (
-            <View style={styles.reply}>
-              <NativeMarkdown text={companion.reply} />
-            </View>
-          ) : null}
-
-          {companion.proposal ? (
-            <View accessibilityLabel="Companion proposal" style={styles.proposal}>
-              <View style={styles.proposalHeading}>
-                <View style={styles.proposalHeadingCopy}>
-                  <Text style={styles.proposalEyebrow}>Proposal</Text>
-                  <Text style={styles.proposalTitle}>{companion.proposal.title}</Text>
+                  ))}
                 </View>
-                <Text
-                  style={[
-                    styles.proposalStatus,
-                    companion.proposalExecution?.ok
-                      ? styles.proposalStatusSuccess
-                      : companion.proposalExecution
-                        ? styles.proposalStatusFailure
-                        : null,
-                  ]}
-                >
-                  {companion.proposalExecuting
-                    ? 'Applying…'
-                    : companion.proposalExecution?.ok
-                      ? 'Applied'
-                      : companion.proposalExecution
-                        ? completedProposalOperations > 0
-                          ? 'Partially applied'
-                          : 'Apply failed'
-                        : 'Review'}
-                </Text>
-              </View>
-              {companion.proposal.summary ? (
-                <Text style={styles.proposalSummary}>{companion.proposal.summary}</Text>
               ) : null}
-              {companion.proposal.operations.length === 0 ? (
-                <Text style={styles.proposalEmpty}>
-                  Companion has not added any operations yet.
-                </Text>
-              ) : (
-                <View style={styles.proposalOperations}>
-                  {companion.proposal.operations.map((operation, index) => {
-                    const outcome = companion.proposalExecution?.operations.find(
-                      (item) => item.id === operation.id,
-                    );
-                    const details = companionProposalOperationDetails(
-                      operation,
-                      companion.proposalDefaultRepoPath ?? '',
-                    );
-                    const detailsExpanded = expandedProposalOperations.has(operation.id);
-                    return (
-                      <View key={operation.id} style={styles.proposalOperation}>
-                        <View style={styles.proposalNumber}>
-                          <Text style={styles.proposalNumberText}>{index + 1}</Text>
-                        </View>
-                        <View style={styles.proposalOperationCopy}>
-                          <Text style={styles.proposalOperationText}>
-                            {companionProposalOperationLabel(operation)}
-                          </Text>
-                          {details.length > 0 ? (
-                            <>
-                              <Pressable
-                                accessibilityRole="button"
-                                accessibilityState={{ expanded: detailsExpanded }}
-                                onPress={() =>
-                                  setExpandedProposalOperations((current) => {
-                                    const next = new Set(current);
-                                    if (next.has(operation.id)) next.delete(operation.id);
-                                    else next.add(operation.id);
-                                    return next;
-                                  })
-                                }
-                                style={({ pressed }) => [
-                                  styles.proposalDetailsToggle,
-                                  pressed && styles.pressed,
-                                ]}
-                              >
-                                <Text style={styles.proposalDetailsToggleText}>
-                                  {detailsExpanded ? 'Hide details' : 'Review details'}
-                                </Text>
-                              </Pressable>
-                              {detailsExpanded ? (
-                                <View style={styles.proposalDetails}>
-                                  {details.map((detail) => (
-                                    <View key={detail.label} style={styles.proposalDetail}>
-                                      <Text style={styles.proposalDetailLabel}>{detail.label}</Text>
-                                      <Text selectable style={styles.proposalDetailValue}>
-                                        {detail.value}
-                                      </Text>
-                                    </View>
-                                  ))}
-                                </View>
-                              ) : null}
-                            </>
-                          ) : null}
-                          {outcome ? (
-                            <Text
-                              style={[
-                                styles.proposalOutcome,
-                                outcome.status === 'completed'
-                                  ? styles.proposalStatusSuccess
-                                  : outcome.status === 'failed'
-                                    ? styles.proposalStatusFailure
-                                    : null,
-                              ]}
-                            >
-                              {outcome.status === 'completed'
-                                ? 'Applied'
-                                : outcome.status === 'skipped'
-                                  ? 'Not run'
-                                  : outcome.error || 'Failed'}
-                            </Text>
-                          ) : null}
-                        </View>
-                      </View>
-                    );
-                  })}
-                </View>
-              )}
-              <View style={styles.proposalActions}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Discard Companion proposal"
-                  disabled={companion.proposalExecuting}
-                  onPress={companion.discardProposal}
-                  style={({ pressed }) => [
-                    styles.proposalDiscard,
-                    pressed && styles.pressed,
-                    companion.proposalExecuting && styles.disabled,
-                  ]}
-                >
-                  <Text style={styles.proposalDiscardText}>Discard</Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Apply Companion proposal"
-                  disabled={applyDisabled}
-                  onPress={() => void companion.executeProposal()}
-                  style={({ pressed }) => [
-                    styles.proposalApply,
-                    pressed && styles.pressed,
-                    applyDisabled && styles.disabled,
-                  ]}
-                >
-                  {companion.proposalExecuting ? (
-                    <ActivityIndicator color={colors.onAccent} size="small" />
-                  ) : null}
-                  <Text style={styles.proposalApplyText}>
-                    {companion.proposalExecuting
-                      ? 'Applying…'
-                      : companion.proposalExecution?.ok
-                        ? 'Applied'
-                        : companion.proposalExecution
-                          ? 'Discard to retry'
-                          : 'Apply proposal'}
-                  </Text>
-                </Pressable>
-              </View>
-            </View>
-          ) : null}
-        </ScrollView>
 
-        <View style={styles.footer}>
-          <ThemedTextInput
-            accessibilityLabel="Message Companion"
-            value={draft}
-            onChangeText={setDraft}
-            editable={!inputLocked}
-            multiline
-            maxLength={8_000}
-            placeholder={
-              recording
-                ? 'Listening…'
-                : active
-                  ? 'Companion is working…'
-                  : companion.reply
-                    ? 'Reply to Companion'
-                    : 'Ask Companion'
-            }
-            placeholderTextColor={colors.secondary}
-            textAlignVertical="center"
-            style={[styles.input, inputLocked && styles.inputLocked]}
-          />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={liveActive ? 'End Live voice' : recording ? 'Stop recording' : 'Talk to Companion'}
-            accessibilityState={{ disabled: micDisabled }}
-            disabled={micDisabled}
-            hitSlop={4}
-            onPress={() => void companion.toggle()}
-            style={({ pressed }) => [
-              styles.ghostButton,
-              micDisabled && styles.disabled,
-              pressed && styles.ghostPressed,
-            ]}
-          >
-            {voiceBusy ? (
-              <ActivityIndicator color={colors.accent} size="small" />
-            ) : recording || liveActive ? (
-              <Square color={colors.danger} fill={colors.danger} size={15} strokeWidth={2} />
-            ) : (
-              <Mic color={colors.textSecondary} size={18} strokeWidth={2.2} />
-            )}
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Send to Companion"
-            accessibilityState={{ disabled: !canSend }}
-            disabled={!canSend}
-            hitSlop={4}
-            onPress={() => void submit()}
-            style={({ pressed }) => [
-              styles.sendButton,
-              !canSend && styles.disabled,
-              pressed && styles.pressed,
-            ]}
-          >
-            {submitting ? (
-              <ActivityIndicator color={colors.onAccent} size="small" />
-            ) : (
-              <ArrowUp color={colors.onAccent} size={18} strokeWidth={2.6} />
-            )}
-          </Pressable>
+              {captionsOpen ? (
+                <View accessibilityLabel="Live voice captions" style={styles.captions}>
+                  <Text style={styles.captionsLabel}>Voice transcript</Text>
+                  <Text selectable style={styles.captionsText}>
+                    {live.captions || 'No voice transcript yet.'}
+                  </Text>
+                </View>
+              ) : null}
+
+              {errors.map((message, index) => (
+                <Text key={`${index}:${message}`} accessibilityRole="alert" style={styles.errorText}>
+                  {message}
+                </Text>
+              ))}
+
+              {companion.reply ? (
+                <View style={styles.reply}>
+                  <NativeMarkdown text={companion.reply} />
+                </View>
+              ) : null}
+
+              {companion.proposal ? (
+                <MobileCompanionProposal
+                  proposal={companion.proposal}
+                  defaultRepoPath={companion.proposalDefaultRepoPath ?? ''}
+                  execution={companion.proposalExecution}
+                  executing={companion.proposalExecuting}
+                  resolveDroneName={companion.resolveDroneName}
+                  applyDisabled={applyDisabled}
+                  onExecute={() => void companion.executeProposal()}
+                  onDiscard={companion.discardProposal}
+                />
+              ) : null}
+            </ScrollView>
+          ) : null}
         </View>
       </Animated.View>
-    </KeyboardAvoidingView>
+      <MobileCompanionMenu visible={menuOpen} items={menuItems} onClose={closeMenu} />
+    </View>
   );
 }
 
@@ -650,12 +684,11 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   sheet: {
-    width: '100%',
+    marginHorizontal: 10,
     overflow: 'hidden',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    borderTopWidth: 1,
-    borderTopColor: colors.accentBorder,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.accentBorder,
     backgroundColor: colors.panelRaised,
     shadowColor: colors.shadow,
     shadowOpacity: 0.36,
@@ -663,54 +696,52 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: -6 },
     elevation: 18,
   },
+  sheetInner: { flexShrink: 1, paddingBottom: 4 },
   header: {
-    minHeight: 44,
-    paddingTop: 4,
+    minHeight: 48,
+    paddingTop: 6,
+    paddingBottom: 4,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingLeft: 16,
-    paddingRight: 8,
+    gap: 6,
+    paddingLeft: 10,
+    paddingRight: 6,
   },
-  dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.mutedDim },
+  dotButton: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center', borderRadius: 6 },
+  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.mutedDim },
   dotDanger: { backgroundColor: colors.danger },
   dotWarning: { backgroundColor: colors.warning },
   dotAccent: { backgroundColor: colors.accent },
   dotOnline: { backgroundColor: colors.online },
   dotMuted: { backgroundColor: colors.mutedDim },
+  headline: { flex: 1, minWidth: 0, justifyContent: 'center', minHeight: 30 },
   title: { color: colors.text, fontSize: 13, fontWeight: '700' },
-  status: { minWidth: 0, flex: 1, color: colors.muted, fontSize: 11 },
-  statusError: { color: colors.danger },
-  workspaceButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 8 },
+  titleError: { color: colors.danger },
+  transcript: { color: colors.textSecondary, fontSize: 12.5, lineHeight: 17 },
+  headerButton: {
+    width: 30,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    backgroundColor: colors.controlSurface,
+  },
   closeButton: {
-    width: 34,
-    height: 34,
+    width: 30,
+    height: 30,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 8,
   },
   body: { flexGrow: 0, flexShrink: 1 },
-  bodyContent: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 10, gap: 10 },
-  transcriptRow: { alignItems: 'flex-end' },
-  transcriptBubble: {
-    maxWidth: '88%',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 12,
-    borderBottomRightRadius: 4,
-    borderWidth: 1,
-    borderColor: colors.userBubbleBorder,
-    backgroundColor: colors.userBubble,
-  },
-  transcriptText: { color: colors.userBubbleText, fontSize: 12.5, lineHeight: 18 },
+  bodyContent: { paddingHorizontal: 14, paddingTop: 2, paddingBottom: 10, gap: 10 },
   activity: { gap: 2 },
-  activitySummary: {
-    minHeight: 28,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  activitySummaryText: { flex: 1, color: colors.muted, fontSize: 11 },
+  activitySummaryText: { color: colors.muted, fontSize: 11, paddingBottom: 4 },
+  captions: { gap: 4, padding: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.borderSubtle, backgroundColor: colors.whiteWashSoft },
+  captionsLabel: { color: colors.mutedDim, fontSize: 9, fontWeight: '800', letterSpacing: 0.6, textTransform: 'uppercase' },
+  captionsText: { color: colors.textSecondary, fontSize: 11.5, lineHeight: 16 },
   parallelDivider: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -724,7 +755,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.border,
   },
   parallelDividerText: { color: colors.mutedDim, fontSize: 9, fontWeight: '700' },
-  toolCall: { marginLeft: 20 },
+  toolCall: { marginLeft: 4 },
   toolHeader: { minHeight: 24, flexDirection: 'row', alignItems: 'center', gap: 8 },
   toolDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: colors.mutedDim },
   toolName: { flex: 1, color: colors.textSecondary, fontSize: 10.5 },
@@ -733,106 +764,7 @@ const styles = StyleSheet.create({
   toolDetail: { color: colors.textSecondary, fontFamily: 'monospace', fontSize: 9, lineHeight: 13 },
   errorText: { color: colors.danger, fontSize: 11, lineHeight: 16 },
   reply: { paddingTop: 2 },
-  proposal: {
-    gap: 8,
-    padding: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.accentBorder,
-    backgroundColor: colors.accentWash,
-  },
-  proposalHeading: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
-  proposalHeadingCopy: { flex: 1, minWidth: 0 },
-  proposalEyebrow: {
-    color: colors.accent,
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-  },
-  proposalTitle: { marginTop: 2, color: colors.text, fontSize: 13, fontWeight: '700' },
-  proposalStatus: { color: colors.mutedDim, fontSize: 9.5, fontWeight: '600' },
-  proposalStatusSuccess: { color: colors.online },
-  proposalStatusFailure: { color: colors.danger },
-  proposalSummary: { color: colors.muted, fontSize: 11, lineHeight: 16 },
-  proposalEmpty: { color: colors.mutedDim, fontSize: 11 },
-  proposalOperations: { gap: 6 },
-  proposalOperation: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-  proposalNumber: {
-    width: 18,
-    height: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 9,
-    backgroundColor: colors.controlSurface,
-  },
-  proposalNumberText: { color: colors.muted, fontSize: 9, fontWeight: '700' },
-  proposalOperationCopy: { flex: 1, minWidth: 0 },
-  proposalOperationText: { color: colors.textSecondary, fontSize: 11, lineHeight: 15 },
-  proposalDetailsToggle: { alignSelf: 'flex-start', marginTop: 4, paddingVertical: 2 },
-  proposalDetailsToggleText: { color: colors.accent, fontSize: 9.5, fontWeight: '600' },
-  proposalDetails: { gap: 6, marginTop: 6 },
-  proposalDetail: { gap: 1 },
-  proposalDetailLabel: { color: colors.mutedDim, fontSize: 8.5, fontWeight: '700' },
-  proposalDetailValue: { color: colors.textSecondary, fontSize: 9.5, lineHeight: 13 },
-  proposalOutcome: { marginTop: 3, color: colors.mutedDim, fontSize: 9.5 },
-  proposalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 6, paddingTop: 2 },
-  proposalDiscard: {
-    minHeight: 32,
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-    borderRadius: 8,
-  },
-  proposalDiscardText: { color: colors.muted, fontSize: 11, fontWeight: '600' },
-  proposalApply: {
-    minHeight: 32,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 14,
-    borderRadius: 8,
-    backgroundColor: colors.accent,
-  },
-  proposalApplyText: { color: colors.onAccent, fontSize: 11, fontWeight: '700' },
-  footer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 2,
-    paddingLeft: 10,
-    paddingRight: 8,
-    paddingTop: 6,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.borderSubtle,
-  },
-  input: {
-    minWidth: 0,
-    flex: 1,
-    minHeight: 36,
-    maxHeight: 108,
-    paddingHorizontal: 8,
-    paddingVertical: 8,
-    color: colors.text,
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  inputLocked: { opacity: 0.6 },
-  ghostButton: {
-    width: 36,
-    height: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 8,
-  },
   ghostPressed: { backgroundColor: colors.whiteWash },
-  sendButton: {
-    width: 36,
-    height: 36,
-    marginLeft: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 8,
-    backgroundColor: colors.accent,
-  },
   disabled: { opacity: 0.4 },
   pressed: { opacity: 0.72 },
 });

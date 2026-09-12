@@ -60,6 +60,9 @@ export class MobileCompanionLiveConnection {
       } finally { settled(); }
       if (this.closed) return;
       this.audio.mute(this.muted);
+      // The recorder is running and buffering from here on, so the user can start
+      // talking now: announce capture before the first chunk fills, not after it.
+      this.markCapturing();
       this.unsubscribe = this.options.subscribe(COMPANION_CAPABILITY.id, 'live.event', (event) => {
         if (this.closed || event.sourceDeviceId !== this.options.targetDeviceId || event.payload?.sessionId !== this.options.sessionId) return;
         const payload = event.payload;
@@ -123,9 +126,14 @@ export class MobileCompanionLiveConnection {
     return this.options.request(this.options.targetDeviceId, COMPANION_CAPABILITY.id, operation,
       { sessionId: this.options.sessionId, ...payload });
   }
+  private markCapturing(): void {
+    if (this.closed || this.capturing) return;
+    this.capturing = true;
+    this.options.onCapturing?.();
+  }
   private capture(audio: string): void {
     if (this.closed) return;
-    if (!this.capturing) { this.capturing = true; this.options.onCapturing?.(); }
+    this.markCapturing();
     this.buffer.append(audio);
   }
   private fail(error: string): void { if (!this.closed) { this.close(); this.options.onError(error); } }

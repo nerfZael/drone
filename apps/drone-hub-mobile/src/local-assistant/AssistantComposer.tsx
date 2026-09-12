@@ -9,7 +9,6 @@ import {
   type TextInput,
   View,
 } from 'react-native';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   cancelAnimation,
   Easing,
@@ -56,92 +55,21 @@ import { mobileContinuousVoiceStatusLabel } from './use-mobile-continuous-voice'
 import {
   mobileAssistantComposerCollapsesOnBack,
   mobileAssistantComposerExpanded,
-  mobileAssistantComposerSwipeProgress,
-  mobileAssistantComposerSwipeStartsVoice,
   mobileAssistantStopVisible,
 } from './assistant-composer-model';
 
 type ComposerIcon = typeof ArrowUp;
 
-function useSwipeUpVoiceGesture({
-  enabled,
-  onSwipeUp,
-  onActivate,
-  onArm,
-  onSettle,
-  progress,
-  includeNativeGesture = false,
-}: {
-  enabled: boolean;
-  onSwipeUp(): void;
-  onActivate(): void;
-  /** The swipe crossed the threshold; onSwipeUp follows once the animation lands. */
-  onArm(): void;
-  onSettle(): void;
-  progress: SharedValue<number>;
-  includeNativeGesture?: boolean;
-}) {
-  return React.useMemo(() => {
-    const panGesture = Gesture.Pan()
-      .enabled(enabled)
-      .maxPointers(1)
-      .activeOffsetY(-8)
-      .failOffsetX([-80, 80])
-      .failOffsetY(18)
-      .shouldCancelWhenOutside(false)
-      .onBegin(() => cancelAnimation(progress))
-      .onStart(() => runOnJS(onActivate)())
-      .onUpdate((event) => {
-        progress.value = mobileAssistantComposerSwipeProgress({
-          translationX: event.translationX,
-          translationY: event.translationY,
-          velocityY: event.velocityY,
-        });
-      })
-      .onEnd((event) => {
-        if (
-          mobileAssistantComposerSwipeStartsVoice({
-            translationX: event.translationX,
-            translationY: event.translationY,
-            velocityY: event.velocityY,
-          })
-        ) {
-          runOnJS(onArm)();
-          progress.value = withTiming(
-            1,
-            { duration: 90, easing: Easing.out(Easing.quad) },
-            (finished) => {
-              if (!finished) return;
-              runOnJS(onSwipeUp)();
-              progress.value = withDelay(120, withTiming(0, { duration: 140 }));
-            },
-          );
-        } else {
-          progress.value = withTiming(0, {
-            duration: 180,
-            easing: Easing.out(Easing.quad),
-          });
-        }
-      })
-      .onFinalize((_event, success) => {
-        if (!success) progress.value = withTiming(0, { duration: 140 });
-        runOnJS(onSettle)();
-      });
-    return includeNativeGesture ? Gesture.Simultaneous(panGesture, Gesture.Native()) : panGesture;
-  }, [enabled, includeNativeGesture, onActivate, onArm, onSettle, onSwipeUp, progress]);
-}
-
-function SwipeUpVoiceComposer({
+/** Grows the composer into the dictation card while a mic press opens it; the card itself handles sliding back down. */
+function VoiceMorphComposer({
   enabled,
   usesChatDictation,
-  gesture,
   progress,
   children,
   style,
 }: {
   enabled: boolean;
   usesChatDictation: boolean;
-  gesture: React.ComponentProps<typeof GestureDetector>['gesture'];
   progress: SharedValue<number>;
   children: React.ComponentProps<typeof View>['children'];
   style: React.ComponentProps<typeof Animated.View>['style'];
@@ -163,20 +91,18 @@ function SwipeUpVoiceComposer({
   }));
 
   return (
-    <GestureDetector gesture={gesture}>
-      <Animated.View style={[style, composerStyle]}>
-        {children}
-        <Animated.View
-          accessible={false}
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants"
-          pointerEvents="none"
-          style={[styles.swipeVoicePreview, previewStyle]}
-        >
-          <MobileDictationComposerPreview showDestinationMenu={usesChatDictation} />
-        </Animated.View>
+    <Animated.View style={[style, composerStyle]}>
+      {children}
+      <Animated.View
+        accessible={false}
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        pointerEvents="none"
+        style={[styles.voiceMorphPreview, previewStyle]}
+      >
+        <MobileDictationComposerPreview showDestinationMenu={usesChatDictation} />
       </Animated.View>
-    </GestureDetector>
+    </Animated.View>
   );
 }
 
@@ -317,9 +243,9 @@ export function AssistantComposer({
   onSend: MobileComposerSend;
   onStop?(): void;
   onOpenDictation?(): void;
-  /** Called as soon as a swipe-up is recognised so recording can begin early. */
+  /** Called as soon as the mic is pressed so recording can begin before the card opens. */
   onDictationPrestart?(): void;
-  /** Called when a recognised swipe-up is abandoned before opening dictation. */
+  /** Called when a started press is abandoned before opening dictation. */
   onDictationPrestartCancel?(): void;
   onOpenModel(): void;
   modelLabel: string;
@@ -363,6 +289,13 @@ export function AssistantComposer({
     continuousDictation,
   } = useSharedMobileChatVoiceRecorder();
   const companionUsingVoice = voiceSession.kind === 'companion';
+  const companionOpen = companion.overlayOpen;
+  const setCompanionComposerFocused = companion.setComposerFocused;
+  React.useEffect(() => {
+    if (!focused) return;
+    setCompanionComposerFocused(true);
+    return () => setCompanionComposerFocused(false);
+  }, [focused, setCompanionComposerFocused]);
   const voiceError = companion.status === 'idle' ? sharedVoiceError : '';
   const voiceStatus = voiceSession.kind === 'single-shot' ? voiceSession.status : ('idle' as const);
   const voiceDurationMillis = voiceSession.kind === 'single-shot' ? voiceSession.durationMillis : 0;
@@ -387,12 +320,12 @@ export function AssistantComposer({
     onNotice: setVoiceError,
     onError: setVoiceError,
   });
-  // While a swipe-up is in progress the recorder may already be running
-  // (started early so no speech is lost); the card only appears once the swipe
+  // While the mic-press morph plays the recorder may already be running
+  // (started early so no speech is lost); the card only appears once the morph
   // completes.
-  const [swipeUpActive, setSwipeUpActive] = React.useState(false);
+  const [voiceMorphActive, setVoiceMorphActive] = React.useState(false);
   const localRecorderOpen =
-    !onOpenDictation && (voiceActive || transcriptionQueue.hasClips) && !swipeUpActive;
+    !onOpenDictation && (voiceActive || transcriptionQueue.hasClips) && !voiceMorphActive;
   const voiceRecordAccessibilityLabel =
     voiceSession.kind === 'continuous'
       ? 'Continuous voice is using the microphone'
@@ -451,6 +384,7 @@ export function AssistantComposer({
       hasAttachments,
       voiceActive,
       voiceError,
+      collapsedByCompanion: companionOpen,
     }) ||
     continuousVoiceOwned ||
     continuousDictationOwned;
@@ -560,8 +494,8 @@ export function AssistantComposer({
       if (!voiceActiveRef.current) void beginVoiceRecording();
       return;
     }
-    // The swipe can leave the input focused on release; make sure the keyboard
-    // never shows while the dictation card takes over.
+    // The press can land on a focused input; make sure the keyboard never shows
+    // while the dictation card takes over.
     suppressInputFocusRef.current = true;
     inputRef.current?.blur();
     setFocused(false);
@@ -571,10 +505,10 @@ export function AssistantComposer({
       suppressInputFocusRef.current = false;
     });
   }, [beginVoiceRecording, onOpenDictation, voiceRecordActionDisabled]);
-  // While a swipe-up is in progress the input must not take focus or raise the
+  // While the morph is in progress the input must not take focus or raise the
   // keyboard, otherwise Android briefly shows it before dictation opens.
-  const swipeUpSettleTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const swipeUpArmedRef = React.useRef(false);
+  const voiceMorphSettleTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const voiceMorphArmedRef = React.useRef(false);
   const prestartDictation = React.useCallback(() => {
     if (voiceRecordActionDisabled) return;
     if (onOpenDictation) onDictationPrestart?.();
@@ -584,48 +518,52 @@ export function AssistantComposer({
     if (onOpenDictation) onDictationPrestartCancel?.();
     else if (voiceActiveRef.current) discardVoice();
   }, [discardVoice, onDictationPrestartCancel, onOpenDictation]);
-  const beginSwipeUp = React.useCallback(() => {
-    if (swipeUpSettleTimerRef.current) clearTimeout(swipeUpSettleTimerRef.current);
-    swipeUpSettleTimerRef.current = null;
-    swipeUpArmedRef.current = false;
-    setSwipeUpActive(true);
+  const beginVoiceMorph = React.useCallback(() => {
+    if (voiceMorphSettleTimerRef.current) clearTimeout(voiceMorphSettleTimerRef.current);
+    voiceMorphSettleTimerRef.current = null;
+    voiceMorphArmedRef.current = false;
+    setVoiceMorphActive(true);
     prestartDictation();
   }, [prestartDictation]);
-  const armSwipeUp = React.useCallback(() => {
-    swipeUpArmedRef.current = true;
+  const armVoiceMorph = React.useCallback(() => {
+    voiceMorphArmedRef.current = true;
   }, []);
-  const settleSwipeUp = React.useCallback(() => {
-    if (!swipeUpArmedRef.current) cancelPrestartedDictation();
-    if (swipeUpSettleTimerRef.current) clearTimeout(swipeUpSettleTimerRef.current);
-    swipeUpSettleTimerRef.current = setTimeout(() => {
-      swipeUpSettleTimerRef.current = null;
-      setSwipeUpActive(false);
+  const settleVoiceMorph = React.useCallback(() => {
+    if (!voiceMorphArmedRef.current) cancelPrestartedDictation();
+    if (voiceMorphSettleTimerRef.current) clearTimeout(voiceMorphSettleTimerRef.current);
+    voiceMorphSettleTimerRef.current = setTimeout(() => {
+      voiceMorphSettleTimerRef.current = null;
+      setVoiceMorphActive(false);
     }, 260);
   }, [cancelPrestartedDictation]);
   React.useEffect(
     () => () => {
-      if (swipeUpSettleTimerRef.current) clearTimeout(swipeUpSettleTimerRef.current);
+      if (voiceMorphSettleTimerRef.current) clearTimeout(voiceMorphSettleTimerRef.current);
     },
     [],
   );
-  const swipeVoiceProgress = useSharedValue(0);
-  const swipeUpVoiceGesture = useSwipeUpVoiceGesture({
-    enabled: !voiceRecordActionDisabled,
-    onSwipeUp: activateVoiceRecording,
-    onActivate: beginSwipeUp,
-    onArm: armSwipeUp,
-    onSettle: settleSwipeUp,
-    progress: swipeVoiceProgress,
-  });
-  const swipeUpVoiceInputGesture = useSwipeUpVoiceGesture({
-    enabled: !voiceRecordActionDisabled,
-    onSwipeUp: activateVoiceRecording,
-    onActivate: beginSwipeUp,
-    onArm: armSwipeUp,
-    onSettle: settleSwipeUp,
-    progress: swipeVoiceProgress,
-    includeNativeGesture: true,
-  });
+  const voiceMorphProgress = useSharedValue(0);
+  /** The mic button grows the composer into the dictation card, then opens it. */
+  const pressVoiceRecording = React.useCallback(() => {
+    if (voiceRecordActionDisabled) return;
+    if (!onOpenDictation) {
+      activateVoiceRecording();
+      return;
+    }
+    beginVoiceMorph();
+    armVoiceMorph();
+    cancelAnimation(voiceMorphProgress);
+    voiceMorphProgress.value = withTiming(
+      1,
+      { duration: 160, easing: Easing.out(Easing.quad) },
+      (finished) => {
+        if (!finished) return;
+        runOnJS(activateVoiceRecording)();
+        voiceMorphProgress.value = withDelay(120, withTiming(0, { duration: 140 }));
+      },
+    );
+    settleVoiceMorph();
+  }, [activateVoiceRecording, armVoiceMorph, beginVoiceMorph, onOpenDictation, settleVoiceMorph, voiceMorphProgress, voiceRecordActionDisabled]);
 
   const beginContinuousVoice = React.useCallback(
     async (mode: MobileContinuousVoiceMode) => {
@@ -779,24 +717,22 @@ export function AssistantComposer({
           }}
           style={localRecorderOpen && styles.localRecorderBackdrop}
         >
-          <SwipeUpVoiceComposer
+          <VoiceMorphComposer
             enabled={!voiceRecordActionDisabled}
             usesChatDictation={Boolean(onOpenDictation)}
-            gesture={swipeUpVoiceGesture}
-            progress={swipeVoiceProgress}
+            progress={voiceMorphProgress}
             style={[
               styles.composer,
               expanded && styles.composerExpanded,
               Boolean(leadingControl) && styles.composerWithLeadingControl,
             ]}
           >
-            <GestureDetector gesture={swipeUpVoiceInputGesture}>
               <ThemedTextInput
                 ref={inputRef}
                 value={value}
                 onChangeText={changeText}
                 onFocus={(event) => {
-                  if (suppressInputFocusRef.current || voiceActive || swipeUpActive) {
+                  if (suppressInputFocusRef.current || voiceActive || voiceMorphActive) {
                     inputRef.current?.blur();
                     Keyboard.dismiss();
                     return;
@@ -809,7 +745,7 @@ export function AssistantComposer({
                   onInputBlur?.();
                 }}
                 editable={editable && (!running || queueWhileRunning) && !voiceActive}
-                showSoftInputOnFocus={!voiceActive && !swipeUpActive}
+                showSoftInputOnFocus={!voiceActive && !voiceMorphActive}
                 multiline
                 maxLength={maxLength}
                 placeholder={placeholder}
@@ -823,9 +759,9 @@ export function AssistantComposer({
                       ? styles.inputWithCollapsedVoice
                       : styles.inputWithCollapsedVoiceOnly),
                   !expanded && showAssistantStop && styles.inputWithCollapsedStop,
+                  !expanded && companionOpen && styles.inputCompanionCollapsed,
                 ]}
               />
-            </GestureDetector>
             {!expanded ? (
               <>
                 {attachmentsEnabled ? (
@@ -851,7 +787,7 @@ export function AssistantComposer({
                   accessibilityState={{ disabled: voiceRecordActionDisabled }}
                   disabled={voiceRecordActionDisabled}
                   hitSlop={6}
-                  onPress={activateVoiceRecording}
+                  onPress={pressVoiceRecording}
                   style={({ pressed }) => [
                     styles.collapsedVoiceButton,
                     showAssistantStop && styles.collapsedVoiceButtonWithStop,
@@ -969,7 +905,7 @@ export function AssistantComposer({
                       label={voiceRecordAccessibilityLabel}
                       icon={Mic}
                       disabled={voiceRecordActionDisabled}
-                      onPress={activateVoiceRecording}
+                      onPress={pressVoiceRecording}
                     />
                   </>
                 ) : continuousVoiceOwned ? (
@@ -1068,7 +1004,7 @@ export function AssistantComposer({
                 ) : null}
               </View>
             ) : null}
-          </SwipeUpVoiceComposer>
+          </VoiceMorphComposer>
         </View>
         {localRecorderOpen ? (
           <MobileDictationComposer
@@ -1143,7 +1079,7 @@ const styles = StyleSheet.create({
   },
   composerExpanded: { borderRadius: 16, borderColor: colors.accentBorder },
   composerWithLeadingControl: { overflow: 'visible' },
-  swipeVoicePreview: {
+  voiceMorphPreview: {
     position: 'absolute',
     top: 0,
     right: 0,
@@ -1166,6 +1102,8 @@ const styles = StyleSheet.create({
   inputWithCollapsedVoice: { paddingLeft: 56, paddingRight: 56 },
   inputWithCollapsedVoiceOnly: { paddingLeft: 16, paddingRight: 56 },
   inputWithCollapsedStop: { paddingRight: 100 },
+  // One line while the Companion sheet is open; the draft stays scrollable inside.
+  inputCompanionCollapsed: { maxHeight: 52 },
   collapsedAddButton: {
     position: 'absolute',
     left: 8,

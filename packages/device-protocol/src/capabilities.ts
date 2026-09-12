@@ -119,7 +119,7 @@ export const COMPANION_WORKSPACE_OPERATIONS = ['workspaces.list', 'workspaces.up
 export const COMPANION_CAPABILITY: CapabilityDescriptor = {
   id: 'companion',
   version: 1,
-  operations: [...COMPANION_RUN_OPERATIONS, ...COMPANION_WORKSPACE_OPERATIONS, ...COMPANION_LIVE_OPERATIONS, 'auto-approve.settings.get', 'auto-approve.settings.update'],
+  operations: [...COMPANION_RUN_OPERATIONS, ...COMPANION_WORKSPACE_OPERATIONS, 'workspaces.current', ...COMPANION_LIVE_OPERATIONS, 'auto-approve.settings.get', 'auto-approve.settings.update'],
 };
 
 export function isGranted(
@@ -139,6 +139,9 @@ export function isGranted(
         // Live controls/writes still need their own grants.
         (capability === COMPANION_CAPABILITY.id && version === COMPANION_CAPABILITY.version &&
           (operation === 'live.settings.get' || operation === 'proposal.result') &&
-          grant.operations.includes('run.start'))),
+          grant.operations.includes('run.start')) ||
+        // Reading the current workspace reveals nothing beyond the workspace catalog.
+        (capability === COMPANION_CAPABILITY.id && version === COMPANION_CAPABILITY.version &&
+          operation === 'workspaces.current' && grant.operations.includes('workspaces.list'))),
   );
 }

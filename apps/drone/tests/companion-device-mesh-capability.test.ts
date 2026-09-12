@@ -257,8 +257,10 @@ describe('Companion device mesh capability', () => {
 test('mobile workspace operations use the same catalog and revision-checked save as desktop', async () => {
   const calls: unknown[] = [];
   const catalog = { revision: 'current', access: { targets: [], defaultTargetId: null }, defaults: { targets: [], defaultTargetId: null }, workspaces: [], devices: [] };
+  const target = { id: 'drone:drone-1', name: 'Drone 1', deviceId: 'hub', deviceName: 'Hub', kind: 'drone', read: true, write: false, execute: false };
   const capability = createCompanionCapability({} as any, async () => {}, {
     catalog: async (deviceId) => { calls.push(['list', deviceId]); return catalog; },
+    current: async (droneId) => { calls.push(['current', droneId]); return { ...catalog, target } as any; },
     save: async (access, revision) => {
       calls.push(['save', access, revision]);
       if (revision !== 'current') throw new Error('Workspace access changed elsewhere');
@@ -267,11 +269,14 @@ test('mobile workspace operations use the same catalog and revision-checked save
   });
   expect(capability.descriptor.operations).toContain('workspaces.list');
   expect(capability.descriptor.operations).toContain('workspaces.update');
+  expect(capability.descriptor.operations).toContain('workspaces.current');
   expect(await capability.invoke('workspaces.list', { deviceId: 'remote' }, context())).toEqual(catalog);
+  expect(await capability.invoke('workspaces.current', { droneId: 'drone-1' }, context())).toEqual({ ...catalog, target });
+  await expect(capability.invoke('workspaces.current', {}, context())).rejects.toThrow('droneId');
   expect(await capability.invoke('workspaces.update', { access: catalog.access, revision: 'current' }, context())).toEqual(catalog);
   await expect(capability.invoke('workspaces.update', { access: catalog.access, revision: 'stale' }, context())).rejects.toThrow('changed elsewhere');
   await expect(capability.invoke('workspaces.update', { access: catalog.access }, context())).rejects.toThrow('revision');
-  expect(calls.slice(0, 2)).toEqual([['list', 'remote'], ['save', catalog.access, 'current']]);
+  expect(calls.slice(0, 3)).toEqual([['list', 'remote'], ['current', 'drone-1'], ['save', catalog.access, 'current']]);
 });
 
 test('existing Companion run grants do not authorize workspace settings', async () => {
@@ -281,7 +286,6 @@ test('existing Companion run grants do not authorize workspace settings', async 
   expect(COMPANION_WORKSPACE_OPERATIONS.some((operation) => isGranted(grants, 'companion', 1, operation))).toBe(false);
 });
 
-<<<<<<< HEAD
 
 test('mobile auto-approval settings survive capability and storage restarts', async () => {
   await withTempDroneDataDir('companion-mobile-auto-approve-', async () => {
@@ -295,7 +299,8 @@ test('mobile auto-approval settings survive capability and storage restarts', as
     await expect(capability.invoke('auto-approve.settings.update', { enabled: 'false' }, context())).rejects.toThrow('boolean');
     await capability.close?.();
   });
-=======
+});
+
 test.each(['disconnectDevice', 'accessChanged', 'revokeDevice'] as const)(
   'mobile subscriptions resume idle conversations and stop on %s', async (lifecycle) => {
   const events: any[] = [];
@@ -318,5 +323,4 @@ test.each(['disconnectDevice', 'accessChanged', 'revokeDevice'] as const)(
     expect(deleted).toHaveLength(1);
     await expect(deliver({ prompt: 'late', messageId: 'late', deliveryMode: 'asap' })).rejects.toThrow('disconnected');
   } finally { await capability.close?.(); }
->>>>>>> 10453b1fcf515552b63c83853f39c66d47fb8023
 });

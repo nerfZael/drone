@@ -42,7 +42,7 @@ function requiredText(value: unknown, label: string): string {
 export function createCompanionCapability(
   runtime: CompanionRuntime,
   broadcast: BroadcastEvent,
-  workspaces?: Pick<CompanionWorkspaceService, 'catalog' | 'save'>,
+  workspaces?: Pick<CompanionWorkspaceService, 'catalog' | 'save' | 'current'>,
 ): CapabilityHandler {
   const live = new CompanionLiveMeshSessions({
     emit: (deviceId, payload) => broadcast(COMPANION_CAPABILITY.id, 'live.event', payload, 'live.start', [deviceId]),
@@ -86,11 +86,14 @@ export function createCompanionCapability(
       if (operation === 'auto-approve.settings.update') return writeCompanionAutoApproveSettings(payload);
       if (operation.startsWith('live.')) return live.invoke(sourceDeviceId, operation, payload, context.liveAudio);
 
-      if (operation === 'workspaces.list' || operation === 'workspaces.update') {
+      if (operation === 'workspaces.list' || operation === 'workspaces.update' || operation === 'workspaces.current') {
         if (!workspaces) throw new Error('Companion workspace settings are unavailable on this Hub.');
         // The mesh router authorizes these operations independently from run.start.
         if (operation === 'workspaces.list') {
           return workspaces.catalog(typeof payload.deviceId === 'string' ? payload.deviceId : undefined);
+        }
+        if (operation === 'workspaces.current') {
+          return workspaces.current(requiredText(payload.droneId, 'droneId'));
         }
         return workspaces.save(payload.access, requiredText(payload.revision, 'revision'));
       }

@@ -93,6 +93,7 @@ export function useMobileCompanionWorkspaceTarget({
   }, [targetDeviceId]);
 
   implementationRef.current = {
+    resolveDroneName: (droneId: string) => drones.find((drone) => drone.id === droneId)?.name ?? null,
     getAppContext: () => ({
       surface: 'mobile',
       selectedChat: selectedDrone ? chatName : null,
@@ -460,6 +461,7 @@ export function useMobileCompanionWorkspaceTarget({
         implementationRef.current!.executeProposal(proposal, context),
       openDroneChat: (args) => implementationRef.current!.openDroneChat(args),
       highlightDrones: (args) => implementationRef.current!.highlightDrones(args),
+      resolveDroneName: (droneId) => implementationRef.current!.resolveDroneName?.(droneId) ?? null,
     };
     return companion.registerWorkspaceTarget(target);
   }, [companion.registerWorkspaceTarget, targetDeviceId, targetName, targetReachable]);

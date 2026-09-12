@@ -101,7 +101,8 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
           update({ capturing: true });
           const failed = () => { if (active.current === session) stop(); };
           void currentControls.update('recording').catch(failed);
-          // Capture is already buffering when the start cue sounds.
+          // The recorder is already buffering when the start cue sounds, so
+          // speech right after the cue is never lost while Live connects.
           void currentControls.cue('recording').catch(failed);
         },
         onReady: (backendModel) => {

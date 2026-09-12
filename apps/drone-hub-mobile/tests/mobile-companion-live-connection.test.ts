@@ -6,10 +6,11 @@ import { MobileMicrophoneCoordinator } from '../src/local-assistant/mobile-micro
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 const offer = { suite: LIVE_AUDIO_AUTH_SUITE, publicKey: 'test-key' };
 
-function harness(options: { delayedAudio?: boolean; delayedStream?: boolean; legacyHub?: boolean; rejectStart?: boolean; blockEvents?: boolean; rejectAnswer?: boolean; delayedStart?: boolean; rejectClose?: boolean } = {}) {
+function harness(options: { delayedAudio?: boolean; delayedStream?: boolean; legacyHub?: boolean; rejectStart?: boolean; blockEvents?: boolean; rejectAnswer?: boolean; delayedStart?: boolean; rejectClose?: boolean; silentAudio?: boolean } = {}) {
   const coordinator = new MobileMicrophoneCoordinator();
   const requests: Array<{ operation: string; payload: any }> = [];
   const received: any[] = []; const errors: string[] = []; const ready: string[] = []; const played: string[] = [];
+  let capturing = 0;
   let listener: ((event: any) => void) | undefined;
   let released = 0; let muted = false;
   let releaseEvent: (() => void) | undefined;
@@ -31,7 +32,7 @@ function harness(options: { delayedAudio?: boolean; delayedStream?: boolean; leg
       return { offer, accept() { if (options.rejectAnswer) throw new Error('Invalid Hub Live audio signature'); accepted++; }, send: async (audio) => { streamed.push(audio); if (options.blockEvents) await new Promise<void>((resolve) => { releaseEvent = resolve; }); }, close() { streamClosed++; } };
     },
     openAudio: (callbacks) => {
-      capture = callbacks; capture.onAudio('AQI=');
+      capture = callbacks; if (!options.silentAudio) capture.onAudio('AQI=');
       return options.delayedAudio ? new Promise((resolve) => { resolveAudio = resolve; }) : Promise.resolve(audio);
     },
     request: async (_device, _capability, operation, payload) => {
@@ -44,8 +45,9 @@ function harness(options: { delayedAudio?: boolean; delayedStream?: boolean; leg
     },
     subscribe: (_capability, _event, callback) => { listener = callback; return () => { listener = undefined; }; },
     onEvent: (event) => received.push(event), onReady: (model) => ready.push(model), onError: (error) => errors.push(error),
+    onCapturing: () => { capturing++; },
   });
-  return { connection, coordinator, requests, streamed, finishStart: () => finishStart(), accepted: () => accepted, finishStream: () => finishStream(), streamClosed: () => streamClosed, playback: (audio: string) => playback(audio), received, errors, ready, played, muted: () => muted,
+  return { connection, coordinator, requests, streamed, capturing: () => capturing, finishStart: () => finishStart(), accepted: () => accepted, finishStream: () => finishStream(), streamClosed: () => streamClosed, playback: (audio: string) => playback(audio), received, errors, ready, played, muted: () => muted,
     capture: (audio: string) => capture.onAudio(audio), releaseEvent: () => releaseEvent?.(),
     finishAudio: () => resolveAudio(audio), released: () => released,
     emit: (payload: any, sourceDeviceId = 'hub') => listener?.({ sourceDeviceId, payload: { sessionId: 'voice', ...payload } }),
@@ -70,6 +72,20 @@ test('mobile captures while connecting, drains opening speech in order, and scop
     expect(h.received).toEqual([{ type: 'session.delegation.created' }]);
   } finally { h.connection.close(); await tick(); }
   expect(h.coordinator.getSnapshot()).toBeNull(); expect(h.released()).toBe(1);
+});
+
+test('capture is announced once the recorder runs, before any audio chunk and before the Hub answers', async () => {
+  const h = harness({ silentAudio: true, delayedStart: true });
+  try {
+    const start = h.connection.start(); await tick();
+    expect(h.capturing()).toBe(1);
+    expect(h.ready).toEqual([]);
+    h.capture('AwQ='); h.capture('BQY=');
+    expect(h.capturing()).toBe(1);
+    h.finishStart(); await start;
+    h.emit({ type: 'live_ready', transport: 'pcm', backendModel: 'chosen' }); await tick();
+    expect(h.streamed).toEqual(['AwQFBg==']);
+  } finally { h.connection.close(); await tick(); }
 });
 
 test('closing while native permission is pending holds the lease until late audio is released', async () => {

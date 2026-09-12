@@ -706,6 +706,18 @@ describe('mobile sidebar presentation', () => {
       new URL('../src/local-assistant/MobileCompanionContext.tsx', import.meta.url),
       'utf8',
     );
+    const menuSource = readFileSync(
+      new URL('../src/local-assistant/MobileCompanionMenu.tsx', import.meta.url),
+      'utf8',
+    );
+    const composerSource = readFileSync(
+      new URL('../src/local-assistant/AssistantComposer.tsx', import.meta.url),
+      'utf8',
+    );
+    const proposalSource = readFileSync(
+      new URL('../src/local-assistant/MobileCompanionProposal.tsx', import.meta.url),
+      'utf8',
+    );
     const workspaceTargetSource = readFileSync(
       new URL('../src/local-assistant/use-mobile-companion-workspace-target.ts', import.meta.url),
       'utf8',
@@ -733,7 +745,6 @@ describe('mobile sidebar presentation', () => {
     expect(dronesSource).toContain('visible={active && workspaceVisible}');
     expect(providerSource).toContain('!activeTarget.reachable');
     expect(providerSource).toContain('!hasOperations');
-    expect(providerSource).toContain('!hasGrant');
     expect(providerSource).toContain("tool === 'read_companion_proposal'");
     expect(providerSource).toContain("tool === 'apply_companion_proposal_patch'");
     expect(providerSource).not.toContain('prepareDroneDraft');
@@ -742,18 +753,45 @@ describe('mobile sidebar presentation', () => {
     expect(providerSource).toContain('controller.submitPrompt({');
     expect(providerSource).toContain('controller.hasSession()');
     expect(overlaySource).toContain("justifyContent: 'flex-end'");
-    expect(overlaySource).toContain(
-      "accessibilityLabel={recording ? 'Stop recording' : 'Talk to Companion'}",
-    );
-    expect(overlaySource).toContain('accessibilityLabel="Companion proposal"');
-    expect(overlaySource).toContain('accessibilityLabel="Apply Companion proposal"');
+    // Desktop parity: a compact header with icon controls, no composer, no send button.
+    expect(overlaySource).not.toContain('ThemedTextInput');
+    expect(overlaySource).not.toContain('Send to Companion');
+    expect(overlaySource).not.toContain('Talk to Companion');
+    expect(overlaySource).not.toContain('MobileCompanionLivePanel');
+    expect(overlaySource).toContain('label={`Auto-approve proposals ${autoApprove.enabled ? \'on\' : \'off\'}`}');
+    expect(overlaySource).not.toContain('label="Companion workspaces"');
+    expect(overlaySource).toContain("label: 'Companion workspaces'");
+    expect(overlaySource).toContain('label="Companion options"');
+    expect(overlaySource).toContain("label: `Live voice ${liveSettings.enabled ? 'on' : 'off'}`");
+    expect(overlaySource).toContain("label: live.muted ? 'Unmute microphone' : 'Mute microphone'");
+    expect(overlaySource).toContain('label: currentWorkspace.label');
+    // The sheet floats above the navigation bar and settles without a spring bounce.
+    expect(overlaySource).toContain('const marginBottom = insets.bottom + SHEET_GAP;');
+    expect(overlaySource).toContain('style={[styles.sheet, { maxHeight, marginBottom }, sheetStyle]}');
+    expect(overlaySource).not.toContain('withSpring');
+    expect(menuSource).not.toContain('withSpring');
+    expect(menuSource).not.toContain('<Modal');
+    expect(menuSource).toContain('<GestureDetector gesture={dragGesture}>');
+    // The chat stays usable above the sheet: reserved space, one-line composer, header-only sheet when typing.
+    expect(overlaySource).toContain('if (visible) reportOverlayInset(next);');
+    expect(overlaySource).toContain('const showBody = !composerFocused &&');
+    expect(dronesSource).toContain('<MobileCompanionOverlaySpacer />');
+    expect(composerSource).toContain('collapsedByCompanion: companionOpen,');
+    expect(composerSource).toContain('setCompanionComposerFocused(true);');
+    // The proposal is an inline step list with a full-screen review dialog, like desktop.
+    expect(overlaySource).toContain('<MobileCompanionProposal');
+    expect(proposalSource).toContain('accessibilityLabel="Companion proposal"');
+    expect(proposalSource).toContain('accessibilityLabel="Apply Companion proposal"');
+    expect(proposalSource).toContain('accessibilityLabel="Expand proposal"');
+    expect(proposalSource).toContain('export function MobileCompanionProposalDialog');
+    expect(proposalSource).toContain('<OperationList {...props} full />');
     expect(overlaySource).toContain('<NativeMarkdown text={companion.reply} />');
     expect(overlaySource).toContain(
       'const [activityExpanded, setActivityExpanded] = React.useState(false)',
     );
     expect(overlaySource).toContain('setActivityExpanded(false)');
 
-    expect(overlaySource.indexOf('accessibilityLabel="Companion proposal"')).toBeGreaterThan(
+    expect(overlaySource.indexOf('<MobileCompanionProposal')).toBeGreaterThan(
       overlaySource.indexOf('<NativeMarkdown text={companion.reply} />'),
     );
   });

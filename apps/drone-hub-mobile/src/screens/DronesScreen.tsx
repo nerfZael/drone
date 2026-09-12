@@ -42,6 +42,7 @@ import {
   type DrawerDevicePickerItem,
 } from '../local-assistant/AppDrawer';
 import { AssistantComposer } from '../local-assistant/AssistantComposer';
+import { MobileCompanionOverlaySpacer } from '../local-assistant/MobileCompanionOverlaySpacer';
 import { MobileDictationComposer } from '../local-assistant/MobileDictationComposer';
 import { resolveMobileDictationTarget } from '../local-assistant/mobile-dictation-target';
 import type {
@@ -4024,6 +4025,7 @@ export function DronesScreen({
                           />
                         ) : null}
                       </View>
+                      <MobileCompanionOverlaySpacer />
                       <AssistantModelPicker
                         open={modelOpen}
                         currentProvider={chatModelProvider}
@@ -4287,7 +4289,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   composerMetadataRow: {
-    minHeight: 30,
+    minHeight: 26,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
