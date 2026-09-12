@@ -2,14 +2,14 @@ import { WebSocket } from 'ws';
 import { CompanionPcmLiveSocket } from './CompanionPcmLiveSocket';
 import { resolveEffectiveProviderApiKeySettings } from '../hub-settings';
 import { readCompanionSettings } from './companion-config';
-import { readCompanionLiveSettings } from './companion-live-settings';
+import { companionLiveSessionInstructions, readCompanionLiveSettings } from './companion-live-settings';
 
 type LiveMessage = { transport?: unknown; type?: string; sdp?: unknown; event?: unknown };
 type Dependencies = {
   fetch: typeof fetch;
   connect(url: string, apiKey: string): WebSocket;
   credentials(): Promise<{ apiKey: string | null }>;
-  enabled(): Promise<{ enabled: boolean }>;
+  enabled(): Promise<{ enabled: boolean; systemPrompt?: string }>;
   backend(): Promise<{ model: string; provider: string }>;
 };
 
@@ -44,7 +44,7 @@ export class CompanionLiveSocket {
     if (this.pcm) { this.pcm.handle(message); return; }
     if (message.type === 'live_start' && message.transport === 'pcm' && !this.closed && !this.starting) {
       this.starting = true;
-      this.pcm = new CompanionPcmLiveSocket(this.send, this.deps, LIVE_INSTRUCTIONS);
+      this.pcm = new CompanionPcmLiveSocket(this.send, this.deps);
       this.pcm.handle(message);
       return;
     }
@@ -61,8 +61,9 @@ export class CompanionLiveSocket {
     }
     if (message.type === 'live_event' && this.upstream?.readyState === WebSocket.OPEN && !this.closed) {
       const event = message.event as Record<string, unknown> | undefined;
-      // The browser may provide conversation context/results, never session config or credentials.
-      if (!event || !['session.commentary.append', 'session.thinking.append', 'session.instructions.append'].includes(String(event.type))) return;
+      // The browser may provide conversation context/results, never session instructions,
+      // config, or credentials. Prompt edits apply through settings to new sessions.
+      if (!event || !['session.commentary.append', 'session.thinking.append'].includes(String(event.type))) return;
       if (typeof event.content !== 'string' || !event.content.trim() || Buffer.byteLength(event.content, 'utf8') > 400) return;
       if (event.delegation_id !== null && typeof event.delegation_id !== 'string') return;
       this.upstream.send(JSON.stringify({
@@ -120,7 +121,12 @@ export class CompanionLiveSocket {
       headers: { Authorization: `Bearer ${credential.apiKey}`, 'Content-Type': 'application/json' },
       signal: AbortSignal.timeout(25_000),
       body: JSON.stringify({
-        session: { model: 'gpt-live-1', delegation: { type: 'client' }, store: false, instructions: LIVE_INSTRUCTIONS },
+        session: {
+          model: 'gpt-live-1',
+          delegation: { type: 'client' },
+          store: false,
+          instructions: companionLiveSessionInstructions(setting.systemPrompt),
+        },
         transport: { type: 'webrtc', sdp },
       }),
     });
@@ -180,18 +186,6 @@ export class CompanionLiveSocket {
     });
   }
 }
-
-const LIVE_INSTRUCTIONS = `You are Companion, a calm voice assistant inside Drone Hub.
-Speak briefly and naturally. The backend agent uses the user's selected model and tools.
-Backchannel policy: Use moderate acknowledgments without competing with the main answer.
-Interruption policy: Stop speaking when interrupted and listen. Stopping speech does not cancel backend tasks.
-Delegation policy:
-Backend tools: inspect the app and workspaces, search chats, edit composers and editor buffers, and prepare proposals using the configured Companion tools.
-Delegate to the backend when: the user requests an app action, lookup, careful reasoning, or a correction to pending work.
-Do not delegate to the backend when: greeting, clarifying an unclear request, or repeating a still-current result.
-Delegate before answering questions that depend on backend work. Never invent results or claim a proposal was applied unless confirmed.
-Backend follow-ups follow the user's Companion delivery setting: ASAP steers at the next processing point; Queue waits for the current request to finish. Do not promise immediate delivery. Never promise that a correction cancelled or undid an already-running action. For urgent cancellation, direct the user to Stop Companion turn.
-Use short spoken summaries. Exact results and tool activity appear in the app.`;
 
 function safeError(error: unknown): string {
   return error instanceof Error ? error.message : 'Live voice could not start.';

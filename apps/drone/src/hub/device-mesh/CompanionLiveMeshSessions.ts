@@ -1,5 +1,5 @@
 import { CompanionLiveSocket } from '../companion/CompanionLiveSocket';
-import { readCompanionLiveSettings, writeCompanionLiveSettings } from '../companion/companion-live-settings';
+import { companionLiveSettingsResponse, readCompanionLiveSettings, writeCompanionLiveSettings } from '../companion/companion-live-settings';
 
 type Session = { id: string; socket: Pick<CompanionLiveSocket, 'handle' | 'close'>; events: Promise<void>; queuedBytes: number; congested: boolean };
 type Options = {
@@ -17,8 +17,14 @@ export class CompanionLiveMeshSessions {
 
   async invoke(deviceId: string, operation: string, payload: Record<string, unknown>): Promise<unknown> {
     if (this.closed) throw new Error('Companion is shutting down.');
-    if (operation === 'live.settings.get') return readCompanionLiveSettings();
-    if (operation === 'live.settings.update') return writeCompanionLiveSettings(payload);
+    if (operation === 'live.settings.get') return { enabled: (await readCompanionLiveSettings()).enabled };
+    if (operation === 'live.settings.update') return {
+      enabled: (await writeCompanionLiveSettings({ enabled: payload.enabled })).enabled,
+    };
+    if (operation === 'live.prompt.get') return companionLiveSettingsResponse(await readCompanionLiveSettings());
+    if (operation === 'live.prompt.update') return companionLiveSettingsResponse(await writeCompanionLiveSettings({
+      systemPrompt: payload.systemPrompt,
+    }));
     const id = typeof payload.sessionId === 'string' ? payload.sessionId.trim() : '';
     if (!id || id.length > 200) throw new Error('A valid Live sessionId is required.');
     let session = this.sessions.get(deviceId);

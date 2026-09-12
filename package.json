@@ -64,7 +64,8 @@
   "trustedDependencies": [
     "@shopify/react-native-skia",
     "better-sqlite3",
-    "onnxruntime-node"
+    "onnxruntime-node",
+    "uiohook-napi"
   ],
   "patchedDependencies": {
     "expo-audio@57.0.3": "patches/expo-audio@57.0.3.patch",

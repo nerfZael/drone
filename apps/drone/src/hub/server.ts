@@ -334,6 +334,7 @@ import { registerGroupRoutes } from './routes/group-routes';
 import { registerMessageRoutes } from './routes/message-routes';
 import { registerOperationalRoutes } from './routes/operational-routes';
 import { registerResourceSubscriptionRoutes } from './routes/resource-subscription-routes';
+import { registerGlobalShortcutRoutes } from './routes/global-shortcut-routes';
 import { createRepositoryRouteHandler } from './routes/repository-operation-routes';
 import { registerRepositoryRoutes } from './routes/repository-routes';
 import { registerWindowLayoutPresetRoutes } from './routes/window-layout-preset-routes';
@@ -342,6 +343,7 @@ import { registerSidebarRoutes } from './routes/sidebar-routes';
 import { registerSystemRoutes } from './routes/system-routes';
 import { createTerminalRouteHandler } from './routes/terminal-routes';
 import { registerWhiteboardRoutes } from './routes/whiteboard-routes';
+import { GlobalShortcutService } from './global-shortcut-service';
 import { LocalCheckoutService } from './local-checkout-service';
 import {
   createResourceSubscriptionDeliveryAuthorizer,
@@ -4169,6 +4171,9 @@ async function startDroneHubApiServerWithLifecycle(
   registerBackgroundResource('Hub application events', async () => {
     unsubscribeHubApplicationEvents();
   });
+  const globalShortcutService = new GlobalShortcutService();
+  await globalShortcutService.start();
+  registerBackgroundResource('global shortcuts', async () => globalShortcutService.close());
   const sidebarCommands = createSidebarCommandService(hubApplication);
   let actualPort = opts.port;
   const deviceMesh = await createDeviceMeshService({
@@ -5692,6 +5697,8 @@ async function startDroneHubApiServerWithLifecycle(
     HUB_SETTINGS_LOG_DEFAULT_TAIL_LINES,
     HUB_SETTINGS_LOG_MAX_TAIL_LINES,
   });
+
+  registerGlobalShortcutRoutes(apiRouter, globalShortcutService);
 
   registerSidebarRoutes(apiRouter, sidebarCommands);
 

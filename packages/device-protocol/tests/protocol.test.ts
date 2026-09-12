@@ -61,7 +61,7 @@ describe('device protocol', () => {
   });
 
   test('advertises Companion run controls as explicit permissions', () => {
-    expect(COMPANION_CAPABILITY.operations).toEqual(['run.start', 'run.cancel', 'tool.result', 'workspaces.list', 'workspaces.update', 'live.start', 'live.event', 'live.ping', 'live.close', 'live.settings.get', 'live.settings.update', 'auto-approve.settings.get', 'auto-approve.settings.update']);
+    expect(COMPANION_CAPABILITY.operations).toEqual(['run.start', 'run.cancel', 'tool.result', 'workspaces.list', 'workspaces.update', 'live.start', 'live.event', 'live.ping', 'live.close', 'live.settings.get', 'live.settings.update', 'live.prompt.get', 'live.prompt.update', 'auto-approve.settings.get', 'auto-approve.settings.update']);
     expect(isGranted([], COMPANION_CAPABILITY.id, COMPANION_CAPABILITY.version, 'run.start')).toBe(
       false,
     );

@@ -2,6 +2,8 @@
 
 Desktop Companion has an optional **Live voice** toggle beside **Auto-approve proposals**, also available in **Settings → Companion** before starting a recording. It defaults off. The Hub remembers it across Companion sessions and restarts using the canonical settings repository (SQLite in the normal Hub runtime).
 
+**Settings → Companion → GPT-Live system prompt** edits the conversation instructions supplied as `session.instructions`. This prompt controls voice personality, speaking style, tone, and other conversational behavior. It is saved independently from the delegated backend Companion system prompt. Saving it never changes an active session; end and start Live voice to apply the new value. Restoring the default changes the editor first and requires **Save Live prompt**.
+
 When off, the existing record → transcribe → Companion flow remains in use. When on, **Start voice** or the Companion microphone shortcut opens a GPT-Live 1 conversation with **client delegation**. Enabling the preference alone never starts the microphone. There is no managed Responses delegation mode.
 
 Configure an **OpenAI API key** in Hub Settings for the voice model. The backend continues to use the provider, model, reasoning level, tools, and instructions selected in **Companion settings**. For example, a Codex-backed Sol agent can remain the backend while the OpenAI API key pays for Live voice separately. Actual Live availability and quota depend on the OpenAI project. If the initial preference load fails, Companion asks you to retry instead of silently choosing the old recording mode.
@@ -44,7 +46,9 @@ Tap the Companion microphone to connect. The Live panel shows captions and the b
 
 Switching to another Hub ends the session. Changing chat/file context cannot redirect an existing Live request's phone tools: those calls fail with a request to start a new conversation. Start a new voice session after changing workspaces.
 
-Mobile uses device-mesh operations `live.start`, `live.event`, `live.ping`, and `live.close`, plus `live.settings.get`/`live.settings.update`, with device/session-scoped `live.event` notifications. Live controls and preference writes require explicit device grants. Existing `run.start` access also permits reading the non-secret mode flag, so old backend permissions continue to work when Live is off. Enabling Live without granting its controls produces an actionable error.
+Mobile uses device-mesh operations `live.start`, `live.event`, `live.ping`, and `live.close`, plus `live.settings.get`/`live.settings.update` for the mode flag and `live.prompt.get`/`live.prompt.update` for the GPT-Live prompt, with device/session-scoped `live.event` notifications. Live controls and writes require explicit device grants. Existing `run.start` access permits reading only the non-secret mode flag, so old backend permissions continue to work when Live is off without exposing the prompt. Enabling Live without granting its controls produces an actionable error.
+
+The mobile **Companion Live voice** settings card edits the same Hub-owned prompt as desktop. Hubs that predate the prompt operations still expose the mode toggle; mobile asks for a Hub update instead of treating the old response as editable prompt data.
 
 `CompanionLiveMeshSessions` reuses the Hub's `CompanionLiveSocket` entry point, client-only delegation, event validation, and heartbeat expiry. OpenAI credentials stay on the Hub. PCM microphone/speaker audio, delegation, and backend work travel through the paired-device mesh. The Hub relays audio through a primary Live WebSocket; it does not send audio through a WebRTC sideband. The shared `CompanionLiveConversation` and `waitForCompanionReply` live in `@drone/assistant-chat`, so desktop and mobile share result correlation and stale-answer suppression. The selected backend and ASAP/Queue choice still come from normal Companion settings.
 
@@ -87,7 +91,7 @@ initial-word transcription, and final Live usage. iOS compilation requires Xcode
 
 ## Implementation
 
-`GET` and `PUT /api/settings/companion/live-voice` read/write `{ enabled: boolean }` under the independent `companion-live-voice` settings key. This avoids overwriting model settings when the toggle changes.
+`GET` and `PUT /api/settings/companion/live-voice` read and patch the independent `companion-live-voice` settings record. The response contains `enabled`, `systemPrompt`, `defaultSystemPrompt`, and `maxSystemPromptChars`. Writes accept `enabled`, `systemPrompt`, or both and preserve omitted values. Existing records containing only `enabled` receive the default prompt when read. This avoids overwriting either the prompt or backend model settings when the toggle changes.
 
 A dedicated connection to the authenticated `/api/companion/stream` WebSocket
 carries `live_start` with `transport: "pcm"`, `live_ready`, `live_event`, `live_ping`,
@@ -112,6 +116,9 @@ to local recording files by this path.
 The legacy SDP/WebRTC path remains available on the Hub for older clients. Its
 sideband setup and HTTP hangup fallback remain unchanged. New buffered clients
 require the new PCM-aware Hub.
+
+Both PCM and legacy WebRTC sessions use the saved prompt. At session creation it sends the saved GPT-Live prompt verbatim as `session.instructions`, without wrappers or appended instructions. The fully editable default includes personality, backchannel, interruption, delegation, verified-result, follow-up, and cancellation guidance. An explicitly saved empty prompt is sent as an empty string; only an absent setting uses the default. Previously saved prompts are preserved; Restore default loads the complete current default into the editor. Tool permissions and execution checks remain enforced in code. The backend Companion prompt is not copied into `session.instructions`.
+
 
 `CompanionLiveConversation` accumulates bounded conversation context and holds delegation notifications until transcript text arrives. It deduplicates delegation IDs, coalesces pending notifications into the current accumulated request, and dispatches new requests even while the backend is working. Only the latest dispatched request can supply a spoken result. Results return with the original client delegation ID. Appends stay below 400 UTF-8 bytes each. Answers requiring more than four appends are referred to the UI in full rather than cut off mid-answer; the UI keeps the backend's complete reply. Original audio is not automatically supplied to the backend.
 
@@ -144,9 +151,11 @@ changes.
 
 Focused tests cover mode persistence and failed saves, unchanged model settings, the disabled recording path, captured workspaces, delegation arriving before text, duplicate notifications, continued transcripts during backend work, stale spoken results, ending voice during a task, API-key isolation, and microphone/session cleanup. OpenAI/mesh events are simulated; a Chrome smoke test also exercises actual Web Audio capture and playback using a synthetic microphone. Android native module compilation is checked. iOS compilation requires a macOS/Xcode environment. These checks do not establish live API access or real audio quality.
 
+Prompt tests additionally cover migration from the boolean-only setting, partial writes that preserve the other field, validation, the desktop and mobile settings hooks, separate mobile prompt permissions, and verbatim delivery of custom and empty prompts to new sessions.
+
 Manual checks before release:
 
-1. Start with the toggle off and verify normal recording, transcription, tool calls, and proposals. Enable it, close Companion, reopen, and restart the Hub; confirm the preference survives.
+1. Start with the toggle off and verify normal recording, transcription, tool calls, and proposals. Enable it, close Companion, reopen, and restart the Hub; confirm the preference survives. Save distinct Live prompts from desktop and mobile and confirm both editors show the same Hub-owned value. Verify an already-open Live session is unchanged and the next session uses the saved style while still delegating backend work.
 2. With an authorized API key, start Live. Verify audible two-way speech, captions, interruption, mute/unmute, speaker echo handling, and browser autoplay recovery. Check missing credentials, denied mic permission, and unsupported/project-restricted API access.
 3. In each voice mode, send a correction while the backend is working and verify ASAP reaches the running agent before the task finishes, and Queue waits until it finishes. Save a delivery change, start a fresh run, and verify the new setting persists across Companion sessions. Ask the chosen backend to run a lookup and prepare a proposal while continuing to speak. Verify current tool activity remains visible, exact results render, and manual/automatic proposal execution keeps its existing behavior.
 4. Switch UI workspaces during speech. Confirm tools stay bound to the displayed voice target. Change the backend setting and verify a follow-up to the active run keeps its current model, then confirm the next fresh run uses the saved model.

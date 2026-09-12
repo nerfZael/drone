@@ -1,9 +1,10 @@
 import { WebSocket } from 'ws';
+import { companionLiveSessionInstructions } from './companion-live-settings';
 
 type Dependencies = {
   connect(url: string, apiKey: string): WebSocket;
   credentials(): Promise<{ apiKey: string | null }>;
-  enabled(): Promise<{ enabled: boolean }>;
+  enabled(): Promise<{ enabled: boolean; systemPrompt?: string }>;
   backend(): Promise<{ model: string; provider: string }>;
 };
 
@@ -19,7 +20,7 @@ export class CompanionPcmLiveSocket {
   private closeTimer?: ReturnType<typeof setTimeout>;
 
   constructor(private readonly send: (event: unknown) => void,
-    private readonly deps: Dependencies, private readonly instructions: string) {}
+    private readonly deps: Dependencies) {}
 
   handle(message: { type?: string; event?: unknown }): void {
     if (message.type === 'live_close') { this.close(); return; }
@@ -87,7 +88,7 @@ export class CompanionPcmLiveSocket {
       try {
         upstream.send(JSON.stringify({ type: 'session.start', session: {
           model: 'gpt-live-1', delegation: { type: 'client' }, store: false,
-          instructions: this.instructions, audio: { format: { type: 'audio/pcm', rate: 24_000 } },
+          instructions: companionLiveSessionInstructions(setting.systemPrompt), audio: { format: { type: 'audio/pcm', rate: 24_000 } },
         } }));
       } catch { this.fail('Live audio connection failed.'); }
     });

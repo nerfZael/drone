@@ -1,5 +1,7 @@
 import { readFileSync } from 'node:fs';
+import { DRONE_HUB_SHORTCUT_ACTION_IDS } from '@drone/hub-model';
 import {
+  SHORTCUT_DEFINITIONS,
   cloneDefaultShortcutBindings,
   formatShortcutBinding,
   isShortcutMatch,
@@ -35,6 +37,13 @@ describe('shortcut defaults', () => {
     old.openHome = r;
     expect(migrateChatComposerShortcuts(old)).toMatchObject({ createSideChat: null, clearChatComposer: { key: 'k' }, openHome: r });
   });
+
+  test('keeps the host and browser action lists in sync', () => {
+    expect(SHORTCUT_DEFINITIONS.map((definition) => definition.id)).toEqual([
+      ...DRONE_HUB_SHORTCUT_ACTION_IDS,
+    ]);
+  });
+
   test('uses 1/2/3/4 for root drone, grouped drone, draft chat, and chat clone', () => {
     const defaults = cloneDefaultShortcutBindings();
     expect(defaults.createDraftDrone).toEqual({
@@ -212,6 +221,40 @@ describe('shortcut defaults', () => {
     expect(isShortcutMatch(binding, { key: 'p', ctrlKey: true, metaKey: false, altKey: true, shiftKey: true })).toBe(true);
     expect(isShortcutMatch(binding, { key: 'p', ctrlKey: false, metaKey: true, altKey: true, shiftKey: true })).toBe(true);
     expect(isShortcutMatch(binding, { key: 'p', ctrlKey: true, metaKey: false, altKey: false, shiftKey: true })).toBe(false);
+  });
+
+  test('keeps numpad keys distinct from number-row keys', () => {
+    const binding = shortcutBindingFromKeyboardEvent({
+      key: '1',
+      code: 'Numpad1',
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false,
+    });
+
+    expect(binding?.key).toBe('num1');
+    expect(formatShortcutBinding(binding)).toBe('Numpad 1');
+    expect(
+      isShortcutMatch(binding, {
+        key: '1',
+        code: 'Numpad1',
+        ctrlKey: false,
+        metaKey: false,
+        altKey: false,
+        shiftKey: false,
+      }),
+    ).toBe(true);
+    expect(
+      isShortcutMatch(binding, {
+        key: '1',
+        code: 'Digit1',
+        ctrlKey: false,
+        metaKey: false,
+        altKey: false,
+        shiftKey: false,
+      }),
+    ).toBe(false);
   });
 
   test('restores and accepts customization of the full-editor shortcut', () => {

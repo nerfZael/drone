@@ -1,41 +1,6 @@
-export type ShortcutActionId =
-  | 'openQuickActions'
-  | 'openHome'
-  | 'createDraftDrone'
-  | 'createDraftGroup'
-  | 'createChatGroup'
-  | 'alignFloatingChats'
-  | 'createDraftDroneInCurrentGroup'
-  | 'createDroneChat'
-  | 'cloneDroneChat'
-  | 'createSideChat'
-  | 'toggleSideChatMain'
-  | 'toggleSelectedDronePinned'
-  | 'moveSelectedDroneToTop'
-  | 'toggleSelectedDronesToDo'
-  | 'focusPrimaryChatInput'
-  | 'sendActiveChatComposer'
-  | 'toggleChatComposerEditorMode'
-  | 'toggleChatVoiceRecording'
-  | 'toggleChatVoiceRecordingPause'
-  | 'discardChatVoiceRecording'
-  | 'clearChatComposer'
-  | 'toggleContinuousDictation'
-  | 'toggleFileDictation'
-  | 'toggleCompanion'
-  | 'applyCompanionProposal'
-  | 'toggleVoiceClipboardRecording'
-  | 'markSelectedDronesUnread'
-  | 'toggleSidebarCollapsed'
-  | 'toggleRightPanelWidth'
-  | 'openHoveredGroupMultiChat'
-  | 'openPullRequestsTab'
-  | 'openChangesTab'
-  | 'openCanvasTab'
-  | 'openBrowserTab'
-  | 'openFilesTab'
-  | 'openQuickOpen'
-  | 'openTerminalTab';
+import type { DroneHubShortcutActionId } from '@drone/hub-model';
+
+export type ShortcutActionId = DroneHubShortcutActionId;
 
 export type ShortcutBinding = {
   key: string;
@@ -283,7 +248,7 @@ const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   openTerminalTab: null,
 };
 
-type KeyboardEventLike = Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey'>;
+type KeyboardEventLike = Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey'> & Partial<Pick<KeyboardEvent, 'code'>>;
 type ShortcutCaptureOptions = {
   preferPortablePrimaryModifier?: boolean;
 };
@@ -300,6 +265,25 @@ function normalizeShortcutKey(raw: string): string {
   if (lower === 'esc') return 'escape';
   if (lower === 'return') return 'enter';
   return lower;
+}
+
+function numpadShortcutKeyFromCode(code: string | undefined): string {
+  const value = String(code ?? '');
+  const digit = /^Numpad([0-9])$/.exec(value);
+  if (digit) return `num${digit[1]}`;
+  const map: Record<string, string> = {
+    NumpadDecimal: 'numdec',
+    NumpadAdd: 'numadd',
+    NumpadSubtract: 'numsub',
+    NumpadMultiply: 'nummult',
+    NumpadDivide: 'numdiv',
+    NumpadEnter: 'numenter',
+  };
+  return map[value] ?? '';
+}
+
+function shortcutKeyFromKeyboardEvent(event: KeyboardEventLike): string {
+  return numpadShortcutKeyFromCode(event.code) || normalizeShortcutKey(event.key);
 }
 
 function isModifierOnlyKey(raw: string): boolean {
@@ -549,7 +533,7 @@ export function shortcutBindingFromKeyboardEvent(
   event: KeyboardEventLike,
   opts: ShortcutCaptureOptions = {},
 ): ShortcutBinding | null {
-  const key = normalizeShortcutKey(event.key);
+  const key = shortcutKeyFromKeyboardEvent(event);
   if (!key || isModifierOnlyKey(key)) return null;
   const preferPortablePrimaryModifier = opts.preferPortablePrimaryModifier === true;
   const hasSinglePrimaryModifier = event.ctrlKey !== event.metaKey;
@@ -566,7 +550,7 @@ export function shortcutBindingFromKeyboardEvent(
 
 export function isShortcutMatch(binding: ShortcutBinding | null | undefined, event: KeyboardEventLike): boolean {
   if (!binding) return false;
-  const eventKey = normalizeShortcutKey(event.key);
+  const eventKey = shortcutKeyFromKeyboardEvent(event);
   if (!eventKey || eventKey !== binding.key) return false;
 
   if (binding.mod) {
@@ -582,6 +566,13 @@ export function isShortcutMatch(binding: ShortcutBinding | null | undefined, eve
 }
 
 function formatShortcutKeyLabel(key: string): string {
+  if (/^num[0-9]$/.test(key)) return `Numpad ${key.slice(3)}`;
+  if (key === 'numdec') return 'Numpad .';
+  if (key === 'numadd') return 'Numpad +';
+  if (key === 'numsub') return 'Numpad -';
+  if (key === 'nummult') return 'Numpad *';
+  if (key === 'numdiv') return 'Numpad /';
+  if (key === 'numenter') return 'Numpad Enter';
   if (key === 'space') return 'Space';
   if (key === 'escape') return 'Esc';
   if (key === 'arrowup') return 'Up';

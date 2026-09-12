@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import { expect, test } from 'bun:test';
 import { WebSocket } from 'ws';
 import { CompanionLiveSocket } from '../src/hub/companion/CompanionLiveSocket';
+import { DEFAULT_COMPANION_LIVE_SYSTEM_PROMPT } from '../src/hub/companion/companion-live-settings';
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 class FakeSocket extends EventEmitter {
   readyState: number = WebSocket.CONNECTING; bufferedAmount = 0; sent: any[] = []; terminated = false;
@@ -83,3 +84,13 @@ test('PCM enforces settings and bounds upstream backpressure', async () => {
   h.session.handle({ type: 'live_event', event: { type: 'session.input_audio.append', audio: 'AQI=' } });
   expect(h.messages.at(-1).type).toBe('live_error'); h.event({ type: 'session.closed' });
 });
+
+for (const systemPrompt of [undefined, '', '  Custom voice instructions.\nKeep this exact.  ']) {
+  test(`PCM sends the saved prompt verbatim (${systemPrompt === undefined ? 'default' : systemPrompt === '' ? 'empty' : 'custom'})`, async () => {
+    const h = harness({ enabled: async () => ({ enabled: true, systemPrompt }) });
+    h.session.handle({ type: 'live_start', transport: 'pcm' }); await tick();
+    h.upstream.readyState = WebSocket.OPEN; h.upstream.emit('open');
+    expect(h.upstream.sent[0].session.instructions).toBe(systemPrompt ?? DEFAULT_COMPANION_LIVE_SYSTEM_PROMPT);
+    h.session.close();
+  });
+}

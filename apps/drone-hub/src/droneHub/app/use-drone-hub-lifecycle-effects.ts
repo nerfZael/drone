@@ -34,6 +34,10 @@ import {
   isCompanionShortcutDoubleTap,
   shouldConsumeCompanionProposalShortcut,
 } from '../companion/companion-shortcut';
+import {
+  activeGlobalShortcutBindings,
+} from './global-shortcut-state';
+import { useGlobalShortcutClient } from './use-global-shortcut-client';
 
 type Updater<T> = T | ((prev: T) => T);
 type Setter<T> = (next: Updater<T>) => void;
@@ -243,6 +247,7 @@ export function useDroneHubLifecycleEffects({
   const toggleActiveComposerVoiceRecording = activeComposer.toggleVoiceRecording;
   const toggleFileDictation = useFileDictation()?.toggle;
   const outputScrollContextRef = React.useRef<string>('');
+  const globalShortcutActionHandlerRef = useGlobalShortcutClient();
   useDropdownDismiss(terminalMenuRef, terminalMenuOpen, setTerminalMenuOpen);
   useDropdownDismiss(headerOverflowRef, headerOverflowOpen, setHeaderOverflowOpen);
 
@@ -386,7 +391,8 @@ export function useDroneHubLifecycleEffects({
       return group || null;
     };
 
-    const isSidebarHovered = (): boolean => Boolean(document.querySelector('[data-drone-sidebar-root]:hover'));
+    const isSidebarHovered = (): boolean =>
+      Boolean(document.querySelector('[data-drone-sidebar-root]:hover'));
 
     const shortcutActionHandlers: Record<ShortcutActionId, () => boolean> = {
       openQuickActions: () => {
@@ -540,6 +546,18 @@ export function useDroneHubLifecycleEffects({
     };
     const runShortcutAction = (actionId: ShortcutActionId, _event: KeyboardEvent): boolean =>
       shortcutActionHandlers[actionId]();
+    const runGlobalShortcutAction = (actionId: ShortcutActionId) => {
+      if (actionId === 'toggleChatComposerEditorMode') {
+        toggleCurrentChatComposerEditorMode();
+        return;
+      }
+      runShortcutAction(actionId, new KeyboardEvent('keydown'));
+    };
+    globalShortcutActionHandlerRef.current = runGlobalShortcutAction;
+    const isActiveGlobalShortcutMatch = (event: KeyboardEvent): boolean =>
+      Object.values(activeGlobalShortcutBindings()).some((binding) =>
+        isShortcutMatch(binding, event),
+      );
 
     const isEditableTarget = (target: EventTarget | null): boolean => {
       if (!(target instanceof HTMLElement)) return false;
@@ -569,7 +587,11 @@ export function useDroneHubLifecycleEffects({
 
     const isInteractiveTarget = (target: EventTarget | null): boolean => {
       if (!(target instanceof HTMLElement)) return false;
-      return Boolean(target.closest('button, a[href], summary, [role="button"], [role="menuitem"], [role="tab"]'));
+      return Boolean(
+        target.closest(
+          'button, a[href], summary, [role="button"], [role="menuitem"], [role="tab"]',
+        ),
+      );
     };
 
     const isSidebarDroneCardTarget = (target: EventTarget | null): boolean => {
@@ -579,6 +601,11 @@ export function useDroneHubLifecycleEffects({
 
     const onChatComposerEditorShortcutCapture = (e: KeyboardEvent) => {
       if (quickActions.getSnapshot()) {
+        if (!e.repeat && !e.isComposing && isActiveGlobalShortcutMatch(e)) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          return;
+        }
         if (quickActions.handleKey(e)) {
           e.preventDefault();
           e.stopImmediatePropagation();
@@ -589,17 +616,25 @@ export function useDroneHubLifecycleEffects({
       const captureRoot =
         e.target instanceof HTMLElement ? e.target.closest('[data-shortcut-capture="true"]') : null;
       if (captureRoot) return;
-      const matched = SHORTCUT_DEFINITIONS.find(
-        (definition) => isShortcutMatch(shortcutBindings[definition.id], e),
+      const matched = SHORTCUT_DEFINITIONS.find((definition) =>
+        isShortcutMatch(shortcutBindings[definition.id], e),
       );
+      if (isActiveGlobalShortcutMatch(e)) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       const modalOpen = Boolean(document.querySelector('[role="dialog"][aria-modal="true"]'));
       if (matched?.id === 'applyCompanionProposal') {
         const handled = modalOpen ? false : runShortcutAction(matched.id, e);
-        if (!shouldConsumeCompanionProposalShortcut({
-          matched: true,
-          shortcutKey: shortcutBindings[matched.id]?.key,
-          canApply: handled,
-        })) return;
+        if (
+          !shouldConsumeCompanionProposalShortcut({
+            matched: true,
+            shortcutKey: shortcutBindings[matched.id]?.key,
+            canApply: handled,
+          })
+        )
+          return;
         e.preventDefault();
         e.stopPropagation();
         return;
@@ -628,16 +663,14 @@ export function useDroneHubLifecycleEffects({
       if (
         isAppShortcutBoundaryTarget(e.target) ||
         isAppShortcutBoundaryTarget(document.activeElement)
-      ) return;
+      )
+        return;
       const captureRoot =
-        e.target instanceof HTMLElement ? e.target.closest<HTMLElement>('[data-shortcut-capture="true"]') : null;
+        e.target instanceof HTMLElement
+          ? e.target.closest<HTMLElement>('[data-shortcut-capture="true"]')
+          : null;
       const deleteOnly =
-        e.key === 'Delete' &&
-        !e.repeat &&
-        !e.shiftKey &&
-        !e.ctrlKey &&
-        !e.metaKey &&
-        !e.altKey;
+        e.key === 'Delete' && !e.repeat && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey;
       const modalOpen = Boolean(document.querySelector('[role="dialog"][aria-modal="true"]'));
       if (deleteOnly && !modalOpen && !captureRoot && !isEditableTarget(e.target)) {
         const handled = onDeleteSelectedDroneFromInputShortcut();
@@ -649,10 +682,14 @@ export function useDroneHubLifecycleEffects({
       if (e.repeat) return;
       const matched = SHORTCUT_DEFINITIONS.find((def) => isShortcutMatch(shortcutBindings[def.id], e)) ?? null;
       if (matched?.id === 'openQuickActions' && (modalOpen || isEditableTarget(document.activeElement))) return;
+      if (!captureRoot && isActiveGlobalShortcutMatch(e)) {
+        e.preventDefault();
+        return;
+      }
       if (isEditableTarget(e.target)) {
         const allowEditableShortcut = shouldDispatchEditableShortcutAction({
           matchedActionId: matched?.id ?? null,
-          matchedShortcutKey: matched ? shortcutBindings[matched.id]?.key ?? null : null,
+          matchedShortcutKey: matched ? (shortcutBindings[matched.id]?.key ?? null) : null,
           targetInPrimaryChatInput: isPrimaryChatInputTarget(e.target),
           targetInCanvasMessageInput: isCanvasMessageInputTarget(e.target),
           targetInAssistantChatInput: isAssistantChatInputTarget(e.target),
@@ -663,9 +700,12 @@ export function useDroneHubLifecycleEffects({
         e.preventDefault();
         return;
       }
-      if (e.key === 'Enter' && isInteractiveTarget(e.target) && !isSidebarDroneCardTarget(e.target)) return;
+      if (e.key === 'Enter' && isInteractiveTarget(e.target) && !isSidebarDroneCardTarget(e.target))
+        return;
       if (captureRoot) {
-        const insideCanvasViewport = Boolean(captureRoot.closest('[data-drone-canvas-viewport="1"]'));
+        const insideCanvasViewport = Boolean(
+          captureRoot.closest('[data-drone-canvas-viewport="1"]'),
+        );
         if (!insideCanvasViewport) return;
       }
 
@@ -698,7 +738,12 @@ export function useDroneHubLifecycleEffects({
     document.addEventListener('keyup', onKeyUpCapture, { capture: true });
     document.addEventListener('keydown', onKeyDown);
     return () => {
-      document.removeEventListener('keydown', onChatComposerEditorShortcutCapture, { capture: true });
+      if (globalShortcutActionHandlerRef.current === runGlobalShortcutAction) {
+        globalShortcutActionHandlerRef.current = null;
+      }
+      document.removeEventListener('keydown', onChatComposerEditorShortcutCapture, {
+        capture: true,
+      });
       document.removeEventListener('keyup', onKeyUpCapture, { capture: true });
       document.removeEventListener('keydown', onKeyDown);
     };
@@ -882,7 +927,16 @@ export function useDroneHubLifecycleEffects({
         });
       }
     }
-  }, [chatUiMode, outputScrollRef, pinnedToBottomRef, prevOutputLenRef, selectedChat, selectedDrone, sessionText, updatePinned]);
+  }, [
+    chatUiMode,
+    outputScrollRef,
+    pinnedToBottomRef,
+    prevOutputLenRef,
+    selectedChat,
+    selectedDrone,
+    sessionText,
+    updatePinned,
+  ]);
 
   React.useEffect(() => {
     const pending = draftChat?.prompt ?? null;
@@ -897,7 +951,8 @@ export function useDroneHubLifecycleEffects({
         autoRenaming: draftAutoRenaming,
         hasSelectedDrone: Boolean(selectedDrone),
       })
-    ) return;
+    )
+      return;
     setDraftChat(null);
   }, [
     currentDrone,

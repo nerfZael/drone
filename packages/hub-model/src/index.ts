@@ -1,4 +1,5 @@
 export * from './change-requests';
+export * from './global-shortcuts';
 export * from './sidebar';
 export { CacheExpiryTimer, ExpiringMap } from './cache-expiry';
 export { workspaceExplorerLocation, workspaceExplorerRevealDirectories, normalizeWorkspaceLinkPath, workspaceLinkParent, workspaceLinkIsDirectory, resolveWorkspacePreviewLink } from './path-navigation';

@@ -99,7 +99,16 @@ export const PROVIDER_CREDENTIALS_CAPABILITY: CapabilityDescriptor = {
 };
 
 export const COMPANION_RUN_OPERATIONS = ['run.start', 'run.cancel', 'tool.result'] as const;
-export const COMPANION_LIVE_OPERATIONS = ['live.start', 'live.event', 'live.ping', 'live.close', 'live.settings.get', 'live.settings.update'] as const;
+export const COMPANION_LIVE_OPERATIONS = [
+  'live.start',
+  'live.event',
+  'live.ping',
+  'live.close',
+  'live.settings.get',
+  'live.settings.update',
+  'live.prompt.get',
+  'live.prompt.update',
+] as const;
 export const COMPANION_WORKSPACE_OPERATIONS = ['workspaces.list', 'workspaces.update'] as const;
 
 export const COMPANION_CAPABILITY: CapabilityDescriptor = {

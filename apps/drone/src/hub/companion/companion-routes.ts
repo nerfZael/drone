@@ -9,7 +9,7 @@ import { companionSettingsResponse, writeCompanionSettings } from './companion-c
 import type { CompanionTelemetryService } from './companion-telemetry';
 import { COMPANION_INSTRUCTIONS_MAX_CHARS } from '@drone/assistant-chat';
 import { readCompanionInstructions, writeCompanionInstructions } from './companion-instructions';
-import { readCompanionLiveSettings, writeCompanionLiveSettings } from './companion-live-settings';
+import { companionLiveSettingsResponse, readCompanionLiveSettings, writeCompanionLiveSettings } from './companion-live-settings';
 
 export function registerCompanionRoutes(
   router: HubRouter,
@@ -18,12 +18,14 @@ export function registerCompanionRoutes(
   organization?: { services: HubServices; sidebar: SidebarCommandService },
 ): void {
   router.get('/api/settings/companion/live-voice', async ({ req, json }) => {
-    json(200, { ok: true, ...await measureHubRequestPhase(req, 'companion_settings_read', () => readCompanionLiveSettings()) });
+    const settings = await measureHubRequestPhase(req, 'companion_settings_read', () => readCompanionLiveSettings());
+    json(200, { ok: true, ...companionLiveSettingsResponse(settings) });
   });
   router.put('/api/settings/companion/live-voice', async ({ req, readJson, json, fail }) => {
     try {
       const body = await measureHubRequestPhase(req, 'companion_request_body', () => readJson());
-      json(200, { ok: true, ...await measureHubRequestPhase(req, 'companion_settings_write', () => writeCompanionLiveSettings(body)) });
+      const settings = await measureHubRequestPhase(req, 'companion_settings_write', () => writeCompanionLiveSettings(body));
+      json(200, { ok: true, ...companionLiveSettingsResponse(settings) });
     }
     catch (error) { fail(400, error instanceof Error ? error.message : String(error)); }
   });
