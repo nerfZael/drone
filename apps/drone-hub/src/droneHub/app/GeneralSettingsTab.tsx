@@ -933,14 +933,15 @@ export function GeneralSettingsTab({
               <div>
                 <div className="dh-type-label">Reading density</div>
                 <div className="mt-1 dh-type-supporting">
-                  Comfortable increases prose, navigation, and supporting text throughout the app.
+                  Comfortable is the default. Compact fits more prose, navigation, and supporting
+                  text on screen.
                 </div>
               </div>
               <UiSegmentedControl
                 label="Reading density"
                 value={readingDensityMode}
                 options={[
-                  { value: 'default', label: 'Default' },
+                  { value: 'default', label: 'Compact' },
                   { value: 'comfortable', label: 'Comfortable' },
                 ]}
                 onValueChange={setReadingDensityMode}

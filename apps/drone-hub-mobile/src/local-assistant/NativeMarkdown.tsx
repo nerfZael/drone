@@ -482,12 +482,18 @@ function NativeMarkdownBlocks({
               key={`heading:${index}`}
               style={[
                 styles.heading,
-                block.level <= 2 ? styles.headingLarge : styles.headingSmall,
+                block.level === 1
+                  ? styles.heading1
+                  : block.level === 2
+                    ? styles.heading2
+                    : styles.headingSmall,
                 toneTextStyle(tone),
                 comfortable &&
-                  (block.level <= 2
-                    ? styles.headingLargeComfortable
-                    : styles.headingSmallComfortable),
+                  (block.level === 1
+                    ? styles.heading1Comfortable
+                    : block.level === 2
+                      ? styles.heading2Comfortable
+                      : styles.headingSmallComfortable),
               ]}
             >
               <InlineMarkdown
@@ -895,9 +901,11 @@ const styles = StyleSheet.create({
   bodyComfortable: { fontSize: 16, lineHeight: 24 },
   secondaryTextComfortable: { fontSize: 14, lineHeight: 21 },
   heading: { color: colors.text, fontWeight: '900', letterSpacing: -0.2 },
-  headingLarge: { fontSize: 19, lineHeight: 25, marginTop: 3 },
+  heading1: { fontSize: 22, lineHeight: 28, marginTop: 8 },
+  heading2: { fontSize: 19, lineHeight: 25, marginTop: 6 },
   headingSmall: { fontSize: 16, lineHeight: 22, marginTop: 2 },
-  headingLargeComfortable: { fontSize: 20, lineHeight: 27 },
+  heading1Comfortable: { fontSize: 23, lineHeight: 30 },
+  heading2Comfortable: { fontSize: 20, lineHeight: 27 },
   headingSmallComfortable: { fontSize: 17, lineHeight: 24 },
   documentHeading1Comfortable: { fontSize: 25, lineHeight: 32 },
   documentHeading2Comfortable: { fontSize: 20, lineHeight: 26 },
