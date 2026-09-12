@@ -42,7 +42,7 @@ export function useGlobalShortcutClient(): React.MutableRefObject<
           focused: document.hasFocus(),
           visible: document.visibilityState === 'visible',
           capturing: document.activeElement instanceof Element &&
-            Boolean(document.activeElement.closest('[data-shortcut-capture="true"]')),
+            Boolean(document.activeElement.closest('[data-shortcut-binding-capture="true"]')),
       });
       if (body === lastActivity) return;
       lastActivity = body;
@@ -69,7 +69,7 @@ export function useGlobalShortcutClient(): React.MutableRefObject<
       if (
         document.hasFocus() &&
         document.activeElement instanceof Element &&
-        document.activeElement.closest('[data-shortcut-capture="true"]')
+        document.activeElement.closest('[data-shortcut-binding-capture="true"]')
       ) {
         return;
       }

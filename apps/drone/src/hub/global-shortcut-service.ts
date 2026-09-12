@@ -56,6 +56,7 @@ export type DesktopShortcutConfiguration = {
   bindings: DroneHubGlobalShortcutBindings;
   suspended: boolean;
   observedNumpad: boolean;
+  observedBackquote: boolean;
   numpadUnavailable: boolean;
 };
 
@@ -162,9 +163,9 @@ export class GlobalShortcutService {
     if (this.desktop?.id !== id || revision !== this.desktopRevision ||
         typeof actionId !== 'string' || !this.status.actions[actionId as DroneHubShortcutActionId]?.active) return false;
     if (this.captureActive()) return false;
-    // X11 reports keypad navigation keys differently with Num Lock off. The
-    // observer dispatches those physical keys; Electron still owns their grabs.
-    if (!(this.hook && this.bindings[actionId as DroneHubShortcutActionId]?.key.startsWith('num'))) {
+    // X11 can resolve keypad and backquote accelerators to different physical
+    // keys. The observer dispatches them; Electron still owns registration.
+    if (!(this.hook && isObservedPhysicalKey(this.bindings[actionId as DroneHubShortcutActionId]?.key))) {
       const action = actionId as DroneHubShortcutActionId;
       const sequence = this.desktopPressSequences.get(action);
       if (sequence !== undefined) {
@@ -207,6 +208,7 @@ export class GlobalShortcutService {
     this.desktop?.send({
       revision, bindings: cloneBindings(this.bindings), suspended: this.captureActive(),
       observedNumpad: this.hook !== null,
+      observedBackquote: this.hook !== null,
       numpadUnavailable: this.deps.platform === 'linux' && !this.deps.env.WAYLAND_DISPLAY && !this.hook,
     });
   }
@@ -419,7 +421,7 @@ export class GlobalShortcutService {
       // Native X11 callbacks repeat while a key is held. Record physical presses
       // to deduplicate callbacks, but let native registration authorize dispatch.
       this.desktopPressSequences.set(matched.actionId, (this.desktopPressSequences.get(matched.actionId) ?? 0) + 1);
-      if (!matched.binding.key.startsWith('num') || !this.status.actions[matched.actionId]?.active || this.captureActive()) return;
+      if (!isObservedPhysicalKey(matched.binding.key) || !this.status.actions[matched.actionId]?.active || this.captureActive()) return;
     }
     this.dispatch(matched.actionId);
   }
@@ -619,4 +621,10 @@ function compareClients(left: GlobalShortcutClient, right: GlobalShortcutClient)
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error ?? 'unknown error');
+}
+
+function isObservedPhysicalKey(key: string | undefined): boolean {
+  // Chromium's X11 lookup selects the first occurrence in any layout layer.
+  // Backquote may therefore resolve to AltGr+7 instead of the backquote key.
+  return Boolean(key?.startsWith('num') || key === '`' || key === '~');
 }

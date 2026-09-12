@@ -7,6 +7,7 @@ import { CompanionLiveConversation } from './CompanionLiveConversation';
 type LiveStatus = 'idle' | 'connecting' | 'listening' | 'error';
 type LiveSession = { connection: CompanionLiveConnection; conversation: CompanionLiveConversation; abort: AbortController; replies?: ReturnType<typeof connectCompanionLiveReplies>; muted: boolean };
 type LiveState = {
+  hasStarted: boolean;
   status: LiveStatus;
   capturing: boolean;
   error: string;
@@ -142,7 +143,7 @@ export function useCompanionLive(controller?: CompanionClientController) {
 
   const start = React.useCallback(async (runBackend: (prompt: string, signal: AbortSignal) => Promise<string>, workspaceLabel: string) => {
     if (active.current || !enabledRef.current) return;
-    setState({ ...EMPTY_STATE, status: 'connecting', workspaceLabel });
+    setState({ ...EMPTY_STATE, hasStarted: true, status: 'connecting', workspaceLabel });
     let session: LiveSession;
     const update = (patch: Partial<LiveState>) => {
       if (mounted.current && active.current === session) setState((previous) => ({ ...previous, ...patch }));
@@ -217,7 +218,7 @@ export function useCompanionLive(controller?: CompanionClientController) {
 }
 
 const EMPTY_STATE: LiveState = {
-  status: 'idle', capturing: false, error: '', captions: '', queued: 0, muted: false, playbackBlocked: false, backendModel: '', workspaceLabel: '',
+  hasStarted: false, status: 'idle', capturing: false, error: '', captions: '', queued: 0, muted: false, playbackBlocked: false, backendModel: '', workspaceLabel: '',
 };
 
 async function settingsRequest(update?: Partial<Pick<LiveSettings, 'enabled' | 'systemPrompt'>>): Promise<LiveSettings> {

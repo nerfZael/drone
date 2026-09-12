@@ -8,7 +8,7 @@ import { openMobileLiveAudio, prepareMobileLiveAudio } from './openMobileLiveAud
 import { openMobileLiveControls, type MobileLiveControls, type LiveMediaAction } from './mobile-live-controls';
 import type { MobileMicrophoneCoordinator } from './mobile-microphone-coordinator';
 
-type State = { capturing: boolean; status: 'idle' | 'connecting' | 'listening' | 'paused' | 'error'; error: string; captions: string;
+type State = { hasStarted: boolean; capturing: boolean; status: 'idle' | 'connecting' | 'listening' | 'paused' | 'error'; error: string; captions: string;
   backendModel: string; targetDeviceId: string; targetName: string; muted: boolean; queued: number };
 type Session = { connection: MobileCompanionLiveConnection; conversation: CompanionLiveConversation; abort: AbortController; replies?: ReturnType<typeof connectCompanionLiveReplies>; muted: boolean };
 type Target = { id: string; name: string; run: (prompt: string, signal: AbortSignal) => Promise<string> };
@@ -65,7 +65,7 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
     const previousCleanup = cleanup.current;
     let setupSettled!: () => void;
     pendingSetup.current = new Promise((resolve) => { setupSettled = resolve; });
-    setState({ ...EMPTY, status: 'connecting', targetDeviceId, targetName });
+    setState({ ...EMPTY, hasStarted: true, status: 'connecting', targetDeviceId, targetName });
     let session!: Session;
     // Observe immediately: the backend can finish while previous audio is releasing
     // or native microphone setup is still pending. Flush only after Live is ready.
@@ -154,4 +154,4 @@ export function useMobileCompanionLive(microphoneCoordinator: MobileMicrophoneCo
   return { ...state, start, stop, reset, pause, resume, toggleMute };
 }
 
-const EMPTY: State = { status: 'idle', capturing: false, error: '', captions: '', backendModel: '', targetDeviceId: '', targetName: '', muted: false, queued: 0 };
+const EMPTY: State = { hasStarted: false, status: 'idle', capturing: false, error: '', captions: '', backendModel: '', targetDeviceId: '', targetName: '', muted: false, queued: 0 };

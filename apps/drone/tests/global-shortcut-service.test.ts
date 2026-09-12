@@ -58,6 +58,7 @@ function createService(initialBindings: unknown, options: { env?: NodeJS.Process
           NumpadEnd: 61_007,
           NumpadDecimal: 83,
           NumpadDelete: 61_011,
+          Backquote: 41,
           Q: 16,
           P: 25,
         },
@@ -91,6 +92,36 @@ describe('GlobalShortcutService', () => {
     service.dispatchDesktop('desktop-one', config.revision, 'toggleCompanion');
     expect(events).toHaveLength(2);
     service.close();
+  });
+
+  test('dispatches physical backquote presses even when native X11 callbacks are missing', async () => {
+    for (const shift of [false, true]) {
+      const binding = { key: shift ? '~' : '`', mod: false, ctrl: false, meta: false, alt: false, shift };
+      const { service, hook } = createService({ toggleCompanion: binding });
+      await service.start();
+      let config: any;
+      const events: GlobalShortcutDispatchEvent[] = [];
+      service.connectClient('client-one', (event) => events.push(event));
+      service.connectDesktop('desktop-one', (value) => { config = value; });
+      expect(config.observedBackquote).toBe(true);
+      const press = () => hook.emit('keydown', keyboardEvent(41, { shiftKey: shift }));
+      const release = () => hook.emit('keyup', keyboardEvent(41));
+      press(); release();
+      expect(events).toHaveLength(0); // Registration must succeed first.
+      service.reportDesktopStatus('desktop-one', config.revision, { actions: { toggleCompanion: { active: true } } });
+      for (const focused of [true, false]) {
+        service.updateClientActivity('client-one', { focused, visible: focused });
+        press(); press(); release();
+      }
+      expect(events.map((event) => event.actionId)).toEqual(['toggleCompanion', 'toggleCompanion']);
+      service.dispatchDesktop('desktop-one', config.revision, 'toggleCompanion');
+      expect(events).toHaveLength(2); // Native callbacks cannot double-toggle or dispatch the wrong key.
+      service.updateClientActivity('client-one', { focused: true, capturing: true });
+      service.reportDesktopStatus('desktop-one', config.revision, { actions: { toggleCompanion: { active: true } } });
+      press(); release();
+      expect(events).toHaveLength(2);
+      service.close();
+    }
   });
 
   test('uses the X11 observer only for successfully reserved physical numpad keys', async () => {

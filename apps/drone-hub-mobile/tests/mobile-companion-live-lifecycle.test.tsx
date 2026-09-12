@@ -237,16 +237,22 @@ test('mobile reconnect routes backend completion and subscription replies to the
   const coordinator = new MobileMicrophoneCoordinator();
   let receive!: (event: CompanionServerMessage) => void;
   let messageId = '';
+  const backendCalls: string[] = [];
   const run = (_prompt: string, signal: AbortSignal) => waitForCompanionReply(controller, () => controller.submitPrompt({
     prompt: 'Check this', executeTool: () => ({}), createTransport: () => ({
       open: async (options) => { receive = options.onMessage; return undefined; },
       sendPrompt: (input) => { messageId = input.messageId; },
-      sendToolResult: () => {}, cancel: () => {}, close: () => {},
+      sendToolResult: () => {}, cancel: () => { backendCalls.push('cancel'); }, close: () => { backendCalls.push('close'); },
     }),
   }), signal);
   function Capture() { live = useMobileCompanionLive(coordinator, controller); return null; }
   try {
     await act(async () => { root = create(<Capture />); });
+    await act(async () => { await live.start('hub', 'Hub', run); });
+    expect(live.hasStarted).toBe(true);
+    await act(async () => { live.stop(); });
+    expect(live.status).toBe('idle');
+    expect(live.hasStarted).toBe(true);
     await act(async () => { await live.start('hub', 'Hub', run); });
     const old = connections.at(-1)!;
     await act(async () => {
@@ -255,6 +261,9 @@ test('mobile reconnect routes backend completion and subscription replies to the
       await new Promise((resolve) => setTimeout(resolve, 500));
     });
     await act(async () => { live.stop(); });
+    expect(live.hasStarted).toBe(true);
+    expect(controller.getSnapshot().status).toBe('working');
+    expect(backendCalls).toEqual([]);
     const preparation = Promise.withResolvers<void>();
     prepareAudio = () => preparation.promise;
     let restarting!: Promise<void>;
@@ -276,6 +285,9 @@ test('mobile reconnect routes backend completion and subscription replies to the
       { type: 'session.commentary.append', delegation_id: null, content: 'Finished' },
       { type: 'session.commentary.append', delegation_id: null, content: 'Notification' },
     ]);
+    await act(async () => { live.reset(); });
+    expect(live.hasStarted).toBe(false);
+    expect(backendCalls).toEqual([]);
   } finally {
     await act(async () => { root.unmount(); await controller.close(); });
     prepareAudio = async () => {};

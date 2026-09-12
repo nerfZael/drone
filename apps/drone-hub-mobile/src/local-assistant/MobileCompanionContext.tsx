@@ -696,7 +696,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
 
   const effectiveStatus = resolveMobileCompanionVoiceStatus(state.status, voice.session);
   const overlayOpen =
-    effectiveStatus !== 'idle' || liveArmed || live.status === 'error' || checkingVoiceMode;
+    effectiveStatus !== 'idle' || live.hasStarted || liveArmed || live.status === 'error' || checkingVoiceMode;
   const effectiveDurationMillis =
     voice.session.kind === 'companion' ? voice.session.durationMillis : 0;
 

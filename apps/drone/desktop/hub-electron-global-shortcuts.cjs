@@ -35,7 +35,7 @@ function createShortcutRegistrar(globalShortcut, dispatch, platform = process.pl
     registered.clear();
   }
   return {
-    configure({ revision, bindings, suspended: captureActive = false, observedNumpad = false, numpadUnavailable = false }) {
+    configure({ revision, bindings, suspended: captureActive = false, observedNumpad = false, observedBackquote = false, numpadUnavailable = false }) {
       suspended = captureActive;
       globalShortcut.setSuspended(false);
       clear();
@@ -48,13 +48,15 @@ function createShortcutRegistrar(globalShortcut, dispatch, platform = process.pl
         let error = '';
         let active = false;
         const numpad = bindings[actionId].key.startsWith('num');
+        const observed = (numpad && observedNumpad) ||
+          (observedBackquote && ['`', '~'].includes(bindings[actionId].key));
         if (numpad && numpadUnavailable) error = 'Numpad shortcuts require the host keyboard listener on this desktop.';
         else if (!accelerator) error = 'This key is not supported as a desktop global shortcut. Choose another key.';
         else if (counts.get(accelerator) > 1) error = 'Another global Drone Hub action uses this shortcut.';
         else {
           try {
             active = globalShortcut.register(accelerator, () => {
-              if (!suspended && currentGeneration === generation && !(numpad && observedNumpad)) dispatch({ revision, actionId });
+              if (!suspended && currentGeneration === generation && !observed) dispatch({ revision, actionId });
             });
             if (active) registered.add(accelerator);
             else error = 'This shortcut is unavailable. It may be reserved by the desktop or another application.';

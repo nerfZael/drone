@@ -256,6 +256,7 @@ export function ShortcutSettingsSection() {
                   <button
                     type="button"
                     data-shortcut-capture="true"
+                    data-shortcut-binding-capture="true"
                     onClick={() => setCapturingActionId(definition.id)}
                     onBlur={() => {
                       if (capturingActionId === definition.id) setCapturingActionId(null);

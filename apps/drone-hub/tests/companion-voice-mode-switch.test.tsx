@@ -40,3 +40,28 @@ test('switching voice modes starts the selected input without closing Companion 
     expect(calls).toEqual(['save']);
   } finally { voiceSpy.mockRestore(); liveSpy.mockRestore(); }
 });
+
+test('stopped Live keeps the idle companion visible with a restart control until explicitly closed', async () => {
+  const { CompanionOverlay } = await import('../src/droneHub/companion/CompanionOverlay');
+  let hasStarted = false;
+  let status: 'idle' | 'listening' = 'idle';
+  const original = liveModule.useCompanionLive;
+  const liveSpy = spyOn(liveModule, 'useCompanionLive').mockImplementation(() => ({
+    ...original(), enabled: true, loading: false, saving: false, resolved: true, hasStarted, status,
+  }));
+  const voiceSpy = spyOn(voiceModule, 'useChatVoiceRecorder').mockReturnValue({
+    status: 'idle', durationMillis: 0, discardRecording: async () => {},
+  } as ReturnType<typeof voiceModule.useChatVoiceRecorder>);
+  const render = () => renderToStaticMarkup(<CompanionProvider><CompanionOverlay /></CompanionProvider>);
+  try {
+    expect(render()).toBe('');
+    hasStarted = true;
+    expect(render()).toContain('Start live voice');
+    status = 'listening';
+    expect(render()).toContain('Stop live voice; submitted work continues');
+    status = 'idle';
+    expect(render()).toContain('Start live voice');
+    hasStarted = false;
+    expect(render()).toBe('');
+  } finally { voiceSpy.mockRestore(); liveSpy.mockRestore(); }
+});

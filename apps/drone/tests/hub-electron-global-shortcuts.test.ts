@@ -36,6 +36,21 @@ describe('Electron global shortcuts', () => {
     registrar.close();
   });
 
+  test('leaves observed backquote dispatch to the physical listener, with native fallback elsewhere', () => {
+    for (const key of ['`', '~']) {
+      const native = fakeShortcuts();
+      const events: unknown[] = [];
+      const registrar = createShortcutRegistrar(native, (event: unknown) => events.push(event));
+      registrar.configure({ revision: 1, bindings: { toggleCompanion: binding(key) }, observedBackquote: true });
+      native.callbacks.get(key)!();
+      expect(events).toHaveLength(0);
+      registrar.configure({ revision: 2, bindings: { toggleCompanion: binding(key) } });
+      native.callbacks.get(key)!();
+      expect(events).toEqual([{ revision: 2, actionId: 'toggleCompanion' }]);
+      registrar.close();
+    }
+  });
+
   test('preserves numpad identity and translates portable and explicit modifiers', () => {
     expect(shortcutAccelerator(binding('num1'))).toBe('num1');
     expect(shortcutAccelerator(binding('1'))).toBe('1');

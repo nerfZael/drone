@@ -28,11 +28,12 @@ test('desktop speaks a pending backend completion after restarting Live, then sp
   const controller = new CompanionClientController({ createId: () => String(++nextId) });
   let receive!: (event: CompanionServerMessage) => void;
   let messageId = '';
+  const backendCalls: string[] = [];
   const run = (_prompt: string, signal: AbortSignal) => waitForCompanionReply(controller, () => controller.submitPrompt({
     prompt: 'Check this', executeTool: () => ({}), createTransport: () => ({
       open: async (options) => { receive = options.onMessage; return undefined; },
       sendPrompt: (input) => { messageId = input.messageId; },
-      sendToolResult: () => {}, cancel: () => {}, close: () => {},
+      sendToolResult: () => {}, cancel: () => { backendCalls.push('cancel'); }, close: () => { backendCalls.push('close'); },
     }),
   }), signal);
   let live!: ReturnType<typeof useCompanionLive>;
@@ -43,6 +44,12 @@ test('desktop speaks a pending backend completion after restarting Live, then sp
   try {
     await act(async () => { root.render(<Harness />); });
     await act(async () => { await live.start(run, 'Workspace'); });
+    expect(live.hasStarted).toBe(true);
+    // Stopping before any backend turn must still leave Companion available.
+    await act(async () => { live.stop(); });
+    expect(live.status).toBe('idle');
+    expect(live.hasStarted).toBe(true);
+    await act(async () => { await live.start(run, 'Workspace'); });
     const old = connections.at(-1)!;
     await act(async () => {
       old.callbacks.onEvent({ type: 'session.input_transcript.delta', delta: 'Check this' });
@@ -50,6 +57,9 @@ test('desktop speaks a pending backend completion after restarting Live, then sp
       await new Promise((resolve) => setTimeout(resolve, 500));
     });
     await act(async () => { live.stop(); });
+    expect(live.hasStarted).toBe(true);
+    expect(controller.getSnapshot().status).toBe('working');
+    expect(backendCalls).toEqual([]);
     await act(async () => { await live.start(run, 'Workspace'); });
     const current = connections.at(-1)!;
     await act(async () => {
@@ -64,6 +74,9 @@ test('desktop speaks a pending backend completion after restarting Live, then sp
       { type: 'session.commentary.append', delegation_id: null, content: 'Notification' },
     ]);
     expect(sent.every(({ connection }) => connection === current.connection)).toBe(true);
+    await act(async () => { live.reset(); });
+    expect(live.hasStarted).toBe(false);
+    expect(backendCalls).toEqual([]);
   } finally {
     await act(async () => { root.unmount(); await controller.close(); });
     start.mockRestore(); send.mockRestore(); close.mockRestore();

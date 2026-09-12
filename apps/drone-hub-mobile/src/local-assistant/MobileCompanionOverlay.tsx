@@ -498,6 +498,15 @@ export function MobileCompanionOverlay() {
                   icon={live.muted ? MicOff : Mic}
                 />
               ) : null}
+              {liveSettings.enabled || liveActive || livePaused ? (
+                <HeaderButton
+                  label={liveActive || livePaused ? 'Stop live voice; submitted work continues' : 'Start live voice'}
+                  tone={liveActive || livePaused ? 'danger' : 'accent'}
+                  disabled={!liveActive && !livePaused && (liveBusy || voiceBusy || recording || !companion.available)}
+                  onPress={() => liveActive || livePaused ? live.stop() : void companion.toggle()}
+                  icon={liveActive || livePaused ? Square : Play}
+                />
+              ) : null}
               <HeaderButton
                 label={`Auto-approve proposals ${autoApprove.enabled ? 'on' : 'off'}`}
                 tone={autoApprove.enabled ? 'success' : 'neutral'}

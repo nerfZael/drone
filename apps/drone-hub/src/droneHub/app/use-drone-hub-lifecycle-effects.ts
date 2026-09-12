@@ -615,15 +615,18 @@ export function useDroneHubLifecycleEffects({
       if (e.defaultPrevented || e.repeat || e.isComposing) return;
       const captureRoot =
         e.target instanceof HTMLElement ? e.target.closest('[data-shortcut-capture="true"]') : null;
-      if (captureRoot) return;
-      const matched = SHORTCUT_DEFINITIONS.find((definition) =>
-        isShortcutMatch(shortcutBindings[definition.id], e),
-      );
+      // The canvas owns local keys, but only the binding editor suspends
+      // global shortcuts. Consume their local events to avoid double dispatch.
+      if (captureRoot?.matches('[data-shortcut-binding-capture="true"]')) return;
       if (isActiveGlobalShortcutMatch(e)) {
         e.preventDefault();
         e.stopPropagation();
         return;
       }
+      if (captureRoot) return;
+      const matched = SHORTCUT_DEFINITIONS.find((definition) =>
+        isShortcutMatch(shortcutBindings[definition.id], e),
+      );
       const modalOpen = Boolean(document.querySelector('[role="dialog"][aria-modal="true"]'));
       if (matched?.id === 'applyCompanionProposal') {
         const handled = modalOpen ? false : runShortcutAction(matched.id, e);

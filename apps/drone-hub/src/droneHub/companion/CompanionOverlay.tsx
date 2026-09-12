@@ -143,8 +143,9 @@ export function CompanionOverlay() {
   React.useEffect(() => {
     if (companion?.proposalHistory.length === 0) setHistoryOpen(false);
   }, [companion?.proposalHistory.length]);
-  if (!companion || (companion.status === 'idle' && !panelOpen)) return null;
+  if (!companion || (companion.status === 'idle' && !companion.live?.hasStarted && !panelOpen)) return null;
   const active = companion.status === 'working';
+  const liveActive = companion.live?.status === 'connecting' || companion.live?.status === 'listening';
   const duration = companion.startedAt != null
     ? Math.max(0, (companion.endedAt ?? Date.now()) - companion.startedAt)
     : 0;
@@ -344,6 +345,17 @@ export function CompanionOverlay() {
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
               <path d="M3 10v4M7 6v12M12 3v18M17 6v12M21 10v4" />
+            </svg>
+          </CompanionHeaderButton> : null}
+          {companion.live?.enabled || liveActive ? <CompanionHeaderButton
+            label={liveActive ? 'Stop live voice; submitted work continues' : 'Start live voice'}
+            menuLabel={liveActive ? 'Stop live voice' : 'Start live voice'}
+            tone={liveActive ? 'danger' : 'accent'}
+            disabled={!liveActive && (companion.live.loading || companion.live.saving || companion.switchingVoice || ['starting', 'recording', 'transcribing'].includes(companion.status))}
+            onClick={() => liveActive ? companion.live.stop() : void companion.toggle()}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden="true">
+              {liveActive ? <rect x="6" y="6" width="12" height="12" rx="1" /> : <path d="M8 5v14l11-7Z" />}
             </svg>
           </CompanionHeaderButton> : null}
           <Popover.Root open={menuOpen} onOpenChange={setMenuOpen}>
