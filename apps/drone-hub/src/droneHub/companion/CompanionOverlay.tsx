@@ -18,6 +18,7 @@ import { CompanionInstructionsEditor } from './CompanionInstructionsEditor';
 import { CompanionProposalCard } from './CompanionProposalCard';
 import { CompanionProposalHistory } from './CompanionProposalHistory';
 import { CompanionLivePanel } from './CompanionLivePanel';
+import { CompanionModelPicker } from './CompanionModelPicker';
 import { useCompanionWorkspace } from './CompanionWorkspaceContext';
 
 function Chevron({ open }: { open: boolean }) {
@@ -501,6 +502,7 @@ export function CompanionOverlay() {
       ) : null}
 
       </aside>
+      <CompanionModelPicker />
       </div>
     </div>
   );
