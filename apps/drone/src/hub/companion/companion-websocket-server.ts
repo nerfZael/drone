@@ -1,4 +1,5 @@
 import type http from 'node:http';
+import crypto from 'node:crypto';
 import { validateCompanionRunInput, type CompanionClientMessage } from '@drone/assistant-chat';
 import { type RawData, WebSocket, WebSocketServer } from 'ws';
 
@@ -85,7 +86,7 @@ export function createCompanionWebSocketServer(runtime: CompanionRuntime): WebSo
         let createdSession!: CompanionRunSession;
         createdSession = new CompanionRunSession({
           clientRunId: runId,
-          runtimeRunId: runId,
+          runtimeRunId: `websocket:${crypto.randomUUID()}`,
           transport: 'websocket',
           runtime,
           emit: (event) => send({ runId, ...event }),

@@ -68,6 +68,12 @@ export function createCompanionCapability(
     }
   };
 
+  const closeDeviceSessions = async (deviceId: string) => {
+    live.revokeDevice(deviceId);
+    const session = sessionsByDeviceId.get(deviceId);
+    if (session) await cancelSession(session, false);
+  };
+
   return {
     descriptor: COMPANION_CAPABILITY,
     async invoke(operation, rawPayload, context) {
@@ -163,10 +169,8 @@ export function createCompanionCapability(
         [...sessionsByDeviceId.values()].map((session) => cancelSession(session, false)),
       );
     },
-    async revokeDevice(deviceId) {
-      live.revokeDevice(deviceId);
-      const session = sessionsByDeviceId.get(deviceId);
-      if (session) await cancelSession(session, false);
-    },
+    revokeDevice: closeDeviceSessions,
+    disconnectDevice: closeDeviceSessions,
+    accessChanged: closeDeviceSessions,
   };
 }

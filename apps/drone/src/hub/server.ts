@@ -4363,6 +4363,7 @@ async function startDroneHubApiServerWithLifecycle(
   });
   const companionWorkspaces = new CompanionWorkspaceService(assistantService, deviceMesh);
   const companionRuntime = new CompanionRuntime({
+    resourceSubscriptions: () => resourceSubscriptionService,
     workspaces: companionWorkspaces,
     hubServices: hubApplication,
     buildDroneSummaries: buildAssistantDroneSummariesFromRegistry,

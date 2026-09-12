@@ -204,6 +204,7 @@ export type CompanionClientTelemetry = {
 
 export type CompanionRunEvent =
   | CompanionBrowserToolRequest
+  | { type: 'subscription'; afterMessageId?: string }
   | { type: 'activity'; event: CompanionToolActivityEvent }
   | { type: 'reply'; reply: string }
   | { type: 'status'; status: 'working' | 'completed' | 'cancelled' }

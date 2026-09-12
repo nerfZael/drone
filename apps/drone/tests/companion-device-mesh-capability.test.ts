@@ -281,6 +281,7 @@ test('existing Companion run grants do not authorize workspace settings', async 
   expect(COMPANION_WORKSPACE_OPERATIONS.some((operation) => isGranted(grants, 'companion', 1, operation))).toBe(false);
 });
 
+<<<<<<< HEAD
 
 test('mobile auto-approval settings survive capability and storage restarts', async () => {
   await withTempDroneDataDir('companion-mobile-auto-approve-', async () => {
@@ -294,4 +295,28 @@ test('mobile auto-approval settings survive capability and storage restarts', as
     await expect(capability.invoke('auto-approve.settings.update', { enabled: 'false' }, context())).rejects.toThrow('boolean');
     await capability.close?.();
   });
+=======
+test.each(['disconnectDevice', 'accessChanged', 'revokeDevice'] as const)(
+  'mobile subscriptions resume idle conversations and stop on %s', async (lifecycle) => {
+  const events: any[] = [];
+  const deleted: string[] = [];
+  let deliver!: (input: any) => Promise<void>;
+  const capability = createCompanionCapability({
+    connectSubscriptions: (_id: string, callback: typeof deliver) => { deliver = callback; },
+    run: async (input: any) => `Reply to ${input.prompt}`,
+    steer: () => false,
+    deleteSession: async (id: string) => { deleted.push(id); },
+  } as any, async (_capability, _event, payload) => { events.push(payload); });
+  try {
+    await capability.invoke('run.start', { runId: 'mobile', messageId: 'user', prompt: 'watch' }, context());
+    await waitFor(() => events.some((event) => event.status === 'completed'));
+    await deliver({ prompt: 'event', messageId: 'event', deliveryMode: 'queue' });
+    await waitFor(() => events.some((event) => event.messageId === 'event' && event.status === 'completed'));
+    expect(events.find((event) => event.type === 'subscription')).toMatchObject({ runId: 'mobile', messageId: 'event' });
+    expect(events.find((event) => event.reply === 'Reply to event')).toMatchObject({ runId: 'mobile', messageId: 'event' });
+    await capability[lifecycle]?.('phone-1');
+    expect(deleted).toHaveLength(1);
+    await expect(deliver({ prompt: 'late', messageId: 'late', deliveryMode: 'asap' })).rejects.toThrow('disconnected');
+  } finally { await capability.close?.(); }
+>>>>>>> 10453b1fcf515552b63c83853f39c66d47fb8023
 });

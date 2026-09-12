@@ -79,6 +79,7 @@ type ActiveSession = {
   generation: number;
   transport: CompanionClientTransport;
   messageExecutors: Map<string, CompanionBrowserToolExecutor>;
+  latestExecutor?: CompanionBrowserToolExecutor;
   ready: Promise<CompanionClientConnectionTelemetry | undefined>;
   sentMessages: number;
   latestMessageId: string | null;
@@ -158,6 +159,7 @@ export class CompanionClientController {
     const session = this.activeSession ?? this.createSession(input);
     const messageId = input.messageId || this.options.createId();
     session.messageExecutors.set(messageId, input.executeTool);
+    session.latestExecutor = input.executeTool;
     session.latestMessageId = messageId;
     if (!steering) session.activityMessageId = null;
     this.update({
@@ -204,6 +206,7 @@ export class CompanionClientController {
     this.activeSession = null;
     if (session) {
       session.messageExecutors.clear();
+      session.latestExecutor = undefined;
       try {
         await session.transport.cancel(session.runId);
       } catch {
@@ -220,6 +223,7 @@ export class CompanionClientController {
     this.activeSession = null;
     if (session) {
       session.messageExecutors.clear();
+      session.latestExecutor = undefined;
       try {
         await session.transport.cancel(session.runId);
       } catch {
@@ -257,6 +261,23 @@ export class CompanionClientController {
 
   private handleMessage(session: ActiveSession, message: CompanionServerMessage): void {
     if (!this.isActive(session) || (message.runId && message.runId !== session.runId)) return;
+    if (message.type === 'subscription') {
+      if (!message.messageId || !session.latestExecutor) return;
+      const hasPendingUserMessage = session.latestMessageId !== null &&
+        session.latestMessageId !== message.afterMessageId && session.messageExecutors.has(session.latestMessageId);
+      session.messageExecutors.set(message.messageId, session.latestExecutor);
+      const steering = Boolean(message.afterMessageId) && this.state.status === 'working';
+      if (!steering) this.update({ activity: [], compaction: null, startedAt: this.now() });
+      session.activityMessageId = message.messageId;
+      if (!hasPendingUserMessage) {
+        session.latestMessageId = message.messageId;
+        this.update({
+          status: 'working', error: '', reply: '', transcript: 'Event notification',
+          endedAt: null,
+        });
+      }
+      return;
+    }
     if (message.type === 'status' && message.status === 'completed') {
       const messageId = message.messageId ?? session.latestMessageId;
       if (messageId === session.latestMessageId) session.messageExecutors.clear();
@@ -337,8 +358,17 @@ export class CompanionClientController {
     if (!this.isActive(session)) return;
     this.activeSession = null;
     session.messageExecutors.clear();
+    session.latestExecutor = undefined;
     void closeTransport(session.transport);
-    if (this.state.status === 'completed' || this.state.status === 'idle') return;
+    if (this.state.status === 'idle') return;
+    if (this.state.status === 'completed') {
+      this.update({
+        status: 'error',
+        error: 'Companion disconnected. Event subscriptions have ended; start a new conversation to subscribe again.',
+        endedAt: this.now(),
+      });
+      return;
+    }
     this.update({ status: 'error', error: message, endedAt: this.now() });
   }
 
@@ -351,6 +381,7 @@ export class CompanionClientController {
     if (!this.isActive(session)) return;
     this.activeSession = null;
     session.messageExecutors.clear();
+    session.latestExecutor = undefined;
     this.update({ status, error, endedAt: this.now() });
     if (cancel) {
       void Promise.resolve(session.transport.cancel(session.runId))
