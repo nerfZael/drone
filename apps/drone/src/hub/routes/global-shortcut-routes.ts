@@ -6,6 +6,34 @@ export function registerGlobalShortcutRoutes(
   apiRouter: HubRouter,
   service: GlobalShortcutService,
 ): void {
+  apiRouter.get('/api/global-shortcuts/desktop/events', ({ url, req, res, fail }) => {
+    const id = url.searchParams.get('sessionId') ?? '';
+    const writeEvent = (response: typeof res, event: string, data: unknown) => {
+      if (response.destroyed || response.writableEnded) throw new Error('Desktop disconnected');
+      response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+    try {
+      openHubSseStream({
+        request: req, response: res, connectedData: { ok: true }, writeEvent,
+        subscribe: () => service.connectDesktop(id, (config) => writeEvent(res, 'configure', config)),
+      });
+    } catch (error) {
+      return fail(409, error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  apiRouter.post('/api/global-shortcuts/desktop/:sessionId/status', async ({ params, readJson, json }) => {
+    const body = await readJson<any>();
+    const accepted = service.reportDesktopStatus(params.sessionId, body?.revision, body?.status);
+    json(accepted ? 200 : 409, { ok: accepted });
+  });
+
+  apiRouter.post('/api/global-shortcuts/desktop/:sessionId/dispatch', async ({ params, readJson, json }) => {
+    const body = await readJson<any>();
+    const accepted = service.dispatchDesktop(params.sessionId, body?.revision, body?.actionId);
+    json(accepted ? 200 : 409, { ok: accepted });
+  });
+
   apiRouter.get('/api/settings/global-shortcuts', ({ json: respond }) => {
     respond(200, service.snapshot());
   });
@@ -24,6 +52,7 @@ export function registerGlobalShortcutRoutes(
         connected: service.updateClientActivity(params.clientId, {
           focused: body?.focused,
           visible: body?.visible,
+          capturing: body?.capturing,
         }),
       });
     },
@@ -43,8 +72,13 @@ export function registerGlobalShortcutRoutes(
         response: res,
         connectedData: { ok: true, clientId },
         writeEvent,
-        subscribe: () =>
-          service.connectClient(clientId, (event) => writeEvent(res, 'shortcut', event)),
+        subscribe: () => {
+          const disconnect = service.connectClient(clientId, (event) => writeEvent(res, 'shortcut', event));
+          const unsubscribe = service.onSettingsChanged(() => {
+            try { writeEvent(res, 'settings', service.snapshot()); } catch { /* Stream cleanup removes the listener. */ }
+          });
+          return () => { unsubscribe(); disconnect(); };
+        },
       });
     } catch (error) {
       return fail(400, error instanceof Error ? error.message : String(error));

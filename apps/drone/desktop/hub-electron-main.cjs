@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, contentTracing, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, Menu, contentTracing, globalShortcut, ipcMain, shell } = require('electron');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -15,6 +15,7 @@ const {
   startDesktopStaticUiServer,
 } = require('./hub-electron-static-server.cjs');
 const { zoomActionForInput } = require('./hub-electron-zoom.cjs');
+const { connectDesktopGlobalShortcuts } = require('./hub-electron-global-shortcuts.cjs');
 const { DIAGNOSTICS_CHANNEL, createDesktopDiagnostics, observeWindowDiagnostics, cleanText } = require('./hub-electron-diagnostics.cjs');
 
 const APP_NAME = 'Drone Hub';
@@ -24,6 +25,7 @@ const STARTUP_RETRY_CHANNEL = 'drone-hub:startup-retry';
 let mainWindow = null;
 let hubLauncherProcess = null;
 let desktopStaticUiServer = null;
+let desktopGlobalShortcuts = null;
 let isQuitting = false;
 let performanceTraceStarted = false;
 let restartInProgress = false;
@@ -427,6 +429,8 @@ function createWindow() {
 }
 
 function showError(error) {
+  void desktopGlobalShortcuts?.close();
+  desktopGlobalShortcuts = null;
   diagnostics.write('desktop-startup-error', { message: cleanText(error?.message ?? error), stack: cleanText(error?.stack, 12000) });
   restartInProgress = false;
   const message = error && error.message ? error.message : String(error || 'Unknown error');
@@ -591,6 +595,13 @@ function startHub() {
           diagnostics.setUiBuild({ buildId: version.buildId, buildTime: version.buildTime });
         } catch { /* The renderer also reports its compiled build id. */ }
         if (!tokenPath || !fs.existsSync(tokenPath)) throw new Error('The running Hub API token could not be found.');
+        await desktopGlobalShortcuts?.close();
+        desktopGlobalShortcuts = connectDesktopGlobalShortcuts({
+          globalShortcut,
+          apiUrl: `http://${apiHost.includes(':') ? `[${apiHost}]` : apiHost}:${apiPort}`,
+          apiToken: fs.readFileSync(tokenPath, 'utf8').trim(),
+          onError: (error) => diagnostics.write('desktop-global-shortcuts-error', { message: cleanText(error.message) }, 'warn'),
+        });
         desktopStaticUiServer = await startDesktopStaticUiServer({
           staticDir,
           apiHost,
@@ -666,6 +677,8 @@ if (!hasSingleInstanceLock) {
 
   app.on('before-quit', (event) => {
     isQuitting = true;
+    void desktopGlobalShortcuts?.close();
+    desktopGlobalShortcuts = null;
     if (desktopCleanupComplete || !desktopStaticUiServer) return;
     event.preventDefault();
     if (desktopCleanupPromise) return;

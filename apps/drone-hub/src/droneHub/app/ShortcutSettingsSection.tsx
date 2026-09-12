@@ -4,7 +4,7 @@ import type {
   DroneHubGlobalShortcutSettingsResponse,
 } from '@drone/hub-model';
 import { requestJson } from '../http';
-import { applyGlobalShortcutSettings } from './global-shortcut-state';
+import { applyGlobalShortcutSettings, GLOBAL_SHORTCUT_SETTINGS_EVENT } from './global-shortcut-state';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 import {
   SHORTCUT_DEFINITIONS,
@@ -31,6 +31,7 @@ export function ShortcutSettingsSection() {
   const globalBindingsRef = React.useRef<DroneHubGlobalShortcutBindings>({});
   const globalSaveQueueRef = React.useRef<Promise<void>>(Promise.resolve());
   const globalSaveSequenceRef = React.useRef(0);
+  const pendingGlobalSavesRef = React.useRef(0);
   const latestSaveByActionRef = React.useRef(new Map<ShortcutActionId, number>());
   const defaultShortcutBindings = React.useMemo(() => cloneDefaultShortcutBindings(), []);
 
@@ -48,6 +49,12 @@ export function ShortcutSettingsSection() {
 
   React.useEffect(() => {
     let cancelled = false;
+    const onSettings = (event: Event) => {
+      const settings = (event as CustomEvent<DroneHubGlobalShortcutSettingsResponse>).detail;
+      if (pendingGlobalSavesRef.current > 0) setGlobalSettings(settings);
+      else applySettings(settings, true);
+    };
+    window.addEventListener(GLOBAL_SHORTCUT_SETTINGS_EVENT, onSettings);
     void requestJson<DroneHubGlobalShortcutSettingsResponse>('/api/settings/global-shortcuts')
       .then((settings) => {
         if (cancelled) return;
@@ -59,12 +66,14 @@ export function ShortcutSettingsSection() {
       });
     return () => {
       cancelled = true;
+      window.removeEventListener(GLOBAL_SHORTCUT_SETTINGS_EVENT, onSettings);
     };
   }, [applySettings]);
 
   const saveGlobalBindings = React.useCallback(
     async (next: DroneHubGlobalShortcutBindings, actionIds: ShortcutActionId[]) => {
       const sequence = ++globalSaveSequenceRef.current;
+      pendingGlobalSavesRef.current++;
       globalBindingsRef.current = next;
       for (const actionId of actionIds) latestSaveByActionRef.current.set(actionId, sequence);
       setPendingGlobalActionIds((current) => new Set([...current, ...actionIds]));
@@ -104,6 +113,7 @@ export function ShortcutSettingsSection() {
           }
         }
       } finally {
+        pendingGlobalSavesRef.current--;
         setPendingGlobalActionIds((current) => {
           const updated = new Set(current);
           for (const actionId of actionIds) {
@@ -193,8 +203,9 @@ export function ShortcutSettingsSection() {
           </div>
           <div className="text-11 text-[var(--muted-dim)] mt-1 leading-relaxed">
             Numpad keys are kept separate from number-row keys. Enable Global for shortcuts that
-            should run while Drone Hub is unfocused or minimized. Global keys are observed without
-            blocking the foreground application.
+            should run while Drone Hub is unfocused or minimized. While the desktop app is running,
+            registered global shortcuts are reserved for Drone Hub. Browser-only global shortcuts
+            also reach the foreground application.
           </div>
           <div className="text-11 text-[var(--muted-dim)] mt-1 leading-relaxed">
             For voice shortcuts, open Hub once and grant microphone permission before relying on a
