@@ -73,15 +73,27 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
       }, "LivePcmCapture").apply { start() }
       playbackThread = Thread({
         Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
+        // The software queue plus AudioTrack form the reserve. Silence advances
+        // AudioTrack's clock while the next network chunks accumulate. Inserting
+        // it only on starvation also plays short final chunks without a timer.
+        val reserve = ByteArray(12000) // 250 ms, PCM16 mono / 24 kHz.
+        var writtenFrames = 0L
+        fun write(bytes: ByteArray) {
+          var offset = 0
+          while (running && offset < bytes.size) {
+            val count = output.write(bytes, offset, bytes.size - offset)
+            if (count <= 0) { if (running) error("Live playback disconnected"); break }
+            offset += count
+            writtenFrames += count / 2
+          }
+        }
         try {
           while (running) {
             val bytes = playback.poll(100, TimeUnit.MILLISECONDS) ?: continue
-            var offset = 0
-            while (running && offset < bytes.size) {
-              val written = output.write(bytes, offset, bytes.size - offset)
-              if (written <= 0) { if (running) error("Live playback disconnected"); break }
-              offset += written
-            }
+            // Playback head is an unsigned 32-bit frame counter; compare modulo
+            // 2^32 so long sessions keep detecting starvation after it wraps.
+            if (writtenFrames.toInt() == output.playbackHeadPosition) write(reserve)
+            write(bytes)
             queuedBytes.addAndGet(-bytes.size)
           }
         } catch (error: Exception) { if (running) onError(error.message ?: "Live playback failed") }
@@ -94,7 +106,7 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
     if (!running) return
     require(audio.length <= 256000) { "Invalid Live audio chunk" }
     val bytes = Base64.decode(audio, Base64.DEFAULT)
-    require(bytes.size % 2 == 0) { "Invalid Live PCM audio" }
+    require(bytes.isNotEmpty() && bytes.size % 2 == 0) { "Invalid Live PCM audio" }
     if (queuedBytes.addAndGet(bytes.size) > 240000 || !playback.offer(bytes)) {
       queuedBytes.addAndGet(-bytes.size)
       error("Live voice playback fell behind. Start again.")

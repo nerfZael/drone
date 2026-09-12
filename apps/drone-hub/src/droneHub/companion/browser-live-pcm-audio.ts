@@ -1,5 +1,9 @@
 import type { LivePcmAudio, LivePcmCallbacks } from '@drone/assistant-chat';
 
+// Keep a small playout reserve for network/JS scheduling jitter. Rebuild it only
+// after the queue drains; adding it to every chunk would accumulate latency.
+const PLAYBACK_RESERVE_SECONDS = 0.25;
+
 export async function openBrowserLivePcmAudio(callbacks: LivePcmCallbacks,
   onPlaybackBlocked: (blocked: boolean) => void): Promise<LivePcmAudio> {
   callbacks.signal?.throwIfAborted();
@@ -76,21 +80,22 @@ export async function openBrowserLivePcmAudio(callbacks: LivePcmCallbacks,
           if (audio.length > 256_000) throw new Error('Live audio chunk is too large.');
           const binary = atob(audio);
           if (!binary.length || binary.length % 2) throw new Error('Invalid Live audio.');
-          if (Math.max(0, playbackEnd - context.currentTime) + binary.length / 48_000 > 5) {
-            throw new Error('Live voice playback fell behind. Start again.');
-          }
           const buffer = context.createBuffer(1, binary.length / 2, 24_000);
           const samples = buffer.getChannelData(0);
           for (let i = 0; i < samples.length; i++) {
             const value = binary.charCodeAt(i * 2) | binary.charCodeAt(i * 2 + 1) << 8;
             samples[i] = (value >= 32768 ? value - 65536 : value) / 32768;
           }
+          const now = context.currentTime;
+          const start = playbackEnd > now ? playbackEnd : now + PLAYBACK_RESERVE_SECONDS;
+          if (start - now + binary.length / 48_000 > 5) {
+            throw new Error('Live voice playback fell behind. Start again.');
+          }
           const node = context.createBufferSource();
           node.buffer = buffer;
           node.connect(context.destination);
           playing.add(node);
           node.onended = () => { playing.delete(node); node.disconnect(); };
-          const start = Math.max(context.currentTime, playbackEnd);
           node.start(start);
           playbackEnd = start + buffer.duration;
           onPlaybackBlocked(context.state !== 'running');

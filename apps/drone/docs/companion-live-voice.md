@@ -147,7 +147,13 @@ ordered writes on mobile without a capability-response round trip per chunk, so 
 the startup buffer. Muted frames contain silence to keep Live's audio clock running.
 
 `session.output_audio.delta` drives scheduled PCM playback, independently from
-captions and backend work. Local input/output queues and Hub transport queues have
+captions and backend work. Desktop, Android, and iOS keep a 250 ms playback reserve
+to absorb uneven chunk delivery. The reserve is added at the first chunk and
+rebuilt after playback runs dry, rather than added to every chunk. Short replies
+play after the same bounded delay without waiting for more audio. This trades
+about 250 ms of initial output latency for fewer gaps; delays longer than the
+remaining reserve can still interrupt playback. End voice discards the reserve
+along with pending audio. Mobile playback changes require a new native build. Local input/output queues and Hub transport queues have
 bounds; slow or disconnected sessions fail rather than accumulating indefinitely.
 Closing stops local capture/playback immediately, drops unsent audio, and sends
 `session.close`; the primary socket is terminated if finalization does not arrive
@@ -221,3 +227,16 @@ phrase immediately after **Recording · connecting** appears on each app, thrott
 the Hub connection, continue speaking through readiness, and confirm every word
 appears once. Repeat with Mute and End voice before readiness, permission denial,
 startup failure, and reconnecting into a fresh session.
+
+
+Playback jitter regressions: `bun apps/drone-hub/scripts/smoke-live-playback.ts`
+uses real Chrome with a synthetic microphone and ordered 100 ms output chunks,
+including injected delivery delays of 80–240 ms. It checks the production player's
+scheduled audio for gaps without contacting OpenAI. Browser unit tests cover
+rebuffering, short tails, bounded backlog, and immediate cleanup.
+`bun run --filter drone-hub-mobile test:live-playback` compiles the Android PCM
+implementation against the installed SDK, then runs that implementation with a
+virtual audio device to check jitter, starvation, PCM ordering, partial writes,
+overflow, and stopping during buffering. These checks do not establish physical
+speaker/headset behavior. iOS compilation and playback still require Xcode and a
+physical-device check, including interruptions and long idle periods.
