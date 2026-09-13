@@ -18,6 +18,7 @@ source = app / 'modules/live-voice/android/src/main/java/expo/modules/dronelivev
 with tempfile.TemporaryDirectory(prefix='drone-phone-assistant-') as directory:
     subprocess.run(['java', '-cp', cp, 'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler',
                     '-no-stdlib', '-no-reflect', '-classpath', cp, '-d', directory, str(source),
-                    str(app / 'tests/native-phone-assistant/CompanionAssistantRequestTest.kt')], check=True)
+                    str(source.with_name('CompanionAssistantSettings.kt')),
+                    *map(str, (app / 'tests/native-phone-assistant').glob('*.kt'))], check=True)
     subprocess.run(['java', '-cp', directory + os.pathsep + cp,
                     'expo.modules.dronelivevoice.CompanionAssistantRequestTestKt'], check=True)

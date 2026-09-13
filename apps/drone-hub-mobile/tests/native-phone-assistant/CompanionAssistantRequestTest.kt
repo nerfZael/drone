@@ -1,6 +1,7 @@
 package expo.modules.dronelivevoice
 
 fun main() {
+  testAssistantSettings()
   val request = CompanionAssistantRequest()
   check(!request.accept(null))
   check(!request.accept("spoofed"))

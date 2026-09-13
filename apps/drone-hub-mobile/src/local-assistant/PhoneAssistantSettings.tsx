@@ -39,7 +39,7 @@ export function PhoneAssistantSettings() {
         .finally(() => setBusy(false));
     }}>Set up voice access</Button> : null}
     <Text style={{ color: colors.textSecondary, fontSize: 12, lineHeight: 18 }}>
-      {status.selected ? 'Companion is your phone assistant. ' : 'Choose Drone Hub Mobile / Companion in Android’s assistant picker. '}
+      {status.selected ? 'Companion is your phone assistant. ' : 'Open Android settings, tap Digital assistant app, then choose Drone Hub Mobile / Companion. '}
       Hold the side button to start Live with the Hub selected in Drone Hub, including while locked. Enable Live voice below first.
       {'\n'}On Samsung, set Settings → Advanced features → Side button → Long press to Digital assistant if needed.
       {'\n'}Companion can hear and act on requests while locked. Opening the full app requires unlocking.

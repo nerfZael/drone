@@ -2,9 +2,7 @@ package expo.modules.dronelivevoice
 
 import android.app.role.RoleManager
 import android.content.ComponentName
-import android.content.Intent
 import android.os.Build
-import android.provider.Settings
 import android.service.voice.VoiceInteractionService
 import expo.modules.kotlin.functions.Queues
 import expo.modules.kotlin.modules.Module
@@ -46,14 +44,7 @@ class CompanionAssistantModule : Module() {
     AsyncFunction("requestRole") {
       val activity = appContext.currentActivity ?: error("Open Drone Hub to choose your assistant")
       check(Build.VERSION.SDK_INT >= 31) { "Companion as phone assistant requires Android 12 or later" }
-      val manager = activity.getSystemService(RoleManager::class.java)
-      val intent = if (manager.isRoleAvailable(RoleManager.ROLE_ASSISTANT) && !manager.isRoleHeld(RoleManager.ROLE_ASSISTANT))
-        manager.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT)
-      else Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)
-      try { activity.startActivityForResult(intent, 8401) }
-      catch (_: android.content.ActivityNotFoundException) {
-        activity.startActivity(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS))
-      }
+      CompanionAssistantSettings.open(activity)
     }.runOnQueue(Queues.MAIN)
   }
 }

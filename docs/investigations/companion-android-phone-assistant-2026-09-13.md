@@ -1,6 +1,6 @@
 # Companion as Android's phone assistant
 
-Companion can be selected as the default digital assistant on Android 12 and later. In mobile Settings → Assistant → Companion Live voice, use **Use Companion as phone assistant**, grant audio permissions, and choose Drone Hub Mobile / Companion in Android's picker. On Samsung, the side button's long-press action may also need to be set to Digital assistant. The saved Hub must be reachable with Live voice enabled.
+Companion can be selected as the default digital assistant on Android 12 and later. In mobile Settings → Assistant → Companion Live voice, use **Use Companion as phone assistant**, grant audio permissions, then tap **Digital assistant app** in Android Settings and choose Drone Hub Mobile / Companion. On Samsung, the side button's long-press action may also need to be set to Digital assistant. The saved Hub must be reachable with Live voice enabled.
 
 The assistant screen starts or resumes Live, offers Pause, End, and Open Drone Hub, and can be used above the keyguard. Open Drone Hub requests the device's unlock authentication before revealing the regular app. It uses the existing Companion session, selected Hub, workspace context, tool handlers, audio routing, and microphone coordinator. Selecting the default assistant does not itself start recording. The setup text explains that Companion can hear and act on requests while the phone is locked.
 
@@ -23,6 +23,8 @@ Audio cancellation belongs to the provider operation that starts or resumes audi
 
 Changing away from Companion opens Android settings without requesting audio permissions. When Companion is selected, a separate Set up voice access button remains available. Phone-only use does not require Bluetooth permission; a connected classic Bluetooth headset does. Status refreshes do not erase permission-denial feedback.
 
+The setup button opens `ACTION_VOICE_INPUT_SETTINGS`, falling back to `ACTION_MANAGE_DEFAULT_APPS_SETTINGS` if no activity handles it. The original `RoleManager.createRequestRoleIntent(ROLE_ASSISTANT)` silently closed on the physical Samsung: `RequestRoleActivity` logged `Role is not requestable: android.app.role.ASSISTANT` for each press. Role availability does not imply that it can be requested with that API. Earlier emulator role assignment used adb and did not exercise this setup flow.
+
 The assistant requires the Hub's Live preference and never falls back to dictation. Repeated invocations preserve an active session and resume a paused one. Missing setup, permissions, or connectivity produces actionable screen feedback.
 
 ## Verification
@@ -32,11 +34,13 @@ The assistant requires the Hub's Live preference and never falls back to dictati
 - Launch hook tests: cold hydration, one start per request across remounts, repeated presses, cancellation during hydration/connection/native handoff, foreground restoration, established background sessions, stale native requests, and missing permissions with explicit retry.
 - Native request-state regressions cover token rejection, consumption, explicit retry, stale dismissal/unlock IDs, and ended requests. Run with `python3 apps/drone-hub-mobile/scripts/test-phone-assistant.py`.
 - Settings tests cover changing assistants without audio permission, separate voice setup, and permission feedback after foregrounding. Provider-entry tests cover initial read failure recovery and the initial-snapshot/event race.
+- Setup-button regression tests cover opening voice-input settings, falling back to default-app settings when unavailable, and propagating other launch failures to the UI. These and the existing native request tests, two settings UI tests, mobile typecheck, and release build passed after replacing the rejected role request.
+- The corrected release was installed on the Samsung SM-F966B at 19:10 local time. Its assistant remained Google. The phone locked before the updated app button could be exercised; the successful Settings launch above was an explicit adb intent check, not an app-button test.
 - Companion provider tests verify Live preference enforcement, no dictation fallback, resuming paused Live, and cancelled invocations. Prebuild tests verify cold/warm hooks and idempotence.
 - Android 14 emulator: role registration and metadata accepted; actual system assistant key launches the app; a cold invocation renders Companion while PIN keyguard remains showing and occluded; End returns to keyguard; Open Drone Hub shows the PIN prompt and reveals the app only after authentication; warm invocation with the regular model-picker dialog open hides that dialog and shows only Companion. Launch also succeeds with SYSTEM_ALERT_WINDOW denied.
 - The reviewed release also passed activity recreation (font-scale configuration change) while PIN-locked, followed by authenticated navigation back to the full app. Final checks: 40 relevant TypeScript tests, the Kotlin request-state regressions, mobile typecheck, and the Android release build passed.
 
-The physical Samsung phone was disconnected. Samsung's exact side-button mapping and a paired-Hub conversation from that phone's lock screen still require a device check. The emulator had no paired Hub, so audio/network startup is covered by the existing Live implementation and automated lifecycle/provider tests, not claimed as an emulator end-to-end voice test. Android may reset the assistant role after force-stopping its package; ordinary process recreation and installing an update are distinct from force-stop.
+The physical Samsung phone was disconnected during the earlier review. During the setup-button follow-up, its logs exposed the rejected role request; launching `ACTION_VOICE_INPUT_SETTINGS` opened Samsung's Digital assistant app page, which explicitly describes long-pressing the Side button. Samsung's actual hardware invocation and a paired-Hub conversation from that phone's lock screen still require a device check. The emulator had no paired Hub, so audio/network startup is covered by the existing Live implementation and automated lifecycle/provider tests, not claimed as an emulator end-to-end voice test. Android may reset the assistant role after force-stopping its package; ordinary process recreation and installing an update are distinct from force-stop.
 
 ## Platform references
 
