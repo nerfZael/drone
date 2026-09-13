@@ -190,20 +190,54 @@ fun main() {
   val count = track.snapshot().size
   audio.play(encode(chunk(44)))
   check(track.snapshot().size == count)
-  val pending = LivePcmAudio({}, { errors.add(it) })
-  pending.start()
-  val blocked = AudioTrack.latest
-  blocked.blockWrites = true
-  pending.play(encode(chunk(1)))
-  waitUntil { blocked.writing }
-  // The pending reserve must not allow microphone-independent output to grow unbounded.
-  for (i in 1 until 50) pending.play(encode(chunk(1)))
-  var overflow = false
-  try { pending.play(encode(chunk(1))) } catch (_: IllegalStateException) { overflow = true }
-  check(overflow)
-  pending.stop() // Must unblock a reserve write and never start the held speech.
-  check(blocked.paused && blocked.released && blocked.snapshot().isEmpty())
-  check(errors.isEmpty()) { errors.toString() }
+  // Both byte and chunk-count limits recover without stopping capture or output.
+  for (frames in listOf(2400, 24)) {
+    val captured = CopyOnWriteArrayList<String>()
+    val pending = LivePcmAudio(captured::add, errors::add)
+    pending.start()
+    val blocked = AudioTrack.latest
+    blocked.blockWrites = true
+    pending.play(encode(chunk(1, frames)))
+    waitUntil { blocked.writing }
+    val limit = if (frames == 2400) 50 else 101
+    for (i in 1 until limit) pending.play(encode(chunk(2, frames)))
+    pending.play(encode(chunk(47, frames))) // Overflow: retain only current speech.
+    waitUntil { captured.size > 3 }
+    check(!blocked.paused && !blocked.released && errors.isEmpty())
+    blocked.blockWrites = false
+    waitUntil { blocked.snapshot().any { it.bytes.contentEquals(chunk(47, frames)) } }
+    check(blocked.snapshot().none { it.bytes.contentEquals(chunk(2, frames)) }) {
+      "Recovery must discard stale queued speech"
+    }
+    android.os.Handler.advanceTimeBy(5000)
+    check(errors.isEmpty()) { "Recovered playback must not trigger reconnect" }
+    // More speech still plays after recovery, including another overflow cycle.
+    blocked.writing = false
+    blocked.blockWrites = true
+    pending.play(encode(chunk(3, frames)))
+    waitUntil { blocked.writing }
+    repeat(limit) { pending.play(encode(chunk(4, frames))) }
+    pending.stop() // Unblocks the pending write and cancels the recovery deadline.
+    android.os.Handler.advanceTimeBy(5000)
+    check(blocked.paused && blocked.released && blocked.snapshot().isEmpty())
+    check(errors.isEmpty())
+  }
+  // An output that remains stuck requests reconnection once, rather than silently
+  // discarding speech forever. Stop still unblocks its native write.
+  val stalledErrors = CopyOnWriteArrayList<String>()
+  val stalled = LivePcmAudio({}, stalledErrors::add)
+  stalled.start()
+  val stuck = AudioTrack.latest
+  stuck.blockWrites = true
+  stalled.play(encode(chunk(1)))
+  waitUntil { stuck.writing }
+  repeat(50) { stalled.play(encode(chunk(2))) }
+  android.os.Handler.advanceTimeBy(4999)
+  check(stalledErrors.isEmpty())
+  android.os.Handler.advanceTimeBy(1)
+  check(stalledErrors.single().contains("output stalled"))
+  stalled.stop()
+  check(android.os.Handler.pending.isEmpty())
   var pauses = 0
   lateinit var headset: LivePcmAudio
   headset = LivePcmAudio({}, { errors.add(it) }, { pauses++; headset.stop() })

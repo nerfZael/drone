@@ -7,6 +7,15 @@
   <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
   <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
   <application>
+    <service android:name=".CompanionAssistantService" android:label="@string/companion_assistant_name"
+      android:enabled="@bool/companion_assistant_supported" android:exported="true"
+      android:permission="android.permission.BIND_VOICE_INTERACTION">
+      <intent-filter><action android:name="android.service.voice.VoiceInteractionService" /></intent-filter>
+      <meta-data android:name="android.voice_interaction" android:resource="@xml/companion_assistant" />
+    </service>
+    <service android:name=".CompanionAssistantSessionService" android:exported="true"
+      android:enabled="@bool/companion_assistant_supported"
+      android:permission="android.permission.BIND_VOICE_INTERACTION" />
     <service android:name=".LiveVoiceService" android:exported="false"
       android:foregroundServiceType="microphone|mediaPlayback" android:stopWithTask="true" />
   </application>

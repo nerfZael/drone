@@ -5,7 +5,8 @@
   ],
   "android": {
     "modules": [
-      "expo.modules.dronelivevoice.LiveVoiceModule"
+      "expo.modules.dronelivevoice.LiveVoiceModule",
+      "expo.modules.dronelivevoice.CompanionAssistantModule"
     ]
   },
   "apple": {

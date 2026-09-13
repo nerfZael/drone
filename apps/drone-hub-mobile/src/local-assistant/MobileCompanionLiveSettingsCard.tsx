@@ -7,6 +7,7 @@ import { useMesh } from '../mesh/MeshContext';
 import { colors } from '../theme';
 import { useMobileCompanionLiveSettings } from './use-mobile-companion-live-settings';
 import { ThemedTextInput } from '../components/ThemedTextInput';
+import { PhoneAssistantSettings } from './PhoneAssistantSettings';
 
 export function MobileCompanionLiveSettingsCard() {
   const mesh = useMesh();
@@ -33,6 +34,7 @@ export function MobileCompanionLiveSettingsCard() {
   const promptWritable = Boolean(self && isGranted(self.grants, COMPANION_CAPABILITY.id, COMPANION_CAPABILITY.version, 'live.prompt.update'));
   return <View style={styles.card}>
     <Label>Companion Live voice</Label>
+    <PhoneAssistantSettings />
     {companion.headsetShortcut.supported ? <>
       <View style={styles.row}>
         <Text style={styles.copy}>Start Companion with headset button</Text>

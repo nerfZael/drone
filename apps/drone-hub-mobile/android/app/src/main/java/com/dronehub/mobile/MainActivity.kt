@@ -2,6 +2,8 @@ package com.dronehub.mobile
 
 import android.os.Build
 import android.os.Bundle
+import android.content.Intent
+import expo.modules.dronelivevoice.CompanionAssistantLaunch
 
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
@@ -17,6 +19,13 @@ class MainActivity : ReactActivity() {
     // This is required for expo-splash-screen.
     setTheme(R.style.AppTheme);
     super.onCreate(null)
+    CompanionAssistantLaunch.attach(this)
+  }
+
+  override fun onNewIntent(intent: Intent) {
+    CompanionAssistantLaunch.accept(this, intent)
+    setIntent(intent)
+    super.onNewIntent(intent)
   }
 
   /**

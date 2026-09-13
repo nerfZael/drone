@@ -340,6 +340,7 @@ function mobileDroneAgentId(value: unknown): MobileDroneAgentId | null {
 }
 
 export function DronesScreen({
+  assistantOnly = false,
   header,
   drawerOpen,
   workspaceVisible,
@@ -350,6 +351,7 @@ export function DronesScreen({
   devicePickerItems,
   onDeviceChange,
 }: {
+  assistantOnly?: boolean;
   header: React.JSX.Element;
   drawerOpen: boolean;
   workspaceVisible: boolean;
@@ -3403,6 +3405,10 @@ export function DronesScreen({
           },
         },
   );
+
+  // Keep the workspace and Companion tool handlers alive, but mount no chats, drawers,
+  // editors, or native modal windows while the phone assistant is above the keyguard.
+  if (assistantOnly) return null;
 
   return (
     <View style={styles.screen}>

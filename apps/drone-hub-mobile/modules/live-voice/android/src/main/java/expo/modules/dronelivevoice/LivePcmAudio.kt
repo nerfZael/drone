@@ -99,6 +99,8 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
   private var playbackThread: Thread? = null
   private val playback = ArrayBlockingQueue<ByteArray>(100)
   private val queuedBytes = AtomicInteger(0)
+  private val playbackProgress = AtomicInteger(0)
+  private var recoveryWatchdog: Runnable? = null
   private var recordingCueQueued = false
   private var recordingCueBytes: ByteArray? = null
   private var stoppedOutput = false
@@ -181,6 +183,7 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
             val count = output.write(bytes, offset, bytes.size - offset)
             if (count <= 0) { if (running) error("Live playback disconnected"); break }
             offset += count
+            playbackProgress.incrementAndGet()
             writtenFrames += count / 2
           }
         }
@@ -261,11 +264,40 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
     enqueue(bytes)
   }
 
-  private fun enqueue(bytes: ByteArray) {
-    if (queuedBytes.addAndGet(bytes.size) > 240000 || !playback.offer(bytes)) {
-      queuedBytes.addAndGet(-bytes.size)
-      error("Live voice playback fell behind. Start again.")
+  @Synchronized private fun enqueue(bytes: ByteArray) {
+    if (!running) return
+    if (queuedBytes.get() + bytes.size > 240000 || playback.remainingCapacity() == 0) {
+      // Catch up to current speech instead of turning a temporary output backlog
+      // into a disconnected conversation. Keep the local start cue and any write
+      // already in flight; never pause/re-route the headset from the producer.
+      var droppedBytes = 0
+      for (pending in playback.toTypedArray()) {
+        if (pending !== recordingCueBytes && playback.remove(pending)) {
+          queuedBytes.addAndGet(-pending.size)
+          droppedBytes += pending.size
+        }
+      }
+      Log.i("DroneLiveVoice", "Playback backlog recovered: droppedBytes=$droppedBytes retainedBytes=${queuedBytes.get()}")
+      handler.post {
+        if (running && recoveryWatchdog == null) {
+          val progress = playbackProgress.get()
+          val watchdog = Runnable {
+            recoveryWatchdog = null
+            if (running && queuedBytes.get() > 0 && playbackProgress.get() == progress) {
+              // Let the mobile connection's reconnect path rebuild a stuck output.
+              onError("Live audio output stalled during playback recovery.")
+            }
+          }
+          recoveryWatchdog = watchdog
+          handler.postDelayed(watchdog, 5000)
+        }
+      }
     }
+    // A large write can itself still be in flight. Discard this chunk too if it
+    // cannot fit; preserve the memory bound even when the device stops consuming.
+    if (queuedBytes.get() + bytes.size > 240000) return
+    queuedBytes.addAndGet(bytes.size)
+    if (!playback.offer(bytes)) queuedBytes.addAndGet(-bytes.size)
   }
   // Stop capture and discard assistant speech immediately, retaining only the
   // already-routed output for the local acknowledgement. No second tone player.
@@ -273,6 +305,8 @@ internal class LivePcmAudio(private val onAudio: (String) -> Unit, private val o
     val retainOutput = keepOutputForCue && running && playbackReady &&
       (!headsetRouted || isHeadset(player?.routedDevice))
     running = false
+    recoveryWatchdog?.let { handler.removeCallbacks(it) }
+    recoveryWatchdog = null
     muted = true
     // AudioRecord.stop can block. Silence queued output before waiting for the microphone.
     try { player?.setVolume(0f); player?.pause(); player?.flush() } catch (_: Exception) {}

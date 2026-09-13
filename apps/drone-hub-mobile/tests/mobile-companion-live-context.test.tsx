@@ -583,3 +583,115 @@ test('Live remains bound to its Hub when a different Hub is selected', async () 
     expect(calls.filter((call) => call.operation === 'run.start')).toHaveLength(count);
   } finally { abort.abort(); await h.cleanup(); }
 });
+
+
+test('phone assistant requires Live preference and never falls back to dictation', async () => {
+  const h = await harness();
+  try {
+    enabled = false;
+    await act(async () => {
+      await expect(h.context().startAssistantVoice(new AbortController().signal)).rejects.toThrow('Enable Companion Live');
+    });
+    expect(recorded).toBe(0);
+    expect(live.status).toBe('idle');
+    enabled = true;
+    await act(async () => { await h.context().startAssistantVoice(new AbortController().signal); });
+    expect(live.status).toBe('listening');
+    expect(backend).not.toBeNull();
+    live.pause();
+    await h.refresh();
+    await act(async () => { await h.context().startAssistantVoice(new AbortController().signal); });
+    expect(live.status).toBe('listening');
+    expect(recorded).toBe(0);
+  } finally { await h.cleanup(); }
+});
+
+test('cancelled phone assistant invocation never opens Live', async () => {
+  const h = await harness();
+  try {
+    enabled = true;
+    const abort = new AbortController();
+    abort.abort();
+    await act(async () => { await h.context().startAssistantVoice(abort.signal); });
+    expect(live.status).toBe('idle');
+    expect(recorded).toBe(0);
+    const pendingAbort = new AbortController();
+    await act(async () => {
+      const pending = h.context().startAssistantVoice(pendingAbort.signal);
+      pendingAbort.abort();
+      await pending;
+    });
+    expect(live.status).toBe('idle');
+    expect(recorded).toBe(0);
+  } finally { await h.cleanup(); }
+});
+
+test('cancelling an assistant invocation attached to established Live does not stop it', async () => {
+  const h = await harness();
+  try {
+    enabled = true;
+    await act(async () => { await h.context().startAssistantVoice(new AbortController().signal); });
+    await h.refresh();
+    const abort = new AbortController();
+    await act(async () => {
+      const pending = h.context().startAssistantVoice(abort.signal);
+      await Promise.resolve();
+      abort.abort();
+      await pending;
+    });
+    expect(live.status).toBe('listening');
+  } finally { await h.cleanup(); }
+});
+
+test('a repeated assistant press waits for cancelled audio startup to settle', async () => {
+  const h = await harness();
+  const originalStart = live.start;
+  const originalStop = live.stop;
+  let finish!: () => void;
+  let starts = 0;
+  let stops = 0;
+  let first!: Promise<void>;
+  let second!: Promise<void>;
+  try {
+    enabled = true;
+    live.stop = () => { stops++; originalStop(); };
+    live.start = async () => {
+      starts++;
+      if (starts === 1) await new Promise<void>((resolve) => { finish = resolve; });
+    };
+    const abort = new AbortController();
+    await act(async () => { first = h.context().startAssistantVoice(abort.signal); });
+    expect(starts).toBe(1);
+    await act(async () => {
+      abort.abort();
+      second = h.context().startAssistantVoice(new AbortController().signal);
+    });
+    expect(stops).toBe(1);
+    expect(starts).toBe(1);
+    await act(async () => { finish(); await first; await second; });
+    expect(starts).toBe(2);
+  } finally { live.start = originalStart; live.stop = originalStop; await h.cleanup(); }
+});
+
+test('cancelling while the Hub preference response is pending cannot start audio later', async () => {
+  const h = await harness();
+  const originalRequest = mesh.request;
+  let resolve!: (value: any) => void;
+  let pending!: Promise<void>;
+  let delayed = false;
+  try {
+    mesh.request = async (...args: Parameters<typeof originalRequest>) => {
+      if (args[2] === 'live.settings.get' && !delayed) {
+        delayed = true;
+        return await new Promise((done) => { resolve = done; });
+      }
+      return await originalRequest(...args);
+    };
+    const abort = new AbortController();
+    await act(async () => { pending = h.context().startAssistantVoice(abort.signal); });
+    expect(resolve).toBeDefined();
+    await act(async () => { abort.abort(); resolve({ enabled: true }); await pending; });
+    expect(live.status).toBe('idle');
+    expect(recorded).toBe(0);
+  } finally { mesh.request = originalRequest; await h.cleanup(); }
+});

@@ -102,6 +102,8 @@ type MobileCompanionContextValue = {
   workspaceDeviceId: string;
   unavailableReason: string;
   toggle(): Promise<void>;
+  /** Start or resume Live for an explicit Android assistant invocation. */
+  startAssistantVoice(signal: AbortSignal): Promise<void>;
   /** Flip the Hub's Live voice preference and start the microphone in the new mode, like desktop. */
   toggleLiveVoice(): Promise<void>;
   toggleRecordingPause(): void;
@@ -545,6 +547,42 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
     await startLive();
   }, ended: headsetShortcut.ended };
 
+  const startAssistantVoiceImpl = async (signal: AbortSignal) => {
+    if (signal.aborted) return;
+    if (liveActive) return;
+    const startOwnedAudio = async (start: () => Promise<void>) => {
+      // Only cancel audio started by this request, never an already-established conversation.
+      const cancel = () => live.stop();
+      signal.addEventListener('abort', cancel, { once: true });
+      try { if (!signal.aborted) await start(); }
+      finally { signal.removeEventListener('abort', cancel); }
+    };
+    if (live.status === 'paused') { await startOwnedAudio(live.resume); return; }
+    if (preparingVoice.current) throw new Error('Companion is already preparing voice.');
+    const activeTarget = workspaceTargetRef.current;
+    if (!activeTarget || !available) throw new Error(unavailableReason || 'Companion is unavailable.');
+    preparingVoice.current = true;
+    setCheckingVoiceMode(true);
+    try {
+      const preference = await mesh.request(activeTarget.targetDeviceId, COMPANION_CAPABILITY.id,
+        'live.settings.get', undefined, signal) as { enabled?: unknown };
+      if (signal.aborted || workspaceTargetRef.current?.targetDeviceId !== activeTarget.targetDeviceId) return;
+      if (preference?.enabled !== true) throw new Error('Enable Companion Live voice in Drone Hub settings first.');
+      await startOwnedAudio(startLive);
+    } finally { preparingVoice.current = false; setCheckingVoiceMode(false); }
+  };
+  const assistantStartImpl = React.useRef(startAssistantVoiceImpl);
+  assistantStartImpl.current = startAssistantVoiceImpl;
+  const assistantStartup = React.useRef(Promise.resolve());
+  const startAssistantVoice = React.useCallback((signal: AbortSignal) => {
+    // A new press waits for the cancelled request's audio cleanup before starting again.
+    const pending = assistantStartup.current.catch(() => {}).then(async () => {
+      if (!signal.aborted) await assistantStartImpl.current(signal);
+    });
+    assistantStartup.current = pending;
+    return pending;
+  }, []);
+
   const submitText = React.useCallback(
     async (prompt: string): Promise<{ ok: true } | { ok: false; error: string }> => {
       const text = String(prompt ?? '').trim();
@@ -771,6 +809,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       workspaceDeviceId: activeTargetDeviceIdRef.current || target?.targetDeviceId || '',
       unavailableReason,
       toggle,
+      startAssistantVoice,
       toggleLiveVoice,
       toggleRecordingPause,
       discardRecording,
@@ -806,6 +845,7 @@ export function MobileCompanionProvider({ children }: { children: React.ReactNod
       state,
       submitText,
       toggle,
+      startAssistantVoice,
       unavailableReason,
     ],
   );

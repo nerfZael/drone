@@ -31,6 +31,8 @@ import { LocalAssistantProvider } from '../local-assistant/LocalAssistantContext
 import { MobileChatVoiceRecorderProvider } from '../local-assistant/MobileChatVoiceRecorderContext';
 import { MobileCompanionProvider } from '../local-assistant/MobileCompanionContext';
 import { MobileCompanionOverlay } from '../local-assistant/MobileCompanionOverlay';
+import { PhoneAssistantProvider, usePhoneAssistantRequest } from '../local-assistant/PhoneAssistantContext';
+import { PhoneAssistantScreen } from '../local-assistant/PhoneAssistantScreen';
 import {
   AppDrawerProvider,
   type AppDrawerNavigationItem,
@@ -154,6 +156,7 @@ function HeaderOverflowMenu({
 }
 
 function Shell() {
+  const assistantOnly = Boolean(usePhoneAssistantRequest());
   const mesh = useMesh();
   const [tab, setTab] = React.useState<Tab>('drones');
   const [pairing, setPairing] = React.useState(false);
@@ -200,6 +203,7 @@ function Shell() {
   const pairingVisible = pairing;
   React.useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (assistantOnly) return false;
       if (appDrawerOpen) return false;
       if (pairingVisible) {
         setPairing(false);
@@ -213,7 +217,7 @@ function Shell() {
       return false;
     });
     return () => subscription.remove();
-  }, [appDrawerOpen, pairingVisible, tab]);
+  }, [appDrawerOpen, pairingVisible, tab, assistantOnly]);
   React.useEffect(() => {
     let active = true;
     void loadSelectedDeviceId()
@@ -501,6 +505,7 @@ function Shell() {
         style={[styles.tabContent, (pairingVisible || tab !== 'drones') && styles.tabContentHidden]}
       >
         <DronesScreen
+          assistantOnly={assistantOnly}
           header={header}
           drawerOpen={appDrawerOpen}
           workspaceVisible={!pairingVisible && tab === 'drones'}
@@ -512,20 +517,20 @@ function Shell() {
           onDeviceChange={selectDevice}
         />
       </View>
-      {pairingContent}
-      {!pairingVisible && tab === 'settings' ? (
+      {!assistantOnly ? pairingContent : null}
+      {!assistantOnly && !pairingVisible && tab === 'settings' ? (
         <SettingsScreen tab={settingsTab} onTabChange={setSettingsTab} onPair={openPairing} />
       ) : null}
-      {!pairingVisible && tab === 'devices' ? <DevicesScreen onPair={openPairing} /> : null}
+      {!assistantOnly && !pairingVisible && tab === 'devices' ? <DevicesScreen onPair={openPairing} /> : null}
     </>
   );
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'right', 'bottom', 'left']}>
-      {pairingVisible || tab !== 'drones' ? header : null}
+      {!assistantOnly && (pairingVisible || tab !== 'drones') ? header : null}
       <View style={styles.content}>{content}</View>
       <HeaderOverflowMenu
-        open={headerMenuOpen && headerMenuActions.length > 0}
+        open={!assistantOnly && headerMenuOpen && headerMenuActions.length > 0}
         actions={headerMenuActions}
         onClose={() => setHeaderMenuOpen(false)}
       />
@@ -535,6 +540,7 @@ function Shell() {
 
 export function MeshApp() {
   return (
+    <PhoneAssistantProvider>
     <MeshProvider>
       <LocalAssistantProvider>
         <LocalDroneControlProvider>
@@ -544,14 +550,20 @@ export function MeshApp() {
                 <AppDrawerProvider>
                   <Shell />
                 </AppDrawerProvider>
-                <MobileCompanionOverlay />
+                <CompanionSurface />
               </View>
             </MobileCompanionProvider>
           </MobileChatVoiceRecorderProvider>
         </LocalDroneControlProvider>
       </LocalAssistantProvider>
     </MeshProvider>
+    </PhoneAssistantProvider>
   );
+}
+
+function CompanionSurface() {
+  const requestId = usePhoneAssistantRequest();
+  return <>{!requestId ? <MobileCompanionOverlay /> : null}<PhoneAssistantScreen /></>;
 }
 
 const styles = StyleSheet.create({

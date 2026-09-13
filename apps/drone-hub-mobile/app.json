@@ -21,6 +21,7 @@
     },
     "plugins": [
       "./plugins/with-browser-loopback",
+      "./plugins/with-phone-assistant",
       ["expo-camera", { "cameraPermission": "Allow Drone Hub to scan a device pairing code." }],
       ["expo-secure-store", { "configureAndroidBackup": true }],
       [

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+ keeps the system speech recognizer separate from the assistant.
+     An empty (not omitted) recognitionService is required by its metadata parser. -->
+<voice-interaction-service xmlns:android="http://schemas.android.com/apk/res/android"
+  android:sessionService="expo.modules.dronelivevoice.CompanionAssistantSessionService"
+  android:recognitionService=""
+  android:supportsAssist="true"
+  android:supportsLaunchVoiceAssistFromKeyguard="true" />

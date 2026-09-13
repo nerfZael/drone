@@ -1,0 +1,4 @@
+<resources>
+  <string name="companion_assistant_name">Companion</string>
+  <bool name="companion_assistant_supported">false</bool>
+</resources>
