@@ -994,7 +994,7 @@ describe('Drone Hub assistant MCP transport', () => {
     });
   });
 
-  test('uses read access when creating chat resource subscriptions', async () => {
+  test('allows chat idle subscriptions without read access but requires it for failures', async () => {
     await withTempDroneDataDir('drone-assistant-mcp-subscription-read-', async () => {
       const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
       const previousToken = process.env.DRONE_TOKEN;
@@ -1078,8 +1078,16 @@ describe('Drone Hub assistant MCP transport', () => {
             events: ['chat.idle'],
           },
         });
-        expect(denied.isError).toBe(true);
-        expect(createRequests).toBe(1);
+        expect(denied.isError).not.toBe(true);
+        const deniedFailure = await deniedClient.callTool({
+          name: 'subscribe_to_resource_events',
+          arguments: {
+            provider: 'drone-hub', resourceType: 'chat', resourceId: 'target-chat',
+            events: ['chat.idle', 'chat.failed'],
+          },
+        });
+        expect(deniedFailure.isError).toBe(true);
+        expect(createRequests).toBe(2);
       } finally {
         await allowedClient?.close();
         await deniedClient?.close();

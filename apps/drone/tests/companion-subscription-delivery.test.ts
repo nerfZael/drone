@@ -21,11 +21,13 @@ test('Companion receives persisted chat events and close cancels subscriptions w
   try {
     const subscription = await h.service.subscribe({ subscriber, provider: 'drone-hub', resourceType: 'chat',
       resourceId: source.chatId, events: ['chat.idle'], intent: 'Report completion' });
+    h.readable = [];
     h.idle = true;
     await h.service.tick();
     expect(h.deliveries).toHaveLength(1);
     expect(h.deliveries[0]).toMatchObject({ deliveryMode: 'queue' });
     expect(h.deliveries[0].prompt).toContain('Report completion');
+    expect(h.deliveries[0].prompt).not.toContain('private reply');
     expect(h.service.get(subscription.subscription.id, subscriber.chatId)?.status).toBe('active');
     expect(h.db.query('SELECT COUNT(*) AS count FROM prompts').get()).toEqual({ count: 0 });
     await h.release();
@@ -104,7 +106,7 @@ test('Companion runtime exposes working MCP subscriptions scoped to its own sess
     const runtime = new CompanionRuntime({
       hubServices: {} as any,
       resourceSubscriptions: () => h.service,
-      buildDroneSummaries: () => h.readable.map((id) => ({ id, name: id, chats: ['default'] })) as any,
+      buildDroneSummaries: () => h.readable.map((id) => ({ id, name: id, runtime: 'host', chats: ['default'] })) as any,
     });
     const configurations: any[] = [];
     const toolsFor = async (runId: string) => {
@@ -121,6 +123,12 @@ test('Companion runtime exposes working MCP subscriptions scoped to its own sess
     };
     try {
       const call = await toolsFor('mcp-session');
+      const chatSubscription = await call('subscribe_to_resource_events', {
+        provider: 'drone-hub', resourceType: 'chat', resourceId: source.chatId,
+        events: ['chat.idle'], intent: 'Report host chat completion',
+      });
+      expect(chatSubscription.subscription.resourceId).toBe(source.chatId);
+      await call('cancel_resource_subscription', { subscriptionId: chatSubscription.subscription.id });
       const otherCall = await toolsFor('other-session');
       const created = await call('subscribe_to_custom_events', { name: 'release', intent: 'Report releases' });
       expect(created.subscription.subscriber).toBeUndefined();
@@ -172,7 +180,7 @@ function fixture() {
   const state = { idle: false, readable: [source.droneId] };
   const dependencies = {
     repository,
-    readChatStatus: async () => ({ idle: state.idle, reason: 'test', latest: null }),
+    readChatStatus: async () => ({ idle: state.idle, reason: 'test', latest: { id: 'reply', at: '2026-01-01T00:00:00.000Z', text: 'private reply' } }),
     readSettings: async () => settings,
     authorizeDelivery: async () => false,
     wakePromptQueue: () => { throw new Error('Companion must not enqueue a drone prompt'); },
