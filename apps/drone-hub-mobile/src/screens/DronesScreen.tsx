@@ -3938,8 +3938,6 @@ export function DronesScreen({
                               )
                             }
                             onStop={() => void stopChat()}
-                            onDictationPrestart={() => void dictation.prestartRecording()}
-                            onDictationPrestartCancel={() => void dictation.cancelPrestart()}
                             onOpenDictation={() => {
                               // Keep text attached to images/files in the normal
                               // composer; dictation destinations only send text.
