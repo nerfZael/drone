@@ -1023,9 +1023,10 @@ export class ResourceSubscriptionService {
           });
           continue;
         }
+        let deliveryEvent = item.event;
         try {
           const authorizationKey =
-            current.resourceType === 'custom_event' ? `${current.id}:${item.event.id}` : current.id;
+            current.resourceType === 'custom_event' ? `${current.id}:${item.event.id}` : `${current.id}:${item.event.eventType}`;
           if (!authorizationResults.has(authorizationKey)) {
             authorizationResults.set(
               authorizationKey,
@@ -1033,7 +1034,17 @@ export class ResourceSubscriptionService {
             );
           }
           const authorized = await authorizationResults.get(authorizationKey)!;
-          if (!authorized) {
+          const idleNotification = current.provider === 'drone-hub' &&
+            current.resourceType === 'chat' && item.event.eventType === 'chat.idle';
+          if (!authorized && idleNotification) {
+            // Idle status is public to Hub conversations; transcript content still requires read access.
+            // Sanitize at delivery so already-stored notifications are covered too.
+            const { chatLabel, chatId, droneId, droneName, chatName } = item.event.providerContent;
+            deliveryEvent = {
+              ...item.event,
+              providerContent: { chatLabel, chatId, droneId, droneName, chatName },
+            };
+          } else if (!authorized) {
             rejected.push({
               deliveryId: item.deliveryId,
               error: 'subscriber no longer has access to the resource',
@@ -1070,7 +1081,7 @@ export class ResourceSubscriptionService {
           });
           continue;
         }
-        deliverableItems.push({ ...item, subscription: refreshed });
+        deliverableItems.push({ ...item, event: deliveryEvent, subscription: refreshed });
       }
       if (rejected.length > 0) {
         await this.deps.repository.releaseRejectedBatchItems({

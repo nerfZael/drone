@@ -3459,7 +3459,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     {
       title: 'Subscribe to resource events',
       description:
-        'Subscribe this conversation to events. DroneHub chat IDs support chat.idle and chat.failed. Native DroneHub change-request numbers support change_request.updated, change_request.merged, and change_request.closed. Both require read access to their target drone. GitHub owner/repository supports pull_request.opened, pull_request.comment.created, pull_request.merged, and pull_request.closed. GitHub owner/repository#number supports pull_request.comment.created, pull_request.merged, and pull_request.closed. GitHub resources are validated directly with the Hub GitHub identity and do not need to be registered in DroneHub. Delivery uses the global or per-event queued/ASAP setting in DroneHub. Cursors are managed by DroneHub.',
+        'Subscribe this conversation to events. DroneHub chat IDs support chat.idle and chat.failed. Native DroneHub change-request numbers support change_request.updated, change_request.merged, and change_request.closed. Chat idle subscriptions do not require target-drone read access; without it, delivery includes status only, not message content. Chat failure and change-request subscriptions require read access to their target drone. GitHub owner/repository supports pull_request.opened, pull_request.comment.created, pull_request.merged, and pull_request.closed. GitHub owner/repository#number supports pull_request.comment.created, pull_request.merged, and pull_request.closed. GitHub resources are validated directly with the Hub GitHub identity and do not need to be registered in DroneHub. Delivery uses the global or per-event queued/ASAP setting in DroneHub. Cursors are managed by DroneHub.',
       inputSchema: {
         provider: z.enum(['drone-hub', 'github']),
         resourceType: z.enum(['chat', 'repository', 'pull_request', 'change_request']),
@@ -3470,7 +3470,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     },
     async (args) => {
       const subscriber = subscriptionSubscriber(context);
-      if (args.provider === 'drone-hub' && args.resourceType === 'chat') {
+      if (args.provider === 'drone-hub' && args.resourceType === 'chat' && args.events.some((event) => event !== 'chat.idle')) {
         await authorizeChatSubscriptionResource(context, args.resourceId);
       }
       if (args.provider === 'drone-hub' && args.resourceType === 'change_request') {
