@@ -7,6 +7,7 @@ export type HubAgentModelOption = {
   id: string;
   name: string;
   thinkingLevel: NativeAgentThinkingLevel;
+  defaultReasoningLevel?: NativeAgentThinkingLevel;
 };
 
 export const DEFAULT_OPENAI_MODEL = 'gpt-5.6-sol';

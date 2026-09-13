@@ -19,6 +19,7 @@ import {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   Easing,
+  LinearTransition,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
@@ -145,6 +146,7 @@ export function MobileCompanionOverlay() {
   const { height } = useWindowDimensions();
   const [workspaceDeviceId, setWorkspaceDeviceId] = React.useState<string | null>(null);
   const [menuOpen, setMenuOpen] = React.useState(false);
+  const [collapsed, setCollapsed] = React.useState(false);
   const [activityExpanded, setActivityExpanded] = React.useState(false);
   const [transcriptExpanded, setTranscriptExpanded] = React.useState(false);
   const [captionsOpen, setCaptionsOpen] = React.useState(false);
@@ -155,17 +157,14 @@ export function MobileCompanionOverlay() {
   const visible = companion.overlayOpen;
   const composerFocused = companion.composerFocused;
   const reportOverlayInset = companion.reportOverlayInset;
-  // The reserved space only grows while the sheet stays open, so the chat does not
-  // jump around as a reply streams in. It resets when the sheet closes or shrinks
-  // to its header for the keyboard.
-  const insetFloor = React.useRef(0);
   React.useEffect(() => {
-    insetFloor.current = 0;
-    if (!visible) reportOverlayInset(0);
-  }, [composerFocused, reportOverlayInset, visible]);
+    if (!visible) {
+      reportOverlayInset(0);
+      setCollapsed(false);
+    }
+  }, [reportOverlayInset, visible]);
   React.useEffect(() => () => reportOverlayInset(0), [reportOverlayInset]);
   const translateY = useSharedValue(0);
-  const sheetHeight = useSharedValue(320);
   const close = companion.close;
   const appContext = companion.readAppContext();
   const currentDroneId = typeof appContext?.mainDroneId === 'string' ? appContext.mainDroneId : '';
@@ -220,36 +219,25 @@ export function MobileCompanionOverlay() {
     void close();
   }, [close]);
 
+  const resize = React.useCallback((collapse: boolean) => {
+    setCollapsed(collapse);
+    if (!collapse) Keyboard.dismiss();
+  }, []);
+
   const dragGesture = React.useMemo(
     () =>
       Gesture.Pan()
         .maxPointers(1)
-        .activeOffsetY(10)
+        .activeOffsetY([-10, 10])
         .failOffsetX([-50, 50])
-        .failOffsetY(-14)
-        .onUpdate((event) => {
-          translateY.value = Math.max(0, event.translationY);
-        })
         .onEnd((event) => {
-          const shouldDismiss =
-            event.translationY > sheetHeight.value * 0.35 ||
-            (event.translationY > 40 && event.velocityY > 1_100);
-          if (shouldDismiss) {
-            translateY.value = withTiming(
-              sheetHeight.value + 40,
-              { duration: 180, easing: Easing.in(Easing.quad) },
-              (finished) => {
-                if (finished) runOnJS(dismiss)();
-              },
-            );
-          } else {
-            translateY.value = withTiming(0, SETTLE);
+          if (event.translationY > 30 || (event.translationY > 10 && event.velocityY > 500)) {
+            runOnJS(resize)(true);
+          } else if (event.translationY < -30 || (event.translationY < -10 && event.velocityY < -500)) {
+            runOnJS(resize)(false);
           }
-        })
-        .onFinalize((_event, success) => {
-          if (!success) translateY.value = withTiming(0, SETTLE);
         }),
-    [dismiss, sheetHeight, translateY],
+    [resize],
   );
   const sheetStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: translateY.value }],
@@ -277,8 +265,8 @@ export function MobileCompanionOverlay() {
   const autoApprove = companion.autoApproveSettings;
   const liveSettings = companion.liveSettings;
   const errors = [companion.error, live.error, liveSettings.error, autoApprove.error].filter(Boolean);
-  // A focused chat composer owns the keyboard; the sheet keeps only its header row.
-  const showBody = !composerFocused &&
+  // Manual collapse persists through streamed replies; composer focus also keeps only the header.
+  const showBody = !collapsed && !composerFocused &&
     (activityExpanded || captionsOpen || errors.length > 0 || Boolean(companion.reply) || Boolean(companion.proposal));
   const openWorkspaces = () => {
     Keyboard.dismiss();
@@ -404,7 +392,7 @@ export function MobileCompanionOverlay() {
             icon: Captions,
             label: captionsOpen ? 'Hide voice transcript' : 'Voice transcript',
             keepOpen: false,
-            onPress: () => setCaptionsOpen((value) => !value),
+            onPress: () => { resize(false); setCaptionsOpen((value) => !value); },
           } satisfies MobileCompanionMenuItem,
         ]
       : []),
@@ -444,25 +432,27 @@ export function MobileCompanionOverlay() {
       {workspaceDeviceId ? <MobileCompanionWorkspaceModal deviceId={workspaceDeviceId} onClose={() => setWorkspaceDeviceId(null)} /> : null}
       <Animated.View
         accessibilityLabel="Companion"
+        layout={LinearTransition.duration(SETTLE.duration).easing(SETTLE.easing)}
         onLayout={(event) => {
           const sheet = event.nativeEvent.layout.height;
-          sheetHeight.value = sheet;
           // The chat screen already sits above the system inset; reserve the sheet plus its gaps.
-          const next = Math.max(insetFloor.current, Math.round(sheet + SHEET_GAP));
-          insetFloor.current = next;
-          if (visible) reportOverlayInset(next);
+          if (visible) reportOverlayInset(Math.round(sheet + SHEET_GAP));
         }}
         style={[styles.sheet, { maxHeight, marginBottom }, sheetStyle]}
       >
         <View style={styles.sheetInner}>
           <GestureDetector gesture={dragGesture}>
-            <View style={styles.header}>
+            <View
+              style={styles.header}
+              accessibilityActions={[{ name: 'expand', label: 'Expand Companion' }, { name: 'collapse', label: 'Collapse Companion' }]}
+              onAccessibilityAction={(event) => resize(event.nativeEvent.actionName === 'collapse')}
+            >
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={active ? 'Working — show tool activity' : 'Show Companion activity'}
                 accessibilityState={{ expanded: activityExpanded }}
                 hitSlop={8}
-                onPress={() => setActivityExpanded((value) => !value)}
+                onPress={() => { resize(false); setActivityExpanded((value) => !value); }}
                 style={({ pressed }) => [styles.dotButton, pressed && styles.pressed]}
               >
                 {active ? (
@@ -477,9 +467,9 @@ export function MobileCompanionOverlay() {
                     accessibilityRole="button"
                     accessibilityLabel={transcriptExpanded ? 'Collapse your message' : 'Expand your message'}
                     accessibilityState={{ expanded: transcriptExpanded }}
-                    onPress={() => setTranscriptExpanded((value) => !value)}
+                    onPress={() => { resize(false); setTranscriptExpanded((value) => !value); }}
                   >
-                    <Text numberOfLines={transcriptExpanded ? undefined : 1} style={styles.transcript}>
+                    <Text numberOfLines={!collapsed && !composerFocused && transcriptExpanded ? undefined : 1} style={styles.transcript}>
                       {companion.transcript}
                     </Text>
                   </Pressable>

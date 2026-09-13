@@ -11,6 +11,17 @@ const entry = {
   top_provider: { max_completion_tokens: 8192 },
   pricing: { prompt: '0.000001', completion: '0.000002' },
 };
+const glmFlash = {
+  ...entry,
+  id: 'z-ai/glm-5.3-flash',
+  name: 'Z.ai: GLM 5.3 Flash',
+  reasoning: {
+    mandatory: true,
+    default_enabled: true,
+    supported_efforts: ['max', 'high', 'low'],
+    default_effort: 'max',
+  },
+};
 const fetchCatalog = (data: unknown) => (async () => Response.json(data)) as typeof fetch;
 
 describe('OpenRouter model discovery', () => {
@@ -21,6 +32,27 @@ describe('OpenRouter model discovery', () => {
       reasoning: true, input: ['text', 'image'], cost: { input: 1, output: 2 } });
     expect(() => parseOpenRouterModels({ data: [] })).toThrow('no usable');
     expect(() => parseOpenRouterModels({ error: 'bad request' })).toThrow('Invalid');
+  });
+
+  test('uses OpenRouter reasoning efforts, mandatory state, and default', async () => {
+    const [model] = parseOpenRouterModels({ data: [glmFlash] });
+    expect(model).toMatchObject({
+      reasoningLevels: ['xhigh', 'high', 'low'],
+      defaultReasoningLevel: 'xhigh',
+      thinkingLevelMap: { off: null, minimal: null, medium: null, xhigh: 'max' },
+    });
+
+    await withTempDroneDataDir('openrouter-reasoning-', async () => {
+      await refreshOpenRouterCatalog(fetchCatalog({ data: [glmFlash] }));
+      const service = new HubAssistantService({ listDrones: async () => [] });
+      const catalogModel = (await service.defaultSettings()).models.find(
+        (candidate) => candidate.id === glmFlash.id,
+      );
+      expect(catalogModel).toMatchObject({
+        reasoningLevels: ['xhigh', 'high', 'low'],
+        defaultReasoningLevel: 'xhigh',
+      });
+    });
   });
 
   test('new models validate and survive reload; a failed refresh preserves the catalog', async () => {
